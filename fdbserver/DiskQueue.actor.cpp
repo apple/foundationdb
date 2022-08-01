@@ -19,10 +19,10 @@
  */
 
 #include "fdbserver/IDiskQueue.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
-#include "flow/crc32c.h"
+#include "crc32/crc32c.h"
 #include "flow/genericactors.actor.h"
 #include "flow/xxhash.h"
 
@@ -379,7 +379,7 @@ public:
 					    pageFloor(std::max(self->files[1].size - desiredMaxFileSize, self->fileShrinkBytes));
 					if ((maxShrink > SERVER_KNOBS->DISK_QUEUE_MAX_TRUNCATE_BYTES) ||
 					    (frivolouslyTruncate && deterministicRandom()->random01() < 0.3)) {
-						TEST(true); // Replacing DiskQueue file
+						CODE_PROBE(true, "Replacing DiskQueue file");
 						TraceEvent("DiskQueueReplaceFile", self->dbgid)
 						    .detail("Filename", self->files[1].f->getFilename())
 						    .detail("OldFileSize", self->files[1].size)
@@ -389,7 +389,7 @@ public:
 						waitfor.push_back(self->files[1].f->truncate(self->fileExtensionBytes));
 						self->files[1].size = self->fileExtensionBytes;
 					} else {
-						TEST(true); // Truncating DiskQueue file
+						CODE_PROBE(true, "Truncating DiskQueue file");
 						const int64_t startingSize = self->files[1].size;
 						self->files[1].size -= std::min(maxShrink, self->files[1].size);
 						self->files[1].size = std::max(self->files[1].size, self->fileExtensionBytes);
@@ -460,12 +460,12 @@ public:
 
 			wait(ready);
 
-			TEST(pageData.size() > sizeof(Page)); // push more than one page of data
+			CODE_PROBE(pageData.size() > sizeof(Page), "push more than one page of data");
 
 			Future<Void> pushed = wait(self->push(pageData, &syncFiles));
 			pushing.send(Void());
 			ASSERT(syncFiles.size() >= 1 && syncFiles.size() <= 2);
-			TEST(2 == syncFiles.size()); // push spans both files
+			CODE_PROBE(2 == syncFiles.size(), "push spans both files");
 			wait(pushed);
 
 			delete pageMem;
@@ -491,8 +491,8 @@ public:
 			committed.send(Void());
 		} catch (Error& e) {
 			delete pageMem;
-			TEST(true); // push error
-			TEST(2 == syncFiles.size()); // push spanning both files error
+			CODE_PROBE(true, "push error");
+			CODE_PROBE(2 == syncFiles.size(), "push spanning both files error");
 			TraceEvent(SevError, "RDQPushAndCommitError", dbgid)
 			    .errorUnsuppressed(e)
 			    .detail("InitialFilename0", filename);
@@ -805,7 +805,7 @@ public:
 			Standalone<StringRef> result = self->readingBuffer.pop_front(sizeof(Page));
 			return result;
 		} catch (Error& e) {
-			TEST(true); // Read next page error
+			CODE_PROBE(true, "Read next page error");
 			TraceEvent(SevError, "RDQReadNextPageError", self->dbgid)
 			    .errorUnsuppressed(e)
 			    .detail("File0Name", self->files[0].dbgFilename);
@@ -840,8 +840,8 @@ public:
 			state std::vector<Future<Void>> commits;
 			state bool swap = file == 0;
 
-			TEST(file == 0); // truncate before last read page on file 0
-			TEST(file == 1 && pos != self->files[1].size); // truncate before last read page on file 1
+			CODE_PROBE(file == 0, "truncate before last read page on file 0");
+			CODE_PROBE(file == 1 && pos != self->files[1].size, "truncate before last read page on file 1");
 
 			self->readingFile = 2;
 			self->readingBuffer.clear();
@@ -890,10 +890,10 @@ public:
 		ASSERT(recovered);
 		uint8_t const* begin = contents.begin();
 		uint8_t const* end = contents.end();
-		TEST(contents.size() && pushedPageCount()); // More than one push between commits
+		CODE_PROBE(contents.size() && pushedPageCount(), "More than one push between commits");
 
 		bool pushAtEndOfPage = contents.size() >= 4 && pushedPageCount() && backPage().remainingCapacity() < 4;
-		TEST(pushAtEndOfPage); // Push right at the end of a page, possibly splitting size
+		CODE_PROBE(pushAtEndOfPage, "Push right at the end of a page, possibly splitting size");
 		while (begin != end) {
 			if (!pushedPageCount() || !backPage().remainingCapacity())
 				addEmptyPage();
@@ -1391,7 +1391,7 @@ private:
 		int f;
 		int64_t p;
 		bool poppedNotDurable = self->lastPoppedSeq / sizeof(Page) != self->poppedSeq / sizeof(Page);
-		TEST(poppedNotDurable); // DiskQueue: Recovery popped position not fully durable
+		CODE_PROBE(poppedNotDurable, "DiskQueue: Recovery popped position not fully durable");
 		self->findPhysicalLocation(self->lastPoppedSeq, &f, &p, "lastPoppedSeq");
 		wait(self->rawQueue->setPoppedPage(f, p, pageFloor(self->lastPoppedSeq)));
 
@@ -1408,8 +1408,8 @@ private:
 		self->recovered = true;
 		ASSERT(self->poppedSeq <= self->endLocation());
 
-		TEST(result.size() == 0); // End of queue at border between reads
-		TEST(result.size() != 0); // Partial read at end of queue
+		CODE_PROBE(result.size() == 0, "End of queue at border between reads");
+		CODE_PROBE(result.size() != 0, "Partial read at end of queue");
 
 		// The next read location isn't necessarily the end of the last commit, but this is sufficient for helping us
 		// check an ASSERTion
@@ -1628,8 +1628,9 @@ public:
 			                // totally finished
 			pop(popLocation);
 			commitFuture = commitFuture && queue->commit();
-		} else
-			TEST(true); // No uncommitted data was popped
+		} else {
+			CODE_PROBE(true, "No uncommitted data was popped");
+		}
 
 		return commitFuture;
 	}

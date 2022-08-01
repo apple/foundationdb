@@ -19,7 +19,7 @@
  */
 
 #include "benchmark/benchmark.h"
-#include "flow/crc32c.h"
+#include "crc32/crc32c.h"
 #include "flow/Hash3.h"
 #include "flow/xxhash.h"
 #include "flowbench/GlobalData.h"

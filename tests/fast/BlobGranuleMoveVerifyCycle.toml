@@ -1,0 +1,48 @@
+[configuration]
+blobGranulesEnabled = true 
+allowDefaultTenant = false
+# FIXME: re-enable rocks at some point
+storageEngineExcludeTypes = [4]
+
+[[knobs]]
+bg_range_source = "blobRangeKeys"
+
+[[test]]
+testTitle = 'BlobGranuleMoveVerifyCycle'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 250.0
+    testDuration = 60.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'RandomMoveKeys'
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'BlobGranuleVerifier'
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 60.0
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 60.0

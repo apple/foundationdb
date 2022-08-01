@@ -22,7 +22,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RkTagThrottleCollection.h"
 
-double RkTagThrottleCollection::RkTagThrottleData::getTargetRate(Optional<double> requestRate) {
+double RkTagThrottleCollection::RkTagThrottleData::getTargetRate(Optional<double> requestRate) const {
 	if (limits.tpsRate == 0.0 || !requestRate.present() || requestRate.get() == 0.0 || !rateSet) {
 		return limits.tpsRate;
 	} else {
@@ -48,7 +48,7 @@ Optional<double> RkTagThrottleCollection::RkTagThrottleData::updateAndGetClientR
 		ASSERT_GE(rate, 0);
 		return rate;
 	} else {
-		TEST(true); // Get throttle rate for expired throttle
+		CODE_PROBE(true, "Get throttle rate for expired throttle");
 		rateSet = false;
 		return Optional<double>();
 	}
@@ -92,14 +92,14 @@ Optional<double> RkTagThrottleCollection::autoThrottleTag(UID id,
 	bool present = (itr != autoThrottledTags.end());
 	if (!present) {
 		if (autoThrottledTags.size() >= SERVER_KNOBS->MAX_AUTO_THROTTLED_TRANSACTION_TAGS) {
-			TEST(true); // Reached auto-throttle limit
+			CODE_PROBE(true, "Reached auto-throttle limit");
 			return Optional<double>();
 		}
 
 		itr = autoThrottledTags.try_emplace(tag).first;
 		initializeTag(tag);
 	} else if (itr->second.limits.expiration <= now()) {
-		TEST(true); // Re-throttling expired tag that hasn't been cleaned up
+		CODE_PROBE(true, "Re-throttling expired tag that hasn't been cleaned up");
 		present = false;
 		itr->second = RkTagThrottleData();
 	}
@@ -113,7 +113,7 @@ Optional<double> RkTagThrottleCollection::autoThrottleTag(UID id,
 				return Optional<double>();
 			}
 		} else if (now() <= throttle.lastUpdated + SERVER_KNOBS->AUTO_TAG_THROTTLE_UPDATE_FREQUENCY) {
-			TEST(true); // Tag auto-throttled too quickly
+			CODE_PROBE(true, "Tag auto-throttled too quickly");
 			return Optional<double>();
 		} else {
 			tpsRate = computeTargetTpsRate(fractionalBusyness,
@@ -121,7 +121,7 @@ Optional<double> RkTagThrottleCollection::autoThrottleTag(UID id,
 			                               tagData[tag].requestRate.smoothRate());
 
 			if (throttle.limits.expiration > now() && tpsRate.get() >= throttle.limits.tpsRate) {
-				TEST(true); // Tag auto-throttle rate increase attempt while active
+				CODE_PROBE(true, "Tag auto-throttle rate increase attempt while active");
 				return Optional<double>();
 			}
 
@@ -176,14 +176,14 @@ void RkTagThrottleCollection::manualThrottleTag(UID id,
 	result.first->second.limits.expiration = expiration;
 
 	if (!oldLimits.present()) {
-		TEST(true); // Transaction tag manually throttled
+		CODE_PROBE(true, "Transaction tag manually throttled");
 		TraceEvent("RatekeeperAddingManualThrottle", id)
 		    .detail("Tag", tag)
 		    .detail("Rate", tpsRate)
 		    .detail("Priority", transactionPriorityToString(priority))
 		    .detail("SecondsToExpiration", expiration - now());
 	} else if (oldLimits.get().tpsRate != tpsRate || oldLimits.get().expiration != expiration) {
-		TEST(true); // Manual transaction tag throttle updated
+		CODE_PROBE(true, "Manual transaction tag throttle updated");
 		TraceEvent("RatekeeperUpdatingManualThrottle", id)
 		    .detail("Tag", tag)
 		    .detail("Rate", tpsRate)
@@ -225,14 +225,14 @@ PrioritizedTransactionTagMap<ClientTagThrottleLimits> RkTagThrottleCollection::g
 				if (priorityItr != manualItr->second.end()) {
 					Optional<double> priorityClientRate = priorityItr->second.updateAndGetClientRate(requestRate);
 					if (!priorityClientRate.present()) {
-						TEST(true); // Manual priority throttle expired
+						CODE_PROBE(true, "Manual priority throttle expired");
 						priorityItr = manualItr->second.erase(priorityItr);
 					} else {
 						if (!manualClientRate.present() || manualClientRate.get().tpsRate > priorityClientRate.get()) {
 							manualClientRate = ClientTagThrottleLimits(priorityClientRate.get(),
 							                                           priorityItr->second.limits.expiration);
 						} else {
-							TEST(true); // Manual throttle overriden by higher priority
+							CODE_PROBE(true, "Manual throttle overriden by higher priority");
 						}
 
 						++priorityItr;
@@ -241,13 +241,13 @@ PrioritizedTransactionTagMap<ClientTagThrottleLimits> RkTagThrottleCollection::g
 
 				if (manualClientRate.present()) {
 					tagPresent = true;
-					TEST(true); // Using manual throttle
+					CODE_PROBE(true, "Using manual throttle");
 					clientRates[*priority][tagItr->first] = manualClientRate.get();
 				}
 			}
 
 			if (manualItr->second.empty()) {
-				TEST(true); // All manual throttles expired
+				CODE_PROBE(true, "All manual throttles expired");
 				manualThrottledTags.erase(manualItr);
 				break;
 			}
@@ -261,7 +261,7 @@ PrioritizedTransactionTagMap<ClientTagThrottleLimits> RkTagThrottleCollection::g
 				double rampStartTime = autoItr->second.lastReduced + SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION -
 				                       SERVER_KNOBS->AUTO_TAG_THROTTLE_RAMP_UP_TIME;
 				if (now() >= rampStartTime && adjustedRate != std::numeric_limits<double>::max()) {
-					TEST(true); // Tag auto-throttle ramping up
+					CODE_PROBE(true, "Tag auto-throttle ramping up");
 
 					double targetBusyness = SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS;
 					if (targetBusyness == 0) {
@@ -280,14 +280,14 @@ PrioritizedTransactionTagMap<ClientTagThrottleLimits> RkTagThrottleCollection::g
 					if (!result.second && result.first->second.tpsRate > adjustedRate) {
 						result.first->second = ClientTagThrottleLimits(adjustedRate, autoItr->second.limits.expiration);
 					} else {
-						TEST(true); // Auto throttle overriden by manual throttle
+						CODE_PROBE(true, "Auto throttle overriden by manual throttle");
 					}
 					clientRates[TransactionPriority::BATCH][tagItr->first] =
 					    ClientTagThrottleLimits(0, autoItr->second.limits.expiration);
 				}
 			} else {
 				ASSERT(autoItr->second.limits.expiration <= now());
-				TEST(true); // Auto throttle expired
+				CODE_PROBE(true, "Auto throttle expired");
 				if (BUGGIFY) { // Temporarily extend the window between expiration and cleanup
 					tagPresent = true;
 				} else {
@@ -297,7 +297,7 @@ PrioritizedTransactionTagMap<ClientTagThrottleLimits> RkTagThrottleCollection::g
 		}
 
 		if (!tagPresent) {
-			TEST(true); // All tag throttles expired
+			CODE_PROBE(true, "All tag throttles expired");
 			tagItr = tagData.erase(tagItr);
 		} else {
 			++tagItr;
@@ -309,7 +309,7 @@ PrioritizedTransactionTagMap<ClientTagThrottleLimits> RkTagThrottleCollection::g
 
 void RkTagThrottleCollection::addRequests(TransactionTag const& tag, int requests) {
 	if (requests > 0) {
-		TEST(true); // Requests reported for throttled tag
+		CODE_PROBE(true, "Requests reported for throttled tag");
 
 		auto tagItr = tagData.try_emplace(tag);
 		tagItr.first->second.requestRate.addDelta(requests);
@@ -347,10 +347,12 @@ int64_t RkTagThrottleCollection::manualThrottleCount() const {
 	return count;
 }
 
-void RkTagThrottleCollection::updateBusyTagCount(TagThrottledReason reason) {
+void RkTagThrottleCollection::incrementBusyTagCount(TagThrottledReason reason) {
 	if (reason == TagThrottledReason::BUSY_READ) {
 		++busyReadTagCount;
 	} else if (reason == TagThrottledReason::BUSY_WRITE) {
 		++busyWriteTagCount;
+	} else {
+		ASSERT(false);
 	}
 }

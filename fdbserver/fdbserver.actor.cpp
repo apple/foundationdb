@@ -44,7 +44,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
-#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/IPAllowList.h"
@@ -69,15 +69,16 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/pubsub.h"
+#include "fdbserver/OnDemandStore.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/SimpleOpt.h"
+#include "SimpleOpt/SimpleOpt.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
-#include "flow/Tracing.h"
+#include "fdbclient/Tracing.h"
 #include "flow/WriteOnlySet.h"
 #include "flow/UnitTest.h"
 #include "flow/FaultInjection.h"
@@ -108,10 +109,11 @@ enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
 	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_VMEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
-	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
+	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
-	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS, OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT
+	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS, OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT,
+	OPT_NEW_CLUSTER_KEY
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -183,6 +185,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_HELP,                  "-h",                          SO_NONE },
 	{ OPT_HELP,                  "--help",                      SO_NONE },
 	{ OPT_DEVHELP,               "--dev-help",                  SO_NONE },
+	{ OPT_PRINT_CODE_PROBES,     "--code-probes",               SO_REQ_SEP },
 	{ OPT_KNOB,                  "--knob-",                     SO_REQ_SEP },
 	{ OPT_UNITTESTPARAM,         "--test-",                     SO_REQ_SEP },
 	{ OPT_LOCALITY,              "--locality-",                 SO_REQ_SEP },
@@ -204,9 +207,11 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_FLOW_PROCESS_NAME,     "--process-name",              SO_REQ_SEP },
 	{ OPT_FLOW_PROCESS_ENDPOINT, "--process-endpoint",          SO_REQ_SEP },
 	{ OPT_IP_TRUSTED_MASK,       "--trusted-subnet-",           SO_REQ_SEP },
+	{ OPT_NEW_CLUSTER_KEY,       "--new-cluster-key",           SO_REQ_SEP },
 	{ OPT_KMS_CONN_DISCOVERY_URL_FILE,           "--discover-kms-conn-url-file",            SO_REQ_SEP},
 	{ OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,     "--kms-conn-validation-token-details",     SO_REQ_SEP},
 	{ OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-encryption-keys-endpoint", SO_REQ_SEP},
+	
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -734,6 +739,17 @@ static void printUsage(const char* name, bool devhelp) {
 		       " - FDB_DUMP_STARTKEY: start key for the dump, default is empty\n"
 		       " - FDB_DUMP_ENDKEY: end key for the dump, default is \"\\xff\\xff\"\n"
 		       " - FDB_DUMP_DEBUG: print key-values to stderr in escaped format\n");
+
+		printf(
+		    "\n"
+		    "The 'changedescription' role replaces the old cluster key in all coordinators' data file to the specified "
+		    "new cluster key,\n"
+		    "which is passed in by '--new-cluster-key'. In particular, cluster key means '[description]:[id]'.\n"
+		    "'--datadir' is supposed to point to the top level directory of FDB's data, where subdirectories are for "
+		    "each process's data.\n"
+		    "The given cluster file passed in by '-C, --cluster-file' is considered to contain the old cluster key.\n"
+		    "It is used before restoring a snapshotted cluster to let the cluster have a different cluster key.\n"
+		    "Please make sure run it on every host in the cluster with the same '--new-cluster-key'.\n");
 	} else {
 		printOptionUsage("--dev-help", "Display developer-specific help and exit.");
 	}
@@ -979,10 +995,12 @@ void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::stri
 
 namespace {
 enum class ServerRole {
+	ChangeClusterKey,
 	ConsistencyCheck,
 	CreateTemplateDatabase,
 	DSLTest,
 	FDBD,
+	FlowProcess,
 	KVFileGenerateIOLogChecksums,
 	KVFileIntegrityCheck,
 	KVFileDump,
@@ -995,13 +1013,12 @@ enum class ServerRole {
 	SkipListTest,
 	Test,
 	VersionedMapTest,
-	UnitTests,
-	FlowProcess
+	UnitTests
 };
 struct CLIOptions {
 	std::string commandLine;
 	std::string fileSystemPath, dataFolder, connFile, seedConnFile, seedConnString, logFolder = ".", metricsConnFile,
-	                                                                                metricsPrefix;
+	                                                                                metricsPrefix, newClusterKey;
 	std::string logGroup = "default";
 	uint64_t rollsize = TRACE_DEFAULT_ROLL_SIZE;
 	uint64_t maxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
@@ -1144,6 +1161,10 @@ private:
 				printUsage(argv[0], true);
 				flushAndExit(FDB_EXIT_SUCCESS);
 				break;
+			case OPT_PRINT_CODE_PROBES:
+				probe::ICodeProbe::printProbesJSON({ std::string(args.OptionArg()) });
+				flushAndExit(FDB_EXIT_SUCCESS);
+				break;
 			case OPT_KNOB: {
 				Optional<std::string> knobName = extractPrefixedArgument("--knob", args.OptionSyntax());
 				if (!knobName.present()) {
@@ -1245,6 +1266,8 @@ private:
 					role = ServerRole::UnitTests;
 				else if (!strcmp(sRole, "flowprocess"))
 					role = ServerRole::FlowProcess;
+				else if (!strcmp(sRole, "changeclusterkey"))
+					role = ServerRole::ChangeClusterKey;
 				else {
 					fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
 					printHelpTeaser(argv[0]);
@@ -1648,6 +1671,19 @@ private:
 				knobs.emplace_back("rest_kms_connector_get_encryption_keys_endpoint", args.OptionArg());
 				break;
 			}
+			case OPT_NEW_CLUSTER_KEY: {
+				newClusterKey = args.OptionArg();
+				try {
+					ClusterConnectionString ccs;
+					// make sure the new cluster key is in valid format
+					ccs.parseKey(newClusterKey);
+				} catch (Error& e) {
+					std::cerr << "Invalid cluster key(description:id) '" << newClusterKey << "' from --new-cluster-key"
+					          << std::endl;
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
+			}
 			}
 		}
 
@@ -1743,6 +1779,21 @@ private:
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
+		if (role == ServerRole::ChangeClusterKey) {
+			bool error = false;
+			if (!newClusterKey.size()) {
+				fprintf(stderr, "ERROR: please specify --new-cluster-key\n");
+				error = true;
+			} else if (connectionFile->getConnectionString().clusterKey() == newClusterKey) {
+				fprintf(stderr, "ERROR: the new cluster key is the same as the old one\n");
+				error = true;
+			}
+			if (error) {
+				printHelpTeaser(argv[0]);
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+		}
+
 		// Interpret legacy "maxLogs" option in the most sensible and unsurprising way we can while eliminating its code
 		// path
 		if (maxLogsSet) {
@@ -1806,8 +1857,10 @@ int main(int argc, char* argv[]) {
 		auto opts = CLIOptions::parseArgs(argc, argv);
 		const auto role = opts.role;
 
-		if (role == ServerRole::Simulation)
+		if (role == ServerRole::Simulation) {
 			printf("Random seed is %u...\n", opts.randomSeed);
+			bindDeterministicRandomToOpenssl();
+		}
 
 		if (opts.zoneId.present())
 			printf("ZoneId set to %s, dcId to %s\n", printable(opts.zoneId).c_str(), printable(opts.dcId).c_str());
@@ -1844,6 +1897,12 @@ int main(int argc, char* argv[]) {
 			if (SERVER_KNOBS->PEEK_USING_STREAMING) {
 				fprintf(stderr,
 				        "ERROR : explicitly setting PEEK_USING_STREAMING is dangerous! set ALLOW_DANGEROUS_KNOBS to "
+				        "proceed anyways\n");
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+			if (SERVER_KNOBS->REMOTE_KV_STORE) {
+				fprintf(stderr,
+				        "ERROR : explicitly setting REMOTE_KV_STORE is dangerous! set ALLOW_DANGEROUS_KNOBS to "
 				        "proceed anyways\n");
 				flushAndExit(FDB_EXIT_ERROR);
 			}
@@ -2115,6 +2174,14 @@ int main(int argc, char* argv[]) {
 						}
 					}
 				}
+				g_knobs.setKnob("enable_encryption",
+				                KnobValue::create(ini.GetBoolValue("META", "enableEncryption", false)));
+				g_knobs.setKnob("enable_tlog_encryption",
+				                KnobValue::create(ini.GetBoolValue("META", "enableTLogEncryption", false)));
+				g_knobs.setKnob("enable_blob_granule_encryption",
+				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
+				g_knobs.setKnob("enable_blob_granule_compression",
+				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
 			}
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator.run();
@@ -2252,6 +2319,11 @@ int main(int argc, char* argv[]) {
 			g_network->run();
 		} else if (role == ServerRole::KVFileDump) {
 			f = stopAfter(KVFileDump(opts.kvFile));
+			g_network->run();
+		} else if (role == ServerRole::ChangeClusterKey) {
+			Key newClusterKey(opts.newClusterKey);
+			Key oldClusterKey = opts.connectionFile->getConnectionString().clusterKey();
+			f = stopAfter(coordChangeClusterKey(opts.dataFolder, newClusterKey, oldClusterKey));
 			g_network->run();
 		}
 

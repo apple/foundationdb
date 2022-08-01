@@ -21,7 +21,19 @@
 #include "flow/EncryptUtils.h"
 #include "flow/Trace.h"
 
+#include <boost/algorithm/string.hpp>
 #include <boost/format.hpp>
+
+EncryptCipherMode encryptModeFromString(const std::string& modeStr) {
+	if (modeStr == "NONE") {
+		return ENCRYPT_CIPHER_MODE_NONE;
+	} else if (modeStr == "AES-256-CTR") {
+		return ENCRYPT_CIPHER_MODE_AES_256_CTR;
+	} else {
+		TraceEvent("EncryptModeFromString").log();
+		throw not_implemented();
+	}
+}
 
 std::string getEncryptDbgTraceKey(std::string_view prefix,
                                   EncryptCipherDomainId domainId,
@@ -29,12 +41,15 @@ std::string getEncryptDbgTraceKey(std::string_view prefix,
                                   Optional<EncryptCipherBaseKeyId> baseCipherId) {
 	// Construct the TraceEvent field key ensuring its uniqueness and compliance to TraceEvent field validator and log
 	// parsing tools
+	std::string dName = domainName.toString();
+	// Underscores are invalid in trace event detail name.
+	boost::replace_all(dName, "_", "-");
 	if (baseCipherId.present()) {
 		boost::format fmter("%s.%lld.%s.%llu");
-		return boost::str(boost::format(fmter % prefix % domainId % domainName.toString() % baseCipherId.get()));
+		return boost::str(boost::format(fmter % prefix % domainId % dName % baseCipherId.get()));
 	} else {
 		boost::format fmter("%s.%lld.%s");
-		return boost::str(boost::format(fmter % prefix % domainId % domainName.toString()));
+		return boost::str(boost::format(fmter % prefix % domainId % dName));
 	}
 }
 

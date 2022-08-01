@@ -127,7 +127,7 @@ public:
 				}
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
-				    wait(getServerListAndProcessClasses(&tr));
+				    wait(NativeAPI::getServerListAndProcessClasses(&tr));
 				self->lastSSListFetchedTimestamp = now();
 
 				std::map<UID, StorageServerInterface> newServers;
@@ -240,11 +240,6 @@ public:
 			}
 			when(wait(err.getFuture())) {}
 		}
-	}
-
-	ACTOR static Future<Void> monitorThrottlingChanges(Ratekeeper* self) {
-		wait(self->tagThrottler->monitorThrottlingChanges());
-		return Void();
 	}
 
 	ACTOR static Future<Void> monitorBlobWorkers(Ratekeeper* self) {
@@ -422,7 +417,7 @@ public:
 						reply.throttledTags = self.tagThrottler->getClientRates();
 						bool returningTagsToProxy =
 						    reply.throttledTags.present() && reply.throttledTags.get().size() > 0;
-						TEST(returningTagsToProxy); // Returning tag throttles to a proxy
+						CODE_PROBE(returningTagsToProxy, "Returning tag throttles to a proxy");
 					}
 
 					reply.healthMetrics.update(self.healthMetrics, true, req.detailed);
@@ -500,7 +495,7 @@ Future<Void> Ratekeeper::trackTLogQueueInfo(TLogInterface tli) {
 }
 
 Future<Void> Ratekeeper::monitorThrottlingChanges() {
-	return RatekeeperImpl::monitorThrottlingChanges(this);
+	return tagThrottler->monitorThrottlingChanges();
 }
 
 Future<Void> Ratekeeper::monitorBlobWorkers() {
@@ -535,7 +530,11 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH,
                 SERVER_KNOBS->TARGET_BW_LAG_VERSIONS_BATCH),
     minBlobWorkerVersion(0), minBlobWorkerGRV(0), minBlobWorkerTime(0), minBlobWorkerRate(0) {
-	tagThrottler = std::make_unique<TagThrottler>(db, id);
+	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
+		tagThrottler = std::make_unique<GlobalTagThrottler>(db, id);
+	} else {
+		tagThrottler = std::make_unique<TagThrottler>(db, id);
+	}
 }
 
 void Ratekeeper::updateCommitCostEstimation(
@@ -555,8 +554,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 
 	double actualTps = smoothReleasedTransactions.smoothRate();
 	actualTpsMetric = (int64_t)actualTps;
-	// SOMEDAY: Remove the max( 1.0, ... ) since the below calculations _should_ be able to recover back up from this
-	// value
+	// SOMEDAY: Remove the max( 1.0, ... ) since the below calculations _should_ be able to recover back
+	// up from this value
 	actualTps =
 	    std::max(std::max(1.0, actualTps), smoothTotalDurableBytes.smoothRate() / CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
 
@@ -585,7 +584,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	    SERVER_KNOBS->RATEKEEPER_PRINT_LIMIT_REASON &&
 	    (deterministicRandom()->random01() < SERVER_KNOBS->RATEKEEPER_LIMIT_REASON_SAMPLE_RATE);
 
-	// Look at each storage server's write queue and local rate, compute and store the desired rate ratio
+	// Look at each storage server's write queue and local rate, compute and store the desired rate
+	// ratio
 	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
 		auto const& ss = i->value;
 		if (!ss.valid || !ss.acceptingRequests || (remoteDC.present() && ss.locality.dcId() == remoteDC))
@@ -874,7 +874,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		}
 
 		if (minSSVer != std::numeric_limits<Version>::max() && maxTLVer != std::numeric_limits<Version>::min()) {
-			// writeToReadLatencyLimit: 0 = infinite speed; 1 = TL durable speed ; 2 = half TL durable speed
+			// writeToReadLatencyLimit: 0 = infinite speed; 1 = TL durable speed ; 2 = half TL durable
+			// speed
 			writeToReadLatencyLimit =
 			    ((maxTLVer - minLimitingSSVer) - limits->maxVersionDifference / 2) / (limits->maxVersionDifference / 4);
 			worstVersionLag = std::max((Version)0, maxTLVer - minSSVer);
@@ -1089,7 +1090,8 @@ StorageQueueInfo::StorageQueueInfo(UID id, LocalityData locality)
     smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
     smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
     limitReason(limitReason_t::unlimited) {
-	// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
+	// FIXME: this is a tacky workaround for a potential uninitialized use in
+	// trackStorageServerQueueInfo
 	lastReply.instanceID = -1;
 }
 
@@ -1164,8 +1166,8 @@ TLogQueueInfo::TLogQueueInfo(UID id)
   : valid(false), id(id), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
     smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
     smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT) {
-	// FIXME: this is a tacky workaround for a potential uninitialized use in trackTLogQueueInfo (copied from
-	// storageQueueInfO)
+	// FIXME: this is a tacky workaround for a potential uninitialized use in trackTLogQueueInfo (copied
+	// from storageQueueInfO)
 	lastReply.instanceID = -1;
 }
 
@@ -1202,9 +1204,9 @@ RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,
     reasonMetric(StringRef("Ratekeeper.Reason" + context)), storageTargetBytes(storageTargetBytes),
     storageSpringBytes(storageSpringBytes), logTargetBytes(logTargetBytes), logSpringBytes(logSpringBytes),
     maxVersionDifference(maxVersionDifference),
-    durabilityLagTargetVersions(
-        durabilityLagTargetVersions +
-        SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions are expected to not
+    durabilityLagTargetVersions(durabilityLagTargetVersions +
+                                SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions
+                                                                                   // are expected to not
     // be durable on the storage servers
     lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()),
     bwLagTargetVersions(bwLagTargetVersions), bwLagLimit(std::numeric_limits<double>::infinity()), bwLagTime(0),

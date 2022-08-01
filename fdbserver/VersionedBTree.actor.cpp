@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Error.h"
@@ -37,8 +37,7 @@
 #include "flow/serialize.h"
 #include "flow/genericactors.actor.h"
 #include "flow/UnitTest.h"
-#include "fdbserver/IPager.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/ActorCollection.h"
 #include <map>
 #include <string>
@@ -7820,10 +7819,10 @@ public:
 		if (rowLimit > 0) {
 			f = cur.seekGTE(keys.begin);
 			if (f.isReady()) {
-				TEST(true); // Cached forward range read seek
+				CODE_PROBE(true, "Cached forward range read seek");
 				f.get();
 			} else {
-				TEST(true); // Uncached forward range read seek
+				CODE_PROBE(true, "Uncached forward range read seek");
 				wait(store(lock, self->m_concurrentReads.lock()));
 				wait(f);
 			}
@@ -7876,10 +7875,10 @@ public:
 		} else {
 			f = cur.seekLT(keys.end);
 			if (f.isReady()) {
-				TEST(true); // Cached reverse range read seek
+				CODE_PROBE(true, "Cached reverse range read seek");
 				f.get();
 			} else {
-				TEST(true); // Uncached reverse range read seek
+				CODE_PROBE(true, "Uncached reverse range read seek");
 				wait(store(lock, self->m_concurrentReads.lock()));
 				wait(f);
 			}
@@ -10274,7 +10273,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 
 		state int v;
 		state ExtentQueueEntry<16> e;
-		generateRandomData(e.entry, 16);
+		deterministicRandom()->randomBytes(e.entry, 16);
 		state int sinceYield = 0;
 		for (v = 1; v <= numEntries; ++v) {
 			// Sometimes do a commit

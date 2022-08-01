@@ -1,8 +1,60 @@
-.. _release-notes:
-
 #############
 Release Notes
 #############
+
+7.1.17
+======
+* Same as 7.1.16 release with AVX enabled.
+
+7.1.16
+======
+* Released with AVX disabled.
+* Fixed a crash bug when cluster controller shuts down. `(PR #7706) <https://github.com/apple/foundationdb/pull/7706>`_
+* Fixed a storage server failure when getReadVersion returns an error. `(PR #7688) <https://github.com/apple/foundationdb/pull/7688>`_
+* Fixed unbounded status json generation. `(PR #7680) <https://github.com/apple/foundationdb/pull/7680>`_
+* Fixed ScopeEventFieldTypeMismatch error for TLogMetrics. `(PR #7640) <https://github.com/apple/foundationdb/pull/7640>`_
+* Added getMappedRange latency metrics. `(PR #7632) <https://github.com/apple/foundationdb/pull/7632>`_
+* Fixed a version vector performance bug due to not updating client side tag cache. `(PR #7616) <https://github.com/apple/foundationdb/pull/7616>`_
+* Fixed DiskReadSeconds and DiskWriteSeconds calculaion in ProcessMetrics. `(PR #7609) <https://github.com/apple/foundationdb/pull/7609>`_
+* Added Rocksdb compression and data size stats. `(PR #7596) <https://github.com/apple/foundationdb/pull/7596>`_
+
+7.1.15
+======
+* Same as 7.1.14 release with AVX enabled.
+
+7.1.14
+======
+* Released with AVX disabled.
+* Fixed a high commit latency bug when there are data movement. `(PR #7548) <https://github.com/apple/foundationdb/pull/7548>`_
+* Fixed the primary locality on the sequencer by obtaining it from cluster controller. `(PR #7535) <https://github.com/apple/foundationdb/pull/7535>`_
+* Added StorageEngine type to StorageMetrics trace events. `(PR #7546) <https://github.com/apple/foundationdb/pull/7546>`_
+* Improved hasIncompleteVersionstamp performance in Java binding to use iteration rather than stream processing. `(PR #7559) <https://github.com/apple/foundationdb/pull/7559>`_
+
+7.1.13
+======
+* Same as 7.1.12 release with AVX enabled.
+
+7.1.12
+======
+* Released with AVX disabled.
+* Optimized out the version vector specific code on the client when version vector is disabled. `(PR #7528) <https://github.com/apple/foundationdb/pull/7528>`_
+* Added pipelining for secondary queries in index prefetch. `(PR #7507) <https://github.com/apple/foundationdb/pull/7507>`_
+* Fixed a connection failure bug when using DNS names. `(PR #7478) <https://github.com/apple/foundationdb/pull/7478>`_
+* Fixed delays in version advancement that can be larger than knob MAX_COMMIT_BATCH_INTERVAL. `(PR #7518) <https://github.com/apple/foundationdb/pull/7518>`_
+* Removed explicit degraded peer recovery in gray failure detection since this may be false positive. `(PR #7466) <https://github.com/apple/foundationdb/pull/7466>`_
+* Fixed undefined behavior from accessing field of uninitialized object. `(PR #7430) <https://github.com/apple/foundationdb/pull/7430>`_
+
+7.1.11
+======
+* Same as 7.1.10 release with AVX enabled.
+
+7.1.10
+======
+* Released with AVX disabled.
+* Fixed a sequencer crash when DC ID is a string. `(PR #7393) <https://github.com/apple/foundationdb/pull/7393>`_
+* Fixed a client performance regression by removing unnecessary transaction initialization. `(PR #7365) <https://github.com/apple/foundationdb/pull/7365>`_
+* Safely removed fdb_transaction_get_range_and_flat_map C API. `(PR #7379) <https://github.com/apple/foundationdb/pull/7379>`_
+* Fixed an unknown error bug when hostname resolving fails. `(PR #7380) <https://github.com/apple/foundationdb/pull/7380>`_
 
 7.1.9
 =====
@@ -15,7 +67,7 @@ Release Notes
 * Added RSS bytes for processes in status json output and corrected available_bytes calculation. `(PR #7348) <https://github.com/apple/foundationdb/pull/7348>`_
 * Added versionstamp support in tuples. `(PR #7313) <https://github.com/apple/foundationdb/pull/7313>`_
 * Fixed some spammy trace events. `(PR #7300) <https://github.com/apple/foundationdb/pull/7300>`_
-* Fixed a memory corruption bug for using streaming peeks. `(PR #7288) <https://github.com/apple/foundationdb/pull/7288>`_
+* Avoided a memory corruption bug by disabling streaming peeks. `(PR #7288) <https://github.com/apple/foundationdb/pull/7288>`_
 * Fixed a hang bug in fdbcli exclude command. `(PR #7268) <https://github.com/apple/foundationdb/pull/7268>`_
 * Fixed an issue that a remote TLog blocks peeks. `(PR #7255) <https://github.com/apple/foundationdb/pull/7255>`_
 * Fixed a connection issue using hostnames. `(PR #7264) <https://github.com/apple/foundationdb/pull/7264>`_

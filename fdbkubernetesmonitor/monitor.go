@@ -24,6 +24,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -33,6 +35,7 @@ import (
 	"time"
 
 	"k8s.io/utils/pointer"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 	"github.com/fsnotify/fsnotify"
@@ -88,7 +91,7 @@ type Monitor struct {
 }
 
 // StartMonitor starts the monitor loop.
-func StartMonitor(logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int) {
+func StartMonitor(logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int, listenAddr string, enableDebug bool) {
 	podClient, err := CreatePodClient(logger)
 	if err != nil {
 		panic(err)
@@ -103,6 +106,33 @@ func StartMonitor(logger logr.Logger, configFile string, customEnvironment map[s
 	}
 
 	go func() { monitor.WatchPodTimestamps() }()
+
+	mux := http.NewServeMux()
+	// Enable pprof endpoints for debugging purposes.
+	if enableDebug {
+		mux.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+		mux.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+		mux.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+		mux.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
+		mux.Handle("/debug/pprof/block", pprof.Handler("block"))
+		mux.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	}
+
+	// Add Prometheus support
+	mux.Handle("/metrics", promhttp.Handler())
+	go func() {
+		err := http.ListenAndServe(listenAddr, mux)
+		if err != nil {
+			logger.Error(err, "could not start HTTP server")
+			os.Exit(1)
+		}
+	}()
+
 	monitor.Run()
 }
 

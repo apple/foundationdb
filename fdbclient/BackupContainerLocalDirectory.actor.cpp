@@ -20,7 +20,7 @@
 
 #include "fdbclient/BackupContainerLocalDirectory.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/Platform.actor.h"
 #include "flow/Platform.h"
 #include "fdbrpc/simulator.h"
