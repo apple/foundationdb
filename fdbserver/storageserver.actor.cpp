@@ -697,19 +697,6 @@ public:
 	Reference<Histogram> storageCommitLatencyHistogram;
 	Reference<Histogram> ssDurableVersionUpdateLatencyHistogram;
 
-	struct PhysicalShardHistograms {
-		const Reference<Histogram> cleanUpLatency;
-		const Reference<Histogram> numShardsToCleanUp;
-
-		PhysicalShardHistograms()
-		  : cleanUpLatency(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
-		                                           "TimeSpentCleanUpEmptyShards"_sr,
-		                                           Histogram::Unit::microseconds)),
-		    numShardsToCleanUp(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
-		                                               "NumShardsToCleanUp"_sr,
-		                                               Histogram::Unit::countLinear)) {}
-	} physicalShardHistograms;
-
 	// watch map operations
 	Reference<ServerWatchMetadata> getWatchMetadata(KeyRef key) const;
 	KeyRef setWatchMetadata(Reference<ServerWatchMetadata> metadata);
@@ -8463,10 +8450,10 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				}
 				if (emptyShardIds.size() > 0) {
 					state double start = now();
-					TraceEvent("RemoveEmptyPhysicalShards").detail("NumShards", emptyShardIds.size());
 					wait(data->storage.cleanUpShardsIfNeeded(emptyShardIds));
-					data->physicalShardHistograms.cleanUpLatency->sample(now() - start);
-					data->physicalShardHistograms.numShardsToCleanUp->sampleRecordCounter(emptyShardIds.size());
+					TraceEvent("RemoveEmptyPhysicalShards")
+					    .detail("NumShards", emptyShardIds.size())
+					    .detail("TimeSpent", now() - start);
 				}
 				data->pendingRemoveRanges.erase(data->pendingRemoveRanges.begin());
 			}
