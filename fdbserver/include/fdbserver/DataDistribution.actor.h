@@ -404,6 +404,34 @@ struct IDDQueue {
 	virtual ~IDDQueue() = 0;
 };
 
+// The common info shared by all DD components. Normally the DD components should share the reference to the same
+// context.
+struct DDContext : public ReferenceCounted<DDContext> {
+	// FIXME(xwang) mark fields privates
+	// private:
+	std::shared_ptr<DDEnabledState> ddEnabledState; // Note: don't operate directly because it's shared with snapshot server
+	IDDTracker::Interface trackerInterface;
+	IDDQueue::Interface queueInterface;
+	// public:
+	UID ddId;
+	MoveKeysLock lock;
+	DatabaseConfiguration configuration;
+	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
+	Reference<AsyncVar<bool>> processingUnhealthy, processingWiggle;
+
+	DDContext() = default;
+
+	DDContext(UID id, std::shared_ptr<DDEnabledState> ddEnabledState)
+	  : ddEnabledState(std::move(ddEnabledState)), ddId(id), shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure),
+	    processingUnhealthy(new AsyncVar<bool>(false)), processingWiggle(new AsyncVar<bool>(false)) {}
+
+	void initTeamCollectionStates();
+
+	void proposeRelocation(const RelocateShard& rs) const { return queueInterface.relocationProducer.send(rs); }
+
+	void restartShardTrackerAsync(KeyRange keys) const { return trackerInterface.restartShardTracker.send(keys); }
+};
+
 #ifndef __INTEL_COMPILER
 #pragma endregion
 #endif
