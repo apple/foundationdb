@@ -715,7 +715,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 
 	loop {
 		try {
-			if (injectTooBig) {
+			if (injectTooBig || (initialSnapshot && bytesRead >= 3 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES)) {
+				// throw transaction too old either on injection for simulation, or if snapshot would be too large now
 				throw transaction_too_old();
 			}
 			RangeResult res = waitNext(rows.getFuture());
@@ -727,8 +728,9 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 			if (e.code() == error_code_end_of_stream) {
 				break;
 			}
+			// if we got transaction_too_old naturally, have lower threshold for re-evaluating (2*limit)
 			if (initialSnapshot && e.code() == error_code_transaction_too_old &&
-			    (injectTooBig || bytesRead > 2 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES)) {
+			    (injectTooBig || bytesRead >= 2 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES)) {
 				// idle this actor, while we tell the manager this is too big and to re-evaluate granules and revoke us
 				wait(reevaluateInitialSplit(bwData, granuleID, keyRange, epoch, seqno));
 				ASSERT(false);
