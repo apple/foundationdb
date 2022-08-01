@@ -278,7 +278,6 @@ ACTOR Future<bool> metaclusterGetCommand(Reference<IDatabase> db, std::vector<St
 	return true;
 }
 
-
 // metacluster status command
 ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 2 || tokens.size() > 3) {
