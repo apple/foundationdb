@@ -736,6 +736,9 @@ public:
 		return static_cast<INetworkConnections*>((void*)g_network->global(INetwork::enNetworkConnections));
 	}
 
+	// If a DNS name can be resolved to both and IPv4 and IPv6 addresses, we want IPv6 addresses when running the
+	// clusters on IPv6.
+	// This function takes a vector of addresses and return a random one, preferring IPv6 over IPv4.
 	static NetworkAddress pickOneAddress(const std::vector<NetworkAddress>& addresses) {
 		std::vector<NetworkAddress> ipV6Addresses;
 		for (const NetworkAddress& addr : addresses) {
