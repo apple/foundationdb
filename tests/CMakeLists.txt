@@ -381,7 +381,7 @@ if(WITH_PYTHON)
   if(NOT OPEN_FOR_IDE)
     add_test(
       NAME command_line_argument_test
-      COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/argument_parsing/test_argument_parsing.py ${CMAKE_BINARY_DIR}
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/argument_parsing/test_argument_parsing.py ${CMAKE_BINARY_DIR}
     )
   endif()
 

@@ -29,7 +29,7 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
 endif()
 
 add_custom_command(OUTPUT ${asm_file} ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h
-  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/generate_asm.py ${os} ${cpu}
+  COMMAND $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/generate_asm.py ${os} ${cpu}
       ${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.cpp
       ${asm_file}
       ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h
@@ -65,7 +65,7 @@ endif()
 if(APPLE)
   set(symbols ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.symbols)
   add_custom_command(OUTPUT ${symbols}
-    COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/symbolify.py
+    COMMAND $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/symbolify.py
         ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c.h
         ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c_internal.h
         ${symbols}
@@ -457,7 +457,7 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT USE_UBSAN) # Linux Only, non-ubsan only
     )
 
   add_custom_command(OUTPUT ${SHIM_LIB_GEN_SRC}
-    COMMAND $<TARGET_FILE:Python::Interpreter> ${IMPLIBSO_SRC_DIR}/implib-gen.py
+    COMMAND $<TARGET_FILE:Python3::Interpreter> ${IMPLIBSO_SRC_DIR}/implib-gen.py
       --target ${CMAKE_SYSTEM_PROCESSOR}
       --outdir ${SHIM_LIB_OUTPUT_DIR}
       --dlopen-callback=fdb_shim_dlopen_callback
@@ -484,7 +484,7 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT USE_UBSAN) # Linux Only, non-ubsan only
   target_include_directories(fdb_c_shim_lib_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include)
 
   add_test(NAME fdb_c_shim_library_tests
-    COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_shim_tests.py
+    COMMAND $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_shim_tests.py
           --build-dir ${CMAKE_BINARY_DIR}
           --unit-tests-bin $<TARGET_FILE:fdb_c_shim_unit_tests>
           --api-tester-bin $<TARGET_FILE:fdb_c_shim_api_tester>
