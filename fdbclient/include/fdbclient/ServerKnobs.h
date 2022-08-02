@@ -163,6 +163,8 @@ public:
 	int PRIORITY_SPLIT_SHARD;
 
 	// Data distribution
+	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
+
 	double READ_REBALANCE_CPU_THRESHOLD; // read rebalance only happens if the source servers' CPU > threshold
 	int READ_REBALANCE_SRC_PARALLELISM; // the max count a server become a source server within a certain interval
 	int READ_REBALANCE_SHARD_TOPK; // top k shards from which to select randomly for read-rebalance

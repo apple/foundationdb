@@ -1099,7 +1099,7 @@ struct DDQueueData {
 			}
 
 			Future<Void> fCleanup =
-			    CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
+			    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
 
 			// If there is a job in flight that wants data relocation which we are about to cancel/modify,
 			//     make sure that we keep the relocation intent for the job that we launch
@@ -1121,13 +1121,13 @@ struct DDQueueData {
 				rrs.keys = ranges[r];
 				if (rd.keys == ranges[r] && rd.isRestore()) {
 					ASSERT(rd.dataMove != nullptr);
-					ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+					ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 					rrs.dataMoveId = rd.dataMove->meta.id;
 				} else {
 					ASSERT_WE_THINK(!rd.isRestore()); // Restored data move should not overlap.
 					// TODO(psm): The shard id is determined by DD.
 					rrs.dataMove.reset();
-					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 						rrs.dataMoveId = deterministicRandom()->randomUniqueID();
 					} else {
 						rrs.dataMoveId = anonymousShardId;
@@ -1290,7 +1290,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			self->suppressIntervals = 0;
 		}
 
-		if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 			auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
 			ASSERT(inFlightRange.range() == rd.keys);
 			ASSERT(inFlightRange.value().randomId == rd.randomId);
@@ -1332,7 +1332,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 				bestTeams.clear();
 				// Get team from teamCollections in different DCs and find the best one
 				while (tciIndex < self->teamCollections.size()) {
-					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && rd.isRestore()) {
+					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && rd.isRestore()) {
 						auto req = GetTeamRequest(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest);
 						Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
 						    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
@@ -1579,7 +1579,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 								                      CancelConflictingDataMoves::False);
 							} else {
 								self->fetchKeysComplete.insert(rd);
-								if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+								if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 									auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(rd.keys);
 									if (ranges.size() == 1 && static_cast<KeyRange>(ranges[0]) == rd.keys &&
 									    ranges[0].value.id == rd.dataMoveId && !ranges[0].value.cancel.isValid()) {
