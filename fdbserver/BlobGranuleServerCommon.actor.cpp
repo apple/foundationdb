@@ -128,6 +128,10 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Database cx, UID granuleID) {
 // key range, the granule may have a snapshot file at version X, where beginVersion < X <= readVersion. In this case, if
 // the number of bytes in delta files between beginVersion and X is larger than the snapshot file at version X, it is
 // strictly more efficient (in terms of files and bytes read) to just use the snapshot file at version X instead.
+//
+// To assist BlobGranule file (snapshot and/or delta) file encryption, the routine while populating snapshot and/or
+// delta files, constructs BlobFilePointerRef->cipherKeysMeta field. Approach avoids this method to be defined as an
+// ACTOR, as fetching desired EncryptionKey may potentially involve reaching out to EncryptKeyProxy or external KMS.
 void GranuleFiles::getFiles(Version beginVersion,
                             Version readVersion,
                             bool canCollapse,
@@ -195,8 +199,12 @@ void GranuleFiles::getFiles(Version beginVersion,
 	}
 
 	while (deltaF != deltaFiles.end() && deltaF->version < readVersion) {
-		chunk.deltaFiles.emplace_back_deep(
-		    replyArena, deltaF->filename, deltaF->offset, deltaF->length, deltaF->fullFileLength);
+		chunk.deltaFiles.emplace_back_deep(replyArena,
+		                                   deltaF->filename,
+		                                   deltaF->offset,
+		                                   deltaF->length,
+		                                   deltaF->fullFileLength,
+		                                   deltaF->cipherKeysMeta);
 		deltaBytesCounter += deltaF->length;
 		ASSERT(lastIncluded < deltaF->version);
 		lastIncluded = deltaF->version;
@@ -204,8 +212,12 @@ void GranuleFiles::getFiles(Version beginVersion,
 	}
 	// include last delta file that passes readVersion, if it exists
 	if (deltaF != deltaFiles.end() && lastIncluded < readVersion) {
-		chunk.deltaFiles.emplace_back_deep(
-		    replyArena, deltaF->filename, deltaF->offset, deltaF->length, deltaF->fullFileLength);
+		chunk.deltaFiles.emplace_back_deep(replyArena,
+		                                   deltaF->filename,
+		                                   deltaF->offset,
+		                                   deltaF->length,
+		                                   deltaF->fullFileLength,
+		                                   deltaF->cipherKeysMeta);
 		deltaBytesCounter += deltaF->length;
 		lastIncluded = deltaF->version;
 	}

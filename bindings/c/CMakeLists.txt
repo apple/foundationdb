@@ -29,7 +29,7 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
 endif()
 
 add_custom_command(OUTPUT ${asm_file} ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h
-  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/generate_asm.py ${os} ${cpu}
+  COMMAND $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/generate_asm.py ${os} ${cpu}
       ${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.cpp
       ${asm_file}
       ${CMAKE_CURRENT_BINARY_DIR}/fdb_c_function_pointers.g.h
@@ -65,7 +65,7 @@ endif()
 if(APPLE)
   set(symbols ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.symbols)
   add_custom_command(OUTPUT ${symbols}
-    COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/symbolify.py
+    COMMAND $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/symbolify.py
         ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c.h
         ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c_internal.h
         ${symbols}
@@ -428,10 +428,18 @@ endif()
 # Generate shim library in Linux builds
 if (OPEN_FOR_IDE)
 
-  add_library(fdb_c_shim OBJECT fdb_c_shim.cpp)
+  add_library(fdb_c_shim OBJECT foundationdb/fdb_c_shim.h fdb_c_shim.cpp)
   target_link_libraries(fdb_c_shim PUBLIC dl)
+  target_include_directories(fdb_c_shim PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/foundationdb>)
 
-elseif(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE AND NOT USE_UBSAN) # Linux, non-ubsan only
+  add_library(fdb_c_shim_lib_tester OBJECT test/shim_lib_tester.cpp)
+  target_link_libraries(fdb_c_shim_lib_tester PRIVATE fdb_c_shim SimpleOpt fdb_cpp Threads::Threads)
+  target_include_directories(fdb_c_shim_lib_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include)
+
+elseif(NOT WIN32 AND NOT APPLE AND NOT USE_UBSAN) # Linux Only, non-ubsan only
 
   set(SHIM_LIB_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
@@ -439,16 +447,31 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE AND NOT USE_UBSAN) # Linux, 
     ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.init.c
     ${SHIM_LIB_OUTPUT_DIR}/libfdb_c.so.tramp.S)
 
+  set(IMPLIBSO_SRC_DIR ${CMAKE_SOURCE_DIR}/contrib/Implib.so)
+  set(IMPLIBSO_SRC
+    ${IMPLIBSO_SRC_DIR}/implib-gen.py
+    ${IMPLIBSO_SRC_DIR}/arch/common/init.c.tpl
+    ${IMPLIBSO_SRC_DIR}/arch/${CMAKE_SYSTEM_PROCESSOR}/config.ini
+    ${IMPLIBSO_SRC_DIR}/arch/${CMAKE_SYSTEM_PROCESSOR}/table.S.tpl
+    ${IMPLIBSO_SRC_DIR}/arch/${CMAKE_SYSTEM_PROCESSOR}/trampoline.S.tpl
+    )
+
   add_custom_command(OUTPUT ${SHIM_LIB_GEN_SRC}
-  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_SOURCE_DIR}/contrib/Implib.so/implib-gen.py
+    COMMAND $<TARGET_FILE:Python3::Interpreter> ${IMPLIBSO_SRC_DIR}/implib-gen.py
       --target ${CMAKE_SYSTEM_PROCESSOR}
       --outdir ${SHIM_LIB_OUTPUT_DIR}
       --dlopen-callback=fdb_shim_dlopen_callback
-      $<TARGET_FILE:fdb_c>)
+      $<TARGET_FILE:fdb_c>
+    DEPENDS ${IMPLIBSO_SRC}
+    COMMENT "Generating source code for C shim library")
 
-  add_library(fdb_c_shim SHARED ${SHIM_LIB_GEN_SRC} fdb_c_shim.cpp)
+  add_library(fdb_c_shim SHARED ${SHIM_LIB_GEN_SRC} foundationdb/fdb_c_shim.h fdb_c_shim.cpp)
   target_link_options(fdb_c_shim PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map,-z,nodelete,-z,noexecstack")
   target_link_libraries(fdb_c_shim PUBLIC dl)
+  target_include_directories(fdb_c_shim PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/foundationdb>)
 
   add_executable(fdb_c_shim_unit_tests)
   target_link_libraries(fdb_c_shim_unit_tests PRIVATE fdb_c_shim fdb_c_unit_tests_impl)
@@ -456,15 +479,20 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE AND NOT USE_UBSAN) # Linux, 
   add_executable(fdb_c_shim_api_tester)
   target_link_libraries(fdb_c_shim_api_tester PRIVATE fdb_c_shim fdb_c_api_tester_impl)
 
+  add_executable(fdb_c_shim_lib_tester test/shim_lib_tester.cpp)
+  target_link_libraries(fdb_c_shim_lib_tester PRIVATE fdb_c_shim SimpleOpt fdb_cpp Threads::Threads)
+  target_include_directories(fdb_c_shim_lib_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include)
+
   add_test(NAME fdb_c_shim_library_tests
-    COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_shim_tests.py
+    COMMAND $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_shim_tests.py
           --build-dir ${CMAKE_BINARY_DIR}
           --unit-tests-bin $<TARGET_FILE:fdb_c_shim_unit_tests>
           --api-tester-bin $<TARGET_FILE:fdb_c_shim_api_tester>
+          --shim-lib-tester-bin $<TARGET_FILE:fdb_c_shim_lib_tester>
           --api-test-dir ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
           )
 
-endif() # End Linux, non-ubsan only
+endif() # End Linux only, non-ubsan only
 
 # TODO: re-enable once the old vcxproj-based build system is removed.
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
@@ -508,3 +536,19 @@ fdb_install(
   DESTINATION lib
   DESTINATION_SUFFIX "/cmake/${targets_export_name}"
   COMPONENT clients)
+
+if(NOT WIN32 AND NOT APPLE AND NOT USE_UBSAN) # Linux Only, non-ubsan only
+
+fdb_install(
+  FILES foundationdb/fdb_c_shim.h
+  DESTINATION include
+  DESTINATION_SUFFIX /foundationdb
+  COMPONENT clients)
+
+fdb_install(
+  TARGETS fdb_c_shim
+  EXPORT ${targets_export_name}
+  DESTINATION lib
+  COMPONENT clients)
+
+endif() # End Linux only, non-ubsan only

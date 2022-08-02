@@ -75,4 +75,4 @@ struct StorageQuotaWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<StorageQuotaWorkload> StorageQuotaWorkloadFactory("StorageQuota", true);
+WorkloadFactory<StorageQuotaWorkload> StorageQuotaWorkloadFactory("StorageQuota");

@@ -117,6 +117,7 @@ struct ClientDBInfo {
 	Optional<Value> forward;
 	std::vector<VersionHistory> history;
 	UID clusterId;
+	bool isEncryptionEnabled = false;
 
 	TenantMode tenantMode;
 
@@ -130,7 +131,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, grvProxies, commitProxies, id, forward, history, tenantMode, clusterId);
+		serializer(ar, grvProxies, commitProxies, id, forward, history, tenantMode, clusterId, isEncryptionEnabled);
 	}
 };
 
@@ -175,6 +176,8 @@ struct CommitTransactionRequest : TimedRequest {
 
 	CommitTransactionRequest() : CommitTransactionRequest(SpanContext()) {}
 	CommitTransactionRequest(SpanContext const& context) : spanContext(context), flags(0) {}
+
+	bool verify() const { return tenantInfo.isAuthorized(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -281,6 +284,8 @@ struct GetReadVersionRequest : TimedRequest {
 		}
 	}
 
+	bool verify() const { return true; }
+
 	bool operator<(GetReadVersionRequest const& rhs) const { return priority < rhs.priority; }
 
 	template <class Ar>
@@ -327,7 +332,7 @@ struct GetKeyServerLocationsRequest {
 	constexpr static FileIdentifier file_identifier = 9144680;
 	Arena arena;
 	SpanContext spanContext;
-	Optional<TenantNameRef> tenant;
+	TenantInfo tenant;
 	KeyRef begin;
 	Optional<KeyRef> end;
 	int limit;
@@ -342,7 +347,7 @@ struct GetKeyServerLocationsRequest {
 
 	GetKeyServerLocationsRequest() : limit(0), reverse(false), minTenantVersion(latestVersion) {}
 	GetKeyServerLocationsRequest(SpanContext spanContext,
-	                             Optional<TenantNameRef> const& tenant,
+	                             TenantInfo const& tenant,
 	                             KeyRef const& begin,
 	                             Optional<KeyRef> const& end,
 	                             int limit,
@@ -351,6 +356,8 @@ struct GetKeyServerLocationsRequest {
 	                             Arena const& arena)
 	  : arena(arena), spanContext(spanContext), tenant(tenant), begin(begin), end(end), limit(limit), reverse(reverse),
 	    minTenantVersion(minTenantVersion) {}
+
+	bool verify() const { return tenant.isAuthorized(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

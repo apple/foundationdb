@@ -1909,14 +1909,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "createtenant")) {
-					bool _result = wait(makeInterruptable(createTenantCommandActor(db, tokens)));
+					bool _result = wait(makeInterruptable(createTenantCommandActor(db, tokens, opt.apiVersion)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "deletetenant")) {
-					bool _result = wait(makeInterruptable(deleteTenantCommandActor(db, tokens)));
+					bool _result = wait(makeInterruptable(deleteTenantCommandActor(db, tokens, opt.apiVersion)));
 					if (!_result)
 						is_error = true;
 					else if (tenantName.present() && tokens[1] == tenantName.get()) {
@@ -1928,7 +1928,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "listtenants")) {
-					bool _result = wait(makeInterruptable(listTenantsCommandActor(db, tokens)));
+					bool _result = wait(makeInterruptable(listTenantsCommandActor(db, tokens, opt.apiVersion)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -1941,8 +1941,27 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "configuretenant")) {
+					if (opt.apiVersion < 720) {
+						fmt::print(stderr, "ERROR: tenants cannot be configured before API version 720.\n");
+						is_error = true;
+						continue;
+					}
+
+					bool _result = wait(makeInterruptable(configureTenantCommandActor(db, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "renametenant")) {
-					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens)));
+					if (opt.apiVersion < 720) {
+						fmt::print(stderr, "ERROR: tenants cannot be renamed before API version 720.\n");
+						is_error = true;
+						continue;
+					}
+
+					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens, opt.apiVersion)));
 					if (!_result)
 						is_error = true;
 					continue;

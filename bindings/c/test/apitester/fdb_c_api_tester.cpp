@@ -278,7 +278,7 @@ void fdb_check(fdb::Error e) {
 }
 
 void applyNetworkOptions(TesterOptions& options) {
-	if (!options.tmpDir.empty()) {
+	if (!options.tmpDir.empty() && options.apiVersion >= 720) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_TMP_DIR, options.tmpDir);
 	}
 	if (!options.externalClientLibrary.empty()) {
@@ -419,7 +419,7 @@ int main(int argc, char** argv) {
 		}
 		randomizeOptions(options);
 
-		fdb::selectApiVersion(options.apiVersion);
+		fdb::selectApiVersionCapped(options.apiVersion);
 		applyNetworkOptions(options);
 		fdb::network::setup();
 

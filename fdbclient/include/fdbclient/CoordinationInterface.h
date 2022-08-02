@@ -242,6 +242,8 @@ struct GetLeaderRequest {
 	GetLeaderRequest() {}
 	explicit GetLeaderRequest(Key key, UID kl) : key(key), knownLeader(kl) {}
 
+	bool verify() const { return true; }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, key, knownLeader, reply);
@@ -261,6 +263,8 @@ struct OpenDatabaseCoordRequest {
 	std::vector<Hostname> hostnames;
 	std::vector<NetworkAddress> coordinators;
 	ReplyPromise<CachedSerialization<struct ClientDBInfo>> reply;
+
+	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

@@ -35,19 +35,105 @@
 
 namespace fdb_cli {
 
-const KeyRangeRef tenantSpecialKeyRange(LiteralStringRef("\xff\xff/management/tenant/map/"),
-                                        LiteralStringRef("\xff\xff/management/tenant/map0"));
+const KeyRangeRef tenantMapSpecialKeyRange720("\xff\xff/management/tenant/map/"_sr,
+                                              "\xff\xff/management/tenant/map0"_sr);
+const KeyRangeRef tenantConfigSpecialKeyRange("\xff\xff/management/tenant/configure/"_sr,
+                                              "\xff\xff/management/tenant/configure0"_sr);
+const KeyRangeRef tenantRenameSpecialKeyRange("\xff\xff/management/tenant/rename/"_sr,
+                                              "\xff\xff/management/tenant/rename0"_sr);
+
+const KeyRangeRef tenantMapSpecialKeyRange710("\xff\xff/management/tenant_map/"_sr,
+                                              "\xff\xff/management/tenant_map0"_sr);
+
+KeyRangeRef const& tenantMapSpecialKeyRange(int apiVersion) {
+	if (apiVersion >= 720) {
+		return tenantMapSpecialKeyRange720;
+	} else {
+		return tenantMapSpecialKeyRange710;
+	}
+}
+
+Optional<std::map<Standalone<StringRef>, Optional<Value>>>
+parseTenantConfiguration(std::vector<StringRef> const& tokens, int startIndex, bool allowUnset) {
+	std::map<Standalone<StringRef>, Optional<Value>> configParams;
+	for (int tokenNum = startIndex; tokenNum < tokens.size(); ++tokenNum) {
+		Optional<Value> value;
+
+		StringRef token = tokens[tokenNum];
+		StringRef param;
+		if (allowUnset && token == "unset"_sr) {
+			if (++tokenNum == tokens.size()) {
+				fmt::print(stderr, "ERROR: `unset' specified without a configuration parameter.\n");
+				return {};
+			}
+			param = tokens[tokenNum];
+		} else {
+			bool foundEquals;
+			param = token.eat("=", &foundEquals);
+			if (!foundEquals) {
+				fmt::print(stderr,
+				           "ERROR: invalid configuration string `{}'. String must specify a value using `='.\n",
+				           param.toString().c_str());
+				return {};
+			}
+			value = token;
+		}
+
+		if (configParams.count(param)) {
+			fmt::print(
+			    stderr, "ERROR: configuration parameter `{}' specified more than once.\n", param.toString().c_str());
+			return {};
+		}
+
+		if (tokencmp(param, "tenant_group")) {
+			configParams[param] = value;
+		} else {
+			fmt::print(stderr, "ERROR: unrecognized configuration parameter `{}'.\n", param.toString().c_str());
+			return {};
+		}
+	}
+
+	return configParams;
+}
+
+Key makeConfigKey(TenantNameRef tenantName, StringRef configName) {
+	return tenantConfigSpecialKeyRange.begin.withSuffix(Tuple().append(tenantName).append(configName).pack());
+}
+
+void applyConfiguration(Reference<ITransaction> tr,
+                        TenantNameRef tenantName,
+                        std::map<Standalone<StringRef>, Optional<Value>> configuration) {
+	for (auto [configName, value] : configuration) {
+		if (value.present()) {
+			tr->set(makeConfigKey(tenantName, configName), value.get());
+		} else {
+			tr->clear(makeConfigKey(tenantName, configName));
+		}
+	}
+}
 
 // createtenant command
-ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() != 2) {
+ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion) {
+	if (tokens.size() < 2 || tokens.size() > 3) {
 		printUsage(tokens[0]);
 		return false;
 	}
 
-	state Key tenantNameKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(tokens[1]);
+	state Key tenantNameKey = tenantMapSpecialKeyRange(apiVersion).begin.withSuffix(tokens[1]);
 	state Reference<ITransaction> tr = db->createTransaction();
 	state bool doneExistenceCheck = false;
+
+	state Optional<std::map<Standalone<StringRef>, Optional<Value>>> configuration =
+	    parseTenantConfiguration(tokens, 2, false);
+
+	if (!configuration.present()) {
+		return false;
+	}
+
+	if (apiVersion < 720 && !configuration.get().empty()) {
+		fmt::print(stderr, "ERROR: tenants do not accept configuration options before API version 720.\n");
+		return false;
+	}
 
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
@@ -63,12 +149,13 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 			}
 
 			tr->set(tenantNameKey, ValueRef());
+			applyConfiguration(tr, tokens[1], configuration.get());
 			wait(safeThreadFutureToFuture(tr->commit()));
 			break;
 		} catch (Error& e) {
 			state Error err(e);
 			if (e.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+				std::string errorMsgStr = wait(getSpecialKeysFailureErrorMessage(tr));
 				fmt::print(stderr, "ERROR: {}\n", errorMsgStr.c_str());
 				return false;
 			}
@@ -81,18 +168,18 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 }
 
 CommandFactory createTenantFactory("createtenant",
-                                   CommandHelp("createtenant <TENANT_NAME>",
+                                   CommandHelp("createtenant <TENANT_NAME> [tenant_group=<TENANT_GROUP>]",
                                                "creates a new tenant in the cluster",
                                                "Creates a new tenant in the cluster with the specified name."));
 
 // deletetenant command
-ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion) {
 	if (tokens.size() != 2) {
 		printUsage(tokens[0]);
 		return false;
 	}
 
-	state Key tenantNameKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(tokens[1]);
+	state Key tenantNameKey = tenantMapSpecialKeyRange(apiVersion).begin.withSuffix(tokens[1]);
 	state Reference<ITransaction> tr = db->createTransaction();
 	state bool doneExistenceCheck = false;
 
@@ -115,7 +202,7 @@ ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector
 		} catch (Error& e) {
 			state Error err(e);
 			if (e.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+				std::string errorMsgStr = wait(getSpecialKeysFailureErrorMessage(tr));
 				fmt::print(stderr, "ERROR: {}\n", errorMsgStr.c_str());
 				return false;
 			}
@@ -135,7 +222,7 @@ CommandFactory deleteTenantFactory(
         "Deletes a tenant from the cluster. Deletion will be allowed only if the specified tenant contains no data."));
 
 // listtenants command
-ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion) {
 	if (tokens.size() > 4) {
 		printUsage(tokens[0]);
 		return false;
@@ -157,14 +244,14 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 	}
 	if (tokens.size() == 4) {
 		int n = 0;
-		if (sscanf(tokens[3].toString().c_str(), "%d%n", &limit, &n) != 1 || n != tokens[3].size()) {
-			fmt::print(stderr, "ERROR: invalid limit {}\n", tokens[3].toString().c_str());
+		if (sscanf(tokens[3].toString().c_str(), "%d%n", &limit, &n) != 1 || n != tokens[3].size() || limit <= 0) {
+			fmt::print(stderr, "ERROR: invalid limit `{}'\n", tokens[3].toString().c_str());
 			return false;
 		}
 	}
 
-	state Key beginTenantKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(beginTenant);
-	state Key endTenantKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(endTenant);
+	state Key beginTenantKey = tenantMapSpecialKeyRange(apiVersion).begin.withSuffix(beginTenant);
+	state Key endTenantKey = tenantMapSpecialKeyRange(apiVersion).begin.withSuffix(endTenant);
 	state Reference<ITransaction> tr = db->createTransaction();
 
 	loop {
@@ -186,14 +273,14 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 			for (auto tenant : tenants) {
 				fmt::print("  {}. {}\n",
 				           ++index,
-				           printable(tenant.key.removePrefix(fdb_cli::tenantSpecialKeyRange.begin)).c_str());
+				           printable(tenant.key.removePrefix(tenantMapSpecialKeyRange(apiVersion).begin)).c_str());
 			}
 
 			return true;
 		} catch (Error& e) {
 			state Error err(e);
 			if (e.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+				std::string errorMsgStr = wait(getSpecialKeysFailureErrorMessage(tr));
 				fmt::print(stderr, "ERROR: {}\n", errorMsgStr.c_str());
 				return false;
 			}
@@ -217,7 +304,7 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 	}
 
 	state bool useJson = tokens.size() == 3;
-	state Key tenantNameKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(tokens[1]);
+	state Key tenantNameKey = tenantMapSpecialKeyRange(apiVersion).begin.withSuffix(tokens[1]);
 	state Reference<ITransaction> tr = db->createTransaction();
 
 	loop {
@@ -245,6 +332,7 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 				int64_t id;
 				std::string prefix;
 				std::string tenantState;
+				std::string tenantGroup;
 
 				doc.get("id", id);
 
@@ -255,10 +343,14 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 				}
 
 				doc.get("tenant_state", tenantState);
+				bool hasTenantGroup = doc.tryGet("tenant_group.printable", tenantGroup);
 
 				fmt::print("  id: {}\n", id);
 				fmt::print("  prefix: {}\n", printable(prefix).c_str());
 				fmt::print("  tenant state: {}\n", printable(tenantState).c_str());
+				if (hasTenantGroup) {
+					fmt::print("  tenant group: {}\n", tenantGroup.c_str());
+				}
 			}
 
 			return true;
@@ -299,13 +391,126 @@ CommandFactory getTenantFactory(
                 "prints the metadata for a tenant",
                 "Prints the metadata for a tenant. If JSON is specified, then the output will be in JSON format."));
 
+// configuretenant command
+ACTOR Future<bool> configureTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	if (tokens.size() < 3) {
+		printUsage(tokens[0]);
+		return false;
+	}
+
+	state Optional<std::map<Standalone<StringRef>, Optional<Value>>> configuration =
+	    parseTenantConfiguration(tokens, 2, true);
+
+	if (!configuration.present()) {
+		return false;
+	}
+
+	state Reference<ITransaction> tr = db->createTransaction();
+
+	loop {
+		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		try {
+			applyConfiguration(tr, tokens[1], configuration.get());
+			wait(safeThreadFutureToFuture(tr->commit()));
+			break;
+		} catch (Error& e) {
+			state Error err(e);
+			if (e.code() == error_code_special_keys_api_failure) {
+				std::string errorMsgStr = wait(getSpecialKeysFailureErrorMessage(tr));
+				fmt::print(stderr, "ERROR: {}\n", errorMsgStr.c_str());
+				return false;
+			}
+			wait(safeThreadFutureToFuture(tr->onError(err)));
+		}
+	}
+
+	fmt::print("The configuration for tenant `{}' has been updated\n", printable(tokens[1]).c_str());
+	return true;
+}
+
+CommandFactory configureTenantFactory(
+    "configuretenant",
+    CommandHelp("configuretenant <TENANT_NAME> <[unset] tenant_group[=<GROUP_NAME>]> ...",
+                "updates the configuration for a tenant",
+                "Updates the configuration for a tenant. Use `tenant_group=<GROUP_NAME>' to change the tenant group "
+                "that a tenant is assigned to or `unset tenant_group' to remove a tenant from its tenant group."));
+
+// Helper function to extract tenant ID from json metadata string
+int64_t getTenantId(Value metadata) {
+	json_spirit::mValue jsonObject;
+	json_spirit::read_string(metadata.toString(), jsonObject);
+	JSONDoc doc(jsonObject);
+	int64_t id;
+	doc.get("id", id);
+	return id;
+}
+
 // renametenant command
-ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion) {
 	if (tokens.size() != 3) {
 		printUsage(tokens[0]);
 		return false;
 	}
-	wait(safeThreadFutureToFuture(TenantAPI::renameTenant(db, tokens[1], tokens[2])));
+	state Reference<ITransaction> tr = db->createTransaction();
+	state Key tenantRenameKey = tenantRenameSpecialKeyRange.begin.withSuffix(tokens[1]);
+	state Key tenantOldNameKey = tenantMapSpecialKeyRange(apiVersion).begin.withSuffix(tokens[1]);
+	state Key tenantNewNameKey = tenantMapSpecialKeyRange(apiVersion).begin.withSuffix(tokens[2]);
+	state bool firstTry = true;
+	state int64_t id;
+	loop {
+		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		try {
+			// Hold the reference to the standalone's memory
+			state ThreadFuture<Optional<Value>> oldEntryFuture = tr->get(tenantOldNameKey);
+			state ThreadFuture<Optional<Value>> newEntryFuture = tr->get(tenantNewNameKey);
+			state Optional<Value> oldEntry = wait(safeThreadFutureToFuture(oldEntryFuture));
+			state Optional<Value> newEntry = wait(safeThreadFutureToFuture(newEntryFuture));
+			if (firstTry) {
+				if (!oldEntry.present()) {
+					throw tenant_not_found();
+				}
+				if (newEntry.present()) {
+					throw tenant_already_exists();
+				}
+				// Store the id we see when first reading this key
+				id = getTenantId(oldEntry.get());
+
+				firstTry = false;
+			} else {
+				// If we got commit_unknown_result, the rename may have already occurred.
+				if (newEntry.present()) {
+					int64_t checkId = getTenantId(newEntry.get());
+					if (id == checkId) {
+						ASSERT(!oldEntry.present() || getTenantId(oldEntry.get()) != id);
+						return true;
+					}
+					// If the new entry is present but does not match, then
+					// the rename should fail, so we throw an error.
+					throw tenant_already_exists();
+				}
+				if (!oldEntry.present()) {
+					throw tenant_not_found();
+				}
+				int64_t checkId = getTenantId(oldEntry.get());
+				// If the id has changed since we made our first attempt,
+				// then it's possible we've already moved the tenant. Don't move it again.
+				if (id != checkId) {
+					throw tenant_not_found();
+				}
+			}
+			tr->set(tenantRenameKey, tokens[2]);
+			wait(safeThreadFutureToFuture(tr->commit()));
+			break;
+		} catch (Error& e) {
+			state Error err(e);
+			if (e.code() == error_code_special_keys_api_failure) {
+				std::string errorMsgStr = wait(getSpecialKeysFailureErrorMessage(tr));
+				fmt::print(stderr, "ERROR: {}\n", errorMsgStr.c_str());
+				return false;
+			}
+			wait(safeThreadFutureToFuture(tr->onError(err)));
+		}
+	}
 
 	fmt::print(
 	    "The tenant `{}' has been renamed to `{}'\n", printable(tokens[1]).c_str(), printable(tokens[2]).c_str());
@@ -316,6 +521,6 @@ CommandFactory renameTenantFactory(
     "renametenant",
     CommandHelp(
         "renametenant <OLD_NAME> <NEW_NAME>",
-        "renames a tenant in the cluster.",
+        "renames a tenant in the cluster",
         "Renames a tenant in the cluster. The old name must exist and the new name must not exist in the cluster."));
 } // namespace fdb_cli

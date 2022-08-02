@@ -98,7 +98,7 @@ TEST_CASE("/CompressionUtils/noCompression") {
 	Arena arena;
 	const int size = deterministicRandom()->randomInt(512, 1024);
 	Standalone<StringRef> uncompressed = makeString(size);
-	generateRandomData(mutateString(uncompressed), size);
+	deterministicRandom()->randomBytes(mutateString(uncompressed), size);
 
 	Standalone<StringRef> compressed = CompressionUtils::compress(CompressionFilter::NONE, uncompressed, arena);
 	ASSERT_EQ(compressed.compare(uncompressed), 0);
@@ -116,7 +116,7 @@ TEST_CASE("/CompressionUtils/gzipCompression") {
 	Arena arena;
 	const int size = deterministicRandom()->randomInt(512, 1024);
 	Standalone<StringRef> uncompressed = makeString(size);
-	generateRandomData(mutateString(uncompressed), size);
+	deterministicRandom()->randomBytes(mutateString(uncompressed), size);
 
 	Standalone<StringRef> compressed = CompressionUtils::compress(CompressionFilter::GZIP, uncompressed, arena);
 	ASSERT_NE(compressed.compare(uncompressed), 0);
