@@ -3866,6 +3866,9 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 	if (SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK) {
 		state Transaction tr(data->cx, pOriginalReq->tenantInfo.name.castTo<TenantName>());
 		tr.setVersion(version);
+		if (pOriginalReq->debugID.present()) {
+			tr.debugTransaction(pOriginalReq->debugID.get());
+		}
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
 		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
 		Future<RangeResult> rangeResultFuture =
