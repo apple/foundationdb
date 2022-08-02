@@ -918,8 +918,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 
 	// Fetch cipher keys if needed.
 	state Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getCipherKeys;
-	if (isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION,
-	                        SERVER_KNOBS->ENABLE_ENCRYPTION)) {
+	if (isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION, SERVER_KNOBS->ENABLE_ENCRYPTION)) {
 		static std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> defaultDomains = {
 			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME },
 			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
@@ -962,8 +961,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 		g_traceBatch.addEvent(
 		    "CommitDebug", self->debugID.get().first(), "CommitProxyServer.commitBatch.AfterResolution");
 	}
-	if (isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION,
-	                        encryptionEnabled)) {
+	if (isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION, encryptionEnabled)) {
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys = wait(getCipherKeys);
 		self->cipherKeys = cipherKeys;
 	}
@@ -1108,8 +1106,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 				                       pProxyCommitData->logSystem,
 				                       trs[t].transaction.mutations,
 				                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
-				                       isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION,
-				                                           encryptionEnabled)
+				                       isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION, encryptionEnabled)
 				                           ? &self->cipherKeys
 				                           : nullptr,
 				                       self->forceRecovery,
