@@ -188,8 +188,6 @@ struct MetaclusterOperationContext {
 	Reference<DB> managementDb;
 	Reference<IDatabase> dataClusterDb;
 
-	UID id = nondeterministicRandom()->randomUniqueID();
-
 	Optional<ClusterName> clusterName;
 
 	Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
