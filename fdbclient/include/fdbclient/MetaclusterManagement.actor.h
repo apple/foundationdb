@@ -270,13 +270,17 @@ struct MetaclusterOperationContext {
 						    store(self->dataClusterDb, openDatabase(self->dataClusterMetadata.get().connectionString)));
 					}
 				}
+				TraceEvent("Breakpoint2.8");
 
 				state decltype(std::declval<Function>()(Reference<typename DB::TransactionT>()).getValue()) result =
 				    wait(func(tr));
+				TraceEvent("Breakpoint2.9");
 
 				wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
+				TraceEvent("Breakpoint2.10");
 				return result;
 			} catch (Error& e) {
+				TraceEvent("BreakpointError").error(e);
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
 		}
@@ -1782,21 +1786,44 @@ struct RenameTenantImpl {
 				CODE_PROBE(true, "Metacluster rename new name marked for deletion");
 				throw tenant_not_found();
 			}
-			ASSERT(
-			    (newTenantEntry.get().tenantState == TenantState::RENAMING_TO &&
-			     oldTenantEntry.get().tenantState == TenantState::RENAMING_FROM &&
-			     newTenantEntry.get().renamePair.present() && newTenantEntry.get().renamePair.get() == self->oldName &&
-			     oldTenantEntry.get().renamePair.present() && oldTenantEntry.get().renamePair.get() == self->newName));
-			CODE_PROBE(true, "Metacluster rename tenants already marked in renaming state");
-			return Void();
+			if (newTenantEntry.get().tenantState == TenantState::RENAMING_TO &&
+			    oldTenantEntry.get().tenantState == TenantState::RENAMING_FROM &&
+			    newTenantEntry.get().renamePair.present() && newTenantEntry.get().renamePair.get() == self->oldName &&
+			    oldTenantEntry.get().renamePair.present() && oldTenantEntry.get().renamePair.get() == self->newName) {
+				CODE_PROBE(true, "Metacluster rename tenants already marked in renaming state");
+				return Void();
+			} else {
+				TraceEvent("MarkTenantRenames")
+				    .detail("NewState", TenantMapEntry::tenantStateToString(newTenantEntry.get().tenantState))
+				    .detail("OldState", TenantMapEntry::tenantStateToString(oldTenantEntry.get().tenantState))
+				    .detail("NewEntryName", self->newName)
+				    .detail("NewEntryPair",
+				            newTenantEntry.get().renamePair.present() ? newTenantEntry.get().renamePair.get()
+				                                                      : "None"_sr)
+				    .detail("OldEntryName", self->oldName)
+				    .detail("OldEntryPair",
+				            oldTenantEntry.get().renamePair.present() ? oldTenantEntry.get().renamePair.get()
+				                                                      : "None"_sr);
+				CODE_PROBE(true, "Metacluster rename entries in wrong state");
+				throw invalid_tenant_state();
+			}
 		}
-
 		TenantMapEntry updatedOldEntry = oldTenantEntry.get();
 		TenantMapEntry updatedNewEntry(updatedOldEntry);
+		// this gets marked
 		updatedOldEntry.tenantState = TenantState::RENAMING_FROM;
 		updatedNewEntry.tenantState = TenantState::RENAMING_TO;
+		// but this doesn't. Why?
 		updatedOldEntry.renamePair = self->newName;
 		updatedNewEntry.renamePair = self->oldName;
+		TraceEvent("MarkTenantRenamesSanityCheck")
+		    .detail("NewState", TenantMapEntry::tenantStateToString(updatedNewEntry.tenantState))
+		    .detail("OldState", TenantMapEntry::tenantStateToString(updatedOldEntry.tenantState))
+		    .detail("NewEntryName", self->newName)
+		    .detail("NewEntryPair", updatedNewEntry.renamePair.present() ? updatedNewEntry.renamePair.get() : "None"_sr)
+		    .detail("OldEntryName", self->oldName)
+		    .detail("OldEntryPair",
+		            updatedOldEntry.renamePair.present() ? updatedOldEntry.renamePair.get() : "None"_sr);
 
 		ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->oldName, updatedOldEntry);
 		ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->newName, updatedNewEntry);

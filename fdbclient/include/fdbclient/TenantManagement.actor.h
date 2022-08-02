@@ -519,6 +519,7 @@ Future<Void> renameTenant(Reference<DB> db,
                           Optional<int64_t> tenantId = Optional<int64_t>(),
                           ClusterType clusterType = ClusterType::STANDALONE) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	ASSERT(clusterType == ClusterType::STANDALONE || tenantId.present());
 
 	state bool firstTry = true;
 	state int64_t id;
