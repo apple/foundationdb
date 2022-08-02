@@ -377,6 +377,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 	bool adjacentReads; // keys are adjacent within a transaction
 	bool adjacentWrites;
 	int extraReadConflictRangesPerTransaction, extraWriteConflictRangesPerTransaction;
+	int readType;
 	Optional<Key> transactionTag;
 
 	int transactionsTagThrottled{ 0 };
@@ -401,6 +402,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		rampUpConcurrency = getOption(options, LiteralStringRef("rampUpConcurrency"), false);
 		batchPriority = getOption(options, LiteralStringRef("batchPriority"), false);
 		descriptionString = getOption(options, LiteralStringRef("description"), LiteralStringRef("ReadWrite"));
+		readType = getOption(options, LiteralStringRef("readType"), 3);
 		if (hasOption(options, LiteralStringRef("transactionTag"))) {
 			transactionTag = getOption(options, LiteralStringRef("transactionTag"), ""_sr);
 		}
@@ -430,6 +432,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		if (transactionTag.present() && tr.getTags().size() == 0) {
 			tr.setOption(FDBTransactionOptions::AUTO_THROTTLE_TAG, transactionTag.get());
 		}
+		tr.getTransaction().trState->readType = static_cast<ReadType>(readType);
 	}
 
 	std::string description() const override { return descriptionString.toString(); }
@@ -505,7 +508,6 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		state double startTime = now();
 		loop {
 			state Transaction tr(cx);
-
 			try {
 				self->setupTransaction(tr);
 				wait(self->readOp(&tr, keys, self, false));

@@ -1572,7 +1572,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 		// so we need to downgrade here
 		wait(data->getQueryDelay());
-		wait(store(lock, data->ssLock.lock(data->readPriorityRanks[(int)ReadType::NORMAL])));
+		wait(store(lock, data->ssLock.lock(data->readPriorityRanks[(int)req.readType])));
 
 		if (req.debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
@@ -1716,8 +1716,14 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 			state Version latest = data->version.get();
 			TEST(latest >= minVersion &&
 			     latest < data->data().latestVersion); // Starting watch loop with latestVersion > data->version
-			GetValueRequest getReq(
-			    span.context, TenantInfo(), metadata->key, latest, metadata->tags, metadata->debugID, VersionVector());
+			GetValueRequest getReq(span.context,
+			                       TenantInfo(),
+			                       metadata->key,
+			                       latest,
+			                       ReadType::NORMAL,
+			                       metadata->tags,
+			                       metadata->debugID,
+			                       VersionVector());
 			state Future<Void> getValue = getValueQ(
 			    data, getReq); // we are relying on the delay zero at the top of getValueQ, if removed we need one here
 			GetValueReply reply = wait(getReq.reply.getFuture());
@@ -2964,6 +2970,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 			                    pOriginalReq->tenantInfo,
 			                    key,
 			                    version,
+			                    ReadType::HIGH,
 			                    pOriginalReq->tags,
 			                    pOriginalReq->debugID,
 			                    VersionVector());
@@ -3384,6 +3391,9 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	wait(data->getQueryDelay());
+	if (!SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && type == ReadType::FETCH) {
+		type = ReadType::NORMAL;
+	}
 	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[(int)type]));
 
 	try {
@@ -4100,6 +4110,9 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	wait(data->getQueryDelay());
+	if (!SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && type == ReadType::FETCH) {
+		type = ReadType::NORMAL;
+	}
 	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[(int)type]));
 
 	try {
@@ -4288,7 +4301,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	state Span span("SS:getKeyValuesStream"_loc, req.spanContext);
 	state int64_t resultSize = 0;
 	state ReadType type = req.readType;
-	state int readPriority = data->readPriorityRanks[(int)type];
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -4304,6 +4316,10 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	wait(delay(0, TaskPriority::DefaultEndpoint));
+	if (!SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && type == ReadType::FETCH) {
+		type = ReadType::NORMAL;
+	}
+	state int readPriority = data->readPriorityRanks[(int)type];
 	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(readPriority));
 
 	try {
@@ -4500,7 +4516,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	wait(data->getQueryDelay());
-	wait(store(lock, data->ssLock.lock(data->readPriorityRanks[(int)ReadType::NORMAL])));
+	wait(store(lock, data->ssLock.lock(data->readPriorityRanks[(int)req.readType])));
 
 	try {
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
@@ -8925,6 +8941,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 					                       TenantInfo(),
 					                       metadata->key,
 					                       latest,
+					                       ReadType::NORMAL,
 					                       metadata->tags,
 					                       metadata->debugID,
 					                       VersionVector());

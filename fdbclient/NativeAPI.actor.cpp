@@ -3313,6 +3313,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 					                         useTenant ? trState->getTenantInfo() : TenantInfo(),
 					                         key,
 					                         ver,
+					                         trState->readType,
 					                         trState->cx->sampleReadTags() ? trState->options.readTags
 					                                                       : Optional<TagSet>(),
 					                         getValueID,
@@ -3438,6 +3439,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 			                  useTenant ? trState->getTenantInfo() : TenantInfo(),
 			                  k,
 			                  version.get(),
+			                  trState->readType,
 			                  trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>(),
 			                  getKeyID,
 			                  ssLatestCommitVersions);
@@ -3884,6 +3886,7 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 			req.version = version;
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
+			req.readType = trState->readType;
 			setMatchIndex<GetKeyValuesFamilyRequest>(req, matchIndex);
 			req.spanContext = span.context;
 			trState->cx->getLatestCommitVersions(

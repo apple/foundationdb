@@ -276,6 +276,7 @@ struct GetValueRequest : TimedRequest {
 	TenantInfo tenantInfo;
 	Key key;
 	Version version;
+	ReadType readType;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetValueReply> reply;
@@ -283,20 +284,21 @@ struct GetValueRequest : TimedRequest {
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
 
-	GetValueRequest() {}
+	GetValueRequest() : readType(ReadType::NORMAL) {}
 	GetValueRequest(SpanContext spanContext,
 	                const TenantInfo& tenantInfo,
 	                const Key& key,
 	                Version ver,
+	                ReadType type,
 	                Optional<TagSet> tags,
 	                Optional<UID> debugID,
 	                VersionVector latestCommitVersions)
-	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), tags(tags), debugID(debugID),
-	    ssLatestCommitVersions(latestCommitVersions) {}
+	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), readType(type), tags(tags),
+	    debugID(debugID), ssLatestCommitVersions(latestCommitVersions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, version, tags, debugID, reply, spanContext, tenantInfo, ssLatestCommitVersions);
+		serializer(ar, key, version, readType, tags, debugID, reply, spanContext, tenantInfo, ssLatestCommitVersions);
 	}
 };
 
@@ -542,6 +544,7 @@ struct GetKeyRequest : TimedRequest {
 	TenantInfo tenantInfo;
 	KeySelectorRef sel;
 	Version version; // or latestVersion
+	ReadType readType;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetKeyReply> reply;
@@ -549,21 +552,23 @@ struct GetKeyRequest : TimedRequest {
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
 
-	GetKeyRequest() {}
+	GetKeyRequest() : readType(ReadType::NORMAL) {}
 
 	GetKeyRequest(SpanContext spanContext,
 	              TenantInfo tenantInfo,
 	              KeySelectorRef const& sel,
 	              Version version,
+	              ReadType type,
 	              Optional<TagSet> tags,
 	              Optional<UID> debugID,
 	              VersionVector latestCommitVersions)
-	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), debugID(debugID),
+	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), readType(type), debugID(debugID),
 	    ssLatestCommitVersions(latestCommitVersions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sel, version, tags, debugID, reply, spanContext, tenantInfo, arena, ssLatestCommitVersions);
+		serializer(
+		    ar, sel, version, readType, tags, debugID, reply, spanContext, tenantInfo, arena, ssLatestCommitVersions);
 	}
 };
 
