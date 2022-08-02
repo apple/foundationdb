@@ -92,6 +92,61 @@ private:
 	virtual void getMetrics(std::vector<PerfMetric>& m) = 0;
 };
 
+struct CompoundWorkload;
+class DeterministicRandom;
+
+struct NoOptions {};
+
+struct FailureInjectionWorkload : ReferenceCounted<FailureInjectionWorkload> {
+	virtual ~FailureInjectionWorkload() {}
+	virtual bool add(DeterministicRandom& random, WorkloadRequest const work, CompoundWorkload const& workload) = 0;
+	virtual Reference<TestWorkload> workload() = 0;
+	virtual std::string description() const = 0;
+
+	Future<Void> setup(Database const& cx, Future<Void> done);
+	Future<Void> start(Database const& cx, Future<Void> done);
+	Future<bool> check(Database const& cx, Future<bool> done);
+};
+
+struct IFailureInjectorFactory : ReferenceCounted<IFailureInjectorFactory> {
+	static std::vector<Reference<IFailureInjectorFactory>>& factories() {
+		static std::vector<Reference<IFailureInjectorFactory>> _factories;
+		return _factories;
+	}
+	virtual Reference<FailureInjectionWorkload> create(WorkloadContext const& wcx) = 0;
+};
+
+template <class W>
+struct FailureInjectorFactory : IFailureInjectorFactory {
+	static_assert(std::is_base_of<FailureInjectionWorkload, W>::value);
+	FailureInjectorFactory() {
+		IFailureInjectorFactory::factories().push_back(Reference<IFailureInjectorFactory>::addRef(this));
+	}
+	Reference<FailureInjectionWorkload> create(WorkloadContext const& wcx) override {
+		return makeReference<W>(wcx, NoOptions());
+	}
+};
+
+struct CompoundWorkload : TestWorkload {
+	std::vector<Reference<TestWorkload>> workloads;
+	std::vector<Reference<FailureInjectionWorkload>> failureInjection;
+
+	CompoundWorkload(WorkloadContext& wcx);
+	CompoundWorkload* add(Reference<TestWorkload>&& w);
+	void addFailureInjection(WorkloadRequest& work);
+
+	std::string description() const override;
+
+	Future<Void> setup(Database const& cx) override;
+	Future<Void> start(Database const& cx) override;
+	Future<bool> check(Database const& cx) override;
+
+	Future<std::vector<PerfMetric>> getMetrics() override;
+	double getCheckTimeout() const override;
+
+	void getMetrics(std::vector<PerfMetric>&) override;
+};
+
 struct WorkloadProcess;
 struct ClientWorkload : TestWorkload {
 	WorkloadProcess* impl;
