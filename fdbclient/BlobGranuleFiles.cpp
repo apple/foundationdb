@@ -39,9 +39,8 @@
 #include "fmt/format.h"
 
 #include <cstring>
+#include <fstream> // for perf microbenchmark
 #include <vector>
-// for perf microbenchmark
-#include <fstream>
 
 #define BG_READ_DEBUG false
 #define BG_FILES_TEST_DEBUG false
