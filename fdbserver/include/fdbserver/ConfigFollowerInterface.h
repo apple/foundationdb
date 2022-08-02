@@ -27,7 +27,7 @@
 #include "fdbrpc/fdbrpc.h"
 
 struct VersionedConfigMutationRef {
-	Version version;
+	Version version{ ::invalidVersion };
 	ConfigMutationRef mutation;
 
 	VersionedConfigMutationRef() = default;
@@ -46,7 +46,7 @@ struct VersionedConfigMutationRef {
 using VersionedConfigMutation = Standalone<VersionedConfigMutationRef>;
 
 struct VersionedConfigCommitAnnotationRef {
-	Version version;
+	Version version{ ::invalidVersion };
 	ConfigCommitAnnotationRef annotation;
 
 	VersionedConfigCommitAnnotationRef() = default;
@@ -66,7 +66,7 @@ using VersionedConfigCommitAnnotation = Standalone<VersionedConfigCommitAnnotati
 
 struct ConfigFollowerGetSnapshotAndChangesReply {
 	static constexpr FileIdentifier file_identifier = 1734095;
-	Version snapshotVersion;
+	Version snapshotVersion{ 0 };
 	std::map<ConfigKey, KnobValue> snapshot;
 	// TODO: Share arena
 	Standalone<VectorRef<VersionedConfigMutationRef>> changes;
@@ -91,7 +91,7 @@ struct ConfigFollowerGetSnapshotAndChangesReply {
 struct ConfigFollowerGetSnapshotAndChangesRequest {
 	static constexpr FileIdentifier file_identifier = 294811;
 	ReplyPromise<ConfigFollowerGetSnapshotAndChangesReply> reply;
-	Version mostRecentVersion;
+	Version mostRecentVersion{ 0 };
 
 	ConfigFollowerGetSnapshotAndChangesRequest() = default;
 	explicit ConfigFollowerGetSnapshotAndChangesRequest(Version mostRecentVersion)
@@ -158,6 +158,7 @@ struct ConfigFollowerRollforwardRequest {
 	Version target{ 0 };
 	Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
 	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
+	bool specialZeroQuorum{ false };
 	ReplyPromise<Void> reply;
 
 	ConfigFollowerRollforwardRequest() = default;
@@ -165,22 +166,23 @@ struct ConfigFollowerRollforwardRequest {
 	                                          Version lastKnownCommitted,
 	                                          Version target,
 	                                          Standalone<VectorRef<VersionedConfigMutationRef>> mutations,
-	                                          Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations)
+	                                          Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations,
+	                                          bool specialZeroQuorum)
 	  : rollback(rollback), lastKnownCommitted(lastKnownCommitted), target(target), mutations(mutations),
-	    annotations(annotations) {}
+	    annotations(annotations), specialZeroQuorum(specialZeroQuorum) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rollback, lastKnownCommitted, target, mutations, annotations, reply);
+		serializer(ar, rollback, lastKnownCommitted, target, mutations, annotations, specialZeroQuorum, reply);
 	}
 };
 
 struct ConfigFollowerGetCommittedVersionReply {
 	static constexpr FileIdentifier file_identifier = 9214735;
-	bool registered;
-	Version lastCompacted;
-	Version lastLive;
-	Version lastCommitted;
+	bool registered{ false };
+	Version lastCompacted{ 0 };
+	Version lastLive{ 0 };
+	Version lastCommitted{ 0 };
 
 	ConfigFollowerGetCommittedVersionReply() = default;
 	explicit ConfigFollowerGetCommittedVersionReply(bool registered,
@@ -209,7 +211,7 @@ struct ConfigFollowerGetCommittedVersionRequest {
 
 struct ConfigFollowerLockRequest {
 	static constexpr FileIdentifier file_identifier = 1867800;
-	size_t coordinatorsHash;
+	size_t coordinatorsHash{ 0 };
 	ReplyPromise<Void> reply;
 
 	ConfigFollowerLockRequest() = default;

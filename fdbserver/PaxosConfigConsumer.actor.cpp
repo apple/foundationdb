@@ -61,7 +61,7 @@ class GetCommittedVersionQuorum {
 	Version largestLive{ 0 };
 	// Stores the largest committed version out of all responses.
 	Version largestCommitted{ 0 };
-	bool allowSpecialCaseRollforward_;
+	bool allowSpecialCaseRollforward_{ false };
 	// True if a quorum has zero as their committed version. See explanation
 	// comment below.
 	bool specialZeroQuorum{ false };
@@ -146,16 +146,23 @@ class GetCommittedVersionQuorum {
 				// 		.detail("SpecialZeroQuorum", self->specialZeroQuorum);
 				if (cfi.hostname.present()) {
 					wait(timeoutError(
-					    retryGetReplyFromHostname(
-					        ConfigFollowerRollforwardRequest{
-					            rollback, nodeVersion.lastCommitted, target, reply.changes, reply.annotations },
-					        cfi.hostname.get(),
-					        WLTOKEN_CONFIGFOLLOWER_ROLLFORWARD),
+					    retryGetReplyFromHostname(ConfigFollowerRollforwardRequest{ rollback,
+					                                                                nodeVersion.lastCommitted,
+					                                                                target,
+					                                                                reply.changes,
+					                                                                reply.annotations,
+					                                                                self->specialZeroQuorum },
+					                              cfi.hostname.get(),
+					                              WLTOKEN_CONFIGFOLLOWER_ROLLFORWARD),
 					    SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
 				} else {
 					wait(timeoutError(
-					    cfi.rollforward.getReply(ConfigFollowerRollforwardRequest{
-					        rollback, nodeVersion.lastCommitted, target, reply.changes, reply.annotations }),
+					    cfi.rollforward.getReply(ConfigFollowerRollforwardRequest{ rollback,
+					                                                               nodeVersion.lastCommitted,
+					                                                               target,
+					                                                               reply.changes,
+					                                                               reply.annotations,
+					                                                               self->specialZeroQuorum }),
 					    SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
 				}
 			} catch (Error& e) {
@@ -401,8 +408,8 @@ class PaxosConfigConsumerImpl {
 	Version compactionVersion{ 0 };
 	double pollingInterval;
 	Optional<double> compactionInterval;
-	bool allowSpecialCaseRollforward_;
-	bool readPreviousCoordinators;
+	bool allowSpecialCaseRollforward_{ false };
+	bool readPreviousCoordinators{ false };
 	UID id;
 
 	ACTOR static Future<Version> getCommittedVersion(PaxosConfigConsumerImpl* self) {

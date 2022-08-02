@@ -98,7 +98,7 @@ struct ConfigBroadcastChangesReply {
 
 struct ConfigBroadcastChangesRequest {
 	static constexpr FileIdentifier file_identifier = 601281;
-	Version mostRecentVersion;
+	Version mostRecentVersion{ 0 };
 	Standalone<VectorRef<VersionedConfigMutationRef>> changes;
 	ReplyPromise<ConfigBroadcastChangesReply> reply;
 
@@ -115,8 +115,8 @@ struct ConfigBroadcastChangesRequest {
 
 struct ConfigBroadcastRegisteredReply {
 	static constexpr FileIdentifier file_identifier = 12041047;
-	bool registered;
-	Version lastSeenVersion;
+	bool registered{ false };
+	Version lastSeenVersion{ 0 };
 
 	ConfigBroadcastRegisteredReply() = default;
 	explicit ConfigBroadcastRegisteredReply(bool registered, Version lastSeenVersion)
@@ -153,10 +153,10 @@ struct ConfigBroadcastReadyReply {
 
 struct ConfigBroadcastReadyRequest {
 	static constexpr FileIdentifier file_identifier = 7402862;
-	size_t coordinatorsHash;
+	size_t coordinatorsHash{ 0 };
 	std::map<ConfigKey, KnobValue> snapshot;
-	Version snapshotVersion;
-	Version liveVersion;
+	Version snapshotVersion{ 0 };
+	Version liveVersion{ 0 };
 	ReplyPromise<ConfigBroadcastReadyReply> reply;
 
 	ConfigBroadcastReadyRequest() = default;
