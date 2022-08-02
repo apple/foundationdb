@@ -2536,7 +2536,7 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 						           curHistory.range.end.printable(),
 						           curHistory.version);
 					}
-					
+
 					rootGranules.push(OrderedHistoryKey(curHistory.version, curHistory.value.granuleID));
 				} else {
 					for (auto& it : nexts) {
@@ -2758,13 +2758,14 @@ std::vector<std::pair<KeyRange, Future<GranuleFiles>>> loadHistoryChunks(Referen
 			if (BW_DEBUG) {
 				// history must have been pruned up to live granule, but BW still has previous history cached.
 				fmt::print("live granule history version {0} for [{1} - {2}) != history end version {3} for "
-			           "[{4} - {5}) on BW {6}\n",
-			           expectedEndVersion,
-			           keyRange.begin.printable(),
-			           keyRange.end.printable(),
-			           it.cvalue()->endVersion,
-			           it.begin().printable(),
-			           it.end().printable(), bwData->id.toString().substr(0, 5));
+				           "[{4} - {5}) on BW {6}\n",
+				           expectedEndVersion,
+				           keyRange.begin.printable(),
+				           keyRange.end.printable(),
+				           it.cvalue()->endVersion,
+				           it.begin().printable(),
+				           it.end().printable(),
+				           bwData->id.toString().substr(0, 5));
 			}
 			throw blob_granule_transaction_too_old();
 		}
