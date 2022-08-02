@@ -27,7 +27,6 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 bool isEncryptionEnabled(EncryptOperationType operation_type, bool clusterEncryptionEnabled) {
-    // TraceEvent("Nim::here").detail("encrypt", clusterEncryptionEnabled).detail("op_type", operation_type).backtrace();
 	if (clusterEncryptionEnabled) {
 		return false;
 	}

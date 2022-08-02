@@ -880,6 +880,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	// Sending these requests is the fuzzy border between phase 1 and phase 2; it could conceivably overlap with
 	// resolution processing but is still using CPU
 	ProxyCommitData* pProxyCommitData = self->pProxyCommitData;
+	state bool encryptionEnabled = pProxyCommitData->db->get().client.isEncryptionEnabled;
 	std::vector<CommitTransactionRequest>& trs = self->trs;
 	state Span span("MP:getResolution"_loc, self->span.context);
 
@@ -961,9 +962,8 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 		g_traceBatch.addEvent(
 		    "CommitDebug", self->debugID.get().first(), "CommitProxyServer.commitBatch.AfterResolution");
 	}
-	TraceEvent("Nim::here").detail("enabled", self->pProxyCommitData->db->get().client.isEncryptionEnabled).detail("encrypt", SERVER_KNOBS->ENABLE_ENCRYPTION).detail("first", self->pProxyCommitData->firstProxy);
 	if (isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION,
-	                        self->pProxyCommitData->db->get().client.isEncryptionEnabled)) {
+	                        encryptionEnabled)) {
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys = wait(getCipherKeys);
 		self->cipherKeys = cipherKeys;
 	}
@@ -1088,6 +1088,7 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 // to storage servers' responsibilities)
 ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self) {
 	auto pProxyCommitData = self->pProxyCommitData;
+	bool encryptionEnabled = pProxyCommitData->db->get().client.isEncryptionEnabled;
 	const auto& trs = self->trs;
 
 	int t;
@@ -1108,7 +1109,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 				                       trs[t].transaction.mutations,
 				                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
 				                       isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION,
-				                                           self->pProxyCommitData->db->get().client.isEncryptionEnabled)
+				                                           encryptionEnabled)
 				                           ? &self->cipherKeys
 				                           : nullptr,
 				                       self->forceRecovery,
