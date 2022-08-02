@@ -103,13 +103,17 @@ void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int pr
 	}
 }
 
+Future<Void> StorageWiggler::onCheck() const {
+	return pqCanCheck.onTrigger();
+}
+
 // add server to wiggling queue
 void StorageWiggler::addServer(const UID& serverId, const StorageMetadataType& metadata) {
 	// std::cout << "size: " << pq_handles.size() << " add " << serverId.toString() << " DC: "
 	//           << teamCollection->isPrimary() << std::endl;
 	ASSERT(!pq_handles.count(serverId));
 	pq_handles[serverId] = wiggle_pq.emplace(metadata, serverId);
-	nonEmpty.set(true);
+	pqCanCheck.trigger();
 }
 
 void StorageWiggler::removeServer(const UID& serverId) {
@@ -120,7 +124,6 @@ void StorageWiggler::removeServer(const UID& serverId) {
 		pq_handles.erase(serverId);
 		wiggle_pq.erase(handle);
 	}
-	nonEmpty.set(!wiggle_pq.empty());
 }
 
 void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataType& metadata) {
@@ -131,11 +134,19 @@ void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataTy
 		return;
 	}
 	wiggle_pq.update(handle, std::make_pair(metadata, serverId));
+	pqCanCheck.trigger();
+}
+
+bool StorageWiggler::eligible(const UID& serverId, const StorageMetadataType& metadata) const {
+	return metadata.wrongConfigured || (now() - metadata.createdTime > SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC);
 }
 
 Optional<UID> StorageWiggler::getNextServerId() {
 	if (!wiggle_pq.empty()) {
 		auto [metadata, id] = wiggle_pq.top();
+		if (!eligible(id, metadata)) {
+			return {};
+		}
 		wiggle_pq.pop();
 		pq_handles.erase(id);
 		return Optional<UID>(id);

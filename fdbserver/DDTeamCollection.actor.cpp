@@ -135,7 +135,9 @@ public:
 
 		loop {
 			choose {
-				when(wait(self->buildTeams())) { return Void(); }
+				when(wait(self->buildTeams())) {
+					return Void();
+				}
 				when(wait(self->restartTeamBuilder.onTrigger())) {}
 			}
 		}
@@ -526,7 +528,9 @@ public:
 		while (self->pauseWiggle && !self->pauseWiggle->get() && self->waitUntilRecruited.get()) {
 			choose {
 				when(wait(self->waitUntilRecruited.onChange() || self->pauseWiggle->onChange())) {}
-				when(wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY, g_network->getCurrentTask()))) { break; }
+				when(wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY, g_network->getCurrentTask()))) {
+					break;
+				}
 			}
 		}
 
@@ -1366,7 +1370,9 @@ public:
 						    .detail("ConfigStoreType", self->configuration.storageServerStoreType)
 						    .detail("WrongStoreTypeRemoved", server->wrongStoreTypeToRemove.get());
 					}
-					when(wait(server->wakeUpTracker.getFuture())) { server->wakeUpTracker = Promise<Void>(); }
+					when(wait(server->wakeUpTracker.getFuture())) {
+						server->wakeUpTracker = Promise<Void>();
+					}
 					when(wait(storageMetadataTracker)) {}
 					when(wait(server->ssVersionTooFarBehind.onChange())) {}
 					when(wait(self->disableFailingLaggingServers.onChange())) {}
@@ -2080,7 +2086,9 @@ public:
 							    .detail("ExtraHealthyTeamCount", extraTeamCount)
 							    .detail("HealthyTeamCount", self->healthyTeamCount);
 						}
-						when(wait(pauseChanged)) { continue; }
+						when(wait(pauseChanged)) {
+							continue;
+						}
 					}
 				}
 			}
@@ -2605,7 +2613,9 @@ public:
 							}
 						}
 					}
-					when(wait(recruitStorage->onChange())) { fCandidateWorker = Future<RecruitStorageReply>(); }
+					when(wait(recruitStorage->onChange())) {
+						fCandidateWorker = Future<RecruitStorageReply>();
+					}
 					when(wait(self->zeroHealthyTeams->onChange())) {
 						if (!pendingTSSCheck && self->zeroHealthyTeams->get() &&
 						    (self->isTssRecruiting || self->tss_info_by_pair.size() > 0)) {
@@ -2848,38 +2858,33 @@ public:
 		}
 
 		loop {
-			// wait until the wiggle queue is not empty
-			if (teamCollection->storageWiggler->empty()) {
-				wait(teamCollection->storageWiggler->nonEmpty.onChange());
+			state Optional<UID> id = teamCollection->storageWiggler->getNextServerId();
+			if (!id.present()) {
+				wait(teamCollection->storageWiggler->onCheck());
+				continue;
 			}
 
 			// if perpetual_storage_wiggle_locality has value and not 0(disabled).
 			if (localityKey.present()) {
 				// Whether the selected server matches the locality
-				auto id = teamCollection->storageWiggler->getNextServerId();
-				if (!id.present())
-					continue;
 				auto server = teamCollection->server_info.at(id.get());
 
 				// TraceEvent("PerpetualLocality").detail("Server", server->getLastKnownInterface().locality.get(localityKey)).detail("Desire", localityValue);
 				if (server->getLastKnownInterface().locality.get(localityKey.get()) == localityValue) {
 					return id.get();
-				} else {
-					if (teamCollection->storageWiggler->empty()) {
-						// None of the entries in wiggle queue matches the given locality.
-						TraceEvent("PerpetualStorageWiggleEmptyQueue", teamCollection->distributorId)
-						    .detail("WriteValue", "No process matched the given perpetualStorageWiggleLocality")
-						    .detail("PerpetualStorageWiggleLocality",
-						            teamCollection->configuration.perpetualStorageWiggleLocality);
-					}
-					continue;
 				}
-			} else {
-				auto id = teamCollection->storageWiggler->getNextServerId();
-				if (!id.present())
-					continue;
-				return id.get();
+
+				if (teamCollection->storageWiggler->empty()) {
+					// None of the entries in wiggle queue matches the given locality.
+					TraceEvent("PerpetualStorageWiggleEmptyQueue", teamCollection->distributorId)
+					    .detail("WriteValue", "No process matched the given perpetualStorageWiggleLocality")
+					    .detail("PerpetualStorageWiggleLocality",
+					            teamCollection->configuration.perpetualStorageWiggleLocality);
+				}
+				continue;
 			}
+
+			return id.get();
 		}
 	}
 
