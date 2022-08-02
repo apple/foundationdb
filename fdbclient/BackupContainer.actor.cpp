@@ -286,11 +286,25 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 #ifdef BUILD_AZURE_BACKUP
 		else if (u.startsWith("azure://"_sr)) {
 			u.eat("azure://"_sr);
-			auto accountName = u.eat("@"_sr).toString();
-			auto endpoint = u.eat("/"_sr).toString();
-			auto containerName = u.eat("/"_sr).toString();
-			r = makeReference<BackupContainerAzureBlobStore>(
-			    endpoint, accountName, containerName, encryptionKeyFileName);
+			auto address = u.eat("/"_sr);
+			TraceEvent(SevDebug, "AzureBackupParsing").detail("Address", address);
+			if (address.endsWith(std::string(azure::storage_lite::constants::default_endpoint_suffix))) {
+				// <account>.<service>.core.windows.net/<resource_path>
+				auto endPoint = address.toString();
+				auto accountName = address.eat("."_sr).toString();
+				auto containerName = u.eat("/"_sr).toString();
+				TraceEvent(SevDebug, "AzureBackupCoreWindowsNet").detail("Endpoint", endPoint);
+				r = makeReference<BackupContainerAzureBlobStore>(
+				    endPoint, accountName, containerName, encryptionKeyFileName);
+			} else {
+				auto accountName = u.eat("/"_sr).toString();
+				auto containerName = u.eat("/"_sr).toString();
+				r = makeReference<BackupContainerAzureBlobStore>(
+				    format("%s/%s", address.toString().c_str(), accountName.c_str()),
+				    accountName,
+				    containerName,
+				    encryptionKeyFileName);
+			}
 		}
 #endif
 		else {
