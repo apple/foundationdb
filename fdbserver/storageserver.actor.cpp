@@ -101,6 +101,22 @@
 #define SHORT_CIRCUT_ACTUAL_STORAGE 0
 
 namespace {
+enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE, CSK_ASSIGN_EMPTY };
+
+std::string changeServerKeysContextName(const ChangeServerKeysContext& context) {
+	switch (context) {
+	case CSK_UPDATE:
+		return "Update";
+	case CSK_RESTORE:
+		return "Restore";
+	case CSK_ASSIGN_EMPTY:
+		return "AssignEmpty";
+	default:
+		ASSERT(false);
+	}
+	return "UnknowContext";
+}
+
 bool canReplyWith(Error e) {
 	switch (e.code()) {
 	case error_code_transaction_too_old:
@@ -6737,9 +6753,6 @@ void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& 
 	}
 }
 
-enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE, CSK_ASSIGN_EMPTY };
-const char* changeServerKeysContextName[] = { "Update", "Restore" };
-
 ACTOR Future<Void> restoreShards(StorageServer* data,
                                  Version version,
                                  RangeResult storageShards,
@@ -6938,7 +6951,7 @@ void changeServerKeys(StorageServer* data,
 	//     .detail("KeyEnd", keys.end)
 	//     .detail("NowAssigned", nowAssigned)
 	//     .detail("Version", version)
-	//     .detail("Context", changeServerKeysContextName[(int)context]);
+	//     .detail("Context", changeServerKeysContextName(context));
 	validate(data);
 
 	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
@@ -7085,7 +7098,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	    .detail("Range", keys)
 	    .detail("NowAssigned", nowAssigned)
 	    .detail("Version", version)
-	    .detail("Context", changeServerKeysContextName[(int)context]);
+	    .detail("Context", changeServerKeysContextName(context));
 
 	validate(data);
 
