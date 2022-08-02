@@ -409,7 +409,8 @@ struct IDDQueue {
 struct DDContext : public ReferenceCounted<DDContext> {
 	// FIXME(xwang) mark fields privates
 	// private:
-	std::shared_ptr<DDEnabledState> ddEnabledState; // Note: don't operate directly because it's shared with snapshot server
+	std::shared_ptr<DDEnabledState>
+	    ddEnabledState; // Note: don't operate directly because it's shared with snapshot server
 	IDDTracker::Interface trackerInterface;
 	IDDQueue::Interface queueInterface;
 	// public:
@@ -424,8 +425,9 @@ struct DDContext : public ReferenceCounted<DDContext> {
 	DDContext() = default;
 
 	DDContext(UID id, std::shared_ptr<DDEnabledState> ddEnabledState)
-	  : ddEnabledState(std::move(ddEnabledState)), ddId(id), shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure),
-	    processingUnhealthy(new AsyncVar<bool>(false)), processingWiggle(new AsyncVar<bool>(false)) {}
+	  : ddEnabledState(std::move(ddEnabledState)), ddId(id),
+	    shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure), processingUnhealthy(new AsyncVar<bool>(false)),
+	    processingWiggle(new AsyncVar<bool>(false)) {}
 
 	void initTeamCollectionStates();
 
