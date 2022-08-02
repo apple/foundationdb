@@ -692,12 +692,17 @@ Future<RangeResult> ConflictingKeysImpl::getRange(ReadYourWritesTransaction* ryw
                                                   GetRangeLimits limitsHint) const {
 	RangeResult result;
 	if (ryw->getTransactionState()->conflictingKeys) {
-		auto ranges = ryw->getTransactionState()->conflictingKeys->containedRanges(kr);
-		for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		auto krMapPtr = ryw->getTransactionState()->conflictingKeys.get();
+		auto beginIter = krMapPtr->rangeContaining(kr.begin);
+		auto endIter = krMapPtr->rangeContaining(kr.end);
+
+		if (!kr.contains(beginIter->begin()) && beginIter != endIter)
+			++beginIter;
+		for (auto it = beginIter; it != endIter; ++it) {
 			result.push_back_deep(result.arena(), KeyValueRef(it->begin(), it->value()));
 		}
-		if (kr.contains(ranges.end()->begin()))
-			result.push_back_deep(result.arena(), KeyValueRef(ranges.end()->begin(), ranges.end()->value()));
+		if (kr.contains(endIter->begin()))
+			result.push_back_deep(result.arena(), KeyValueRef(endIter->begin(), endIter->value()));
 	}
 	return result;
 }
