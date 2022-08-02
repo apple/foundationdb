@@ -99,7 +99,15 @@ struct TenantMapEntry {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, tenantState, tenantGroup, encrypted, assignedCluster, configurationSequenceNum);
+		serializer(ar,
+		           id,
+		           tenantState,
+		           tenantLockState,
+		           tenantGroup,
+		           encrypted,
+		           assignedCluster,
+		           renamePair,
+		           configurationSequenceNum);
 		if constexpr (Ar::isDeserializing) {
 			if (id >= 0) {
 				prefix = idToPrefix(id);
