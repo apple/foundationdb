@@ -65,7 +65,7 @@ struct ConfigTransactionGetGenerationReply {
 
 struct ConfigTransactionGetGenerationRequest {
 	static constexpr FileIdentifier file_identifier = 138941;
-	size_t coordinatorsHash;
+	size_t coordinatorsHash{ 0 };
 	// A hint to catch up lagging nodes:
 	Optional<Version> lastSeenLiveVersion;
 	ReplyPromise<ConfigTransactionGetGenerationReply> reply;
@@ -94,7 +94,7 @@ struct ConfigTransactionGetReply {
 
 struct ConfigTransactionGetRequest {
 	static constexpr FileIdentifier file_identifier = 923040;
-	size_t coordinatorsHash;
+	size_t coordinatorsHash{ 0 };
 	ConfigGeneration generation;
 	ConfigKey key;
 	ReplyPromise<ConfigTransactionGetReply> reply;
@@ -112,7 +112,7 @@ struct ConfigTransactionGetRequest {
 struct ConfigTransactionCommitRequest {
 	static constexpr FileIdentifier file_identifier = 103841;
 	Arena arena;
-	size_t coordinatorsHash;
+	size_t coordinatorsHash{ 0 };
 	ConfigGeneration generation{ ::invalidVersion, ::invalidVersion };
 	VectorRef<ConfigMutationRef> mutations;
 	ConfigCommitAnnotationRef annotation;
@@ -150,7 +150,7 @@ struct ConfigTransactionGetConfigClassesReply {
 
 struct ConfigTransactionGetConfigClassesRequest {
 	static constexpr FileIdentifier file_identifier = 7163400;
-	size_t coordinatorsHash;
+	size_t coordinatorsHash{ 0 };
 	ConfigGeneration generation;
 	ReplyPromise<ConfigTransactionGetConfigClassesReply> reply;
 
@@ -179,7 +179,7 @@ struct ConfigTransactionGetKnobsReply {
 
 struct ConfigTransactionGetKnobsRequest {
 	static constexpr FileIdentifier file_identifier = 987410;
-	size_t coordinatorsHash;
+	size_t coordinatorsHash{ 0 };
 	ConfigGeneration generation;
 	Optional<Key> configClass;
 	ReplyPromise<ConfigTransactionGetKnobsReply> reply;

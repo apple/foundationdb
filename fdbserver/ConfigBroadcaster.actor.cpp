@@ -84,6 +84,7 @@ class ConfigBroadcasterImpl {
 	std::unique_ptr<IConfigConsumer> consumer;
 	Future<Void> consumerFuture;
 	ActorCollection actors{ false };
+	std::unordered_map<NetworkAddress, Future<Void>> registrationActors;
 	std::map<UID, BroadcastClientDetails> clients;
 	std::map<UID, Future<Void>> clientFailures;
 
@@ -287,13 +288,15 @@ class ConfigBroadcasterImpl {
 				}
 			}
 		}
-		self->registrationResponses.insert(address);
+		int responsesRemaining = self->coordinators - (int)self->registrationResponses.size();
+		int nodesTillQuorum = self->coordinators / 2 + 1 - (int)self->activeConfigNodes.size();
 
 		if (registered) {
 			self->activeConfigNodes.insert(address);
 			self->disallowUnregistered = true;
 		} else if ((self->activeConfigNodes.size() < self->coordinators / 2 + 1 && !self->disallowUnregistered) ||
-		           self->registrationResponsesUnregistered.size() < self->coordinators / 2) {
+		           (self->registrationResponsesUnregistered.size() < self->coordinators / 2 &&
+		            responsesRemaining <= nodesTillQuorum)) {
 			// Received a registration request from an unregistered node. There
 			// are two cases where we want to allow unregistered nodes to
 			// register:
@@ -315,6 +318,7 @@ class ConfigBroadcasterImpl {
 		} else {
 			self->disallowUnregistered = true;
 		}
+		self->registrationResponses.insert(address);
 
 		// Read previous coordinators and fetch snapshot from them if they
 		// exist. This path should only be hit once after the coordinators are
@@ -412,7 +416,10 @@ class ConfigBroadcasterImpl {
 		    .detail("IsCoordinator", isCoordinator);
 
 		if (isCoordinator) {
-			impl->actors.add(registerNodeInternal(self, impl, broadcastInterface));
+			// A client re-registering will cause the old actor to be
+			// cancelled.
+			impl->registrationActors[broadcastInterface.address()] =
+			    registerNodeInternal(self, impl, broadcastInterface);
 		}
 
 		// Push full snapshot to worker if it isn't up to date.

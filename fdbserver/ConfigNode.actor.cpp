@@ -408,7 +408,8 @@ class ConfigNodeImpl {
 	ACTOR static Future<Void> commitMutations(ConfigNodeImpl* self,
 	                                          Standalone<VectorRef<VersionedConfigMutationRef>> mutations,
 	                                          Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations,
-	                                          Version commitVersion) {
+	                                          Version commitVersion,
+	                                          Version liveVersion = ::invalidVersion) {
 		Version latestVersion = 0;
 		int index = 0;
 		for (const auto& mutation : mutations) {
@@ -440,6 +441,9 @@ class ConfigNodeImpl {
 			                               BinaryWriter::toValue(annotation.annotation, IncludeVersion())));
 		}
 		ConfigGeneration newGeneration = { commitVersion, commitVersion };
+		if (liveVersion != ::invalidVersion) {
+			newGeneration.liveVersion = liveVersion;
+		}
 		self->kvStore->set(KeyValueRef(currentGenerationKey, BinaryWriter::toValue(newGeneration, IncludeVersion())));
 		wait(self->kvStore->commit());
 		++self->successfulCommits;
@@ -475,6 +479,7 @@ class ConfigNodeImpl {
 		}
 		Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
 		annotations.emplace_back_deep(annotations.arena(), req.generation.liveVersion, req.annotation);
+
 		wait(commitMutations(self, mutations, annotations, req.generation.liveVersion));
 		req.reply.send(Void());
 		return Void();
@@ -588,7 +593,8 @@ class ConfigNodeImpl {
 		    .detail("LastKnownCommitted", req.lastKnownCommitted)
 		    .detail("Committed", currentGeneration.committedVersion)
 		    .detail("CurrentGeneration", currentGeneration.toString())
-		    .detail("LastCompactedVersion", lastCompactedVersion);
+		    .detail("LastCompactedVersion", lastCompactedVersion)
+		    .detail("SpecialZeroQuorum", req.specialZeroQuorum);
 		// Rollback to prior known committed version to erase any commits not
 		// made on a quorum.
 		if (req.rollback.present() && req.rollback.get() < currentGeneration.committedVersion) {
@@ -620,7 +626,11 @@ class ConfigNodeImpl {
 		if (req.mutations.size() > 0) {
 			ASSERT_GT(req.mutations.size(), 0);
 			ASSERT_GT(req.mutations[0].version, currentGeneration.committedVersion);
-			wait(commitMutations(self, req.mutations, req.annotations, req.target));
+			wait(commitMutations(self,
+			                     req.mutations,
+			                     req.annotations,
+			                     req.target,
+			                     req.specialZeroQuorum ? currentGeneration.liveVersion : ::invalidVersion));
 		}
 
 		req.reply.send(Void());

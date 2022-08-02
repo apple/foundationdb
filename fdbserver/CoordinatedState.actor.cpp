@@ -347,7 +347,7 @@ struct MovableCoordinatedStateImpl {
 		if (BUGGIFY_WITH_PROB(0.001)) {
 			// Simulate random cluster controller death during coordinator
 			// change.
-			throw actor_cancelled();
+			// throw actor_cancelled();
 		}
 
 		// SOMEDAY: If we are worried about someone magically getting the new cluster ID and interfering, do a second

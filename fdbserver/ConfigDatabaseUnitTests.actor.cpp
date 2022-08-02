@@ -114,7 +114,7 @@ public:
 	                         Standalone<VectorRef<VersionedConfigMutationRef>> mutations,
 	                         Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations) {
 		return cfi.rollforward.getReply(
-		    ConfigFollowerRollforwardRequest{ rollback, lastKnownCommitted, target, mutations, annotations });
+		    ConfigFollowerRollforwardRequest{ rollback, lastKnownCommitted, target, mutations, annotations, false });
 	}
 
 	void restartNode() {
