@@ -44,6 +44,7 @@
 #include <fstream>
 
 #define BG_READ_DEBUG false
+#define BG_FILES_TEST_DEBUG false
 
 // Implements granule file parsing and materialization with normal c++ functions (non-actors) so that this can be used
 // outside the FDB network thread.
@@ -1958,14 +1959,16 @@ void checkSnapshotRead(const Standalone<StringRef>& fileNameRef,
 		fmt::print("Read {0} rows != {1}\n", result.size(), endIdx - beginIdx);
 	}
 
-	/*fmt::print("Expected Data {0}:\n", result.size());
-	for (auto& it : result) {
-	    fmt::print("  {0}=\n", it.key.printable());
+	if (BG_FILES_TEST_DEBUG) {
+		fmt::print("Expected Data {0}:\n", result.size());
+		for (auto& it : result) {
+			fmt::print("  {0}=\n", it.key.printable());
+		}
+		fmt::print("Actual Data {0}:\n", endIdx - beginIdx);
+		for (int i = beginIdx; i < endIdx; i++) {
+			fmt::print("  {0}=\n", snapshot[i].key.printable());
+		}
 	}
-	fmt::print("Actual Data {0}:\n", endIdx - beginIdx);
-	for (int i = beginIdx; i < endIdx; i++) {
-	    fmt::print("  {0}=\n", snapshot[i].key.printable());
-	}*/
 
 	ASSERT(result.size() == endIdx - beginIdx);
 	for (auto& it : result) {
@@ -2538,14 +2541,16 @@ void checkGranuleRead(const KeyValueGen& kvGen,
 	if (expectedData.size() != actualData.size()) {
 		fmt::print("Expected Size {0} != Actual Size {1}\n", expectedData.size(), actualData.size());
 	}
-	/*fmt::print("Expected Data {0}:\n", expectedData.size());
-	for (auto& it : expectedData) {
-	    fmt::print("  {0}=\n", it.first.printable());
+	if (BG_FILES_TEST_DEBUG) {
+		fmt::print("Expected Data {0}:\n", expectedData.size());
+		for (auto& it : expectedData) {
+			fmt::print("  {0}=\n", it.first.printable());
+		}
+		fmt::print("Actual Data {0}:\n", actualData.size());
+		for (auto& it : actualData) {
+			fmt::print("  {0}=\n", it.key.printable());
+		}
 	}
-	fmt::print("Actual Data {0}:\n", actualData.size());
-	for (auto& it : actualData) {
-	    fmt::print("  {0}=\n", it.key.printable());
-	}*/
 
 	ASSERT(expectedData.size() == actualData.size());
 	int i = 0;
@@ -2569,34 +2574,40 @@ TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 	int targetSnapshotBytes = (int)(deterministicRandom()->randomInt(0, targetDataBytes));
 	int targetDeltaBytes = targetDataBytes - targetSnapshotBytes;
 
-	fmt::print("Snapshot Chunks: {0}\nDelta Chunks: {1}\nSnapshot Bytes: {2}\nDelta Bytes: {3}\n",
-	           targetSnapshotChunks,
-	           targetDeltaChunks,
-	           targetSnapshotBytes,
-	           targetDeltaBytes);
+	if (BG_FILES_TEST_DEBUG) {
+		fmt::print("Snapshot Chunks: {0}\nDelta Chunks: {1}\nSnapshot Bytes: {2}\nDelta Bytes: {3}\n",
+		           targetSnapshotChunks,
+		           targetDeltaChunks,
+		           targetSnapshotBytes,
+		           targetDeltaBytes);
+	}
 
 	int targetSnapshotChunkSize = targetSnapshotBytes / targetSnapshotChunks;
 	int targetDeltaChunkSize = targetDeltaBytes / targetDeltaChunks;
 
 	Standalone<GranuleSnapshot> snapshotData = genSnapshot(kvGen, targetSnapshotBytes);
-	/*fmt::print("Snapshot data: {0}\n", snapshotData.size());
-	for (auto& it : snapshotData) {
-	    fmt::print("  {0}=\n", it.key.printable());
-	}*/
+	if (BG_FILES_TEST_DEBUG) {
+		fmt::print("Snapshot data: {0}\n", snapshotData.size());
+		for (auto& it : snapshotData) {
+			fmt::print("  {0}=\n", it.key.printable());
+		}
+	}
 	Standalone<GranuleDeltas> deltaData = genDeltas(kvGen, targetDeltaBytes);
 	fmt::print("{0} snapshot rows and {1} deltas\n", snapshotData.size(), deltaData.size());
 
-	/*fmt::print("Delta data: {0}\n", deltaData.size());
-	for (auto& it : deltaData) {
-	    fmt::print("  {0}) ({1})\n", it.version, it.mutations.size());
-	    for (auto& it2 : it.mutations) {
-	        if (it2.type == MutationRef::Type::SetValue) {
-	            fmt::print("    {0}=\n", it2.param1.printable());
-	        } else {
-	            fmt::print("    {0} - {1}\n", it2.param1.printable(), it2.param2.printable());
-	        }
-	    }
-	}*/
+	if (BG_FILES_TEST_DEBUG) {
+		fmt::print("Delta data: {0}\n", deltaData.size());
+		for (auto& it : deltaData) {
+			fmt::print("  {0}) ({1})\n", it.version, it.mutations.size());
+			for (auto& it2 : it.mutations) {
+				if (it2.type == MutationRef::Type::SetValue) {
+					fmt::print("    {0}=\n", it2.param1.printable());
+				} else {
+					fmt::print("    {0} - {1}\n", it2.param1.printable(), it2.param2.printable());
+				}
+			}
+		}
+	}
 
 	Value serializedSnapshot = serializeChunkedSnapshot(
 	    fileNameRef, snapshotData, targetSnapshotChunkSize, kvGen.compressFilter, kvGen.cipherKeys);
