@@ -513,7 +513,7 @@ public:
 
 	void log();
 
-	void disable() { enabled = false; } // Disables the trace event so it doesn't get
+	void disable() { enabled = false; } // Disables the trace event so it doesn't get logged
 
 	virtual ~BaseTraceEvent(); // Actually logs the event
 

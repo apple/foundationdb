@@ -379,73 +379,115 @@ class GlobalTagThrottlerImpl {
 		}
 	}
 
+	Optional<double> getTargetTps(TransactionTag tag, bool& isReadBusy, bool& isWriteBusy, TraceEvent& te) {
+		// Currently there is no differentiation between batch priority and default priority transactions
+		auto const readLimitingTps = getLimitingTps(tag, OpType::READ);
+		auto const writeLimitingTps = getLimitingTps(tag, OpType::WRITE);
+		Optional<double> limitingTps;
+		limitingTps = getMin(readLimitingTps, writeLimitingTps);
+
+		auto const averageTransactionReadCost = getAverageTransactionCost(tag, OpType::READ);
+		auto const averageTransactionWriteCost = getAverageTransactionCost(tag, OpType::WRITE);
+		auto const readDesiredTps = getTps(tag, OpType::READ, LimitType::TOTAL, averageTransactionReadCost);
+		auto const writeDesiredTps = getTps(tag, OpType::WRITE, LimitType::TOTAL, averageTransactionWriteCost);
+		Optional<double> desiredTps;
+		desiredTps = getMin(readDesiredTps, writeDesiredTps);
+
+		if (!desiredTps.present()) {
+			return {};
+		}
+
+		isReadBusy = readLimitingTps.present() && readLimitingTps.get() < readDesiredTps.orDefault(0);
+		isWriteBusy = writeLimitingTps.present() && writeLimitingTps.get() < writeDesiredTps.orDefault(0);
+
+		auto const readReservedTps = getTps(tag, OpType::READ, LimitType::RESERVED, averageTransactionReadCost);
+		auto const writeReservedTps = getTps(tag, OpType::WRITE, LimitType::RESERVED, averageTransactionWriteCost);
+		Optional<double> reservedTps;
+		reservedTps = getMax(readReservedTps, writeReservedTps);
+
+		auto targetTps = desiredTps.get();
+		if (limitingTps.present()) {
+			targetTps = std::min(targetTps, limitingTps.get());
+		}
+		if (reservedTps.present()) {
+			targetTps = std::max(targetTps, reservedTps.get());
+		}
+
+		te.detail("Tag", printable(tag))
+		    .detail("TargetTps", targetTps)
+		    .detail("AverageTransactionReadCost", averageTransactionReadCost)
+		    .detail("AverageTransactionWriteCost", averageTransactionWriteCost)
+		    .detail("LimitingTps", limitingTps)
+		    .detail("ReservedTps", reservedTps)
+		    .detail("DesiredTps", desiredTps)
+		    .detail("NumStorageServers", throughput.size());
+
+		auto& tagStats = statusReply.status[tag];
+		tagStats.desiredTps = desiredTps.get();
+		tagStats.limitingTps = limitingTps;
+		tagStats.targetTps = targetTps;
+		tagStats.reservedTps = reservedTps.get();
+
+		return targetTps;
+	}
+
 public:
 	GlobalTagThrottlerImpl(Database db, UID id) : db(db), id(id) {}
 	Future<Void> monitorThrottlingChanges() { return monitorThrottlingChanges(this); }
 	void addRequests(TransactionTag tag, int count) { tagStatistics[tag].addTransactions(static_cast<double>(count)); }
 	uint64_t getThrottledTagChangeId() const { return throttledTagChangeId; }
+
+	PrioritizedTransactionTagMap<double> getRates() {
+		PrioritizedTransactionTagMap<double> result;
+		lastBusyReadTagCount = lastBusyWriteTagCount = 0;
+		statusReply = {};
+
+		for (const auto& [tag, stats] : tagStatistics) {
+			// Currently there is no differentiation between batch priority and default priority transactions
+			TraceEvent te("GlobalTagThrottler_GotRate", id);
+			bool isReadBusy, isWriteBusy;
+			auto const targetTps = getTargetTps(tag, isReadBusy, isWriteBusy, te);
+			if (isReadBusy) {
+				++lastBusyReadTagCount;
+			}
+			if (isWriteBusy) {
+				++lastBusyWriteTagCount;
+			}
+			if (targetTps.present()) {
+				result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] = targetTps.get();
+			} else {
+				te.disable();
+			}
+		}
+
+		return result;
+	}
+
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() {
 		PrioritizedTransactionTagMap<ClientTagThrottleLimits> result;
 		lastBusyReadTagCount = lastBusyWriteTagCount = 0;
-
 		statusReply = {};
+
 		for (auto& [tag, stats] : tagStatistics) {
 			// Currently there is no differentiation between batch priority and default priority transactions
-			auto const readLimitingTps = getLimitingTps(tag, OpType::READ);
-			auto const writeLimitingTps = getLimitingTps(tag, OpType::WRITE);
-			Optional<double> limitingTps;
-			limitingTps = getMin(readLimitingTps, writeLimitingTps);
+			bool isReadBusy, isWriteBusy;
+			TraceEvent te("GlobalTagThrottler_GotClientRate", id);
+			auto const targetTps = getTargetTps(tag, isReadBusy, isWriteBusy, te);
 
-			auto const averageTransactionReadCost = getAverageTransactionCost(tag, OpType::READ);
-			auto const averageTransactionWriteCost = getAverageTransactionCost(tag, OpType::WRITE);
-			auto const readDesiredTps = getTps(tag, OpType::READ, LimitType::TOTAL, averageTransactionReadCost);
-			auto const writeDesiredTps = getTps(tag, OpType::WRITE, LimitType::TOTAL, averageTransactionWriteCost);
-			Optional<double> desiredTps;
-			desiredTps = getMin(readDesiredTps, writeDesiredTps);
-
-			if (!desiredTps.present()) {
-				continue;
-			}
-
-			if (readLimitingTps.present() && readLimitingTps.get() < readDesiredTps.orDefault(0)) {
+			if (isReadBusy) {
 				++lastBusyReadTagCount;
 			}
-			if (writeLimitingTps.present() && writeLimitingTps.get() < writeDesiredTps.orDefault(0)) {
+			if (isWriteBusy) {
 				++lastBusyWriteTagCount;
 			}
 
-			auto const readReservedTps = getTps(tag, OpType::READ, LimitType::RESERVED, averageTransactionReadCost);
-			auto const writeReservedTps = getTps(tag, OpType::WRITE, LimitType::RESERVED, averageTransactionWriteCost);
-			Optional<double> reservedTps;
-			reservedTps = getMax(readReservedTps, writeReservedTps);
-
-			auto targetTps = desiredTps.get();
-			if (limitingTps.present()) {
-				targetTps = std::min(targetTps, limitingTps.get());
+			if (targetTps.present()) {
+				auto const clientRate = stats.updateAndGetPerClientLimit(targetTps.get());
+				result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] = clientRate;
+				te.detail("ClientTps", clientRate.tpsRate);
+			} else {
+				te.disable();
 			}
-			if (reservedTps.present()) {
-				targetTps = std::max(targetTps, reservedTps.get());
-			}
-
-			auto const clientRate = stats.updateAndGetPerClientLimit(targetTps);
-			result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] = clientRate;
-
-			auto& tagStats = statusReply.status[tag];
-			tagStats.desiredTps = desiredTps.get();
-			tagStats.limitingTps = limitingTps;
-			tagStats.perClientTps = clientRate.tpsRate;
-			tagStats.reservedTps = reservedTps.get();
-
-			TraceEvent("GlobalTagThrottler_GotClientRate", id)
-			    .detail("Tag", printable(tag))
-			    .detail("TargetTps", targetTps)
-			    .detail("AverageTransactionReadCost", averageTransactionReadCost)
-			    .detail("AverageTransactionWriteCost", averageTransactionWriteCost)
-			    .detail("ClientTps", clientRate.tpsRate)
-			    .detail("LimitingTps", limitingTps)
-			    .detail("ReservedTps", reservedTps)
-			    .detail("DesiredTps", desiredTps)
-			    .detail("NumStorageServers", throughput.size());
 		}
 		return result;
 	}
@@ -499,6 +541,9 @@ uint64_t GlobalTagThrottler::getThrottledTagChangeId() const {
 }
 PrioritizedTransactionTagMap<ClientTagThrottleLimits> GlobalTagThrottler::getClientRates() {
 	return impl->getClientRates();
+}
+PrioritizedTransactionTagMap<double> GlobalTagThrottler::getRates() {
+	return impl->getRates();
 }
 int64_t GlobalTagThrottler::autoThrottleCount() const {
 	return impl->autoThrottleCount();
@@ -701,7 +746,7 @@ bool statusIsNear(GlobalTagThrottler const& globalTagThrottler,
                   TransactionTag tag,
                   double expectedDesiredTps,
                   Optional<double> expectedLimitingTps,
-                  double expectedPerClientTps,
+                  double expectedTargetTps,
                   double expectedReservedTps) {
 	auto const stats = globalTagThrottler.getGlobalTagThrottlerStatusReply().status[tag];
 	TraceEvent("GlobalTagThrottling_StatusMonitor")
@@ -709,11 +754,11 @@ bool statusIsNear(GlobalTagThrottler const& globalTagThrottler,
 	    .detail("ExpectedDesiredTps", expectedDesiredTps)
 	    .detail("LimitingTps", stats.limitingTps)
 	    .detail("ExpectedLimitingTps", expectedLimitingTps)
-	    .detail("PerClientTps", stats.perClientTps)
-	    .detail("ExpectedPerClientTps", expectedPerClientTps)
+	    .detail("TargetTps", stats.targetTps)
+	    .detail("ExpectedTargetTps", expectedTargetTps)
 	    .detail("ReservedTps", stats.reservedTps)
 	    .detail("ExpectedReservedTps", expectedReservedTps);
-	return isNear(stats.desiredTps, expectedDesiredTps) && isNear(stats.perClientTps, expectedPerClientTps) &&
+	return isNear(stats.desiredTps, expectedDesiredTps) && isNear(stats.targetTps, expectedTargetTps) &&
 	       isNear(stats.reservedTps, expectedReservedTps) && isNear(stats.limitingTps, expectedLimitingTps);
 }
 

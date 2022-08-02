@@ -155,12 +155,12 @@ struct GlobalTagThrottlerStatusReply {
 		constexpr static FileIdentifier file_identifier = 6018293;
 		double desiredTps;
 		Optional<double> limitingTps;
-		double perClientTps;
+		double targetTps;
 		double reservedTps;
 
 		template <class Ar>
 		void serialize(Ar& ar) {
-			serializer(ar, desiredTps, limitingTps, perClientTps, reservedTps);
+			serializer(ar, desiredTps, limitingTps, targetTps, reservedTps);
 		}
 	};
 
