@@ -207,6 +207,16 @@ struct KeyRangeLocationInfo {
 	  : tenantEntry(tenantEntry), range(range), locations(locations) {}
 };
 
+struct OverlappingChangeFeedsInfo {
+	Arena arena;
+	VectorRef<OverlappingChangeFeedEntry> feeds;
+	// would prefer to use key range map but it complicates copy/move constructors
+	std::vector<std::pair<KeyRangeRef, Version>> feedMetadataVersions;
+
+	// for a feed that wasn't present, returns the metadata version it would have been fetched at.
+	Version getFeedMetadataVersion(const KeyRangeRef& feedRange) const;
+};
+
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -245,16 +255,16 @@ public:
 		return cx;
 	}
 
-	Optional<KeyRangeLocationInfo> getCachedLocation(const Optional<TenantName>& tenant,
+	Optional<KeyRangeLocationInfo> getCachedLocation(const Optional<TenantNameRef>& tenant,
 	                                                 const KeyRef&,
 	                                                 Reverse isBackward = Reverse::False);
-	bool getCachedLocations(const Optional<TenantName>& tenant,
+	bool getCachedLocations(const Optional<TenantNameRef>& tenant,
 	                        const KeyRangeRef&,
 	                        std::vector<KeyRangeLocationInfo>&,
 	                        int limit,
 	                        Reverse reverse);
 	void cacheTenant(const TenantName& tenant, const TenantMapEntry& tenantEntry);
-	Reference<LocationInfo> setCachedLocation(const Optional<TenantName>& tenant,
+	Reference<LocationInfo> setCachedLocation(const Optional<TenantNameRef>& tenant,
 	                                          const TenantMapEntry& tenantEntry,
 	                                          const KeyRangeRef&,
 	                                          const std::vector<struct StorageServerInterface>&);
@@ -361,7 +371,7 @@ public:
 	                                 int replyBufferSize = -1,
 	                                 bool canReadPopped = true);
 
-	Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
+	Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
 
 	Future<Key> purgeBlobGranules(KeyRange keyRange,
@@ -517,6 +527,7 @@ public:
 	Counter transactionsExpensiveClearCostEstCount;
 	Counter transactionGrvFullBatches;
 	Counter transactionGrvTimedOutBatches;
+	Counter transactionCommitVersionNotFoundForSS;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
 	    bytesPerCommit, bgLatencies, bgGranulesPerRequest;

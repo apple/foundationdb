@@ -484,8 +484,11 @@ public:
 	}
 
 	// TODO: unit test needed
-	ACTOR static Future<Void> resumeFromDataMoves(Reference<DataDistributor> self) {
+	ACTOR static Future<Void> resumeFromDataMoves(Reference<DataDistributor> self, Future<Void> readyToStart) {
 		state KeyRangeMap<std::shared_ptr<DataMove>>::iterator it = self->initData->dataMoveMap.ranges().begin();
+
+		wait(readyToStart);
+
 		for (; it != self->initData->dataMoveMap.ranges().end(); ++it) {
 			const DataMoveMetaData& meta = it.value()->meta;
 			if (it.value()->isCancelled() || (it.value()->valid && !CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
@@ -528,8 +531,8 @@ public:
 	// usage if it turns out to be a problem.
 	Future<Void> resumeRelocations() {
 		ASSERT(shardsAffectedByTeamFailure); // has to be allocated
-		return runAfter(resumeFromShards(Reference<DataDistributor>::addRef(this), g_network->isSimulated()),
-		                resumeFromDataMoves(Reference<DataDistributor>::addRef(this)));
+		Future<Void> shardsReady = resumeFromShards(Reference<DataDistributor>::addRef(this), g_network->isSimulated());
+		return resumeFromDataMoves(Reference<DataDistributor>::addRef(this), shardsReady);
 	}
 };
 

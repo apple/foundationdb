@@ -1,8 +1,5 @@
 fdb_find_sources(FDBCLIENT_SRCS)
-list(APPEND FDBCLIENT_SRCS
-  sha1/SHA1.cpp
-  libb64/cdecode.c
-  libb64/cencode.c)
+list(APPEND FDBCLIENT_SRCS sha1/SHA1.cpp)
 
 message(STATUS "FDB version is ${FDB_VERSION}")
 message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")

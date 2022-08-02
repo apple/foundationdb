@@ -789,7 +789,7 @@ namespace SummarizeTest
             int stderrSeverity = (int)Magnesium.Severity.SevError;
 
             Dictionary<KeyValuePair<string, Magnesium.Severity>, Magnesium.Severity> severityMap = new Dictionary<KeyValuePair<string, Magnesium.Severity>, Magnesium.Severity>();
-            Dictionary<Tuple<string, string>, bool> codeCoverage = new Dictionary<Tuple<string, string>, bool>();
+            var codeCoverage = new Dictionary<Tuple<string, string, string>, bool>();
 
             foreach (var traceFileName in traceFiles)
             {
@@ -902,12 +902,17 @@ namespace SummarizeTest
                             if (ev.Type == "CodeCoverage" && !willRestart)
                             {
                                 bool covered = true;
-                                if(ev.DDetails.ContainsKey("Covered"))
+                                if (ev.DDetails.ContainsKey("Covered"))
                                 {
                                     covered = int.Parse(ev.Details.Covered) != 0;
                                 }
 
-                                var key = new Tuple<string, string>(ev.Details.File, ev.Details.Line);
+                                var comment = "";
+                                if (ev.DDetails.ContainsKey("Comment"))
+                                {
+                                    comment = ev.Details.Comment;
+                                }
+                                var key = new Tuple<string, string, string>(ev.Details.File, ev.Details.Line, comment);
                                 if (covered || !codeCoverage.ContainsKey(key))
                                 {
                                     codeCoverage[key] = covered;
@@ -960,6 +965,9 @@ namespace SummarizeTest
                 if(!kv.Value)
                 {
                     element.Add(new XAttribute("Covered", "0"));
+                }
+                if (kv.Key.Item3.Length > 0) {
+                    element.Add(new XAttribute("Comment", kv.Key.Item3));
                 }
 
                 xout.Add(element);

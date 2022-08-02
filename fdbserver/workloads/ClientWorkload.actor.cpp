@@ -119,6 +119,7 @@ public:
 
 struct WorkloadProcess {
 	WorkloadProcessState* processState;
+	WorkloadContext childWorkloadContext;
 	UID id = deterministicRandom()->randomUniqueID();
 	Database cx;
 	Future<Void> databaseOpened;
@@ -166,36 +167,56 @@ struct WorkloadProcess {
 	WorkloadProcess(ClientWorkload::CreateWorkload const& childCreator, WorkloadContext const& wcx)
 	  : processState(WorkloadProcessState::instance(wcx.clientId)) {
 		TraceEvent("StartingClinetWorkload", id).detail("OnClientProcess", processState->id);
-		databaseOpened = openDatabase(this, childCreator, wcx);
+		childWorkloadContext.clientCount = wcx.clientCount;
+		childWorkloadContext.clientId = wcx.clientId;
+		childWorkloadContext.ccr = wcx.ccr;
+		childWorkloadContext.options = wcx.options;
+		childWorkloadContext.sharedRandomNumber = wcx.sharedRandomNumber;
+		databaseOpened = openDatabase(this, childCreator, childWorkloadContext);
 	}
 
 	ACTOR static void destroy(WorkloadProcess* self) {
 		state ISimulator::ProcessInfo* parent = g_simulator.getCurrentProcess();
 		wait(g_simulator.onProcess(self->childProcess(), TaskPriority::DefaultYield));
+		TraceEvent("DeleteWorkloadProcess").backtrace();
 		delete self;
 		wait(g_simulator.onProcess(parent, TaskPriority::DefaultYield));
 	}
 
 	std::string description() { return desc; }
 
+	// This actor will keep a reference to a future alive, switch to another process and then return. If the future
+	// count of `f` is 1, this will cause the future to be destroyed in the process `process`
+	ACTOR template <class T>
+	static void cancelChild(ISimulator::ProcessInfo* process, Future<T> f) {
+		wait(g_simulator.onProcess(process, TaskPriority::DefaultYield));
+	}
+
 	ACTOR template <class Ret, class Fun>
 	Future<Ret> runActor(WorkloadProcess* self, Optional<TenantName> defaultTenant, Fun f) {
 		state Optional<Error> err;
 		state Ret res;
+		state Future<Ret> fut;
 		state ISimulator::ProcessInfo* parent = g_simulator.getCurrentProcess();
 		wait(self->databaseOpened);
 		wait(g_simulator.onProcess(self->childProcess(), TaskPriority::DefaultYield));
 		self->cx->defaultTenant = defaultTenant;
 		try {
-			Ret r = wait(f(self->cx));
+			fut = f(self->cx);
+			Ret r = wait(fut);
 			res = r;
 		} catch (Error& e) {
+			// if we're getting cancelled, we could run in the scope of the parent process, but we're not allowed to
+			// cancel `fut` in any other process than the child process. So we're going to pass the future to an
+			// uncancellable actor (it has to be uncancellable because if we got cancelled here we can't wait on
+			// anything) which will then destroy the future on the child process.
+			cancelChild(self->childProcess(), fut);
 			if (e.code() == error_code_actor_cancelled) {
-				ASSERT(g_simulator.getCurrentProcess() == parent);
-				throw;
+				throw e;
 			}
 			err = e;
 		}
+		fut = Future<Ret>();
 		wait(g_simulator.onProcess(parent, TaskPriority::DefaultYield));
 		if (err.present()) {
 			throw err.get();
@@ -208,6 +229,7 @@ ClientWorkload::ClientWorkload(CreateWorkload const& childCreator, WorkloadConte
   : TestWorkload(wcx), impl(new WorkloadProcess(childCreator, wcx)) {}
 
 ClientWorkload::~ClientWorkload() {
+	TraceEvent(SevDebug, "DestroyClientWorkload").backtrace();
 	WorkloadProcess::destroy(impl);
 }
 

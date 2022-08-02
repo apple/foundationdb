@@ -175,6 +175,10 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 			ASSERT(res[i] == kvRange[i]);
 		}
 
+		Future<Void> close = kvStore->onClosed();
+		kvStore->dispose();
+		wait(close);
+
 		int ignore = wait(setDDMode(cx, 1));
 		return Void();
 	}

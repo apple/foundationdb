@@ -228,7 +228,7 @@ struct CodeProbeImpl : ICodeProbe {
 		evt.detail("File", filename())
 		    .detail("Line", Line)
 		    .detail("Condition", Condition::value())
-		    .detail("ProbeHit", condition)
+		    .detail("Covered", condition)
 		    .detail("Comment", Comment::value());
 		annotations.trace(this, evt, condition);
 	}

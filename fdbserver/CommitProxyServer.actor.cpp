@@ -283,16 +283,20 @@ bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransacti
 				if (!m.param1.startsWith(tenantPrefix)) {
 					TraceEvent(SevWarnAlways, "TenantPrefixMismatch")
 					    .suppressFor(60)
-					    .detail("Prefix", tenantPrefix.toHexString())
-					    .detail("Key", m.param1.toHexString());
+					    .detail("Tenant", req.tenantInfo.name)
+					    .detail("TenantID", req.tenantInfo.tenantId)
+					    .detail("Prefix", tenantPrefix)
+					    .detail("Key", m.param1);
 					return false;
 				}
 
 				if (m.type == MutationRef::ClearRange && !m.param2.startsWith(tenantPrefix)) {
 					TraceEvent(SevWarnAlways, "TenantClearRangePrefixMismatch")
 					    .suppressFor(60)
-					    .detail("Prefix", tenantPrefix.toHexString())
-					    .detail("Key", m.param2.toHexString());
+					    .detail("Tenant", req.tenantInfo.name)
+					    .detail("TenantID", req.tenantInfo.tenantId)
+					    .detail("Prefix", tenantPrefix)
+					    .detail("Key", m.param2);
 					return false;
 				} else if (m.type == MutationRef::SetVersionstampedKey) {
 					ASSERT(m.param1.size() >= 4);
@@ -301,8 +305,10 @@ bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransacti
 					if (*offset < tenantPrefix.size()) {
 						TraceEvent(SevWarnAlways, "TenantVersionstampInvalidOffset")
 						    .suppressFor(60)
-						    .detail("Prefix", tenantPrefix.toHexString())
-						    .detail("Key", m.param1.toHexString())
+						    .detail("Tenant", req.tenantInfo.name)
+						    .detail("TenantID", req.tenantInfo.tenantId)
+						    .detail("Prefix", tenantPrefix)
+						    .detail("Key", m.param1)
 						    .detail("Offset", *offset);
 						return false;
 					}
@@ -315,9 +321,11 @@ bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransacti
 			    (!rc.begin.startsWith(tenantPrefix) || !rc.end.startsWith(tenantPrefix))) {
 				TraceEvent(SevWarnAlways, "TenantReadConflictPrefixMismatch")
 				    .suppressFor(60)
-				    .detail("Prefix", tenantPrefix.toHexString())
-				    .detail("BeginKey", rc.begin.toHexString())
-				    .detail("EndKey", rc.end.toHexString());
+				    .detail("Tenant", req.tenantInfo.name)
+				    .detail("TenantID", req.tenantInfo.tenantId)
+				    .detail("Prefix", tenantPrefix)
+				    .detail("BeginKey", rc.begin)
+				    .detail("EndKey", rc.end);
 				return false;
 			}
 		}
@@ -327,9 +335,11 @@ bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransacti
 			    (!wc.begin.startsWith(tenantPrefix) || !wc.end.startsWith(tenantPrefix))) {
 				TraceEvent(SevWarnAlways, "TenantWriteConflictPrefixMismatch")
 				    .suppressFor(60)
-				    .detail("Prefix", tenantPrefix.toHexString())
-				    .detail("BeginKey", wc.begin.toHexString())
-				    .detail("EndKey", wc.end.toHexString());
+				    .detail("Tenant", req.tenantInfo.name)
+				    .detail("TenantID", req.tenantInfo.tenantId)
+				    .detail("Prefix", tenantPrefix)
+				    .detail("BeginKey", wc.begin)
+				    .detail("EndKey", wc.end);
 				return false;
 			}
 		}
@@ -913,8 +923,9 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 		};
 		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> encryptDomains = defaultDomains;
 		for (int t = 0; t < trs.size(); t++) {
-			int64_t tenantId = trs[t].tenantInfo.tenantId;
-			Optional<TenantName> tenantName = trs[t].tenantInfo.name;
+			TenantInfo const& tenantInfo = trs[t].tenantInfo;
+			int64_t tenantId = tenantInfo.tenantId;
+			Optional<TenantNameRef> const& tenantName = tenantInfo.name;
 			// TODO(yiwu): In raw access mode, use tenant prefix to figure out tenant id for user data
 			if (tenantId != TenantInfo::INVALID_TENANT) {
 				ASSERT(tenantName.present());
@@ -1138,7 +1149,8 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	if (!self->isMyFirstBatch &&
 	    pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get() != self->oldCoordinators.get()) {
 		wait(brokenPromiseToNever(pProxyCommitData->db->get().clusterInterface.changeCoordinators.getReply(
-		    ChangeCoordinatorsRequest(pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get()))));
+		    ChangeCoordinatorsRequest(pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get(),
+		                              self->pProxyCommitData->master.id()))));
 		ASSERT(false); // ChangeCoordinatorsRequest should always throw
 	}
 
@@ -1845,7 +1857,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 	while (tenantEntry.isError()) {
 		bool finalQuery = commitData->version.get() >= minTenantVersion;
 		ErrorOr<Optional<TenantMapEntry>> _tenantEntry =
-		    getTenantEntry(commitData, req.tenant, Optional<int64_t>(), finalQuery);
+		    getTenantEntry(commitData, req.tenant.name, Optional<int64_t>(), finalQuery);
 		tenantEntry = _tenantEntry;
 
 		if (tenantEntry.isError()) {

@@ -325,6 +325,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 					TraceEvent("TestCancelDataMoveEnd").detail("DataMove", dataMove.toString());
 				}
 
+				TraceEvent("TestMoveShardStartMoveKeys").detail("DataMove", dataMoveId);
 				wait(moveKeys(cx,
 				              dataMoveId,
 				              keys,

@@ -22,6 +22,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
+#include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 
 #define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
@@ -81,7 +82,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( METADATA_VERSION_CACHE_SIZE,            1000 );
 	init( CHANGE_FEED_LOCATION_LIMIT,            10000 );
 	init( CHANGE_FEED_CACHE_SIZE,               100000 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_SIZE = 1;
-	init( CHANGE_FEED_POP_TIMEOUT,                 5.0 );
+	init( CHANGE_FEED_POP_TIMEOUT,                10.0 );
 	init( CHANGE_FEED_STREAM_MIN_BYTES,            1e4 ); if( randomize && BUGGIFY ) CHANGE_FEED_STREAM_MIN_BYTES = 1;
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1;
@@ -209,12 +210,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( IS_ACCEPTABLE_DELAY,                     1.5 );
 
-	init( HTTP_READ_SIZE,                     128*1024 );
-	init( HTTP_SEND_SIZE,                      32*1024 );
-	init( HTTP_VERBOSE_LEVEL,                        0 );
-	init( HTTP_REQUEST_ID_HEADER,                   "" );
 	init( HTTP_REQUEST_AWS_V4_HEADER,             true );
-	init( HTTP_RESPONSE_SKIP_VERIFY_CHECKSUM_FOR_PARTIAL_CONTENT, false );
 	init( BLOBSTORE_ENCRYPTION_TYPE,                "" );
 	init( BLOBSTORE_CONNECT_TRIES,                  10 );
 	init( BLOBSTORE_CONNECT_TIMEOUT,                10 );
@@ -293,6 +289,9 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_TIMES,        3 );
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_DELAY,      2.0 );
+
+	// Tenants and Metacluster
+	init( MAX_TENANTS_PER_CLUSTER,                  1e6 ); if ( randomize && BUGGIFY ) MAX_TENANTS_PER_CLUSTER = deterministicRandom()->randomInt(20, 100);
 
 	// clang-format on
 }
