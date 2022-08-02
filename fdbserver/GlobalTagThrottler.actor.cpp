@@ -405,13 +405,9 @@ class GlobalTagThrottlerImpl {
 		Optional<double> reservedTps;
 		reservedTps = getMax(readReservedTps, writeReservedTps);
 
-		auto targetTps = desiredTps.get();
-		if (limitingTps.present()) {
-			targetTps = std::min(targetTps, limitingTps.get());
-		}
-		if (reservedTps.present()) {
-			targetTps = std::max(targetTps, reservedTps.get());
-		}
+		auto targetTps = desiredTps;
+		targetTps = getMin(targetTps, limitingTps);
+		targetTps = getMax(targetTps, reservedTps);
 
 		te.detail("Tag", printable(tag))
 		    .detail("TargetTps", targetTps)
@@ -425,7 +421,7 @@ class GlobalTagThrottlerImpl {
 		auto& tagStats = statusReply.status[tag];
 		tagStats.desiredTps = desiredTps.get();
 		tagStats.limitingTps = limitingTps;
-		tagStats.targetTps = targetTps;
+		tagStats.targetTps = targetTps.get();
 		tagStats.reservedTps = reservedTps.get();
 
 		return targetTps;
