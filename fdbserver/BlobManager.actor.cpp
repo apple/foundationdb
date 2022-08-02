@@ -3496,7 +3496,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 				// get
 				if (history.present()) {
 					if (BM_PURGE_DEBUG) {
-						fmt::print("BM {0}   Adding range to history queue: [{1} - {2}) @ {3} ({4})\n",
+						fmt::print("BM {0}   Adding range to history queue: [{1} - {2}) @ {3}\n",
 						           self->epoch,
 						           activeRange.begin.printable(),
 						           activeRange.end.printable(),
