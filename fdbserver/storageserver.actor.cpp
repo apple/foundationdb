@@ -114,7 +114,7 @@ std::string changeServerKeysContextName(const ChangeServerKeysContext& context) 
 	default:
 		ASSERT(false);
 	}
-	return "UnknowContext";
+	return "UnknownContext";
 }
 
 bool canReplyWith(Error e) {
