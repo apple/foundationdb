@@ -139,7 +139,8 @@ TEST_CASE("/CompressionUtils/gzipCompression2") {
 	Standalone<StringRef> compressed = CompressionUtils::compress(CompressionFilter::GZIP, uncompressed, arena);
 	ASSERT_NE(compressed.compare(uncompressed), 0);
 	printf("Size after: %d\n", (int)compressed.size());
-	ASSERT(compressed.size() < uncompressed.size());
+	// Assert compressed size is less than half.
+	ASSERT(compressed.size() * 2 < uncompressed.size());
 
 	StringRef verify = CompressionUtils::decompress(CompressionFilter::GZIP, compressed, arena);
 	ASSERT_EQ(verify.compare(uncompressed), 0);
