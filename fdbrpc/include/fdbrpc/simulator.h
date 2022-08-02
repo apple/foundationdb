@@ -20,20 +20,23 @@
 
 #ifndef FLOW_SIMULATOR_H
 #define FLOW_SIMULATOR_H
-#include "flow/ProtocolVersion.h"
+#pragma once
 #include <algorithm>
 #include <string>
+#include <random>
 #include <limits>
-#pragma once
 
 #include "flow/flow.h"
 #include "flow/Histogram.h"
+#include "flow/ProtocolVersion.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "flow/IAsyncFile.h"
 #include "flow/TDMetric.actor.h"
-#include <random>
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
+#include "fdbrpc/TokenSign.h"
 
 enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
@@ -472,6 +475,8 @@ public:
 	bool allowStorageMigrationTypeChange = false;
 	double injectTargetedSSRestartTime = std::numeric_limits<double>::max();
 	double injectSSDelayTime = std::numeric_limits<double>::max();
+
+	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 
 	flowGlobalType global(int id) const final { return getCurrentProcess()->global(id); };
 	void setGlobal(size_t id, flowGlobalType v) final { getCurrentProcess()->setGlobal(id, v); };

@@ -1712,15 +1712,19 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				             Void(),
 				             TaskPriority::MoveKeys));
 
-				int count = 0;
+				std::vector<UID> readyServers;
 				for (int s = 0; s < serverReady.size(); ++s) {
-					count += serverReady[s].isReady() && !serverReady[s].isError();
+					if (serverReady[s].isReady() && !serverReady[s].isError()) {
+						readyServers.push_back(storageServerInterfaces[s].uniqueID);
+					}
 				}
 
 				TraceEvent(SevVerbose, "FinishMoveShardsWaitedServers", relocationIntervalId)
-				    .detail("ReadyServers", count);
+				    .detail("DataMoveID", dataMoveId)
+				    .detail("ReadyServers", describe(readyServers));
 
-				if (count == newDestinations.size()) {
+				if (readyServers.size() == newDestinations.size()) {
+
 					std::vector<Future<Void>> actors;
 					actors.push_back(krmSetRangeCoalescing(
 					    &tr, keyServersPrefix, range, allKeys, keyServersValue(destServers, {}, dataMoveId, UID())));

@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/VersionedMap.h"
+#include "fdbrpc/TenantInfo.h"
 #include "flow/flat_buffers.h"
 
 typedef StringRef TenantNameRef;
@@ -47,13 +48,14 @@ struct TenantMapEntry {
 	Key prefix;
 	TenantState tenantState = TenantState::READY;
 	Optional<TenantGroupName> tenantGroup;
+	bool encrypted = false;
 
 	constexpr static int PREFIX_SIZE = sizeof(id);
 
 public:
 	TenantMapEntry();
-	TenantMapEntry(int64_t id, TenantState tenantState);
-	TenantMapEntry(int64_t id, TenantState tenantState, Optional<TenantGroupName> tenantGroup);
+	TenantMapEntry(int64_t id, TenantState tenantState, bool encrypted);
+	TenantMapEntry(int64_t id, TenantState tenantState, Optional<TenantGroupName> tenantGroup, bool encrypted);
 
 	void setId(int64_t id);
 	std::string toJson(int apiVersion) const;
@@ -68,7 +70,7 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, tenantState, tenantGroup);
+		serializer(ar, id, tenantState, tenantGroup, encrypted);
 		if constexpr (Ar::isDeserializing) {
 			if (id >= 0) {
 				prefix = idToPrefix(id);

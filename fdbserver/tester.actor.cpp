@@ -710,6 +710,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 
 		endRole(Role::TESTER, workIface.id(), "Complete");
 	} catch (Error& e) {
+		TraceEvent(SevDebug, "TesterWorkloadFailed").errorUnsuppressed(e);
 		if (!replied) {
 			if (e.code() == error_code_test_specification_invalid)
 				work.reply.sendError(e);
@@ -1639,6 +1640,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			if (deterministicRandom()->coinflip()) {
 				entry.tenantGroup = "TestTenantGroup"_sr;
 			}
+			entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
 			TraceEvent("CreatingTenant").detail("Tenant", tenant).detail("TenantGroup", entry.tenantGroup);
 			tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenant, entry)));
 		}

@@ -3222,7 +3222,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 
 	++data->counters.quickGetValueMiss;
 	if (SERVER_KNOBS->QUICK_GET_VALUE_FALLBACK) {
-		state Transaction tr(data->cx, pOriginalReq->tenantInfo.name);
+		state Transaction tr(data->cx, pOriginalReq->tenantInfo.name.castTo<TenantName>());
 		tr.setVersion(version);
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
 		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
@@ -3818,6 +3818,9 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 	state double getValuesStart = g_network->timer();
 	getRange.begin = firstGreaterOrEqual(KeyRef(*a, prefix));
 	getRange.end = firstGreaterOrEqual(strinc(prefix, *a));
+	if (pOriginalReq->debugID.present())
+		g_traceBatch.addEvent(
+		    "TransactionDebug", pOriginalReq->debugID.get().first(), "storageserver.quickGetKeyValues.Before");
 	try {
 		// TODO: Use a lower level API may be better? Or tweak priorities?
 		GetKeyValuesRequest req;
@@ -3848,6 +3851,10 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 			getRange.result = RangeResultRef(reply.data, reply.more);
 			const double duration = g_network->timer() - getValuesStart;
 			data->counters.mappedRangeLocalSample.addMeasurement(duration);
+			if (pOriginalReq->debugID.present())
+				g_traceBatch.addEvent("TransactionDebug",
+				                      pOriginalReq->debugID.get().first(),
+				                      "storageserver.quickGetKeyValues.AfterLocalFetch");
 			return getRange;
 		}
 		// Otherwise fallback.
@@ -3857,8 +3864,11 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 
 	++data->counters.quickGetKeyValuesMiss;
 	if (SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK) {
-		state Transaction tr(data->cx, pOriginalReq->tenantInfo.name);
+		state Transaction tr(data->cx, pOriginalReq->tenantInfo.name.castTo<TenantName>());
 		tr.setVersion(version);
+		if (pOriginalReq->debugID.present()) {
+			tr.debugTransaction(pOriginalReq->debugID.get());
+		}
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
 		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
 		Future<RangeResult> rangeResultFuture =
@@ -3869,6 +3879,10 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		getRange.result = rangeResult;
 		const double duration = g_network->timer() - getValuesStart;
 		data->counters.mappedRangeRemoteSample.addMeasurement(duration);
+		if (pOriginalReq->debugID.present())
+			g_traceBatch.addEvent("TransactionDebug",
+			                      pOriginalReq->debugID.get().first(),
+			                      "storageserver.quickGetKeyValues.AfterRemoteFetch");
 		return getRange;
 	} else {
 		throw quick_get_key_values_miss();
@@ -4156,7 +4170,9 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	result.arena.dependsOn(input.arena);
 
 	result.data.reserve(result.arena, input.data.size());
-
+	if (pOriginalReq->debugID.present())
+		g_traceBatch.addEvent(
+		    "TransactionDebug", pOriginalReq->debugID.get().first(), "storageserver.mapKeyValues.Start");
 	state Tuple mappedKeyFormatTuple;
 	state Tuple mappedKeyTuple;
 
@@ -4175,6 +4191,9 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	state std::vector<MappedKeyValueRef> kvms(k);
 	state std::vector<Future<Void>> subqueries;
 	state int offset = 0;
+	if (pOriginalReq->debugID.present())
+		g_traceBatch.addEvent(
+		    "TransactionDebug", pOriginalReq->debugID.get().first(), "storageserver.mapKeyValues.BeforeLoop");
 	for (; offset < sz; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
 		// Divide into batches of MAX_PARALLEL_QUICK_GET_VALUE subqueries
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
@@ -4210,11 +4229,17 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			                                 mappedKey));
 		}
 		wait(waitForAll(subqueries));
+		if (pOriginalReq->debugID.present())
+			g_traceBatch.addEvent(
+			    "TransactionDebug", pOriginalReq->debugID.get().first(), "storageserver.mapKeyValues.AfterBatch");
 		subqueries.clear();
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			result.data.push_back(result.arena, kvms[i]);
 		}
 	}
+	if (pOriginalReq->debugID.present())
+		g_traceBatch.addEvent(
+		    "TransactionDebug", pOriginalReq->debugID.get().first(), "storageserver.mapKeyValues.AfterAll");
 	return result;
 }
 
@@ -4240,11 +4265,11 @@ bool rangeIntersectsAnyTenant(TenantPrefixIndex& prefixIndex, KeyRangeRef range,
 
 TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
 	std::map<TenantName, TenantMapEntry> entries = {
-		std::make_pair("tenant0"_sr, TenantMapEntry(0, TenantState::READY)),
-		std::make_pair("tenant2"_sr, TenantMapEntry(2, TenantState::READY)),
-		std::make_pair("tenant3"_sr, TenantMapEntry(3, TenantState::READY)),
-		std::make_pair("tenant4"_sr, TenantMapEntry(4, TenantState::READY)),
-		std::make_pair("tenant6"_sr, TenantMapEntry(6, TenantState::READY))
+		std::make_pair("tenant0"_sr, TenantMapEntry(0, TenantState::READY, SERVER_KNOBS->ENABLE_ENCRYPTION)),
+		std::make_pair("tenant2"_sr, TenantMapEntry(2, TenantState::READY, SERVER_KNOBS->ENABLE_ENCRYPTION)),
+		std::make_pair("tenant3"_sr, TenantMapEntry(3, TenantState::READY, SERVER_KNOBS->ENABLE_ENCRYPTION)),
+		std::make_pair("tenant4"_sr, TenantMapEntry(4, TenantState::READY, SERVER_KNOBS->ENABLE_ENCRYPTION)),
+		std::make_pair("tenant6"_sr, TenantMapEntry(6, TenantState::READY, SERVER_KNOBS->ENABLE_ENCRYPTION))
 	};
 	TenantPrefixIndex index;
 	index.createNewVersion(1);
@@ -7084,6 +7109,10 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	for (int i = 0; i < ranges.size(); i++) {
 		const Reference<ShardInfo> currentShard = ranges[i].value;
 		const KeyRangeRef currentRange = static_cast<KeyRangeRef>(ranges[i]);
+		if (currentShard.isValid()) {
+			TraceEvent(SevVerbose, "OverlappingPhysicalShard", data->thisServerID)
+			    .detail("PhysicalShard", currentShard->toStorageServerShard().toString());
+		}
 		if (!currentShard.isValid()) {
 			ASSERT(currentRange == keys); // there shouldn't be any nulls except for the range being inserted
 		} else if (currentShard->notAssigned()) {
@@ -7105,7 +7134,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("NowAssigned", nowAssigned)
 			    .detail("Version", cVer)
 			    .detail("ResultingShard", newShard.toString());
-		} else if (ranges[i].value->adding) {
+		} else if (currentShard->adding) {
 			ASSERT(!nowAssigned);
 			StorageServerShard newShard = currentShard->toStorageServerShard();
 			newShard.range = currentRange;
