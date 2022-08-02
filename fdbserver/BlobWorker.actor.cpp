@@ -1293,6 +1293,10 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
                                           int64_t epoch,
                                           int64_t seqno,
                                           Key proposedSplitKey) {
+	// wait for first stream to be initialized
+	while (!bwData->statusStreamInitialized) {
+		wait(bwData->currentManagerStatusStream.onChange());
+	}
 	loop {
 		try {
 			// wait for manager stream to become ready, and send a message
@@ -1303,9 +1307,19 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
 				}
 			}
 
-			GranuleStatusReply reply(
-	    keyRange, true, false, true, epoch, seqno, granuleID, invalidVersion, invalidVersion, false, epoch, seqno);
-reply.proposedSplitKey = proposedSplitKey;
+			GranuleStatusReply reply(keyRange,
+			                         true,
+			                         false,
+			                         true,
+			                         epoch,
+			                         seqno,
+			                         granuleID,
+			                         invalidVersion,
+			                         invalidVersion,
+			                         false,
+			                         epoch,
+			                         seqno);
+			reply.proposedSplitKey = proposedSplitKey;
 			bwData->currentManagerStatusStream.get().send(reply);
 			// if a new manager appears, also tell it about this granule being mergeable, or retry after a certain
 			// amount of time of not hearing back
@@ -1362,7 +1376,6 @@ ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
 			wait(bwData->currentManagerStatusStream.onChange());
 		}
 
-		// FIXME: after a certain amount of retries/time, we may want to re-check anyway
 		state double sendTimeGiveUp = now() + SERVER_KNOBS->BG_MERGE_CANDIDATE_THRESHOLD_SECONDS / 2.0;
 		loop {
 			try {

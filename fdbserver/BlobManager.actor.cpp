@@ -1144,6 +1144,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 	ASSERT(granuleRange.begin < proposedSplitKey);
 	ASSERT(proposedSplitKey < granuleRange.end);
 	state Standalone<VectorRef<KeyRef>> newRanges;
+	// FIXME: should evaluate if [begin, proposedSplit) and [proposedSplit, end) need to be split more within themselves
 	newRanges.push_back(newRanges.arena(), granuleRange.begin);
 	// FIXME: need to align proposedSplitKey once that's merged
 	newRanges.push_back(newRanges.arena(), proposedSplitKey);
@@ -1184,7 +1185,8 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 			int64_t prevOwnerSeqno = std::get<1>(prevOwner);
 			UID prevGranuleID = std::get<2>(prevOwner);
 			if (prevOwnerEpoch != epoch || prevOwnerSeqno != seqno || prevGranuleID != granuleID) {
-				if (retried && prevOwnerEpoch == epoch && prevGranuleID == granuleID && prevOwnerSeqno == std::numeric_limits<int64_t>::max()) {
+				if (retried && prevOwnerEpoch == epoch && prevGranuleID == granuleID &&
+				    prevOwnerSeqno == std::numeric_limits<int64_t>::max()) {
 					// owner didn't change, last iteration of this transaction just succeeded but threw an error.
 					CODE_PROBE(true, "split too big adjustment succeeded after retry");
 					break;
