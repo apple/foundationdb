@@ -3122,14 +3122,10 @@ ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID gra
 				std::tie(st, v) = decodeBlobGranuleSplitValue(splitState[i].value);
 				// if split state is done, this granule has definitely persisted a snapshot
 				if (st >= BlobGranuleSplitState::Done) {
-					if (BM_PURGE_DEBUG) {
-						fmt::print("  Done\n");
-					}
 					continue;
 				}
 				// if split state isn't even assigned, this granule has definitely not persisted a snapshot
 				if (st <= BlobGranuleSplitState::Initialized) {
-					fmt::print("  Init\n");
 					retry = true;
 					break;
 				}
@@ -3140,7 +3136,6 @@ ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID gra
 				// granule
 				KeyRange granuleFileRange = blobGranuleFileKeyRangeFor(child);
 				RangeResult files = wait(tr.getRange(granuleFileRange, 1));
-				fmt::print("  Assigned. FilesEmpty={0}\n", files.empty() ? "T" : "F");
 				if (files.empty()) {
 					retry = true;
 					break;

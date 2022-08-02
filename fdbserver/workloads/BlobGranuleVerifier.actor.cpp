@@ -83,8 +83,10 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		threads = getOption(options, LiteralStringRef("threads"), 1);
 		enablePurging = getOption(options, LiteralStringRef("enablePurging"), false /*sharedRandomNumber % 2 == 0*/);
 		sharedRandomNumber /= 2;
-		// FIXME: re-enable this! There exist several bugs with purging active granules where a small amount of state won't be cleaned up.
-		strictPurgeChecking = getOption(options, LiteralStringRef("strictPurgeChecking"), false /*sharedRandomNumber % 2 == 0*/);
+		// FIXME: re-enable this! There exist several bugs with purging active granules where a small amount of state
+		// won't be cleaned up.
+		strictPurgeChecking =
+		    getOption(options, LiteralStringRef("strictPurgeChecking"), false /*sharedRandomNumber % 2 == 0*/);
 		ASSERT(threads >= 1);
 
 		if (BGV_DEBUG) {
