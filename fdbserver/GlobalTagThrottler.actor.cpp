@@ -381,9 +381,7 @@ class GlobalTagThrottlerImpl {
 public:
 	GlobalTagThrottlerImpl(Database db, UID id) : db(db), id(id) {}
 	Future<Void> monitorThrottlingChanges() { return monitorThrottlingChanges(this); }
-	void addRequests(TransactionTag tag, int count) {
-		tagStatistics[tag].addTransactions(static_cast<double>(count) / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
-	}
+	void addRequests(TransactionTag tag, int count) { tagStatistics[tag].addTransactions(static_cast<double>(count)); }
 	uint64_t getThrottledTagChangeId() const { return throttledTagChangeId; }
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() {
 		PrioritizedTransactionTagMap<ClientTagThrottleLimits> result;
