@@ -1,0 +1,5 @@
+[[test]]
+testTitle = 'TenantEntryCacheTest'
+
+    [[test.workload]]
+    testName = 'TenantEntryCacheOps'
