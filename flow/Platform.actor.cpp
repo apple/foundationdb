@@ -46,6 +46,7 @@
 #include <boost/format.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/operations.hpp>
+#include <boost/algorithm/string.hpp>
 
 #include <sys/types.h>
 #include <time.h>
@@ -1931,6 +1932,18 @@ std::string epochsToGMTString(double epochs) {
 	timeString += format(".%03.3d +0000", (int)(1000 * modf(epochs, &integerPart)));
 
 	return timeString;
+}
+
+std::vector<std::string> getEnvironmentKnobOptions() {
+	char** e = environ;
+	std::vector<std::string> knobOptions;
+	for (; *e; e++) {
+		std::string envOption(*e);
+		if (boost::starts_with(envOption, ENVIRONMENT_KNOB_OPTION_PREFIX)) {
+			knobOptions.push_back(envOption.substr(strlen(ENVIRONMENT_KNOB_OPTION_PREFIX)));
+		}
+	}
+	return knobOptions;
 }
 
 void setMemoryQuota(size_t limit) {

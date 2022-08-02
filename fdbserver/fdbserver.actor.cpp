@@ -1078,6 +1078,7 @@ struct CLIOptions {
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
 		opts.parseArgsInternal(argc, argv);
+		opts.parseEnvInternal();
 		return opts;
 	}
 
@@ -1106,6 +1107,23 @@ struct CLIOptions {
 
 private:
 	CLIOptions() = default;
+
+	void parseEnvInternal() {
+		for (std::string knob : getEnvironmentKnobOptions()) {
+			std::vector<std::string> kv;
+			boost::split(kv, knob, [](char c) { return c == '='; });
+			if (kv.size() != 2 || !kv[0].length() || !kv[1].length()) {
+				fprintf(stderr,
+				        "Error: malformed environment knob option: %s%s\n",
+				        ENVIRONMENT_KNOB_OPTION_PREFIX,
+				        knob.c_str());
+				flushAndExit(FDB_EXIT_ERROR);
+			} else {
+				knobs.emplace_back(kv[0], kv[1]);
+				manualKnobOverrides[kv[0]] = kv[1];
+			}
+		}
+	}
 
 	void parseArgsInternal(int argc, char* argv[]) {
 		for (int a = 0; a < argc; a++) {
@@ -2012,6 +2030,14 @@ int main(int argc, char* argv[]) {
 				throw;
 		}
 
+		std::string environmentKnobOptions;
+		for (std::string knobOption : getEnvironmentKnobOptions()) {
+			environmentKnobOptions += knobOption + " ";
+		}
+		if (environmentKnobOptions.length()) {
+			environmentKnobOptions.pop_back();
+		}
+
 		TraceEvent("ProgramStart")
 		    .setMaxEventLength(12000)
 		    .detail("RandomSeed", opts.randomSeed)
@@ -2026,6 +2052,7 @@ int main(int argc, char* argv[]) {
 		            opts.connectionFile ? opts.connectionFile->getConnectionString().toString() : "")
 		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 		    .setMaxFieldLength(10000)
+		    .detail("EnvironmentKnobOptions", environmentKnobOptions.length() ? environmentKnobOptions : "none")
 		    .detail("CommandLine", opts.commandLine)
 		    .setMaxFieldLength(0)
 		    .detail("BuggifyEnabled", opts.buggifyEnabled)
