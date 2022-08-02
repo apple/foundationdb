@@ -20,6 +20,7 @@
 
 #include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/ClusterConnectionFile.h"
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
@@ -142,19 +143,14 @@ ThreadFuture<Void> ThreadSafeDatabase::waitPurgeGranulesComplete(const KeyRef& p
 	return onMainThread([db, key]() -> Future<Void> { return db->waitPurgeGranulesComplete(key); });
 }
 
-ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
-	ClusterConnectionFile* connFile =
-	    new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first);
-
+ThreadSafeDatabase::ThreadSafeDatabase(Reference<IClusterConnectionRecord> connectionRecord, int apiVersion) {
 	// Allocate memory for the Database from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 	DatabaseContext* db = this->db = DatabaseContext::allocateOnForeignThread();
 
-	onMainThreadVoid([db, connFile, apiVersion]() {
+	onMainThreadVoid([db, connectionRecord, apiVersion]() {
 		try {
-			Database::createDatabase(
-			    Reference<ClusterConnectionFile>(connFile), apiVersion, IsInternal::False, LocalityData(), db)
-			    .extractPtr();
+			Database::createDatabase(connectionRecord, apiVersion, IsInternal::False, LocalityData(), db).extractPtr();
 		} catch (Error& e) {
 			new (db) DatabaseContext(e);
 		} catch (...) {
@@ -175,7 +171,7 @@ Reference<ITransaction> ThreadSafeTenant::createTransaction() {
 
 ThreadFuture<Key> ThreadSafeTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
 	DatabaseContext* db = this->db->db;
-	Standalone<StringRef> tenantName = this->name;
+	TenantName tenantName = this->name;
 	KeyRange range = keyRange;
 	return onMainThread([db, range, purgeVersion, tenantName, force]() -> Future<Key> {
 		return db->purgeBlobGranules(range, purgeVersion, tenantName, force);
@@ -635,7 +631,13 @@ void ThreadSafeApi::stopNetwork() {
 }
 
 Reference<IDatabase> ThreadSafeApi::createDatabase(const char* clusterFilePath) {
-	return Reference<IDatabase>(new ThreadSafeDatabase(clusterFilePath, apiVersion));
+	return Reference<IDatabase>(
+	    new ThreadSafeDatabase(ClusterConnectionFile::openOrDefault(clusterFilePath), apiVersion));
+}
+
+Reference<IDatabase> ThreadSafeApi::createDatabaseFromConnectionString(const char* connectionString) {
+	return Reference<IDatabase>(new ThreadSafeDatabase(
+	    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(connectionString)), apiVersion));
 }
 
 void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) {

@@ -24,7 +24,7 @@
 #include <stdio.h>
 #include <cinttypes>
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"

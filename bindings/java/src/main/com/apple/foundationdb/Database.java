@@ -162,6 +162,24 @@ public interface Database extends AutoCloseable, TransactionContext {
 	double getMainThreadBusyness();
 
 	/**
+	 * Queues a purge of blob granules for the specified key range, at the specified version.
+     *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param purgeVersion version to purge at
+	 * @param force if true delete all data, if not keep data >= purgeVersion
+	 * @return the key to watch for purge complete
+	 */
+	CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion, boolean force, Executor e);
+
+	/**
+	 * Wait for a previous call to purgeBlobGranules to complete
+	 *
+	 * @param purgeKey key to watch
+	 */
+	CompletableFuture<Void> waitPurgeGranulesComplete(byte[] purgeKey, Executor e);
+
+	/**
 	 * Runs a read-only transactional function against this {@code Database} with retry logic.
 	 *  {@link Function#apply(Object) apply(ReadTransaction)} will be called on the
 	 *  supplied {@link Function} until a non-retryable

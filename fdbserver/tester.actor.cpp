@@ -31,6 +31,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/KnobProtectiveGroups.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -384,7 +385,9 @@ ACTOR Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
 
 	workload = IWorkloadFactory::create(testName.toString(), wcx);
-	wait(workload->initialized());
+	if (workload) {
+		wait(workload->initialized());
+	}
 
 	auto unconsumedOptions = checkAllOptionsConsumed(workload ? workload->options : VectorRef<KeyValueRef>());
 	if (!workload || unconsumedOptions.size()) {
@@ -707,6 +710,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 
 		endRole(Role::TESTER, workIface.id(), "Complete");
 	} catch (Error& e) {
+		TraceEvent(SevDebug, "TesterWorkloadFailed").errorUnsuppressed(e);
 		if (!replied) {
 			if (e.code() == error_code_test_specification_invalid)
 				work.reply.sendError(e);
@@ -779,7 +783,7 @@ ACTOR Future<Void> clearData(Database cx) {
 			//    it should disable the default tenant.
 			if (!rangeResult.empty()) {
 				if (cx->defaultTenant.present()) {
-					TenantMapEntry entry = wait(ManagementAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
+					TenantMapEntry entry = wait(TenantAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
 					tenantPrefix = entry.prefix;
 				}
 
@@ -996,6 +1000,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 
 	state double connectionFailures;
 	if (g_network->isSimulated()) {
+		// NOTE: the value will be reset after consistency check
 		connectionFailures = g_simulator.connectionFailuresDisableDuration;
 		g_simulator.connectionFailuresDisableDuration = 1e6;
 		g_simulator.speedUpSimulation = true;
@@ -1170,7 +1175,10 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	{ "disableTss", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableTSS", ""); } },
 	{ "disableHostname",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableHostname", ""); } },
-	{ "disableRemoteKVS", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } }
+	{ "disableRemoteKVS",
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } },
+	{ "disableEncryption",
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } }
 };
 
 std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
@@ -1628,8 +1636,13 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	if (useDB) {
 		std::vector<Future<Void>> tenantFutures;
 		for (auto tenant : tenantsToCreate) {
-			TraceEvent("CreatingTenant").detail("Tenant", tenant);
-			tenantFutures.push_back(success(ManagementAPI::createTenant(cx.getReference(), tenant)));
+			TenantMapEntry entry;
+			if (deterministicRandom()->coinflip()) {
+				entry.tenantGroup = "TestTenantGroup"_sr;
+			}
+			entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
+			TraceEvent("CreatingTenant").detail("Tenant", tenant).detail("TenantGroup", entry.tenantGroup);
+			tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenant, entry)));
 		}
 
 		wait(waitForAll(tenantFutures));
@@ -1651,7 +1664,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 
 		if (perpetualWiggleEnabled) { // restore the enabled perpetual storage wiggle setting
 			printf("Set perpetual_storage_wiggle=1 ...\n");
-			wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
+			Version cVer = wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
 			printf("Set perpetual_storage_wiggle=1 Done.\n");
 		}
 	}

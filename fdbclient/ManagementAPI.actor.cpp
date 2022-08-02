@@ -22,7 +22,8 @@
 #include <string>
 #include <vector>
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fdbclient/GenericManagementAPI.actor.h"
+#include "fmt/format.h"
 #include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -450,16 +451,21 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options) 
 	       options.count(p + "storage_engine") == 1;
 }
 
+ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr) {
+	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	RangeResult res = wait(tr->getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+	ASSERT(res.size() < CLIENT_KNOBS->TOO_MANY);
+	DatabaseConfiguration config;
+	config.fromKeyValues((VectorRef<KeyValueRef>)res);
+	return config;
+}
+
 ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			RangeResult res = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
-			ASSERT(res.size() < CLIENT_KNOBS->TOO_MANY);
-			DatabaseConfiguration config;
-			config.fromKeyValues((VectorRef<KeyValueRef>)res);
+			DatabaseConfiguration config = wait(getDatabaseConfiguration(&tr));
 			return config;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -798,6 +804,8 @@ ACTOR Future<Optional<ClusterConnectionString>> getConnectionString(Database cx)
 	}
 }
 
+static std::vector<std::string> connectionStrings;
+
 namespace {
 
 ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromStorageServer(Transaction* tr) {
@@ -815,6 +823,19 @@ ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromSt
 
 		Version readVersion = wait(tr->getReadVersion());
 		state Optional<Value> currentKey = wait(tr->get(coordinatorsKey));
+		if (g_network->isSimulated() && currentKey.present()) {
+			// If the change coordinators request succeeded, the coordinators
+			// should have changed to the connection string of the most
+			// recently issued request. If instead the connection string is
+			// equal to one of the previously issued requests, there is a bug
+			// and we are breaking the promises we make with
+			// commit_unknown_result (the transaction must no longer be in
+			// progress when receiving this error).
+			int n = connectionStrings.size() > 0 ? connectionStrings.size() - 1 : 0; // avoid underflow
+			for (int i = 0; i < n; ++i) {
+				ASSERT(currentKey.get() != connectionStrings.at(i));
+			}
+		}
 
 		if (!currentKey.present()) {
 			// Someone deleted this key entirely?
@@ -873,10 +894,12 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	std::sort(old.hostnames.begin(), old.hostnames.end());
 	std::sort(old.coords.begin(), old.coords.end());
 	if (conn->hostnames == old.hostnames && conn->coords == old.coords && old.clusterKeyName() == newName) {
+		connectionStrings.clear();
 		return CoordinatorsResult::SAME_NETWORK_ADDRESSES;
 	}
 
 	conn->parseKey(newName + ':' + deterministicRandom()->randomAlphaNumeric(32));
+	connectionStrings.push_back(conn->toString());
 
 	if (g_network->isSimulated()) {
 		int i = 0;
@@ -997,8 +1020,8 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 			TraceEvent("AttemptingQuorumChange")
 			    .detail("FromCS", oldClusterConnectionString.toString())
 			    .detail("ToCS", newClusterConnectionString.toString());
-			TEST(oldClusterKeyName != newClusterKeyName); // Quorum change with new name
-			TEST(oldClusterKeyName == newClusterKeyName); // Quorum change with unchanged name
+			CODE_PROBE(oldClusterKeyName != newClusterKeyName, "Quorum change with new name");
+			CODE_PROBE(oldClusterKeyName == newClusterKeyName, "Quorum change with unchanged name");
 
 			state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 			state ClientCoordinators coord(Reference<ClusterConnectionMemoryRecord>(
@@ -2167,13 +2190,14 @@ ACTOR Future<Void> updateChangeFeed(Transaction* tr, Key rangeID, ChangeFeedStat
 		}
 	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 		if (val.present()) {
+			if (g_network->isSimulated()) {
+				g_simulator.validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
+			}
 			tr->set(rangeIDKey,
 			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
 			                        std::get<1>(decodeChangeFeedValue(val.get())),
 			                        status));
 			tr->clear(rangeIDKey);
-		} else {
-			throw unsupported_operation();
 		}
 	}
 	return Void();
@@ -2204,13 +2228,14 @@ ACTOR Future<Void> updateChangeFeed(Reference<ReadYourWritesTransaction> tr,
 		}
 	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 		if (val.present()) {
+			if (g_network->isSimulated()) {
+				g_simulator.validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
+			}
 			tr->set(rangeIDKey,
 			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
 			                        std::get<1>(decodeChangeFeedValue(val.get())),
 			                        status));
 			tr->clear(rangeIDKey);
-		} else {
-			throw unsupported_operation();
 		}
 	}
 	return Void();
@@ -2452,6 +2477,21 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 		    .detail("SchemaPath", schemaPath);
 		throw unknown_error();
 	}
+}
+
+void setStorageQuota(Transaction& tr, StringRef tenantName, uint64_t quota) {
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	auto key = storageQuotaKey(tenantName);
+	tr.set(key, BinaryWriter::toValue<uint64_t>(quota, Unversioned()));
+}
+
+ACTOR Future<Optional<uint64_t>> getStorageQuota(Transaction* tr, StringRef tenantName) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	state Optional<Value> v = wait(tr->get(storageQuotaKey(tenantName)));
+	if (!v.present()) {
+		return Optional<uint64_t>();
+	}
+	return BinaryReader::fromStringRef<uint64_t>(v.get(), Unversioned());
 }
 
 std::string ManagementAPI::generateErrorMessage(const CoordinatorsResult& res) {
