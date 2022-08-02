@@ -858,7 +858,7 @@ Future<Void> timeoutWarningCollector(FutureStream<Void> const& input,
                                      double const& logDelay,
                                      const char* const& context,
                                      UID const& id);
-Future<bool> quorumEqualsTrue(std::vector<Future<bool>> const& futures, int const& required);
+ACTOR Future<bool> quorumEqualsTrue(std::vector<Future<bool>> futures, int required);
 Future<Void> lowPriorityDelay(double const& waitTime);
 
 ACTOR template <class T>
@@ -1003,6 +1003,11 @@ Future<Void> waitForAny(std::vector<Future<T>> const& results) {
 		return Void();
 	return quorum(results, 1);
 }
+
+ACTOR Future<Void> waitForMost(std::vector<Future<ErrorOr<Void>>> futures,
+                               int faultTolerance,
+                               Error e,
+                               double waitMultiplierForSlowFutures = 1.0);
 
 ACTOR Future<bool> shortCircuitAny(std::vector<Future<bool>> f);
 
@@ -2002,6 +2007,7 @@ Future<U> operator>>(Future<T> const& lhs, Future<U> const& rhs) {
  * IAsyncListener is similar to AsyncVar, but it decouples the input and output, so the translation unit
  * responsible for handling the output does not need to have knowledge of how the output is generated
  */
+
 template <class Output>
 class IAsyncListener : public ReferenceCounted<IAsyncListener<Output>> {
 public:
