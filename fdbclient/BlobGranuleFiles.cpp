@@ -1505,7 +1505,10 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 	if (snapshotData.present()) {
 		ASSERT(chunk.snapshotFile.present());
 		Standalone<VectorRef<ParsedDeltaBoundaryRef>> snapshotRows =
-		    loadSnapshotFile(chunk.snapshotFile.get().filename, snapshotData.get(), requestRange, chunk.snapshotFile.get().cipherKeysCtx);
+		    loadSnapshotFile(chunk.snapshotFile.get().filename,
+		                     snapshotData.get(),
+		                     requestRange,
+		                     chunk.snapshotFile.get().cipherKeysCtx);
 		if (!snapshotRows.empty()) {
 			streams.push_back(snapshotRows);
 			startClears.push_back(false);
