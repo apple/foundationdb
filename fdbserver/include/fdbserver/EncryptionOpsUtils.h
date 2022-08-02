@@ -18,12 +18,14 @@
  * limitations under the License.
  */
 
-#ifndef ENCRYPTION_UTIL_H
-#define ENCRYPTION_UTIL_H
+#ifndef FDBSERVER_ENCRYPTION_OPS_UTIL_H
+#define FDBSERVER_ENCRYPTION_OPS_UTIL_H
 #pragma once
+
+#include "fdbclient/CommitProxyInterface.h"
 
 typedef enum { TLOG_ENCRYPTION = 0, STORAGE_SERVER_ENCRYPTION = 1, BLOB_GRANULE_ENCRYPTION = 2 } EncryptOperationType;
 
-bool isEncryptionEnabled(EncryptOperationType operation_type, bool clusterEncryptionEnabled);
+bool isEncryptionOpSupported(EncryptOperationType operation_type, ClientDBInfo dbInfo);
 
-#endif // ENCRYPTION_UTIL_H
+#endif // FDBSERVER_ENCRYPTION_OPS_UTIL_H

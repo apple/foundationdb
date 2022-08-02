@@ -35,7 +35,7 @@
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/EncryptedMutationMessage.h"
-#include "fdbserver/EncryptionUtil.h"
+#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/GetEncryptCipherKeys.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -879,8 +879,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	state double resolutionStart = now();
 	// Sending these requests is the fuzzy border between phase 1 and phase 2; it could conceivably overlap with
 	// resolution processing but is still using CPU
-	ProxyCommitData* pProxyCommitData = self->pProxyCommitData;
-	state bool encryptionEnabled = pProxyCommitData->db->get().client.isEncryptionEnabled;
+	state ProxyCommitData* pProxyCommitData = self->pProxyCommitData;
 	std::vector<CommitTransactionRequest>& trs = self->trs;
 	state Span span("MP:getResolution"_loc, self->span.context);
 
@@ -918,7 +917,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 
 	// Fetch cipher keys if needed.
 	state Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getCipherKeys;
-	if (isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION, SERVER_KNOBS->ENABLE_ENCRYPTION)) {
+	if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, pProxyCommitData->db->get().client)) {
 		static std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> defaultDomains = {
 			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME },
 			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
@@ -961,7 +960,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 		g_traceBatch.addEvent(
 		    "CommitDebug", self->debugID.get().first(), "CommitProxyServer.commitBatch.AfterResolution");
 	}
-	if (isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION, encryptionEnabled)) {
+	if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, pProxyCommitData->db->get().client)) {
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys = wait(getCipherKeys);
 		self->cipherKeys = cipherKeys;
 	}
@@ -1086,7 +1085,6 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 // to storage servers' responsibilities)
 ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self) {
 	auto pProxyCommitData = self->pProxyCommitData;
-	bool encryptionEnabled = pProxyCommitData->db->get().client.isEncryptionEnabled;
 	const auto& trs = self->trs;
 
 	int t;
@@ -1100,19 +1098,20 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 				trs[t].reply.sendError(result.getError());
 			} else {
 				self->commitCount++;
-				applyMetadataMutations(trs[t].spanContext,
-				                       *pProxyCommitData,
-				                       self->arena,
-				                       pProxyCommitData->logSystem,
-				                       trs[t].transaction.mutations,
-				                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
-				                       isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION, encryptionEnabled)
-				                           ? &self->cipherKeys
-				                           : nullptr,
-				                       self->forceRecovery,
-				                       self->commitVersion,
-				                       self->commitVersion + 1,
-				                       /* initialCommit= */ false);
+				applyMetadataMutations(
+				    trs[t].spanContext,
+				    *pProxyCommitData,
+				    self->arena,
+				    pProxyCommitData->logSystem,
+				    trs[t].transaction.mutations,
+				    SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
+				    isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, pProxyCommitData->db->get().client)
+				        ? &self->cipherKeys
+				        : nullptr,
+				    self->forceRecovery,
+				    self->commitVersion,
+				    self->commitVersion + 1,
+				    /* initialCommit= */ false);
 			}
 		}
 		if (self->firstStateMutations) {
@@ -1163,8 +1162,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 
 void writeMutation(CommitBatchContext* self, int64_t tenantId, const MutationRef& mutation) {
 	static_assert(TenantInfo::INVALID_TENANT == ENCRYPT_INVALID_DOMAIN_ID);
-	if (!isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION,
-	                         self->pProxyCommitData->db->get().client.isEncryptionEnabled) ||
+	if (!isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, self->pProxyCommitData->db->get().client) ||
 	    tenantId == TenantInfo::INVALID_TENANT) {
 		// TODO(yiwu): In raw access mode, use tenant prefix to figure out tenant id for user data
 		bool isRawAccess = tenantId == TenantInfo::INVALID_TENANT && !isSystemKey(mutation.param1) &&
@@ -2476,7 +2474,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	// Wait until we can load the "real" logsystem, since we don't support switching them currently
 	while (!(masterLifetime.isEqual(commitData.db->get().masterLifetime) &&
 	         commitData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION &&
-	         (!isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION, db->get().client.isEncryptionEnabled) ||
+	         (!isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, db->get().client) ||
 	          commitData.db->get().encryptKeyProxy.present()))) {
 		//TraceEvent("ProxyInit2", proxy.id()).detail("LSEpoch", db->get().logSystemConfig.epoch).detail("Need", epoch);
 		wait(commitData.db->onChange());
@@ -2503,15 +2501,15 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
 	commitData.logAdapter =
 	    new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
-	commitData.txnStateStore = keyValueStoreLogSystem(
-	    commitData.logAdapter,
-	    commitData.db,
-	    proxy.id(),
-	    2e9,
-	    true,
-	    true,
-	    true,
-	    isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION, db->get().client.isEncryptionEnabled));
+	commitData.txnStateStore =
+	    keyValueStoreLogSystem(commitData.logAdapter,
+	                           commitData.db,
+	                           proxy.id(),
+	                           2e9,
+	                           true,
+	                           true,
+	                           true,
+	                           isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, db->get().client));
 	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
 
 	commitData.updateLatencyBandConfig(commitData.db->get().latencyBandConfig);

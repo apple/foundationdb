@@ -20,21 +20,21 @@
 
 // This file implements the functions defined in EncryptionUtil.h
 
-#include "fdbserver/EncryptionUtil.h"
+#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/Knobs.h"
 
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-bool isEncryptionEnabled(EncryptOperationType operation_type, bool clusterEncryptionEnabled) {
-	if (clusterEncryptionEnabled) {
+bool isEncryptionOpSupported(EncryptOperationType operation_type, ClientDBInfo info) {
+	if (!info.isEncryptionEnabled) {
 		return false;
 	}
 
 	if (operation_type == TLOG_ENCRYPTION) {
 		return SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION;
 	} else if (operation_type == BLOB_GRANULE_ENCRYPTION) {
-		return SERVER_KNOBS->ENABLE_BLOB_GRANULE_ENCRYPTION;
+		return SERVER_KNOBS->ENABLE_BLOB_GRANULE_ENCRYPTION && SERVER_KNOBS->BG_RANGE_SOURCE == "tenant";
 	} else {
 		// TODO (Nim): Add once storage server encryption knob is created
 		return false;

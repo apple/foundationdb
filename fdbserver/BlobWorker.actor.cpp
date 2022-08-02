@@ -36,7 +36,7 @@
 #include "fdbclient/Notified.h"
 
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
-#include "fdbserver/EncryptionUtil.h"
+#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/GetEncryptCipherKeys.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MutationTracking.h"
@@ -236,9 +236,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 namespace {
 bool isBlobFileEncryptionSupported(Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	bool supported =
-	    isEncryptionEnabled(EncryptOperationType::BLOB_GRANULE_ENCRYPTION, dbInfo->get().client.isEncryptionEnabled) &&
-	    SERVER_KNOBS->BG_RANGE_SOURCE == "tenant";
+	bool supported = isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION, dbInfo->get().client);
 	ASSERT((supported && SERVER_KNOBS->ENABLE_ENCRYPTION) || !supported);
 	return supported;
 }

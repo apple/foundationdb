@@ -26,7 +26,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
-#include "fdbserver/EncryptionUtil.h"
+#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
@@ -653,15 +653,15 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	state TransactionStateResolveContext transactionStateResolveContext;
 	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 		self->logAdapter = new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
-		self->txnStateStore = keyValueStoreLogSystem(
-		    self->logAdapter,
-		    db,
-		    resolver.id(),
-		    2e9,
-		    true,
-		    true,
-		    true,
-		    isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION, db->get().client.isEncryptionEnabled));
+		self->txnStateStore =
+		    keyValueStoreLogSystem(self->logAdapter,
+		                           db,
+		                           resolver.id(),
+		                           2e9,
+		                           true,
+		                           true,
+		                           true,
+		                           isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, db->get().client));
 
 		// wait for txnStateStore recovery
 		wait(success(self->txnStateStore->readValue(StringRef())));

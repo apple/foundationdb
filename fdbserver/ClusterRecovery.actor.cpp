@@ -22,7 +22,7 @@
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupProgress.actor.h"
 #include "fdbserver/ClusterRecovery.actor.h"
-#include "fdbserver/EncryptionUtil.h"
+#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
 
@@ -1066,7 +1066,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	    false,
 	    false,
 	    true,
-	    isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION, self->dbInfo->get().client.isEncryptionEnabled));
+	    isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, self->dbInfo->get().client));
 
 	// Version 0 occurs at the version epoch. The version epoch is the number
 	// of microseconds since the Unix epoch. It can be set through fdbcli.

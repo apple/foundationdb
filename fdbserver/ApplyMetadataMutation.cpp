@@ -25,7 +25,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/EncryptedMutationMessage.h"
-#include "fdbserver/EncryptionUtil.h"
+#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
@@ -163,8 +163,7 @@ private:
 
 private:
 	void writeMutation(const MutationRef& m) {
-		if (forResolver ||
-		    !isEncryptionEnabled(EncryptOperationType::TLOG_ENCRYPTION, dbInfo->get().client.isEncryptionEnabled)) {
+		if (forResolver || !isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, dbInfo->get().client)) {
 			toCommit->writeTypedMessage(m);
 		} else {
 			ASSERT(cipherKeys != nullptr);
