@@ -1143,12 +1143,28 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 	// calculate new split targets speculatively assuming split is too large and current worker still owns it
 	ASSERT(granuleRange.begin < proposedSplitKey);
 	ASSERT(proposedSplitKey < granuleRange.end);
+	state Future<Standalone<VectorRef<KeyRef>>> fSplitFirst = splitRange(bmData, KeyRangeRef(granuleRange.begin, proposedSplitKey), false, true);
+	state Future<Standalone<VectorRef<KeyRef>>> fSplitSecond = splitRange(bmData, KeyRangeRef(proposedSplitKey, granuleRange.end), false, true);
+
 	state Standalone<VectorRef<KeyRef>> newRanges;
-	// FIXME: should evaluate if [begin, proposedSplit) and [proposedSplit, end) need to be split more within themselves
-	newRanges.push_back(newRanges.arena(), granuleRange.begin);
-	// FIXME: need to align proposedSplitKey once that's merged
-	newRanges.push_back(newRanges.arena(), proposedSplitKey);
-	newRanges.push_back(newRanges.arena(), granuleRange.end);
+
+	Standalone<VectorRef<KeyRef>> splitFirst = wait(fSplitFirst);
+	ASSERT(splitFirst.size() >= 2);
+	ASSERT(splitFirst.front() == granuleRange.begin);
+	ASSERT(splitFirst.back() == proposedSplitKey);
+	for (int i = 0; i < splitFirst.size(); i++) {
+		// FIXME: need to align proposedSplitKey once that's merged
+		newRanges.push_back_deep(newRanges.arena(), splitFirst[i]);
+	}
+
+	Standalone<VectorRef<KeyRef>> splitSecond = wait(fSplitSecond);
+	ASSERT(splitSecond.size() >= 2);
+	ASSERT(splitSecond.front() == proposedSplitKey);
+	ASSERT(splitSecond.back() == granuleRange.end);
+	// i=1 to skip proposedSplitKey, since above already added it
+	for (int i = 1; i < splitSecond.size(); i++) {
+		newRanges.push_back_deep(newRanges.arena(), splitSecond[i]);
+	}
 
 	// Check lock to see if lock is still the specified epoch and seqno, and there are no files for the granule.
 	// If either of these are false, some other worker now has the granule. if there are files, it already succeeded at
