@@ -791,6 +791,10 @@ namespace SummarizeTest
             xout.Add(new XAttribute("DeterminismCheck", expectedUnseed != -1 ? "1" : "0"));
             xout.Add(new XAttribute("OldBinary", Path.GetFileName(oldBinaryName)));
 
+            if (traceFiles.Length == 0) {
+                xout.Add(new XElement("NoTraceFilesFound"));
+            }
+
             Dictionary<KeyValuePair<string, Magnesium.Severity>, Magnesium.Severity> severityMap = new Dictionary<KeyValuePair<string, Magnesium.Severity>, Magnesium.Severity>();
             var codeCoverage = new Dictionary<Tuple<string, string, string>, bool>();
 
