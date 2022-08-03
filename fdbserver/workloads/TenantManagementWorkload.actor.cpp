@@ -33,6 +33,7 @@
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/MetaclusterConsistency.actor.h"
+#include "fdbserver/workloads/TenantConsistency.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Error.h"
@@ -1420,46 +1421,6 @@ struct TenantManagementWorkload : TestWorkload {
 		return Void();
 	}
 
-	// Verify that the tenant count matches the actual number of tenants in the cluster and that we haven't created too
-	// many
-	ACTOR template <bool UseMetacluster, class DB>
-	static Future<Void> checkTenantCount(TenantManagementWorkload* self, Reference<DB> db) {
-		state Reference<typename DB::TransactionT> tr = db->createTransaction();
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				state int64_t tenantCount;
-				state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenants;
-
-				if (UseMetacluster) {
-					wait(store(tenantCount,
-					           MetaclusterAPI::ManagementClusterMetadata::tenantMetadata.tenantCount.getD(
-					               tr, Snapshot::False, 0)));
-					wait(store(tenants,
-					           MetaclusterAPI::ManagementClusterMetadata::tenantMetadata.tenantMap.getRange(
-					               tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
-
-					int64_t clusterTenantCount =
-					    wait(MetaclusterAPI::ManagementClusterMetadata::clusterTenantCount.getD(
-					        tr, self->dataClusterName, Snapshot::False, 0));
-
-					ASSERT(clusterTenantCount == tenantCount);
-				} else {
-					wait(store(tenantCount, TenantMetadata::tenantCount.getD(tr, Snapshot::False, 0)));
-					wait(store(
-					    tenants,
-					    TenantMetadata::tenantMap.getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
-					ASSERT(tenantCount <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
-				}
-
-				ASSERT(tenants.results.size() == tenantCount && !tenants.more);
-				return Void();
-			} catch (Error& e) {
-				wait(safeThreadFutureToFuture(tr->onError(e)));
-			}
-		}
-	}
-
 	// Verify that the set of tenants in the database matches our local state
 	ACTOR static Future<Void> compareTenants(TenantManagementWorkload* self) {
 		state std::map<TenantName, TenantData>::iterator localItr = self->createdTenants.begin();
@@ -1472,15 +1433,6 @@ struct TenantManagementWorkload : TestWorkload {
 			state std::vector<std::pair<TenantName, TenantMapEntry>> dataClusterTenants =
 			    wait(TenantAPI::listTenants(self->dataDb.getReference(), beginTenant, endTenant, 1000));
 
-			// Read the tenant list from the management cluster.
-			state std::vector<std::pair<TenantName, TenantMapEntry>> managementClusterTenants;
-			if (self->useMetacluster) {
-				std::vector<std::pair<TenantName, TenantMapEntry>> _managementClusterTenants =
-				    wait(MetaclusterAPI::listTenants(self->mvDb, beginTenant, endTenant, 1000));
-				managementClusterTenants = _managementClusterTenants;
-			}
-
-			auto managementItr = managementClusterTenants.begin();
 			auto dataItr = dataClusterTenants.begin();
 
 			TenantNameRef lastTenant;
@@ -1493,18 +1445,9 @@ struct TenantManagementWorkload : TestWorkload {
 				checkTenants.push_back(checkTenantContents(self, dataItr->first, localItr->second));
 				lastTenant = dataItr->first;
 
-				if (self->useMetacluster) {
-					ASSERT(managementItr != managementClusterTenants.end());
-					ASSERT(managementItr->first == dataItr->first);
-					ASSERT(managementItr->second.matchesConfiguration(dataItr->second));
-					++managementItr;
-				}
-
 				++localItr;
 				++dataItr;
 			}
-
-			ASSERT(managementItr == managementClusterTenants.end());
 
 			if (dataClusterTenants.size() < 1000) {
 				break;
@@ -1539,7 +1482,6 @@ struct TenantManagementWorkload : TestWorkload {
 
 	// Verify that the set of tenants in the database matches our local state
 	ACTOR static Future<Void> compareTenantGroups(TenantManagementWorkload* self) {
-		// Verify that the set of tena
 		state std::map<TenantName, TenantGroupData>::iterator localItr = self->createdTenantGroups.begin();
 		state TenantName beginTenantGroup = ""_sr.withPrefix(self->localTenantGroupNamePrefix);
 		state TenantName endTenantGroup = "\xff\xff"_sr.withPrefix(self->localTenantGroupNamePrefix);
@@ -1550,32 +1492,13 @@ struct TenantManagementWorkload : TestWorkload {
 			state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> dataClusterTenantGroups;
 			TenantName const& beginTenantGroupRef = beginTenantGroup;
 			TenantName const& endTenantGroupRef = endTenantGroup;
-			KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> _dataClusterTenantGroups =
-			    wait(runTransaction(self->dataDb.getReference(),
+			wait(store(dataClusterTenantGroups, runTransaction(self->dataDb.getReference(),
 			                        [beginTenantGroupRef, endTenantGroupRef](Reference<ReadYourWritesTransaction> tr) {
 				                        tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				                        return TenantMetadata::tenantGroupMap.getRange(
 				                            tr, beginTenantGroupRef, endTenantGroupRef, 1000);
-			                        }));
-			dataClusterTenantGroups = _dataClusterTenantGroups;
+			                        })));
 
-			// Read the tenant group list from the management cluster.
-			state std::vector<std::pair<TenantGroupName, TenantGroupEntry>> managementClusterTenantGroups;
-			if (self->useMetacluster) {
-				TenantName const& beginTenantGroupRef = beginTenantGroup;
-				TenantName const& endTenantGroupRef = endTenantGroup;
-				KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> _managementClusterTenantGroups =
-				    wait(runTransaction(
-				        self->mvDb, [beginTenantGroupRef, endTenantGroupRef](Reference<ITransaction> tr) {
-					        tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					        return MetaclusterAPI::ManagementClusterMetadata::tenantMetadata.tenantGroupMap.getRange(
-					            tr, beginTenantGroupRef, endTenantGroupRef, 1000);
-				        }));
-
-				managementClusterTenantGroups = _managementClusterTenantGroups.results;
-			}
-
-			auto managementItr = managementClusterTenantGroups.begin();
 			auto dataItr = dataClusterTenantGroups.results.begin();
 
 			TenantGroupNameRef lastTenantGroup;
@@ -1588,22 +1511,9 @@ struct TenantManagementWorkload : TestWorkload {
 				checkTenantGroups.push_back(checkTenantGroupTenantCount(
 				    self->dataDb.getReference(), dataItr->first, localItr->second.tenantCount));
 
-				if (self->useMetacluster) {
-					ASSERT(managementItr != managementClusterTenantGroups.end());
-					ASSERT(managementItr->first == dataItr->first);
-					ASSERT(managementItr->second.assignedCluster.present());
-
-					checkTenantGroups.push_back(
-					    checkTenantGroupTenantCount(self->mvDb, managementItr->first, localItr->second.tenantCount));
-
-					++managementItr;
-				}
-
 				++localItr;
 				++dataItr;
 			}
-
-			ASSERT(managementItr == managementClusterTenantGroups.end());
 
 			if (!dataClusterTenantGroups.more) {
 				break;
@@ -1616,58 +1526,26 @@ struct TenantManagementWorkload : TestWorkload {
 		return Void();
 	}
 
-	// Check that the tenant tombstones are properly cleaned up and only present on a metacluster data cluster
-	ACTOR static Future<Void> checkTenantTombstones(TenantManagementWorkload* self) {
+	// Check that the tenant tombstones are properly cleaned up
+	ACTOR static Future<Void> checkTombstoneCleanup(TenantManagementWorkload* self) {
 		state Reference<ReadYourWritesTransaction> tr = self->dataDb->createTransaction();
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
-				state KeyBackedRangeResult<int64_t> tombstones =
-				    wait(TenantMetadata::tenantTombstones.getRange(tr, 0, {}, 1));
 				Optional<TenantTombstoneCleanupData> tombstoneCleanupData =
 				    wait(TenantMetadata::tombstoneCleanupData.get(tr));
 
-				if (!self->useMetacluster) {
-					ASSERT(tombstones.results.empty() && !tombstoneCleanupData.present());
-				} else {
-					if (self->oldestDeletionVersion != 0 && tombstoneCleanupData.present()) {
-						if (self->newestDeletionVersion - self->oldestDeletionVersion >
-						    CLIENT_KNOBS->TENANT_TOMBSTONE_CLEANUP_INTERVAL * CLIENT_KNOBS->VERSIONS_PER_SECOND) {
-							ASSERT(tombstoneCleanupData.get().tombstonesErasedThrough >= 0);
-						}
-					} else if (!tombstoneCleanupData.present()) {
-						ASSERT(tombstones.results.empty());
-					}
-
-					if (!tombstones.results.empty()) {
-						ASSERT(tombstoneCleanupData.present());
-						ASSERT(tombstones.results[0] > tombstoneCleanupData.get().tombstonesErasedThrough);
+				if (self->oldestDeletionVersion != 0) {
+					ASSERT(tombstoneCleanupData.present());
+					if (self->newestDeletionVersion - self->oldestDeletionVersion >
+						CLIENT_KNOBS->TENANT_TOMBSTONE_CLEANUP_INTERVAL * CLIENT_KNOBS->VERSIONS_PER_SECOND) {
+						ASSERT(tombstoneCleanupData.get().tombstonesErasedThrough >= 0);
 					}
 				}
 				break;
 			} catch (Error& e) {
 				wait(tr->onError(e));
-			}
-		}
-
-		if (self->useMetacluster) {
-			// We don't store tombstones in the management cluster
-			state Reference<ITransaction> managementTr = self->mvDb->createTransaction();
-			loop {
-				try {
-					state KeyBackedRangeResult<int64_t> managementTombstones =
-					    wait(MetaclusterAPI::ManagementClusterMetadata::tenantMetadata.tenantTombstones.getRange(
-					        managementTr, 0, {}, 1));
-					Optional<TenantTombstoneCleanupData> managementTombstoneCleanupData =
-					    wait(MetaclusterAPI::ManagementClusterMetadata::tenantMetadata.tombstoneCleanupData.get(
-					        managementTr));
-
-					ASSERT(managementTombstones.results.empty() && !managementTombstoneCleanupData.present());
-					break;
-				} catch (Error& e) {
-					wait(safeThreadFutureToFuture(managementTr->onError(e)));
-				}
 			}
 		}
 
@@ -1699,19 +1577,17 @@ struct TenantManagementWorkload : TestWorkload {
 			}
 		}
 
-		if (self->clientId == 0) {
-			if (self->useMetacluster) {
-				wait(checkTenantCount<true>(self, self->mvDb));
-			}
-			wait(checkTenantCount<false>(self, self->dataDb.getReference()));
-		}
-
-		wait(compareTenants(self) && compareTenantGroups(self) && checkTenantTombstones(self));
+		wait(compareTenants(self) && compareTenantGroups(self));
 
 		if (self->useMetacluster) {
+			// The metacluster consistency check runs the tenant consistency check for each cluster
 			state MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
 			    self->mvDb, AllowPartialMetaclusterOperations::False);
 			wait(metaclusterConsistencyCheck.run());
+			wait(checkTombstoneCleanup(self));
+		} else {
+			state TenantConsistencyCheck<DatabaseContext> tenantConsistencyCheck(self->dataDb.getReference());
+			wait(tenantConsistencyCheck.run());
 		}
 
 		return true;

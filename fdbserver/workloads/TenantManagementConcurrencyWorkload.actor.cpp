@@ -29,6 +29,7 @@
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/MetaclusterConsistency.actor.h"
+#include "fdbserver/workloads/TenantConsistency.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Error.h"
@@ -285,51 +286,14 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 	ACTOR static Future<bool> _check(Database cx, TenantManagementConcurrencyWorkload* self) {
-		state std::vector<std::pair<TenantName, TenantMapEntry>> dataClusterMap =
-		    wait(TenantAPI::listTenants(self->dataDb.getReference(),
-		                                self->tenantNamePrefix,
-		                                self->tenantNamePrefix.withSuffix("\xff"_sr),
-		                                self->maxTenants + 1));
-
-		state std::vector<std::pair<TenantName, TenantMapEntry>> metaclusterMap;
-
 		if (self->useMetacluster) {
-			std::vector<std::pair<TenantName, TenantMapEntry>> _metaclusterMap =
-			    wait(MetaclusterAPI::listTenants(self->mvDb,
-			                                     self->tenantNamePrefix,
-			                                     self->tenantNamePrefix.withSuffix("\xff"_sr),
-			                                     self->maxTenants + 1));
-			metaclusterMap = _metaclusterMap;
-		} else {
-			metaclusterMap = dataClusterMap;
-		}
-
-		auto metaclusterItr = metaclusterMap.begin();
-		auto dataItr = dataClusterMap.begin();
-
-		while (metaclusterItr != metaclusterMap.end() || dataItr != dataClusterMap.end()) {
-			bool matches = metaclusterItr != metaclusterMap.end() && dataItr != dataClusterMap.end() &&
-			               metaclusterItr->first == dataItr->first;
-
-			if (matches) {
-				ASSERT(metaclusterItr->second.matchesConfiguration(dataItr->second));
-				++metaclusterItr;
-				++dataItr;
-			} else {
-				ASSERT(metaclusterItr != metaclusterMap.end() &&
-				       (dataItr == dataClusterMap.end() || metaclusterItr->first < dataItr->first));
-
-				ASSERT(metaclusterItr->second.tenantState == TenantState::REGISTERING ||
-				       metaclusterItr->second.tenantState == TenantState::REMOVING);
-
-				++metaclusterItr;
-			}
-		}
-
-		if (self->useMetacluster) {
+			// The metacluster consistency check runs the tenant consistency check for each cluster
 			state MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
 			    self->mvDb, AllowPartialMetaclusterOperations::True);
 			wait(metaclusterConsistencyCheck.run());
+		} else {
+			state TenantConsistencyCheck<DatabaseContext> tenantConsistencyCheck(self->dataDb.getReference());
+			wait(tenantConsistencyCheck.run());
 		}
 
 		return true;
