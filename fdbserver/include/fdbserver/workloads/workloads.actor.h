@@ -97,18 +97,19 @@ class DeterministicRandom;
 
 struct NoOptions {};
 
-struct FailureInjectionWorkload : ReferenceCounted<FailureInjectionWorkload> {
+struct FailureInjectionWorkload : TestWorkload {
+	FailureInjectionWorkload(WorkloadContext const&);
 	virtual ~FailureInjectionWorkload() {}
 	virtual bool add(DeterministicRandom& random, WorkloadRequest const work, CompoundWorkload const& workload) = 0;
-	virtual Reference<TestWorkload> workload() = 0;
 	virtual std::string description() const = 0;
 
-	Future<Void> setup(Database const& cx, Future<Void> done);
-	Future<Void> start(Database const& cx, Future<Void> done);
-	Future<bool> check(Database const& cx, Future<bool> done);
+	Future<Void> setupInjectionWorkload(Database const& cx, Future<Void> done);
+	Future<Void> startInjectionWorkload(Database const& cx, Future<Void> done);
+	Future<bool> checkInjectionWorkload(Database const& cx, Future<bool> done);
 };
 
 struct IFailureInjectorFactory : ReferenceCounted<IFailureInjectorFactory> {
+	virtual ~IFailureInjectorFactory() = default;
 	static std::vector<Reference<IFailureInjectorFactory>>& factories() {
 		static std::vector<Reference<IFailureInjectorFactory>> _factories;
 		return _factories;
@@ -128,6 +129,7 @@ struct FailureInjectorFactory : IFailureInjectorFactory {
 };
 
 struct CompoundWorkload : TestWorkload {
+	bool runFailureWorkloads = true;
 	std::vector<Reference<TestWorkload>> workloads;
 	std::vector<Reference<FailureInjectionWorkload>> failureInjection;
 
@@ -278,6 +280,7 @@ public:
 	bool dumpAfterTest;
 	bool clearAfterTest;
 	bool useDB;
+	bool runFailureWorkloads = true;
 	double startDelay;
 	int phases;
 	Standalone<VectorRef<VectorRef<KeyValueRef>>> options;

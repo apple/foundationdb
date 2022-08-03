@@ -299,7 +299,7 @@ Future<Void> CompoundWorkload::setup(Database const& cx) {
 	std::vector<Future<Void>> res;
 	res.reserve(failureInjection.size());
 	for (auto& f : failureInjection) {
-		res.push_back(f->setup(cx, done));
+		res.push_back(f->setupInjectionWorkload(cx, done));
 	}
 	return waitForAll(res);
 }
@@ -323,10 +323,13 @@ Future<Void> CompoundWorkload::start(Database const& cx) {
 		    workloads[i]->start(cx)));
 	}
 	auto done = waitForAll(all);
+	if (failureInjection.empty()) {
+		return done;
+	}
 	std::vector<Future<Void>> res;
 	res.reserve(failureInjection.size());
 	for (auto& f : failureInjection) {
-		res.push_back(f->start(cx, done));
+		res.push_back(f->startInjectionWorkload(cx, done));
 	}
 	return waitForAll(res);
 }
@@ -353,10 +356,13 @@ Future<bool> CompoundWorkload::check(Database const& cx) {
 		    workloads[i]->check(cx)));
 	}
 	auto done = allTrue(all);
+	if (failureInjection.empty()) {
+		return done;
+	}
 	std::vector<Future<bool>> res;
 	res.reserve(failureInjection.size());
 	for (auto& f : failureInjection) {
-		res.push_back(f->check(cx, done));
+		res.push_back(f->checkInjectionWorkload(cx, done));
 	}
 	return allTrue(res);
 }
@@ -379,6 +385,9 @@ ACTOR Future<std::vector<PerfMetric>> getMetricsCompoundWorkload(CompoundWorkloa
 }
 
 void CompoundWorkload::addFailureInjection(WorkloadRequest& work) {
+	if (!work.runFailureWorkloads) {
+		return;
+	}
 	auto& factories = IFailureInjectorFactory::factories();
 	DeterministicRandom random(sharedRandomNumber);
 	for (auto& factory : factories) {
@@ -405,16 +414,18 @@ void CompoundWorkload::getMetrics(std::vector<PerfMetric>&) {
 	ASSERT(false);
 }
 
-Future<Void> FailureInjectionWorkload::setup(const Database& cx, Future<Void> done) {
-	return holdWhile(this->workload()->setup(cx), done);
+FailureInjectionWorkload::FailureInjectionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+
+Future<Void> FailureInjectionWorkload::setupInjectionWorkload(const Database& cx, Future<Void> done) {
+	return holdWhile(this->setup(cx), done);
 }
 
-Future<Void> FailureInjectionWorkload::start(const Database& cx, Future<Void> done) {
-	return holdWhile(this->workload()->start(cx), done);
+Future<Void> FailureInjectionWorkload::startInjectionWorkload(const Database& cx, Future<Void> done) {
+	return holdWhile(this->start(cx), done);
 }
 
-Future<bool> FailureInjectionWorkload::check(const Database& cx, Future<bool> done) {
-	return holdWhile(this->workload()->check(cx), done);
+Future<bool> FailureInjectionWorkload::checkInjectionWorkload(const Database& cx, Future<bool> done) {
+	return holdWhile(this->check(cx), done);
 }
 
 ACTOR Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
@@ -780,7 +791,7 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 	state PromiseStream<Future<Void>> addWorkload;
 	state Future<Void> workerFatalError = actorCollection(addWorkload.getFuture());
 
-	TraceEvent("StartingTesterServerCore", interf.id());
+	TraceEvent("StartingTesterServerCore", interf.id()).log();
 	loop choose {
 		when(wait(workerFatalError)) {}
 		when(WorkloadRequest work = waitNext(interf.recruitments.getFuture())) {
@@ -927,6 +938,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx,
 		WorkloadRequest req;
 		req.title = spec.title;
 		req.useDatabase = spec.useDB;
+		req.runFailureWorkloads = spec.runFailureWorkloads;
 		req.timeout = spec.timeout;
 		req.databasePingDelay = spec.useDB ? spec.databasePingDelay : 0.0;
 		req.options = spec.options;
@@ -1020,6 +1032,7 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 	state TestSpec spec;
 	Standalone<VectorRef<KeyValueRef>> options;
 	spec.title = LiteralStringRef("ChangeConfig");
+	spec.runFailureWorkloads = false;
 	options.push_back_deep(options.arena(),
 	                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ChangeConfig")));
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("configMode"), configMode));
@@ -1066,6 +1079,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	}
 	spec.title = LiteralStringRef("ConsistencyCheck");
 	spec.databasePingDelay = databasePingDelay;
+	spec.runFailureWorkloads = false;
 	spec.timeout = 32000;
 	options.push_back_deep(options.arena(),
 	                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
@@ -1355,6 +1369,8 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	      if (value == "false")
 		      spec->restorePerpetualWiggleSetting = false;
 	  } },
+	{ "runFailureWorkloads",
+	  [](const std::string& value, TestSpec* spec) { spec->runFailureWorkloads = (value == "true"); } },
 };
 
 std::vector<TestSpec> readTests(std::ifstream& ifs) {
@@ -1709,6 +1725,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		if (perpetualWiggleEnabled) { // restore the enabled perpetual storage wiggle setting
 			printf("Set perpetual_storage_wiggle=1 ...\n");
 			Version cVer = wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
+			(void)cVer;
 			printf("Set perpetual_storage_wiggle=1 Done.\n");
 		}
 	}
@@ -1857,6 +1874,7 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		TestSpec spec;
 		Standalone<VectorRef<KeyValueRef>> options;
 		spec.title = LiteralStringRef("ConsistencyCheck");
+		spec.runFailureWorkloads = false;
 		spec.databasePingDelay = 0;
 		spec.timeout = 0;
 		spec.waitForQuiescenceBegin = false;

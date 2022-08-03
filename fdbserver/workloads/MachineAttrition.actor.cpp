@@ -61,7 +61,7 @@ ACTOR Future<bool> ignoreSSFailuresForDuration(Database cx, double duration) {
 	}
 }
 
-struct MachineAttritionWorkload : TestWorkload, FailureInjectionWorkload {
+struct MachineAttritionWorkload : FailureInjectionWorkload {
 	bool enabled;
 	int machinesToKill = 2, machinesToLeave = 1, workersToKill = 2, workersToLeave = 1;
 	double testDuration = 10.0, suspendDuration = 1.0, liveDuration = 5.0;
@@ -82,13 +82,13 @@ struct MachineAttritionWorkload : TestWorkload, FailureInjectionWorkload {
 	// This is set in setup from the list of workers when the cluster is started
 	std::vector<LocalityData> machines;
 
-	MachineAttritionWorkload(WorkloadContext const& wcx, NoOptions) : TestWorkload(wcx) {
+	MachineAttritionWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId && g_network->isSimulated() && faultInjectionActivated;
 		suspendDuration = 10.0;
 		iterate = true;
 	}
 
-	MachineAttritionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	MachineAttritionWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		// only do this on the "first" client, and only when in simulation and only when fault injection is enabled
 		enabled = !clientId && g_network->isSimulated() && faultInjectionActivated;
 		machinesToKill = getOption(options, LiteralStringRef("machinesToKill"), machinesToKill);
@@ -125,28 +125,34 @@ struct MachineAttritionWorkload : TestWorkload, FailureInjectionWorkload {
 		if (res) {
 			initializeForInjection(random);
 		}
+		TraceEvent("AddingFailureInjection")
+		    .detail("Reboot", reboot)
+		    .detail("Replacement", replacement)
+		    .detail("AllowFaultInjection", allowFaultInjection)
+		    .detail("KillDC", killDc)
+		    .detail("KillDataHall", killDatahall)
+		    .detail("KillZone", killZone);
 		return res;
 	}
 
 	void initializeForInjection(DeterministicRandom& random) {
 		reboot = random.random01() < 0.25;
 		replacement = random.random01() < 0.25;
+		allowFaultInjection = random.random01() < 0.5;
 		if (g_network->isSimulated()) {
 			std::set<Optional<StringRef>> dataCenters;
 			std::set<Optional<StringRef>> dataHalls;
 			std::set<Optional<StringRef>> zones;
 			for (auto process : g_simulator.getAllProcesses()) {
-				dataCenters.insert(process->locality.dcId());
-				dataHalls.insert(process->locality.dataHallId());
-				zones.insert(process->locality.zoneId());
+				dataCenters.emplace(process->locality.dcId().castTo<StringRef>());
+				dataHalls.emplace(process->locality.dataHallId().castTo<StringRef>());
+				zones.emplace(process->locality.zoneId().castTo<StringRef>());
 			}
 			killDc = dataCenters.size() > 0 && random.random01() > (dataHalls.size() < 0 ? 0.1 : 0.25);
 			killDatahall = dataHalls.size() > 0 && killDc && random.random01() < 0.5;
 			killZone = zones.size() > 0 && random.random01() < 0.2;
 		}
 	}
-
-	Reference<TestWorkload> workload() override { return Reference<TestWorkload>::addRef(this); }
 
 	static std::vector<ISimulator::ProcessInfo*> getServers() {
 		std::vector<ISimulator::ProcessInfo*> machines;
@@ -240,7 +246,8 @@ struct MachineAttritionWorkload : TestWorkload, FailureInjectionWorkload {
 		}
 		deterministicRandom()->randomShuffle(workers);
 		wait(delay(self->liveDuration));
-		// if a specific kill is requested, it must be accompanied by a set of target IDs otherwise no kills will occur
+		// if a specific kill is requested, it must be accompanied by a set of target IDs otherwise no kills will
+		// occur
 		if (self->killDc) {
 			TraceEvent("Assassination").detail("TargetDataCenterIds", describe(self->targetIds));
 			sendRebootRequests(workers,
@@ -468,3 +475,4 @@ struct MachineAttritionWorkload : TestWorkload, FailureInjectionWorkload {
 };
 
 WorkloadFactory<MachineAttritionWorkload> MachineAttritionWorkloadFactory("Attrition");
+FailureInjectorFactory<MachineAttritionWorkload> MachineAttritionFailureWorkloadFactory;
