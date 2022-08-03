@@ -125,6 +125,11 @@ class ConfigBroadcasterImpl {
 			}
 		}
 		request.version = snapshotVersion;
+		// TODO: Don't need a delay if there are no atomic changes.
+		// Delay restarting the cluster controller to allow messages to be sent to workers.
+		request.restartDelay = client.broadcastInterface.address() == g_network->getLocalAddress()
+		                           ? SERVER_KNOBS->BROADCASTER_SELF_UPDATE_DELAY
+		                           : 0.0;
 		TraceEvent(SevDebug, "ConfigBroadcasterSnapshotRequest", id)
 		    .detail("Size", request.snapshot.size())
 		    .detail("Version", request.version);
@@ -164,6 +169,11 @@ class ConfigBroadcasterImpl {
 
 		client.lastSeenVersion = mostRecentVersion;
 		req.mostRecentVersion = mostRecentVersion;
+		// TODO: Don't need a delay if there are no atomic changes.
+		// Delay restarting the cluster controller to allow messages to be sent to workers.
+		req.restartDelay = client.broadcastInterface.address() == g_network->getLocalAddress()
+		                       ? SERVER_KNOBS->BROADCASTER_SELF_UPDATE_DELAY
+		                       : 0.0;
 		++successfulChangeRequest;
 		return success(client.broadcastInterface.changes.getReply(req));
 	}

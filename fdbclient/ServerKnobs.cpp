@@ -815,6 +815,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	// Dynamic Knobs (implementation)
 	init( COMPACTION_INTERVAL,             isSimulated ? 5.0 : 300.0 );
+	init( BROADCASTER_SELF_UPDATE_DELAY,                         1.0 );
+	init( UPDATE_NODE_TIMEOUT,                                   3.0 );
 	init( GET_COMMITTED_VERSION_TIMEOUT,                         3.0 );
 	init( GET_SNAPSHOT_AND_CHANGES_TIMEOUT,                      3.0 );
 	init( FETCH_CHANGES_TIMEOUT,                                 3.0 );

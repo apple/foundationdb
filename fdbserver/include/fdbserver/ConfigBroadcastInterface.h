@@ -72,16 +72,17 @@ struct ConfigBroadcastSnapshotRequest {
 	static constexpr FileIdentifier file_identifier = 10911925;
 	Version version{ 0 };
 	std::map<ConfigKey, KnobValue> snapshot;
+	double restartDelay{ 0.0 };
 	ReplyPromise<ConfigBroadcastSnapshotReply> reply;
 
 	ConfigBroadcastSnapshotRequest() = default;
 	template <class Snapshot>
-	explicit ConfigBroadcastSnapshotRequest(Version version, Snapshot&& snapshot)
-	  : version(version), snapshot(std::forward<Snapshot>(snapshot)) {}
+	explicit ConfigBroadcastSnapshotRequest(Version version, Snapshot&& snapshot, double restartDelay)
+	  : version(version), snapshot(std::forward<Snapshot>(snapshot)), restartDelay(restartDelay) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, snapshot, reply);
+		serializer(ar, version, snapshot, restartDelay, reply);
 	}
 };
 
@@ -100,16 +101,18 @@ struct ConfigBroadcastChangesRequest {
 	static constexpr FileIdentifier file_identifier = 601281;
 	Version mostRecentVersion{ 0 };
 	Standalone<VectorRef<VersionedConfigMutationRef>> changes;
+	double restartDelay{ 0.0 };
 	ReplyPromise<ConfigBroadcastChangesReply> reply;
 
 	ConfigBroadcastChangesRequest() = default;
 	explicit ConfigBroadcastChangesRequest(Version mostRecentVersion,
-	                                       Standalone<VectorRef<VersionedConfigMutationRef>> const& changes)
-	  : mostRecentVersion(mostRecentVersion), changes(changes) {}
+	                                       Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
+	                                       double restartDelay)
+	  : mostRecentVersion(mostRecentVersion), changes(changes), restartDelay(restartDelay) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, mostRecentVersion, changes, reply);
+		serializer(ar, mostRecentVersion, changes, restartDelay, reply);
 	}
 };
 
