@@ -259,6 +259,7 @@ struct BlobManagerStats {
 
 	Counter granuleSplits;
 	Counter granuleWriteHotSplits;
+	Counter granuleMerges;
 	Counter ccGranulesChecked;
 	Counter ccRowsChecked;
 	Counter ccBytesChecked;
@@ -270,16 +271,27 @@ struct BlobManagerStats {
 	Counter granulesPartiallyPurged;
 	Counter filesPurged;
 	Future<Void> logger;
+	int64_t activeMerges;
 
 	// Current stats maintained for a given blob worker process
-	explicit BlobManagerStats(UID id, double interval, std::unordered_map<UID, BlobWorkerInterface>* workers)
+	explicit BlobManagerStats(UID id,
+	                          double interval,
+	                          int64_t epoch,
+	                          std::unordered_map<UID, BlobWorkerInterface>* workers,
+	                          std::unordered_map<Key, bool>* mergeHardBoundaries,
+	                          std::unordered_map<Key, BlobGranuleMergeBoundary>* mergeBoundaries)
 	  : cc("BlobManagerStats", id.toString()), granuleSplits("GranuleSplits", cc),
-	    granuleWriteHotSplits("GranuleWriteHotSplits", cc), ccGranulesChecked("CCGranulesChecked", cc),
-	    ccRowsChecked("CCRowsChecked", cc), ccBytesChecked("CCBytesChecked", cc), ccMismatches("CCMismatches", cc),
-	    ccTimeouts("CCTimeouts", cc), ccErrors("CCErrors", cc), purgesProcessed("PurgesProcessed", cc),
+	    granuleWriteHotSplits("GranuleWriteHotSplits", cc), granuleMerges("GranuleMerges", cc),
+	    ccGranulesChecked("CCGranulesChecked", cc), ccRowsChecked("CCRowsChecked", cc),
+	    ccBytesChecked("CCBytesChecked", cc), ccMismatches("CCMismatches", cc), ccTimeouts("CCTimeouts", cc),
+	    ccErrors("CCErrors", cc), purgesProcessed("PurgesProcessed", cc),
 	    granulesFullyPurged("GranulesFullyPurged", cc), granulesPartiallyPurged("GranulesPartiallyPurged", cc),
-	    filesPurged("FilesPurged", cc) {
+	    filesPurged("FilesPurged", cc), activeMerges(0) {
 		specialCounter(cc, "WorkerCount", [workers]() { return workers->size(); });
+		specialCounter(cc, "Epoch", [epoch]() { return epoch; });
+		specialCounter(cc, "ActiveMerges", [this]() { return this->activeMerges; });
+		specialCounter(cc, "HardBoundaries", [mergeHardBoundaries]() { return mergeHardBoundaries->size(); });
+		specialCounter(cc, "SoftBoundaries", [mergeBoundaries]() { return mergeBoundaries->size(); });
 		logger = traceCounters("BlobManagerMetrics", id, interval, &cc, "BlobManagerMetrics");
 	}
 };
@@ -364,18 +376,23 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	Promise<Void> foundBlobWorkers;
 	Promise<Void> doneRecovering;
 
-	int64_t epoch = -1;
+	int64_t epoch;
 	int64_t seqNo = 1;
 
 	Promise<Void> iAmReplaced;
 
-	BlobManagerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db, Optional<Key> dcId)
-	  : id(id), db(db), dcId(dcId), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &workersById),
+	BlobManagerData(UID id,
+	                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+	                Database db,
+	                Optional<Key> dcId,
+	                int64_t epoch)
+	  : id(id), db(db), dcId(dcId),
+	    stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, epoch, &workersById, &mergeHardBoundaries, &mergeBoundaries),
 	    knownBlobRanges(false, normalKeys.end), tenantData(BGTenantMap(dbInfo)),
 	    mergeCandidates(MergeCandidateInfo(MergeCandidateUnknown), normalKeys.end),
 	    activeGranuleMerges(invalidVersion, normalKeys.end),
 	    concurrentMergeChecks(SERVER_KNOBS->BLOB_MANAGER_CONCURRENT_MERGE_CHECKS),
-	    restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), recruitingStream(0) {}
+	    restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), recruitingStream(0), epoch(epoch) {}
 
 	// only initialize blob store if actually needed
 	void initBStore() {
@@ -1874,6 +1891,7 @@ ACTOR Future<Void> finishMergeGranules(Reference<BlobManagerData> bmData,
                                        std::vector<UID> parentGranuleIDs,
                                        std::vector<Key> parentGranuleRanges,
                                        std::vector<Version> parentGranuleStartVersions) {
+	++bmData->stats.activeMerges;
 
 	// wait for BM to be fully recovered before starting actual merges
 	wait(bmData->doneRecovering.getFuture());
@@ -1919,6 +1937,8 @@ ACTOR Future<Void> finishMergeGranules(Reference<BlobManagerData> bmData,
 	bmData->boundaryEvaluations.insert(mergeRange,
 	                                   BoundaryEvaluation(bmData->epoch, seqnoForEval, BoundaryEvalType::MERGE, 0, 0));
 	bmData->setMergeCandidate(mergeRange, MergeCandidateMerging);
+
+	--bmData->stats.activeMerges;
 
 	return Void();
 }
@@ -4207,7 +4227,8 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	    makeReference<BlobManagerData>(deterministicRandom()->randomUniqueID(),
 	                                   dbInfo,
 	                                   openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True),
-	                                   bmInterf.locality.dcId());
+	                                   bmInterf.locality.dcId(),
+	                                   epoch);
 
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 
@@ -4215,8 +4236,6 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		fmt::print("Blob manager {0} starting...\n", epoch);
 	}
 	TraceEvent("BlobManagerInit", bmInterf.id()).detail("Epoch", epoch).log();
-
-	self->epoch = epoch;
 
 	// although we start the recruiter, we wait until existing workers are ack'd
 	auto recruitBlobWorker = IAsyncListener<RequestStream<RecruitBlobWorkerRequest>>::create(
