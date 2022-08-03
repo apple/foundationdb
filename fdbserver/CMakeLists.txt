@@ -50,6 +50,8 @@ if(GPERFTOOLS_FOUND)
   target_link_libraries(fdbserver PRIVATE gperftools)
 endif()
 
+target_link_libraries(fdbserver PRIVATE fdb_rust2)
+
 if(NOT OPEN_FOR_IDE)
   if(GENERATE_DEBUG_PACKAGES)
     fdb_install(TARGETS fdbserver DESTINATION sbin COMPONENT server)
