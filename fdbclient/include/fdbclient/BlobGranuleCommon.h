@@ -236,6 +236,19 @@ struct BlobGranuleChunkRef {
 
 enum BlobGranuleSplitState { Unknown = 0, Initialized = 1, Assigned = 2, Done = 3 };
 
+// Boundary metadata for each range indexed by the beginning of the range.
+struct BlobGranuleMergeBoundary {
+	constexpr static FileIdentifier file_identifier = 557861;
+
+	// Hard boundaries represent backing regions we want to keep separate.
+	bool buddy;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, buddy);
+	}
+};
+
 struct BlobGranuleHistoryValue {
 	constexpr static FileIdentifier file_identifier = 991434;
 	UID granuleID;

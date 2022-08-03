@@ -27,13 +27,13 @@
 #include "flow/CompressionUtils.h"
 
 Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
-                               Standalone<GranuleSnapshot> snapshot,
+                               const Standalone<GranuleSnapshot>& snapshot,
                                int chunkSize,
                                Optional<CompressionFilter> compressFilter,
                                Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = {});
 
 Value serializeChunkedDeltaFile(const Standalone<StringRef>& fileNameRef,
-                                Standalone<GranuleDeltas> deltas,
+                                const Standalone<GranuleDeltas>& deltas,
                                 const KeyRangeRef& fileRange,
                                 int chunkSize,
                                 Optional<CompressionFilter> compressFilter,
