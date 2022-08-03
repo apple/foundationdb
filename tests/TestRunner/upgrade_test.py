@@ -11,7 +11,7 @@ import sys
 from threading import Thread, Event
 import traceback
 import time
-from binary_download import FdbBinaryDownloader, SUPPORTED_VERSIONS, CURRENT_VERSION
+from binary_download import FdbBinaryDownloader, SUPPORTED_VERSIONS, CURRENT_VERSION, FUTURE_VERSION
 from local_cluster import LocalCluster, random_secret_string
 
 CLUSTER_ACTIONS = ["wiggle"]
@@ -59,6 +59,10 @@ class UpgradeTest:
         self.downloader = FdbBinaryDownloader(args.build_dir)
         self.download_old_binaries()
         self.create_external_lib_dir()
+        self.testing_future_version = FUTURE_VERSION in self.upgrade_path
+        self.future_version_client_lib_path = (
+            self.downloader.lib_path(FUTURE_VERSION) if self.testing_future_version else None
+        )
         init_version = self.upgrade_path[0]
         self.cluster = LocalCluster(
             self.tmp_dir,
@@ -96,6 +100,8 @@ class UpgradeTest:
         self.external_lib_dir = self.tmp_dir.joinpath("client_libs")
         self.external_lib_dir.mkdir(parents=True)
         for version in self.used_versions:
+            if version == FUTURE_VERSION:
+                continue
             src_file_path = self.downloader.lib_path(version)
             assert src_file_path.exists(), "{} does not exist".format(src_file_path)
             target_file_path = self.external_lib_dir.joinpath("libfdb_c.{}.so".format(version))
@@ -117,10 +123,13 @@ class UpgradeTest:
                 print("Health check: {} of {} processes found. Retrying".format(num_proc, self.cluster.process_number))
                 time.sleep(1)
                 continue
+            expected_version = self.cluster_version
+            if expected_version == FUTURE_VERSION:
+                expected_version = CURRENT_VERSION
             for (_, proc_stat) in status["cluster"]["processes"].items():
                 proc_ver = proc_stat["version"]
-                assert proc_ver == self.cluster_version, "Process version: expected: {}, actual: {}".format(
-                    self.cluster_version, proc_ver
+                assert proc_ver == expected_version, "Process version: expected: {}, actual: {}".format(
+                    expected_version, proc_ver
                 )
             print("Health check: OK")
             return
@@ -132,8 +141,8 @@ class UpgradeTest:
         self.cluster.fdbserver_binary = self.downloader.binary_path(version, "fdbserver")
         self.cluster.fdbcli_binary = self.downloader.binary_path(version, "fdbcli")
         self.cluster.set_env_var("LD_LIBRARY_PATH", self.downloader.lib_dir(version))
-        if version_before(version, "7.1.0"):
-            self.cluster.use_legacy_conf_syntax = True
+        self.cluster.use_legacy_conf_syntax = version_before(version, "7.1.0")
+        self.cluster.use_future_protocol_version = version == FUTURE_VERSION
         self.cluster.save_config()
         self.cluster_version = version
 
@@ -194,6 +203,8 @@ class UpgradeTest:
             ]
             if RUN_WITH_GDB:
                 cmd_args = ["gdb", "-ex", "run", "--args"] + cmd_args
+            if FUTURE_VERSION in self.upgrade_path:
+                cmd_args += ["--future-version-client-library", self.future_version_client_lib_path]
             print("Executing test command: {}".format(" ".join([str(c) for c in cmd_args])))
 
             self.tester_proc = subprocess.Popen(cmd_args, stdout=sys.stdout, stderr=sys.stderr)

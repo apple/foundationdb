@@ -10,9 +10,13 @@ import hashlib
 
 from local_cluster import random_secret_string
 
+CURRENT_VERSION = "7.2.0"
+FUTURE_VERSION = "7.3.0"
+
 SUPPORTED_PLATFORMS = ["x86_64", "aarch64"]
 SUPPORTED_VERSIONS = [
-    "7.2.0",
+    FUTURE_VERSION,
+    CURRENT_VERSION,
     "7.1.9",
     "7.1.8",
     "7.1.7",
@@ -67,7 +71,6 @@ SUPPORTED_VERSIONS = [
 ]
 FDB_DOWNLOAD_ROOT = "https://github.com/apple/foundationdb/releases/download/"
 LOCAL_OLD_BINARY_REPO = "/opt/foundationdb/old/"
-CURRENT_VERSION = "7.2.0"
 MAX_DOWNLOAD_ATTEMPTS = 5
 
 
@@ -93,6 +96,10 @@ def read_to_str(filename):
         return f.read()
 
 
+def is_local_build_version(version):
+    return version == CURRENT_VERSION or version == FUTURE_VERSION
+
+
 class FdbBinaryDownloader:
     def __init__(self, build_dir):
         self.build_dir = Path(build_dir).resolve()
@@ -112,7 +119,7 @@ class FdbBinaryDownloader:
         return (self.local_binary_repo is not None) and (self.local_binary_repo.joinpath(version).exists())
 
     def binary_path(self, version, bin_name):
-        if version == CURRENT_VERSION:
+        if is_local_build_version(version):
             return self.build_dir.joinpath("bin", bin_name)
         elif self.version_in_local_repo(version):
             return self.local_binary_repo.joinpath(version, "bin", "{}-{}".format(bin_name, version))
@@ -120,7 +127,7 @@ class FdbBinaryDownloader:
             return self.download_dir.joinpath(version, bin_name)
 
     def lib_dir(self, version):
-        if version == CURRENT_VERSION:
+        if is_local_build_version(version):
             return self.build_dir.joinpath("lib")
         else:
             return self.download_dir.joinpath(version)
@@ -189,7 +196,7 @@ class FdbBinaryDownloader:
 
     # Download all old binaries required for testing the specified upgrade path
     def download_old_binaries(self, version):
-        if version == CURRENT_VERSION:
+        if is_local_build_version(version):
             return
 
         if self.version_in_local_repo(version):

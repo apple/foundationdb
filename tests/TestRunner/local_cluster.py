@@ -86,6 +86,7 @@ datadir = {datadir}/$ID
 logdir = {logdir}
 {bg_knob_line}
 {tls_config}
+{use_future_protocol_version}
 # logsize = 10MiB
 # maxlogssize = 100MiB
 # machine-id =
@@ -112,6 +113,7 @@ logdir = {logdir}
         port=None,
         ip_address=None,
         blob_granules_enabled: bool = False,
+        use_future_protocol_version: bool = False,
         redundancy: str = "single",
         tls_config: TLSConfig = None,
         mkcert_binary: str = "",
@@ -139,6 +141,7 @@ logdir = {logdir}
         if blob_granules_enabled:
             # add extra process for blob_worker
             self.process_number += 1
+        self.use_future_protocol_version = use_future_protocol_version
 
         if self.first_port is not None:
             self.last_used_port = int(self.first_port) - 1
@@ -196,6 +199,9 @@ logdir = {logdir}
                     bg_knob_line=bg_knob_line,
                     tls_config=self.tls_conf_string(),
                     optional_tls=":tls" if self.tls_config is not None else "",
+                    use_future_protocol_version="use-future-protocol-version = true"
+                    if self.use_future_protocol_version
+                    else "",
                 )
             )
             # By default, the cluster only has one process
@@ -288,6 +294,8 @@ logdir = {logdir}
                 "--tls-ca-file",
                 self.server_ca_file,
             ]
+        if self.use_future_protocol_version:
+            args += ["--use-future-protocol-version"]
         res = subprocess.run(args, env=self.process_env(), stderr=stderr, stdout=stdout, timeout=timeout)
         assert res.returncode == 0, "fdbcli command {} failed with {}".format(cmd, res.returncode)
         return res.stdout
