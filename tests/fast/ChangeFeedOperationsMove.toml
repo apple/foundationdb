@@ -11,12 +11,16 @@ testTitle = 'ChangeFeedOperationsTest'
     testDuration = 60.0
 
     [[test.workload]]
+    testName = 'RandomMoveKeys'
+    testDuration = 60.0
+
+    [[test.workload]]
     testName = 'RandomClogging'
     testDuration = 60.0
 
     [[test.workload]]
     testName = 'Rollback'
-    meanDelay = 30.0
+    meanDelay = 60.0
     testDuration = 60.0
 
     [[test.workload]]

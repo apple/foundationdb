@@ -24,6 +24,7 @@
 #include <sstream>
 
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
@@ -240,6 +241,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			if (i < self->numTenants) {
 				TenantMapEntry entry;
 				entry.tenantGroup = self->getTenantGroup(i);
+				entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
 				tenantFutures.push_back(::success(TenantAPI::createTenant(cx.getReference(), tenantName, entry)));
 				self->createdTenants.insert(tenantName);
 			}

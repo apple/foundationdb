@@ -460,7 +460,7 @@ TokenRef makeRandomTokenSpec(Arena& arena, IRandom& rng, Algorithm alg) {
 	for (auto i = 0; i < numAudience; i++)
 		aud[i] = genRandomAlphanumStringRef(arena, rng, MaxTenantNameLenPlus1);
 	ret.audience = VectorRef<StringRef>(aud, numAudience);
-	ret.issuedAtUnixTime = timer_int() / 1'000'000'000ul;
+	ret.issuedAtUnixTime = uint64_t(std::floor(g_network->timer()));
 	ret.notBeforeUnixTime = ret.issuedAtUnixTime.get();
 	ret.expiresAtUnixTime = ret.issuedAtUnixTime.get() + rng.randomInt(360, 1080 + 1);
 	auto numTenants = rng.randomInt(1, 3);
