@@ -1957,6 +1957,8 @@ ACTOR Future<Void> doMerge(Reference<BlobManagerData> bmData,
 	}
 	ranges.push_back(std::get<1>(toMerge.back()).end);
 
+	++bmData->stats.granuleMerges;
+
 	try {
 		std::pair<UID, Version> persistMerge =
 		    wait(persistMergeGranulesStart(bmData, mergeRange, ids, ranges, startVersions));
