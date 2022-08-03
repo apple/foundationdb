@@ -94,17 +94,12 @@ def read_to_str(filename):
 
 
 class FdbBinaryDownloader:
-    def __init__(
-        self,
-        build_dir
-    ):
+    def __init__(self, build_dir):
         self.build_dir = Path(build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(build_dir)
         self.platform = platform.machine()
-        assert self.platform in SUPPORTED_PLATFORMS, "Unsupported platform {}".format(
-            self.platform
-        )
+        assert self.platform in SUPPORTED_PLATFORMS, "Unsupported platform {}".format(self.platform)
         self.tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
         self.tmp_dir.mkdir(parents=True)
         self.download_dir = self.build_dir.joinpath("tmp", "old_binaries")
@@ -134,9 +129,7 @@ class FdbBinaryDownloader:
         return self.lib_dir(version).joinpath("libfdb_c.so")
 
     # Download an old binary of a given version from a remote repository
-    def download_old_binary(
-        self, version, target_bin_name, remote_bin_name, make_executable
-    ):
+    def download_old_binary(self, version, target_bin_name, remote_bin_name, make_executable):
         local_file = self.download_dir.joinpath(version, target_bin_name)
         if local_file.exists():
             return
@@ -152,9 +145,7 @@ class FdbBinaryDownloader:
 
         for attempt_cnt in range(MAX_DOWNLOAD_ATTEMPTS + 1):
             if attempt_cnt == MAX_DOWNLOAD_ATTEMPTS:
-                assert False, "Failed to download {} after {} attempts".format(
-                    local_file_tmp, MAX_DOWNLOAD_ATTEMPTS
-                )
+                assert False, "Failed to download {} after {} attempts".format(local_file_tmp, MAX_DOWNLOAD_ATTEMPTS)
             try:
                 print("Downloading '{}' to '{}'...".format(remote_file, local_file_tmp))
                 request.urlretrieve(remote_file, local_file_tmp)
@@ -172,11 +163,7 @@ class FdbBinaryDownloader:
             if expected_checksum == actual_checkum:
                 print("Checksum OK")
                 break
-            print(
-                "Checksum mismatch. Expected: {} Actual: {}".format(
-                    expected_checksum, actual_checkum
-                )
-            )
+            print("Checksum mismatch. Expected: {} Actual: {}".format(expected_checksum, actual_checkum))
 
         os.rename(local_file_tmp, local_file)
         os.remove(local_sha256)
@@ -209,15 +196,7 @@ class FdbBinaryDownloader:
             self.copy_clientlib_from_local_repo(version)
             return
 
-        self.download_old_binary(
-            version, "fdbserver", "fdbserver.{}".format(self.platform), True
-        )
-        self.download_old_binary(
-            version, "fdbmonitor", "fdbmonitor.{}".format(self.platform), True
-        )
-        self.download_old_binary(
-            version, "fdbcli", "fdbcli.{}".format(self.platform), True
-        )
-        self.download_old_binary(
-            version, "libfdb_c.so", "libfdb_c.{}.so".format(self.platform), False
-        )
+        self.download_old_binary(version, "fdbserver", "fdbserver.{}".format(self.platform), True)
+        self.download_old_binary(version, "fdbmonitor", "fdbmonitor.{}".format(self.platform), True)
+        self.download_old_binary(version, "fdbcli", "fdbcli.{}".format(self.platform), True)
+        self.download_old_binary(version, "libfdb_c.so", "libfdb_c.{}.so".format(self.platform), False)

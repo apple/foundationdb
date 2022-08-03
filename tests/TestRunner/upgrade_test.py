@@ -44,10 +44,7 @@ def random_sleep(min_sec, max_sec):
 
 
 class UpgradeTest:
-    def __init__(
-        self,
-        args
-    ):
+    def __init__(self, args):
         self.build_dir = Path(args.build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(args.build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(args.build_dir)
@@ -70,19 +67,15 @@ class UpgradeTest:
             self.downloader.binary_path(init_version, "fdbcli"),
             args.process_number,
             create_config=False,
-            redundancy=args.redundancy
+            redundancy=args.redundancy,
         )
         self.cluster.create_cluster_file()
         self.configure_version(init_version)
         self.log = self.cluster.log
         self.etc = self.cluster.etc
         self.data = self.cluster.data
-        self.input_pipe_path = self.tmp_dir.joinpath(
-            "input.{}".format(random_secret_string(8))
-        )
-        self.output_pipe_path = self.tmp_dir.joinpath(
-            "output.{}".format(random_secret_string(8))
-        )
+        self.input_pipe_path = self.tmp_dir.joinpath("input.{}".format(random_secret_string(8)))
+        self.output_pipe_path = self.tmp_dir.joinpath("output.{}".format(random_secret_string(8)))
         os.mkfifo(self.input_pipe_path)
         os.mkfifo(self.output_pipe_path)
         self.progress_event = Event()
@@ -105,9 +98,7 @@ class UpgradeTest:
         for version in self.used_versions:
             src_file_path = self.downloader.lib_path(version)
             assert src_file_path.exists(), "{} does not exist".format(src_file_path)
-            target_file_path = self.external_lib_dir.joinpath(
-                "libfdb_c.{}.so".format(version)
-            )
+            target_file_path = self.external_lib_dir.joinpath("libfdb_c.{}.so".format(version))
             shutil.copyfile(src_file_path, target_file_path)
 
     # Perform a health check of the cluster: Use fdbcli status command to check if the number of
@@ -123,18 +114,12 @@ class UpgradeTest:
                 continue
             num_proc = len(status["cluster"]["processes"])
             if num_proc != self.cluster.process_number:
-                print(
-                    "Health check: {} of {} processes found. Retrying".format(
-                        num_proc, self.cluster.process_number
-                    )
-                )
+                print("Health check: {} of {} processes found. Retrying".format(num_proc, self.cluster.process_number))
                 time.sleep(1)
                 continue
             for (_, proc_stat) in status["cluster"]["processes"].items():
                 proc_ver = proc_stat["version"]
-                assert (
-                    proc_ver == self.cluster_version
-                ), "Process version: expected: {}, actual: {}".format(
+                assert proc_ver == self.cluster_version, "Process version: expected: {}, actual: {}".format(
                     self.cluster_version, proc_ver
                 )
             print("Health check: OK")
@@ -205,19 +190,13 @@ class UpgradeTest:
                 "--transaction-retry-limit",
                 str(TRANSACTION_RETRY_LIMIT),
                 "--stats-interval",
-                str(TESTER_STATS_INTERVAL_SEC * 1000)
+                str(TESTER_STATS_INTERVAL_SEC * 1000),
             ]
             if RUN_WITH_GDB:
                 cmd_args = ["gdb", "-ex", "run", "--args"] + cmd_args
-            print(
-                "Executing test command: {}".format(
-                    " ".join([str(c) for c in cmd_args])
-                )
-            )
+            print("Executing test command: {}".format(" ".join([str(c) for c in cmd_args])))
 
-            self.tester_proc = subprocess.Popen(
-                cmd_args, stdout=sys.stdout, stderr=sys.stderr
-            )
+            self.tester_proc = subprocess.Popen(cmd_args, stdout=sys.stdout, stderr=sys.stderr)
             self.tester_retcode = self.tester_proc.wait()
             self.tester_proc = None
 
@@ -241,9 +220,7 @@ class UpgradeTest:
         if self.progress_event.is_set():
             print("Progress check: OK")
         else:
-            assert False, "Progress check failed after upgrade to version {}".format(
-                self.cluster_version
-            )
+            assert False, "Progress check failed after upgrade to version {}".format(self.cluster_version)
 
     # The main function of a thread for reading and processing
     # the notifications received from the tester
@@ -324,11 +301,7 @@ class UpgradeTest:
 
     def grep_logs_for_events(self, severity):
         return (
-            subprocess.getoutput(
-                "grep -r 'Severity=\"{}\"' {}".format(
-                    severity, self.cluster.log.as_posix()
-                )
-            )
+            subprocess.getoutput("grep -r 'Severity=\"{}\"' {}".format(severity, self.cluster.log.as_posix()))
             .rstrip()
             .splitlines()
         )
@@ -336,9 +309,7 @@ class UpgradeTest:
     # Check the cluster log for errors
     def check_cluster_logs(self, error_limit=100):
         sev40s = (
-            subprocess.getoutput(
-                "grep -r 'Severity=\"40\"' {}".format(self.cluster.log.as_posix())
-            )
+            subprocess.getoutput("grep -r 'Severity=\"40\"' {}".format(self.cluster.log.as_posix()))
             .rstrip()
             .splitlines()
         )
@@ -368,9 +339,7 @@ class UpgradeTest:
     # Check the server and client logs for warnings and dump them
     def dump_warnings_in_logs(self, limit=100):
         sev30s = (
-            subprocess.getoutput(
-                "grep -r 'Severity=\"30\"' {}".format(self.cluster.log.as_posix())
-            )
+            subprocess.getoutput("grep -r 'Severity=\"30\"' {}".format(self.cluster.log.as_posix()))
             .rstrip()
             .splitlines()
         )
@@ -378,11 +347,7 @@ class UpgradeTest:
         if len(sev30s) == 0:
             print("No warnings found in logs")
         else:
-            print(
-                ">>>>>>>>>>>>>>>>>>>> Found {} severity 30 events (warnings):".format(
-                    len(sev30s)
-                )
-            )
+            print(">>>>>>>>>>>>>>>>>>>> Found {} severity 30 events (warnings):".format(len(sev30s)))
             for line in sev30s[:limit]:
                 print(line)
 
@@ -418,8 +383,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--upgrade-path",
         nargs="+",
-        help="Cluster upgrade path: a space separated list of versions.\n" +
-        "The list may also contain cluster change actions: {}".format(CLUSTER_ACTIONS),
+        help="Cluster upgrade path: a space separated list of versions.\n"
+        + "The list may also contain cluster change actions: {}".format(CLUSTER_ACTIONS),
         default=[CURRENT_VERSION],
     )
     parser.add_argument(
@@ -445,9 +410,7 @@ if __name__ == "__main__":
         help="Do not dump cluster log on error",
         action="store_true",
     )
-    parser.add_argument(
-        "--run-with-gdb", help="Execute the tester binary from gdb", action="store_true"
-    )
+    parser.add_argument("--run-with-gdb", help="Execute the tester binary from gdb", action="store_true")
     args = parser.parse_args()
     if args.process_number == 0:
         args.process_number = random.randint(1, 5)
