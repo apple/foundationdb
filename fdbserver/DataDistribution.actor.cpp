@@ -104,13 +104,12 @@ void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int pr
 }
 
 Future<Void> StorageWiggler::onCheck() const {
-	Future<Void> res = pqCanCheck.onTrigger();
+	double delayTime = MIN_ON_CHECK_DELAY_SEC;
 	if (!empty()) {
-		double waitTime =
-		    std::max(0.0, wiggle_pq.top().first.createdTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC - now());
-		res = res || delay(waitTime);
+		delayTime = std::max(
+		    delayTime, wiggle_pq.top().first.createdTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC - now());
 	}
-	return res;
+	return delay(delayTime) || pqCanCheck.onTrigger();
 }
 
 // add server to wiggling queue
@@ -119,7 +118,6 @@ void StorageWiggler::addServer(const UID& serverId, const StorageMetadataType& m
 	//           << teamCollection->isPrimary() << std::endl;
 	ASSERT(!pq_handles.count(serverId));
 	pq_handles[serverId] = wiggle_pq.emplace(metadata, serverId);
-	pqCanCheck.trigger();
 }
 
 void StorageWiggler::removeServer(const UID& serverId) {
@@ -1442,16 +1440,18 @@ TEST_CASE("/DataDistribution/StorageWiggler/MinAge") {
 	ASSERT(wiggler.getNextServerId() == UID(1, 0));
 
 	std::cout << "Test onCheck() after addServer() ...\n";
+	t = now();
 	state Future<Void> canCheck = wiggler.onCheck();
 	ASSERT(!canCheck.isReady());
 	wiggler.addServer(
 	    UID(5, 0),
 	    StorageMetadataType(now() + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC, KeyValueStoreType::SSD_BTREE_V2));
-	ASSERT(canCheck.isReady());
+	wait(canCheck);
+	std::cout << "After " << now() - t << " s\n";
+	ASSERT(now() - t > StorageWiggler::MIN_ON_CHECK_DELAY_SEC - 0.1);
 	ASSERT(!wiggler.getNextServerId().present());
 
-	std::cout << "Test onCheck() after update...\n";
-	canCheck = wiggler.onCheck();
+	std::cout << "Test after update...\n";
 	StorageWiggler* ptr = &wiggler;
 	wait(trigger(
 	    [ptr]() {
@@ -1461,7 +1461,6 @@ TEST_CASE("/DataDistribution/StorageWiggler/MinAge") {
 	    },
 	    delay(5.0)));
 
-	ASSERT(canCheck.isReady());
 	ASSERT(wiggler.getNextServerId() == UID(5, 0));
 	return Void();
 }
