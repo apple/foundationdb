@@ -1411,6 +1411,42 @@ TEST_CASE("/DataDistribution/StorageWiggler/Order") {
 	return Void();
 }
 
+TEST_CASE("/DataDistribution/StorageWiggler/MinAge") {
+	state StorageWiggler wiggler(nullptr);
+	wiggler.addServer(
+	    UID(1, 0),
+	    StorageMetadataType(now() + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC, KeyValueStoreType::SSD_BTREE_V2));
+	wiggler.addServer(
+	    UID(2, 0),
+	    StorageMetadataType(now() + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC, KeyValueStoreType::MEMORY, true));
+	wiggler.addServer(UID(3, 0), StorageMetadataType(now() - 5.0, KeyValueStoreType::SSD_ROCKSDB_V1, true));
+	wiggler.addServer(UID(4, 0),
+	                  StorageMetadataType(now() - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC - 1,
+	                                      KeyValueStoreType::SSD_BTREE_V2));
+	std::vector<Optional<UID>> correctResult{ UID(3, 0), UID(2, 0), UID(4, 0), Optional<UID>() };
+	for (int i = 0; i < 4; ++i) {
+		auto id = wiggler.getNextServerId();
+		ASSERT(id == correctResult[i]);
+	}
+	std::cout << "Finish Initial Check. Wait updating...\n";
+	state double t = now();
+	state Future<Void> canCheck = wiggler.onCheck();
+	ASSERT(!canCheck.isReady());
+	StorageWiggler* ptr = &wiggler;
+	Future<Void> update = trigger(
+	    [ptr]() {
+		    ptr->updateMetadata(UID(1, 0),
+		                        StorageMetadataType(now() - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC,
+		                                            KeyValueStoreType::SSD_BTREE_V2));
+	    },
+	    delay(5.0));
+	wait(update);
+	ASSERT(canCheck.isReady());
+	ASSERT(wiggler.getNextServerId() == UID(1, 0));
+
+	return Void();
+}
+
 TEST_CASE("/DataDistribution/Initialization/ResumeFromShard") {
 	state Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	state Reference<DataDistributor> self(new DataDistributor(dbInfo, UID()));
