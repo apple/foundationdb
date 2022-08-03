@@ -1,5 +1,5 @@
 /*
- * EncryptionUtil.cpp
+ * EncryptionOpUtils.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-// This file implements the functions defined in EncryptionUtil.h
+// This file implements the functions defined in EncryptionOpUtils.h
 
 #include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/Knobs.h"
@@ -34,7 +34,9 @@ bool isEncryptionOpSupported(EncryptOperationType operation_type, ClientDBInfo i
 	if (operation_type == TLOG_ENCRYPTION) {
 		return SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION;
 	} else if (operation_type == BLOB_GRANULE_ENCRYPTION) {
-		return SERVER_KNOBS->ENABLE_BLOB_GRANULE_ENCRYPTION && SERVER_KNOBS->BG_RANGE_SOURCE == "tenant";
+		bool supported = SERVER_KNOBS->ENABLE_BLOB_GRANULE_ENCRYPTION && SERVER_KNOBS->BG_RANGE_SOURCE == "tenant";
+		ASSERT((supported && SERVER_KNOBS->ENABLE_ENCRYPTION) || !supported);
+		return supported;
 	} else {
 		// TODO (Nim): Add once storage server encryption knob is created
 		return false;
