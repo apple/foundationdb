@@ -1343,8 +1343,7 @@ struct DeleteTenantImpl {
 		// If pair is present, and this is not already a pair check, call this function recursively
 		state Future<Void> pairFuture = Void();
 		if (!checkPair && self->pairName.present()) {
-			pairFuture = self->ctx.runDataClusterTransaction(
-			    [self = self](Reference<ITransaction> tr) { return checkTenantEmpty(self, tr, true); });
+			pairFuture = checkTenantEmpty(self, tr, true);
 		}
 		state Optional<TenantMapEntry> tenantEntry =
 		    wait(TenantAPI::tryGetTenantTransaction(tr, checkPair ? self->pairName.get() : self->tenantName));
@@ -1404,9 +1403,7 @@ struct DeleteTenantImpl {
 		state Future<Void> pairFuture = Void();
 		if (!pairDelete && self->pairName.present()) {
 			CODE_PROBE(true, "deleting pair tenant from management cluster");
-			pairFuture = self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
-				return deleteTenantFromManagementCluster(self, tr, true);
-			});
+			pairFuture = deleteTenantFromManagementCluster(self, tr, true);
 		}
 		state TenantName tenantName = pairDelete ? self->pairName.get() : self->tenantName;
 		state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, tenantName));
@@ -1733,7 +1730,6 @@ struct RenameTenantImpl {
 			CODE_PROBE(true, "Metacluster rename old name not found");
 			throw tenant_not_found();
 		}
-		state bool canContinue = true;
 		// If the new entry is present, we can only continue if this a retry of the same rename
 		// To check this, verify both entries are in the correct state
 		// and have each other as pairs
@@ -1754,12 +1750,10 @@ struct RenameTenantImpl {
 				self->tenantId = oldTenantEntry.get().id;
 			}
 			wait(self->ctx.setCluster(tr, oldTenantEntry.get().assignedCluster.get()));
-			canContinue = oldTenantEntry.get().tenantState == TenantState::READY;
-		}
-
-		if (!canContinue) {
-			CODE_PROBE(true, "Metacluster unable to proceed with rename operation");
-			throw invalid_tenant_state();
+			if (oldTenantEntry.get().tenantState != TenantState::READY) {
+				CODE_PROBE(true, "Metacluster unable to proceed with rename operation");
+				throw invalid_tenant_state();
+			}
 		}
 
 		if (oldTenantEntry.get().id != self->tenantId) {
