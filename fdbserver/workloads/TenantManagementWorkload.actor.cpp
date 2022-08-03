@@ -173,7 +173,7 @@ struct TenantManagementWorkload : TestWorkload {
 				entry.setId(nextId++);
 				createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, tenant, entry)));
 			}
-			TenantMetadata::lastTenantId.set(tr, nextId - 1);
+			TenantMetadata::lastTenantId().set(tr, nextId - 1);
 			wait(waitForAll(createFutures));
 			wait(tr->commit());
 		}
@@ -235,7 +235,7 @@ struct TenantManagementWorkload : TestWorkload {
 			try {
 				if (operationType != OperationType::MANAGEMENT_DATABASE) {
 					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					wait(store(finalTenantCount, TenantMetadata::tenantCount.getD(tr, Snapshot::False, 0)));
+					wait(store(finalTenantCount, TenantMetadata::tenantCount().getD(tr, Snapshot::False, 0)));
 					minTenantCount = std::min(finalTenantCount, minTenantCount);
 				}
 
@@ -1103,9 +1103,9 @@ struct TenantManagementWorkload : TestWorkload {
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				state int64_t tenantCount = wait(TenantMetadata::tenantCount.getD(tr, Snapshot::False, 0));
+				state int64_t tenantCount = wait(TenantMetadata::tenantCount().getD(tr, Snapshot::False, 0));
 				KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenants =
-				    wait(TenantMetadata::tenantMap.getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
+				    wait(TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 
 				ASSERT(tenants.results.size() == tenantCount && !tenants.more);
 				ASSERT(tenantCount <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
@@ -1165,10 +1165,10 @@ struct TenantManagementWorkload : TestWorkload {
 		KeyBackedSet<Tuple>::RangeResultType tenants =
 		    wait(runTransaction(db, [tenantGroupRef, expectedCountRef](Reference<typename DB::TransactionT> tr) {
 			    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			    return TenantMetadata::tenantGroupTenantIndex.getRange(tr,
-			                                                           Tuple::makeTuple(tenantGroupRef),
-			                                                           Tuple::makeTuple(keyAfter(tenantGroupRef)),
-			                                                           expectedCountRef + 1);
+			    return TenantMetadata::tenantGroupTenantIndex().getRange(tr,
+			                                                             Tuple::makeTuple(tenantGroupRef),
+			                                                             Tuple::makeTuple(keyAfter(tenantGroupRef)),
+			                                                             expectedCountRef + 1);
 		    }));
 
 		ASSERT(tenants.results.size() == expectedCount && !tenants.more);
@@ -1191,7 +1191,7 @@ struct TenantManagementWorkload : TestWorkload {
 			KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> _tenantGroups = wait(runTransaction(
 			    cx.getReference(), [beginTenantGroupRef, endTenantGroupRef](Reference<ReadYourWritesTransaction> tr) {
 				    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				    return TenantMetadata::tenantGroupMap.getRange(tr, beginTenantGroupRef, endTenantGroupRef, 1000);
+				    return TenantMetadata::tenantGroupMap().getRange(tr, beginTenantGroupRef, endTenantGroupRef, 1000);
 			    }));
 			tenantGroups = _tenantGroups;
 

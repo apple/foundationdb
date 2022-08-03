@@ -137,7 +137,7 @@ private:
 	    std::map<TenantName, std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>> tenants,
 	    std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
 		state Future<int64_t> tenantCountFuture =
-		    TenantMetadata::tenantCount.getD(&ryw->getTransaction(), Snapshot::False, 0);
+		    TenantMetadata::tenantCount().getD(&ryw->getTransaction(), Snapshot::False, 0);
 		int64_t _nextId = wait(TenantAPI::getNextTenantId(&ryw->getTransaction()));
 		state int64_t nextId = _nextId;
 
@@ -146,7 +146,7 @@ private:
 			createFutures.push_back(createTenant(ryw, tenant, config, nextId++, tenantGroupNetTenantDelta));
 		}
 
-		TenantMetadata::lastTenantId.set(&ryw->getTransaction(), nextId - 1);
+		TenantMetadata::lastTenantId().set(&ryw->getTransaction(), nextId - 1);
 		wait(waitForAll(createFutures));
 
 		state int numCreatedTenants = 0;
@@ -240,14 +240,14 @@ private:
 		ASSERT(tenantDelta < 0);
 		state int removedTenants = -tenantDelta;
 		KeyBackedSet<Tuple>::RangeResultType tenantsInGroup =
-		    wait(TenantMetadata::tenantGroupTenantIndex.getRange(&ryw->getTransaction(),
-		                                                         Tuple::makeTuple(tenantGroup),
-		                                                         Tuple::makeTuple(keyAfter(tenantGroup)),
-		                                                         removedTenants + 1));
+		    wait(TenantMetadata::tenantGroupTenantIndex().getRange(&ryw->getTransaction(),
+		                                                           Tuple::makeTuple(tenantGroup),
+		                                                           Tuple::makeTuple(keyAfter(tenantGroup)),
+		                                                           removedTenants + 1));
 
 		ASSERT(tenantsInGroup.results.size() >= removedTenants);
 		if (tenantsInGroup.results.size() == removedTenants) {
-			TenantMetadata::tenantGroupMap.erase(&ryw->getTransaction(), tenantGroup);
+			TenantMetadata::tenantGroupMap().erase(&ryw->getTransaction(), tenantGroup);
 		}
 
 		return Void();

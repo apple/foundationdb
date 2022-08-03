@@ -214,7 +214,7 @@ public:
 		globals[id] = v;
 	}
 
-	ProtocolVersion protocolVersion() const override { return currentProtocolVersion; }
+	ProtocolVersion protocolVersion() const override { return currentProtocolVersion(); }
 
 	std::vector<flowGlobalType> globals;
 

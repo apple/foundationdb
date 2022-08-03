@@ -1035,7 +1035,7 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 ACTOR Future<Void> loadTenantMap(Reference<ReadYourWritesTransaction> tr, Reference<BlobManagerData> bmData) {
 	state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
 	wait(store(tenantResults,
-	           TenantMetadata::tenantMap.getRange(
+	           TenantMetadata::tenantMap().getRange(
 	               tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
 	ASSERT(tenantResults.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantResults.more);
 
@@ -1052,7 +1052,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 	state std::unordered_map<int64_t, TenantMapEntry> knownTenantCache;
 
 	if (SERVER_KNOBS->BG_RANGE_SOURCE == "tenant") {
-		changeKey = TenantMetadata::lastTenantId.key;
+		changeKey = TenantMetadata::lastTenantId().key;
 	} else if (SERVER_KNOBS->BG_RANGE_SOURCE == "blobRangeKeys") {
 		changeKey = blobRangeChangeKey;
 	} else {

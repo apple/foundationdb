@@ -8642,7 +8642,7 @@ Future<DatabaseSharedState*> DatabaseContext::initSharedState() {
 }
 
 void DatabaseContext::setSharedState(DatabaseSharedState* p) {
-	ASSERT(p->protocolVersion == currentProtocolVersion);
+	ASSERT(p->protocolVersion == currentProtocolVersion());
 	sharedStatePtr = p;
 	sharedStatePtr->refCount++;
 }

@@ -114,16 +114,16 @@ struct TenantMetadataSpecification {
 
 struct TenantMetadata {
 private:
-	static inline TenantMetadataSpecification instance = TenantMetadataSpecification("\xff/"_sr);
+	static TenantMetadataSpecification& instance();
 
 public:
-	static inline auto& tenantMap = instance.tenantMap;
-	static inline auto& lastTenantId = instance.lastTenantId;
-	static inline auto& tenantCount = instance.tenantCount;
-	static inline auto& tenantGroupTenantIndex = instance.tenantGroupTenantIndex;
-	static inline auto& tenantGroupMap = instance.tenantGroupMap;
+	static auto& tenantMap() { return instance().tenantMap; }
+	static auto& lastTenantId() { return instance().lastTenantId; }
+	static auto& tenantCount() { return instance().tenantCount; }
+	static auto& tenantGroupTenantIndex() { return instance().tenantGroupTenantIndex; }
+	static auto& tenantGroupMap() { return instance().tenantGroupMap; }
 
-	static inline Key tenantMapPrivatePrefix = "\xff"_sr.withSuffix(tenantMap.subspace.begin);
+	static Key tenantMapPrivatePrefix();
 };
 
 typedef VersionedMap<TenantName, TenantMapEntry> TenantMap;
