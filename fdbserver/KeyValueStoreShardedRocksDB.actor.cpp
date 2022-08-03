@@ -303,9 +303,6 @@ rocksdb::Options getOptions() {
 
 	// TODO: enable rocksdb metrics.
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
-	if (g_network->isSimulated()) {
-		options.OptimizeForSmallDb();
-	}
 	return options;
 }
 
