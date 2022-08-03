@@ -34,40 +34,6 @@
 #define deltatree_printf(...)
 #endif
 
-typedef uint64_t Word;
-// Get the number of prefix bytes that are the same between a and b, up to their common length of cl
-static inline int commonPrefixLength(uint8_t const* ap, uint8_t const* bp, int cl) {
-	int i = 0;
-	const int wordEnd = cl - sizeof(Word) + 1;
-
-	for (; i < wordEnd; i += sizeof(Word)) {
-		Word a = *(Word*)ap;
-		Word b = *(Word*)bp;
-		if (a != b) {
-			return i + ctzll(a ^ b) / 8;
-		}
-		ap += sizeof(Word);
-		bp += sizeof(Word);
-	}
-
-	for (; i < cl; i++) {
-		if (*ap != *bp) {
-			return i;
-		}
-		++ap;
-		++bp;
-	}
-	return cl;
-}
-
-static inline int commonPrefixLength(const StringRef& a, const StringRef& b) {
-	return commonPrefixLength(a.begin(), b.begin(), std::min(a.size(), b.size()));
-}
-
-static inline int commonPrefixLength(const StringRef& a, const StringRef& b, int skipLen) {
-	return commonPrefixLength(a.begin() + skipLen, b.begin() + skipLen, std::min(a.size(), b.size()) - skipLen);
-}
-
 // This appears to be the fastest version
 static int lessOrEqualPowerOfTwo(int n) {
 	int p;

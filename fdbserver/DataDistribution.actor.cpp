@@ -491,7 +491,7 @@ public:
 
 		for (; it != self->initData->dataMoveMap.ranges().end(); ++it) {
 			const DataMoveMetaData& meta = it.value()->meta;
-			if (it.value()->isCancelled() || (it.value()->valid && !CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
+			if (it.value()->isCancelled() || (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
 				RelocateShard rs(meta.range, DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 				rs.dataMoveId = meta.id;
 				rs.cancelled = true;
@@ -810,24 +810,6 @@ ACTOR Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stre
 			break;
 	}
 	return ErrorOr<Void>(Void());
-}
-
-ACTOR static Future<Void> waitForMost(std::vector<Future<ErrorOr<Void>>> futures,
-                                      int faultTolerance,
-                                      Error e,
-                                      double waitMultiplierForSlowFutures = 1.0) {
-	state std::vector<Future<bool>> successFutures;
-	state double startTime = now();
-	successFutures.reserve(futures.size());
-	for (const auto& future : futures) {
-		successFutures.push_back(fmap([](auto const& result) { return result.present(); }, future));
-	}
-	bool success = wait(quorumEqualsTrue(successFutures, successFutures.size() - faultTolerance));
-	if (!success) {
-		throw e;
-	}
-	wait(delay((now() - startTime) * waitMultiplierForSlowFutures) || waitForAll(successFutures));
-	return Void();
 }
 
 ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getStatefulWorkers(
@@ -1389,14 +1371,6 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 
 namespace data_distribution_test {
 
-static Future<ErrorOr<Void>> goodTestFuture(double duration) {
-	return tag(delay(duration), ErrorOr<Void>(Void()));
-}
-
-static Future<ErrorOr<Void>> badTestFuture(double duration, Error e) {
-	return tag(delay(duration), ErrorOr<Void>(e));
-}
-
 inline DDShardInfo doubleToNoLocationShardInfo(double d, bool hasDest) {
 	DDShardInfo res(doubleToTestKey(d), anonymousShardId, anonymousShardId);
 	res.primarySrc.emplace_back((uint64_t)d, 0);
@@ -1409,50 +1383,7 @@ inline DDShardInfo doubleToNoLocationShardInfo(double d, bool hasDest) {
 
 } // namespace data_distribution_test
 
-TEST_CASE("/DataDistribution/WaitForMost") {
-	state std::vector<Future<ErrorOr<Void>>> futures;
-	{
-		futures = { data_distribution_test::goodTestFuture(1),
-			        data_distribution_test::goodTestFuture(2),
-			        data_distribution_test::goodTestFuture(3) };
-		wait(waitForMost(futures, 1, operation_failed(), 0.0)); // Don't wait for slowest future
-		ASSERT(!futures[2].isReady());
-	}
-	{
-		futures = { data_distribution_test::goodTestFuture(1),
-			        data_distribution_test::goodTestFuture(2),
-			        data_distribution_test::goodTestFuture(3) };
-		wait(waitForMost(futures, 0, operation_failed(), 0.0)); // Wait for all futures
-		ASSERT(futures[2].isReady());
-	}
-	{
-		futures = { data_distribution_test::goodTestFuture(1),
-			        data_distribution_test::goodTestFuture(2),
-			        data_distribution_test::goodTestFuture(3) };
-		wait(waitForMost(futures, 1, operation_failed(), 1.0)); // Wait for slowest future
-		ASSERT(futures[2].isReady());
-	}
-	{
-		futures = { data_distribution_test::goodTestFuture(1),
-			        data_distribution_test::goodTestFuture(2),
-			        data_distribution_test::badTestFuture(1, success()) };
-		wait(waitForMost(futures, 1, operation_failed(), 1.0)); // Error ignored
-	}
-	{
-		futures = { data_distribution_test::goodTestFuture(1),
-			        data_distribution_test::goodTestFuture(2),
-			        data_distribution_test::badTestFuture(1, success()) };
-		try {
-			wait(waitForMost(futures, 0, operation_failed(), 1.0));
-			ASSERT(false);
-		} catch (Error& e) {
-			ASSERT_EQ(e.code(), error_code_operation_failed);
-		}
-	}
-	return Void();
-}
-
-TEST_CASE("/DataDistributor/StorageWiggler/Order") {
+TEST_CASE("/DataDistribution/StorageWiggler/Order") {
 	StorageWiggler wiggler(nullptr);
 	wiggler.addServer(UID(1, 0), StorageMetadataType(1, KeyValueStoreType::SSD_BTREE_V2));
 	wiggler.addServer(UID(2, 0), StorageMetadataType(2, KeyValueStoreType::MEMORY, true));
@@ -1469,7 +1400,7 @@ TEST_CASE("/DataDistributor/StorageWiggler/Order") {
 	return Void();
 }
 
-TEST_CASE("/DataDistributor/Initialization/ResumeFromShard") {
+TEST_CASE("/DataDistribution/Initialization/ResumeFromShard") {
 	state Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	state Reference<DataDistributor> self(new DataDistributor(dbInfo, UID()));
 

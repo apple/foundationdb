@@ -31,9 +31,12 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"
+
 #include "fdbserver/ServerDBInfo.h"
-#include "flow/actorcompiler.h" // has to be last include
+
 #include "flow/flow.h"
+
+#include "flow/actorcompiler.h" // has to be last include
 
 struct GranuleHistory {
 	KeyRange range;
