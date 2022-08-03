@@ -125,7 +125,7 @@ public:
 
 class GetGenerationQuorum {
 	ActorCollection actors{ false };
-	size_t coordinatorsHash;
+	size_t coordinatorsHash{ 0 };
 	std::vector<ConfigTransactionInterface> ctis;
 	std::map<ConfigGeneration, std::vector<ConfigTransactionInterface>> seenGenerations;
 	Promise<ConfigGeneration> result;
@@ -267,7 +267,7 @@ public:
 };
 
 class PaxosConfigTransactionImpl {
-	size_t coordinatorsHash;
+	size_t coordinatorsHash{ 0 };
 	std::vector<ConfigTransactionInterface> ctis;
 	GetGenerationQuorum getGenerationQuorum;
 	CommitQuorum commitQuorum;

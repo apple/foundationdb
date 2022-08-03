@@ -232,7 +232,7 @@ class LocalConfigEnvironment {
 	Future<Void> addMutation(Optional<KeyRef> configClass, KeyRef knobName, Optional<KnobValueRef> value) {
 		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
 		appendVersionedMutation(versionedMutations, ++lastWrittenVersion, configClass, knobName, value);
-		return readFrom.getMutableLocalConfiguration().addChanges(versionedMutations, lastWrittenVersion);
+		return readFrom.getMutableLocalConfiguration().addChanges(versionedMutations, lastWrittenVersion, 0);
 	}
 
 public:
