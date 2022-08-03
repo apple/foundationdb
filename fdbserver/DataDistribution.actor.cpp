@@ -38,7 +38,6 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/StorageQuota.actor.h"
 #include "fdbserver/TenantCache.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WaitFailure.h"
@@ -318,6 +317,8 @@ public:
 	// relocationConsumer (by DDQueue)
 	PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
 
+	StorageQuotaInfo storageQuotaInfo;
+
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id)
 	  : dbInfo(db), ddId(id), txnProcessor(nullptr), initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
 	    movingDataEventHolder(makeReference<EventCacheHolder>("MovingData")),
@@ -537,6 +538,27 @@ public:
 	}
 };
 
+ACTOR Future<Void> storageQuotaTracker(Database cx, StorageQuotaInfo* storageQuotaInfo) {
+	loop {
+		state Transaction tr(cx);
+		loop {
+			try {
+				state RangeResult currentQuotas = wait(tr.getRange(storageQuotaKeys, CLIENT_KNOBS->TOO_MANY));
+				TraceEvent("StorageQuota_ReadCurrentQuotas").detail("Size", currentQuotas.size());
+				for (auto const kv : currentQuotas) {
+					Key const key = kv.key.removePrefix(storageQuotaPrefix);
+					uint64_t const quota = BinaryReader::fromStringRef<uint64_t>(kv.value, Unversioned());
+					storageQuotaInfo->quotaMap[key] = quota;
+				}
+				wait(delay(5.0));
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+}
+
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList,
@@ -647,8 +669,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
 
-			actors.push_back(
-			    reportErrorsExcept(storageQuotaTracker(cx), "StorageQuotaTracker", self->ddId, &normalDDQueueErrors()));
+			actors.push_back(reportErrorsExcept(storageQuotaTracker(cx, &self->storageQuotaInfo),
+			                                    "StorageQuotaTracker",
+			                                    self->ddId,
+			                                    &normalDDQueueErrors()));
 
 			std::vector<DDTeamCollection*> teamCollectionsPtrs;
 			primaryTeamCollection = makeReference<DDTeamCollection>(
