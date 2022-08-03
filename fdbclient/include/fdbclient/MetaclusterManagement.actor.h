@@ -1363,8 +1363,6 @@ struct DeleteTenantImpl {
 			TenantMapEntry updatedEntry = tenantEntry.get();
 			updatedEntry.tenantState = TenantState::REMOVING;
 			ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->tenantName, updatedEntry);
-			Optional<TenantMapEntry> entryCheck =
-			    wait(ManagementClusterMetadata::tenantMetadata.tenantMap.get(tr, self->tenantName));
 		}
 
 		return Void();
