@@ -302,10 +302,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 				auto accountName = u.eat("/"_sr).toString();
 				auto containerName = u.eat("/"_sr).toString();
 				r = makeReference<BackupContainerAzureBlobStore>(
-				    address.toString(),
-				    accountName,
-				    containerName,
-				    encryptionKeyFileName);
+				    address.toString(), accountName, containerName, encryptionKeyFileName);
 			}
 		}
 #endif

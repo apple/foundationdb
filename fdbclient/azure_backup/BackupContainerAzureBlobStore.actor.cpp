@@ -331,8 +331,7 @@ BackupContainerAzureBlobStore::BackupContainerAzureBlobStore(const std::string& 
 		if (resolvedAddr.present()) {
 			address = resolvedAddr.get();
 			address.get().fromHostname = false;
-		}
-		else
+		} else
 			throw backup_invalid_url();
 	}
 	std::string resolvedAddr = address.get().toString();

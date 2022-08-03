@@ -1537,10 +1537,7 @@ Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
 				auto accountName = u.eat("/"_sr).toString();
 				auto containerName = u.eat("/"_sr).toString();
 				r = makeReference<BackupContainerAzureBlobStore>(
-				    address.toString(),
-				    accountName,
-				    containerName,
-				    encryptionKeyFileName);
+				    address.toString(), accountName, containerName, encryptionKeyFileName);
 			}
 		}
 #endif
