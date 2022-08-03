@@ -268,17 +268,13 @@ struct MetaclusterOperationContext {
 						    store(self->dataClusterDb, openDatabase(self->dataClusterMetadata.get().connectionString)));
 					}
 				}
-				TraceEvent("Breakpoint2.8");
 
 				state decltype(std::declval<Function>()(Reference<typename DB::TransactionT>()).getValue()) result =
 				    wait(func(tr));
-				TraceEvent("Breakpoint2.9");
 
 				wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
-				TraceEvent("Breakpoint2.10");
 				return result;
 			} catch (Error& e) {
-				TraceEvent("BreakpointError").error(e);
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
 		}
@@ -1341,8 +1337,17 @@ struct DeleteTenantImpl {
 	// point.
 	//
 	// SOMEDAY: should this also lock the tenant when locking is supported?
-	ACTOR static Future<Void> checkTenantEmpty(DeleteTenantImpl* self, Reference<ITransaction> tr) {
-		state Optional<TenantMapEntry> tenantEntry = wait(TenantAPI::tryGetTenantTransaction(tr, self->tenantName));
+	ACTOR static Future<Void> checkTenantEmpty(DeleteTenantImpl* self,
+	                                           Reference<ITransaction> tr,
+	                                           bool checkPair = false) {
+		// If pair is present, and this is not already a pair check, call this function recursively
+		state Future<Void> pairFuture = Void();
+		if (!checkPair && self->pairName.present()) {
+			pairFuture = self->ctx.runDataClusterTransaction(
+			    [self = self](Reference<ITransaction> tr) { return checkTenantEmpty(self, tr, true); });
+		}
+		state Optional<TenantMapEntry> tenantEntry =
+		    wait(TenantAPI::tryGetTenantTransaction(tr, checkPair ? self->pairName.get() : self->tenantName));
 		if (!tenantEntry.present() || tenantEntry.get().id != self->tenantId) {
 			// The tenant must have been removed simultaneously
 			return Void();
@@ -1354,6 +1359,7 @@ struct DeleteTenantImpl {
 			throw tenant_not_empty();
 		}
 
+		wait(pairFuture);
 		return Void();
 	}
 
@@ -1379,6 +1385,7 @@ struct DeleteTenantImpl {
 				// Sanity check that our pair has us named as their partner
 				ASSERT(updatedPairEntry.renamePair.present());
 				ASSERT(updatedPairEntry.renamePair.get() == self->tenantName);
+				ASSERT(updatedPairEntry.id == self->tenantId);
 				updatedPairEntry.tenantState = TenantState::REMOVING;
 				ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->pairName.get(), updatedPairEntry);
 			}
@@ -1393,6 +1400,14 @@ struct DeleteTenantImpl {
 	ACTOR static Future<Void> deleteTenantFromManagementCluster(DeleteTenantImpl* self,
 	                                                            Reference<typename DB::TransactionT> tr,
 	                                                            bool pairDelete = false) {
+		// If pair is present, and this is not already a pair delete, call this function recursively
+		state Future<Void> pairFuture = Void();
+		if (!pairDelete && self->pairName.present()) {
+			CODE_PROBE(true, "deleting pair tenant from management cluster");
+			pairFuture = self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+				return deleteTenantFromManagementCluster(self, tr, true);
+			});
+		}
 		state TenantName tenantName = pairDelete ? self->pairName.get() : self->tenantName;
 		state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, tenantName));
 
@@ -1420,15 +1435,8 @@ struct DeleteTenantImpl {
 		// Remove the tenant from its tenant group
 		wait(managementClusterRemoveTenantFromGroup(
 		    tr, self->tenantName, tenantEntry.get(), &self->ctx.dataClusterMetadata.get()));
-		
-		// If pair is present, and this is not already a pair delete, call this function recursively
-		if (!pairDelete && self->pairName.present()) {
-			CODE_PROBE(true, "deleting pair tenant from management cluster");
-			wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
-				return deleteTenantFromManagementCluster(self, tr, true);
-			}));
-		}
 
+		wait(pairFuture);
 		return Void();
 	}
 
@@ -1448,25 +1456,22 @@ struct DeleteTenantImpl {
 
 		// Delete tenant on the data cluster
 		wait(self->ctx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
+			// Call delete on pair if it exists. This is necessary with the following sequence:
+			// 1. Rename marked on management cluster (RENAMING_FROM & RENAMING_TO, foo & bar)
+			// 2. Rename on data cluster (foo->bar)
+			// 3. Delete marked on management cluster (delete foo, foo & bar now in REMOVING state)
+			// 4. Delete foo (above) on data cluster should have no effect. Delete bar here.
+			// In all cases, only one of delete foo or delete bar should have any effect because
+			// of the existence check in deleteTenantTransaction.
+			// However, this may cause duplication of tombstone code. Is that going to behave properly?
+			if (self->pairName.present()) {
+				CODE_PROBE(true, "deleting pair tenant from data cluster");
+				TenantAPI::deleteTenantTransaction(
+				    tr, self->pairName.get(), self->tenantId, ClusterType::METACLUSTER_DATA);
+			}
 			return TenantAPI::deleteTenantTransaction(
 			    tr, self->tenantName, self->tenantId, ClusterType::METACLUSTER_DATA);
 		}));
-
-		// Call delete on pair if it exists. This is necessary with the following sequence:
-		// 1. Rename marked on management cluster (RENAMING_FROM & RENAMING_TO, foo & bar)
-		// 2. Rename on data cluster (foo->bar)
-		// 3. Delete marked on management cluster (delete foo, foo & bar now in REMOVING state)
-		// 4. Delete foo (above) on data cluster should have no effect. Delete bar here.
-		// In all cases, only one of delete foo or delete bar should have any effect because
-		// of the existence check in deleteTenantTransaction.
-		// However, this may cause duplication of tombstone code. Is that going to behave properly?
-		if (self->pairName.present()) {
-			CODE_PROBE(true, "deleting pair tenant from data cluster");
-			wait(self->ctx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
-				return TenantAPI::deleteTenantTransaction(
-				    tr, self->pairName.get(), self->tenantId, ClusterType::METACLUSTER_DATA);
-			}));
-		}
 
 		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return deleteTenantFromManagementCluster(self, tr);
@@ -1696,30 +1701,22 @@ struct RenameTenantImpl {
 
 	// Delete the tenant and related metadata on the management cluster
 	ACTOR static Future<Void> deleteTenantFromManagementCluster(RenameTenantImpl* self,
-	                                                            Reference<typename DB::TransactionT> tr) {
-		state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->oldName));
-
-		if (!tenantEntry.present() || tenantEntry.get().id != self->tenantId) {
-			return Void();
-		}
-
+	                                                            Reference<typename DB::TransactionT> tr,
+	                                                            TenantMapEntry tenantEntry) {
 		// Erase the tenant entry itself
 		ManagementClusterMetadata::tenantMetadata.tenantMap.erase(tr, self->oldName);
 
 		// Unlike DeleteTenantImpl, we do not decrement the tenant count because a rename should
 		// preserve the total number of tenants.
 
-		// Clean up cluster based tenant indices and remove the tenant group if it is empty
-		state DataClusterMetadata clusterMetadata =
-		    wait(getClusterTransaction(tr, tenantEntry.get().assignedCluster.get()));
-
+		// Clean up cluster based tenant indices and remove the old entry from its tenant group
 		// Remove the tenant from the cluster -> tenant index
 		ManagementClusterMetadata::clusterTenantIndex.erase(
-		    tr, Tuple::makeTuple(tenantEntry.get().assignedCluster.get(), self->oldName));
+		    tr, Tuple::makeTuple(tenantEntry.assignedCluster.get(), self->oldName));
 
 		// Remove the tenant from its tenant group
 		wait(managementClusterRemoveTenantFromGroup(
-		    tr, self->oldName, tenantEntry.get(), &self->ctx.dataClusterMetadata.get()));
+		    tr, self->oldName, tenantEntry, &self->ctx.dataClusterMetadata.get()));
 
 		return Void();
 	}
@@ -1744,6 +1741,7 @@ struct RenameTenantImpl {
 			    oldTenantEntry.get().tenantState == TenantState::RENAMING_FROM &&
 			    newTenantEntry.get().renamePair.present() && newTenantEntry.get().renamePair.get() == self->oldName &&
 			    oldTenantEntry.get().renamePair.present() && oldTenantEntry.get().renamePair.get() == self->newName) {
+				wait(self->ctx.setCluster(tr, oldTenantEntry.get().assignedCluster.get()));
 				CODE_PROBE(true, "Metacluster rename retry in progress");
 				return true;
 			} else {
@@ -1793,37 +1791,16 @@ struct RenameTenantImpl {
 				CODE_PROBE(true, "Metacluster rename tenants already marked in renaming state");
 				return Void();
 			} else {
-				TraceEvent("MarkTenantRenames")
-				    .detail("NewState", TenantMapEntry::tenantStateToString(newTenantEntry.get().tenantState))
-				    .detail("OldState", TenantMapEntry::tenantStateToString(oldTenantEntry.get().tenantState))
-				    .detail("NewEntryName", self->newName)
-				    .detail("NewEntryPair",
-				            newTenantEntry.get().renamePair.present() ? newTenantEntry.get().renamePair.get()
-				                                                      : "None"_sr)
-				    .detail("OldEntryName", self->oldName)
-				    .detail("OldEntryPair",
-				            oldTenantEntry.get().renamePair.present() ? oldTenantEntry.get().renamePair.get()
-				                                                      : "None"_sr);
 				CODE_PROBE(true, "Metacluster rename entries in wrong state");
 				throw invalid_tenant_state();
 			}
 		}
 		TenantMapEntry updatedOldEntry = oldTenantEntry.get();
 		TenantMapEntry updatedNewEntry(updatedOldEntry);
-		// this gets marked
 		updatedOldEntry.tenantState = TenantState::RENAMING_FROM;
 		updatedNewEntry.tenantState = TenantState::RENAMING_TO;
-		// but this doesn't. Why?
 		updatedOldEntry.renamePair = self->newName;
 		updatedNewEntry.renamePair = self->oldName;
-		TraceEvent("MarkTenantRenamesSanityCheck")
-		    .detail("NewState", TenantMapEntry::tenantStateToString(updatedNewEntry.tenantState))
-		    .detail("OldState", TenantMapEntry::tenantStateToString(updatedOldEntry.tenantState))
-		    .detail("NewEntryName", self->newName)
-		    .detail("NewEntryPair", updatedNewEntry.renamePair.present() ? updatedNewEntry.renamePair.get() : "None"_sr)
-		    .detail("OldEntryName", self->oldName)
-		    .detail("OldEntryPair",
-		            updatedOldEntry.renamePair.present() ? updatedOldEntry.renamePair.get() : "None"_sr);
 
 		ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->oldName, updatedOldEntry);
 		ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->newName, updatedNewEntry);
@@ -1841,11 +1818,15 @@ struct RenameTenantImpl {
 		// Possible for the new entry to also have been tampered with,
 		// so it may or may not be present with or without the same id, which are all
 		// legal states. Assume the rename completed properly in this case
-		if (!oldTenantEntry.present() || oldTenantEntry.get().id != self->tenantId || !newTenantEntry.present() ||
-		    newTenantEntry.get().id != self->tenantId) {
+		if (!oldTenantEntry.present() || oldTenantEntry.get().id != self->tenantId) {
 			CODE_PROBE(true, "Metacluster finished rename with missing entries or mismatched id");
 			return Void();
 		}
+		if (oldTenantEntry.get().tenantState == TenantState::REMOVING) {
+			throw tenant_removed();
+		}
+		ASSERT(newTenantEntry.present());
+		ASSERT(newTenantEntry.get().id == self->tenantId);
 
 		TenantMapEntry updatedOldEntry = oldTenantEntry.get();
 		TenantMapEntry updatedNewEntry = newTenantEntry.get();
@@ -1866,22 +1847,21 @@ struct RenameTenantImpl {
 
 		// We will remove the old entry from the management cluster
 		// This should still be the same old entry since the tenantId matches from the check above.
-		wait(deleteTenantFromManagementCluster(self, tr));
+		wait(deleteTenantFromManagementCluster(self, tr, updatedOldEntry));
 		return Void();
 	}
 
 	ACTOR static Future<Void> run(RenameTenantImpl* self) {
-		// Get information about tenant's current state
-		// If not in READY state, reject the rename
-		bool canRename = wait(self->ctx.runManagementTransaction(
-		    [self = self](Reference<typename DB::TransactionT> tr) { return getAssignedLocation(self, tr); }));
-		if (!canRename) {
-			CODE_PROBE(true, "Metacluster unable to proceed with rename operation");
-			return Void();
-		}
-		wait(self->ctx.runManagementTransaction(
-		    [self = self](Reference<typename DB::TransactionT> tr) { return markTenantsInRenamingState(self, tr); }));
-		CODE_PROBE(true, "Metacluster marked tenants in renaming state");
+		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+			// Get information about tenant's current state
+			// If not in READY state, reject the rename
+			bool canRename = wait(getAssignedLocation(self, tr));
+			if (!canRename) {
+				CODE_PROBE(true, "Metacluster unable to proceed with rename operation");
+				throw invalid_tenant_state();
+			}
+			return markTenantsInRenamingState(self, tr);
+		}));
 
 		// Rename tenant on the data cluster
 		wait(self->ctx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {

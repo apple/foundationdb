@@ -51,7 +51,7 @@ typedef Standalone<TenantGroupNameRef> TenantGroupName;
 //
 // If an operation fails and the tenant is left in a non-ready state, re-running the same operation is legal. If
 // successful, the tenant will return to the READY state.
-enum class TenantState { REGISTERING, READY, RENAMING_FROM, RENAMING_TO, REMOVING, UPDATING_CONFIGURATION, ERROR };
+enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, RENAMING_FROM, RENAMING_TO, ERROR };
 
 // Represents the lock state the tenant could be in.
 // Can be used in conjunction with the other tenant states above.

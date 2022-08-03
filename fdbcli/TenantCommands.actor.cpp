@@ -513,6 +513,7 @@ ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 				wait(MetaclusterAPI::renameTenant(db, tokens[1], tokens[2]));

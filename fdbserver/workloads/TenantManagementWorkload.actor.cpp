@@ -1203,12 +1203,8 @@ struct TenantManagementWorkload : TestWorkload {
 			try {
 				wait(renameImpl(tr, operationType, tenantRenames, tenantNotFound, tenantExists, tenantOverlap, self));
 				wait(verifyTenantRenames(self, tenantRenames));
-				// TraceEvent("RenameTenantPreAssert")
-				// 	.detail("TenantRenames", describe(tenantRenames))
-				// 	.detail("OperationType", operationType)
-				// 	.detail("UseMetacluster", self->useMetacluster);
-				// // Check that using the wrong deletion type fails depending on whether we are using a metacluster
-				// ASSERT(self->useMetacluster == (operationType == OperationType::METACLUSTER));
+				// Check that using the wrong deletion type fails depending on whether we are using a metacluster
+				ASSERT(self->useMetacluster == (operationType == OperationType::METACLUSTER));
 				TraceEvent("RenameTenantSuccessful").detail("TenantRenames", describe(tenantRenames));
 				return Void();
 			} catch (Error& e) {

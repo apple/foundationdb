@@ -489,12 +489,13 @@ Future<Void> renameTenantTransaction(Transaction tr,
                                      ClusterType clusterType = ClusterType::STANDALONE) {
 	ASSERT(clusterType == ClusterType::STANDALONE || tenantId.present());
 	ASSERT(clusterType != ClusterType::METACLUSTER_MANAGEMENT);
+	wait(checkTenantMode(tr, clusterType));
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	state Optional<TenantMapEntry> oldEntry;
 	state Optional<TenantMapEntry> newEntry;
 	wait(store(oldEntry, tryGetTenantTransaction(tr, oldName)) &&
 	     store(newEntry, tryGetTenantTransaction(tr, newName)));
-	if (!oldEntry.present()) {
+	if (!oldEntry.present() || (tenantId.present() && tenantId.get() != oldEntry.get().id)) {
 		throw tenant_not_found();
 	}
 	if (newEntry.present()) {
