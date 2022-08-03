@@ -296,7 +296,7 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
                                               FlowLock* cleanUpDataMoveParallelismLock,
                                               UID dataMoveId,
                                               const DDEnabledState* ddEnabledState) {
-	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	TraceEvent(SevInfo, "CleanUpSingleShardDataMoveBegin", dataMoveId).detail("Range", keys);
 
 	loop {
@@ -1226,7 +1226,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
                                           UID relocationIntervalId,
                                           const DDEnabledState* ddEnabledState,
                                           CancelConflictingDataMoves cancelConflictingDataMoves) {
-	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	state Future<Void> warningLogger = logWarningAfter("StartMoveShardsTooLong", 600, servers);
 
 	wait(startMoveKeysLock->take(TaskPriority::DataDistributionLaunch));
@@ -1561,7 +1561,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
                                            UID relocationIntervalId,
                                            std::map<UID, StorageServerInterface> tssMapping,
                                            const DDEnabledState* ddEnabledState) {
-	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	state KeyRange keys = targetKeys;
 	state Future<Void> warningLogger = logWarningAfter("FinishMoveShardsTooLong", 600, destinationTeam);
 	state int retries = 0;
@@ -2225,7 +2225,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						const UID shardId = newShardId(deterministicRandom()->randomUInt64(), AssignEmptyRange::True);
 
 						// Assign the shard to teamForDroppedRange in keyServer space.
-						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 							tr.set(keyServersKey(it.key), keyServersValue(teamForDroppedRange, {}, shardId, UID()));
 						} else {
 							tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, teamForDroppedRange));
@@ -2242,7 +2242,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						// Assign the shard to the new team as an empty range.
 						// Note, there could be data loss.
 						for (const UID& id : teamForDroppedRange) {
-							if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+							if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 								actors.push_back(krmSetRangeCoalescing(
 								    &tr, serverKeysPrefixFor(id), range, allKeys, serverKeysValue(shardId)));
 							} else {
@@ -2462,7 +2462,7 @@ ACTOR Future<Void> moveKeys(Database cx,
 
 	state std::map<UID, StorageServerInterface> tssMapping;
 
-	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		wait(startMoveShards(cx,
 		                     dataMoveId,
 		                     keys,
@@ -2487,7 +2487,7 @@ ACTOR Future<Void> moveKeys(Database cx,
 	state Future<Void> completionSignaller =
 	    checkFetchingState(cx, healthyDestinations, keys, dataMovementComplete, relocationIntervalId, tssMapping);
 
-	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		wait(finishMoveShards(cx,
 		                      dataMoveId,
 		                      keys,
@@ -2570,7 +2570,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 	// We have to set this range in two blocks, because the master tracking of "keyServersLocations" depends on a change
 	// to a specific
 	//   key (keyServersKeyServersKey)
-	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		const UID teamId = deterministicRandom()->randomUniqueID();
 		ksValue = keyServersValue(serverSrcUID, /*dest=*/std::vector<UID>(), teamId, UID());
 		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());
