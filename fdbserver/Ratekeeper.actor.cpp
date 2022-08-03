@@ -1018,6 +1018,16 @@ void StorageQueueInfo::refreshCommitCost(double elapsed) {
 	totalWriteCosts = 0;
 }
 
+Optional<double> StorageQueueInfo::getThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const {
+	auto const storageQueue = getStorageQueueBytes();
+	if (storageQueue < storageTargetBytes - storageSpringBytes) {
+		return {};
+	} else {
+		return std::max(
+		    0.0, static_cast<double>((storageTargetBytes + storageSpringBytes) - storageQueue) / storageSpringBytes);
+	}
+}
+
 TLogQueueInfo::TLogQueueInfo(UID id)
   : valid(false), id(id), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
     smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
