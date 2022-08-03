@@ -3361,12 +3361,28 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			info.changeFeedStartVersion = invalidVersion;
 
 			state Future<Optional<Value>> fLockValue = tr.get(lockKey);
+			state Future<ForcedPurgeState> fForcedPurgeState = getForcePurgedState(&tr, req.keyRange);
 			Future<Optional<GranuleHistory>> fHistory = getLatestGranuleHistory(&tr, req.keyRange);
+
 			Optional<GranuleHistory> history = wait(fHistory);
 			info.history = history;
+
+			ForcedPurgeState purgeState = wait(fForcedPurgeState);
+			if (purgeState != ForcedPurgeState::NonePurged) {
+				CODE_PROBE(true, "Worker trying to open force purged granule");
+				if (BW_DEBUG) {
+					fmt::print("Granule [{0} - {1}) is force purged on BW {2}, abandoning\n",
+					           req.keyRange.begin.printable(),
+					           req.keyRange.end.printable(),
+					           bwData->id.toString().substr(0, 5));
+				}
+				throw granule_assignment_conflict();
+			}
+
 			Optional<Value> prevLockValue = wait(fLockValue);
 			state bool hasPrevOwner = prevLockValue.present();
 			state bool createChangeFeed = false;
+
 			if (hasPrevOwner) {
 				CODE_PROBE(true, "Granule open found previous owner");
 				std::tuple<int64_t, int64_t, UID> prevOwner = decodeBlobGranuleLockValue(prevLockValue.get());
@@ -4352,7 +4368,8 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				self->addActor.send(handleRangeAssign(self, granuleToReassign, true));
 			}
 			when(GetGranuleAssignmentsRequest req = waitNext(bwInterf.granuleAssignmentsRequest.getFuture())) {
-				if (self->managerEpochOk(req.managerEpoch)) {
+				// if request isn't from a manager and is just validation, let it check
+				if (req.managerEpoch == -1 || self->managerEpochOk(req.managerEpoch)) {
 					if (BW_DEBUG) {
 						fmt::print("Worker {0} got granule assignments request from BM {1}\n",
 						           self->id.toString(),

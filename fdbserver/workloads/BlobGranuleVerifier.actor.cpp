@@ -29,8 +29,10 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BlobGranuleValidation.actor.h"
+#include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/QuietDatabase.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
@@ -66,11 +68,17 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	std::vector<Future<Void>> clients;
 	bool enablePurging;
 	bool strictPurgeChecking;
+	bool doForcePurge;
 
 	DatabaseConfiguration config;
 
 	Reference<BlobConnectionProvider> bstore;
 	AsyncVar<Standalone<VectorRef<KeyRangeRef>>> granuleRanges;
+
+	bool startedForcePurge;
+	Optional<Key> forcePurgeKey;
+
+	std::vector<std::tuple<KeyRange, Version, UID, Future<GranuleFiles>>> purgedDataToCheck;
 
 	BlobGranuleVerifierWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		doSetup = !clientId; // only do this on the "first" client
@@ -81,12 +89,20 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		timeTravelLimit = getOption(options, LiteralStringRef("timeTravelLimit"), testDuration);
 		timeTravelBufferSize = getOption(options, LiteralStringRef("timeTravelBufferSize"), 100000000);
 		threads = getOption(options, LiteralStringRef("threads"), 1);
-		enablePurging = getOption(options, LiteralStringRef("enablePurging"), false /*sharedRandomNumber % 2 == 0*/);
+		// TODO change to half
+		enablePurging = getOption(options, LiteralStringRef("enablePurging"), true /*sharedRandomNumber % 2 == 0*/);
 		sharedRandomNumber /= 2;
 		// FIXME: re-enable this! There exist several bugs with purging active granules where a small amount of state
 		// won't be cleaned up.
 		strictPurgeChecking =
 		    getOption(options, LiteralStringRef("strictPurgeChecking"), false /*sharedRandomNumber % 2 == 0*/);
+		sharedRandomNumber /= 2;
+		// TODO change to 20%
+		doForcePurge = getOption(options, LiteralStringRef("doForcePurge"), true /*sharedRandomNumber % 5 == 0*/);
+		sharedRandomNumber /= 5;
+
+		startedForcePurge = false;
+
 		ASSERT(threads >= 1);
 
 		if (BGV_DEBUG) {
@@ -216,6 +232,50 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 	}
 
+	// TODO refactor more generally
+	ACTOR Future<Void> loadGranuleMetadataBeforeForcePurge(Database cx, BlobGranuleVerifierWorkload* self) {
+		// load all granule history entries that intersect purged range
+		state KeyRange cur = blobGranuleHistoryKeys;
+		state Transaction tr(cx);
+		loop {
+			try {
+				RangeResult history = wait(tr.getRange(cur, 100));
+				for (auto& it : history) {
+					KeyRange keyRange;
+					Version version;
+					std::tie(keyRange, version) = decodeBlobGranuleHistoryKey(it.key);
+					// TODO: filter by key range for partial key range purge
+					Standalone<BlobGranuleHistoryValue> historyValue = decodeBlobGranuleHistoryValue(it.value);
+
+					Future<GranuleFiles> fileFuture = loadHistoryFiles(cx, historyValue.granuleID);
+					self->purgedDataToCheck.push_back({ keyRange, version, historyValue.granuleID, fileFuture });
+					
+				}
+				if (!history.empty() && history.more) {
+					cur = KeyRangeRef(keyAfter(history.back().key), cur.end);
+				} else {
+					break;
+				}
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
+		// wait for file loads to finish
+		state int i;
+		for (i = 0; i < self->purgedDataToCheck.size(); i++) {
+			wait(success(std::get<3>(self->purgedDataToCheck[i])));
+		}
+
+		if (BGV_DEBUG) {
+			fmt::print("BGV loaded {0} granules metadata before force purge\n", self->purgedDataToCheck.size());
+		}
+
+		ASSERT(!self->purgedDataToCheck.empty());
+
+		return Void();
+	}
+
 	ACTOR Future<Void> verifyGranules(Database cx, BlobGranuleVerifierWorkload* self, bool allowPurging) {
 		state double last = now();
 		state double endTime = last + self->testDuration;
@@ -252,6 +312,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					// before doing read, purge just before read version
 					state Version newPurgeVersion = 0;
 					state bool doPurging = allowPurging && deterministicRandom()->random01() < 0.5;
+					state bool forcePurge = doPurging && deterministicRandom()->random01() < 0.25;
 					if (doPurging) {
 						CODE_PROBE(true, "BGV considering purge");
 						Version maxPurgeVersion = oldRead.v;
@@ -263,10 +324,21 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 							newPurgeVersion = deterministicRandom()->randomInt64(prevPurgeVersion, maxPurgeVersion);
 							prevPurgeVersion = std::max(prevPurgeVersion, newPurgeVersion);
 							if (BGV_DEBUG) {
-								fmt::print("BGV Purging @ {0}\n", newPurgeVersion);
+								fmt::print("BGV Purging @ {0}{1}\n", newPurgeVersion, forcePurge ? " (force)" : "");
 							}
 							try {
-								Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, newPurgeVersion, {}, false));
+								if (forcePurge) {
+									wait(self->loadGranuleMetadataBeforeForcePurge(cx, self));
+									self->startedForcePurge = true;
+								}
+								Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, newPurgeVersion, {}, forcePurge));
+								if (forcePurge) {
+									self->forcePurgeKey = purgeKey;
+									if (BGV_DEBUG) {
+										fmt::print("BGV Force purge registered, stopping\n");
+									}
+									return Void();
+								}
 								if (BGV_DEBUG) {
 									fmt::print("BGV Purged @ {0}, waiting\n", newPurgeVersion);
 								}
@@ -427,7 +499,184 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR Future<Void> validateForcePurge(Database cx, BlobGranuleVerifierWorkload* self, KeyRange purgeRange) {
+		// first, wait for force purge to complete
+		if (BGV_DEBUG) {
+			fmt::print("BGV waiting for force purge to complete\n");
+		}
+		wait(cx->waitPurgeGranulesComplete(self->forcePurgeKey.get()));
+		if (BGV_DEBUG) {
+			fmt::print("BGV force purge completed, checking\n");
+		}
+
+		state Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+		// check that force purge range is set and that data is not readable
+		ForcedPurgeState forcePurgedState = wait(getForcePurgedState(&tr, purgeRange));
+		ASSERT(forcePurgedState == ForcedPurgeState::AllPurged);
+
+		if (BGV_DEBUG) {
+			fmt::print("BGV force purge checked state\n");
+		}
+
+		// make sure blob read fails
+		tr.reset();
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		loop {
+			try {
+				Version readVersion = wait(self->doGrv(&tr));
+				wait(success(readFromBlob(cx, self->bstore, purgeRange, 0, readVersion)));
+				ASSERT(false);
+			} catch (Error& e) {
+				if (e.code() == error_code_operation_cancelled) {
+					throw e;
+				}
+				ASSERT(e.code() == error_code_blob_granule_transaction_too_old);
+				break;
+			}
+		}
+
+		if (BGV_DEBUG) {
+			fmt::print("BGV force purge checked read\n");
+		}
+
+		tr.reset();
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+		// check that metadata is gone for each granule
+		if (BGV_DEBUG) {
+			fmt::print("BGV checking metadata deleted\n");
+		}
+		state int i;
+		state int64_t filesChecked = 0;
+		for (i = 0; i < self->purgedDataToCheck.size(); i++) {
+			state KeyRange granuleRange = std::get<0>(self->purgedDataToCheck[i]);
+			state Version historyVersion = std::get<1>(self->purgedDataToCheck[i]);
+			state UID granuleId = std::get<2>(self->purgedDataToCheck[i]);
+			state GranuleFiles oldFiles = wait(std::get<3>(self->purgedDataToCheck[i]));
+			fmt::print("  Checking [{0} - {1}): {2}\n", granuleRange.begin.printable(), granuleRange.end.printable(), granuleId.toString().substr(0, 6));
+			loop {
+				try {
+					// lock
+					Optional<Value> lock = wait(tr.get(blobGranuleLockKeyFor(granuleRange)));
+					ASSERT(!lock.present());
+
+					// history entry
+					Optional<Value> history = wait(tr.get(blobGranuleHistoryKeyFor(granuleRange, historyVersion)));
+					ASSERT(!history.present());
+
+					// change feed
+					Optional<Value> changeFeed = wait(tr.get(granuleIDToCFKey(granuleId).withPrefix(changeFeedPrefix)));
+					ASSERT(!changeFeed.present());
+
+					// file metadata
+					RangeResult fileMetadata = wait(tr.getRange(blobGranuleFileKeyRangeFor(granuleId), 1));
+					ASSERT(fileMetadata.empty());
+
+					// split state
+					RangeResult splitData = wait(tr.getRange(blobGranuleSplitKeyRangeFor(granuleId), 1));
+					ASSERT(splitData.empty());
+
+					// merge state
+					Optional<Value> merge = wait(tr.get(blobGranuleMergeKeyFor(granuleId)));
+					ASSERT(!merge.present());
+
+					// FIXME: add merge boundaries!
+
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+
+			// ensure all old files were deleted from blob storage
+			state int fileIdx;
+			for (fileIdx = 0; fileIdx < oldFiles.snapshotFiles.size() + oldFiles.deltaFiles.size(); fileIdx++) {
+				std::string fname = (fileIdx >= oldFiles.snapshotFiles.size())
+				                        ? oldFiles.deltaFiles[fileIdx - oldFiles.snapshotFiles.size()].filename
+				                        : oldFiles.snapshotFiles[fileIdx].filename;
+				state Reference<BackupContainerFileSystem> bstore = self->bstore->getForRead(fname);
+				try {
+					wait(success(bstore->readFile(fname)));
+					ASSERT(false);
+				} catch (Error& e) {
+					if (e.code() == error_code_operation_cancelled) {
+						throw e;
+					}
+					ASSERT(e.code() == error_code_file_not_found);
+					filesChecked++;
+				}
+			}
+		}
+
+		if (BGV_DEBUG) {
+			fmt::print("BGV force purge checked {0} old granules and {1} old files cleaned up\n", self->purgedDataToCheck.size(), filesChecked);
+		}
+
+		// quick check to make sure we didn't miss any new granules generated between the purge metadata load time and
+		// the actual purge, by checking for any new history keys in the range
+		state KeyRange cur = blobGranuleHistoryKeys;
+		loop {
+			try {
+				RangeResult history = wait(tr.getRange(cur, 100));
+				for (auto& it : history) {
+					KeyRangeRef keyRange;
+					Version version;
+					std::tie(keyRange, version) = decodeBlobGranuleHistoryKey(it.key);
+					ASSERT(!purgeRange.intersects(keyRange));
+				}
+				if (!history.empty() && history.more) {
+					cur = KeyRangeRef(keyAfter(history.back().key), cur.end);
+				} else {
+					break;
+				}
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
+		if (BGV_DEBUG) {
+			fmt::print("BGV force purge checked for new granule history entries\n");
+		}
+
+		// ask all workers for all of their open granules and make sure none are in the force purge range
+		state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(cx));
+
+		for (i = 0; i < blobWorkers.size(); i++) {
+			GetGranuleAssignmentsRequest req;
+			req.managerEpoch = -1; // not manager
+			Optional<GetGranuleAssignmentsReply> assignments =
+			    wait(timeout(brokenPromiseToNever(blobWorkers[i].granuleAssignmentsRequest.getReply(req)),
+			                 SERVER_KNOBS->BLOB_WORKER_TIMEOUT));
+			if (assignments.present()) {
+				for (auto& it : assignments.get().assignments) {
+					ASSERT(!purgeRange.intersects(it.range));
+				}
+			}
+		}
+
+		if (BGV_DEBUG) {
+			fmt::print("BGV force purge checked blob worker mappings\n");
+		}
+
+		if (BGV_DEBUG) {
+			fmt::print("BGV force purge check complete\n");
+		}
+
+		return Void();
+	}
+
 	ACTOR Future<bool> _check(Database cx, BlobGranuleVerifierWorkload* self) {
+		if (self->startedForcePurge) {
+			// data may or may not be gone, depending on whether force purge was registered or not. Only do force purge
+			// check if we're sure it was registerd, otherwise, only do actual checks if we're sure no force purge was
+			// started.
+			if (self->forcePurgeKey.present()) {
+				wait(self->validateForcePurge(cx, self, normalKeys));
+			}
+			return true;
+		}
 		// check error counts, and do an availability check at the end
 
 		state Transaction tr(cx);
@@ -543,7 +792,12 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		return result;
 	}
 
-	Future<bool> check(Database const& cx) override { return _check(cx, this); }
+	Future<bool> check(Database const& cx) override {
+		if (clientId == 0 || !doForcePurge) {
+			return _check(cx, this);
+		}
+		return true;
+	}
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 

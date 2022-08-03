@@ -9674,11 +9674,6 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 	state KeyRange purgeRange = range;
 	state bool loadedTenantPrefix = false;
 
-	// FIXME: implement force
-	if (force) {
-		throw unsupported_operation();
-	}
-
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);

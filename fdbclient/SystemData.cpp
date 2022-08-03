@@ -1338,7 +1338,8 @@ const KeyRangeRef blobGranuleSplitKeys(LiteralStringRef("\xff\x02/bgs/"), Litera
 const KeyRangeRef blobGranuleMergeKeys(LiteralStringRef("\xff\x02/bgmerge/"), LiteralStringRef("\xff\x02/bgmerge0"));
 const KeyRangeRef blobGranuleHistoryKeys(LiteralStringRef("\xff\x02/bgh/"), LiteralStringRef("\xff\x02/bgh0"));
 const KeyRangeRef blobGranulePurgeKeys(LiteralStringRef("\xff\x02/bgp/"), LiteralStringRef("\xff\x02/bgp0"));
-const KeyRangeRef blobGranuleVersionKeys(LiteralStringRef("\xff\x02/bgv/"), LiteralStringRef("\xff\x02/bgv0"));
+const KeyRangeRef blobGranuleForcePurgedKeys(LiteralStringRef("\xff\x02/bgpforce/"),
+                                             LiteralStringRef("\xff\x02/bgpforce0"));
 const KeyRef blobGranulePurgeChangeKey = LiteralStringRef("\xff\x02/bgpChange");
 
 const uint8_t BG_FILE_TYPE_DELTA = 'D';

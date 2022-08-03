@@ -245,7 +245,6 @@ enum BlobGranuleSplitState { Unknown = 0, Initialized = 1, Assigned = 2, Done = 
 struct BlobGranuleHistoryValue {
 	constexpr static FileIdentifier file_identifier = 991434;
 	UID granuleID;
-	// VectorRef<std::pair<KeyRangeRef, Version>> parentGranules;
 	VectorRef<KeyRef> parentBoundaries;
 	VectorRef<Version> parentVersions;
 
