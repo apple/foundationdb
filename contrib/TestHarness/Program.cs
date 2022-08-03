@@ -788,6 +788,9 @@ namespace SummarizeTest
             string firstRetryableError = "";
             int stderrSeverity = (int)Magnesium.Severity.SevError;
 
+            xout.Add(new XAttribute("DeterminismCheck", expectedUnseed != -1 ? "1" : "0"));
+            xout.Add(new XAttribute("OldBinary", Path.GetFileName(oldBinaryName)));
+
             Dictionary<KeyValuePair<string, Magnesium.Severity>, Magnesium.Severity> severityMap = new Dictionary<KeyValuePair<string, Magnesium.Severity>, Magnesium.Severity>();
             var codeCoverage = new Dictionary<Tuple<string, string, string>, bool>();
 
@@ -824,9 +827,7 @@ namespace SummarizeTest
                                     new XAttribute("RandomSeed", ev.Details.RandomSeed),
                                     new XAttribute("SourceVersion", ev.Details.SourceVersion),
                                     new XAttribute("Time", ev.Details.ActualTime),
-                                    new XAttribute("BuggifyEnabled", ev.Details.BuggifyEnabled),
-                                    new XAttribute("DeterminismCheck", expectedUnseed != -1 ? "1" : "0"),
-                                    new XAttribute("OldBinary", Path.GetFileName(oldBinaryName)));
+                                    new XAttribute("BuggifyEnabled", ev.Details.BuggifyEnabled));
                                 testBeginFound = true;
                                 if (ev.DDetails.ContainsKey("FaultInjectionEnabled"))
                                     xout.Add(new XAttribute("FaultInjectionEnabled", ev.Details.FaultInjectionEnabled));
