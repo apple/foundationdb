@@ -960,6 +960,12 @@ namespace SummarizeTest
                 xout.Add(new XElement(externalError, new XAttribute("Severity", (int)Magnesium.Severity.SevError)));
             }
 
+            string joshuaSeed = System.Environment.GetEnvironmentVariable("JOSHUA_SEED");
+
+            if (joshuaSeed != null) {
+                xout.Add(new XAttribute("JoshuaSeed", joshuaSeed));
+            }
+
             foreach(var kv in codeCoverage)
             {
                 var element = new XElement("CodeCoverage", new XAttribute("File", kv.Key.Item1), new XAttribute("Line", kv.Key.Item2));
