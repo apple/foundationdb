@@ -253,6 +253,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			std::map<ClusterName, DataClusterMetadata> clusterList =
 			    wait(MetaclusterAPI::listClusters(self->managementDb, clusterName1, clusterName2, limit));
 
+			ASSERT(clusterName1 <= clusterName2);
+
 			auto resultItr = clusterList.begin();
 			if (clusterName1 <= clusterName2) {
 				int count = 0;
@@ -272,6 +274,10 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 			return Void();
 		} catch (Error& e) {
+			if (e.code() == error_code_inverted_range) {
+				ASSERT(clusterName1 > clusterName2);
+				return Void();
+			}
 			TraceEvent(SevError, "ListClustersFailure")
 			    .error(e)
 			    .detail("BeginClusterName", clusterName1)

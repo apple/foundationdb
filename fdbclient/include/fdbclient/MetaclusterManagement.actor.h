@@ -1464,13 +1464,14 @@ struct DeleteTenantImpl {
 			// In all cases, only one of delete foo or delete bar should have any effect because
 			// of the existence check in deleteTenantTransaction.
 			// However, this may cause duplication of tombstone code. Is that going to behave properly?
+			Future<Void> pairDelete = Void();
 			if (self->pairName.present()) {
 				CODE_PROBE(true, "deleting pair tenant from data cluster");
-				TenantAPI::deleteTenantTransaction(
+				pairDelete = TenantAPI::deleteTenantTransaction(
 				    tr, self->pairName.get(), self->tenantId, ClusterType::METACLUSTER_DATA);
 			}
-			return TenantAPI::deleteTenantTransaction(
-			    tr, self->tenantName, self->tenantId, ClusterType::METACLUSTER_DATA);
+			return pairDelete && TenantAPI::deleteTenantTransaction(
+			                         tr, self->tenantName, self->tenantId, ClusterType::METACLUSTER_DATA);
 		}));
 
 		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
@@ -1852,16 +1853,16 @@ struct RenameTenantImpl {
 	}
 
 	ACTOR static Future<Void> run(RenameTenantImpl* self) {
-		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
-			// Get information about tenant's current state
-			// If not in READY state, reject the rename
-			bool canRename = wait(getAssignedLocation(self, tr));
-			if (!canRename) {
-				CODE_PROBE(true, "Metacluster unable to proceed with rename operation");
-				throw invalid_tenant_state();
-			}
-			return markTenantsInRenamingState(self, tr);
-		}));
+		// Get information about tenant's current state
+		// If not in READY state, reject the rename
+		bool canRename = wait(self->ctx.runManagementTransaction(
+		    [self = self](Reference<typename DB::TransactionT> tr) { return getAssignedLocation(self, tr); }));
+		if (!canRename) {
+			CODE_PROBE(true, "Metacluster unable to proceed with rename operation");
+			throw invalid_tenant_state();
+		}
+		wait(self->ctx.runManagementTransaction(
+		    [self = self](Reference<typename DB::TransactionT> tr) { return markTenantsInRenamingState(self, tr); }));
 
 		// Rename tenant on the data cluster
 		wait(self->ctx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
