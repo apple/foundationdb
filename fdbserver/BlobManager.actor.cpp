@@ -3094,7 +3094,7 @@ ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID gra
 
 			int lim = SERVER_KNOBS->BG_MAX_SPLIT_FANOUT;
 			if (BUGGIFY_WITH_PROB(0.1)) {
-				deterministicRandom()->randomInt(1, std::max(2, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT));
+				lim = deterministicRandom()->randomInt(1, std::max(2, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT));
 			}
 			state RangeResult splitState = wait(tr.getRange(checkRange, lim));
 			// if first try and empty, splitting state is fully cleaned up
