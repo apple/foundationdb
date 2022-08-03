@@ -244,6 +244,11 @@ class CommitInfo(BaseInfo):
         self.read_snapshot_version = bb.get_long()
         if protocol_version >= PROTOCOL_VERSION_6_3:
             self.report_conflicting_keys = bb.get_bool()
+        
+        if protocol_version >= PROTOCOL_VERSION_7_1:
+            lock_aware = bb.get_bool()
+            if bb.get_bool():
+                spanId = bb.get_bytes(16)
 
 
 class ErrorGetInfo(BaseInfo):
