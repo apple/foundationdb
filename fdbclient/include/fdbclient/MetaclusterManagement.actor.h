@@ -1760,14 +1760,14 @@ struct RenameTenantImpl {
 		if (oldTenantEntry.get().id != self->tenantId) {
 			// The tenant must have been removed simultaneously
 			CODE_PROBE(true, "Metacluster rename old tenant ID mismatch");
-			throw tenant_not_found();
+			throw tenant_removed();
 		}
 
 		// If marked for deletion, abort the rename
 		// newTenantEntry.get().tenantState == TenantState::REMOVING is already checked above
 		if (oldTenantEntry.get().tenantState == TenantState::REMOVING) {
 			CODE_PROBE(true, "Metacluster rename candidates marked for deletion");
-			throw tenant_not_found();
+			throw tenant_removed();
 		}
 
 		TenantMapEntry updatedOldEntry = oldTenantEntry.get();
@@ -1831,10 +1831,22 @@ struct RenameTenantImpl {
 		    [self = self](Reference<typename DB::TransactionT> tr) { return markTenantsInRenamingState(self, tr); }));
 
 		// Rename tenant on the data cluster
-		wait(self->ctx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
-			return TenantAPI::renameTenantTransaction(
-			    tr, self->oldName, self->newName, self->tenantId, ClusterType::METACLUSTER_DATA);
-		}));
+		try {
+			wait(self->ctx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
+				return TenantAPI::renameTenantTransaction(
+				    tr, self->oldName, self->newName, self->tenantId, ClusterType::METACLUSTER_DATA);
+			}));
+		} catch (Error& e) {
+			// Since we track the tenant entries on the management cluster, these error codes should only appear
+			// on a retry of the transaction, typically caused by commit_unknown_result.
+			// Operating on the assumption that the first transaction completed successfully, we keep going
+			// so we can finish the rename on the management cluster.
+			if (e.code() == error_code_tenant_not_found || e.code() == error_code_tenant_already_exists) {
+				CODE_PROBE(true, "Metacluster rename ran into commit_unknown_result");
+			} else {
+				throw e;
+			}
+		}
 
 		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return finishRenameFromManagementCluster(self, tr);

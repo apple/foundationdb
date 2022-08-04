@@ -1234,7 +1234,16 @@ struct TenantManagementWorkload : TestWorkload {
 					ASSERT(tenantOverlap);
 					return Void();
 				} else if (e.code() == error_code_invalid_metacluster_operation) {
+					TraceEvent("RenameTenantInvalidMetaclusterOp").detail("TenantRenames", describe(tenantRenames));
 					ASSERT(operationType == OperationType::METACLUSTER != self->useMetacluster);
+					return Void();
+				} else if (e.code() == error_code_tenant_removed) {
+					TraceEvent("RenameTenantTenantRemoved").detail("TenantRenames", describe(tenantRenames));
+					ASSERT(operationType == OperationType::METACLUSTER);
+					return Void();
+				} else if (e.code() == error_code_invalid_tenant_state) {
+					TraceEvent("RenameTenantInvalidTenantState").detail("TenantRenames", describe(tenantRenames));
+					ASSERT(operationType == OperationType::METACLUSTER);
 					return Void();
 				} else {
 					try {
@@ -1243,7 +1252,8 @@ struct TenantManagementWorkload : TestWorkload {
 						// already been moved, so account for that and update internal map as needed.
 						if (e.code() == error_code_commit_unknown_result) {
 							TraceEvent("RenameTenantCommitUnknownResult").error(e);
-							ASSERT(operationType != OperationType::MANAGEMENT_DATABASE);
+							ASSERT(operationType != OperationType::MANAGEMENT_DATABASE &&
+							       operationType != OperationType::METACLUSTER);
 							unknownResult = true;
 						}
 						wait(tr->onError(e));
