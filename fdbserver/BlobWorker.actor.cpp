@@ -4178,7 +4178,7 @@ void handleGetGranuleAssignmentsRequest(Reference<BlobWorkerData> self, const Ge
 	GetGranuleAssignmentsReply reply;
 	auto allRanges = self->granuleMetadata.intersectingRanges(normalKeys);
 	for (auto& it : allRanges) {
-		if (it.value().activeMetadata.isValid()) {
+		if (it.value().activeMetadata.isValid() && it.value().activeMetadata->cancelled.canBeSet()) {
 			// range is active, copy into reply's arena
 			StringRef start = StringRef(reply.arena, it.begin());
 			StringRef end = StringRef(reply.arena, it.end());

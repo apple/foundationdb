@@ -651,6 +651,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			                 SERVER_KNOBS->BLOB_WORKER_TIMEOUT));
 			if (assignments.present()) {
 				for (auto& it : assignments.get().assignments) {
+					if (purgeRange.intersects(it.range)) {
+						fmt::print("BW {0} still has range [{1} - {2})\n", blobWorkers[i].id().toString(), it.range.begin.printable(), it.range.end.printable());
+					}
 					ASSERT(!purgeRange.intersects(it.range));
 				}
 			}
