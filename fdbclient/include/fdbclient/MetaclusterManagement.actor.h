@@ -1005,7 +1005,8 @@ ACTOR template <class Transaction>
 Future<Void> managementClusterRemoveTenantFromGroup(Transaction tr,
                                                     TenantName tenantName,
                                                     TenantMapEntry tenantEntry,
-                                                    DataClusterMetadata* clusterMetadata) {
+                                                    DataClusterMetadata* clusterMetadata,
+                                                    bool rename = false) {
 	state bool updateClusterCapacity = !tenantEntry.tenantGroup.present();
 	if (tenantEntry.tenantGroup.present()) {
 		ManagementClusterMetadata::tenantMetadata.tenantGroupTenantIndex.erase(
@@ -1028,8 +1029,8 @@ Future<Void> managementClusterRemoveTenantFromGroup(Transaction tr,
 	}
 
 	// Update the tenant group count information for the assigned cluster if this tenant group was erased so we
-	// can use the freed capacity
-	if (updateClusterCapacity) {
+	// can use the freed capacity. Do not update if this is a rename because the new entry should be put in
+	if (updateClusterCapacity && !rename) {
 		DataClusterEntry updatedEntry = clusterMetadata->entry;
 		--updatedEntry.allocated.numTenantGroups;
 		updateClusterMetadata(
@@ -1714,7 +1715,7 @@ struct RenameTenantImpl {
 
 		// Remove the tenant from its tenant group
 		wait(managementClusterRemoveTenantFromGroup(
-		    tr, self->oldName, tenantEntry, &self->ctx.dataClusterMetadata.get()));
+		    tr, self->oldName, tenantEntry, &self->ctx.dataClusterMetadata.get(), true));
 
 		return Void();
 	}
