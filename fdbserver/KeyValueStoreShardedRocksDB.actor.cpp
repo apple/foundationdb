@@ -301,7 +301,8 @@ rocksdb::Options getOptions() {
 		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
 	}
 
-	// TODO: enable rocksdb metrics.
+	options.statistics = rocksdb::CreateDBStatistics();
+	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
 	if (g_network->isSimulated()) {
 		options.OptimizeForSmallDb();
@@ -603,11 +604,10 @@ public:
 		return Void();
 	}
 
-	rocksdb::Status init() {
+	rocksdb::Status init(rocksdb::Options options) {
 		// Open instance.
 		TraceEvent(SevInfo, "ShardedRocksShardManagerInitBegin", this->logId).detail("DataPath", path);
 		std::vector<std::string> columnFamilies;
-		rocksdb::Options options = getOptions();
 		rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, path, &columnFamilies);
 
 		rocksdb::ColumnFamilyOptions cfOptions = getCFOptions();
@@ -1044,7 +1044,7 @@ private:
 
 class RocksDBMetrics {
 public:
-	RocksDBMetrics();
+	RocksDBMetrics(std::shared_ptr<rocksdb::Statistics> stats);
 	void logStats(rocksdb::DB* db);
 	// PerfContext
 	void resetPerfContext();
@@ -1159,8 +1159,7 @@ Reference<Histogram> RocksDBMetrics::getDeleteCompactRangeHistogram() {
 	return deleteCompactRangeHistogram;
 }
 
-RocksDBMetrics::RocksDBMetrics() {
-	stats = rocksdb::CreateDBStatistics();
+RocksDBMetrics::RocksDBMetrics(std::shared_ptr<rocksdb::Statistics> stats) : stats(stats) {
 	stats->set_stats_level(rocksdb::kExceptHistogramOrTimers);
 	tickerStats = {
 		{ "StallMicros", rocksdb::STALL_MICROS, 0 },
@@ -1360,7 +1359,7 @@ void RocksDBMetrics::logStats(rocksdb::DB* db) {
 }
 
 void RocksDBMetrics::logMemUsage(rocksdb::DB* db) {
-	TraceEvent e("RocksDBMemMetrics");
+	TraceEvent e("ShardedRocksDBMemMetrics");
 	uint64_t stat;
 	ASSERT(db != nullptr);
 	ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kBlockCacheUsage, &stat));
@@ -1636,6 +1635,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		struct OpenAction : TypedAction<Writer, OpenAction> {
 			ShardManager* shardManager;
+			rocksdb::Options dbOptions;
 			ThreadReturnPromise<Void> done;
 			Optional<Future<Void>>& metrics;
 			const FlowLock* readLock;
@@ -1643,18 +1643,19 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			std::shared_ptr<RocksDBErrorListener> errorListener;
 
 			OpenAction(ShardManager* shardManager,
+			           rocksdb::Options dbOptions,
 			           Optional<Future<Void>>& metrics,
 			           const FlowLock* readLock,
 			           const FlowLock* fetchLock,
 			           std::shared_ptr<RocksDBErrorListener> errorListener)
-			  : shardManager(shardManager), metrics(metrics), readLock(readLock), fetchLock(fetchLock),
-			    errorListener(errorListener) {}
+			  : shardManager(shardManager), dbOptions(dbOptions), metrics(metrics), readLock(readLock),
+			    fetchLock(fetchLock), errorListener(errorListener) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 
 		void action(OpenAction& a) {
-			auto status = a.shardManager->init();
+			auto status = a.shardManager->init(a.dbOptions);
 
 			if (!status.ok()) {
 				logRocksDBError(status, "Open");
@@ -2173,7 +2174,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    errorListener(std::make_shared<RocksDBErrorListener>()), errorFuture(errorListener->getFuture()),
-	    shardManager(path, id), rocksDBMetrics(new RocksDBMetrics()) {
+	    shardManager(path, id), dbOptions(getOptions()),
+	    rocksDBMetrics(std::make_shared<RocksDBMetrics>(dbOptions.statistics)) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage
 		// engine is still multi-threaded as background compaction threads are still present. Reads/writes to disk
 		// will also block the network thread in a way that would be unacceptable in production but is a necessary
@@ -2237,7 +2239,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			// mapping data.
 		} else {
 			auto a = std::make_unique<Writer::OpenAction>(
-			    &shardManager, metrics, &readSemaphore, &fetchSemaphore, errorListener);
+			    &shardManager, dbOptions, metrics, &readSemaphore, &fetchSemaphore, errorListener);
 			openFuture = a->done.getFuture();
 			this->metrics = ShardManager::shardMetricsLogger(this->rState, openFuture, &shardManager) &&
 			                rocksDBAggregatedMetricsLogger(this->rState, openFuture, rocksDBMetrics, &shardManager);
@@ -2433,6 +2435,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	std::shared_ptr<ShardedRocksDBState> rState;
 	ShardManager shardManager;
+	rocksdb::Options dbOptions;
 	std::shared_ptr<RocksDBMetrics> rocksDBMetrics;
 	std::string path;
 	UID id;
