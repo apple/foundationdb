@@ -697,7 +697,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 						if (result.present()) {
 							if (anyExists) {
-								if (self->oldestDeletionVersion == 0) {
+								if (self->oldestDeletionVersion == 0 && !tenants.empty()) {
 									tr->reset();
 									Version afterVersion = wait(tr->getReadVersion());
 									self->oldestDeletionVersion = afterVersion;
@@ -1506,12 +1506,14 @@ struct TenantManagementWorkload : TestWorkload {
 			state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> dataClusterTenantGroups;
 			TenantName const& beginTenantGroupRef = beginTenantGroup;
 			TenantName const& endTenantGroupRef = endTenantGroup;
-			wait(store(dataClusterTenantGroups, runTransaction(self->dataDb.getReference(),
-			                        [beginTenantGroupRef, endTenantGroupRef](Reference<ReadYourWritesTransaction> tr) {
-				                        tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				                        return TenantMetadata::tenantGroupMap.getRange(
-				                            tr, beginTenantGroupRef, endTenantGroupRef, 1000);
-			                        })));
+			wait(
+			    store(dataClusterTenantGroups,
+			          runTransaction(self->dataDb.getReference(),
+			                         [beginTenantGroupRef, endTenantGroupRef](Reference<ReadYourWritesTransaction> tr) {
+				                         tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				                         return TenantMetadata::tenantGroupMap.getRange(
+				                             tr, beginTenantGroupRef, endTenantGroupRef, 1000);
+			                         })));
 
 			auto dataItr = dataClusterTenantGroups.results.begin();
 
@@ -1553,7 +1555,7 @@ struct TenantManagementWorkload : TestWorkload {
 				if (self->oldestDeletionVersion != 0) {
 					ASSERT(tombstoneCleanupData.present());
 					if (self->newestDeletionVersion - self->oldestDeletionVersion >
-						CLIENT_KNOBS->TENANT_TOMBSTONE_CLEANUP_INTERVAL * CLIENT_KNOBS->VERSIONS_PER_SECOND) {
+					    CLIENT_KNOBS->TENANT_TOMBSTONE_CLEANUP_INTERVAL * CLIENT_KNOBS->VERSIONS_PER_SECOND) {
 						ASSERT(tombstoneCleanupData.get().tombstonesErasedThrough >= 0);
 					}
 				}
