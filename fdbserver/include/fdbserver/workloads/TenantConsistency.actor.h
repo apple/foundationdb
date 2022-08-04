@@ -158,6 +158,7 @@ private:
 				ASSERT(tenantMapEntry.tenantState == TenantState::READY);
 				ASSERT(!tenantMapEntry.assignedCluster.present());
 			}
+			ASSERT(!tenantMapEntry.renamePair.present());
 		}
 	}
 
