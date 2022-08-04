@@ -169,9 +169,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			wait(success(runTransaction(dataDb->db.getReference(),
 			                            [](Reference<ReadYourWritesTransaction> tr) { return tr->getReadVersion(); })));
 
-			// TODO: find a better way to ensure fully recovered
-			wait(delay(10));
-
 			return Void();
 		} catch (Error& e) {
 			if (e.code() == error_code_cluster_already_exists) {
@@ -224,9 +221,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			// Get a version to know that the cluster has recovered
 			wait(success(runTransaction(dataDb->db.getReference(),
 			                            [](Reference<ReadYourWritesTransaction> tr) { return tr->getReadVersion(); })));
-
-			// TODO: find a better way to ensure fully recovered
-			wait(delay(10));
 
 			return Void();
 		} catch (Error& e) {

@@ -697,7 +697,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 						if (result.present()) {
 							if (anyExists) {
-								if (self->oldestDeletionVersion == 0) {
+								if (self->oldestDeletionVersion == 0 && !tenants.empty()) {
 									tr->reset();
 									Version afterVersion = wait(tr->getReadVersion());
 									self->oldestDeletionVersion = afterVersion;
