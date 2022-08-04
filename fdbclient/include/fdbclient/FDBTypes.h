@@ -1392,6 +1392,11 @@ struct TenantMode {
 	uint32_t mode;
 };
 
+typedef StringRef ClusterNameRef;
+typedef Standalone<ClusterNameRef> ClusterName;
+
+enum class ClusterType { STANDALONE, METACLUSTER_MANAGEMENT, METACLUSTER_DATA };
+
 struct GRVCacheSpace {
 	Version cachedReadVersion;
 	double lastGrvTime;

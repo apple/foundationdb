@@ -2,15 +2,15 @@
 allowDefaultTenant = false
 allowDisablingTenants = false
 allowCreatingTenants = false
-extraDatabaseMode = 'Single'
+extraDatabaseMode = 'Single' 
 
 [[test]]
-testTitle = 'TenantManagementTest'
+testTitle = 'TenantManagementConcurrencyTest'
 clearAfterTest = true
 timeout = 2100
 runSetup = true
 
     [[test.workload]]
-    testName = 'TenantManagement'
-    maxTenants = 1000
+    testName = 'TenantManagementConcurrency'
+    maxTenants = 100
     testDuration = 120
