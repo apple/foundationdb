@@ -1851,7 +1851,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			path = 1;
 		} else if (!i || !i->isClearTo() || i->getEndKey() <= req.key) {
 			path = 2;
-			Optional<Value> vv = wait(data->storage.readValue(req.key, ReadType::NORMAL, req.debugID));
+			Optional<Value> vv = wait(data->storage.readValue(req.key, req.readType, req.debugID));
 			data->counters.kvGetBytes += vv.expectedSize();
 			// Validate that while we were reading the data we didn't lose the version or shard
 			if (version < data->storageVersion()) {
@@ -1961,6 +1961,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 			state Version latest = data->version.get();
 			CODE_PROBE(latest >= minVersion && latest < data->data().latestVersion,
 			           "Starting watch loop with latestVersion > data->version");
+			// perhaps use a lower priority?
 			GetValueRequest getReq(span.context,
 			                       TenantInfo(),
 			                       metadata->key,
@@ -4845,8 +4846,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		KeyRangeRef searchRange = data->clampRangeToTenant(shard, tenantEntry, req.arena);
 
 		state int offset;
-		Key absoluteKey =
-		    wait(findKey(data, req.sel, version, searchRange, &offset, req.spanContext, ReadType::NORMAL));
+		Key absoluteKey = wait(findKey(data, req.sel, version, searchRange, &offset, req.spanContext, req.readType));
 
 		data->checkChangeCounter(changeCounter,
 		                         KeyRangeRef(std::min<KeyRef>(req.sel.getKey(), absoluteKey),
