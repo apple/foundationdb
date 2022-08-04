@@ -418,7 +418,12 @@ ACTOR Future<Void> readAndCheckGranuleLock(Reference<ReadYourWritesTransaction> 
 	state Key lockKey = blobGranuleLockKeyFor(granuleRange);
 	Optional<Value> lockValue = wait(tr->get(lockKey));
 
-	ASSERT(lockValue.present());
+	if (!lockValue.present()) {
+		// FIXME: could add some validation for simulation that a force purge was initiated
+		// for lock to be deleted out from under an active granule means a force purge must have happened.
+		throw granule_assignment_conflict();
+	}
+
 	std::tuple<int64_t, int64_t, UID> currentOwner = decodeBlobGranuleLockValue(lockValue.get());
 	checkGranuleLock(epoch, seqno, std::get<0>(currentOwner), std::get<1>(currentOwner));
 
