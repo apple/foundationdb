@@ -542,6 +542,11 @@ ACTOR Future<Void> dataDistributionRelocator(struct DDQueueData* self,
                                              Future<Void> prevCleanup,
                                              const DDEnabledState* ddEnabledState);
 
+ACTOR Future<GetTopKMetricsReply> GetTopOrBottomKMetrics(DDQueueData* self,
+                                                         std::vector<KeyRange> shards,
+                                                         bool isTopK,
+                                                         double srcLoad,
+                                                         double destLoad);
 ACTOR Future<Void> getSrcTeam(RelocateData* rd,
                               DDQueueData* self,
                               double inflightPenalty,
@@ -553,13 +558,15 @@ void addSrcTeamsToDestTeams(const std::vector<std::pair<Reference<IDataDistribut
                             std::vector<UID>& healthyIds,
                             std::vector<UID>& destIds);
 
-RelocateOperation selectRebalanceOperation(DDQueueData* self,
-                                           TraceEvent* traceEvent,
-                                           DataMovementReason reason,
-                                           double minReadLoad,
-                                           double maxReadLoad,
-                                           double srcLoad,
-                                           StorageMetrics& metrics);
+RelocateOperation selectRelocateOperation(DDQueueData* self,
+                                          TraceEvent* traceEvent,
+                                          DataMovementReason reason,
+                                          double minReadLoad,
+                                          double maxReadLoad,
+                                          double srcLoad,
+                                          StorageMetrics& metrics,
+                                          GetTopKMetricsReply& bottomKReply);
+
 struct DDQueueData {
 	struct DDDataMove {
 		DDDataMove() = default;
@@ -1856,7 +1863,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
                                      DataMovementReason reason,
                                      Reference<IDataDistributionTeam> sourceTeam,
                                      Reference<IDataDistributionTeam> destTeam,
-                                     bool primary,
+                                     int teamCollectionIndex,
                                      TraceEvent* traceEvent) {
 	// TODO@ZZX: uncomment
 	// if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
@@ -1864,6 +1871,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	// 	return false;
 	// }
 
+	state bool primary = teamCollectionIndex == 0;
 	state std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 	traceEvent->detail("ShardsInSource", shards.size());
@@ -1886,7 +1894,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	}
 	// check team difference
 	state double srcLoad = sourceTeam->getLoadReadBandwidth(false);
-	double destLoad = destTeam->getLoadReadBandwidth();
+	state double destLoad = destTeam->getLoadReadBandwidth();
 	traceEvent->detail("SrcReadBandwidth", srcLoad).detail("DestReadBandwidth", destLoad);
 
 	// read bandwidth difference is less than 30% of src load
@@ -1894,21 +1902,8 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		traceEvent->detail("SkipReason", "TeamTooSimilar");
 		return false;
 	}
-	// randomly choose topK shards
-	state int topK = std::min(int(0.1 * shards.size()), SERVER_KNOBS->READ_REBALANCE_SHARD_TOPK);
-	state Future<HealthMetrics> healthMetrics = self->cx->getHealthMetrics(true);
-	state GetTopKMetricsRequest req(
-	    // shards, topK, (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC, srcLoad / shards.size());
-	    shards,
-	    topK,
-	    (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC,
-	    srcLoad / shards.size());
 
-	req.comparator = [](const StorageMetrics& a, const StorageMetrics& b) {
-		return a.bytesReadPerKSecond / std::max(a.bytes * 1.0, 1.0) >
-		       b.bytesReadPerKSecond / std::max(b.bytes * 1.0, 1.0);
-	};
-	state GetTopKMetricsReply reply = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
+	state Future<HealthMetrics> healthMetrics = self->cx->getHealthMetrics(true);
 	wait(ready(healthMetrics));
 	auto cpu = getWorstCpu(healthMetrics.get(), sourceTeam->getServerIDs()); // Server cpu
 	if (cpu < SERVER_KNOBS->READ_REBALANCE_CPU_THRESHOLD) { // 15.0 +- (0.3 * 15) < 20.0
@@ -1916,10 +1911,16 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		return false;
 	}
 
-	auto& metricsList = reply.metrics;
+	// randomly choose topK shards
+	state GetTopKMetricsReply topKReply = wait(GetTopOrBottomKMetrics(self, shards, true, srcLoad, destLoad));
+	state GetTopKMetricsReply bottomKReply = wait(GetTopOrBottomKMetrics(self, shards, false, srcLoad, destLoad));
+
+	auto& metricsList = topKReply.metrics;
 	// NOTE: randomize is important here since we don't want to always push the same shard into the queue
 	deterministicRandom()->randomShuffle(metricsList);
-	traceEvent->detail("MinReadLoad", reply.minReadLoad).detail("MaxReadLoad", reply.maxReadLoad);
+	traceEvent->detail("MinReadLoad", topKReply.minReadLoad)
+	    .detail("MaxReadLoad", topKReply.maxReadLoad)
+	    .detail("MetricListSize", metricsList.size());
 
 	int chosenIdx = -1;
 	for (int i = 0; i < metricsList.size(); ++i) {
@@ -1941,11 +1942,10 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	shards = self->shardsAffectedByTeamFailure->getShardsFor(
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 
-	RelocateOperation relocateOperation =
-	    selectRebalanceOperation(self, traceEvent, reason, reply.minReadLoad, reply.maxReadLoad, srcLoad, metrics);
+	RelocateOperation relocateOperation = selectRelocateOperation(
+	    self, traceEvent, reason, topKReply.minReadLoad, topKReply.maxReadLoad, srcLoad, metrics, bottomKReply);
 
 	traceEvent->detail("ZZXREBALANCE", 0)
-	    .detail("TopK", topK)
 	    .detail("IsMountainChopper", isDataMovementForMountainChopper(reason))
 	    .detail("ShardSize", shards.size())
 	    .detail("Server", sourceTeam->getServerIDs())
@@ -1970,12 +1970,19 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	} else {
 		for (int i = 0; i < shards.size(); i++) {
 			if (metrics.keys == shards[i]) {
+				// TODO@ZZX: Actually, we can simply use RelocateShard().
 				if (relocateOperation == RelocateOperation::MULTIPLY_REPLICAS) {
 					traceEvent->detail("MultiplyReplicasKeys", metrics.keys.get());
 					self->output.send(RelocateShard(metrics.keys.get(),
 					                                priority,
 					                                RelocateReason::REBALANCE_READ,
 					                                RelocateOperation::MULTIPLY_REPLICAS));
+				} else if (relocateOperation == RelocateOperation::REDUCE_REPLICAS) {
+					traceEvent->detail("ReduceReplicasKeys", metrics.keys.get());
+					self->output.send(RelocateShard(metrics.keys.get(),
+					                                priority,
+					                                RelocateReason::REBALANCE_READ,
+					                                RelocateOperation::REDUCE_REPLICAS));
 				} else {
 					self->output.send(RelocateShard(metrics.keys.get(), priority, RelocateReason::REBALANCE_READ));
 				}
@@ -1988,49 +1995,106 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	}
 }
 
+ACTOR Future<GetTopKMetricsReply> GetTopOrBottomKMetrics(DDQueueData* self,
+                                                         std::vector<KeyRange> shards,
+                                                         bool isTopK,
+                                                         double srcLoad,
+                                                         double destLoad) {
+	int K = std::min(int(0.1 * shards.size()), SERVER_KNOBS->READ_REBALANCE_SHARD_TOPK);
+	if (isTopK) {
+		//  TODO@ZZX: uncomment
+		GetTopKMetricsRequest req(
+		    // shards, topK, (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC, srcLoad /
+		    // shards.size());
+		    shards,
+		    K,
+		    srcLoad);
+		req.comparator = [](const StorageMetrics& a, const StorageMetrics& b) {
+			return a.bytesReadPerKSecond / std::max(a.bytes * 1.0, 1.0) >
+			       b.bytesReadPerKSecond / std::max(b.bytes * 1.0, 1.0);
+		};
+		GetTopKMetricsReply reply = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
+		return reply;
+	} else { // get BottomK shards
+		GetTopKMetricsRequest req(shards, K, srcLoad / shards.size());
+		req.comparator = [](const StorageMetrics& a, const StorageMetrics& b) {
+			return a.bytesReadPerKSecond / std::max(a.bytes * 1.0, 1.0) <
+			       b.bytesReadPerKSecond / std::max(b.bytes * 1.0, 1.0);
+		};
+
+		GetTopKMetricsReply reply = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
+		return reply;
+	}
+}
+
 // TODO@ZZX: reduce replicas case
-RelocateOperation selectRebalanceOperation(DDQueueData* self,
-                                           TraceEvent* traceEvent,
-                                           DataMovementReason reason,
-                                           double minReadLoad,
-                                           double maxReadLoad,
-                                           double srcLoad,
-                                           StorageMetrics& metrics) {
+RelocateOperation selectRelocateOperation(DDQueueData* self,
+                                          TraceEvent* traceEvent,
+                                          DataMovementReason reason,
+                                          double minReadLoad,
+                                          double maxReadLoad,
+                                          double srcLoad,
+                                          StorageMetrics& metrics,
+                                          GetTopKMetricsReply& bottomKReply) {
 	RelocateOperation operation = RelocateOperation::INVALID;
 	double epsilon = 0.0001;
 	int64_t selectShardReadLoad = metrics.bytesReadPerKSecond;
 
 	std::pair<std::vector<ShardsAffectedByTeamFailure::Team>, std::vector<ShardsAffectedByTeamFailure::Team>> teams =
 	    self->shardsAffectedByTeamFailure->getTeamsFor(metrics.keys.get());
-	size_t srcTeamSize = teams.first.size();
-
+	int srcTeamSize = teams.first.size();
 	if (!(SERVER_KNOBS->DYNAMIC_REPLICATION_ENABLED)) {
 		// If the button was turned off, we directly use old ways, i.e, move shards to dest team
 		operation = RelocateOperation::MOVE;
 	} else if (isDataMovementForMountainChopper(reason)) {
-		if (fabs(minReadLoad - maxReadLoad) < epsilon && fabs(minReadLoad - selectShardReadLoad) < epsilon) {
+		if (srcTeamSize > self->teamSize) {
+			// Already have an auxiliary team
+			operation = RelocateOperation::INVALID;
+		} else if (fabs(minReadLoad - maxReadLoad) < epsilon && fabs(minReadLoad - selectShardReadLoad) < epsilon) {
 			// If three of them are equal, it means we only have one shard whose readLoad > 0 in sourceTeam. In this
 			// case, moving shard to another team won't solve the problem, so we would use MULTIPLY_REPLICAS here.
 			operation = RelocateOperation::MULTIPLY_REPLICAS;
 		} else if (selectShardReadLoad >= srcLoad * SERVER_KNOBS->DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC) {
 			// If one team has a very hot shard, we will try to multiply replicas.
 			operation = RelocateOperation::MULTIPLY_REPLICAS;
-		} else if (srcTeamSize > self->teamSize) {
-			// Already have an auxliary team, but is not very hot now.
-			operation = RelocateOperation::INVALID;
 		} else {
 			operation = RelocateOperation::MOVE;
 		}
-	} else { // ValleyFiller
-		if (srcTeamSize > self->teamSize) { // Already have an auxiliary team.
-			if (selectShardReadLoad < srcLoad * SERVER_KNOBS->DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC * 0.5) {
-				// If the shards with auxiliary turns to be cold now, we need to reduce replicas.
+	} else {
+		// ValleyFiller will check bottomK(REDUCE_REPLICAS) and TopK(MOVE) metrics together.
+		// REDUCE_REPLICAS If a shard with an auxliary team among bottomK shards is cold now.
+		std::vector<StorageMetrics>& metricsList = bottomKReply.metrics;
+		int chosenIdx = -1;
+		for (int i = 0; i < metricsList.size(); i++) {
+			if (metricsList[i].keys.present()) {
+				std::pair<std::vector<ShardsAffectedByTeamFailure::Team>,
+				          std::vector<ShardsAffectedByTeamFailure::Team>>
+				    teams = self->shardsAffectedByTeamFailure->getTeamsFor(metricsList[i].keys.get());
+				size_t srcTeamSize = teams.first.size();
+				if (srcTeamSize > self->teamSize) { // With auxiliary team
+					chosenIdx = i;
+					break;
+				}
+			}
+		}
+		if (chosenIdx != -1) {
+			if (metricsList[chosenIdx].bytesReadPerKSecond <
+			    srcLoad * SERVER_KNOBS->DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC * 0.5) {
+				// Change the metrics
 				operation = RelocateOperation::REDUCE_REPLICAS;
+				metrics = metricsList[chosenIdx];
 			} else {
 				operation = RelocateOperation::INVALID;
 			}
-		} else {
-			operation = RelocateOperation::MOVE;
+		}
+
+		if (operation == RelocateOperation::INVALID) {
+			if (srcTeamSize > self->teamSize) {
+				// We have selected a TopK shard with auxiliary team. Don't do anything for now
+				operation = RelocateOperation::INVALID;
+			} else {
+				operation = RelocateOperation::MOVE;
+			}
 		}
 	}
 
@@ -2229,7 +2293,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 				// clang-format off
 				if (sourceTeam.isValid() && destTeam.isValid()) {
 					if (readRebalance) {
-						wait(store(moved,rebalanceReadLoad(self, reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
+						wait(store(moved,rebalanceReadLoad(self, reason, sourceTeam, destTeam, teamCollectionIndex, &traceEvent)));
 					} else {
 						wait(store(moved,rebalanceTeams(self, ddPriority, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
 					}
@@ -2489,9 +2553,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 
 	for (int i = 0; i < teamCollections.size(); i++) {
 		// FIXME: Use BgDDLoadBalance for disk rebalance too after DD simulation test proof.
-		// balancingFutures.push_back(BgDDLoadRebalance(&self, i,
-		// SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM)); balancingFutures.push_back(BgDDLoadRebalance(&self,
-		// i, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM));
+		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM));
+		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM));
 		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
 			balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM));
 			balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM));
