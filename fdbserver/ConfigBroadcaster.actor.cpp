@@ -298,6 +298,7 @@ class ConfigBroadcasterImpl {
 				}
 			}
 		}
+
 		int responsesRemaining = self->coordinators - (int)self->registrationResponses.size();
 		int nodesTillQuorum = self->coordinators / 2 + 1 - (int)self->activeConfigNodes.size();
 
@@ -471,8 +472,9 @@ public:
 	                  Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations,
 	                  std::vector<ConfigFollowerInterface> const& readReplicas) {
 		if (mostRecentVersion >= 0) {
-			TraceEvent(SevDebug, "ConfigBroadcasterApplyingChanges", id)
+			TraceEvent(SevInfo, "ConfigBroadcasterApplyingChanges", id)
 			    .detail("ChangesSize", changes.size())
+			    .detail("AnnotationsSize", annotations.size())
 			    .detail("CurrentMostRecentVersion", this->mostRecentVersion)
 			    .detail("NewMostRecentVersion", mostRecentVersion)
 			    .detail("ActiveReplicas", readReplicas.size());
@@ -491,12 +493,13 @@ public:
 	                             std::vector<ConfigFollowerInterface> const& readReplicas,
 	                             Version largestLiveVersion,
 	                             bool fromPreviousCoordinators) {
-		TraceEvent(SevDebug, "ConfigBroadcasterApplyingSnapshotAndChanges", id)
+		TraceEvent(SevInfo, "ConfigBroadcasterApplyingSnapshotAndChanges", id)
 		    .detail("CurrentMostRecentVersion", this->mostRecentVersion)
 		    .detail("SnapshotSize", snapshot.size())
 		    .detail("SnapshotVersion", snapshotVersion)
 		    .detail("ChangesSize", changes.size())
 		    .detail("ChangesVersion", changesVersion)
+		    .detail("AnnotationsSize", annotations.size())
 		    .detail("ActiveReplicas", readReplicas.size())
 		    .detail("LargestLiveVersion", largestLiveVersion)
 		    .detail("FromPreviousCoordinators", fromPreviousCoordinators);
