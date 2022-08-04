@@ -84,7 +84,7 @@ struct ConfigFollowerGetSnapshotAndChangesReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, snapshotVersion, snapshot, changes);
+		serializer(ar, snapshotVersion, snapshot, changes, annotations);
 	}
 };
 

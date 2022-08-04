@@ -238,7 +238,7 @@ class ConfigNodeImpl {
 		    wait(getMutations(self, req.lastSeenVersion + 1, committedVersion));
 		state Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> versionedAnnotations =
 		    wait(getAnnotations(self, req.lastSeenVersion + 1, committedVersion));
-		TraceEvent(SevDebug, "ConfigNodeSendingChanges", self->id)
+		TraceEvent(SevInfo, "ConfigNodeSendingChanges", self->id)
 		    .detail("ReqLastSeenVersion", req.lastSeenVersion)
 		    .detail("ReqMostRecentVersion", req.mostRecentVersion)
 		    .detail("CommittedVersion", committedVersion)
@@ -522,10 +522,11 @@ class ConfigNodeImpl {
 		wait(store(reply.snapshotVersion, getLastCompactedVersion(self)));
 		wait(store(reply.changes, getMutations(self, reply.snapshotVersion + 1, req.mostRecentVersion)));
 		wait(store(reply.annotations, getAnnotations(self, reply.snapshotVersion + 1, req.mostRecentVersion)));
-		TraceEvent(SevDebug, "ConfigNodeGettingSnapshot", self->id)
+		TraceEvent(SevInfo, "ConfigNodeGettingSnapshot", self->id)
 		    .detail("SnapshotVersion", reply.snapshotVersion)
 		    .detail("SnapshotSize", reply.snapshot.size())
-		    .detail("ChangesSize", reply.changes.size());
+		    .detail("ChangesSize", reply.changes.size())
+		    .detail("AnnotationsSize", reply.annotations.size());
 		req.reply.send(reply);
 		return Void();
 	}
