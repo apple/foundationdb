@@ -22,7 +22,6 @@
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include <future>
 
-#include "flow/Hostname.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -316,29 +315,10 @@ BackupContainerAzureBlobStore::BackupContainerAzureBlobStore(const std::string& 
 		// TODO: More descriptive error?
 		throw backup_error();
 	}
-	TraceEvent(SevDebug, "BackupContainerAzureBlobStore")
-	    .detail("Endpoint", endpoint)
-	    .detail("AccountName", accountName)
-	    .detail("ContainerName", containerName);
 	std::string accountKey = _accountKey;
 	auto credential = std::make_shared<azure::storage_lite::shared_key_credential>(accountName, accountKey);
-	// resolve networkaddress if necessary
-	Optional<NetworkAddress> address = NetworkAddress::parseOptional(endpoint);
-
-	if (!address.present()) {
-		auto hostname = Hostname::parse(endpoint);
-		auto resolvedAddr = hostname.resolveBlocking();
-		if (resolvedAddr.present()) {
-			address = resolvedAddr.get();
-			address.get().fromHostname = false;
-		} else
-			throw backup_invalid_url();
-	}
-	std::string resolvedAddr = address.get().toString();
-	TraceEvent(SevDebug, "AzureBackupResolvedEndpoint").detail("ResolvedAddr", resolvedAddr);
-	// end resolution
 	auto storageAccount = std::make_shared<azure::storage_lite::storage_account>(
-	    accountName, credential, true, format("https://%s/%s", resolvedAddr.c_str(), accountName.c_str()));
+	    accountName, credential, true, fmt::format("https://{}", endpoint));
 	client = std::make_unique<AzureClient>(storageAccount, 1);
 }
 
