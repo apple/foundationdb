@@ -2305,8 +2305,8 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 	}
 
 	// Make sure all of the metadata we are sending won't get rolled back
-	if (metadataWaitVersion != invalidVersion && metadataWaitVersion > data->knownCommittedVersion.get()) {
-		CODE_PROBE(true, "overlapping change feeds waiting for metadata version to be committed");
+	if (metadataWaitVersion != invalidVersion && metadataWaitVersion > data->desiredOldestVersion.get()) {
+		CODE_PROBE(true, "overlapping change feeds waiting for metadata version to be safe from rollback");
 		wait(data->desiredOldestVersion.whenAtLeast(metadataWaitVersion));
 	}
 	req.reply.send(reply);
