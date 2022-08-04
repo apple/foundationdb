@@ -385,8 +385,8 @@ public:
 	                              bool force = false);
 	Future<Void> waitPurgeGranulesComplete(Key purgeKey);
 
-	Future<Void> blobbifyRange(KeyRange range);
-	Future<Void> unblobbifyRange(KeyRange range);
+	Future<bool> blobbifyRange(KeyRange range);
+	Future<bool> unblobbifyRange(KeyRange range);
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
