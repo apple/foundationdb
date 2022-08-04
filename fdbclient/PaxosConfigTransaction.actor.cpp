@@ -413,7 +413,7 @@ class PaxosConfigTransactionImpl {
 	ACTOR static Future<Void> watchClusterFile(Database cx) {
 		state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(
 		    new AsyncVar<Optional<ClusterInterface>>);
-		state Future<Void> _ = monitorLeader<ClusterInterface>(cx->getConnectionRecord(), clusterInterface);
+		state Future<Void> leaderMonitor = monitorLeader<ClusterInterface>(cx->getConnectionRecord(), clusterInterface);
 		state std::string connectionString = cx->getConnectionRecord()->getConnectionString().toString();
 
 		loop {
