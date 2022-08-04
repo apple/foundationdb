@@ -1044,7 +1044,7 @@ private:
 
 class RocksDBMetrics {
 public:
-	RocksDBMetrics(std::shared_ptr<rocksdb::Statistics> stats);
+	RocksDBMetrics(UID debugID, std::shared_ptr<rocksdb::Statistics> stats);
 	void logStats(rocksdb::DB* db);
 	// PerfContext
 	void resetPerfContext();
@@ -1073,6 +1073,7 @@ public:
 	void logMemUsage(rocksdb::DB* db);
 
 private:
+	const UID debugID;
 	// Global Statistic Input to RocksDB DB instance
 	std::shared_ptr<rocksdb::Statistics> stats;
 	// Statistic Output from RocksDB
@@ -1159,8 +1160,8 @@ Reference<Histogram> RocksDBMetrics::getDeleteCompactRangeHistogram() {
 	return deleteCompactRangeHistogram;
 }
 
-RocksDBMetrics::RocksDBMetrics(std::shared_ptr<rocksdb::Statistics> stats) : stats(stats) {
-	stats->set_stats_level(rocksdb::kExceptHistogramOrTimers);
+RocksDBMetrics::RocksDBMetrics(UID debugID, std::shared_ptr<rocksdb::Statistics> stats)
+  : debugID(debugID), stats(stats) {
 	tickerStats = {
 		{ "StallMicros", rocksdb::STALL_MICROS, 0 },
 		{ "BytesRead", rocksdb::BYTES_READ, 0 },
@@ -1344,7 +1345,7 @@ RocksDBMetrics::RocksDBMetrics(std::shared_ptr<rocksdb::Statistics> stats) : sta
 }
 
 void RocksDBMetrics::logStats(rocksdb::DB* db) {
-	TraceEvent e("ShardedRocksDBMetrics");
+	TraceEvent e(SevInfo, "ShardedRocksDBMetrics", debugID);
 	uint64_t stat;
 	for (auto& [name, ticker, cumulation] : tickerStats) {
 		stat = stats->getTickerCount(ticker);
@@ -1359,7 +1360,7 @@ void RocksDBMetrics::logStats(rocksdb::DB* db) {
 }
 
 void RocksDBMetrics::logMemUsage(rocksdb::DB* db) {
-	TraceEvent e("ShardedRocksDBMemMetrics");
+	TraceEvent e(SevInfo, "ShardedRocksDBMemMetrics", debugID);
 	uint64_t stat;
 	ASSERT(db != nullptr);
 	ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kBlockCacheUsage, &stat));
@@ -1384,7 +1385,7 @@ void RocksDBMetrics::setPerfContext(int index) {
 }
 
 void RocksDBMetrics::logPerfContext(bool ignoreZeroMetric) {
-	TraceEvent e("ShardedRocksDBPerfContextMetrics");
+	TraceEvent e(SevInfo, "ShardedRocksDBPerfContextMetrics", debugID);
 	e.setMaxEventLength(20000);
 	for (auto& [name, metric, vals] : perfContextMetrics) {
 		uint64_t s = 0;
@@ -2175,7 +2176,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    errorListener(std::make_shared<RocksDBErrorListener>()), errorFuture(errorListener->getFuture()),
 	    shardManager(path, id), dbOptions(getOptions()),
-	    rocksDBMetrics(std::make_shared<RocksDBMetrics>(dbOptions.statistics)) {
+	    rocksDBMetrics(std::make_shared<RocksDBMetrics>(id, dbOptions.statistics)) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage
 		// engine is still multi-threaded as background compaction threads are still present. Reads/writes to disk
 		// will also block the network thread in a way that would be unacceptable in production but is a necessary
