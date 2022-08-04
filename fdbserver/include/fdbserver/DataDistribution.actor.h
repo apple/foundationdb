@@ -94,11 +94,14 @@ struct RelocateShard {
 	UID dataMoveId;
 	RelocateReason reason;
 	DataMovementReason moveReason;
+
+	UID traceId; // track the lifetime of this relocate shard
 	RelocateShard()
 	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::INVALID),
 	    moveReason(DataMovementReason::INVALID) {}
-	RelocateShard(KeyRange const& keys, DataMovementReason moveReason, RelocateReason reason)
-	  : keys(keys), cancelled(false), dataMoveId(anonymousShardId), reason(reason), moveReason(moveReason) {
+	RelocateShard(KeyRange const& keys, DataMovementReason moveReason, RelocateReason reason, UID traceId = UID())
+	  : keys(keys), cancelled(false), dataMoveId(anonymousShardId), reason(reason), moveReason(moveReason),
+	    traceId(traceId) {
 		priority = dataMovementPriority(moveReason);
 	}
 

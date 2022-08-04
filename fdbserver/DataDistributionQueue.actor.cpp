@@ -137,7 +137,7 @@ struct RelocateData {
 	RelocateReason reason;
 
 	double startTime;
-	UID randomId;
+	UID randomId; // inherit from RelocateShard.traceId
 	UID dataMoveId;
 	int workFactor;
 	std::vector<UID> src;
@@ -155,10 +155,11 @@ struct RelocateData {
 	explicit RelocateData(RelocateShard const& rs)
 	  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
 	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), startTime(now()),
-	    randomId(deterministicRandom()->randomUniqueID()), dataMoveId(rs.dataMoveId), workFactor(0),
-	    wantsNewServers(
-	        isDataMovementForMountainChopper(rs.moveReason) || isDataMovementForValleyFiller(rs.moveReason) ||
-	        rs.moveReason == DataMovementReason::SPLIT_SHARD || rs.moveReason == DataMovementReason::TEAM_REDUNDANT),
+	    randomId(rs.traceId.isValid() ? rs.traceId : deterministicRandom()->randomUniqueID()),
+	    dataMoveId(rs.dataMoveId), workFactor(0), wantsNewServers(isDataMovementForMountainChopper(rs.moveReason) ||
+	                                                              isDataMovementForValleyFiller(rs.moveReason) ||
+	                                                              rs.moveReason == DataMovementReason::SPLIT_SHARD ||
+	                                                              rs.moveReason == DataMovementReason::TEAM_REDUNDANT),
 	    cancellable(true), interval("QueuedRelocation", randomId), dataMove(rs.dataMove) {
 		if (dataMove != nullptr) {
 			this->src.insert(this->src.end(), dataMove->meta.src.begin(), dataMove->meta.src.end());
@@ -1808,8 +1809,10 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 	for (int i = 0; i < shards.size(); i++) {
 		if (shard == shards[i]) {
-			self->output.send(RelocateShard(shard, moveReason, RelocateReason::REBALANCE_READ));
+			UID traceId = deterministicRandom()->randomUniqueID();
+			self->output.send(RelocateShard(shard, moveReason, RelocateReason::REBALANCE_READ, traceId));
 			self->updateLastAsSource(sourceTeam->getServerIDs());
+			traceEvent->detail("TraceId", traceId);
 			return true;
 		}
 	}
@@ -1880,7 +1883,9 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 	for (int i = 0; i < shards.size(); i++) {
 		if (moveShard == shards[i]) {
-			self->output.send(RelocateShard(moveShard, moveReason, RelocateReason::REBALANCE_DISK));
+			UID traceId = deterministicRandom()->randomUniqueID();
+			self->output.send(RelocateShard(moveShard, moveReason, RelocateReason::REBALANCE_DISK, traceId));
+			traceEvent->detail("TraceId", traceId);
 			return true;
 		}
 	}
