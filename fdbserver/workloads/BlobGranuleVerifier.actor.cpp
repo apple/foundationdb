@@ -249,7 +249,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 					Future<GranuleFiles> fileFuture = loadHistoryFiles(cx, historyValue.granuleID);
 					self->purgedDataToCheck.push_back({ keyRange, version, historyValue.granuleID, fileFuture });
-					
 				}
 				if (!history.empty() && history.more) {
 					cur = KeyRangeRef(keyAfter(history.back().key), cur.end);
@@ -513,8 +512,15 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 		// check that force purge range is set and that data is not readable
-		ForcedPurgeState forcePurgedState = wait(getForcePurgedState(&tr, purgeRange));
-		ASSERT(forcePurgedState == ForcedPurgeState::AllPurged);
+		loop {
+			try {
+				ForcedPurgeState forcePurgedState = wait(getForcePurgedState(&tr, purgeRange));
+				ASSERT(forcePurgedState == ForcedPurgeState::AllPurged);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
 
 		if (BGV_DEBUG) {
 			fmt::print("BGV force purge checked state\n");
@@ -555,7 +561,10 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			state Version historyVersion = std::get<1>(self->purgedDataToCheck[i]);
 			state UID granuleId = std::get<2>(self->purgedDataToCheck[i]);
 			state GranuleFiles oldFiles = wait(std::get<3>(self->purgedDataToCheck[i]));
-			fmt::print("  Checking [{0} - {1}): {2}\n", granuleRange.begin.printable(), granuleRange.end.printable(), granuleId.toString().substr(0, 6));
+			fmt::print("  Checking [{0} - {1}): {2}\n",
+			           granuleRange.begin.printable(),
+			           granuleRange.end.printable(),
+			           granuleId.toString().substr(0, 6));
 			loop {
 				try {
 					// lock
@@ -611,7 +620,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 
 		if (BGV_DEBUG) {
-			fmt::print("BGV force purge checked {0} old granules and {1} old files cleaned up\n", self->purgedDataToCheck.size(), filesChecked);
+			fmt::print("BGV force purge checked {0} old granules and {1} old files cleaned up\n",
+			           self->purgedDataToCheck.size(),
+			           filesChecked);
 		}
 
 		// quick check to make sure we didn't miss any new granules generated between the purge metadata load time and
@@ -652,7 +663,10 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			if (assignments.present()) {
 				for (auto& it : assignments.get().assignments) {
 					if (purgeRange.intersects(it.range)) {
-						fmt::print("BW {0} still has range [{1} - {2})\n", blobWorkers[i].id().toString(), it.range.begin.printable(), it.range.end.printable());
+						fmt::print("BW {0} still has range [{1} - {2})\n",
+						           blobWorkers[i].id().toString(),
+						           it.range.begin.printable(),
+						           it.range.end.printable());
 					}
 					ASSERT(!purgeRange.intersects(it.range));
 				}
