@@ -34,6 +34,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/DDTxnProcessor.h"
+#include "flow/DebugTrace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define WORK_FULL_UTILIZATION 10000 // This is not a knob; it is a fixed point scaling factor!
@@ -158,7 +159,7 @@ struct RelocateData {
 	    wantsNewServers(
 	        isDataMovementForMountainChopper(rs.moveReason) || isDataMovementForValleyFiller(rs.moveReason) ||
 	        rs.moveReason == DataMovementReason::SPLIT_SHARD || rs.moveReason == DataMovementReason::TEAM_REDUNDANT),
-	    cancellable(true), interval("QueuedRelocation"), dataMove(rs.dataMove) {
+	    cancellable(true), interval("QueuedRelocation", randomId), dataMove(rs.dataMove) {
 		if (dataMove != nullptr) {
 			this->src.insert(this->src.end(), dataMove->meta.src.begin(), dataMove->meta.src.end());
 		}
@@ -907,11 +908,14 @@ struct DDQueueData {
 
 			if (rrs.src.size() == 0 && (rrs.keys == rd.keys || fetchingSourcesQueue.erase(rrs) > 0)) {
 				rrs.keys = affectedQueuedItems[r];
+				rrs.interval = TraceInterval("QueuedRelocation", rrs.randomId); // inherit the old randomId
 
-				rrs.interval = TraceInterval("QueuedRelocation");
-				/*TraceEvent(rrs.interval.begin(), distributorId);
-				  .detail("KeyBegin", rrs.keys.begin).detail("KeyEnd", rrs.keys.end)
-				    .detail("Priority", rrs.priority).detail("WantsNewServers", rrs.wantsNewServers);*/
+				DebugRelocationTraceEvent(rrs.interval.begin(), distributorId)
+				    .detail("KeyBegin", rrs.keys.begin)
+				    .detail("KeyEnd", rrs.keys.end)
+				    .detail("Priority", rrs.priority)
+				    .detail("WantsNewServers", rrs.wantsNewServers);
+
 				queuedRelocations++;
 				TraceEvent(SevVerbose, "QueuedRelocationsChanged")
 				    .detail("DataMoveID", rrs.dataMoveId)
@@ -933,11 +937,15 @@ struct DDQueueData {
 
 					if (serverQueue.erase(rrs) > 0) {
 						if (!foundActiveRelocation) {
-							newData.interval = TraceInterval("QueuedRelocation");
-							/*TraceEvent(newData.interval.begin(), distributorId);
-							  .detail("KeyBegin", newData.keys.begin).detail("KeyEnd", newData.keys.end)
-							    .detail("Priority", newData.priority).detail("WantsNewServers",
-							  newData.wantsNewServers);*/
+							newData.interval =
+							    TraceInterval("QueuedRelocation", rrs.randomId); // inherit the old randomId
+
+							DebugRelocationTraceEvent(newData.interval.begin(), distributorId)
+							    .detail("KeyBegin", newData.keys.begin)
+							    .detail("KeyEnd", newData.keys.end)
+							    .detail("Priority", newData.priority)
+							    .detail("WantsNewServers", newData.wantsNewServers);
+
 							queuedRelocations++;
 							TraceEvent(SevVerbose, "QueuedRelocationsChanged")
 							    .detail("DataMoveID", newData.dataMoveId)
@@ -958,11 +966,11 @@ struct DDQueueData {
 			}
 		}
 
-		/*TraceEvent("ReceivedRelocateShard", distributorId)
-		  .detail("KeyBegin", rd.keys.begin)
-		  .detail("KeyEnd", rd.keys.end)
+		DebugRelocationTraceEvent("ReceivedRelocateShard", distributorId)
+		    .detail("KeyBegin", rd.keys.begin)
+		    .detail("KeyEnd", rd.keys.end)
 		    .detail("Priority", rd.priority)
-		    .detail("AffectedRanges", affectedQueuedItems.size()); */
+		    .detail("AffectedRanges", affectedQueuedItems.size());
 	}
 
 	void completeSourceFetch(const RelocateData& results) {
@@ -1044,10 +1052,12 @@ struct DDQueueData {
 				if (fetchKeysComplete.count(it->value()) && inFlightActors.liveActorAt(it->range().begin) &&
 				    !rd.keys.contains(it->range()) && it->value().priority >= rd.priority &&
 				    rd.healthPriority < SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY) {
-					/*TraceEvent("OverlappingInFlight", distributorId)
+
+					DebugRelocationTraceEvent("OverlappingInFlight", distributorId)
 					    .detail("KeyBegin", it->value().keys.begin)
 					    .detail("KeyEnd", it->value().keys.end)
-					    .detail("Priority", it->value().priority);*/
+					    .detail("Priority", it->value().priority);
+
 					overlappingInFlight = true;
 					break;
 				}
@@ -1082,8 +1092,8 @@ struct DDQueueData {
 			// because they do not have too much inflight data movement.
 
 			// logRelocation( rd, "LaunchingRelocation" );
+			DebugRelocationTraceEvent(rd.interval.end(), distributorId).detail("Result", "Success");
 
-			//TraceEvent(rd.interval.end(), distributorId).detail("Result","Success");
 			if (!rd.isRestore()) {
 				queuedRelocations--;
 				TraceEvent(SevVerbose, "QueuedRelocationsChanged")
@@ -1255,7 +1265,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
                                              Future<Void> prevCleanup,
                                              const DDEnabledState* ddEnabledState) {
 	state Promise<Void> errorOut(self->error);
-	state TraceInterval relocateShardInterval("RelocateShard");
+	state TraceInterval relocateShardInterval("RelocateShard", rd.randomId);
 	state PromiseStream<RelocateData> dataTransferComplete(self->dataTransferComplete);
 	state PromiseStream<RelocateData> relocationComplete(self->relocationComplete);
 	state bool signalledTransferComplete = false;
@@ -1282,7 +1292,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 		    .detail("KeyBegin", rd.keys.begin)
 		    .detail("KeyEnd", rd.keys.end)
 		    .detail("Priority", rd.priority)
-		    .detail("RelocationID", relocateShardInterval.pairID)
 		    .detail("SuppressedEventCount", self->suppressIntervals);
 
 		if (relocateShardInterval.severity != SevDebug) {
@@ -2322,7 +2331,9 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 						debug_setCheckRelocationDuration(false);
 					}
 				}
-				when(KeyRange done = waitNext(rangesComplete.getFuture())) { keysToLaunchFrom = done; }
+				when(KeyRange done = waitNext(rangesComplete.getFuture())) {
+					keysToLaunchFrom = done;
+				}
 				when(wait(recordMetrics)) {
 					Promise<int64_t> req;
 					getAverageShardBytes.send(req);
@@ -2369,7 +2380,9 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
 				when(wait(waitForAll(balancingFutures))) {}
-				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) { r.send(self.unhealthyRelocations); }
+				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) {
+					r.send(self.unhealthyRelocations);
+				}
 			}
 		}
 	} catch (Error& e) {
