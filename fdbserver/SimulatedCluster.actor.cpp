@@ -2037,10 +2037,23 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	NetworkAddressFromHostname fromHostname =
 	    useHostname ? NetworkAddressFromHostname::True : NetworkAddressFromHostname::False;
 
+	int extraDatabaseCount = 0;
+	bool useLocalDatabase = (testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::LocalOrSingle && BUGGIFY) ||
+	                        testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::Local;
+	if (!useLocalDatabase && testConfig.extraDatabaseMode != ISimulator::ExtraDatabaseMode::Disabled) {
+		extraDatabaseCount =
+		    testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::Multiple && testConfig.extraDatabaseCount > 0
+		        ? testConfig.extraDatabaseCount
+		        : 1;
+	}
+
 	std::vector<NetworkAddress> coordinatorAddresses;
 	std::vector<Hostname> coordinatorHostnames;
-	std::vector<NetworkAddress> extraCoordinatorAddresses; // Used by extra DB if the DR db is a new one
-	std::vector<Hostname> extraCoordinatorHostnames;
+
+	// A list of coordinators for each extra database being created. The Nth vector in the outer vector
+	// contains the coordinators for the Nth extra database.
+	std::vector<std::vector<NetworkAddress>> extraCoordinatorAddresses(extraDatabaseCount);
+	std::vector<std::vector<Hostname>> extraCoordinatorHostnames(extraDatabaseCount);
 
 	if (testConfig.minimumRegions > 1) {
 		// do not put coordinators in the primary region so that we can kill that region safely
@@ -2052,21 +2065,29 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				uint16_t port = sslEnabled && !sslOnly ? 2 : 1;
 				NetworkAddress coordinator(ip, port, true, isTLS, fromHostname);
 				coordinatorAddresses.push_back(coordinator);
-				auto extraIp = makeIPAddressForSim(useIPv6, { 4, dc, 1, m });
-				NetworkAddress extraCoordinator(extraIp, port, true, isTLS, fromHostname);
-				extraCoordinatorAddresses.push_back(extraCoordinator);
 
 				if (useHostname) {
 					std::string hostname = "fakeCoordinatorDC" + std::to_string(dc) + "M" + std::to_string(m);
 					Hostname coordinatorHostname(hostname, std::to_string(port), isTLS);
 					coordinatorHostnames.push_back(coordinatorHostname);
 					INetworkConnections::net()->addMockTCPEndpoint(hostname, std::to_string(port), { coordinator });
-					hostname = "fakeExtraCoordinatorDC" + std::to_string(dc) + "M" + std::to_string(m);
-					Hostname extraCoordinatorHostname(hostname, std::to_string(port), isTLS);
-					extraCoordinatorHostnames.push_back(extraCoordinatorHostname);
-					INetworkConnections::net()->addMockTCPEndpoint(
-					    hostname, std::to_string(port), { extraCoordinator });
 				}
+
+				for (int edb = 0; edb < extraDatabaseCount; ++edb) {
+					auto extraIp = makeIPAddressForSim(useIPv6, { 4 + edb, dc, 1, m });
+					NetworkAddress extraCoordinator(extraIp, port, true, isTLS, fromHostname);
+					extraCoordinatorAddresses[edb].push_back(extraCoordinator);
+
+					if (useHostname) {
+						std::string hostname = "fakeExtraCoordinatorDC" + std::to_string(dc) + "M" + std::to_string(m) +
+						                       "C" + std::to_string(edb);
+						Hostname extraCoordinatorHostname(hostname, std::to_string(port), isTLS);
+						extraCoordinatorHostnames[edb].push_back(extraCoordinatorHostname);
+						INetworkConnections::net()->addMockTCPEndpoint(
+						    hostname, std::to_string(port), { extraCoordinator });
+					}
+				}
+
 				TraceEvent("SelectedCoordinator")
 				    .detail("Hostname", useHostname ? coordinatorHostnames.back().toString().c_str() : "N/A")
 				    .detail("Address", coordinatorAddresses.back());
@@ -2098,20 +2119,26 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 					uint16_t port = sslEnabled && !sslOnly ? 2 : 1;
 					NetworkAddress coordinator(ip, port, true, isTLS, fromHostname);
 					coordinatorAddresses.push_back(coordinator);
-					auto extraIp = makeIPAddressForSim(useIPv6, { 4, dc, 1, m });
-					NetworkAddress extraCoordinator(extraIp, port, true, isTLS, fromHostname);
-					extraCoordinatorAddresses.push_back(extraCoordinator);
+
 					if (useHostname) {
 						std::string hostname = "fakeCoordinatorDC" + std::to_string(dc) + "M" + std::to_string(m);
 						Hostname coordinatorHostname(hostname, std::to_string(port), isTLS);
 						coordinatorHostnames.push_back(coordinatorHostname);
 						INetworkConnections::net()->addMockTCPEndpoint(hostname, std::to_string(port), { coordinator });
-						hostname = "fakeExtraCoordinatorDC" + std::to_string(dc) + "M" + std::to_string(m);
+					}
+
+					for (int edb = 0; edb < extraDatabaseCount; ++edb) {
+						auto extraIp = makeIPAddressForSim(useIPv6, { 4 + edb, dc, 1, m });
+						NetworkAddress extraCoordinator(extraIp, port, true, isTLS, fromHostname);
+						extraCoordinatorAddresses[edb].push_back(extraCoordinator);
+						std::string hostname = "fakeExtraCoordinatorDC" + std::to_string(dc) + "M" + std::to_string(m) +
+						                       "C" + std::to_string(edb);
 						Hostname extraCoordinatorHostname(hostname, std::to_string(port), isTLS);
-						extraCoordinatorHostnames.push_back(extraCoordinatorHostname);
+						extraCoordinatorHostnames[edb].push_back(extraCoordinatorHostname);
 						INetworkConnections::net()->addMockTCPEndpoint(
 						    hostname, std::to_string(port), { extraCoordinator });
 					}
+
 					TraceEvent("SelectedCoordinator")
 					    .detail("Hostname", useHostname ? coordinatorHostnames.back().toString().c_str() : "N/A")
 					    .detail("Address", coordinatorAddresses.back())
@@ -2150,23 +2177,17 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		conn = ClusterConnectionString(coordinatorHostnames, "TestCluster:0"_sr);
 	}
 
-	bool useLocalDatabase = (testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::LocalOrSingle && BUGGIFY) ||
-	                        testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::Local;
 	if (useLocalDatabase) {
 		g_simulator.extraDatabases.push_back(
 		    useHostname ? ClusterConnectionString(coordinatorHostnames, "TestCluster:0"_sr).toString()
 		                : ClusterConnectionString(coordinatorAddresses, "TestCluster:0"_sr).toString());
 	} else if (testConfig.extraDatabaseMode != ISimulator::ExtraDatabaseMode::Disabled) {
-		int extraDatabaseCount =
-		    testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::Multiple && testConfig.extraDatabaseCount > 0
-		        ? testConfig.extraDatabaseCount
-		        : 1;
 		for (int i = 0; i < extraDatabaseCount; ++i) {
 			g_simulator.extraDatabases.push_back(
 			    useHostname
-			        ? ClusterConnectionString(extraCoordinatorHostnames, StringRef(format("ExtraCluster%04d:0", i)))
+			        ? ClusterConnectionString(extraCoordinatorHostnames[i], StringRef(format("ExtraCluster%04d:0", i)))
 			              .toString()
-			        : ClusterConnectionString(extraCoordinatorAddresses, StringRef(format("ExtraCluster%04d:0", i)))
+			        : ClusterConnectionString(extraCoordinatorAddresses[i], StringRef(format("ExtraCluster%04d:0", i)))
 			              .toString());
 		}
 	}
@@ -2312,8 +2333,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 					                                                      protocolVersion,
 					                                                      configDBType),
 					                                     "SimulatedMachine"));
+					++cluster;
 				}
-				++cluster;
 			}
 
 			assignedMachines++;

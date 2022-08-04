@@ -256,20 +256,22 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			ASSERT(clusterName1 <= clusterName2);
 
 			auto resultItr = clusterList.begin();
-			if (clusterName1 <= clusterName2) {
-				int count = 0;
-				for (auto localItr = self->dataDbs.find(clusterName1); localItr != self->dataDbs.find(clusterName2);
-				     ++localItr) {
-					if (localItr->second.registered) {
-						ASSERT(resultItr != clusterList.end());
-						ASSERT(resultItr->first == localItr->first);
-						ASSERT(resultItr->second.connectionString ==
-						       localItr->second.db->getConnectionRecord()->getConnectionString());
-						++resultItr;
-						++count;
-					}
+
+			int count = 0;
+			for (auto localItr = self->dataDbs.find(clusterName1);
+			     localItr != self->dataDbs.find(clusterName2) && count < limit;
+			     ++localItr) {
+				fmt::print("Checking cluster {} {}\n", printable(localItr->first), localItr->second.registered);
+				if (localItr->second.registered) {
+					ASSERT(resultItr != clusterList.end());
+					ASSERT(resultItr->first == localItr->first);
+					ASSERT(resultItr->second.connectionString ==
+					       localItr->second.db->getConnectionRecord()->getConnectionString());
+					++resultItr;
+					++count;
 				}
 			}
+
 			ASSERT(resultItr == clusterList.end());
 
 			return Void();
