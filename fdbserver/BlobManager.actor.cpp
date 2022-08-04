@@ -1366,7 +1366,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 
 			// make sure we're still manager when this transaction gets committed
 			wait(checkManagerLock(tr, bmData));
-			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction()));
+			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction(), granuleRange));
 			if (purgeState != ForcedPurgeState::NonePurged) {
 				CODE_PROBE(true, "Split stopped because of force purge");
 				TraceEvent("GranuleSplitCancelledForcePurge", bmData->id)
@@ -1798,12 +1798,12 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			wait(checkManagerLock(tr, bmData));
-			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction()));
+			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction(), mergeRange));
 			if (purgeState != ForcedPurgeState::NonePurged) {
 				CODE_PROBE(true, "Merge finish stopped because of force purge");
 				TraceEvent("GranuleMergeCancelledForcePurge", bmData->id)
 				    .detail("Epoch", bmData->epoch)
-				    .detail("GranuleRange", granuleRange);
+				    .detail("GranuleRange", mergeRange);
 				return Void();
 				// TODO: check this in split re-eval too once that is merged!!
 			}
@@ -3760,6 +3760,8 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 			try {
 				// set force purged range and clear mapping range
 				wait(checkManagerLock(&tr, self));
+				// FIXME: need to handle this better if range is unaligned. Need to not truncate existing granules, and
+				// instead cover whole of intersecting granules at begin/end
 				wait(krmSetRangeCoalescing(
 				    &tr, blobGranuleForcePurgedKeys.begin, range, normalKeys, LiteralStringRef("1")));
 				wait(krmSetRange(&tr, blobGranuleMappingKeys.begin, range, blobGranuleMappingValueFor(UID())));
