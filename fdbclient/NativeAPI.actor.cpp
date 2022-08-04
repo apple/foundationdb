@@ -9799,19 +9799,31 @@ Future<Void> DatabaseContext::waitPurgeGranulesComplete(Key purgeKey) {
 	return waitPurgeGranulesCompleteActor(Reference<DatabaseContext>::addRef(this), purgeKey);
 }
 
-ACTOR Future<Void> setBlobRangeActor(Reference<DatabaseContext> cx, KeyRange range, bool active) {
+ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx, KeyRange range, bool active) {
 	state Database db(cx);
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 
-	state Value value = active ? LiteralStringRef("1") : LiteralStringRef("0");
+	state Value value = active ? blobRangeActive : blobRangeInactive;
 
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			// FIXME: check that the set range is currently inactive, and that a revoked range is currently its own
-			// range in the map and fully set.
+			if (active) {
+				state RangeResult results = wait(krmGetRanges(tr, blobRangeKeys.begin, range));
+				ASSERT(results.size() >= 2);
+				if (results[0].key == range.begin && results[1].key == range.end &&
+				    results[0].value == blobRangeActive) {
+					return true;
+				} else {
+					for (int i = 0; i < results.size(); i++) {
+						if (results[i].value == blobRangeActive) {
+							return false;
+						}
+					}
+				}
+			}
 
 			tr->set(blobRangeChangeKey, deterministicRandom()->randomUniqueID().toString());
 			// This is not coalescing because we want to keep each range logically separate.
@@ -9821,18 +9833,18 @@ ACTOR Future<Void> setBlobRangeActor(Reference<DatabaseContext> cx, KeyRange ran
 			       range.begin.printable().c_str(),
 			       range.end.printable().c_str(),
 			       value.printable().c_str());
-			return Void();
+			return true;
 		} catch (Error& e) {
 			wait(tr->onError(e));
 		}
 	}
 }
 
-Future<Void> DatabaseContext::blobbifyRange(KeyRange range) {
+Future<bool> DatabaseContext::blobbifyRange(KeyRange range) {
 	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, true);
 }
 
-Future<Void> DatabaseContext::unblobbifyRange(KeyRange range) {
+Future<bool> DatabaseContext::unblobbifyRange(KeyRange range) {
 	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, false);
 }
 

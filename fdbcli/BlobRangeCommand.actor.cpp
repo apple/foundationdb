@@ -175,7 +175,7 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 		fmt::print("Invalid blob range [{0} - {1})\n", tokens[2].printable(), tokens[3].printable());
 	} else {
 		if (tokencmp(tokens[1], "start") || tokencmp(tokens[1], "stop")) {
-			bool starting = tokencmp(tokens[1], "start");
+			state bool starting = tokencmp(tokens[1], "start");
 			if (tokens.size() > 4) {
 				printUsage(tokens[0]);
 				return false;
@@ -184,11 +184,19 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 			           starting ? "Starting" : "Stopping",
 			           tokens[2].printable().c_str(),
 			           tokens[3].printable().c_str());
+			state bool success = false;
 			if (starting) {
-				wait(localDb->blobbifyRange(KeyRangeRef(begin, end)));
+				wait(store(success, localDb->blobbifyRange(KeyRangeRef(begin, end))));
 			} else {
-				wait(localDb->unblobbifyRange(KeyRangeRef(begin, end)));
+				wait(store(success, localDb->unblobbifyRange(KeyRangeRef(begin, end))));
 			}
+			if (!success) {
+				fmt::print("{0} blobbify range for [{1} - {2}) failed\n",
+				           starting ? "Starting" : "Stopping",
+				           tokens[2].printable().c_str(),
+				           tokens[3].printable().c_str());
+			}
+			return success;
 		} else if (tokencmp(tokens[1], "purge") || tokencmp(tokens[1], "forcepurge") || tokencmp(tokens[1], "check")) {
 			bool purge = tokencmp(tokens[1], "purge") || tokencmp(tokens[1], "forcepurge");
 			bool forcePurge = tokencmp(tokens[1], "forcepurge");

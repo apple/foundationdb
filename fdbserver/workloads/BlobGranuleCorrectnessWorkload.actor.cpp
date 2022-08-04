@@ -270,7 +270,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			self->directories[directoryIdx]->directoryRange =
 			    KeyRangeRef(tenantEntry.prefix, tenantEntry.prefix.withSuffix(normalKeys.end));
 			tenants.push_back({ self->directories[directoryIdx]->tenantName, tenantEntry });
-			wait(cx->blobbifyRange(self->directories[directoryIdx]->directoryRange));
+			bool _success = wait(cx->blobbifyRange(self->directories[directoryIdx]->directoryRange));
+			ASSERT(_success);
 		}
 		tenantData.addTenants(tenants);
 
