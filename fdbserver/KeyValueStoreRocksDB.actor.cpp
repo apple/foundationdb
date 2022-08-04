@@ -87,18 +87,21 @@ public:
 	rocksdb::DBOptions getDbOptions() const { return this->dbOptions; }
 	rocksdb::ColumnFamilyOptions getCfOptions() const { return this->cfOptions; }
 	rocksdb::Options getOptions() const { return rocksdb::Options(this->dbOptions, this->cfOptions); }
+	rocksdb::ReadOptions& getReadOptions() { return this->readOptions; }
 
 private:
 	rocksdb::ColumnFamilyOptions initialCfOptions();
 	rocksdb::DBOptions initialDbOptions();
+	rocksdb::ReadOptions initialReadOptions();
 
 	bool closing;
 	rocksdb::DBOptions dbOptions;
 	rocksdb::ColumnFamilyOptions cfOptions;
+	rocksdb::ReadOptions readOptions;
 };
 
 SharedRocksDBState::SharedRocksDBState()
-  : closing(false), dbOptions(initialDbOptions()), cfOptions(initialCfOptions()) {}
+  : closing(false), dbOptions(initialDbOptions()), cfOptions(initialCfOptions()), readOptions(initialReadOptions()) {}
 
 rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 	rocksdb::ColumnFamilyOptions options;
@@ -174,6 +177,12 @@ rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
 	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
 
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
+	return options;
+}
+
+rocksdb::ReadOptions SharedRocksDBState::initialReadOptions() {
+	rocksdb::ReadOptions options;
+	options.background_purge_on_iterator_cleanup = true;
 	return options;
 }
 
@@ -345,13 +354,6 @@ StringRef toStringRef(rocksdb::Slice s) {
 	return StringRef(reinterpret_cast<const uint8_t*>(s.data()), s.size());
 }
 
-// Set some useful defaults desired for all reads.
-rocksdb::ReadOptions getReadOptions() {
-	rocksdb::ReadOptions options;
-	options.background_purge_on_iterator_cleanup = true;
-	return options;
-}
-
 struct Counters {
 	CounterCollection cc;
 	Counter immediateThrottle;
@@ -385,8 +387,8 @@ gets deleted as the ref count becomes 0.
 */
 class ReadIteratorPool {
 public:
-	ReadIteratorPool(UID id, DB& db, CF& cf)
-	  : db(db), cf(cf), index(0), iteratorsReuseCount(0), readRangeOptions(getReadOptions()) {
+	ReadIteratorPool(UID id, DB& db, CF& cf, const rocksdb::ReadOptions readOptions)
+	  : db(db), cf(cf), index(0), iteratorsReuseCount(0), readRangeOptions(readOptions) {
 		readRangeOptions.background_purge_on_iterator_cleanup = true;
 		readRangeOptions.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
 		TraceEvent("ReadIteratorPool", id)
@@ -1252,6 +1254,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		UID id;
 		DB& db;
 		CF& cf;
+		std::shared_ptr<SharedRocksDBState> sharedState;
 		double readValueTimeout;
 		double readValuePrefixTimeout;
 		double readRangeTimeout;
@@ -1265,12 +1268,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		explicit Reader(UID id,
 		                DB& db,
 		                CF& cf,
+		                std::shared_ptr<SharedRocksDBState> sharedState,
 		                std::shared_ptr<ReadIteratorPool> readIterPool,
 		                std::shared_ptr<PerfContextMetrics> perfContextMetrics,
 		                int threadIndex,
 		                ThreadReturnPromiseStream<std::pair<std::string, double>>* metricPromiseStream)
-		  : id(id), db(db), cf(cf), readIterPool(readIterPool), perfContextMetrics(perfContextMetrics),
-		    metricPromiseStream(metricPromiseStream), threadIndex(threadIndex) {
+		  : id(id), db(db), cf(cf), sharedState(sharedState), readIterPool(readIterPool),
+		    perfContextMetrics(perfContextMetrics), metricPromiseStream(metricPromiseStream), threadIndex(threadIndex) {
 			if (g_network->isSimulated()) {
 				// In simulation, increasing the read operation timeouts to 5 minutes, as some of the tests have
 				// very high load and single read thread cannot process all the load within the timeouts.
@@ -1332,7 +1336,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			rocksdb::PinnableSlice value;
-			auto options = getReadOptions();
+			auto& options = sharedState->getReadOptions();
 			uint64_t deadlineMircos =
 			    db->GetEnv()->NowMicros() + (readValueTimeout - (readBeginTime - a.startTime)) * 1000000;
 			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
@@ -1419,7 +1423,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			rocksdb::PinnableSlice value;
-			auto options = getReadOptions();
+			auto& options = sharedState->getReadOptions();
 			uint64_t deadlineMircos =
 			    db->GetEnv()->NowMicros() + (readValuePrefixTimeout - (readBeginTime - a.startTime)) * 1000000;
 			std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
@@ -1588,7 +1592,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	explicit RocksDBKeyValueStore(const std::string& path, UID id)
 	  : sharedState(std::make_shared<SharedRocksDBState>()), path(path), id(id),
-	    perfContextMetrics(new PerfContextMetrics()), readIterPool(new ReadIteratorPool(id, db, defaultFdbCF)),
+	    perfContextMetrics(new PerfContextMetrics()),
+	    readIterPool(new ReadIteratorPool(id, db, defaultFdbCF, sharedState->getReadOptions())),
 	    readSemaphore(SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
@@ -1641,6 +1646,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    new Reader(id,
 			               db,
 			               defaultFdbCF,
+						   this->sharedState,
 			               readIterPool,
 			               perfContextMetrics,
 			               i,
@@ -2043,7 +2049,7 @@ void RocksDBKeyValueStore::Writer::action(CheckpointAction& a) {
 	}
 
 	rocksdb::PinnableSlice value;
-	rocksdb::ReadOptions readOptions = getReadOptions();
+	rocksdb::ReadOptions& readOptions = sharedState->getReadOptions();
 	s = db->Get(readOptions, cf, toSlice(persistVersion), &value);
 
 	if (!s.ok() && !s.IsNotFound()) {
