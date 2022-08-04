@@ -20,7 +20,6 @@
 
 #include <boost/asio.hpp>
 #include <boost/asio/ssl.hpp>
-#include <boost/bind.hpp>
 #include <fmt/format.h>
 #include <algorithm>
 #include <iostream>

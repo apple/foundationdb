@@ -69,6 +69,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/OTELSpanContextMessage.h"
+#include "fdbserver/Ratekeeper.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/ServerCheckpoint.actor.h"
@@ -635,6 +636,17 @@ public:
 	  : key(key), value(value), version(version), tags(tags), debugID(debugID) {}
 };
 
+struct BusiestWriteTagContext {
+	const std::string busiestWriteTagTrackingKey;
+	UID ratekeeperID;
+	Reference<EventCacheHolder> busiestWriteTagEventHolder;
+	double lastUpdateTime;
+
+	BusiestWriteTagContext(const UID& thisServerID)
+	  : busiestWriteTagTrackingKey(thisServerID.toString() + "/BusiestWriteTag"), ratekeeperID(UID()),
+	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(-1) {}
+};
+
 struct StorageServer {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
 
@@ -1033,6 +1045,7 @@ public:
 	}
 
 	TransactionTagCounter transactionTagCounter;
+	BusiestWriteTagContext busiestWriteTagContext;
 
 	Optional<LatencyBandConfig> latencyBandConfig;
 
@@ -1241,7 +1254,8 @@ public:
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
-	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()), counters(this),
+	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()),
+	    busiestWriteTagContext(ssi.id()), counters(this),
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
@@ -10089,6 +10103,35 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 			}
 			when(FetchCheckpointRequest req = waitNext(ssi.fetchCheckpoint.getFuture())) {
 				self->actors.add(fetchCheckpointQ(self, req));
+			}
+			when(UpdateCommitCostRequest req = waitNext(ssi.updateCommitCostRequest.getFuture())) {
+				// Ratekeeper might change with a new ID. In this case, always accept the data.
+				if (req.ratekeeperID != self->busiestWriteTagContext.ratekeeperID) {
+					TraceEvent("RatekeeperIDChange")
+					    .detail("OldID", self->busiestWriteTagContext.ratekeeperID)
+					    .detail("OldLastUpdateTime", self->busiestWriteTagContext.lastUpdateTime)
+					    .detail("NewID", req.ratekeeperID)
+					    .detail("LastUpdateTime", req.postTime);
+					self->busiestWriteTagContext.ratekeeperID = req.ratekeeperID;
+					self->busiestWriteTagContext.lastUpdateTime = -1;
+				}
+				// In case we received an old request/duplicate request, due to, e.g. network problem
+				ASSERT(req.postTime > 0);
+				if (req.postTime < self->busiestWriteTagContext.lastUpdateTime) {
+					continue;
+				}
+
+				self->busiestWriteTagContext.lastUpdateTime = req.postTime;
+				TraceEvent("BusiestWriteTag", self->thisServerID)
+				    .detail("Elapsed", req.elapsed)
+				    .detail("Tag", printable(req.busiestTag))
+				    .detail("TagOps", req.opsSum)
+				    .detail("TagCost", req.costSum)
+				    .detail("TotalCost", req.totalWriteCosts)
+				    .detail("Reported", req.reported)
+				    .trackLatest(self->busiestWriteTagContext.busiestWriteTagTrackingKey);
+
+				req.reply.send(Void());
 			}
 			when(FetchCheckpointKeyValuesRequest req = waitNext(ssi.fetchCheckpointKeyValues.getFuture())) {
 				self->actors.add(fetchCheckpointKeyValuesQ(self, req));
