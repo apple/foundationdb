@@ -23,6 +23,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/NativeAPI.actor.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
@@ -30,33 +31,6 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
-
-// copy to standalones for krm
-ACTOR Future<Void> setBlobRange(Database db, Key startKey, Key endKey, Value value) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
-
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-			// FIXME: check that the set range is currently inactive, and that a revoked range is currently its own
-			// range in the map and fully set.
-
-			tr->set(blobRangeChangeKey, deterministicRandom()->randomUniqueID().toString());
-			// This is not coalescing because we want to keep each range logically separate.
-			wait(krmSetRange(tr, blobRangeKeys.begin, KeyRange(KeyRangeRef(startKey, endKey)), value));
-			wait(tr->commit());
-			printf("Successfully updated blob range [%s - %s) to %s\n",
-			       startKey.printable().c_str(),
-			       endKey.printable().c_str(),
-			       value.printable().c_str());
-			return Void();
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-}
 
 ACTOR Future<Version> getLatestReadVersion(Database db) {
 	state Transaction tr(db);
@@ -210,7 +184,11 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 			           starting ? "Starting" : "Stopping",
 			           tokens[2].printable().c_str(),
 			           tokens[3].printable().c_str());
-			wait(setBlobRange(localDb, begin, end, starting ? LiteralStringRef("1") : StringRef()));
+			if (starting) {
+				wait(localDb->blobbifyRange(KeyRangeRef(begin, end)));
+			} else {
+				wait(localDb->unblobbifyRange(KeyRangeRef(begin, end)));
+			}
 		} else if (tokencmp(tokens[1], "purge") || tokencmp(tokens[1], "forcepurge") || tokencmp(tokens[1], "check")) {
 			bool purge = tokencmp(tokens[1], "purge") || tokencmp(tokens[1], "forcepurge");
 			bool forcePurge = tokencmp(tokens[1], "forcepurge");

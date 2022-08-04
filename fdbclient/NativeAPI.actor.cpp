@@ -9707,6 +9707,7 @@ Reference<DatabaseContext::TransactionT> DatabaseContext::createTransaction() {
 	return makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(this)));
 }
 
+// BlobGranule API.
 ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
                                          KeyRange range,
                                          Version purgeVersion,
@@ -9796,6 +9797,43 @@ ACTOR Future<Void> waitPurgeGranulesCompleteActor(Reference<DatabaseContext> db,
 
 Future<Void> DatabaseContext::waitPurgeGranulesComplete(Key purgeKey) {
 	return waitPurgeGranulesCompleteActor(Reference<DatabaseContext>::addRef(this), purgeKey);
+}
+
+ACTOR Future<Void> setBlobRangeActor(Reference<DatabaseContext> cx, KeyRange range, bool active) {
+	state Database db(cx);
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+
+	state Value value = active ? LiteralStringRef("1") : LiteralStringRef("0");
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			// FIXME: check that the set range is currently inactive, and that a revoked range is currently its own
+			// range in the map and fully set.
+
+			tr->set(blobRangeChangeKey, deterministicRandom()->randomUniqueID().toString());
+			// This is not coalescing because we want to keep each range logically separate.
+			wait(krmSetRange(tr, blobRangeKeys.begin, range, value));
+			wait(tr->commit());
+			printf("Successfully updated blob range [%s - %s) to %s\n",
+			       range.begin.printable().c_str(),
+			       range.end.printable().c_str(),
+			       value.printable().c_str());
+			return Void();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+Future<Void> DatabaseContext::blobbifyRange(KeyRange range) {
+	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, true);
+}
+
+Future<Void> DatabaseContext::unblobbifyRange(KeyRange range) {
+	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, false);
 }
 
 int64_t getMaxKeySize(KeyRef const& key) {
