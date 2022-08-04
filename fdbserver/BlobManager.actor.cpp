@@ -1596,6 +1596,15 @@ ACTOR Future<Void> forceGranuleFlush(Reference<BlobManagerData> bmData, KeyRange
 			break;
 		}
 		try {
+			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr, keyRange));
+			if (purgeState != ForcedPurgeState::NonePurged) {
+				CODE_PROBE(true, "Granule flush stopped because of force purge");
+				TraceEvent("GranuleFlushCancelledForcePurge", bmData->id)
+				    .detail("Epoch", bmData->epoch)
+				    .detail("KeyRange", keyRange);
+				return Void();
+			}
+
 			// TODO KNOB
 			state RangeResult blobGranuleMapping = wait(krmGetRanges(
 			    &tr, blobGranuleMappingKeys.begin, currentRange, 64, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
@@ -1610,6 +1619,7 @@ ACTOR Future<Void> forceGranuleFlush(Reference<BlobManagerData> bmData, KeyRange
 						           blobGranuleMapping[i].key.printable(),
 						           blobGranuleMapping[i + 1].key.printable());
 					}
+					// range isn't force purged because of above check, so flush was for invalid range
 					throw blob_granule_transaction_too_old();
 				}
 
@@ -1620,6 +1630,7 @@ ACTOR Future<Void> forceGranuleFlush(Reference<BlobManagerData> bmData, KeyRange
 						           blobGranuleMapping[i].key.printable(),
 						           blobGranuleMapping[i + 1].key.printable());
 					}
+					// range isn't force purged because of above check, so flush was for invalid range
 					throw blob_granule_transaction_too_old();
 				}
 
@@ -1726,6 +1737,16 @@ ACTOR Future<std::pair<UID, Version>> persistMergeGranulesStart(Reference<BlobMa
 
 			wait(checkManagerLock(tr, bmData));
 
+			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction(), mergeRange));
+			if (purgeState != ForcedPurgeState::NonePurged) {
+				CODE_PROBE(true, "Merge start stopped because of force purge");
+				TraceEvent("GranuleMergeStartCancelledForcePurge", bmData->id)
+				    .detail("Epoch", bmData->epoch)
+				    .detail("GranuleRange", mergeRange);
+				// TODO better error?
+				return std::pair(UID(), invalidVersion);
+			}
+
 			tr->atomicOp(
 			    blobGranuleMergeKeyFor(mergeGranuleID),
 			    blobGranuleMergeValueFor(mergeRange, parentGranuleIDs, parentGranuleRanges, parentGranuleStartVersions),
@@ -1798,6 +1819,7 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			wait(checkManagerLock(tr, bmData));
+
 			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction(), mergeRange));
 			if (purgeState != ForcedPurgeState::NonePurged) {
 				CODE_PROBE(true, "Merge finish stopped because of force purge");
@@ -1962,6 +1984,10 @@ ACTOR Future<Void> doMerge(Reference<BlobManagerData> bmData,
 	try {
 		std::pair<UID, Version> persistMerge =
 		    wait(persistMergeGranulesStart(bmData, mergeRange, ids, ranges, startVersions));
+		if (persistMerge.second == invalidVersion) {
+			// cancelled because of force purge
+			return Void();
+		}
 		wait(finishMergeGranules(
 		    bmData, persistMerge.first, mergeRange, persistMerge.second, ids, ranges, startVersions));
 		return Void();
@@ -2718,6 +2744,20 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 	}
 }
 
+// essentially just error handling for resumed merge, since doMerge does it for new merge
+ACTOR Future<Void> resumeMerge(Future<Void> finishMergeFuture, KeyRange mergeRange) {
+	try {
+		wait(finishMergeFuture);
+		return Void();
+	} catch (Error& e) {
+		if (e.code() == error_code_operation_cancelled || e.code() == error_code_blob_manager_replaced) {
+			throw;
+		}
+		TraceEvent(SevError, "UnexpectedErrorResumeGranuleMerge").error(e).detail("Range", mergeRange);
+		throw e;
+	}
+}
+
 ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 
@@ -2753,13 +2793,14 @@ ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData) {
 				// report updated status. Start with early (epoch, seqno) to guarantee lower than later status
 				BoundaryEvaluation eval(1, 0, BoundaryEvalType::MERGE, 1, 0);
 				ASSERT(!bmData->isMergeActive(mergeRange));
-				bmData->addActor.send(finishMergeGranules(bmData,
-				                                          mergeGranuleID,
-				                                          mergeRange,
-				                                          mergeVersion,
-				                                          parentGranuleIDs,
-				                                          parentGranuleRanges,
-				                                          parentGranuleStartVersions));
+				bmData->addActor.send(resumeMerge(finishMergeGranules(bmData,
+				                                                      mergeGranuleID,
+				                                                      mergeRange,
+				                                                      mergeVersion,
+				                                                      parentGranuleIDs,
+				                                                      parentGranuleRanges,
+				                                                      parentGranuleStartVersions),
+				                                  mergeRange));
 				bmData->boundaryEvaluations.insert(mergeRange, eval);
 				bmData->activeGranuleMerges.insert(mergeRange, mergeVersion);
 				bmData->setMergeCandidate(mergeRange, MergeCandidateMerging);
