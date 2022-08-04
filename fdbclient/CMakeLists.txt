@@ -1,8 +1,5 @@
 fdb_find_sources(FDBCLIENT_SRCS)
-list(APPEND FDBCLIENT_SRCS
-  sha1/SHA1.cpp
-  libb64/cdecode.c
-  libb64/cencode.c)
+list(APPEND FDBCLIENT_SRCS sha1/SHA1.cpp)
 
 message(STATUS "FDB version is ${FDB_VERSION}")
 message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")
@@ -89,7 +86,7 @@ if(WIN32)
   add_dependencies(fdbclient_sampling_actors fdbclient_actors)
 endif()
 
-add_flow_target(LINK_TEST NAME fdbclientlinktest SRCS ${FDBCLIENT_SRCS} LinkTest.cpp ADDL_SRCS ${options_srcs})
+add_flow_target(LINK_TEST NAME fdbclientlinktest SRCS LinkTest.cpp)
 target_link_libraries(fdbclientlinktest PRIVATE fdbclient rapidxml) # re-link rapidxml due to private link interface
 
 if(BUILD_AZURE_BACKUP)
@@ -101,3 +98,4 @@ if(BUILD_AWS_BACKUP)
   target_link_libraries(fdbclient PUBLIC awssdk_target)
   target_link_libraries(fdbclient_sampling PUBLIC awssdk_target)
 endif()
+

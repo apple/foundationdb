@@ -20,21 +20,30 @@
 
 #ifndef FLOW_SIMULATOR_H
 #define FLOW_SIMULATOR_H
-#include "flow/ProtocolVersion.h"
+#pragma once
 #include <algorithm>
 #include <string>
-#pragma once
+#include <random>
+#include <limits>
 
 #include "flow/flow.h"
 #include "flow/Histogram.h"
+#include "flow/ProtocolVersion.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "flow/IAsyncFile.h"
 #include "flow/TDMetric.actor.h"
-#include <random>
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
+#include "fdbrpc/TokenSign.h"
 
 enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
+
+struct ValidationData {
+	// global validation that missing refreshed feeds were previously destroyed
+	std::unordered_set<std::string> allDestroyedChangeFeedIDs;
+};
 
 class ISimulator : public INetwork {
 public:
@@ -458,11 +467,16 @@ public:
 	BackupAgentType backupAgents;
 	BackupAgentType drAgents;
 	bool restarted = false;
+	ValidationData validationData;
 
 	bool hasDiffProtocolProcess; // true if simulator is testing a process with a different version
 	bool setDiffProtocol; // true if a process with a different protocol version has been started
 
 	bool allowStorageMigrationTypeChange = false;
+	double injectTargetedSSRestartTime = std::numeric_limits<double>::max();
+	double injectSSDelayTime = std::numeric_limits<double>::max();
+
+	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 
 	flowGlobalType global(int id) const final { return getCurrentProcess()->global(id); };
 	void setGlobal(size_t id, flowGlobalType v) final { getCurrentProcess()->setGlobal(id, v); };

@@ -104,9 +104,9 @@ public:
 			TraceEvent("KVSMemSwitchingToLargeTransactionMode", id)
 			    .detail("TransactionSize", transactionSize)
 			    .detail("DataSize", committedDataSize);
-			TEST(true); // KeyValueStoreMemory switching to large transaction mode
-			TEST(committedDataSize >
-			     1e3); // KeyValueStoreMemory switching to large transaction mode with committed data
+			CODE_PROBE(true, "KeyValueStoreMemory switching to large transaction mode");
+			CODE_PROBE(committedDataSize > 1e3,
+			           "KeyValueStoreMemory switching to large transaction mode with committed data");
 		}
 
 		int64_t bytesWritten = commit_queue(queue, true);
@@ -503,6 +503,12 @@ private:
 	                                                      OpHeader* h,
 	                                                      bool* isZeroFilled,
 	                                                      int* zeroFillSize) {
+		// Metadata op types to be excluded from encryption.
+		static std::unordered_set<OpType> metaOps = { OpSnapshotEnd, OpSnapshotAbort, OpCommit, OpRollback };
+		if (metaOps.count((OpType)h->op) == 0) {
+			// It is not supported to open an encrypted store as unencrypted, or vice-versa.
+			ASSERT_EQ(h->op == OpEncrypted, self->enableEncryption);
+		}
 		state int remainingBytes = h->len1 + h->len2 + 1;
 		if (h->op == OpEncrypted) {
 			// encryption header, plus the real (encrypted) op type
@@ -565,7 +571,7 @@ private:
 						Standalone<StringRef> data = wait(self->log->readNext(sizeof(OpHeader)));
 						if (data.size() != sizeof(OpHeader)) {
 							if (data.size()) {
-								TEST(true); // zero fill partial header in KeyValueStoreMemory
+								CODE_PROBE(true, "zero fill partial header in KeyValueStoreMemory");
 								memset(&h, 0, sizeof(OpHeader));
 								memcpy(&h, data.begin(), data.size());
 								zeroFillSize = sizeof(OpHeader) - data.size() + h.len1 + h.len2 + 1;
@@ -696,7 +702,7 @@ private:
 						ASSERT(false);
 					}
 
-					TEST(true); // Fixing a partial commit at the end of the KeyValueStoreMemory log
+					CODE_PROBE(true, "Fixing a partial commit at the end of the KeyValueStoreMemory log");
 					for (int i = 0; i < zeroFillSize; i++)
 						self->log->push(StringRef((const uint8_t*)"", 1));
 				}

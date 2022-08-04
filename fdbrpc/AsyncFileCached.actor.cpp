@@ -193,14 +193,14 @@ Future<Void> AsyncFileCached::changeFileSize(int64_t size) {
 	prevLength = size;
 
 	if (offsetInPage) {
-		TEST(true); // Truncating to the middle of a page
+		CODE_PROBE(true, "Truncating to the middle of a page");
 		auto p = pages.find(pageOffset);
 		if (p != pages.end()) {
 			auto f = p->second->flush();
 			if (!f.isReady() || f.isError())
 				actors.push_back(f);
 		} else {
-			TEST(true); // Truncating to the middle of a page that isn't in cache
+			CODE_PROBE(true, "Truncating to the middle of a page that isn't in cache");
 		}
 
 		pageOffset += pageCache->pageSize;

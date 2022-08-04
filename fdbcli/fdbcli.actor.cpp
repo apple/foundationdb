@@ -49,6 +49,7 @@
 #include "flow/FastRef.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
+#include "flow/CodeProbe.h"
 
 #include "flow/TLSConfig.actor.h"
 #include "flow/ThreadHelper.actor.h"
@@ -201,9 +202,31 @@ private:
 	                          bool enabled,
 	                          Optional<StringRef> arg,
 	                          bool intrans) {
-		if (enabled && arg.present() != FDBTransactionOptions::optionInfo.getMustExist(option).hasParameter) {
-			fprintf(stderr, "ERROR: option %s a parameter\n", arg.present() ? "did not expect" : "expected");
-			throw invalid_option_value();
+		// If the parameter type is an int, we will extract into this variable and reference its memory with a StringRef
+		int64_t parsedInt = 0;
+
+		if (enabled) {
+			auto optionInfo = FDBTransactionOptions::optionInfo.getMustExist(option);
+			if (arg.present() != optionInfo.hasParameter) {
+				fprintf(stderr, "ERROR: option %s a parameter\n", arg.present() ? "did not expect" : "expected");
+				throw invalid_option_value();
+			}
+			if (arg.present() && optionInfo.paramType == FDBOptionInfo::ParamType::Int) {
+				try {
+					size_t nextIdx;
+					std::string value = arg.get().toString();
+					parsedInt = std::stoll(value, &nextIdx);
+					if (nextIdx != value.length()) {
+						fprintf(
+						    stderr, "ERROR: could not parse value `%s' as an integer\n", arg.get().toString().c_str());
+						throw invalid_option_value();
+					}
+					arg = StringRef(reinterpret_cast<uint8_t*>(&parsedInt), 8);
+				} catch (std::exception e) {
+					fprintf(stderr, "ERROR: could not parse value `%s' as an integer\n", arg.get().toString().c_str());
+					throw invalid_option_value();
+				}
+			}
 		}
 
 		if (intrans) {
@@ -860,7 +883,7 @@ struct CLIOptions {
 	std::vector<std::pair<std::string, std::string>> knobs;
 
 	// api version, using the latest version by default
-	int api_version = FDB_API_VERSION;
+	int apiVersion = FDB_API_VERSION;
 
 	CLIOptions(int argc, char* argv[]) {
 		program_name = argv[0];
@@ -905,11 +928,11 @@ struct CLIOptions {
 			break;
 		case OPT_API_VERSION: {
 			char* endptr;
-			api_version = strtoul((char*)args.OptionArg(), &endptr, 10);
+			apiVersion = strtoul((char*)args.OptionArg(), &endptr, 10);
 			if (*endptr != '\0') {
 				fprintf(stderr, "ERROR: invalid client version %s\n", args.OptionArg());
 				return 1;
-			} else if (api_version < 700 || api_version > FDB_API_VERSION) {
+			} else if (apiVersion < 700 || apiVersion > FDB_API_VERSION) {
 				// multi-version fdbcli only available after 7.0
 				fprintf(stderr,
 				        "ERROR: api version %s is not supported. (Min: 700, Max: %d)\n",
@@ -1091,7 +1114,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	TraceEvent::setNetworkThread();
 
 	try {
-		localDb = Database::createDatabase(ccf, opt.api_version, IsInternal::False);
+		localDb = Database::createDatabase(ccf, opt.apiVersion, IsInternal::False);
 		if (!opt.exec.present()) {
 			printf("Using cluster file `%s'.\n", ccf->getLocation().c_str());
 		}
@@ -1886,14 +1909,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "createtenant")) {
-					bool _result = wait(makeInterruptable(createTenantCommandActor(db, tokens)));
+					bool _result = wait(makeInterruptable(createTenantCommandActor(db, tokens, opt.apiVersion)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "deletetenant")) {
-					bool _result = wait(makeInterruptable(deleteTenantCommandActor(db, tokens)));
+					bool _result = wait(makeInterruptable(deleteTenantCommandActor(db, tokens, opt.apiVersion)));
 					if (!_result)
 						is_error = true;
 					else if (tenantName.present() && tokens[1] == tenantName.get()) {
@@ -1905,21 +1928,40 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "listtenants")) {
-					bool _result = wait(makeInterruptable(listTenantsCommandActor(db, tokens)));
+					bool _result = wait(makeInterruptable(listTenantsCommandActor(db, tokens, opt.apiVersion)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "gettenant")) {
-					bool _result = wait(makeInterruptable(getTenantCommandActor(db, tokens)));
+					bool _result = wait(makeInterruptable(getTenantCommandActor(db, tokens, opt.apiVersion)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "configuretenant")) {
+					if (opt.apiVersion < 720) {
+						fmt::print(stderr, "ERROR: tenants cannot be configured before API version 720.\n");
+						is_error = true;
+						continue;
+					}
+
+					bool _result = wait(makeInterruptable(configureTenantCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "renametenant")) {
-					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens)));
+					if (opt.apiVersion < 720) {
+						fmt::print(stderr, "ERROR: tenants cannot be renamed before API version 720.\n");
+						is_error = true;
+						continue;
+					}
+
+					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens, opt.apiVersion)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -2149,7 +2191,7 @@ int main(int argc, char** argv) {
 	}
 
 	try {
-		API->selectApiVersion(opt.api_version);
+		API->selectApiVersion(opt.apiVersion);
 		API->setupNetwork();
 		opt.setupKnobs();
 		if (opt.exit_code != -1) {

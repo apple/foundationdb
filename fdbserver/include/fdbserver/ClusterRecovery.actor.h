@@ -132,7 +132,7 @@ private:
 			wait(self->cstate.setExclusive(
 			    BinaryWriter::toValue(newState, IncludeVersion(ProtocolVersion::withDBCoreState()))));
 		} catch (Error& e) {
-			TEST(true); // Master displaced during writeMasterState
+			CODE_PROBE(true, "Master displaced during writeMasterState");
 			throw;
 		}
 
@@ -148,7 +148,7 @@ private:
 
 			if (readState != newState) {
 				TraceEvent("RecoveryTerminated", self->dbgid).detail("Reason", "CStateChanged");
-				TEST(true); // Coordinated state changed between writing and reading, recovery restarting
+				CODE_PROBE(true, "Coordinated state changed between writing and reading, recovery restarting");
 				throw worker_removed();
 			}
 			self->switchedState = Promise<Void>();

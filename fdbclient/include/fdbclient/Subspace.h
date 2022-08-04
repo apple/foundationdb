@@ -42,9 +42,7 @@ public:
 
 	template <class T>
 	Key pack(T const& item) const {
-		Tuple t;
-		t.append(item);
-		return pack(t);
+		return pack(Tuple::makeTuple(item));
 	}
 
 	Key pack(StringRef const& item, bool utf8 = false) const {
@@ -58,9 +56,7 @@ public:
 
 	template <class T>
 	Subspace get(T const& item) const {
-		Tuple t;
-		t.append(item);
-		return get(t);
+		return get(Tuple::makeTuple(item));
 	}
 
 	Subspace get(StringRef const& item, bool utf8 = false) const {

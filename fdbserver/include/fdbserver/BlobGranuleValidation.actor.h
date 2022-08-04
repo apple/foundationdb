@@ -51,6 +51,10 @@ bool compareFDBAndBlob(RangeResult fdb,
                        Version v,
                        bool debug);
 
+void printGranuleChunks(const Standalone<VectorRef<BlobGranuleChunkRef>>& chunks);
+
+ACTOR Future<Void> clearAndAwaitMerge(Database cx, KeyRange range);
+
 #include "flow/unactorcompiler.h"
 
 #endif

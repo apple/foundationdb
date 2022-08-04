@@ -46,6 +46,7 @@
 #include <memory>
 #include <mutex>
 
+#include "flow/CodeProbe.h"
 #include "flow/Platform.h"
 #include "flow/FastAlloc.h"
 #include "flow/IRandom.h"
@@ -59,15 +60,9 @@
 #include <boost/version.hpp>
 
 #define TEST(condition)                                                                                                \
-	if (!(condition)) {                                                                                                \
-	} else {                                                                                                           \
-		static BaseTraceEvent* __test =                                                                                \
-		    &(TraceEvent(intToSeverity(FLOW_KNOBS->CODE_COV_TRACE_EVENT_SEVERITY), "CodeCoverage")                     \
-		          .detail("File", __FILE__)                                                                            \
-		          .detail("Line", __LINE__)                                                                            \
-		          .detail("Condition", #condition));                                                                   \
-		(void)__test;                                                                                                  \
-	}
+	do {                                                                                                               \
+		static_assert(false, "TEST macros are deprecated, please use CODE_PROBE instead");                             \
+	} while (false)
 
 /*
 usage:
@@ -1369,6 +1364,8 @@ inline Future<Void> yield(TaskPriority taskID = TaskPriority::DefaultYield) {
 inline bool check_yield(TaskPriority taskID = TaskPriority::DefaultYield) {
 	return g_network->check_yield(taskID);
 }
+
+void bindDeterministicRandomToOpenssl();
 
 #include "flow/genericactors.actor.h"
 #endif

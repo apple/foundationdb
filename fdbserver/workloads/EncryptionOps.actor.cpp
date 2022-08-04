@@ -159,7 +159,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 	void generateRandomBaseCipher(const int maxLen, uint8_t* buff, int* retLen) {
 		memset(buff, 0, maxLen);
 		*retLen = deterministicRandom()->randomInt(maxLen / 2, maxLen);
-		generateRandomData(buff, *retLen);
+		deterministicRandom()->randomBytes(buff, *retLen);
 	}
 
 	void setupCipherEssentials() {
@@ -247,7 +247,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 	                                   const EncryptAuthTokenMode authMode,
 	                                   BlobCipherEncryptHeader* header) {
 		uint8_t iv[AES_256_IV_LENGTH];
-		generateRandomData(&iv[0], AES_256_IV_LENGTH);
+		deterministicRandom()->randomBytes(&iv[0], AES_256_IV_LENGTH);
 		EncryptBlobCipherAes265Ctr encryptor(textCipherKey, headerCipherKey, &iv[0], AES_256_IV_LENGTH, authMode);
 
 		auto start = std::chrono::high_resolution_clock::now();
@@ -341,7 +341,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 			}
 
 			int dataLen = isFixedSizePayload() ? pageSize : deterministicRandom()->randomInt(100, maxBufSize);
-			generateRandomData(buff.get(), dataLen);
+			deterministicRandom()->randomBytes(buff.get(), dataLen);
 
 			// Encrypt the payload - generates BlobCipherEncryptHeader to assist decryption later
 			BlobCipherEncryptHeader header;

@@ -30,6 +30,18 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+// serialize change feed key as UID bytes, to use 16 bytes on disk
+Key granuleIDToCFKey(UID granuleID) {
+	BinaryWriter wr(Unversioned());
+	wr << granuleID;
+	return wr.toValue();
+}
+
+// parse change feed key back to UID, to be human-readable
+UID cfKeyToGranuleID(Key cfKey) {
+	return BinaryReader::fromStringRef<UID>(cfKey, Unversioned());
+}
+
 // Gets the latest granule history node for range that was persisted
 ACTOR Future<Optional<GranuleHistory>> getLatestGranuleHistory(Transaction* tr, KeyRange range) {
 	state KeyRange historyRange = blobGranuleHistoryKeyRangeFor(range);
@@ -62,13 +74,14 @@ ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, 
 			int64_t offset;
 			int64_t length;
 			int64_t fullFileLength;
+			Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 
 			std::tie(gid, version, fileType) = decodeBlobGranuleFileKey(it.key);
 			ASSERT(gid == granuleID);
 
-			std::tie(filename, offset, length, fullFileLength) = decodeBlobGranuleFileValue(it.value);
+			std::tie(filename, offset, length, fullFileLength, cipherKeysMeta) = decodeBlobGranuleFileValue(it.value);
 
-			BlobFileIndex idx(version, filename.toString(), offset, length, fullFileLength);
+			BlobFileIndex idx(version, filename.toString(), offset, length, fullFileLength, cipherKeysMeta);
 			if (fileType == 'S') {
 				ASSERT(files->snapshotFiles.empty() || files->snapshotFiles.back().version < idx.version);
 				files->snapshotFiles.push_back(idx);
@@ -115,6 +128,10 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Database cx, UID granuleID) {
 // key range, the granule may have a snapshot file at version X, where beginVersion < X <= readVersion. In this case, if
 // the number of bytes in delta files between beginVersion and X is larger than the snapshot file at version X, it is
 // strictly more efficient (in terms of files and bytes read) to just use the snapshot file at version X instead.
+//
+// To assist BlobGranule file (snapshot and/or delta) file encryption, the routine while populating snapshot and/or
+// delta files, constructs BlobFilePointerRef->cipherKeysMeta field. Approach avoids this method to be defined as an
+// ACTOR, as fetching desired EncryptionKey may potentially involve reaching out to EncryptKeyProxy or external KMS.
 void GranuleFiles::getFiles(Version beginVersion,
                             Version readVersion,
                             bool canCollapse,
@@ -170,16 +187,24 @@ void GranuleFiles::getFiles(Version beginVersion,
 	Version lastIncluded = invalidVersion;
 	if (snapshotF != snapshotFiles.end()) {
 		chunk.snapshotVersion = snapshotF->version;
-		chunk.snapshotFile = BlobFilePointerRef(
-		    replyArena, snapshotF->filename, snapshotF->offset, snapshotF->length, snapshotF->fullFileLength);
+		chunk.snapshotFile = BlobFilePointerRef(replyArena,
+		                                        snapshotF->filename,
+		                                        snapshotF->offset,
+		                                        snapshotF->length,
+		                                        snapshotF->fullFileLength,
+		                                        snapshotF->cipherKeysMeta);
 		lastIncluded = chunk.snapshotVersion;
 	} else {
 		chunk.snapshotVersion = invalidVersion;
 	}
 
 	while (deltaF != deltaFiles.end() && deltaF->version < readVersion) {
-		chunk.deltaFiles.emplace_back_deep(
-		    replyArena, deltaF->filename, deltaF->offset, deltaF->length, deltaF->fullFileLength);
+		chunk.deltaFiles.emplace_back_deep(replyArena,
+		                                   deltaF->filename,
+		                                   deltaF->offset,
+		                                   deltaF->length,
+		                                   deltaF->fullFileLength,
+		                                   deltaF->cipherKeysMeta);
 		deltaBytesCounter += deltaF->length;
 		ASSERT(lastIncluded < deltaF->version);
 		lastIncluded = deltaF->version;
@@ -187,8 +212,12 @@ void GranuleFiles::getFiles(Version beginVersion,
 	}
 	// include last delta file that passes readVersion, if it exists
 	if (deltaF != deltaFiles.end() && lastIncluded < readVersion) {
-		chunk.deltaFiles.emplace_back_deep(
-		    replyArena, deltaF->filename, deltaF->offset, deltaF->length, deltaF->fullFileLength);
+		chunk.deltaFiles.emplace_back_deep(replyArena,
+		                                   deltaF->filename,
+		                                   deltaF->offset,
+		                                   deltaF->length,
+		                                   deltaF->fullFileLength,
+		                                   deltaF->cipherKeysMeta);
 		deltaBytesCounter += deltaF->length;
 		lastIncluded = deltaF->version;
 	}

@@ -99,7 +99,7 @@ public:
 
 	void addRequest(Optional<TagSet> const& tags, int64_t bytes) {
 		if (tags.present()) {
-			TEST(true); // Tracking transaction tag in counter
+			CODE_PROBE(true, "Tracking transaction tag in counter");
 			double cost = costFunction(bytes);
 			for (auto& tag : tags.get()) {
 				int64_t& count = intervalCounts[TransactionTag(tag, tags.get().getArena())];
@@ -117,13 +117,29 @@ public:
 		if (intervalStart > 0 && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
 			previousBusiestTags = topTags.getBusiestTags(elapsed, intervalTotalSampledCount);
 
-			TraceEvent("BusiestReadTag", thisServerID)
-			    .detail("Elapsed", elapsed)
-			    //.detail("Tag", printable(busiestTag))
-			    //.detail("TagCost", busiestTagCount)
-			    .detail("TotalSampledCost", intervalTotalSampledCount)
-			    .detail("Reported", previousBusiestTags.size())
-			    .trackLatest(busiestReadTagEventHolder->trackingKey);
+			// For status, report the busiest tag:
+			if (previousBusiestTags.empty()) {
+				TraceEvent("BusiestReadTag", thisServerID).detail("TagCost", 0);
+			} else {
+				auto busiestTagInfo = previousBusiestTags[0];
+				for (int i = 1; i < previousBusiestTags.size(); ++i) {
+					auto const& tagInfo = previousBusiestTags[i];
+					if (tagInfo.rate > busiestTagInfo.rate) {
+						busiestTagInfo = tagInfo;
+					}
+				}
+				TraceEvent("BusiestReadTag", thisServerID)
+				    .detail("Tag", printable(busiestTagInfo.tag))
+				    .detail("TagCost", busiestTagInfo.rate)
+				    .detail("FractionalBusyness", busiestTagInfo.fractionalBusyness);
+			}
+
+			for (const auto& tagInfo : previousBusiestTags) {
+				TraceEvent("BusyReadTag", thisServerID)
+				    .detail("Tag", printable(tagInfo.tag))
+				    .detail("TagCost", tagInfo.rate)
+				    .detail("FractionalBusyness", tagInfo.fractionalBusyness);
+			}
 		}
 
 		intervalCounts.clear();
