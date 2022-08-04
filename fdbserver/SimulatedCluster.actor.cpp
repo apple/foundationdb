@@ -1409,14 +1409,6 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		                 storage_engine_type) != testConfig.storageEngineExcludeTypes.end()) {
 			storage_engine_type = deterministicRandom()->randomInt(0, 6);
 		}
-		int focus_storage_engine_type = SERVER_KNOBS->TEST_STORAGE_ENGINE_TYPE;
-		if (focus_storage_engine_type > 0 &&
-		    std::find(testConfig.storageEngineExcludeTypes.begin(),
-		              testConfig.storageEngineExcludeTypes.end(),
-		              focus_storage_engine_type) == testConfig.storageEngineExcludeTypes.end()) {
-			storage_engine_type = focus_storage_engine_type;
-			TraceEvent(SevWarnAlways, "TestStorageEngineType").detail("StorageEngineType", focus_storage_engine_type);
-		}
 	}
 
 	switch (storage_engine_type) {
@@ -1800,7 +1792,7 @@ void SimulationConfig::setProcessesPerMachine(const TestConfig& testConfig) {
 void SimulationConfig::setTss(const TestConfig& testConfig) {
 	int tssCount = 0;
 	// TODO: Support TSS in SHARD_ENCODE_LOCATION_METADATA mode.
-	if (!testConfig.simpleConfig && !testConfig.disableTss && !CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
+	if (!testConfig.simpleConfig && !testConfig.disableTss && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
 	    deterministicRandom()->random01() < 0.25) {
 		// 1 or 2 tss
 		tssCount = deterministicRandom()->randomInt(1, 3);
@@ -2402,7 +2394,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state bool allowDisablingTenants = testConfig.allowDisablingTenants;
 	state bool allowCreatingTenants = true;
 
-	if (!CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		testConfig.storageEngineExcludeTypes.push_back(5);
 	}
 

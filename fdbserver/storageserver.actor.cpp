@@ -69,6 +69,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/OTELSpanContextMessage.h"
+#include "fdbserver/Ratekeeper.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/ServerCheckpoint.actor.h"
@@ -101,6 +102,22 @@
 #define SHORT_CIRCUT_ACTUAL_STORAGE 0
 
 namespace {
+enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE, CSK_ASSIGN_EMPTY };
+
+std::string changeServerKeysContextName(const ChangeServerKeysContext& context) {
+	switch (context) {
+	case CSK_UPDATE:
+		return "Update";
+	case CSK_RESTORE:
+		return "Restore";
+	case CSK_ASSIGN_EMPTY:
+		return "AssignEmpty";
+	default:
+		ASSERT(false);
+	}
+	return "UnknownContext";
+}
+
 bool canReplyWith(Error e) {
 	switch (e.code()) {
 	case error_code_transaction_too_old:
@@ -619,6 +636,17 @@ public:
 	  : key(key), value(value), version(version), tags(tags), debugID(debugID) {}
 };
 
+struct BusiestWriteTagContext {
+	const std::string busiestWriteTagTrackingKey;
+	UID ratekeeperID;
+	Reference<EventCacheHolder> busiestWriteTagEventHolder;
+	double lastUpdateTime;
+
+	BusiestWriteTagContext(const UID& thisServerID)
+	  : busiestWriteTagTrackingKey(thisServerID.toString() + "/BusiestWriteTag"), ratekeeperID(UID()),
+	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(-1) {}
+};
+
 struct StorageServer {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
 
@@ -1017,6 +1045,7 @@ public:
 	}
 
 	TransactionTagCounter transactionTagCounter;
+	BusiestWriteTagContext busiestWriteTagContext;
 
 	Optional<LatencyBandConfig> latencyBandConfig;
 
@@ -1225,7 +1254,8 @@ public:
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
-	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()), counters(this),
+	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()),
+	    busiestWriteTagContext(ssi.id()), counters(this),
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
@@ -1235,7 +1265,7 @@ public:
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
-		if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
 		    (SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE || storage->shardAware())) {
 			addShard(ShardInfo::newShard(this, StorageServerShard::notAssigned(allKeys)));
 		} else {
@@ -6737,9 +6767,6 @@ void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& 
 	}
 }
 
-enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE, CSK_ASSIGN_EMPTY };
-const char* changeServerKeysContextName[] = { "Update", "Restore" };
-
 ACTOR Future<Void> restoreShards(StorageServer* data,
                                  Version version,
                                  RangeResult storageShards,
@@ -6938,7 +6965,7 @@ void changeServerKeys(StorageServer* data,
 	//     .detail("KeyEnd", keys.end)
 	//     .detail("NowAssigned", nowAssigned)
 	//     .detail("Version", version)
-	//     .detail("Context", changeServerKeysContextName[(int)context]);
+	//     .detail("Context", changeServerKeysContextName(context));
 	validate(data);
 
 	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
@@ -7085,7 +7112,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	    .detail("Range", keys)
 	    .detail("NowAssigned", nowAssigned)
 	    .detail("Version", version)
-	    .detail("Context", changeServerKeysContextName[(int)context]);
+	    .detail("Context", changeServerKeysContextName(context));
 
 	validate(data);
 
@@ -8594,9 +8621,18 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
 			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
 			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
+				state std::vector<std::string> emptyShardIds;
 				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
-					data->storage.removeRange(range);
+					auto ids = data->storage.removeRange(range);
+					emptyShardIds.insert(emptyShardIds.end(), ids.begin(), ids.end());
 					TraceEvent(SevVerbose, "RemoveKVSRange", data->thisServerID).detail("Range", range);
+				}
+				if (emptyShardIds.size() > 0) {
+					state double start = now();
+					wait(data->storage.cleanUpShardsIfNeeded(emptyShardIds));
+					TraceEvent(SevInfo, "RemoveEmptyPhysicalShards", data->thisServerID)
+					    .detail("NumShards", emptyShardIds.size())
+					    .detail("TimeSpent", now() - start);
 				}
 				data->pendingRemoveRanges.erase(data->pendingRemoveRanges.begin());
 			}
@@ -10068,6 +10104,35 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 			when(FetchCheckpointRequest req = waitNext(ssi.fetchCheckpoint.getFuture())) {
 				self->actors.add(fetchCheckpointQ(self, req));
 			}
+			when(UpdateCommitCostRequest req = waitNext(ssi.updateCommitCostRequest.getFuture())) {
+				// Ratekeeper might change with a new ID. In this case, always accept the data.
+				if (req.ratekeeperID != self->busiestWriteTagContext.ratekeeperID) {
+					TraceEvent("RatekeeperIDChange")
+					    .detail("OldID", self->busiestWriteTagContext.ratekeeperID)
+					    .detail("OldLastUpdateTime", self->busiestWriteTagContext.lastUpdateTime)
+					    .detail("NewID", req.ratekeeperID)
+					    .detail("LastUpdateTime", req.postTime);
+					self->busiestWriteTagContext.ratekeeperID = req.ratekeeperID;
+					self->busiestWriteTagContext.lastUpdateTime = -1;
+				}
+				// In case we received an old request/duplicate request, due to, e.g. network problem
+				ASSERT(req.postTime > 0);
+				if (req.postTime < self->busiestWriteTagContext.lastUpdateTime) {
+					continue;
+				}
+
+				self->busiestWriteTagContext.lastUpdateTime = req.postTime;
+				TraceEvent("BusiestWriteTag", self->thisServerID)
+				    .detail("Elapsed", req.elapsed)
+				    .detail("Tag", printable(req.busiestTag))
+				    .detail("TagOps", req.opsSum)
+				    .detail("TagCost", req.costSum)
+				    .detail("TotalCost", req.totalWriteCosts)
+				    .detail("Reported", req.reported)
+				    .trackLatest(self->busiestWriteTagContext.busiestWriteTagTrackingKey);
+
+				req.reply.send(Void());
+			}
 			when(FetchCheckpointKeyValuesRequest req = waitNext(ssi.fetchCheckpointKeyValues.getFuture())) {
 				self->actors.add(fetchCheckpointKeyValuesQ(self, req));
 			}
@@ -10345,7 +10410,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder) {
 	state StorageServer self(persistentData, db, ssi);
-	self.shardAware = CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
+	self.shardAware = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
 	                  (SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE || persistentData->shardAware());
 	state Future<Void> ssCore;
 	self.clusterId.send(clusterId);

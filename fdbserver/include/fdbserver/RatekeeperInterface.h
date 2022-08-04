@@ -51,6 +51,8 @@ struct RatekeeperInterface {
 };
 
 struct TransactionCommitCostEstimation {
+	// NOTE: If class variables are changed, counterparts in StorageServerInterface.h:UpdateCommitCostRequest should be
+	// updated too.
 	int opsSum = 0;
 	uint64_t costSum = 0;
 

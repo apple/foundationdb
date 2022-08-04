@@ -1,12 +1,12 @@
 [[test]]
 testTitle = 'ApiCorrectnessTest'
 clearAfterTest = true
-timeout = 6000
+timeout = 2100
 runSetup = true
 
     [[test.workload]]
     testName = 'ApiCorrectness'
-    numKeys = 15000
+    numKeys = 5000
     onlyLowerCase = true
     shortKeysRatio = 0.5
     minShortKeyLength = 1
@@ -16,10 +16,10 @@ runSetup = true
     minValueLength = 1
     maxValueLength = 1000
     numGets = 1000
-    numGetRanges = 300
+    numGetRanges = 100
     numGetRangeSelectors = 100
-    numGetKeys = 1000
+    numGetKeys = 100
     numClears = 100
-    numClearRanges = 50
+    numClearRanges = 10
     maxTransactionBytes = 500000
-    randomTestDuration = 180
+    randomTestDuration = 60

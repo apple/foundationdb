@@ -1646,7 +1646,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    new Reader(id,
 			               db,
 			               defaultFdbCF,
-						   this->sharedState,
+			               this->sharedState,
 			               readIterPool,
 			               perfContextMetrics,
 			               i,

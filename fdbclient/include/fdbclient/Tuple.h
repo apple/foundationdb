@@ -56,7 +56,9 @@ struct Tuple {
 	Tuple& appendNull();
 	Tuple& append(Versionstamp const&);
 
-	StringRef pack() const { return StringRef(data.begin(), data.size()); }
+	Standalone<StringRef> pack() const {
+		return Standalone<StringRef>(StringRef(data.begin(), data.size()), data.arena());
+	}
 
 	template <typename T>
 	Tuple& operator<<(T const& t) {
