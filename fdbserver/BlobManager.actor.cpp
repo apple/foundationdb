@@ -3799,13 +3799,12 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		// set force purged range, to prevent future operations on this range
 		loop {
 			try {
-				// set force purged range and clear mapping range
+				// set force purged range, but don't clear mapping range yet, so that if a new BM recovers in the middle of purging, it still knows what granules to purge
 				wait(checkManagerLock(&tr, self));
 				// FIXME: need to handle this better if range is unaligned. Need to not truncate existing granules, and
 				// instead cover whole of intersecting granules at begin/end
 				wait(krmSetRangeCoalescing(
 				    &tr, blobGranuleForcePurgedKeys.begin, range, normalKeys, LiteralStringRef("1")));
-				wait(krmSetRange(&tr, blobGranuleMappingKeys.begin, range, blobGranuleMappingValueFor(UID())));
 				wait(tr.commit());
 				break;
 			} catch (Error& e) {
@@ -4057,6 +4056,23 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	}
 
 	wait(waitForAll(partialDeletions));
+
+	if (force) {
+		tr.reset();
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		loop {
+			try {
+				// clear mapping range, so that a new BM doesn't try to recover force purged granules, and clients can't read them
+				wait(checkManagerLock(&tr, self));
+				wait(krmSetRange(&tr, blobGranuleMappingKeys.begin, range, blobGranuleMappingValueFor(UID())));
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
 
 	// Now that all the necessary granules and their files have been deleted, we can
 	// clear the purgeIntent key to signify that the work is done. However, there could have been
