@@ -53,7 +53,7 @@ public:
 	int size() const { return keySize; }
 	uint8_t* data() const { return arr.get(); }
 	void initializeKey(uint8_t* data, int len);
-	void initializeRandomTestKey() { generateRandomData(arr.get(), keySize); }
+	void initializeRandomTestKey() { deterministicRandom()->randomBytes(arr.get(), keySize); }
 	void reset() { memset(arr.get(), 0, keySize); }
 
 	static bool isGlobalKeyPresent();

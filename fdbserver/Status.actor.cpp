@@ -487,6 +487,11 @@ struct RolesInfo {
 		double dataLagSeconds = -1.0;
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
+		if (iface.metadata.present()) {
+			obj["storage_metadata"] = iface.metadata.get().toJSON();
+			// printf("%s\n", metadataObj.getJson().c_str());
+		}
+
 		try {
 			TraceEventFields const& storageMetrics = metrics.at("StorageMetrics");
 
@@ -549,23 +554,11 @@ struct RolesInfo {
 			TraceEventFields const& busiestReadTag = metrics.at("BusiestReadTag");
 			if (busiestReadTag.size()) {
 				int64_t tagCost = busiestReadTag.getInt64("TagCost");
-
 				if (tagCost > 0) {
 					JsonBuilderObject busiestReadTagObj;
-
-					int64_t totalSampledCost = busiestReadTag.getInt64("TotalSampledCost");
-					ASSERT(totalSampledCost > 0);
-
 					busiestReadTagObj["tag"] = busiestReadTag.getValue("Tag");
-					busiestReadTagObj["fractional_cost"] = (double)tagCost / totalSampledCost;
-
-					double elapsed = busiestReadTag.getDouble("Elapsed");
-					if (CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
-						JsonBuilderObject estimatedCostObj;
-						estimatedCostObj["hz"] = tagCost / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE / elapsed;
-						busiestReadTagObj["estimated_cost"] = estimatedCostObj;
-					}
-
+					busiestReadTagObj["cost"] = tagCost;
+					busiestReadTagObj["fractional_cost"] = busiestReadTag.getValue("FractionalBusyness");
 					obj["busiest_read_tag"] = busiestReadTagObj;
 				}
 			}
@@ -594,14 +587,12 @@ struct RolesInfo {
 				}
 			}
 
-			if (iface.metadata.present()) {
-				obj["storage_metadata"] = iface.metadata.get().toJSON();
-				// printf("%s\n", metadataObj.getJson().c_str());
-			}
-
 		} catch (Error& e) {
 			if (e.code() != error_code_attribute_not_found)
 				throw e;
+			else {
+				TraceEvent(SevWarnAlways, "StorageServerStatusJson").error(e);
+			}
 		}
 
 		if (pDataLagSeconds) {
@@ -742,6 +733,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
     std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies,
     std::vector<BlobWorkerInterface> blobWorkers,
     ServerCoordinators coordinators,
+    std::vector<NetworkAddress> coordinatorAddresses,
     Database cx,
     Optional<DatabaseConfiguration> configuration,
     Optional<Key> healthyZone,
@@ -839,8 +831,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		}
 	}
 
-	std::vector<NetworkAddress> addressVec = wait(coordinators.ccr->getConnectionString().tryResolveHostnames());
-	for (const auto& coordinator : addressVec) {
+	for (const auto& coordinator : coordinatorAddresses) {
 		roles.addCoordinatorRole(coordinator);
 	}
 
@@ -1909,27 +1900,6 @@ static Future<std::vector<std::pair<iface, EventMap>>> getServerMetrics(
 	return results;
 }
 
-ACTOR template <class iface>
-static Future<std::vector<TraceEventFields>> getServerBusiestWriteTags(
-    std::vector<iface> servers,
-    std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
-    WorkerDetails rkWorker) {
-	state std::vector<Future<Optional<TraceEventFields>>> futures;
-	futures.reserve(servers.size());
-	for (const auto& s : servers) {
-		futures.push_back(latestEventOnWorker(rkWorker.interf, s.id().toString() + "/BusiestWriteTag"));
-	}
-	wait(waitForAll(futures));
-
-	std::vector<TraceEventFields> result(servers.size());
-	for (int i = 0; i < servers.size(); ++i) {
-		if (futures[i].get().present()) {
-			result[i] = futures[i].get().get();
-		}
-	}
-	return result;
-}
-
 ACTOR
 static Future<std::vector<StorageServerStatusInfo>> readStorageInterfaceAndMetadata(Database cx,
                                                                                     bool use_system_priority) {
@@ -1967,6 +1937,16 @@ static Future<std::vector<StorageServerStatusInfo>> readStorageInterfaceAndMetad
 	return servers;
 }
 
+namespace {
+
+const std::vector<std::string> STORAGE_SERVER_METRICS_LIST{ "StorageMetrics",
+	                                                        "ReadLatencyMetrics",
+	                                                        "ReadLatencyBands",
+	                                                        "BusiestReadTag",
+	                                                        "BusiestWriteTag" };
+
+} // namespace
+
 ACTOR static Future<std::vector<StorageServerStatusInfo>> getStorageServerStatusInfos(
     Database cx,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
@@ -1974,18 +1954,9 @@ ACTOR static Future<std::vector<StorageServerStatusInfo>> getStorageServerStatus
 	state std::vector<StorageServerStatusInfo> servers =
 	    wait(timeoutError(readStorageInterfaceAndMetadata(cx, true), 5.0));
 	state std::vector<std::pair<StorageServerStatusInfo, EventMap>> results;
-	state std::vector<TraceEventFields> busiestWriteTags;
-	wait(store(results,
-	           getServerMetrics(servers,
-	                            address_workers,
-	                            std::vector<std::string>{
-	                                "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands", "BusiestReadTag" })) &&
-	     store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)));
-
-	ASSERT(busiestWriteTags.size() == results.size());
+	wait(store(results, getServerMetrics(servers, address_workers, STORAGE_SERVER_METRICS_LIST)));
 	for (int i = 0; i < results.size(); ++i) {
 		servers[i].eventMap = std::move(results[i].second);
-		servers[i].eventMap.emplace("BusiestWriteTag", busiestWriteTags[i]);
 	}
 	return servers;
 }
@@ -2751,6 +2722,9 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<ServerDBI
 			try {
 				wait(tr.onError(e));
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled)
+					throw;
+
 				incomplete_reasons->insert(format("Unable to determine if database is locked (%s).", e.what()));
 				break;
 			}
@@ -3041,6 +3015,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		statusObj["machines"] = machineStatusFetcher(mMetrics, workers, configuration, &status_incomplete_reasons);
 
+		state std::vector<NetworkAddress> coordinatorAddresses;
 		if (configuration.present()) {
 			// Do the latency probe by itself to avoid interference from other status activities
 			state bool isAvailable = true;
@@ -3133,8 +3108,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 			wait(success(primaryDCFO));
 
-			std::vector<NetworkAddress> coordinatorAddresses =
-			    wait(coordinators.ccr->getConnectionString().tryResolveHostnames());
+			std::vector<NetworkAddress> addresses =
+			    wait(timeoutError(coordinators.ccr->getConnectionString().tryResolveHostnames(), 5.0));
+			coordinatorAddresses = std::move(addresses);
 
 			int logFaultTolerance = 100;
 			if (db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
@@ -3275,6 +3251,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		                              grvProxies,
 		                              blobWorkers,
 		                              coordinators,
+		                              coordinatorAddresses,
 		                              cx,
 		                              configuration,
 		                              loadResult.present() ? loadResult.get().healthyZone : Optional<Key>(),

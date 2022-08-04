@@ -20,7 +20,7 @@
 
 #include "fdbclient/RESTClient.h"
 
-#include "fdbclient/HTTP.h"
+#include "fdbrpc/HTTP.h"
 #include "flow/IRateControl.h"
 #include "fdbclient/RESTUtils.h"
 #include "flow/Arena.h"

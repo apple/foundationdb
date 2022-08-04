@@ -157,6 +157,8 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
                                          std::vector<StringRef> tokens,
                                          LineNoise* linenoise,
                                          Future<Void> warn);
+// configuretenant command
+ACTOR Future<bool> configureTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // consistency command
 ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
                                                 std::vector<StringRef> tokens,
@@ -164,11 +166,11 @@ ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
 // coordinators command
 ACTOR Future<bool> coordinatorsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // createtenant command
-ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion);
 // datadistribution command
 ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // deletetenant command
-ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion);
 // exclude command
 ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, Future<Void> warn);
 // expensive_data_check command
@@ -194,7 +196,7 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
                                     std::vector<StringRef> tokens,
                                     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
 // listtenants command
-ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion);
 // lock/unlock command
 ACTOR Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
@@ -219,7 +221,7 @@ ACTOR Future<bool> profileCommandActor(Database db,
                                        std::vector<StringRef> tokens,
                                        bool intrans);
 // renametenant command
-ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion);
 // quota command
 ACTOR Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // setclass command

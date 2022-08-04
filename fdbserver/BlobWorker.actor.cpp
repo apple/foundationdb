@@ -314,7 +314,7 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 	cipherKeysCtx.headerCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(systemCipherKeys.cipherHeaderKey, *arena);
 
 	cipherKeysCtx.ivRef = makeString(AES_256_IV_LENGTH, *arena);
-	generateRandomData(mutateString(cipherKeysCtx.ivRef), AES_256_IV_LENGTH);
+	deterministicRandom()->randomBytes(mutateString(cipherKeysCtx.ivRef), AES_256_IV_LENGTH);
 
 	if (BG_ENCRYPT_COMPRESS_DEBUG) {
 		TraceEvent(SevDebug, "GetLatestGranuleCipherKey")
@@ -352,29 +352,27 @@ ACTOR Future<BlobGranuleCipherKey> lookupCipherKey(Reference<BlobWorkerData> bwD
 	return BlobGranuleCipherKey::fromBlobCipherKey(cipherKeyMapItr->second, *arena);
 }
 
-ACTOR Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeys(Reference<BlobWorkerData> bwData,
-                                                            BlobGranuleCipherKeysMetaRef cipherKeysMetaRef,
-                                                            Arena* arena) {
+ACTOR Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysImpl(Reference<BlobWorkerData> bwData,
+                                                                BlobCipherDetails textCipherDetails,
+                                                                BlobCipherDetails headerCipherDetails,
+                                                                StringRef ivRef,
+                                                                Arena* arena) {
 	state BlobGranuleCipherKeysCtx cipherKeysCtx;
 
 	// Fetch 'textCipher' key
-	state BlobCipherDetails textCipherDetails(
-	    cipherKeysMetaRef.textDomainId, cipherKeysMetaRef.textBaseCipherId, cipherKeysMetaRef.textSalt);
 	BlobGranuleCipherKey textCipherKey = wait(lookupCipherKey(bwData, textCipherDetails, arena));
 	cipherKeysCtx.textCipherKey = textCipherKey;
 
 	// Fetch 'headerCipher' key
-	state BlobCipherDetails headerCipherDetails(
-	    cipherKeysMetaRef.headerDomainId, cipherKeysMetaRef.headerBaseCipherId, cipherKeysMetaRef.headerSalt);
 	BlobGranuleCipherKey headerCipherKey = wait(lookupCipherKey(bwData, headerCipherDetails, arena));
 	cipherKeysCtx.headerCipherKey = headerCipherKey;
 
 	// Populate 'Intialization Vector'
-	ASSERT_EQ(cipherKeysMetaRef.ivRef.size(), AES_256_IV_LENGTH);
-	cipherKeysCtx.ivRef = StringRef(*arena, cipherKeysMetaRef.ivRef);
+	ASSERT_EQ(ivRef.size(), AES_256_IV_LENGTH);
+	cipherKeysCtx.ivRef = StringRef(*arena, ivRef);
 
 	if (BG_ENCRYPT_COMPRESS_DEBUG) {
-		TraceEvent("GetGranuleCipherKey")
+		TraceEvent(SevDebug, "GetGranuleCipherKey")
 		    .detail("TextDomainId", cipherKeysCtx.textCipherKey.encryptDomainId)
 		    .detail("TextBaseCipherId", cipherKeysCtx.textCipherKey.baseCipherId)
 		    .detail("TextSalt", cipherKeysCtx.textCipherKey.salt)
@@ -385,6 +383,32 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeys(Reference<BlobWorker
 	}
 
 	return cipherKeysCtx;
+}
+
+Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysFromKeysMeta(Reference<BlobWorkerData> bwData,
+                                                                  BlobGranuleCipherKeysMeta cipherKeysMeta,
+                                                                  Arena* arena) {
+	BlobCipherDetails textCipherDetails(
+	    cipherKeysMeta.textDomainId, cipherKeysMeta.textBaseCipherId, cipherKeysMeta.textSalt);
+
+	BlobCipherDetails headerCipherDetails(
+	    cipherKeysMeta.headerDomainId, cipherKeysMeta.headerBaseCipherId, cipherKeysMeta.headerSalt);
+
+	StringRef ivRef = StringRef(*arena, cipherKeysMeta.ivStr);
+
+	return getGranuleCipherKeysImpl(bwData, textCipherDetails, headerCipherDetails, ivRef, arena);
+}
+
+Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysFromKeysMetaRef(Reference<BlobWorkerData> bwData,
+                                                                     BlobGranuleCipherKeysMetaRef cipherKeysMetaRef,
+                                                                     Arena* arena) {
+	BlobCipherDetails textCipherDetails(
+	    cipherKeysMetaRef.textDomainId, cipherKeysMetaRef.textBaseCipherId, cipherKeysMetaRef.textSalt);
+
+	BlobCipherDetails headerCipherDetails(
+	    cipherKeysMetaRef.headerDomainId, cipherKeysMetaRef.headerBaseCipherId, cipherKeysMetaRef.headerSalt);
+
+	return getGranuleCipherKeysImpl(bwData, textCipherDetails, headerCipherDetails, cipherKeysMetaRef.ivRef, arena);
 }
 
 ACTOR Future<Void> readAndCheckGranuleLock(Reference<ReadYourWritesTransaction> tr,
@@ -602,7 +626,23 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 
 	state std::string fileName = randomBGFilename(bwData->id, granuleID, currentDeltaVersion, ".delta");
 
-	state Value serialized = ObjectWriter::toValue(deltasToWrite, Unversioned());
+	state Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx;
+	state Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
+	state Arena arena;
+
+	if (isBlobFileEncryptionSupported()) {
+		BlobGranuleCipherKeysCtx ciphKeysCtx = wait(getLatestGranuleCipherKeys(bwData, keyRange, &arena));
+		cipherKeysCtx = std::move(ciphKeysCtx);
+		cipherKeysMeta = BlobGranuleCipherKeysCtx::toCipherKeysMeta(cipherKeysCtx.get());
+	}
+
+	state Optional<CompressionFilter> compressFilter = getBlobFileCompressFilter();
+	state Value serialized = serializeChunkedDeltaFile(StringRef(fileName),
+	                                                   deltasToWrite,
+	                                                   keyRange,
+	                                                   SERVER_KNOBS->BG_DELTA_FILE_TARGET_CHUNK_BYTES,
+	                                                   compressFilter,
+	                                                   cipherKeysCtx);
 	state size_t serializedSize = serialized.size();
 
 	// Free up deltasToWrite here to reduce memory
@@ -640,7 +680,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 
 				Key dfKey = blobGranuleFileKeyFor(granuleID, currentDeltaVersion, 'D');
 				// TODO change once we support file multiplexing
-				Value dfValue = blobGranuleFileValueFor(fname, 0, serializedSize, serializedSize);
+				Value dfValue = blobGranuleFileValueFor(fname, 0, serializedSize, serializedSize, cipherKeysMeta);
 				tr->set(dfKey, dfValue);
 
 				if (oldGranuleComplete.present()) {
@@ -667,8 +707,16 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 				if (BUGGIFY_WITH_PROB(0.01)) {
 					wait(delay(deterministicRandom()->random01()));
 				}
+
+				if (BW_DEBUG) {
+					TraceEvent(SevDebug, "DeltaFileWritten")
+					    .detail("FileName", fname)
+					    .detail("Encrypted", cipherKeysCtx.present())
+					    .detail("Compressed", compressFilter.present());
+				}
+
 				// FIXME: change when we implement multiplexing
-				return BlobFileIndex(currentDeltaVersion, fname, 0, serializedSize, serializedSize);
+				return BlobFileIndex(currentDeltaVersion, fname, 0, serializedSize, serializedSize, cipherKeysMeta);
 			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
@@ -746,15 +794,19 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	state Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx;
 	state Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 	state Arena arena;
+
 	if (isBlobFileEncryptionSupported()) {
 		BlobGranuleCipherKeysCtx ciphKeysCtx = wait(getLatestGranuleCipherKeys(bwData, keyRange, &arena));
-		cipherKeysCtx = ciphKeysCtx;
+		cipherKeysCtx = std::move(ciphKeysCtx);
 		cipherKeysMeta = BlobGranuleCipherKeysCtx::toCipherKeysMeta(cipherKeysCtx.get());
 	}
 
-	Optional<CompressionFilter> compressFilter = getBlobFileCompressFilter();
-	state Value serialized =
-	    serializeChunkedSnapshot(snapshot, SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNKS, compressFilter, cipherKeysCtx);
+	state Optional<CompressionFilter> compressFilter = getBlobFileCompressFilter();
+	state Value serialized = serializeChunkedSnapshot(StringRef(fileName),
+	                                                  snapshot,
+	                                                  SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES,
+	                                                  compressFilter,
+	                                                  cipherKeysCtx);
 	state size_t serializedSize = serialized.size();
 
 	// free snapshot to reduce memory
@@ -833,6 +885,13 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 
 	if (BUGGIFY_WITH_PROB(0.1)) {
 		wait(delay(deterministicRandom()->random01()));
+	}
+
+	if (BW_DEBUG) {
+		TraceEvent(SevDebug, "SnapshotFileWritten")
+		    .detail("FileName", fileName)
+		    .detail("Encrypted", cipherKeysCtx.present())
+		    .detail("Compressed", compressFilter.present());
 	}
 
 	// FIXME: change when we implement multiplexing
@@ -962,32 +1021,49 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		}
 		ASSERT(snapshotVersion < version);
 
+		state Optional<BlobGranuleCipherKeysCtx> snapCipherKeysCtx;
+		if (snapshotF.cipherKeysMeta.present()) {
+			ASSERT(isBlobFileEncryptionSupported());
+
+			BlobGranuleCipherKeysCtx keysCtx =
+			    wait(getGranuleCipherKeysFromKeysMeta(bwData, snapshotF.cipherKeysMeta.get(), &filenameArena));
+			snapCipherKeysCtx = std::move(keysCtx);
+		}
+
 		chunk.snapshotFile = BlobFilePointerRef(filenameArena,
 		                                        snapshotF.filename,
 		                                        snapshotF.offset,
 		                                        snapshotF.length,
 		                                        snapshotF.fullFileLength,
-		                                        snapshotF.cipherKeysMeta);
-
-		// TODO: optimization - batch 'encryption-key' lookup given the GranuleFile set is known
-		if (chunk.snapshotFile.get().cipherKeysMetaRef.present()) {
-			ASSERT(isBlobFileEncryptionSupported());
-			BlobGranuleCipherKeysCtx cipherKeysCtx =
-			    wait(getGranuleCipherKeys(bwData, chunk.snapshotFile.get().cipherKeysMetaRef.get(), &filenameArena));
-			chunk.cipherKeysCtx = cipherKeysCtx;
-		}
+		                                        snapCipherKeysCtx);
 
 		compactBytesRead += snapshotF.length;
-		int deltaIdx = files.deltaFiles.size() - 1;
+		state int deltaIdx = files.deltaFiles.size() - 1;
 		while (deltaIdx >= 0 && files.deltaFiles[deltaIdx].version > snapshotVersion) {
 			deltaIdx--;
 		}
 		deltaIdx++;
-		Version lastDeltaVersion = snapshotVersion;
+		state Version lastDeltaVersion = snapshotVersion;
+		state BlobFileIndex deltaF;
 		while (deltaIdx < files.deltaFiles.size() && lastDeltaVersion < version) {
-			BlobFileIndex deltaF = files.deltaFiles[deltaIdx];
-			chunk.deltaFiles.emplace_back_deep(
-			    filenameArena, deltaF.filename, deltaF.offset, deltaF.length, deltaF.fullFileLength);
+			state Optional<BlobGranuleCipherKeysCtx> deltaCipherKeysCtx;
+
+			deltaF = files.deltaFiles[deltaIdx];
+
+			if (deltaF.cipherKeysMeta.present()) {
+				ASSERT(isBlobFileEncryptionSupported());
+
+				BlobGranuleCipherKeysCtx keysCtx =
+				    wait(getGranuleCipherKeysFromKeysMeta(bwData, deltaF.cipherKeysMeta.get(), &filenameArena));
+				deltaCipherKeysCtx = std::move(keysCtx);
+			}
+
+			chunk.deltaFiles.emplace_back_deep(filenameArena,
+			                                   deltaF.filename,
+			                                   deltaF.offset,
+			                                   deltaF.length,
+			                                   deltaF.fullFileLength,
+			                                   deltaCipherKeysCtx);
 			compactBytesRead += deltaF.length;
 			lastDeltaVersion = files.deltaFiles[deltaIdx].version;
 			deltaIdx++;
@@ -1241,11 +1317,9 @@ ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
 				                                                                 metadata->originalEpoch,
 				                                                                 metadata->originalSeqno));
 				// if a new manager appears, also tell it about this granule being mergeable
-				state int64_t lastSendEpoch = bwData->currentManagerEpoch;
-				while (lastSendEpoch == bwData->currentManagerEpoch) {
-					wait(bwData->currentManagerStatusStream.onChange());
-					wait(delay(0));
-				}
+				// or if a new stream from the existing manager, it may have missed the message due to a network issue
+				wait(bwData->currentManagerStatusStream.onChange());
+				wait(delay(0));
 				CODE_PROBE(true, "Blob worker re-sending merge candidate to new manager");
 			} catch (Error& e) {
 				if (e.code() == error_code_operation_cancelled) {
@@ -1926,12 +2000,30 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										    .detail("RollbackVersion", rollbackVersion);
 									}
 
+									Version oldPendingSnapshot = metadata->pendingSnapshotVersion;
 									Version cfRollbackVersion = doGranuleRollback(metadata,
 									                                              deltas.version,
 									                                              rollbackVersion,
 									                                              inFlightFiles,
 									                                              rollbacksInProgress,
 									                                              rollbacksCompleted);
+
+									if (oldPendingSnapshot > metadata->pendingSnapshotVersion) {
+										// If rollback cancelled in-flight snapshot, merge candidate checker also got
+										// cancelled. Restart it
+										CODE_PROBE(true,
+										           "Restarting merge candidate checker after rolling back snapshot");
+										checkMergeCandidate = granuleCheckMergeCandidate(
+										    bwData,
+										    metadata,
+										    startState.granuleID,
+										    inFlightFiles.empty() ? Future<Void>(Void())
+										                          : success(inFlightFiles.back().future));
+									}
+									// reset force flush state, requests should retry and add it back once feed is ready
+									forceFlushVersions.clear();
+									lastForceFlushVersion = 0;
+									metadata->forceFlushVersion = NotifiedVersion();
 
 									Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>();
 
@@ -2397,7 +2489,7 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 				}
 
 				auto prev = bwData->granuleHistory.intersectingRanges(curHistory.range);
-				bool allLess = true;
+				bool allLess = true; // if the version is less than all existing granules
 				for (auto& it : prev) {
 					if (it.cvalue().isValid() && curHistory.version >= it.cvalue()->endVersion) {
 						allLess = false;
@@ -2434,7 +2526,9 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 				}
 
 				state int pIdx = 0;
-				state bool noParentsPresent = true;
+				state bool anyParentsMissing = curHistory.value.parentVersions.empty();
+				state std::vector<GranuleHistory> nexts;
+				nexts.reserve(curHistory.value.parentVersions.size());
 				// FIXME: parallelize this for all parents/all entries in queue?
 				loop {
 					if (pIdx >= curHistory.value.parentVersions.size()) {
@@ -2457,7 +2551,7 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 								// curHistory.version]
 								inserted.first->second.entry = makeReference<GranuleHistoryEntry>(
 								    next.range, next.value.granuleID, next.version, curHistory.version);
-								queue.push_back(next);
+								nexts.push_back(next);
 								if (BW_HISTORY_DEBUG) {
 									fmt::print("HL {0} {1}) [{2} - {3}) @ {4}: loaded parent [{5} - {6}) @ {7}\n",
 									           bwData->id.shortString().substr(0, 5),
@@ -2485,7 +2579,8 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 								}
 								ASSERT(inserted.first->second.entry->endVersion == curHistory.version);
 							}
-							noParentsPresent = false;
+						} else {
+							anyParentsMissing = true;
 						}
 
 						pIdx++;
@@ -2494,16 +2589,21 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 					}
 				}
 
-				if (noParentsPresent) {
+				if (anyParentsMissing) {
 					if (BW_HISTORY_DEBUG) {
-						fmt::print("HL {0} {1}) [{2} - {3}) @ {4}: root b/c no parents\n",
+						fmt::print("HL {0} {1}) [{2} - {3}) @ {4}: root b/c parents missing\n",
 						           bwData->id.shortString().substr(0, 5),
 						           loadId,
 						           curHistory.range.begin.printable(),
 						           curHistory.range.end.printable(),
 						           curHistory.version);
 					}
+
 					rootGranules.push(OrderedHistoryKey(curHistory.version, curHistory.value.granuleID));
+				} else {
+					for (auto& it : nexts) {
+						queue.push_back(it);
+					}
 				}
 			}
 
@@ -2716,17 +2816,21 @@ std::vector<std::pair<KeyRange, Future<GranuleFiles>>> loadHistoryChunks(Referen
 		if (!it.cvalue().isValid()) {
 			throw blob_granule_transaction_too_old();
 		}
-		if (expectedEndVersion != it.cvalue()->endVersion) {
-			fmt::print("live granule history version {0} for [{1} - {2}) != history end version {3} for "
-			           "[{4} - {5})\n",
-			           expectedEndVersion,
-			           keyRange.begin.printable(),
-			           keyRange.end.printable(),
-			           it.cvalue()->endVersion,
-			           it.begin().printable(),
-			           it.end().printable());
+		if (expectedEndVersion > it.cvalue()->endVersion) {
+			if (BW_DEBUG) {
+				// history must have been pruned up to live granule, but BW still has previous history cached.
+				fmt::print("live granule history version {0} for [{1} - {2}) != history end version {3} for "
+				           "[{4} - {5}) on BW {6}\n",
+				           expectedEndVersion,
+				           keyRange.begin.printable(),
+				           keyRange.end.printable(),
+				           it.cvalue()->endVersion,
+				           it.begin().printable(),
+				           it.end().printable(),
+				           bwData->id.toString().substr(0, 5));
+			}
+			throw blob_granule_transaction_too_old();
 		}
-		ASSERT(expectedEndVersion == it.cvalue()->endVersion);
 		visited.insert(it.cvalue()->granuleID);
 		queue.push_back(it.cvalue());
 
@@ -3163,13 +3267,47 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					didCollapse = true;
 				}
 
-				// TODO: optimization - batch 'encryption-key' lookup given the GranuleFile set is known
-				state Future<BlobGranuleCipherKeysCtx> cipherKeysCtx;
-				if (chunk.snapshotFile.present() && chunk.snapshotFile.get().cipherKeysMetaRef.present()) {
-					ASSERT(isBlobFileEncryptionSupported());
-					cipherKeysCtx =
-					    getGranuleCipherKeys(bwData, chunk.snapshotFile.get().cipherKeysMetaRef.get(), &rep.arena);
+				// Invoke calls to populate 'EncryptionKeysCtx' for snapshot and/or deltaFiles asynchronously
+				state Optional<Future<BlobGranuleCipherKeysCtx>> snapCipherKeysCtx;
+				if (chunk.snapshotFile.present()) {
+					const bool encrypted = chunk.snapshotFile.get().cipherKeysMetaRef.present();
+
+					if (BW_DEBUG) {
+						TraceEvent("DoBlobGranuleFileRequestDelta_KeysCtxPrepare")
+						    .detail("FileName", chunk.snapshotFile.get().filename.toString())
+						    .detail("Encrypted", encrypted);
+					}
+
+					if (encrypted) {
+						ASSERT(isBlobFileEncryptionSupported());
+						ASSERT(!chunk.snapshotFile.get().cipherKeysCtx.present());
+
+						snapCipherKeysCtx = getGranuleCipherKeysFromKeysMetaRef(
+						    bwData, chunk.snapshotFile.get().cipherKeysMetaRef.get(), &rep.arena);
+					}
 				}
+				state std::unordered_map<int, Future<BlobGranuleCipherKeysCtx>> deltaCipherKeysCtxs;
+				for (int deltaIdx = 0; deltaIdx < chunk.deltaFiles.size(); deltaIdx++) {
+					const bool encrypted = chunk.deltaFiles[deltaIdx].cipherKeysMetaRef.present();
+
+					if (BW_DEBUG) {
+						TraceEvent("DoBlobGranuleFileRequestDelta_KeysCtxPrepare")
+						    .detail("FileName", chunk.deltaFiles[deltaIdx].filename.toString())
+						    .detail("Encrypted", encrypted);
+					}
+
+					if (encrypted) {
+						ASSERT(isBlobFileEncryptionSupported());
+						ASSERT(!chunk.deltaFiles[deltaIdx].cipherKeysCtx.present());
+
+						deltaCipherKeysCtxs.emplace(
+						    deltaIdx,
+						    getGranuleCipherKeysFromKeysMetaRef(
+						        bwData, chunk.deltaFiles[deltaIdx].cipherKeysMetaRef.get(), &rep.arena));
+					}
+				}
+
+				// FIXME: get cipher keys for delta files too!
 
 				// new deltas (if version is larger than version of last delta file)
 				// FIXME: do trivial key bounds here if key range is not fully contained in request key
@@ -3213,9 +3351,37 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					}
 				}
 
-				if (chunk.snapshotFile.present() && chunk.snapshotFile.get().cipherKeysMetaRef.present()) {
-					BlobGranuleCipherKeysCtx ctx = wait(cipherKeysCtx);
-					chunk.cipherKeysCtx = std::move(ctx);
+				// Update EncryptionKeysCtx information for the chunk->snapshotFile
+				if (chunk.snapshotFile.present() && snapCipherKeysCtx.present()) {
+					ASSERT(chunk.snapshotFile.get().cipherKeysMetaRef.present());
+
+					BlobGranuleCipherKeysCtx keysCtx = wait(snapCipherKeysCtx.get());
+					chunk.snapshotFile.get().cipherKeysCtx = std::move(keysCtx);
+					// reclaim memory from non-serializable field
+					chunk.snapshotFile.get().cipherKeysMetaRef.reset();
+
+					if (BW_DEBUG) {
+						TraceEvent("DoBlobGranuleFileRequestSnap_KeysCtxDone")
+						    .detail("FileName", chunk.snapshotFile.get().filename.toString());
+					}
+				}
+
+				// Update EncryptionKeysCtx information for the chunk->deltaFiles
+				if (!deltaCipherKeysCtxs.empty()) {
+					ASSERT(!chunk.deltaFiles.empty());
+
+					state std::unordered_map<int, Future<BlobGranuleCipherKeysCtx>>::const_iterator itr;
+					for (itr = deltaCipherKeysCtxs.begin(); itr != deltaCipherKeysCtxs.end(); itr++) {
+						BlobGranuleCipherKeysCtx keysCtx = wait(itr->second);
+						chunk.deltaFiles[itr->first].cipherKeysCtx = std::move(keysCtx);
+						// reclaim memory from non-serializable field
+						chunk.deltaFiles[itr->first].cipherKeysMetaRef.reset();
+
+						if (BW_DEBUG) {
+							TraceEvent("DoBlobGranuleFileRequestDelta_KeysCtxDone")
+							    .detail("FileName", chunk.deltaFiles[itr->first].filename.toString());
+						}
+					}
 				}
 
 				rep.chunks.push_back(rep.arena, chunk);
@@ -3965,29 +4131,22 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				state RangeResult tenantResults;
-				wait(store(tenantResults, tr->getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY)));
-				ASSERT_WE_THINK(!tenantResults.more && tenantResults.size() < CLIENT_KNOBS->TOO_MANY);
-				if (tenantResults.more || tenantResults.size() >= CLIENT_KNOBS->TOO_MANY) {
-					TraceEvent(SevError, "BlobWorkerTooManyTenants", bwData->id)
-					    .detail("TenantCount", tenantResults.size());
-					wait(delay(600));
-					if (bwData->fatalError.canBeSet()) {
-						bwData->fatalError.sendError(internal_error());
-					}
-					throw internal_error();
-				}
+				state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
+				wait(store(tenantResults,
+				           TenantMetadata::tenantMap.getRange(tr,
+				                                              Optional<TenantName>(),
+				                                              Optional<TenantName>(),
+				                                              CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+				ASSERT(tenantResults.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantResults.more);
 
 				std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
-				for (auto& it : tenantResults) {
+				for (auto& it : tenantResults.results) {
 					// FIXME: handle removing/moving tenants!
-					TenantNameRef tenantName = it.key.removePrefix(tenantMapPrefix);
-					TenantMapEntry entry = TenantMapEntry::decode(it.value);
-					tenants.push_back(std::pair(tenantName, entry));
+					tenants.push_back(std::pair(it.first, it.second));
 				}
 				bwData->tenantData.addTenants(tenants);
 
-				state Future<Void> watchChange = tr->watch(tenantLastIdKey);
+				state Future<Void> watchChange = tr->watch(TenantMetadata::lastTenantId.key);
 				wait(tr->commit());
 				wait(watchChange);
 				tr->reset();
@@ -4062,93 +4221,102 @@ ACTOR Future<Void> handleFlushGranuleReq(Reference<BlobWorkerData> self, FlushGr
 				}
 			}
 
-			// force granule to flush at this version, and wait
-			if (req.flushVersion > metadata->pendingDeltaVersion) {
-				// first, wait for granule active
+			loop {
+				// force granule to flush at this version, and wait
+				if (req.flushVersion > metadata->pendingDeltaVersion) {
+					// first, wait for granule active
 
-				// wait for change feed version to catch up to ensure we have all data
-				if (metadata->activeCFData.get()->getVersion() < req.flushVersion) {
-					if (BW_DEBUG) {
-						fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: waiting for CF version "
-						           "(currently {4})\n",
-						           self->id.toString().substr(0, 5),
-						           req.granuleRange.begin.printable(),
-						           req.granuleRange.end.printable(),
-						           req.flushVersion,
-						           metadata->activeCFData.get()->getVersion());
-					}
+					// wait for change feed version to catch up to ensure we have all data
+					if (metadata->activeCFData.get()->getVersion() < req.flushVersion) {
+						if (BW_DEBUG) {
+							fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: waiting for CF version "
+							           "(currently {4})\n",
+							           self->id.toString().substr(0, 5),
+							           req.granuleRange.begin.printable(),
+							           req.granuleRange.end.printable(),
+							           req.flushVersion,
+							           metadata->activeCFData.get()->getVersion());
+						}
 
-					loop {
-						choose {
-							when(wait(metadata->activeCFData.get().isValid()
-							              ? metadata->activeCFData.get()->whenAtLeast(req.flushVersion)
-							              : Never())) {
-								break;
-							}
-							when(wait(metadata->activeCFData.onChange())) {}
-							when(wait(granuleCancelled.getFuture())) {
-								if (BW_DEBUG) {
-									fmt::print("BW {0} flush granule [{1} - {2}) cancelled 2\n",
-									           self->id.toString().substr(0, 5),
-									           req.granuleRange.begin.printable(),
-									           req.granuleRange.end.printable());
+						loop {
+							choose {
+								when(wait(metadata->activeCFData.get().isValid()
+								              ? metadata->activeCFData.get()->whenAtLeast(req.flushVersion)
+								              : Never())) {
+									break;
 								}
-								req.reply.sendError(wrong_shard_server());
-								return Void();
+								when(wait(metadata->activeCFData.onChange())) {}
+								when(wait(granuleCancelled.getFuture())) {
+									if (BW_DEBUG) {
+										fmt::print("BW {0} flush granule [{1} - {2}) cancelled 2\n",
+										           self->id.toString().substr(0, 5),
+										           req.granuleRange.begin.printable(),
+										           req.granuleRange.end.printable());
+									}
+									req.reply.sendError(wrong_shard_server());
+									return Void();
+								}
 							}
+						}
+
+						ASSERT(metadata->activeCFData.get()->getVersion() >= req.flushVersion);
+						if (BW_DEBUG) {
+							fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got CF version\n",
+							           self->id.toString().substr(0, 5),
+							           req.granuleRange.begin.printable(),
+							           req.granuleRange.end.printable(),
+							           req.flushVersion);
 						}
 					}
 
-					ASSERT(metadata->activeCFData.get()->getVersion() >= req.flushVersion);
-					if (BW_DEBUG) {
-						fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got CF version\n",
-						           self->id.toString().substr(0, 5),
-						           req.granuleRange.begin.printable(),
-						           req.granuleRange.end.printable(),
-						           req.flushVersion);
+					if (req.flushVersion > metadata->pendingDeltaVersion) {
+						if (BW_DEBUG) {
+							fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: setting force flush version\n",
+							           self->id.toString().substr(0, 5),
+							           req.granuleRange.begin.printable(),
+							           req.granuleRange.end.printable(),
+							           req.flushVersion);
+						}
+						// if after waiting for CF version, flushVersion still higher than pendingDeltaVersion,
+						// set forceFlushVersion
+						metadata->forceFlushVersion.set(req.flushVersion);
 					}
 				}
 
-				if (req.flushVersion > metadata->pendingDeltaVersion) {
-					if (BW_DEBUG) {
-						fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: setting force flush version\n",
-						           self->id.toString().substr(0, 5),
-						           req.granuleRange.begin.printable(),
-						           req.granuleRange.end.printable(),
-						           req.flushVersion);
-					}
-					// if after waiting for CF version, flushVersion still higher than pendingDeltaVersion,
-					// set forceFlushVersion
-					metadata->forceFlushVersion.set(req.flushVersion);
+				if (BW_DEBUG) {
+					fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: waiting durable\n",
+					           self->id.toString().substr(0, 5),
+					           req.granuleRange.begin.printable(),
+					           req.granuleRange.end.printable(),
+					           req.flushVersion);
 				}
-			}
+				choose {
+					when(wait(metadata->durableDeltaVersion.whenAtLeast(req.flushVersion))) {
+						if (BW_DEBUG) {
+							fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got durable\n",
+							           self->id.toString().substr(0, 5),
+							           req.granuleRange.begin.printable(),
+							           req.granuleRange.end.printable(),
+							           req.flushVersion);
+						}
 
-			if (BW_DEBUG) {
-				fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: waiting durable\n",
-				           self->id.toString().substr(0, 5),
-				           req.granuleRange.begin.printable(),
-				           req.granuleRange.end.printable(),
-				           req.flushVersion);
-			}
-			choose {
-				when(wait(metadata->durableDeltaVersion.whenAtLeast(req.flushVersion))) {}
-				when(wait(granuleCancelled.getFuture())) {
-					if (BW_DEBUG) {
-						fmt::print("BW {0} flush granule [{1} - {2}) cancelled 3\n",
-						           self->id.toString().substr(0, 5),
-						           req.granuleRange.begin.printable(),
-						           req.granuleRange.end.printable());
+						req.reply.send(Void());
+						return Void();
 					}
-					req.reply.sendError(wrong_shard_server());
-					return Void();
+					when(wait(metadata->activeCFData.onChange())) {
+						// if a rollback happens, need to restart flush process
+					}
+					when(wait(granuleCancelled.getFuture())) {
+						if (BW_DEBUG) {
+							fmt::print("BW {0} flush granule [{1} - {2}) cancelled 3\n",
+							           self->id.toString().substr(0, 5),
+							           req.granuleRange.begin.printable(),
+							           req.granuleRange.end.printable());
+						}
+						req.reply.sendError(wrong_shard_server());
+						return Void();
+					}
 				}
-			}
-			if (BW_DEBUG) {
-				fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: got durable\n",
-				           self->id.toString().substr(0, 5),
-				           req.granuleRange.begin.printable(),
-				           req.granuleRange.end.printable(),
-				           req.flushVersion);
 			}
 		} catch (Error& e) {
 			if (BW_DEBUG) {
@@ -4169,10 +4337,10 @@ ACTOR Future<Void> handleFlushGranuleReq(Reference<BlobWorkerData> self, FlushGr
 			           req.granuleRange.end.printable(),
 			           req.flushVersion);
 		}
-	}
 
-	req.reply.send(Void());
-	return Void();
+		req.reply.send(Void());
+		return Void();
+	}
 }
 
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,

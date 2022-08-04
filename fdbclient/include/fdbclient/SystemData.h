@@ -613,6 +613,9 @@ extern const KeyRangeRef blobGranuleSplitKeys;
 // \xff\x02/bgmerge/mergeGranuleId = [[BlobGranuleMergeState]]
 extern const KeyRangeRef blobGranuleMergeKeys;
 
+// \xff\x02/bgmergebounds/beginkey = [[BlobGranuleMergeBoundary]]
+extern const KeyRangeRef blobGranuleMergeBoundaryKeys;
+
 // \xff\x02/bgh/(beginKey,endKey,startVersion) = { granuleUID, [parentGranuleHistoryKeys] }
 extern const KeyRangeRef blobGranuleHistoryKeys;
 
@@ -664,6 +667,11 @@ const Value blobGranuleMergeValueFor(KeyRange mergeKeyRange,
 std::tuple<KeyRange, Version, std::vector<UID>, std::vector<Key>, std::vector<Version>> decodeBlobGranuleMergeValue(
     ValueRef const& value);
 
+// BlobGranuleMergeBoundary.
+const Key blobGranuleMergeBoundaryKeyFor(const KeyRef& key);
+const Value blobGranuleMergeBoundaryValueFor(BlobGranuleMergeBoundary const& boundary);
+Standalone<BlobGranuleMergeBoundary> decodeBlobGranuleMergeBoundaryValue(const ValueRef& value);
+
 const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version);
 std::pair<KeyRange, Version> decodeBlobGranuleHistoryKey(KeyRef const& key);
 const KeyRange blobGranuleHistoryKeyRangeFor(KeyRangeRef const& range);
@@ -678,13 +686,6 @@ const Key blobWorkerListKeyFor(UID workerID);
 UID decodeBlobWorkerListKey(KeyRef const& key);
 const Value blobWorkerListValue(BlobWorkerInterface const& interface);
 BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
-
-// State for the tenant map
-extern const KeyRangeRef tenantMapKeys;
-extern const KeyRef tenantMapPrefix;
-extern const KeyRef tenantMapPrivatePrefix;
-extern const KeyRef tenantLastIdKey;
-extern const KeyRef tenantDataPrefixKey;
 
 // Storage quota per tenant
 // "\xff/storageQuota/[[tenantName]]" := "[[quota]]"

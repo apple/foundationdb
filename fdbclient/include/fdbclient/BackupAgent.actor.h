@@ -361,7 +361,7 @@ public:
 template <>
 inline Standalone<StringRef> TupleCodec<FileBackupAgent::ERestoreState>::pack(
     FileBackupAgent::ERestoreState const& val) {
-	return Tuple().append(val).pack();
+	return Tuple::makeTuple(static_cast<int>(val)).pack();
 }
 template <>
 inline FileBackupAgent::ERestoreState TupleCodec<FileBackupAgent::ERestoreState>::unpack(
@@ -578,7 +578,7 @@ ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData);
 using EBackupState = BackupAgentBase::EnumState;
 template <>
 inline Standalone<StringRef> TupleCodec<EBackupState>::pack(EBackupState const& val) {
-	return Tuple().append(static_cast<int>(val)).pack();
+	return Tuple::makeTuple(static_cast<int>(val)).pack();
 }
 template <>
 inline EBackupState TupleCodec<EBackupState>::unpack(Standalone<StringRef> const& val) {
@@ -727,8 +727,7 @@ protected:
 
 template <>
 inline Standalone<StringRef> TupleCodec<Reference<IBackupContainer>>::pack(Reference<IBackupContainer> const& bc) {
-	Tuple tuple;
-	tuple.append(StringRef(bc->getURL()));
+	Tuple tuple = Tuple::makeTuple(bc->getURL());
 
 	if (bc->getEncryptionKeyFileName().present()) {
 		tuple.append(bc->getEncryptionKeyFileName().get());
@@ -775,9 +774,7 @@ public:
 		Version version;
 		std::string fileName;
 		int64_t fileSize;
-		Tuple pack() const {
-			return Tuple().append(begin).append(version).append(StringRef(fileName)).append(fileSize);
-		}
+		Tuple pack() const { return Tuple::makeTuple(begin, version, fileName, fileSize); }
 		static RangeSlice unpack(Tuple const& t) {
 			RangeSlice r;
 			int i = 0;

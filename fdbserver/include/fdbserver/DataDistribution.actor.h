@@ -30,6 +30,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include <boost/heap/policies.hpp>
 #include <boost/heap/skew_heap.hpp>
 
@@ -39,6 +40,7 @@ enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ 
 
 // One-to-one relationship to the priority knobs
 enum class DataMovementReason {
+	INVALID,
 	RECOVER_MOVE,
 	REBALANCE_UNDERUTILIZED_TEAM,
 	REBALANCE_OVERUTILIZED_TEAM,
@@ -59,6 +61,8 @@ enum class DataMovementReason {
 };
 
 struct DDShardInfo;
+
+extern int dataMovementPriority(DataMovementReason moveReason);
 
 // Represents a data move in DD.
 struct DataMove {
@@ -89,9 +93,14 @@ struct RelocateShard {
 	std::shared_ptr<DataMove> dataMove; // Not null if this is a restored data move.
 	UID dataMoveId;
 	RelocateReason reason;
-	RelocateShard() : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::INVALID) {}
-	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason)
-	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason) {}
+	DataMovementReason moveReason;
+	RelocateShard()
+	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::INVALID),
+	    moveReason(DataMovementReason::INVALID) {}
+	RelocateShard(KeyRange const& keys, DataMovementReason moveReason, RelocateReason reason)
+	  : keys(keys), cancelled(false), dataMoveId(anonymousShardId), reason(reason), moveReason(moveReason) {
+		priority = dataMovementPriority(moveReason);
+	}
 
 	bool isRestore() const { return this->dataMove != nullptr; }
 };
@@ -228,17 +237,20 @@ struct GetMetricsRequest {
 };
 
 struct GetTopKMetricsReply {
-	std::vector<StorageMetrics> metrics;
+	struct KeyRangeStorageMetrics {
+		KeyRange range;
+		StorageMetrics metrics;
+		KeyRangeStorageMetrics() = default;
+		KeyRangeStorageMetrics(const KeyRange& range, const StorageMetrics& s) : range(range), metrics(s) {}
+	};
+	std::vector<KeyRangeStorageMetrics> shardMetrics;
 	double minReadLoad = -1, maxReadLoad = -1;
 	GetTopKMetricsReply() {}
-	GetTopKMetricsReply(std::vector<StorageMetrics> const& m, double minReadLoad, double maxReadLoad)
-	  : metrics(m), minReadLoad(minReadLoad), maxReadLoad(maxReadLoad) {}
+	GetTopKMetricsReply(std::vector<KeyRangeStorageMetrics> const& m, double minReadLoad, double maxReadLoad)
+	  : shardMetrics(m), minReadLoad(minReadLoad), maxReadLoad(maxReadLoad) {}
 };
 struct GetTopKMetricsRequest {
-	// whether a > b
-	typedef std::function<bool(const StorageMetrics& a, const StorageMetrics& b)> MetricsComparator;
-	int topK = 1; // default only return the top 1 shard based on the comparator
-	MetricsComparator comparator; // Return true if a.score > b.score, return the largest topK in keys
+	int topK = 1; // default only return the top 1 shard based on the GetTopKMetricsRequest::compare function
 	std::vector<KeyRange> keys;
 	Promise<GetTopKMetricsReply> reply; // topK storage metrics
 	double maxBytesReadPerKSecond = 0, minBytesReadPerKSecond = 0; // all returned shards won't exceed this read load
@@ -250,6 +262,20 @@ struct GetTopKMetricsRequest {
 	                      double minBytesReadPerKSecond = 0)
 	  : topK(topK), keys(keys), maxBytesReadPerKSecond(maxBytesReadPerKSecond),
 	    minBytesReadPerKSecond(minBytesReadPerKSecond) {}
+
+	// Return true if a.score > b.score, return the largest topK in keys
+	static bool compare(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
+	                    const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
+		return compareByReadDensity(a, b);
+	}
+
+private:
+	// larger read density means higher score
+	static bool compareByReadDensity(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
+	                                 const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
+		return a.metrics.bytesReadPerKSecond / std::max(a.metrics.bytes * 1.0, 1.0) >
+		       b.metrics.bytesReadPerKSecond / std::max(b.metrics.bytes * 1.0, 1.0);
+	}
 };
 
 struct GetMetricsListRequest {
@@ -263,82 +289,6 @@ struct GetMetricsListRequest {
 
 struct TeamCollectionInterface {
 	PromiseStream<GetTeamRequest> getTeam;
-};
-
-class ShardsAffectedByTeamFailure : public ReferenceCounted<ShardsAffectedByTeamFailure> {
-public:
-	ShardsAffectedByTeamFailure() {}
-
-	struct Team {
-		std::vector<UID> servers; // sorted
-		bool primary;
-
-		Team() : primary(true) {}
-		Team(std::vector<UID> const& servers, bool primary) : servers(servers), primary(primary) {}
-
-		bool operator<(const Team& r) const {
-			if (servers == r.servers)
-				return primary < r.primary;
-			return servers < r.servers;
-		}
-		bool operator>(const Team& r) const { return r < *this; }
-		bool operator<=(const Team& r) const { return !(*this > r); }
-		bool operator>=(const Team& r) const { return !(*this < r); }
-		bool operator==(const Team& r) const { return servers == r.servers && primary == r.primary; }
-		bool operator!=(const Team& r) const { return !(*this == r); }
-
-		std::string toString() const { return describe(servers); };
-	};
-
-	// This tracks the data distribution on the data distribution server so that teamTrackers can
-	//   relocate the right shards when a team is degraded.
-
-	// The following are important to make sure that failure responses don't revert splits or merges:
-	//   - The shards boundaries in the two data structures reflect "queued" RelocateShard requests
-	//       (i.e. reflects the desired set of shards being tracked by dataDistributionTracker,
-	//       rather than the status quo).  These boundaries are modified in defineShard and the content
-	//       of what servers correspond to each shard is a copy or union of the shards already there
-	//   - The teams associated with each shard reflect either the sources for non-moving shards
-	//       or the destination team for in-flight shards (the change is atomic with respect to team selection).
-	//       moveShard() changes the servers associated with a shard and will never adjust the shard
-	//       boundaries. If a move is received for a shard that has been redefined (the exact shard is
-	//       no longer in the map), the servers will be set for all contained shards and added to all
-	//       intersecting shards.
-
-	int getNumberOfShards(UID ssID) const;
-	std::vector<KeyRange> getShardsFor(Team team) const;
-	bool hasShards(Team team) const;
-
-	// The first element of the pair is either the source for non-moving shards or the destination team for in-flight
-	// shards The second element of the pair is all previous sources for in-flight shards
-	std::pair<std::vector<Team>, std::vector<Team>> getTeamsFor(KeyRangeRef keys);
-
-	void defineShard(KeyRangeRef keys);
-	void moveShard(KeyRangeRef keys, std::vector<Team> destinationTeam);
-	void finishMove(KeyRangeRef keys);
-	void check() const;
-
-	PromiseStream<KeyRange> restartShardTracker;
-
-private:
-	struct OrderByTeamKey {
-		bool operator()(const std::pair<Team, KeyRange>& lhs, const std::pair<Team, KeyRange>& rhs) const {
-			if (lhs.first < rhs.first)
-				return true;
-			if (lhs.first > rhs.first)
-				return false;
-			return lhs.second.begin < rhs.second.begin;
-		}
-	};
-
-	KeyRangeMap<std::pair<std::vector<Team>, std::vector<Team>>>
-	    shard_teams; // A shard can be affected by the failure of multiple teams if it is a queued merge, or when
-	                 // usable_regions > 1
-	std::set<std::pair<Team, KeyRange>, OrderByTeamKey> team_shards;
-	std::map<UID, int> storageServerShards;
-
-	void erase(Team team, KeyRange const& range);
-	void insert(Team team, KeyRange const& range);
 };
 
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer

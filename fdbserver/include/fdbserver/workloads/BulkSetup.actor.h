@@ -39,10 +39,29 @@
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+template <class T>
+struct sfinae_true : std::true_type {};
+
+template <class T>
+auto testAuthToken(int) -> sfinae_true<decltype(std::declval<T>().getAuthToken())>;
+template <class>
+auto testAuthToken(long) -> std::false_type;
+
+template <class T>
+struct hasAuthToken : decltype(testAuthToken<T>(0)) {};
+
+template <class T>
+void setAuthToken(T const& self, Transaction& tr) {
+	if constexpr (hasAuthToken<T>::value) {
+		tr.setOption(FDBTransactionOptions::AUTHORIZATION_TOKEN, self.getAuthToken());
+	}
+}
+
 ACTOR template <class T>
 Future<bool> checkRangeSimpleValueSize(Database cx, T* workload, uint64_t begin, uint64_t end) {
 	loop {
 		state Transaction tr(cx);
+		setAuthToken(*workload, tr);
 		try {
 			state Standalone<KeyValueRef> firstKV = (*workload)(begin);
 			state Standalone<KeyValueRef> lastKV = (*workload)(end - 1);
@@ -63,6 +82,7 @@ Future<uint64_t> setupRange(Database cx, T* workload, uint64_t begin, uint64_t e
 	state uint64_t bytesInserted = 0;
 	loop {
 		state Transaction tr(cx);
+		setAuthToken(*workload, tr);
 		try {
 			// if( deterministicRandom()->random01() < 0.001 )
 			//	tr.debugTransaction( deterministicRandom()->randomUniqueID() );
@@ -128,6 +148,7 @@ Future<uint64_t> setupRangeWorker(Database cx,
 
 			if (keysLoaded - lastStoredKeysLoaded >= keySaveIncrement || jobs->size() == 0) {
 				state Transaction tr(cx);
+				setAuthToken(*workload, tr);
 				try {
 					std::string countKey = format("keycount|%d|%d", workload->clientId, actorId);
 					std::string bytesKey = format("bytesstored|%d|%d", workload->clientId, actorId);
@@ -294,8 +315,8 @@ Future<Void> bulkSetup(Database cx,
 	// Here we wait for data in flight to go to 0 (this will not work on a database with other users)
 	if (postSetupWarming != 0) {
 		try {
-			wait(delay(5.0) >>
-			     waitForLowInFlight(cx, workload)); // Wait for the data distribution in a small test to start
+			wait(delay(5.0));
+			wait(waitForLowInFlight(cx, workload)); // Wait for the data distribution in a small test to start
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;
