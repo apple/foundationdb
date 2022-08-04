@@ -1534,7 +1534,6 @@ Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
 			} else {
 				// resolve the network address if necessary
 				std::string endpoint(address.toString());
-				// parse to see
 				Optional<NetworkAddress> parsedAddress = NetworkAddress::parseOptional(endpoint);
 				if (!parsedAddress.present()) {
 					try {

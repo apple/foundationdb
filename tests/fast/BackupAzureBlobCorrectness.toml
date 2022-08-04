@@ -74,7 +74,7 @@ clearAfterTest = 'false'
     testName = 'RestoreFromBlob'
     restoreAfter = 0.0
     backupTag = 'default'
-    backupURL = 'azure://foo.bar.com:10000/devstoreaccount1/testcontainer'
+    backupURL = 'azure://0.0.0.0:10000/devstoreaccount1/testcontainer'
 
     [[test.workload]]
     testName = 'RandomClogging'

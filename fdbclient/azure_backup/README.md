@@ -12,8 +12,8 @@ For example, _BackupAzureBlobCorrectness.toml_
 
 The code now supports the following style urls:
 
-- azure://<account_name>.blob.core.windows.net/<container_name> (The formal url format for the blob service provided by the azure storage account)
-- azure://<ip|hostname>:<port>/<account_name>/<container_name> (Directly providing the endpoint address for the blob service, usually for local testing)
+- `azure://<account_name>.blob.core.windows.net/<container_name>` (The formal url format for the blob service provided by the azure storage account)
+- `azure://<ip|hostname>:<port>/<account_name>/<container_name>` (Directly providing the endpoint address for the blob service, usually for local testing)
 
 ## Local test environment 
 
