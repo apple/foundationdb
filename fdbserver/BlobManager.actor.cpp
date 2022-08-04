@@ -1061,23 +1061,31 @@ ACTOR Future<Void> loadTenantMap(Reference<ReadYourWritesTransaction> tr, Refere
 	return Void();
 }
 
+ACTOR Future<Void> monitorTenants(Reference<BlobManagerData> bmData) {
+	loop {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				wait(loadTenantMap(tr, bmData));
+
+				state Future<Void> watchChange = tr->watch(TenantMetadata::lastTenantId.key);
+				wait(tr->commit());
+				wait(watchChange);
+				tr->reset();
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+	}
+}
+
 // FIXME: better way to load tenant mapping?
 ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 	state Optional<Value> lastChangeKeyValue;
-	state Key changeKey;
+	state Key changeKey = blobRangeChangeKey;
 	state bool needToCoalesce = bmData->epoch > 1;
-	state std::unordered_map<int64_t, TenantMapEntry> knownTenantCache;
-
-	if (SERVER_KNOBS->BG_RANGE_SOURCE == "tenant") {
-		changeKey = TenantMetadata::lastTenantId.key;
-	} else if (SERVER_KNOBS->BG_RANGE_SOURCE == "blobRangeKeys") {
-		changeKey = blobRangeChangeKey;
-	} else {
-		ASSERT_WE_THINK(false);
-		// wait to prevent spin looping
-		wait(delay(600.0));
-		throw internal_error();
-	}
 
 	loop {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
@@ -1095,46 +1103,24 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 
 				// TODO why is there separate arena?
 				state Arena ar;
-				state RangeResult results;
-				if (SERVER_KNOBS->BG_RANGE_SOURCE == "blobRangeKeys") {
-					wait(store(results,
-					           krmGetRanges(tr,
-					                        blobRangeKeys.begin,
-					                        KeyRange(normalKeys),
-					                        CLIENT_KNOBS->TOO_MANY,
-					                        GetRangeLimits::BYTE_LIMIT_UNLIMITED)));
-					ASSERT_WE_THINK(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
-					if (results.more || results.size() >= CLIENT_KNOBS->TOO_MANY) {
-						TraceEvent(SevError, "BlobManagerTooManyClientRanges", bmData->id)
-						    .detail("Epoch", bmData->epoch)
-						    .detail("ClientRanges", results.size() - 1);
-						wait(delay(600));
-						if (bmData->iAmReplaced.canBeSet()) {
-							bmData->iAmReplaced.sendError(internal_error());
-						}
-						throw internal_error();
+				state RangeResult results = wait(krmGetRanges(tr,
+				                                              blobRangeKeys.begin,
+				                                              KeyRange(normalKeys),
+				                                              CLIENT_KNOBS->TOO_MANY,
+				                                              GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+				ASSERT_WE_THINK(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
+				if (results.more || results.size() >= CLIENT_KNOBS->TOO_MANY) {
+					TraceEvent(SevError, "BlobManagerTooManyClientRanges", bmData->id)
+					    .detail("Epoch", bmData->epoch)
+					    .detail("ClientRanges", results.size() - 1);
+					wait(delay(600));
+					if (bmData->iAmReplaced.canBeSet()) {
+						bmData->iAmReplaced.sendError(internal_error());
 					}
-
-					ar.dependsOn(results.arena());
-				} else {
-					wait(loadTenantMap(tr, bmData));
-
-					std::vector<Key> prefixes;
-					for (auto& it : bmData->tenantData.tenantInfoById) {
-						prefixes.push_back(it.second.prefix);
-					}
-
-					// make this look like knownBlobRanges
-					std::sort(prefixes.begin(), prefixes.end());
-					for (auto& p : prefixes) {
-						if (!results.empty()) {
-							ASSERT(results.back().key < p);
-						}
-						results.push_back_deep(results.arena(), KeyValueRef(p, LiteralStringRef("1")));
-						results.push_back_deep(results.arena(),
-						                       KeyValueRef(p.withSuffix(normalKeys.end), LiteralStringRef("0")));
-					}
+					throw internal_error();
 				}
+
+				ar.dependsOn(results.arena());
 
 				VectorRef<KeyRangeRef> rangesToAdd;
 				VectorRef<KeyRangeRef> rangesToRemove;
@@ -4295,6 +4281,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 
 	self->addActor.send(doLockChecks(self));
 	self->addActor.send(monitorClientRanges(self));
+	self->addActor.send(monitorTenants(self));
 	self->addActor.send(monitorPurgeKeys(self));
 	if (SERVER_KNOBS->BG_CONSISTENCY_CHECK_ENABLED) {
 		self->addActor.send(bgConsistencyCheck(self));

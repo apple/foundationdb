@@ -235,7 +235,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 namespace {
 bool isBlobFileEncryptionSupported() {
-	bool supported = SERVER_KNOBS->ENABLE_BLOB_GRANULE_ENCRYPTION && SERVER_KNOBS->BG_RANGE_SOURCE == "tenant";
+	bool supported = SERVER_KNOBS->ENABLE_BLOB_GRANULE_ENCRYPTION && SERVER_KNOBS->BG_METADATA_SOURCE == "tenant";
 	ASSERT((supported && SERVER_KNOBS->ENABLE_ENCRYPTION) || !supported);
 	return supported;
 }
@@ -4358,7 +4358,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	}
 
 	try {
-		if (SERVER_KNOBS->BG_RANGE_SOURCE != "tenant") {
+		if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
 			if (BW_DEBUG) {
 				fmt::print("BW constructing backup container from {0}\n", SERVER_KNOBS->BG_URL);
 			}
@@ -4391,9 +4391,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 
 	self->addActor.send(waitFailureServer(bwInterf.waitFailure.getFuture()));
 	self->addActor.send(runGRVChecks(self));
-	if (SERVER_KNOBS->BG_RANGE_SOURCE == "tenant") {
-		self->addActor.send(monitorTenants(self));
-	}
+	self->addActor.send(monitorTenants(self));
 	state Future<Void> selfRemoved = monitorRemoval(self);
 
 	TraceEvent("BlobWorkerInit", self->id).log();
