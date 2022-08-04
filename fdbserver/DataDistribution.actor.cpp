@@ -104,12 +104,7 @@ void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int pr
 }
 
 Future<Void> StorageWiggler::onCheck() const {
-	double delayTime = MIN_ON_CHECK_DELAY_SEC;
-	if (!empty()) {
-		delayTime = std::max(
-		    delayTime, wiggle_pq.top().first.createdTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC - now());
-	}
-	return delay(delayTime) || pqCanCheck.onTrigger();
+	return delay(MIN_ON_CHECK_DELAY_SEC) || pqCanCheck.onTrigger();
 }
 
 // add server to wiggling queue
@@ -1412,56 +1407,6 @@ TEST_CASE("/DataDistribution/StorageWiggler/Order") {
 		ASSERT(id == correctOrder[i]);
 	}
 	ASSERT(!wiggler.getNextServerId().present());
-	return Void();
-}
-
-TEST_CASE("/DataDistribution/StorageWiggler/MinAge") {
-	state StorageWiggler wiggler(nullptr);
-	wiggler.addServer(UID(1, 0),
-	                  StorageMetadataType(now() - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 5.0,
-	                                      KeyValueStoreType::SSD_BTREE_V2));
-	wiggler.addServer(
-	    UID(2, 0),
-	    StorageMetadataType(now() + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC, KeyValueStoreType::MEMORY, true));
-	wiggler.addServer(UID(3, 0), StorageMetadataType(now() - 5.0, KeyValueStoreType::SSD_ROCKSDB_V1, true));
-	wiggler.addServer(UID(4, 0),
-	                  StorageMetadataType(now() - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC - 1,
-	                                      KeyValueStoreType::SSD_BTREE_V2));
-	std::vector<Optional<UID>> correctResult{ UID(3, 0), UID(2, 0), UID(4, 0), Optional<UID>() };
-	for (int i = 0; i < 4; ++i) {
-		auto id = wiggler.getNextServerId();
-		ASSERT(id == correctResult[i]);
-	}
-	std::cout << "Finish Initial Check. Wait updating in ~5.0s ...\n";
-	state double t = now();
-	wait(wiggler.onCheck());
-	std::cout << "After " << now() - t << " s\n";
-	ASSERT(now() - t > 4);
-	ASSERT(wiggler.getNextServerId() == UID(1, 0));
-
-	std::cout << "Test onCheck() after addServer() ...\n";
-	t = now();
-	state Future<Void> canCheck = wiggler.onCheck();
-	ASSERT(!canCheck.isReady());
-	wiggler.addServer(
-	    UID(5, 0),
-	    StorageMetadataType(now() + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC, KeyValueStoreType::SSD_BTREE_V2));
-	wait(canCheck);
-	std::cout << "After " << now() - t << " s\n";
-	ASSERT(now() - t > StorageWiggler::MIN_ON_CHECK_DELAY_SEC - 0.1);
-	ASSERT(!wiggler.getNextServerId().present());
-
-	std::cout << "Test after update...\n";
-	StorageWiggler* ptr = &wiggler;
-	wait(trigger(
-	    [ptr]() {
-		    ptr->updateMetadata(UID(5, 0),
-		                        StorageMetadataType(now() - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC,
-		                                            KeyValueStoreType::SSD_BTREE_V2));
-	    },
-	    delay(5.0)));
-
-	ASSERT(wiggler.getNextServerId() == UID(5, 0));
 	return Void();
 }
 

@@ -2830,27 +2830,14 @@ public:
 		}
 	}
 
-	ACTOR static Future<UID> getNextWigglingServerID(DDTeamCollection* teamCollection) {
-		state Optional<Value> localityKey;
-		state Optional<Value> localityValue;
-
-		// NOTE: because normal \xff/conf change through `changeConfig` now will cause DD throw `movekeys_conflict()`
-		// then recruit a new DD, we only need to read current configuration once
-		if (teamCollection->configuration.perpetualStorageWiggleLocality != "0") {
-			// parsing format is like "datahall:0"
-			std::string& localityKeyValue = teamCollection->configuration.perpetualStorageWiggleLocality;
-			ASSERT(isValidPerpetualStorageWiggleLocality(localityKeyValue));
-			// get key and value from perpetual_storage_wiggle_locality.
-			int split = localityKeyValue.find(':');
-			localityKey = Optional<Value>(ValueRef((uint8_t*)localityKeyValue.c_str(), split));
-			localityValue = Optional<Value>(
-			    ValueRef((uint8_t*)localityKeyValue.c_str() + split + 1, localityKeyValue.size() - split - 1));
-		}
-
+	ACTOR static Future<UID> getNextWigglingServerID(Reference<StorageWiggler> wiggler,
+	                                                 Optional<Value> localityKey = Optional<Value>(),
+	                                                 Optional<Value> localityValue = Optional<Value>(),
+	                                                 DDTeamCollection* teamCollection = nullptr) {
 		loop {
-			state Optional<UID> id = teamCollection->storageWiggler->getNextServerId();
+			state Optional<UID> id = wiggler->getNextServerId();
 			if (!id.present()) {
-				wait(teamCollection->storageWiggler->onCheck());
+				wait(wiggler->onCheck());
 				continue;
 			}
 
@@ -2864,7 +2851,7 @@ public:
 					return id.get();
 				}
 
-				if (teamCollection->storageWiggler->empty()) {
+				if (wiggler->empty()) {
 					// None of the entries in wiggle queue matches the given locality.
 					TraceEvent("PerpetualStorageWiggleEmptyQueue", teamCollection->distributorId)
 					    .detail("WriteValue", "No process matched the given perpetualStorageWiggleLocality")
@@ -2873,7 +2860,6 @@ public:
 				}
 				continue;
 			}
-
 			return id.get();
 		}
 	}
@@ -3533,7 +3519,23 @@ Future<UID> DDTeamCollection::getClusterId() {
 }
 
 Future<UID> DDTeamCollection::getNextWigglingServerID() {
-	return DDTeamCollectionImpl::getNextWigglingServerID(this);
+	Optional<Value> localityKey;
+	Optional<Value> localityValue;
+
+	// NOTE: because normal \xff/conf change through `changeConfig` now will cause DD throw `movekeys_conflict()`
+	// then recruit a new DD, we only need to read current configuration once
+	if (configuration.perpetualStorageWiggleLocality != "0") {
+		// parsing format is like "datahall:0"
+		std::string& localityKeyValue = configuration.perpetualStorageWiggleLocality;
+		ASSERT(isValidPerpetualStorageWiggleLocality(localityKeyValue));
+		// get key and value from perpetual_storage_wiggle_locality.
+		int split = localityKeyValue.find(':');
+		localityKey = Optional<Value>(ValueRef((uint8_t*)localityKeyValue.c_str(), split));
+		localityValue = Optional<Value>(
+		    ValueRef((uint8_t*)localityKeyValue.c_str() + split + 1, localityKeyValue.size() - split - 1));
+	}
+
+	return DDTeamCollectionImpl::getNextWigglingServerID(storageWiggler, localityKey, localityValue, this);
 }
 
 Future<Void> DDTeamCollection::readStorageWiggleMap() {
@@ -5865,5 +5867,52 @@ TEST_CASE("/DataDistribution/GetTeam/TrueBestLeastReadBandwidth") {
 
 TEST_CASE("/DataDistribution/GetTeam/DeprioritizeWigglePausedTeam") {
 	wait(DDTeamCollectionUnitTest::GetTeam_DeprioritizeWigglePausedTeam());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithMinAge") {
+	state StorageWiggler wiggler(nullptr);
+	state double startTime = now();
+	wiggler.addServer(UID(1, 0),
+	                  StorageMetadataType(startTime - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 5.0,
+	                                      KeyValueStoreType::SSD_BTREE_V2));
+	wiggler.addServer(UID(2, 0),
+	                  StorageMetadataType(
+	                      startTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC, KeyValueStoreType::MEMORY, true));
+	wiggler.addServer(UID(3, 0), StorageMetadataType(startTime - 5.0, KeyValueStoreType::SSD_ROCKSDB_V1, true));
+	wiggler.addServer(UID(4, 0),
+	                  StorageMetadataType(startTime - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC - 1.0,
+	                                      KeyValueStoreType::SSD_BTREE_V2));
+	std::vector<Optional<UID>> correctResult{ UID(3, 0), UID(2, 0), UID(4, 0), Optional<UID>() };
+	for (int i = 0; i < 4; ++i) {
+		auto id = wiggler.getNextServerId();
+		ASSERT(id == correctResult[i]);
+	}
+	std::cout << "Finish Initial Check. Start test getNextWigglingServerID() loop...\n";
+	// test the getNextWigglingServerID() loop
+	state UID id = wait(DDTeamCollectionImpl::getNextWigglingServerID(Reference<StorageWiggler>::addRef(&wiggler)));
+	ASSERT(id == UID(1, 0));
+
+	std::cout << "Test after addServer() ...\n";
+	state Future<UID> nextFuture =
+	    DDTeamCollectionImpl::getNextWigglingServerID(Reference<StorageWiggler>::addRef(&wiggler));
+	startTime = now();
+	StorageMetadataType metadata(startTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC,
+	                             KeyValueStoreType::SSD_BTREE_V2);
+	wiggler.addServer(UID(5, 0), metadata);
+	ASSERT(!nextFuture.isReady() || now() - metadata.createdTime >= SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC);
+
+	std::cout << "Test after updateServer() ...\n";
+	StorageWiggler* ptr = &wiggler;
+	wait(trigger(
+	    [ptr]() {
+		    ptr->updateMetadata(UID(5, 0),
+		                        StorageMetadataType(now() - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC,
+		                                            KeyValueStoreType::SSD_BTREE_V2));
+	    },
+	    delay(5.0)));
+	wait(store(id, nextFuture));
+
+	ASSERT(id == UID(5, 0));
 	return Void();
 }
