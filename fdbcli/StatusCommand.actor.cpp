@@ -433,7 +433,15 @@ void printStatus(StatusObjectReader statusObj,
 				} else
 					outputString += "unknown";
 
-				int intVal;
+				int intVal = 0;
+				bool blobGranuleEnabled{ false };
+				if (statusObjConfig.get("blob_granules_enabled", intVal) && intVal) {
+					blobGranuleEnabled = true;
+				}
+				if (blobGranuleEnabled) {
+					outputString += "\n  Blob granules          - enabled";
+				}
+
 				outputString += "\n  Coordinators           - ";
 				if (statusObjConfig.get("coordinators_count", intVal)) {
 					outputString += std::to_string(intVal);
