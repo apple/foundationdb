@@ -80,15 +80,18 @@ public:
 	Future<Void> monitorThrottlingChanges() override;
 	void addRequests(TransactionTag tag, int count) override;
 	uint64_t getThrottledTagChangeId() const override;
-	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() override;
+
 	int64_t autoThrottleCount() const override;
 	uint32_t busyReadTagCount() const override;
 	uint32_t busyWriteTagCount() const override;
 	int64_t manualThrottleCount() const override;
 	bool isAutoThrottlingEnabled() const override;
-	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override;
 
-	// testing only
+	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override;
+	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() override;
+
+	// Testing only:
 public:
 	void setQuota(TransactionTagRef, ThrottleApi::TagQuotaValue const&);
+	void removeQuota(TransactionTagRef);
 };

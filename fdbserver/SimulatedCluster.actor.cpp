@@ -1815,7 +1815,7 @@ void SimulationConfig::setProcessesPerMachine(const TestConfig& testConfig) {
 void SimulationConfig::setTss(const TestConfig& testConfig) {
 	int tssCount = 0;
 	// TODO: Support TSS in SHARD_ENCODE_LOCATION_METADATA mode.
-	if (!testConfig.simpleConfig && !testConfig.disableTss && !CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
+	if (!testConfig.simpleConfig && !testConfig.disableTss && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
 	    deterministicRandom()->random01() < 0.25) {
 		// 1 or 2 tss
 		tssCount = deterministicRandom()->randomInt(1, 3);
@@ -2445,7 +2445,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state bool allowDisablingTenants = testConfig.allowDisablingTenants;
 	state bool allowCreatingTenants = testConfig.allowCreatingTenants;
 
-	if (!CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		testConfig.storageEngineExcludeTypes.push_back(5);
 	}
 

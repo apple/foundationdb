@@ -163,6 +163,8 @@ public:
 	int PRIORITY_SPLIT_SHARD;
 
 	// Data distribution
+	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
+
 	double READ_REBALANCE_CPU_THRESHOLD; // read rebalance only happens if the source servers' CPU > threshold
 	int READ_REBALANCE_SRC_PARALLELISM; // the max count a server become a source server within a certain interval
 	int READ_REBALANCE_SHARD_TOPK; // top k shards from which to select randomly for read-rebalance
@@ -900,6 +902,7 @@ public:
 	bool BG_ENABLE_MERGING;
 	int BG_MERGE_CANDIDATE_THRESHOLD_SECONDS;
 	int BG_MERGE_CANDIDATE_DELAY_SECONDS;
+	int BG_KEY_TUPLE_TRUNCATE_OFFSET;
 
 	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
