@@ -5897,7 +5897,7 @@ TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithMinAge") {
 	state Future<UID> nextFuture =
 	    DDTeamCollectionImpl::getNextWigglingServerID(Reference<StorageWiggler>::addRef(&wiggler));
 	startTime = now();
-	StorageMetadataType metadata(startTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC,
+	StorageMetadataType metadata(startTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 100.0,
 	                             KeyValueStoreType::SSD_BTREE_V2);
 	wiggler.addServer(UID(5, 0), metadata);
 	ASSERT(!nextFuture.isReady() || now() - metadata.createdTime >= SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC);
