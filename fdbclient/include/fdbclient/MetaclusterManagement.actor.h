@@ -835,10 +835,6 @@ struct RemoveClusterImpl {
 		if (!tenantGroupEntries.more) {
 			ManagementClusterMetadata::dataClusters.erase(tr, self->ctx.clusterName.get());
 			ManagementClusterMetadata::dataClusterConnectionRecords.erase(tr, self->ctx.clusterName.get());
-			ManagementClusterMetadata::clusterCapacityIndex.erase(
-			    tr,
-			    Tuple::makeTuple(self->ctx.dataClusterMetadata.get().entry.allocated.numTenantGroups,
-			                     self->ctx.clusterName.get()));
 			ManagementClusterMetadata::clusterTenantCount.erase(tr, self->ctx.clusterName.get());
 		}
 
