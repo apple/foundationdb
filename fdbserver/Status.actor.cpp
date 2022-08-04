@@ -2199,7 +2199,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 		        ? timeoutError(db->get().ratekeeper.get().getGlobalTagThrottlerStatus.getReply(
 		                           GlobalTagThrottlerStatusRequest{}),
 		                       1.0)
-		        : Future<GlobalTagThrottlerStatusReply>({});
+		        : Future<GlobalTagThrottlerStatusReply>(GlobalTagThrottlerStatusReply{});
 		wait(success(f1) && success(f2) && success(f3));
 		TraceEventFields ratekeeper = f1.get();
 		TraceEventFields batchRatekeeper = f2.get();
