@@ -175,7 +175,10 @@ public:
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() {
 		return throttledTags.getClientRates(autoThrottlingEnabled);
 	}
-	PrioritizedTransactionTagMap<double> getRates() const { return {}; }
+	PrioritizedTransactionTagMap<double> getRates() const {
+		// TODO: Implement (currently not supported)
+		return {};
+	}
 	int64_t autoThrottleCount() const { return throttledTags.autoThrottleCount(); }
 	uint32_t busyReadTagCount() const { return throttledTags.getBusyReadTagCount(); }
 	uint32_t busyWriteTagCount() const { return throttledTags.getBusyWriteTagCount(); }

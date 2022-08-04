@@ -137,7 +137,7 @@ At path `.cluster.qos.global_tag_throttler`, throttling limitations for each tag
     "desired_tps": <number>,
     "reserved_tps": <number>,
     "limiting_tps": [<number>|"unset"],
-    "per_client_tps": <number>
+    "target_tps": <number>
   },
   ...
 }
