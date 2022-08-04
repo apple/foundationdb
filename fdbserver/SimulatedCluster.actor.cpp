@@ -1409,6 +1409,14 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		                 storage_engine_type) != testConfig.storageEngineExcludeTypes.end()) {
 			storage_engine_type = deterministicRandom()->randomInt(0, 6);
 		}
+		int focus_storage_engine_type = SERVER_KNOBS->TEST_STORAGE_ENGINE_TYPE;
+		if (focus_storage_engine_type > 0 &&
+		    std::find(testConfig.storageEngineExcludeTypes.begin(),
+		              testConfig.storageEngineExcludeTypes.end(),
+		              focus_storage_engine_type) == testConfig.storageEngineExcludeTypes.end()) {
+			storage_engine_type = focus_storage_engine_type;
+			TraceEvent(SevWarnAlways, "TestStorageEngineType").detail("StorageEngineType", focus_storage_engine_type);
+		}
 	}
 
 	switch (storage_engine_type) {

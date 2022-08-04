@@ -369,6 +369,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// KeyValueStoreMemory
 	init( REPLACE_CONTENTS_BYTES,                                1e5 );
 
+	init( TEST_STORAGE_ENGINE_TYPE,                                5 );
+
 	// KeyValueStoreRocksDB
 	init( ROCKSDB_BACKGROUND_PARALLELISM,                          4 );
 	init( ROCKSDB_READ_PARALLELISM,                                4 );
