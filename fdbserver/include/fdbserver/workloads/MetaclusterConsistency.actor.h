@@ -33,6 +33,7 @@
 
 #include "fdbclient/Metacluster.h"
 #include "fdbclient/MetaclusterManagement.actor.h"
+#include "fdbserver/workloads/TenantConsistency.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 FDB_DECLARE_BOOLEAN_PARAM(AllowPartialMetaclusterOperations);
@@ -56,8 +57,6 @@ private:
 
 		std::map<ClusterName, std::set<TenantName>> clusterTenantMap;
 		std::map<ClusterName, std::set<TenantGroupName>> clusterTenantGroupMap;
-
-		std::map<TenantGroupName, int> tenantGroupTenantCount;
 
 		int64_t tenantCount;
 		RangeResult systemTenantSubspaceKeys;
@@ -124,7 +123,6 @@ private:
 			ASSERT(t.size() == 2);
 			TenantGroupName tenantGroupName = t.getString(1);
 			self->managementMetadata.clusterTenantGroupMap[t.getString(0)].insert(tenantGroupName);
-			self->managementMetadata.tenantGroupTenantCount[tenantGroupName] = 0;
 		}
 
 		return Void();
@@ -197,23 +195,20 @@ private:
 
 		// Iterate through all tenants and verify related metadata
 		std::map<ClusterName, int> clusterAllocated;
+		std::set<TenantGroupName> processedTenantGroups;
 		for (auto [name, entry] : managementMetadata.tenantMap) {
-			// All tenants should be assigned a cluster
 			ASSERT(entry.assignedCluster.present());
+
 			// Each tenant should be assigned to the same cluster where it is stored in the cluster tenant index
 			auto clusterItr = managementMetadata.clusterTenantMap.find(entry.assignedCluster.get());
 			ASSERT(clusterItr != managementMetadata.clusterTenantMap.end());
 			ASSERT(clusterItr->second.count(name));
+
 			if (entry.tenantGroup.present()) {
-				// The tenant's tenant group should be stored in the cluster tenant group index
-				auto tenantGroupCountItr = managementMetadata.tenantGroupTenantCount.find(entry.tenantGroup.get());
-				ASSERT(tenantGroupCountItr != managementMetadata.tenantGroupTenantCount.end());
-				// Track the actual tenant group allocation per cluster
-				if (tenantGroupCountItr->second == 0) {
+				// Count the number of tenant groups allocated in each cluster
+				if (processedTenantGroups.insert(entry.tenantGroup.get()).second) {
 					++clusterAllocated[entry.assignedCluster.get()];
 				}
-				// Update the number of tenants found in the group
-				++tenantGroupCountItr->second;
 				// The tenant group should be stored in the same cluster where it is stored in the cluster tenant
 				// group index
 				auto clusterTenantGroupItr = managementMetadata.clusterTenantGroupMap.find(entry.assignedCluster.get());
@@ -224,11 +219,6 @@ private:
 				// allocation)
 				++clusterAllocated[entry.assignedCluster.get()];
 			}
-		}
-
-		// All tenant groups should have at least one tenant
-		for (auto [name, tenantCount] : managementMetadata.tenantGroupTenantCount) {
-			ASSERT(tenantCount > 0);
 		}
 
 		// The actual allocation for each cluster should match what is stored in the cluster metadata
@@ -259,6 +249,9 @@ private:
 		state Optional<MetaclusterRegistrationEntry> dataClusterRegistration;
 		state std::vector<std::pair<TenantName, TenantMapEntry>> dataClusterTenantList;
 		state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> dataClusterTenantGroups;
+
+		state TenantConsistencyCheck<IDatabase> tenantConsistencyCheck(dataDb);
+		wait(tenantConsistencyCheck.run());
 
 		loop {
 			try {
@@ -333,10 +326,12 @@ private:
 	}
 
 	ACTOR static Future<Void> run(MetaclusterConsistencyCheck* self) {
+		state TenantConsistencyCheck<DB> managementTenantConsistencyCheck(self->managementDb);
+		wait(managementTenantConsistencyCheck.run());
 		wait(loadManagementClusterMetadata(self));
 		self->validateManagementCluster();
 
-		std::vector<Future<Void>> dataClusterChecks;
+		state std::vector<Future<Void>> dataClusterChecks;
 		state std::map<ClusterName, DataClusterMetadata>::iterator dataClusterItr;
 		for (auto [clusterName, clusterMetadata] : self->managementMetadata.dataClusters) {
 			dataClusterChecks.push_back(validateDataCluster(self, clusterName, clusterMetadata));
