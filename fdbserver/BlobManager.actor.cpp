@@ -986,8 +986,7 @@ ACTOR Future<Void> checkManagerLock(Reference<ReadYourWritesTransaction> tr, Ref
 	return Void();
 }
 
-ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
-                                              BlobGranuleSplitPoints splitPoints) {
+ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData, BlobGranuleSplitPoints splitPoints) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 	// don't do too many in one transaction
 	state int i = 0;
@@ -1367,6 +1366,14 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 
 			// make sure we're still manager when this transaction gets committed
 			wait(checkManagerLock(tr, bmData));
+			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction()));
+			if (purgeState != ForcedPurgeState::NonePurged) {
+				CODE_PROBE(true, "Split stopped because of force purge");
+				TraceEvent("GranuleSplitCancelledForcePurge", bmData->id)
+				    .detail("Epoch", bmData->epoch)
+				    .detail("GranuleRange", granuleRange);
+				return Void();
+			}
 
 			// TODO can do this + lock in parallel
 			// Read splitState to see if anything was committed instead of reading granule mapping because we don't want
@@ -1791,6 +1798,15 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			wait(checkManagerLock(tr, bmData));
+			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction()));
+			if (purgeState != ForcedPurgeState::NonePurged) {
+				CODE_PROBE(true, "Merge finish stopped because of force purge");
+				TraceEvent("GranuleMergeCancelledForcePurge", bmData->id)
+				    .detail("Epoch", bmData->epoch)
+				    .detail("GranuleRange", granuleRange);
+				return Void();
+				// TODO: check this in split re-eval too once that is merged!!
+			}
 
 			tr->clear(blobGranuleMergeKeyFor(mergeGranuleID));
 
@@ -2796,8 +2812,6 @@ ACTOR Future<Void> loadBlobGranuleMergeBoundaries(Reference<BlobManagerData> bmD
 	return Void();
 }
 
-// FIXME: should load set of force purged ranges in recovery and not send out assignments for them.
-// It's technically safe to not do this, since the open check will catch it, but it's extra unneeded work and causes the granule mapping to look like a worker owns the range.
 ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	state double recoveryStartTime = now();
 	state Promise<Void> workerListReady;
@@ -3468,7 +3482,13 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
                                       KeyRange granuleRange,
                                       bool force) {
 	if (BM_PURGE_DEBUG) {
-		fmt::print("BM {0} Fully deleting granule [{1} - {2}): {3} @ {4}{5}\n", self->epoch, granuleRange.begin.printable(), granuleRange.end.printable(), granuleId.toString(), purgeVersion, force ? " (force)" : "");
+		fmt::print("BM {0} Fully deleting granule [{1} - {2}): {3} @ {4}{5}\n",
+		           self->epoch,
+		           granuleRange.begin.printable(),
+		           granuleRange.end.printable(),
+		           granuleId.toString(),
+		           purgeVersion,
+		           force ? " (force)" : "");
 	}
 
 	// if granule is still splitting and files are needed for new sub-granules to re-snapshot, we can only partially
@@ -3963,8 +3983,10 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	if (BM_PURGE_DEBUG) {
 		fmt::print("BM {0}: {1} granules to fully delete\n", self->epoch, toFullyDelete.size());
 	}
-	// Go backwards through set of granules to guarantee deleting oldest first. This avoids orphaning granules in the deletion process
-	// FIXME: could track explicit parent dependencies and parallelize so long as a parent and child aren't running in parallel, but that's non-trivial
+	// Go backwards through set of granules to guarantee deleting oldest first. This avoids orphaning granules in the
+	// deletion process
+	// FIXME: could track explicit parent dependencies and parallelize so long as a parent and child aren't running in
+	// parallel, but that's non-trivial
 	for (i = toFullyDelete.size() - 1; i >= 0; --i) {
 		state UID granuleId;
 		Key historyKey;

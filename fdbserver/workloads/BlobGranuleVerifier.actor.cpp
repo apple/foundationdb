@@ -652,29 +652,48 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 
 		// ask all workers for all of their open granules and make sure none are in the force purge range
-		state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(cx));
 
-		for (i = 0; i < blobWorkers.size(); i++) {
-			GetGranuleAssignmentsRequest req;
-			req.managerEpoch = -1; // not manager
-			Optional<GetGranuleAssignmentsReply> assignments =
-			    wait(timeout(brokenPromiseToNever(blobWorkers[i].granuleAssignmentsRequest.getReply(req)),
-			                 SERVER_KNOBS->BLOB_WORKER_TIMEOUT));
-			if (assignments.present()) {
-				for (auto& it : assignments.get().assignments) {
-					if (purgeRange.intersects(it.range)) {
-						fmt::print("BW {0} still has range [{1} - {2})\n",
-						           blobWorkers[i].id().toString(),
-						           it.range.begin.printable(),
-						           it.range.end.printable());
+		// Because there could be ranges assigned that havne't yet finished opening to check for purge, some BWs might
+		// still temporarily have ranges assigned. To address this, we just retry the check after a bit
+		loop {
+			state bool anyRangesLeft = false;
+			state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(cx));
+
+			if (BGV_DEBUG) {
+				fmt::print("BGV force purge checking {0} blob worker mappings\n", blobWorkers.size());
+			}
+
+			for (i = 0; i < blobWorkers.size(); i++) {
+				GetGranuleAssignmentsRequest req;
+				req.managerEpoch = -1; // not manager
+				Optional<GetGranuleAssignmentsReply> assignments =
+				    wait(timeout(brokenPromiseToNever(blobWorkers[i].granuleAssignmentsRequest.getReply(req)),
+				                 SERVER_KNOBS->BLOB_WORKER_TIMEOUT));
+				if (assignments.present()) {
+					for (auto& it : assignments.get().assignments) {
+						if (purgeRange.intersects(it.range)) {
+							if (BGV_DEBUG) {
+								fmt::print("BW {0} still has range [{1} - {2})\n",
+								           blobWorkers[i].id().toString(),
+								           it.range.begin.printable(),
+								           it.range.end.printable());
+							}
+							anyRangesLeft = true;
+						}
 					}
-					ASSERT(!purgeRange.intersects(it.range));
+				} else {
+					if (BGV_DEBUG) {
+						fmt::print("BGV mapping check failed to reach BW {0}\n", blobWorkers[i].id().toString());
+					}
+					// if BW timed out, we don't for sure know it didn't still have some range
+					anyRangesLeft = true;
 				}
 			}
-		}
-
-		if (BGV_DEBUG) {
-			fmt::print("BGV force purge checked blob worker mappings\n");
+			if (anyRangesLeft) {
+				wait(delay(10.0));
+			} else {
+				break;
+			}
 		}
 
 		if (BGV_DEBUG) {
