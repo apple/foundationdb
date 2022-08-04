@@ -1270,6 +1270,10 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 		           currentWorkerId.toString().substr(0, 5),
 		           epoch,
 		           seqno);
+		fmt::print("Proposed split (2):\n");
+		fmt::print("    {0}\n", granuleRange.begin.printable());
+		fmt::print("    {0}\n", proposedSplitKey.printable());
+		fmt::print("    {0}\n", granuleRange.end.printable());
 	}
 	TraceEvent("BMCheckInitialSplitTooBig", bmData->id)
 	    .detail("Epoch", bmData->epoch)
@@ -1278,31 +1282,48 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 	// calculate new split targets speculatively assuming split is too large and current worker still owns it
 	ASSERT(granuleRange.begin < proposedSplitKey);
 	ASSERT(proposedSplitKey < granuleRange.end);
-	state Future<BlobGranuleSplitPoints> fSplitFirst = splitRange(bmData, KeyRangeRef(granuleRange.begin, proposedSplitKey), false, true);
-	state Future<BlobGranuleSplitPoints> fSplitSecond = splitRange(bmData, KeyRangeRef(proposedSplitKey, granuleRange.end), false, true);
+	state Future<BlobGranuleSplitPoints> fSplitFirst =
+	    splitRange(bmData, KeyRangeRef(granuleRange.begin, proposedSplitKey), false, true);
+	state Future<BlobGranuleSplitPoints> fSplitSecond =
+	    splitRange(bmData, KeyRangeRef(proposedSplitKey, granuleRange.end), false, true);
 
 	state Standalone<VectorRef<KeyRef>> newRanges;
 
 	BlobGranuleSplitPoints splitFirst = wait(fSplitFirst);
-	ASSERT(splitFirst.size() >= 2);
-	ASSERT(splitFirst.front() == granuleRange.begin);
-	ASSERT(splitFirst.back() == proposedSplitKey);
+	ASSERT(splitFirst.keys.size() >= 2);
+	ASSERT(splitFirst.keys.front() == granuleRange.begin);
+	ASSERT(splitFirst.keys.back() == proposedSplitKey);
 	for (int i = 0; i < splitFirst.keys.size(); i++) {
-		// FIXME: need to align proposedSplitKey once that's merged
 		newRanges.push_back_deep(newRanges.arena(), splitFirst.keys[i]);
 	}
 
 	BlobGranuleSplitPoints splitSecond = wait(fSplitSecond);
-	ASSERT(splitSecond.size() >= 2);
-	ASSERT(splitSecond.front() == proposedSplitKey);
-	ASSERT(splitSecond.back() == granuleRange.end);
+	ASSERT(splitSecond.keys.size() >= 2);
+	ASSERT(splitSecond.keys.front() == proposedSplitKey);
+	ASSERT(splitSecond.keys.back() == granuleRange.end);
 	// i=1 to skip proposedSplitKey, since above already added it
 	for (int i = 1; i < splitSecond.keys.size(); i++) {
 		newRanges.push_back_deep(newRanges.arena(), splitSecond.keys[i]);
 	}
 
+	if (BM_DEBUG) {
+		fmt::print("Re-evaluated split ({0}:\n", newRanges.size());
+		for (auto& it : newRanges) {
+			fmt::print("    {0}\n", it.printable());
+		}
+	}
+
 	// redo key alignment on full set of split points
 	state BlobGranuleSplitPoints finalSplit = wait(alignKeys(bmData, granuleRange, newRanges));
+
+	ASSERT(finalSplit.keys.size() > 2);
+
+	if (BM_DEBUG) {
+		fmt::print("Aligned split ({0}:\n", finalSplit.keys.size());
+		for (auto& it : finalSplit.keys) {
+			fmt::print("    {0}{1}\n", it.printable(), finalSplit.boundaries.count(it) ? " *" : "");
+		}
+	}
 
 	// Check lock to see if lock is still the specified epoch and seqno, and there are no files for the granule.
 	// If either of these are false, some other worker now has the granule. if there are files, it already succeeded at
@@ -1339,7 +1360,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 			int64_t prevOwnerSeqno = std::get<1>(prevOwner);
 			UID prevGranuleID = std::get<2>(prevOwner);
 			if (prevOwnerEpoch != epoch || prevOwnerSeqno != seqno || prevGranuleID != granuleID) {
-				if (retried && prevOwnerEpoch == epoch && prevGranuleID == granuleID &&
+				if (retried && prevOwnerEpoch == bmData->epoch && prevGranuleID == granuleID &&
 				    prevOwnerSeqno == std::numeric_limits<int64_t>::max()) {
 					// owner didn't change, last iteration of this transaction just succeeded but threw an error.
 					CODE_PROBE(true, "split too big adjustment succeeded after retry");
@@ -1375,6 +1396,24 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 				return Void();
 			}
 
+			// The lock check above *should* handle this, but just be sure, also make sure that this granule wasn't
+			// already split in the granule mapping
+			RangeResult existingRanges = wait(
+			    krmGetRanges(tr, blobGranuleMappingKeys.begin, granuleRange, 3, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+			if (existingRanges.size() > 2 || existingRanges.more) {
+				CODE_PROBE(true, "split too big was already re-split");
+				if (BM_DEBUG) {
+					fmt::print("BM {0} re-evaluating initial split [{1} - {2}) too big: already split\n",
+					           bmData->epoch,
+					           granuleRange.begin.printable(),
+					           granuleRange.end.printable());
+					for (auto& it : existingRanges) {
+						fmt::print("  {0}\n", it.key.printable());
+					}
+				}
+				return Void();
+			}
+
 			// Set lock to max value for this manager, so other reassignments can't race with this transaction
 			// and existing owner can't modify it further.
 			tr->set(lockKey, blobGranuleLockValueFor(bmData->epoch, std::numeric_limits<int64_t>::max(), granuleID));
@@ -1384,11 +1423,11 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 			for (i = 0; i < finalSplit.keys.size() - 1; i++) {
 				wait(krmSetRange(tr,
 				                 blobGranuleMappingKeys.begin,
-				                 KeyRangeRef(finalSplit.keys[i], finalSplit.kyes[i + 1]),
+				                 KeyRangeRef(finalSplit.keys[i], finalSplit.keys[i + 1]),
 				                 blobGranuleMappingValueFor(UID())));
-				if (finalSplits.boundaries.count(finalSplit.keys[i])) {
+				if (finalSplit.boundaries.count(finalSplit.keys[i])) {
 					tr->set(blobGranuleMergeBoundaryKeyFor(finalSplit.keys[i]),
-							blobGranuleMergeBoundaryValueFor(splitPoints.boundaries[finalSplit.keys[i]]));
+					        blobGranuleMergeBoundaryValueFor(finalSplit.boundaries[finalSplit.keys[i]]));
 				}
 			}
 
@@ -1409,11 +1448,11 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 	raRevoke.revoke = RangeRevokeData(false); // not a dispose
 	handleRangeAssign(bmData, raRevoke);
 
-	for (int i = 0; i < finalSplits.keys.size() - 1; i++) {
+	for (int i = 0; i < finalSplit.keys.size() - 1; i++) {
 		// reassign new range and do handover of previous range
 		RangeAssignment raAssignSplit;
 		raAssignSplit.isAssign = true;
-		raAssignSplit.keyRange = KeyRangeRef(finalSplits.keys[i], finalSplits.keys[i + 1]);
+		raAssignSplit.keyRange = KeyRangeRef(finalSplit.keys[i], finalSplit.keys[i + 1]);
 		raAssignSplit.assign = RangeAssignmentData();
 		// don't care who this range gets assigned to
 		handleRangeAssign(bmData, raAssignSplit);
@@ -1424,7 +1463,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 		           bmData->epoch,
 		           granuleRange.begin.printable(),
 		           granuleRange.end.printable(),
-		           finalSplits.keys.size() - 1);
+		           finalSplit.keys.size() - 1);
 	}
 
 	return Void();
@@ -1518,9 +1557,10 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		           granuleRange.end.printable(),
 		           splitPoints.keys.size() - 1);
 		for (int i = 0; i < splitPoints.keys.size(); i++) {
-			fmt::print("    {}:{}\n",
+			fmt::print("    {0}:{1}{2}\n",
 			           (i < newGranuleIDs.size() ? newGranuleIDs[i] : UID()).toString().substr(0, 6).c_str(),
-			           splitPoints.keys[i].printable());
+			           splitPoints.keys[i].printable(),
+			           splitPoints.boundaries.count(splitPoints.keys[i]) ? " *" : "");
 		}
 	}
 
