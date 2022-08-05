@@ -388,6 +388,15 @@ void CompoundWorkload::addFailureInjection(WorkloadRequest& work) {
 	if (!work.runFailureWorkloads) {
 		return;
 	}
+	// Some common workloads won't work with failure injection workloads
+	for (auto const& w : workloads) {
+		auto desc = w->description();
+		if (desc == "ChangeConfig") {
+			return;
+		} else if (desc == "SaveAndKill") {
+			return;
+		}
+	}
 	auto& factories = IFailureInjectorFactory::factories();
 	DeterministicRandom random(sharedRandomNumber);
 	for (auto& factory : factories) {
@@ -1592,6 +1601,24 @@ ACTOR Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterContro
 	}
 }
 
+ACTOR Future<Void> initializeSimConfig(Database db) {
+	state Transaction tr(db);
+	ASSERT(g_network->isSimulated());
+	loop {
+		try {
+			DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(&tr));
+			g_simulator.storagePolicy = dbConfig.storagePolicy;
+			g_simulator.tLogPolicy = dbConfig.tLogPolicy;
+			g_simulator.tLogWriteAntiQuorum = dbConfig.tLogWriteAntiQuorum;
+			g_simulator.remoteTLogPolicy = dbConfig.getRemoteTLogPolicy();
+			g_simulator.usableRegions = dbConfig.usableRegions;
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 /**
  * \brief Test orchestrator: sends test specification to testers in the right order and collects the results.
  *
@@ -1672,6 +1699,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 
 	// Change the configuration (and/or create the database) if necessary
 	printf("startingConfiguration:%s start\n", startingConfiguration.toString().c_str());
+	fmt::print("useDB: {}\n", useDB);
 	printSimulatedTopology();
 	if (useDB && startingConfiguration != StringRef()) {
 		try {
@@ -1706,6 +1734,9 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 
 		wait(waitForAll(tenantFutures));
+		if (g_network->isSimulated()) {
+			wait(initializeSimConfig(cx));
+		}
 	}
 
 	if (useDB && waitForQuiescenceBegin) {
