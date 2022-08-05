@@ -1104,6 +1104,8 @@ struct CreateTenantImpl {
 				wait(managementClusterRemoveTenantFromGroup(
 				    tr, self->tenantName, existingEntry.get(), &previousAssignedClusterMetadata));
 			}
+		} else if (self->replaceExistingTenantId.present()) {
+			throw tenant_removed();
 		}
 
 		return false;
