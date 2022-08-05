@@ -52,8 +52,8 @@
  * The Blob Manager is responsible for managing range granules, and recruiting and monitoring Blob Workers.
  */
 
-#define BM_DEBUG false
-#define BM_PURGE_DEBUG false
+#define BM_DEBUG true
+#define BM_PURGE_DEBUG true
 
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
                            Arena& ar,
@@ -937,6 +937,13 @@ static bool handleRangeIsRevoke(Reference<BlobManagerData> bmData, RangeAssignme
 		auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
 		for (auto& it : currentAssignments) {
 			// ensure range doesn't truncate existing ranges
+			if (it.begin() < assignment.keyRange.begin || it.end() > assignment.keyRange.end) {
+				fmt::print("Assignment [{0} - {1}) truncates range [{2} - {3})\n",
+				           assignment.keyRange.begin.printable(),
+				           assignment.keyRange.end.printable(),
+				           it.begin().printable(),
+				           it.end().printable());
+			}
 			ASSERT(it.begin() >= assignment.keyRange.begin);
 			ASSERT(it.end() <= assignment.keyRange.end);
 
@@ -2773,8 +2780,52 @@ ACTOR Future<Void> resumeMerge(Future<Void> finishMergeFuture, KeyRange mergeRan
 	}
 }
 
-ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData) {
+ACTOR Future<Void> loadForcePurgedRanges(Reference<BlobManagerData> bmData) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
+	state Key beginKey = blobGranuleForcePurgedKeys.begin;
+	state int rowLimit = BUGGIFY ? deterministicRandom()->randomInt(2, 10) : 10000;
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			// using the krm functions can produce incorrect behavior here as it does weird stuff with beginKey
+			KeyRange nextRange(KeyRangeRef(beginKey, blobGranuleForcePurgedKeys.end));
+			state GetRangeLimits limits(rowLimit, GetRangeLimits::BYTE_LIMIT_UNLIMITED);
+			limits.minRows = 2;
+			RangeResult results = wait(tr->getRange(nextRange, limits));
+
+			// Add the mappings to our in memory key range map
+			for (int rangeIdx = 0; rangeIdx < results.size() - 1; rangeIdx++) {
+				if (results[rangeIdx].value == LiteralStringRef("1")) {
+					Key rangeStartKey = results[rangeIdx].key.removePrefix(blobGranuleForcePurgedKeys.begin);
+					Key rangeEndKey = results[rangeIdx + 1].key.removePrefix(blobGranuleForcePurgedKeys.begin);
+					// note: if the old owner is dead, we handle this in rangeAssigner
+					bmData->forcePurgingRanges.insert(KeyRangeRef(rangeStartKey, rangeEndKey), true);
+				}
+			}
+
+			if (!results.more || results.size() <= 1) {
+				break;
+			}
+
+			// re-read last key to get range that starts there
+			beginKey = results.back().key;
+		} catch (Error& e) {
+			if (BM_DEBUG) {
+				fmt::print("BM {0} got error reading granule mapping during recovery: {1}\n", bmData->epoch, e.name());
+			}
+			wait(tr->onError(e));
+		}
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData, Future<Void> loadForcePurgedRanges) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
+	wait(loadForcePurgedRanges); // load these first, to make sure to avoid resuming any merges that are being force
+	                             // purged
 
 	// FIXME: use range stream instead
 	state int rowLimit = BUGGIFY ? deterministicRandom()->randomInt(1, 10) : 10000;
@@ -2802,6 +2853,10 @@ ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData) {
 					           mergeRange.begin.printable(),
 					           mergeRange.end.printable(),
 					           mergeVersion);
+				}
+
+				if (bmData->isForcePurging(mergeRange)) {
+					continue;
 				}
 
 				// want to mark in progress granule ranges as merging, BEFORE recovery is complete and workers can
@@ -2847,7 +2902,7 @@ ACTOR Future<Void> loadBlobGranuleMergeBoundaries(Reference<BlobManagerData> bmD
 			RangeResult results = wait(tr->getRange(nextRange, limits));
 
 			// Add the mappings to our in memory key range map
-			for (int i = 0; i < results.size() - 1; i++) {
+			for (int i = 0; i < results.size(); i++) {
 				bmData->mergeBoundaries[results[i].key] = decodeBlobGranuleMergeBoundaryValue(results[i].value);
 			}
 
@@ -2908,7 +2963,8 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		return Void();
 	}
 
-	state Future<Void> resumeMergesFuture = resumeActiveMerges(bmData);
+	state Future<Void> forcePurgedRanges = loadForcePurgedRanges(bmData);
+	state Future<Void> resumeMergesFuture = resumeActiveMerges(bmData, forcePurgedRanges);
 
 	CODE_PROBE(true, "BM doing recovery");
 
@@ -3066,6 +3122,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		}
 	}
 
+	wait(forcePurgedRanges);
 	wait(resumeMergesFuture);
 
 	// Step 2. Send assign requests for all the granules and transfer assignments
