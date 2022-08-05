@@ -1015,7 +1015,7 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 				// Instead of doing a krmSetRange for each granule, because it does a read-modify-write, we do one
 				// krmSetRange for the whole batch, and then just individual sets for each intermediate boundary This
 				// does one read per transaction instead of N serial reads per transaction
-				state int endIdx = i + std::min(j + transactionChunkSize, (int)(splitPoints.keys.size() - 1));
+				state int endIdx = std::min(i + transactionChunkSize, (int)(splitPoints.keys.size() - 1));
 				wait(krmSetRange(tr,
 				                 blobGranuleMappingKeys.begin,
 				                 KeyRangeRef(splitPoints.keys[i], splitPoints.keys[endIdx]),
