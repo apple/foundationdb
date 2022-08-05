@@ -158,6 +158,75 @@ ACTOR Future<bool> metaclusterRemoveCommand(Reference<IDatabase> db, std::vector
 	return true;
 }
 
+Optional<std::string> parseToken(StringRef token, const char* str) {
+	bool foundEquals;
+	StringRef param = token.eat("=", &foundEquals);
+	if (!foundEquals) {
+		fmt::print(stderr,
+		           "ERROR: invalid configuration string `{}'. String must specify a value using `='.\n",
+		           param.toString().c_str());
+		return Optional<std::string>();
+	}
+
+	if (!tokencmp(param, str)) {
+		fmt::print(
+		    stderr, "ERROR: invalid configuration string `{}'. Expected: `{}'.\n", param.toString().c_str(), str);
+		return Optional<std::string>();
+	}
+
+	return Optional<std::string>(token.toString());
+}
+
+// metacluster restore command
+ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	if (tokens.size() < 4 || tokens.size() > 6) {
+		fmt::print("Usage: metacluster restore <NAME> connection_string=<CONNECTION_STRING>\n"
+		           "[<add_new_tenants=[true|false]>|<remove_missing_tenants=[true|false]>]\n\n");
+		fmt::print("Restore a data cluster.\n");
+		return false;
+	}
+
+	state ClusterNameRef clusterName = tokens[3];
+
+	// connection string
+	ClusterConnectionString connectionString;
+	auto optVal = parseToken(tokens[4], "connection_string");
+	if (optVal.present()) {
+		connectionString = ClusterConnectionString(optVal.get());
+	}
+
+	AddNewTenants addNewTenants(AddNewTenants::True);
+	if (tokens.size() > 4) {
+		optVal = parseToken(tokens[4], "add_new_tenants");
+		if (optVal.present()) {
+			if (optVal.get() == "true") {
+				addNewTenants = AddNewTenants::True;
+			} else {
+				addNewTenants = AddNewTenants::False;
+			}
+		}
+	}
+
+	RemoveMissingTenants removeMissingTenants(RemoveMissingTenants::True);
+	if (tokens.size() > 5) {
+		optVal = parseToken(tokens[4], "remove_missing_tenants");
+		if (optVal.present()) {
+			if (optVal.get() == "true") {
+				removeMissingTenants = RemoveMissingTenants::True;
+			} else {
+				removeMissingTenants = RemoveMissingTenants::False;
+			}
+		}
+	}
+
+	DataClusterEntry defaultEntry;
+	wait(MetaclusterAPI::restoreCluster(
+	    db, clusterName, connectionString, defaultEntry, addNewTenants, removeMissingTenants));
+
+	fmt::print("The cluster `{}' has been restored\n", printable(clusterName).c_str());
+	return true;
+}
+
 // metacluster configure command
 ACTOR Future<bool> metaclusterConfigureCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 4) {
@@ -383,6 +452,8 @@ Future<bool> metaclusterCommand(Reference<IDatabase> db, std::vector<StringRef> 
 		return metaclusterRegisterCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "remove")) {
 		return metaclusterRemoveCommand(db, tokens);
+	} else if (tokencmp(tokens[1], "restore")) {
+		return metaclusterRestoreCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "configure")) {
 		return metaclusterConfigureCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "list")) {
@@ -402,9 +473,8 @@ void metaclusterGenerator(const char* text,
                           std::vector<std::string>& lc,
                           std::vector<StringRef> const& tokens) {
 	if (tokens.size() == 1) {
-		const char* opts[] = {
-			"create_experimental", "decommission", "register", "remove", "configure", "list", "get", "status", nullptr
-		};
+		const char* opts[] = { "create_experimental", "decommission", "register", "remove", "restore",
+			                   "configure",           "list",         "get",      "status", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokens.size() > 1 && (tokencmp(tokens[1], "register") || tokencmp(tokens[1], "configure"))) {
 		const char* opts[] = { "max_tenant_groups=", "connection_string=", nullptr };
@@ -418,7 +488,7 @@ void metaclusterGenerator(const char* text,
 
 std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& tokens, bool inArgument) {
 	if (tokens.size() == 1) {
-		return { "<create_experimental|decommission|register|remove|configure|list|get|status>", "[ARGS]" };
+		return { "<create_experimental|decommission|register|remove|restore|configure|list|get|status>", "[ARGS]" };
 	} else if (tokencmp(tokens[1], "create_experimental")) {
 		return { "<NAME>" };
 	} else if (tokencmp(tokens[1], "decommission")) {
@@ -438,6 +508,12 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 		} else {
 			return {};
 		}
+	} else if (tokencmp(tokens[1], "restore") && tokens.size() < 4) {
+		static std::vector<const char*> opts = { "<NAME>",
+			                                     "connection_string=<CONNECTION_STRING> ",
+			                                     "<add_new_tenants=[true|false]>",
+			                                     "<remove_missing_tenants=[true|false]>" };
+		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "configure")) {
 		static std::vector<const char*> opts = {
 			"<NAME>", "<max_tenant_groups=<NUM_GROUPS>|connection_string=<CONNECTION_STRING>>"
