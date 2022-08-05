@@ -741,6 +741,13 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	}
 }
 
+ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
+                                          UID granuleID,
+                                          KeyRange keyRange,
+                                          int64_t epoch,
+                                          int64_t seqno,
+                                          Key proposedSplitKey);
+
 ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
                                           Reference<BlobConnectionProvider> bstore,
                                           KeyRange keyRange,
@@ -749,33 +756,59 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
                                           int64_t seqno,
                                           Version version,
                                           PromiseStream<RangeResult> rows,
-                                          bool createGranuleHistory) {
+                                          bool initialSnapshot) {
 	state std::string fileName = randomBGFilename(bwData->id, granuleID, version, ".snapshot");
 	state Standalone<GranuleSnapshot> snapshot;
+	state int64_t bytesRead = 0;
+	state bool injectTooBig = initialSnapshot && g_network->isSimulated() && BUGGIFY_WITH_PROB(0.1);
 
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 
 	loop {
 		try {
+			if (initialSnapshot && snapshot.size() > 1 &&
+			    (injectTooBig || bytesRead >= 3 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES)) {
+				// throw transaction too old either on injection for simulation, or if snapshot would be too large now
+				throw transaction_too_old();
+			}
 			RangeResult res = waitNext(rows.getFuture());
 			snapshot.arena().dependsOn(res.arena());
 			snapshot.append(snapshot.arena(), res.begin(), res.size());
+			bytesRead += res.expectedSize();
 			wait(yield(TaskPriority::BlobWorkerUpdateStorage));
 		} catch (Error& e) {
 			if (e.code() == error_code_end_of_stream) {
 				break;
 			}
-			throw e;
+			// if we got transaction_too_old naturally, have lower threshold for re-evaluating (2xlimit)
+			if (initialSnapshot && snapshot.size() > 1 && e.code() == error_code_transaction_too_old &&
+			    (injectTooBig || bytesRead >= 2 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES)) {
+				// idle this actor, while we tell the manager this is too big and to re-evaluate granules and revoke us
+				if (BW_DEBUG) {
+					fmt::print("Granule [{0} - {1}) re-evaluating snapshot after {2} bytes ({3} limit) {4}\n",
+					           keyRange.begin.printable(),
+					           keyRange.end.printable(),
+					           bytesRead,
+					           SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES,
+					           injectTooBig ? "(injected)" : "");
+				}
+				wait(reevaluateInitialSplit(
+				    bwData, granuleID, keyRange, epoch, seqno, snapshot[snapshot.size() / 2].key));
+				ASSERT(false);
+			} else {
+				throw e;
+			}
 		}
 	}
 
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 
 	if (BW_DEBUG) {
-		fmt::print("Granule [{0} - {1}) read {2} snapshot rows\n",
+		fmt::print("Granule [{0} - {1}) read {2} snapshot rows ({3} bytes)\n",
 		           keyRange.begin.printable(),
 		           keyRange.end.printable(),
-		           snapshot.size());
+		           snapshot.size(),
+		           bytesRead);
 	}
 
 	if (g_network->isSimulated()) {
@@ -850,7 +883,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 				    blobGranuleFileValueFor(fname, 0, serializedSize, serializedSize, cipherKeysMeta);
 				tr->set(snapshotFileKey, snapshotFileValue);
 				// create granule history at version if this is a new granule with the initial dump from FDB
-				if (createGranuleHistory) {
+				if (initialSnapshot) {
 					Key historyKey = blobGranuleHistoryKeyFor(keyRange, version);
 					Standalone<BlobGranuleHistoryValue> historyValue;
 					historyValue.granuleID = granuleID;
@@ -917,7 +950,6 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 	state FlowLock::Releaser holdingDVL(bwData->initialSnapshotLock);
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
-	state int64_t bytesRead = 0;
 	state int retries = 0;
 	state Version lastReadVersion = invalidVersion;
 	state Version readVersion = invalidVersion;
@@ -956,12 +988,11 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 				throw e;
 			}
 			if (BW_DEBUG) {
-				fmt::print("Dumping snapshot {0} from FDB for [{1} - {2}) got error {3} after {4} bytes\n",
+				fmt::print("Dumping snapshot {0} from FDB for [{1} - {2}) got error {3}\n",
 				           retries + 1,
 				           metadata->keyRange.begin.printable(),
 				           metadata->keyRange.end.printable(),
-				           e.name(),
-				           bytesRead);
+				           e.name());
 			}
 			state Error err = e;
 			if (e.code() == error_code_server_overloaded) {
@@ -976,7 +1007,6 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			    .error(err)
 			    .detail("Granule", metadata->keyRange)
 			    .detail("Count", retries);
-			bytesRead = 0;
 			lastReadVersion = readVersion;
 			// Pop change feed up to readVersion, because that data will be before the next snapshot
 			// Do this to prevent a large amount of CF data from accumulating if we have consecutive failures to
@@ -1196,6 +1226,7 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 				bwData->currentManagerStatusStream.get().send(GranuleStatusReply(metadata->keyRange,
 				                                                                 true,
 				                                                                 writeHot,
+				                                                                 false,
 				                                                                 statusEpoch,
 				                                                                 statusSeqno,
 				                                                                 granuleID,
@@ -1259,6 +1290,64 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 	return reSnapshotIdx;
 }
 
+// wait indefinitely to tell manager to re-evaluate this split, until the granule is revoked
+ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
+                                          UID granuleID,
+                                          KeyRange keyRange,
+                                          int64_t epoch,
+                                          int64_t seqno,
+                                          Key proposedSplitKey) {
+	// wait for first stream to be initialized
+	while (!bwData->statusStreamInitialized) {
+		wait(bwData->currentManagerStatusStream.onChange());
+	}
+	loop {
+		try {
+			// wait for manager stream to become ready, and send a message
+			loop {
+				choose {
+					when(wait(bwData->currentManagerStatusStream.get().onReady())) { break; }
+					when(wait(bwData->currentManagerStatusStream.onChange())) {}
+				}
+			}
+
+			GranuleStatusReply reply(keyRange,
+			                         true,
+			                         false,
+			                         true,
+			                         epoch,
+			                         seqno,
+			                         granuleID,
+			                         invalidVersion,
+			                         invalidVersion,
+			                         false,
+			                         epoch,
+			                         seqno);
+			reply.proposedSplitKey = proposedSplitKey;
+			bwData->currentManagerStatusStream.get().send(reply);
+			// if a new manager appears, also tell it about this granule being splittable, or retry after a certain
+			// amount of time of not hearing back
+			wait(success(timeout(bwData->currentManagerStatusStream.onChange(), 10.0)));
+			wait(delay(0));
+			CODE_PROBE(true, "Blob worker re-sending initialsplit too big");
+		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) {
+				throw e;
+			}
+
+			CODE_PROBE(true, "Blob worker re-sending merge candidate to manager after not error/not hearing back");
+
+			// if we got broken promise while waiting, the old stream was killed, so we don't need to wait
+			// on change, just retry
+			if (e.code() == error_code_broken_promise) {
+				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+			} else {
+				wait(bwData->currentManagerStatusStream.onChange());
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
                                               Reference<GranuleMetadata> metadata,
                                               UID granuleID,
@@ -1291,7 +1380,6 @@ ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
 			wait(bwData->currentManagerStatusStream.onChange());
 		}
 
-		// FIXME: after a certain amount of retries/time, we may want to re-check anyway
 		state double sendTimeGiveUp = now() + SERVER_KNOBS->BG_MERGE_CANDIDATE_THRESHOLD_SECONDS / 2.0;
 		loop {
 			try {
@@ -1310,6 +1398,7 @@ ACTOR Future<Void> granuleCheckMergeCandidate(Reference<BlobWorkerData> bwData,
 				}
 
 				bwData->currentManagerStatusStream.get().send(GranuleStatusReply(metadata->keyRange,
+				                                                                 false,
 				                                                                 false,
 				                                                                 false,
 				                                                                 metadata->continueEpoch,
