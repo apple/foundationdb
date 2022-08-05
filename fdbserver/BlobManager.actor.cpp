@@ -1136,6 +1136,12 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 					}
 				}
 
+				// TODO better way to do this!
+				bmData->mergeHardBoundaries.clear();
+				for (auto& it : results) {
+					bmData->mergeHardBoundaries[it.key] = true;
+				}
+
 				VectorRef<KeyRangeRef> rangesToAdd;
 				VectorRef<KeyRangeRef> rangesToRemove;
 				updateClientBlobRanges(&bmData->knownBlobRanges, results, ar, &rangesToAdd, &rangesToRemove);
@@ -1165,11 +1171,6 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 					ra.keyRange = range;
 					ra.revoke = RangeRevokeData(true); // dispose=true
 					handleRangeAssign(bmData, ra);
-
-					bmData->mergeHardBoundaries.erase(range.begin);
-					if (bmData->knownBlobRanges.containedRanges(singleKeyRange(range.end)).empty()) {
-						bmData->mergeHardBoundaries[range.end] = true;
-					}
 				}
 
 				state std::vector<Future<BlobGranuleSplitPoints>> splitFutures;
@@ -1177,10 +1178,6 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				for (KeyRangeRef range : rangesToAdd) {
 					TraceEvent("ClientBlobRangeAdded", bmData->id).detail("Range", range);
 					splitFutures.push_back(splitRange(bmData, range, false, true));
-
-					if (bmData->knownBlobRanges.containedRanges(singleKeyRange(range.begin)).empty()) {
-						bmData->mergeHardBoundaries[range.begin] = true;
-					}
 				}
 
 				for (auto f : splitFutures) {
