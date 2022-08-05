@@ -1431,6 +1431,14 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 				}
 			}
 
+			// Need to destroy the old change feed for the no longer needed feed, otherwise it will leak
+			// This has to be a non-ryw transaction for the change feed destroy mutations to propagate properly
+			// TODO: fix this better! (privatize change feed key clear)
+			wait(updateChangeFeed(&tr->getTransaction(),
+				                      granuleIDToCFKey(granuleID),
+				                      ChangeFeedStatus::CHANGE_FEED_DESTROY,
+				                      granuleRange));
+
 			retried = true;
 			wait(tr->commit());
 			break;
@@ -2014,7 +2022,7 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 				// Clear existing merge boundaries.
 				tr->clear(blobGranuleMergeBoundaryKeyFor(parentRange.begin));
 
-				// This has to be
+				// This has to be a non-ryw transaction for the change feed destroy mutations to propagate properly
 				// TODO: fix this better! (privatize change feed key clear)
 				wait(updateChangeFeed(&tr->getTransaction(),
 				                      granuleIDToCFKey(parentGranuleIDs[parentIdx]),
