@@ -1900,27 +1900,6 @@ static Future<std::vector<std::pair<iface, EventMap>>> getServerMetrics(
 	return results;
 }
 
-ACTOR template <class iface>
-static Future<std::vector<TraceEventFields>> getServerBusiestWriteTags(
-    std::vector<iface> servers,
-    std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
-    WorkerDetails rkWorker) {
-	state std::vector<Future<Optional<TraceEventFields>>> futures;
-	futures.reserve(servers.size());
-	for (const auto& s : servers) {
-		futures.push_back(latestEventOnWorker(rkWorker.interf, s.id().toString() + "/BusiestWriteTag"));
-	}
-	wait(waitForAll(futures));
-
-	std::vector<TraceEventFields> result(servers.size());
-	for (int i = 0; i < servers.size(); ++i) {
-		if (futures[i].get().present()) {
-			result[i] = futures[i].get().get();
-		}
-	}
-	return result;
-}
-
 ACTOR
 static Future<std::vector<StorageServerStatusInfo>> readStorageInterfaceAndMetadata(Database cx,
                                                                                     bool use_system_priority) {
@@ -1958,6 +1937,16 @@ static Future<std::vector<StorageServerStatusInfo>> readStorageInterfaceAndMetad
 	return servers;
 }
 
+namespace {
+
+const std::vector<std::string> STORAGE_SERVER_METRICS_LIST{ "StorageMetrics",
+	                                                        "ReadLatencyMetrics",
+	                                                        "ReadLatencyBands",
+	                                                        "BusiestReadTag",
+	                                                        "BusiestWriteTag" };
+
+} // namespace
+
 ACTOR static Future<std::vector<StorageServerStatusInfo>> getStorageServerStatusInfos(
     Database cx,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
@@ -1965,18 +1954,9 @@ ACTOR static Future<std::vector<StorageServerStatusInfo>> getStorageServerStatus
 	state std::vector<StorageServerStatusInfo> servers =
 	    wait(timeoutError(readStorageInterfaceAndMetadata(cx, true), 5.0));
 	state std::vector<std::pair<StorageServerStatusInfo, EventMap>> results;
-	state std::vector<TraceEventFields> busiestWriteTags;
-	wait(store(results,
-	           getServerMetrics(servers,
-	                            address_workers,
-	                            std::vector<std::string>{
-	                                "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands", "BusiestReadTag" })) &&
-	     store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)));
-
-	ASSERT(busiestWriteTags.size() == results.size());
+	wait(store(results, getServerMetrics(servers, address_workers, STORAGE_SERVER_METRICS_LIST)));
 	for (int i = 0; i < results.size(); ++i) {
 		servers[i].eventMap = std::move(results[i].second);
-		servers[i].eventMap.emplace("BusiestWriteTag", busiestWriteTags[i]);
 	}
 	return servers;
 }

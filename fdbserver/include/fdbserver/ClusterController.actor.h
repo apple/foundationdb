@@ -139,6 +139,8 @@ public:
 		Future<Void> clientCounter;
 		int clientCount;
 		AsyncVar<bool> blobGranulesEnabled;
+		ClusterType clusterType = ClusterType::STANDALONE;
+		Optional<ClusterName> metaclusterName;
 
 		DBInfo()
 		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
