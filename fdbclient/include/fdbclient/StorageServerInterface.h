@@ -1142,4 +1142,47 @@ struct StorageQueuingMetricsRequest {
 	}
 };
 
+struct ValidateStorageResult {
+	constexpr static FileIdentifier file_identifier = 13804340;
+
+	UID requestId;
+	std::string error;
+
+	ValidateStorageResult() = default;
+	ValidateStorageResult(UID requestId) : requestId(requestId) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, requestId, error);
+	}
+};
+
+struct ValidateStorageRequest {
+	constexpr static FileIdentifier file_identifier = 13804341;
+
+	enum Action { VALIDATE_HA = 0 };
+
+	UID requestId;
+	KeyRange range;
+	std::vector<int32_t> actions;
+	ReplyPromise<ValidateStorageResult> reply;
+
+	ValidateStorageRequest() = default;
+	ValidateStorageRequest(UID requestId, KeyRange range) : requestId(requestId), range(range) {}
+
+	void addItem(Action action) { this->actions.push_back(static_cast<int32_t>(action)); }
+	std::vector<Action> getActions() const {
+		std::vector<Action> res;
+		for (const int32_t action : this->actions) {
+			res.push_back(static_cast<Action>(action));
+		}
+		return res;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, requestId, range, actions, reply);
+	}
+};
+
 #endif
