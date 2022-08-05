@@ -1263,6 +1263,14 @@ struct DDQueue {
 		    .detail("DataMoveID", dataMoveId)
 		    .detail("Range", range);
 	}
+
+	Future<Void> periodicalRefreshCounter() {
+		auto f = [this]() {
+			serverCounter.traceAll(distributorId);
+			serverCounter.clear();
+		};
+		return recurring(f, SERVER_KNOBS->DD_QUEUE_COUNTER_REFRESH_INTERVAL, TaskPriority::FlushTrace);
+	}
 };
 
 ACTOR Future<Void> cancelDataMove(struct DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState) {
@@ -2292,40 +2300,41 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          int singleRegionTeamSize,
                                          const DDEnabledState* ddEnabledState) {
 	state DDQueue self(distributorId,
-	                       lock,
-	                       cx,
-	                       teamCollections,
-	                       shardsAffectedByTeamFailure,
-	                       getAverageShardBytes,
-	                       teamSize,
-	                       singleRegionTeamSize,
-	                       output,
-	                       input,
-	                       getShardMetrics,
-	                       getTopKMetrics);
+	                   lock,
+	                   cx,
+	                   teamCollections,
+	                   shardsAffectedByTeamFailure,
+	                   getAverageShardBytes,
+	                   teamSize,
+	                   singleRegionTeamSize,
+	                   output,
+	                   input,
+	                   getShardMetrics,
+	                   getTopKMetrics);
 	state std::set<UID> serversToLaunchFrom;
 	state KeyRange keysToLaunchFrom;
 	state RelocateData launchData;
 	state Future<Void> recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL);
 
-	state std::vector<Future<Void>> balancingFutures;
+	state std::vector<Future<Void>> ddQueueFutures;
 
 	state PromiseStream<KeyRange> rangesComplete;
 	state Future<Void> launchQueuedWorkTimeout = Never();
 
 	for (int i = 0; i < teamCollections.size(); i++) {
 		// FIXME: Use BgDDLoadBalance for disk rebalance too after DD simulation test proof.
-		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_OVERUTILIZED_TEAM));
-		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM));
+		// ddQueueFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_OVERUTILIZED_TEAM));
+		// ddQueueFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM));
 		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
-			balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM));
-			balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM));
+			ddQueueFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM));
+			ddQueueFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM));
 		}
-		balancingFutures.push_back(BgDDMountainChopper(&self, i));
-		balancingFutures.push_back(BgDDValleyFiller(&self, i));
+		ddQueueFutures.push_back(BgDDMountainChopper(&self, i));
+		ddQueueFutures.push_back(BgDDValleyFiller(&self, i));
 	}
-	balancingFutures.push_back(delayedAsyncVar(self.rawProcessingUnhealthy, processingUnhealthy, 0));
-	balancingFutures.push_back(delayedAsyncVar(self.rawProcessingWiggle, processingWiggle, 0));
+	ddQueueFutures.push_back(delayedAsyncVar(self.rawProcessingUnhealthy, processingUnhealthy, 0));
+	ddQueueFutures.push_back(delayedAsyncVar(self.rawProcessingWiggle, processingWiggle, 0));
+	ddQueueFutures.push_back(self.periodicalRefreshCounter());
 
 	try {
 		loop {
@@ -2392,9 +2401,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 						debug_setCheckRelocationDuration(false);
 					}
 				}
-				when(KeyRange done = waitNext(rangesComplete.getFuture())) {
-					keysToLaunchFrom = done;
-				}
+				when(KeyRange done = waitNext(rangesComplete.getFuture())) { keysToLaunchFrom = done; }
 				when(wait(recordMetrics)) {
 					Promise<int64_t> req;
 					getAverageShardBytes.send(req);
@@ -2440,10 +2447,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					                                // key we use here must match the key used in the holder.
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
-				when(wait(waitForAll(balancingFutures))) {}
-				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) {
-					r.send(self.unhealthyRelocations);
-				}
+				when(wait(waitForAll(ddQueueFutures))) {}
+				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) { r.send(self.unhealthyRelocations); }
 			}
 		}
 	} catch (Error& e) {
