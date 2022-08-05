@@ -1084,7 +1084,6 @@ ACTOR Future<Void> monitorTenants(Reference<BlobManagerData> bmData) {
 // FIXME: better way to load tenant mapping?
 ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 	state Optional<Value> lastChangeKeyValue;
-	state Key changeKey = blobRangeChangeKey;
 	state bool needToCoalesce = bmData->epoch > 1;
 
 	loop {
@@ -1099,7 +1098,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 				// read change key at this point along with data
-				state Optional<Value> ckvBegin = wait(tr->get(changeKey));
+				state Optional<Value> ckvBegin = wait(tr->get(blobRangeChangeKey));
 
 				// TODO why is there separate arena?
 				state Arena ar;
@@ -1207,10 +1206,10 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				state Future<Void> watchFuture;
 
-				Optional<Value> ckvEnd = wait(tr->get(changeKey));
+				Optional<Value> ckvEnd = wait(tr->get(blobRangeChangeKey));
 
 				if (ckvEnd == lastChangeKeyValue) {
-					watchFuture = tr->watch(changeKey); // watch for change in key
+					watchFuture = tr->watch(blobRangeChangeKey); // watch for change in key
 					wait(tr->commit());
 					if (BM_DEBUG) {
 						printf("Blob manager done processing client ranges, awaiting update\n");
