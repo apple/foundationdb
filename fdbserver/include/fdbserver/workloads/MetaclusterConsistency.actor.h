@@ -78,7 +78,7 @@ private:
 				    systemTenantSubspaceKeysFuture = managementTr->getRange(prefixRange(TenantMetadata::subspace()), 1);
 
 				wait(store(self->managementMetadata.metaclusterRegistration,
-				           MetaclusterMetadata::metaclusterRegistration.get(managementTr)) &&
+				           MetaclusterMetadata::metaclusterRegistration().get(managementTr)) &&
 				     store(self->managementMetadata.dataClusters,
 				           MetaclusterAPI::listClustersTransaction(
 				               managementTr, ""_sr, "\xff\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS + 1)) &&
@@ -95,13 +95,13 @@ private:
 				           MetaclusterAPI::ManagementClusterMetadata::clusterTenantGroupIndex.getRange(
 				               managementTr, {}, {}, metaclusterMaxTenants)) &&
 				     store(self->managementMetadata.tenantCount,
-				           MetaclusterAPI::ManagementClusterMetadata::tenantMetadata.tenantCount.getD(
+				           MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantCount.getD(
 				               managementTr, Snapshot::False, 0)) &&
 				     store(tenantList,
 				           MetaclusterAPI::listTenantsTransaction(
 				               managementTr, ""_sr, "\xff\xff"_sr, metaclusterMaxTenants)) &&
 				     store(self->managementMetadata.tenantGroups,
-				           MetaclusterAPI::ManagementClusterMetadata::tenantMetadata.tenantGroupMap.getRange(
+				           MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantGroupMap.getRange(
 				               managementTr, {}, {}, metaclusterMaxTenants)) &&
 				     store(self->managementMetadata.systemTenantSubspaceKeys,
 				           safeThreadFutureToFuture(systemTenantSubspaceKeysFuture)));
@@ -256,7 +256,7 @@ private:
 		loop {
 			try {
 				dataTr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				wait(store(dataClusterRegistration, MetaclusterMetadata::metaclusterRegistration.get(dataTr)) &&
+				wait(store(dataClusterRegistration, MetaclusterMetadata::metaclusterRegistration().get(dataTr)) &&
 				     store(dataClusterTenantList,
 				           TenantAPI::listTenantsTransaction(
 				               dataTr, ""_sr, "\xff\xff"_sr, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)) &&

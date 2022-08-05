@@ -1159,7 +1159,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	}
 
 	Optional<Value> metaclusterRegistrationVal =
-	    wait(self->txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration.key));
+	    wait(self->txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration().key));
 	Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
 	    MetaclusterRegistrationEntry::decode(metaclusterRegistrationVal);
 	if (metaclusterRegistration.present()) {

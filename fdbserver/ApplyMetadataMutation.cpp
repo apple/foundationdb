@@ -687,7 +687,7 @@ private:
 	}
 
 	void checkSetMetaclusterRegistration(MutationRef m) {
-		if (m.param1 == MetaclusterMetadata::metaclusterRegistration.key) {
+		if (m.param1 == MetaclusterMetadata::metaclusterRegistration().key) {
 			MetaclusterRegistrationEntry entry = MetaclusterRegistrationEntry::decode(m.param2);
 
 			TraceEvent("SetMetaclusterRegistration", dbgid)
@@ -1096,11 +1096,11 @@ private:
 	}
 
 	void checkClearMetaclusterRegistration(KeyRangeRef range) {
-		if (range.contains(MetaclusterMetadata::metaclusterRegistration.key)) {
+		if (range.contains(MetaclusterMetadata::metaclusterRegistration().key)) {
 			TraceEvent("ClearMetaclusterRegistration", dbgid);
 
 			if (!initialCommit) {
-				txnStateStore->clear(singleKeyRange(MetaclusterMetadata::metaclusterRegistration.key));
+				txnStateStore->clear(singleKeyRange(MetaclusterMetadata::metaclusterRegistration().key));
 			}
 
 			confChange = true;

@@ -29,3 +29,10 @@ json_spirit::mObject ClusterUsage::toJson() const {
 	obj["num_tenant_groups"] = numTenantGroups;
 	return obj;
 }
+
+KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>&
+MetaclusterMetadata::metaclusterRegistration() {
+	static KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())> instance(
+	    "\xff/metacluster/clusterRegistration"_sr, IncludeVersion());
+	return instance;
+}
