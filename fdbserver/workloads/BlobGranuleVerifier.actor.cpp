@@ -91,7 +91,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		timeTravelBufferSize = getOption(options, LiteralStringRef("timeTravelBufferSize"), 100000000);
 		threads = getOption(options, LiteralStringRef("threads"), 1);
 		// TODO change to half
-		enablePurging = getOption(options, LiteralStringRef("enablePurging"), true /*sharedRandomNumber % 2 == 0*/);
+		enablePurging = getOption(options, LiteralStringRef("enablePurging"), false /*sharedRandomNumber % 2 == 0*/);
 		sharedRandomNumber /= 2;
 		// FIXME: re-enable this! There exist several bugs with purging active granules where a small amount of state
 		// won't be cleaned up.
@@ -99,7 +99,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		    getOption(options, LiteralStringRef("strictPurgeChecking"), false /*sharedRandomNumber % 2 == 0*/);
 		sharedRandomNumber /= 2;
 		// TODO change to 20%
-		doForcePurge = getOption(options, LiteralStringRef("doForcePurge"), true /*sharedRandomNumber % 5 == 0*/);
+		doForcePurge = getOption(options, LiteralStringRef("doForcePurge"), false /*sharedRandomNumber % 5 == 0*/);
 		sharedRandomNumber /= 5;
 
 		startedForcePurge = false;

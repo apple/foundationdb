@@ -52,8 +52,8 @@
  * The Blob Manager is responsible for managing range granules, and recruiting and monitoring Blob Workers.
  */
 
-#define BM_DEBUG true
-#define BM_PURGE_DEBUG true
+#define BM_DEBUG false
+#define BM_PURGE_DEBUG false
 
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
                            Arena& ar,
