@@ -109,7 +109,9 @@ std::string TenantMapEntry::toJson(int apiVersion) const {
 	}
 
 	tenantEntry["tenant_state"] = TenantMapEntry::tenantStateToString(tenantState);
-
+	if (assignedCluster.present()) {
+		tenantEntry["assigned_cluster"] = assignedCluster.get().toString();
+	}
 	if (tenantGroup.present()) {
 		json_spirit::mObject tenantGroupObject;
 		std::string encodedTenantGroup = base64::encoder::from_string(tenantGroup.get().toString());
