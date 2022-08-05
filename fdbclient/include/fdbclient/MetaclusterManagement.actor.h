@@ -1075,13 +1075,12 @@ struct CreateTenantImpl {
 		state Optional<TenantMapEntry> existingEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
 		if (existingEntry.present()) {
 			if (!existingEntry.get().matchesConfiguration(self->tenantEntry) ||
-			    (self->replaceExistingTenantId.present() &&
-			     existingEntry.get().id != self->replaceExistingTenantId.get()) ||
 			    existingEntry.get().tenantState != TenantState::REGISTERING) {
-				// The tenant already exists and is either completely created, has a different
-				// configuration, or is a different tenant than the one we intend to replace
+				// The tenant already exists and is either completely created or has a different
+				// configuration
 				throw tenant_already_exists();
-			} else if (!self->replaceExistingTenantId.present()) {
+			} else if (!self->replaceExistingTenantId.present() ||
+			           self->replaceExistingTenantId.get() != existingEntry.get().id) {
 				// The tenant creation has already started, so resume where we left off
 				self->tenantEntry = existingEntry.get();
 				ASSERT(existingEntry.get().assignedCluster.present());
