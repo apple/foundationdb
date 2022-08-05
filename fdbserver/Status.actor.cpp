@@ -554,23 +554,11 @@ struct RolesInfo {
 			TraceEventFields const& busiestReadTag = metrics.at("BusiestReadTag");
 			if (busiestReadTag.size()) {
 				int64_t tagCost = busiestReadTag.getInt64("TagCost");
-
 				if (tagCost > 0) {
 					JsonBuilderObject busiestReadTagObj;
-
-					int64_t totalSampledCost = busiestReadTag.getInt64("TotalSampledCost");
-					ASSERT(totalSampledCost > 0);
-
 					busiestReadTagObj["tag"] = busiestReadTag.getValue("Tag");
-					busiestReadTagObj["fractional_cost"] = (double)tagCost / totalSampledCost;
-
-					double elapsed = busiestReadTag.getDouble("Elapsed");
-					if (CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
-						JsonBuilderObject estimatedCostObj;
-						estimatedCostObj["hz"] = tagCost / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE / elapsed;
-						busiestReadTagObj["estimated_cost"] = estimatedCostObj;
-					}
-
+					busiestReadTagObj["cost"] = tagCost;
+					busiestReadTagObj["fractional_cost"] = busiestReadTag.getValue("FractionalBusyness");
 					obj["busiest_read_tag"] = busiestReadTagObj;
 				}
 			}
@@ -1912,27 +1900,6 @@ static Future<std::vector<std::pair<iface, EventMap>>> getServerMetrics(
 	return results;
 }
 
-ACTOR template <class iface>
-static Future<std::vector<TraceEventFields>> getServerBusiestWriteTags(
-    std::vector<iface> servers,
-    std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
-    WorkerDetails rkWorker) {
-	state std::vector<Future<Optional<TraceEventFields>>> futures;
-	futures.reserve(servers.size());
-	for (const auto& s : servers) {
-		futures.push_back(latestEventOnWorker(rkWorker.interf, s.id().toString() + "/BusiestWriteTag"));
-	}
-	wait(waitForAll(futures));
-
-	std::vector<TraceEventFields> result(servers.size());
-	for (int i = 0; i < servers.size(); ++i) {
-		if (futures[i].get().present()) {
-			result[i] = futures[i].get().get();
-		}
-	}
-	return result;
-}
-
 ACTOR
 static Future<std::vector<StorageServerStatusInfo>> readStorageInterfaceAndMetadata(Database cx,
                                                                                     bool use_system_priority) {
@@ -1970,6 +1937,16 @@ static Future<std::vector<StorageServerStatusInfo>> readStorageInterfaceAndMetad
 	return servers;
 }
 
+namespace {
+
+const std::vector<std::string> STORAGE_SERVER_METRICS_LIST{ "StorageMetrics",
+	                                                        "ReadLatencyMetrics",
+	                                                        "ReadLatencyBands",
+	                                                        "BusiestReadTag",
+	                                                        "BusiestWriteTag" };
+
+} // namespace
+
 ACTOR static Future<std::vector<StorageServerStatusInfo>> getStorageServerStatusInfos(
     Database cx,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
@@ -1977,18 +1954,9 @@ ACTOR static Future<std::vector<StorageServerStatusInfo>> getStorageServerStatus
 	state std::vector<StorageServerStatusInfo> servers =
 	    wait(timeoutError(readStorageInterfaceAndMetadata(cx, true), 5.0));
 	state std::vector<std::pair<StorageServerStatusInfo, EventMap>> results;
-	state std::vector<TraceEventFields> busiestWriteTags;
-	wait(store(results,
-	           getServerMetrics(servers,
-	                            address_workers,
-	                            std::vector<std::string>{
-	                                "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands", "BusiestReadTag" })) &&
-	     store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)));
-
-	ASSERT(busiestWriteTags.size() == results.size());
+	wait(store(results, getServerMetrics(servers, address_workers, STORAGE_SERVER_METRICS_LIST)));
 	for (int i = 0; i < results.size(); ++i) {
 		servers[i].eventMap = std::move(results[i].second);
-		servers[i].eventMap.emplace("BusiestWriteTag", busiestWriteTags[i]);
 	}
 	return servers;
 }
@@ -2387,6 +2355,40 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(
 		incomplete_reasons->insert("Unknown cache statistics.");
 	}
 
+	return statusObj;
+}
+
+ACTOR static Future<JsonBuilderObject> blobWorkerStatusFetcher(
+    std::vector<BlobWorkerInterface> servers,
+    std::unordered_map<NetworkAddress, WorkerInterface> addressWorkersMap,
+    std::set<std::string>* incompleteReason) {
+
+	state JsonBuilderObject statusObj;
+	state int totalRanges = 0;
+	state std::vector<Future<Optional<TraceEventFields>>> futures;
+
+	statusObj["number_of_blob_workers"] = static_cast<int>(servers.size());
+
+	try {
+		for (auto& intf : servers) {
+			auto workerIntf = addressWorkersMap[intf.address()];
+			futures.push_back(latestEventOnWorker(workerIntf, "BlobWorkerMetrics"));
+		}
+
+		wait(waitForAll(futures));
+
+		for (auto future : futures) {
+			if (future.get().present()) {
+				auto latestTrace = future.get().get();
+				totalRanges += latestTrace.getInt("NumRangesAssigned");
+			}
+		}
+		statusObj["number_of_key_ranges"] = totalRanges;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		incompleteReason->insert("Unknown blob worker stats");
+	}
 	return statusObj;
 }
 
@@ -3017,6 +3019,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		state Optional<DatabaseConfiguration> configuration;
 		state Optional<LoadConfigurationResult> loadResult;
+		state std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
 
 		if (statusCode != RecoveryStatus::configuration_missing) {
 			std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>> loadResults =
@@ -3070,7 +3073,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			// Start getting storage servers now (using system priority) concurrently.  Using sys priority because
 			// having storage servers in status output is important to give context to error messages in status that
 			// reference a storage server role ID.
-			state std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
 			for (auto const& worker : workers) {
 				address_workers[worker.interf.address()] = worker.interf;
 			}
@@ -3290,6 +3292,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		                              &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
 		statusObj["clients"] = clientStatusFetcher(clientStatus);
+
+		if (configuration.present() && configuration.get().blobGranulesEnabled) {
+			JsonBuilderObject blobGranuelsStatus =
+			    wait(blobWorkerStatusFetcher(blobWorkers, address_workers, &status_incomplete_reasons));
+			statusObj["blob_granules"] = blobGranuelsStatus;
+		}
 
 		JsonBuilderArray incompatibleConnectionsArray;
 		for (auto it : incompatibleConnections) {

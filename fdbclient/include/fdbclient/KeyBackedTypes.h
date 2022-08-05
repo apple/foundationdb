@@ -156,6 +156,12 @@ struct NullCodec {
 	static Standalone<StringRef> unpack(Standalone<StringRef> val) { return val; }
 };
 
+template <class T>
+struct BinaryCodec {
+	static Standalone<StringRef> pack(T val) { return BinaryWriter::toValue<T>(val, Unversioned()); }
+	static T unpack(Standalone<StringRef> val) { return BinaryReader::fromStringRef<T>(val, Unversioned()); }
+};
+
 template <typename ResultType>
 struct KeyBackedRangeResult {
 	std::vector<ResultType> results;
@@ -364,6 +370,16 @@ public:
 		    }));
 	}
 
+	// Get key's value or defaultValue if it doesn't exist
+	template <class Transaction>
+	Future<ValueType> getD(Transaction tr,
+	                       KeyType const& key,
+	                       Snapshot snapshot = Snapshot::False,
+	                       ValueType defaultValue = ValueType()) const {
+		return map(get(tr, key, snapshot),
+		           [=](Optional<ValueType> val) -> ValueType { return val.orDefault(defaultValue); });
+	}
+
 	// Returns a Property that can be get/set that represents key's entry in this this.
 	KeyBackedProperty<ValueType> getProperty(KeyType const& key) const {
 		return subspace.begin.withSuffix(KeyCodec::pack(key));
@@ -376,6 +392,13 @@ public:
 		Value v = ValueCodec::pack(val);
 		tr->set(k, v);
 		return k.expectedSize() + v.expectedSize();
+	}
+
+	template <class Transaction>
+	void atomicOp(Transaction tr, KeyType const& key, ValueType const& val, MutationRef::Type type) {
+		Key k = subspace.begin.withSuffix(KeyCodec::pack(key));
+		Value v = ValueCodec::pack(val);
+		tr->atomicOp(k, v, type);
 	}
 
 	template <class Transaction>

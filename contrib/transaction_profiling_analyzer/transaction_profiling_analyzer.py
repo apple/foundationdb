@@ -49,7 +49,7 @@ PROTOCOL_VERSION_6_1 = 0x0FDB00B061060001
 PROTOCOL_VERSION_6_2 = 0x0FDB00B062010001
 PROTOCOL_VERSION_6_3 = 0x0FDB00B063010001
 PROTOCOL_VERSION_7_0 = 0x0FDB00B070010001
-PROTOCOL_VERSION_7_1 = 0x0FDB00B071010001
+PROTOCOL_VERSION_7_1 = 0x0FDB00B071010000
 PROTOCOL_VERSION_7_2 = 0x0FDB00B072000000
 supported_protocol_versions = frozenset([PROTOCOL_VERSION_5_2, PROTOCOL_VERSION_6_0, PROTOCOL_VERSION_6_1,
                                          PROTOCOL_VERSION_6_2, PROTOCOL_VERSION_6_3, PROTOCOL_VERSION_7_0,
@@ -244,6 +244,11 @@ class CommitInfo(BaseInfo):
         self.read_snapshot_version = bb.get_long()
         if protocol_version >= PROTOCOL_VERSION_6_3:
             self.report_conflicting_keys = bb.get_bool()
+        
+        if protocol_version >= PROTOCOL_VERSION_7_1:
+            lock_aware = bb.get_bool()
+            if bb.get_bool():
+                spanId = bb.get_bytes(16)
 
 
 class ErrorGetInfo(BaseInfo):
