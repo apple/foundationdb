@@ -1012,22 +1012,21 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 				tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
 				wait(checkManagerLock(tr, bmData));
-				while (i + j < splitPoints.keys.size() - 1 && j < transactionChunkSize) {
-					state KeyRangeRef splitRange = KeyRangeRef(splitPoints.keys[i + j], splitPoints.keys[i + j + 1]);
-
-					// set to empty UID - no worker assigned yet
-					wait(krmSetRange(tr,
-					                 blobGranuleMappingKeys.begin,
-					                 KeyRangeRef(splitPoints.keys[i + j], splitPoints.keys[i + j + 1]),
-					                 blobGranuleMappingValueFor(UID())));
-
-					// Update BlobGranuleMergeBoundary.
-					if (splitPoints.boundaries.count(splitRange.begin)) {
-						tr->set(blobGranuleMergeBoundaryKeyFor(splitRange.begin),
-						        blobGranuleMergeBoundaryValueFor(splitPoints.boundaries[splitRange.begin]));
+				// Instead of doing a krmSetRange for each granule, because it does a read-modify-write, we do one
+				// krmSetRange for the whole batch, and then just individual sets for each intermediate boundary This
+				// does one read per transaction instead of N serial reads per transaction
+				state int endIdx = i + std::min(j + transactionChunkSize, (int)(splitPoints.keys.size() - 1));
+				wait(krmSetRange(tr,
+				                 blobGranuleMappingKeys.begin,
+				                 KeyRangeRef(splitPoints.keys[i], splitPoints.keys[endIdx]),
+				                 blobGranuleMappingValueFor(UID())));
+				for (j = 0; i + j < endIdx; j++) {
+					if (splitPoints.boundaries.count(splitPoints.keys[i + j])) {
+						tr->set(blobGranuleMergeBoundaryKeyFor(splitPoints.keys[i + j]),
+						        blobGranuleMergeBoundaryValueFor(splitPoints.boundaries[splitPoints.keys[i + j]]));
 					}
-
-					j++;
+					tr->set(splitPoints.keys[i + j].withPrefix(blobGranuleMappingKeys.begin),
+					        blobGranuleMappingValueFor(UID()));
 				}
 				wait(tr->commit());
 
@@ -1328,6 +1327,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 	}
 
 	// redo key alignment on full set of split points
+	// FIXME: only need to align propsedSplitKey in the middle
 	state BlobGranuleSplitPoints finalSplit = wait(alignKeys(bmData, granuleRange, newRanges));
 
 	ASSERT(finalSplit.keys.size() > 2);

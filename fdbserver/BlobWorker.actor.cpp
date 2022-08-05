@@ -1321,7 +1321,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
 			                         seqno);
 			reply.proposedSplitKey = proposedSplitKey;
 			bwData->currentManagerStatusStream.get().send(reply);
-			// if a new manager appears, also tell it about this granule being mergeable, or retry after a certain
+			// if a new manager appears, also tell it about this granule being splittable, or retry after a certain
 			// amount of time of not hearing back
 			wait(success(timeout(bwData->currentManagerStatusStream.onChange(), 10.0)));
 			wait(delay(0));
