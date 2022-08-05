@@ -1449,9 +1449,9 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 			// This has to be a non-ryw transaction for the change feed destroy mutations to propagate properly
 			// TODO: fix this better! (privatize change feed key clear)
 			wait(updateChangeFeed(&tr->getTransaction(),
-				                      granuleIDToCFKey(granuleID),
-				                      ChangeFeedStatus::CHANGE_FEED_DESTROY,
-				                      granuleRange));
+			                      granuleIDToCFKey(granuleID),
+			                      ChangeFeedStatus::CHANGE_FEED_DESTROY,
+			                      granuleRange));
 
 			retried = true;
 			wait(tr->commit());
