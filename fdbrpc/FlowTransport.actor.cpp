@@ -421,7 +421,7 @@ struct ConnectPacket {
 	ProtocolVersion protocolVersion; // Expect currentProtocolVersion
 
 	uint16_t canonicalRemotePort = 0; // Port number to reconnect to the originating process
-	uint64_t connectionId = 0; // Multi-version clients will use the same Id for both connections, other connections
+	uint64_t connectionId = 0; // Multi-version clients will use the same id for both connections, other connections
 	                           // will set this to zero. Added at protocol Version 0x0FDB00A444020001.
 
 	// IP Address to reconnect to the originating process. Only one of these must be populated.

@@ -565,7 +565,7 @@ To verify that the start of the partition is aligned with the EBS of the drive u
     I/O size (minimum/optimal): 512 bytes / 512 bytes
     Disk identifier: 0xe5169faa
 
-       Device Boot     Start         End      Blocks   Id  System
+       Device Boot     Start         End      Blocks   id  System
          /dev/sdb1      2048   250069679   125033816   83  Linux
 
 This output shows a properly partitioned disk in Ubuntu 12.04.

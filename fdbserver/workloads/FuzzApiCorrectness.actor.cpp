@@ -436,7 +436,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 							TraceEvent(SevWarn, "IgnoredOperation")
 							    .error(e)
 							    .detail("Operation", operationType)
-							    .detail("Id", self->operationId);
+							    .detail("id", self->operationId);
 						}
 					}
 
@@ -518,7 +518,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		virtual ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) = 0;
 		virtual Void errorCheck(Reference<ITransaction> tr, value_type result) { return Void(); }
-		virtual void augmentTrace(TraceEvent& e) const { e.detail("Id", id); }
+		virtual void augmentTrace(TraceEvent& e) const { e.detail("id", id); }
 
 	protected:
 		unsigned int id;

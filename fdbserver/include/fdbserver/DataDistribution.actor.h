@@ -428,12 +428,10 @@ struct DDContext : public ReferenceCounted<DDContext> {
 	  : ddEnabledState(std::move(ddEnabledState)), ddId(id),
 	    shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure), processingUnhealthy(new AsyncVar<bool>(false)),
 	    processingWiggle(new AsyncVar<bool>(false)) {}
-
-	void initTeamCollectionStates();
-
+	
 	void proposeRelocation(const RelocateShard& rs) const { return queueInterface.relocationProducer.send(rs); }
 
-	void restartShardTrackerAsync(KeyRange keys) const { return trackerInterface.restartShardTracker.send(keys); }
+	void requestRestartShardTracker(KeyRange keys) const { return trackerInterface.restartShardTracker.send(keys); }
 };
 
 // provide common behavior to manage shared state. Beware of expose too much details
@@ -445,14 +443,7 @@ public:
 	DDComponent() : context(makeReference<DDContext>()) {}
 	explicit DDComponent(Reference<DDContext> context) : context(context) {}
 
-	// reset context to uninitialized state
-	void resetContext() {
-		auto enabledState = context->ddEnabledState;
-		auto id = Id();
-		context = makeReference<DDContext>(id, enabledState);
-	}
-
-	UID Id() const { return context->ddId; }
+	UID id() const { return context->ddId; }
 
 	void markTrackerCancelled() { context->trackerCancelled = true; }
 

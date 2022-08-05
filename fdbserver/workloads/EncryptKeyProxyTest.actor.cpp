@@ -259,7 +259,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 				Standalone<StringRef> toCompare = self->cipherIdMap[cacheKey];
 				if (toCompare.compare(item.baseCipherKey) != 0) {
 					TraceEvent("Mismatch")
-					    .detail("Id", item.baseCipherId)
+					    .detail("id", item.baseCipherId)
 					    .detail("CipherMapDataHash", XXH3_64bits(toCompare.begin(), toCompare.size()))
 					    .detail("CipherMapSize", toCompare.size())
 					    .detail("CipherMapValue", toCompare.toString())

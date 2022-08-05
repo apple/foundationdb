@@ -76,7 +76,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			encryptionKeyFileName = "simfdb/test_encryption_key_file";
 		}
 
-		TraceEvent("BARW_ClientId").detail("Id", wcx.clientId);
+		TraceEvent("BARW_ClientId").detail("id", wcx.clientId);
 		UID randomID = nondeterministicRandom()->randomUniqueID();
 		TraceEvent("BARW_PerformRestore", randomID).detail("Value", performRestore);
 		if (shareLogRange) {
