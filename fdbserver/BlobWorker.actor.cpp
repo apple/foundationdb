@@ -1696,7 +1696,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		metadata->bufferedDeltaVersion = startVersion;
 		metadata->knownCommittedVersion = startVersion;
 
-		Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>();
+		Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>(bwData->db.getPtr());
 
 		if (startState.splitParentGranule.present() && startVersion < startState.changeFeedStartVersion) {
 			// read from parent change feed up until our new change feed is started
@@ -1853,7 +1853,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				// update this for change feed popped detection
 				metadata->bufferedDeltaVersion = metadata->activeCFData.get()->getVersion();
 
-				Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>();
+				Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>(bwData->db.getPtr());
 
 				changeFeedFuture = bwData->db->getChangeFeedStream(cfData,
 				                                                   cfKey,
@@ -1963,7 +1963,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									lastForceFlushVersion = 0;
 									metadata->forceFlushVersion = NotifiedVersion();
 
-									Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>();
+									Reference<ChangeFeedData> cfData =
+									    makeReference<ChangeFeedData>(bwData->db.getPtr());
 
 									if (!readOldChangeFeed && cfRollbackVersion < startState.changeFeedStartVersion) {
 										// It isn't possible to roll back across the parent/child feed boundary,

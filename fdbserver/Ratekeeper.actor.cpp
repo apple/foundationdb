@@ -291,7 +291,7 @@ public:
 				int minIdx = 0;
 				for (int i = 0; i < blobWorkers.size(); i++) {
 					if (aliveVersions[i].get().present()) {
-						if (minVer < aliveVersions[i].get().get().version) {
+						if (aliveVersions[i].get().get().version < minVer) {
 							minVer = aliveVersions[i].get().get().version;
 							minIdx = i;
 						}
