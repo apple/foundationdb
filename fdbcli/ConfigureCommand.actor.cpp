@@ -272,6 +272,10 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		    stderr,
 		    "WARN: Sharded RocksDB storage engine type is still in experimental stage, not yet production tested.\n");
 		break;
+	case ConfigurationResult::DATABASE_IS_REGISTERED:
+		fprintf(stderr, "ERROR: A cluster cannot change its tenant mode while part of a metacluster.\n");
+		ret = false;
+		break;
 	default:
 		ASSERT(false);
 		ret = false;

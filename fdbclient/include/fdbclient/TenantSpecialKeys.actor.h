@@ -289,7 +289,7 @@ public:
 		state std::set<TenantName> renameSet;
 		state std::vector<std::pair<TenantName, TenantName>> renameMutations;
 
-		tenantManagementFutures.push_back(TenantAPI::checkTenantMode(&ryw->getTransaction()));
+		tenantManagementFutures.push_back(TenantAPI::checkTenantMode(&ryw->getTransaction(), ClusterType::STANDALONE));
 
 		for (auto range : ranges) {
 			if (!range.value().first) {

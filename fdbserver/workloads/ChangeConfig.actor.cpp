@@ -53,35 +53,43 @@ struct ChangeConfigWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	// When simulated two clusters for DR tests, this actor sets the starting configuration
-	// for the extra cluster.
-	ACTOR Future<Void> extraDatabaseConfigure(ChangeConfigWorkload* self) {
-		if (g_network->isSimulated() && g_simulator.extraDB) {
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
-			state Database extraDB = Database::createDatabase(extraFile, -1);
-
-			wait(delay(5 * deterministicRandom()->random01()));
-			if (self->configMode.size()) {
-				if (g_simulator.startingDisabledConfiguration != "") {
-					// It is not safe to allow automatic failover to a region which is not fully replicated,
-					// so wait for both regions to be fully replicated before enabling failover
-					wait(success(ManagementAPI::changeConfig(
-					    extraDB.getReference(), g_simulator.startingDisabledConfiguration, true)));
-					TraceEvent("WaitForReplicasExtra").log();
-					wait(waitForFullReplication(extraDB));
-					TraceEvent("WaitForReplicasExtraEnd").log();
-				}
-				wait(success(ManagementAPI::changeConfig(extraDB.getReference(), self->configMode, true)));
+	ACTOR Future<Void> configureExtraDatabase(ChangeConfigWorkload* self, Database db) {
+		wait(delay(5 * deterministicRandom()->random01()));
+		if (self->configMode.size()) {
+			if (g_simulator.startingDisabledConfiguration != "") {
+				// It is not safe to allow automatic failover to a region which is not fully replicated,
+				// so wait for both regions to be fully replicated before enabling failover
+				wait(success(
+				    ManagementAPI::changeConfig(db.getReference(), g_simulator.startingDisabledConfiguration, true)));
+				TraceEvent("WaitForReplicasExtra").log();
+				wait(waitForFullReplication(db));
+				TraceEvent("WaitForReplicasExtraEnd").log();
 			}
-			if (self->networkAddresses.size()) {
-				if (self->networkAddresses == "auto")
-					wait(CoordinatorsChangeActor(extraDB, self, true));
-				else
-					wait(CoordinatorsChangeActor(extraDB, self));
-			}
-			wait(delay(5 * deterministicRandom()->random01()));
+			wait(success(ManagementAPI::changeConfig(db.getReference(), self->configMode, true)));
 		}
+		if (self->networkAddresses.size()) {
+			if (self->networkAddresses == "auto")
+				wait(CoordinatorsChangeActor(db, self, true));
+			else
+				wait(CoordinatorsChangeActor(db, self));
+		}
+
+		wait(delay(5 * deterministicRandom()->random01()));
 		return Void();
+	}
+
+	// When simulating multiple clusters, this actor sets the starting configuration
+	// for the extra clusters.
+	Future<Void> configureExtraDatabases(ChangeConfigWorkload* self) {
+		std::vector<Future<Void>> futures;
+		if (g_network->isSimulated()) {
+			for (auto extraDatabase : g_simulator.extraDatabases) {
+				auto extraFile = makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(extraDatabase));
+				Database db = Database::createDatabase(extraFile, -1);
+				futures.push_back(configureExtraDatabase(self, db));
+			}
+		}
+		return waitForAll(futures);
 	}
 
 	// Either changes the database configuration, or changes the coordinators based on the parameters
@@ -93,7 +101,7 @@ struct ChangeConfigWorkload : TestWorkload {
 		state bool extraConfigureBefore = deterministicRandom()->random01() < 0.5;
 
 		if (extraConfigureBefore) {
-			wait(self->extraDatabaseConfigure(self));
+			wait(self->configureExtraDatabases(self));
 		}
 
 		if (self->configMode.size()) {
@@ -116,7 +124,7 @@ struct ChangeConfigWorkload : TestWorkload {
 		}
 
 		if (!extraConfigureBefore) {
-			wait(self->extraDatabaseConfigure(self));
+			wait(self->configureExtraDatabases(self));
 		}
 
 		return Void();

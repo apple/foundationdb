@@ -69,6 +69,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/OTELSpanContextMessage.h"
+#include "fdbserver/Ratekeeper.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/ServerCheckpoint.actor.h"
@@ -635,6 +636,17 @@ public:
 	  : key(key), value(value), version(version), tags(tags), debugID(debugID) {}
 };
 
+struct BusiestWriteTagContext {
+	const std::string busiestWriteTagTrackingKey;
+	UID ratekeeperID;
+	Reference<EventCacheHolder> busiestWriteTagEventHolder;
+	double lastUpdateTime;
+
+	BusiestWriteTagContext(const UID& thisServerID)
+	  : busiestWriteTagTrackingKey(thisServerID.toString() + "/BusiestWriteTag"), ratekeeperID(UID()),
+	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(-1) {}
+};
+
 struct StorageServer {
 	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
 
@@ -1033,6 +1045,7 @@ public:
 	}
 
 	TransactionTagCounter transactionTagCounter;
+	BusiestWriteTagContext busiestWriteTagContext;
 
 	Optional<LatencyBandConfig> latencyBandConfig;
 
@@ -1241,7 +1254,8 @@ public:
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
-	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()), counters(this),
+	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()),
+	    busiestWriteTagContext(ssi.id()), counters(this),
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
@@ -2309,8 +2323,8 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 	}
 
 	// Make sure all of the metadata we are sending won't get rolled back
-	if (metadataWaitVersion != invalidVersion && metadataWaitVersion > data->knownCommittedVersion.get()) {
-		CODE_PROBE(true, "overlapping change feeds waiting for metadata version to be committed");
+	if (metadataWaitVersion != invalidVersion && metadataWaitVersion > data->desiredOldestVersion.get()) {
+		CODE_PROBE(true, "overlapping change feeds waiting for metadata version to be safe from rollback");
 		wait(data->desiredOldestVersion.whenAtLeast(metadataWaitVersion));
 	}
 	req.reply.send(reply);
@@ -2511,6 +2525,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	state Version dequeVersion = data->version.get();
 	state Version dequeKnownCommit = data->knownCommittedVersion.get();
 	state Version emptyVersion = feedInfo->emptyVersion;
+	state Version durableValidationVersion = std::min(data->durableVersion.get(), feedInfo->durableFetchVersion.get());
 	Version fetchStorageVersion = std::max(feedInfo->fetchVersion, feedInfo->durableFetchVersion.get());
 
 	if (DEBUG_CF_TRACE) {
@@ -2527,7 +2542,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    .detail("DurableVersion", feedInfo->durableVersion)
 		    .detail("FetchStorageVersion", fetchStorageVersion)
 		    .detail("FetchVersion", feedInfo->fetchVersion)
-		    .detail("DurableFetchVersion", feedInfo->durableFetchVersion.get());
+		    .detail("DurableFetchVersion", feedInfo->durableFetchVersion.get())
+		    .detail("DurableValidationVersion", durableValidationVersion);
 	}
 
 	if (req.end > emptyVersion + 1) {
@@ -2642,18 +2658,19 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				}
 			} else if (memoryVerifyIdx < memoryReply.mutations.size() &&
 			           version == memoryReply.mutations[memoryVerifyIdx].version) {
-				if (version > feedInfo->storageVersion && version > feedInfo->fetchVersion) {
+				if (version > durableValidationVersion) {
 					// Another validation case - feed was popped, data was fetched, fetched data was persisted but pop
 					// wasn't yet, then SS restarted. Now SS has the data without the popped version. This looks wrong
 					// here but is fine.
 					memoryVerifyIdx++;
 				} else {
-					fmt::print(
-					    "ERROR: SS {0} CF {1} SQ {2} has mutation at {3} in memory but all filtered out on disk!\n",
-					    data->thisServerID.toString().substr(0, 4),
-					    req.rangeID.printable().substr(0, 6),
-					    streamUID.toString().substr(0, 8),
-					    version);
+					fmt::print("ERROR: SS {0} CF {1} SQ {2} has mutation at {3} in memory but all filtered out on "
+					           "disk! (durable validation = {4})\n",
+					           data->thisServerID.toString().substr(0, 4),
+					           req.rangeID.printable().substr(0, 6),
+					           streamUID.toString().substr(0, 8),
+					           version,
+					           durableValidationVersion);
 
 					fmt::print("  Memory: ({})\n", memoryReply.mutations[memoryVerifyIdx].mutations.size());
 					for (auto& it : memoryReply.mutations[memoryVerifyIdx].mutations) {
@@ -2671,7 +2688,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 							fmt::print("    {} - {}\n", it.param1.printable().c_str(), it.param2.printable().c_str());
 						}
 					}
-					ASSERT(false);
+					ASSERT_WE_THINK(false);
 				}
 			}
 			remainingDurableBytes -=
@@ -8611,9 +8628,18 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			    .detail("OldestRemoveKVSRangesVersion", data->pendingRemoveRanges.begin()->first);
 			ASSERT(newOldestVersion <= data->pendingRemoveRanges.begin()->first);
 			if (newOldestVersion == data->pendingRemoveRanges.begin()->first) {
+				state std::vector<std::string> emptyShardIds;
 				for (const auto& range : data->pendingRemoveRanges.begin()->second) {
-					data->storage.removeRange(range);
+					auto ids = data->storage.removeRange(range);
+					emptyShardIds.insert(emptyShardIds.end(), ids.begin(), ids.end());
 					TraceEvent(SevVerbose, "RemoveKVSRange", data->thisServerID).detail("Range", range);
+				}
+				if (emptyShardIds.size() > 0) {
+					state double start = now();
+					wait(data->storage.cleanUpShardsIfNeeded(emptyShardIds));
+					TraceEvent(SevInfo, "RemoveEmptyPhysicalShards", data->thisServerID)
+					    .detail("NumShards", emptyShardIds.size())
+					    .detail("TimeSpent", now() - start);
 				}
 				data->pendingRemoveRanges.erase(data->pendingRemoveRanges.begin());
 			}
@@ -10084,6 +10110,35 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 			}
 			when(FetchCheckpointRequest req = waitNext(ssi.fetchCheckpoint.getFuture())) {
 				self->actors.add(fetchCheckpointQ(self, req));
+			}
+			when(UpdateCommitCostRequest req = waitNext(ssi.updateCommitCostRequest.getFuture())) {
+				// Ratekeeper might change with a new ID. In this case, always accept the data.
+				if (req.ratekeeperID != self->busiestWriteTagContext.ratekeeperID) {
+					TraceEvent("RatekeeperIDChange")
+					    .detail("OldID", self->busiestWriteTagContext.ratekeeperID)
+					    .detail("OldLastUpdateTime", self->busiestWriteTagContext.lastUpdateTime)
+					    .detail("NewID", req.ratekeeperID)
+					    .detail("LastUpdateTime", req.postTime);
+					self->busiestWriteTagContext.ratekeeperID = req.ratekeeperID;
+					self->busiestWriteTagContext.lastUpdateTime = -1;
+				}
+				// In case we received an old request/duplicate request, due to, e.g. network problem
+				ASSERT(req.postTime > 0);
+				if (req.postTime < self->busiestWriteTagContext.lastUpdateTime) {
+					continue;
+				}
+
+				self->busiestWriteTagContext.lastUpdateTime = req.postTime;
+				TraceEvent("BusiestWriteTag", self->thisServerID)
+				    .detail("Elapsed", req.elapsed)
+				    .detail("Tag", printable(req.busiestTag))
+				    .detail("TagOps", req.opsSum)
+				    .detail("TagCost", req.costSum)
+				    .detail("TotalCost", req.totalWriteCosts)
+				    .detail("Reported", req.reported)
+				    .trackLatest(self->busiestWriteTagContext.busiestWriteTagTrackingKey);
+
+				req.reply.send(Void());
 			}
 			when(FetchCheckpointKeyValuesRequest req = waitNext(ssi.fetchCheckpointKeyValues.getFuture())) {
 				self->actors.add(fetchCheckpointKeyValuesQ(self, req));

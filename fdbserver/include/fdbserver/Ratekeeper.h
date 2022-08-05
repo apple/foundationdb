@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#ifndef FDBSERVER_RATEKEEPER_H
+#define FDBSERVER_RATEKEEPER_H
+
 #pragma once
 
 #include "fdbclient/DatabaseConfiguration.h"
@@ -49,13 +52,13 @@ enum limitReason_t {
 class StorageQueueInfo {
 	uint64_t totalWriteCosts{ 0 };
 	int totalWriteOps{ 0 };
-	Reference<EventCacheHolder> busiestWriteTagEventHolder;
 
 	// refresh periodically
 	TransactionTagMap<TransactionCommitCostEstimation> tagCostEst;
 
 public:
 	bool valid;
+	UID ratekeeperID;
 	UID id;
 	LocalityData locality;
 	StorageQueuingMetricsReply lastReply;
@@ -67,8 +70,10 @@ public:
 	limitReason_t limitReason;
 	std::vector<StorageQueuingMetricsReply::TagInfo> busiestReadTags, busiestWriteTags;
 
-	StorageQueueInfo(UID id, LocalityData locality);
-	void refreshCommitCost(double elapsed);
+	StorageQueueInfo(const UID& id, const LocalityData& locality);
+	StorageQueueInfo(const UID& rateKeeperID, const UID& id, const LocalityData& locality);
+	// Summarizes up the commit cost per storage server. Returns the UpdateCommitCostRequest for corresponding SS.
+	UpdateCommitCostRequest refreshCommitCost(double elapsed);
 	int64_t getStorageQueueBytes() const { return lastReply.bytesInput - smoothDurableBytes.smoothTotal(); }
 	int64_t getDurabilityLag() const { return smoothLatestVersion.smoothTotal() - smoothDurableVersion.smoothTotal(); }
 	void update(StorageQueuingMetricsReply const&, Smoother& smoothTotalDurableBytes);
@@ -153,6 +158,9 @@ class Ratekeeper {
 
 	std::unique_ptr<class ITagThrottler> tagThrottler;
 
+	// Maps storage server ID to storage server interface
+	std::unordered_map<UID, StorageServerInterface> storageServerInterfaces;
+
 	RatekeeperLimits normalLimits;
 	RatekeeperLimits batchLimits;
 
@@ -166,7 +174,6 @@ class Ratekeeper {
 	void updateRate(RatekeeperLimits* limits);
 	Future<Void> refreshStorageServerCommitCosts();
 	Future<Void> monitorServerListChange(PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges);
-	Future<Void> trackEachStorageServer(FutureStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges);
 
 	// SOMEDAY: template trackStorageServerQueueInfo and trackTLogQueueInfo into one function
 	Future<Void> trackStorageServerQueueInfo(StorageServerInterface);
@@ -179,3 +186,5 @@ class Ratekeeper {
 public:
 	static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 };
+
+#endif // FDBSERVER_RATEKEEPER_H
