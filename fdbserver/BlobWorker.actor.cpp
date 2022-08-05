@@ -644,6 +644,8 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	                                                   compressFilter,
 	                                                   cipherKeysCtx);
 	state size_t serializedSize = serialized.size();
+	bwData->stats.compressionBytesRaw += deltasToWrite.expectedSize();
+	bwData->stats.compressionBytesFinal += serializedSize;
 
 	// Free up deltasToWrite here to reduce memory
 	deltasToWrite = Standalone<GranuleDeltas>();
@@ -808,6 +810,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	                                                  compressFilter,
 	                                                  cipherKeysCtx);
 	state size_t serializedSize = serialized.size();
+	bwData->stats.compressionBytesRaw += snapshot.expectedSize();
+	bwData->stats.compressionBytesFinal += serializedSize;
 
 	// free snapshot to reduce memory
 	snapshot = Standalone<GranuleSnapshot>();
