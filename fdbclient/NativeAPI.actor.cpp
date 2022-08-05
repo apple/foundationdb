@@ -7763,7 +7763,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 
 		// basically krmGetRange, but enable it to not use tenant without RAW_ACCESS by doing manual getRange with
 		// UseTenant::False
-		GetRangeLimits limits(1000);
+		GetRangeLimits limits(CLIENT_KNOBS->BG_TOO_MANY_GRANULES);
 		limits.minRows = 2;
 		RangeResult rawMapping = wait(getRange(self->trState,
 		                                       self->getReadVersion(),
@@ -7778,19 +7778,24 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		blobGranuleMapping = krmDecodeRanges(prefix, range, rawMapping);
 	} else {
 		self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		wait(store(
-		    blobGranuleMapping,
-		    krmGetRanges(self, blobGranuleMappingKeys.begin, keyRange, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED)));
+		wait(store(blobGranuleMapping,
+		           krmGetRanges(self,
+		                        blobGranuleMappingKeys.begin,
+		                        keyRange,
+		                        CLIENT_KNOBS->BG_TOO_MANY_GRANULES,
+		                        GetRangeLimits::BYTE_LIMIT_UNLIMITED)));
 	}
 	if (blobGranuleMapping.more) {
 		if (BG_REQUEST_DEBUG) {
 			fmt::print(
 			    "BG Mapping for [{0} - %{1}) too large!\n", keyRange.begin.printable(), keyRange.end.printable());
 		}
-		TraceEvent(SevWarn, "BGMappingTooLarge").detail("Range", range).detail("Max", 1000);
+		TraceEvent(SevWarn, "BGMappingTooLarge")
+		    .detail("Range", range)
+		    .detail("Max", CLIENT_KNOBS->BG_TOO_MANY_GRANULES);
 		throw unsupported_operation();
 	}
-	ASSERT(!blobGranuleMapping.more && blobGranuleMapping.size() < CLIENT_KNOBS->TOO_MANY);
+	ASSERT(!blobGranuleMapping.more && blobGranuleMapping.size() <= CLIENT_KNOBS->BG_TOO_MANY_GRANULES);
 
 	if (blobGranuleMapping.size() < 2) {
 		throw blob_granule_transaction_too_old();

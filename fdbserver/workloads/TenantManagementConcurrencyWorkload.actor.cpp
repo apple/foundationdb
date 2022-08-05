@@ -251,14 +251,13 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 				Optional<Void> result = wait(timeout(configureImpl(self, tenant, configParams), 30));
 
 				if (result.present()) {
-					fmt::print("Delete tenant success: {}\n", printable(tenant));
 					break;
 				}
 			}
 
 			return Void();
 		} catch (Error& e) {
-			if (e.code() != error_code_tenant_not_found) {
+			if (e.code() != error_code_tenant_not_found && e.code() != error_code_invalid_tenant_state) {
 				TraceEvent(SevError, "ConfigureTenantFailure").error(e).detail("TenantName", tenant);
 			}
 			return Void();
