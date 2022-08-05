@@ -479,6 +479,7 @@ static void printProgramUsage(const char* name) {
 	       "  --memory       Resident memory limit of the CLI (defaults to 8GiB).\n"
 	       "  --use-future-protocol-version\n"
 	       "                 Use the simulated future protocol version to connect to the cluster.\n"
+	       "                 This option can be used testing purposes only!\n"
 	       "  -v, --version  Print FoundationDB CLI version information and exit.\n"
 	       "  -h, --help     Display this help and exit.\n");
 }

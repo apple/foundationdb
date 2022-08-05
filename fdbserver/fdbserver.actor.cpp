@@ -733,8 +733,8 @@ static void printUsage(const char* name, bool devhelp) {
 		                 " Instead of failing when an I/O operation exceeds io_trust_seconds, just"
 		                 " log a warning to the trace log. Has no effect if io_trust_seconds is unspecified.");
 		printOptionUsage("--use-future-protocol-version [true,false]",
-		                 " Run the process with a simulated future protocol version. Necessary for testing upgrades"
-		                 " to future versions.");
+		                 " Run the process with a simulated future protocol version."
+		                 " This option can be used testing purposes only!");
 		printf("\n"
 		       "The 'kvfiledump' role dump all key-values from kvfile to stdout in binary format:\n"
 		       "{key length}{key binary}{value length}{value binary}, length is 4 bytes int\n"
