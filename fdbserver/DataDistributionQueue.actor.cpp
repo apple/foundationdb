@@ -521,14 +521,14 @@ void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap, 
 }
 
 // Cancells in-flight data moves intersecting with range.
-ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, const DDEnabledState* ddEnabledState);
+ACTOR Future<Void> cancelDataMove(struct DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState);
 
-ACTOR Future<Void> dataDistributionRelocator(struct DDQueueData* self,
+ACTOR Future<Void> dataDistributionRelocator(struct DDQueue* self,
                                              RelocateData rd,
                                              Future<Void> prevCleanup,
                                              const DDEnabledState* ddEnabledState);
 
-struct DDQueueData {
+struct DDQueue {
 	struct DDDataMove {
 		DDDataMove() = default;
 		explicit DDDataMove(UID id) : id(id) {}
@@ -537,6 +537,27 @@ struct DDQueueData {
 
 		UID id;
 		Future<Void> cancel;
+	};
+
+	struct ServerCounter {
+		enum CountType { ProposedSource = 0, QueuedSource, LaunchedSource, LaunchedDest };
+		typedef std::array<int, 4> Item; // one for each CountType
+		typedef std::array<Item, 3> ReasonItem; // one for each RelocateReason
+		std::unordered_map<UID, ReasonItem> counter;
+
+		void clear() { counter.clear(); }
+		bool has(const UID& id) const { return counter.find(id) != counter.end(); }
+		int& get(const UID& id, RelocateReason reason, CountType type) {
+			int idx = (int)(reason);
+			ASSERT(idx >= 0 && idx < 3);
+			return counter[id][idx][(int)type];
+		}
+
+		void increaseForTeam(const std::vector<UID>& ids, RelocateReason reason, CountType type) {
+			for (auto& id : ids) {
+				get(id, reason, type)++;
+			}
+		}
 	};
 
 	ActorCollectionNoErrors noErrorActors; // has to be the last one to be destroyed because other Actors may use it.
@@ -572,6 +593,7 @@ struct DDQueueData {
 	// The last time one server was selected as source team for read rebalance reason. We want to throttle read
 	// rebalance on time bases because the read workload sample update has delay after the previous moving
 	std::map<UID, double> lastAsSource;
+	ServerCounter serverCounter;
 
 	KeyRangeMap<RelocateData> inFlight;
 	// Track all actors that relocates specified keys to a good place; Key: keyRange; Value: actor
@@ -639,7 +661,7 @@ struct DDQueueData {
 		}
 	}
 
-	DDQueueData(UID mid,
+	DDQueue(UID mid,
 	            MoveKeysLock lock,
 	            Database cx,
 	            std::vector<TeamCollectionInterface> teamCollections,
@@ -807,7 +829,7 @@ struct DDQueueData {
 		}
 	}
 
-	ACTOR static Future<Void> getSourceServersForRange(DDQueueData* self,
+	ACTOR static Future<Void> getSourceServersForRange(DDQueue* self,
 	                                                   RelocateData input,
 	                                                   PromiseStream<RelocateData> output,
 	                                                   Reference<FlowLock> fetchLock) {
@@ -985,6 +1007,7 @@ struct DDQueueData {
 			queue[results.src[i]].insert(results);
 		}
 		updateLastAsSource(results.src);
+		serverCounter.increaseForTeam(results.src, results.reason, ServerCounter::CountType::QueuedSource);
 	}
 
 	void logRelocation(const RelocateData& rd, const char* title) {
@@ -1211,7 +1234,7 @@ struct DDQueueData {
 			}
 		}
 
-		DDQueueData::DDDataMove dataMove(dataMoveId);
+		DDQueue::DDDataMove dataMove(dataMoveId);
 		dataMove.cancel = cleanUpDataMove(
 		    this->cx, dataMoveId, this->lock, &this->cleanUpDataMoveParallelismLock, range, ddEnabledState);
 		this->dataMoves.insert(range, dataMove);
@@ -1221,7 +1244,7 @@ struct DDQueueData {
 	}
 };
 
-ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, const DDEnabledState* ddEnabledState) {
+ACTOR Future<Void> cancelDataMove(struct DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState) {
 	std::vector<Future<Void>> cleanup;
 	auto f = self->dataMoves.intersectingRanges(range);
 	for (auto it = f.begin(); it != f.end(); ++it) {
@@ -1242,7 +1265,7 @@ ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, cons
 	wait(waitForAll(cleanup));
 	auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(range);
 	if (!ranges.empty()) {
-		self->dataMoves.insert(KeyRangeRef(ranges.front().begin, ranges.back().end), DDQueueData::DDDataMove());
+		self->dataMoves.insert(KeyRangeRef(ranges.front().begin, ranges.back().end), DDQueue::DDDataMove());
 	}
 	return Void();
 }
@@ -1261,7 +1284,7 @@ static std::string destServersString(std::vector<std::pair<Reference<IDataDistri
 
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
-ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
+ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
                                              RelocateData rd,
                                              Future<Void> prevCleanup,
                                              const DDEnabledState* ddEnabledState) {
@@ -1320,7 +1343,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 					    .detail("Range", kr);
 				}
 			}
-			self->dataMoves.insert(rd.keys, DDQueueData::DDDataMove(rd.dataMoveId));
+			self->dataMoves.insert(rd.keys, DDQueue::DDDataMove(rd.dataMoveId));
 		}
 
 		state StorageMetrics metrics =
@@ -1546,6 +1569,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 				    .detail("ExtraIds", describe(extraIds));
 			}
 
+			self->serverCounter.increaseForTeam(rd.src, rd.reason, DDQueue::ServerCounter::LaunchedSource);
+			self->serverCounter.increaseForTeam(destIds, rd.reason, DDQueue::ServerCounter::LaunchedDest);
+			self->serverCounter.increaseForTeam(extraIds, rd.reason, DDQueue::ServerCounter::LaunchedDest);
+
 			state Error error = success();
 			state Promise<Void> dataMovementComplete;
 			// Move keys from source to destination by changing the serverKeyList and keyServerList system keys
@@ -1593,7 +1620,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 									auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(rd.keys);
 									if (ranges.size() == 1 && static_cast<KeyRange>(ranges[0]) == rd.keys &&
 									    ranges[0].value.id == rd.dataMoveId && !ranges[0].value.cancel.isValid()) {
-										self->dataMoves.insert(rd.keys, DDQueueData::DDDataMove());
+										self->dataMoves.insert(rd.keys, DDQueue::DDDataMove());
 										TraceEvent(SevVerbose, "DequeueDataMoveOnSuccess", self->distributorId)
 										    .detail("DataMoveID", rd.dataMoveId)
 										    .detail("DataMoveRange", rd.keys);
@@ -1740,7 +1767,7 @@ inline double getWorstCpu(const HealthMetrics& metrics, const std::vector<UID>& 
 
 // Move the shard with the top K highest read density of sourceTeam's to destTeam if sourceTeam has much more read load
 // than destTeam
-ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
+ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
                                      DataMovementReason moveReason,
                                      Reference<IDataDistributionTeam> sourceTeam,
                                      Reference<IDataDistributionTeam> destTeam,
@@ -1811,8 +1838,13 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		if (shard == shards[i]) {
 			UID traceId = deterministicRandom()->randomUniqueID();
 			self->output.send(RelocateShard(shard, moveReason, RelocateReason::REBALANCE_READ, traceId));
-			self->updateLastAsSource(sourceTeam->getServerIDs());
 			traceEvent->detail("TraceId", traceId);
+
+			auto serverIds = sourceTeam->getServerIDs();
+			self->updateLastAsSource(serverIds);
+
+			self->serverCounter.increaseForTeam(
+			    serverIds, RelocateReason::REBALANCE_READ, DDQueue::ServerCounter::ProposedSource);
 			return true;
 		}
 	}
@@ -1821,7 +1853,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 }
 
 // Move a random shard from sourceTeam if sourceTeam has much more data than provided destTeam
-ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
+ACTOR static Future<bool> rebalanceTeams(DDQueue* self,
                                          DataMovementReason moveReason,
                                          Reference<IDataDistributionTeam const> sourceTeam,
                                          Reference<IDataDistributionTeam const> destTeam,
@@ -1886,6 +1918,9 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
 			UID traceId = deterministicRandom()->randomUniqueID();
 			self->output.send(RelocateShard(moveShard, moveReason, RelocateReason::REBALANCE_DISK, traceId));
 			traceEvent->detail("TraceId", traceId);
+
+			self->serverCounter.increaseForTeam(
+			    sourceTeam->getServerIDs(), RelocateReason::REBALANCE_DISK, DDQueue::ServerCounter::ProposedSource);
 			return true;
 		}
 	}
@@ -1894,7 +1929,7 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
 	return false;
 }
 
-ACTOR Future<SrcDestTeamPair> getSrcDestTeams(DDQueueData* self,
+ACTOR Future<SrcDestTeamPair> getSrcDestTeams(DDQueue* self,
                                               int teamCollectionIndex,
                                               GetTeamRequest srcReq,
                                               GetTeamRequest destReq,
@@ -1921,7 +1956,7 @@ ACTOR Future<SrcDestTeamPair> getSrcDestTeams(DDQueueData* self,
 	return {};
 }
 
-ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex, DataMovementReason reason) {
+ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, DataMovementReason reason) {
 	state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
 	state Transaction tr(self->cx);
 	state double lastRead = 0;
@@ -2022,7 +2057,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 	}
 }
 
-ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionIndex) {
+ACTOR Future<Void> BgDDMountainChopper(DDQueue* self, int teamCollectionIndex) {
 	state double rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 	state Transaction tr(self->cx);
 	state double lastRead = 0;
@@ -2120,7 +2155,7 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 	}
 }
 
-ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) {
+ACTOR Future<Void> BgDDValleyFiller(DDQueue* self, int teamCollectionIndex) {
 	state double rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 	state Transaction tr(self->cx);
 	state double lastRead = 0;
@@ -2235,7 +2270,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          int teamSize,
                                          int singleRegionTeamSize,
                                          const DDEnabledState* ddEnabledState) {
-	state DDQueueData self(distributorId,
+	state DDQueue self(distributorId,
 	                       lock,
 	                       cx,
 	                       teamCollections,
