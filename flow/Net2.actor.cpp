@@ -2129,7 +2129,7 @@ void startThreadF(F&& func) {
 		}
 	};
 	Thing* t = new Thing(std::move(func));
-	startThread(Thing::start, t);
+	g_network->startThread(Thing::start, t);
 }
 
 TEST_CASE("/flow/Net2/ThreadSafeQueue/Interface") {
@@ -2167,8 +2167,8 @@ struct QueueTestThreadState {
 	int nextProduced() { return elementValue(produced++); }
 	int nextConsumed() { return elementValue(consumed++); }
 	void checkDone() {
-		ASSERT(produced == toProduce);
-		ASSERT(consumed == produced);
+		ASSERT_EQ(produced, toProduce);
+		ASSERT_EQ(consumed, produced);
 	}
 };
 
@@ -2241,7 +2241,7 @@ TEST_CASE("/flow/Net2/onMainThreadFIFO") {
 					nextYield = nondeterministicRandom()->randomInt(0, 100);
 				}
 				int v = s.nextProduced();
-				onMainThreadVoid([&s, v]() { ASSERT(v == s.nextConsumed()); });
+				onMainThreadVoid([&s, v]() { ASSERT_EQ(v, s.nextConsumed()); });
 			}
 			s.doneProducing.send(Void());
 		});
