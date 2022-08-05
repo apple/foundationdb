@@ -36,7 +36,29 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ };
+class RelocateReason {
+public:
+	enum Value : int8_t { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ };
+	RelocateReason(Value v = INVALID) : value(v) {}
+	explicit RelocateReason(int v) : value((Value)v) {}
+	std::string toString() const {
+		switch (value) {
+		case OTHER:
+			return "Other";
+		case REBALANCE_DISK:
+			return "RebalanceDisk";
+		case REBALANCE_READ:
+			return "RebalanceRead";
+		case INVALID:
+		default:
+			return "Invalid";
+		}
+	}
+	operator int() const { return (int)value; }
+
+private:
+	Value value;
+};
 
 // One-to-one relationship to the priority knobs
 enum class DataMovementReason {

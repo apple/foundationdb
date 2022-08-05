@@ -541,10 +541,23 @@ struct DDQueue {
 
 	struct ServerCounter {
 		enum CountType { ProposedSource = 0, QueuedSource, LaunchedSource, LaunchedDest };
+
+	private:
 		typedef std::array<int, 4> Item; // one for each CountType
 		typedef std::array<Item, 3> ReasonItem; // one for each RelocateReason
+
 		std::unordered_map<UID, ReasonItem> counter;
 
+		std::string toString(const Item& item) const {
+			return format("%d %d %d %d", item[0], item[1], item[2], item[3]);
+		}
+		void traceReasonItem(TraceEvent* event, const ReasonItem& item) const {
+			for (int i = 0; i < item.size(); ++i) {
+				event->detail(RelocateReason(i).toString(), toString(item[i]));
+			}
+		}
+
+	public:
 		void clear() { counter.clear(); }
 		bool has(const UID& id) const { return counter.find(id) != counter.end(); }
 		int& get(const UID& id, RelocateReason reason, CountType type) {
@@ -556,6 +569,14 @@ struct DDQueue {
 		void increaseForTeam(const std::vector<UID>& ids, RelocateReason reason, CountType type) {
 			for (auto& id : ids) {
 				get(id, reason, type)++;
+			}
+		}
+
+		void traceAll(const UID& debugId = UID()) const {
+			for (auto& [id, reasonItem] : counter) {
+				TraceEvent event("DDQueueServerCounter", debugId);
+				event.detail("ServerId", id);
+				traceReasonItem(&event, reasonItem);
 			}
 		}
 	};
@@ -662,17 +683,17 @@ struct DDQueue {
 	}
 
 	DDQueue(UID mid,
-	            MoveKeysLock lock,
-	            Database cx,
-	            std::vector<TeamCollectionInterface> teamCollections,
-	            Reference<ShardsAffectedByTeamFailure> sABTF,
-	            PromiseStream<Promise<int64_t>> getAverageShardBytes,
-	            int teamSize,
-	            int singleRegionTeamSize,
-	            PromiseStream<RelocateShard> output,
-	            FutureStream<RelocateShard> input,
-	            PromiseStream<GetMetricsRequest> getShardMetrics,
-	            PromiseStream<GetTopKMetricsRequest> getTopKMetrics)
+	        MoveKeysLock lock,
+	        Database cx,
+	        std::vector<TeamCollectionInterface> teamCollections,
+	        Reference<ShardsAffectedByTeamFailure> sABTF,
+	        PromiseStream<Promise<int64_t>> getAverageShardBytes,
+	        int teamSize,
+	        int singleRegionTeamSize,
+	        PromiseStream<RelocateShard> output,
+	        FutureStream<RelocateShard> input,
+	        PromiseStream<GetMetricsRequest> getShardMetrics,
+	        PromiseStream<GetTopKMetricsRequest> getTopKMetrics)
 	  : distributorId(mid), lock(lock), cx(cx), txnProcessor(new DDTxnProcessor(cx)), teamCollections(teamCollections),
 	    shardsAffectedByTeamFailure(sABTF), getAverageShardBytes(getAverageShardBytes),
 	    startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
