@@ -354,6 +354,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	// TODO: consider switching to an iterator approach.
 	std::unordered_map<Key, bool> mergeHardBoundaries;
 	std::unordered_map<Key, BlobGranuleMergeBoundary> mergeBoundaries;
+	CoalescedKeyRangeMap<bool> forcePurgingRanges;
 
 	FlowLock concurrentMergeChecks;
 
@@ -373,7 +374,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	  : id(id), db(db), dcId(dcId), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &workersById),
 	    knownBlobRanges(false, normalKeys.end), tenantData(BGTenantMap(dbInfo)),
 	    mergeCandidates(MergeCandidateInfo(MergeCandidateUnknown), normalKeys.end),
-	    activeGranuleMerges(invalidVersion, normalKeys.end),
+	    activeGranuleMerges(invalidVersion, normalKeys.end), forcePurgingRanges(false, normalKeys.end),
 	    concurrentMergeChecks(SERVER_KNOBS->BLOB_MANAGER_CONCURRENT_MERGE_CHECKS),
 	    restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), recruitingStream(0) {}
 
@@ -434,6 +435,16 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	}
 
 	void clearMergeCandidate(const KeyRangeRef& range) { setMergeCandidate(range, MergeCandidateCannotMerge); }
+
+	bool isForcePurging(const KeyRangeRef& range) {
+		auto ranges = forcePurgingRanges.intersectingRanges(range);
+		for (auto& it : ranges) {
+			if (it.value()) {
+				return true;
+			}
+		}
+		return false;
+	}
 };
 
 // Helper function for alignKeys().
@@ -947,6 +958,10 @@ static bool handleRangeIsRevoke(Reference<BlobManagerData> bmData, RangeAssignme
 }
 
 static bool handleRangeAssign(Reference<BlobManagerData> bmData, RangeAssignment assignment) {
+	if ((assignment.isAssign || !assignment.revoke.get().dispose) && bmData->isForcePurging(assignment.keyRange)) {
+		return false;
+	}
+
 	int64_t seqNo = bmData->seqNo;
 	bmData->seqNo++;
 
@@ -3796,10 +3811,13 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 	if (force) {
+		// TODO could clean this up after force purge is done, but it's safer not to
+		self->forcePurgingRanges.insert(range, true);
 		// set force purged range, to prevent future operations on this range
 		loop {
 			try {
-				// set force purged range, but don't clear mapping range yet, so that if a new BM recovers in the middle of purging, it still knows what granules to purge
+				// set force purged range, but don't clear mapping range yet, so that if a new BM recovers in the middle
+				// of purging, it still knows what granules to purge
 				wait(checkManagerLock(&tr, self));
 				// FIXME: need to handle this better if range is unaligned. Need to not truncate existing granules, and
 				// instead cover whole of intersecting granules at begin/end
@@ -4063,7 +4081,8 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		loop {
 			try {
-				// clear mapping range, so that a new BM doesn't try to recover force purged granules, and clients can't read them
+				// clear mapping range, so that a new BM doesn't try to recover force purged granules, and clients can't
+				// read them
 				wait(checkManagerLock(&tr, self));
 				wait(krmSetRange(&tr, blobGranuleMappingKeys.begin, range, blobGranuleMappingValueFor(UID())));
 				wait(tr.commit());
