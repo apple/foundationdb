@@ -2358,6 +2358,40 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(
 	return statusObj;
 }
 
+ACTOR static Future<JsonBuilderObject> blobWorkerStatusFetcher(
+    std::vector<BlobWorkerInterface> servers,
+    std::unordered_map<NetworkAddress, WorkerInterface> addressWorkersMap,
+    std::set<std::string>* incompleteReason) {
+
+	state JsonBuilderObject statusObj;
+	state int totalRanges = 0;
+	state std::vector<Future<Optional<TraceEventFields>>> futures;
+
+	statusObj["number_of_blob_workers"] = static_cast<int>(servers.size());
+
+	try {
+		for (auto& intf : servers) {
+			auto workerIntf = addressWorkersMap[intf.address()];
+			futures.push_back(latestEventOnWorker(workerIntf, "BlobWorkerMetrics"));
+		}
+
+		wait(waitForAll(futures));
+
+		for (auto future : futures) {
+			if (future.get().present()) {
+				auto latestTrace = future.get().get();
+				totalRanges += latestTrace.getInt("NumRangesAssigned");
+			}
+		}
+		statusObj["number_of_key_ranges"] = totalRanges;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		incompleteReason->insert("Unknown blob worker stats");
+	}
+	return statusObj;
+}
+
 static JsonBuilderObject tlogFetcher(int* logFaultTolerance,
                                      const std::vector<TLogSet>& tLogs,
                                      std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
@@ -2985,6 +3019,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		state Optional<DatabaseConfiguration> configuration;
 		state Optional<LoadConfigurationResult> loadResult;
+		state std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
 
 		if (statusCode != RecoveryStatus::configuration_missing) {
 			std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>> loadResults =
@@ -3038,7 +3073,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			// Start getting storage servers now (using system priority) concurrently.  Using sys priority because
 			// having storage servers in status output is important to give context to error messages in status that
 			// reference a storage server role ID.
-			state std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
 			for (auto const& worker : workers) {
 				address_workers[worker.interf.address()] = worker.interf;
 			}
@@ -3258,6 +3292,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		                              &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
 		statusObj["clients"] = clientStatusFetcher(clientStatus);
+
+		if (configuration.present() && configuration.get().blobGranulesEnabled) {
+			JsonBuilderObject blobGranuelsStatus =
+			    wait(blobWorkerStatusFetcher(blobWorkers, address_workers, &status_incomplete_reasons));
+			statusObj["blob_granules"] = blobGranuelsStatus;
+		}
 
 		JsonBuilderArray incompatibleConnectionsArray;
 		for (auto it : incompatibleConnections) {

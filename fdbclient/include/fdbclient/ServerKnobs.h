@@ -884,8 +884,6 @@ public:
 	// FIXME: configure url with database configuration instead of knob eventually
 	std::string BG_URL;
 
-	// whether to use blobRangeKeys or tenants for blob granule range sources
-	std::string BG_RANGE_SOURCE;
 	// Whether to use knobs or EKP for blob metadata and credentials
 	std::string BG_METADATA_SOURCE;
 
