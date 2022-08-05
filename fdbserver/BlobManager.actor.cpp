@@ -2883,12 +2883,12 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	bmData->startRecruiting.trigger();
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 	// set up force purge keys if not done already
 	loop {
 		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			RangeResult existingForcePurgeKeys = wait(tr->getRange(blobGranuleForcePurgedKeys, 1));
 			if (!existingForcePurgeKeys.empty()) {
 				break;
