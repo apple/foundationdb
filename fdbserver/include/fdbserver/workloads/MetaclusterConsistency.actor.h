@@ -64,8 +64,9 @@ private:
 
 	ManagementClusterData managementMetadata;
 
-	static inline const int64_t metaclusterMaxTenants =
-	    CLIENT_KNOBS->MAX_DATA_CLUSTERS * CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER;
+	// Note: this check can only be run on metaclusters with a reasonable number of tenants, as should be
+	// the case with the current metacluster simulation workloads
+	static inline const int metaclusterMaxTenants = 10e6;
 
 	ACTOR static Future<Void> loadManagementClusterMetadata(MetaclusterConsistencyCheck* self) {
 		state Reference<typename DB::TransactionT> managementTr = self->managementDb->createTransaction();
