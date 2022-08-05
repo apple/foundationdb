@@ -3242,6 +3242,8 @@ TenantInfo TransactionState::getTenantInfo(AllowInvalidTenantID allowInvalidId /
 
 	if (options.rawAccess) {
 		return TenantInfo();
+	} else if (!cx->internal && cx->clientInfo->get().clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
+		throw management_cluster_invalid_access();
 	} else if (!cx->internal && cx->clientInfo->get().tenantMode == TenantMode::REQUIRED && !t.present()) {
 		throw tenant_name_required();
 	} else if (!t.present()) {

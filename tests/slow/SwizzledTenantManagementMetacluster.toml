@@ -1,6 +1,8 @@
 [configuration]
 allowDefaultTenant = false
 allowDisablingTenants = false
+allowCreatingTenants = false
+extraDatabaseMode = 'Single'
 
 [[test]]
 testTitle = 'TenantManagementTest'
@@ -25,10 +27,6 @@ runSetup = true
 
     [[test.workload]]
     testName = 'Attrition'
-    testDuration = 180.0
-
-    [[test.workload]]
-    testName = 'Attrition'
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true
@@ -40,8 +38,3 @@ runSetup = true
     machinesToLeave = 3
     reboot = true
     testDuration = 180.0
-
-    [[test.workload]]
-    testName = 'ChangeConfig'
-    maxDelayBeforeChange = 120.0
-    coordinators = 'auto'

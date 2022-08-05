@@ -76,7 +76,9 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 		}
 
-		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
+		ASSERT(g_simulator.extraDatabases.size() == 1);
+		auto extraFile =
+		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
 		extraDB = Database::createDatabase(extraFile, -1);
 
 		TraceEvent("DRU_Start").log();

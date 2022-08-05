@@ -4225,6 +4225,10 @@ ACTOR Future<Void> handleFlushGranuleReq(Reference<BlobWorkerData> self, FlushGr
 				// force granule to flush at this version, and wait
 				if (req.flushVersion > metadata->pendingDeltaVersion) {
 					// first, wait for granule active
+					if (!metadata->activeCFData.get().isValid()) {
+						req.reply.sendError(wrong_shard_server());
+						return Void();
+					}
 
 					// wait for change feed version to catch up to ensure we have all data
 					if (metadata->activeCFData.get()->getVersion() < req.flushVersion) {
