@@ -65,6 +65,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	bool enablePurging;
 	bool initAtEnd;
 	bool strictPurgeChecking;
+	bool clearAndMergeCheck;
 
 	DatabaseConfiguration config;
 
@@ -87,6 +88,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 		// randomly some tests write data first and then turn on blob granules later, to test conversion of existing DB
 		initAtEnd = !enablePurging && sharedRandomNumber % 10 == 0;
+		sharedRandomNumber /= 10;
+
+		clearAndMergeCheck = getOption(options, LiteralStringRef("clearAndMergeCheck"), sharedRandomNumber % 10 == 0);
 		sharedRandomNumber /= 10;
 
 		ASSERT(threads >= 1);
@@ -552,7 +556,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 		// FIXME: if doPurging was set, possibly do one last purge here, and verify it succeeds with no errors
 
-		if (self->clientId == 0 && SERVER_KNOBS->BG_ENABLE_MERGING && deterministicRandom()->random01() < 0.1) {
+		if (self->clientId == 0 && self->clearAndMergeCheck) {
 			CODE_PROBE(true, "BGV clearing database and awaiting merge");
 			wait(clearAndAwaitMerge(cx, normalKeys));
 		}
