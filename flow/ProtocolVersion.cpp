@@ -19,7 +19,11 @@
  */
 #include "flow/ProtocolVersion.h"
 
+namespace {
+
 ProtocolVersion g_currentProtocolVersion(defaultProtocolVersionValue);
+
+}
 
 ProtocolVersion currentProtocolVersion() {
 	static ProtocolVersion firstReturnedProtocolVersion = g_currentProtocolVersion;
