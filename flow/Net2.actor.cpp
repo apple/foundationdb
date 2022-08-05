@@ -2223,7 +2223,9 @@ TEST_CASE("/flow/Net2/ThreadSafeQueue/Threaded") {
 	return Void();
 }
 
-TEST_CASE("/flow/Net2/onMainThreadFIFO") {
+// NB: This could be a test for any INetwork implementation, but Sim2 doesn't
+// satisfy this requirement yet.
+TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 	// Verifies that signals processed by onMainThread() are executed in order.
 
 	state std::vector<QueueTestThreadState> perThread = { QueueTestThreadState(0, 1000000),
