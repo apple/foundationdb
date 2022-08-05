@@ -118,9 +118,12 @@ RangeResult rywGetRange(ReadYourWritesTransaction* ryw, const KeyRangeRef& kr, c
 ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* skrImpl,
                                                  ReadYourWritesTransaction* ryw,
                                                  KeySelector* ks,
-                                                 Optional<RangeResult>* cache) {
-	ASSERT(!ks->orEqual); // should be removed before calling
-	ASSERT(ks->offset != 1); // never being called if KeySelector is already normalized
+                                                 KeyRangeMap<Optional<RangeResult>>* cache) {
+	// should be removed before calling
+	ASSERT(!ks->orEqual);
+
+	// never being called if KeySelector is already normalized
+	ASSERT(ks->offset != 1);
 
 	state Key startKey(skrImpl->getKeyRange().begin);
 	state Key endKey(skrImpl->getKeyRange().end);
@@ -198,7 +201,7 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks,
                                              KeyRangeRef boundary,
                                              int* actualOffset,
                                              RangeResult* result,
-                                             Optional<RangeResult>* cache) {
+                                             KeyRangeMap<Optional<RangeResult>>* cache) {
 	// If offset < 1, where we need to move left, iter points to the range containing at least one smaller key
 	// (It's a wasting of time to walk through the range whose begin key is same as ks->key)
 	// (rangeContainingKeyBefore itself handles the case where ks->key == Key())
@@ -298,8 +301,9 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 	state int actualBeginOffset;
 	state int actualEndOffset;
 	state KeyRangeRef moduleBoundary;
-	// used to cache result from potential first read
-	state Optional<RangeResult> cache;
+	// used to cache results from potential first async read
+	// the current implementation will read the whole range result to save in the cache
+	state KeyRangeMap<Optional<RangeResult>> cache(Optional<RangeResult>(), specialKeys.end);
 
 	if (ryw->specialKeySpaceRelaxed()) {
 		moduleBoundary = sks->range;
@@ -346,7 +350,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
-			if (iter->value()->isAsync() && cache.present()) {
+			if (iter->value()->isAsync() && cache.rangeContaining(keyStart).value().present()) {
 				const SpecialKeyRangeAsyncImpl* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value());
 				RangeResult pairs_ = wait(ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), &cache));
 				pairs = pairs_;
@@ -377,7 +381,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
-			if (iter->value()->isAsync() && cache.present()) {
+			if (iter->value()->isAsync() && cache.rangeContaining(keyStart).value().present()) {
 				const SpecialKeyRangeAsyncImpl* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value());
 				RangeResult pairs_ = wait(ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), &cache));
 				pairs = pairs_;
@@ -586,10 +590,8 @@ Future<Void> SpecialKeySpace::commit(ReadYourWritesTransaction* ryw) {
 	return commitActor(this, ryw);
 }
 
-SKSCTestImpl::SKSCTestImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
-
-Future<RangeResult> SKSCTestImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
-	ASSERT(range.contains(kr));
+// For SKSCTestRWImpl and SKSCTestAsyncReadImpl
+Future<RangeResult> SKSCTestGetRangeBase(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	auto resultFuture = ryw->getRange(kr, CLIENT_KNOBS->TOO_MANY);
 	// all keys are written to RYW, since GRV is set, the read should happen locally
 	ASSERT(resultFuture.isReady());
@@ -599,9 +601,23 @@ Future<RangeResult> SKSCTestImpl::getRange(ReadYourWritesTransaction* ryw, KeyRa
 	return rywGetRange(ryw, kr, kvs);
 }
 
-Future<Optional<std::string>> SKSCTestImpl::commit(ReadYourWritesTransaction* ryw) {
+SKSCTestRWImpl::SKSCTestRWImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<RangeResult> SKSCTestRWImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	ASSERT(range.contains(kr));
+	return SKSCTestGetRangeBase(ryw, kr);
+}
+
+Future<Optional<std::string>> SKSCTestRWImpl::commit(ReadYourWritesTransaction* ryw) {
 	ASSERT(false);
 	return Optional<std::string>();
+}
+
+SKSCTestAsyncReadImpl::SKSCTestAsyncReadImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
+
+Future<RangeResult> SKSCTestAsyncReadImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	ASSERT(range.contains(kr));
+	return SKSCTestGetRangeBase(ryw, kr);
 }
 
 ReadConflictRangeImpl::ReadConflictRangeImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}

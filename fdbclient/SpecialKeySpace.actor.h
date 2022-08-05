@@ -103,7 +103,9 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override = 0;
 
 	// calling with a cache object to have consistent results if we need to call rpc
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr, Optional<RangeResult>* cache) const {
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	                             KeyRangeRef kr,
+	                             KeyRangeMap<Optional<RangeResult>>* cache) const {
 		return getRangeAsyncActor(this, ryw, kr, cache);
 	}
 
@@ -112,17 +114,18 @@ public:
 	ACTOR static Future<RangeResult> getRangeAsyncActor(const SpecialKeyRangeReadImpl* skrAyncImpl,
 	                                                    ReadYourWritesTransaction* ryw,
 	                                                    KeyRangeRef kr,
-	                                                    Optional<RangeResult>* cache) {
+	                                                    KeyRangeMap<Optional<RangeResult>>* cache) {
 		ASSERT(skrAyncImpl->getKeyRange().contains(kr));
 		ASSERT(cache != nullptr);
-		if (!cache->present()) {
+		ASSERT(cache->rangeContaining(kr.begin) == cache->rangeContainingKeyBefore(kr.end));
+		if (!(*cache)[kr.begin].present()) {
 			// For simplicity, every time we need to cache, we read the whole range
 			// Although sometimes the range can be narrowed,
 			// there is not a general way to do it in complicated scenarios
 			RangeResult result_ = wait(skrAyncImpl->getRange(ryw, skrAyncImpl->getKeyRange()));
-			*cache = result_;
+			cache->insert(skrAyncImpl->getKeyRange(), result_);
 		}
-		const auto& allResults = cache->get();
+		const auto& allResults = (*cache)[kr.begin].get();
 		int start = 0, end = allResults.size();
 		while (start < allResults.size() && allResults[start].key < kr.begin)
 			++start;
@@ -233,11 +236,17 @@ private:
 };
 
 // Used for SpecialKeySpaceCorrectnessWorkload
-class SKSCTestImpl : public SpecialKeyRangeRWImpl {
+class SKSCTestRWImpl : public SpecialKeyRangeRWImpl {
 public:
-	explicit SKSCTestImpl(KeyRangeRef kr);
+	explicit SKSCTestRWImpl(KeyRangeRef kr);
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
+class SKSCTestAsyncReadImpl : public SpecialKeyRangeAsyncImpl {
+public:
+	explicit SKSCTestAsyncReadImpl(KeyRangeRef kr);
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
 };
 
 // Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
