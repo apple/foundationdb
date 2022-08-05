@@ -133,8 +133,8 @@ ACTOR Future<Void> doBlobCheck(Database db, Key startKey, Key endKey, Optional<V
 	}
 	fmt::print("Loaded {0} blob ranges to check\n", allRanges.size());
 	state std::vector<Future<Version>> checkParts;
-	// chunk up to smaller ranges than max
-	int maxChunkSize = 1000;
+	// Chunk up to smaller ranges than this limit. Must be smaller than BG_TOO_MANY_GRANULES to not hit the limit
+	int maxChunkSize = CLIENT_KNOBS->BG_TOO_MANY_GRANULES / 2;
 	KeyRange currentChunk;
 	int currentChunkSize = 0;
 	for (auto& it : allRanges) {

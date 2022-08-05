@@ -275,6 +275,7 @@ public:
 
 	// Blob Granules
 	int BG_MAX_GRANULE_PARALLELISM;
+	int BG_TOO_MANY_GRANULES;
 
 	// The coordinator key/value in storage server might be inconsistent to the value stored in the cluster file.
 	// This might happen when a recovery is happening together with a cluster controller coordinator key change.
