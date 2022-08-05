@@ -428,7 +428,7 @@ struct DDContext : public ReferenceCounted<DDContext> {
 	  : ddEnabledState(std::move(ddEnabledState)), ddId(id),
 	    shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure), processingUnhealthy(new AsyncVar<bool>(false)),
 	    processingWiggle(new AsyncVar<bool>(false)) {}
-	
+
 	void proposeRelocation(const RelocateShard& rs) const { return queueInterface.relocationProducer.send(rs); }
 
 	void requestRestartShardTracker(KeyRange keys) const { return trackerInterface.restartShardTracker.send(keys); }
