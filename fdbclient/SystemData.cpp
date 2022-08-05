@@ -1336,6 +1336,8 @@ const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff\x02/bgm/"), Lite
 const KeyRangeRef blobGranuleLockKeys(LiteralStringRef("\xff\x02/bgl/"), LiteralStringRef("\xff\x02/bgl0"));
 const KeyRangeRef blobGranuleSplitKeys(LiteralStringRef("\xff\x02/bgs/"), LiteralStringRef("\xff\x02/bgs0"));
 const KeyRangeRef blobGranuleMergeKeys(LiteralStringRef("\xff\x02/bgmerge/"), LiteralStringRef("\xff\x02/bgmerge0"));
+const KeyRangeRef blobGranuleMergeBoundaryKeys(LiteralStringRef("\xff\x02/bgmergebounds/"),
+                                               LiteralStringRef("\xff\x02/bgmergebounds0"));
 const KeyRangeRef blobGranuleHistoryKeys(LiteralStringRef("\xff\x02/bgh/"), LiteralStringRef("\xff\x02/bgh0"));
 const KeyRangeRef blobGranulePurgeKeys(LiteralStringRef("\xff\x02/bgp/"), LiteralStringRef("\xff\x02/bgp0"));
 const KeyRangeRef blobGranuleVersionKeys(LiteralStringRef("\xff\x02/bgv/"), LiteralStringRef("\xff\x02/bgv0"));
@@ -1559,6 +1561,23 @@ std::tuple<KeyRange, Version, std::vector<UID>, std::vector<Key>, std::vector<Ve
 	ASSERT(bigEndian64(v) >= 0);
 
 	return std::tuple(range, bigEndian64(v), parentGranuleIDs, parentGranuleRanges, parentGranuleStartVersions);
+}
+
+const Key blobGranuleMergeBoundaryKeyFor(const KeyRef& key) {
+	return key.withPrefix(blobGranuleMergeBoundaryKeys.begin);
+}
+
+const Value blobGranuleMergeBoundaryValueFor(BlobGranuleMergeBoundary const& boundary) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
+	wr << boundary;
+	return wr.toValue();
+}
+
+Standalone<BlobGranuleMergeBoundary> decodeBlobGranuleMergeBoundaryValue(const ValueRef& value) {
+	Standalone<BlobGranuleMergeBoundary> boundaryValue;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> boundaryValue;
+	return boundaryValue;
 }
 
 const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version) {

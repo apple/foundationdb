@@ -5,10 +5,7 @@ injectTargetedSSRestart = true
 injectSSDelay = true
 # FIXME: exclude redwood because WriteDuringRead can write massive KV pairs and we don't chunk change feed data on disk yet
 # FIXME: re-enable rocks at some point
-storageEngineExcludeTypes = [3, 4, 5] 
-
-[[knobs]]
-bg_range_source = "blobRangeKeys"
+storageEngineExcludeTypes = [3, 4, 5]
 
 [[test]]
 testTitle = 'BlobGranuleVerifySmall'

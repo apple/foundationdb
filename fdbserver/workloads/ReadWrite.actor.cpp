@@ -690,6 +690,10 @@ struct ReadWriteWorkload : ReadWriteCommon {
 
 						break;
 					} catch (Error& e) {
+						if (e.code() == error_code_tag_throttled) {
+							++self->transactionsTagThrottled;
+						}
+
 						self->transactionFailureMetric->errorCode = e.code();
 						self->transactionFailureMetric->log();
 
