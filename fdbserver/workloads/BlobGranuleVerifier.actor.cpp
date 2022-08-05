@@ -556,7 +556,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 		// FIXME: if doPurging was set, possibly do one last purge here, and verify it succeeds with no errors
 
-		if (self->clientId == 0 && self->clearAndMergeCheck) {
+		if (self->clientId == 0 && SERVER_KNOBS->BG_ENABLE_MERGING && self->clearAndMergeCheck) {
 			CODE_PROBE(true, "BGV clearing database and awaiting merge");
 			wait(clearAndAwaitMerge(cx, normalKeys));
 		}
