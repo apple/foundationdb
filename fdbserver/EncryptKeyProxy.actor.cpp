@@ -633,7 +633,7 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
 
 		ekpProxyData->baseCipherKeysRefreshed += rep.cipherKeyDetails.size();
 
-		t.detail("nKeys", rep.cipherKeyDetails.size());
+		t.detail("NumKeys", rep.cipherKeyDetails.size());
 	} catch (Error& e) {
 		if (!canReplyWith(e)) {
 			TraceEvent(SevWarn, "RefreshEKs_Error").error(e);
@@ -646,8 +646,8 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
 	return Void();
 }
 
-void refreshEncryptionKeys(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnectorInterface kmsConnectorInf) {
-	Future<Void> ignored = refreshEncryptionKeysCore(ekpProxyData, kmsConnectorInf);
+Future<Void> refreshEncryptionKeys(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnectorInterface kmsConnectorInf) {
+	return refreshEncryptionKeysCore(ekpProxyData, kmsConnectorInf);
 }
 
 ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxyData,
@@ -805,9 +805,11 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface, 
 	// FLOW_KNOB->ENCRRYPTION_KEY_REFRESH_INTERVAL_SEC, allowing the interactions with external Encryption Key Manager
 	// mostly not co-inciding with FDB process encryption key refresh attempts.
 
-	self->encryptionKeyRefresher = recurring([&]() { refreshEncryptionKeys(self, kmsConnectorInf); },
-	                                         FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL,
-	                                         TaskPriority::Worker);
+	self->encryptionKeyRefresher = recurringAsync([&]() { return refreshEncryptionKeys(self, kmsConnectorInf); },
+	                                              FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL, /* interval */
+	                                              true, /* absoluteIntervalDelay */
+	                                              FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL, /* initialDelay */
+	                                              TaskPriority::Worker);
 
 	self->blobMetadataRefresher = recurring([&]() { refreshBlobMetadata(self, kmsConnectorInf); },
 	                                        SERVER_KNOBS->BLOB_METADATA_REFRESH_INTERVAL,
