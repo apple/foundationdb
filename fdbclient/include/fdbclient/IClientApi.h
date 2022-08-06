@@ -172,6 +172,9 @@ public:
 	virtual ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) = 0;
 	virtual ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) = 0;
 
+	virtual ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) = 0;
+	virtual ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) = 0;
+
 	// Interface to manage shared state across multiple connections to the same Database
 	virtual ThreadFuture<DatabaseSharedState*> createSharedState() = 0;
 	virtual void setSharedState(DatabaseSharedState* p) = 0;
