@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Metacluster.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupProgress.actor.h"
@@ -1157,6 +1158,17 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	RangeResult rawHistoryTags = wait(self->txnStateStore->readRange(serverTagHistoryKeys));
 	for (auto& kv : rawHistoryTags) {
 		self->allTags.push_back(decodeServerTagValue(kv.value));
+	}
+
+	Optional<Value> metaclusterRegistrationVal =
+	    wait(self->txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration.key));
+	Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
+	    MetaclusterRegistrationEntry::decode(metaclusterRegistrationVal);
+	if (metaclusterRegistration.present()) {
+		self->controllerData->db.metaclusterName = metaclusterRegistration.get().metaclusterName;
+		self->controllerData->db.clusterType = metaclusterRegistration.get().clusterType;
+	} else {
+		self->controllerData->db.clusterType = ClusterType::STANDALONE;
 	}
 
 	uniquify(self->allTags);

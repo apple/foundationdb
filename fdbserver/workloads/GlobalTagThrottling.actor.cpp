@@ -50,6 +50,7 @@ class GlobalTagThrottlingWorkload : public TestWorkload {
 				wait(tr->commit());
 				return Void();
 			} catch (Error& e) {
+				TraceEvent("GlobalTagThrottlingWorkload_SetupError").error(e);
 				wait(tr->onError(e));
 			}
 		};
