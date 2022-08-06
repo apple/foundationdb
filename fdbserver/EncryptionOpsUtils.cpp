@@ -34,7 +34,7 @@ bool isEncryptionOpSupported(EncryptOperationType operation_type, ClientDBInfo i
 	if (operation_type == TLOG_ENCRYPTION) {
 		return SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION;
 	} else if (operation_type == BLOB_GRANULE_ENCRYPTION) {
-		bool supported = SERVER_KNOBS->ENABLE_BLOB_GRANULE_ENCRYPTION && SERVER_KNOBS->BG_RANGE_SOURCE == "tenant";
+		bool supported = SERVER_KNOBS->ENABLE_BLOB_GRANULE_ENCRYPTION && SERVER_KNOBS->BG_METADATA_SOURCE == "tenant";
 		ASSERT((supported && SERVER_KNOBS->ENABLE_ENCRYPTION) || !supported);
 		return supported;
 	} else {
