@@ -498,6 +498,28 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_wait_purge_granules_complete(FDBDat
 	    FDBFuture*)(DB(db)->waitPurgeGranulesComplete(StringRef(purge_key_name, purge_key_name_length)).extractPtr());
 }
 
+extern "C" DLLEXPORT FDBFuture* fdb_database_blobbify_range(FDBDatabase* db,
+                                                            uint8_t const* begin_key_name,
+                                                            int begin_key_name_length,
+                                                            uint8_t const* end_key_name,
+                                                            int end_key_name_length) {
+	return (FDBFuture*)(DB(db)
+	                        ->blobbifyRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                    StringRef(end_key_name, end_key_name_length)))
+	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_unblobbify_range(FDBDatabase* db,
+                                                              uint8_t const* begin_key_name,
+                                                              int begin_key_name_length,
+                                                              uint8_t const* end_key_name,
+                                                              int end_key_name_length) {
+	return (FDBFuture*)(DB(db)
+	                        ->unblobbifyRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                      StringRef(end_key_name, end_key_name_length)))
+	                        .extractPtr());
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant, FDBTransaction** out_transaction) {
 	CATCH_AND_RETURN(*out_transaction = (FDBTransaction*)TENANT(tenant)->createTransaction().extractPtr(););
 }

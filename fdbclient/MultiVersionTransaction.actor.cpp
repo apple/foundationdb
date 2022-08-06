@@ -583,6 +583,36 @@ ThreadFuture<Void> DLDatabase::waitPurgeGranulesComplete(const KeyRef& purgeKey)
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
+ThreadFuture<bool> DLDatabase::blobbifyRange(const KeyRangeRef& keyRange) {
+	if (!api->databaseBlobbifyRange) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseBlobbifyRange(
+	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
+
+	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		bool ret = false;
+		ASSERT(!api->futureGetBool(f, &ret));
+		return ret;
+	});
+}
+
+ThreadFuture<bool> DLDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {
+	if (!api->databaseUnblobbifyRange) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseUnblobbifyRange(
+	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
+
+	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		bool ret = false;
+		ASSERT(!api->futureGetBool(f, &ret));
+		return ret;
+	});
+}
+
 // DLApi
 
 // Loads the specified function from a dynamic library
@@ -670,6 +700,9 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_database_wait_purge_granules_complete",
 	                   headerVersion >= 710);
+	loadClientFunction(&api->databaseBlobbifyRange, lib, fdbCPath, "fdb_database_blobbify_range", headerVersion >= 720);
+	loadClientFunction(
+	    &api->databaseUnblobbifyRange, lib, fdbCPath, "fdb_database_unblobbify_range", headerVersion >= 720);
 
 	loadClientFunction(
 	    &api->tenantCreateTransaction, lib, fdbCPath, "fdb_tenant_create_transaction", headerVersion >= 710);
@@ -1588,6 +1621,18 @@ ThreadFuture<Key> MultiVersionDatabase::purgeBlobGranules(const KeyRangeRef& key
 ThreadFuture<Void> MultiVersionDatabase::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
 	auto f = dbState->db ? dbState->db->waitPurgeGranulesComplete(purgeKey) : ThreadFuture<Void>(Never());
 	return abortableFuture(f, dbState->dbVar->get().onChange);
+}
+
+ThreadFuture<bool> MultiVersionDatabase::blobbifyRange(const KeyRangeRef& keyRange) {
+	auto dbVar = dbState->dbVar->get();
+	auto f = dbVar.value ? dbVar.value->blobbifyRange(keyRange) : ThreadFuture<bool>(Never());
+	return abortableFuture(f, dbVar.onChange);
+}
+
+ThreadFuture<bool> MultiVersionDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {
+	auto dbVar = dbState->dbVar->get();
+	auto f = dbVar.value ? dbVar.value->unblobbifyRange(keyRange) : ThreadFuture<bool>(Never());
+	return abortableFuture(f, dbVar.onChange);
 }
 
 // Returns the protocol version reported by the coordinator this client is connected to
