@@ -259,7 +259,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			for (auto localItr = self->dataDbs.find(clusterName1);
 			     localItr != self->dataDbs.find(clusterName2) && count < limit;
 			     ++localItr) {
-				fmt::print("Checking cluster {} {}\n", printable(localItr->first), localItr->second.registered);
 				if (localItr->second.registered) {
 					ASSERT(resultItr != clusterList.end());
 					ASSERT(resultItr->first == localItr->first);
