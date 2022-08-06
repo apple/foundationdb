@@ -155,6 +155,11 @@ struct TenantManagementWorkload : TestWorkload {
 	};
 
 	Future<Void> setup(Database const& cx) override {
+		if (clientId == 0 && g_network->isSimulated() && BUGGIFY) {
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob(
+			    "max_tenants_per_cluster", KnobValueRef::create(int{ deterministicRandom()->randomInt(20, 100) }));
+		}
+
 		if (clientId == 0 || !singleClient) {
 			return _setup(cx, this);
 		} else {

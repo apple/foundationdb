@@ -83,6 +83,10 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
+			if (g_network->isSimulated() && BUGGIFY) {
+				IKnobCollection::getMutableGlobalKnobCollection().setKnob(
+				    "max_tenants_per_cluster", KnobValueRef::create(int{ deterministicRandom()->randomInt(20, 100) }));
+			}
 			return _setup(cx, this);
 		} else {
 			return Void();
