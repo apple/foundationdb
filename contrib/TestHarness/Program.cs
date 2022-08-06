@@ -721,7 +721,7 @@ namespace SummarizeTest
                         process.Refresh();
                         if (process.HasExited)
                             return;
-                        long mem = process.PrivateMemorySize64;
+                        long mem = process.PagedMemorySize64;
                         MaxMem = Math.Max(MaxMem, mem);
                         //Console.WriteLine(string.Format("Process used {0} bytes", MaxMem));
                         Thread.Sleep(1000);
