@@ -540,7 +540,7 @@ struct DDQueue {
 	};
 
 	struct ServerCounter {
-		enum CountType { ProposedSource = 0, QueuedSource, LaunchedSource, LaunchedDest };
+		enum CountType : uint8_t { ProposedSource = 0, QueuedSource, LaunchedSource, LaunchedDest };
 
 	private:
 		typedef std::array<int, 4> Item; // one for each CountType
@@ -551,24 +551,29 @@ struct DDQueue {
 		std::string toString(const Item& item) const {
 			return format("%d %d %d %d", item[0], item[1], item[2], item[3]);
 		}
+
 		void traceReasonItem(TraceEvent* event, const ReasonItem& item) const {
 			for (int i = 0; i < item.size(); ++i) {
 				event->detail(RelocateReason(i).toString(), toString(item[i]));
 			}
 		}
 
-	public:
-		void clear() { counter.clear(); }
-		bool has(const UID& id) const { return counter.find(id) != counter.end(); }
-		int& get(const UID& id, RelocateReason reason, CountType type) {
+		void increase(const UID& id, RelocateReason reason, CountType type) {
 			int idx = (int)(reason);
 			ASSERT(idx >= 0 && idx < 3);
-			return counter[id][idx][(int)type];
+			counter[id][idx][(int)type] += 1;
+		}
+
+	public:
+		void clear() { counter.clear(); }
+
+		int get(const UID& id, RelocateReason reason, CountType type) const {
+			return counter.at(id)[(int)reason][(int)type];
 		}
 
 		void increaseForTeam(const std::vector<UID>& ids, RelocateReason reason, CountType type) {
 			for (auto& id : ids) {
-				get(id, reason, type)++;
+				increase(id, reason, type);
 			}
 		}
 
@@ -578,6 +583,14 @@ struct DDQueue {
 				event.detail("ServerId", id);
 				traceReasonItem(&event, reasonItem);
 			}
+		}
+
+		size_t size() const { return counter.size(); }
+
+		// for random test
+		static CountType randomCountType() {
+			int i = deterministicRandom()->randomInt(0, (int)LaunchedDest + 1);
+			return (CountType)i;
 		}
 	};
 
@@ -705,6 +718,7 @@ struct DDQueue {
 	    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
 	    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
 	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")) {}
+	DDQueue() = default;
 
 	void validate() {
 		if (EXPENSIVE_VALIDATION) {
@@ -1269,7 +1283,7 @@ struct DDQueue {
 			serverCounter.traceAll(distributorId);
 			serverCounter.clear();
 		};
-		return recurring(f, SERVER_KNOBS->DD_QUEUE_COUNTER_REFRESH_INTERVAL, TaskPriority::FlushTrace);
+		return recurring(f, SERVER_KNOBS->DD_QUEUE_COUNTER_REFRESH_INTERVAL);
 	}
 };
 
@@ -2459,4 +2473,28 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 			TraceEvent(SevError, "DataDistributionQueueError", distributorId).error(e);
 		throw e;
 	}
+}
+
+TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
+	state double duration = 2 * SERVER_KNOBS->DD_QUEUE_COUNTER_REFRESH_INTERVAL;
+	state DDQueue self;
+	state Future<Void> counterFuture = self.periodicalRefreshCounter();
+	state Future<Void> finishFuture = delay(duration);
+	std::cout << "Start trace counter unit test for " << duration << "s ...\n";
+	loop choose {
+		when(wait(counterFuture)) {}
+		when(wait(finishFuture)) { break; }
+		when(wait(delayJittered(2.0))) {
+			std::vector<UID> team(3);
+			for (int i = 0; i < team.size(); ++i) {
+				team[i] = UID(deterministicRandom()->randomInt(1, 5), 0);
+			}
+			auto reason = RelocateReason(deterministicRandom()->randomInt(0, RelocateReason::typeCount()));
+			auto countType = DDQueue::ServerCounter::randomCountType();
+			self.serverCounter.increaseForTeam(team, reason, countType);
+			ASSERT(self.serverCounter.get(team[0], reason, countType));
+		}
+	}
+	std::cout << "Finished.";
+	return Void();
 }

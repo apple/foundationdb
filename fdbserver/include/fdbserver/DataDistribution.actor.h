@@ -55,6 +55,7 @@ public:
 		}
 	}
 	operator int() const { return (int)value; }
+	constexpr static int8_t typeCount() { return 3; }
 
 private:
 	Value value;
