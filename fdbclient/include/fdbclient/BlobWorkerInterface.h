@@ -172,6 +172,7 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 	KeyRange granuleRange;
 	bool doSplit;
 	bool writeHotSplit;
+	bool initialSplitTooBig;
 	int64_t continueEpoch;
 	int64_t continueSeqno;
 	UID granuleID;
@@ -180,11 +181,13 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 	bool mergeCandidate;
 	int64_t originalEpoch;
 	int64_t originalSeqno;
+	Optional<Key> proposedSplitKey;
 
 	GranuleStatusReply() {}
 	explicit GranuleStatusReply(KeyRange range,
 	                            bool doSplit,
 	                            bool writeHotSplit,
+	                            bool initialSplitTooBig,
 	                            int64_t continueEpoch,
 	                            int64_t continueSeqno,
 	                            UID granuleID,
@@ -193,11 +196,15 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 	                            bool mergeCandidate,
 	                            int64_t originalEpoch,
 	                            int64_t originalSeqno)
-	  : granuleRange(range), doSplit(doSplit), writeHotSplit(writeHotSplit), continueEpoch(continueEpoch),
-	    continueSeqno(continueSeqno), granuleID(granuleID), startVersion(startVersion), blockedVersion(blockedVersion),
-	    mergeCandidate(mergeCandidate), originalEpoch(originalEpoch), originalSeqno(originalSeqno) {}
+	  : granuleRange(range), doSplit(doSplit), writeHotSplit(writeHotSplit), initialSplitTooBig(initialSplitTooBig),
+	    continueEpoch(continueEpoch), continueSeqno(continueSeqno), granuleID(granuleID), startVersion(startVersion),
+	    blockedVersion(blockedVersion), mergeCandidate(mergeCandidate), originalEpoch(originalEpoch),
+	    originalSeqno(originalSeqno) {}
 
-	int expectedSize() const { return sizeof(GranuleStatusReply) + granuleRange.expectedSize(); }
+	int expectedSize() const {
+		return sizeof(GranuleStatusReply) + granuleRange.expectedSize() +
+		       (proposedSplitKey.present() ? proposedSplitKey.get().expectedSize() : 0);
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -207,6 +214,7 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 		           granuleRange,
 		           doSplit,
 		           writeHotSplit,
+		           initialSplitTooBig,
 		           continueEpoch,
 		           continueSeqno,
 		           granuleID,
@@ -214,7 +222,8 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 		           blockedVersion,
 		           mergeCandidate,
 		           originalEpoch,
-		           originalSeqno);
+		           originalSeqno,
+		           proposedSplitKey);
 	}
 };
 
