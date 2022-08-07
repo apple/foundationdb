@@ -482,8 +482,14 @@ struct StorageWiggleMetrics {
 };
 
 struct StorageWiggler : ReferenceCounted<StorageWiggler> {
+	static constexpr double MIN_ON_CHECK_DELAY_SEC = 5.0;
+
+private:
+	mutable Debouncer pqCanCheck{ MIN_ON_CHECK_DELAY_SEC };
+
+public:
 	enum State : uint8_t { INVALID = 0, RUN = 1, PAUSE = 2 };
-	AsyncVar<bool> nonEmpty;
+
 	DDTeamCollection const* teamCollection;
 	StorageWiggleMetrics metrics;
 	// data structures
@@ -496,7 +502,7 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	State wiggleState = State::INVALID;
 	double lastStateChangeTs = 0.0; // timestamp describes when did the state change
 
-	explicit StorageWiggler(DDTeamCollection* collection) : nonEmpty(false), teamCollection(collection){};
+	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection){};
 	// add server to wiggling queue
 	void addServer(const UID& serverId, const StorageMetadataType& metadata);
 	// remove server from wiggling queue
@@ -505,8 +511,14 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	void updateMetadata(const UID& serverId, const StorageMetadataType& metadata);
 	bool contains(const UID& serverId) const { return pq_handles.count(serverId) > 0; }
 	bool empty() const { return wiggle_pq.empty(); }
-	Optional<UID> getNextServerId();
 
+	// It's guarantee that When a.metadata >= b.metadata, if !eligible(a) then !eligible(b)
+	bool eligible(const UID& serverId, const StorageMetadataType& metadata) const;
+
+	// try to return the next storage server that is eligible for wiggle
+	Optional<UID> getNextServerId();
+	// next check time to avoid busy loop
+	Future<Void> onCheck() const;
 	State getWiggleState() const { return wiggleState; }
 	void setWiggleState(State s) {
 		if (wiggleState != s) {
