@@ -3330,13 +3330,10 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 			                                                                configDBType),
 			                              "ClusterController"));
 		} else {
-			actors.push_back(reportErrors(clusterController(connRecord,
-			                                                cc,
-			                                                asyncPriorityInfo,
-			                                                recoveredDiskFiles.getFuture(),
-			                                                localities,
-			                                                configDBType),
-			                              "ClusterController"));
+			actors.push_back(reportErrors(
+			    clusterController(
+			        connRecord, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, configDBType),
+			    "ClusterController"));
 		}
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
 		actors.push_back(reportErrorsExcept(workerServer(connRecord,
