@@ -2808,7 +2808,8 @@ ACTOR Future<Void> updateNewestSoftwareVersion(std::string folder,
 }
 
 ACTOR Future<Void> testAndUpdateSoftwareVersionCompatibility(std::string dataFolder, UID processIDUid) {
-	ErrorOr<SWVersion> swVersion = wait(errorOr(testSoftwareVersionCompatibility(dataFolder, currentProtocolVersion)));
+	ErrorOr<SWVersion> swVersion =
+	    wait(errorOr(testSoftwareVersionCompatibility(dataFolder, currentProtocolVersion())));
 	if (swVersion.isError()) {
 		TraceEvent(SevWarnAlways, "SWVersionCompatibilityCheckError", processIDUid).error(swVersion.getError());
 		throw swVersion.getError();
@@ -2817,16 +2818,16 @@ ACTOR Future<Void> testAndUpdateSoftwareVersionCompatibility(std::string dataFol
 	TraceEvent(SevInfo, "SWVersionCompatible", processIDUid).detail("SWVersion", swVersion.get());
 
 	if (!swVersion.get().isValid() ||
-	    currentProtocolVersion > ProtocolVersion(swVersion.get().newestProtocolVersion())) {
+	    currentProtocolVersion() > ProtocolVersion(swVersion.get().newestProtocolVersion())) {
 		ErrorOr<Void> updatedSWVersion = wait(errorOr(updateNewestSoftwareVersion(
-		    dataFolder, currentProtocolVersion, currentProtocolVersion, minCompatibleProtocolVersion)));
+		    dataFolder, currentProtocolVersion(), currentProtocolVersion(), minCompatibleProtocolVersion)));
 		if (updatedSWVersion.isError()) {
 			throw updatedSWVersion.getError();
 		}
-	} else if (currentProtocolVersion < ProtocolVersion(swVersion.get().newestProtocolVersion())) {
+	} else if (currentProtocolVersion() < ProtocolVersion(swVersion.get().newestProtocolVersion())) {
 		ErrorOr<Void> updatedSWVersion = wait(
 		    errorOr(updateNewestSoftwareVersion(dataFolder,
-		                                        currentProtocolVersion,
+		                                        currentProtocolVersion(),
 		                                        ProtocolVersion(swVersion.get().newestProtocolVersion()),
 		                                        ProtocolVersion(swVersion.get().lowestCompatibleProtocolVersion()))));
 		if (updatedSWVersion.isError()) {
@@ -2835,7 +2836,7 @@ ACTOR Future<Void> testAndUpdateSoftwareVersionCompatibility(std::string dataFol
 	}
 
 	ErrorOr<SWVersion> newSWVersion =
-	    wait(errorOr(testSoftwareVersionCompatibility(dataFolder, currentProtocolVersion)));
+	    wait(errorOr(testSoftwareVersionCompatibility(dataFolder, currentProtocolVersion())));
 	if (newSWVersion.isError()) {
 		TraceEvent(SevWarnAlways, "SWVersionCompatibilityCheckError", processIDUid).error(newSWVersion.getError());
 		throw newSWVersion.getError();

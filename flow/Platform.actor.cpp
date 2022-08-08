@@ -3589,11 +3589,16 @@ void crashHandler(int sig) {
 	//  but the idea is that we're about to crash anyway...
 	std::string backtrace = platform::get_backtrace();
 
-	bool error = (sig != SIGUSR2);
+	bool error = (sig != SIGUSR2 && sig != SIGTERM);
 
 	StreamCipherKey::cleanup();
 	StreamCipher::cleanup();
 	BlobCipherKeyCache::cleanup();
+
+	fprintf(error ? stderr : stdout, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
+	if (error) {
+		fprintf(stderr, "Trace: %s\n", backtrace.c_str());
+	}
 
 	fflush(stdout);
 	{
@@ -3605,8 +3610,9 @@ void crashHandler(int sig) {
 	}
 	flushTraceFileVoid();
 
-	fprintf(stderr, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
-	fprintf(stderr, "Trace: %s\n", backtrace.c_str());
+#ifdef USE_GCOV
+	__gcov_flush();
+#endif
 
 	struct sigaction sa;
 	sa.sa_handler = SIG_DFL;
@@ -3646,6 +3652,7 @@ void registerCrashHandler() {
 	sigaction(SIGSEGV, &action, nullptr);
 	sigaction(SIGBUS, &action, nullptr);
 	sigaction(SIGUSR2, &action, nullptr);
+	sigaction(SIGTERM, &action, nullptr);
 #else
 	// No crash handler for other platforms!
 #endif

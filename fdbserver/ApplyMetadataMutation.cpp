@@ -656,7 +656,7 @@ private:
 	}
 
 	void checkSetTenantMapPrefix(MutationRef m) {
-		KeyRef prefix = TenantMetadata::tenantMap.subspace.begin;
+		KeyRef prefix = TenantMetadata::tenantMap().subspace.begin;
 		if (m.param1.startsWith(prefix)) {
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
@@ -692,7 +692,7 @@ private:
 	}
 
 	void checkSetMetaclusterRegistration(MutationRef m) {
-		if (m.param1 == MetaclusterMetadata::metaclusterRegistration.key) {
+		if (m.param1 == MetaclusterMetadata::metaclusterRegistration().key) {
 			MetaclusterRegistrationEntry entry = MetaclusterRegistrationEntry::decode(m.param2);
 
 			TraceEvent("SetMetaclusterRegistration", dbgid)
@@ -1055,7 +1055,7 @@ private:
 	}
 
 	void checkClearTenantMapPrefix(KeyRangeRef range) {
-		KeyRangeRef subspace = TenantMetadata::tenantMap.subspace;
+		KeyRangeRef subspace = TenantMetadata::tenantMap().subspace;
 		if (subspace.intersects(range)) {
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
@@ -1101,11 +1101,11 @@ private:
 	}
 
 	void checkClearMetaclusterRegistration(KeyRangeRef range) {
-		if (range.contains(MetaclusterMetadata::metaclusterRegistration.key)) {
+		if (range.contains(MetaclusterMetadata::metaclusterRegistration().key)) {
 			TraceEvent("ClearMetaclusterRegistration", dbgid);
 
 			if (!initialCommit) {
-				txnStateStore->clear(singleKeyRange(MetaclusterMetadata::metaclusterRegistration.key));
+				txnStateStore->clear(singleKeyRange(MetaclusterMetadata::metaclusterRegistration().key));
 			}
 
 			confChange = true;

@@ -172,8 +172,7 @@ function(stage_correctness_package)
   file(MAKE_DIRECTORY ${STAGE_OUT_DIR}/bin)
   string(LENGTH "${CMAKE_SOURCE_DIR}/tests/" base_length)
   foreach(test IN LISTS TEST_NAMES)
-    if(("${TEST_TYPE_${test}}" STREQUAL "simulation") AND
-        (${test} MATCHES ${TEST_PACKAGE_INCLUDE}) AND
+    if((${test} MATCHES ${TEST_PACKAGE_INCLUDE}) AND
         (NOT ${test} MATCHES ${TEST_PACKAGE_EXCLUDE}))
       foreach(file IN LISTS TEST_FILES_${test})
         string(SUBSTRING ${file} ${base_length} -1 rel_out_file)

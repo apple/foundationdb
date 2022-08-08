@@ -1,5 +1,5 @@
 /*
- * Metacluster.cpp
+ * ProtocolVersion.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -17,22 +17,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "flow/ProtocolVersion.h"
 
-#include "fdbclient/Metacluster.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
+namespace {
 
-FDB_DEFINE_BOOLEAN_PARAM(AddNewTenants);
-FDB_DEFINE_BOOLEAN_PARAM(RemoveMissingTenants);
+ProtocolVersion g_currentProtocolVersion(defaultProtocolVersionValue);
 
-json_spirit::mObject ClusterUsage::toJson() const {
-	json_spirit::mObject obj;
-	obj["num_tenant_groups"] = numTenantGroups;
-	return obj;
 }
 
-KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>&
-MetaclusterMetadata::metaclusterRegistration() {
-	static KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())> instance(
-	    "\xff/metacluster/clusterRegistration"_sr, IncludeVersion());
-	return instance;
+ProtocolVersion currentProtocolVersion() {
+	static ProtocolVersion firstReturnedProtocolVersion = g_currentProtocolVersion;
+	// Make sure the protocol version is not changed, once it is already in use
+	ASSERT(firstReturnedProtocolVersion == g_currentProtocolVersion);
+	return g_currentProtocolVersion;
+}
+
+void useFutureProtocolVersion() {
+	g_currentProtocolVersion = ProtocolVersion(futureProtocolVersionValue);
 }

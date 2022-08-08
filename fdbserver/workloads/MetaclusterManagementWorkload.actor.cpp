@@ -83,6 +83,10 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
+			if (g_network->isSimulated() && BUGGIFY) {
+				IKnobCollection::getMutableGlobalKnobCollection().setKnob(
+				    "max_tenants_per_cluster", KnobValueRef::create(int{ deterministicRandom()->randomInt(20, 100) }));
+			}
 			return _setup(cx, this);
 		} else {
 			return Void();
@@ -538,7 +542,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				wait(
 				    store(metaclusterRegistration,
-				          MetaclusterMetadata::metaclusterRegistration.get(clusterData.db.getReference())) &&
+				          MetaclusterMetadata::metaclusterRegistration().get(clusterData.db.getReference())) &&
 				    store(tenants,
 				          TenantAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, clusterData.tenants.size() + 1)));
 				break;
