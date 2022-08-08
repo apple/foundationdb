@@ -201,20 +201,20 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	}
 
 	@Override
-	public CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion, boolean force, Executor executor) {
+	public CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion, boolean force, Executor e) {
 		pointerReadLock.lock();
 		try {
-			return new FutureKey(Database_purgeBlobGranules(getPtr(), beginKey, endKey, purgeVersion, force), executor, eventKeeper);
+			return new FutureKey(Database_purgeBlobGranules(getPtr(), beginKey, endKey, purgeVersion, force), e, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
 		}
 	}
 
 	@Override
-	public CompletableFuture<Void> waitPurgeGranulesComplete(byte[] purgeKey, Executor executor) {
+	public CompletableFuture<Void> waitPurgeGranulesComplete(byte[] purgeKey, Executor e) {
 		pointerReadLock.lock();
 		try {
-			return new FutureVoid(Database_waitPurgeGranulesComplete(getPtr(), purgeKey), executor);
+			return new FutureVoid(Database_waitPurgeGranulesComplete(getPtr(), purgeKey), e);
 		} finally {
 			pointerReadLock.unlock();
 		}
