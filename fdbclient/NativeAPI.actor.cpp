@@ -3313,6 +3313,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 					                         useTenant ? trState->getTenantInfo() : TenantInfo(),
 					                         key,
 					                         ver,
+					                         trState->cacheResult,
 					                         trState->cx->sampleReadTags() ? trState->options.readTags
 					                                                       : Optional<TagSet>(),
 					                         getValueID,
@@ -3438,6 +3439,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 			                  useTenant ? trState->getTenantInfo() : TenantInfo(),
 			                  k,
 			                  version.get(),
+			                  trState->cacheResult,
 			                  trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>(),
 			                  getKeyID,
 			                  ssLatestCommitVersions);
@@ -4265,6 +4267,8 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 			setMatchIndex<GetKeyValuesFamilyRequest>(req, matchIndex);
 			req.tenantInfo = useTenant ? trState->getTenantInfo() : TenantInfo();
 			req.isFetchKeys = (trState->taskID == TaskPriority::FetchKeys);
+			// Don't cache for fetch
+			req.cacheResult = !req.isFetchKeys;
 			req.version = readVersion;
 
 			trState->cx->getLatestCommitVersions(
@@ -4727,6 +4731,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
+			req.cacheResult = trState->cacheResult;
 			// FIXME: buggify byte limits on internal functions that use them, instead of globally
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
 			req.debugID = trState->debugID;

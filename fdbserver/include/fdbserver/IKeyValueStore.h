@@ -75,14 +75,20 @@ public:
 		HIGH,
 	};
 
+	struct ReadOptions {
+		ReadOptions(ReadType type = ReadType::NORMAL, bool cacheResult = true) : type(type), cacheResult(cacheResult){};
+		ReadType type;
+		bool cacheResult;
+	};
+
 	virtual Future<Optional<Value>> readValue(KeyRef key,
-	                                          ReadType type = ReadType::NORMAL,
+	                                          ReadOptions const& options = ReadOptions(),
 	                                          Optional<UID> debugID = Optional<UID>()) = 0;
 
 	// Like readValue(), but returns only the first maxLength bytes of the value if it is longer
 	virtual Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                                int maxLength,
-	                                                ReadType type = ReadType::NORMAL,
+	                                                ReadOptions const& options = ReadOptions(),
 	                                                Optional<UID> debugID = Optional<UID>()) = 0;
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
@@ -90,7 +96,7 @@ public:
 	virtual Future<RangeResult> readRange(KeyRangeRef keys,
 	                                      int rowLimit = 1 << 30,
 	                                      int byteLimit = 1 << 30,
-	                                      ReadType type = ReadType::NORMAL) = 0;
+	                                      ReadOptions const& options = ReadOptions()) = 0;
 
 	// Shard management APIs.
 	// Adds key range to a physical shard.

@@ -198,11 +198,13 @@ public:
 		return c;
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) override {
+	Future<Optional<Value>> readValue(KeyRef key,
+	                                  IKeyValueStore::ReadOptions const& options,
+	                                  Optional<UID> debugID) override {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
-			return waitAndReadValue(this, key);
+			return waitAndReadValue(this, key, options);
 
 		auto it = data.find(key);
 		if (it == data.end())
@@ -212,12 +214,12 @@ public:
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
-	                                        IKeyValueStore::ReadType,
+	                                        IKeyValueStore::ReadOptions const& options,
 	                                        Optional<UID> debugID) override {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
-			return waitAndReadValuePrefix(this, key, maxLength);
+			return waitAndReadValuePrefix(this, key, maxLength, options);
 
 		auto it = data.find(key);
 		if (it == data.end())
@@ -232,11 +234,14 @@ public:
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, IKeyValueStore::ReadType) override {
+	Future<RangeResult> readRange(KeyRangeRef keys,
+	                              int rowLimit,
+	                              int byteLimit,
+	                              IKeyValueStore::ReadOptions const& options) override {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
-			return waitAndReadRange(this, keys, rowLimit, byteLimit);
+			return waitAndReadRange(this, keys, rowLimit, byteLimit, options);
 
 		RangeResult result;
 		if (rowLimit == 0) {
@@ -916,20 +921,26 @@ private:
 		}
 	}
 
-	ACTOR static Future<Optional<Value>> waitAndReadValue(KeyValueStoreMemory* self, Key key) {
+	ACTOR static Future<Optional<Value>> waitAndReadValue(KeyValueStoreMemory* self,
+	                                                      Key key,
+	                                                      IKeyValueStore::ReadOptions options) {
 		wait(self->recovering);
-		return static_cast<IKeyValueStore*>(self)->readValue(key).get();
+		return static_cast<IKeyValueStore*>(self)->readValue(key, options).get();
 	}
-	ACTOR static Future<Optional<Value>> waitAndReadValuePrefix(KeyValueStoreMemory* self, Key key, int maxLength) {
+	ACTOR static Future<Optional<Value>> waitAndReadValuePrefix(KeyValueStoreMemory* self,
+	                                                            Key key,
+	                                                            int maxLength,
+	                                                            IKeyValueStore::ReadOptions options) {
 		wait(self->recovering);
-		return static_cast<IKeyValueStore*>(self)->readValuePrefix(key, maxLength).get();
+		return static_cast<IKeyValueStore*>(self)->readValuePrefix(key, maxLength, options).get();
 	}
 	ACTOR static Future<RangeResult> waitAndReadRange(KeyValueStoreMemory* self,
 	                                                  KeyRange keys,
 	                                                  int rowLimit,
-	                                                  int byteLimit) {
+	                                                  int byteLimit,
+	                                                  IKeyValueStore::ReadOptions options) {
 		wait(self->recovering);
-		return static_cast<IKeyValueStore*>(self)->readRange(keys, rowLimit, byteLimit).get();
+		return static_cast<IKeyValueStore*>(self)->readRange(keys, rowLimit, byteLimit, options).get();
 	}
 	ACTOR static Future<Void> waitAndCommit(KeyValueStoreMemory* self, bool sequential) {
 		wait(self->recovering);

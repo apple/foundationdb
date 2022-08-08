@@ -403,24 +403,24 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	}
 
 	Future<Optional<Value>> readValue(KeyRef key,
-	                                  ReadType type = ReadType::NORMAL,
+	                                  IKeyValueStore::ReadOptions const& options = IKeyValueStore::ReadOptions(),
 	                                  Optional<UID> debugID = Optional<UID>()) override {
-		return readValueImpl(this, IKVSGetValueRequest{ key, type, debugID, ReplyPromise<Optional<Value>>() });
+		return readValueImpl(this, IKVSGetValueRequest{ key, options.type, debugID, ReplyPromise<Optional<Value>>() });
 	}
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
-	                                        ReadType type = ReadType::NORMAL,
+	                                        IKeyValueStore::ReadOptions const& options = IKeyValueStore::ReadOptions(),
 	                                        Optional<UID> debugID = Optional<UID>()) override {
 		return interf.readValuePrefix.getReply(
-		    IKVSReadValuePrefixRequest{ key, maxLength, type, debugID, ReplyPromise<Optional<Value>>() });
+		    IKVSReadValuePrefixRequest{ key, maxLength, options.type, debugID, ReplyPromise<Optional<Value>>() });
 	}
 
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit = 1 << 30,
 	                              int byteLimit = 1 << 30,
-	                              ReadType type = ReadType::NORMAL) override {
-		IKVSReadRangeRequest req{ keys, rowLimit, byteLimit, type, ReplyPromise<IKVSReadRangeReply>() };
+	                              IKeyValueStore::ReadOptions const& options = IKeyValueStore::ReadOptions()) override {
+		IKVSReadRangeRequest req{ keys, rowLimit, byteLimit, options.type, ReplyPromise<IKVSReadRangeReply>() };
 		return fmap([](const IKVSReadRangeReply& reply) { return reply.toRangeResult(); },
 		            interf.readRange.getReply(req));
 	}

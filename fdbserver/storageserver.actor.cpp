@@ -278,29 +278,30 @@ struct StorageServerDisk {
 	//  - "a", if key "a" exist
 	//  - "b", if key "a" doesn't exist, and "b" is the next existing key in total order
 	//  - allKeys.end, if keyrange [a, allKeys.end) is empty
-	Future<Key> readNextKeyInclusive(KeyRef key, IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL) {
+	Future<Key> readNextKeyInclusive(KeyRef key,
+	                                 IKeyValueStore::ReadOptions const& options = IKeyValueStore::ReadOptions()) {
 		++(*kvScans);
-		return readFirstKey(storage, KeyRangeRef(key, allKeys.end), type);
+		return readFirstKey(storage, KeyRangeRef(key, allKeys.end), options);
 	}
 	Future<Optional<Value>> readValue(KeyRef key,
-	                                  IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL,
+	                                  IKeyValueStore::ReadOptions const& options = IKeyValueStore::ReadOptions(),
 	                                  Optional<UID> debugID = Optional<UID>()) {
 		++(*kvGets);
-		return storage->readValue(key, type, debugID);
+		return storage->readValue(key, options, debugID);
 	}
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
-	                                        IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL,
+	                                        IKeyValueStore::ReadOptions const& options = IKeyValueStore::ReadOptions(),
 	                                        Optional<UID> debugID = Optional<UID>()) {
 		++(*kvGets);
-		return storage->readValuePrefix(key, maxLength, type, debugID);
+		return storage->readValuePrefix(key, maxLength, options, debugID);
 	}
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit = 1 << 30,
 	                              int byteLimit = 1 << 30,
-	                              IKeyValueStore::ReadType type = IKeyValueStore::ReadType::NORMAL) {
+	                              IKeyValueStore::ReadOptions const& options = IKeyValueStore::ReadOptions()) {
 		++(*kvScans);
-		return storage->readRange(keys, rowLimit, byteLimit, type);
+		return storage->readRange(keys, rowLimit, byteLimit, options);
 	}
 
 	Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) { return storage->checkpoint(request); }
@@ -327,8 +328,10 @@ private:
 	IKeyValueStore* storage;
 	void writeMutations(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
 
-	ACTOR static Future<Key> readFirstKey(IKeyValueStore* storage, KeyRangeRef range, IKeyValueStore::ReadType type) {
-		RangeResult r = wait(storage->readRange(range, 1, 1 << 30, type));
+	ACTOR static Future<Key> readFirstKey(IKeyValueStore* storage,
+	                                      KeyRangeRef range,
+	                                      IKeyValueStore::ReadOptions options) {
+		RangeResult r = wait(storage->readRange(range, 1, 1 << 30, options));
 		if (r.size())
 			return r[0].key;
 		else
@@ -1707,8 +1710,14 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 			state Version latest = data->version.get();
 			TEST(latest >= minVersion &&
 			     latest < data->data().latestVersion); // Starting watch loop with latestVersion > data->version
-			GetValueRequest getReq(
-			    span.context, TenantInfo(), metadata->key, latest, metadata->tags, metadata->debugID, VersionVector());
+			GetValueRequest getReq(span.context,
+			                       TenantInfo(),
+			                       metadata->key,
+			                       latest,
+			                       true,
+			                       metadata->tags,
+			                       metadata->debugID,
+			                       VersionVector());
 			state Future<Void> getValue = getValueQ(
 			    data, getReq); // we are relying on the delay zero at the top of getValueQ, if removed we need one here
 			GetValueReply reply = wait(getReq.reply.getFuture());
@@ -2235,6 +2244,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	state int remainingLimitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	state int remainingDurableBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	state Version startVersion = data->version.get();
+	state IKeyValueStore::ReadOptions options;
 
 	if (DEBUG_CF_TRACE) {
 		TraceEvent(SevDebug, "TraceChangeFeedMutationsBegin", data->thisServerID)
@@ -2326,7 +2336,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    data->storage.readRange(KeyRangeRef(changeFeedDurableKey(req.rangeID, std::max(req.begin, emptyVersion)),
 		                                        changeFeedDurableKey(req.rangeID, req.end)),
 		                            1 << 30,
-		                            remainingDurableBytes));
+		                            remainingDurableBytes,
+		                            options));
 
 		data->counters.kvScanBytes += res.logicalSize();
 
@@ -2955,6 +2966,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 			                    pOriginalReq->tenantInfo,
 			                    key,
 			                    version,
+			                    pOriginalReq->cacheResult,
 			                    pOriginalReq->tags,
 			                    pOriginalReq->debugID,
 			                    VersionVector());
@@ -2999,7 +3011,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
                                           int limit,
                                           int* pLimitBytes,
                                           SpanContext parentSpan,
-                                          IKeyValueStore::ReadType type,
+                                          IKeyValueStore::ReadOptions options,
                                           Optional<Key> tenantPrefix) {
 	state GetKeyValuesReply result;
 	state StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
@@ -3075,7 +3087,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			// Read the data on disk up to vCurrent (or the end of the range)
 			readEnd = vCurrent ? std::min(vCurrent.key(), range.end) : range.end;
 			RangeResult atStorageVersion =
-			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type));
+			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, options));
 			data->counters.kvScanBytes += atStorageVersion.logicalSize();
 
 			ASSERT(atStorageVersion.size() <= limit);
@@ -3168,7 +3180,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			readBegin = vCurrent ? std::max(vCurrent->isClearTo() ? vCurrent->getEndKey() : vCurrent.key(), range.begin)
 			                     : range.begin;
 			RangeResult atStorageVersion =
-			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type));
+			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, options));
 			data->counters.kvScanBytes += atStorageVersion.logicalSize();
 
 			ASSERT(atStorageVersion.size() <= -limit);
@@ -3238,7 +3250,7 @@ ACTOR Future<Key> findKey(StorageServer* data,
                           KeyRange range,
                           int* pOffset,
                           SpanContext parentSpan,
-                          IKeyValueStore::ReadType type)
+                          IKeyValueStore::ReadOptions options)
 // Attempts to find the key indicated by sel in the data at version, within range.
 // Precondition: selectorInRange(sel, range)
 // If it is found, offset is set to 0 and a key is returned which falls inside range.
@@ -3277,7 +3289,7 @@ ACTOR Future<Key> findKey(StorageServer* data,
 	              (distance + skipEqualKey) * sign,
 	              &maxBytes,
 	              span.context,
-	              type,
+	              options,
 	              Optional<Key>()));
 	state bool more = rep.more && rep.data.size() != distance + skipEqualKey;
 
@@ -3292,7 +3304,7 @@ ACTOR Future<Key> findKey(StorageServer* data,
 		                                        -2,
 		                                        &maxBytes,
 		                                        span.context,
-		                                        type,
+		                                        options,
 		                                        Optional<Key>()));
 		rep = rep2;
 		more = rep.more && rep.data.size() != distance + skipEqualKey;
@@ -3358,8 +3370,9 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 {
 	state Span span("SS:getKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state IKeyValueStore::ReadType type =
-	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
+	state IKeyValueStore::ReadOptions options;
+	options.cacheResult = req.cacheResult;
+	options.type = req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -3418,12 +3431,13 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 		state int offset1 = 0;
 		state int offset2;
-		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
-		                               ? Future<Key>(req.begin.getKey())
-		                               : findKey(data, req.begin, version, searchRange, &offset1, span.context, type);
+		state Future<Key> fBegin =
+		    req.begin.isFirstGreaterOrEqual()
+		        ? Future<Key>(req.begin.getKey())
+		        : findKey(data, req.begin, version, searchRange, &offset1, span.context, options);
 		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
 		                             ? Future<Key>(req.end.getKey())
-		                             : findKey(data, req.end, version, searchRange, &offset2, span.context, type);
+		                             : findKey(data, req.end, version, searchRange, &offset2, span.context, options);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 
@@ -3469,7 +3483,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			                                      req.limit,
 			                                      &remainingLimitBytes,
 			                                      span.context,
-			                                      type,
+			                                      options,
 			                                      tenantPrefix));
 			GetKeyValuesReply r = _r;
 
@@ -3566,6 +3580,8 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		req.limit = SERVER_KNOBS->QUICK_GET_KEY_VALUES_LIMIT;
 		req.limitBytes = SERVER_KNOBS->QUICK_GET_KEY_VALUES_LIMIT_BYTES;
 		req.isFetchKeys = false;
+		// Don't cache for fetch
+		req.cacheResult = !req.isFetchKeys && pOriginalReq->cacheResult;
 		req.tags = pOriginalReq->tags;
 		req.ssLatestCommitVersions = VersionVector();
 		req.debugID = pOriginalReq->debugID;
@@ -4078,8 +4094,9 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 {
 	state Span span("SS:getMappedKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state IKeyValueStore::ReadType type =
-	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
+	state IKeyValueStore::ReadOptions options;
+	options.cacheResult = req.cacheResult;
+	options.type = req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -4139,12 +4156,13 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 
 		state int offset1 = 0;
 		state int offset2;
-		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
-		                               ? Future<Key>(req.begin.getKey())
-		                               : findKey(data, req.begin, version, searchRange, &offset1, span.context, type);
+		state Future<Key> fBegin =
+		    req.begin.isFirstGreaterOrEqual()
+		        ? Future<Key>(req.begin.getKey())
+		        : findKey(data, req.begin, version, searchRange, &offset1, span.context, options);
 		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
 		                             ? Future<Key>(req.end.getKey())
-		                             : findKey(data, req.end, version, searchRange, &offset2, span.context, type);
+		                             : findKey(data, req.end, version, searchRange, &offset2, span.context, options);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 
@@ -4204,7 +4222,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			                                                     req.limit,
 			                                                     &remainingLimitBytes,
 			                                                     span.context,
-			                                                     type,
+			                                                     options,
 			                                                     tenantPrefix));
 
 			state GetMappedKeyValuesReply r;
@@ -4286,8 +4304,9 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 {
 	state Span span("SS:getKeyValuesStream"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state IKeyValueStore::ReadType type =
-	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
+	state IKeyValueStore::ReadOptions options;
+	options.cacheResult = req.cacheResult;
+	options.type = req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -4346,12 +4365,13 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 		state int offset1 = 0;
 		state int offset2;
-		state Future<Key> fBegin = req.begin.isFirstGreaterOrEqual()
-		                               ? Future<Key>(req.begin.getKey())
-		                               : findKey(data, req.begin, version, searchRange, &offset1, span.context, type);
+		state Future<Key> fBegin =
+		    req.begin.isFirstGreaterOrEqual()
+		        ? Future<Key>(req.begin.getKey())
+		        : findKey(data, req.begin, version, searchRange, &offset1, span.context, options);
 		state Future<Key> fEnd = req.end.isFirstGreaterOrEqual()
 		                             ? Future<Key>(req.end.getKey())
-		                             : findKey(data, req.end, version, searchRange, &offset2, span.context, type);
+		                             : findKey(data, req.end, version, searchRange, &offset2, span.context, options);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 		if (req.debugID.present())
@@ -4402,8 +4422,14 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				                       !data->isTss() && !data->isSSWithTSSPair())
 				                          ? 1
 				                          : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-				GetKeyValuesReply _r = wait(readRange(
-				    data, version, KeyRangeRef(begin, end), req.limit, &byteLimit, span.context, type, tenantPrefix));
+				GetKeyValuesReply _r = wait(readRange(data,
+				                                      version,
+				                                      KeyRangeRef(begin, end),
+				                                      req.limit,
+				                                      &byteLimit,
+				                                      span.context,
+				                                      options,
+				                                      tenantPrefix));
 				GetKeyValuesStreamReply r(_r);
 
 				if (req.debugID.present())
@@ -4493,6 +4519,8 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
 	state int64_t resultSize = 0;
+	state IKeyValueStore::ReadOptions options;
+	options.cacheResult = req.cacheResult;
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
 	++data->counters.getKeyQueries;
@@ -4519,8 +4547,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		KeyRangeRef searchRange = data->clampRangeToTenant(shard, tenantEntry, req.arena);
 
 		state int offset;
-		Key absoluteKey = wait(
-		    findKey(data, req.sel, version, searchRange, &offset, req.spanContext, IKeyValueStore::ReadType::NORMAL));
+		Key absoluteKey = wait(findKey(data, req.sel, version, searchRange, &offset, req.spanContext, options));
 
 		data->checkChangeCounter(changeCounter,
 		                         KeyRangeRef(std::min<KeyRef>(req.sel.getKey(), absoluteKey),
@@ -4616,11 +4643,12 @@ void getQueuingMetrics(StorageServer* self, StorageQueuingMetricsRequest const& 
 
 ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager) {
 	eager->finishKeyBegin();
-
+	state IKeyValueStore::ReadOptions options;
+	options.type = IKeyValueStore::ReadType::EAGER;
 	if (SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS) {
 		std::vector<Future<Key>> keyEnd(eager->keyBegin.size());
 		for (int i = 0; i < keyEnd.size(); i++)
-			keyEnd[i] = data->storage.readNextKeyInclusive(eager->keyBegin[i], IKeyValueStore::ReadType::EAGER);
+			keyEnd[i] = data->storage.readNextKeyInclusive(eager->keyBegin[i], options);
 		data->counters.eagerReadsKeys += keyEnd.size();
 
 		state Future<std::vector<Key>> futureKeyEnds = getAll(keyEnd);
@@ -4633,8 +4661,7 @@ ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager)
 
 	std::vector<Future<Optional<Value>>> value(eager->keys.size());
 	for (int i = 0; i < value.size(); i++)
-		value[i] =
-		    data->storage.readValuePrefix(eager->keys[i].first, eager->keys[i].second, IKeyValueStore::ReadType::EAGER);
+		value[i] = data->storage.readValuePrefix(eager->keys[i].first, eager->keys[i].second, options);
 
 	state Future<std::vector<Optional<Value>>> futureValues = getAll(value);
 	std::vector<Optional<Value>> optionalValues = wait(futureValues);
@@ -8910,6 +8937,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 					                       TenantInfo(),
 					                       metadata->key,
 					                       latest,
+					                       true,
 					                       metadata->tags,
 					                       metadata->debugID,
 					                       VersionVector());

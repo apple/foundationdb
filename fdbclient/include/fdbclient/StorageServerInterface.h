@@ -276,6 +276,7 @@ struct GetValueRequest : TimedRequest {
 	TenantInfo tenantInfo;
 	Key key;
 	Version version;
+	bool cacheResult;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetValueReply> reply;
@@ -283,20 +284,22 @@ struct GetValueRequest : TimedRequest {
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
 
-	GetValueRequest() {}
+	GetValueRequest() : cacheResult(true) {}
 	GetValueRequest(SpanContext spanContext,
 	                const TenantInfo& tenantInfo,
 	                const Key& key,
 	                Version ver,
+	                bool cacheResult,
 	                Optional<TagSet> tags,
 	                Optional<UID> debugID,
 	                VersionVector latestCommitVersions)
-	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), tags(tags), debugID(debugID),
-	    ssLatestCommitVersions(latestCommitVersions) {}
+	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), cacheResult(cacheResult), tags(tags),
+	    debugID(debugID), ssLatestCommitVersions(latestCommitVersions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, version, tags, debugID, reply, spanContext, tenantInfo, ssLatestCommitVersions);
+		serializer(
+		    ar, key, version, cacheResult, tags, debugID, reply, spanContext, tenantInfo, ssLatestCommitVersions);
 	}
 };
 
@@ -371,6 +374,7 @@ struct GetKeyValuesRequest : TimedRequest {
 	Version version; // or latestVersion
 	int limit, limitBytes;
 	bool isFetchKeys;
+	bool cacheResult;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetKeyValuesReply> reply;
@@ -378,7 +382,7 @@ struct GetKeyValuesRequest : TimedRequest {
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
 
-	GetKeyValuesRequest() : isFetchKeys(false) {}
+	GetKeyValuesRequest() : isFetchKeys(false), cacheResult(true) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -389,6 +393,7 @@ struct GetKeyValuesRequest : TimedRequest {
 		           limit,
 		           limitBytes,
 		           isFetchKeys,
+		           cacheResult,
 		           tags,
 		           debugID,
 		           reply,
@@ -428,6 +433,7 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	int limit, limitBytes;
 	int matchIndex;
 	bool isFetchKeys;
+	bool cacheResult;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetMappedKeyValuesReply> reply;
@@ -435,7 +441,7 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key range
 
-	GetMappedKeyValuesRequest() : isFetchKeys(false) {}
+	GetMappedKeyValuesRequest() : isFetchKeys(false), cacheResult(true) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -446,6 +452,7 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 		           limit,
 		           limitBytes,
 		           isFetchKeys,
+		           cacheResult,
 		           tags,
 		           debugID,
 		           reply,
@@ -493,6 +500,7 @@ struct GetKeyValuesStreamRequest {
 	Version version; // or latestVersion
 	int limit, limitBytes;
 	bool isFetchKeys;
+	bool cacheResult;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromiseStream<GetKeyValuesStreamReply> reply;
@@ -500,7 +508,7 @@ struct GetKeyValuesStreamRequest {
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key range
 
-	GetKeyValuesStreamRequest() : isFetchKeys(false) {}
+	GetKeyValuesStreamRequest() : isFetchKeys(false), cacheResult(true) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -511,6 +519,7 @@ struct GetKeyValuesStreamRequest {
 		           limit,
 		           limitBytes,
 		           isFetchKeys,
+		           cacheResult,
 		           tags,
 		           debugID,
 		           reply,
@@ -542,6 +551,7 @@ struct GetKeyRequest : TimedRequest {
 	TenantInfo tenantInfo;
 	KeySelectorRef sel;
 	Version version; // or latestVersion
+	bool cacheResult;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetKeyReply> reply;
@@ -549,21 +559,32 @@ struct GetKeyRequest : TimedRequest {
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
 
-	GetKeyRequest() {}
+	GetKeyRequest() : cacheResult(true) {}
 
 	GetKeyRequest(SpanContext spanContext,
 	              TenantInfo tenantInfo,
 	              KeySelectorRef const& sel,
 	              Version version,
+	              bool cacheResult,
 	              Optional<TagSet> tags,
 	              Optional<UID> debugID,
 	              VersionVector latestCommitVersions)
-	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), debugID(debugID),
-	    ssLatestCommitVersions(latestCommitVersions) {}
+	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), cacheResult(cacheResult),
+	    debugID(debugID), ssLatestCommitVersions(latestCommitVersions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sel, version, tags, debugID, reply, spanContext, tenantInfo, arena, ssLatestCommitVersions);
+		serializer(ar,
+		           sel,
+		           version,
+		           cacheResult,
+		           tags,
+		           debugID,
+		           reply,
+		           spanContext,
+		           tenantInfo,
+		           arena,
+		           ssLatestCommitVersions);
 	}
 };
 

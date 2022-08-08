@@ -56,8 +56,10 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override { store->clear(range, arena); }
 	Future<Void> commit(bool sequential = false) override { return store->commit(sequential); }
 
-	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) override {
-		return doReadValue(store, key, debugID);
+	Future<Optional<Value>> readValue(KeyRef key,
+	                                  IKeyValueStore::ReadOptions const& options,
+	                                  Optional<UID> debugID) override {
+		return doReadValue(store, key, options, debugID);
 	}
 
 	// Note that readValuePrefix doesn't do anything in this implementation of IKeyValueStore, so the "atomic bomb"
@@ -66,20 +68,26 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 	// reason, you will need to fix this.
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
-	                                        IKeyValueStore::ReadType,
+	                                        IKeyValueStore::ReadOptions const& options,
 	                                        Optional<UID> debugID) override {
-		return doReadValuePrefix(store, key, maxLength, debugID);
+		return doReadValuePrefix(store, key, maxLength, options, debugID);
 	}
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, IKeyValueStore::ReadType) override {
-		return doReadRange(store, keys, rowLimit, byteLimit);
+	Future<RangeResult> readRange(KeyRangeRef keys,
+	                              int rowLimit,
+	                              int byteLimit,
+	                              IKeyValueStore::ReadOptions const& options) override {
+		return doReadRange(store, keys, rowLimit, byteLimit, options);
 	}
 
 private:
-	ACTOR static Future<Optional<Value>> doReadValue(IKeyValueStore* store, Key key, Optional<UID> debugID) {
-		Optional<Value> v = wait(store->readValue(key, IKeyValueStore::ReadType::NORMAL, debugID));
+	ACTOR static Future<Optional<Value>> doReadValue(IKeyValueStore* store,
+	                                                 Key key,
+	                                                 IKeyValueStore::ReadOptions options,
+	                                                 Optional<UID> debugID) {
+		Optional<Value> v = wait(store->readValue(key, options, debugID));
 		if (!v.present())
 			return v;
 		return unpack(v.get());
@@ -88,8 +96,9 @@ private:
 	ACTOR static Future<Optional<Value>> doReadValuePrefix(IKeyValueStore* store,
 	                                                       Key key,
 	                                                       int maxLength,
+	                                                       IKeyValueStore::ReadOptions options,
 	                                                       Optional<UID> debugID) {
-		Optional<Value> v = wait(doReadValue(store, key, debugID));
+		Optional<Value> v = wait(doReadValue(store, key, options, debugID));
 		if (!v.present())
 			return v;
 		if (maxLength < v.get().size()) {
@@ -98,8 +107,12 @@ private:
 			return v;
 		}
 	}
-	ACTOR Future<RangeResult> doReadRange(IKeyValueStore* store, KeyRangeRef keys, int rowLimit, int byteLimit) {
-		RangeResult _vs = wait(store->readRange(keys, rowLimit, byteLimit));
+	ACTOR Future<RangeResult> doReadRange(IKeyValueStore* store,
+	                                      KeyRangeRef keys,
+	                                      int rowLimit,
+	                                      int byteLimit,
+	                                      IKeyValueStore::ReadOptions options) {
+		RangeResult _vs = wait(store->readRange(keys, rowLimit, byteLimit, options));
 		RangeResult vs = _vs; // Get rid of implicit const& from wait statement
 		Arena& a = vs.arena();
 		for (int i = 0; i < vs.size(); i++)
