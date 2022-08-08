@@ -46,7 +46,7 @@ To report a security issue, please **DO NOT** start by filing a public issue or 
 
 ## Project Communication
 ### Community Forums
-We encourage your participation asking questions and helping improve the FoundationDB project. Check out the [FoundationDB community forums](https://forums.foundationdb.org), which serve a similar function as mailing lists in many open source projects. The forums are organized into three sections:
+We encourage your participation asking questions and helping improve the FoundationDB project. Check out the [FoundationDB community forums](https://forums.foundationdb.org), which serve a similar function as mailing lists in many open source projects. The forums are organized into three categories:
 
 * [Development](https://forums.foundationdb.org/c/development): For discussing the internals and development of the FoundationDB core, as well as layers.
 * [Using FoundationDB](https://forums.foundationdb.org/c/using-foundationdb): For discussing user-facing topics. Getting started and have a question? This is the category for you.
