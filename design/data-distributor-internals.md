@@ -153,3 +153,22 @@ CPU utilization. This metric is in a positive relationship with “FinishedQueri
 * The typical movement size under a read-skew scenario is 100M ~ 600M under default KNOB value `READ_REBALANCE_MAX_SHARD_FRAC=0.2, READ_REBALANCE_SRC_PARALLELISM = 20`. Increasing those knobs may accelerate the converge speed with the risk of data movement churn, which overwhelms the destination and over-cold the source.
 * The upper bound of `READ_REBALANCE_MAX_SHARD_FRAC` is 0.5. Any value larger than 0.5 can result in hot server switching.
 * When needing a deeper diagnosis of the read aware DD, `BgDDMountainChopper_New`, and `BgDDValleyFiller_New` trace events are where to go.
+
+## Data Distribution Diagnosis Q&A
+* Why Read-aware DD hasn't been triggered when there's a read imbalance? 
+  * Check `BgDDMountainChopper_New`, `BgDDValleyFiller_New` `SkipReason` field.
+* The Read-aware DD is triggered, and some data movement happened, but it doesn't help the read balance. Why? 
+  * Need to figure out which server is selected as the source and destination. The information is in `BgDDMountainChopper*`, `BgDDValleyFiller*`  `DestTeam` and `SourceTeam` field.
+  * Also, the `DDQueueServerCounter` event tells how many times a server being a source or destination (defined in 
+  ```c++
+  enum CountType : uint8_t { ProposedSource = 0, QueuedSource, LaunchedSource, LaunchedDest };
+  ```
+  ) for different relocation reason (`Other`, `RebalanceDisk`, `RebalanceRead`) in different phase within `DD_QUEUE_COUNTER_REFRESH_INTERVAL` (default 60) seconds. For example, 
+  ```xml
+  <Event Severity="10" Time="1659974950.984176" DateTime="2022-08-08T16:09:10Z" Type="DDQueueServerCounter" ID="0000000000000000" ServerId="0000000000000004" Other="0 1 3 2" RebalanceDisk="0 0 1 4" RebalanceRead="2 0 0 5" ThreadID="9733255463206053180" Machine="0.0.0.0:0" LogGroup="default" Roles="TS" />
+  ```
+  `RebalanceRead="2 0 0 5"` means server `0000000000000004` has been selected as for read balancing for twice, but it's not queued and executed yet. This server also has been a destination for read balancing for 5 times in the past 1 min.
+* How to track the lifecycle of a relocation attempt for balancing?
+  * First find the TraceId fields in `BgDDMountainChopper*`, `BgDDValleyFiller*`, which indicates a relocation is triggered.
+  * (Only when enabled) Find the `QueuedRelocation` event with the same `BeginPair` and `EndPair` as the original `TraceId`. This means the relocation request is queued.
+  * Find the `RelocateShard` event whose `BeginPair`, `EndPair` field is the same as `TraceId`. This event means the relocation is ongoing.

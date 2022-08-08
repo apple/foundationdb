@@ -578,10 +578,15 @@ struct DDQueue {
 		}
 
 		void traceAll(const UID& debugId = UID()) const {
+			int count = 0;
 			for (auto& [id, reasonItem] : counter) {
 				TraceEvent event("DDQueueServerCounter", debugId);
 				event.detail("ServerId", id);
 				traceReasonItem(&event, reasonItem);
+				if (++count >= SERVER_KNOBS->DD_QUEUE_COUNTER_MAX_LOG) {
+					TraceEvent(SevWarn, "DDQueueServerCounterTooMany", debugId).detail("ServerSize", counter.size());
+					return;
+				}
 			}
 		}
 
