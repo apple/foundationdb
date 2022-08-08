@@ -387,6 +387,7 @@ public:
 
 	Future<bool> blobbifyRange(KeyRange range);
 	Future<bool> unblobbifyRange(KeyRange range);
+	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range, int rangeLimit);
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,

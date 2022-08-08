@@ -9857,6 +9857,40 @@ Future<bool> DatabaseContext::unblobbifyRange(KeyRange range) {
 	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, false);
 }
 
+ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRangesActor(Reference<DatabaseContext> cx,
+                                                                           KeyRange range,
+                                                                           int rangeLimit) {
+	state Database db(cx);
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	state Standalone<VectorRef<KeyRangeRef>> blobRanges;
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+			state RangeResult results = wait(krmGetRanges(tr, blobRangeKeys.begin, range, 2 * rangeLimit + 2));
+
+			blobRanges.arena().dependsOn(results.arena());
+			for (int i = 0; i < results.size() - 1; i++) {
+				if (results[i].value == LiteralStringRef("1")) {
+					blobRanges.push_back(blobRanges.arena(), KeyRangeRef(results[i].value, results[i + 1].value));
+				}
+				if (blobRanges.size() == rangeLimit) {
+					return blobRanges;
+				}
+			}
+
+			return blobRanges;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges(KeyRange range, int rowLimit) {
+	return listBlobbifiedRangesActor(Reference<DatabaseContext>::addRef(this), range, rowLimit);
+}
+
 int64_t getMaxKeySize(KeyRef const& key) {
 	return getMaxWriteKeySize(key, true);
 }

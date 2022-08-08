@@ -64,6 +64,8 @@ public:
 
 	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
 	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;

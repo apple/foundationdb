@@ -174,6 +174,8 @@ public:
 
 	virtual ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) = 0;
 	virtual ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) = 0;
+	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
+	                                                                              int rangeLimit) = 0;
 
 	// Interface to manage shared state across multiple connections to the same Database
 	virtual ThreadFuture<DatabaseSharedState*> createSharedState() = 0;

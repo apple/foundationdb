@@ -156,6 +156,14 @@ ThreadFuture<bool> ThreadSafeDatabase::unblobbifyRange(const KeyRangeRef& keyRan
 	return onMainThread([=]() -> Future<bool> { return db->blobbifyRange(range); });
 }
 
+ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeDatabase::listBlobbifiedRanges(const KeyRangeRef& keyRange,
+                                                                                          int rangeLimit) {
+	DatabaseContext* db = this->db;
+	KeyRange range = keyRange;
+	return onMainThread(
+	    [=]() -> Future<Standalone<VectorRef<KeyRangeRef>>> { return db->listBlobbifiedRanges(range, rangeLimit); });
+}
+
 ThreadSafeDatabase::ThreadSafeDatabase(ConnectionRecordType connectionRecordType,
                                        std::string connectionRecordString,
                                        int apiVersion) {
