@@ -3609,8 +3609,10 @@ void crashHandler(int sig) {
 	__gcov_flush();
 #endif
 
-	fprintf(stderr, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
-	fprintf(stderr, "Trace: %s\n", backtrace.c_str());
+	if (error) {
+		fprintf(stderr, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
+		fprintf(stderr, "Trace: %s\n", backtrace.c_str());
+	}
 
 	struct sigaction sa;
 	sa.sa_handler = SIG_DFL;
