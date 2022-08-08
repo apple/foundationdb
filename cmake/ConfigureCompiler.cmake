@@ -190,6 +190,7 @@ else()
   endif()
 
   if(USE_GCOV)
+    add_compile_options(--coverage)
     add_link_options(--coverage)
   endif()
 
