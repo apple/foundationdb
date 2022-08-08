@@ -385,7 +385,7 @@ ACTOR Future<std::vector<PerfMetric>> getMetricsCompoundWorkload(CompoundWorkloa
 }
 
 void CompoundWorkload::addFailureInjection(WorkloadRequest& work) {
-	if (!work.runFailureWorkloads) {
+	if (!work.runFailureWorkloads || !FLOW_KNOBS->ENABLE_SIMULATION_IMPROVEMENTS) {
 		return;
 	}
 	// Some common workloads won't work with failure injection workloads
