@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/Ratekeeper.h"
 #include "fdbserver/TagThrottler.h"
 #include "fdbserver/WaitFailure.h"
@@ -911,6 +912,11 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 
 	limits->tpsLimitMetric = std::min(limits->tpsLimit, 1e6);
 	limits->reasonMetric = limitReason;
+
+	if (limits->priority == TransactionPriority::DEFAULT) {
+		limits->tpsLimit = std::max(limits->tpsLimit, SERVER_KNOBS->RATEKEEPER_MIN_RATE);
+		limits->tpsLimit = std::min(limits->tpsLimit, SERVER_KNOBS->RATEKEEPER_MAX_RATE);
+	}
 
 	if (deterministicRandom()->random01() < 0.1) {
 		const std::string& name = limits->rkUpdateEventCacheHolder.getPtr()->trackingKey;
