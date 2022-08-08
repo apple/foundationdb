@@ -24,7 +24,6 @@
 #include "fdbserver/Knobs.h"
 
 #include "flow/Trace.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 bool isEncryptionOpSupported(EncryptOperationType operation_type, ClientDBInfo info) {
 	if (!info.isEncryptionEnabled) {
