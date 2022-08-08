@@ -3598,7 +3598,7 @@ void crashHandler(int sig) {
 	fprintf(error ? stderr : stdout, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
 	if (error) {
 		fprintf(stderr, "Trace: %s\n", backtrace.c_str());
-  }
+	}
 
 	fflush(stdout);
 	{
