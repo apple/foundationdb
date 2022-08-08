@@ -78,6 +78,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 	bool waitForVersion = false;
 	bool allowFaultInjection = true;
 	Future<bool> ignoreSSFailures = true;
+	double maxRunDuration = 60.0, backoff = 1.5;
 
 	// This is set in setup from the list of workers when the cluster is started
 	std::vector<LocalityData> machines;
@@ -139,6 +140,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 		reboot = random.random01() < 0.25;
 		replacement = random.random01() < 0.25;
 		allowFaultInjection = random.random01() < 0.5;
+		suspendDuration = 10.0 * random.random01();
 		if (g_network->isSimulated()) {
 			std::set<Optional<StringRef>> dataCenters;
 			std::set<Optional<StringRef>> dataHalls;
@@ -324,6 +326,8 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 	ACTOR static Future<Void> machineKillWorker(MachineAttritionWorkload* self, double meanDelay, Database cx) {
 		ASSERT(g_network->isSimulated());
 		state double delayBeforeKill;
+		state double suspendDuration = self->suspendDuration;
+		state double startTime = now();
 
 		loop {
 			if (self->killDc) {
@@ -461,10 +465,11 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 					TraceEvent("WorkerKillAfterMeanDelay").detail("DelayBeforeKill", delayBeforeKill);
 				}
 			}
-			if (self->iterate) {
-				wait(delay(self->suspendDuration));
-			} else {
+			if (!self->iterate || now() - startTime > self->maxRunDuration) {
 				break;
+			} else {
+				wait(delay(suspendDuration));
+				suspendDuration *= self->backoff;
 			}
 		}
 
