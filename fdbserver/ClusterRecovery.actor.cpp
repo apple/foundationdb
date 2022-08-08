@@ -1159,7 +1159,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	}
 
 	Optional<Value> metaclusterRegistrationVal =
-	    wait(self->txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration.key));
+	    wait(self->txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration().key));
 	Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
 	    MetaclusterRegistrationEntry::decode(metaclusterRegistrationVal);
 	if (metaclusterRegistration.present()) {
@@ -1436,7 +1436,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	wait(self->cstate.read());
 
-	if (self->cstate.prevDBState.lowestCompatibleProtocolVersion > currentProtocolVersion) {
+	if (self->cstate.prevDBState.lowestCompatibleProtocolVersion > currentProtocolVersion()) {
 		TraceEvent(SevWarnAlways, "IncompatibleProtocolVersion", self->dbgid).log();
 		throw internal_error();
 	}
@@ -1497,10 +1497,10 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	DBCoreState newState = self->cstate.myDBState;
 	newState.recoveryCount++;
 	if (self->cstate.prevDBState.newestProtocolVersion.isInvalid() ||
-	    self->cstate.prevDBState.newestProtocolVersion < currentProtocolVersion) {
+	    self->cstate.prevDBState.newestProtocolVersion < currentProtocolVersion()) {
 		ASSERT(self->cstate.myDBState.lowestCompatibleProtocolVersion.isInvalid() ||
 		       !self->cstate.myDBState.newestProtocolVersion.isInvalid());
-		newState.newestProtocolVersion = currentProtocolVersion;
+		newState.newestProtocolVersion = currentProtocolVersion();
 		newState.lowestCompatibleProtocolVersion = minCompatibleProtocolVersion;
 	}
 	wait(self->cstate.write(newState) || recoverAndEndEpoch);

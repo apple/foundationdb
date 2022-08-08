@@ -102,7 +102,7 @@ public:
 			// Some file identifiers are changed in 7.0, so file identifier mismatches
 			// are expected during a downgrade from 7.0 to 6.3
 			bool expectMismatch = mProtocolVersion.get() >= ProtocolVersion(0x0FDB00B070000000LL) &&
-			                      currentProtocolVersion < ProtocolVersion(0x0FDB00B070000000LL);
+			                      currentProtocolVersion() < ProtocolVersion(0x0FDB00B070000000LL);
 			{
 				TraceEvent te(expectMismatch ? SevInfo : SevError, "MismatchedFileIdentifier");
 				if (expectMismatch) {

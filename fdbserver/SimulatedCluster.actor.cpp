@@ -2485,12 +2485,12 @@ ACTOR void setupAndRun(std::string dataFolder,
 		testConfig.storageEngineExcludeTypes.push_back(5);
 	}
 
-	state ProtocolVersion protocolVersion = currentProtocolVersion;
+	state ProtocolVersion protocolVersion = currentProtocolVersion();
 	if (testConfig.startIncompatibleProcess) {
 		// isolates right most 1 bit of compatibleProtocolVersionMask to make this protocolVersion incompatible
 		uint64_t minAddToMakeIncompatible =
 		    ProtocolVersion::compatibleProtocolVersionMask & ~(ProtocolVersion::compatibleProtocolVersionMask - 1);
-		protocolVersion = ProtocolVersion(currentProtocolVersion.version() + minAddToMakeIncompatible);
+		protocolVersion = ProtocolVersion(currentProtocolVersion().version() + minAddToMakeIncompatible);
 	}
 
 	// TODO (IPv6) Use IPv6?
@@ -2507,7 +2507,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	                           ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
 	                           "",
 	                           "",
-	                           currentProtocolVersion);
+	                           currentProtocolVersion());
 	testSystem->excludeFromRestarts = true;
 	wait(g_simulator.onProcess(testSystem, TaskPriority::DefaultYield));
 	Sim2FileSystem::newFileSystem();

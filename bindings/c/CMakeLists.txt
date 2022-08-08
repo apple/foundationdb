@@ -332,6 +332,14 @@ if(NOT WIN32)
             @SERVER_CA_FILE@
             )
 
+  add_test(NAME fdb_c_upgrade_to_future_version
+    COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "7.2.0" "7.3.0" "7.2.0"
+        --process-number 3
+      )
+
   if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
     add_test(NAME fdb_c_upgrade_single_threaded_630api
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py

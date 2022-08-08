@@ -93,10 +93,10 @@ struct ManagementClusterMetadata {
 		}
 	};
 
-	static inline TenantMetadataSpecification tenantMetadata = TenantMetadataSpecification(""_sr);
+	static TenantMetadataSpecification& tenantMetadata();
 
 	// A map from cluster name to the metadata associated with a cluster
-	static KeyBackedObjectMap<ClusterName, DataClusterEntry, decltype(IncludeVersion())> dataClusters;
+	static KeyBackedObjectMap<ClusterName, DataClusterEntry, decltype(IncludeVersion())>& dataClusters();
 
 	// A map from cluster name to the connection string for the cluster
 	static KeyBackedMap<ClusterName, ClusterConnectionString, TupleCodec<ClusterName>, ConnectionStringCodec>
@@ -124,7 +124,8 @@ Future<Optional<DataClusterMetadata>> tryGetClusterTransaction(Transaction tr, C
 	state Future<Void> metaclusterRegistrationCheck =
 	    TenantAPI::checkTenantMode(tr, ClusterType::METACLUSTER_MANAGEMENT);
 
-	state Future<Optional<DataClusterEntry>> clusterEntryFuture = ManagementClusterMetadata::dataClusters.get(tr, name);
+	state Future<Optional<DataClusterEntry>> clusterEntryFuture =
+	    ManagementClusterMetadata::dataClusters().get(tr, name);
 	state Future<Optional<ClusterConnectionString>> connectionRecordFuture =
 	    ManagementClusterMetadata::dataClusterConnectionRecords.get(tr, name);
 
@@ -222,7 +223,7 @@ struct MetaclusterOperationContext {
 
 				// Get the metacluster registration information
 				state Optional<MetaclusterRegistrationEntry> currentMetaclusterRegistration =
-				    wait(MetaclusterMetadata::metaclusterRegistration.get(tr));
+				    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
 
 				state Optional<DataClusterMetadata> currentDataClusterMetadata;
 				if (self->clusterName.present()) {
@@ -303,7 +304,7 @@ struct MetaclusterOperationContext {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 				state Optional<MetaclusterRegistrationEntry> currentMetaclusterRegistration =
-				    wait(MetaclusterMetadata::metaclusterRegistration.get(tr));
+				    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
 
 				// Check that this is the expected data cluster and is part of the right metacluster
 				if (!currentMetaclusterRegistration.present() ||
@@ -371,7 +372,7 @@ struct MetaclusterOperationContext {
 template <class Transaction>
 Future<Optional<TenantMapEntry>> tryGetTenantTransaction(Transaction tr, TenantName name) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	return ManagementClusterMetadata::tenantMetadata.tenantMap.get(tr, name);
+	return ManagementClusterMetadata::tenantMetadata().tenantMap.get(tr, name);
 }
 
 ACTOR template <class DB>
@@ -413,7 +414,7 @@ Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
 ACTOR template <class Transaction>
 Future<Void> managementClusterCheckEmpty(Transaction tr) {
 	state Future<KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>>> tenantsFuture =
-	    TenantMetadata::tenantMap.getRange(tr, {}, {}, 1);
+	    TenantMetadata::tenantMap().getRange(tr, {}, {}, 1);
 	state typename transaction_future_type<Transaction, RangeResult>::type dbContentsFuture =
 	    tr->getRange(normalKeys, 1);
 
@@ -440,7 +441,7 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName na
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 			state Future<Optional<MetaclusterRegistrationEntry>> metaclusterRegistrationFuture =
-			    MetaclusterMetadata::metaclusterRegistration.get(tr);
+			    MetaclusterMetadata::metaclusterRegistration().get(tr);
 
 			wait(managementClusterCheckEmpty(tr));
 
@@ -461,8 +462,8 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db, ClusterName na
 				metaclusterUid = deterministicRandom()->randomUniqueID();
 			}
 
-			MetaclusterMetadata::metaclusterRegistration.set(tr,
-			                                                 MetaclusterRegistrationEntry(name, metaclusterUid.get()));
+			MetaclusterMetadata::metaclusterRegistration().set(
+			    tr, MetaclusterRegistrationEntry(name, metaclusterUid.get()));
 
 			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 			break;
@@ -495,7 +496,7 @@ Future<Void> decommissionMetacluster(Reference<DB> db) {
 				}
 			}
 
-			MetaclusterMetadata::metaclusterRegistration.clear(tr);
+			MetaclusterMetadata::metaclusterRegistration().clear(tr);
 
 			firstTry = false;
 			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
@@ -538,7 +539,7 @@ void updateClusterMetadata(Transaction tr,
 		if (previousMetadata.entry.locked) {
 			throw cluster_locked();
 		}
-		ManagementClusterMetadata::dataClusters.set(tr, name, updatedEntry.get());
+		ManagementClusterMetadata::dataClusters().set(tr, name, updatedEntry.get());
 		updateClusterCapacityIndex(tr, name, previousMetadata.entry, updatedEntry.get());
 	}
 	if (updatedConnectionString.present()) {
@@ -584,7 +585,7 @@ struct RegisterClusterImpl {
 
 				// Check whether this cluster has already been registered
 				state Optional<MetaclusterRegistrationEntry> existingRegistration =
-				    wait(MetaclusterMetadata::metaclusterRegistration.get(tr));
+				    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
 				if (existingRegistration.present()) {
 					if (existingRegistration.get().clusterType != ClusterType::METACLUSTER_DATA ||
 					    existingRegistration.get().name != self->clusterName ||
@@ -612,7 +613,7 @@ struct RegisterClusterImpl {
 				}
 
 				self->clusterEntry.id = deterministicRandom()->randomUniqueID();
-				MetaclusterMetadata::metaclusterRegistration.set(
+				MetaclusterMetadata::metaclusterRegistration().set(
 				    tr,
 				    self->ctx.metaclusterRegistration.get().toDataClusterRegistration(self->clusterName,
 				                                                                      self->clusterEntry.id));
@@ -647,7 +648,7 @@ struct RegisterClusterImpl {
 				ManagementClusterMetadata::clusterCapacityIndex.insert(
 				    tr, Tuple::makeTuple(self->clusterEntry.allocated.numTenantGroups, self->clusterName));
 			}
-			ManagementClusterMetadata::dataClusters.set(tr, self->clusterName, self->clusterEntry);
+			ManagementClusterMetadata::dataClusters().set(tr, self->clusterName, self->clusterEntry);
 			ManagementClusterMetadata::dataClusterConnectionRecords.set(tr, self->clusterName, self->connectionString);
 		}
 
@@ -734,7 +735,7 @@ struct RemoveClusterImpl {
 
 		// Get the last allocated tenant ID to be used on the detached data cluster
 		if (self->forceRemove) {
-			Optional<int64_t> lastId = wait(ManagementClusterMetadata::tenantMetadata.lastTenantId.get(tr));
+			Optional<int64_t> lastId = wait(ManagementClusterMetadata::tenantMetadata().lastTenantId.get(tr));
 			self->lastTenantId = lastId;
 		}
 
@@ -748,18 +749,18 @@ struct RemoveClusterImpl {
 	// Delete metacluster metadata from the data cluster
 	ACTOR static Future<Void> updateDataCluster(RemoveClusterImpl* self, Reference<ITransaction> tr) {
 		// Delete metacluster related metadata
-		MetaclusterMetadata::metaclusterRegistration.clear(tr);
-		TenantMetadata::tenantTombstones.clear(tr);
-		TenantMetadata::tombstoneCleanupData.clear(tr);
+		MetaclusterMetadata::metaclusterRegistration().clear(tr);
+		TenantMetadata::tenantTombstones().clear(tr);
+		TenantMetadata::tombstoneCleanupData().clear(tr);
 
 		// If we are force removing a cluster, then it will potentially contain tenants that have IDs
 		// larger than the next tenant ID to be allocated on the cluster. To avoid collisions, we advance
 		// the ID so that it will be the larger of the current one on the data cluster and the management
 		// cluster.
 		if (self->lastTenantId.present()) {
-			Optional<int64_t> lastId = wait(TenantMetadata::lastTenantId.get(tr));
+			Optional<int64_t> lastId = wait(TenantMetadata::lastTenantId().get(tr));
 			if (!lastId.present() || lastId.get() < self->lastTenantId.get()) {
-				TenantMetadata::lastTenantId.set(tr, self->lastTenantId.get());
+				TenantMetadata::lastTenantId().set(tr, self->lastTenantId.get());
 			}
 		}
 
@@ -784,7 +785,7 @@ struct RemoveClusterImpl {
 		// Erase each tenant from the tenant map on the management cluster
 		for (Tuple entry : tenantEntries.results) {
 			ASSERT(entry.getString(0) == self->ctx.clusterName.get());
-			ManagementClusterMetadata::tenantMetadata.tenantMap.erase(tr, entry.getString(1));
+			ManagementClusterMetadata::tenantMetadata().tenantMap.erase(tr, entry.getString(1));
 		}
 
 		// Erase all of the tenants processed in this transaction from the cluster tenant index
@@ -795,7 +796,7 @@ struct RemoveClusterImpl {
 			    Tuple::makeTuple(self->ctx.clusterName.get(), keyAfter(tenantEntries.results.rbegin()->getString(1))));
 		}
 
-		ManagementClusterMetadata::tenantMetadata.tenantCount.atomicOp(
+		ManagementClusterMetadata::tenantMetadata().tenantCount.atomicOp(
 		    tr, -tenantEntries.results.size(), MutationRef::AddValue);
 		ManagementClusterMetadata::clusterTenantCount.atomicOp(
 		    tr, self->ctx.clusterName.get(), -tenantEntries.results.size(), MutationRef::AddValue);
@@ -817,9 +818,9 @@ struct RemoveClusterImpl {
 		for (Tuple entry : tenantGroupEntries.results) {
 			ASSERT(entry.getString(0) == self->ctx.clusterName.get());
 			TenantGroupName tenantGroup = entry.getString(1);
-			ManagementClusterMetadata::tenantMetadata.tenantGroupTenantIndex.erase(
+			ManagementClusterMetadata::tenantMetadata().tenantGroupTenantIndex.erase(
 			    tr, Tuple::makeTuple(tenantGroup), Tuple::makeTuple(keyAfter(tenantGroup)));
-			ManagementClusterMetadata::tenantMetadata.tenantGroupMap.erase(tr, tenantGroup);
+			ManagementClusterMetadata::tenantMetadata().tenantGroupMap.erase(tr, tenantGroup);
 		}
 
 		if (!tenantGroupEntries.results.empty()) {
@@ -833,7 +834,7 @@ struct RemoveClusterImpl {
 
 		// Erase the data cluster record from the management cluster if processing our last batch
 		if (!tenantGroupEntries.more) {
-			ManagementClusterMetadata::dataClusters.erase(tr, self->ctx.clusterName.get());
+			ManagementClusterMetadata::dataClusters().erase(tr, self->ctx.clusterName.get());
 			ManagementClusterMetadata::dataClusterConnectionRecords.erase(tr, self->ctx.clusterName.get());
 			ManagementClusterMetadata::clusterTenantCount.erase(tr, self->ctx.clusterName.get());
 		}
@@ -921,7 +922,7 @@ Future<std::map<ClusterName, DataClusterMetadata>> listClustersTransaction(Trans
 	state Future<Void> tenantModeCheck = TenantAPI::checkTenantMode(tr, ClusterType::METACLUSTER_MANAGEMENT);
 
 	state Future<KeyBackedRangeResult<std::pair<ClusterName, DataClusterEntry>>> clusterEntriesFuture =
-	    ManagementClusterMetadata::dataClusters.getRange(tr, begin, end, limit);
+	    ManagementClusterMetadata::dataClusters().getRange(tr, begin, end, limit);
 	state Future<KeyBackedRangeResult<std::pair<ClusterName, ClusterConnectionString>>> connectionStringFuture =
 	    ManagementClusterMetadata::dataClusterConnectionRecords.getRange(tr, begin, end, limit);
 
@@ -975,12 +976,12 @@ void managementClusterAddTenantToGroup(Transaction tr,
 		}
 
 		if (!groupAlreadyExists) {
-			ManagementClusterMetadata::tenantMetadata.tenantGroupMap.set(
+			ManagementClusterMetadata::tenantMetadata().tenantGroupMap.set(
 			    tr, tenantEntry.tenantGroup.get(), TenantGroupEntry(tenantEntry.assignedCluster));
 			ManagementClusterMetadata::clusterTenantGroupIndex.insert(
 			    tr, Tuple::makeTuple(tenantEntry.assignedCluster.get(), tenantEntry.tenantGroup.get()));
 		}
-		ManagementClusterMetadata::tenantMetadata.tenantGroupTenantIndex.insert(
+		ManagementClusterMetadata::tenantMetadata().tenantGroupTenantIndex.insert(
 		    tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), tenantName));
 	}
 
@@ -1004,11 +1005,11 @@ Future<Void> managementClusterRemoveTenantFromGroup(Transaction tr,
                                                     DataClusterMetadata* clusterMetadata) {
 	state bool updateClusterCapacity = !tenantEntry.tenantGroup.present();
 	if (tenantEntry.tenantGroup.present()) {
-		ManagementClusterMetadata::tenantMetadata.tenantGroupTenantIndex.erase(
+		ManagementClusterMetadata::tenantMetadata().tenantGroupTenantIndex.erase(
 		    tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), tenantName));
 
 		state KeyBackedSet<Tuple>::RangeResultType result =
-		    wait(ManagementClusterMetadata::tenantMetadata.tenantGroupTenantIndex.getRange(
+		    wait(ManagementClusterMetadata::tenantMetadata().tenantGroupTenantIndex.getRange(
 		        tr,
 		        Tuple::makeTuple(tenantEntry.tenantGroup.get()),
 		        Tuple::makeTuple(keyAfter(tenantEntry.tenantGroup.get())),
@@ -1018,7 +1019,7 @@ Future<Void> managementClusterRemoveTenantFromGroup(Transaction tr,
 			ManagementClusterMetadata::clusterTenantGroupIndex.erase(
 			    tr, Tuple::makeTuple(tenantEntry.assignedCluster.get(), tenantEntry.tenantGroup.get()));
 
-			ManagementClusterMetadata::tenantMetadata.tenantGroupMap.erase(tr, tenantEntry.tenantGroup.get());
+			ManagementClusterMetadata::tenantMetadata().tenantGroupMap.erase(tr, tenantEntry.tenantGroup.get());
 			updateClusterCapacity = true;
 		}
 	}
@@ -1091,7 +1092,7 @@ struct CreateTenantImpl {
 				// The previous creation is permanently failed, so cleanup the tenant and create it again from scratch
 				// We don't need to remove it from the tenant map because we will overwrite the existing entry later in
 				// this transaction.
-				ManagementClusterMetadata::tenantMetadata.tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
+				ManagementClusterMetadata::tenantMetadata().tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
 				ManagementClusterMetadata::clusterTenantCount.atomicOp(
 				    tr, existingEntry.get().assignedCluster.get(), -1, MutationRef::AddValue);
 
@@ -1117,8 +1118,9 @@ struct CreateTenantImpl {
 		// If our tenant group is already assigned, then we just use that assignment
 		state Optional<TenantGroupEntry> groupEntry;
 		if (self->tenantEntry.tenantGroup.present()) {
-			Optional<TenantGroupEntry> _groupEntry = wait(
-			    ManagementClusterMetadata::tenantMetadata.tenantGroupMap.get(tr, self->tenantEntry.tenantGroup.get()));
+			Optional<TenantGroupEntry> _groupEntry =
+			    wait(ManagementClusterMetadata::tenantMetadata().tenantGroupMap.get(
+			        tr, self->tenantEntry.tenantGroup.get()));
 			groupEntry = _groupEntry;
 
 			if (groupEntry.present()) {
@@ -1191,14 +1193,14 @@ struct CreateTenantImpl {
 		state Future<Void> setClusterFuture = self->ctx.setCluster(tr, assignment.first);
 
 		// Create a tenant entry in the management cluster
-		Optional<int64_t> lastId = wait(ManagementClusterMetadata::tenantMetadata.lastTenantId.get(tr));
+		Optional<int64_t> lastId = wait(ManagementClusterMetadata::tenantMetadata().lastTenantId.get(tr));
 		self->tenantEntry.setId(lastId.orDefault(-1) + 1);
-		ManagementClusterMetadata::tenantMetadata.lastTenantId.set(tr, self->tenantEntry.id);
+		ManagementClusterMetadata::tenantMetadata().lastTenantId.set(tr, self->tenantEntry.id);
 
 		self->tenantEntry.tenantState = TenantState::REGISTERING;
-		ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->tenantName, self->tenantEntry);
+		ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->tenantName, self->tenantEntry);
 
-		ManagementClusterMetadata::tenantMetadata.tenantCount.atomicOp(tr, 1, MutationRef::AddValue);
+		ManagementClusterMetadata::tenantMetadata().tenantCount.atomicOp(tr, 1, MutationRef::AddValue);
 		ManagementClusterMetadata::clusterTenantCount.atomicOp(
 		    tr, self->tenantEntry.assignedCluster.get(), 1, MutationRef::AddValue);
 
@@ -1251,7 +1253,7 @@ struct CreateTenantImpl {
 		if (managementEntry.get().tenantState == TenantState::REGISTERING) {
 			TenantMapEntry updatedEntry = managementEntry.get();
 			updatedEntry.tenantState = TenantState::READY;
-			ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->tenantName, updatedEntry);
+			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->tenantName, updatedEntry);
 		}
 
 		return Void();
@@ -1359,7 +1361,7 @@ struct DeleteTenantImpl {
 		if (tenantEntry.get().tenantState != TenantState::REMOVING) {
 			TenantMapEntry updatedEntry = tenantEntry.get();
 			updatedEntry.tenantState = TenantState::REMOVING;
-			ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->tenantName, updatedEntry);
+			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->tenantName, updatedEntry);
 		}
 
 		return Void();
@@ -1377,10 +1379,10 @@ struct DeleteTenantImpl {
 		ASSERT(tenantEntry.get().tenantState == TenantState::REMOVING);
 
 		// Erase the tenant entry itself
-		ManagementClusterMetadata::tenantMetadata.tenantMap.erase(tr, self->tenantName);
+		ManagementClusterMetadata::tenantMetadata().tenantMap.erase(tr, self->tenantName);
 
 		// This is idempotent because this function is only called if the tenant is in the map
-		ManagementClusterMetadata::tenantMetadata.tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
+		ManagementClusterMetadata::tenantMetadata().tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
 		ManagementClusterMetadata::clusterTenantCount.atomicOp(
 		    tr, tenantEntry.get().assignedCluster.get(), -1, MutationRef::AddValue);
 
@@ -1439,7 +1441,7 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantsTransactio
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 	KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> results =
-	    wait(ManagementClusterMetadata::tenantMetadata.tenantMap.getRange(tr, begin, end, limit));
+	    wait(ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(tr, begin, end, limit));
 
 	return results.results;
 }
@@ -1508,7 +1510,7 @@ struct ConfigureTenantImpl {
 		}
 
 		state Optional<TenantGroupEntry> tenantGroupEntry =
-		    wait(ManagementClusterMetadata::tenantMetadata.tenantGroupMap.get(tr, desiredGroup.get()));
+		    wait(ManagementClusterMetadata::tenantMetadata().tenantGroupMap.get(tr, desiredGroup.get()));
 
 		// If we are creating a new tenant group, we need to have capacity on the current cluster
 		if (!tenantGroupEntry.present()) {
@@ -1566,7 +1568,7 @@ struct ConfigureTenantImpl {
 		}
 
 		++self->updatedEntry.configurationSequenceNum;
-		ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->tenantName, self->updatedEntry);
+		ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->tenantName, self->updatedEntry);
 
 		return Void();
 	}
@@ -1601,7 +1603,7 @@ struct ConfigureTenantImpl {
 		}
 
 		tenantEntry.get().tenantState = TenantState::READY;
-		ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->tenantName, tenantEntry.get());
+		ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->tenantName, tenantEntry.get());
 		return Void();
 	}
 

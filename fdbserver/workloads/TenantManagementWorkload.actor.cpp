@@ -299,7 +299,7 @@ struct TenantManagementWorkload : TestWorkload {
 				entry.setId(nextId++);
 				createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, tenant, entry)));
 			}
-			TenantMetadata::lastTenantId.set(tr, nextId - 1);
+			TenantMetadata::lastTenantId().set(tr, nextId - 1);
 			wait(waitForAll(createFutures));
 			wait(tr->commit());
 		} else {
@@ -373,7 +373,7 @@ struct TenantManagementWorkload : TestWorkload {
 					if (operationType == OperationType::MANAGEMENT_TRANSACTION ||
 					    operationType == OperationType::SPECIAL_KEYS) {
 						tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-						wait(store(finalTenantCount, TenantMetadata::tenantCount.getD(tr, Snapshot::False, 0)));
+						wait(store(finalTenantCount, TenantMetadata::tenantCount().getD(tr, Snapshot::False, 0)));
 						minTenantCount = std::min(finalTenantCount, minTenantCount);
 					}
 
@@ -1470,10 +1470,10 @@ struct TenantManagementWorkload : TestWorkload {
 		KeyBackedSet<Tuple>::RangeResultType tenants =
 		    wait(runTransaction(db, [tenantGroupRef, expectedCountRef](Reference<typename DB::TransactionT> tr) {
 			    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			    return TenantMetadata::tenantGroupTenantIndex.getRange(tr,
-			                                                           Tuple::makeTuple(tenantGroupRef),
-			                                                           Tuple::makeTuple(keyAfter(tenantGroupRef)),
-			                                                           expectedCountRef + 1);
+			    return TenantMetadata::tenantGroupTenantIndex().getRange(tr,
+			                                                             Tuple::makeTuple(tenantGroupRef),
+			                                                             Tuple::makeTuple(keyAfter(tenantGroupRef)),
+			                                                             expectedCountRef + 1);
 		    }));
 
 		ASSERT(tenants.results.size() == expectedCount && !tenants.more);
@@ -1497,7 +1497,7 @@ struct TenantManagementWorkload : TestWorkload {
 			          runTransaction(self->dataDb.getReference(),
 			                         [beginTenantGroupRef, endTenantGroupRef](Reference<ReadYourWritesTransaction> tr) {
 				                         tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				                         return TenantMetadata::tenantGroupMap.getRange(
+				                         return TenantMetadata::tenantGroupMap().getRange(
 				                             tr, beginTenantGroupRef, endTenantGroupRef, 1000);
 			                         })));
 
@@ -1536,7 +1536,7 @@ struct TenantManagementWorkload : TestWorkload {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 				Optional<TenantTombstoneCleanupData> tombstoneCleanupData =
-				    wait(TenantMetadata::tombstoneCleanupData.get(tr));
+				    wait(TenantMetadata::tombstoneCleanupData().get(tr));
 
 				if (self->oldestDeletionVersion != 0) {
 					ASSERT(tombstoneCleanupData.present());

@@ -4226,10 +4226,10 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
 				wait(store(tenantResults,
-				           TenantMetadata::tenantMap.getRange(tr,
-				                                              Optional<TenantName>(),
-				                                              Optional<TenantName>(),
-				                                              CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+				           TenantMetadata::tenantMap().getRange(tr,
+				                                                Optional<TenantName>(),
+				                                                Optional<TenantName>(),
+				                                                CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
 				ASSERT(tenantResults.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantResults.more);
 
 				std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
@@ -4239,7 +4239,7 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 				}
 				bwData->tenantData.addTenants(tenants);
 
-				state Future<Void> watchChange = tr->watch(TenantMetadata::lastTenantId.key);
+				state Future<Void> watchChange = tr->watch(TenantMetadata::lastTenantId().key);
 				wait(tr->commit());
 				wait(watchChange);
 				tr->reset();

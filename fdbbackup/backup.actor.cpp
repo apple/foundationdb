@@ -928,7 +928,7 @@ void parentWatcher(void* parentHandle) {
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getSourceVersion());
-	printf("protocol %llx\n", (long long)currentProtocolVersion.version());
+	printf("protocol %llx\n", (long long)currentProtocolVersion().version());
 }
 
 static void printBuildInformation() {

@@ -139,6 +139,16 @@ void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> 
 	}
 }
 
+TenantMetadataSpecification& TenantMetadata::instance() {
+	static TenantMetadataSpecification _instance = TenantMetadataSpecification("\xff/"_sr);
+	return _instance;
+}
+
+Key TenantMetadata::tenantMapPrivatePrefix() {
+	static Key _prefix = "\xff"_sr.withSuffix(tenantMap().subspace.begin);
+	return _prefix;
+}
+
 TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
 	TenantMapEntry entry1(1, TenantState::READY, false);
 	ASSERT(entry1.prefix == "\x00\x00\x00\x00\x00\x00\x00\x01"_sr);

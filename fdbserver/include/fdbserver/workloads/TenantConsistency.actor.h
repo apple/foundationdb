@@ -76,16 +76,16 @@ private:
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				wait(store(self->metadata.metaclusterRegistration,
-				           MetaclusterMetadata::metaclusterRegistration.get(tr)));
+				           MetaclusterMetadata::metaclusterRegistration().get(tr)));
 
 				self->metadata.clusterType = self->metadata.metaclusterRegistration.present()
 				                                 ? self->metadata.metaclusterRegistration.get().clusterType
 				                                 : ClusterType::STANDALONE;
 
 				if (self->metadata.clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-					tenantMetadata = &MetaclusterAPI::ManagementClusterMetadata::tenantMetadata;
+					tenantMetadata = &MetaclusterAPI::ManagementClusterMetadata::tenantMetadata();
 				} else {
-					tenantMetadata = &TenantMetadata::instance;
+					tenantMetadata = &TenantMetadata::instance();
 				}
 
 				wait(
