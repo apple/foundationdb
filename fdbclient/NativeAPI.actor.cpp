@@ -2992,11 +2992,9 @@ Future<KeyRangeLocationInfo> getKeyLocation(Reference<TransactionState> trState,
 	                        isBackward,
 	                        version);
 
-	if (trState->tenant().present() && useTenant && trState->tenantId == TenantInfo::INVALID_TENANT) {
+	if (trState->tenant().present() && useTenant && trState->tenantId() == TenantInfo::INVALID_TENANT) {
 		return map(f, [trState](const KeyRangeLocationInfo& locationInfo) {
-			if (trState->tenantId == TenantInfo::INVALID_TENANT) {
-				trState->tenantId = locationInfo.tenantEntry.id;
-			}
+			trState->trySetTenantId(locationInfo.tenantEntry.id);
 			return locationInfo;
 		});
 	} else {
@@ -3134,12 +3132,10 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<Transac
 	                              trState->useProvisionalProxies,
 	                              version);
 
-	if (trState->tenant().present() && useTenant && trState->tenantId == TenantInfo::INVALID_TENANT) {
+	if (trState->tenant().present() && useTenant && trState->tenantId() == TenantInfo::INVALID_TENANT) {
 		return map(f, [trState](const std::vector<KeyRangeLocationInfo>& locationInfo) {
 			ASSERT(!locationInfo.empty());
-			if (trState->tenantId == TenantInfo::INVALID_TENANT) {
-				trState->tenantId = locationInfo[0].tenantEntry.id;
-			}
+			trState->trySetTenantId(locationInfo[0].tenantEntry.id);
 			return locationInfo;
 		});
 	} else {
@@ -3259,8 +3255,8 @@ TenantInfo TransactionState::getTenantInfo(AllowInvalidTenantID allowInvalidId /
 		}
 	}
 
-	ASSERT(allowInvalidId || tenantId != TenantInfo::INVALID_TENANT);
-	return TenantInfo(t, authToken, tenantId);
+	ASSERT(allowInvalidId || tenantId_ != TenantInfo::INVALID_TENANT);
+	return TenantInfo(t, authToken, tenantId_);
 }
 
 // Returns the tenant used in this transaction. If the tenant is unset and raw access isn't specified, then the default
@@ -3286,6 +3282,13 @@ Optional<TenantName> const& TransactionState::tenant() {
 // for raw access).
 bool TransactionState::hasTenant() const {
 	return tenantSet && tenant_.present();
+}
+
+Future<Void> TransactionState::handleUnknownTenant() {
+	tenantId_ = TenantInfo::INVALID_TENANT;
+	ASSERT(tenant().present());
+	cx->invalidateCachedTenant(tenant().get());
+	return delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, taskID);
 }
 
 Future<Void> Transaction::warmRange(KeyRange keys) {
@@ -3406,9 +3409,8 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 				trState->cx->invalidateCache(locationInfo.tenantEntry.prefix, key);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
 			} else if (e.code() == error_code_unknown_tenant) {
-				ASSERT(useTenant && trState->tenant().present());
-				trState->cx->invalidateCachedTenant(trState->tenant().get());
-				wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
+				ASSERT(useTenant);
+				wait(trState->handleUnknownTenant());
 			} else {
 				if (trState->trLogInfo && recordLogInfo)
 					trState->trLogInfo->addLog(FdbClientLogEvents::EventGetError(startTimeD,
@@ -3517,9 +3519,8 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
 			} else if (e.code() == error_code_unknown_tenant) {
-				ASSERT(useTenant && trState->tenant().present());
-				trState->cx->invalidateCachedTenant(trState->tenant().get());
-				wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
+				ASSERT(useTenant);
+				wait(trState->handleUnknownTenant());
 			} else {
 				TraceEvent(SevInfo, "GetKeyError").error(e).detail("AtKey", k.getKey()).detail("Offset", k.offset);
 				throw e;
@@ -3753,7 +3754,7 @@ ACTOR Future<Void> sameVersionDiffValue(Database cx, Reference<WatchParameters> 
 			}
 
 			// val_3 == val_2 (storage server value matches value passed into the function -> new watch)
-			if (valSS == parameters->value && tr.getTransactionState()->tenantId == parameters->tenant.tenantId) {
+			if (valSS == parameters->value && tr.getTransactionState()->tenantId() == parameters->tenant.tenantId) {
 				metadata = makeReference<WatchMetadata>(parameters);
 				cx->setWatchMetadata(metadata);
 
@@ -4061,9 +4062,8 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
 					break;
 				} else if (e.code() == error_code_unknown_tenant) {
-					ASSERT(useTenant && trState->tenant().present());
-					trState->cx->invalidateCachedTenant(trState->tenant().get());
-					wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
+					ASSERT(useTenant);
+					wait(trState->handleUnknownTenant());
 					break;
 				} else {
 					TraceEvent(SevInfo, "GetExactRangeError")
@@ -4532,9 +4532,8 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 
 					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
 				} else if (e.code() == error_code_unknown_tenant) {
-					ASSERT(useTenant && trState->tenant().present());
-					trState->cx->invalidateCachedTenant(trState->tenant().get());
-					wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
+					ASSERT(useTenant);
+					wait(trState->handleUnknownTenant());
 				} else {
 					if (trState->trLogInfo)
 						trState->trLogInfo->addLog(
@@ -4993,9 +4992,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
 					break;
 				} else if (e.code() == error_code_unknown_tenant) {
-					ASSERT(trState->tenant().present());
-					trState->cx->invalidateCachedTenant(trState->tenant().get());
-					wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
+					wait(trState->handleUnknownTenant());
 					break;
 				} else {
 					results->sendError(e);
@@ -5278,7 +5275,7 @@ ACTOR Future<TenantInfo> getTenantMetadata(Reference<TransactionState> trState, 
 Future<TenantInfo> populateAndGetTenant(Reference<TransactionState> trState, Key const& key, Version version) {
 	if (!trState->tenant().present() || key == metadataVersionKey) {
 		return TenantInfo();
-	} else if (trState->tenantId != TenantInfo::INVALID_TENANT) {
+	} else if (trState->tenantId() != TenantInfo::INVALID_TENANT) {
 		return trState->getTenantInfo();
 	} else {
 		return getTenantMetadata(trState, key, version);
@@ -5978,7 +5975,7 @@ ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trS
 			tr.trState->options = trState->options;
 			tr.trState->taskID = trState->taskID;
 			tr.trState->authToken = trState->authToken;
-			tr.trState->tenantId = trState->tenantId;
+			tr.trState->trySetTenantId(trState->tenantId());
 			if (!trState->hasTenant()) {
 				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 			} else {
@@ -6316,6 +6313,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			// retry it anyway (relying on transaction idempotence) but a client might do something else.
 			throw commit_unknown_result();
 		} else if (e.code() == error_code_unknown_tenant) {
+			// Rather than reset the tenant and retry just the commit, we need to throw this error to the user and let
+			// them retry the whole transaction
 			ASSERT(trState->tenant().present());
 			trState->cx->invalidateCachedTenant(trState->tenant().get());
 			throw;
@@ -7606,9 +7605,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 				trState->cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 			} else if (e.code() == error_code_unknown_tenant) {
-				ASSERT(trState->tenant().present());
-				trState->cx->invalidateCachedTenant(trState->tenant().get());
-				wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
+				wait(trState->handleUnknownTenant());
 			} else {
 				TraceEvent(SevError, "GetRangeSplitPoints").error(e);
 				throw;
@@ -7630,14 +7627,10 @@ ACTOR Future<TenantMapEntry> blobGranuleGetTenantEntry(Transaction* self, Key ra
 		                                                      self->trState->useProvisionalProxies,
 		                                                      Reverse::False,
 		                                                      latestVersion));
-		if (self->trState->tenantId == TenantInfo::INVALID_TENANT) {
-			self->trState->tenantId = l.tenantEntry.id;
-		}
+		self->trState->trySetTenantId(l.tenantEntry.id);
 		return l.tenantEntry;
 	} else {
-		if (self->trState->tenantId == TenantInfo::INVALID_TENANT) {
-			self->trState->tenantId = cachedLocationInfo.get().tenantEntry.id;
-		}
+		self->trState->trySetTenantId(cachedLocationInfo.get().tenantEntry.id);
 		return cachedLocationInfo.get().tenantEntry;
 	}
 }
