@@ -917,7 +917,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 
 	// Fetch cipher keys if needed.
 	state Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getCipherKeys;
-	if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, pProxyCommitData->db->get().client)) {
+	if (pProxyCommitData->isEncryptionEnabled) {
 		static std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> defaultDomains = {
 			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME },
 			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
@@ -960,7 +960,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 		g_traceBatch.addEvent(
 		    "CommitDebug", self->debugID.get().first(), "CommitProxyServer.commitBatch.AfterResolution");
 	}
-	if (isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, pProxyCommitData->db->get().client)) {
+	if (pProxyCommitData->isEncryptionEnabled) {
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys = wait(getCipherKeys);
 		self->cipherKeys = cipherKeys;
 	}
@@ -1098,20 +1098,17 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 				trs[t].reply.sendError(result.getError());
 			} else {
 				self->commitCount++;
-				applyMetadataMutations(
-				    trs[t].spanContext,
-				    *pProxyCommitData,
-				    self->arena,
-				    pProxyCommitData->logSystem,
-				    trs[t].transaction.mutations,
-				    SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
-				    isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, pProxyCommitData->db->get().client)
-				        ? &self->cipherKeys
-				        : nullptr,
-				    self->forceRecovery,
-				    self->commitVersion,
-				    self->commitVersion + 1,
-				    /* initialCommit= */ false);
+				applyMetadataMutations(trs[t].spanContext,
+				                       *pProxyCommitData,
+				                       self->arena,
+				                       pProxyCommitData->logSystem,
+				                       trs[t].transaction.mutations,
+				                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
+				                       pProxyCommitData->isEncryptionEnabled ? &self->cipherKeys : nullptr,
+				                       self->forceRecovery,
+				                       self->commitVersion,
+				                       self->commitVersion + 1,
+				                       /* initialCommit= */ false);
 			}
 		}
 		if (self->firstStateMutations) {
@@ -1162,8 +1159,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 
 void writeMutation(CommitBatchContext* self, int64_t tenantId, const MutationRef& mutation) {
 	static_assert(TenantInfo::INVALID_TENANT == ENCRYPT_INVALID_DOMAIN_ID);
-	if (!isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, self->pProxyCommitData->db->get().client) ||
-	    tenantId == TenantInfo::INVALID_TENANT) {
+	if (!self->pProxyCommitData->isEncryptionEnabled || tenantId == TenantInfo::INVALID_TENANT) {
 		// TODO(yiwu): In raw access mode, use tenant prefix to figure out tenant id for user data
 		bool isRawAccess = tenantId == TenantInfo::INVALID_TENANT && !isSystemKey(mutation.param1) &&
 		                   !(mutation.type == MutationRef::ClearRange && isSystemKey(mutation.param2)) &&
