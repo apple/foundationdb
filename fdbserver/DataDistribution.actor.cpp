@@ -1391,6 +1391,14 @@ inline DDShardInfo doubleToNoLocationShardInfo(double d, bool hasDest) {
 	return res;
 }
 
+inline int getRandomShardCount() {
+#if defined(USE_SANITIZER)
+	return deterministicRandom()->randomInt(1000, 24000); // 24000 * MAX_SHARD_SIZE = 12TB
+#else
+	return deterministicRandom()->randomInt(1000, CLIENT_KNOBS->TOO_MANY); // 2000000000; OOM
+#endif
+}
+
 } // namespace data_distribution_test
 
 TEST_CASE("/DataDistribution/StorageWiggler/Order") {
@@ -1423,7 +1431,7 @@ TEST_CASE("/DataDistribution/Initialization/ResumeFromShard") {
 	// add DDShardInfo
 	self->shardsAffectedByTeamFailure->setCheckMode(
 	    ShardsAffectedByTeamFailure::CheckMode::ForceNoCheck); // skip check when build
-	int shardNum = deterministicRandom()->randomInt(1000, CLIENT_KNOBS->TOO_MANY * 5); // 2000000000; OOM
+	int shardNum = data_distribution_test::getRandomShardCount();
 	std::cout << "generating " << shardNum << " shards...\n";
 	for (int i = 1; i <= SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM; ++i) {
 		self->initData->shards.emplace_back(data_distribution_test::doubleToNoLocationShardInfo(i, true));
