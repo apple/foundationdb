@@ -3595,6 +3595,11 @@ void crashHandler(int sig) {
 	StreamCipher::cleanup();
 	BlobCipherKeyCache::cleanup();
 
+	fprintf(error ? stderr : stdout, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
+	if (error) {
+		fprintf(stderr, "Trace: %s\n", backtrace.c_str());
+  }
+
 	fflush(stdout);
 	{
 		TraceEvent te(error ? SevError : SevInfo, error ? "Crash" : "ProcessTerminated");
@@ -3608,11 +3613,6 @@ void crashHandler(int sig) {
 #ifdef USE_GCOV
 	__gcov_flush();
 #endif
-
-	if (error) {
-		fprintf(stderr, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
-		fprintf(stderr, "Trace: %s\n", backtrace.c_str());
-	}
 
 	struct sigaction sa;
 	sa.sa_handler = SIG_DFL;
