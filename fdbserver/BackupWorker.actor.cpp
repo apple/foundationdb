@@ -87,7 +87,7 @@ struct VersionedMessage {
 	void collectCipherDetailIfEncrypted(std::unordered_set<BlobCipherDetails>& cipherDetails) {
 		ASSERT(!message.empty());
 		if (*message.begin() == MutationRef::Encrypted) {
-			ArenaReader reader(arena, message, AssumeVersion(g_network->protocolVersion()));
+			ArenaReader reader(arena, message, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 			MutationRef m;
 			reader >> m;
 			const BlobCipherEncryptHeader* header = m.encryptionHeader();

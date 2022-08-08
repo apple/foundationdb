@@ -149,7 +149,7 @@ struct MutationRef {
 		ASSERT(headerCipherItr != cipherKeys.end() && headerCipherItr->second.isValid());
 		uint8_t iv[AES_256_IV_LENGTH] = { 0 };
 		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
-		BinaryWriter bw(AssumeVersion(g_network->protocolVersion()));
+		BinaryWriter bw(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 		bw << *this;
 		EncryptBlobCipherAes265Ctr cipher(textCipherItr->second,
 		                                  headerCipherItr->second,
@@ -181,7 +181,7 @@ struct MutationRef {
 		if (buf != nullptr) {
 			*buf = plaintext;
 		}
-		ArenaReader reader(arena, plaintext, AssumeVersion(g_network->protocolVersion()));
+		ArenaReader reader(arena, plaintext, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 		MutationRef mutation;
 		reader >> mutation;
 		return mutation;
