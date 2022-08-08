@@ -520,6 +520,19 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_unblobbify_range(FDBDatabase* db,
 	                        .extractPtr());
 }
 
+extern "C" DLLEXPORT FDBFuture* fdb_database_list_blobbified_ranges(FDBDatabase* db,
+                                                                    uint8_t const* begin_key_name,
+                                                                    int begin_key_name_length,
+                                                                    uint8_t const* end_key_name,
+                                                                    int end_key_name_length,
+                                                                    int rangeLimit) {
+	return (FDBFuture*)(DB(db)
+	                        ->listBlobbifiedRanges(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                           StringRef(end_key_name, end_key_name_length)),
+	                                               rangeLimit)
+	                        .extractPtr());
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant, FDBTransaction** out_transaction) {
 	CATCH_AND_RETURN(*out_transaction = (FDBTransaction*)TENANT(tenant)->createTransaction().extractPtr(););
 }

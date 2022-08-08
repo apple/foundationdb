@@ -613,6 +613,26 @@ ThreadFuture<bool> DLDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {
 	});
 }
 
+ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> DLDatabase::listBlobbifiedRanges(const KeyRangeRef& keyRange,
+                                                                                  int rangeLimit) {
+	if (!api->databaseListBlobbifiedRanges) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseListBlobbifiedRanges(
+	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), rangeLimit);
+
+	return toThreadFuture<Standalone<VectorRef<KeyRangeRef>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const FdbCApi::FDBKeyRange* keyRanges;
+		int keyRangesLength;
+		FdbCApi::fdb_error_t error = api->futureGetKeyRangeArray(f, &keyRanges, &keyRangesLength);
+		ASSERT(!error);
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed.
+		return Standalone<VectorRef<KeyRangeRef>>(VectorRef<KeyRangeRef>((KeyRangeRef*)keyRanges, keyRangesLength),
+		                                          Arena());
+	});
+}
+
 // DLApi
 
 // Loads the specified function from a dynamic library
@@ -703,6 +723,8 @@ void DLApi::init() {
 	loadClientFunction(&api->databaseBlobbifyRange, lib, fdbCPath, "fdb_database_blobbify_range", headerVersion >= 720);
 	loadClientFunction(
 	    &api->databaseUnblobbifyRange, lib, fdbCPath, "fdb_database_unblobbify_range", headerVersion >= 720);
+	loadClientFunction(
+	    &api->databaseListBlobbifiedRanges, lib, fdbCPath, "fdb_database_list_blobbified_ranges", headerVersion >= 720);
 
 	loadClientFunction(
 	    &api->tenantCreateTransaction, lib, fdbCPath, "fdb_tenant_create_transaction", headerVersion >= 710);
@@ -1632,6 +1654,14 @@ ThreadFuture<bool> MultiVersionDatabase::blobbifyRange(const KeyRangeRef& keyRan
 ThreadFuture<bool> MultiVersionDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {
 	auto dbVar = dbState->dbVar->get();
 	auto f = dbVar.value ? dbVar.value->unblobbifyRange(keyRange) : ThreadFuture<bool>(Never());
+	return abortableFuture(f, dbVar.onChange);
+}
+
+ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> MultiVersionDatabase::listBlobbifiedRanges(const KeyRangeRef& keyRange,
+                                                                                            int rangeLimit) {
+	auto dbVar = dbState->dbVar->get();
+	auto f = dbVar.value ? dbVar.value->listBlobbifiedRanges(keyRange, rangeLimit)
+	                     : ThreadFuture<Standalone<VectorRef<KeyRangeRef>>>(Never());
 	return abortableFuture(f, dbVar.onChange);
 }
 
