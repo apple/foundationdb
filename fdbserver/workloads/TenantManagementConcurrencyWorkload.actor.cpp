@@ -83,7 +83,14 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		}
 	};
 
-	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
+	Future<Void> setup(Database const& cx) override {
+		if (clientId == 0 && g_network->isSimulated() && BUGGIFY) {
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob(
+			    "max_tenants_per_cluster", KnobValueRef::create(int{ deterministicRandom()->randomInt(20, 100) }));
+		}
+
+		return _setup(cx, this);
+	}
 	ACTOR static Future<Void> _setup(Database cx, TenantManagementConcurrencyWorkload* self) {
 		state ClusterConnectionString connectionString(g_simulator.extraDatabases[0]);
 		Reference<IDatabase> threadSafeHandle =
