@@ -221,6 +221,26 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	}
 
 	@Override
+	public CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey, Executor e) {
+		pointerReadLock.lock();
+		try {
+			return new FutureBool(Database_blobbifyRange(getPtr(), beginKey, endKey), e);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
+	public CompletableFuture<Boolean> unblobbifyRange(byte[] beginKey, byte[] endKey, Executor e) {
+		pointerReadLock.lock();
+		try {
+			return new FutureBool(Database_unblobbifyRange(getPtr(), beginKey, endKey), e);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
 	public Executor getExecutor() {
 		return executor;
 	}
@@ -237,4 +257,6 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	private native double Database_getMainThreadBusyness(long cPtr);
 	private native long Database_purgeBlobGranules(long cPtr, byte[] beginKey, byte[] endKey, long purgeVersion, boolean force);
 	private native long Database_waitPurgeGranulesComplete(long cPtr, byte[] purgeKey);
+	private native long Database_blobbifyRange(long cPtr, byte[] beginKey, byte[] endKey);
+	private native long Database_unblobbifyRange(long cPtr, byte[] beginKey, byte[] endKey);
 }

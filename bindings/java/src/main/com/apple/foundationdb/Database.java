@@ -207,6 +207,52 @@ public interface Database extends AutoCloseable, TransactionContext {
 	CompletableFuture<Void> waitPurgeGranulesComplete(byte[] purgeKey, Executor e);
 
 	/**
+	 * Runs {@link #blobbifyRange(Function)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+
+	 * @return if the recording of the range was successful
+	 */
+	default CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey) {
+		return blobbifyRange(beginKey, endKey, getExecutor());
+	}
+
+	/**
+	 * Sets a range to be blobbified in the database. Must be a completely unblobbified range.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return if the recording of the range was successful
+	 */
+	CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey, Executor e);
+
+	/**
+	 * Runs {@link #unblobbifyRange(Function)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+
+	 * @return if the recording of the range was successful
+	 */
+	default CompletableFuture<Boolean> unblobbifyRange(byte[] beginKey, byte[] endKey) {
+		return unblobbifyRange(beginKey, endKey, getExecutor());
+	}
+
+	/**
+	 * Sets a range to be unblobbified in the database.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return if the recording of the range was successful
+	 */
+	CompletableFuture<Boolean> unblobbifyRange(byte[] beginKey, byte[] endKey, Executor e);
+
+	/**
 	 * Runs a read-only transactional function against this {@code Database} with retry logic.
 	 *  {@link Function#apply(Object) apply(ReadTransaction)} will be called on the
 	 *  supplied {@link Function} until a non-retryable
