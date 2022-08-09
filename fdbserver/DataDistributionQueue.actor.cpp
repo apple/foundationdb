@@ -2411,9 +2411,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 						debug_setCheckRelocationDuration(false);
 					}
 				}
-				when(KeyRange done = waitNext(rangesComplete.getFuture())) {
-					keysToLaunchFrom = done;
-				}
+				when(KeyRange done = waitNext(rangesComplete.getFuture())) { keysToLaunchFrom = done; }
 				when(wait(recordMetrics)) {
 					Promise<int64_t> req;
 					getAverageShardBytes.send(req);
@@ -2460,9 +2458,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
 				when(wait(waitForAll(ddQueueFutures))) {}
-				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) {
-					r.send(self.unhealthyRelocations);
-				}
+				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) { r.send(self.unhealthyRelocations); }
 			}
 		}
 	} catch (Error& e) {
@@ -2483,9 +2479,7 @@ TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
 	std::cout << "Start trace counter unit test for " << duration << "s ...\n";
 	loop choose {
 		when(wait(counterFuture)) {}
-		when(wait(finishFuture)) {
-			break;
-		}
+		when(wait(finishFuture)) { break; }
 		when(wait(delayJittered(2.0))) {
 			std::vector<UID> team(3);
 			for (int i = 0; i < team.size(); ++i) {
