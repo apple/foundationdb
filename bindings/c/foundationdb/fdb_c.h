@@ -342,6 +342,13 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_list_blobbified_ranges(FDBD
                                                                             int end_key_name_length,
                                                                             int rangeLimit);
 
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_verify_blob_range(FDBDatabase* db,
+                                                                       uint8_t const* begin_key_name,
+                                                                       int begin_key_name_length,
+                                                                       uint8_t const* end_key_name,
+                                                                       int end_key_name_length,
+                                                                       int64_t version);
+
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant,
                                                                        FDBTransaction** out_transaction);
 
