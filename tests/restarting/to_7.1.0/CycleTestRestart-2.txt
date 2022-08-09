@@ -1,5 +1,5 @@
 storageEngineExcludeTypes=-1,-2
-maxTLogVersion=6
+maxTLogVersion=7
 disableTss=true
 testTitle=Clogged
     runSetup=false

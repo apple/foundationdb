@@ -1,5 +1,5 @@
 storageEngineExcludeTypes=-1,-2,3
-maxTLogVersion=6
+maxTLogVersion=7
 disableTss=true
 disableHostname=true
 disableEncryption=true
