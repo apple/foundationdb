@@ -356,9 +356,15 @@ fdb_error_t Transaction::add_conflict_range(std::string_view begin_key,
 	    tr_, (const uint8_t*)begin_key.data(), begin_key.size(), (const uint8_t*)end_key.data(), end_key.size(), type);
 }
 
-KeyRangeArrayFuture Transaction::get_blob_granule_ranges(std::string_view begin_key, std::string_view end_key) {
-	return KeyRangeArrayFuture(fdb_transaction_get_blob_granule_ranges(
-	    tr_, (const uint8_t*)begin_key.data(), begin_key.size(), (const uint8_t*)end_key.data(), end_key.size()));
+KeyRangeArrayFuture Transaction::get_blob_granule_ranges(std::string_view begin_key,
+                                                         std::string_view end_key,
+                                                         int rangeLimit) {
+	return KeyRangeArrayFuture(fdb_transaction_get_blob_granule_ranges(tr_,
+	                                                                   (const uint8_t*)begin_key.data(),
+	                                                                   begin_key.size(),
+	                                                                   (const uint8_t*)end_key.data(),
+	                                                                   end_key.size(),
+	                                                                   rangeLimit));
 }
 KeyValueArrayResult Transaction::read_blob_granules(std::string_view begin_key,
                                                     std::string_view end_key,

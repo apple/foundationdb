@@ -78,7 +78,8 @@ public:
 	virtual ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                        int64_t chunkSize) = 0;
 
-	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) = 0;
+	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
+	                                                                              int rowLimit) = 0;
 
 	virtual ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
 	                                                   Version beginVersion,

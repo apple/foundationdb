@@ -169,7 +169,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			state Transaction tr(cx);
 			loop {
 				try {
-					Standalone<VectorRef<KeyRangeRef>> allGranules = wait(tr.getBlobGranuleRanges(normalKeys));
+					Standalone<VectorRef<KeyRangeRef>> allGranules = wait(tr.getBlobGranuleRanges(normalKeys, 1000000));
 					self->granuleRanges.set(allGranules);
 					break;
 				} catch (Error& e) {

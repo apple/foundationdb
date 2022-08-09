@@ -891,8 +891,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		loop {
 			state Transaction tr(cx, threadData->tenantName);
 			try {
-				Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(normalKeys));
-				ASSERT(ranges.size() >= 1);
+				Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(normalKeys, 1000000));
+				ASSERT(ranges.size() >= 1 && ranges.size() < 1000000);
 				ASSERT(ranges.front().begin == normalKeys.begin);
 				ASSERT(ranges.back().end == normalKeys.end);
 				for (int i = 0; i < ranges.size() - 1; i++) {
