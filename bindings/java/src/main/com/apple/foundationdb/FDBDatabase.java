@@ -251,6 +251,16 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	}
 
 	@Override
+	public CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey, long version, Executor e) {
+		pointerReadLock.lock();
+		try {
+			return new FutureInt64(Database_verifyBlobRange(getPtr(), beginKey, endKey, version), e);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
 	public Executor getExecutor() {
 		return executor;
 	}
@@ -270,4 +280,5 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	private native long Database_blobbifyRange(long cPtr, byte[] beginKey, byte[] endKey);
 	private native long Database_unblobbifyRange(long cPtr, byte[] beginKey, byte[] endKey);
 	private native long Database_listBlobbifiedRanges(long cPtr, byte[] beginKey, byte[] endKey, int rangeLimit);
+	private native long Database_verifyBlobRange(long cPtr, byte[] beginKey, byte[] endKey, long version);
 }

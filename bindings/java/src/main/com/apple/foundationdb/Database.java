@@ -279,6 +279,30 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 CompletableFuture<KeyRangeArrayResult> listBlobbifiedRanges(byte[] beginKey, byte[] endKey, int rangeLimit, Executor e);
 
 	/**
+	 * Runs {@link #verifyBlobRange(Function)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param version version to read at
+	 *
+	 * @return a future with the version of the last blob granule.
+	 */
+	default CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey, long version) {
+		return verifyBlobRange(beginKey, endKey, version, getExecutor());
+	}
+
+	/**
+	 * Checks if a blob range is blobbified.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param version version to read at
+	 *
+	 * @return a future with the version of the last blob granule.
+	 */
+	CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey, long version, Executor e);
+
+	/**
 	 * Runs a read-only transactional function against this {@code Database} with retry logic.
 	 *  {@link Function#apply(Object) apply(ReadTransaction)} will be called on the
 	 *  supplied {@link Function} until a non-retryable
