@@ -295,7 +295,8 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                              uint8_t const* begin_key_name,
 	                                              int begin_key_name_length,
 	                                              uint8_t const* end_key_name,
-	                                              int end_key_name_length);
+	                                              int end_key_name_length,
+	                                              int rangeLimit);
 
 	FDBResult* (*transactionReadBlobGranules)(FDBTransaction* db,
 	                                          uint8_t const* begin_key_name,
@@ -395,7 +396,8 @@ public:
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                int64_t chunkSize) override;
-	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
 
 	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
 	                                           Version beginVersion,
@@ -598,7 +600,8 @@ public:
 
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                int64_t chunkSize) override;
-	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
 
 	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
 	                                           Version beginVersion,

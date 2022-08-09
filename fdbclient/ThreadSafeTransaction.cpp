@@ -379,13 +379,14 @@ ThreadFuture<Standalone<VectorRef<const char*>>> ThreadSafeTransaction::getAddre
 }
 
 ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeTransaction::getBlobGranuleRanges(
-    const KeyRangeRef& keyRange) {
+    const KeyRangeRef& keyRange,
+    int rangeLimit) {
 	ISingleThreadTransaction* tr = this->tr;
 	KeyRange r = keyRange;
 
-	return onMainThread([tr, r]() -> Future<Standalone<VectorRef<KeyRangeRef>>> {
+	return onMainThread([=]() -> Future<Standalone<VectorRef<KeyRangeRef>>> {
 		tr->checkDeferredError();
-		return tr->getBlobGranuleRanges(r);
+		return tr->getBlobGranuleRanges(r, rangeLimit);
 	});
 }
 

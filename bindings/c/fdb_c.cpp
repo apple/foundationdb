@@ -895,11 +895,12 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_blob_granule_ranges(FDBTrans
                                                                         uint8_t const* begin_key_name,
                                                                         int begin_key_name_length,
                                                                         uint8_t const* end_key_name,
-                                                                        int end_key_name_length) {
+                                                                        int end_key_name_length,
+                                                                        int rangeLimit) {
 	RETURN_FUTURE_ON_ERROR(
 	    Standalone<VectorRef<KeyRangeRef>>,
 	    KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
-	    return (FDBFuture*)(TXN(tr)->getBlobGranuleRanges(range).extractPtr()););
+	    return (FDBFuture*)(TXN(tr)->getBlobGranuleRanges(range, rangeLimit).extractPtr()););
 }
 
 extern "C" DLLEXPORT FDBResult* fdb_transaction_read_blob_granules(FDBTransaction* tr,

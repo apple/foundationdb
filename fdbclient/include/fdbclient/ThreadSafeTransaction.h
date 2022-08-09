@@ -154,7 +154,8 @@ public:
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                int64_t chunkSize) override;
 
-	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
 
 	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
 	                                           Version beginVersion,
