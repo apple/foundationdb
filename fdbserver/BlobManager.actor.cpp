@@ -1536,12 +1536,13 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		coalescedRanges.push_back(coalescedRanges.arena(), splitPoints.keys.back());
 		ASSERT(coalescedRanges.size() == SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1);
 		if (BM_DEBUG) {
-			fmt::print("Downsampled split from {0} -> {1} granules\n",
+			fmt::print("Downsampled split [{0} - {1}) from {2} -> {3} granules\n", granuleRange.begin.printable(), granuleRange.end.printable(),
 			           splitPoints.keys.size() - 1,
 			           SERVER_KNOBS->BG_MAX_SPLIT_FANOUT);
 		}
 
-		splitPoints.keys = coalescedRanges;
+		// TODO probably do something better here?
+		wait(store(splitPoints, alignKeys(bmData, granuleRange, coalescedRanges)));
 		ASSERT(splitPoints.keys.size() <= SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1);
 	}
 
