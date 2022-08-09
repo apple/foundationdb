@@ -259,7 +259,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			for (auto localItr = self->dataDbs.find(clusterName1);
 			     localItr != self->dataDbs.find(clusterName2) && count < limit;
 			     ++localItr) {
-				fmt::print("Checking cluster {} {}\n", printable(localItr->first), localItr->second.registered);
 				if (localItr->second.registered) {
 					ASSERT(resultItr != clusterList.end());
 					ASSERT(resultItr->first == localItr->first);
@@ -567,6 +566,42 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR static Future<Void> decommissionMetacluster(MetaclusterManagementWorkload* self) {
+		state Reference<ITransaction> tr = self->managementDb->createTransaction();
+
+		state bool deleteTenants = deterministicRandom()->coinflip();
+
+		if (deleteTenants) {
+			state std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
+			    wait(MetaclusterAPI::listTenants(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6));
+
+			state std::vector<Future<Void>> deleteTenantFutures;
+			for (auto [tenantName, tenantMapEntry] : tenants) {
+				deleteTenantFutures.push_back(MetaclusterAPI::deleteTenant(self->managementDb, tenantName));
+			}
+
+			wait(waitForAll(deleteTenantFutures));
+		}
+
+		state std::map<ClusterName, DataClusterMetadata> dataClusters = wait(
+		    MetaclusterAPI::listClusters(self->managementDb, ""_sr, "\xff\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
+
+		std::vector<Future<Void>> removeClusterFutures;
+		for (auto [clusterName, clusterMetadata] : dataClusters) {
+			removeClusterFutures.push_back(
+			    MetaclusterAPI::removeCluster(self->managementDb, clusterName, !deleteTenants));
+		}
+
+		wait(waitForAll(removeClusterFutures));
+		wait(MetaclusterAPI::decommissionMetacluster(self->managementDb));
+
+		Optional<MetaclusterRegistrationEntry> entry =
+		    wait(MetaclusterMetadata::metaclusterRegistration().get(self->managementDb));
+		ASSERT(!entry.present());
+
+		return Void();
+	}
+
 	Future<bool> check(Database const& cx) override {
 		if (clientId == 0) {
 			return _check(this);
@@ -596,6 +631,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			dataClusterChecks.push_back(checkDataCluster(self, clusterName, dataClusterData));
 		}
 		wait(waitForAll(dataClusterChecks));
+
+		wait(decommissionMetacluster(self));
 
 		return true;
 	}

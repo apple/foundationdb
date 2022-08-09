@@ -484,10 +484,7 @@ Future<Void> decommissionMetacluster(Reference<DB> db) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			state Future<ClusterType> clusterTypeFuture = TenantAPI::getClusterType(tr);
-			wait(managementClusterCheckEmpty(tr));
-
-			ClusterType clusterType = wait(clusterTypeFuture);
+			ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
 				if (firstTry) {
 					throw invalid_metacluster_operation();
@@ -496,6 +493,14 @@ Future<Void> decommissionMetacluster(Reference<DB> db) {
 				}
 			}
 
+			// Erase all metadata not associated with specific tenants prior to checking
+			// cluster emptiness
+			ManagementClusterMetadata::tenantMetadata().tenantCount.clear(tr);
+			ManagementClusterMetadata::tenantMetadata().lastTenantId.clear(tr);
+			ManagementClusterMetadata::tenantMetadata().tenantTombstones.clear(tr);
+			ManagementClusterMetadata::tenantMetadata().tombstoneCleanupData.clear(tr);
+
+			wait(managementClusterCheckEmpty(tr));
 			MetaclusterMetadata::metaclusterRegistration().clear(tr);
 
 			firstTry = false;
