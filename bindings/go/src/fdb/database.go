@@ -174,9 +174,16 @@ func (d Database) transact(ctx context.Context, f func(Transaction) (interface{}
 		return nil, e
 	}
 
-	if deadline, ok := ctx.Deadline(); ok {
-		t := time.Until(deadline).Milliseconds()
-		tr.Options().SetTimeout(t)
+	if ctx != nil {
+		if deadline, ok := ctx.Deadline(); ok {
+			t := time.Until(deadline).Milliseconds()
+			_ = tr.Options().SetTimeout(t)
+		}
+
+		go func() {
+			<-ctx.Done()
+			tr.Cancel()
+		}()
 	}
 
 	wrapped := func() (ret interface{}, e error) {
@@ -233,9 +240,16 @@ func (d Database) readTransact(ctx context.Context, f func(ReadTransaction) (int
 		return nil, e
 	}
 
-	if deadline, ok := ctx.Deadline(); ok {
-		t := time.Until(deadline).Milliseconds()
-		tr.Options().SetTimeout(t)
+	if ctx != nil {
+		if deadline, ok := ctx.Deadline(); ok {
+			t := time.Until(deadline).Milliseconds()
+			_ = tr.Options().SetTimeout(t)
+		}
+
+		go func() {
+			<-ctx.Done()
+			tr.Cancel()
+		}()
 	}
 
 	wrapped := func() (ret interface{}, e error) {
@@ -285,9 +299,16 @@ func (d Database) localityGetBoundaryKeys(ctx context.Context, er ExactRange, li
 		return nil, e
 	}
 
-	if deadline, ok := ctx.Deadline(); ok {
-		t := time.Until(deadline).Milliseconds()
-		tr.Options().SetTimeout(t)
+	if ctx != nil {
+		if deadline, ok := ctx.Deadline(); ok {
+			t := time.Until(deadline).Milliseconds()
+			_ = tr.Options().SetTimeout(t)
+		}
+
+		go func() {
+			<-ctx.Done()
+			tr.Cancel()
+		}()
 	}
 
 	if readVersion != 0 {
