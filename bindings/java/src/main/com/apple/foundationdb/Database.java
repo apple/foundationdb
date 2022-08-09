@@ -253,6 +253,32 @@ public interface Database extends AutoCloseable, TransactionContext {
 	CompletableFuture<Boolean> unblobbifyRange(byte[] beginKey, byte[] endKey, Executor e);
 
 	/**
+	 * Runs {@link #listBlobbifiedRanges(Function)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param rangeLimit batch size
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return a future with the list of blobbified ranges.
+	 */
+	 default CompletableFuture<KeyRangeArrayResult> listBlobbifiedRanges(byte[] beginKey, byte[] endKey, int rangeLimit) {
+		return listBlobbifiedRanges(beginKey, endKey, rangeLimit, getExecutor());
+	 }
+
+	/**
+	 * Lists blobbified ranges in the database. There may be more if result.size() == rangeLimit.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param rangeLimit batch size
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return a future with the list of blobbified ranges.
+	 */
+	 CompletableFuture<KeyRangeArrayResult> listBlobbifiedRanges(byte[] beginKey, byte[] endKey, int rangeLimit, Executor e);
+
+	/**
 	 * Runs a read-only transactional function against this {@code Database} with retry logic.
 	 *  {@link Function#apply(Object) apply(ReadTransaction)} will be called on the
 	 *  supplied {@link Function} until a non-retryable

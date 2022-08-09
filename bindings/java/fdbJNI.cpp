@@ -976,6 +976,40 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1unblob
 	return (jlong)f;
 }
 
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1listBlobbifiedRanges(JNIEnv* jenv,
+                                                                                               jobject,
+                                                                                               jlong dbPtr,
+                                                                                               jbyteArray beginKeyBytes,
+                                                                                               jbyteArray endKeyBytes,
+                                                                                               jint rangeLimit) {
+	if (!dbPtr || !beginKeyBytes || !endKeyBytes) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBDatabase* tr = (FDBDatabase*)dbPtr;
+
+	uint8_t* startKey = (uint8_t*)jenv->GetByteArrayElements(beginKeyBytes, JNI_NULL);
+	if (!startKey) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	uint8_t* endKey = (uint8_t*)jenv->GetByteArrayElements(endKeyBytes, JNI_NULL);
+	if (!endKey) {
+		jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)startKey, JNI_ABORT);
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	FDBFuture* f = fdb_database_list_blobbified_ranges(
+	    tr, startKey, jenv->GetArrayLength(beginKeyBytes), endKey, jenv->GetArrayLength(endKeyBytes), rangeLimit);
+	jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)startKey, JNI_ABORT);
+	jenv->ReleaseByteArrayElements(endKeyBytes, (jbyte*)endKey, JNI_ABORT);
+	return (jlong)f;
+}
+
 JNIEXPORT jboolean JNICALL Java_com_apple_foundationdb_FDB_Error_1predicate(JNIEnv* jenv,
                                                                             jobject,
                                                                             jint predicate,
