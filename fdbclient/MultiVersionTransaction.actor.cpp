@@ -634,6 +634,21 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> DLDatabase::listBlobbifiedRange
 	});
 }
 
+ThreadFuture<Version> DLDatabase::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
+	if (!api->databaseVerifyBlobRange) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseVerifyBlobRange(
+	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), version);
+
+	return toThreadFuture<Version>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		Version version = invalidVersion;
+		ASSERT(!api->futureGetInt64(f, &version));
+		return version;
+	});
+}
+
 // DLApi
 
 // Loads the specified function from a dynamic library
@@ -726,6 +741,8 @@ void DLApi::init() {
 	    &api->databaseUnblobbifyRange, lib, fdbCPath, "fdb_database_unblobbify_range", headerVersion >= 720);
 	loadClientFunction(
 	    &api->databaseListBlobbifiedRanges, lib, fdbCPath, "fdb_database_list_blobbified_ranges", headerVersion >= 720);
+	loadClientFunction(
+	    &api->databaseVerifyBlobRange, lib, fdbCPath, "fdb_database_verify_blob_range", headerVersion >= 720);
 
 	loadClientFunction(
 	    &api->tenantCreateTransaction, lib, fdbCPath, "fdb_tenant_create_transaction", headerVersion >= 710);
@@ -1664,6 +1681,12 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> MultiVersionDatabase::listBlobb
 	auto dbVar = dbState->dbVar->get();
 	auto f = dbVar.value ? dbVar.value->listBlobbifiedRanges(keyRange, rangeLimit)
 	                     : ThreadFuture<Standalone<VectorRef<KeyRangeRef>>>(Never());
+	return abortableFuture(f, dbVar.onChange);
+}
+
+ThreadFuture<Version> MultiVersionDatabase::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
+	auto dbVar = dbState->dbVar->get();
+	auto f = dbVar.value ? dbVar.value->verifyBlobRange(keyRange, version) : ThreadFuture<Version>(Never());
 	return abortableFuture(f, dbVar.onChange);
 }
 

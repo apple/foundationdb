@@ -388,6 +388,7 @@ public:
 	Future<bool> blobbifyRange(KeyRange range);
 	Future<bool> unblobbifyRange(KeyRange range);
 	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range, int rangeLimit);
+	Future<Version> verifyBlobRange(const KeyRange& range, Optional<Version> version);
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,

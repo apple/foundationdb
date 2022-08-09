@@ -73,70 +73,10 @@ ACTOR Future<Void> doBlobPurge(Database db, Key startKey, Key endKey, Optional<V
 	return Void();
 }
 
-ACTOR Future<Version> checkBlobSubrange(Database db, KeyRange keyRange, Optional<Version> version) {
-	state Transaction tr(db);
-	state Version readVersionOut = invalidVersion;
-	loop {
-		try {
-			wait(success(tr.readBlobGranules(keyRange, 0, version, &readVersionOut)));
-			return readVersionOut;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
-ACTOR Future<Version> verifyBlobRange(Database db, KeyRange range, Optional<Version> version) {
-	state Transaction tr(db);
-	state Standalone<VectorRef<KeyRangeRef>> allRanges;
-	state KeyRange curRegion = KeyRangeRef(range.begin, range.begin);
-	state Version readVersionOut = invalidVersion;
-	state int batchSize = CLIENT_KNOBS->BG_TOO_MANY_GRANULES / 2;
-	loop {
-		try {
-			wait(store(allRanges, tr.getBlobGranuleRanges(KeyRangeRef(curRegion.begin, range.end), 20 * batchSize)));
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-
-		if (allRanges.empty()) {
-			if (curRegion.begin < range.end) {
-				return invalidVersion;
-			}
-			return readVersionOut;
-		}
-
-		state std::vector<Future<Version>> checkParts;
-		// Chunk up to smaller ranges than this limit. Must be smaller than BG_TOO_MANY_GRANULES to not hit the limit
-		int batchCount = 0;
-		for (auto& it : allRanges) {
-			if (it.begin != curRegion.end) {
-				return invalidVersion;
-			}
-
-			curRegion = KeyRangeRef(curRegion.begin, it.end);
-			batchCount++;
-
-			if (batchCount == batchSize) {
-				checkParts.push_back(checkBlobSubrange(db, curRegion, version));
-				batchCount = 0;
-				curRegion = KeyRangeRef(curRegion.end, curRegion.end);
-			}
-		}
-		if (!curRegion.empty()) {
-			checkParts.push_back(checkBlobSubrange(db, curRegion, version));
-		}
-
-		wait(waitForAll(checkParts));
-		readVersionOut = checkParts.back().get();
-		curRegion = KeyRangeRef(curRegion.end, curRegion.end);
-	}
-}
-
 ACTOR Future<Void> doBlobCheck(Database db, Key startKey, Key endKey, Optional<Version> version) {
 	state double elapsed = -timer_monotonic();
 
-	state Version readVersionOut = wait(verifyBlobRange(db, KeyRangeRef(startKey, endKey), version));
+	state Version readVersionOut = wait(db->verifyBlobRange(KeyRangeRef(startKey, endKey), version));
 
 	elapsed += timer_monotonic();
 

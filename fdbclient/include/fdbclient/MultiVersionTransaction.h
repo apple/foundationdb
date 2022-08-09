@@ -190,6 +190,13 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                           int end_key_name_length,
 	                                           int rangeLimit);
 
+	FDBFuture* (*databaseVerifyBlobRange)(FDBDatabase* db,
+	                                      uint8_t const* begin_key_name,
+	                                      int begin_key_name_length,
+	                                      uint8_t const* end_key_name,
+	                                      int end_key_name_length,
+	                                      Optional<Version> version);
+
 	// Tenant
 	fdb_error_t (*tenantCreateTransaction)(FDBTenant* tenant, FDBTransaction** outTransaction);
 
@@ -501,6 +508,7 @@ public:
 	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
+	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
@@ -848,6 +856,7 @@ public:
 	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
+	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
