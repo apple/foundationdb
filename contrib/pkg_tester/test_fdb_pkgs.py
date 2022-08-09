@@ -165,7 +165,6 @@ def centos_image_with_fdb_helper(versioned: bool) -> Iterator[Optional[Image]]:
         container = Container("centos:7", initd=True)
         for rpm in rpms:
             container.copy_to(rpm, "/opt")
-        container.run(["bash", "-c", "yum update -y"])
         container.run(
             ["bash", "-c", "yum install -y prelink"]
         )  # this is for testing libfdb_c execstack permissions
@@ -327,7 +326,7 @@ def test_execstack_permissions_libfdb_c(linux_container: Container, snapshot):
         [
             "bash",
             "-c",
-            "execstack -q $(ldconfig -p | grep libfdb_c | awk '{print $(NF)}')",
+            "execstack -q $(ldconfig -p | grep libfdb_c.so | awk '{print $(NF)}')",
         ]
     )
 
