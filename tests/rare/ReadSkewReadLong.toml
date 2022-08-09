@@ -1,0 +1,30 @@
+[[test]]
+testTitle = 'SkewedReadWriteTest'
+connectionFailuresDisableDuration = 100000
+# waitForQuiescenceBegin= false
+# waitForQuiescenceEnd=false
+clearAfterTest = true
+runSetup = true # false
+timeout = 3600.0
+
+
+[[test.workload]]
+testName = 'SkewedReadWrite'
+transactionsPerSecond = 100000
+testDuration = 1200.0
+skewRound = 1
+# 120GB
+nodeCount = 60000000
+valueBytes = 2000
+readsPerTransactionA = 10
+readsPerTransactionB = 0
+alpha = 0.5
+discardEdgeMeasurements = false
+hotServerFraction = 0.3
+hotServerReadFrac = 1.0
+# hotServerWriteFrac = 0.6
+# hotReadWriteServerOverlap = 0.5
+hotServerShardFraction = 0.1
+warmingDelay = 10.0
+
+

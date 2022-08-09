@@ -950,7 +950,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// NOTE: 'token-name" can NOT contain '#' character
 	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS,             "");
 
-	init( DYNAMIC_REPLICATION_ENABLED,                           true);
+	init( DYNAMIC_REPLICATION_ENABLED,                           false);
 	init( DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC,               0.2);
 
 	// clang-format on

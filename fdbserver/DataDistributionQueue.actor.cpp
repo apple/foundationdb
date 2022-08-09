@@ -1555,15 +1555,25 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			// TODO@ZZX, decide what to deal with healthyDestinations
 			if (SERVER_KNOBS->DYNAMIC_REPLICATION_ENABLED) {
 				if (rd.operation_ == RelocateOperation::MULTIPLY_REPLICAS) {
+					TraceEvent("ZZXBeforeRelocateByMultplyReplicas")
+					    .detail("Source", rd.src)
+					    .detail("CompleteSrc", rd.completeSources)
+					    .detail("BestTeam", destServersString(bestTeams))
+					    .detail("SrcTeam", destServersString(srcTeams))
+					    .detail("DestinationTeam", destinationTeams)
+					    .detail("HealthIds", healthyIds)
+					    .detail("DestIds", destIds);
 					addSrcTeamsToDestTeams(srcTeams, destinationTeams, healthyIds, destIds);
 					TraceEvent("RelocateByMultplyReplicas")
 					    .detail("Source", rd.src)
 					    .detail("CompleteSrc", rd.completeSources)
-					    .detail("Server", destServersString(bestTeams))
+					    .detail("BestTeam", destServersString(bestTeams))
+					    .detail("SrcTeam", destServersString(srcTeams))
+					    .detail("DestinationTeam", destinationTeams)
+					    .detail("HealthIds", healthyIds)
 					    .detail("DestIds", destIds);
 				} else if (rd.operation_ == RelocateOperation::REDUCE_REPLICAS) {
-					// TODO@ZZX
-					// Looks like don't have to do anything?
+					// Looks like don't have to do anything in particular?
 					TraceEvent("RelocateByReduceReplicas")
 					    .detail("Source", rd.src)
 					    .detail("CompleteSrc", rd.completeSources)
@@ -1823,24 +1833,37 @@ void addSrcTeamsToDestTeams(const std::vector<std::pair<Reference<IDataDistribut
                             std::vector<UID>& healthyIds,
                             std::vector<UID>& destIds) {
 	// Sometimes srcTeam may intersect with destTeams, we need to use SET to eliminate repeated members.
-	std::set<ShardsAffectedByTeamFailure::Team> tmpDestTeams(destinationTeams.begin(), destinationTeams.end());
-	std::set<UID> tmpHealthyIds(healthyIds.begin(), healthyIds.end());
-	std::set<UID> tmpDestIds(destIds.begin(), destIds.end());
+	std::set<UID> uniqueHealthyIds(healthyIds.begin(), healthyIds.end());
+	std::set<UID> uniqueDestIds(destIds.begin(), destIds.end());
 
-	for (auto& [team, _] : srcTeams) {
+	std::set<std::vector<UID>> uniqueDestTeams;
+
+	for (auto& it : destinationTeams) {
+		uniqueDestTeams.insert(it.servers);
+	}
+
+	for (int i = 0; i < srcTeams.size(); i++) {
+		Reference<IDataDistributionTeam> team = srcTeams[i].first;
 		const std::vector<UID>& serverIds = team->getServerIDs();
-		tmpDestTeams.insert(ShardsAffectedByTeamFailure::Team(serverIds, false));
-		tmpDestIds.insert(serverIds.begin(), serverIds.end());
-		if (team->isHealthy()) {
-			tmpHealthyIds.insert(serverIds.begin(), serverIds.end());
+
+		if (!uniqueDestTeams.count(serverIds)) {
+			destinationTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
+			uniqueDestTeams.insert(serverIds);
+		}
+
+		for (int i = 0; i < serverIds.size(); i++) {
+			UID serverId = serverIds[i];
+			if (!uniqueDestIds.count(serverId)) {
+				destIds.push_back(serverId);
+				uniqueDestIds.insert(serverId);
+			}
+
+			if (team->isHealthy() && !uniqueHealthyIds.count(serverId)) {
+				healthyIds.push_back(serverId);
+				uniqueHealthyIds.insert(serverId);
+			}
 		}
 	}
-	destinationTeams.clear();
-	destinationTeams.assign(tmpDestTeams.begin(), tmpDestTeams.end());
-	healthyIds.clear();
-	healthyIds.assign(tmpHealthyIds.begin(), tmpHealthyIds.end());
-	destIds.clear();
-	destIds.assign(tmpDestIds.begin(), tmpDestIds.end());
 }
 
 inline double getWorstCpu(const HealthMetrics& metrics, const std::vector<UID>& ids) {
@@ -1865,11 +1888,10 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
                                      Reference<IDataDistributionTeam> destTeam,
                                      int teamCollectionIndex,
                                      TraceEvent* traceEvent) {
-	// TODO@ZZX: uncomment
-	// if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
-	// 	traceEvent->detail("CancelingDueToSimulationSpeedup", true);
-	// 	return false;
-	// }
+	if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
+		traceEvent->detail("CancelingDueToSimulationSpeedup", true);
+		return false;
+	}
 
 	state bool primary = teamCollectionIndex == 0;
 	state std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
@@ -1877,8 +1899,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	traceEvent->detail("ShardsInSource", shards.size());
 	// For read rebalance if there is just 1 hot shard remained, move this shard to another server won't solve the
 	// problem.
-	// TODO: This situation should be solved by split and merge
-	// UPDATE: This problem can be solved by dynamic replication.
+	// UPDATE: This problem can be solved by dynamic replication & split,merge
 	if (shards.size() < 1) {
 		traceEvent->detail("SkipReason", "NoShardOnSource");
 		return false;
@@ -2351,6 +2372,8 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 				}
 			}
 
+			// TODO@ZZX:
+			skipCurrentLoop = true;
 			traceEvent.detail("Enabled", !skipCurrentLoop);
 
 			wait(delayF);
@@ -2453,6 +2476,8 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 			traceEvent.detail("Enabled", !skipCurrentLoop);
 
 			wait(delayF);
+			// TODO@ZZX:
+			skipCurrentLoop = true;
 			if (skipCurrentLoop) {
 				// set loop interval to avoid busy wait here.
 				rebalancePollingInterval =
@@ -2553,8 +2578,9 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 
 	for (int i = 0; i < teamCollections.size(); i++) {
 		// FIXME: Use BgDDLoadBalance for disk rebalance too after DD simulation test proof.
-		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM));
-		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM));
+		// balancingFutures.push_back(BgDDLoadRebalance(&self, i,
+		// SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM)); balancingFutures.push_back(BgDDLoadRebalance(&self,
+		// i, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM));
 		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
 			balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM));
 			balancingFutures.push_back(BgDDLoadRebalance(&self, i, DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM));

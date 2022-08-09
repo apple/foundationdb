@@ -3297,6 +3297,8 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 			startTimeD = now();
 			++trState->cx->transactionPhysicalReads;
 
+			TraceEvent("GetValueAlternatives").detail("NumberOfReplicas", locationInfo.locations->locations()->size());
+
 			state GetValueReply reply;
 			try {
 				if (CLIENT_BUGGIFY_WITH_PROB(.01)) {
