@@ -28,7 +28,7 @@
 typedef enum { TLOG_ENCRYPTION = 0, STORAGE_SERVER_ENCRYPTION = 1, BLOB_GRANULE_ENCRYPTION = 2 } EncryptOperationType;
 
 inline bool isEncryptionOpSupported(EncryptOperationType operation_type, ClientDBInfo dbInfo) {
-    if (!dbInfo.isEncryptionEnabled) {
+	if (!dbInfo.isEncryptionEnabled) {
 		return false;
 	}
 
