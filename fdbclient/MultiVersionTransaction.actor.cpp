@@ -744,6 +744,7 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version",
 	                   headerVersion >= 0);
+	loadClientFunction(&api->futureGetBool, lib, fdbCPath, "fdb_future_get_bool", headerVersion >= 720);
 	loadClientFunction(&api->futureGetUInt64, lib, fdbCPath, "fdb_future_get_uint64", headerVersion >= 700);
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error", headerVersion >= 0);
 	loadClientFunction(&api->futureGetKey, lib, fdbCPath, "fdb_future_get_key", headerVersion >= 0);

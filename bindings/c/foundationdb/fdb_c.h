@@ -227,6 +227,8 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_set_callback(FDBFuture* f,
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_error(FDBFuture* f);
 #endif
 
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_bool(FDBFuture* f, fdb_bool_t* out);
+
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_int64(FDBFuture* f, int64_t* out);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_uint64(FDBFuture* f, uint64_t* out);

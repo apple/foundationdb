@@ -25,6 +25,7 @@
 #include "com_apple_foundationdb_FDB.h"
 #include "com_apple_foundationdb_FDBDatabase.h"
 #include "com_apple_foundationdb_FDBTransaction.h"
+#include "com_apple_foundationdb_FutureBool.h"
 #include "com_apple_foundationdb_FutureInt64.h"
 #include "com_apple_foundationdb_FutureKey.h"
 #include "com_apple_foundationdb_FutureKeyArray.h"
@@ -276,6 +277,23 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_NativeFuture_Future_1releaseM
 	}
 	FDBFuture* var = (FDBFuture*)future;
 	fdb_future_release_memory(var);
+}
+
+JNIEXPORT jboolean JNICALL Java_com_apple_foundationdb_FutureBool_FutureBool_1get(JNIEnv* jenv, jobject, jlong future) {
+	if (!future) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBFuture* f = (FDBFuture*)future;
+
+	fdb_bool_t value = false;
+	fdb_error_t err = fdb_future_get_bool(f, &value);
+	if (err) {
+		safeThrow(jenv, getThrowable(jenv, err));
+		return 0;
+	}
+
+	return (jboolean)value;
 }
 
 JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureInt64_FutureInt64_1get(JNIEnv* jenv, jobject, jlong future) {
