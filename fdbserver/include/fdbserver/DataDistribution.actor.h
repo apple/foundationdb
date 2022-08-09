@@ -94,15 +94,24 @@ struct RelocateShard {
 	UID dataMoveId;
 	RelocateReason reason;
 	DataMovementReason moveReason;
+
+	// Initialization when define is a better practice. We should avoid assignment of member after definition.
+	// static RelocateShard emptyRelocateShard() { return {}; }
+
+	RelocateShard(KeyRange const& keys, DataMovementReason moveReason, RelocateReason reason)
+	  : keys(keys), priority(dataMovementPriority(moveReason)), cancelled(false), dataMoveId(anonymousShardId),
+	    reason(reason), moveReason(moveReason) {}
+
+	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason)
+	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason),
+	    moveReason(priorityToDataMovementReason(priority)) {}
+
+	bool isRestore() const { return this->dataMove != nullptr; }
+
+private:
 	RelocateShard()
 	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::OTHER),
 	    moveReason(DataMovementReason::INVALID) {}
-	RelocateShard(KeyRange const& keys, DataMovementReason moveReason, RelocateReason reason)
-	  : keys(keys), cancelled(false), dataMoveId(anonymousShardId), reason(reason), moveReason(moveReason) {
-		priority = dataMovementPriority(moveReason);
-	}
-
-	bool isRestore() const { return this->dataMove != nullptr; }
 };
 
 struct IDataDistributionTeam {
