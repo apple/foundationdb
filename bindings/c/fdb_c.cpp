@@ -239,6 +239,10 @@ fdb_error_t fdb_future_get_version_v619(FDBFuture* f, int64_t* out_version) {
 	CATCH_AND_RETURN(*out_version = TSAV(Version, f)->get(););
 }
 
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_bool(FDBFuture* f, fdb_bool_t* out_value) {
+	CATCH_AND_RETURN(*out_value = TSAV(bool, f)->get(););
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_future_get_int64(FDBFuture* f, int64_t* out_value) {
 	CATCH_AND_RETURN(*out_value = TSAV(int64_t, f)->get(););
 }
