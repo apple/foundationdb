@@ -52,6 +52,7 @@ public:
 		default:
 			ASSERT(false);
 		}
+		return "";
 	}
 	operator int() const { return (int)value; }
 	constexpr static int8_t typeCount() { return 3; }
