@@ -20,6 +20,7 @@
 
 #include <cinttypes>
 #include "fmt/format.h"
+#include "fdbclient/ClientStatusStats.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbserver/Status.h"
@@ -1078,30 +1079,18 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	return processMap;
 }
 
-struct ClientStats {
-	int count;
-	std::set<std::pair<NetworkAddress, Key>> examples;
-
-	ClientStats() : count(0) {}
-};
-
 static JsonBuilderObject clientStatusFetcher(
     std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatusMap) {
 	JsonBuilderObject clientStatus;
 
 	int64_t clientCount = 0;
-	std::map<Key, ClientStats> issues;
-	std::map<Standalone<ClientVersionRef>, ClientStats> supportedVersions;
-	std::map<Key, ClientStats> maxSupportedProtocol;
+	// Here we handle versions and maxSupportedProtocols, the issues will be handled in getClientIssuesAsMessages
+	std::map<Standalone<ClientVersionRef>, ClientStatusStats> supportedVersions;
+	std::map<Key, ClientStatusStats> maxSupportedProtocol;
 
 	for (auto iter = clientStatusMap->begin(); iter != clientStatusMap->end();) {
 		if (now() - iter->second.first < 2 * SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL) {
 			clientCount += iter->second.second.clientCount;
-			for (auto& it : iter->second.second.issues) {
-				auto& issue = issues[it.item];
-				issue.count += it.count;
-				issue.examples.insert(it.examples.begin(), it.examples.end());
-			}
 			for (auto& it : iter->second.second.supportedVersions) {
 				auto& version = supportedVersions[it.item];
 				version.count += it.count;

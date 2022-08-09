@@ -105,8 +105,8 @@ struct ItemWithExamples {
 	std::vector<std::pair<NetworkAddress, Key>> examples;
 
 	ItemWithExamples() : item{}, count(0) {}
-	ItemWithExamples(T const& item, int count, std::vector<std::pair<NetworkAddress, Key>> const& examples)
-	  : item(item), count(count), examples(examples) {}
+	ItemWithExamples(T const& item, int count, std::set<std::pair<NetworkAddress, Key>> const& examples)
+	  : item(item), count(count), examples(std::begin(examples), std::end(examples)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
