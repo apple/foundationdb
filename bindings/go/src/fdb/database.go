@@ -27,8 +27,10 @@ package fdb
 import "C"
 
 import (
+	"context"
 	"errors"
 	"runtime"
+	"time"
 
 	"golang.org/x/xerrors"
 )
@@ -157,10 +159,24 @@ func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNi
 // See the Transactor interface for an example of using Transact with
 // Transaction and Database objects.
 func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{}, error) {
+	return d.transact(context.Background(), f)
+}
+
+// TransactWithContext - same as Transact but uses context for setting timeout
+func (d Database) TransactWithContext(ctx context.Context, f func(Transaction) (interface{}, error)) (interface{}, error) {
+	return d.transact(ctx, f)
+}
+
+func (d Database) transact(ctx context.Context, f func(Transaction) (interface{}, error)) (interface{}, error) {
 	tr, e := d.CreateTransaction()
 	// Any error here is non-retryable
 	if e != nil {
 		return nil, e
+	}
+
+	if deadline, ok := ctx.Deadline(); ok {
+		t := time.Until(deadline).Milliseconds()
+		tr.Options().SetTimeout(t)
 	}
 
 	wrapped := func() (ret interface{}, e error) {
@@ -201,10 +217,25 @@ func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{
 // See the ReadTransactor interface for an example of using ReadTransact with
 // Transaction, Snapshot and Database objects.
 func (d Database) ReadTransact(f func(ReadTransaction) (interface{}, error)) (interface{}, error) {
+	// context used just for setting timeouts
+	return d.readTransact(context.Background(), f)
+}
+
+// ReadTransactWithContext - same as ReadTransact but uses context for setting timeout
+func (d Database) ReadTransactWithContext(ctx context.Context, f func(ReadTransaction) (interface{}, error)) (interface{}, error) {
+	return d.readTransact(ctx, f)
+}
+
+func (d Database) readTransact(ctx context.Context, f func(ReadTransaction) (interface{}, error)) (interface{}, error) {
 	tr, e := d.CreateTransaction()
 	// Any error here is non-retryable
 	if e != nil {
 		return nil, e
+	}
+
+	if deadline, ok := ctx.Deadline(); ok {
+		t := time.Until(deadline).Milliseconds()
+		tr.Options().SetTimeout(t)
 	}
 
 	wrapped := func() (ret interface{}, e error) {
@@ -240,9 +271,23 @@ func (d Database) Options() DatabaseOptions {
 // If readVersion is non-zero, the boundary keys as of readVersion will be
 // returned.
 func (d Database) LocalityGetBoundaryKeys(er ExactRange, limit int, readVersion int64) ([]Key, error) {
+	return d.localityGetBoundaryKeys(context.Background(), er, limit, readVersion)
+}
+
+// LocalityGetBoundaryKeysWithContext - same as LocalityGetBoundaryKeys but uses context for setting timeout
+func (d Database) LocalityGetBoundaryKeysWithContext(ctx context.Context, er ExactRange, limit int, readVersion int64) ([]Key, error) {
+	return d.localityGetBoundaryKeys(ctx, er, limit, readVersion)
+}
+
+func (d Database) localityGetBoundaryKeys(ctx context.Context, er ExactRange, limit int, readVersion int64) ([]Key, error) {
 	tr, e := d.CreateTransaction()
 	if e != nil {
 		return nil, e
+	}
+
+	if deadline, ok := ctx.Deadline(); ok {
+		t := time.Until(deadline).Milliseconds()
+		tr.Options().SetTimeout(t)
 	}
 
 	if readVersion != 0 {
