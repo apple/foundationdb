@@ -289,7 +289,8 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 			return Void();
 		} catch (Error& e) {
-			if (e.code() == error_code_invalid_tenant_state || e.code() == error_code_tenant_removed) {
+			if (e.code() == error_code_invalid_tenant_state || e.code() == error_code_tenant_removed ||
+			    e.code() == error_code_cluster_no_capacity) {
 				ASSERT(self->useMetacluster);
 			} else if (e.code() != error_code_tenant_not_found && e.code() != error_code_tenant_already_exists) {
 				TraceEvent(SevError, "RenameTenantFailure")
