@@ -190,6 +190,7 @@ public:
 
 	virtual void selectApiVersion(int apiVersion) = 0;
 	virtual const char* getClientVersion() = 0;
+	virtual void useFutureProtocolVersion() = 0;
 
 	virtual void setNetworkOption(FDBNetworkOptions::Option option,
 	                              Optional<StringRef> value = Optional<StringRef>()) = 0;

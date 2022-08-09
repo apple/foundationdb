@@ -10,9 +10,13 @@ import hashlib
 
 from local_cluster import random_secret_string
 
+CURRENT_VERSION = "7.2.0"
+FUTURE_VERSION = "7.3.0"
+
 SUPPORTED_PLATFORMS = ["x86_64", "aarch64"]
 SUPPORTED_VERSIONS = [
-    "7.2.0",
+    FUTURE_VERSION,
+    CURRENT_VERSION,
     "7.1.9",
     "7.1.8",
     "7.1.7",
@@ -67,7 +71,6 @@ SUPPORTED_VERSIONS = [
 ]
 FDB_DOWNLOAD_ROOT = "https://github.com/apple/foundationdb/releases/download/"
 LOCAL_OLD_BINARY_REPO = "/opt/foundationdb/old/"
-CURRENT_VERSION = "7.2.0"
 MAX_DOWNLOAD_ATTEMPTS = 5
 
 
@@ -93,18 +96,17 @@ def read_to_str(filename):
         return f.read()
 
 
+def is_local_build_version(version):
+    return version == CURRENT_VERSION or version == FUTURE_VERSION
+
+
 class FdbBinaryDownloader:
-    def __init__(
-        self,
-        build_dir
-    ):
+    def __init__(self, build_dir):
         self.build_dir = Path(build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(build_dir)
         self.platform = platform.machine()
-        assert self.platform in SUPPORTED_PLATFORMS, "Unsupported platform {}".format(
-            self.platform
-        )
+        assert self.platform in SUPPORTED_PLATFORMS, "Unsupported platform {}".format(self.platform)
         self.tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
         self.tmp_dir.mkdir(parents=True)
         self.download_dir = self.build_dir.joinpath("tmp", "old_binaries")
@@ -117,7 +119,7 @@ class FdbBinaryDownloader:
         return (self.local_binary_repo is not None) and (self.local_binary_repo.joinpath(version).exists())
 
     def binary_path(self, version, bin_name):
-        if version == CURRENT_VERSION:
+        if is_local_build_version(version):
             return self.build_dir.joinpath("bin", bin_name)
         elif self.version_in_local_repo(version):
             return self.local_binary_repo.joinpath(version, "bin", "{}-{}".format(bin_name, version))
@@ -125,7 +127,7 @@ class FdbBinaryDownloader:
             return self.download_dir.joinpath(version, bin_name)
 
     def lib_dir(self, version):
-        if version == CURRENT_VERSION:
+        if is_local_build_version(version):
             return self.build_dir.joinpath("lib")
         else:
             return self.download_dir.joinpath(version)
@@ -134,9 +136,7 @@ class FdbBinaryDownloader:
         return self.lib_dir(version).joinpath("libfdb_c.so")
 
     # Download an old binary of a given version from a remote repository
-    def download_old_binary(
-        self, version, target_bin_name, remote_bin_name, make_executable
-    ):
+    def download_old_binary(self, version, target_bin_name, remote_bin_name, make_executable):
         local_file = self.download_dir.joinpath(version, target_bin_name)
         if local_file.exists():
             return
@@ -152,9 +152,7 @@ class FdbBinaryDownloader:
 
         for attempt_cnt in range(MAX_DOWNLOAD_ATTEMPTS + 1):
             if attempt_cnt == MAX_DOWNLOAD_ATTEMPTS:
-                assert False, "Failed to download {} after {} attempts".format(
-                    local_file_tmp, MAX_DOWNLOAD_ATTEMPTS
-                )
+                assert False, "Failed to download {} after {} attempts".format(local_file_tmp, MAX_DOWNLOAD_ATTEMPTS)
             try:
                 print("Downloading '{}' to '{}'...".format(remote_file, local_file_tmp))
                 request.urlretrieve(remote_file, local_file_tmp)
@@ -172,11 +170,7 @@ class FdbBinaryDownloader:
             if expected_checksum == actual_checkum:
                 print("Checksum OK")
                 break
-            print(
-                "Checksum mismatch. Expected: {} Actual: {}".format(
-                    expected_checksum, actual_checkum
-                )
-            )
+            print("Checksum mismatch. Expected: {} Actual: {}".format(expected_checksum, actual_checkum))
 
         os.rename(local_file_tmp, local_file)
         os.remove(local_sha256)
@@ -202,22 +196,14 @@ class FdbBinaryDownloader:
 
     # Download all old binaries required for testing the specified upgrade path
     def download_old_binaries(self, version):
-        if version == CURRENT_VERSION:
+        if is_local_build_version(version):
             return
 
         if self.version_in_local_repo(version):
             self.copy_clientlib_from_local_repo(version)
             return
 
-        self.download_old_binary(
-            version, "fdbserver", "fdbserver.{}".format(self.platform), True
-        )
-        self.download_old_binary(
-            version, "fdbmonitor", "fdbmonitor.{}".format(self.platform), True
-        )
-        self.download_old_binary(
-            version, "fdbcli", "fdbcli.{}".format(self.platform), True
-        )
-        self.download_old_binary(
-            version, "libfdb_c.so", "libfdb_c.{}.so".format(self.platform), False
-        )
+        self.download_old_binary(version, "fdbserver", "fdbserver.{}".format(self.platform), True)
+        self.download_old_binary(version, "fdbmonitor", "fdbmonitor.{}".format(self.platform), True)
+        self.download_old_binary(version, "fdbcli", "fdbcli.{}".format(self.platform), True)
+        self.download_old_binary(version, "libfdb_c.so", "libfdb_c.{}.so".format(self.platform), False)

@@ -927,6 +927,10 @@ namespace SummarizeTest
                             {
                                 xout.Add(new XElement(ev.Type, new XAttribute("File", ev.Details.File), new XAttribute("Line", ev.Details.Line)));
                             }
+                            if (ev.Type == "RunningUnitTest") 
+                            {
+                                xout.Add(new XElement(ev.Type, new XAttribute("Name", ev.Details.Name), new XAttribute("File", ev.Details.File), new XAttribute("Line", ev.Details.Line)));
+                            }
                             if (ev.Type == "TestsExpectedToPass")
                                 testCount = int.Parse(ev.Details.Count);
                             if (ev.Type == "TestResults" && ev.Details.Passed == "1")

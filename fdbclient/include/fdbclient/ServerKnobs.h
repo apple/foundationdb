@@ -234,6 +234,8 @@ public:
 	int DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY;
 	int DD_STORAGE_WIGGLE_PAUSE_THRESHOLD; // How many unhealthy relocations are ongoing will pause storage wiggle
 	int DD_STORAGE_WIGGLE_STUCK_THRESHOLD; // How many times bestTeamStuck accumulate will pause storage wiggle
+	int64_t
+	    DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC; // Minimal age of a correct-configured server before it's chosen to be wiggled
 	bool DD_TENANT_AWARENESS_ENABLED;
 	int TENANT_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantCache is refreshed
 
@@ -548,6 +550,8 @@ public:
 	double RATEKEEPER_DEFAULT_LIMIT;
 	double RATEKEEPER_LIMIT_REASON_SAMPLE_RATE;
 	bool RATEKEEPER_PRINT_LIMIT_REASON;
+	double RATEKEEPER_MIN_RATE;
+	double RATEKEEPER_MAX_RATE;
 
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER;
 	int64_t SPRING_BYTES_STORAGE_SERVER;

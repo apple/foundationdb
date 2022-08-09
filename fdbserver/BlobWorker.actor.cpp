@@ -36,6 +36,7 @@
 #include "fdbclient/Notified.h"
 
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
+#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/GetEncryptCipherKeys.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MutationTracking.h"
@@ -210,12 +211,16 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 	int changeFeedStreamReplyBufferSize = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 4;
 
+	bool isEncryptionEnabled = false;
+
 	BlobWorkerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db)
 	  : id(id), db(db), tenantData(BGTenantMap(dbInfo)), dbInfo(dbInfo),
 	    initialSnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM)),
 	    resnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_RESNAPSHOT_PARALLELISM)),
 	    deltaWritesLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM)),
-	    stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, initialSnapshotLock, resnapshotLock, deltaWritesLock) {}
+	    stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, initialSnapshotLock, resnapshotLock, deltaWritesLock),
+	    isEncryptionEnabled(
+	        isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION, db->clientInfo->get())) {}
 
 	bool managerEpochOk(int64_t epoch) {
 		if (epoch < currentManagerEpoch) {
@@ -240,11 +245,6 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 };
 
 namespace {
-bool isBlobFileEncryptionSupported() {
-	bool supported = SERVER_KNOBS->ENABLE_BLOB_GRANULE_ENCRYPTION && SERVER_KNOBS->BG_METADATA_SOURCE == "tenant";
-	ASSERT((supported && SERVER_KNOBS->ENABLE_ENCRYPTION) || !supported);
-	return supported;
-}
 
 Optional<CompressionFilter> getBlobFileCompressFilter() {
 	Optional<CompressionFilter> compFilter;
@@ -640,7 +640,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 	state Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 	state Arena arena;
 
-	if (isBlobFileEncryptionSupported()) {
+	if (bwData->isEncryptionEnabled) {
 		BlobGranuleCipherKeysCtx ciphKeysCtx = wait(getLatestGranuleCipherKeys(bwData, keyRange, &arena));
 		cipherKeysCtx = std::move(ciphKeysCtx);
 		cipherKeysMeta = BlobGranuleCipherKeysCtx::toCipherKeysMeta(cipherKeysCtx.get());
@@ -844,7 +844,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	state Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 	state Arena arena;
 
-	if (isBlobFileEncryptionSupported()) {
+	if (bwData->isEncryptionEnabled) {
 		BlobGranuleCipherKeysCtx ciphKeysCtx = wait(getLatestGranuleCipherKeys(bwData, keyRange, &arena));
 		cipherKeysCtx = std::move(ciphKeysCtx);
 		cipherKeysMeta = BlobGranuleCipherKeysCtx::toCipherKeysMeta(cipherKeysCtx.get());
@@ -1073,7 +1073,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 
 		state Optional<BlobGranuleCipherKeysCtx> snapCipherKeysCtx;
 		if (snapshotF.cipherKeysMeta.present()) {
-			ASSERT(isBlobFileEncryptionSupported());
+			ASSERT(bwData->isEncryptionEnabled);
 
 			BlobGranuleCipherKeysCtx keysCtx =
 			    wait(getGranuleCipherKeysFromKeysMeta(bwData, snapshotF.cipherKeysMeta.get(), &filenameArena));
@@ -1101,7 +1101,8 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 			deltaF = files.deltaFiles[deltaIdx];
 
 			if (deltaF.cipherKeysMeta.present()) {
-				ASSERT(isBlobFileEncryptionSupported());
+				ASSERT(isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION,
+				                               bwData->dbInfo->get().client));
 
 				BlobGranuleCipherKeysCtx keysCtx =
 				    wait(getGranuleCipherKeysFromKeysMeta(bwData, deltaF.cipherKeysMeta.get(), &filenameArena));
@@ -3395,7 +3396,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					}
 
 					if (encrypted) {
-						ASSERT(isBlobFileEncryptionSupported());
+						ASSERT(bwData->isEncryptionEnabled);
 						ASSERT(!chunk.snapshotFile.get().cipherKeysCtx.present());
 
 						snapCipherKeysCtx = getGranuleCipherKeysFromKeysMetaRef(
@@ -3413,7 +3414,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					}
 
 					if (encrypted) {
-						ASSERT(isBlobFileEncryptionSupported());
+						ASSERT(bwData->isEncryptionEnabled);
 						ASSERT(!chunk.deltaFiles[deltaIdx].cipherKeysCtx.present());
 
 						deltaCipherKeysCtxs.emplace(
@@ -4249,10 +4250,10 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
 				wait(store(tenantResults,
-				           TenantMetadata::tenantMap.getRange(tr,
-				                                              Optional<TenantName>(),
-				                                              Optional<TenantName>(),
-				                                              CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+				           TenantMetadata::tenantMap().getRange(tr,
+				                                                Optional<TenantName>(),
+				                                                Optional<TenantName>(),
+				                                                CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
 				ASSERT(tenantResults.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantResults.more);
 
 				std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
@@ -4262,7 +4263,7 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 				}
 				bwData->tenantData.addTenants(tenants);
 
-				state Future<Void> watchChange = tr->watch(TenantMetadata::lastTenantId.key);
+				state Future<Void> watchChange = tr->watch(TenantMetadata::lastTenantId().key);
 				wait(tr->commit());
 				wait(watchChange);
 				tr->reset();

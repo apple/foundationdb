@@ -67,65 +67,53 @@ inline bool isDataMovementForValleyFiller(DataMovementReason reason) {
 	       reason == DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM;
 }
 
-int dataMovementPriority(DataMovementReason reason) {
-	int priority;
-	switch (reason) {
-	case DataMovementReason::INVALID:
-		priority = -1;
-		break;
-	case DataMovementReason::RECOVER_MOVE:
-		priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE;
-		break;
-	case DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM:
-		priority = SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM;
-		break;
-	case DataMovementReason::REBALANCE_OVERUTILIZED_TEAM:
-		priority = SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
-		break;
-	case DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM:
-		priority = SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM;
-		break;
-	case DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM:
-		priority = SERVER_KNOBS->PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM;
-		break;
-	case DataMovementReason::PERPETUAL_STORAGE_WIGGLE:
-		priority = SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE;
-		break;
-	case DataMovementReason::TEAM_HEALTHY:
-		priority = SERVER_KNOBS->PRIORITY_TEAM_HEALTHY;
-		break;
-	case DataMovementReason::TEAM_CONTAINS_UNDESIRED_SERVER:
-		priority = SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
-		break;
-	case DataMovementReason::TEAM_REDUNDANT:
-		priority = SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT;
-		break;
-	case DataMovementReason::MERGE_SHARD:
-		priority = SERVER_KNOBS->PRIORITY_MERGE_SHARD;
-		break;
-	case DataMovementReason::POPULATE_REGION:
-		priority = SERVER_KNOBS->PRIORITY_POPULATE_REGION;
-		break;
-	case DataMovementReason::TEAM_UNHEALTHY:
-		priority = SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY;
-		break;
-	case DataMovementReason::TEAM_2_LEFT:
-		priority = SERVER_KNOBS->PRIORITY_TEAM_2_LEFT;
-		break;
-	case DataMovementReason::TEAM_1_LEFT:
-		priority = SERVER_KNOBS->PRIORITY_TEAM_1_LEFT;
-		break;
-	case DataMovementReason::TEAM_FAILED:
-		priority = SERVER_KNOBS->PRIORITY_TEAM_FAILED;
-		break;
-	case DataMovementReason::TEAM_0_LEFT:
-		priority = SERVER_KNOBS->PRIORITY_TEAM_0_LEFT;
-		break;
-	case DataMovementReason::SPLIT_SHARD:
-		priority = SERVER_KNOBS->PRIORITY_SPLIT_SHARD;
-		break;
+typedef std::map<DataMovementReason, int> DmReasonPriorityMapping;
+typedef std::map<int, DataMovementReason> PriorityDmReasonMapping;
+std::pair<const DmReasonPriorityMapping&, const PriorityDmReasonMapping&> buildPriorityMappings() {
+	static DmReasonPriorityMapping reasonPriority{
+		{ DataMovementReason::INVALID, -1 },
+		{ DataMovementReason::RECOVER_MOVE, SERVER_KNOBS->PRIORITY_RECOVER_MOVE },
+		{ DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM },
+		{ DataMovementReason::REBALANCE_OVERUTILIZED_TEAM, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM },
+		{ DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM, SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM },
+		{ DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM, SERVER_KNOBS->PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM },
+		{ DataMovementReason::PERPETUAL_STORAGE_WIGGLE, SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE },
+		{ DataMovementReason::TEAM_HEALTHY, SERVER_KNOBS->PRIORITY_TEAM_HEALTHY },
+		{ DataMovementReason::TEAM_CONTAINS_UNDESIRED_SERVER, SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER },
+		{ DataMovementReason::TEAM_REDUNDANT, SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT },
+		{ DataMovementReason::MERGE_SHARD, SERVER_KNOBS->PRIORITY_MERGE_SHARD },
+		{ DataMovementReason::POPULATE_REGION, SERVER_KNOBS->PRIORITY_POPULATE_REGION },
+		{ DataMovementReason::TEAM_UNHEALTHY, SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY },
+		{ DataMovementReason::TEAM_2_LEFT, SERVER_KNOBS->PRIORITY_TEAM_2_LEFT },
+		{ DataMovementReason::TEAM_1_LEFT, SERVER_KNOBS->PRIORITY_TEAM_1_LEFT },
+		{ DataMovementReason::TEAM_FAILED, SERVER_KNOBS->PRIORITY_TEAM_FAILED },
+		{ DataMovementReason::TEAM_0_LEFT, SERVER_KNOBS->PRIORITY_TEAM_0_LEFT },
+		{ DataMovementReason::SPLIT_SHARD, SERVER_KNOBS->PRIORITY_SPLIT_SHARD }
+	};
+
+	static PriorityDmReasonMapping priorityReason;
+	if (priorityReason.empty()) { // only build once
+		for (const auto& [r, p] : reasonPriority) {
+			priorityReason[p] = r;
+		}
+		// Don't allow 2 priorities value being the same.
+		if (priorityReason.size() != reasonPriority.size()) {
+			TraceEvent(SevError, "DuplicateDataMovementPriority").log();
+			ASSERT(false);
+		}
 	}
-	return priority;
+
+	return std::make_pair(reasonPriority, priorityReason);
+}
+
+int dataMovementPriority(DataMovementReason reason) {
+	const auto& [reasonPriority, _] = buildPriorityMappings();
+	return reasonPriority.at(reason);
+}
+
+DataMovementReason priorityToDataMovementReason(int priority) {
+	const auto& [_, priorityReason] = buildPriorityMappings();
+	return priorityReason.at(priority);
 }
 
 struct RelocateData {
@@ -148,7 +136,7 @@ struct RelocateData {
 	std::shared_ptr<DataMove> dataMove;
 
 	RelocateData()
-	  : priority(-1), boundaryPriority(-1), healthPriority(-1), reason(RelocateReason::INVALID), startTime(-1),
+	  : priority(-1), boundaryPriority(-1), healthPriority(-1), reason(RelocateReason::OTHER), startTime(-1),
 	    dataMoveId(anonymousShardId), workFactor(0), wantsNewServers(false), cancellable(false),
 	    interval("QueuedRelocation") {}
 	explicit RelocateData(RelocateShard const& rs)
