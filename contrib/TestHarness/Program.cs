@@ -326,7 +326,8 @@ namespace SummarizeTest
                     }
                     string[] currentBinary = { fdbserverName };
                     IEnumerable<string> oldBinaries = Array.FindAll(
-                                                         Directory.GetFiles(oldBinaryFolder),
+                                                         Directory.GetFiles(oldBinaryFolder).Concat(
+                                                            Directory.GetFiles(Path.Combine("/app", "deploy", "global_data", "snowflakeBinaries"))).ToArray(),
                                                          x => versionGreaterThanOrEqual(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionLowerBound)
                                                            && versionLessThan(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionUpperBound));
                     if (!lastFolderName.Contains("until_")) {
