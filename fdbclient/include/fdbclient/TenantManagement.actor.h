@@ -487,7 +487,8 @@ Future<Void> renameTenantTransaction(Transaction tr,
                                      TenantName oldName,
                                      TenantName newName,
                                      Optional<int64_t> tenantId = Optional<int64_t>(),
-                                     ClusterType clusterType = ClusterType::STANDALONE) {
+                                     ClusterType clusterType = ClusterType::STANDALONE,
+                                     Optional<int64_t> configureSequenceNum = Optional<int64_t>()) {
 	ASSERT(clusterType == ClusterType::STANDALONE || tenantId.present());
 	ASSERT(clusterType != ClusterType::METACLUSTER_MANAGEMENT);
 	wait(checkTenantMode(tr, clusterType));
@@ -501,6 +502,9 @@ Future<Void> renameTenantTransaction(Transaction tr,
 	}
 	if (newEntry.present()) {
 		throw tenant_already_exists();
+	}
+	if (configureSequenceNum.present()) {
+		oldEntry.get().configurationSequenceNum = configureSequenceNum.get();
 	}
 	TenantMetadata::tenantMap().erase(tr, oldName);
 	TenantMetadata::tenantMap().set(tr, newName, oldEntry.get());

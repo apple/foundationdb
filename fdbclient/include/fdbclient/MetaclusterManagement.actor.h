@@ -1711,6 +1711,7 @@ struct RenameTenantImpl {
 
 	// Parameters set in markTenantsInRenamingState
 	int64_t tenantId = -1;
+	int64_t configurationSequenceNum = -1;
 
 	RenameTenantImpl(Reference<DB> managementDb, TenantName oldName, TenantName newName)
 	  : ctx(managementDb), oldName(oldName), newName(newName) {}
@@ -1748,6 +1749,16 @@ struct RenameTenantImpl {
 			CODE_PROBE(true, "Metacluster rename old name not found");
 			throw tenant_not_found();
 		}
+
+		// Check cluster capacity. If we would exceed the amount due to temporary extra tenants
+		// then we deny the rename request altogether.
+		int64_t clusterTenantCount = wait(ManagementClusterMetadata::clusterTenantCount.getD(
+		    tr, oldTenantEntry.get().assignedCluster.get(), Snapshot::False, 0));
+
+		if (clusterTenantCount + 1 > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
+			throw cluster_no_capacity();
+		}
+
 		// If the new entry is present, we can only continue if this a retry of the same rename
 		// To check this, verify both entries are in the correct state
 		// and have each other as pairs
@@ -1766,6 +1777,10 @@ struct RenameTenantImpl {
 		} else {
 			if (self->tenantId == -1) {
 				self->tenantId = oldTenantEntry.get().id;
+			}
+			++oldTenantEntry.get().configurationSequenceNum;
+			if (self->configurationSequenceNum == -1) {
+				self->configurationSequenceNum = oldTenantEntry.get().configurationSequenceNum;
 			}
 			wait(self->ctx.setCluster(tr, oldTenantEntry.get().assignedCluster.get()));
 			if (oldTenantEntry.get().tenantState != TenantState::READY) {
@@ -1789,6 +1804,8 @@ struct RenameTenantImpl {
 
 		TenantMapEntry updatedOldEntry = oldTenantEntry.get();
 		TenantMapEntry updatedNewEntry(updatedOldEntry);
+		ASSERT(updatedOldEntry.configurationSequenceNum == self->configurationSequenceNum);
+		ASSERT(updatedNewEntry.configurationSequenceNum == self->configurationSequenceNum);
 		updatedOldEntry.tenantState = TenantState::RENAMING_FROM;
 		updatedNewEntry.tenantState = TenantState::RENAMING_TO;
 		updatedOldEntry.renamePair = self->newName;
@@ -1796,6 +1813,33 @@ struct RenameTenantImpl {
 
 		ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->oldName, updatedOldEntry);
 		ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->newName, updatedNewEntry);
+
+		// Updated indexes to include the new tenant
+		ManagementClusterMetadata::clusterTenantIndex.insert(
+		    tr, Tuple::makeTuple(updatedNewEntry.assignedCluster.get(), self->newName));
+
+		// Add new name to tenant group. It should already exist since the old name was part of it.
+		managementClusterAddTenantToGroup(
+		    tr, self->newName, updatedNewEntry, &self->ctx.dataClusterMetadata.get(), true);
+		return Void();
+	}
+
+	ACTOR static Future<Void> updateDataCluster(RenameTenantImpl* self, Reference<typename DB::TransactionT> tr) {
+		state Optional<TenantMapEntry> tenantEntry = wait(TenantAPI::tryGetTenantTransaction(tr, self->oldName));
+
+		if (!tenantEntry.present() || tenantEntry.get().id != self->tenantId ||
+		    tenantEntry.get().configurationSequenceNum >= self->configurationSequenceNum) {
+			// If the tenant isn't in the metacluster, it must have been concurrently removed
+			return Void();
+		}
+		ASSERT(self->tenantId != -1);
+		ASSERT(self->configurationSequenceNum != -1);
+		wait(TenantAPI::renameTenantTransaction(tr,
+		                                        self->oldName,
+		                                        self->newName,
+		                                        self->tenantId,
+		                                        ClusterType::METACLUSTER_DATA,
+		                                        self->configurationSequenceNum));
 		return Void();
 	}
 
@@ -1810,8 +1854,11 @@ struct RenameTenantImpl {
 		// Possible for the new entry to also have been tampered with,
 		// so it may or may not be present with or without the same id, which are all
 		// legal states. Assume the rename completed properly in this case
-		if (!oldTenantEntry.present() || oldTenantEntry.get().id != self->tenantId) {
-			CODE_PROBE(true, "Metacluster finished rename with missing entries or mismatched id");
+		if (!oldTenantEntry.present() || oldTenantEntry.get().id != self->tenantId ||
+		    oldTenantEntry.get().configurationSequenceNum > self->configurationSequenceNum) {
+			CODE_PROBE(true,
+			           "Metacluster finished rename with missing entries, mismatched id, and/or mismatched "
+			           "configuration sequence.");
 			return Void();
 		}
 		if (oldTenantEntry.get().tenantState == TenantState::REMOVING) {
@@ -1829,13 +1876,6 @@ struct RenameTenantImpl {
 			updatedNewEntry.tenantState = TenantState::READY;
 			updatedNewEntry.renamePair.reset();
 			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->newName, updatedNewEntry);
-			// Updated indexes to include the new tenant
-			ManagementClusterMetadata::clusterTenantIndex.insert(
-			    tr, Tuple::makeTuple(updatedNewEntry.assignedCluster.get(), self->newName));
-
-			// Add new name to tenant group. It should already exist since the old name was part of it.
-			managementClusterAddTenantToGroup(
-			    tr, self->newName, updatedNewEntry, &self->ctx.dataClusterMetadata.get(), true);
 		}
 
 		// We will remove the old entry from the management cluster
@@ -1850,10 +1890,8 @@ struct RenameTenantImpl {
 
 		// Rename tenant on the data cluster
 		try {
-			wait(self->ctx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
-				return TenantAPI::renameTenantTransaction(
-				    tr, self->oldName, self->newName, self->tenantId, ClusterType::METACLUSTER_DATA);
-			}));
+			wait(self->ctx.runDataClusterTransaction(
+			    [self = self](Reference<ITransaction> tr) { return updateDataCluster(self, tr); }));
 		} catch (Error& e) {
 			// Since we track the tenant entries on the management cluster, these error codes should only appear
 			// on a retry of the transaction, typically caused by commit_unknown_result.
