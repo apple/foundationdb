@@ -175,8 +175,6 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	UID id;
 	Database db;
 
-	BlobWorkerStats stats;
-
 	PromiseStream<Future<Void>> addActor;
 
 	LocalityData locality;
@@ -203,16 +201,24 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	NotifiedVersion grvVersion;
 	Promise<Void> fatalError;
 
-	FlowLock initialSnapshotLock;
+	Reference<FlowLock> initialSnapshotLock;
+	Reference<FlowLock> resnapshotLock;
+	Reference<FlowLock> deltaWritesLock;
+
+	BlobWorkerStats stats;
+
 	bool shuttingDown = false;
 
-	int changeFeedStreamReplyBufferSize = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 2;
+	int changeFeedStreamReplyBufferSize = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 4;
 
 	bool isEncryptionEnabled = false;
 
-	BlobWorkerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInf, Database db)
-	  : id(id), db(db), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL), tenantData(BGTenantMap(dbInf)), dbInfo(dbInf),
-	    initialSnapshotLock(SERVER_KNOBS->BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM),
+	BlobWorkerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db)
+	  : id(id), db(db), tenantData(BGTenantMap(dbInfo)), dbInfo(dbInfo),
+	    initialSnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM)),
+	    resnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_RESNAPSHOT_PARALLELISM)),
+	    deltaWritesLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM)),
+	    stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, initialSnapshotLock, resnapshotLock, deltaWritesLock),
 	    isEncryptionEnabled(
 	        isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION, db->clientInfo->get())) {}
 
@@ -621,7 +627,11 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
                                            Version currentDeltaVersion,
                                            Future<BlobFileIndex> previousDeltaFileFuture,
                                            Future<Void> waitCommitted,
-                                           Optional<std::pair<KeyRange, UID>> oldGranuleComplete) {
+                                           Optional<std::pair<KeyRange, UID>> oldGranuleComplete,
+                                           Future<Void> startDeltaFileWrite) {
+	wait(startDeltaFileWrite);
+	state FlowLock::Releaser holdingLock(*bwData->deltaWritesLock);
+
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 
 	state std::string fileName = randomBGFilename(bwData->id, granuleID, currentDeltaVersion, ".delta");
@@ -664,6 +674,10 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 
 	// free serialized since it is persisted in blob
 	serialized = Value();
+
+	// now that all buffered memory from file is gone, we can release memory flow lock
+	// we must unblock here to allow feed to continue to consume, so that waitCommitted returns
+	holdingLock.release();
 
 	state int numIterations = 0;
 	try {
@@ -946,8 +960,8 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 		           metadata->keyRange.begin.printable(),
 		           metadata->keyRange.end.printable());
 	}
-	wait(bwData->initialSnapshotLock.take());
-	state FlowLock::Releaser holdingDVL(bwData->initialSnapshotLock);
+	wait(bwData->initialSnapshotLock->take());
+	state FlowLock::Releaser holdingLock(*bwData->initialSnapshotLock);
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
 	state int retries = 0;
@@ -1026,6 +1040,8 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
                                             UID granuleID,
                                             std::vector<GranuleFiles> fileSet,
                                             Version version) {
+	wait(bwData->resnapshotLock->take());
+	state FlowLock::Releaser holdingLock(*bwData->resnapshotLock);
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 	if (BW_DEBUG) {
 		fmt::print("Compacting snapshot from blob for [{0} - {1}) @ {2}\n",
@@ -1747,6 +1763,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 	state std::deque<std::pair<Version, Version>> rollbacksInProgress;
 	state std::deque<std::pair<Version, Version>> rollbacksCompleted;
+	state Future<Void> startDeltaFileWrite = Future<Void>(Void());
 
 	state bool snapshotEligible; // just wrote a delta file or just took granule over from another worker
 	state bool justDidRollback = false;
@@ -2276,6 +2293,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				} else {
 					previousFuture = Future<BlobFileIndex>(BlobFileIndex());
 				}
+				startDeltaFileWrite = bwData->deltaWritesLock->take();
 				Future<BlobFileIndex> dfFuture =
 				    writeDeltaFile(bwData,
 				                   bstore,
@@ -2287,7 +2305,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				                   lastDeltaVersion,
 				                   previousFuture,
 				                   waitVersionCommitted(bwData, metadata, lastDeltaVersion),
-				                   oldChangeFeedDataComplete);
+				                   oldChangeFeedDataComplete,
+				                   startDeltaFileWrite);
 				inFlightFiles.push_back(InFlightFile(dfFuture, lastDeltaVersion, metadata->bufferedDeltaBytes, false));
 
 				oldChangeFeedDataComplete.reset();
@@ -2311,6 +2330,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				// exhaust old change feed before compacting - otherwise we could end up with an endlessly
 				// growing list of previous change feeds in the worst case.
 				snapshotEligible = true;
+
+				// Wait on delta file starting here. If we have too many pending delta file writes, we need to not
+				// continue to consume from the change feed, as that will pile on even more delta files to write
+				wait(startDeltaFileWrite);
 			}
 
 			// FIXME: if we're still reading from old change feed, we should probably compact if we're
@@ -4441,6 +4464,48 @@ ACTOR Future<Void> handleFlushGranuleReq(Reference<BlobWorkerData> self, FlushGr
 	}
 }
 
+ACTOR Future<Void> simForceFileWriteContention(Reference<BlobWorkerData> bwData) {
+	// take the file write contention lock down to just 1 or 2 open writes
+	int numToLeave = deterministicRandom()->randomInt(1, 3);
+	state int numToTake = SERVER_KNOBS->BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM - numToLeave;
+	ASSERT(bwData->deltaWritesLock->available() >= numToTake);
+
+	if (numToTake <= 0) {
+		return Void();
+	}
+	if (BW_DEBUG) {
+		fmt::print("BW {0} forcing file contention down to {1}\n", bwData->id.toString().substr(0, 5), numToTake);
+	}
+
+	wait(bwData->deltaWritesLock->take(TaskPriority::DefaultYield, numToTake));
+	if (BW_DEBUG) {
+		fmt::print("BW {0} force acquired {1} file writes\n", bwData->id.toString().substr(0, 5), numToTake);
+	}
+	state FlowLock::Releaser holdingLock(*bwData->deltaWritesLock, numToTake);
+	state Future<Void> delayFor = delay(deterministicRandom()->randomInt(10, 60));
+	loop {
+		choose {
+			when(wait(delayFor)) {
+				if (BW_DEBUG) {
+					fmt::print("BW {0} releasing {1} file writes\n", bwData->id.toString().substr(0, 5), numToTake);
+				}
+				return Void();
+			}
+			// check for speed up sim
+			when(wait(delay(5.0))) {
+				if (g_simulator.speedUpSimulation) {
+					if (BW_DEBUG) {
+						fmt::print("BW {0} releasing {1} file writes b/c speed up simulation\n",
+						           bwData->id.toString().substr(0, 5),
+						           numToTake);
+					}
+					return Void();
+				}
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
                               ReplyPromise<InitializeBlobWorkerReply> recruitReply,
                               Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
@@ -4491,6 +4556,9 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	self->addActor.send(runGRVChecks(self));
 	self->addActor.send(monitorTenants(self));
 	state Future<Void> selfRemoved = monitorRemoval(self);
+	if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.25)) {
+		self->addActor.send(simForceFileWriteContention(self));
+	}
 
 	TraceEvent("BlobWorkerInit", self->id).log();
 

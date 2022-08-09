@@ -649,17 +649,29 @@ ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmDat
 
 // Picks a worker with the fewest number of already assigned ranges.
 // If there is a tie, picks one such worker at random.
+// TODO: add desired per-blob-worker limit? don't assign ranges to each worker past that limit?
 ACTOR Future<UID> pickWorkerForAssign(Reference<BlobManagerData> bmData) {
 	// wait until there are BWs to pick from
-	while (bmData->workerStats.size() == 0) {
-		CODE_PROBE(true, "BM wants to assign range, but no workers available");
-		if (BM_DEBUG) {
-			fmt::print("BM {0} waiting for blob workers before assigning granules\n", bmData->epoch);
+	loop {
+		state bool wasZeroWorkers = false;
+		while (bmData->workerStats.size() == 0) {
+			wasZeroWorkers = true;
+			CODE_PROBE(true, "BM wants to assign range, but no workers available");
+			if (BM_DEBUG) {
+				fmt::print("BM {0} waiting for blob workers before assigning granules\n", bmData->epoch);
+			}
+			bmData->restartRecruiting.trigger();
+			wait(bmData->recruitingStream.onChange() || bmData->foundBlobWorkers.getFuture());
 		}
-		bmData->restartRecruiting.trigger();
-		wait(bmData->recruitingStream.onChange() || bmData->foundBlobWorkers.getFuture());
-		// FIXME: may want to have some buffer here so zero-worker recruiting case doesn't assign every single pending
-		// range to the first worker recruited
+		if (wasZeroWorkers) {
+			// Add a bit of delay. If we were at zero workers, don't immediately assign all granules to the first worker
+			// we recruit
+			wait(delay(0.1));
+		}
+		if (bmData->workerStats.size() != 0) {
+			break;
+		}
+		// if in the post-zero workers delay, we went back down to zero workers, re-loop
 	}
 
 	int minGranulesAssigned = INT_MAX;
@@ -2231,7 +2243,7 @@ ACTOR Future<Void> attemptMerges(Reference<BlobManagerData> bmData,
 	}
 	CODE_PROBE(true, "Candidate ranges to merge");
 	wait(bmData->concurrentMergeChecks.take());
-	state FlowLock::Releaser holdingDVL(bmData->concurrentMergeChecks);
+	state FlowLock::Releaser holdingLock(bmData->concurrentMergeChecks);
 
 	// start merging any set of 2+ consecutive granules that can be merged
 	state int64_t currentBytes = 0;
@@ -3756,7 +3768,7 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 		           canDeleteHistoryKey ? "" : " ignoring history key!");
 	}
 
-	TraceEvent("GranuleFullPurge", self->id)
+	TraceEvent(SevDebug, "GranuleFullPurge", self->id)
 	    .detail("Epoch", self->epoch)
 	    .detail("GranuleID", granuleId)
 	    .detail("PurgeVersion", purgeVersion)
@@ -3876,7 +3888,7 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
 	if (BM_PURGE_DEBUG) {
 		fmt::print("BM {0} Partially deleting granule {1}: success\n", self->epoch, granuleId.toString());
 	}
-	TraceEvent("GranulePartialPurge", self->id)
+	TraceEvent(SevDebug, "GranulePartialPurge", self->id)
 	    .detail("Epoch", self->epoch)
 	    .detail("GranuleID", granuleId)
 	    .detail("PurgeVersion", purgeVersion)
