@@ -532,7 +532,7 @@ struct DDQueue {
 
 	private:
 		typedef std::array<int, 4> Item; // one for each CountType
-		typedef std::array<Item, 3> ReasonItem; // one for each RelocateReason
+		typedef std::array<Item, RelocateReason::typeCount()> ReasonItem; // one for each RelocateReason
 
 		std::unordered_map<UID, ReasonItem> counter;
 
@@ -542,7 +542,8 @@ struct DDQueue {
 
 		void traceReasonItem(TraceEvent* event, const ReasonItem& item) const {
 			for (int i = 0; i < item.size(); ++i) {
-				event->detail(RelocateReason(i).toString(), toString(item[i]));
+				// "PQSD" corresponding to CounterType
+				event->detail(RelocateReason(i).toString() + "PQSD", toString(item[i]));
 			}
 		}
 

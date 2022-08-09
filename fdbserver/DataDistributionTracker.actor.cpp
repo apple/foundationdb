@@ -477,7 +477,8 @@ private:
 ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
                                  KeyRange keys,
                                  Reference<AsyncVar<Optional<ShardMetrics>>> shardSize,
-                                 ShardSizeBounds shardBounds) {
+                                 ShardSizeBounds shardBounds,
+                                 RelocateReason reason) {
 	state StorageMetrics metrics = shardSize->get().get().metrics;
 	state BandwidthStatus bandwidthStatus = getBandwidthStatus(metrics);
 
@@ -524,12 +525,12 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 		for (int i = 0; i < skipRange; i++) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, RelocateReason::OTHER));
+			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, reason));
 		}
 		for (int i = numShards - 1; i > skipRange; i--) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, RelocateReason::OTHER));
+			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, reason));
 		}
 
 		self->sizeChanges.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes));
@@ -675,7 +676,7 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	}
 	restartShardTrackers(self, mergeRange, ShardMetrics(endingStats, lastLowBandwidthStartTime, shardCount));
 	self->shardsAffectedByTeamFailure->defineShard(mergeRange);
-	self->output.send(RelocateShard(mergeRange, DataMovementReason::MERGE_SHARD, RelocateReason::OTHER));
+	self->output.send(RelocateShard(mergeRange, DataMovementReason::MERGE_SHARD, RelocateReason::MERGE_SHARD));
 
 	// We are about to be cancelled by the call to restartShardTrackers
 	return Void();
@@ -728,7 +729,10 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 		onChange = onChange || shardMerger(self, keys, shardSize);
 	}
 	if (shouldSplit) {
-		onChange = onChange || shardSplitter(self, keys, shardSize, shardBounds);
+		RelocateReason reason = (bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin)
+		                            ? RelocateReason::WRITE_SPLIT
+		                            : RelocateReason::SIZE_SPLIT;
+		onChange = onChange || shardSplitter(self, keys, shardSize, shardBounds, reason);
 	}
 
 	wait(onChange);

@@ -38,7 +38,7 @@
 
 class RelocateReason {
 public:
-	enum Value : int8_t { OTHER = 0, REBALANCE_DISK, REBALANCE_READ };
+	enum Value : int8_t { OTHER = 0, REBALANCE_DISK, REBALANCE_READ, MERGE_SHARD, SIZE_SPLIT, WRITE_SPLIT };
 	RelocateReason(Value v) : value(v) {}
 	explicit RelocateReason(int v) : value((Value)v) {}
 	std::string toString() const {
@@ -49,13 +49,19 @@ public:
 			return "RebalanceDisk";
 		case REBALANCE_READ:
 			return "RebalanceRead";
+		case MERGE_SHARD:
+			return "MergeShard";
+		case SIZE_SPLIT:
+			return "SizeSplit";
+		case WRITE_SPLIT:
+			return "WriteSplit";
 		default:
 			ASSERT(false);
 		}
 		return "";
 	}
 	operator int() const { return (int)value; }
-	constexpr static int8_t typeCount() { return 3; }
+	constexpr static int8_t typeCount() { return (int)WRITE_SPLIT + 1; }
 
 private:
 	Value value;
