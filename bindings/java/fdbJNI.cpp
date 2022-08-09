@@ -29,6 +29,7 @@
 #include "com_apple_foundationdb_FutureInt64.h"
 #include "com_apple_foundationdb_FutureKey.h"
 #include "com_apple_foundationdb_FutureKeyArray.h"
+#include "com_apple_foundationdb_FutureKeyRangeArray.h"
 #include "com_apple_foundationdb_FutureResult.h"
 #include "com_apple_foundationdb_FutureResults.h"
 #include "com_apple_foundationdb_FutureStrings.h"
@@ -56,7 +57,11 @@ static jclass mapped_range_result_class;
 static jclass mapped_key_value_class;
 static jclass string_class;
 static jclass key_array_result_class;
+static jclass keyrange_class;
+static jclass keyrange_array_result_class;
 static jmethodID key_array_result_init;
+static jmethodID keyrange_init;
+static jmethodID keyrange_array_result_init;
 static jmethodID range_result_init;
 static jmethodID mapped_range_result_init;
 static jmethodID mapped_key_value_from_bytes;
@@ -423,6 +428,61 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureKeyArray_FutureKeyAr
 		return JNI_NULL;
 
 	return result;
+}
+
+JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureKeyRangeArray_FutureKeyRangeArray_1get(JNIEnv* jenv,
+                                                                                                   jobject,
+                                                                                                   jlong future) {
+	if (!future) {
+		throwParamNotNull(jenv);
+		return JNI_NULL;
+	}
+
+	FDBFuture* f = (FDBFuture*)future;
+
+	const FDBKeyRange* fdbKr;
+	int count;
+	fdb_error_t err = fdb_future_get_keyrange_array(f, &fdbKr, &count);
+	if (err) {
+		safeThrow(jenv, getThrowable(jenv, err));
+		return JNI_NULL;
+	}
+
+	jobjectArray kr_values = jenv->NewObjectArray(count, keyrange_class, NULL);
+	if (!kr_values) {
+		if (!jenv->ExceptionOccurred())
+			throwOutOfMem(jenv);
+		return JNI_NULL;
+	}
+
+	for (int i = 0; i < count; i++) {
+		jbyteArray beginArr = jenv->NewByteArray(fdbKr[i].begin_key_length);
+		if (!beginArr) {
+			if (!jenv->ExceptionOccurred())
+				throwOutOfMem(jenv);
+			return JNI_NULL;
+		}
+		jbyteArray endArr = jenv->NewByteArray(fdbKr[i].end_key_length);
+		if (!endArr) {
+			if (!jenv->ExceptionOccurred())
+				throwOutOfMem(jenv);
+			return JNI_NULL;
+		}
+		jenv->SetByteArrayRegion(beginArr, 0, fdbKr[i].begin_key_length, (const jbyte*)fdbKr[i].begin_key);
+		jenv->SetByteArrayRegion(endArr, 0, fdbKr[i].end_key_length, (const jbyte*)fdbKr[i].end_key);
+
+		jobject kr = jenv->NewObject(keyrange_class, keyrange_init, beginArr, endArr);
+		if (jenv->ExceptionOccurred())
+			return JNI_NULL;
+		jenv->SetObjectArrayElement(kr_values, i, kr);
+		if (jenv->ExceptionOccurred())
+			return JNI_NULL;
+	}
+	jobject krarr = jenv->NewObject(keyrange_array_result_class, keyrange_array_result_init, kr_values);
+	if (jenv->ExceptionOccurred())
+		return JNI_NULL;
+
+	return krarr;
 }
 
 // SOMEDAY: explore doing this more efficiently with Direct ByteBuffers
@@ -1832,6 +1892,15 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved) {
 		key_array_result_init = env->GetMethodID(local_key_array_result_class, "<init>", "([B[I)V");
 		key_array_result_class = (jclass)(env)->NewGlobalRef(local_key_array_result_class);
 
+		jclass local_keyrange_class = env->FindClass("com/apple/foundationdb/Range");
+		keyrange_init = env->GetMethodID(local_keyrange_class, "<init>", "([B[B)V");
+		keyrange_class = (jclass)(env)->NewGlobalRef(local_keyrange_class);
+
+		jclass local_keyrange_array_result_class = env->FindClass("com/apple/foundationdb/KeyRangeArrayResult");
+		keyrange_array_result_init =
+		    env->GetMethodID(local_keyrange_array_result_class, "<init>", "([Lcom/apple/foundationdb/Range;)V");
+		keyrange_array_result_class = (jclass)(env)->NewGlobalRef(local_keyrange_array_result_class);
+
 		jclass local_range_result_summary_class = env->FindClass("com/apple/foundationdb/RangeResultSummary");
 		range_result_summary_init = env->GetMethodID(local_range_result_summary_class, "<init>", "([BIZ)V");
 		range_result_summary_class = (jclass)(env)->NewGlobalRef(local_range_result_summary_class);
@@ -1855,6 +1924,12 @@ void JNI_OnUnload(JavaVM* vm, void* reserved) {
 		}
 		if (range_result_class != JNI_NULL) {
 			env->DeleteGlobalRef(range_result_class);
+		}
+		if (keyrange_array_result_class != JNI_NULL) {
+			env->DeleteGlobalRef(keyrange_array_result_class);
+		}
+		if (keyrange_class != JNI_NULL) {
+			env->DeleteGlobalRef(keyrange_class);
 		}
 		if (mapped_range_result_class != JNI_NULL) {
 			env->DeleteGlobalRef(mapped_range_result_class);
