@@ -2889,8 +2889,6 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
 
 // Change feed stream must be sent an error as soon as it is moved away, or change feed can get incorrect results
 ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamRequest req, UID streamUID) {
-	wait(delay(0, TaskPriority::DefaultEndpoint));
-
 	auto feed = data->uidChangeFeed.find(req.rangeID);
 	if (feed == data->uidChangeFeed.end() || feed->second->removing) {
 		req.reply.sendError(unknown_change_feed());
