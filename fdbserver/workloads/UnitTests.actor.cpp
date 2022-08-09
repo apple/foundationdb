@@ -142,6 +142,11 @@ struct UnitTestWorkload : TestWorkload {
 			state UnitTest* test = *t;
 			printf("Testing %s\n", test->name);
 
+			TraceEvent(SevInfo, "RunningUnitTest")
+			    .detail("Name", test->name)
+			    .detail("File", test->file)
+			    .detail("Line", test->line);
+
 			state Error result = success();
 			state double start_now = now();
 			state double start_timer = timer();

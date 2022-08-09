@@ -176,10 +176,7 @@ struct Traceable<MetaclusterRegistrationEntry> : std::true_type {
 
 struct MetaclusterMetadata {
 	// Registration information for a metacluster, stored on both management and data clusters
-	static inline KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>
-	    metaclusterRegistration = KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>(
-	        "\xff/metacluster/clusterRegistration"_sr,
-	        IncludeVersion());
+	static KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>& metaclusterRegistration();
 };
 
 #endif
