@@ -49,6 +49,8 @@ public:
 			return "RebalanceDisk";
 		case REBALANCE_READ:
 			return "RebalanceRead";
+		default:
+			ASSERT(false);
 		}
 	}
 	operator int() const { return (int)value; }
