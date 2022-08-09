@@ -536,8 +536,8 @@ void updateClusterMetadata(Transaction tr,
                            Optional<DataClusterEntry> const& updatedEntry) {
 
 	if (updatedEntry.present()) {
-		if (previousMetadata.entry.locked) {
-			throw cluster_locked();
+		if (previousMetadata.entry.clusterState == DataClusterState::REMOVING) {
+			throw cluster_removed();
 		}
 		ManagementClusterMetadata::dataClusters().set(tr, name, updatedEntry.get());
 		updateClusterCapacityIndex(tr, name, previousMetadata.entry, updatedEntry.get());
@@ -704,21 +704,21 @@ struct RemoveClusterImpl {
 	// Initialization parameters
 	bool forceRemove;
 
-	// Parameters set in lockDataCluster
+	// Parameters set in markClusterRemoving
 	Optional<int64_t> lastTenantId;
 
 	RemoveClusterImpl(Reference<DB> managementDb, ClusterName clusterName, bool forceRemove)
 	  : ctx(managementDb, clusterName), forceRemove(forceRemove) {}
 
 	// Returns false if the cluster is no longer present, or true if it is present and the removal should proceed.
-	ACTOR static Future<bool> lockDataCluster(RemoveClusterImpl* self, Reference<typename DB::TransactionT> tr) {
+	ACTOR static Future<bool> markClusterRemoving(RemoveClusterImpl* self, Reference<typename DB::TransactionT> tr) {
 		if (!self->forceRemove && self->ctx.dataClusterMetadata.get().entry.allocated.numTenantGroups > 0) {
 			throw cluster_not_empty();
-		} else if (!self->ctx.dataClusterMetadata.get().entry.locked) {
-			// Lock the cluster while we finish the remaining removal steps to prevent new tenants from being
-			// assigned to it.
+		} else if (self->ctx.dataClusterMetadata.get().entry.clusterState != DataClusterState::REMOVING) {
+			// Mark the cluster in a removing state while we finish the remaining removal steps. This prevents new
+			// tenants from being assigned to it.
 			DataClusterEntry updatedEntry = self->ctx.dataClusterMetadata.get().entry;
-			updatedEntry.locked = true;
+			updatedEntry.clusterState = DataClusterState::REMOVING;
 			updatedEntry.capacity.numTenantGroups = 0;
 
 			updateClusterMetadata(tr,
@@ -739,7 +739,7 @@ struct RemoveClusterImpl {
 			self->lastTenantId = lastId;
 		}
 
-		TraceEvent("LockedDataCluster")
+		TraceEvent("MarkedDataClusterRemoving")
 		    .detail("Name", self->ctx.clusterName.get())
 		    .detail("Version", tr->getCommittedVersion());
 
@@ -775,6 +775,8 @@ struct RemoveClusterImpl {
 	ACTOR static Future<bool> purgeTenants(RemoveClusterImpl* self,
 	                                       Reference<typename DB::TransactionT> tr,
 	                                       std::pair<Tuple, Tuple> clusterTupleRange) {
+		ASSERT(self->ctx.dataClusterMetadata.get().entry.clusterState == DataClusterState::REMOVING);
+
 		// Get the list of tenants
 		state Future<KeyBackedRangeResult<Tuple>> tenantEntriesFuture =
 		    ManagementClusterMetadata::clusterTenantIndex.getRange(
@@ -808,6 +810,8 @@ struct RemoveClusterImpl {
 	ACTOR static Future<bool> purgeTenantGroupsAndDataCluster(RemoveClusterImpl* self,
 	                                                          Reference<typename DB::TransactionT> tr,
 	                                                          std::pair<Tuple, Tuple> clusterTupleRange) {
+		ASSERT(self->ctx.dataClusterMetadata.get().entry.clusterState == DataClusterState::REMOVING);
+
 		// Get the list of tenant groups
 		state Future<KeyBackedRangeResult<Tuple>> tenantGroupEntriesFuture =
 		    ManagementClusterMetadata::clusterTenantGroupIndex.getRange(
@@ -875,8 +879,21 @@ struct RemoveClusterImpl {
 	}
 
 	ACTOR static Future<Void> run(RemoveClusterImpl* self) {
-		bool clusterIsPresent = wait(self->ctx.runManagementTransaction(
-		    [self = self](Reference<typename DB::TransactionT> tr) { return lockDataCluster(self, tr); }));
+		state bool clusterIsPresent;
+		try {
+			wait(store(clusterIsPresent,
+			           self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+				           return markClusterRemoving(self, tr);
+			           })));
+		} catch (Error& e) {
+			// If the transaction retries after success or if we are trying a second time to remove the cluster, it will
+			// throw an error indicating that the removal has already started
+			if (e.code() == error_code_cluster_removed) {
+				clusterIsPresent = true;
+			} else {
+				throw;
+			}
+		}
 
 		if (clusterIsPresent) {
 			try {
@@ -1219,8 +1236,8 @@ struct CreateTenantImpl {
 
 		// If we are part of a tenant group that is assigned to a cluster being removed from the metacluster,
 		// then we fail with an error.
-		if (self->ctx.dataClusterMetadata.get().entry.locked) {
-			throw cluster_locked();
+		if (self->ctx.dataClusterMetadata.get().entry.clusterState == DataClusterState::REMOVING) {
+			throw cluster_removed();
 		}
 
 		managementClusterAddTenantToGroup(
