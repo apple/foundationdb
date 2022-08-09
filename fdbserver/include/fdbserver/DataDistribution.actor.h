@@ -36,6 +36,8 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// SOMEDAY: whether it's possible to combine RelocateReason and DataMovementReason together?
+// RelocateReason to DataMovementReason is one-to-N mapping
 class RelocateReason {
 public:
 	enum Value : int8_t { OTHER = 0, REBALANCE_DISK, REBALANCE_READ, MERGE_SHARD, SIZE_SPLIT, WRITE_SPLIT };
