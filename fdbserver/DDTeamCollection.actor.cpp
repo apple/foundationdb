@@ -949,9 +949,7 @@ public:
 								}
 							}
 
-							RelocateShard rs;
-							rs.keys = shards[i];
-							rs.priority = maxPriority;
+							RelocateShard rs(shards[i], maxPriority, RelocateReason::OTHER);
 
 							self->output.send(rs);
 							TraceEvent("SendRelocateToDDQueue", self->distributorId)

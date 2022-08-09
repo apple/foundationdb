@@ -288,11 +288,44 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 #ifdef BUILD_AZURE_BACKUP
 		else if (u.startsWith("azure://"_sr)) {
 			u.eat("azure://"_sr);
-			auto accountName = u.eat("@"_sr).toString();
-			auto endpoint = u.eat("/"_sr).toString();
-			auto containerName = u.eat("/"_sr).toString();
-			r = makeReference<BackupContainerAzureBlobStore>(
-			    endpoint, accountName, containerName, encryptionKeyFileName);
+			auto address = u.eat("/"_sr);
+			if (address.endsWith(std::string(azure::storage_lite::constants::default_endpoint_suffix))) {
+				// <account>.<service>.core.windows.net/<resource_path>
+				auto endPoint = address.toString();
+				auto accountName = address.eat("."_sr).toString();
+				auto containerName = u.eat("/"_sr).toString();
+				r = makeReference<BackupContainerAzureBlobStore>(
+				    endPoint, accountName, containerName, encryptionKeyFileName);
+			} else {
+				// resolve the network address if necessary
+				std::string endpoint(address.toString());
+				Optional<NetworkAddress> parsedAddress = NetworkAddress::parseOptional(endpoint);
+				if (!parsedAddress.present()) {
+					try {
+						auto hostname = Hostname::parse(endpoint);
+						auto resolvedAddress = hostname.resolveBlocking();
+						if (resolvedAddress.present()) {
+							parsedAddress = resolvedAddress.get();
+						}
+					} catch (Error& e) {
+						TraceEvent(SevError, "InvalidAzureBackupUrl").error(e).detail("Endpoint", endpoint);
+						throw backup_invalid_url();
+					}
+				}
+				if (!parsedAddress.present()) {
+					TraceEvent(SevError, "InvalidAzureBackupUrl").detail("Endpoint", endpoint);
+					throw backup_invalid_url();
+				}
+				auto accountName = u.eat("/"_sr).toString();
+				// Avoid including ":tls" and "(fromHostname)"
+				// note: the endpoint needs to contain the account name
+				// so either "<account_name>.blob.core.windows.net" or "<ip>:<port>/<account_name>"
+				endpoint =
+				    fmt::format("{}/{}", formatIpPort(parsedAddress.get().ip, parsedAddress.get().port), accountName);
+				auto containerName = u.eat("/"_sr).toString();
+				r = makeReference<BackupContainerAzureBlobStore>(
+				    endpoint, accountName, containerName, encryptionKeyFileName);
+			}
 		}
 #endif
 		else {

@@ -36,7 +36,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ };
+enum class RelocateReason { OTHER = 0, REBALANCE_DISK, REBALANCE_READ };
 
 // One-to-one relationship to the priority knobs
 enum class DataMovementReason {
@@ -59,10 +59,10 @@ enum class DataMovementReason {
 	TEAM_0_LEFT,
 	SPLIT_SHARD
 };
+extern int dataMovementPriority(DataMovementReason moveReason);
+extern DataMovementReason priorityToDataMovementReason(int priority);
 
 struct DDShardInfo;
-
-extern int dataMovementPriority(DataMovementReason moveReason);
 
 // Represents a data move in DD.
 struct DataMove {
@@ -94,15 +94,24 @@ struct RelocateShard {
 	UID dataMoveId;
 	RelocateReason reason;
 	DataMovementReason moveReason;
-	RelocateShard()
-	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::INVALID),
-	    moveReason(DataMovementReason::INVALID) {}
+
+	// Initialization when define is a better practice. We should avoid assignment of member after definition.
+	// static RelocateShard emptyRelocateShard() { return {}; }
+
 	RelocateShard(KeyRange const& keys, DataMovementReason moveReason, RelocateReason reason)
-	  : keys(keys), cancelled(false), dataMoveId(anonymousShardId), reason(reason), moveReason(moveReason) {
-		priority = dataMovementPriority(moveReason);
-	}
+	  : keys(keys), priority(dataMovementPriority(moveReason)), cancelled(false), dataMoveId(anonymousShardId),
+	    reason(reason), moveReason(moveReason) {}
+
+	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason)
+	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason),
+	    moveReason(priorityToDataMovementReason(priority)) {}
 
 	bool isRestore() const { return this->dataMove != nullptr; }
+
+private:
+	RelocateShard()
+	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::OTHER),
+	    moveReason(DataMovementReason::INVALID) {}
 };
 
 struct IDataDistributionTeam {
