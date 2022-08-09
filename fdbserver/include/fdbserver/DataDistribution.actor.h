@@ -38,8 +38,8 @@
 
 class RelocateReason {
 public:
-	enum Value : int8_t { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ };
-	RelocateReason(Value v = INVALID) : value(v) {}
+	enum Value : int8_t { OTHER = 0, REBALANCE_DISK, REBALANCE_READ };
+	RelocateReason(Value v) : value(v) {}
 	explicit RelocateReason(int v) : value((Value)v) {}
 	std::string toString() const {
 		switch (value) {
@@ -49,9 +49,6 @@ public:
 			return "RebalanceDisk";
 		case REBALANCE_READ:
 			return "RebalanceRead";
-		case INVALID:
-		default:
-			return "Invalid";
 		}
 	}
 	operator int() const { return (int)value; }
@@ -120,8 +117,13 @@ struct RelocateShard {
 
 	UID traceId; // track the lifetime of this relocate shard
 	RelocateShard()
-	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::INVALID),
+	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::OTHER),
 	    moveReason(DataMovementReason::INVALID) {}
+
+	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason, UID traceId = UID())
+	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason),
+	    moveReason(DataMovementReason::INVALID), traceId(traceId) {}
+
 	RelocateShard(KeyRange const& keys, DataMovementReason moveReason, RelocateReason reason, UID traceId = UID())
 	  : keys(keys), cancelled(false), dataMoveId(anonymousShardId), reason(reason), moveReason(moveReason),
 	    traceId(traceId) {

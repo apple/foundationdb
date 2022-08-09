@@ -149,7 +149,7 @@ struct RelocateData {
 	std::shared_ptr<DataMove> dataMove;
 
 	RelocateData()
-	  : priority(-1), boundaryPriority(-1), healthPriority(-1), reason(RelocateReason::INVALID), startTime(-1),
+	  : priority(-1), boundaryPriority(-1), healthPriority(-1), reason(RelocateReason::OTHER), startTime(-1),
 	    dataMoveId(anonymousShardId), workFactor(0), wantsNewServers(false), cancellable(false),
 	    interval("QueuedRelocation") {}
 	explicit RelocateData(RelocateShard const& rs)
@@ -560,7 +560,10 @@ struct DDQueue {
 
 		void increase(const UID& id, RelocateReason reason, CountType type) {
 			int idx = (int)(reason);
-			ASSERT(idx >= 0 && idx < 3);
+			if (idx < 0 || idx >= RelocateReason::typeCount()) {
+				TraceEvent(SevWarnAlways, "Debug").detail("Reason", reason.toString());
+			}
+			ASSERT(idx >= 0 && idx < RelocateReason::typeCount());
 			counter[id][idx][(int)type] += 1;
 		}
 
