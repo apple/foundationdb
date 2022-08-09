@@ -192,7 +192,14 @@ func (d Database) transact(ctx context.Context, f func(Transaction) (interface{}
 		ret, e = f(tr)
 
 		if e == nil {
-			e = tr.Commit().Get()
+			futureNil := tr.Commit()
+			go func() {
+				if ctx != nil {
+					<-ctx.Done()
+					futureNil.Cancel()
+				}
+			}()
+			e = futureNil.Get()
 		}
 
 		return
@@ -258,7 +265,14 @@ func (d Database) readTransact(ctx context.Context, f func(ReadTransaction) (int
 		ret, e = f(tr)
 
 		if e == nil {
-			e = tr.Commit().Get()
+			futureNil := tr.Commit()
+			go func() {
+				if ctx != nil {
+					<-ctx.Done()
+					futureNil.Cancel()
+				}
+			}()
+			e = futureNil.Get()
 		}
 
 		return
