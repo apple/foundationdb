@@ -158,18 +158,18 @@ struct TenantMetadataSpecification {
 };
 
 struct TenantMetadata {
-	static inline TenantMetadataSpecification instance = TenantMetadataSpecification("\xff/"_sr);
+	static TenantMetadataSpecification& instance();
 
-	static inline auto& subspace = instance.subspace;
-	static inline auto& tenantMap = instance.tenantMap;
-	static inline auto& lastTenantId = instance.lastTenantId;
-	static inline auto& tenantCount = instance.tenantCount;
-	static inline auto& tenantTombstones = instance.tenantTombstones;
-	static inline auto& tombstoneCleanupData = instance.tombstoneCleanupData;
-	static inline auto& tenantGroupTenantIndex = instance.tenantGroupTenantIndex;
-	static inline auto& tenantGroupMap = instance.tenantGroupMap;
+	static inline auto& subspace() { return instance().subspace; }
+	static inline auto& tenantMap() { return instance().tenantMap; }
+	static inline auto& lastTenantId() { return instance().lastTenantId; }
+	static inline auto& tenantCount() { return instance().tenantCount; }
+	static inline auto& tenantTombstones() { return instance().tenantTombstones; }
+	static inline auto& tombstoneCleanupData() { return instance().tombstoneCleanupData; }
+	static inline auto& tenantGroupTenantIndex() { return instance().tenantGroupTenantIndex; }
+	static inline auto& tenantGroupMap() { return instance().tenantGroupMap; }
 
-	static inline Key tenantMapPrivatePrefix = "\xff"_sr.withSuffix(tenantMap.subspace.begin);
+	static Key tenantMapPrivatePrefix();
 };
 
 typedef VersionedMap<TenantName, TenantMapEntry> TenantMap;

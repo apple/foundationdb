@@ -40,9 +40,12 @@ ACTOR Future<Reference<IDatabase>> openDatabase(ClusterConnectionString connecti
 	}
 }
 
-KeyBackedObjectMap<ClusterName, DataClusterEntry, decltype(IncludeVersion())> ManagementClusterMetadata::dataClusters(
-    "metacluster/dataCluster/metadata/"_sr,
-    IncludeVersion());
+KeyBackedObjectMap<ClusterName, DataClusterEntry, decltype(IncludeVersion())>&
+ManagementClusterMetadata::dataClusters() {
+	static KeyBackedObjectMap<ClusterName, DataClusterEntry, decltype(IncludeVersion())> instance(
+	    "metacluster/dataCluster/metadata/"_sr, IncludeVersion());
+	return instance;
+}
 
 KeyBackedMap<ClusterName,
              ClusterConnectionString,
@@ -55,5 +58,10 @@ KeyBackedMap<ClusterName, int64_t, TupleCodec<ClusterName>, BinaryCodec<int64_t>
     ManagementClusterMetadata::clusterTenantCount("metacluster/clusterTenantCount/"_sr);
 KeyBackedSet<Tuple> ManagementClusterMetadata::clusterTenantIndex("metacluster/dataCluster/tenantMap/"_sr);
 KeyBackedSet<Tuple> ManagementClusterMetadata::clusterTenantGroupIndex("metacluster/dataCluster/tenantGroupMap/"_sr);
+
+TenantMetadataSpecification& ManagementClusterMetadata::tenantMetadata() {
+	static TenantMetadataSpecification instance(""_sr);
+	return instance;
+}
 
 }; // namespace MetaclusterAPI

@@ -81,10 +81,10 @@ enum class DataMovementReason {
 	TEAM_0_LEFT,
 	SPLIT_SHARD
 };
+extern int dataMovementPriority(DataMovementReason moveReason);
+extern DataMovementReason priorityToDataMovementReason(int priority);
 
 struct DDShardInfo;
-
-extern int dataMovementPriority(DataMovementReason moveReason);
 
 // Represents a data move in DD.
 struct DataMove {
@@ -118,21 +118,24 @@ struct RelocateShard {
 	DataMovementReason moveReason;
 
 	UID traceId; // track the lifetime of this relocate shard
-	RelocateShard()
-	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::OTHER),
-	    moveReason(DataMovementReason::INVALID) {}
+
+	// Initialization when define is a better practice. We should avoid assignment of member after definition.
+	// static RelocateShard emptyRelocateShard() { return {}; }
+
+	RelocateShard(KeyRange const& keys, DataMovementReason moveReason, RelocateReason reason, UID traceId = UID())
+	  : keys(keys), priority(dataMovementPriority(moveReason)), cancelled(false), dataMoveId(anonymousShardId),
+	    reason(reason), moveReason(moveReason), traceId(traceId) {}
 
 	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason, UID traceId = UID())
 	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason),
-	    moveReason(DataMovementReason::INVALID), traceId(traceId) {}
-
-	RelocateShard(KeyRange const& keys, DataMovementReason moveReason, RelocateReason reason, UID traceId = UID())
-	  : keys(keys), cancelled(false), dataMoveId(anonymousShardId), reason(reason), moveReason(moveReason),
-	    traceId(traceId) {
-		priority = dataMovementPriority(moveReason);
-	}
+	    moveReason(priorityToDataMovementReason(priority)), traceId(traceId) {}
 
 	bool isRestore() const { return this->dataMove != nullptr; }
+
+private:
+	RelocateShard()
+	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::OTHER),
+	    moveReason(DataMovementReason::INVALID) {}
 };
 
 struct IDataDistributionTeam {

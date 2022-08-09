@@ -103,6 +103,7 @@ enum {
 	OPT_DEBUG_TLS,
 	OPT_API_VERSION,
 	OPT_MEMORY,
+	OPT_USE_FUTURE_PROTOCOL_VERSION
 };
 
 CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -127,6 +128,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_DEBUG_TLS, "--debug-tls", SO_NONE },
 	                                  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
 	                                  { OPT_MEMORY, "--memory", SO_REQ_SEP },
+	                                  { OPT_USE_FUTURE_PROTOCOL_VERSION, "--use-future-protocol-version", SO_NONE },
 	                                  TLS_OPTION_FLAGS,
 	                                  SO_END_OF_OPTIONS };
 
@@ -475,6 +477,9 @@ static void printProgramUsage(const char* name) {
 	       "                 Useful in reporting and diagnosing TLS issues.\n"
 	       "  --build-flags  Print build information and exit.\n"
 	       "  --memory       Resident memory limit of the CLI (defaults to 8GiB).\n"
+	       "  --use-future-protocol-version\n"
+	       "                 Use the simulated future protocol version to connect to the cluster.\n"
+	       "                 This option can be used testing purposes only!\n"
 	       "  -v, --version  Print FoundationDB CLI version information and exit.\n"
 	       "  -h, --help     Display this help and exit.\n");
 }
@@ -578,7 +583,7 @@ void initHelp() {
 void printVersion() {
 	printf("FoundationDB CLI " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getSourceVersion());
-	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion().version());
 }
 
 void printBuildInformation() {
@@ -872,6 +877,7 @@ struct CLIOptions {
 	Optional<std::string> exec;
 	bool initialStatusCheck = true;
 	bool cliHints = true;
+	bool useFutureProtocolVersion = false;
 	bool debugTLS = false;
 	std::string tlsCertPath;
 	std::string tlsKeyPath;
@@ -973,6 +979,10 @@ struct CLIOptions {
 			break;
 		case OPT_NO_HINTS:
 			cliHints = false;
+			break;
+		case OPT_USE_FUTURE_PROTOCOL_VERSION:
+			useFutureProtocolVersion = true;
+			break;
 
 		// TLS Options
 		case TLSConfig::OPT_TLS_PLUGIN:
@@ -2199,6 +2209,9 @@ int main(int argc, char** argv) {
 
 	try {
 		API->selectApiVersion(opt.apiVersion);
+		if (opt.useFutureProtocolVersion) {
+			API->useFutureProtocolVersion();
+		}
 		API->setupNetwork();
 		opt.setupKnobs();
 		if (opt.exit_code != -1) {
