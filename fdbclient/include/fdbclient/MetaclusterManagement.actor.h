@@ -1347,6 +1347,8 @@ struct DeleteTenantImpl {
 		    wait(TenantAPI::tryGetTenantTransaction(tr, checkPair ? self->pairName.get() : self->tenantName));
 		if (!tenantEntry.present() || tenantEntry.get().id != self->tenantId) {
 			// The tenant must have been removed simultaneously
+			// Reset pair name because the rest should all be no-op
+			self->pairName.reset();
 			return Void();
 		}
 
@@ -1367,27 +1369,47 @@ struct DeleteTenantImpl {
 
 		if (!tenantEntry.present() || tenantEntry.get().id != self->tenantId) {
 			// The tenant must have been removed simultaneously
+			// Reset pair name because the rest should all be no-op
+			self->pairName.reset();
 			return Void();
 		}
 
 		if (tenantEntry.get().tenantState != TenantState::REMOVING) {
-			TenantMapEntry updatedEntry = tenantEntry.get();
+			state TenantMapEntry updatedEntry = tenantEntry.get();
+			// Very specific timing edge case. Since we check for the rename pair
+			// in getAssignedLocation, it's possible that a rename has started after
+			// that check and before this state change. This will leave things in
+			// a bad state for the rename operation, so we check again here.
+			if (updatedEntry.renamePair.present() && !self->pairName.present()) {
+				self->pairName = updatedEntry.renamePair.get();
+				wait(markTenantInRemovingState(self, tr));
+				return Void();
+			}
 			updatedEntry.tenantState = TenantState::REMOVING;
 			ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->tenantName, updatedEntry);
+			Optional<TenantMapEntry> entryCheck =
+			    wait(ManagementClusterMetadata::tenantMetadata.tenantMap.get(tr, self->tenantName));
 			// If this has a rename pair, also mark the other entry for deletion
 			if (self->pairName.present()) {
-				CODE_PROBE(true, "marking pair tenant in removing state");
 				state Optional<TenantMapEntry> pairEntry = wait(tryGetTenantTransaction(tr, self->pairName.get()));
+				// If the entry is not present or does not match, that means the rename completed
+				// before we could mark it as removed and we are trying to remove the "new" name.
+				// We can proceed as normal, but treat it as a standalone remove instead of paired
+				if (!pairEntry.present() || pairEntry.get().id != self->tenantId) {
+					self->pairName.reset();
+					return Void();
+				}
 				TenantMapEntry updatedPairEntry = pairEntry.get();
 				// Sanity check that our pair has us named as their partner
 				ASSERT(updatedPairEntry.renamePair.present());
 				ASSERT(updatedPairEntry.renamePair.get() == self->tenantName);
 				ASSERT(updatedPairEntry.id == self->tenantId);
+				CODE_PROBE(true, "marking pair tenant in removing state");
 				updatedPairEntry.tenantState = TenantState::REMOVING;
 				ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->pairName.get(), updatedPairEntry);
+				Optional<TenantMapEntry> pairEntryCheck =
+				    wait(ManagementClusterMetadata::tenantMetadata.tenantMap.get(tr, self->pairName.get()));
 			}
-			Optional<TenantMapEntry> entryCheck =
-			    wait(ManagementClusterMetadata::tenantMetadata.tenantMap.get(tr, self->tenantName));
 		}
 
 		return Void();
@@ -1795,6 +1817,7 @@ struct RenameTenantImpl {
 			return Void();
 		}
 		if (oldTenantEntry.get().tenantState == TenantState::REMOVING) {
+			ASSERT(newTenantEntry.get().tenantState == TenantState::REMOVING);
 			throw tenant_removed();
 		}
 		ASSERT(newTenantEntry.present());
@@ -1803,8 +1826,8 @@ struct RenameTenantImpl {
 		TenantMapEntry updatedOldEntry = oldTenantEntry.get();
 		TenantMapEntry updatedNewEntry = newTenantEntry.get();
 
-		// If marked as removing, we will not update the new entry
-		if (updatedNewEntry.tenantState != TenantState::REMOVING) {
+		// Only update if in the expected state
+		if (updatedNewEntry.tenantState == TenantState::RENAMING_TO) {
 			updatedNewEntry.tenantState = TenantState::READY;
 			updatedNewEntry.renamePair.reset();
 			ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->newName, updatedNewEntry);
@@ -1848,7 +1871,6 @@ struct RenameTenantImpl {
 		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return finishRenameFromManagementCluster(self, tr);
 		}));
-
 		return Void();
 	}
 	Future<Void> run() { return run(this); }
