@@ -1007,6 +1007,8 @@ public:
 
 	FlowLock serveFetchCheckpointParallelismLock;
 
+	FlowLock serveValidateStorageParallelismLock;
+
 	int64_t instanceID;
 
 	Promise<Void> otherError;
@@ -1180,8 +1182,11 @@ public:
 			specialCounter(cc, "ServeFetchCheckpointActive", [self]() {
 				return self->serveFetchCheckpointParallelismLock.activePermits();
 			});
-			specialCounter(cc, "ServeFetchCheckpointWaiting", [self]() {
-				return self->serveFetchCheckpointParallelismLock.waiters();
+			specialCounter(cc, "ServeFetchCheckpointActive", [self]() {
+				return self->serveFetchCheckpointParallelismLock.activePermits();
+			});
+			specialCounter(cc, "ServeValidateStorageWaiting", [self]() {
+				return self->serveValidateStorageParallelismLock.waiters();
 			});
 			specialCounter(cc, "QueryQueueMax", [self]() { return self->getAndResetMaxQueryQueueSize(); });
 			specialCounter(cc, "BytesStored", [self]() { return self->metrics.byteSample.getEstimate(allKeys); });
@@ -1239,6 +1244,7 @@ public:
 	    fetchChangeFeedParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
+	    serveValidateStorageParallelismLock(SERVER_KNOBS->SERVE_VALIDATE_STORAGE_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
 	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()), counters(this),
@@ -2248,6 +2254,19 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 	}
 
 	wait(reader->close());
+	return Void();
+}
+
+// Serves FetchCheckpointKeyValuesRequest, reads local checkpoint and sends it to the client over wire.
+ACTOR Future<Void> validateStorageQ(StorageServer* self, ValidateStorageRequest req) {
+	wait(self->serveValidateStorageParallelismLock.take(TaskPriority::DefaultYield));
+	state FlowLock::Releaser holder(self->serveValidateStorageParallelismLock);
+
+	TraceEvent("ServeValidateStorageBegin", self->thisServerID)
+	    .detail("RequestID", req.requestId)
+	    .detail("Range", req.range);
+	
+	req.reply.send(ValidateStorageResult(req.requestId));
 	return Void();
 }
 
@@ -10092,6 +10111,9 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 			}
 			when(FetchCheckpointKeyValuesRequest req = waitNext(ssi.fetchCheckpointKeyValues.getFuture())) {
 				self->actors.add(fetchCheckpointKeyValuesQ(self, req));
+			}
+			when(ValidateStorageRequest req = waitNext(ssi.validateStorage.getFuture())) {
+				self->actors.add(validateStorageQ(self, req));
 			}
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);

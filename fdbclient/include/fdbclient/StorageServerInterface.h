@@ -93,6 +93,7 @@ struct StorageServerInterface {
 	RequestStream<struct GetCheckpointRequest> checkpoint;
 	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
 	RequestStream<struct FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues;
+	RequestStream<struct ValidateStorageRequest> validateStorage;
 
 private:
 	bool acceptingRequests;
@@ -163,6 +164,7 @@ public:
 				    RequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
 				fetchCheckpointKeyValues = RequestStream<struct FetchCheckpointKeyValuesRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(21));
+				validateStorage = RequestStream<struct ValidateStorageRequest>(getValue.getEndpoint().getAdjustedEndpoint(22));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -213,6 +215,7 @@ public:
 		streams.push_back(checkpoint.getReceiver());
 		streams.push_back(fetchCheckpoint.getReceiver());
 		streams.push_back(fetchCheckpointKeyValues.getReceiver());
+		streams.push_back(validateStorage.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
