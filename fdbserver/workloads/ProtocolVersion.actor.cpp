@@ -32,7 +32,7 @@ struct ProtocolVersionWorkload : TestWorkload {
 		state std::vector<ISimulator::ProcessInfo*> allProcesses = g_pSimulator->getAllProcesses();
 		state std::vector<ISimulator::ProcessInfo*>::iterator diffVersionProcess =
 		    find_if(allProcesses.begin(), allProcesses.end(), [](const ISimulator::ProcessInfo* p) {
-			    return p->protocolVersion != currentProtocolVersion;
+			    return p->protocolVersion != currentProtocolVersion();
 		    });
 
 		ASSERT(diffVersionProcess != allProcesses.end());

@@ -942,8 +942,9 @@ public:
 											                                : SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY);
 										}
 									} else {
-										TEST(true); // A removed server is still associated with a team in
-										            // ShardsAffectedByTeamFailure
+										CODE_PROBE(true,
+										           "A removed server is still associated with a team in "
+										           "ShardsAffectedByTeamFailure");
 									}
 								}
 							}
@@ -1253,7 +1254,7 @@ public:
 
 						server->updateLastKnown(newInterface.first, newInterface.second);
 						if (localityChanged && !isTss) {
-							TEST(true); // Server locality changed
+							CODE_PROBE(true, "Server locality changed");
 
 							// The locality change of a server will affect machine teams related to the server if
 							// the server's machine locality is changed
@@ -1320,7 +1321,7 @@ public:
 								}
 							}
 							if (addedNewBadTeam && self->badTeamRemover.isReady()) {
-								TEST(true); // Server locality change created bad teams
+								CODE_PROBE(true, "Server locality change created bad teams");
 								self->doBuildTeams = true;
 								self->badTeamRemover = removeBadTeams(self);
 								self->addActor.send(self->badTeamRemover);
@@ -1724,7 +1725,7 @@ public:
 					// in the serverTeams vector in the machine team.
 					--teamIndex;
 					self->addTeam(team->getServers(), IsInitialTeam::True, IsRedundantTeam::True);
-					TEST(true); // Removed machine team
+					CODE_PROBE(true, "Removed machine team");
 				}
 
 				self->doBuildTeams = true;
@@ -1808,7 +1809,7 @@ public:
 				bool foundTeam = self->removeTeam(st);
 				ASSERT(foundTeam);
 				self->addTeam(st->getServers(), IsInitialTeam::True, IsRedundantTeam::True);
-				TEST(true); // Marked team as a bad team
+				CODE_PROBE(true, "Marked team as a bad team");
 
 				self->doBuildTeams = true;
 
@@ -2052,7 +2053,7 @@ public:
 			if (self->wigglingId.present()) {
 				state UID id = self->wigglingId.get();
 				if (self->pauseWiggle->get()) {
-					TEST(true); // paused because cluster is unhealthy
+					CODE_PROBE(true, "paused because cluster is unhealthy");
 					moveFinishFuture = Never();
 					self->includeStorageServersForWiggle();
 					self->storageWiggler->setWiggleState(StorageWiggler::PAUSE);
@@ -2068,7 +2069,7 @@ public:
 				} else {
 					choose {
 						when(wait(self->waitUntilHealthy())) {
-							TEST(true); // start wiggling
+							CODE_PROBE(true, "start wiggling");
 							wait(self->storageWiggler->startWiggle());
 							auto fv = self->excludeStorageServersForWiggle(id);
 							moveFinishFuture = fv;
@@ -2431,10 +2432,10 @@ public:
 		// SS and/or TSS recruitment failed at this point, update tssState
 		if (recruitTss && tssState->tssRecruitFailed()) {
 			tssState->markComplete();
-			TEST(true); // TSS recruitment failed for some reason
+			CODE_PROBE(true, "TSS recruitment failed for some reason");
 		}
 		if (!recruitTss && tssState->ssRecruitFailed()) {
-			TEST(true); // SS with pair TSS recruitment failed for some reason
+			CODE_PROBE(true, "SS with pair TSS recruitment failed for some reason");
 		}
 
 		self->recruitingStream.set(self->recruitingStream.get() - 1);
@@ -2575,7 +2576,7 @@ public:
 							    .detail("Addr", candidateSSAddr.toString())
 							    .detail("Locality", candidateWorker.worker.locality.toString());
 
-							TEST(true); // Starting TSS recruitment
+							CODE_PROBE(true, "Starting TSS recruitment");
 							self->isTssRecruiting = true;
 							tssState = makeReference<TSSPairState>(candidateWorker.worker.locality);
 
@@ -2585,7 +2586,7 @@ public:
 							checkTss = self->initialFailureReactionDelay;
 						} else {
 							if (tssState->active && tssState->inDataZone(candidateWorker.worker.locality)) {
-								TEST(true); // TSS recruits pair in same dc/datahall
+								CODE_PROBE(true, "TSS recruits pair in same dc/datahall");
 								self->isTssRecruiting = false;
 								TraceEvent("TSS_Recruit", self->distributorId)
 								    .detail("Stage", "PairSS")
@@ -2596,8 +2597,9 @@ public:
 								// successfully started recruitment of pair, reset tss recruitment state
 								tssState = makeReference<TSSPairState>();
 							} else {
-								TEST(tssState->active); // TSS recruitment skipped potential pair because it's in a
-								                        // different dc/datahall
+								CODE_PROBE(
+								    tssState->active,
+								    "TSS recruitment skipped potential pair because it's in a different dc/datahall");
 								self->addActor.send(initializeStorage(
 								    self, candidateWorker, ddEnabledState, false, makeReference<TSSPairState>()));
 							}
@@ -2617,8 +2619,9 @@ public:
 						int tssToKill = std::min((int)self->tss_info_by_pair.size(),
 						                         std::max(-tssToRecruit, self->zeroHealthyTeams->get() ? 1 : 0));
 						if (cancelTss) {
-							TEST(tssToRecruit < 0); // tss recruitment cancelled due to too many TSS
-							TEST(self->zeroHealthyTeams->get()); // tss recruitment cancelled due zero healthy teams
+							CODE_PROBE(tssToRecruit < 0, "tss recruitment cancelled due to too many TSS");
+							CODE_PROBE(self->zeroHealthyTeams->get(),
+							           "tss recruitment cancelled due zero healthy teams");
 
 							TraceEvent(SevWarn, "TSS_RecruitCancelled", self->distributorId)
 							    .detail("Reason", tssToRecruit <= 0 ? "TooMany" : "ZeroHealthyTeams");
@@ -2637,8 +2640,8 @@ public:
 								if (self->shouldHandleServer(tssi) && self->server_and_tss_info.count(tssId)) {
 									Promise<Void> killPromise = itr->second->killTss;
 									if (killPromise.canBeSet()) {
-										TEST(tssToRecruit < 0); // Killing TSS due to too many TSS
-										TEST(self->zeroHealthyTeams->get()); // Killing TSS due zero healthy teams
+										CODE_PROBE(tssToRecruit < 0, "Killing TSS due to too many TSS");
+										CODE_PROBE(self->zeroHealthyTeams->get(), "Killing TSS due zero healthy teams");
 										TraceEvent(SevWarn, "TSS_DDKill", self->distributorId)
 										    .detail("TSSID", tssId)
 										    .detail("Reason",
@@ -2672,7 +2675,7 @@ public:
 				if (e.code() != error_code_timed_out) {
 					throw;
 				}
-				TEST(true); // Storage recruitment timed out
+				CODE_PROBE(true, "Storage recruitment timed out");
 			}
 		}
 	}
@@ -2827,56 +2830,37 @@ public:
 		}
 	}
 
-	ACTOR static Future<UID> getNextWigglingServerID(DDTeamCollection* teamCollection) {
-		state Optional<Value> localityKey;
-		state Optional<Value> localityValue;
-
-		// NOTE: because normal \xff/conf change through `changeConfig` now will cause DD throw `movekeys_conflict()`
-		// then recruit a new DD, we only need to read current configuration once
-		if (teamCollection->configuration.perpetualStorageWiggleLocality != "0") {
-			// parsing format is like "datahall:0"
-			std::string& localityKeyValue = teamCollection->configuration.perpetualStorageWiggleLocality;
-			ASSERT(isValidPerpetualStorageWiggleLocality(localityKeyValue));
-			// get key and value from perpetual_storage_wiggle_locality.
-			int split = localityKeyValue.find(':');
-			localityKey = Optional<Value>(ValueRef((uint8_t*)localityKeyValue.c_str(), split));
-			localityValue = Optional<Value>(
-			    ValueRef((uint8_t*)localityKeyValue.c_str() + split + 1, localityKeyValue.size() - split - 1));
-		}
-
+	ACTOR static Future<UID> getNextWigglingServerID(Reference<StorageWiggler> wiggler,
+	                                                 Optional<Value> localityKey = Optional<Value>(),
+	                                                 Optional<Value> localityValue = Optional<Value>(),
+	                                                 DDTeamCollection* teamCollection = nullptr) {
 		loop {
-			// wait until the wiggle queue is not empty
-			if (teamCollection->storageWiggler->empty()) {
-				wait(teamCollection->storageWiggler->nonEmpty.onChange());
+			state Optional<UID> id = wiggler->getNextServerId();
+			if (!id.present()) {
+				wait(wiggler->onCheck());
+				continue;
 			}
 
 			// if perpetual_storage_wiggle_locality has value and not 0(disabled).
 			if (localityKey.present()) {
 				// Whether the selected server matches the locality
-				auto id = teamCollection->storageWiggler->getNextServerId();
-				if (!id.present())
-					continue;
 				auto server = teamCollection->server_info.at(id.get());
 
 				// TraceEvent("PerpetualLocality").detail("Server", server->getLastKnownInterface().locality.get(localityKey)).detail("Desire", localityValue);
 				if (server->getLastKnownInterface().locality.get(localityKey.get()) == localityValue) {
 					return id.get();
-				} else {
-					if (teamCollection->storageWiggler->empty()) {
-						// None of the entries in wiggle queue matches the given locality.
-						TraceEvent("PerpetualStorageWiggleEmptyQueue", teamCollection->distributorId)
-						    .detail("WriteValue", "No process matched the given perpetualStorageWiggleLocality")
-						    .detail("PerpetualStorageWiggleLocality",
-						            teamCollection->configuration.perpetualStorageWiggleLocality);
-					}
-					continue;
 				}
-			} else {
-				auto id = teamCollection->storageWiggler->getNextServerId();
-				if (!id.present())
-					continue;
-				return id.get();
+
+				if (wiggler->empty()) {
+					// None of the entries in wiggle queue matches the given locality.
+					TraceEvent("PerpetualStorageWiggleEmptyQueue", teamCollection->distributorId)
+					    .detail("WriteValue", "No process matched the given perpetualStorageWiggleLocality")
+					    .detail("PerpetualStorageWiggleLocality",
+					            teamCollection->configuration.perpetualStorageWiggleLocality);
+				}
+				continue;
 			}
+			return id.get();
 		}
 	}
 
@@ -2992,14 +2976,14 @@ public:
 
 			loop choose {
 				when(UID removedServer = waitNext(self->removedServers.getFuture())) {
-					TEST(true); // Storage server removed from database
+					CODE_PROBE(true, "Storage server removed from database");
 					self->removeServer(removedServer);
 					serverRemoved.send(Void());
 
 					self->restartRecruiting.trigger();
 				}
 				when(UID removedTSS = waitNext(self->removedTSS.getFuture())) {
-					TEST(true); // TSS removed from database
+					CODE_PROBE(true, "TSS removed from database");
 					self->removeTSS(removedTSS);
 					serverRemoved.send(Void());
 
@@ -3535,7 +3519,23 @@ Future<UID> DDTeamCollection::getClusterId() {
 }
 
 Future<UID> DDTeamCollection::getNextWigglingServerID() {
-	return DDTeamCollectionImpl::getNextWigglingServerID(this);
+	Optional<Value> localityKey;
+	Optional<Value> localityValue;
+
+	// NOTE: because normal \xff/conf change through `changeConfig` now will cause DD throw `movekeys_conflict()`
+	// then recruit a new DD, we only need to read current configuration once
+	if (configuration.perpetualStorageWiggleLocality != "0") {
+		// parsing format is like "datahall:0"
+		std::string& localityKeyValue = configuration.perpetualStorageWiggleLocality;
+		ASSERT(isValidPerpetualStorageWiggleLocality(localityKeyValue));
+		// get key and value from perpetual_storage_wiggle_locality.
+		int split = localityKeyValue.find(':');
+		localityKey = Optional<Value>(ValueRef((uint8_t*)localityKeyValue.c_str(), split));
+		localityValue = Optional<Value>(
+		    ValueRef((uint8_t*)localityKeyValue.c_str() + split + 1, localityKeyValue.size() - split - 1));
+	}
+
+	return DDTeamCollectionImpl::getNextWigglingServerID(storageWiggler, localityKey, localityValue, this);
 }
 
 Future<Void> DDTeamCollection::readStorageWiggleMap() {
@@ -4808,7 +4808,7 @@ Reference<TCMachineInfo> DDTeamCollection::checkAndCreateMachine(Reference<TCSer
 	Reference<TCMachineInfo> machineInfo;
 	if (machine_info.find(machine_id) == machine_info.end()) {
 		// uid is the first storage server process on the machine
-		TEST(true); // First storage server in process on the machine
+		CODE_PROBE(true, "First storage server in process on the machine");
 		// For each machine, store the first server's localityEntry into machineInfo for later use.
 		LocalityEntry localityEntry = machineLocalityMap.add(locality, &server->getId());
 		machineInfo = makeReference<TCMachineInfo>(server, localityEntry);
@@ -5867,5 +5867,52 @@ TEST_CASE("/DataDistribution/GetTeam/TrueBestLeastReadBandwidth") {
 
 TEST_CASE("/DataDistribution/GetTeam/DeprioritizeWigglePausedTeam") {
 	wait(DDTeamCollectionUnitTest::GetTeam_DeprioritizeWigglePausedTeam());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithMinAge") {
+	state StorageWiggler wiggler(nullptr);
+	state double startTime = now();
+	wiggler.addServer(UID(1, 0),
+	                  StorageMetadataType(startTime - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 5.0,
+	                                      KeyValueStoreType::SSD_BTREE_V2));
+	wiggler.addServer(UID(2, 0),
+	                  StorageMetadataType(
+	                      startTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC, KeyValueStoreType::MEMORY, true));
+	wiggler.addServer(UID(3, 0), StorageMetadataType(startTime - 5.0, KeyValueStoreType::SSD_ROCKSDB_V1, true));
+	wiggler.addServer(UID(4, 0),
+	                  StorageMetadataType(startTime - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC - 1.0,
+	                                      KeyValueStoreType::SSD_BTREE_V2));
+	std::vector<Optional<UID>> correctResult{ UID(3, 0), UID(2, 0), UID(4, 0), Optional<UID>() };
+	for (int i = 0; i < 4; ++i) {
+		auto id = wiggler.getNextServerId();
+		ASSERT(id == correctResult[i]);
+	}
+	std::cout << "Finish Initial Check. Start test getNextWigglingServerID() loop...\n";
+	// test the getNextWigglingServerID() loop
+	state UID id = wait(DDTeamCollectionImpl::getNextWigglingServerID(Reference<StorageWiggler>::addRef(&wiggler)));
+	ASSERT(id == UID(1, 0));
+
+	std::cout << "Test after addServer() ...\n";
+	state Future<UID> nextFuture =
+	    DDTeamCollectionImpl::getNextWigglingServerID(Reference<StorageWiggler>::addRef(&wiggler));
+	startTime = now();
+	StorageMetadataType metadata(startTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 100.0,
+	                             KeyValueStoreType::SSD_BTREE_V2);
+	wiggler.addServer(UID(5, 0), metadata);
+	ASSERT(!nextFuture.isReady() || now() - metadata.createdTime >= SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC);
+
+	std::cout << "Test after updateServer() ...\n";
+	StorageWiggler* ptr = &wiggler;
+	wait(trigger(
+	    [ptr]() {
+		    ptr->updateMetadata(UID(5, 0),
+		                        StorageMetadataType(now() - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC,
+		                                            KeyValueStoreType::SSD_BTREE_V2));
+	    },
+	    delay(5.0)));
+	wait(store(id, nextFuture));
+
+	ASSERT(id == UID(5, 0));
 	return Void();
 }

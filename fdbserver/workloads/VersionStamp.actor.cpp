@@ -155,7 +155,9 @@ struct VersionStampWorkload : TestWorkload {
 
 	ACTOR Future<bool> _check(Database cx, VersionStampWorkload* self) {
 		if (self->validateExtraDB) {
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
+			ASSERT(g_simulator.extraDatabases.size() == 1);
+			auto extraFile =
+			    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
 			cx = Database::createDatabase(extraFile, -1);
 		}
 		state ReadYourWritesTransaction tr(cx);
@@ -205,7 +207,7 @@ struct VersionStampWorkload : TestWorkload {
 				if (self->failIfDataLost) {
 					ASSERT(result.size() == self->key_commit.size());
 				} else {
-					TEST(result.size() > 0); // Not all data should always be lost.
+					CODE_PROBE(result.size() > 0, "Not all data should always be lost.");
 				}
 
 				//TraceEvent("VST_Check0").detail("Size", result.size()).detail("NodeCount", self->nodeCount).detail("KeyCommit", self->key_commit.size()).detail("ReadVersion", readVersion);
@@ -260,7 +262,7 @@ struct VersionStampWorkload : TestWorkload {
 				if (self->failIfDataLost) {
 					ASSERT(result.size() == self->versionStampKey_commit.size());
 				} else {
-					TEST(result.size() > 0); // Not all data should always be lost (2)
+					CODE_PROBE(result.size() > 0, "Not all data should always be lost (2)");
 				}
 
 				//TraceEvent("VST_Check1").detail("Size", result.size()).detail("VsKeyCommitSize", self->versionStampKey_commit.size());
@@ -312,8 +314,10 @@ struct VersionStampWorkload : TestWorkload {
 		state double lastTime = now();
 		state Database extraDB;
 
-		if (g_simulator.extraDB != nullptr) {
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
+		if (!g_simulator.extraDatabases.empty()) {
+			ASSERT(g_simulator.extraDatabases.size() == 1);
+			auto extraFile =
+			    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
 			extraDB = Database::createDatabase(extraFile, -1);
 		}
 
@@ -380,7 +384,7 @@ struct VersionStampWorkload : TestWorkload {
 
 				} catch (Error& e) {
 					err = e;
-					if (err.code() == error_code_database_locked && g_simulator.extraDB != nullptr) {
+					if (err.code() == error_code_database_locked && !g_simulator.extraDatabases.empty()) {
 						//TraceEvent("VST_CommitDatabaseLocked");
 						cx_is_primary = !cx_is_primary;
 						tr = ReadYourWritesTransaction(cx_is_primary ? cx : extraDB);

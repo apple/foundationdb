@@ -193,7 +193,7 @@ Error checkIOTimeout(Error const& e) {
 		timeoutOccurred = g_pSimulator->getCurrentProcess()->machine->machineProcess->global(INetwork::enASIOTimedOut);
 
 	if (timeoutOccurred) {
-		TEST(true); // Timeout occurred
+		CODE_PROBE(true, "Timeout occurred");
 		Error timeout = io_timeout();
 		// Preserve injectedness of error
 		if (e.isInjectedFault())
@@ -244,7 +244,7 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 			// file_not_found can occur due to attempting to open a partially deleted DiskQueue, which should not be
 			// reported SevError.
 			if (e.isError() && e.getError().code() == error_code_file_not_found) {
-				TEST(true); // Worker terminated with file_not_found error
+				CODE_PROBE(true, "Worker terminated with file_not_found error");
 				return Void();
 			}
 			throw e.isError() ? e.getError() : actor_cancelled();
@@ -565,7 +565,8 @@ ACTOR Future<Void> registrationClient(
     Reference<AsyncVar<std::set<std::string>> const> issues,
     Reference<ConfigNode> configNode,
     Reference<LocalConfiguration> localConfig,
-    Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+    Reference<AsyncVar<ServerDBInfo>> dbInfo,
+    Promise<Void> recoveredDiskFiles) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply
 	// (requiring us to re-register) The registration request piggybacks optional distributor interface if it exists.
@@ -600,7 +601,8 @@ ACTOR Future<Void> registrationClient(
 		                              ekpInterf->get(),
 		                              degraded->get(),
 		                              localConfig->lastSeenVersion(),
-		                              localConfig->configClassSet());
+		                              localConfig->configClassSet(),
+		                              recoveredDiskFiles.isSet());
 
 		for (auto const& i : issues->get()) {
 			request.issues.push_back_deep(request.issues.arena(), i);
@@ -637,10 +639,15 @@ ACTOR Future<Void> registrationClient(
 				request.requestDbInfo = true;
 				firstReg = false;
 			}
+			TraceEvent("WorkerRegister")
+			    .detail("CCID", ccInterface->get().get().id())
+			    .detail("Generation", requestGeneration)
+			    .detail("RecoveredDiskFiles", recoveredDiskFiles.isSet());
 		}
 		state Future<RegisterWorkerReply> registrationReply =
 		    ccInterfacePresent ? brokenPromiseToNever(ccInterface->get().get().registerWorker.getReply(request))
 		                       : Never();
+		state Future<Void> recovered = recoveredDiskFiles.isSet() ? Never() : recoveredDiskFiles.getFuture();
 		state double startTime = now();
 		loop choose {
 			when(RegisterWorkerReply reply = wait(registrationReply)) {
@@ -664,6 +671,7 @@ ACTOR Future<Void> registrationClient(
 			when(wait(degraded->onChange())) { break; }
 			when(wait(FlowTransport::transport().onIncompatibleChanged())) { break; }
 			when(wait(issues->onChange())) { break; }
+			when(wait(recovered)) { break; }
 		}
 	}
 }
@@ -1589,7 +1597,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	// As (store type, spill type) can map to the same TLogFn across multiple TLogVersions, we need to
 	// decide if we should collapse them into the same SharedTLog instance as well.  The answer
 	// here is no, so that when running with log_version==3, all files should say V=3.
-	state std::map<SharedLogsKey, SharedLogsValue> sharedLogs;
+	state std::map<SharedLogsKey, std::vector<SharedLogsValue>> sharedLogs;
 	state Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>());
 	state WorkerCache<InitializeBackupReply> backupWorkerCache;
 	state WorkerCache<InitializeBlobWorkerReply> blobWorkerCache;
@@ -1787,32 +1795,29 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				Promise<Void> recovery;
 				TLogFn tLogFn = tLogFnForOptions(s.tLogOptions);
 				auto& logData = sharedLogs[SharedLogsKey(s.tLogOptions, s.storeType)];
+				logData.push_back(SharedLogsValue());
 				// FIXME: Shouldn't if logData.first isValid && !isReady, shouldn't we
 				// be sending a fake InitializeTLogRequest rather than calling tLog() ?
-				Future<Void> tl =
-				    tLogFn(kv,
-				           queue,
-				           dbInfo,
-				           locality,
-				           !logData.actor.isValid() || logData.actor.isReady() ? logData.requests
-				                                                               : PromiseStream<InitializeTLogRequest>(),
-				           s.storeID,
-				           interf.id(),
-				           true,
-				           oldLog,
-				           recovery,
-				           folder,
-				           degraded,
-				           activeSharedTLog);
+				Future<Void> tl = tLogFn(kv,
+				                         queue,
+				                         dbInfo,
+				                         locality,
+				                         logData.back().requests,
+				                         s.storeID,
+				                         interf.id(),
+				                         true,
+				                         oldLog,
+				                         recovery,
+				                         folder,
+				                         degraded,
+				                         activeSharedTLog);
 				recoveries.push_back(recovery.getFuture());
 				activeSharedTLog->set(s.storeID);
 
 				tl = handleIOErrors(tl, kv, s.storeID);
 				tl = handleIOErrors(tl, queue, s.storeID);
-				if (!logData.actor.isValid() || logData.actor.isReady()) {
-					logData.actor = oldLog.getFuture() || tl;
-					logData.uid = s.storeID;
-				}
+				logData.back().actor = oldLog.getFuture() || tl;
+				logData.back().uid = s.storeID;
 				errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, s.storeID, tl));
 			}
 		}
@@ -1855,8 +1860,31 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		startRole(Role::WORKER, interf.id(), interf.id(), details);
 		errorForwarders.add(traceRole(Role::WORKER, interf.id()));
 
-		wait(waitForAll(recoveries));
-		recoveredDiskFiles.send(Void());
+		// We want to avoid the worker being recruited as storage or TLog before recoverying it is local files,
+		// to make sure:
+		//   (1) the worker can start serving requests once it is recruited as storage or TLog server, and
+		//   (2) a slow recovering worker server wouldn't been recruited as TLog and make recovery slow.
+		// However, the worker server can still serve stateless roles, and if encryption is on, it is crucial to have
+		// some worker available to serve the EncryptKeyProxy role, before opening encrypted storage files.
+		//
+		// When encryption-at-rest is enabled, the follow code allows a worker to first register with the
+		// cluster controller to be recruited only as a stateless process i.e. it can't be recruited as a SS or TLog
+		// process; once the local disk recovery is complete (if applicable), the process re-registers with cluster
+		// controller as a stateful process role.
+		//
+		// TODO(yiwu): Unify behavior for encryption and non-encryption once the change is stable.
+		Future<Void> recoverDiskFiles = trigger(
+		    [=]() {
+			    TraceEvent("RecoveriesComplete", interf.id());
+			    recoveredDiskFiles.send(Void());
+			    return Void();
+		    },
+		    waitForAll(recoveries));
+		if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
+			wait(recoverDiskFiles);
+		} else {
+			errorForwarders.add(recoverDiskFiles);
+		}
 
 		errorForwarders.add(registrationClient(ccInterface,
 		                                       interf,
@@ -1871,7 +1899,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       issues,
 		                                       configNode,
 		                                       localConfig,
-		                                       dbInfo));
+		                                       dbInfo,
+		                                       recoveredDiskFiles));
 
 		if (configNode.isValid()) {
 			errorForwarders.add(localConfig->consume(interf.configBroadcastInterface));
@@ -1880,8 +1909,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		if (SERVER_KNOBS->ENABLE_WORKER_HEALTH_MONITOR) {
 			errorForwarders.add(healthMonitor(ccInterface, interf, locality, dbInfo));
 		}
-
-		TraceEvent("RecoveriesComplete", interf.id());
 
 		loop choose {
 			when(UpdateServerDBInfoRequest req = waitNext(interf.updateServerDBInfo.getFuture())) {
@@ -2017,7 +2044,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 				if (ddInterf->get().present()) {
 					recruited = ddInterf->get().get();
-					TEST(true); // Recruited while already a data distributor.
+					CODE_PROBE(true, "Recruited while already a data distributor.");
 				} else {
 					startRole(Role::DATA_DISTRIBUTOR, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);
@@ -2041,7 +2068,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 				if (rkInterf->get().present()) {
 					recruited = rkInterf->get().get();
-					TEST(true); // Recruited while already a ratekeeper.
+					CODE_PROBE(true, "Recruited while already a ratekeeper.");
 				} else {
 					startRole(Role::RATEKEEPER, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);
@@ -2069,7 +2096,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				if (bmEpochAndInterf->get().present() && bmEpochAndInterf->get().get().first == req.epoch) {
 					recruited = bmEpochAndInterf->get().get().second;
 
-					TEST(true); // Recruited while already a blob manager.
+					CODE_PROBE(true, "Recruited while already a blob manager.");
 				} else {
 					// TODO: it'd be more optimal to halt the last manager if present here, but it will figure it out
 					// via the epoch check
@@ -2124,7 +2151,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 				if (ekpInterf->get().present()) {
 					recruited = ekpInterf->get().get();
-					TEST(true); // Recruited while already a encryptKeyProxy server.
+					CODE_PROBE(true, "Recruited while already a encryptKeyProxy server.");
 				} else {
 					startRole(Role::ENCRYPT_KEY_PROXY, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);
@@ -2156,8 +2183,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				TLogOptions tLogOptions(req.logVersion, req.spillType);
 				TLogFn tLogFn = tLogFnForOptions(tLogOptions);
 				auto& logData = sharedLogs[SharedLogsKey(tLogOptions, req.storeType)];
-				logData.requests.send(req);
-				if (!logData.actor.isValid() || logData.actor.isReady()) {
+				while (!logData.empty() && (!logData.back().actor.isValid() || logData.back().actor.isReady())) {
+					logData.pop_back();
+				}
+				if (logData.empty()) {
 					UID logId = deterministicRandom()->randomUniqueID();
 					std::map<std::string, std::string> details;
 					details["ForMaster"] = req.recruitmentID.shortString();
@@ -2183,11 +2212,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					filesClosed.add(data->onClosed());
 					filesClosed.add(queue->onClosed());
 
+					logData.push_back(SharedLogsValue());
 					Future<Void> tLogCore = tLogFn(data,
 					                               queue,
 					                               dbInfo,
 					                               locality,
-					                               logData.requests,
+					                               logData.back().requests,
 					                               logId,
 					                               interf.id(),
 					                               false,
@@ -2199,10 +2229,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					tLogCore = handleIOErrors(tLogCore, data, logId);
 					tLogCore = handleIOErrors(tLogCore, queue, logId);
 					errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, logId, tLogCore));
-					logData.actor = tLogCore;
-					logData.uid = logId;
+					logData.back().actor = tLogCore;
+					logData.back().uid = logId;
 				}
-				activeSharedTLog->set(logData.uid);
+				logData.back().requests.send(req);
+				activeSharedTLog->set(logData.back().uid);
 			}
 			when(InitializeStorageRequest req = waitNext(interf.storage.getFuture())) {
 				// We want to prevent double recruiting on a worker unless we try to recruit something
@@ -2514,7 +2545,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			when(state WorkerSnapRequest snapReq = waitNext(interf.workerSnapReq.getFuture())) {
 				std::string snapUID = snapReq.snapUID.toString() + snapReq.role.toString();
 				if (snapReqResultMap.count(snapUID)) {
-					TEST(true); // Worker received a duplicate finished snap request
+					CODE_PROBE(true, "Worker received a duplicate finished snap request");
 					auto result = snapReqResultMap[snapUID];
 					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
 					TraceEvent("RetryFinishedWorkerSnapRequest")
@@ -2522,7 +2553,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    .detail("Role", snapReq.role)
 					    .detail("Result", result.isError() ? result.getError().code() : 0);
 				} else if (snapReqMap.count(snapUID)) {
-					TEST(true); // Worker received a duplicate ongoing snap request
+					CODE_PROBE(true, "Worker received a duplicate ongoing snap request");
 					TraceEvent("RetryOngoingWorkerSnapRequest").detail("SnapUID", snapUID).detail("Role", snapReq.role);
 					ASSERT(snapReq.role == snapReqMap[snapUID].role);
 					ASSERT(snapReq.snapPayload == snapReqMap[snapUID].snapPayload);
@@ -2777,7 +2808,8 @@ ACTOR Future<Void> updateNewestSoftwareVersion(std::string folder,
 }
 
 ACTOR Future<Void> testAndUpdateSoftwareVersionCompatibility(std::string dataFolder, UID processIDUid) {
-	ErrorOr<SWVersion> swVersion = wait(errorOr(testSoftwareVersionCompatibility(dataFolder, currentProtocolVersion)));
+	ErrorOr<SWVersion> swVersion =
+	    wait(errorOr(testSoftwareVersionCompatibility(dataFolder, currentProtocolVersion())));
 	if (swVersion.isError()) {
 		TraceEvent(SevWarnAlways, "SWVersionCompatibilityCheckError", processIDUid).error(swVersion.getError());
 		throw swVersion.getError();
@@ -2786,16 +2818,16 @@ ACTOR Future<Void> testAndUpdateSoftwareVersionCompatibility(std::string dataFol
 	TraceEvent(SevInfo, "SWVersionCompatible", processIDUid).detail("SWVersion", swVersion.get());
 
 	if (!swVersion.get().isValid() ||
-	    currentProtocolVersion > ProtocolVersion(swVersion.get().newestProtocolVersion())) {
+	    currentProtocolVersion() > ProtocolVersion(swVersion.get().newestProtocolVersion())) {
 		ErrorOr<Void> updatedSWVersion = wait(errorOr(updateNewestSoftwareVersion(
-		    dataFolder, currentProtocolVersion, currentProtocolVersion, minCompatibleProtocolVersion)));
+		    dataFolder, currentProtocolVersion(), currentProtocolVersion(), minCompatibleProtocolVersion)));
 		if (updatedSWVersion.isError()) {
 			throw updatedSWVersion.getError();
 		}
-	} else if (currentProtocolVersion < ProtocolVersion(swVersion.get().newestProtocolVersion())) {
+	} else if (currentProtocolVersion() < ProtocolVersion(swVersion.get().newestProtocolVersion())) {
 		ErrorOr<Void> updatedSWVersion = wait(
 		    errorOr(updateNewestSoftwareVersion(dataFolder,
-		                                        currentProtocolVersion,
+		                                        currentProtocolVersion(),
 		                                        ProtocolVersion(swVersion.get().newestProtocolVersion()),
 		                                        ProtocolVersion(swVersion.get().lowestCompatibleProtocolVersion()))));
 		if (updatedSWVersion.isError()) {
@@ -2804,7 +2836,7 @@ ACTOR Future<Void> testAndUpdateSoftwareVersionCompatibility(std::string dataFol
 	}
 
 	ErrorOr<SWVersion> newSWVersion =
-	    wait(errorOr(testSoftwareVersionCompatibility(dataFolder, currentProtocolVersion)));
+	    wait(errorOr(testSoftwareVersionCompatibility(dataFolder, currentProtocolVersion())));
 	if (newSWVersion.isError()) {
 		TraceEvent(SevWarnAlways, "SWVersionCompatibilityCheckError", processIDUid).error(newSWVersion.getError());
 		throw newSWVersion.getError();

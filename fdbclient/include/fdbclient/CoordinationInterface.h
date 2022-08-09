@@ -63,6 +63,8 @@ struct ClientLeaderRegInterface {
 //  - There is no address present more than once
 class ClusterConnectionString {
 public:
+	constexpr static FileIdentifier file_identifier = 13602011;
+
 	ClusterConnectionString() {}
 	ClusterConnectionString(const std::string& connectionString);
 	ClusterConnectionString(const std::vector<NetworkAddress>& coordinators, Key key);
@@ -84,9 +86,20 @@ public:
 	std::vector<NetworkAddress> coords;
 	std::vector<Hostname> hostnames;
 
+	bool operator==(const ClusterConnectionString& other) const noexcept {
+		return key == other.key && keyDesc == other.keyDesc && coords == other.coords && hostnames == other.hostnames;
+	}
+	bool operator!=(const ClusterConnectionString& other) const noexcept { return !(*this == other); }
+
 private:
 	void parseConnString();
 	Key key, keyDesc;
+
+public:
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, coords, hostnames, key, keyDesc);
+	}
 };
 
 FDB_DECLARE_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
@@ -229,6 +242,8 @@ struct GetLeaderRequest {
 	GetLeaderRequest() {}
 	explicit GetLeaderRequest(Key key, UID kl) : key(key), knownLeader(kl) {}
 
+	bool verify() const { return true; }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, key, knownLeader, reply);
@@ -248,6 +263,8 @@ struct OpenDatabaseCoordRequest {
 	std::vector<Hostname> hostnames;
 	std::vector<NetworkAddress> coordinators;
 	ReplyPromise<CachedSerialization<struct ClientDBInfo>> reply;
+
+	bool verify() const { return true; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

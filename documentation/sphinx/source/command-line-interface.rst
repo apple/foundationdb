@@ -241,7 +241,10 @@ Included in the output of this command are the ``id`` and ``prefix`` assigned to
     {
         "tenant": {
             "id": 0,
-            "prefix": "\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000"
+            "prefix": {
+              "base64": "AAAAAAAAAAU=",
+              "printable": "\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x05",
+            }
         },
         "type": "success"
     }

@@ -39,8 +39,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	double testDuration, absoluteRandomProb, transactionsPerSecond;
 	PerfIntCounter wrongResults, keysCount;
 	Reference<ReadYourWritesTransaction> ryw; // used to store all populated data
-	std::vector<std::shared_ptr<SKSCTestImpl>> impls;
+	std::vector<std::shared_ptr<SKSCTestRWImpl>> rwImpls;
+	std::vector<std::shared_ptr<SKSCTestAsyncReadImpl>> asyncReadImpls;
 	Standalone<VectorRef<KeyRangeRef>> keys;
+	Standalone<VectorRef<KeyRangeRef>> rwKeys;
 
 	SpecialKeySpaceCorrectnessWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), wrongResults("Wrong Results"), keysCount("Number of generated keys") {
@@ -81,12 +83,20 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			Key startKey(baseKey + "/");
 			Key endKey(baseKey + "/\xff");
 			self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
-			self->impls.push_back(std::make_shared<SKSCTestImpl>(KeyRangeRef(startKey, endKey)));
-			// Although there are already ranges registered, the testing range will replace them
-			cx->specialKeySpace->registerKeyRange(SpecialKeySpace::MODULE::TESTONLY,
-			                                      SpecialKeySpace::IMPLTYPE::READWRITE,
-			                                      self->keys.back(),
-			                                      self->impls.back().get());
+			if (deterministicRandom()->random01() < 0.2) {
+				self->asyncReadImpls.push_back(std::make_shared<SKSCTestAsyncReadImpl>(KeyRangeRef(startKey, endKey)));
+				cx->specialKeySpace->registerKeyRange(SpecialKeySpace::MODULE::TESTONLY,
+				                                      SpecialKeySpace::IMPLTYPE::READONLY,
+				                                      self->keys.back(),
+				                                      self->asyncReadImpls.back().get());
+			} else {
+				self->rwImpls.push_back(std::make_shared<SKSCTestRWImpl>(KeyRangeRef(startKey, endKey)));
+				// Although there are already ranges registered, the testing range will replace them
+				cx->specialKeySpace->registerKeyRange(SpecialKeySpace::MODULE::TESTONLY,
+				                                      SpecialKeySpace::IMPLTYPE::READWRITE,
+				                                      self->keys.back(),
+				                                      self->rwImpls.back().get());
+			}
 			// generate keys in each key range
 			int keysInRange = deterministicRandom()->randomInt(self->minKeysPerRange, self->maxKeysPerRange + 1);
 			self->keysCount += keysInRange;
@@ -119,7 +129,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				return;
 			}
 			f = success(ryw.get(LiteralStringRef("\xff\xff/status/json")));
-			TEST(!f.isReady()); // status json not ready
+			CODE_PROBE(!f.isReady(), "status json not ready");
 		}
 		ASSERT(f.isError());
 		ASSERT(f.getError().code() == error_code_transaction_cancelled);
@@ -154,7 +164,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			}
 
 			// check ryw result consistency
-			KeyRange rkr = self->randomKeyRange();
+			KeyRange rkr = self->randomRWKeyRange();
 			KeyRef rkey1 = rkr.begin;
 			KeyRef rkey2 = rkr.end;
 			// randomly set/clear two keys or clear a key range
@@ -233,13 +243,13 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("TestValue", printable(res2[i].value));
 				return false;
 			}
-			TEST(true); // Special key space keys equal
+			CODE_PROBE(true, "Special key space keys equal");
 		}
 		return true;
 	}
 
-	KeyRange randomKeyRange() {
-		Key prefix = keys[deterministicRandom()->randomInt(0, rangeCount)].begin;
+	KeyRange randomRWKeyRange() {
+		Key prefix = rwImpls[deterministicRandom()->randomInt(0, rwImpls.size())]->getKeyRange().begin;
 		Key rkey1 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, keyBytes)))
 		                .withPrefix(prefix);
 		Key rkey2 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, keyBytes)))
@@ -335,7 +345,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			wait(success(tx->getRange(
 			    KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0")),
 			    CLIENT_KNOBS->TOO_MANY)));
-			TEST(true); // read transaction special keyrange
+			CODE_PROBE(true, "read transaction special keyrange");
 			tx->reset();
 		} catch (Error& e) {
 			throw;
@@ -361,7 +371,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			KeySelector begin = KeySelectorRef(readConflictRangeKeysRange.begin, false, 1);
 			KeySelector end = KeySelectorRef(LiteralStringRef("\xff\xff/transaction0"), false, 0);
 			wait(success(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY))));
-			TEST(true); // end key selector inside module range
+			CODE_PROBE(true, "end key selector inside module range");
 			tx->reset();
 		} catch (Error& e) {
 			throw;
@@ -489,8 +499,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	ACTOR static Future<Void> testConflictRanges(Database cx_, bool read, SpecialKeySpaceCorrectnessWorkload* self) {
 		state StringRef prefix = read ? readConflictRangeKeysRange.begin : writeConflictRangeKeysRange.begin;
-		TEST(read); // test read conflict range special key implementation
-		TEST(!read); // test write conflict range special key implementation
+		CODE_PROBE(read, "test read conflict range special key implementation");
+		CODE_PROBE(!read, "test write conflict range special key implementation");
 		// Get a default special key range instance
 		Database cx = cx_->clone();
 		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
@@ -545,7 +555,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					throw;
 				return Void();
 			}
-			TEST(true); // Read write conflict range of committed transaction
+			CODE_PROBE(true, "Read write conflict range of committed transaction");
 		}
 		try {
 			wait(success(tx->get(LiteralStringRef("\xff\xff/1314109/i_hope_this_isn't_registered"))));

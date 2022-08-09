@@ -36,8 +36,8 @@
 #include "flow/Net2Packet.h"
 #include "flow/IRateControl.h"
 #include "fdbclient/S3BlobStore.h"
-#include "fdbclient/md5/md5.h"
-#include "fdbclient/libb64/encode.h"
+#include "md5/md5.h"
+#include "libb64/encode.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR template <typename T>

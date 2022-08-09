@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/SystemData.h"
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -355,7 +356,7 @@ const Key storageCacheServerKey(UID id) {
 }
 
 const Value storageCacheServerValue(const StorageServerInterface& ssi) {
-	auto protocolVersion = currentProtocolVersion;
+	auto protocolVersion = currentProtocolVersion();
 	protocolVersion.addObjectSerializerFlag();
 	return ObjectWriter::toValue(ssi, IncludeVersion(protocolVersion));
 }
@@ -474,18 +475,21 @@ const Value serverKeysValue(const UID& id) {
 
 void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRange, UID& id) {
 	if (value.size() == 0) {
-		id = UID();
 		assigned = false;
 		emptyRange = false;
+		id = UID();
 	} else if (value == serverKeysTrue) {
 		assigned = true;
 		emptyRange = false;
+		id = anonymousShardId;
 	} else if (value == serverKeysTrueEmptyRange) {
 		assigned = true;
 		emptyRange = true;
+		id = anonymousShardId;
 	} else if (value == serverKeysFalse) {
 		assigned = false;
 		emptyRange = false;
+		id = UID();
 	} else {
 		BinaryReader rd(value, IncludeVersion());
 		ASSERT(rd.protocolVersion().hasShardEncodeLocationMetaData());
@@ -662,7 +666,7 @@ const KeyRangeRef tagLocalityListKeys(LiteralStringRef("\xff/tagLocalityList/"),
 const KeyRef tagLocalityListPrefix = tagLocalityListKeys.begin;
 
 const Key tagLocalityListKeyFor(Optional<Value> dcID) {
-	BinaryWriter wr(AssumeVersion(currentProtocolVersion));
+	BinaryWriter wr(AssumeVersion(currentProtocolVersion()));
 	wr.serializeBytes(tagLocalityListKeys.begin);
 	wr << dcID;
 	return wr.toValue();
@@ -675,7 +679,7 @@ const Value tagLocalityListValue(int8_t const& tagLocality) {
 }
 Optional<Value> decodeTagLocalityListKey(KeyRef const& key) {
 	Optional<Value> dcID;
-	BinaryReader rd(key.removePrefix(tagLocalityListKeys.begin), AssumeVersion(currentProtocolVersion));
+	BinaryReader rd(key.removePrefix(tagLocalityListKeys.begin), AssumeVersion(currentProtocolVersion()));
 	rd >> dcID;
 	return dcID;
 }
@@ -691,7 +695,7 @@ const KeyRangeRef datacenterReplicasKeys(LiteralStringRef("\xff\x02/datacenterRe
 const KeyRef datacenterReplicasPrefix = datacenterReplicasKeys.begin;
 
 const Key datacenterReplicasKeyFor(Optional<Value> dcID) {
-	BinaryWriter wr(AssumeVersion(currentProtocolVersion));
+	BinaryWriter wr(AssumeVersion(currentProtocolVersion()));
 	wr.serializeBytes(datacenterReplicasKeys.begin);
 	wr << dcID;
 	return wr.toValue();
@@ -704,7 +708,7 @@ const Value datacenterReplicasValue(int const& replicas) {
 }
 Optional<Value> decodeDatacenterReplicasKey(KeyRef const& key) {
 	Optional<Value> dcID;
-	BinaryReader rd(key.removePrefix(datacenterReplicasKeys.begin), AssumeVersion(currentProtocolVersion));
+	BinaryReader rd(key.removePrefix(datacenterReplicasKeys.begin), AssumeVersion(currentProtocolVersion()));
 	rd >> dcID;
 	return dcID;
 }
@@ -725,14 +729,14 @@ const KeyRangeRef tLogDatacentersKeys(LiteralStringRef("\xff\x02/tLogDatacenters
 const KeyRef tLogDatacentersPrefix = tLogDatacentersKeys.begin;
 
 const Key tLogDatacentersKeyFor(Optional<Value> dcID) {
-	BinaryWriter wr(AssumeVersion(currentProtocolVersion));
+	BinaryWriter wr(AssumeVersion(currentProtocolVersion()));
 	wr.serializeBytes(tLogDatacentersKeys.begin);
 	wr << dcID;
 	return wr.toValue();
 }
 Optional<Value> decodeTLogDatacentersKey(KeyRef const& key) {
 	Optional<Value> dcID;
-	BinaryReader rd(key.removePrefix(tLogDatacentersKeys.begin), AssumeVersion(currentProtocolVersion));
+	BinaryReader rd(key.removePrefix(tLogDatacentersKeys.begin), AssumeVersion(currentProtocolVersion()));
 	rd >> dcID;
 	return dcID;
 }
@@ -751,7 +755,7 @@ const Key serverListKeyFor(UID serverID) {
 }
 
 const Value serverListValue(StorageServerInterface const& server) {
-	auto protocolVersion = currentProtocolVersion;
+	auto protocolVersion = currentProtocolVersion();
 	protocolVersion.addObjectSerializerFlag();
 	return ObjectWriter::toValue(server, IncludeVersion(protocolVersion));
 }
@@ -783,7 +787,7 @@ StorageServerInterface decodeServerListValue(ValueRef const& value) {
 }
 
 Value swVersionValue(SWVersion const& swversion) {
-	auto protocolVersion = currentProtocolVersion;
+	auto protocolVersion = currentProtocolVersion();
 	protocolVersion.addObjectSerializerFlag();
 	return ObjectWriter::toValue(swversion, IncludeVersion(protocolVersion));
 }
@@ -1331,6 +1335,9 @@ const KeyRangeRef blobGranuleFileKeys(LiteralStringRef("\xff\x02/bgf/"), Literal
 const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff\x02/bgm/"), LiteralStringRef("\xff\x02/bgm0"));
 const KeyRangeRef blobGranuleLockKeys(LiteralStringRef("\xff\x02/bgl/"), LiteralStringRef("\xff\x02/bgl0"));
 const KeyRangeRef blobGranuleSplitKeys(LiteralStringRef("\xff\x02/bgs/"), LiteralStringRef("\xff\x02/bgs0"));
+const KeyRangeRef blobGranuleMergeKeys(LiteralStringRef("\xff\x02/bgmerge/"), LiteralStringRef("\xff\x02/bgmerge0"));
+const KeyRangeRef blobGranuleMergeBoundaryKeys(LiteralStringRef("\xff\x02/bgmergebounds/"),
+                                               LiteralStringRef("\xff\x02/bgmergebounds0"));
 const KeyRangeRef blobGranuleHistoryKeys(LiteralStringRef("\xff\x02/bgh/"), LiteralStringRef("\xff\x02/bgh0"));
 const KeyRangeRef blobGranulePurgeKeys(LiteralStringRef("\xff\x02/bgp/"), LiteralStringRef("\xff\x02/bgp0"));
 const KeyRangeRef blobGranuleVersionKeys(LiteralStringRef("\xff\x02/bgv/"), LiteralStringRef("\xff\x02/bgv0"));
@@ -1369,26 +1376,35 @@ const KeyRange blobGranuleFileKeyRangeFor(UID granuleID) {
 	return KeyRangeRef(startKey, strinc(startKey));
 }
 
-const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length, int64_t fullFileLength) {
+const Value blobGranuleFileValueFor(StringRef const& filename,
+                                    int64_t offset,
+                                    int64_t length,
+                                    int64_t fullFileLength,
+                                    Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
 	wr << filename;
 	wr << offset;
 	wr << length;
 	wr << fullFileLength;
+	wr << cipherKeysMeta;
 	return wr.toValue();
 }
 
-std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value) {
+std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t, Optional<BlobGranuleCipherKeysMeta>>
+decodeBlobGranuleFileValue(ValueRef const& value) {
 	StringRef filename;
 	int64_t offset;
 	int64_t length;
 	int64_t fullFileLength;
+	Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
+
 	BinaryReader reader(value, IncludeVersion());
 	reader >> filename;
 	reader >> offset;
 	reader >> length;
 	reader >> fullFileLength;
-	return std::tuple(filename, offset, length, fullFileLength);
+	reader >> cipherKeysMeta;
+	return std::tuple(filename, offset, length, fullFileLength, cipherKeysMeta);
 }
 
 const Value blobGranulePurgeValueFor(Version version, KeyRange range, bool force) {
@@ -1476,6 +1492,25 @@ const KeyRange blobGranuleSplitKeyRangeFor(UID const& parentGranuleID) {
 	return KeyRangeRef(startKey, strinc(startKey));
 }
 
+const Key blobGranuleMergeKeyFor(UID const& mergeGranuleID) {
+	// TODO should we bump this assumed version to 7.2 as blob granule merging is not in 7.1? 7.1 won't try to read this
+	// data though since it didn't exist before
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
+	wr.serializeBytes(blobGranuleMergeKeys.begin);
+	wr << mergeGranuleID;
+
+	return wr.toValue();
+}
+
+UID decodeBlobGranuleMergeKey(KeyRef const& key) {
+	UID mergeGranuleID;
+	BinaryReader reader(key.removePrefix(blobGranuleMergeKeys.begin),
+	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
+
+	reader >> mergeGranuleID;
+	return mergeGranuleID;
+}
+
 const Value blobGranuleSplitValueFor(BlobGranuleSplitState st) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
 	wr << st;
@@ -1490,6 +1525,59 @@ std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(const Valu
 	reader >> v;
 
 	return std::pair(st, bigEndian64(v));
+}
+
+const Value blobGranuleMergeValueFor(KeyRange mergeKeyRange,
+                                     std::vector<UID> parentGranuleIDs,
+                                     std::vector<Key> parentGranuleRanges,
+                                     std::vector<Version> parentGranuleStartVersions) {
+	ASSERT(parentGranuleIDs.size() == parentGranuleRanges.size() - 1);
+	ASSERT(parentGranuleIDs.size() == parentGranuleStartVersions.size());
+
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
+	wr << mergeKeyRange;
+	wr << parentGranuleIDs;
+	wr << parentGranuleRanges;
+	wr << parentGranuleStartVersions;
+	return addVersionStampAtEnd(wr.toValue());
+}
+std::tuple<KeyRange, Version, std::vector<UID>, std::vector<Key>, std::vector<Version>> decodeBlobGranuleMergeValue(
+    ValueRef const& value) {
+	KeyRange range;
+	Version v;
+	std::vector<UID> parentGranuleIDs;
+	std::vector<Key> parentGranuleRanges;
+	std::vector<Version> parentGranuleStartVersions;
+
+	BinaryReader reader(value, IncludeVersion());
+	reader >> range;
+	reader >> parentGranuleIDs;
+	reader >> parentGranuleRanges;
+	reader >> parentGranuleStartVersions;
+	reader >> v;
+
+	ASSERT(parentGranuleIDs.size() == parentGranuleRanges.size() - 1);
+	ASSERT(parentGranuleIDs.size() == parentGranuleStartVersions.size());
+	ASSERT(bigEndian64(v) >= 0);
+
+	return std::tuple(range, bigEndian64(v), parentGranuleIDs, parentGranuleRanges, parentGranuleStartVersions);
+}
+
+const Key blobGranuleMergeBoundaryKeyFor(const KeyRef& key) {
+	return key.withPrefix(blobGranuleMergeBoundaryKeys.begin);
+}
+
+const Value blobGranuleMergeBoundaryValueFor(BlobGranuleMergeBoundary const& boundary) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
+	wr << boundary;
+	return wr.toValue();
+}
+
+Standalone<BlobGranuleMergeBoundary> decodeBlobGranuleMergeBoundaryValue(const ValueRef& value) {
+	Standalone<BlobGranuleMergeBoundary> boundaryValue;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> boundaryValue;
+	return boundaryValue;
 }
 
 const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version) {
@@ -1515,6 +1603,8 @@ const KeyRange blobGranuleHistoryKeyRangeFor(KeyRangeRef const& range) {
 }
 
 const Value blobGranuleHistoryValueFor(Standalone<BlobGranuleHistoryValue> const& historyValue) {
+	ASSERT(historyValue.parentVersions.empty() ||
+	       historyValue.parentBoundaries.size() - 1 == historyValue.parentVersions.size());
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
 	wr << historyValue;
 	return wr.toValue();
@@ -1524,6 +1614,8 @@ Standalone<BlobGranuleHistoryValue> decodeBlobGranuleHistoryValue(const ValueRef
 	Standalone<BlobGranuleHistoryValue> historyValue;
 	BinaryReader reader(value, IncludeVersion());
 	reader >> historyValue;
+	ASSERT(historyValue.parentVersions.empty() ||
+	       historyValue.parentBoundaries.size() - 1 == historyValue.parentVersions.size());
 	return historyValue;
 }
 
@@ -1554,11 +1646,12 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 	return interf;
 }
 
-const KeyRangeRef tenantMapKeys("\xff/tenantMap/"_sr, "\xff/tenantMap0"_sr);
-const KeyRef tenantMapPrefix = tenantMapKeys.begin;
-const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenantMap/"_sr;
-const KeyRef tenantLastIdKey = "\xff/tenantLastId/"_sr;
-const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
+const KeyRangeRef storageQuotaKeys(LiteralStringRef("\xff/storageQuota/"), LiteralStringRef("\xff/storageQuota0"));
+const KeyRef storageQuotaPrefix = storageQuotaKeys.begin;
+
+Key storageQuotaKey(StringRef tenantName) {
+	return tenantName.withPrefix(storageQuotaPrefix);
+}
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi) {

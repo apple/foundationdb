@@ -373,7 +373,7 @@ struct _Unversioned {
 };
 
 // These functions return valid options to the VersionOptions parameter of the constructor of each archive type
-inline _IncludeVersion IncludeVersion(ProtocolVersion defaultVersion = currentProtocolVersion) {
+inline _IncludeVersion IncludeVersion(ProtocolVersion defaultVersion = currentProtocolVersion()) {
 	return _IncludeVersion(defaultVersion);
 }
 inline _AssumeVersion AssumeVersion(ProtocolVersion version) {
@@ -409,6 +409,7 @@ public:
 	void* getData() { return data; }
 	int getLength() const { return size; }
 	Standalone<StringRef> toValue() const { return Standalone<StringRef>(StringRef(data, size), arena); }
+	StringRef toValue(Arena& arena) const { return StringRef(arena, StringRef(data, size)); }
 	template <class VersionOptions>
 	explicit BinaryWriter(VersionOptions vo) : data(nullptr), size(0), allocated(0) {
 		vo.write(*this);
@@ -853,10 +854,6 @@ struct PacketWriter {
 	}
 	ProtocolVersion protocolVersion() const { return m_protocolVersion; }
 	void setProtocolVersion(ProtocolVersion pv) { m_protocolVersion = pv; }
-
-private:
-	void serializeBytesAcrossBoundary(const void* data, int bytes);
-	void nextBuffer(size_t size = 0 /* downstream it will default to at least 4k minus some padding */);
 	uint8_t* writeBytes(size_t size) {
 		if (size > buffer->bytes_unwritten()) {
 			nextBuffer(size);
@@ -867,6 +864,9 @@ private:
 		return result;
 	}
 
+private:
+	void serializeBytesAcrossBoundary(const void* data, int bytes);
+	void nextBuffer(size_t size = 0 /* downstream it will default to at least 4k minus some padding */);
 	template <class, class>
 	friend class MakeSerializeSource;
 

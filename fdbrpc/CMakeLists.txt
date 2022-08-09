@@ -25,6 +25,10 @@ add_flow_target(STATIC_LIBRARY NAME fdbrpc_sampling
   SRCS ${FDBRPC_SRCS}
   DISABLE_ACTOR_DIAGNOSTICS ${FDBRPC_SRCS_DISABLE_ACTOR_DIAGNOSTICS})
 
+add_flow_target(LINK_TEST NAME fdbrpclinktest SRCS LinkTest.cpp)
+target_link_libraries(fdbrpclinktest PRIVATE fdbrpc rapidjson)
+target_include_directories(fdbrpclinktest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
+
 if(COMPILE_EIO)
   add_library(eio STATIC libeio/eio.c)
   if(USE_VALGRIND)
@@ -57,10 +61,10 @@ if(${COROUTINE_IMPL} STREQUAL libcoro)
 endif()
 
 target_include_directories(fdbrpc PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include" PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
-target_link_libraries(fdbrpc PUBLIC flow PRIVATE rapidjson)
+target_link_libraries(fdbrpc PUBLIC flow libb64 md5 PRIVATE rapidjson)
 
 target_include_directories(fdbrpc_sampling PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include" PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
-target_link_libraries(fdbrpc_sampling PUBLIC flow_sampling PRIVATE rapidjson)
+target_link_libraries(fdbrpc_sampling PUBLIC flow_sampling libb64 md5 PRIVATE rapidjson)
 
 if(${COROUTINE_IMPL} STREQUAL libcoro)
   target_link_libraries(fdbrpc PUBLIC coro)

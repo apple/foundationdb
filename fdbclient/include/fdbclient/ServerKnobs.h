@@ -163,6 +163,8 @@ public:
 	int PRIORITY_SPLIT_SHARD;
 
 	// Data distribution
+	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
+
 	double READ_REBALANCE_CPU_THRESHOLD; // read rebalance only happens if the source servers' CPU > threshold
 	int READ_REBALANCE_SRC_PARALLELISM; // the max count a server become a source server within a certain interval
 	int READ_REBALANCE_SHARD_TOPK; // top k shards from which to select randomly for read-rebalance
@@ -232,6 +234,8 @@ public:
 	int DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY;
 	int DD_STORAGE_WIGGLE_PAUSE_THRESHOLD; // How many unhealthy relocations are ongoing will pause storage wiggle
 	int DD_STORAGE_WIGGLE_STUCK_THRESHOLD; // How many times bestTeamStuck accumulate will pause storage wiggle
+	int64_t
+	    DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC; // Minimal age of a correct-configured server before it's chosen to be wiggled
 	bool DD_TENANT_AWARENESS_ENABLED;
 	int TENANT_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantCache is refreshed
 
@@ -398,6 +402,10 @@ public:
 	int RESET_RESOLVER_BATCHES;
 	double RESET_MASTER_DELAY;
 	double RESET_RESOLVER_DELAY;
+
+	double GLOBAL_CONFIG_MIGRATE_TIMEOUT;
+	double GLOBAL_CONFIG_REFRESH_INTERVAL;
+	double GLOBAL_CONFIG_REFRESH_TIMEOUT;
 
 	// Master Server
 	double COMMIT_SLEEP_TIME;
@@ -655,6 +663,7 @@ public:
 	int FETCH_BLOCK_BYTES;
 	int FETCH_KEYS_PARALLELISM_BYTES;
 	int FETCH_KEYS_PARALLELISM;
+	int FETCH_KEYS_PARALLELISM_FULL;
 	int FETCH_KEYS_LOWER_PRIORITY;
 	int FETCH_CHANGEFEED_PARALLELISM;
 	int SERVE_FETCH_CHECKPOINT_PARALLELISM;
@@ -698,6 +707,7 @@ public:
 	int CHECKPOINT_TRANSFER_BLOCK_BYTES;
 	int QUICK_GET_KEY_VALUES_LIMIT;
 	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
+	bool STORAGE_SERVER_SHARD_AWARE;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -863,6 +873,11 @@ public:
 	int SIM_KMS_MAX_KEYS;
 	int ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH;
 	bool ENABLE_TLOG_ENCRYPTION;
+	bool ENABLE_BLOB_GRANULE_ENCRYPTION;
+
+	// Compression
+	bool ENABLE_BLOB_GRANULE_COMPRESSION;
+	std::string BLOB_GRANULE_COMPRESSION_FILTER;
 
 	// Key Management Service (KMS) Connector
 	std::string KMS_CONNECTOR_TYPE;
@@ -871,18 +886,23 @@ public:
 	// FIXME: configure url with database configuration instead of knob eventually
 	std::string BG_URL;
 
-	// whether to use blobRangeKeys or tenants for blob granule range sources
-	std::string BG_RANGE_SOURCE;
 	// Whether to use knobs or EKP for blob metadata and credentials
 	std::string BG_METADATA_SOURCE;
 
 	int BG_SNAPSHOT_FILE_TARGET_BYTES;
+	int BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES;
 	int BG_DELTA_FILE_TARGET_BYTES;
+	int BG_DELTA_FILE_TARGET_CHUNK_BYTES;
 	int BG_DELTA_BYTES_BEFORE_COMPACT;
 	int BG_MAX_SPLIT_FANOUT;
+	int BG_MAX_MERGE_FANIN;
 	int BG_HOT_SNAPSHOT_VERSIONS;
 	int BG_CONSISTENCY_CHECK_ENABLED;
 	int BG_CONSISTENCY_CHECK_TARGET_SPEED_KB;
+	bool BG_ENABLE_MERGING;
+	int BG_MERGE_CANDIDATE_THRESHOLD_SECONDS;
+	int BG_MERGE_CANDIDATE_DELAY_SECONDS;
+	int BG_KEY_TUPLE_TRUNCATE_OFFSET;
 
 	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
@@ -893,6 +913,7 @@ public:
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN;
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX;
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT;
+	int BLOB_MANAGER_CONCURRENT_MERGE_CHECKS;
 	double BGCC_TIMEOUT;
 	double BGCC_MIN_INTERVAL;
 

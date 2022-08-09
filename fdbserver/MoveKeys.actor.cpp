@@ -27,6 +27,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
+#include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -217,7 +218,7 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 			return lock;
 		} catch (Error& e) {
 			wait(tr.onError(e));
-			TEST(true); // takeMoveKeysLock retry
+			CODE_PROBE(true, "takeMoveKeysLock retry");
 		}
 	}
 }
@@ -239,7 +240,7 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 		Optional<Value> readVal = wait(tr->get(moveKeysLockWriteKey));
 		UID lastWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 		if (lastWrite != lock.prevWrite) {
-			TEST(true); // checkMoveKeysLock: Conflict with previous owner
+			CODE_PROBE(true, "checkMoveKeysLock: Conflict with previous owner");
 			throw movekeys_conflict();
 		}
 
@@ -272,7 +273,7 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 
 		return Void();
 	} else {
-		TEST(true); // checkMoveKeysLock: Conflict with new owner
+		CODE_PROBE(true, "checkMoveKeysLock: Conflict with new owner");
 		throw movekeys_conflict();
 	}
 }
@@ -295,7 +296,7 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
                                               FlowLock* cleanUpDataMoveParallelismLock,
                                               UID dataMoveId,
                                               const DDEnabledState* ddEnabledState) {
-	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	TraceEvent(SevInfo, "CleanUpSingleShardDataMoveBegin", dataMoveId).detail("Range", keys);
 
 	loop {
@@ -591,7 +592,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 		// This process can be split up into multiple transactions if there are too many existing overlapping shards
 		// In that case, each iteration of this loop will have begin set to the end of the last processed shard
 		while (begin < keys.end) {
-			TEST(begin > keys.begin); // Multi-transactional startMoveKeys
+			CODE_PROBE(begin > keys.begin, "Multi-transactional startMoveKeys");
 			batches++;
 
 			// RYW to optimize re-reading the same key ranges
@@ -631,7 +632,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 							// Attempt to move onto a server that isn't in serverList (removed or never added to the
 							// database) This can happen (why?) and is handled by the data distribution algorithm
 							// FIXME: Answer why this can happen?
-							TEST(true); // start move keys moving to a removed server
+							CODE_PROBE(true, "start move keys moving to a removed server");
 							throw move_to_removed_server();
 						}
 					}
@@ -825,7 +826,7 @@ ACTOR Future<Void> checkFetchingState(Database cx,
 			for (int s = 0; s < serverListValues.size(); s++) {
 				if (!serverListValues[s].present()) {
 					// FIXME: Is this the right behavior?  dataMovementComplete will never be sent!
-					TEST(true); // check fetching state moved to removed server
+					CODE_PROBE(true, "check fetching state moved to removed server");
 					throw move_to_removed_server();
 				}
 				auto si = decodeServerListValue(serverListValues[s].get());
@@ -897,7 +898,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 		// This process can be split up into multiple transactions if there are too many existing overlapping shards
 		// In that case, each iteration of this loop will have begin set to the end of the last processed shard
 		while (begin < keys.end) {
-			TEST(begin > keys.begin); // Multi-transactional finishMoveKeys
+			CODE_PROBE(begin > keys.begin, "Multi-transactional finishMoveKeys");
 
 			state Transaction tr(occ);
 
@@ -994,7 +995,8 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						} else if (alreadyMoved) {
 							dest.clear();
 							src.clear();
-							TEST(true); // FinishMoveKeys first key in iteration sub-range has already been processed
+							CODE_PROBE(true,
+							           "FinishMoveKeys first key in iteration sub-range has already been processed");
 						}
 					}
 
@@ -1029,8 +1031,9 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						}
 					}
 					if (!dest.size()) {
-						TEST(true); // A previous finishMoveKeys for this range committed just as it was cancelled to
-						            // start this one?
+						CODE_PROBE(true,
+						           "A previous finishMoveKeys for this range committed just as it was cancelled to "
+						           "start this one?");
 						TraceEvent("FinishMoveKeysNothingToDo", relocationIntervalId)
 						    .detail("KeyBegin", keys.begin)
 						    .detail("KeyEnd", keys.end)
@@ -1223,7 +1226,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
                                           UID relocationIntervalId,
                                           const DDEnabledState* ddEnabledState,
                                           CancelConflictingDataMoves cancelConflictingDataMoves) {
-	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	state Future<Void> warningLogger = logWarningAfter("StartMoveShardsTooLong", 600, servers);
 
 	wait(startMoveKeysLock->take(TaskPriority::DataDistributionLaunch));
@@ -1394,7 +1397,6 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							physicalShardMap[ssId].emplace_back(rangeIntersectKeys, srcId);
 						}
 
-						const UID checkpontId = deterministicRandom()->randomUniqueID();
 						for (const UID& ssId : src) {
 							dataMove.src.insert(ssId);
 							// TODO(psm): Create checkpoint for the range.
@@ -1559,7 +1561,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
                                            UID relocationIntervalId,
                                            std::map<UID, StorageServerInterface> tssMapping,
                                            const DDEnabledState* ddEnabledState) {
-	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	state KeyRange keys = targetKeys;
 	state Future<Void> warningLogger = logWarningAfter("FinishMoveShardsTooLong", 600, destinationTeam);
 	state int retries = 0;
@@ -1710,15 +1712,19 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				             Void(),
 				             TaskPriority::MoveKeys));
 
-				int count = 0;
+				std::vector<UID> readyServers;
 				for (int s = 0; s < serverReady.size(); ++s) {
-					count += serverReady[s].isReady() && !serverReady[s].isError();
+					if (serverReady[s].isReady() && !serverReady[s].isError()) {
+						readyServers.push_back(storageServerInterfaces[s].uniqueID);
+					}
 				}
 
 				TraceEvent(SevVerbose, "FinishMoveShardsWaitedServers", relocationIntervalId)
-				    .detail("ReadyServers", count);
+				    .detail("DataMoveID", dataMoveId)
+				    .detail("ReadyServers", describe(readyServers));
 
-				if (count == newDestinations.size()) {
+				if (readyServers.size() == newDestinations.size()) {
+
 					std::vector<Future<Void>> actors;
 					actors.push_back(krmSetRangeCoalescing(
 					    &tr, keyServersPrefix, range, allKeys, keyServersValue(destServers, {}, dataMoveId, UID())));
@@ -2021,8 +2027,9 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 
 			state bool canRemove = wait(canRemoveStorageServer(tr, serverID));
 			if (!canRemove) {
-				TEST(true); // The caller had a transaction in flight that assigned keys to the server.  Wait for it to
-				            // reverse its mistake.
+				CODE_PROBE(true,
+				           "The caller had a transaction in flight that assigned keys to the server.  Wait for it to "
+				           "reverse its mistake.");
 				TraceEvent(SevWarn, "NoCanRemove").detail("Count", noCanRemoveCount++).detail("ServerID", serverID);
 				wait(delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskPriority::DataDistributionLaunch));
 				tr->reset();
@@ -2039,7 +2046,7 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 
 				if (!fListKey.get().present()) {
 					if (retry) {
-						TEST(true); // Storage server already removed after retrying transaction
+						CODE_PROBE(true, "Storage server already removed after retrying transaction");
 						return Void();
 					}
 					TraceEvent(SevError, "RemoveInvalidServer").detail("ServerID", serverID);
@@ -2218,7 +2225,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						const UID shardId = newShardId(deterministicRandom()->randomUInt64(), AssignEmptyRange::True);
 
 						// Assign the shard to teamForDroppedRange in keyServer space.
-						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 							tr.set(keyServersKey(it.key), keyServersValue(teamForDroppedRange, {}, shardId, UID()));
 						} else {
 							tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, teamForDroppedRange));
@@ -2235,7 +2242,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						// Assign the shard to the new team as an empty range.
 						// Note, there could be data loss.
 						for (const UID& id : teamForDroppedRange) {
-							if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+							if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 								actors.push_back(krmSetRangeCoalescing(
 								    &tr, serverKeysPrefixFor(id), range, allKeys, serverKeysValue(shardId)));
 							} else {
@@ -2455,7 +2462,7 @@ ACTOR Future<Void> moveKeys(Database cx,
 
 	state std::map<UID, StorageServerInterface> tssMapping;
 
-	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		wait(startMoveShards(cx,
 		                     dataMoveId,
 		                     keys,
@@ -2480,7 +2487,7 @@ ACTOR Future<Void> moveKeys(Database cx,
 	state Future<Void> completionSignaller =
 	    checkFetchingState(cx, healthyDestinations, keys, dataMovementComplete, relocationIntervalId, tssMapping);
 
-	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		wait(finishMoveShards(cx,
 		                      dataMoveId,
 		                      keys,
@@ -2563,7 +2570,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 	// We have to set this range in two blocks, because the master tracking of "keyServersLocations" depends on a change
 	// to a specific
 	//   key (keyServersKeyServersKey)
-	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		const UID teamId = deterministicRandom()->randomUniqueID();
 		ksValue = keyServersValue(serverSrcUID, /*dest=*/std::vector<UID>(), teamId, UID());
 		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());

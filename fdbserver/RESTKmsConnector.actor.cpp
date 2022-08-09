@@ -21,7 +21,7 @@
 #include "fdbserver/RESTKmsConnector.h"
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/HTTP.h"
+#include "fdbrpc/HTTP.h"
 #include "flow/IAsyncFile.h"
 #include "fdbserver/KmsConnectorInterface.h"
 #include "fdbserver/Knobs.h"
@@ -880,7 +880,7 @@ std::shared_ptr<platform::TmpFile> prepareTokenFile(const uint8_t* buff, const i
 
 std::shared_ptr<platform::TmpFile> prepareTokenFile(const int tokenLen) {
 	Standalone<StringRef> buff = makeString(tokenLen);
-	generateRandomData(mutateString(buff), tokenLen);
+	deterministicRandom()->randomBytes(mutateString(buff), tokenLen);
 
 	return prepareTokenFile(buff.begin(), tokenLen);
 }
@@ -941,7 +941,7 @@ ACTOR Future<Void> testValidationFileTokenPayloadTooLarge(Reference<RESTKmsConne
 	                        SERVER_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE +
 	                    2;
 	Standalone<StringRef> buff = makeString(tokenLen);
-	generateRandomData(mutateString(buff), tokenLen);
+	deterministicRandom()->randomBytes(mutateString(buff), tokenLen);
 
 	std::string details;
 	state std::vector<std::shared_ptr<platform::TmpFile>> tokenfiles;
@@ -972,7 +972,7 @@ ACTOR Future<Void> testMultiValidationFileTokenFiles(Reference<RESTKmsConnectorC
 	state std::unordered_map<std::string, std::string> tokenNameValueMap;
 	state std::string tokenDetailsStr;
 
-	generateRandomData(mutateString(buff), tokenLen);
+	deterministicRandom()->randomBytes(mutateString(buff), tokenLen);
 
 	for (int i = 1; i <= numFiles; i++) {
 		std::string tokenName = std::to_string(i);
@@ -1350,7 +1350,7 @@ TEST_CASE("/KmsConnector/REST/ParseKmsDiscoveryUrls") {
 	state Arena arena;
 
 	// initialize cipher key used for testing
-	generateRandomData(&BASE_CIPHER_KEY_TEST[0], 32);
+	deterministicRandom()->randomBytes(&BASE_CIPHER_KEY_TEST[0], 32);
 
 	wait(testParseDiscoverKmsUrlFileNotFound(ctx));
 	wait(testParseDiscoverKmsUrlFile(ctx));
@@ -1363,7 +1363,7 @@ TEST_CASE("/KmsConnector/REST/ParseValidationTokenFile") {
 	state Arena arena;
 
 	// initialize cipher key used for testing
-	generateRandomData(&BASE_CIPHER_KEY_TEST[0], 32);
+	deterministicRandom()->randomBytes(&BASE_CIPHER_KEY_TEST[0], 32);
 
 	wait(testEmptyValidationFileDetails(ctx));
 	wait(testMalformedFileValidationTokenDetails(ctx));
@@ -1380,7 +1380,7 @@ TEST_CASE("/KmsConnector/REST/ParseKmsResponse") {
 	state Arena arena;
 
 	// initialize cipher key used for testing
-	generateRandomData(&BASE_CIPHER_KEY_TEST[0], 32);
+	deterministicRandom()->randomBytes(&BASE_CIPHER_KEY_TEST[0], 32);
 
 	testMissingCipherDetailsTag(ctx);
 	testMalformedCipherDetails(ctx);
@@ -1394,7 +1394,7 @@ TEST_CASE("/KmsConnector/REST/GetEncryptionKeyOps") {
 	state Arena arena;
 
 	// initialize cipher key used for testing
-	generateRandomData(&BASE_CIPHER_KEY_TEST[0], 32);
+	deterministicRandom()->randomBytes(&BASE_CIPHER_KEY_TEST[0], 32);
 
 	// Prepare KmsConnector context details
 	wait(testParseDiscoverKmsUrlFile(ctx));

@@ -18,12 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbclient/HTTP.h"
+#include "fdbrpc/HTTP.h"
 
-#include "fdbclient/md5/md5.h"
-#include "fdbclient/ClientKnobs.h"
-#include "fdbclient/libb64/encode.h"
-#include "fdbclient/Knobs.h"
+#include "md5/md5.h"
+#include "libb64/encode.h"
+#include "flow/Knobs.h"
 #include <cctype>
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -153,7 +152,7 @@ ACTOR Future<size_t> read_delimited_into_string(Reference<IConnection> conn,
 		// Next search will start at the current end of the buffer - delim size + 1
 		if (sPos >= lookBack)
 			sPos -= lookBack;
-		wait(success(read_into_string(conn, buf, CLIENT_KNOBS->HTTP_READ_SIZE)));
+		wait(success(read_into_string(conn, buf, FLOW_KNOBS->HTTP_READ_SIZE)));
 	}
 }
 
@@ -161,7 +160,7 @@ ACTOR Future<size_t> read_delimited_into_string(Reference<IConnection> conn,
 ACTOR Future<Void> read_fixed_into_string(Reference<IConnection> conn, int len, std::string* buf, size_t pos) {
 	state int stop_size = pos + len;
 	while (buf->size() < stop_size)
-		wait(success(read_into_string(conn, buf, CLIENT_KNOBS->HTTP_READ_SIZE)));
+		wait(success(read_into_string(conn, buf, FLOW_KNOBS->HTTP_READ_SIZE)));
 	return Void();
 }
 
@@ -329,7 +328,7 @@ ACTOR Future<Void> read_http_response(Reference<HTTP::Response> r, Reference<ICo
 
 	// If there is actual response content, check the MD5 sum against the Content-MD5 response header
 	if (r->content.size() > 0) {
-		if (r->code == 206 && CLIENT_KNOBS->HTTP_RESPONSE_SKIP_VERIFY_CHECKSUM_FOR_PARTIAL_CONTENT) {
+		if (r->code == 206 && FLOW_KNOBS->HTTP_RESPONSE_SKIP_VERIFY_CHECKSUM_FOR_PARTIAL_CONTENT) {
 			return Void();
 		}
 
@@ -368,7 +367,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 	// There is no standard http request id header field, so either a global default can be set via a knob
 	// or it can be set per-request with the requestIDHeader argument (which overrides the default)
 	if (requestIDHeader.empty()) {
-		requestIDHeader = CLIENT_KNOBS->HTTP_REQUEST_ID_HEADER;
+		requestIDHeader = FLOW_KNOBS->HTTP_REQUEST_ID_HEADER;
 	}
 
 	state bool earlyResponse = false;
@@ -400,13 +399,13 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 		// Prepend headers to content packer buffer chain
 		pContent->prependWriteBuffer(pFirst, pLast);
 
-		if (CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 1)
+		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 1)
 			printf("[%s] HTTP starting %s %s ContentLen:%d\n",
 			       conn->getDebugID().toString().c_str(),
 			       verb.c_str(),
 			       resource.c_str(),
 			       contentLen);
-		if (CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
+		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
 			for (auto h : headers)
 				printf("Request Header: %s: %s\n", h.first.c_str(), h.second.c_str());
 		}
@@ -427,7 +426,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 				break;
 			}
 
-			state int trySend = CLIENT_KNOBS->HTTP_SEND_SIZE;
+			state int trySend = FLOW_KNOBS->HTTP_SEND_SIZE;
 			wait(sendRate->getAllowance(trySend));
 			int len = conn->write(pContent->getUnsent(), trySend);
 			if (pSent != nullptr)
@@ -481,7 +480,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 			}
 		}
 
-		if (CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0) {
+		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 0) {
 			printf("[%s] HTTP %scode=%d early=%d, time=%fs %s %s contentLen=%d [%d out, response content len %d]\n",
 			       conn->getDebugID().toString().c_str(),
 			       (err.present() ? format("*ERROR*=%s ", err.get().name()).c_str() : ""),
@@ -494,7 +493,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 			       total_sent,
 			       (int)r->contentLen);
 		}
-		if (CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
+		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
 			printf("[%s] HTTP RESPONSE:  %s %s\n%s\n",
 			       conn->getDebugID().toString().c_str(),
 			       verb.c_str(),
@@ -510,7 +509,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 	} catch (Error& e) {
 		double elapsed = timer() - send_start;
 		// A bad_request_id error would have already been logged in verbose mode before err is thrown above.
-		if (CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0 && e.code() != error_code_http_bad_request_id) {
+		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 0 && e.code() != error_code_http_bad_request_id) {
 			printf("[%s] HTTP *ERROR*=%s early=%d, time=%fs %s %s contentLen=%d [%d out]\n",
 			       conn->getDebugID().toString().c_str(),
 			       e.name(),

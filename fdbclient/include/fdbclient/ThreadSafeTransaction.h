@@ -205,6 +205,7 @@ class ThreadSafeApi : public IClientApi, ThreadSafeReferenceCounted<ThreadSafeAp
 public:
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
+	void useFutureProtocolVersion() override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	void setupNetwork() override;
@@ -221,7 +222,7 @@ private:
 	ThreadSafeApi();
 
 	int apiVersion;
-	const std::string clientVersion;
+	std::string clientVersion;
 	uint64_t transportId;
 
 	Mutex lock;

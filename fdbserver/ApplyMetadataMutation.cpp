@@ -20,6 +20,7 @@
 
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/KeyBackedTypes.h" // for key backed map codecs for tss mapping
+#include "fdbclient/Metacluster.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
@@ -624,7 +625,7 @@ private:
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		confChange = true;
-		TEST(true); // Recovering at a higher version.
+		CODE_PROBE(true, "Recovering at a higher version.");
 	}
 
 	void checkSetVersionEpochKey(MutationRef m) {
@@ -636,7 +637,7 @@ private:
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		confChange = true;
-		TEST(true); // Setting version epoch
+		CODE_PROBE(true, "Setting version epoch");
 	}
 
 	void checkSetWriteRecoverKey(MutationRef m) {
@@ -646,14 +647,15 @@ private:
 		TraceEvent("WriteRecoveryKeySet", dbgid).log();
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
-		TEST(true); // Snapshot created, setting writeRecoveryKey in txnStateStore
+		CODE_PROBE(true, "Snapshot created, setting writeRecoveryKey in txnStateStore");
 	}
 
 	void checkSetTenantMapPrefix(MutationRef m) {
-		if (m.param1.startsWith(tenantMapPrefix)) {
+		KeyRef prefix = TenantMetadata::tenantMap().subspace.begin;
+		if (m.param1.startsWith(prefix)) {
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
-				TenantName tenantName = m.param1.removePrefix(tenantMapPrefix);
+				TenantName tenantName = m.param1.removePrefix(prefix);
 				TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
 
 				TraceEvent("CommitProxyInsertTenant", dbgid).detail("Tenant", tenantName).detail("Version", version);
@@ -680,7 +682,27 @@ private:
 				writeMutation(privatized);
 			}
 
-			TEST(true); // Tenant added to map
+			CODE_PROBE(true, "Tenant added to map");
+		}
+	}
+
+	void checkSetMetaclusterRegistration(MutationRef m) {
+		if (m.param1 == MetaclusterMetadata::metaclusterRegistration().key) {
+			MetaclusterRegistrationEntry entry = MetaclusterRegistrationEntry::decode(m.param2);
+
+			TraceEvent("SetMetaclusterRegistration", dbgid)
+			    .detail("ClusterType", entry.clusterType)
+			    .detail("MetaclusterID", entry.metaclusterId)
+			    .detail("MetaclusterName", entry.metaclusterName)
+			    .detail("ClusterID", entry.id)
+			    .detail("ClusterName", entry.name);
+
+			if (!initialCommit) {
+				txnStateStore->set(KeyValueRef(m.param1, m.param2));
+			}
+
+			confChange = true;
+			CODE_PROBE(true, "Metacluster registration set");
 		}
 	}
 
@@ -1028,13 +1050,14 @@ private:
 	}
 
 	void checkClearTenantMapPrefix(KeyRangeRef range) {
-		if (tenantMapKeys.intersects(range)) {
+		KeyRangeRef subspace = TenantMetadata::tenantMap().subspace;
+		if (subspace.intersects(range)) {
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
 
-				StringRef startTenant = std::max(range.begin, tenantMapPrefix).removePrefix(tenantMapPrefix);
-				StringRef endTenant = (range.end.startsWith(tenantMapPrefix) ? range.end : tenantMapKeys.end)
-				                          .removePrefix(tenantMapPrefix);
+				StringRef startTenant = std::max(range.begin, subspace.begin).removePrefix(subspace.begin);
+				StringRef endTenant =
+				    range.end.startsWith(subspace.begin) ? range.end.removePrefix(subspace.begin) : "\xff\xff"_sr;
 
 				TraceEvent("CommitProxyEraseTenants", dbgid)
 				    .detail("BeginTenant", startTenant)
@@ -1068,7 +1091,20 @@ private:
 				writeMutation(privatized);
 			}
 
-			TEST(true); // Tenant cleared from map
+			CODE_PROBE(true, "Tenant cleared from map");
+		}
+	}
+
+	void checkClearMetaclusterRegistration(KeyRangeRef range) {
+		if (range.contains(MetaclusterMetadata::metaclusterRegistration().key)) {
+			TraceEvent("ClearMetaclusterRegistration", dbgid);
+
+			if (!initialCommit) {
+				txnStateStore->clear(singleKeyRange(MetaclusterMetadata::metaclusterRegistration().key));
+			}
+
+			confChange = true;
+			CODE_PROBE(true, "Metacluster registration cleared");
 		}
 	}
 
@@ -1194,6 +1230,7 @@ public:
 				checkSetMinRequiredCommitVersionKey(m);
 				checkSetVersionEpochKey(m);
 				checkSetTenantMapPrefix(m);
+				checkSetMetaclusterRegistration(m);
 				checkSetOtherKeys(m);
 			} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {
 				KeyRangeRef range(m.param1, m.param2);
@@ -1211,6 +1248,7 @@ public:
 				checkClearTssQuarantineKeys(m, range);
 				checkClearVersionEpochKeys(m, range);
 				checkClearTenantMapPrefix(range);
+				checkClearMetaclusterRegistration(range);
 				checkClearMiscRangeKeys(range);
 			}
 		}

@@ -41,6 +41,7 @@ void forceLinkVersionVectorTests();
 void forceLinkRESTClientTests();
 void forceLinkRESTUtilsTests();
 void forceLinkRESTKmsConnectorTest();
+void forceLinkCompressionUtilsTest();
 
 struct UnitTestWorkload : TestWorkload {
 	bool enabled;
@@ -92,6 +93,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkRESTClientTests();
 		forceLinkRESTUtilsTests();
 		forceLinkRESTKmsConnectorTest();
+		forceLinkCompressionUtilsTest();
 	}
 
 	std::string description() const override { return "UnitTests"; }
@@ -139,6 +141,11 @@ struct UnitTestWorkload : TestWorkload {
 		for (t = tests.begin(); t != tests.end(); ++t) {
 			state UnitTest* test = *t;
 			printf("Testing %s\n", test->name);
+
+			TraceEvent(SevInfo, "RunningUnitTest")
+			    .detail("Name", test->name)
+			    .detail("File", test->file)
+			    .detail("Line", test->line);
 
 			state Error result = success();
 			state double start_now = now();

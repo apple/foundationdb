@@ -37,8 +37,9 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 	bool switchComplete = false;
 
 	DifferentClustersSameRVWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		ASSERT(g_simulator.extraDB != nullptr);
-		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
+		ASSERT(g_simulator.extraDatabases.size() == 1);
+		auto extraFile =
+		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
 		extraDB = Database::createDatabase(extraFile, -1);
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 100.0);
 		switchAfter = getOption(options, LiteralStringRef("switchAfter"), 50.0);
@@ -216,7 +217,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 				state Future<Optional<Value>> val2 = tr2.get(self->keyToRead);
 				wait(success(val1) && success(val2));
 				// We're reading from different db's with the same read version. We can get a different value.
-				TEST(val1.get() != val2.get()); // reading from different dbs with the same version
+				CODE_PROBE(val1.get() != val2.get(), "reading from different dbs with the same version");
 			} catch (Error& e) {
 				wait(tr1.onError(e) && tr2.onError(e));
 			}
