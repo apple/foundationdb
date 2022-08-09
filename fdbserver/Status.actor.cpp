@@ -2364,7 +2364,6 @@ ACTOR static Future<JsonBuilderObject> blobWorkerStatusFetcher(
     std::set<std::string>* incompleteReason) {
 
 	state JsonBuilderObject statusObj;
-	state int totalRanges = 0;
 	state std::vector<Future<Optional<TraceEventFields>>> futures;
 
 	statusObj["number_of_blob_workers"] = static_cast<int>(servers.size());
@@ -2377,10 +2376,24 @@ ACTOR static Future<JsonBuilderObject> blobWorkerStatusFetcher(
 
 		wait(waitForAll(futures));
 
+		state int totalRanges = 0;
 		for (auto future : futures) {
 			if (future.get().present()) {
 				auto latestTrace = future.get().get();
-				totalRanges += latestTrace.getInt("NumRangesAssigned");
+				int numRanges = latestTrace.getInt("NumRangesAssigned");
+				totalRanges += numRanges;
+
+				JsonBuilderObject workerStatusObj;
+				workerStatusObj["number_of_key_ranges"] = numRanges;
+				workerStatusObj["put_requests"] = StatusCounter(latestTrace.getValue("S3PutReqs")).getStatus();
+				workerStatusObj["get_requests"] = StatusCounter(latestTrace.getValue("S3GetReqs")).getStatus();
+				workerStatusObj["delete_requests"] = StatusCounter(latestTrace.getValue("S3DeleteReqs")).getStatus();
+				workerStatusObj["bytes_buffered"] = latestTrace.getInt64("MutationBytesBuffered");
+				workerStatusObj["compression_bytes_raw"] =
+				    StatusCounter(latestTrace.getValue("CompressionBytesRaw")).getStatus();
+				workerStatusObj["compression_bytes_final"] =
+				    StatusCounter(latestTrace.getValue("CompressionBytesFinal")).getStatus();
+				statusObj[latestTrace.getValue("ID")] = workerStatusObj;
 			}
 		}
 		statusObj["number_of_key_ranges"] = totalRanges;
