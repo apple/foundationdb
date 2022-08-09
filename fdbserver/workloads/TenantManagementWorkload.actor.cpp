@@ -1250,6 +1250,12 @@ struct TenantManagementWorkload : TestWorkload {
 					TraceEvent("RenameTenantInvalidTenantState").detail("TenantRenames", describe(tenantRenames));
 					ASSERT(operationType == OperationType::METACLUSTER);
 					return Void();
+				} else if (e.code() == error_code_cluster_no_capacity) {
+					// This error should only occur on metacluster due to the multi-stage process.
+					// Having temporary tenants may exceed capacity, so we disallow the rename.
+					TraceEvent("RenameTenanClusterNoCapacity").detail("TenantRenames", describe(tenantRenames));
+					ASSERT(operationType == OperationType::METACLUSTER);
+					return Void();
 				} else {
 					try {
 						// In the case of commit_unknown_result, assume we continue retrying
