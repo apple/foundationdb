@@ -109,7 +109,6 @@ public:
 	int RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT;
 	bool QUARANTINE_TSS_ON_MISMATCH;
 	double CHANGE_FEED_EMPTY_BATCH_TIME;
-	bool SHARD_ENCODE_LOCATION_METADATA;
 
 	// KeyRangeMap
 	int KRM_GET_RANGE_LIMIT;
@@ -276,6 +275,7 @@ public:
 
 	// Blob Granules
 	int BG_MAX_GRANULE_PARALLELISM;
+	int BG_TOO_MANY_GRANULES;
 
 	// The coordinator key/value in storage server might be inconsistent to the value stored in the cluster file.
 	// This might happen when a recovery is happening together with a cluster controller coordinator key change.
@@ -286,6 +286,12 @@ public:
 
 	// Tenants and Metacluster
 	int MAX_TENANTS_PER_CLUSTER;
+	int TENANT_TOMBSTONE_CLEANUP_INTERVAL;
+	int MAX_DATA_CLUSTERS;
+	int REMOVE_CLUSTER_TENANT_BATCH_SIZE;
+	int METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK;
+	double METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY;
+	double METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

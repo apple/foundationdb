@@ -964,6 +964,10 @@ extern "C" DLLEXPORT const char* fdb_get_client_version() {
 	return API->getClientVersion();
 }
 
+extern "C" DLLEXPORT void fdb_use_future_protocol_version() {
+	API->useFutureProtocolVersion();
+}
+
 #if defined(__APPLE__)
 #include <dlfcn.h>
 __attribute__((constructor)) static void initialize() {

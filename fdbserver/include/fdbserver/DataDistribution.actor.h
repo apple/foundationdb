@@ -41,7 +41,7 @@
 #pragma region Data
 #endif
 
-enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ };
+enum class RelocateReason { OTHER = 0, REBALANCE_DISK, REBALANCE_READ };
 
 // One-to-one relationship to the priority knobs
 enum class DataMovementReason {
@@ -64,10 +64,10 @@ enum class DataMovementReason {
 	TEAM_0_LEFT,
 	SPLIT_SHARD
 };
+extern int dataMovementPriority(DataMovementReason moveReason);
+extern DataMovementReason priorityToDataMovementReason(int priority);
 
 struct DDShardInfo;
-
-extern int dataMovementPriority(DataMovementReason moveReason);
 
 // Represents a data move in DD.
 struct DataMove {
@@ -99,15 +99,24 @@ struct RelocateShard {
 	UID dataMoveId;
 	RelocateReason reason;
 	DataMovementReason moveReason;
-	RelocateShard()
-	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::INVALID),
-	    moveReason(DataMovementReason::INVALID) {}
+
+	// Initialization when define is a better practice. We should avoid assignment of member after definition.
+	// static RelocateShard emptyRelocateShard() { return {}; }
+
 	RelocateShard(KeyRange const& keys, DataMovementReason moveReason, RelocateReason reason)
-	  : keys(keys), cancelled(false), dataMoveId(anonymousShardId), reason(reason), moveReason(moveReason) {
-		priority = dataMovementPriority(moveReason);
-	}
+	  : keys(keys), priority(dataMovementPriority(moveReason)), cancelled(false), dataMoveId(anonymousShardId),
+	    reason(reason), moveReason(moveReason) {}
+
+	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason)
+	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason),
+	    moveReason(priorityToDataMovementReason(priority)) {}
 
 	bool isRestore() const { return this->dataMove != nullptr; }
+
+private:
+	RelocateShard()
+	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::OTHER),
+	    moveReason(DataMovementReason::INVALID) {}
 };
 
 struct IDataDistributionTeam {
@@ -612,8 +621,14 @@ struct StorageWiggleMetrics {
 };
 
 struct StorageWiggler : ReferenceCounted<StorageWiggler> {
+	static constexpr double MIN_ON_CHECK_DELAY_SEC = 5.0;
+
+private:
+	mutable Debouncer pqCanCheck{ MIN_ON_CHECK_DELAY_SEC };
+
+public:
 	enum State : uint8_t { INVALID = 0, RUN = 1, PAUSE = 2 };
-	AsyncVar<bool> nonEmpty;
+
 	DDTeamCollection const* teamCollection;
 	StorageWiggleMetrics metrics;
 	// data structures
@@ -626,7 +641,7 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	State wiggleState = State::INVALID;
 	double lastStateChangeTs = 0.0; // timestamp describes when did the state change
 
-	explicit StorageWiggler(DDTeamCollection* collection) : nonEmpty(false), teamCollection(collection){};
+	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection){};
 	// add server to wiggling queue
 	void addServer(const UID& serverId, const StorageMetadataType& metadata);
 	// remove server from wiggling queue
@@ -635,8 +650,14 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	void updateMetadata(const UID& serverId, const StorageMetadataType& metadata);
 	bool contains(const UID& serverId) const { return pq_handles.count(serverId) > 0; }
 	bool empty() const { return wiggle_pq.empty(); }
-	Optional<UID> getNextServerId();
 
+	// It's guarantee that When a.metadata >= b.metadata, if !eligible(a) then !eligible(b)
+	bool eligible(const UID& serverId, const StorageMetadataType& metadata) const;
+
+	// try to return the next storage server that is eligible for wiggle
+	Optional<UID> getNextServerId();
+	// next check time to avoid busy loop
+	Future<Void> onCheck() const;
 	State getWiggleState() const { return wiggleState; }
 	void setWiggleState(State s) {
 		if (wiggleState != s) {

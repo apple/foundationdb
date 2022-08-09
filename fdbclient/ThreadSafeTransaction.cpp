@@ -563,17 +563,23 @@ void ThreadSafeTransaction::reset() {
 
 extern const char* getSourceVersion();
 
-ThreadSafeApi::ThreadSafeApi()
-  : apiVersion(-1), clientVersion(format("%s,%s,%llx", FDB_VT_VERSION, getSourceVersion(), currentProtocolVersion)),
-    transportId(0) {}
+ThreadSafeApi::ThreadSafeApi() : apiVersion(-1), transportId(0) {}
 
 void ThreadSafeApi::selectApiVersion(int apiVersion) {
 	this->apiVersion = apiVersion;
 }
 
 const char* ThreadSafeApi::getClientVersion() {
-	// There is only one copy of the ThreadSafeAPI, and it never gets deleted. Also, clientVersion is never modified.
+	// There is only one copy of the ThreadSafeAPI, and it never gets deleted.
+	// Also, clientVersion is initialized on demand and never modified afterwards.
+	if (clientVersion.empty()) {
+		clientVersion = format("%s,%s,%llx", FDB_VT_VERSION, getSourceVersion(), currentProtocolVersion());
+	}
 	return clientVersion.c_str();
+}
+
+void ThreadSafeApi::useFutureProtocolVersion() {
+	::useFutureProtocolVersion();
 }
 
 void ThreadSafeApi::setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {

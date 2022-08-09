@@ -20,7 +20,7 @@ If you have questions, we encourage you to engage in discussion on the [communit
 
 ## Before you get started
 ### Community Guidelines
-We want the FoundationDB community to be as welcoming and inclusive as possible, and have adopted a [Code of Conduct](CODE_OF_CONDUCT.md) that we ask all community members to read and observe.
+We want the FoundationDB community to be as welcoming and inclusive as possible, and have adopted a [Code of Conduct](CODE_OF_CONDUCT.md) that we ask all community members to read and abide by.
 
 ### Project Licensing
 By submitting a pull request, you represent that you have the right to license your contribution to Apple and the community, and agree by submitting the patch that your contributions are licensed under the Apache 2.0 license.
@@ -34,7 +34,7 @@ Members of the Apple FoundationDB team are part of the core committers helping r
 
 ## Contributing
 ### Opening a Pull Request
-We love pull requests! For minor changes, feel free to open up a PR directly. For larger feature development and any changes that may require community discussion, we ask that you discuss your ideas on the [community forums](https://forums.foundationdb.org) prior to opening a PR, and then reference that thread within your PR comment. Please refer to [FoundationDB Commit Process](https://github.com/apple/foundationdb/wiki/FoundationDB-Commit-Process) for more detailed guidelines.
+We love pull requests! For minor changes, feel free to open up a PR directly. For larger feature development and any changes that may require community discussion, we ask that you discuss your ideas on the [community forums](https://forums.foundationdb.org) prior to opening a PR, and then reference that thread within your PR comment. Please refer to the [FoundationDB Commit Process](https://github.com/apple/foundationdb/wiki/FoundationDB-Commit-Process) for more detailed guidelines.
 
 CI will be run automatically for core committers, and for community PRs it will be initiated by the request of a core committer.  Tests can also be run locally via `ctest`, and core committers can run additional validation on pull requests prior to merging them.
 
@@ -46,10 +46,10 @@ To report a security issue, please **DO NOT** start by filing a public issue or 
 
 ## Project Communication
 ### Community Forums
-We encourage your participation asking questions and helping improve the FoundationDB project. Check out the [FoundationDB community forums](https://forums.foundationdb.org), which serve a similar function as mailing lists in many open source projects. The forums are organized into three sections:
+We encourage your participation asking questions and helping improve the FoundationDB project. Check out the [FoundationDB community forums](https://forums.foundationdb.org), which serve a similar function as mailing lists in many open source projects. The forums are organized into three categories:
 
 * [Development](https://forums.foundationdb.org/c/development): For discussing the internals and development of the FoundationDB core, as well as layers.
-* [Using FoundationDB](https://forums.foundationdb.org/c/using-foundationdb): For discussing user-facing topics. Getting started and have a question? This is the place for you.
+* [Using FoundationDB](https://forums.foundationdb.org/c/using-foundationdb): For discussing user-facing topics. Getting started and have a question? This is the category for you.
 * [Site Feedback](https://forums.foundationdb.org/c/site-feedback): A category for discussing the forums and the OSS project, its organization, how it works, and how we can improve it.
 
 ### Using GitHub Issues and Community Forums
@@ -63,4 +63,4 @@ GitHub Issues should be used for tracking tasks. If you know the specific code t
 * Implementing an agreed upon feature: *GitHub Issues*
 
 ### Project and Development Updates
-Stay connected to the project and the community! For project and community updates, follow the [FoundationDB project blog](https://www.foundationdb.org/blog/). Development announcements will be made via the community forums' [dev-announce](https://forums.foundationdb.org/c/development/dev-announce) section.
+Stay connected to the project and the community! For project and community updates, follow the [FoundationDB project blog](https://www.foundationdb.org/blog/). Development announcements will be made via the community forums' [dev-announce](https://forums.foundationdb.org/c/development/dev-announce) category.

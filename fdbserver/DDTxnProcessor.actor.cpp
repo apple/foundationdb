@@ -349,7 +349,7 @@ class DDTxnProcessorImpl {
 		// a dummy shard at the end with no keys or servers makes life easier for trackInitialShards()
 		result->shards.push_back(DDShardInfo(allKeys.end));
 
-		if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && numDataMoves > 0) {
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && numDataMoves > 0) {
 			for (int shard = 0; shard < result->shards.size() - 1; ++shard) {
 				const DDShardInfo& iShard = result->shards[shard];
 				KeyRangeRef keys = KeyRangeRef(iShard.key, result->shards[shard + 1].key);

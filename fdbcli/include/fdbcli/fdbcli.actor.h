@@ -200,6 +200,10 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 // lock/unlock command
 ACTOR Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
+
+// metacluster command
+Future<bool> metaclusterCommand(Reference<IDatabase> db, std::vector<StringRef> tokens);
+
 // changefeed command
 ACTOR Future<bool> changeFeedCommandActor(Database localDb,
                                           Optional<TenantMapEntry> tenantEntry,

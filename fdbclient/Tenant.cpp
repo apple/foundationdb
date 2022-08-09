@@ -109,7 +109,9 @@ std::string TenantMapEntry::toJson(int apiVersion) const {
 	}
 
 	tenantEntry["tenant_state"] = TenantMapEntry::tenantStateToString(tenantState);
-
+	if (assignedCluster.present()) {
+		tenantEntry["assigned_cluster"] = assignedCluster.get().toString();
+	}
 	if (tenantGroup.present()) {
 		json_spirit::mObject tenantGroupObject;
 		std::string encodedTenantGroup = base64::encoder::from_string(tenantGroup.get().toString());
@@ -135,6 +137,16 @@ void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> 
 		TraceEvent(SevWarnAlways, "UnknownTenantConfigurationParameter").detail("Parameter", parameter);
 		throw invalid_tenant_configuration();
 	}
+}
+
+TenantMetadataSpecification& TenantMetadata::instance() {
+	static TenantMetadataSpecification _instance = TenantMetadataSpecification("\xff/"_sr);
+	return _instance;
+}
+
+Key TenantMetadata::tenantMapPrivatePrefix() {
+	static Key _prefix = "\xff"_sr.withSuffix(tenantMap().subspace.begin);
+	return _prefix;
 }
 
 TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {

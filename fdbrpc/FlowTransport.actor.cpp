@@ -1713,7 +1713,7 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 		deliver(self,
 		        destination,
 		        priority,
-		        ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)),
+		        ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion())),
 		        NetworkAddress(),
 		        true,
 		        InReadSocket::False,

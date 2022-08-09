@@ -626,6 +626,8 @@ void DLApi::init() {
 
 	loadClientFunction(&api->selectApiVersion, lib, fdbCPath, "fdb_select_api_version_impl", headerVersion >= 0);
 	loadClientFunction(&api->getClientVersion, lib, fdbCPath, "fdb_get_client_version", headerVersion >= 410);
+	loadClientFunction(
+	    &api->useFutureProtocolVersion, lib, fdbCPath, "fdb_use_future_protocol_version", headerVersion >= 720);
 	loadClientFunction(&api->setNetworkOption, lib, fdbCPath, "fdb_network_set_option", headerVersion >= 0);
 	loadClientFunction(&api->setupNetwork, lib, fdbCPath, "fdb_setup_network", headerVersion >= 0);
 	loadClientFunction(&api->runNetwork, lib, fdbCPath, "fdb_run_network", headerVersion >= 0);
@@ -786,6 +788,14 @@ const char* DLApi::getClientVersion() {
 	}
 
 	return api->getClientVersion();
+}
+
+void DLApi::useFutureProtocolVersion() {
+	if (!api->useFutureProtocolVersion) {
+		return;
+	}
+
+	api->useFutureProtocolVersion();
 }
 
 void DLApi::setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
@@ -1644,7 +1654,7 @@ ThreadFuture<Void> MultiVersionDatabase::DatabaseState::monitorProtocolVersion()
 		}
 
 		ProtocolVersion clusterVersion =
-		    !cv.isError() ? cv.get() : self->dbProtocolVersion.orDefault(currentProtocolVersion);
+		    !cv.isError() ? cv.get() : self->dbProtocolVersion.orDefault(currentProtocolVersion());
 		onMainThreadVoid([self, clusterVersion]() { self->protocolVersionChanged(clusterVersion); });
 		return ErrorOr<Void>(Void());
 	});
@@ -1974,6 +1984,10 @@ const char* MultiVersionApi::getClientVersion() {
 	return localClient->api->getClientVersion();
 }
 
+void MultiVersionApi::useFutureProtocolVersion() {
+	localClient->api->useFutureProtocolVersion();
+}
+
 namespace {
 
 void validateOption(Optional<StringRef> value, bool canBePresent, bool canBeAbsent, bool canBeEmpty = true) {
@@ -2006,7 +2020,7 @@ void MultiVersionApi::setCallbacksOnExternalThreads() {
 
 	callbackOnMainThread = false;
 }
-void MultiVersionApi::addExternalLibrary(std::string path) {
+void MultiVersionApi::addExternalLibrary(std::string path, bool useFutureVersion) {
 	std::string filename = basename(path);
 
 	if (filename.empty() || !fileExists(path)) {
@@ -2023,8 +2037,8 @@ void MultiVersionApi::addExternalLibrary(std::string path) {
 	threadCount = std::max(threadCount, 1);
 
 	if (externalClientDescriptions.count(filename) == 0) {
-		TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
-		externalClientDescriptions.emplace(std::make_pair(filename, ClientDesc(path, true)));
+		TraceEvent("AddingExternalClient").detail("LibraryPath", filename).detail("UseFutureVersion", useFutureVersion);
+		externalClientDescriptions.emplace(std::make_pair(filename, ClientDesc(path, true, useFutureVersion)));
 	}
 }
 
@@ -2044,7 +2058,7 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 		std::string lib = abspath(joinPath(path, filename));
 		if (externalClientDescriptions.count(filename) == 0) {
 			TraceEvent("AddingExternalClient").detail("LibraryPath", filename);
-			externalClientDescriptions.emplace(std::make_pair(filename, ClientDesc(lib, true)));
+			externalClientDescriptions.emplace(std::make_pair(filename, ClientDesc(lib, true, false)));
 		}
 	}
 }
@@ -2182,7 +2196,7 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		setCallbacksOnExternalThreads();
 	} else if (option == FDBNetworkOptions::EXTERNAL_CLIENT_LIBRARY) {
 		validateOption(value, true, false, false);
-		addExternalLibrary(abspath(value.get().toString()));
+		addExternalLibrary(abspath(value.get().toString()), false);
 	} else if (option == FDBNetworkOptions::EXTERNAL_CLIENT_DIRECTORY) {
 		validateOption(value, true, false, false);
 		addExternalLibraryDirectory(value.get().toString());
@@ -2213,6 +2227,9 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 	} else if (option == FDBNetworkOptions::CLIENT_TMP_DIR) {
 		validateOption(value, true, false, false);
 		tmpDir = abspath(value.get().toString());
+	} else if (option == FDBNetworkOptions::FUTURE_VERSION_CLIENT_LIBRARY) {
+		validateOption(value, true, false, false);
+		addExternalLibrary(abspath(value.get().toString()), true);
 	} else {
 		forwardOption = true;
 	}
@@ -2251,13 +2268,14 @@ void MultiVersionApi::setupNetwork() {
 		for (auto i : externalClientDescriptions) {
 			std::string path = i.second.libPath;
 			std::string filename = basename(path);
+			bool useFutureVersion = i.second.useFutureVersion;
 
 			// Copy external lib for each thread
 			if (externalClients.count(filename) == 0) {
 				externalClients[filename] = {};
 				for (const auto& tmp : copyExternalLibraryPerThread(path)) {
 					externalClients[filename].push_back(Reference<ClientInfo>(
-					    new ClientInfo(new DLApi(tmp.first, tmp.second /*unlink on load*/), path)));
+					    new ClientInfo(new DLApi(tmp.first, tmp.second /*unlink on load*/), path, useFutureVersion)));
 				}
 			}
 		}
@@ -2297,6 +2315,9 @@ void MultiVersionApi::setupNetwork() {
 		runOnExternalClientsAllThreads([this](Reference<ClientInfo> client) {
 			TraceEvent("InitializingExternalClient").detail("LibraryPath", client->libPath);
 			client->api->selectApiVersion(apiVersion);
+			if (client->useFutureVersion) {
+				client->api->useFutureProtocolVersion();
+			}
 			client->loadVersion();
 		});
 

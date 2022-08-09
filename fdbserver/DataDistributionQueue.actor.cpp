@@ -67,65 +67,53 @@ inline bool isDataMovementForValleyFiller(DataMovementReason reason) {
 	       reason == DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM;
 }
 
-int dataMovementPriority(DataMovementReason reason) {
-	int priority;
-	switch (reason) {
-	case DataMovementReason::INVALID:
-		priority = -1;
-		break;
-	case DataMovementReason::RECOVER_MOVE:
-		priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE;
-		break;
-	case DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM:
-		priority = SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM;
-		break;
-	case DataMovementReason::REBALANCE_OVERUTILIZED_TEAM:
-		priority = SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
-		break;
-	case DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM:
-		priority = SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM;
-		break;
-	case DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM:
-		priority = SERVER_KNOBS->PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM;
-		break;
-	case DataMovementReason::PERPETUAL_STORAGE_WIGGLE:
-		priority = SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE;
-		break;
-	case DataMovementReason::TEAM_HEALTHY:
-		priority = SERVER_KNOBS->PRIORITY_TEAM_HEALTHY;
-		break;
-	case DataMovementReason::TEAM_CONTAINS_UNDESIRED_SERVER:
-		priority = SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER;
-		break;
-	case DataMovementReason::TEAM_REDUNDANT:
-		priority = SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT;
-		break;
-	case DataMovementReason::MERGE_SHARD:
-		priority = SERVER_KNOBS->PRIORITY_MERGE_SHARD;
-		break;
-	case DataMovementReason::POPULATE_REGION:
-		priority = SERVER_KNOBS->PRIORITY_POPULATE_REGION;
-		break;
-	case DataMovementReason::TEAM_UNHEALTHY:
-		priority = SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY;
-		break;
-	case DataMovementReason::TEAM_2_LEFT:
-		priority = SERVER_KNOBS->PRIORITY_TEAM_2_LEFT;
-		break;
-	case DataMovementReason::TEAM_1_LEFT:
-		priority = SERVER_KNOBS->PRIORITY_TEAM_1_LEFT;
-		break;
-	case DataMovementReason::TEAM_FAILED:
-		priority = SERVER_KNOBS->PRIORITY_TEAM_FAILED;
-		break;
-	case DataMovementReason::TEAM_0_LEFT:
-		priority = SERVER_KNOBS->PRIORITY_TEAM_0_LEFT;
-		break;
-	case DataMovementReason::SPLIT_SHARD:
-		priority = SERVER_KNOBS->PRIORITY_SPLIT_SHARD;
-		break;
+typedef std::map<DataMovementReason, int> DmReasonPriorityMapping;
+typedef std::map<int, DataMovementReason> PriorityDmReasonMapping;
+std::pair<const DmReasonPriorityMapping&, const PriorityDmReasonMapping&> buildPriorityMappings() {
+	static DmReasonPriorityMapping reasonPriority{
+		{ DataMovementReason::INVALID, -1 },
+		{ DataMovementReason::RECOVER_MOVE, SERVER_KNOBS->PRIORITY_RECOVER_MOVE },
+		{ DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM },
+		{ DataMovementReason::REBALANCE_OVERUTILIZED_TEAM, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM },
+		{ DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM, SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM },
+		{ DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM, SERVER_KNOBS->PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM },
+		{ DataMovementReason::PERPETUAL_STORAGE_WIGGLE, SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE },
+		{ DataMovementReason::TEAM_HEALTHY, SERVER_KNOBS->PRIORITY_TEAM_HEALTHY },
+		{ DataMovementReason::TEAM_CONTAINS_UNDESIRED_SERVER, SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER },
+		{ DataMovementReason::TEAM_REDUNDANT, SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT },
+		{ DataMovementReason::MERGE_SHARD, SERVER_KNOBS->PRIORITY_MERGE_SHARD },
+		{ DataMovementReason::POPULATE_REGION, SERVER_KNOBS->PRIORITY_POPULATE_REGION },
+		{ DataMovementReason::TEAM_UNHEALTHY, SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY },
+		{ DataMovementReason::TEAM_2_LEFT, SERVER_KNOBS->PRIORITY_TEAM_2_LEFT },
+		{ DataMovementReason::TEAM_1_LEFT, SERVER_KNOBS->PRIORITY_TEAM_1_LEFT },
+		{ DataMovementReason::TEAM_FAILED, SERVER_KNOBS->PRIORITY_TEAM_FAILED },
+		{ DataMovementReason::TEAM_0_LEFT, SERVER_KNOBS->PRIORITY_TEAM_0_LEFT },
+		{ DataMovementReason::SPLIT_SHARD, SERVER_KNOBS->PRIORITY_SPLIT_SHARD }
+	};
+
+	static PriorityDmReasonMapping priorityReason;
+	if (priorityReason.empty()) { // only build once
+		for (const auto& [r, p] : reasonPriority) {
+			priorityReason[p] = r;
+		}
+		// Don't allow 2 priorities value being the same.
+		if (priorityReason.size() != reasonPriority.size()) {
+			TraceEvent(SevError, "DuplicateDataMovementPriority").log();
+			ASSERT(false);
+		}
 	}
-	return priority;
+
+	return std::make_pair(reasonPriority, priorityReason);
+}
+
+int dataMovementPriority(DataMovementReason reason) {
+	const auto& [reasonPriority, _] = buildPriorityMappings();
+	return reasonPriority.at(reason);
+}
+
+DataMovementReason priorityToDataMovementReason(int priority) {
+	const auto& [_, priorityReason] = buildPriorityMappings();
+	return priorityReason.at(priority);
 }
 
 struct RelocateData {
@@ -148,7 +136,7 @@ struct RelocateData {
 	std::shared_ptr<DataMove> dataMove;
 
 	RelocateData()
-	  : priority(-1), boundaryPriority(-1), healthPriority(-1), reason(RelocateReason::INVALID), startTime(-1),
+	  : priority(-1), boundaryPriority(-1), healthPriority(-1), reason(RelocateReason::OTHER), startTime(-1),
 	    dataMoveId(anonymousShardId), workFactor(0), wantsNewServers(false), cancellable(false),
 	    interval("QueuedRelocation") {}
 	explicit RelocateData(RelocateShard const& rs)
@@ -1099,7 +1087,7 @@ struct DDQueueData {
 			}
 
 			Future<Void> fCleanup =
-			    CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
+			    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
 
 			// If there is a job in flight that wants data relocation which we are about to cancel/modify,
 			//     make sure that we keep the relocation intent for the job that we launch
@@ -1121,13 +1109,13 @@ struct DDQueueData {
 				rrs.keys = ranges[r];
 				if (rd.keys == ranges[r] && rd.isRestore()) {
 					ASSERT(rd.dataMove != nullptr);
-					ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+					ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 					rrs.dataMoveId = rd.dataMove->meta.id;
 				} else {
 					ASSERT_WE_THINK(!rd.isRestore()); // Restored data move should not overlap.
 					// TODO(psm): The shard id is determined by DD.
 					rrs.dataMove.reset();
-					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 						rrs.dataMoveId = deterministicRandom()->randomUniqueID();
 					} else {
 						rrs.dataMoveId = anonymousShardId;
@@ -1290,7 +1278,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			self->suppressIntervals = 0;
 		}
 
-		if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 			auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
 			ASSERT(inFlightRange.range() == rd.keys);
 			ASSERT(inFlightRange.value().randomId == rd.randomId);
@@ -1332,7 +1320,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 				bestTeams.clear();
 				// Get team from teamCollections in different DCs and find the best one
 				while (tciIndex < self->teamCollections.size()) {
-					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && rd.isRestore()) {
+					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && rd.isRestore()) {
 						auto req = GetTeamRequest(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest);
 						Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
 						    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
@@ -1579,7 +1567,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 								                      CancelConflictingDataMoves::False);
 							} else {
 								self->fetchKeysComplete.insert(rd);
-								if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+								if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 									auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(rd.keys);
 									if (ranges.size() == 1 && static_cast<KeyRange>(ranges[0]) == rd.keys &&
 									    ranges[0].value.id == rd.dataMoveId && !ranges[0].value.cancel.isValid()) {
