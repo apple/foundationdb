@@ -70,7 +70,7 @@ inline bool isDataMovementForValleyFiller(DataMovementReason reason) {
 
 typedef std::map<DataMovementReason, int> DmReasonPriorityMapping;
 typedef std::map<int, DataMovementReason> PriorityDmReasonMapping;
-std::pair<const DmReasonPriorityMapping&, const PriorityDmReasonMapping&> buildPriorityMappings() {
+std::pair<const DmReasonPriorityMapping*, const PriorityDmReasonMapping*> buildPriorityMappings() {
 	static DmReasonPriorityMapping reasonPriority{
 		{ DataMovementReason::INVALID, -1 },
 		{ DataMovementReason::RECOVER_MOVE, SERVER_KNOBS->PRIORITY_RECOVER_MOVE },
@@ -104,17 +104,17 @@ std::pair<const DmReasonPriorityMapping&, const PriorityDmReasonMapping&> buildP
 		}
 	}
 
-	return std::make_pair(reasonPriority, priorityReason);
+	return std::make_pair(&reasonPriority, &priorityReason);
 }
 
 int dataMovementPriority(DataMovementReason reason) {
-	const auto& [reasonPriority, _] = buildPriorityMappings();
-	return reasonPriority.at(reason);
+	auto [reasonPriority, _] = buildPriorityMappings();
+	return reasonPriority->at(reason);
 }
 
 DataMovementReason priorityToDataMovementReason(int priority) {
-	const auto& [_, priorityReason] = buildPriorityMappings();
-	return priorityReason.at(priority);
+	auto [_, priorityReason] = buildPriorityMappings();
+	return priorityReason->at(priority);
 }
 
 struct RelocateData {

@@ -346,7 +346,9 @@ struct IndexBlockRef {
 
 			decrypt(cipherKeysCtx.get(), *this, arena);
 		} else {
-			TraceEvent("IndexBlockSize").detail("Sz", buffer.size());
+			if (BG_ENCRYPT_COMPRESS_DEBUG) {
+				TraceEvent("IndexBlockSize").detail("Sz", buffer.size());
+			}
 
 			ObjectReader dataReader(buffer.begin(), IncludeVersion());
 			dataReader.deserialize(FileIdentifierFor<IndexBlock>::value, block, arena);
@@ -368,7 +370,11 @@ struct IndexBlockRef {
 			    arena, ObjectWriter::toValue(block, IncludeVersion(ProtocolVersion::withBlobGranuleFile())).contents());
 		}
 
-		TraceEvent(SevDebug, "IndexBlockSize").detail("Sz", buffer.size()).detail("Encrypted", cipherKeysCtx.present());
+		if (BG_ENCRYPT_COMPRESS_DEBUG) {
+			TraceEvent(SevDebug, "IndexBlockSize")
+			    .detail("Sz", buffer.size())
+			    .detail("Encrypted", cipherKeysCtx.present());
+		}
 	}
 
 	template <class Ar>

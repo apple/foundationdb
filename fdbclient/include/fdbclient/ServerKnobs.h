@@ -911,6 +911,9 @@ public:
 	int BG_KEY_TUPLE_TRUNCATE_OFFSET;
 
 	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
+	int BLOB_WORKER_RESNAPSHOT_PARALLELISM;
+	int BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM;
+
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
 	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
 	double BLOB_WORKERLIST_FETCH_INTERVAL;
