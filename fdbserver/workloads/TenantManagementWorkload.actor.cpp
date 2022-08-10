@@ -727,6 +727,11 @@ struct TenantManagementWorkload : TestWorkload {
 							       operationType == OperationType::MANAGEMENT_DATABASE);
 							ASSERT(retried);
 							break;
+						} else if (e.code() == error_code_proxy_memory_limit_exceeded ||
+						           e.code() == error_code_batch_transaction_throttled) {
+							// GRV proxy returns an error
+							wait(tr->onError(e));
+							continue;
 						} else {
 							throw;
 						}
