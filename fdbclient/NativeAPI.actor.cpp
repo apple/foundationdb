@@ -3531,8 +3531,8 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 
 ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanContext spanContext) {
 	state Span span("NAPI:waitForCommittedVersion"_loc, spanContext);
-	try {
-		loop {
+	loop {
+		try {
 			choose {
 				when(wait(cx->onProxiesChanged())) {}
 				when(GetReadVersionReply v = wait(basicLoadBalance(
@@ -3558,10 +3558,16 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, Span
 					wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, cx->taskID));
 				}
 			}
+		} catch (Error& e) {
+			if (e.code() == error_code_batch_transaction_throttled ||
+			    e.code() == error_code_proxy_memory_limit_exceeded) {
+				// GRV Proxy returns an error
+				wait(delayJittered(5.0));
+			} else {
+				TraceEvent(SevError, "WaitForCommittedVersionError").error(e);
+				throw;
+			}
 		}
-	} catch (Error& e) {
-		TraceEvent(SevError, "WaitForCommittedVersionError").error(e);
-		throw;
 	}
 }
 
