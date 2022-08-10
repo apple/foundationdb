@@ -3128,6 +3128,8 @@ ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData, Future<
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			RangeResult result = wait(tr->getRange(currentRange, rowLimit));
+			state bool anyMore = result.more;
+			state std::vector<Future<Void>> cleanupForcePurged;
 			for (auto& it : result) {
 				CODE_PROBE(true, "Blob Manager Recovery found merging granule");
 				UID mergeGranuleID = decodeBlobGranuleMergeKey(it.key);
@@ -3148,6 +3150,19 @@ ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData, Future<
 				}
 
 				if (bmData->isForcePurging(mergeRange)) {
+					if (BM_DEBUG) {
+						fmt::print(
+						    "BM {0} cleaning up merge [{1} - {2}): {3} @ {4} in progress b/c it was force purged\n",
+						    bmData->epoch,
+						    mergeRange.begin.printable(),
+						    mergeRange.end.printable(),
+						    mergeGranuleID.toString().substr(0, 6),
+						    mergeVersion);
+					}
+					cleanupForcePurged.push_back(updateChangeFeed(&tr->getTransaction(),
+					                                              granuleIDToCFKey(mergeGranuleID),
+					                                              ChangeFeedStatus::CHANGE_FEED_DESTROY,
+					                                              mergeRange));
 					continue;
 				}
 
@@ -3168,9 +3183,17 @@ ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData, Future<
 				bmData->setMergeCandidate(mergeRange, MergeCandidateMerging);
 			}
 
-			if (result.more) {
+			if (anyMore) {
 				currentRange = KeyRangeRef(keyAfter(result.back().key), currentRange.end);
-			} else {
+			}
+
+			if (!cleanupForcePurged.empty()) {
+				wait(waitForAll(cleanupForcePurged));
+				wait(tr->commit());
+				tr->reset();
+			}
+
+			if (!anyMore) {
 				return Void();
 			}
 		} catch (Error& e) {
