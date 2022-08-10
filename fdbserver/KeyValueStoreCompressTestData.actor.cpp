@@ -56,38 +56,27 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override { store->clear(range, arena); }
 	Future<Void> commit(bool sequential = false) override { return store->commit(sequential); }
 
-	Future<Optional<Value>> readValue(KeyRef key,
-	                                  IKeyValueStore::ReadOptions const& options,
-	                                  Optional<UID> debugID) override {
-		return doReadValue(store, key, options, debugID);
+	Future<Optional<Value>> readValue(KeyRef key, ReadOptions const& options) override {
+		return doReadValue(store, key, options);
 	}
 
 	// Note that readValuePrefix doesn't do anything in this implementation of IKeyValueStore, so the "atomic bomb"
 	// problem is still present if you are using this storage interface, but this storage interface is not used by
 	// customers ever. However, if you want to try to test malicious atomic op workloads with compressed values for some
 	// reason, you will need to fix this.
-	Future<Optional<Value>> readValuePrefix(KeyRef key,
-	                                        int maxLength,
-	                                        IKeyValueStore::ReadOptions const& options,
-	                                        Optional<UID> debugID) override {
-		return doReadValuePrefix(store, key, maxLength, options, debugID);
+	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, ReadOptions const& options) override {
+		return doReadValuePrefix(store, key, maxLength, options);
 	}
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	Future<RangeResult> readRange(KeyRangeRef keys,
-	                              int rowLimit,
-	                              int byteLimit,
-	                              IKeyValueStore::ReadOptions const& options) override {
+	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, ReadOptions const& options) override {
 		return doReadRange(store, keys, rowLimit, byteLimit, options);
 	}
 
 private:
-	ACTOR static Future<Optional<Value>> doReadValue(IKeyValueStore* store,
-	                                                 Key key,
-	                                                 IKeyValueStore::ReadOptions options,
-	                                                 Optional<UID> debugID) {
-		Optional<Value> v = wait(store->readValue(key, options, debugID));
+	ACTOR static Future<Optional<Value>> doReadValue(IKeyValueStore* store, Key key, ReadOptions options) {
+		Optional<Value> v = wait(store->readValue(key, options));
 		if (!v.present())
 			return v;
 		return unpack(v.get());
@@ -96,9 +85,8 @@ private:
 	ACTOR static Future<Optional<Value>> doReadValuePrefix(IKeyValueStore* store,
 	                                                       Key key,
 	                                                       int maxLength,
-	                                                       IKeyValueStore::ReadOptions options,
-	                                                       Optional<UID> debugID) {
-		Optional<Value> v = wait(doReadValue(store, key, options, debugID));
+	                                                       ReadOptions options) {
+		Optional<Value> v = wait(doReadValue(store, key, options));
 		if (!v.present())
 			return v;
 		if (maxLength < v.get().size()) {
@@ -111,7 +99,7 @@ private:
 	                                      KeyRangeRef keys,
 	                                      int rowLimit,
 	                                      int byteLimit,
-	                                      IKeyValueStore::ReadOptions options) {
+	                                      ReadOptions options) {
 		RangeResult _vs = wait(store->readRange(keys, rowLimit, byteLimit, options));
 		RangeResult vs = _vs; // Get rid of implicit const& from wait statement
 		Arena& a = vs.arena();

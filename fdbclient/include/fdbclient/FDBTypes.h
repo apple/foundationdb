@@ -1515,6 +1515,29 @@ struct StorageWiggleValue {
 	}
 };
 
+enum class ReadType {
+	EAGER,
+	FETCH,
+	LOW,
+	NORMAL,
+	HIGH,
+};
+
+struct ReadOptions {
+	ReadType type;
+	bool cacheResult;
+	Optional<Version> consistencyCheckStartVersion;
+	Optional<UID> debugID;
+
+	ReadOptions() : type(ReadType::NORMAL), cacheResult(true){};
+	ReadOptions(ReadType type, bool cacheResult) : type(type), cacheResult(cacheResult){};
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, type, cacheResult, consistencyCheckStartVersion, debugID);
+	}
+};
+
 // Can be used to identify types (e.g. IDatabase) that can be used to create transactions with a `createTransaction`
 // function
 template <typename, typename = void>

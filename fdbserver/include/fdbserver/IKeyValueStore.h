@@ -70,29 +70,12 @@ public:
 	virtual Future<Void> commit(
 	    bool sequential = false) = 0; // returns when prior sets and clears are (atomically) durable
 
-	enum class ReadType {
-		EAGER,
-		FETCH,
-		LOW,
-		NORMAL,
-		HIGH,
-	};
-
-	struct ReadOptions {
-		ReadOptions(ReadType type = ReadType::NORMAL, bool cacheResult = true) : type(type), cacheResult(cacheResult){};
-		ReadType type;
-		bool cacheResult;
-	};
-
-	virtual Future<Optional<Value>> readValue(KeyRef key,
-	                                          ReadOptions const& options = ReadOptions(),
-	                                          Optional<UID> debugID = Optional<UID>()) = 0;
+	virtual Future<Optional<Value>> readValue(KeyRef key, ReadOptions const& options = ReadOptions()) = 0;
 
 	// Like readValue(), but returns only the first maxLength bytes of the value if it is longer
 	virtual Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                                int maxLength,
-	                                                ReadOptions const& options = ReadOptions(),
-	                                                Optional<UID> debugID = Optional<UID>()) = 0;
+	                                                ReadOptions const& options = ReadOptions()) = 0;
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit

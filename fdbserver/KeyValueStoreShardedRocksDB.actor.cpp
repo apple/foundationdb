@@ -2287,8 +2287,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	// We don't throttle eager reads and reads to the FF keyspace because FDB struggles when those reads fail.
 	// Thus far, they have been low enough volume to not cause an issue.
-	static bool shouldThrottle(IKeyValueStore::ReadType type, KeyRef key) {
-		return type != IKeyValueStore::ReadType::EAGER && !(key.startsWith(systemKeys.begin));
+	static bool shouldThrottle(ReadType type, KeyRef key) {
+		return type != ReadType::EAGER && !(key.startsWith(systemKeys.begin));
 	}
 
 	ACTOR template <class Action>
@@ -2309,9 +2309,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return result;
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key,
-	                                  IKeyValueStore::ReadOptions const& options,
-	                                  Optional<UID> debugID) override {
+	Future<Optional<Value>> readValue(KeyRef key, ReadOptions const& options) override {
 		auto* shard = shardManager.getDataShard(key);
 		if (shard == nullptr || !shard->physicalShard->initialized()) {
 			// TODO: read non-exist system key range should not cause an error.
@@ -2322,24 +2320,21 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		if (!shouldThrottle(options.type, key)) {
-			auto a = new Reader::ReadValueAction(key, shard->physicalShard, debugID);
+			auto a = new Reader::ReadValueAction(key, shard->physicalShard, options.debugID);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
 		}
 
-		auto& semaphore = (options.type == IKeyValueStore::ReadType::FETCH) ? fetchSemaphore : readSemaphore;
-		int maxWaiters = (options.type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
+		auto& semaphore = (options.type == ReadType::FETCH) ? fetchSemaphore : readSemaphore;
+		int maxWaiters = (options.type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
-		auto a = std::make_unique<Reader::ReadValueAction>(key, shard->physicalShard, debugID);
+		auto a = std::make_unique<Reader::ReadValueAction>(key, shard->physicalShard, options.debugID);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
-	Future<Optional<Value>> readValuePrefix(KeyRef key,
-	                                        int maxLength,
-	                                        IKeyValueStore::ReadOptions const& options,
-	                                        Optional<UID> debugID) override {
+	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, ReadOptions const& options) override {
 		auto* shard = shardManager.getDataShard(key);
 		if (shard == nullptr || !shard->physicalShard->initialized()) {
 			// TODO: read non-exist system key range should not cause an error.
@@ -2350,17 +2345,17 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		if (!shouldThrottle(options.type, key)) {
-			auto a = new Reader::ReadValuePrefixAction(key, maxLength, shard->physicalShard, debugID);
+			auto a = new Reader::ReadValuePrefixAction(key, maxLength, shard->physicalShard, options.debugID);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
 		}
 
-		auto& semaphore = (options.type == IKeyValueStore::ReadType::FETCH) ? fetchSemaphore : readSemaphore;
-		int maxWaiters = (options.type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
+		auto& semaphore = (options.type == ReadType::FETCH) ? fetchSemaphore : readSemaphore;
+		int maxWaiters = (options.type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
-		auto a = std::make_unique<Reader::ReadValuePrefixAction>(key, maxLength, shard->physicalShard, debugID);
+		auto a = std::make_unique<Reader::ReadValuePrefixAction>(key, maxLength, shard->physicalShard, options.debugID);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
@@ -2387,7 +2382,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit,
 	                              int byteLimit,
-	                              IKeyValueStore::ReadOptions const& options = IKeyValueStore::ReadOptions()) override {
+	                              ReadOptions const& options = ReadOptions()) override {
 		TraceEvent(SevVerbose, "ShardedRocksReadRangeBegin", this->id).detail("Range", keys);
 		auto shards = shardManager.getDataShardsByRange(keys);
 
@@ -2398,8 +2393,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			return res;
 		}
 
-		auto& semaphore = (options.type == IKeyValueStore::ReadType::FETCH) ? fetchSemaphore : readSemaphore;
-		int maxWaiters = (options.type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
+		auto& semaphore = (options.type == ReadType::FETCH) ? fetchSemaphore : readSemaphore;
+		int maxWaiters = (options.type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 		checkWaiters(semaphore, maxWaiters);
 
 		auto a = std::make_unique<Reader::ReadRangeAction>(keys, shards, rowLimit, byteLimit);

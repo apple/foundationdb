@@ -7346,7 +7346,7 @@ public:
 
 	private:
 		PagerEventReasons reason;
-		IKeyValueStore::ReadOptions options;
+		ReadOptions options;
 		VersionedBTree* btree;
 		Reference<IPagerSnapshot> pager;
 		bool valid;
@@ -7446,7 +7446,7 @@ public:
 		// Initialize or reinitialize cursor
 		Future<Void> init(VersionedBTree* btree_in,
 		                  PagerEventReasons reason_in,
-		                  IKeyValueStore::ReadOptions options_in,
+		                  ReadOptions options_in,
 		                  Reference<IPagerSnapshot> pager_in,
 		                  BTreeNodeLink root) {
 			btree = btree_in;
@@ -7649,7 +7649,7 @@ public:
 	Future<Void> initBTreeCursor(BTreeCursor* cursor,
 	                             Version snapshotVersion,
 	                             PagerEventReasons reason,
-	                             IKeyValueStore::ReadOptions options = IKeyValueStore::ReadOptions()) {
+	                             ReadOptions options = ReadOptions()) {
 		Reference<IPagerSnapshot> snapshot = m_pager->getReadSnapshot(snapshotVersion);
 
 		BTreeNodeLinkRef root;
@@ -7795,10 +7795,7 @@ public:
 		m_tree->set(keyValue);
 	}
 
-	Future<RangeResult> readRange(KeyRangeRef keys,
-	                              int rowLimit,
-	                              int byteLimit,
-	                              IKeyValueStore::ReadOptions const& options) override {
+	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, ReadOptions const& options) override {
 		debug_printf("READRANGE %s\n", printable(keys).c_str());
 		return catchError(readRange_impl(this, keys, rowLimit, byteLimit, options));
 	}
@@ -7807,10 +7804,9 @@ public:
 	                                                KeyRange keys,
 	                                                int rowLimit,
 	                                                int byteLimit,
-	                                                IKeyValueStore::ReadOptions options) {
-		state PagerEventReasons reason = (options.type == IKeyValueStore::ReadType::FETCH)
-		                                     ? PagerEventReasons::FetchRange
-		                                     : PagerEventReasons::RangeRead;
+	                                                ReadOptions options) {
+		state PagerEventReasons reason =
+		    (options.type == ReadType::FETCH) ? PagerEventReasons::FetchRange : PagerEventReasons::RangeRead;
 		state VersionedBTree::BTreeCursor cur;
 		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), reason, options));
 		state PriorityMultiLock::Lock lock;
@@ -7948,10 +7944,7 @@ public:
 		return result;
 	}
 
-	ACTOR static Future<Optional<Value>> readValue_impl(KeyValueStoreRedwood* self,
-	                                                    Key key,
-	                                                    IKeyValueStore::ReadOptions options,
-	                                                    Optional<UID> debugID) {
+	ACTOR static Future<Optional<Value>> readValue_impl(KeyValueStoreRedwood* self, Key key, ReadOptions options) {
 		state VersionedBTree::BTreeCursor cur;
 		wait(self->m_tree->initBTreeCursor(
 		    &cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::PointRead, options));
@@ -7973,17 +7966,12 @@ public:
 		return Optional<Value>();
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key,
-	                                  IKeyValueStore::ReadOptions const& options,
-	                                  Optional<UID> debugID) override {
-		return catchError(readValue_impl(this, key, options, debugID));
+	Future<Optional<Value>> readValue(KeyRef key, ReadOptions const& options) override {
+		return catchError(readValue_impl(this, key, options));
 	}
 
-	Future<Optional<Value>> readValuePrefix(KeyRef key,
-	                                        int maxLength,
-	                                        IKeyValueStore::ReadOptions const& options,
-	                                        Optional<UID> debugID) override {
-		return catchError(map(readValue_impl(this, key, options, debugID), [maxLength](Optional<Value> v) {
+	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, ReadOptions const& options) override {
+		return catchError(map(readValue_impl(this, key, options), [maxLength](Optional<Value> v) {
 			if (v.present() && v.get().size() > maxLength) {
 				v.get().contents() = v.get().substr(0, maxLength);
 			}
@@ -11007,7 +10995,7 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
                                     bool singlePrefix,
                                     int rowLimit,
                                     int bitLimit,
-                                    IKeyValueStore::ReadOptions options = IKeyValueStore::ReadOptions()) {
+                                    ReadOptions options = ReadOptions()) {
 	fmt::print("\nstoreType: {}\n", static_cast<int>(kvs->getType()));
 	fmt::print("prefixSource: {}\n", source.toString());
 	fmt::print("suffixSize: {}\n", suffixSize);
@@ -11064,9 +11052,9 @@ TEST_CASE(":/redwood/performance/randomRangeScans") {
 	state int suffixSize = 12;
 	state int valueSize = 100;
 	state int maxByteLimit = std::numeric_limits<int>::max();
-	state IKeyValueStore::ReadOptions options;
+	state ReadOptions options;
 	options.cacheResult = true;
-	options.type = IKeyValueStore::ReadType::NORMAL;
+	options.type = ReadType::NORMAL;
 
 	// TODO change to 100e8 after figuring out no-disk redwood mode
 	state int writeRecordCountTarget = 1e6;

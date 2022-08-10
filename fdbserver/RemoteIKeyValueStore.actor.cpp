@@ -90,7 +90,6 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 	state UID kvsId(ikvsInterface.id());
 	state ActorCollection actors(false);
 	state AfterReturn guard(kvStore, kvsId);
-	state IKeyValueStore::ReadOptions options;
 	state Promise<Void> onClosed;
 	TraceEvent(SevDebug, "RemoteKVStoreInitializing").detail("UID", kvsId);
 	wait(kvStore->init());
@@ -101,9 +100,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 		try {
 			choose {
 				when(IKVSGetValueRequest getReq = waitNext(ikvsInterface.getValue.getFuture())) {
-					options.type = getReq.type;
-					actors.add(cancellableForwardPromise(getReq.reply,
-					                                     kvStore->readValue(getReq.key, options, getReq.debugID)));
+					actors.add(cancellableForwardPromise(getReq.reply, kvStore->readValue(getReq.key, getReq.options)));
 				}
 				when(IKVSSetRequest req = waitNext(ikvsInterface.set.getFuture())) { kvStore->set(req.keyValue); }
 				when(IKVSClearRequest req = waitNext(ikvsInterface.clear.getFuture())) { kvStore->clear(req.range); }
@@ -111,19 +108,18 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					sendCommitReply(commitReq, kvStore, onClosed.getFuture());
 				}
 				when(IKVSReadValuePrefixRequest readPrefixReq = waitNext(ikvsInterface.readValuePrefix.getFuture())) {
-					options.type = readPrefixReq.type;
 					actors.add(cancellableForwardPromise(
 					    readPrefixReq.reply,
-					    kvStore->readValuePrefix(
-					        readPrefixReq.key, readPrefixReq.maxLength, options, readPrefixReq.debugID)));
+					    kvStore->readValuePrefix(readPrefixReq.key, readPrefixReq.maxLength, readPrefixReq.options)));
 				}
 				when(IKVSReadRangeRequest readRangeReq = waitNext(ikvsInterface.readRange.getFuture())) {
-					options.type = readRangeReq.type;
 					actors.add(cancellableForwardPromise(
 					    readRangeReq.reply,
 					    fmap([](const RangeResult& result) { return IKVSReadRangeReply(result); },
-					         kvStore->readRange(
-					             readRangeReq.keys, readRangeReq.rowLimit, readRangeReq.byteLimit, options))));
+					         kvStore->readRange(readRangeReq.keys,
+					                            readRangeReq.rowLimit,
+					                            readRangeReq.byteLimit,
+					                            readRangeReq.options))));
 				}
 				when(IKVSGetStorageByteRequest req = waitNext(ikvsInterface.getStorageBytes.getFuture())) {
 					StorageBytes storageBytes = kvStore->getStorageBytes();

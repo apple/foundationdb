@@ -155,13 +155,12 @@ struct OpenKVStoreRequest {
 struct IKVSGetValueRequest {
 	constexpr static FileIdentifier file_identifier = 1029439;
 	KeyRef key;
-	IKeyValueStore::ReadType type;
-	Optional<UID> debugID = Optional<UID>();
+	ReadOptions options;
 	ReplyPromise<Optional<Value>> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, type, debugID, reply);
+		serializer(ar, key, options, reply);
 	}
 };
 
@@ -202,13 +201,12 @@ struct IKVSReadValuePrefixRequest {
 	constexpr static FileIdentifier file_identifier = 1928374;
 	KeyRef key;
 	int maxLength;
-	IKeyValueStore::ReadType type;
-	Optional<UID> debugID = Optional<UID>();
+	ReadOptions options;
 	ReplyPromise<Optional<Value>> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, maxLength, type, debugID, reply);
+		serializer(ar, key, maxLength, options, reply);
 	}
 };
 
@@ -246,12 +244,12 @@ struct IKVSReadRangeRequest {
 	KeyRangeRef keys;
 	int rowLimit;
 	int byteLimit;
-	IKeyValueStore::ReadType type;
+	ReadOptions options;
 	ReplyPromise<IKVSReadRangeReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, rowLimit, byteLimit, type, reply);
+		serializer(ar, keys, rowLimit, byteLimit, options, reply);
 	}
 };
 
@@ -402,25 +400,22 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 		return commitAndGetStorageBytes(this, commitReply);
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key,
-	                                  IKeyValueStore::ReadOptions const& options = IKeyValueStore::ReadOptions(),
-	                                  Optional<UID> debugID = Optional<UID>()) override {
-		return readValueImpl(this, IKVSGetValueRequest{ key, options.type, debugID, ReplyPromise<Optional<Value>>() });
+	Future<Optional<Value>> readValue(KeyRef key, ReadOptions const& options = ReadOptions()) override {
+		return readValueImpl(this, IKVSGetValueRequest{ key, options, ReplyPromise<Optional<Value>>() });
 	}
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
-	                                        IKeyValueStore::ReadOptions const& options = IKeyValueStore::ReadOptions(),
-	                                        Optional<UID> debugID = Optional<UID>()) override {
+	                                        ReadOptions const& options = ReadOptions()) override {
 		return interf.readValuePrefix.getReply(
-		    IKVSReadValuePrefixRequest{ key, maxLength, options.type, debugID, ReplyPromise<Optional<Value>>() });
+		    IKVSReadValuePrefixRequest{ key, maxLength, options, ReplyPromise<Optional<Value>>() });
 	}
 
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit = 1 << 30,
 	                              int byteLimit = 1 << 30,
-	                              IKeyValueStore::ReadOptions const& options = IKeyValueStore::ReadOptions()) override {
-		IKVSReadRangeRequest req{ keys, rowLimit, byteLimit, options.type, ReplyPromise<IKVSReadRangeReply>() };
+	                              ReadOptions const& options = ReadOptions()) override {
+		IKVSReadRangeRequest req{ keys, rowLimit, byteLimit, options, ReplyPromise<IKVSReadRangeReply>() };
 		return fmap([](const IKVSReadRangeReply& reply) { return reply.toRangeResult(); },
 		            interf.readRange.getReply(req));
 	}
