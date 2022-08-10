@@ -468,7 +468,7 @@ bool isWhitelisted(const std::vector<Standalone<StringRef>>& binPathVec, StringR
 
 ACTOR Future<Void> addBackupMutations(ProxyCommitData* self,
                                       const std::map<Key, MutationListRef>* logRangeMutations,
-                                      LogPushData* toCommit,
+                                      Reference<LogPushData> toCommit,
                                       Version commitVersion,
                                       double* computeDuration,
                                       double* computeStart) {
@@ -586,7 +586,18 @@ struct CommitBatchContext {
 	bool rejected = false; // If rejected due to long queue length
 
 	int64_t localBatchNumber;
-	LogPushData toCommit;
+	Reference<LogPushData> toCommit;
+
+	/// true after mutations have been tagged and serialized to toCommit.
+	/// This gets reset if we need to re-tag them post-resolution
+	/// because of a metadata change.
+	bool mutationsTagged = false;
+
+	/// Number of mutations optimistically tagged, according to toCommit.
+	int mutationsToCommit;
+
+	/// Number of metadata updates when we optimistically tagged mutations.
+	int initialMetadataUpdateCount;
 
 	int batchOperations = 0;
 
@@ -640,9 +651,6 @@ struct CommitBatchContext {
 
 	std::map<Key, MutationListRef> logRangeMutations;
 	Arena logRangeMutationsArena;
-
-	int transactionNum = 0;
-	int yieldBytes = 0;
 
 	LogSystemDiskQueueAdapter::CommitMessage msg;
 
@@ -717,8 +725,8 @@ CommitBatchContext::CommitBatchContext(ProxyCommitData* const pProxyCommitData_,
   : pProxyCommitData(pProxyCommitData_), trs(std::move(*const_cast<std::vector<CommitTransactionRequest>*>(trs_))),
     currentBatchMemBytesCount(currentBatchMemBytesCount), startTime(g_network->now()),
     localBatchNumber(++pProxyCommitData->localCommitBatchesStarted),
-    toCommit(pProxyCommitData->logSystem, pProxyCommitData->localTLogCount), span("MP:commitBatch"_loc),
-    committed(trs.size()) {
+    toCommit(makeReference<LogPushData>(pProxyCommitData->logSystem, pProxyCommitData->localTLogCount)),
+    span("MP:commitBatch"_loc), committed(trs.size()) {
 
 	evaluateBatchSize();
 
@@ -758,6 +766,227 @@ void CommitBatchContext::evaluateBatchSize() {
 	}
 }
 
+/// Serializes and appends `mutation` to `self->toCommit`.
+/// If encryption is enabled, the mutation is also encrypted with `self->cipherKeys[tenantId]`.
+///
+/// TODO: What is the role of `tenantId`? And raw access mode?
+void writeMutation(CommitBatchContext* self, int64_t tenantId, const MutationRef& mutation) {
+	static_assert(TenantInfo::INVALID_TENANT == ENCRYPT_INVALID_DOMAIN_ID);
+	if (!self->pProxyCommitData->isEncryptionEnabled || tenantId == TenantInfo::INVALID_TENANT) {
+		// TODO(yiwu): In raw access mode, use tenant prefix to figure out tenant id for user data
+		bool isRawAccess = tenantId == TenantInfo::INVALID_TENANT && !isSystemKey(mutation.param1) &&
+		                   !(mutation.type == MutationRef::ClearRange && isSystemKey(mutation.param2)) &&
+		                   self->pProxyCommitData->db->get().client.tenantMode == TenantMode::REQUIRED;
+		CODE_PROBE(isRawAccess, "Raw access to tenant key space");
+		self->toCommit->writeTypedMessage(mutation);
+	} else {
+		Arena arena;
+		self->toCommit->writeTypedMessage(mutation.encrypt(self->cipherKeys, tenantId /*domainId*/, arena));
+	}
+}
+
+/// This second pass through transactions assigns the actual mutations to the appropriate storage servers' tags.
+///
+/// If called `preResolution`, this function optimistically tags mutations for all transactions on the assumption
+/// that all transactions will commit, and the key->tag mapping won't be changed by any metadata operations prior
+/// to our commit versions.
+///
+/// If called `postResolution`, this function tags mutations for only committed transactions.
+///
+/// Implicit Inputs:
+///   * `self->trs`: transaction requests, doesn't change after commitBatch starts.
+///   * `self->commited`: which transactions are commited, determined post resolution.
+///   * `self->locked`: ? determined post resolution.
+///   * `self->pProxyCommitData->keyInfo: key->tag mapping, can change post resolution.
+///   * `self->pProxyCommitData->cacheInfo`: cache mapping? can change post resolution.
+///   * `self->pProxyCommitData->vecBackupKeys`: backup keys? can change post resolution.
+///   * `self->cipherKeys`: encryption keys, only available post-resolution.
+///
+/// Side effects:
+///   * mutations are written to `self->toCommit`
+///   * `self->mutationCount` and `self->mutationBytes` are updated with the number and size of mutations to be
+///   committed.
+///   * backup mutations are added to `self->logRangeMutations`.
+ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self, bool preResolution) {
+	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
+	state std::vector<CommitTransactionRequest>& trs = self->trs;
+	state int transactionNum = 0;
+	state int yieldBytes = 0;
+
+	for (; transactionNum < trs.size(); transactionNum++) {
+		// We can't check for commited transactions or "locked" pre-resolution.
+		if (!preResolution) {
+			if (self->committed[transactionNum] != ConflictBatch::TransactionCommitted) {
+				continue;
+			}
+			if (self->locked && !trs[transactionNum].isLockAware()) {
+				continue;
+			}
+		}
+
+		state bool checkSample = trs[transactionNum].commitCostEstimation.present();
+		state Optional<ClientTrCommitCostEstimation>* trCost = &trs[transactionNum].commitCostEstimation;
+		state int mutationNum = 0;
+		state VectorRef<MutationRef>* pMutations = &trs[transactionNum].transaction.mutations;
+		state int64_t tenantId = trs[transactionNum].tenantInfo.tenantId;
+
+		self->toCommit->addTransactionInfo(trs[transactionNum].spanContext);
+
+		for (; mutationNum < pMutations->size(); mutationNum++) {
+			if (yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+				yieldBytes = 0;
+				if (g_network->check_yield(TaskPriority::ProxyCommitYield1)) {
+					self->computeDuration += g_network->timer() - self->computeStart;
+					wait(delay(0, TaskPriority::ProxyCommitYield1));
+					self->computeStart = g_network->timer();
+				}
+			}
+
+			auto& m = (*pMutations)[mutationNum];
+			self->mutationCount++;
+			self->mutationBytes += m.expectedSize();
+			yieldBytes += m.expectedSize();
+			// Determine the set of tags (responsible storage servers) for the mutation, splitting it
+			// if necessary.  Serialize (splits of) the mutation into the message buffer and add the tags.
+
+			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+				auto& tags = pProxyCommitData->tagsForKey(m.param1);
+
+				// sample single key mutation based on cost
+				// the expectation of sampling is every COMMIT_SAMPLE_COST sample once
+				if (checkSample) {
+					double totalCosts = trCost->get().writeCosts;
+					double cost = getWriteOperationCost(m.expectedSize());
+					double mul = std::max(1.0, totalCosts / std::max(1.0, (double)CLIENT_KNOBS->COMMIT_SAMPLE_COST));
+					ASSERT(totalCosts > 0);
+					double prob = mul * cost / totalCosts;
+
+					if (deterministicRandom()->random01() < prob) {
+						for (const auto& ssInfo : pProxyCommitData->keyInfo[m.param1].src_info) {
+							auto id = ssInfo->interf.id();
+							// scale cost
+							cost = cost < CLIENT_KNOBS->COMMIT_SAMPLE_COST ? CLIENT_KNOBS->COMMIT_SAMPLE_COST : cost;
+							pProxyCommitData->updateSSTagCost(id, trs[transactionNum].tagSet.get(), m, cost);
+						}
+					}
+				}
+
+				if (pProxyCommitData->singleKeyMutationEvent->enabled) {
+					KeyRangeRef shard = pProxyCommitData->keyInfo.rangeContaining(m.param1).range();
+					pProxyCommitData->singleKeyMutationEvent->tag1 = (int64_t)tags[0].id;
+					pProxyCommitData->singleKeyMutationEvent->tag2 = (int64_t)tags[1].id;
+					pProxyCommitData->singleKeyMutationEvent->tag3 = (int64_t)tags[2].id;
+					pProxyCommitData->singleKeyMutationEvent->shardBegin = shard.begin;
+					pProxyCommitData->singleKeyMutationEvent->shardEnd = shard.end;
+					pProxyCommitData->singleKeyMutationEvent->log();
+				}
+
+				DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid).detail("To", tags);
+				self->toCommit->addTags(tags);
+				if (pProxyCommitData->cacheInfo[m.param1]) {
+					self->toCommit->addTag(cacheTag);
+				}
+				writeMutation(self, tenantId, m);
+			} else if (m.type == MutationRef::ClearRange) {
+				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
+				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
+				auto firstRange = ranges.begin();
+				++firstRange;
+				if (firstRange == ranges.end()) {
+					// Fast path
+					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid)
+					    .detail("To", ranges.begin().value().tags);
+					ranges.begin().value().populateTags();
+					self->toCommit->addTags(ranges.begin().value().tags);
+
+					// check whether clear is sampled
+					if (checkSample && !trCost->get().clearIdxCosts.empty() &&
+					    trCost->get().clearIdxCosts[0].first == mutationNum) {
+						for (const auto& ssInfo : ranges.begin().value().src_info) {
+							auto id = ssInfo->interf.id();
+							pProxyCommitData->updateSSTagCost(
+							    id, trs[transactionNum].tagSet.get(), m, trCost->get().clearIdxCosts[0].second);
+						}
+						trCost->get().clearIdxCosts.pop_front();
+					}
+				} else {
+					CODE_PROBE(true, "A clear range extends past a shard boundary");
+					std::set<Tag> allSources;
+					for (auto r : ranges) {
+						r.value().populateTags();
+						allSources.insert(r.value().tags.begin(), r.value().tags.end());
+
+						// check whether clear is sampled
+						if (checkSample && !trCost->get().clearIdxCosts.empty() &&
+						    trCost->get().clearIdxCosts[0].first == mutationNum) {
+							for (const auto& ssInfo : r.value().src_info) {
+								auto id = ssInfo->interf.id();
+								pProxyCommitData->updateSSTagCost(
+								    id, trs[transactionNum].tagSet.get(), m, trCost->get().clearIdxCosts[0].second);
+							}
+							trCost->get().clearIdxCosts.pop_front();
+						}
+					}
+
+					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m)
+					    .detail("Dbgid", pProxyCommitData->dbgid)
+					    .detail("To", allSources);
+					self->toCommit->addTags(allSources);
+				}
+
+				if (pProxyCommitData->needsCacheTag(clearRange)) {
+					self->toCommit->addTag(cacheTag);
+				}
+				writeMutation(self, tenantId, m);
+			} else {
+				UNREACHABLE();
+			}
+
+			// Check on backing up key, if backup ranges are defined and a normal key
+			if (!(pProxyCommitData->vecBackupKeys.size() > 1 &&
+			      (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey))) {
+				continue;
+			}
+
+			if (m.type != MutationRef::Type::ClearRange) {
+				// Add the mutation to the relevant backup tag
+				for (auto backupName : pProxyCommitData->vecBackupKeys[m.param1]) {
+					self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, m);
+				}
+			} else {
+				KeyRangeRef mutationRange(m.param1, m.param2);
+				KeyRangeRef intersectionRange;
+
+				// Identify and add the intersecting ranges of the mutation to the array of mutations to serialize
+				for (auto backupRange : pProxyCommitData->vecBackupKeys.intersectingRanges(mutationRange)) {
+					// Get the backup sub range
+					const auto& backupSubrange = backupRange.range();
+
+					// Determine the intersecting range
+					intersectionRange = mutationRange & backupSubrange;
+
+					// Create the custom mutation for the specific backup tag
+					MutationRef backupMutation(
+					    MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
+
+					// Add the mutation to the relevant backup tag
+					for (auto backupName : backupRange.value()) {
+						self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena,
+						                                                   backupMutation);
+					}
+				}
+			}
+		}
+
+		if (checkSample) {
+			self->pProxyCommitData->stats.txnExpensiveClearCostEstCount +=
+			    trs[transactionNum].commitCostEstimation.get().expensiveCostEstCount;
+		}
+	}
+
+	return Void();
+}
+
 // Try to identify recovery transaction and backup's apply mutations (blind writes).
 // Both cannot be rejected and are approximated by looking at first mutation
 // starting with 0xff.
@@ -776,6 +1005,21 @@ bool canReject(const std::vector<CommitTransactionRequest>& trs) {
 double computeReleaseDelay(CommitBatchContext* self, double latencyBucket) {
 	return std::min(SERVER_KNOBS->MAX_PROXY_COMPUTE,
 	                self->batchOperations * self->pProxyCommitData->commitComputePerOperation[latencyBucket]);
+}
+
+/// Returns true if there are any Versionstamp mutations in this batch of transactions.
+///
+/// This should be called before `getResolution` as those transactions are mutated
+/// as part of that step.
+bool hasVersionstampMutations(const CommitBatchContext* self) {
+	for (const auto& tr : self->trs) {
+		for (const auto& mut : tr.transaction.mutations) {
+			if (mut.type == MutationRef::SetVersionstampedKey || mut.type == MutationRef::SetVersionstampedValue) {
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
@@ -840,6 +1084,30 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		self->writtenTagsPreResolution = self->getWrittenTagsPreResolution();
 	}
+
+	// Optimistically tag mutations prior to requesting commmit version.
+	// This can be computationally expensive for large transactions, and
+	// it's preferrable to do it outside the critical path where we hold
+	// a commit version to avoid head-of-line blocking at the resolvers.
+	//
+	// The cached key->tag mapping is unlikely to change prior to resolution,
+	// but if it does, we'll have to redo this work.
+	//
+	// We'll also have to redo this work if any of the transactions in the
+	// batch fail, since we can't currently separate out serialized and tagged
+	// mutations by transaction. Perhaps it would be better to only apply this
+	// optimization to single, large transactions.
+	if (SERVER_KNOBS->ENABLE_OPTIMISTICALLY_TAGGING_MUTATIONS && !SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS &&
+	    !self->pProxyCommitData->isEncryptionEnabled && !hasVersionstampMutations(self)) {
+		ASSERT(self->toCommit->getMutationCount() == 1);
+		self->initialMetadataUpdateCount = self->pProxyCommitData->metadataUpdateCount;
+		self->computeStart = g_network->timer();
+		wait(assignMutationsToStorageServers(self, /*preResolution=*/true));
+		self->computeDuration += g_network->timer() - self->computeStart;
+		self->mutationsTagged = true;
+		self->mutationsToCommit = static_cast<int>(self->toCommit->getMutationCount());
+	}
+
 	GetCommitVersionRequest req(span.context,
 	                            pProxyCommitData->commitVersionRequestNumber++,
 	                            pProxyCommitData->mostRecentProcessedRequestNumber,
@@ -1037,6 +1305,13 @@ void applyMetadataEffect(CommitBatchContext* self) {
 }
 
 /// Determine which transactions actually committed (conservatively) by combining results from the resolvers
+///
+/// Side Effects:
+/// * Sets 'self->committed[t]` to transaction `t`'s commit status.
+/// * Sets `self->locked` and `self->lockedKey`.
+/// * Sets `self->commitCount`.
+/// * `self->pProxyCommitData->logAdapter->setNextVersion(self->commitVersion);`
+/// * Sends error response for missing tenant entries.
 void determineCommittedTransactions(CommitBatchContext* self) {
 	auto pProxyCommitData = self->pProxyCommitData;
 	const auto& trs = self->trs;
@@ -1078,6 +1353,22 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 			}
 		}
 	}
+
+	// Check for tenant entries.
+	// XXX: Why do we return the error here instead of waiting until reply?
+	for (int t = 0; t < trs.size(); t++) {
+		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
+			ErrorOr<Optional<TenantMapEntry>> result = getTenantEntry(
+			    pProxyCommitData, trs[t].tenantInfo.name.castTo<TenantNameRef>(), trs[t].tenantInfo.tenantId, true);
+
+			if (result.isError()) {
+				self->committed[t] = ConflictBatch::TransactionTenantFailure;
+				trs[t].reply.sendError(result.getError());
+			} else {
+				self->commitCount++;
+			}
+		}
+	}
 }
 
 // This first pass through committed transactions deals with "metadata" effects (modifications of txnStateStore, changes
@@ -1089,26 +1380,18 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
-			ErrorOr<Optional<TenantMapEntry>> result = getTenantEntry(
-			    pProxyCommitData, trs[t].tenantInfo.name.castTo<TenantNameRef>(), trs[t].tenantInfo.tenantId, true);
-
-			if (result.isError()) {
-				self->committed[t] = ConflictBatch::TransactionTenantFailure;
-				trs[t].reply.sendError(result.getError());
-			} else {
-				self->commitCount++;
-				applyMetadataMutations(trs[t].spanContext,
-				                       *pProxyCommitData,
-				                       self->arena,
-				                       pProxyCommitData->logSystem,
-				                       trs[t].transaction.mutations,
-				                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
-				                       pProxyCommitData->isEncryptionEnabled ? &self->cipherKeys : nullptr,
-				                       self->forceRecovery,
-				                       self->commitVersion,
-				                       self->commitVersion + 1,
-				                       /* initialCommit= */ false);
-			}
+			applyMetadataMutations(trs[t].spanContext,
+			                       *pProxyCommitData,
+			                       self->arena,
+			                       pProxyCommitData->logSystem,
+			                       trs[t].transaction.mutations,
+			                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr
+			                                                                          : self->toCommit.getPtr(),
+			                       pProxyCommitData->isEncryptionEnabled ? &self->cipherKeys : nullptr,
+			                       self->forceRecovery,
+			                       self->commitVersion,
+			                       self->commitVersion + 1,
+			                       /* initialCommit= */ false);
 		}
 		if (self->firstStateMutations) {
 			ASSERT(self->committed[t] == ConflictBatch::TransactionCommitted);
@@ -1125,12 +1408,12 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		// Resolver also calculates forceRecovery and only applies metadata mutations
 		// in the same set of transactions as this proxy.
 		ResolveTransactionBatchReply& reply = self->resolution[0];
-		self->toCommit.setMutations(reply.privateMutationCount, reply.privateMutations);
+		self->toCommit->setMutations(reply.privateMutationCount, reply.privateMutations);
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 			// TraceEvent("ResolverReturn").detail("ReturnTags",reply.writtenTags).detail("TPCVsize",reply.tpcvMap.size()).detail("ReqTags",self->writtenTagsPreResolution);
 			self->tpcvMap = reply.tpcvMap;
 		}
-		self->toCommit.addWrittenTags(reply.writtenTags);
+		self->toCommit->addWrittenTags(reply.writtenTags);
 	}
 
 	self->lockedKey = pProxyCommitData->txnStateStore->readValue(databaseLockedKey).get();
@@ -1156,196 +1439,46 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	return Void();
 }
 
-void writeMutation(CommitBatchContext* self, int64_t tenantId, const MutationRef& mutation) {
-	static_assert(TenantInfo::INVALID_TENANT == ENCRYPT_INVALID_DOMAIN_ID);
-	if (!self->pProxyCommitData->isEncryptionEnabled || tenantId == TenantInfo::INVALID_TENANT) {
-		// TODO(yiwu): In raw access mode, use tenant prefix to figure out tenant id for user data
-		bool isRawAccess = tenantId == TenantInfo::INVALID_TENANT && !isSystemKey(mutation.param1) &&
-		                   !(mutation.type == MutationRef::ClearRange && isSystemKey(mutation.param2)) &&
-		                   self->pProxyCommitData->db->get().client.tenantMode == TenantMode::REQUIRED;
-		CODE_PROBE(isRawAccess, "Raw access to tenant key space");
-		self->toCommit.writeTypedMessage(mutation);
-	} else {
-		Arena arena;
-		self->toCommit.writeTypedMessage(mutation.encrypt(self->cipherKeys, tenantId /*domainId*/, arena));
+/// Returns true if there are an unapplied metadata mutations prior to this commit version.
+///
+/// This function is conservative, so it might return true when
+/// there haven't actually been any relevant mutations, but
+/// it should never return false if there have been.
+///
+/// This should be called after `getResolution` but before any metadata mutations
+/// are applied.
+bool hasUnappliedMetadataMutations(const CommitBatchContext* self) {
+	// Any state mutations from the resolver count.
+	ASSERT(self->resolution.size() > 0);
+	if (self->resolution[0].stateMutations.size() > 0) {
+		return true;
 	}
+
+	// Check this batch for metadata mutations.
+	for (const auto& tr : self->trs) {
+		for (const auto& mut : tr.transaction.mutations) {
+			if (isMetadataMutation(mut)) {
+				return true;
+			}
+		}
+	}
+
+	return false;
 }
 
-/// This second pass through committed transactions assigns the actual mutations to the appropriate storage servers'
-/// tags
-ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
-	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
-	state std::vector<CommitTransactionRequest>& trs = self->trs;
-
-	for (; self->transactionNum < trs.size(); self->transactionNum++) {
-		if (!(self->committed[self->transactionNum] == ConflictBatch::TransactionCommitted &&
-		      (!self->locked || trs[self->transactionNum].isLockAware()))) {
-			continue;
+/// Returns true if all transactions will commit, according to the resolvers.
+///
+/// This should be called after `determineCommittedTransactions`.
+bool allCommitted(const CommitBatchContext* self) {
+	for (int t = 0; t < self->trs.size(); t++) {
+		if (self->committed[t] != ConflictBatch::TransactionCommitted) {
+			return false;
 		}
-
-		state bool checkSample = trs[self->transactionNum].commitCostEstimation.present();
-		state Optional<ClientTrCommitCostEstimation>* trCost = &trs[self->transactionNum].commitCostEstimation;
-		state int mutationNum = 0;
-		state VectorRef<MutationRef>* pMutations = &trs[self->transactionNum].transaction.mutations;
-		state int64_t tenantId = trs[self->transactionNum].tenantInfo.tenantId;
-
-		self->toCommit.addTransactionInfo(trs[self->transactionNum].spanContext);
-
-		for (; mutationNum < pMutations->size(); mutationNum++) {
-			if (self->yieldBytes > SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
-				self->yieldBytes = 0;
-				if (g_network->check_yield(TaskPriority::ProxyCommitYield1)) {
-					self->computeDuration += g_network->timer() - self->computeStart;
-					wait(delay(0, TaskPriority::ProxyCommitYield1));
-					self->computeStart = g_network->timer();
-				}
-			}
-
-			auto& m = (*pMutations)[mutationNum];
-			self->mutationCount++;
-			self->mutationBytes += m.expectedSize();
-			self->yieldBytes += m.expectedSize();
-			// Determine the set of tags (responsible storage servers) for the mutation, splitting it
-			// if necessary.  Serialize (splits of) the mutation into the message buffer and add the tags.
-
-			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
-				auto& tags = pProxyCommitData->tagsForKey(m.param1);
-
-				// sample single key mutation based on cost
-				// the expectation of sampling is every COMMIT_SAMPLE_COST sample once
-				if (checkSample) {
-					double totalCosts = trCost->get().writeCosts;
-					double cost = getWriteOperationCost(m.expectedSize());
-					double mul = std::max(1.0, totalCosts / std::max(1.0, (double)CLIENT_KNOBS->COMMIT_SAMPLE_COST));
-					ASSERT(totalCosts > 0);
-					double prob = mul * cost / totalCosts;
-
-					if (deterministicRandom()->random01() < prob) {
-						for (const auto& ssInfo : pProxyCommitData->keyInfo[m.param1].src_info) {
-							auto id = ssInfo->interf.id();
-							// scale cost
-							cost = cost < CLIENT_KNOBS->COMMIT_SAMPLE_COST ? CLIENT_KNOBS->COMMIT_SAMPLE_COST : cost;
-							pProxyCommitData->updateSSTagCost(id, trs[self->transactionNum].tagSet.get(), m, cost);
-						}
-					}
-				}
-
-				if (pProxyCommitData->singleKeyMutationEvent->enabled) {
-					KeyRangeRef shard = pProxyCommitData->keyInfo.rangeContaining(m.param1).range();
-					pProxyCommitData->singleKeyMutationEvent->tag1 = (int64_t)tags[0].id;
-					pProxyCommitData->singleKeyMutationEvent->tag2 = (int64_t)tags[1].id;
-					pProxyCommitData->singleKeyMutationEvent->tag3 = (int64_t)tags[2].id;
-					pProxyCommitData->singleKeyMutationEvent->shardBegin = shard.begin;
-					pProxyCommitData->singleKeyMutationEvent->shardEnd = shard.end;
-					pProxyCommitData->singleKeyMutationEvent->log();
-				}
-
-				DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid).detail("To", tags);
-				self->toCommit.addTags(tags);
-				if (pProxyCommitData->cacheInfo[m.param1]) {
-					self->toCommit.addTag(cacheTag);
-				}
-				writeMutation(self, tenantId, m);
-			} else if (m.type == MutationRef::ClearRange) {
-				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
-				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
-				auto firstRange = ranges.begin();
-				++firstRange;
-				if (firstRange == ranges.end()) {
-					// Fast path
-					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid)
-					    .detail("To", ranges.begin().value().tags);
-					ranges.begin().value().populateTags();
-					self->toCommit.addTags(ranges.begin().value().tags);
-
-					// check whether clear is sampled
-					if (checkSample && !trCost->get().clearIdxCosts.empty() &&
-					    trCost->get().clearIdxCosts[0].first == mutationNum) {
-						for (const auto& ssInfo : ranges.begin().value().src_info) {
-							auto id = ssInfo->interf.id();
-							pProxyCommitData->updateSSTagCost(
-							    id, trs[self->transactionNum].tagSet.get(), m, trCost->get().clearIdxCosts[0].second);
-						}
-						trCost->get().clearIdxCosts.pop_front();
-					}
-				} else {
-					CODE_PROBE(true, "A clear range extends past a shard boundary");
-					std::set<Tag> allSources;
-					for (auto r : ranges) {
-						r.value().populateTags();
-						allSources.insert(r.value().tags.begin(), r.value().tags.end());
-
-						// check whether clear is sampled
-						if (checkSample && !trCost->get().clearIdxCosts.empty() &&
-						    trCost->get().clearIdxCosts[0].first == mutationNum) {
-							for (const auto& ssInfo : r.value().src_info) {
-								auto id = ssInfo->interf.id();
-								pProxyCommitData->updateSSTagCost(id,
-								                                  trs[self->transactionNum].tagSet.get(),
-								                                  m,
-								                                  trCost->get().clearIdxCosts[0].second);
-							}
-							trCost->get().clearIdxCosts.pop_front();
-						}
-					}
-
-					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m)
-					    .detail("Dbgid", pProxyCommitData->dbgid)
-					    .detail("To", allSources);
-					self->toCommit.addTags(allSources);
-				}
-
-				if (pProxyCommitData->needsCacheTag(clearRange)) {
-					self->toCommit.addTag(cacheTag);
-				}
-				writeMutation(self, tenantId, m);
-			} else {
-				UNREACHABLE();
-			}
-
-			// Check on backing up key, if backup ranges are defined and a normal key
-			if (!(pProxyCommitData->vecBackupKeys.size() > 1 &&
-			      (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey))) {
-				continue;
-			}
-
-			if (m.type != MutationRef::Type::ClearRange) {
-				// Add the mutation to the relevant backup tag
-				for (auto backupName : pProxyCommitData->vecBackupKeys[m.param1]) {
-					self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, m);
-				}
-			} else {
-				KeyRangeRef mutationRange(m.param1, m.param2);
-				KeyRangeRef intersectionRange;
-
-				// Identify and add the intersecting ranges of the mutation to the array of mutations to serialize
-				for (auto backupRange : pProxyCommitData->vecBackupKeys.intersectingRanges(mutationRange)) {
-					// Get the backup sub range
-					const auto& backupSubrange = backupRange.range();
-
-					// Determine the intersecting range
-					intersectionRange = mutationRange & backupSubrange;
-
-					// Create the custom mutation for the specific backup tag
-					MutationRef backupMutation(
-					    MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
-
-					// Add the mutation to the relevant backup tag
-					for (auto backupName : backupRange.value()) {
-						self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena,
-						                                                   backupMutation);
-					}
-				}
-			}
-		}
-
-		if (checkSample) {
-			self->pProxyCommitData->stats.txnExpensiveClearCostEstCount +=
-			    trs[self->transactionNum].commitCostEstimation.get().expensiveCostEstCount;
+		if (self->locked && !self->trs[t].isLockAware()) {
+			return false;
 		}
 	}
-
-	return Void();
+	return true;
 }
 
 ACTOR Future<Void> postResolution(CommitBatchContext* self) {
@@ -1386,11 +1519,45 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	determineCommittedTransactions(self);
 
 	if (debugID.present()) {
-		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ApplyMetadaEffect");
+		g_traceBatch.addEvent(
+		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.DetermineCommittedTxns");
 	}
 
 	if (self->forceRecovery) {
 		wait(Future<Void>(Never()));
+	}
+
+	// Keep track of any possible metadata mutations.
+	if (hasUnappliedMetadataMutations(self)) {
+		self->pProxyCommitData->metadataUpdateCount++;
+	}
+
+	// If we optimistically tagged mutations pre-resolution, then
+	// we need to check here that none of our assumptions were
+	// validated. If there were any metadata changes, or any
+	// transactions failed to commit, then we need to reset our state.
+	//
+	// Note, this needs to take place prior to applying metadata
+	// mutations, which might append to toCommit. But it is safe
+	// to check after applyMetadataEffect because that doesn't
+	// append to toCommit.
+	if (self->mutationsTagged) {
+		TraceEvent(SevInfo, "ProxyOptimisticTagging")
+		    .detail("CommitVersion", self->commitVersion)
+		    .detail("MutationsTagged", self->mutationsToCommit);
+		if (!allCommitted(self) || self->pProxyCommitData->metadataUpdateCount > self->initialMetadataUpdateCount) {
+			CODE_PROBE(true, "Undoing optimistically tagged mutations");
+			TraceEvent(SevInfo, "ProxyUndoingOptimism").detail("CommitVersion", self->commitVersion);
+			// Make sure we're not unintetionally wiping out any mutations.
+			ASSERT(self->toCommit->getMutationCount() == self->mutationsToCommit);
+
+			self->toCommit =
+			    makeReference<LogPushData>(self->pProxyCommitData->logSystem, self->pProxyCommitData->localTLogCount);
+			self->logRangeMutations.clear();
+			self->mutationCount = 0;
+			self->mutationBytes = 0;
+			self->mutationsTagged = false;
+		}
 	}
 
 	// First pass
@@ -1402,7 +1569,10 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	}
 
 	// Second pass
-	wait(assignMutationsToStorageServers(self));
+	// This is only necessary if mutations haven't already been tagged.
+	if (!self->mutationsTagged) {
+		wait(assignMutationsToStorageServers(self, /*preResolution=*/false));
+	}
 
 	if (debugID.present()) {
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.AssignMutationToSS");
@@ -1412,13 +1582,13 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	if ((pProxyCommitData->vecBackupKeys.size() > 1) && self->logRangeMutations.size()) {
 		wait(addBackupMutations(pProxyCommitData,
 		                        &self->logRangeMutations,
-		                        &self->toCommit,
+		                        self->toCommit,
 		                        self->commitVersion,
 		                        &self->computeDuration,
 		                        &self->computeStart));
 	}
 
-	self->toCommit.saveTags(self->writtenTags);
+	self->toCommit->saveTags(self->writtenTags);
 
 	pProxyCommitData->stats.mutations += self->mutationCount;
 	pProxyCommitData->stats.mutationBytes += self->mutationBytes;
@@ -1476,9 +1646,9 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	bool firstMessage = true;
 	for (auto m : self->msg.messages) {
 		if (firstMessage) {
-			self->toCommit.addTxsTag();
+			self->toCommit->addTxsTag();
 		}
-		self->toCommit.writeMessage(StringRef(m.begin(), m.size()), !firstMessage);
+		self->toCommit->writeMessage(StringRef(m.begin(), m.size()), !firstMessage);
 		firstMessage = false;
 	}
 
@@ -1505,12 +1675,12 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	                                                          self->commitVersion,
 	                                                          pProxyCommitData->committedVersion.get(),
 	                                                          pProxyCommitData->minKnownCommittedVersion,
-	                                                          self->toCommit,
+	                                                          *self->toCommit,
 	                                                          span.context,
 	                                                          self->debugID,
 	                                                          tpcvMap);
 
-	float ratio = self->toCommit.getEmptyMessageRatio();
+	float ratio = self->toCommit->getEmptyMessageRatio();
 	pProxyCommitData->stats.commitBatchingEmptyMessageRatio.addMeasurement(ratio);
 
 	if (!self->forceRecovery) {

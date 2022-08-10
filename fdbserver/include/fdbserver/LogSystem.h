@@ -738,7 +738,7 @@ struct LengthPrefixedStringRef {
 // such as LogProtocolMessage or SpanContextMessage. The type of `Mutation` is
 // uniquely identified by its first byte -- a value from MutationRef::Type.
 //
-struct LogPushData : NonCopyable {
+struct LogPushData : NonCopyable, public ReferenceCounted<LogPushData> {
 	// Log subsequences have to start at 1 (the MergedPeekCursor relies on this to make sure we never have !hasMessage()
 	// in the middle of data for a version
 
