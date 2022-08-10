@@ -78,7 +78,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 	ACTOR static Future<Void> testTenantNotFound(Database cx) {
 		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(cx, createPayload);
-		TraceEvent("TenantNotFound_Start").log();
+		TraceEvent("TenantNotFound.Start").log();
 
 		wait(cache->init());
 
@@ -89,7 +89,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		Optional<TenantEntryCachePayload<int64_t>> value1 = wait(cache->getByPrefix(dummy.prefix));
 		ASSERT(!value1.present());
 
-		TraceEvent("TenantNotFound_End").log();
+		TraceEvent("TenantNotFound.End").log();
 		return Void();
 	}
 
@@ -100,7 +100,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(cx, createPayload);
 		state int nTenants = deterministicRandom()->randomInt(5, self->maxTenants);
 
-		TraceEvent("CreateTenantsAndLookup_Start").log();
+		TraceEvent("CreateTenantsAndLookup.Start").log();
 
 		wait(cache->init());
 
@@ -124,7 +124,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 		wait(compareContents(tenantList, cache));
 
-		TraceEvent("CreateTenantsAndLookup_End").log();
+		TraceEvent("CreateTenantsAndLookup.End").log();
 		return Void();
 	}
 
@@ -134,12 +134,12 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 		ASSERT(!tenantList->empty());
 
-		TraceEvent("CacheReload_Start").log();
+		TraceEvent("CacheReload.Start").log();
 
 		wait(cache->init());
 		wait(compareContents(tenantList, cache));
 
-		TraceEvent("CacheReload_End").log();
+		TraceEvent("CacheReload.End").log();
 		return Void();
 	}
 

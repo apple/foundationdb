@@ -102,7 +102,7 @@ private:
 		        tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 		ASSERT(tenantList.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantList.more);
 
-		TraceEvent(SevDebug, "TenantEntryCache_GetTenantList").detail("Count", tenantList.results.size());
+		TraceEvent(SevDebug, "TenantEntryCache.GetTenantList").detail("Count", tenantList.results.size());
 
 		return tenantList.results;
 	}
@@ -116,7 +116,7 @@ private:
 	}
 
 	ACTOR static Future<Void> refreshImpl(TenantEntryCache<T>* cache, TenantEntryCacheRefreshReason reason) {
-		TraceEvent(SevDebug, "TenantEntryCache_RefreshStart", cache->id()).detail("Reason", static_cast<int>(reason));
+		TraceEvent(SevDebug, "TenantEntryCache.RefreshStart", cache->id()).detail("Reason", static_cast<int>(reason));
 
 		// Increment cache generation count
 		cache->incGen();
@@ -136,7 +136,7 @@ private:
 				break;
 			} catch (Error& e) {
 				if (e.code() != error_code_actor_cancelled) {
-					TraceEvent(SevInfo, "TenantEntryCache_RefreshError", cache->id())
+					TraceEvent(SevInfo, "TenantEntryCache.RefreshError", cache->id())
 					    .errorUnsuppressed(e)
 					    .suppressFor(1.0);
 				}
@@ -144,7 +144,7 @@ private:
 			}
 		}
 
-		TraceEvent(SevDebug, "TenantEntryCache_RefreshEnd", cache->id())
+		TraceEvent(SevDebug, "TenantEntryCache.RefreshEnd", cache->id())
 		    .detail("Reason", static_cast<int>(reason))
 		    .detail("CurGen", cache->getCurGen());
 
@@ -172,7 +172,7 @@ private:
 			return ret;
 		}
 
-		TraceEvent(SevInfo, "TenantEntryCache_GetByIdRefresh").detail("TenantId", tenantId);
+		TraceEvent(SevInfo, "TenantEntryCache.GetByIdRefresh").detail("TenantId", tenantId);
 
 		// Entry not found. Refresh cacheEntries by scanning underlying KeyRange.
 		// TODO: Cache will implement a "KeyRange" watch, monitoring notification when a new entry gets added or any
@@ -191,7 +191,7 @@ private:
 			return ret;
 		}
 
-		TraceEvent(SevInfo, "TenantEntryCache_GetByNameRefresh").detail("TenantName", name.contents().toString());
+		TraceEvent(SevInfo, "TenantEntryCache.GetByNameRefresh").detail("TenantName", name.contents().toString());
 
 		// Entry not found. Refresh cacheEntries by scanning underlying KeyRange.
 		// TODO: Cache will implement a "KeyRange" watch, monitoring notification when a new entry gets added or any
@@ -207,7 +207,7 @@ private:
 	void triggerSweeper() { sweepTrigger.trigger(); }
 
 	void sweep() {
-		TraceEvent(SevDebug, "TenantEntryCache_SweepStart", uid).log();
+		TraceEvent(SevDebug, "TenantEntryCache.SweepStart", uid).log();
 
 		// Sweep cache and clean up entries older than current generation
 		TenantNameEntryPairVec entriesToRemove;
@@ -220,7 +220,7 @@ private:
 		}
 
 		for (auto& r : entriesToRemove) {
-			TraceEvent(SevInfo, "TenantEntryCache_Remove", uid)
+			TraceEvent(SevInfo, "TenantEntryCache.Remove", uid)
 			    .detail("TenantName", r.first.contents())
 			    .detail("TenantID", r.second.id)
 			    .detail("TenantPrefix", r.second.prefix);
@@ -229,7 +229,7 @@ private:
 			mapByTenantName.erase(r.first);
 		}
 
-		TraceEvent(SevInfo, "TenantEntryCache_SweepDone", uid).detail("Removed", entriesToRemove.size());
+		TraceEvent(SevInfo, "TenantEntryCache.SweepDone", uid).detail("Removed", entriesToRemove.size());
 	}
 
 	Optional<TenantEntryCachePayload<T>> lookupById(int64_t tenantId) {
@@ -272,7 +272,7 @@ public:
 	    hits("TenantEntryCacheHits", metrics), misses("TenantEntryCacheMisses", metrics),
 	    refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
 	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics), numSweeps("TenantEntryCacheNumSweeps", metrics) {
-		TraceEvent("TenantEntryCache_CreatedDefaultFunc", uid).detail("Gen", curGen);
+		TraceEvent("TenantEntryCache.CreatedDefaultFunc", uid).detail("Gen", curGen);
 	}
 
 	TenantEntryCache(Database db, TenantEntryCachePayloadFunc<T> fn)
@@ -280,7 +280,7 @@ public:
 	    metrics("TenantEntryCacheMetrics", uid.toString()), hits("TenantEntryCacheHits", metrics),
 	    misses("TenantEntryCacheMisses", metrics), refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
 	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics), numSweeps("TenantEntryCacheNumSweeps", metrics) {
-		TraceEvent("TenantEntryCache_Created", uid).detail("Gen", curGen);
+		TraceEvent("TenantEntryCache.Created", uid).detail("Gen", curGen);
 	}
 
 	TenantEntryCache(Database db, UID id, TenantEntryCachePayloadFunc<T> fn)
@@ -288,11 +288,11 @@ public:
 	    metrics("TenantEntryCacheMetrics", uid.toString()), hits("TenantEntryCacheHits", metrics),
 	    misses("TenantEntryCacheMisses", metrics), refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
 	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics), numSweeps("TenantEntryCacheNumSweeps", metrics) {
-		TraceEvent("TenantEntryCache_Created", uid).detail("Gen", curGen);
+		TraceEvent("TenantEntryCache.Created", uid).detail("Gen", curGen);
 	}
 
 	Future<Void> init() {
-		TraceEvent(SevInfo, "TenantEntryCache_Init", uid).log();
+		TraceEvent(SevInfo, "TenantEntryCache.Init", uid).log();
 
 		// Launch sweeper to cleanup stale entries.
 		sweeper = sweepImpl(this);
@@ -327,7 +327,7 @@ public:
 			mapByTenantId[pair.second.id] = payload;
 			mapByTenantName[pair.first] = payload;
 
-			TraceEvent(SevInfo, "TenantEntryCache_NewTenant", uid)
+			TraceEvent(SevInfo, "TenantEntryCache.NewTenant", uid)
 			    .detail("TenantName", pair.first.contents().toString())
 			    .detail("TenantID", pair.second.id)
 			    .detail("TenantPrefix", pair.second.prefix)
@@ -336,7 +336,7 @@ public:
 			mapByTenantId[pair.second.id] = payload;
 			mapByTenantName[pair.first] = payload;
 
-			TraceEvent(SevInfo, "TenantEntryCache_UpdateTenant", uid)
+			TraceEvent(SevInfo, "TenantEntryCache.UpdateTenant", uid)
 			    .detail("TenantName", pair.first.contents().toString())
 			    .detail("TenantID", pair.second.id)
 			    .detail("TenantPrefix", pair.second.prefix)
