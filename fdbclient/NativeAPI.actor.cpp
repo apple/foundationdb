@@ -6770,9 +6770,12 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 				}
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_broken_promise && e.code() != error_code_batch_transaction_throttled)
+			if (e.code() != error_code_broken_promise && e.code() != error_code_batch_transaction_throttled &&
+			    e.code() != error_code_proxy_memory_limit_exceeded)
 				TraceEvent(SevError, "GetConsistentReadVersionError").error(e);
-			if (e.code() == error_code_batch_transaction_throttled && !cx->apiVersionAtLeast(630)) {
+			if ((e.code() == error_code_batch_transaction_throttled ||
+			     e.code() == error_code_proxy_memory_limit_exceeded) &&
+			    !cx->apiVersionAtLeast(630)) {
 				wait(delayJittered(5.0));
 			} else {
 				throw;
