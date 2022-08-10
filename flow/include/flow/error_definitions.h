@@ -97,6 +97,7 @@ ERROR( unexpected_encoding_type, 1073, "Page content decoding failed" )
 ERROR( encryption_key_not_found, 1074, "Encryption key not found" )
 ERROR( data_move_cancelled, 1075, "Data move was cancelled" )
 ERROR( data_move_dest_team_not_found, 1076, "Dest team was not found for data move" )
+ERROR( blob_worker_full, 1077, "Blob worker cannot take on more granule assignments" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )

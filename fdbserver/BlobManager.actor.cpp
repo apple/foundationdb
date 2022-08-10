@@ -194,6 +194,7 @@ struct RangeAssignment {
 	bool isAssign;
 	KeyRange keyRange;
 	Optional<UID> worker;
+	Optional<std::pair<UID, Error>> previousFailure;
 
 	// I tried doing this with a union and it was just kind of messy
 	Optional<RangeAssignmentData> assign;
@@ -667,7 +668,8 @@ ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmDat
 // Picks a worker with the fewest number of already assigned ranges.
 // If there is a tie, picks one such worker at random.
 // TODO: add desired per-blob-worker limit? don't assign ranges to each worker past that limit?
-ACTOR Future<UID> pickWorkerForAssign(Reference<BlobManagerData> bmData) {
+ACTOR Future<UID> pickWorkerForAssign(Reference<BlobManagerData> bmData,
+                                      Optional<std::pair<UID, Error>> previousFailure) {
 	// wait until there are BWs to pick from
 	loop {
 		state bool wasZeroWorkers = false;
@@ -694,15 +696,42 @@ ACTOR Future<UID> pickWorkerForAssign(Reference<BlobManagerData> bmData) {
 	int minGranulesAssigned = INT_MAX;
 	std::vector<UID> eligibleWorkers;
 
+	// because lowest number of granules worker(s) might not exactly have the lowest memory for various reasons, if we
+	// got blob_worker_full as the error last time, sometimes just pick a random worker that wasn't the last one we
+	// tried
+	if (bmData->workerStats.size() >= 2 && previousFailure.present() &&
+	    previousFailure.get().second.code() == error_code_blob_worker_full && deterministicRandom()->coinflip()) {
+		CODE_PROBE(true, "randomly picking worker due to blob_worker_full");
+		eligibleWorkers.reserve(bmData->workerStats.size());
+		for (auto& it : bmData->workerStats) {
+			if (it.first != previousFailure.get().first) {
+				eligibleWorkers.push_back(it.first);
+			}
+		}
+		ASSERT(!eligibleWorkers.empty());
+		int randomIdx = deterministicRandom()->randomInt(0, eligibleWorkers.size());
+		if (BM_DEBUG) {
+			fmt::print("picked worker {0} randomly since previous attempt got blob_worker_full\n",
+			           eligibleWorkers[randomIdx].toString().substr(0, 5));
+		}
+
+		return eligibleWorkers[randomIdx];
+	}
+
 	for (auto const& worker : bmData->workerStats) {
 		UID currId = worker.first;
 		int granulesAssigned = worker.second.numGranulesAssigned;
 
-		if (granulesAssigned < minGranulesAssigned) {
-			eligibleWorkers.resize(0);
-			minGranulesAssigned = granulesAssigned;
-			eligibleWorkers.emplace_back(currId);
-		} else if (granulesAssigned == minGranulesAssigned) {
+		// if previous attempt failed and that worker is still present, ignore it
+		if (bmData->workerStats.size() >= 2 && previousFailure.present() && previousFailure.get().first == currId) {
+			continue;
+		}
+
+		if (granulesAssigned <= minGranulesAssigned) {
+			if (granulesAssigned < minGranulesAssigned) {
+				eligibleWorkers.clear();
+				minGranulesAssigned = granulesAssigned;
+			}
 			eligibleWorkers.emplace_back(currId);
 		}
 	}
@@ -712,7 +741,7 @@ ACTOR Future<UID> pickWorkerForAssign(Reference<BlobManagerData> bmData) {
 	int idx = deterministicRandom()->randomInt(0, eligibleWorkers.size());
 	if (BM_DEBUG) {
 		fmt::print("picked worker {0}, which has a minimal number ({1}) of granules assigned\n",
-		           eligibleWorkers[idx].toString(),
+		           eligibleWorkers[idx].toString().substr(0, 5),
 		           minGranulesAssigned);
 	}
 
@@ -740,7 +769,7 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 
 	if (!workerID.present()) {
 		ASSERT(assignment.isAssign && assignment.assign.get().type != AssignRequestType::Continue);
-		UID _workerId = wait(pickWorkerForAssign(bmData));
+		UID _workerId = wait(pickWorkerForAssign(bmData, assignment.previousFailure));
 		if (BM_DEBUG) {
 			fmt::print("Chose BW {0} for seqno {1} in BM {2}\n", _workerId.toString(), seqNo, bmData->epoch);
 		}
@@ -801,6 +830,7 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			}
 		}
 	} catch (Error& e) {
+		state Error e2 = e;
 		if (e.code() == error_code_operation_cancelled) {
 			throw;
 		}
@@ -828,7 +858,8 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			return Void();
 		}
 
-		if (e.code() != error_code_broken_promise && e.code() != error_code_no_more_servers) {
+		if (e.code() != error_code_broken_promise && e.code() != error_code_no_more_servers &&
+		    e.code() != error_code_blob_worker_full) {
 			TraceEvent(SevWarn, "BlobManagerUnexpectedErrorDoRangeAssignment", bmData->id)
 			    .error(e)
 			    .detail("Epoch", bmData->epoch);
@@ -839,6 +870,11 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			throw;
 		}
 
+		if (e.code() == error_code_blob_worker_full) {
+			ASSERT(assignment.isAssign);
+			wait(delay(1.0)); // wait a bit before retrying
+		}
+
 		CODE_PROBE(true, "BM retrying range assign");
 
 		// We use reliable delivery (getReply), so the broken_promise means the worker is dead, and we may need to retry
@@ -846,7 +882,7 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 		if (assignment.isAssign) {
 			if (BM_DEBUG) {
 				fmt::print("BM got error {0} assigning range [{1} - {2}) to worker {3}, requeueing\n",
-				           e.name(),
+				           e2.name(),
 				           assignment.keyRange.begin.printable(),
 				           assignment.keyRange.end.printable(),
 				           workerID.get().toString());
@@ -867,8 +903,9 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			ASSERT(assignment.assign.present());
 			assignment.assign.get().type = AssignRequestType::Normal;
 			assignment.worker.reset();
+			std::pair<UID, Error> failure = { workerID.get(), e2 };
+			assignment.previousFailure = failure;
 			handleRangeAssign(bmData, assignment);
-			// FIXME: improvement would be to add history of failed workers to assignment so it can try other ones first
 		} else {
 			if (BM_DEBUG) {
 				fmt::print("BM got error revoking range [{0} - {1}) from worker",
