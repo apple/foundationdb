@@ -322,9 +322,22 @@ public:
 						p.lastThrottledTagChangeId = self.tagThrottler->getThrottledTagChangeId();
 						p.lastTagPushTime = now();
 
-						reply.throttledTags = self.tagThrottler->getClientRates();
-						bool returningTagsToProxy =
-						    reply.throttledTags.present() && reply.throttledTags.get().size() > 0;
+						bool returningTagsToProxy{ false };
+						if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
+							reply.proxyThrottledTags = self.tagThrottler->getRates();
+							if (reply.proxyThrottledTags.present()) {
+								for (auto& [priority, tagToRate] : reply.proxyThrottledTags.get()) {
+									for (auto& [tag, rate] : tagToRate) {
+										rate /= self.grvProxyInfo.size();
+									}
+								}
+								returningTagsToProxy = reply.proxyThrottledTags.get().size() > 0;
+							}
+						} else {
+							reply.clientThrottledTags = self.tagThrottler->getClientRates();
+							returningTagsToProxy =
+							    reply.clientThrottledTags.present() && reply.clientThrottledTags.get().size() > 0;
+						}
 						CODE_PROBE(returningTagsToProxy, "Returning tag throttles to a proxy");
 					}
 

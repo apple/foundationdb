@@ -175,6 +175,10 @@ public:
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() {
 		return throttledTags.getClientRates(autoThrottlingEnabled);
 	}
+	PrioritizedTransactionTagMap<double> getRates() const {
+		// TODO: Implement (currently not supported)
+		return {};
+	}
 	int64_t autoThrottleCount() const { return throttledTags.autoThrottleCount(); }
 	uint32_t busyReadTagCount() const { return throttledTags.getBusyReadTagCount(); }
 	uint32_t busyWriteTagCount() const { return throttledTags.getBusyWriteTagCount(); }
@@ -219,6 +223,9 @@ uint64_t TagThrottler::getThrottledTagChangeId() const {
 }
 PrioritizedTransactionTagMap<ClientTagThrottleLimits> TagThrottler::getClientRates() {
 	return impl->getClientRates();
+}
+PrioritizedTransactionTagMap<double> TagThrottler::getRates() {
+	return impl->getRates();
 }
 int64_t TagThrottler::autoThrottleCount() const {
 	return impl->autoThrottleCount();

@@ -2276,7 +2276,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 				} else {
 					tagStatsObj["limiting_tps"] = "<unset>"_sr;
 				}
-				tagStatsObj["per_client_tps"] = tagStats.perClientTps;
+				tagStatsObj["target_tps"] = tagStats.targetTps;
 				globalTagThrottlerObj[printable(tag)] = tagStatsObj;
 			}
 			(*qos)["global_tag_throttler"] = globalTagThrottlerObj;

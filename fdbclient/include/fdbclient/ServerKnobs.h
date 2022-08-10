@@ -591,6 +591,8 @@ public:
 	// Use global tag throttling strategy. i.e. throttle based on the cluster-wide
 	// throughput for tags and their associated quotas.
 	bool GLOBAL_TAG_THROTTLING;
+	// Enforce tag throttling on proxies rather than on clients
+	bool ENFORCE_TAG_THROTTLING_ON_PROXIES;
 	// Minimum number of transactions per second that the global tag throttler must allow for each tag
 	double GLOBAL_TAG_THROTTLING_MIN_RATE;
 	// Used by global tag throttling counters
