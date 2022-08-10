@@ -547,6 +547,10 @@ struct DDQueue {
 			}
 		}
 
+		bool countNonZero(const ReasonItem& item, CountType type) const {
+			return std::any_of(item.cbegin(), item.cend(), [type](const Item& item) { return item[(int)type] > 0; });
+		}
+
 		void increase(const UID& id, RelocateReason reason, CountType type) {
 			int idx = (int)(reason);
 			// if (idx < 0 || idx >= RelocateReason::typeCount()) {
@@ -570,15 +574,26 @@ struct DDQueue {
 		}
 
 		void traceAll(const UID& debugId = UID()) const {
+			auto it = counter.cbegin();
 			int count = 0;
-			for (auto& [id, reasonItem] : counter) {
+			for (; count < SERVER_KNOBS->DD_QUEUE_COUNTER_MAX_LOG && it != counter.cend(); ++count, ++it) {
 				TraceEvent event("DDQueueServerCounter", debugId);
-				event.detail("ServerId", id);
-				traceReasonItem(&event, reasonItem);
-				if (++count >= SERVER_KNOBS->DD_QUEUE_COUNTER_MAX_LOG) {
-					TraceEvent(SevWarn, "DDQueueServerCounterTooMany", debugId).detail("ServerSize", counter.size());
-					return;
+				event.detail("ServerId", it->first);
+				traceReasonItem(&event, it->second);
+			}
+			if (it != counter.cend()) {
+				std::string execSrc, execDest;
+				for (; it != counter.cend(); ++it) {
+					if (countNonZero(it->second, LaunchedSource)) {
+						execSrc += it->first.shortString() + ",";
+					}
+					if (countNonZero(it->second, LaunchedDest)) {
+						execDest += it->first.shortString() + ",";
+					}
 				}
+				TraceEvent("DDQueueServerCounterTooMany", debugId)
+				    .detail("RemainedLaunchedSources", execSrc)
+				    .detail("RemainedLaunchedDestinations", execDest);
 			}
 		}
 
@@ -2484,7 +2499,7 @@ TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
 		when(wait(delayJittered(2.0))) {
 			std::vector<UID> team(3);
 			for (int i = 0; i < team.size(); ++i) {
-				team[i] = UID(deterministicRandom()->randomInt(1, 5), 0);
+				team[i] = UID(deterministicRandom()->randomInt(1, 400), 0);
 			}
 			auto reason = RelocateReason(deterministicRandom()->randomInt(0, RelocateReason::typeCount()));
 			auto countType = DDQueue::ServerCounter::randomCountType();
