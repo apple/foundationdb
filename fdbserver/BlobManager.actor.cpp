@@ -426,7 +426,24 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 		return v;
 	}
 
+	// FIXME: is it possible for merge/split/re-merge to call this with same range but a different granule id or
+	// startVersion? Unlikely but could cause weird history problems
 	void setMergeCandidate(const KeyRangeRef& range, UID granuleID, Version startVersion) {
+		// if this granule is not an active granule, it can't be merged
+		auto gIt = workerAssignments.rangeContaining(range.begin);
+		if (gIt->begin() != range.begin || gIt->end() != range.end) {
+			CODE_PROBE(true, "non-active granule reported merge eligible, ignoring");
+			if (BM_DEBUG) {
+				fmt::print(
+				    "BM {0} Ignoring Merge Candidate [{1} - {2}): range mismatch with active granule [{3} - {4})\n",
+				    epoch,
+				    range.begin.printable(),
+				    range.end.printable(),
+				    gIt->begin().printable(),
+				    gIt->end().printable());
+			}
+			return;
+		}
 		// Want this to be idempotent. If a granule was already reported as merge-eligible, we want to use the existing
 		// merge and mergeNow state.
 		auto it = mergeCandidates.rangeContaining(range.begin);
@@ -649,17 +666,29 @@ ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmDat
 
 // Picks a worker with the fewest number of already assigned ranges.
 // If there is a tie, picks one such worker at random.
+// TODO: add desired per-blob-worker limit? don't assign ranges to each worker past that limit?
 ACTOR Future<UID> pickWorkerForAssign(Reference<BlobManagerData> bmData) {
 	// wait until there are BWs to pick from
-	while (bmData->workerStats.size() == 0) {
-		CODE_PROBE(true, "BM wants to assign range, but no workers available");
-		if (BM_DEBUG) {
-			fmt::print("BM {0} waiting for blob workers before assigning granules\n", bmData->epoch);
+	loop {
+		state bool wasZeroWorkers = false;
+		while (bmData->workerStats.size() == 0) {
+			wasZeroWorkers = true;
+			CODE_PROBE(true, "BM wants to assign range, but no workers available");
+			if (BM_DEBUG) {
+				fmt::print("BM {0} waiting for blob workers before assigning granules\n", bmData->epoch);
+			}
+			bmData->restartRecruiting.trigger();
+			wait(bmData->recruitingStream.onChange() || bmData->foundBlobWorkers.getFuture());
 		}
-		bmData->restartRecruiting.trigger();
-		wait(bmData->recruitingStream.onChange() || bmData->foundBlobWorkers.getFuture());
-		// FIXME: may want to have some buffer here so zero-worker recruiting case doesn't assign every single pending
-		// range to the first worker recruited
+		if (wasZeroWorkers) {
+			// Add a bit of delay. If we were at zero workers, don't immediately assign all granules to the first worker
+			// we recruit
+			wait(delay(0.1));
+		}
+		if (bmData->workerStats.size() != 0) {
+			break;
+		}
+		// if in the post-zero workers delay, we went back down to zero workers, re-loop
 	}
 
 	int minGranulesAssigned = INT_MAX;
@@ -1536,12 +1565,15 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		coalescedRanges.push_back(coalescedRanges.arena(), splitPoints.keys.back());
 		ASSERT(coalescedRanges.size() == SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1);
 		if (BM_DEBUG) {
-			fmt::print("Downsampled split from {0} -> {1} granules\n",
+			fmt::print("Downsampled split [{0} - {1}) from {2} -> {3} granules\n",
+			           granuleRange.begin.printable(),
+			           granuleRange.end.printable(),
 			           splitPoints.keys.size() - 1,
 			           SERVER_KNOBS->BG_MAX_SPLIT_FANOUT);
 		}
 
-		splitPoints.keys = coalescedRanges;
+		// TODO probably do something better here?
+		wait(store(splitPoints, alignKeys(bmData, granuleRange, coalescedRanges)));
 		ASSERT(splitPoints.keys.size() <= SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1);
 	}
 
@@ -1935,6 +1967,9 @@ ACTOR Future<std::pair<UID, Version>> persistMergeGranulesStart(Reference<BlobMa
 
 			wait(checkManagerLock(tr, bmData));
 
+			// FIXME: extra safeguard: check that granuleID of active lock == parentGranuleID for each parent, abort
+			// merge if so
+
 			tr->atomicOp(
 			    blobGranuleMergeKeyFor(mergeGranuleID),
 			    blobGranuleMergeValueFor(mergeRange, parentGranuleIDs, parentGranuleRanges, parentGranuleStartVersions),
@@ -2231,7 +2266,7 @@ ACTOR Future<Void> attemptMerges(Reference<BlobManagerData> bmData,
 	}
 	CODE_PROBE(true, "Candidate ranges to merge");
 	wait(bmData->concurrentMergeChecks.take());
-	state FlowLock::Releaser holdingDVL(bmData->concurrentMergeChecks);
+	state FlowLock::Releaser holdingLock(bmData->concurrentMergeChecks);
 
 	// start merging any set of 2+ consecutive granules that can be merged
 	state int64_t currentBytes = 0;
@@ -3756,7 +3791,7 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 		           canDeleteHistoryKey ? "" : " ignoring history key!");
 	}
 
-	TraceEvent("GranuleFullPurge", self->id)
+	TraceEvent(SevDebug, "GranuleFullPurge", self->id)
 	    .detail("Epoch", self->epoch)
 	    .detail("GranuleID", granuleId)
 	    .detail("PurgeVersion", purgeVersion)
@@ -3876,7 +3911,7 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
 	if (BM_PURGE_DEBUG) {
 		fmt::print("BM {0} Partially deleting granule {1}: success\n", self->epoch, granuleId.toString());
 	}
-	TraceEvent("GranulePartialPurge", self->id)
+	TraceEvent(SevDebug, "GranulePartialPurge", self->id)
 	    .detail("Epoch", self->epoch)
 	    .detail("GranuleID", granuleId)
 	    .detail("PurgeVersion", purgeVersion)
