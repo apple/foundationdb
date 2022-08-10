@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include <fdbserver/Knobs.h>
 #include <flow/actorcompiler.h>
@@ -82,7 +83,16 @@ struct LocalRatekeeperWorkload : TestWorkload {
 				    .detail("Actual", metrics.localRateLimit);
 			}
 			tr.reset();
-			Version readVersion = wait(tr.getReadVersion());
+			state Version readVersion = invalidVersion;
+			loop {
+				try {
+					Version v = wait(tr.getReadVersion());
+					readVersion = v;
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
 			requests.clear();
 			// we send 100 requests to this storage node and count how many of those get rejected
 			for (int i = 0; i < 100; ++i) {
