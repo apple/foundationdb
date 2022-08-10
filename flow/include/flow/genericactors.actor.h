@@ -224,47 +224,6 @@ Future<T> delayed(Future<T> what, double time = 0.0, TaskPriority taskID = TaskP
 	}
 }
 
-// wait <interval> then call what() in a loop forever
-ACTOR template <class Func>
-Future<Void> recurring(Func what, double interval, TaskPriority taskID = TaskPriority::DefaultDelay) {
-	loop choose {
-		when(wait(delay(interval, taskID))) { what(); }
-	}
-}
-
-// Invoke actorFunc() forever in a loop
-// At least wait<interval> between two actor functor invocations
-ACTOR template <class F>
-Future<Void> recurringAsync(
-    F actorFunc, // Callback actor functor
-    double interval, // Interval between two subsequent invocations of actor functor.
-    bool absoluteIntervalDelay, // Flag guarantees "interval" delay between two subequent actor functor invocations. If
-                                // not selected, guarantees provided are "at least 'interval' delay" between two
-                                // subsequent actor functor invocations, however, due to either 'poorly choose' interval
-                                // value AND/OR actor functor taking longer than expected to return, could cause actor
-                                // functor to run with no-delay
-    double initialDelay, // Initial delay interval
-    TaskPriority taskID = TaskPriority::DefaultDelay) {
-
-	wait(delay(initialDelay));
-
-	state double beforeTS;
-	state double afterTS;
-	loop {
-		beforeTS = now();
-		Future<Void> val = actorFunc();
-		wait(val);
-		afterTS = now();
-
-		double toWait = absoluteIntervalDelay ? interval : interval - (afterTS - beforeTS);
-		if (toWait > 0.0) {
-			wait(delay(toWait));
-		} else {
-			// Supplied actor took long enough to yield result, run functor with no delay
-		}
-	}
-}
-
 ACTOR template <class Func>
 Future<Void> trigger(Func what, Future<Void> signal) {
 	wait(signal);
@@ -1235,6 +1194,46 @@ inline Future<Void> operator||(Future<Void> const& lhs, Future<Void> const& rhs)
 	}
 
 	return chooseActor(lhs, rhs);
+}
+
+// wait <interval> then call what() in a loop forever
+ACTOR template <class Func>
+Future<Void> recurring(Func what, double interval, TaskPriority taskID = TaskPriority::DefaultDelay) {
+	loop choose {
+		when(wait(delay(interval, taskID))) { what(); }
+	}
+}
+
+// Invoke actorFunc() forever in a loop
+// At least wait<interval> between two actor functor invocations
+ACTOR template <class F>
+Future<Void> recurringAsync(
+    F actorFunc, // Callback actor functor
+    double interval, // Interval between two subsequent invocations of actor functor.
+    bool absoluteIntervalDelay, // Flag guarantees "interval" delay between two subequent actor functor invocations. If
+                                // not selected, guarantees provided are "at least 'interval' delay" between two
+                                // subsequent actor functor invocations, however, due to either 'poorly choose' interval
+                                // value AND/OR actor functor taking longer than expected to return, could cause actor
+                                // functor to run with no-delay
+    double initialDelay, // Initial delay interval
+    TaskPriority taskID = TaskPriority::DefaultDelay) {
+
+	wait(delay(initialDelay));
+
+	state Future<Void> val = actorFunc();
+
+	loop {
+		if (absoluteIntervalDelay) {
+			wait(val);
+			// Ensure subsequent actorFunc executions observe client supplied delay interval.
+			wait(delay(interval));
+		} else {
+			// Guarantee at-least client supplied interval delay; two possible scenarios:
+			// 1. The actorFunc executions finishes before 'interval' delay
+			// 2. The actorFunc executions takes > 'interval' delay.
+			wait(val && delay(interval));
+		}
+	}
 }
 
 ACTOR template <class T>

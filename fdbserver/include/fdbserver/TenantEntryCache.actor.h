@@ -86,14 +86,20 @@ private:
 	Map<int64_t, TenantEntryCachePayload<T>> mapByTenantId;
 	Map<TenantName, TenantEntryCachePayload<T>> mapByTenantName;
 
-	// TODO: add hit/miss/refresh counters
+	CounterCollection metrics;
+	Counter hits;
+	Counter misses;
+	Counter refreshByCacheInit;
+	Counter refreshByCacheMiss;
+	Counter numSweeps;
 
 	ACTOR static Future<TenantNameEntryPairVec> getTenantList(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
-		KeyBackedRangeResult<TenantNameEntryPair> tenantList = wait(TenantMetadata::tenantMap.getRange(
-		    tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
+		KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantList =
+		    wait(TenantMetadata::tenantMap().getRange(
+		        tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 		ASSERT(tenantList.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantList.more);
 
 		TraceEvent(SevDebug, "TenantEntryCache_GetTenantList").detail("Count", tenantList.results.size());
@@ -101,8 +107,16 @@ private:
 		return tenantList.results;
 	}
 
+	static void updateCacheRefreshMetrics(TenantEntryCache<T>* cache, TenantEntryCacheRefreshReason reason) {
+		if (reason == TenantEntryCacheRefreshReason::INIT) {
+			cache->refreshByCacheInit += 1;
+		} else if (reason == TenantEntryCacheRefreshReason::CACHE_MISS) {
+			cache->refreshByCacheMiss += 1;
+		}
+	}
+
 	ACTOR static Future<Void> refreshImpl(TenantEntryCache<T>* cache, TenantEntryCacheRefreshReason reason) {
-		TraceEvent("TenantEntryCache_RefreshStart", cache->id()).detail("Reason", static_cast<int>(reason));
+		TraceEvent(SevDebug, "TenantEntryCache_RefreshStart", cache->id()).detail("Reason", static_cast<int>(reason));
 
 		// Increment cache generation count
 		cache->incGen();
@@ -118,16 +132,19 @@ private:
 				}
 
 				cache->triggerSweeper();
+				updateCacheRefreshMetrics(cache, reason);
 				break;
 			} catch (Error& e) {
 				if (e.code() != error_code_actor_cancelled) {
-					TraceEvent("TenantEntryCache_RefreshError", cache->id()).errorUnsuppressed(e).suppressFor(1.0);
+					TraceEvent(SevInfo, "TenantEntryCache_RefreshError", cache->id())
+					    .errorUnsuppressed(e)
+					    .suppressFor(1.0);
 				}
 				wait(tr->onError(e));
 			}
 		}
 
-		TraceEvent("TenantEntryCache_RefreshEnd", cache->id())
+		TraceEvent(SevDebug, "TenantEntryCache_RefreshEnd", cache->id())
 		    .detail("Reason", static_cast<int>(reason))
 		    .detail("CurGen", cache->getCurGen());
 
@@ -143,6 +160,7 @@ private:
 
 			trigger = cache->waitForSweepTrigger();
 			cache->sweep();
+			cache->numSweeps += 1;
 		}
 	}
 
@@ -150,16 +168,18 @@ private:
 	                                                                      int64_t tenantId) {
 		Optional<TenantEntryCachePayload<T>> ret = cache->lookupById(tenantId);
 		if (ret.present()) {
+			cache->hits += 1;
 			return ret;
 		}
 
 		TraceEvent(SevInfo, "TenantEntryCache_GetByIdRefresh").detail("TenantId", tenantId);
 
-		// Entry not found. Refresh cacheEntries by scanning underling KeyRange.
+		// Entry not found. Refresh cacheEntries by scanning underlying KeyRange.
 		// TODO: Cache will implement a "KeyRange" watch, monitoring notification when a new entry gets added or any
 		// existing entry gets updated within the KeyRange of interest. Hence, misses would be very rare
 		wait(refreshImpl(cache, TenantEntryCacheRefreshReason::CACHE_MISS));
 
+		cache->misses += 1;
 		return cache->lookupById(tenantId);
 	}
 
@@ -167,32 +187,18 @@ private:
 	                                                                        TenantName name) {
 		Optional<TenantEntryCachePayload<T>> ret = cache->lookupByName(name);
 		if (ret.present()) {
+			cache->hits += 1;
 			return ret;
 		}
 
 		TraceEvent(SevInfo, "TenantEntryCache_GetByNameRefresh").detail("TenantName", name.contents().toString());
 
-		// Entry not found. Refresh cacheEntries by scanning underling KeyRange.
+		// Entry not found. Refresh cacheEntries by scanning underlying KeyRange.
 		// TODO: Cache will implement a "KeyRange" watch, monitoring notification when a new entry gets added or any
 		// existing entry gets updated within the KeyRange of interest. Hence, misses would be very rare
 		wait(refreshImpl(cache, TenantEntryCacheRefreshReason::CACHE_MISS));
 
-		return cache->lookupByName(name);
-	}
-
-	ACTOR static Future<Optional<TenantEntryCachePayload<T>>> getByIdImpl(TenantEntryCache<T>* cache, TenantName name) {
-		Optional<TenantEntryCachePayload<T>> ret = cache->lookupByName(name);
-		if (ret.present()) {
-			return ret;
-		}
-
-		TraceEvent(SevInfo, "TenantEntryCache_GetByNameRefresh").detail("TenantName", name.contents().toString());
-
-		// Entry not found. Refresh cacheEntries by scanning underling KeyRange.
-		// TODO: Cache will implement a "KeyRange" watch, monitoring notification when a new entry gets added or any
-		// existing entry gets updated within the KeyRange of interest. Hence, misses would be very rare
-		wait(refreshImpl(cache, TenantEntryCacheRefreshReason::CACHE_MISS));
-
+		cache->misses += 1;
 		return cache->lookupByName(name);
 	}
 
@@ -201,7 +207,7 @@ private:
 	void triggerSweeper() { sweepTrigger.trigger(); }
 
 	void sweep() {
-		TraceEvent(SevInfo, "TenantEntryCache_SweepStart", uid).log();
+		TraceEvent(SevDebug, "TenantEntryCache_SweepStart", uid).log();
 
 		// Sweep cache and clean up entries older than current generation
 		TenantNameEntryPairVec entriesToRemove;
@@ -215,7 +221,7 @@ private:
 
 		for (auto& r : entriesToRemove) {
 			TraceEvent(SevInfo, "TenantEntryCache_Remove", uid)
-			    .detail("TenantName", r.first.contents().toString())
+			    .detail("TenantName", r.first.contents())
 			    .detail("TenantID", r.second.id)
 			    .detail("TenantPrefix", r.second.prefix);
 
@@ -262,12 +268,26 @@ private:
 public:
 	TenantEntryCache(Database db)
 	  : uid(deterministicRandom()->randomUniqueID()), db(db), curGen(INITIAL_CACHE_GEN),
-	    createPayloadFunc(defaultCreatePayload) {
+	    createPayloadFunc(defaultCreatePayload), metrics("TenantEntryCacheMetrics", uid.toString()),
+	    hits("TenantEntryCacheHits", metrics), misses("TenantEntryCacheMisses", metrics),
+	    refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
+	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics), numSweeps("TenantEntryCacheNumSweeps", metrics) {
 		TraceEvent("TenantEntryCache_CreatedDefaultFunc", uid).detail("Gen", curGen);
 	}
 
 	TenantEntryCache(Database db, TenantEntryCachePayloadFunc<T> fn)
-	  : uid(deterministicRandom()->randomUniqueID()), db(db), curGen(INITIAL_CACHE_GEN), createPayloadFunc(fn) {
+	  : uid(deterministicRandom()->randomUniqueID()), db(db), curGen(INITIAL_CACHE_GEN), createPayloadFunc(fn),
+	    metrics("TenantEntryCacheMetrics", uid.toString()), hits("TenantEntryCacheHits", metrics),
+	    misses("TenantEntryCacheMisses", metrics), refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
+	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics), numSweeps("TenantEntryCacheNumSweeps", metrics) {
+		TraceEvent("TenantEntryCache_Created", uid).detail("Gen", curGen);
+	}
+
+	TenantEntryCache(Database db, UID id, TenantEntryCachePayloadFunc<T> fn)
+	  : uid(id), db(db), curGen(INITIAL_CACHE_GEN), createPayloadFunc(fn),
+	    metrics("TenantEntryCacheMetrics", uid.toString()), hits("TenantEntryCacheHits", metrics),
+	    misses("TenantEntryCacheMisses", metrics), refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
+	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics), numSweeps("TenantEntryCacheNumSweeps", metrics) {
 		TraceEvent("TenantEntryCache_Created", uid).detail("Gen", curGen);
 	}
 

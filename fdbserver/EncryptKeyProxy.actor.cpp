@@ -587,12 +587,13 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
 	try {
 		KmsConnLookupEKsByDomainIdsReq req;
 		req.debugId = debugId;
-		req.encryptDomainInfos.reserve(req.arena, ekpProxyData->baseCipherDomainIdCache.size());
+		// req.encryptDomainInfos.reserve(req.arena, ekpProxyData->baseCipherDomainIdCache.size());
 
 		int64_t currTS = (int64_t)now();
 		for (auto itr = ekpProxyData->baseCipherDomainIdCache.begin();
 		     itr != ekpProxyData->baseCipherDomainIdCache.end();) {
 			if (isCipherKeyEligibleForRefresh(itr->second, currTS)) {
+				TraceEvent("RefreshEKs").detail("Id", itr->first);
 				req.encryptDomainInfos.emplace_back_deep(req.arena, itr->first, itr->second.domainName);
 			}
 
@@ -608,9 +609,9 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
 		for (const auto& item : rep.cipherKeyDetails) {
 			const auto itr = ekpProxyData->baseCipherDomainIdCache.find(item.encryptDomainId);
 			if (itr == ekpProxyData->baseCipherDomainIdCache.end()) {
-				TraceEvent(SevError, "RefreshEKs_DomainIdNotFound", ekpProxyData->myId)
+				TraceEvent(SevInfo, "RefreshEKs_DomainIdNotFound", ekpProxyData->myId)
 				    .detail("DomainId", item.encryptDomainId);
-				// Continue updating the cache with othe elements
+				// Continue updating the cache with other elements
 				continue;
 			}
 
