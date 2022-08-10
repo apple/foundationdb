@@ -31,7 +31,7 @@
 // used and should not be changed from 0.
 //                                                         xyzdev
 //                                                         vvvv
-constexpr uint64_t currentProtocolVersionValue = 0x0FDB00B072000000LL;
+constexpr uint64_t defaultProtocolVersionValue = 0x0FDB00B072000000LL;
 
 // The first protocol version that cannot be downgraded from. Ordinarily, this will be two release versions larger
 // than the current version, meaning that we only support downgrades between consecutive release versions.
@@ -40,9 +40,13 @@ constexpr uint64_t minInvalidProtocolVersionValue = 0x0FDB00B074000000LL;
 // The lowest protocol version that can be downgraded to.
 constexpr uint64_t minCompatibleProtocolVersionValue = 0x0FDB00B071000000LL;
 
+// The protocol version that will most likely follow the current one
+// Used only for testing upgrades to the future version
+constexpr uint64_t futureProtocolVersionValue = 0x0FDB00B073000000LL;
+
 #define PROTOCOL_VERSION_FEATURE(v, x)                                                                                 \
 	static_assert((v & 0xF0FFFFLL) == 0 || v < 0x0FDB00B071000000LL, "Unexpected feature protocol version");           \
-	static_assert(v <= currentProtocolVersionValue, "Feature protocol version too large");                             \
+	static_assert(v <= defaultProtocolVersionValue, "Feature protocol version too large");                             \
 	struct x {                                                                                                         \
 		static constexpr uint64_t protocolVersion = v;                                                                 \
 	};                                                                                                                 \
@@ -184,23 +188,31 @@ struct Traceable<ProtocolVersion> : std::true_type {
 	}
 };
 
-constexpr ProtocolVersion currentProtocolVersion(currentProtocolVersionValue);
+constexpr ProtocolVersion defaultProtocolVersion(defaultProtocolVersionValue);
 constexpr ProtocolVersion minInvalidProtocolVersion(minInvalidProtocolVersionValue);
 constexpr ProtocolVersion minCompatibleProtocolVersion(minCompatibleProtocolVersionValue);
 
+// The protocol version of the process, normally it is equivalent defaultProtocolVersion
+// The currentProtocolVersion can be overridden dynamically for testing upgrades
+// to a future FDB version
+ProtocolVersion currentProtocolVersion();
+
+// Assume the next future protocol version as the current one. Used for testing purposes only
+void useFutureProtocolVersion();
+
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
 // change when we reach version 10.
-static_assert(currentProtocolVersion.version() < 0x0FDB00B100000000LL, "Unexpected protocol version");
+static_assert(defaultProtocolVersion.version() < 0x0FDB00B100000000LL, "Unexpected protocol version");
 
 // The last two bytes of the protocol version are currently masked out in compatibility checks. We do not use them,
 // so prevent them from being inadvertently changed.
 //
 // We also do not modify the protocol version for patch releases, so prevent modifying the patch version digit.
-static_assert((currentProtocolVersion.version() & 0xF0FFFFLL) == 0, "Unexpected protocol version");
+static_assert((defaultProtocolVersion.version() & 0xF0FFFFLL) == 0, "Unexpected protocol version");
 
 // Downgrades must support at least one minor version.
 static_assert(minInvalidProtocolVersion.version() >=
-                  (currentProtocolVersion.version() & 0xFFFFFFFFFF000000LL) + 0x0000000002000000,
+                  (defaultProtocolVersion.version() & 0xFFFFFFFFFF000000LL) + 0x0000000002000000,
               "Downgrades must support one minor version");
 
 // The min invalid protocol version should be the smallest possible protocol version associated with a minor release

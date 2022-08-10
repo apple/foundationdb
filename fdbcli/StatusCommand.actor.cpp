@@ -411,6 +411,7 @@ void printStatus(StatusObjectReader statusObj,
 			outputString += "\nConfiguration:";
 			std::string outputStringCache = outputString;
 			bool isOldMemory = false;
+			bool blobGranuleEnabled{ false };
 			try {
 				// Configuration section
 				// FIXME: Should we suppress this if there are cluster messages implying that the database has no
@@ -433,7 +434,14 @@ void printStatus(StatusObjectReader statusObj,
 				} else
 					outputString += "unknown";
 
-				int intVal;
+				int intVal = 0;
+				if (statusObjConfig.get("blob_granules_enabled", intVal) && intVal) {
+					blobGranuleEnabled = true;
+				}
+				if (blobGranuleEnabled) {
+					outputString += "\n  Blob granules          - enabled";
+				}
+
 				outputString += "\n  Coordinators           - ";
 				if (statusObjConfig.get("coordinators_count", intVal)) {
 					outputString += std::to_string(intVal);
@@ -1101,6 +1109,15 @@ void printStatus(StatusObjectReader statusObj,
 					printedCoordinators = true;
 					outputString += "\n\nCoordination servers:";
 					outputString += getCoordinatorsInfoString(statusObj);
+				}
+
+				if (blobGranuleEnabled) {
+					outputString += "\n\nBlob Granules:";
+					StatusObjectReader statusObjBlobGranules = statusObjCluster["blob_granules"];
+					auto numWorkers = statusObjBlobGranules["number_of_blob_workers"].get_int();
+					outputString += "\n  Number of Workers      - " + format("%d", numWorkers);
+					auto numKeyRanges = statusObjBlobGranules["number_of_key_ranges"].get_int();
+					outputString += "\n  Number of Key Ranges   - " + format("%d", numKeyRanges);
 				}
 			}
 

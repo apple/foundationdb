@@ -192,9 +192,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/WriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/WriteDuringReadClean.toml)
   add_fdb_test(TEST_FILES noSim/RandomUnitTests.toml UNIT)
-  add_fdb_test(TEST_FILES noSim/SystemDataTest.toml UNIT)
   if (WITH_ROCKSDB_EXPERIMENTAL)
-    add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml)
+    add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml)
     add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml)
@@ -260,11 +259,11 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_6.3.13/CycleTestRestart-1.txt
                restarting/from_6.3.13/CycleTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.3.13/DrUpgradeRestart-1.txt
-               restarting/from_6.3.13/DrUpgradeRestart-2.txt)
-  add_fdb_test(
     TEST_FILES restarting/from_6.3.13/StorefrontTestRestart-1.txt
                restarting/from_6.3.13/StorefrontTestRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_6.3.13_until_7.2.0/DrUpgradeRestart-1.txt
+               restarting/from_6.3.13_until_7.2.0/DrUpgradeRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
                restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
@@ -295,6 +294,9 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0/VersionVectorEnableRestart-1.toml
                restarting/from_7.1.0/VersionVectorEnableRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.2.0/DrUpgradeRestart-1.txt
+               restarting/from_7.2.0/DrUpgradeRestart-2.txt)
 
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
@@ -319,6 +321,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/DiskFailureCycle.toml)
   add_fdb_test(TEST_FILES slow/FastTriggeredWatches.toml)
   add_fdb_test(TEST_FILES slow/LowLatencyWithFailures.toml)
+  add_fdb_test(TEST_FILES slow/MetaclusterManagement.toml)
   add_fdb_test(TEST_FILES slow/MoveKeysClean.toml)
   add_fdb_test(TEST_FILES slow/MoveKeysSideband.toml)
   add_fdb_test(TEST_FILES slow/RyowCorrectness.toml)
@@ -332,7 +335,9 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/SwizzledRollbackTimeLapse.toml)
   add_fdb_test(TEST_FILES slow/SwizzledRollbackTimeLapseIncrement.toml)
   add_fdb_test(TEST_FILES slow/SwizzledTenantManagement.toml)
+  add_fdb_test(TEST_FILES slow/SwizzledTenantManagementMetacluster.toml)
   add_fdb_test(TEST_FILES slow/TenantManagement.toml)
+  add_fdb_test(TEST_FILES slow/TenantManagementConcurrency.toml)
   add_fdb_test(TEST_FILES slow/VersionStampBackupToDB.toml)
   add_fdb_test(TEST_FILES slow/VersionStampSwitchover.toml)
   add_fdb_test(TEST_FILES slow/WriteDuringReadAtomicRestore.toml)

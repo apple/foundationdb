@@ -2992,11 +2992,9 @@ Future<KeyRangeLocationInfo> getKeyLocation(Reference<TransactionState> trState,
 	                        isBackward,
 	                        version);
 
-	if (trState->tenant().present() && useTenant && trState->tenantId == TenantInfo::INVALID_TENANT) {
+	if (trState->tenant().present() && useTenant && trState->tenantId() == TenantInfo::INVALID_TENANT) {
 		return map(f, [trState](const KeyRangeLocationInfo& locationInfo) {
-			if (trState->tenantId == TenantInfo::INVALID_TENANT) {
-				trState->tenantId = locationInfo.tenantEntry.id;
-			}
+			trState->trySetTenantId(locationInfo.tenantEntry.id);
 			return locationInfo;
 		});
 	} else {
@@ -3134,12 +3132,10 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<Transac
 	                              trState->useProvisionalProxies,
 	                              version);
 
-	if (trState->tenant().present() && useTenant && trState->tenantId == TenantInfo::INVALID_TENANT) {
+	if (trState->tenant().present() && useTenant && trState->tenantId() == TenantInfo::INVALID_TENANT) {
 		return map(f, [trState](const std::vector<KeyRangeLocationInfo>& locationInfo) {
 			ASSERT(!locationInfo.empty());
-			if (trState->tenantId == TenantInfo::INVALID_TENANT) {
-				trState->tenantId = locationInfo[0].tenantEntry.id;
-			}
+			trState->trySetTenantId(locationInfo[0].tenantEntry.id);
 			return locationInfo;
 		});
 	} else {
@@ -3242,6 +3238,8 @@ TenantInfo TransactionState::getTenantInfo(AllowInvalidTenantID allowInvalidId /
 
 	if (options.rawAccess) {
 		return TenantInfo();
+	} else if (!cx->internal && cx->clientInfo->get().clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
+		throw management_cluster_invalid_access();
 	} else if (!cx->internal && cx->clientInfo->get().tenantMode == TenantMode::REQUIRED && !t.present()) {
 		throw tenant_name_required();
 	} else if (!t.present()) {
@@ -3257,8 +3255,8 @@ TenantInfo TransactionState::getTenantInfo(AllowInvalidTenantID allowInvalidId /
 		}
 	}
 
-	ASSERT(allowInvalidId || tenantId != TenantInfo::INVALID_TENANT);
-	return TenantInfo(t, authToken, tenantId);
+	ASSERT(allowInvalidId || tenantId_ != TenantInfo::INVALID_TENANT);
+	return TenantInfo(t, authToken, tenantId_);
 }
 
 // Returns the tenant used in this transaction. If the tenant is unset and raw access isn't specified, then the default
@@ -3284,6 +3282,13 @@ Optional<TenantName> const& TransactionState::tenant() {
 // for raw access).
 bool TransactionState::hasTenant() const {
 	return tenantSet && tenant_.present();
+}
+
+Future<Void> TransactionState::handleUnknownTenant() {
+	tenantId_ = TenantInfo::INVALID_TENANT;
+	ASSERT(tenant().present());
+	cx->invalidateCachedTenant(tenant().get());
+	return delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, taskID);
 }
 
 Future<Void> Transaction::warmRange(KeyRange keys) {
@@ -3404,9 +3409,8 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 				trState->cx->invalidateCache(locationInfo.tenantEntry.prefix, key);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
 			} else if (e.code() == error_code_unknown_tenant) {
-				ASSERT(useTenant && trState->tenant().present());
-				trState->cx->invalidateCachedTenant(trState->tenant().get());
-				wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
+				ASSERT(useTenant);
+				wait(trState->handleUnknownTenant());
 			} else {
 				if (trState->trLogInfo && recordLogInfo)
 					trState->trLogInfo->addLog(FdbClientLogEvents::EventGetError(startTimeD,
@@ -3515,9 +3519,8 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
 			} else if (e.code() == error_code_unknown_tenant) {
-				ASSERT(useTenant && trState->tenant().present());
-				trState->cx->invalidateCachedTenant(trState->tenant().get());
-				wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
+				ASSERT(useTenant);
+				wait(trState->handleUnknownTenant());
 			} else {
 				TraceEvent(SevInfo, "GetKeyError").error(e).detail("AtKey", k.getKey()).detail("Offset", k.offset);
 				throw e;
@@ -3751,7 +3754,7 @@ ACTOR Future<Void> sameVersionDiffValue(Database cx, Reference<WatchParameters> 
 			}
 
 			// val_3 == val_2 (storage server value matches value passed into the function -> new watch)
-			if (valSS == parameters->value && tr.getTransactionState()->tenantId == parameters->tenant.tenantId) {
+			if (valSS == parameters->value && tr.getTransactionState()->tenantId() == parameters->tenant.tenantId) {
 				metadata = makeReference<WatchMetadata>(parameters);
 				cx->setWatchMetadata(metadata);
 
@@ -4059,9 +4062,8 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
 					break;
 				} else if (e.code() == error_code_unknown_tenant) {
-					ASSERT(useTenant && trState->tenant().present());
-					trState->cx->invalidateCachedTenant(trState->tenant().get());
-					wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
+					ASSERT(useTenant);
+					wait(trState->handleUnknownTenant());
 					break;
 				} else {
 					TraceEvent(SevInfo, "GetExactRangeError")
@@ -4530,9 +4532,8 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 
 					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
 				} else if (e.code() == error_code_unknown_tenant) {
-					ASSERT(useTenant && trState->tenant().present());
-					trState->cx->invalidateCachedTenant(trState->tenant().get());
-					wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
+					ASSERT(useTenant);
+					wait(trState->handleUnknownTenant());
 				} else {
 					if (trState->trLogInfo)
 						trState->trLogInfo->addLog(
@@ -4991,9 +4992,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
 					break;
 				} else if (e.code() == error_code_unknown_tenant) {
-					ASSERT(trState->tenant().present());
-					trState->cx->invalidateCachedTenant(trState->tenant().get());
-					wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
+					wait(trState->handleUnknownTenant());
 					break;
 				} else {
 					results->sendError(e);
@@ -5276,7 +5275,7 @@ ACTOR Future<TenantInfo> getTenantMetadata(Reference<TransactionState> trState, 
 Future<TenantInfo> populateAndGetTenant(Reference<TransactionState> trState, Key const& key, Version version) {
 	if (!trState->tenant().present() || key == metadataVersionKey) {
 		return TenantInfo();
-	} else if (trState->tenantId != TenantInfo::INVALID_TENANT) {
+	} else if (trState->tenantId() != TenantInfo::INVALID_TENANT) {
 		return trState->getTenantInfo();
 	} else {
 		return getTenantMetadata(trState, key, version);
@@ -5976,7 +5975,7 @@ ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trS
 			tr.trState->options = trState->options;
 			tr.trState->taskID = trState->taskID;
 			tr.trState->authToken = trState->authToken;
-			tr.trState->tenantId = trState->tenantId;
+			tr.trState->trySetTenantId(trState->tenantId());
 			if (!trState->hasTenant()) {
 				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 			} else {
@@ -6314,6 +6313,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			// retry it anyway (relying on transaction idempotence) but a client might do something else.
 			throw commit_unknown_result();
 		} else if (e.code() == error_code_unknown_tenant) {
+			// Rather than reset the tenant and retry just the commit, we need to throw this error to the user and let
+			// them retry the whole transaction
 			ASSERT(trState->tenant().present());
 			trState->cx->invalidateCachedTenant(trState->tenant().get());
 			throw;
@@ -7604,9 +7605,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 				trState->cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 			} else if (e.code() == error_code_unknown_tenant) {
-				ASSERT(trState->tenant().present());
-				trState->cx->invalidateCachedTenant(trState->tenant().get());
-				wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
+				wait(trState->handleUnknownTenant());
 			} else {
 				TraceEvent(SevError, "GetRangeSplitPoints").error(e);
 				throw;
@@ -7628,14 +7627,10 @@ ACTOR Future<TenantMapEntry> blobGranuleGetTenantEntry(Transaction* self, Key ra
 		                                                      self->trState->useProvisionalProxies,
 		                                                      Reverse::False,
 		                                                      latestVersion));
-		if (self->trState->tenantId == TenantInfo::INVALID_TENANT) {
-			self->trState->tenantId = l.tenantEntry.id;
-		}
+		self->trState->trySetTenantId(l.tenantEntry.id);
 		return l.tenantEntry;
 	} else {
-		if (self->trState->tenantId == TenantInfo::INVALID_TENANT) {
-			self->trState->tenantId = cachedLocationInfo.get().tenantEntry.id;
-		}
+		self->trState->trySetTenantId(cachedLocationInfo.get().tenantEntry.id);
 		return cachedLocationInfo.get().tenantEntry;
 	}
 }
@@ -7761,7 +7756,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 
 		// basically krmGetRange, but enable it to not use tenant without RAW_ACCESS by doing manual getRange with
 		// UseTenant::False
-		GetRangeLimits limits(1000);
+		GetRangeLimits limits(CLIENT_KNOBS->BG_TOO_MANY_GRANULES);
 		limits.minRows = 2;
 		RangeResult rawMapping = wait(getRange(self->trState,
 		                                       self->getReadVersion(),
@@ -7776,19 +7771,24 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		blobGranuleMapping = krmDecodeRanges(prefix, range, rawMapping);
 	} else {
 		self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		wait(store(
-		    blobGranuleMapping,
-		    krmGetRanges(self, blobGranuleMappingKeys.begin, keyRange, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED)));
+		wait(store(blobGranuleMapping,
+		           krmGetRanges(self,
+		                        blobGranuleMappingKeys.begin,
+		                        keyRange,
+		                        CLIENT_KNOBS->BG_TOO_MANY_GRANULES,
+		                        GetRangeLimits::BYTE_LIMIT_UNLIMITED)));
 	}
 	if (blobGranuleMapping.more) {
 		if (BG_REQUEST_DEBUG) {
 			fmt::print(
 			    "BG Mapping for [{0} - %{1}) too large!\n", keyRange.begin.printable(), keyRange.end.printable());
 		}
-		TraceEvent(SevWarn, "BGMappingTooLarge").detail("Range", range).detail("Max", 1000);
+		TraceEvent(SevWarn, "BGMappingTooLarge")
+		    .detail("Range", range)
+		    .detail("Max", CLIENT_KNOBS->BG_TOO_MANY_GRANULES);
 		throw unsupported_operation();
 	}
-	ASSERT(!blobGranuleMapping.more && blobGranuleMapping.size() < CLIENT_KNOBS->TOO_MANY);
+	ASSERT(!blobGranuleMapping.more && blobGranuleMapping.size() <= CLIENT_KNOBS->BG_TOO_MANY_GRANULES);
 
 	if (blobGranuleMapping.size() < 2) {
 		throw blob_granule_transaction_too_old();
@@ -8642,7 +8642,7 @@ Future<DatabaseSharedState*> DatabaseContext::initSharedState() {
 }
 
 void DatabaseContext::setSharedState(DatabaseSharedState* p) {
-	ASSERT(p->protocolVersion == currentProtocolVersion);
+	ASSERT(p->protocolVersion == currentProtocolVersion());
 	sharedStatePtr = p;
 	sharedStatePtr->refCount++;
 }
@@ -9180,10 +9180,21 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
 	// update lastReturned once the previous mutation has been consumed
 	if (*begin - 1 > results->lastReturnedVersion.get()) {
 		results->lastReturnedVersion.set(*begin - 1);
+		if (!refresh.canBeSet()) {
+			try {
+				// refresh is set if and only if this actor is cancelled
+				wait(Future<Void>(Void()));
+				// Catch any unexpected behavior if the above contract is broken
+				ASSERT(false);
+			} catch (Error& e) {
+				ASSERT(e.code() == error_code_actor_cancelled);
+				throw;
+			}
+		}
 	}
 
 	loop {
-
+		ASSERT(refresh.canBeSet());
 		state ChangeFeedStreamReply feedReply = waitNext(results->streams[0].getFuture());
 		*begin = feedReply.mutations.back().version + 1;
 

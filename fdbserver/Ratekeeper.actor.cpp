@@ -19,9 +19,11 @@
  */
 
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/Ratekeeper.h"
 #include "fdbserver/TagThrottler.h"
 #include "fdbserver/WaitFailure.h"
+#include "flow/OwningResource.h"
 
 #include "flow/actorcompiler.h" // must be last include
 
@@ -147,9 +149,9 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> trackStorageServerQueueInfo(Ratekeeper* self, StorageServerInterface ssi) {
-		self->storageQueueInfo.insert(mapPair(ssi.id(), StorageQueueInfo(ssi.id(), ssi.locality)));
-		state Map<UID, StorageQueueInfo>::iterator myQueueInfo = self->storageQueueInfo.find(ssi.id());
+	ACTOR static Future<Void> trackStorageServerQueueInfo(ActorWeakSelfRef<Ratekeeper> self,
+	                                                      StorageServerInterface ssi) {
+		self->storageQueueInfo.insert(mapPair(ssi.id(), StorageQueueInfo(self->id, ssi.id(), ssi.locality)));
 		TraceEvent("RkTracking", self->id)
 		    .detail("StorageServer", ssi.id())
 		    .detail("Locality", ssi.locality.toString());
@@ -157,6 +159,7 @@ public:
 			loop {
 				ErrorOr<StorageQueuingMetricsReply> reply = wait(ssi.getQueuingMetrics.getReplyUnlessFailedFor(
 				    StorageQueuingMetricsRequest(), 0, 0)); // SOMEDAY: or tryGetReply?
+				Map<UID, StorageQueueInfo>::iterator myQueueInfo = self->storageQueueInfo.find(ssi.id());
 				if (reply.present()) {
 					myQueueInfo->value.update(reply.get(), self->smoothTotalDurableBytes);
 					myQueueInfo->value.acceptingRequests = ssi.isAcceptingRequests();
@@ -173,7 +176,8 @@ public:
 			}
 		} catch (...) {
 			// including cancellation
-			self->storageQueueInfo.erase(myQueueInfo);
+			self->storageQueueInfo.erase(ssi.id());
+			self->storageServerInterfaces.erase(ssi.id());
 			throw;
 		}
 	}
@@ -207,28 +211,40 @@ public:
 	}
 
 	ACTOR static Future<Void> trackEachStorageServer(
-	    Ratekeeper* self,
+	    ActorWeakSelfRef<Ratekeeper> self,
 	    FutureStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
-		state Map<UID, Future<Void>> actors;
+
+		state std::unordered_map<UID, Future<Void>> storageServerTrackers;
 		state Promise<Void> err;
+
 		loop choose {
 			when(state std::pair<UID, Optional<StorageServerInterface>> change = waitNext(serverChanges)) {
 				wait(delay(0)); // prevent storageServerTracker from getting cancelled while on the call stack
+
+				const UID& id = change.first;
 				if (change.second.present()) {
 					if (!change.second.get().isTss()) {
-						auto& a = actors[change.first];
+
+						auto& a = storageServerTrackers[change.first];
 						a = Future<Void>();
 						a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
+
+						self->storageServerInterfaces[id] = change.second.get();
 					}
-				} else
-					actors.erase(change.first);
+				} else {
+					storageServerTrackers.erase(id);
+
+					self->storageServerInterfaces.erase(id);
+				}
 			}
 			when(wait(err.getFuture())) {}
 		}
 	}
 
 	ACTOR static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-		state Ratekeeper self(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
+		state ActorOwningSelfRef<Ratekeeper> pSelf(
+		    new Ratekeeper(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
+		state Ratekeeper& self = *pSelf;
 		state Future<Void> timeout = Void();
 		state std::vector<Future<Void>> tlogTrackers;
 		state std::vector<TLogInterface> tlogInterfs;
@@ -241,7 +257,7 @@ public:
 
 		PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges;
 		self.addActor.send(self.monitorServerListChange(serverChanges));
-		self.addActor.send(self.trackEachStorageServer(serverChanges.getFuture()));
+		self.addActor.send(RatekeeperImpl::trackEachStorageServer(pSelf, serverChanges.getFuture()));
 		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
 
 		self.addActor.send(self.monitorThrottlingChanges());
@@ -367,17 +383,23 @@ public:
 
 	ACTOR static Future<Void> refreshStorageServerCommitCosts(Ratekeeper* self) {
 		state double lastBusiestCommitTagPick;
+		state std::vector<Future<Void>> replies;
 		loop {
 			lastBusiestCommitTagPick = now();
 			wait(delay(SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
+
+			replies.clear();
+
 			double elapsed = now() - lastBusiestCommitTagPick;
 			// for each SS, select the busiest commit tag from ssTrTagCommitCost
 			for (auto& [ssId, ssQueueInfo] : self->storageQueueInfo) {
-				ssQueueInfo.refreshCommitCost(elapsed);
+				// NOTE: In some cases, for unknown reason SS will not respond to the updateCommitCostRequest. Since the
+				// information is not time-sensitive, we do not wait for the replies.
+				replies.push_back(self->storageServerInterfaces[ssId].updateCommitCostRequest.getReply(
+				    ssQueueInfo.refreshCommitCost(elapsed)));
 			}
 		}
 	}
-
 }; // class RatekeeperImpl
 
 Future<Void> Ratekeeper::configurationMonitor() {
@@ -387,15 +409,6 @@ Future<Void> Ratekeeper::configurationMonitor() {
 Future<Void> Ratekeeper::monitorServerListChange(
     PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
 	return RatekeeperImpl::monitorServerListChange(this, serverChanges);
-}
-
-Future<Void> Ratekeeper::trackEachStorageServer(
-    FutureStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges) {
-	return RatekeeperImpl::trackEachStorageServer(this, serverChanges);
-}
-
-Future<Void> Ratekeeper::trackStorageServerQueueInfo(StorageServerInterface ssi) {
-	return RatekeeperImpl::trackStorageServerQueueInfo(this, ssi);
 }
 
 Future<Void> Ratekeeper::trackTLogQueueInfo(TLogInterface tli) {
@@ -900,6 +913,11 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	limits->tpsLimitMetric = std::min(limits->tpsLimit, 1e6);
 	limits->reasonMetric = limitReason;
 
+	if (limits->priority == TransactionPriority::DEFAULT) {
+		limits->tpsLimit = std::max(limits->tpsLimit, SERVER_KNOBS->RATEKEEPER_MIN_RATE);
+		limits->tpsLimit = std::min(limits->tpsLimit, SERVER_KNOBS->RATEKEEPER_MAX_RATE);
+	}
+
 	if (deterministicRandom()->random01() < 0.1) {
 		const std::string& name = limits->rkUpdateEventCacheHolder.getPtr()->trackingKey;
 		TraceEvent(name.c_str(), id)
@@ -940,16 +958,18 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 	return Void();
 }
 
-StorageQueueInfo::StorageQueueInfo(UID id, LocalityData locality)
-  : busiestWriteTagEventHolder(makeReference<EventCacheHolder>(id.toString() + "/BusiestWriteTag")), valid(false),
-    id(id), locality(locality), acceptingRequests(false), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-    smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    limitReason(limitReason_t::unlimited) {
+StorageQueueInfo::StorageQueueInfo(const UID& ratekeeperID_, const UID& id_, const LocalityData& locality_)
+  : valid(false), ratekeeperID(ratekeeperID_), id(id_), locality(locality_), acceptingRequests(false),
+    smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), limitReason(limitReason_t::unlimited) {
 	// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 	lastReply.instanceID = -1;
 }
+
+StorageQueueInfo::StorageQueueInfo(const UID& id_, const LocalityData& locality_)
+  : StorageQueueInfo(UID(), id_, locality_) {}
 
 void StorageQueueInfo::addCommitCost(TransactionTagRef tagName, TransactionCommitCostEstimation const& cost) {
 	tagCostEst[tagName] += cost;
@@ -983,7 +1003,7 @@ void StorageQueueInfo::update(StorageQueuingMetricsReply const& reply, Smoother&
 	busiestReadTags = reply.busiestTags;
 }
 
-void StorageQueueInfo::refreshCommitCost(double elapsed) {
+UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 	busiestWriteTags.clear();
 	TransactionTag busiestTag;
 	TransactionCommitCostEstimation maxCost;
@@ -1003,19 +1023,22 @@ void StorageQueueInfo::refreshCommitCost(double elapsed) {
 		busiestWriteTags.emplace_back(busiestTag, maxRate, maxBusyness);
 	}
 
-	TraceEvent("BusiestWriteTag", id)
-	    .detail("Elapsed", elapsed)
-	    .detail("Tag", printable(busiestTag))
-	    .detail("TagOps", maxCost.getOpsSum())
-	    .detail("TagCost", maxCost.getCostSum())
-	    .detail("TotalCost", totalWriteCosts)
-	    .detail("Reported", !busiestWriteTags.empty())
-	    .trackLatest(busiestWriteTagEventHolder->trackingKey);
+	UpdateCommitCostRequest updateCommitCostRequest{ ratekeeperID,
+		                                             now(),
+		                                             elapsed,
+		                                             busiestTag,
+		                                             maxCost.getOpsSum(),
+		                                             maxCost.getCostSum(),
+		                                             totalWriteCosts,
+		                                             !busiestWriteTags.empty(),
+		                                             ReplyPromise<Void>() };
 
 	// reset statistics
 	tagCostEst.clear();
 	totalWriteOps = 0;
 	totalWriteCosts = 0;
+
+	return updateCommitCostRequest;
 }
 
 Optional<double> StorageQueueInfo::getThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const {

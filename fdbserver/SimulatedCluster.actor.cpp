@@ -215,8 +215,12 @@ class TestConfig {
 			std::string attrib = removeWhitespace(line.substr(0, found));
 			std::string value = removeWhitespace(line.substr(found + 1));
 
-			if (attrib == "extraDB") {
-				sscanf(value.c_str(), "%d", &extraDB);
+			if (attrib == "extraDatabaseMode") {
+				extraDatabaseMode = ISimulator::stringToExtraDatabaseMode(value);
+			}
+
+			if (attrib == "extraDatabaseCount") {
+				sscanf(value.c_str(), "%d", &extraDatabaseCount);
 			}
 
 			if (attrib == "minimumReplication") {
@@ -296,7 +300,9 @@ class TestConfig {
 	ConfigDBType configDBType{ ConfigDBType::DISABLED };
 
 public:
-	int extraDB = 0;
+	ISimulator::ExtraDatabaseMode extraDatabaseMode = ISimulator::ExtraDatabaseMode::Disabled;
+	// The number of extra database used if the database mode is MULTIPLE
+	int extraDatabaseCount = 1;
 	int minimumReplication = 0;
 	int minimumRegions = 0;
 	bool configureLocked = false;
@@ -335,6 +341,7 @@ public:
 
 	bool allowDefaultTenant = true;
 	bool allowDisablingTenants = true;
+	bool allowCreatingTenants = true;
 	bool injectTargetedSSRestart = false;
 	bool injectSSDelay = false;
 
@@ -362,8 +369,10 @@ public:
 			loadIniFile(testFile);
 			return;
 		}
+		std::string extraDatabaseModeStr;
 		ConfigBuilder builder;
-		builder.add("extraDB", &extraDB)
+		builder.add("extraDatabaseMode", &extraDatabaseModeStr)
+		    .add("extraDatabaseCount", &extraDatabaseCount)
 		    .add("minimumReplication", &minimumReplication)
 		    .add("minimumRegions", &minimumRegions)
 		    .add("configureLocked", &configureLocked)
@@ -394,6 +403,8 @@ public:
 		    .add("blobGranulesEnabled", &blobGranulesEnabled)
 		    .add("allowDefaultTenant", &allowDefaultTenant)
 		    .add("allowDisablingTenants", &allowDisablingTenants)
+		    .add("allowCreatingTenants", &allowCreatingTenants)
+		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
 		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
 		    .add("injectTargetedSSRestart", &injectTargetedSSRestart)
 		    .add("injectSSDelay", &injectSSDelay);
@@ -417,6 +428,9 @@ public:
 			// look for restartInfoLocation to mark isFirstTestInRestart
 			if (!isFirstTestInRestart) {
 				isFirstTestInRestart = tomlKeyPresent(file, "restartInfoLocation");
+			}
+			if (!extraDatabaseModeStr.empty()) {
+				extraDatabaseMode = ISimulator::stringToExtraDatabaseMode(extraDatabaseModeStr);
 			}
 		} catch (std::exception& e) {
 			std::cerr << e.what() << std::endl;
@@ -478,22 +492,24 @@ ACTOR Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 	}
 
 	if (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
+		ASSERT(g_simulator.extraDatabases.size() == 1);
 		Database cx = Database::createDatabase(connRecord, -1);
 
-		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
-		state Database extraDB = Database::createDatabase(extraFile, -1);
+		auto extraFile =
+		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
+		state Database drDatabase = Database::createDatabase(extraFile, -1);
 
 		TraceEvent("StartingDrAgents")
 		    .detail("ConnectionString", connRecord->getConnectionString().toString())
 		    .detail("ExtraString", extraFile->getConnectionString().toString());
 
 		state DatabaseBackupAgent dbAgent = DatabaseBackupAgent(cx);
-		state DatabaseBackupAgent extraAgent = DatabaseBackupAgent(extraDB);
+		state DatabaseBackupAgent extraAgent = DatabaseBackupAgent(drDatabase);
 
 		auto drPollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
 
 		agentFutures.push_back(extraAgent.run(cx, drPollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
-		agentFutures.push_back(dbAgent.run(extraDB, drPollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
+		agentFutures.push_back(dbAgent.run(drDatabase, drPollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
 
 		while (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
 			wait(delay(1.0));
@@ -1102,10 +1118,10 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		if (tssModeStr != nullptr) {
 			g_simulator.tssMode = (ISimulator::TSSMode)atoi(tssModeStr);
 		}
-		bool enableExtraDB = (testConfig.extraDB == 3);
 		ClusterConnectionString conn(ini.GetValue("META", "connectionString"));
-		if (enableExtraDB) {
-			g_simulator.extraDB = new ClusterConnectionString(ini.GetValue("META", "connectionString"));
+		if (testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::Local) {
+			g_simulator.extraDatabases.clear();
+			g_simulator.extraDatabases.push_back(conn.toString());
 		}
 		if (!testConfig.disableHostname) {
 			auto mockDNSStr = ini.GetValue("META", "mockDNS");
@@ -1271,7 +1287,8 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 // Configuration details compiled in a structure used when setting up a simulated cluster
 struct SimulationConfig {
 	explicit SimulationConfig(const TestConfig& testConfig);
-	int extraDB;
+	ISimulator::ExtraDatabaseMode extraDatabaseMode;
+	int extraDatabaseCount;
 	bool generateFearless;
 
 	DatabaseConfiguration db;
@@ -1300,7 +1317,8 @@ private:
 	void generateNormalConfig(const TestConfig& testConfig);
 };
 
-SimulationConfig::SimulationConfig(const TestConfig& testConfig) : extraDB(testConfig.extraDB) {
+SimulationConfig::SimulationConfig(const TestConfig& testConfig)
+  : extraDatabaseMode(testConfig.extraDatabaseMode), extraDatabaseCount(testConfig.extraDatabaseCount) {
 	generateNormalConfig(testConfig);
 }
 
@@ -1746,7 +1764,9 @@ void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
 		machine_count = std::max(datacenters + 2,
 		                         ((db.minDatacentersRequired() > 0) ? datacenters : 1) *
 		                             std::max(3, db.minZonesRequiredPerDatacenter()));
-		machine_count = deterministicRandom()->randomInt(machine_count, std::max(machine_count + 1, extraDB ? 6 : 10));
+		machine_count = deterministicRandom()->randomInt(
+		    machine_count,
+		    std::max(machine_count + 1, extraDatabaseMode == ISimulator::ExtraDatabaseMode::Disabled ? 10 : 6));
 		// generateMachineTeamTestConfig set up the number of servers per machine and the number of machines such that
 		// if we do not remove the surplus server and machine teams, the simulation test will report error.
 		// This is needed to make sure the number of server (and machine) teams is no larger than the desired number.
@@ -1756,7 +1776,9 @@ void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
 			// while the max possible machine team number is 10.
 			// If machine_count > 5, we can still test the effectivenss of machine teams
 			// Note: machine_count may be much larger than 5 because we may have a big replication factor
-			machine_count = std::max(machine_count, deterministicRandom()->randomInt(5, extraDB ? 6 : 10));
+			machine_count = std::max(machine_count,
+			                         deterministicRandom()->randomInt(
+			                             5, extraDatabaseMode == ISimulator::ExtraDatabaseMode::Disabled ? 10 : 6));
 		}
 	}
 	machine_count += datacenters * testConfig.extraMachineCountDC;
@@ -1783,7 +1805,8 @@ void SimulationConfig::setProcessesPerMachine(const TestConfig& testConfig) {
 	} else if (generateFearless) {
 		processes_per_machine = 1;
 	} else {
-		processes_per_machine = deterministicRandom()->randomInt(1, (extraDB ? 14 : 28) / machine_count + 2);
+		processes_per_machine = deterministicRandom()->randomInt(
+		    1, (extraDatabaseMode == ISimulator::ExtraDatabaseMode::Disabled ? 28 : 14) / machine_count + 2);
 	}
 }
 
@@ -2014,10 +2037,23 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	NetworkAddressFromHostname fromHostname =
 	    useHostname ? NetworkAddressFromHostname::True : NetworkAddressFromHostname::False;
 
+	int extraDatabaseCount = 0;
+	bool useLocalDatabase = (testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::LocalOrSingle && BUGGIFY) ||
+	                        testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::Local;
+	if (!useLocalDatabase && testConfig.extraDatabaseMode != ISimulator::ExtraDatabaseMode::Disabled) {
+		extraDatabaseCount =
+		    testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::Multiple && testConfig.extraDatabaseCount > 0
+		        ? testConfig.extraDatabaseCount
+		        : 1;
+	}
+
 	std::vector<NetworkAddress> coordinatorAddresses;
 	std::vector<Hostname> coordinatorHostnames;
-	std::vector<NetworkAddress> extraCoordinatorAddresses; // Used by extra DB if the DR db is a new one
-	std::vector<Hostname> extraCoordinatorHostnames;
+
+	// A list of coordinators for each extra database being created. The Nth vector in the outer vector
+	// contains the coordinators for the Nth extra database.
+	std::vector<std::vector<NetworkAddress>> extraCoordinatorAddresses(extraDatabaseCount);
+	std::vector<std::vector<Hostname>> extraCoordinatorHostnames(extraDatabaseCount);
 
 	if (testConfig.minimumRegions > 1) {
 		// do not put coordinators in the primary region so that we can kill that region safely
@@ -2029,21 +2065,29 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				uint16_t port = sslEnabled && !sslOnly ? 2 : 1;
 				NetworkAddress coordinator(ip, port, true, isTLS, fromHostname);
 				coordinatorAddresses.push_back(coordinator);
-				auto extraIp = makeIPAddressForSim(useIPv6, { 4, dc, 1, m });
-				NetworkAddress extraCoordinator(extraIp, port, true, isTLS, fromHostname);
-				extraCoordinatorAddresses.push_back(extraCoordinator);
 
 				if (useHostname) {
 					std::string hostname = "fakeCoordinatorDC" + std::to_string(dc) + "M" + std::to_string(m);
 					Hostname coordinatorHostname(hostname, std::to_string(port), isTLS);
 					coordinatorHostnames.push_back(coordinatorHostname);
 					INetworkConnections::net()->addMockTCPEndpoint(hostname, std::to_string(port), { coordinator });
-					hostname = "fakeExtraCoordinatorDC" + std::to_string(dc) + "M" + std::to_string(m);
-					Hostname extraCoordinatorHostname(hostname, std::to_string(port), isTLS);
-					extraCoordinatorHostnames.push_back(extraCoordinatorHostname);
-					INetworkConnections::net()->addMockTCPEndpoint(
-					    hostname, std::to_string(port), { extraCoordinator });
 				}
+
+				for (int edb = 0; edb < extraDatabaseCount; ++edb) {
+					auto extraIp = makeIPAddressForSim(useIPv6, { 4 + edb, dc, 1, m });
+					NetworkAddress extraCoordinator(extraIp, port, true, isTLS, fromHostname);
+					extraCoordinatorAddresses[edb].push_back(extraCoordinator);
+
+					if (useHostname) {
+						std::string hostname = "fakeExtraCoordinatorDC" + std::to_string(dc) + "M" + std::to_string(m) +
+						                       "C" + std::to_string(edb);
+						Hostname extraCoordinatorHostname(hostname, std::to_string(port), isTLS);
+						extraCoordinatorHostnames[edb].push_back(extraCoordinatorHostname);
+						INetworkConnections::net()->addMockTCPEndpoint(
+						    hostname, std::to_string(port), { extraCoordinator });
+					}
+				}
+
 				TraceEvent("SelectedCoordinator")
 				    .detail("Hostname", useHostname ? coordinatorHostnames.back().toString().c_str() : "N/A")
 				    .detail("Address", coordinatorAddresses.back());
@@ -2075,20 +2119,26 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 					uint16_t port = sslEnabled && !sslOnly ? 2 : 1;
 					NetworkAddress coordinator(ip, port, true, isTLS, fromHostname);
 					coordinatorAddresses.push_back(coordinator);
-					auto extraIp = makeIPAddressForSim(useIPv6, { 4, dc, 1, m });
-					NetworkAddress extraCoordinator(extraIp, port, true, isTLS, fromHostname);
-					extraCoordinatorAddresses.push_back(extraCoordinator);
+
 					if (useHostname) {
 						std::string hostname = "fakeCoordinatorDC" + std::to_string(dc) + "M" + std::to_string(m);
 						Hostname coordinatorHostname(hostname, std::to_string(port), isTLS);
 						coordinatorHostnames.push_back(coordinatorHostname);
 						INetworkConnections::net()->addMockTCPEndpoint(hostname, std::to_string(port), { coordinator });
-						hostname = "fakeExtraCoordinatorDC" + std::to_string(dc) + "M" + std::to_string(m);
+					}
+
+					for (int edb = 0; edb < extraDatabaseCount; ++edb) {
+						auto extraIp = makeIPAddressForSim(useIPv6, { 4 + edb, dc, 1, m });
+						NetworkAddress extraCoordinator(extraIp, port, true, isTLS, fromHostname);
+						extraCoordinatorAddresses[edb].push_back(extraCoordinator);
+						std::string hostname = "fakeExtraCoordinatorDC" + std::to_string(dc) + "M" + std::to_string(m) +
+						                       "C" + std::to_string(edb);
 						Hostname extraCoordinatorHostname(hostname, std::to_string(port), isTLS);
-						extraCoordinatorHostnames.push_back(extraCoordinatorHostname);
+						extraCoordinatorHostnames[edb].push_back(extraCoordinatorHostname);
 						INetworkConnections::net()->addMockTCPEndpoint(
 						    hostname, std::to_string(port), { extraCoordinator });
 					}
+
 					TraceEvent("SelectedCoordinator")
 					    .detail("Hostname", useHostname ? coordinatorHostnames.back().toString().c_str() : "N/A")
 					    .detail("Address", coordinatorAddresses.back())
@@ -2127,22 +2177,19 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		conn = ClusterConnectionString(coordinatorHostnames, "TestCluster:0"_sr);
 	}
 
-	// If extraDB==0, leave g_simulator.extraDB as null because the test does not use DR.
-	if (testConfig.extraDB == 1) {
-		// The DR database can be either a new database or itself
-		g_simulator.extraDB =
-		    BUGGIFY ? (useHostname ? new ClusterConnectionString(coordinatorHostnames, "TestCluster:0"_sr)
-		                           : new ClusterConnectionString(coordinatorAddresses, "TestCluster:0"_sr))
-		            : (useHostname ? new ClusterConnectionString(extraCoordinatorHostnames, "ExtraCluster:0"_sr)
-		                           : new ClusterConnectionString(extraCoordinatorAddresses, "ExtraCluster:0"_sr));
-	} else if (testConfig.extraDB == 2) {
-		// The DR database is a new database
-		g_simulator.extraDB = useHostname ? new ClusterConnectionString(extraCoordinatorHostnames, "ExtraCluster:0"_sr)
-		                                  : new ClusterConnectionString(extraCoordinatorAddresses, "ExtraCluster:0"_sr);
-	} else if (testConfig.extraDB == 3) {
-		// The DR database is the same database
-		g_simulator.extraDB = useHostname ? new ClusterConnectionString(coordinatorHostnames, "TestCluster:0"_sr)
-		                                  : new ClusterConnectionString(coordinatorAddresses, "TestCluster:0"_sr);
+	if (useLocalDatabase) {
+		g_simulator.extraDatabases.push_back(
+		    useHostname ? ClusterConnectionString(coordinatorHostnames, "TestCluster:0"_sr).toString()
+		                : ClusterConnectionString(coordinatorAddresses, "TestCluster:0"_sr).toString());
+	} else if (testConfig.extraDatabaseMode != ISimulator::ExtraDatabaseMode::Disabled) {
+		for (int i = 0; i < extraDatabaseCount; ++i) {
+			g_simulator.extraDatabases.push_back(
+			    useHostname
+			        ? ClusterConnectionString(extraCoordinatorHostnames[i], StringRef(format("ExtraCluster%04d:0", i)))
+			              .toString()
+			        : ClusterConnectionString(extraCoordinatorAddresses[i], StringRef(format("ExtraCluster%04d:0", i)))
+			              .toString());
+		}
 	}
 
 	*pConnString = conn;
@@ -2151,7 +2198,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	    .detail("String", conn.toString())
 	    .detail("ConfigString", startingConfigString);
 
-	bool requiresExtraDBMachines = testConfig.extraDB && g_simulator.extraDB->toString() != conn.toString();
+	bool requiresExtraDBMachines = !g_simulator.extraDatabases.empty() && !useLocalDatabase;
 	int assignedMachines = 0, nonVersatileMachines = 0;
 	bool gradualMigrationPossible = true;
 	std::vector<ProcessClass::ClassType> processClassesSubSet = { ProcessClass::UnsetClass,
@@ -2259,31 +2306,35 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			                                     "SimulatedMachine"));
 
 			if (requiresExtraDBMachines) {
-				std::vector<IPAddress> extraIps;
-				extraIps.reserve(processesPerMachine);
-				for (int i = 0; i < processesPerMachine; i++) {
-					extraIps.push_back(
-					    makeIPAddressForSim(useIPv6, { 4, dc, deterministicRandom()->randomInt(1, i + 2), machine }));
+				int cluster = 4;
+				for (auto extraDatabase : g_simulator.extraDatabases) {
+					std::vector<IPAddress> extraIps;
+					extraIps.reserve(processesPerMachine);
+					for (int i = 0; i < processesPerMachine; i++) {
+						extraIps.push_back(makeIPAddressForSim(
+						    useIPv6, { cluster, dc, deterministicRandom()->randomInt(1, i + 2), machine }));
+					}
+
+					Standalone<StringRef> newMachineId(deterministicRandom()->randomUniqueID().toString());
+
+					LocalityData localities(Optional<Standalone<StringRef>>(), newZoneId, newMachineId, dcUID);
+					localities.set("data_hall"_sr, dcUID);
+					systemActors->push_back(reportErrors(simulatedMachine(ClusterConnectionString(extraDatabase),
+					                                                      extraIps,
+					                                                      sslEnabled,
+					                                                      localities,
+					                                                      processClass,
+					                                                      baseFolder,
+					                                                      false,
+					                                                      machine == useSeedForMachine,
+					                                                      AgentNone,
+					                                                      sslOnly,
+					                                                      whitelistBinPaths,
+					                                                      protocolVersion,
+					                                                      configDBType),
+					                                     "SimulatedMachine"));
+					++cluster;
 				}
-
-				Standalone<StringRef> newMachineId(deterministicRandom()->randomUniqueID().toString());
-
-				LocalityData localities(Optional<Standalone<StringRef>>(), newZoneId, newMachineId, dcUID);
-				localities.set("data_hall"_sr, dcUID);
-				systemActors->push_back(reportErrors(simulatedMachine(*g_simulator.extraDB,
-				                                                      extraIps,
-				                                                      sslEnabled,
-				                                                      localities,
-				                                                      processClass,
-				                                                      baseFolder,
-				                                                      false,
-				                                                      machine == useSeedForMachine,
-				                                                      AgentNone,
-				                                                      sslOnly,
-				                                                      whitelistBinPaths,
-				                                                      protocolVersion,
-				                                                      configDBType),
-				                                     "SimulatedMachine"));
 			}
 
 			assignedMachines++;
@@ -2392,7 +2443,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	allowList.addTrustedSubnet("abcd::/16"sv);
 	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
 	state bool allowDisablingTenants = testConfig.allowDisablingTenants;
-	state bool allowCreatingTenants = true;
+	state bool allowCreatingTenants = testConfig.allowCreatingTenants;
 
 	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		testConfig.storageEngineExcludeTypes.push_back(5);
@@ -2422,7 +2473,8 @@ ACTOR void setupAndRun(std::string dataFolder,
 	// Disable the default tenant in backup and DR tests for now. This is because backup does not currently duplicate
 	// the tenant map and related state.
 	// TODO: reenable when backup/DR or BlobGranule supports tenants.
-	if (std::string_view(testFile).find("Backup") != std::string_view::npos || testConfig.extraDB != 0) {
+	if (std::string_view(testFile).find("Backup") != std::string_view::npos ||
+	    testConfig.extraDatabaseMode != ISimulator::ExtraDatabaseMode::Disabled) {
 		allowDefaultTenant = false;
 	}
 
@@ -2433,12 +2485,12 @@ ACTOR void setupAndRun(std::string dataFolder,
 		testConfig.storageEngineExcludeTypes.push_back(5);
 	}
 
-	state ProtocolVersion protocolVersion = currentProtocolVersion;
+	state ProtocolVersion protocolVersion = currentProtocolVersion();
 	if (testConfig.startIncompatibleProcess) {
 		// isolates right most 1 bit of compatibleProtocolVersionMask to make this protocolVersion incompatible
 		uint64_t minAddToMakeIncompatible =
 		    ProtocolVersion::compatibleProtocolVersionMask & ~(ProtocolVersion::compatibleProtocolVersionMask - 1);
-		protocolVersion = ProtocolVersion(currentProtocolVersion.version() + minAddToMakeIncompatible);
+		protocolVersion = ProtocolVersion(currentProtocolVersion().version() + minAddToMakeIncompatible);
 	}
 
 	// TODO (IPv6) Use IPv6?
@@ -2455,7 +2507,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	                           ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
 	                           "",
 	                           "",
-	                           currentProtocolVersion);
+	                           currentProtocolVersion());
 	testSystem->excludeFromRestarts = true;
 	wait(g_simulator.onProcess(testSystem, TaskPriority::DefaultYield));
 	Sim2FileSystem::newFileSystem();
