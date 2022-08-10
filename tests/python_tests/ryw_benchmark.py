@@ -26,21 +26,22 @@ import sys
 import time
 import traceback
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from python_tests import PythonTest
 
 import fdb
+
 fdb.api_version(400)
 
 
 class RYWBenchmark(PythonTest):
     tests = {
-        'get_single': "RYW: get single cached value throughput",
-        'get_many_sequential': "RYW: get sequential cached values throughput",
-        'get_range_basic': "RYW: get range cached values throughput",
-        'single_clear_get_range': "RYW: get range cached values with clears throughput",
-        'clear_range_get_range': "RYW: get range cached values with clear ranges throughput",
-        'interleaved_sets_gets': "RYW: interleaved sets and gets on a single key throughput",
+        "get_single": "RYW: get single cached value throughput",
+        "get_many_sequential": "RYW: get sequential cached values throughput",
+        "get_range_basic": "RYW: get range cached values throughput",
+        "single_clear_get_range": "RYW: get range cached values with clears throughput",
+        "clear_range_get_range": "RYW: get range cached values with clear ranges throughput",
+        "interleaved_sets_gets": "RYW: interleaved sets and gets on a single key throughput",
     }
 
     def __init__(self, key_count=10000, key_size=16):
@@ -50,28 +51,28 @@ class RYWBenchmark(PythonTest):
 
     def run_test(self):
         try:
-            db = fdb.open(None, 'DB')
+            db = fdb.open(None, "DB")
         except KeyboardInterrupt:
             raise
-        except:
-            self.result.add_error(self.get_error('fdb.open failed'))
+        except Exception:
+            self.result.add_error(self.get_error("fdb.open failed"))
             return
 
         try:
             self.test_performance(db)
         except KeyboardInterrupt:
             raise
-        except:
-            self.result.add_error(self.get_error('Failed to complete all tests'))
+        except Exception:
+            self.result.add_error(self.get_error("Failed to complete all tests"))
 
     def key(self, num):
-        return '%0*d' % (self.key_size, num)
+        return "%0*d" % (self.key_size, num)
 
     # Adds the stack trace to an error message
     def get_error(self, message):
-        errorMessage = message + "\n" + traceback.format_exc()
-        print(errorMessage)
-        return errorMessage
+        error_message = message + "\n" + traceback.format_exc()
+        print(error_message)
+        return error_message
 
     def test_performance(self, db):
         tr = db.create_transaction()
@@ -88,29 +89,35 @@ class RYWBenchmark(PythonTest):
 
         for test in self.args.tests_to_run:
             time.sleep(5)
-            print('Running test %s' % test)
+            print("Running test %s" % test)
             results = []
 
-            fxn_name = 'run_%s' % test
-            assert hasattr(self, fxn_name), 'Test function %s is not implemented' % fxn_name
+            fxn_name = "run_%s" % test
+            assert hasattr(self, fxn_name), (
+                "Test function %s is not implemented" % fxn_name
+            )
 
             for x in range(0, num_runs):
                 try:
                     results.append(getattr(self, fxn_name)(tr))
                 except KeyboardInterrupt:
                     raise
-                except:
-                    self.result.add_error(self.get_error('Performance test failed: ' + RYWBenchmark.tests[test]))
+                except Exception:
+                    self.result.add_error(
+                        self.get_error(
+                            "Performance test failed: " + RYWBenchmark.tests[test]
+                        )
+                    )
                     break
 
             if len(results) == num_runs:
                 median = sorted(results)[num_runs / 2]
-                self.result.add_kpi(RYWBenchmark.tests[test], int(median), 'keys/s')
+                self.result.add_kpi(RYWBenchmark.tests[test], int(median), "keys/s")
 
     def insert_data(self, tr):
         del tr[:]
         for i in range(0, 10000):
-            tr[self.key(i)] = 'foo'
+            tr[self.key(i)] = "foo"
 
     def run_get_single(self, tr, count=10000):
         start = time.time()
@@ -152,26 +159,39 @@ class RYWBenchmark(PythonTest):
 
     def run_interleaved_sets_gets(self, tr, count=10000):
         start = time.time()
-        tr['foo'] = str(1)
+        tr["foo"] = str(1)
         for i in range(count):
-            old = int(tr.get('foo').wait())
-            tr.set('foo', str(old + 1))
+            old = int(tr.get("foo").wait())
+            tr.set("foo", str(old + 1))
         return count / (time.time() - start)
 
 
-if __name__ == '__main__':
-    print("Running RYW Benchmark test on Python version %d.%d.%d%s%d" %
-          (sys.version_info[0], sys.version_info[1], sys.version_info[2], sys.version_info[3][0], sys.version_info[4]))
+if __name__ == "__main__":
+    print(
+        "Running RYW Benchmark test on Python version %d.%d.%d%s%d"
+        % (
+            sys.version_info[0],
+            sys.version_info[1],
+            sys.version_info[2],
+            sys.version_info[3][0],
+            sys.version_info[4],
+        )
+    )
 
     parser = argparse.ArgumentParser()
 
     tests = sorted(RYWBenchmark.tests.keys())
-    assert len(tests) > 0, 'RYW benchmark test has no test_functions'
-    test_string = ', '.join(tests[:-1])
+    assert len(tests) > 0, "RYW benchmark test has no test_functions"
+    test_string = ", ".join(tests[:-1])
     if len(tests) > 1:
-        test_string += ', and '
+        test_string += ", and "
 
     test_string += tests[-1]
 
-    parser.add_argument('--tests-to-run', nargs='*', help='Names of tests to run. Can be any of %s. By default, all tests are run.' % test_string)
+    parser.add_argument(
+        "--tests-to-run",
+        nargs="*",
+        help="Names of tests to run. Can be any of %s. By default, all tests are run."
+        % test_string,
+    )
     RYWBenchmark().run(parser=parser)

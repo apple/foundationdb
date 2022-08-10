@@ -71,6 +71,11 @@ import types
 import struct
 
 
+def remove_prefix(text, prefix):
+    if text.startswith(prefix):
+        return text[len(prefix):]
+    return text
+
 def option_wrap(code):
     def setfunc(self):
         self._parent._set_option(code, None, 0)

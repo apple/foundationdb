@@ -44,15 +44,29 @@ class SimpleConfigConsumerImpl {
 		loop {
 			state Version compactionVersion = self->lastSeenVersion;
 			wait(delayJittered(self->compactionInterval.get()));
-			wait(self->cfi.compact.getReply(ConfigFollowerCompactRequest{ compactionVersion }));
+			if (self->cfi.hostname.present()) {
+				wait(retryGetReplyFromHostname(ConfigFollowerCompactRequest{ compactionVersion },
+				                               self->cfi.hostname.get(),
+				                               WLTOKEN_CONFIGFOLLOWER_COMPACT));
+			} else {
+				wait(self->cfi.compact.getReply(ConfigFollowerCompactRequest{ compactionVersion }));
+			}
 			++self->compactRequest;
 			broadcaster->compact(compactionVersion);
 		}
 	}
 
 	ACTOR static Future<Version> getCommittedVersion(SimpleConfigConsumerImpl* self) {
-		ConfigFollowerGetCommittedVersionReply committedVersionReply =
-		    wait(self->cfi.getCommittedVersion.getReply(ConfigFollowerGetCommittedVersionRequest{}));
+		state ConfigFollowerGetCommittedVersionReply committedVersionReply;
+		if (self->cfi.hostname.present()) {
+			wait(store(committedVersionReply,
+			           retryGetReplyFromHostname(ConfigFollowerGetCommittedVersionRequest{},
+			                                     self->cfi.hostname.get(),
+			                                     WLTOKEN_CONFIGFOLLOWER_GETCOMMITTEDVERSION)));
+		} else {
+			wait(store(committedVersionReply,
+			           self->cfi.getCommittedVersion.getReply(ConfigFollowerGetCommittedVersionRequest{})));
+		}
 		return committedVersionReply.lastCommitted;
 	}
 
@@ -63,8 +77,18 @@ class SimpleConfigConsumerImpl {
 				state Version committedVersion = wait(getCommittedVersion(self));
 				ASSERT_GE(committedVersion, self->lastSeenVersion);
 				if (committedVersion > self->lastSeenVersion) {
-					ConfigFollowerGetChangesReply reply = wait(self->cfi.getChanges.getReply(
-					    ConfigFollowerGetChangesRequest{ self->lastSeenVersion, committedVersion }));
+					state ConfigFollowerGetChangesReply reply;
+					if (self->cfi.hostname.present()) {
+						wait(store(reply,
+						           retryGetReplyFromHostname(
+						               ConfigFollowerGetChangesRequest{ self->lastSeenVersion, committedVersion },
+						               self->cfi.hostname.get(),
+						               WLTOKEN_CONFIGFOLLOWER_GETCHANGES)));
+					} else {
+						wait(store(reply,
+						           self->cfi.getChanges.getReply(
+						               ConfigFollowerGetChangesRequest{ self->lastSeenVersion, committedVersion })));
+					}
 					++self->successfulChangeRequest;
 					for (const auto& versionedMutation : reply.changes) {
 						TraceEvent te(SevDebug, "ConsumerFetchedMutation", self->id);
@@ -85,7 +109,7 @@ class SimpleConfigConsumerImpl {
 			} catch (Error& e) {
 				++self->failedChangeRequest;
 				if (e.code() == error_code_version_already_compacted) {
-					TEST(true); // SimpleConfigConsumer get version_already_compacted error
+					CODE_PROBE(true, "SimpleConfigConsumer get version_already_compacted error");
 					wait(getSnapshotAndChanges(self, broadcaster));
 				} else {
 					throw e;
@@ -96,8 +120,17 @@ class SimpleConfigConsumerImpl {
 
 	ACTOR static Future<Void> getSnapshotAndChanges(SimpleConfigConsumerImpl* self, ConfigBroadcaster* broadcaster) {
 		state Version committedVersion = wait(getCommittedVersion(self));
-		ConfigFollowerGetSnapshotAndChangesReply reply = wait(
-		    self->cfi.getSnapshotAndChanges.getReply(ConfigFollowerGetSnapshotAndChangesRequest{ committedVersion }));
+		state ConfigFollowerGetSnapshotAndChangesReply reply;
+		if (self->cfi.hostname.present()) {
+			wait(store(reply,
+			           retryGetReplyFromHostname(ConfigFollowerGetSnapshotAndChangesRequest{ committedVersion },
+			                                     self->cfi.hostname.get(),
+			                                     WLTOKEN_CONFIGFOLLOWER_GETSNAPSHOTANDCHANGES)));
+		} else {
+			wait(store(reply,
+			           self->cfi.getSnapshotAndChanges.getReply(
+			               ConfigFollowerGetSnapshotAndChangesRequest{ committedVersion })));
+		}
 		++self->snapshotRequest;
 		TraceEvent(SevDebug, "ConfigConsumerGotSnapshotAndChanges", self->id)
 		    .detail("SnapshotVersion", reply.snapshotVersion)

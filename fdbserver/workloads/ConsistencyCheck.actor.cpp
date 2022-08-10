@@ -22,11 +22,12 @@
 #include "boost/lexical_cast.hpp"
 
 #include "flow/IRandom.h"
-#include "flow/Tracing.h"
+#include "fdbclient/Tracing.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbrpc/IRateControl.h"
+#include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/StorageMetrics.h"
@@ -205,8 +206,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> runCheck(Database cx, ConsistencyCheckWorkload* self) {
-		TEST(self->performQuiescentChecks); // Quiescent consistency check
-		TEST(!self->performQuiescentChecks); // Non-quiescent consistency check
+		CODE_PROBE(self->performQuiescentChecks, "Quiescent consistency check");
+		CODE_PROBE(!self->performQuiescentChecks, "Non-quiescent consistency check");
 
 		if (self->firstClient || self->distributed) {
 			try {
@@ -273,7 +274,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 					// Check that nothing is in the storage server queues
 					try {
-						int64_t maxStorageServerQueueSize = wait(getMaxStorageServerQueueSize(cx, self->dbInfo));
+						int64_t maxStorageServerQueueSize =
+						    wait(getMaxStorageServerQueueSize(cx, self->dbInfo, invalidVersion));
 						if (maxStorageServerQueueSize > 0) {
 							TraceEvent("ConsistencyCheck_ExceedStorageServerQueueLimit")
 							    .detail("MaxQueueSize", maxStorageServerQueueSize);
@@ -873,7 +875,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state Key begin = kr.begin;
 		state Key end = kr.end;
 		state int limitKeyServers = BUGGIFY ? 1 : 100;
-		state Span span(deterministicRandom()->randomUniqueID(), "WL:ConsistencyCheck"_loc);
+		state Span span(SpanContext(deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64()),
+		                "WL:ConsistencyCheck"_loc);
 
 		while (begin < end) {
 			state Reference<CommitProxyInfo> commitProxyInfo =
@@ -882,16 +885,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			for (int i = 0; i < commitProxyInfo->size(); i++)
 				keyServerLocationFutures.push_back(
 				    commitProxyInfo->get(i, &CommitProxyInterface::getKeyServersLocations)
-				        .getReplyUnlessFailedFor(GetKeyServerLocationsRequest(span.context,
-				                                                              Optional<TenantNameRef>(),
-				                                                              begin,
-				                                                              end,
-				                                                              limitKeyServers,
-				                                                              false,
-				                                                              latestVersion,
-				                                                              Arena()),
-				                                 2,
-				                                 0));
+				        .getReplyUnlessFailedFor(
+				            GetKeyServerLocationsRequest(
+				                span.context, TenantInfo(), begin, end, limitKeyServers, false, latestVersion, Arena()),
+				            2,
+				            0));
 
 			state bool keyServersInsertedForThisIteration = false;
 			choose {
@@ -1272,7 +1270,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				for (int i = 0; i < initialSize; i++) {
 					auto tssPair = tssMapping.find(storageServers[i]);
 					if (tssPair != tssMapping.end()) {
-						TEST(true); // TSS checked in consistency check
+						CODE_PROBE(true, "TSS checked in consistency check");
 						storageServers.push_back(tssPair->second.id());
 						storageServerInterfaces.push_back(tssPair->second);
 					}
@@ -1625,8 +1623,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 							break;
 						} else if (estimatedBytes[j] < 0 &&
-						           (g_network->isSimulated() || !storageServerInterfaces[j].isTss())) {
-							self->testFailure("Could not get storage metrics from server");
+						           ((g_network->isSimulated() &&
+						             g_simulator.tssMode <= ISimulator::TSSMode::EnabledNormal) ||
+						            !storageServerInterfaces[j].isTss())) {
+							// Ignore a non-responding TSS outside of simulation, or if tss fault injection is enabled
 							hasValidEstimate = false;
 							break;
 						}
@@ -2034,8 +2034,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> checkWorkerList(Database cx, ConsistencyCheckWorkload* self) {
-		if (g_simulator.extraDB)
+		if (!g_simulator.extraDatabases.empty()) {
 			return true;
+		}
 
 		std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		std::set<NetworkAddress> workerAddresses;
@@ -2096,7 +2097,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					return false;
 				}
 
-				state ClusterConnectionString old(currentKey.get().toString());
+				ClusterConnectionString old(currentKey.get().toString());
+				state std::vector<NetworkAddress> oldCoordinators = wait(old.tryResolveHostnames());
 
 				std::vector<ProcessData> workers = wait(::getWorkers(&tr));
 
@@ -2106,7 +2108,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 
 				std::set<Optional<Standalone<StringRef>>> checkDuplicates;
-				for (const auto& addr : old.coordinators()) {
+				for (const auto& addr : oldCoordinators) {
 					auto findResult = addr_locality.find(addr);
 					if (findResult != addr_locality.end()) {
 						if (checkDuplicates.count(findResult->second.zoneId())) {

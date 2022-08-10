@@ -23,6 +23,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "flow/DebugTrace.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 // create a peek stream for cursor when it's possible
@@ -35,9 +36,12 @@ ACTOR Future<Void> tryEstablishPeekStream(ILogSystem::ServerPeekCursor* self) {
 	}
 	wait(IFailureMonitor::failureMonitor().onStateEqual(self->interf->get().interf().peekStreamMessages.getEndpoint(),
 	                                                    FailureStatus(false)));
-	self->peekReplyStream = self->interf->get().interf().peekStreamMessages.getReplyStream(TLogPeekStreamRequest(
-	    self->messageVersion.version, self->tag, self->returnIfBlocked, std::numeric_limits<int>::max()));
-	TraceEvent(SevDebug, "SPC_StreamCreated", self->randomID)
+
+	auto req = TLogPeekStreamRequest(
+	    self->messageVersion.version, self->tag, self->returnIfBlocked, std::numeric_limits<int>::max());
+	self->peekReplyStream = self->interf->get().interf().peekStreamMessages.getReplyStream(req);
+	DebugLogTraceEvent(SevDebug, "SPC_StreamCreated", self->randomID)
+	    .detail("Tag", self->tag)
 	    .detail("PeerAddr", self->interf->get().interf().peekStreamMessages.getEndpoint().getPrimaryAddress())
 	    .detail("PeerToken", self->interf->get().interf().peekStreamMessages.getEndpoint().token);
 	return Void();
@@ -56,8 +60,9 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor(Reference<AsyncVar<OptionalInterf
     fastReplies(0), unknownReplies(0) {
 	this->results.maxKnownVersion = 0;
 	this->results.minKnownCommittedVersion = 0;
-	DisabledTraceEvent(SevDebug, "SPC_Starting", randomID)
+	DebugLogTraceEvent(SevDebug, "SPC_Starting", randomID)
 	    .detail("Tag", tag.toString())
+	    .detail("UsePeekStream", usePeekStream)
 	    .detail("Begin", begin)
 	    .detail("End", end);
 }
@@ -309,8 +314,14 @@ ACTOR Future<Void> serverPeekParallelGetMore(ILogSystem::ServerPeekCursor* self,
 				// We *should* never get timed_out(), as it means the TLog got stuck while handling a parallel peek,
 				// and thus we've likely just wasted 10min.
 				// timed_out() is sent by cleanupPeekTrackers as value PEEK_TRACKER_EXPIRATION_TIME
-				ASSERT_WE_THINK(e.code() == error_code_operation_obsolete ||
-				                SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME < 10);
+				//
+				// A cursor for a log router can be delayed indefinitely during a network partition, so only fail
+				// simulation tests sufficiently far after we finish simulating network partitions.
+				CODE_PROBE(e.code() == error_code_timed_out, "peek cursor timed out");
+				if (now() >= FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME) {
+					ASSERT_WE_THINK(e.code() == error_code_operation_obsolete ||
+					                SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME < 10);
+				}
 				self->interfaceChanged = self->interf->onChange();
 				self->randomID = deterministicRandom()->randomUniqueID();
 				self->sequence = 0;
@@ -355,7 +366,8 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 					}
 					updateCursorWithReply(self, res);
 					expectedBegin = res.end;
-					DisabledTraceEvent(SevDebug, "SPC_GetMoreB", self->randomID)
+					DebugLogTraceEvent(SevDebug, "SPC_GetMoreB", self->randomID)
+					    .detail("Tag", self->tag)
 					    .detail("Has", self->hasMessage())
 					    .detail("End", res.end)
 					    .detail("Popped", res.popped.present() ? res.popped.get() : 0);
@@ -367,7 +379,9 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 				}
 			}
 		} catch (Error& e) {
-			DisabledTraceEvent(SevDebug, "SPC_GetMoreB_Error", self->randomID).errorUnsuppressed(e);
+			DebugLogTraceEvent(SevDebug, "SPC_GetMoreB_Error", self->randomID)
+			    .errorUnsuppressed(e)
+			    .detail("Tag", self->tag);
 			if (e.code() == error_code_connection_failed || e.code() == error_code_operation_obsolete) {
 				// NOTE: delay in order to avoid the endless retry loop block other tasks
 				self->peekReplyStream.reset();
@@ -639,7 +653,7 @@ void ILogSystem::MergedPeekCursor::updateMessage(bool usePolicy) {
 			c->advanceTo(messageVersion);
 			if (start <= messageVersion && messageVersion < c->version()) {
 				advancedPast = true;
-				TEST(true); // Merge peek cursor advanced past desired sequence
+				CODE_PROBE(true, "Merge peek cursor advanced past desired sequence");
 			}
 		}
 
@@ -951,7 +965,7 @@ void ILogSystem::SetPeekCursor::updateMessage(int logIdx, bool usePolicy) {
 				c->advanceTo(messageVersion);
 				if (start <= messageVersion && messageVersion < c->version()) {
 					advancedPast = true;
-					TEST(true); // Merge peek cursor with logIdx advanced past desired sequence
+					CODE_PROBE(true, "Merge peek cursor with logIdx advanced past desired sequence");
 				}
 			}
 		}

@@ -376,11 +376,13 @@ namespace SummarizeTest
                     bool useNewPlugin = (oldServerName == fdbserverName) || versionGreaterThanOrEqual(oldServerName.Split('-').Last(), "5.2.0");
                     bool useToml = File.Exists(testFile + "-1.toml");
                     string testFile1 = useToml ? testFile + "-1.toml" : testFile + "-1.txt";
-                    result = RunTest(firstServerName, useNewPlugin ? tlsPluginFile : tlsPluginFile_5_1, summaryFileName, errorFileName, seed, buggify, testFile1, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, false, true, oldServerName, traceToStdout, noSim, faultInjectionEnabled);
+                    bool useValgrindRunOne = useValgrind && firstServerName == fdbserverName;
+                    bool useValgrindRunTwo = useValgrind && secondServerName == fdbserverName;
+                    result = RunTest(firstServerName, useNewPlugin ? tlsPluginFile : tlsPluginFile_5_1, summaryFileName, errorFileName, seed, buggify, testFile1, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrindRunOne, false, true, oldServerName, traceToStdout, noSim, faultInjectionEnabled);
                     if (result == 0)
                     {
                         string testFile2 = useToml ? testFile + "-2.toml" : testFile + "-2.txt";
-                        result = RunTest(secondServerName, tlsPluginFile, summaryFileName, errorFileName, seed+1, buggify, testFile2, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrind, true, false, oldServerName, traceToStdout, noSim, faultInjectionEnabled);
+                        result = RunTest(secondServerName, tlsPluginFile, summaryFileName, errorFileName, seed+1, buggify, testFile2, runDir, uid, expectedUnseed, out unseed, out retryableError, logOnRetryableError, useValgrindRunTwo, true, false, oldServerName, traceToStdout, noSim, faultInjectionEnabled);
                     }
                 }
                 else
@@ -458,7 +460,7 @@ namespace SummarizeTest
                             role, IsRunningOnMono() ? "" : "-q", seed, testFile, buggify ? "on" : "off", faultInjectionArg, tlsPluginArg);
                     }
                     if (restarting) args = args + " --restarting";
-                    if (useValgrind && !willRestart)
+                    if (useValgrind)
                     {
                         valgrindOutputFile = string.Format("valgrind-{0}.xml", seed);
                         process.StartInfo.FileName = "valgrind";
@@ -786,8 +788,15 @@ namespace SummarizeTest
             string firstRetryableError = "";
             int stderrSeverity = (int)Magnesium.Severity.SevError;
 
+            xout.Add(new XAttribute("DeterminismCheck", expectedUnseed != -1 ? "1" : "0"));
+            xout.Add(new XAttribute("OldBinary", Path.GetFileName(oldBinaryName)));
+
+            if (traceFiles.Length == 0) {
+                xout.Add(new XElement("NoTraceFilesFound"));
+            }
+
             Dictionary<KeyValuePair<string, Magnesium.Severity>, Magnesium.Severity> severityMap = new Dictionary<KeyValuePair<string, Magnesium.Severity>, Magnesium.Severity>();
-            Dictionary<Tuple<string, string>, bool> codeCoverage = new Dictionary<Tuple<string, string>, bool>();
+            var codeCoverage = new Dictionary<Tuple<string, string, string>, bool>();
 
             foreach (var traceFileName in traceFiles)
             {
@@ -822,9 +831,7 @@ namespace SummarizeTest
                                     new XAttribute("RandomSeed", ev.Details.RandomSeed),
                                     new XAttribute("SourceVersion", ev.Details.SourceVersion),
                                     new XAttribute("Time", ev.Details.ActualTime),
-                                    new XAttribute("BuggifyEnabled", ev.Details.BuggifyEnabled),
-                                    new XAttribute("DeterminismCheck", expectedUnseed != -1 ? "1" : "0"),
-                                    new XAttribute("OldBinary", Path.GetFileName(oldBinaryName)));
+                                    new XAttribute("BuggifyEnabled", ev.Details.BuggifyEnabled));
                                 testBeginFound = true;
                                 if (ev.DDetails.ContainsKey("FaultInjectionEnabled"))
                                     xout.Add(new XAttribute("FaultInjectionEnabled", ev.Details.FaultInjectionEnabled));
@@ -900,12 +907,17 @@ namespace SummarizeTest
                             if (ev.Type == "CodeCoverage" && !willRestart)
                             {
                                 bool covered = true;
-                                if(ev.DDetails.ContainsKey("Covered"))
+                                if (ev.DDetails.ContainsKey("Covered"))
                                 {
                                     covered = int.Parse(ev.Details.Covered) != 0;
                                 }
 
-                                var key = new Tuple<string, string>(ev.Details.File, ev.Details.Line);
+                                var comment = "";
+                                if (ev.DDetails.ContainsKey("Comment"))
+                                {
+                                    comment = ev.Details.Comment;
+                                }
+                                var key = new Tuple<string, string, string>(ev.Details.File, ev.Details.Line, comment);
                                 if (covered || !codeCoverage.ContainsKey(key))
                                 {
                                     codeCoverage[key] = covered;
@@ -914,6 +926,10 @@ namespace SummarizeTest
                             if (ev.Type == "FaultInjected" || (ev.Type == "BuggifySection" && ev.Details.Activated == "1"))
                             {
                                 xout.Add(new XElement(ev.Type, new XAttribute("File", ev.Details.File), new XAttribute("Line", ev.Details.Line)));
+                            }
+                            if (ev.Type == "RunningUnitTest") 
+                            {
+                                xout.Add(new XElement(ev.Type, new XAttribute("Name", ev.Details.Name), new XAttribute("File", ev.Details.File), new XAttribute("Line", ev.Details.Line)));
                             }
                             if (ev.Type == "TestsExpectedToPass")
                                 testCount = int.Parse(ev.Details.Count);
@@ -952,12 +968,21 @@ namespace SummarizeTest
                 xout.Add(new XElement(externalError, new XAttribute("Severity", (int)Magnesium.Severity.SevError)));
             }
 
+            string joshuaSeed = System.Environment.GetEnvironmentVariable("JOSHUA_SEED");
+
+            if (joshuaSeed != null) {
+                xout.Add(new XAttribute("JoshuaSeed", joshuaSeed));
+            }
+
             foreach(var kv in codeCoverage)
             {
                 var element = new XElement("CodeCoverage", new XAttribute("File", kv.Key.Item1), new XAttribute("Line", kv.Key.Item2));
                 if(!kv.Value)
                 {
                     element.Add(new XAttribute("Covered", "0"));
+                }
+                if (kv.Key.Item3.Length > 0) {
+                    element.Add(new XAttribute("Comment", kv.Key.Item3));
                 }
 
                 xout.Add(element);

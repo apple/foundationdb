@@ -21,6 +21,8 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/Tenant.h"
+#include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 
 #define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
@@ -70,7 +72,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( RESOURCE_CONSTRAINED_MAX_BACKOFF,       30.0 );
 	init( PROXY_COMMIT_OVERHEAD_BYTES,              23 ); //The size of serializing 7 tags (3 primary, 3 remote, 1 log router) + 2 for the tag length
 	init( SHARD_STAT_SMOOTH_AMOUNT,                5.0 );
-	init( INIT_MID_SHARD_BYTES,               50000000 ); if( randomize && BUGGIFY ) INIT_MID_SHARD_BYTES = 40000; else if(randomize && BUGGIFY_WITH_PROB(0.75)) INIT_MID_SHARD_BYTES = 200000; // The same value as SERVER_KNOBS->MIN_SHARD_BYTES
+	init( INIT_MID_SHARD_BYTES,               10000000 ); if( randomize && BUGGIFY ) INIT_MID_SHARD_BYTES = 40000; else if(randomize && BUGGIFY_WITH_PROB(0.75)) INIT_MID_SHARD_BYTES = 200000; // The same value as SERVER_KNOBS->MIN_SHARD_BYTES
 
 	init( TRANSACTION_SIZE_LIMIT,                  1e7 );
 	init( KEY_SIZE_LIMIT,                          1e4 );
@@ -80,7 +82,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( METADATA_VERSION_CACHE_SIZE,            1000 );
 	init( CHANGE_FEED_LOCATION_LIMIT,            10000 );
 	init( CHANGE_FEED_CACHE_SIZE,               100000 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_SIZE = 1;
-	init( CHANGE_FEED_POP_TIMEOUT,                 5.0 );
+	init( CHANGE_FEED_POP_TIMEOUT,                10.0 );
 	init( CHANGE_FEED_STREAM_MIN_BYTES,            1e4 ); if( randomize && BUGGIFY ) CHANGE_FEED_STREAM_MIN_BYTES = 1;
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1;
@@ -201,12 +203,12 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( DEFAULT_COMMIT_GRV_PROXIES_RATIO,          3 );
 	init( DEFAULT_MAX_GRV_PROXIES,                   4 );
 
+	init( GLOBAL_CONFIG_REFRESH_BACKOFF,           0.5 );
+	init( GLOBAL_CONFIG_REFRESH_MAX_BACKOFF,      60.0 );
+	init( GLOBAL_CONFIG_REFRESH_TIMEOUT,          10.0 );
+
 	init( IS_ACCEPTABLE_DELAY,                     1.5 );
 
-	init( HTTP_READ_SIZE,                     128*1024 );
-	init( HTTP_SEND_SIZE,                      32*1024 );
-	init( HTTP_VERBOSE_LEVEL,                        0 );
-	init( HTTP_REQUEST_ID_HEADER,                   "" );
 	init( HTTP_REQUEST_AWS_V4_HEADER,             true );
 	init( BLOBSTORE_ENCRYPTION_TYPE,                "" );
 	init( BLOBSTORE_CONNECT_TRIES,                  10 );
@@ -283,6 +285,19 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	// Blob granules
 	init( BG_MAX_GRANULE_PARALLELISM,                10 );
+	init( BG_TOO_MANY_GRANULES,                    1000 );
+
+	init( CHANGE_QUORUM_BAD_STATE_RETRY_TIMES,        3 );
+	init( CHANGE_QUORUM_BAD_STATE_RETRY_DELAY,      2.0 );
+
+	// Tenants and Metacluster
+	init( MAX_TENANTS_PER_CLUSTER,                  1e6 );
+	init( TENANT_TOMBSTONE_CLEANUP_INTERVAL,         60 ); if ( randomize && BUGGIFY ) TENANT_TOMBSTONE_CLEANUP_INTERVAL = deterministicRandom()->random01() * 30;
+	init( MAX_DATA_CLUSTERS,                        1e5 );
+	init( REMOVE_CLUSTER_TENANT_BATCH_SIZE,         1e4 ); if ( randomize && BUGGIFY ) REMOVE_CLUSTER_TENANT_BATCH_SIZE = 1;
+	init( METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK,   5 ); if ( randomize && BUGGIFY ) METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK = 1;
+	init( METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY, 1.0 ); if ( randomize && BUGGIFY ) METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY = deterministicRandom()->random01() * 60;
+	init( METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT, 10.0 ); if ( randomize && BUGGIFY ) METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT = 1 + deterministicRandom()->random01() * 59;
 
 	// clang-format on
 }

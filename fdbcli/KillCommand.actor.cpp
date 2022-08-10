@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "boost/algorithm/string.hpp"
+
 #include "fdbcli/fdbcli.actor.h"
 
 #include "fdbclient/FDBOptions.g.h"
@@ -27,6 +29,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/CodeProbe.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -37,8 +40,10 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
                                     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
 	ASSERT(tokens.size() >= 1);
 	state bool result = true;
+	state std::string addressesStr;
 	if (tokens.size() == 1) {
 		// initialize worker interfaces
+		address_interface->clear();
 		wait(getWorkerInterfaces(tr, address_interface));
 	}
 	if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
@@ -54,21 +59,27 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 		}
 		printf("\n");
 	} else if (tokencmp(tokens[1], "all")) {
-		state std::map<Key, std::pair<Value, ClientLeaderRegInterface>>::const_iterator it;
-		for (it = address_interface->cbegin(); it != address_interface->cend(); it++) {
-			int64_t killRequestSent = wait(safeThreadFutureToFuture(db->rebootWorker(it->first, false, 0)));
-			if (!killRequestSent) {
-				result = false;
-				fprintf(stderr, "ERROR: failed to send request to kill process `%s'.\n", it->first.toString().c_str());
-			}
-		}
 		if (address_interface->size() == 0) {
 			result = false;
 			fprintf(stderr,
 			        "ERROR: no processes to kill. You must run the `kill’ command before "
 			        "running `kill all’.\n");
 		} else {
-			printf("Attempted to kill %zu processes\n", address_interface->size());
+			std::vector<std::string> addressesVec;
+			for (const auto& [address, _] : *address_interface) {
+				addressesVec.push_back(address.toString());
+			}
+			addressesStr = boost::algorithm::join(addressesVec, ",");
+			// make sure we only call the interface once to send requests in parallel
+			int64_t killRequestsSent = wait(safeThreadFutureToFuture(db->rebootWorker(addressesStr, false, 0)));
+			if (!killRequestsSent) {
+				result = false;
+				fprintf(stderr,
+				        "ERROR: failed to send requests to all processes, please run the `kill’ command again to fetch "
+				        "latest addresses.\n");
+			} else {
+				printf("Attempted to kill %zu processes\n", address_interface->size());
+			}
 		}
 	} else {
 		state int i;
@@ -81,18 +92,32 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 		}
 
 		if (result) {
+			std::vector<std::string> addressesVec;
 			for (i = 1; i < tokens.size(); i++) {
-				int64_t killRequestSent = wait(safeThreadFutureToFuture(db->rebootWorker(tokens[i], false, 0)));
-				if (!killRequestSent) {
-					result = false;
-					fprintf(
-					    stderr, "ERROR: failed to send request to kill process `%s'.\n", tokens[i].toString().c_str());
-				}
+				addressesVec.push_back(tokens[i].toString());
 			}
-			printf("Attempted to kill %zu processes\n", tokens.size() - 1);
+			addressesStr = boost::algorithm::join(addressesVec, ",");
+			int64_t killRequestsSent = wait(safeThreadFutureToFuture(db->rebootWorker(addressesStr, false, 0)));
+			if (!killRequestsSent) {
+				result = false;
+				fprintf(stderr,
+				        "ERROR: failed to send requests to kill processes `%s', please run the `kill’ command again to "
+				        "fetch latest addresses.\n",
+				        addressesStr.c_str());
+			} else {
+				printf("Attempted to kill %zu processes\n", tokens.size() - 1);
+			}
 		}
 	}
 	return result;
+}
+
+void killGenerator(const char* text,
+                   const char* line,
+                   std::vector<std::string>& lc,
+                   std::vector<StringRef> const& tokens) {
+	const char* opts[] = { "all", "list", nullptr };
+	arrayGenerator(text, line, opts, lc);
 }
 
 CommandFactory killFactory(
@@ -103,5 +128,6 @@ CommandFactory killFactory(
         "If no addresses are specified, populates the list of processes which can be killed. Processes cannot be "
         "killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known "
         "processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is "
-        "unresponsive.\n\nFor each IP:port pair in <ADDRESS ...>, attempt to kill the specified process."));
+        "unresponsive.\n\nFor each IP:port pair in <ADDRESS ...>, attempt to kill the specified process."),
+    &killGenerator);
 } // namespace fdb_cli

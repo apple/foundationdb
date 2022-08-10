@@ -28,6 +28,7 @@ ACTOR Future<std::pair<RangeResult, Version>> readFromFDB(Database cx, KeyRange 
 	state Transaction tr(cx);
 	state KeyRange currentRange = range;
 	loop {
+		tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 		try {
 			state RangeResult r = wait(tr.getRange(currentRange, CLIENT_KNOBS->TOO_MANY));
 			Version grv = wait(tr.getReadVersion());
@@ -60,13 +61,14 @@ ACTOR Future<std::pair<RangeResult, Version>> readFromFDB(Database cx, KeyRange 
 // FIXME: typedef this pair type and/or chunk list
 ACTOR Future<std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>>> readFromBlob(
     Database cx,
-    Reference<BackupContainerFileSystem> bstore,
+    Reference<BlobConnectionProvider> bstore,
     KeyRange range,
     Version beginVersion,
-    Version readVersion) {
+    Version readVersion,
+    Optional<TenantName> tenantName) {
 	state RangeResult out;
 	state Standalone<VectorRef<BlobGranuleChunkRef>> chunks;
-	state Transaction tr(cx);
+	state Transaction tr(cx, tenantName);
 
 	loop {
 		try {
@@ -80,6 +82,7 @@ ACTOR Future<std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>>>
 	}
 
 	for (const BlobGranuleChunkRef& chunk : chunks) {
+		ASSERT(chunk.tenantPrefix.present() == tenantName.present());
 		RangeResult chunkRows = wait(readBlobGranule(chunk, range, beginVersion, readVersion, bstore));
 		out.arena().dependsOn(chunkRows.arena());
 		out.append(out.arena(), chunkRows.begin(), chunkRows.size());
@@ -102,7 +105,7 @@ bool compareFDBAndBlob(RangeResult fdb,
 		    .detail("BlobSize", blob.first.size());
 
 		if (debug) {
-			fmt::print("\nMismatch for [{0} - {1}) @ {2} ({3}). F({4}) B({5}):\n",
+			fmt::print("\nMismatch for [{0} - {1}) @ {2}. F({3}) B({4}):\n",
 			           range.begin.printable(),
 			           range.end.printable(),
 			           v,
@@ -140,26 +143,61 @@ bool compareFDBAndBlob(RangeResult fdb,
 				}
 			}
 
-			printf("Chunks:\n");
-			for (auto& chunk : blob.second) {
-				printf("[%s - %s)\n", chunk.keyRange.begin.printable().c_str(), chunk.keyRange.end.printable().c_str());
-
-				printf("  SnapshotFile:\n    %s\n",
-				       chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
-				printf("  DeltaFiles:\n");
-				for (auto& df : chunk.deltaFiles) {
-					printf("    %s\n", df.toString().c_str());
-				}
-				printf("  Deltas: (%d)", chunk.newDeltas.size());
-				if (chunk.newDeltas.size() > 0) {
-					fmt::print(" with version [{0} - {1}]",
-					           chunk.newDeltas[0].version,
-					           chunk.newDeltas[chunk.newDeltas.size() - 1].version);
-				}
-				fmt::print("  IncludedVersion: {}\n", chunk.includedVersion);
-			}
-			printf("\n");
+			printGranuleChunks(blob.second);
 		}
 	}
 	return correct;
+}
+
+void printGranuleChunks(const Standalone<VectorRef<BlobGranuleChunkRef>>& chunks) {
+	printf("Chunks:\n");
+	for (auto& chunk : chunks) {
+		printf("[%s - %s)\n", chunk.keyRange.begin.printable().c_str(), chunk.keyRange.end.printable().c_str());
+
+		printf("  SnapshotFile:\n    %s\n",
+		       chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
+		printf("  DeltaFiles:\n");
+		for (auto& df : chunk.deltaFiles) {
+			printf("    %s\n", df.toString().c_str());
+		}
+		printf("  Deltas: (%d)", chunk.newDeltas.size());
+		if (chunk.newDeltas.size() > 0) {
+			fmt::print(" with version [{0} - {1}]",
+			           chunk.newDeltas[0].version,
+			           chunk.newDeltas[chunk.newDeltas.size() - 1].version);
+		}
+		fmt::print("  IncludedVersion: {}\n", chunk.includedVersion);
+	}
+	printf("\n");
+}
+
+ACTOR Future<Void> clearAndAwaitMerge(Database cx, KeyRange range) {
+	// clear key range and check whether it is merged or not, repeatedly
+	state Transaction tr(cx);
+	state int reClearCount = 1;
+	state int reClearInterval = 1; // do quadratic backoff on clear rate, b/c large keys can keep it not write-cold
+	loop {
+		try {
+			Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(range));
+			if (ranges.size() == 1) {
+				return Void();
+			}
+			CODE_PROBE(true, "ClearAndAwaitMerge doing clear");
+			reClearCount--;
+			if (reClearCount <= 0) {
+				tr.clear(range);
+				wait(tr.commit());
+				fmt::print("ClearAndAwaitMerge cleared [{0} - {1}) @ {2}\n",
+				           range.begin.printable(),
+				           range.end.printable(),
+				           tr.getCommittedVersion());
+				reClearCount = reClearInterval;
+				reClearInterval++;
+			}
+			wait(delay(30.0)); // sleep a bit before checking on merge again
+			tr.reset();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 }

@@ -1,2 +1,0 @@
-testTitle=Slow Task Stress
-    testName=SlowTaskWorkload

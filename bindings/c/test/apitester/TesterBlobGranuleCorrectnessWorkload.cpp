@@ -24,6 +24,55 @@
 
 namespace FdbApiTester {
 
+class TesterGranuleContext {
+public:
+	std::unordered_map<int64_t, uint8_t*> loadsInProgress;
+	int64_t nextId = 0;
+	std::string basePath;
+
+	~TesterGranuleContext() {
+		// if there was an error or not all loads finished, delete data
+		for (auto& it : loadsInProgress) {
+			uint8_t* dataToFree = it.second;
+			delete[] dataToFree;
+		}
+	}
+};
+
+static int64_t granule_start_load(const char* filename,
+                                  int filenameLength,
+                                  int64_t offset,
+                                  int64_t length,
+                                  int64_t fullFileLength,
+                                  void* context) {
+
+	TesterGranuleContext* ctx = (TesterGranuleContext*)context;
+	int64_t loadId = ctx->nextId++;
+
+	uint8_t* buffer = new uint8_t[length];
+	std::ifstream fin(ctx->basePath + std::string(filename, filenameLength), std::ios::in | std::ios::binary);
+	fin.seekg(offset);
+	fin.read((char*)buffer, length);
+
+	ctx->loadsInProgress.insert({ loadId, buffer });
+
+	return loadId;
+}
+
+static uint8_t* granule_get_load(int64_t loadId, void* context) {
+	TesterGranuleContext* ctx = (TesterGranuleContext*)context;
+	return ctx->loadsInProgress.at(loadId);
+}
+
+static void granule_free_load(int64_t loadId, void* context) {
+	TesterGranuleContext* ctx = (TesterGranuleContext*)context;
+	auto it = ctx->loadsInProgress.find(loadId);
+	uint8_t* dataToFree = it->second;
+	delete[] dataToFree;
+
+	ctx->loadsInProgress.erase(it);
+}
+
 class ApiBlobGranuleCorrectnessWorkload : public ApiWorkload {
 public:
 	ApiBlobGranuleCorrectnessWorkload(const WorkloadConfig& config) : ApiWorkload(config) {
@@ -37,91 +86,122 @@ private:
 	enum OpType { OP_INSERT, OP_CLEAR, OP_CLEAR_RANGE, OP_READ, OP_GET_RANGES, OP_LAST = OP_GET_RANGES };
 	std::vector<OpType> excludedOpTypes;
 
+	// Allow reads at the start to get blob_granule_transaction_too_old if BG data isn't initialized yet
+	// FIXME: should still guarantee a read succeeds eventually somehow
+	bool seenReadSuccess = false;
+
 	void randomReadOp(TTaskFct cont) {
-		std::string begin = randomKeyName();
-		std::string end = randomKeyName();
-		auto results = std::make_shared<std::vector<KeyValue>>();
+		fdb::Key begin = randomKeyName();
+		fdb::Key end = randomKeyName();
+		auto results = std::make_shared<std::vector<fdb::KeyValue>>();
+		auto tooOld = std::make_shared<bool>(false);
 		if (begin > end) {
 			std::swap(begin, end);
 		}
 		execTransaction(
-		    [begin, end, results](auto ctx) {
-			    ctx->tx()->setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
-			    KeyValuesResult res = ctx->tx()->readBlobGranules(begin, end, ctx->getBGBasePath());
-			    bool more;
-			    (*results) = res.getKeyValues(&more);
-			    ASSERT(!more);
-			    if (res.getError() != error_code_success) {
-				    ctx->onError(res.getError());
+		    [this, begin, end, results, tooOld](auto ctx) {
+			    ctx->tx().setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
+			    TesterGranuleContext testerContext;
+			    testerContext.basePath = ctx->getBGBasePath();
+
+			    fdb::native::FDBReadBlobGranuleContext granuleContext;
+			    granuleContext.userContext = &testerContext;
+			    granuleContext.debugNoMaterialize = false;
+			    granuleContext.granuleParallelism = 1;
+			    granuleContext.start_load_f = &granule_start_load;
+			    granuleContext.get_load_f = &granule_get_load;
+			    granuleContext.free_load_f = &granule_free_load;
+
+			    fdb::Result res = ctx->tx().readBlobGranules(
+			        begin, end, 0 /* beginVersion */, -2 /* latest read version */, granuleContext);
+			    auto out = fdb::Result::KeyValueRefArray{};
+			    fdb::Error err = res.getKeyValueArrayNothrow(out);
+			    if (err.code() == error_code_blob_granule_transaction_too_old) {
+				    info("BlobGranuleCorrectness::randomReadOp bg too old\n");
+				    ASSERT(!seenReadSuccess);
+				    *tooOld = true;
+				    ctx->done();
+			    } else if (err.code() != error_code_success) {
+				    ctx->onError(err);
 			    } else {
+				    auto& [out_kv, out_count, out_more] = out;
+				    ASSERT(!out_more);
+				    if (!seenReadSuccess) {
+					    info("BlobGranuleCorrectness::randomReadOp first success\n");
+				    }
+				    seenReadSuccess = true;
 				    ctx->done();
 			    }
 		    },
-		    [this, begin, end, results, cont]() {
-			    std::vector<KeyValue> expected = store.getRange(begin, end, store.size(), false);
-			    if (results->size() != expected.size()) {
-				    error(fmt::format("randomReadOp result size mismatch. expected: {} actual: {}",
-				                      expected.size(),
-				                      results->size()));
-			    }
-			    ASSERT(results->size() == expected.size());
-
-			    for (int i = 0; i < results->size(); i++) {
-				    if ((*results)[i].key != expected[i].key) {
-					    error(fmt::format("randomReadOp key mismatch at {}/{}. expected: {} actual: {}",
-					                      i,
-					                      results->size(),
-					                      expected[i].key,
-					                      (*results)[i].key));
+		    [this, begin, end, results, tooOld, cont]() {
+			    if (!*tooOld) {
+				    std::vector<fdb::KeyValue> expected = store.getRange(begin, end, store.size(), false);
+				    if (results->size() != expected.size()) {
+					    error(fmt::format("randomReadOp result size mismatch. expected: {} actual: {}",
+					                      expected.size(),
+					                      results->size()));
 				    }
-				    ASSERT((*results)[i].key == expected[i].key);
+				    ASSERT(results->size() == expected.size());
 
-				    if ((*results)[i].value != expected[i].value) {
-					    error(
-					        fmt::format("randomReadOp value mismatch at {}/{}. key: {} expected: {:.80} actual: {:.80}",
-					                    i,
-					                    results->size(),
-					                    expected[i].key,
-					                    expected[i].value,
-					                    (*results)[i].value));
+				    for (int i = 0; i < results->size(); i++) {
+					    if ((*results)[i].key != expected[i].key) {
+						    error(fmt::format("randomReadOp key mismatch at {}/{}. expected: {} actual: {}",
+						                      i,
+						                      results->size(),
+						                      fdb::toCharsRef(expected[i].key),
+						                      fdb::toCharsRef((*results)[i].key)));
+					    }
+					    ASSERT((*results)[i].key == expected[i].key);
+
+					    if ((*results)[i].value != expected[i].value) {
+						    error(fmt::format(
+						        "randomReadOp value mismatch at {}/{}. key: {} expected: {:.80} actual: {:.80}",
+						        i,
+						        results->size(),
+						        fdb::toCharsRef(expected[i].key),
+						        fdb::toCharsRef(expected[i].value),
+						        fdb::toCharsRef((*results)[i].value)));
+					    }
+					    ASSERT((*results)[i].value == expected[i].value);
 				    }
-				    ASSERT((*results)[i].value == expected[i].value);
 			    }
 			    schedule(cont);
 		    });
 	}
 
 	void randomGetRangesOp(TTaskFct cont) {
-		std::string begin = randomKeyName();
-		std::string end = randomKeyName();
-		auto results = std::make_shared<std::vector<KeyValue>>();
+		fdb::Key begin = randomKeyName();
+		fdb::Key end = randomKeyName();
+		auto results = std::make_shared<std::vector<fdb::KeyRange>>();
 		if (begin > end) {
 			std::swap(begin, end);
 		}
 		execTransaction(
 		    [begin, end, results](auto ctx) {
-			    KeyRangesFuture f = ctx->tx()->getBlobGranuleRanges(begin, end);
+			    fdb::Future f = ctx->tx().getBlobGranuleRanges(begin, end).eraseType();
 			    ctx->continueAfter(
 			        f,
 			        [ctx, f, results]() {
-				        (*results) = f.getKeyRanges();
+				        *results = copyKeyRangeArray(f.get<fdb::future_var::KeyRangeRefArray>());
 				        ctx->done();
 			        },
 			        true);
 		    },
 		    [this, begin, end, results, cont]() {
-			    ASSERT(results->size() > 0);
-			    ASSERT(results->front().key <= begin);
-			    ASSERT(results->back().value >= end);
+			    if (seenReadSuccess) {
+				    ASSERT(results->size() > 0);
+				    ASSERT(results->front().beginKey <= begin);
+				    ASSERT(results->back().endKey >= end);
+			    }
 
 			    for (int i = 0; i < results->size(); i++) {
 				    // no empty or inverted ranges
-				    ASSERT((*results)[i].key < (*results)[i].value);
+				    ASSERT((*results)[i].beginKey < (*results)[i].endKey);
 			    }
 
 			    for (int i = 1; i < results->size(); i++) {
 				    // ranges contain entire requested key range
-				    ASSERT((*results)[i].key == (*results)[i - 1].value);
+				    ASSERT((*results)[i].beginKey == (*results)[i - 1].endKey);
 			    }
 
 			    schedule(cont);

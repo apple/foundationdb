@@ -35,7 +35,10 @@
 
 namespace fdb_cli {
 
-ACTOR Future<bool> profileCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens, bool intrans) {
+ACTOR Future<bool> profileCommandActor(Database db,
+                                       Reference<ITransaction> tr,
+                                       std::vector<StringRef> tokens,
+                                       bool intrans) {
 	state bool result = true;
 	if (tokens.size() == 1) {
 		printUsage(tokens[0]);
@@ -45,7 +48,7 @@ ACTOR Future<bool> profileCommandActor(Reference<ITransaction> tr, std::vector<S
 			fprintf(stderr, "ERROR: Usage: profile client <get|set>\n");
 			return false;
 		}
-		wait(GlobalConfig::globalConfig().onInitialized());
+		wait(db->globalConfig->onInitialized());
 		if (tokencmp(tokens[2], "get")) {
 			if (tokens.size() != 3) {
 				fprintf(stderr, "ERROR: Addtional arguments to `get` are not supported.\n");
@@ -53,12 +56,12 @@ ACTOR Future<bool> profileCommandActor(Reference<ITransaction> tr, std::vector<S
 			}
 			std::string sampleRateStr = "default";
 			std::string sizeLimitStr = "default";
-			const double sampleRateDbl = GlobalConfig::globalConfig().get<double>(
-			    fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
+			const double sampleRateDbl =
+			    db->globalConfig->get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
 			if (!std::isinf(sampleRateDbl)) {
 				sampleRateStr = std::to_string(sampleRateDbl);
 			}
-			const int64_t sizeLimit = GlobalConfig::globalConfig().get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
+			const int64_t sizeLimit = db->globalConfig->get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
 			if (sizeLimit != -1) {
 				sizeLimitStr = boost::lexical_cast<std::string>(sizeLimit);
 			}
@@ -94,8 +97,8 @@ ACTOR Future<bool> profileCommandActor(Reference<ITransaction> tr, std::vector<S
 				}
 			}
 
-			Tuple rate = Tuple().appendDouble(sampleRate);
-			Tuple size = Tuple().append(sizeLimit);
+			Tuple rate = Tuple::makeTuple(sampleRate);
+			Tuple size = Tuple::makeTuple(sizeLimit);
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate), rate.pack());
 			tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());

@@ -24,8 +24,8 @@
 #include "TesterTransactionExecutor.h"
 #include "TesterTestSpec.h"
 #include "TesterUtil.h"
-#include "flow/SimpleOpt.h"
-#include "bindings/c/foundationdb/fdb_c.h"
+#include "SimpleOpt/SimpleOpt.h"
+#include "test/fdb_api.hpp"
 
 #include <memory>
 #include <stdexcept>
@@ -46,6 +46,7 @@ enum TesterOptionId {
 	OPT_KNOB,
 	OPT_EXTERNAL_CLIENT_LIBRARY,
 	OPT_EXTERNAL_CLIENT_DIRECTORY,
+	OPT_FUTURE_VERSION_CLIENT_LIBRARY,
 	OPT_TMP_DIR,
 	OPT_DISABLE_LOCAL_CLIENT,
 	OPT_TEST_FILE,
@@ -53,7 +54,11 @@ enum TesterOptionId {
 	OPT_OUTPUT_PIPE,
 	OPT_FDB_API_VERSION,
 	OPT_TRANSACTION_RETRY_LIMIT,
-	OPT_BLOB_GRANULE_LOCAL_FILE_PATH
+	OPT_BLOB_GRANULE_LOCAL_FILE_PATH,
+	OPT_STATS_INTERVAL,
+	OPT_TLS_CERT_FILE,
+	OPT_TLS_KEY_FILE,
+	OPT_TLS_CA_FILE,
 };
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
@@ -68,6 +73,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_KNOB, "--knob-", SO_REQ_SEP },
 	  { OPT_EXTERNAL_CLIENT_LIBRARY, "--external-client-library", SO_REQ_SEP },
 	  { OPT_EXTERNAL_CLIENT_DIRECTORY, "--external-client-dir", SO_REQ_SEP },
+	  { OPT_FUTURE_VERSION_CLIENT_LIBRARY, "--future-version-client-library", SO_REQ_SEP },
 	  { OPT_TMP_DIR, "--tmp-dir", SO_REQ_SEP },
 	  { OPT_DISABLE_LOCAL_CLIENT, "--disable-local-client", SO_NONE },
 	  { OPT_TEST_FILE, "-f", SO_REQ_SEP },
@@ -77,6 +83,10 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_FDB_API_VERSION, "--api-version", SO_REQ_SEP },
 	  { OPT_TRANSACTION_RETRY_LIMIT, "--transaction-retry-limit", SO_REQ_SEP },
 	  { OPT_BLOB_GRANULE_LOCAL_FILE_PATH, "--blob-granule-local-file-path", SO_REQ_SEP },
+	  { OPT_STATS_INTERVAL, "--stats-interval", SO_REQ_SEP },
+	  { OPT_TLS_CERT_FILE, "--tls-cert-file", SO_REQ_SEP },
+	  { OPT_TLS_KEY_FILE, "--tls-key-file", SO_REQ_SEP },
+	  { OPT_TLS_CA_FILE, "--tls-ca-file", SO_REQ_SEP },
 	  SO_END_OF_OPTIONS };
 
 void printProgramUsage(const char* execName) {
@@ -102,6 +112,8 @@ void printProgramUsage(const char* execName) {
 	       "                 Path to the external client library.\n"
 	       "  --external-client-dir DIR\n"
 	       "                 Directory containing external client libraries.\n"
+	       "  --future-version-client-library FILE\n"
+	       "                 Path to a client library to be used with a future protocol version.\n"
 	       "  --tmp-dir DIR\n"
 	       "                 Directory for temporary files of the client.\n"
 	       "  --disable-local-client DIR\n"
@@ -118,6 +130,14 @@ void printProgramUsage(const char* execName) {
 	       "				 Path to blob granule files on local filesystem\n"
 	       "  -f, --test-file FILE\n"
 	       "                 Test file to run.\n"
+	       "  --stats-interval MILLISECONDS\n"
+	       "                 Time interval in milliseconds for printing workload statistics (default: 0 - disabled).\n"
+	       "  --tls-cert-file FILE\n"
+	       "                 Path to file containing client's TLS certificate chain\n"
+	       "  --tls-key-file FILE\n"
+	       "                 Path to file containing client's TLS private key\n"
+	       "  --tls-ca-file FILE\n"
+	       "                 Path to file containing TLS CA certificate\n"
 	       "  -h, --help     Display this help and exit.\n",
 	       FDB_API_VERSION);
 }
@@ -188,6 +208,9 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 	case OPT_EXTERNAL_CLIENT_DIRECTORY:
 		options.externalClientDir = args.OptionArg();
 		break;
+	case OPT_FUTURE_VERSION_CLIENT_LIBRARY:
+		options.futureVersionClientLibrary = args.OptionArg();
+		break;
 	case OPT_TMP_DIR:
 		options.tmpDir = args.OptionArg();
 		break;
@@ -213,6 +236,18 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 		break;
 	case OPT_BLOB_GRANULE_LOCAL_FILE_PATH:
 		options.bgBasePath = args.OptionArg();
+		break;
+	case OPT_STATS_INTERVAL:
+		processIntOption(args.OptionText(), args.OptionArg(), 0, 60000, options.statsIntervalMs);
+		break;
+	case OPT_TLS_CERT_FILE:
+		options.tlsCertFile.assign(args.OptionArg());
+		break;
+	case OPT_TLS_KEY_FILE:
+		options.tlsKeyFile.assign(args.OptionArg());
+		break;
+	case OPT_TLS_CA_FILE:
+		options.tlsCaFile.assign(args.OptionArg());
 		break;
 	}
 	return true;
@@ -242,55 +277,70 @@ bool parseArgs(TesterOptions& options, int argc, char** argv) {
 	return true;
 }
 
-void fdb_check(fdb_error_t e) {
+void fdb_check(fdb::Error e) {
 	if (e) {
-		fmt::print(stderr, "Unexpected FDB error: {}({})\n", e, fdb_get_error(e));
+		fmt::print(stderr, "Unexpected FDB error: {}({})\n", e.code(), e.what());
 		std::abort();
 	}
 }
 
 void applyNetworkOptions(TesterOptions& options) {
-	if (!options.tmpDir.empty()) {
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_TMP_DIR, options.tmpDir));
+	if (!options.tmpDir.empty() && options.apiVersion >= 720) {
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_TMP_DIR, options.tmpDir);
 	}
 	if (!options.externalClientLibrary.empty()) {
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT));
-		fdb_check(
-		    FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_LIBRARY, options.externalClientLibrary));
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT);
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_LIBRARY,
+		                        options.externalClientLibrary);
 	} else if (!options.externalClientDir.empty()) {
 		if (options.disableLocalClient) {
-			fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT));
+			fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT);
 		}
-		fdb_check(
-		    FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_DIRECTORY, options.externalClientDir));
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_DIRECTORY, options.externalClientDir);
 	} else {
 		if (options.disableLocalClient) {
 			throw TesterError("Invalid options: Cannot disable local client if no external library is provided");
 		}
 	}
 
+	if (!options.futureVersionClientLibrary.empty()) {
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_FUTURE_VERSION_CLIENT_LIBRARY,
+		                        options.futureVersionClientLibrary);
+	}
+
 	if (options.testSpec.multiThreaded) {
-		fdb_check(
-		    FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, options.numFdbThreads));
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, options.numFdbThreads);
 	}
 
 	if (options.testSpec.fdbCallbacksOnExternalThreads) {
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CALLBACKS_ON_EXTERNAL_THREADS));
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CALLBACKS_ON_EXTERNAL_THREADS);
 	}
 
 	if (options.testSpec.buggify) {
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_BUGGIFY_ENABLE));
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_BUGGIFY_ENABLE);
 	}
 
 	if (options.trace) {
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, options.traceDir));
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_FORMAT, options.traceFormat));
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_LOG_GROUP, options.logGroup));
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, options.traceDir);
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_FORMAT, options.traceFormat);
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_LOG_GROUP, options.logGroup);
 	}
 
 	for (auto knob : options.knobs) {
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_KNOB,
-		                            fmt::format("{}={}", knob.first.c_str(), knob.second.c_str())));
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_KNOB,
+		                        fmt::format("{}={}", knob.first.c_str(), knob.second.c_str()));
+	}
+
+	if (!options.tlsCertFile.empty()) {
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TLS_CERT_PATH, options.tlsCertFile);
+	}
+
+	if (!options.tlsKeyFile.empty()) {
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TLS_KEY_PATH, options.tlsKeyFile);
+	}
+
+	if (!options.tlsCaFile.empty()) {
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TLS_CA_PATH, options.tlsCaFile);
 	}
 }
 
@@ -310,11 +360,9 @@ bool runWorkloads(TesterOptions& options) {
 		txExecOptions.databasePerTransaction = options.testSpec.databasePerTransaction;
 		txExecOptions.transactionRetryLimit = options.transactionRetryLimit;
 
-		std::unique_ptr<IScheduler> scheduler = createScheduler(options.numClientThreads);
-		std::unique_ptr<ITransactionExecutor> txExecutor = createTransactionExecutor(txExecOptions);
-		txExecutor->init(scheduler.get(), options.clusterFile.c_str(), options.bgBasePath);
-
-		WorkloadManager workloadMgr(txExecutor.get(), scheduler.get());
+		std::vector<std::shared_ptr<IWorkload>> workloads;
+		workloads.reserve(options.testSpec.workloads.size() * options.numClients);
+		int maxSelfBlockingFutures = 0;
 		for (const auto& workloadSpec : options.testSpec.workloads) {
 			for (int i = 0; i < options.numClients; i++) {
 				WorkloadConfig config;
@@ -327,14 +375,40 @@ bool runWorkloads(TesterOptions& options) {
 				if (!workload) {
 					throw TesterError(fmt::format("Unknown workload '{}'", workloadSpec.name));
 				}
-				workloadMgr.add(workload);
+				maxSelfBlockingFutures += workload->getMaxSelfBlockingFutures();
+				workloads.emplace_back(std::move(workload));
 			}
 		}
+
+		int numClientThreads = options.numClientThreads;
+		if (txExecOptions.blockOnFutures) {
+			// If futures block a thread, we must ensure that we have enough threads for self-blocking futures to avoid
+			// a deadlock.
+			int minClientThreads = maxSelfBlockingFutures + 1;
+			if (numClientThreads < minClientThreads) {
+				fmt::print(
+				    stderr, "WARNING: Adjusting minClientThreads from {} to {}\n", numClientThreads, minClientThreads);
+				numClientThreads = minClientThreads;
+			}
+		}
+
+		std::unique_ptr<IScheduler> scheduler = createScheduler(numClientThreads);
+		std::unique_ptr<ITransactionExecutor> txExecutor = createTransactionExecutor(txExecOptions);
+		txExecutor->init(scheduler.get(), options.clusterFile.c_str(), options.bgBasePath);
+
+		WorkloadManager workloadMgr(txExecutor.get(), scheduler.get());
+		for (const auto& workload : workloads) {
+			workloadMgr.add(workload);
+		}
+
 		if (!options.inputPipeName.empty() || !options.outputPipeName.empty()) {
 			workloadMgr.openControlPipes(options.inputPipeName, options.outputPipeName);
 		}
 
 		scheduler->start();
+		if (options.statsIntervalMs) {
+			workloadMgr.schedulePrintStatistics(options.statsIntervalMs);
+		}
 		workloadMgr.run();
 		return !workloadMgr.failed();
 	} catch (const std::runtime_error& err) {
@@ -357,17 +431,17 @@ int main(int argc, char** argv) {
 		}
 		randomizeOptions(options);
 
-		fdb_check(fdb_select_api_version(options.apiVersion));
+		fdb::selectApiVersionCapped(options.apiVersion);
 		applyNetworkOptions(options);
-		fdb_check(fdb_setup_network());
+		fdb::network::setup();
 
-		std::thread network_thread{ &fdb_run_network };
+		std::thread network_thread{ &fdb::network::run };
 
 		if (!runWorkloads(options)) {
 			retCode = 1;
 		}
 
-		fdb_check(fdb_stop_network());
+		fdb_check(fdb::network::stop());
 		network_thread.join();
 	} catch (const std::runtime_error& err) {
 		fmt::print(stderr, "ERROR: {}\n", err.what());

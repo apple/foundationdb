@@ -1,0 +1,171 @@
+/*
+ * ReadWriteWorkload.h
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#pragma once
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_READWRITEWORKLOAD_ACTOR_G_H)
+#define FDBSERVER_READWRITEWORKLOAD_ACTOR_G_H
+#include "fdbserver/workloads/ReadWriteWorkload.actor.g.h"
+#elif !defined(FDBSERVER_READWRITEWORKLOAD_ACTOR_H)
+#define FDBSERVER_READWRITEWORKLOAD_ACTOR_H
+
+#include "fdbserver/workloads/workloads.actor.h"
+#include "flow/TDMetric.actor.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
+DESCR struct TransactionSuccessMetric {
+	int64_t totalLatency; // ns
+	int64_t startLatency; // ns
+	int64_t commitLatency; // ns
+	int64_t retries; // count
+};
+
+DESCR struct TransactionFailureMetric {
+	int64_t startLatency; // ns
+	int64_t errorCode; // flow error code
+};
+
+DESCR struct ReadMetric {
+	int64_t readLatency; // ns
+};
+
+// Common ReadWrite test settings
+struct ReadWriteCommon : KVWorkload {
+	static constexpr int sampleSize = 10000;
+	friend struct ReadWriteCommonImpl;
+
+	// general test setting
+	Standalone<StringRef> descriptionString;
+	bool doSetup, cancelWorkersAtDuration;
+	double testDuration, transactionsPerSecond, warmingDelay, maxInsertRate, debugInterval, debugTime;
+	double metricsStart, metricsDuration;
+	std::vector<uint64_t> insertionCountsToMeasure; // measure the speed of sequential insertion when bulkSetup
+
+	// test log setting
+	bool enableReadLatencyLogging;
+	double periodicLoggingInterval;
+
+	// two type of transaction
+	int readsPerTransactionA, writesPerTransactionA;
+	int readsPerTransactionB, writesPerTransactionB;
+	std::string valueString;
+	double alpha; // probability for run TransactionA type
+	// transaction setting
+	bool useRYW;
+
+	// states of metric
+	Int64MetricHandle totalReadsMetric;
+	Int64MetricHandle totalRetriesMetric;
+	EventMetricHandle<TransactionSuccessMetric> transactionSuccessMetric;
+	EventMetricHandle<TransactionFailureMetric> transactionFailureMetric;
+	EventMetricHandle<ReadMetric> readMetric;
+	PerfIntCounter aTransactions, bTransactions, retries;
+	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, fullReadLatencies;
+	double readLatencyTotal;
+	int readLatencyCount;
+	std::vector<PerfMetric> periodicMetrics;
+	std::vector<std::pair<uint64_t, double>> ratesAtKeyCounts; // sequential insertion speed
+
+	// other internal states
+	std::vector<Future<Void>> clients;
+	double loadTime, clientBegin;
+
+	explicit ReadWriteCommon(WorkloadContext const& wcx)
+	  : KVWorkload(wcx), totalReadsMetric(LiteralStringRef("ReadWrite.TotalReads")),
+	    totalRetriesMetric(LiteralStringRef("ReadWrite.TotalRetries")), aTransactions("A Transactions"),
+	    bTransactions("B Transactions"), retries("Retries"), latencies(sampleSize), readLatencies(sampleSize),
+	    commitLatencies(sampleSize), GRVLatencies(sampleSize), fullReadLatencies(sampleSize), readLatencyTotal(0),
+	    readLatencyCount(0), loadTime(0.0), clientBegin(0) {
+
+		transactionSuccessMetric.init(LiteralStringRef("ReadWrite.SuccessfulTransaction"));
+		transactionFailureMetric.init(LiteralStringRef("ReadWrite.FailedTransaction"));
+		readMetric.init(LiteralStringRef("ReadWrite.Read"));
+
+		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
+		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 5000.0) / clientCount;
+		double allowedLatency = getOption(options, LiteralStringRef("allowedLatency"), 0.250);
+		actorCount = ceil(transactionsPerSecond * allowedLatency);
+		actorCount = getOption(options, LiteralStringRef("actorCountPerTester"), actorCount);
+
+		readsPerTransactionA = getOption(options, LiteralStringRef("readsPerTransactionA"), 10);
+		writesPerTransactionA = getOption(options, LiteralStringRef("writesPerTransactionA"), 0);
+		readsPerTransactionB = getOption(options, LiteralStringRef("readsPerTransactionB"), 1);
+		writesPerTransactionB = getOption(options, LiteralStringRef("writesPerTransactionB"), 9);
+		alpha = getOption(options, LiteralStringRef("alpha"), 0.1);
+
+		valueString = std::string(maxValueBytes, '.');
+		if (nodePrefix > 0) {
+			keyBytes += 16;
+		}
+
+		metricsStart = getOption(options, LiteralStringRef("metricsStart"), 0.0);
+		metricsDuration = getOption(options, LiteralStringRef("metricsDuration"), testDuration);
+		if (getOption(options, LiteralStringRef("discardEdgeMeasurements"), true)) {
+			// discardEdgeMeasurements keeps the metrics from the middle 3/4 of the test
+			metricsStart += testDuration * 0.125;
+			metricsDuration *= 0.75;
+		}
+
+		warmingDelay = getOption(options, LiteralStringRef("warmingDelay"), 0.0);
+		maxInsertRate = getOption(options, LiteralStringRef("maxInsertRate"), 1e12);
+		debugInterval = getOption(options, LiteralStringRef("debugInterval"), 0.0);
+		debugTime = getOption(options, LiteralStringRef("debugTime"), 0.0);
+		enableReadLatencyLogging = getOption(options, LiteralStringRef("enableReadLatencyLogging"), false);
+		periodicLoggingInterval = getOption(options, LiteralStringRef("periodicLoggingInterval"), 5.0);
+		cancelWorkersAtDuration = getOption(options, LiteralStringRef("cancelWorkersAtDuration"), true);
+
+		useRYW = getOption(options, LiteralStringRef("useRYW"), false);
+		doSetup = getOption(options, LiteralStringRef("setup"), true);
+
+		// Validate that keyForIndex() is monotonic
+		for (int i = 0; i < 30; i++) {
+			int64_t a = deterministicRandom()->randomInt64(0, nodeCount);
+			int64_t b = deterministicRandom()->randomInt64(0, nodeCount);
+			if (a > b) {
+				std::swap(a, b);
+			}
+			ASSERT(a <= b);
+			ASSERT((keyForIndex(a, false) <= keyForIndex(b, false)));
+		}
+
+		std::vector<std::string> insertionCountsToMeasureString =
+		    getOption(options, LiteralStringRef("insertionCountsToMeasure"), std::vector<std::string>());
+		for (int i = 0; i < insertionCountsToMeasureString.size(); i++) {
+			try {
+				uint64_t count = boost::lexical_cast<uint64_t>(insertionCountsToMeasureString[i]);
+				insertionCountsToMeasure.push_back(count);
+			} catch (...) {
+			}
+		}
+	}
+
+	Future<Void> tracePeriodically();
+	Future<Void> logLatency(Future<Optional<Value>> f, bool shouldRecord);
+	Future<Void> logLatency(Future<RangeResult> f, bool shouldRecord);
+
+	Future<Void> setup(Database const& cx) override;
+	Future<bool> check(Database const& cx) override;
+	void getMetrics(std::vector<PerfMetric>& m) override;
+
+	Standalone<KeyValueRef> operator()(uint64_t n);
+	bool shouldRecord(double checkTime = now());
+	Value randomValue();
+};
+
+#include "flow/unactorcompiler.h"
+#endif // FDBSERVER_READWRITEWORKLOAD_ACTOR_H

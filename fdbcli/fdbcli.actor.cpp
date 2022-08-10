@@ -19,7 +19,7 @@
  */
 
 #include "boost/lexical_cast.hpp"
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
@@ -39,6 +39,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Tuple.h"
 
 #include "fdbclient/ThreadSafeTransaction.h"
@@ -48,10 +49,11 @@
 #include "flow/FastRef.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
+#include "flow/CodeProbe.h"
 
 #include "flow/TLSConfig.actor.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/SimpleOpt.h"
+#include "SimpleOpt/SimpleOpt.h"
 
 #include "fdbcli/FlowLineNoise.h"
 #include "fdbcli/fdbcli.actor.h"
@@ -63,7 +65,7 @@
 
 #ifdef __unixish__
 #include <stdio.h>
-#include "fdbcli/linenoise/linenoise.h"
+#include "linenoise/linenoise.h"
 #endif
 
 #include "fdbclient/versions.h"
@@ -101,6 +103,7 @@ enum {
 	OPT_DEBUG_TLS,
 	OPT_API_VERSION,
 	OPT_MEMORY,
+	OPT_USE_FUTURE_PROTOCOL_VERSION
 };
 
 CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -125,12 +128,9 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_DEBUG_TLS, "--debug-tls", SO_NONE },
 	                                  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
 	                                  { OPT_MEMORY, "--memory", SO_REQ_SEP },
-
-#ifndef TLS_DISABLED
-	                                  TLS_OPTION_FLAGS
-#endif
-
-	                                      SO_END_OF_OPTIONS };
+	                                  { OPT_USE_FUTURE_PROTOCOL_VERSION, "--use-future-protocol-version", SO_NONE },
+	                                  TLS_OPTION_FLAGS,
+	                                  SO_END_OF_OPTIONS };
 
 void printAtCol(const char* text, int col, FILE* stream = stdout) {
 	const char* iter = text;
@@ -204,9 +204,31 @@ private:
 	                          bool enabled,
 	                          Optional<StringRef> arg,
 	                          bool intrans) {
-		if (enabled && arg.present() != FDBTransactionOptions::optionInfo.getMustExist(option).hasParameter) {
-			fprintf(stderr, "ERROR: option %s a parameter\n", arg.present() ? "did not expect" : "expected");
-			throw invalid_option_value();
+		// If the parameter type is an int, we will extract into this variable and reference its memory with a StringRef
+		int64_t parsedInt = 0;
+
+		if (enabled) {
+			auto optionInfo = FDBTransactionOptions::optionInfo.getMustExist(option);
+			if (arg.present() != optionInfo.hasParameter) {
+				fprintf(stderr, "ERROR: option %s a parameter\n", arg.present() ? "did not expect" : "expected");
+				throw invalid_option_value();
+			}
+			if (arg.present() && optionInfo.paramType == FDBOptionInfo::ParamType::Int) {
+				try {
+					size_t nextIdx;
+					std::string value = arg.get().toString();
+					parsedInt = std::stoll(value, &nextIdx);
+					if (nextIdx != value.length()) {
+						fprintf(
+						    stderr, "ERROR: could not parse value `%s' as an integer\n", arg.get().toString().c_str());
+						throw invalid_option_value();
+					}
+					arg = StringRef(reinterpret_cast<uint8_t*>(&parsedInt), 8);
+				} catch (std::exception e) {
+					fprintf(stderr, "ERROR: could not parse value `%s' as an integer\n", arg.get().toString().c_str());
+					throw invalid_option_value();
+				}
+			}
 		}
 
 		if (intrans) {
@@ -448,16 +470,16 @@ static void printProgramUsage(const char* name) {
 	       "  --no-status    Disables the initial status check done when starting\n"
 	       "                 the CLI.\n"
 	       "  --api-version  APIVERSION\n"
-	       "                 Specifies the version of the API for the CLI to use.\n"
-#ifndef TLS_DISABLED
-	       TLS_HELP
-#endif
+	       "                 Specifies the version of the API for the CLI to use.\n" TLS_HELP
 	       "  --knob-KNOBNAME KNOBVALUE\n"
 	       "                 Changes a knob option. KNOBNAME should be lowercase.\n"
 	       "  --debug-tls    Prints the TLS configuration and certificate chain, then exits.\n"
 	       "                 Useful in reporting and diagnosing TLS issues.\n"
 	       "  --build-flags  Print build information and exit.\n"
 	       "  --memory       Resident memory limit of the CLI (defaults to 8GiB).\n"
+	       "  --use-future-protocol-version\n"
+	       "                 Use the simulated future protocol version to connect to the cluster.\n"
+	       "                 This option can be used testing purposes only!\n"
 	       "  -v, --version  Print FoundationDB CLI version information and exit.\n"
 	       "  -h, --help     Display this help and exit.\n");
 }
@@ -515,6 +537,10 @@ void initHelp() {
 	    CommandHelp("getversion",
 	                "Fetch the current read version",
 	                "Displays the current read version of the database or currently running transaction.");
+	helpMap["quota"] =
+	    CommandHelp("quota",
+	                "quota [get <tag> [reserved|total] [read|write]|set <tag> [reserved|total] [read|write] <value>]",
+	                "Get or modify the throughput quota for the specified tag.");
 	helpMap["reset"] =
 	    CommandHelp("reset",
 	                "reset the current transaction",
@@ -557,7 +583,7 @@ void initHelp() {
 void printVersion() {
 	printf("FoundationDB CLI " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getSourceVersion());
-	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion().version());
 }
 
 void printBuildInformation() {
@@ -758,6 +784,7 @@ void optionGenerator(const char* text, const char* line, std::vector<std::string
 	}
 }
 
+namespace fdb_cli {
 void arrayGenerator(const char* text, const char* line, const char** options, std::vector<std::string>& lc) {
 	const char** iter = options;
 	int len = strlen(text);
@@ -770,79 +797,11 @@ void arrayGenerator(const char* text, const char* line, const char** options, st
 		}
 	}
 }
+} // namespace fdb_cli
 
 void onOffGenerator(const char* text, const char* line, std::vector<std::string>& lc) {
 	const char* opts[] = { "on", "off", nullptr };
 	arrayGenerator(text, line, opts, lc);
-}
-
-void configureGenerator(const char* text, const char* line, std::vector<std::string>& lc) {
-	const char* opts[] = { "new",
-		                   "single",
-		                   "double",
-		                   "triple",
-		                   "three_data_hall",
-		                   "three_datacenter",
-		                   "ssd",
-		                   "ssd-1",
-		                   "ssd-2",
-		                   "memory",
-		                   "memory-1",
-		                   "memory-2",
-		                   "memory-radixtree-beta",
-		                   "commit_proxies=",
-		                   "grv_proxies=",
-		                   "logs=",
-		                   "resolvers=",
-		                   "perpetual_storage_wiggle=",
-		                   "perpetual_storage_wiggle_locality=",
-		                   "storage_migration_type=",
-		                   "tenant_mode=",
-		                   "blob_granules_enabled=",
-		                   nullptr };
-	arrayGenerator(text, line, opts, lc);
-}
-
-void statusGenerator(const char* text, const char* line, std::vector<std::string>& lc) {
-	const char* opts[] = { "minimal", "details", "json", nullptr };
-	arrayGenerator(text, line, opts, lc);
-}
-
-void killGenerator(const char* text, const char* line, std::vector<std::string>& lc) {
-	const char* opts[] = { "all", "list", nullptr };
-	arrayGenerator(text, line, opts, lc);
-}
-
-void throttleGenerator(const char* text,
-                       const char* line,
-                       std::vector<std::string>& lc,
-                       std::vector<StringRef> const& tokens) {
-	if (tokens.size() == 1) {
-		const char* opts[] = { "on tag", "off", "enable auto", "disable auto", "list", nullptr };
-		arrayGenerator(text, line, opts, lc);
-	} else if (tokens.size() >= 2 && tokencmp(tokens[1], "on")) {
-		if (tokens.size() == 2) {
-			const char* opts[] = { "tag", nullptr };
-			arrayGenerator(text, line, opts, lc);
-		} else if (tokens.size() == 6) {
-			const char* opts[] = { "default", "immediate", "batch", nullptr };
-			arrayGenerator(text, line, opts, lc);
-		}
-	} else if (tokens.size() >= 2 && tokencmp(tokens[1], "off") && !tokencmp(tokens[tokens.size() - 1], "tag")) {
-		const char* opts[] = { "all", "auto", "manual", "tag", "default", "immediate", "batch", nullptr };
-		arrayGenerator(text, line, opts, lc);
-	} else if (tokens.size() == 2 && (tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable"))) {
-		const char* opts[] = { "auto", nullptr };
-		arrayGenerator(text, line, opts, lc);
-	} else if (tokens.size() >= 2 && tokencmp(tokens[1], "list")) {
-		if (tokens.size() == 2) {
-			const char* opts[] = { "throttled", "recommended", "all", nullptr };
-			arrayGenerator(text, line, opts, lc);
-		} else if (tokens.size() == 3) {
-			const char* opts[] = { "LIMITS", nullptr };
-			arrayGenerator(text, line, opts, lc);
-		}
-	}
 }
 
 void fdbcliCompCmd(std::string const& text, std::vector<std::string>& lc) {
@@ -856,7 +815,7 @@ void fdbcliCompCmd(std::string const& text, std::vector<std::string>& lc) {
 	int count = tokens.size();
 
 	// for(int i = 0; i < count; i++) {
-	// 	printf("Token (%d): `%s'\n", i, tokens[i].toString().c_str());
+	//	printf("Token (%d): `%s'\n", i, tokens[i].toString().c_str());
 	// }
 
 	std::string ntext = "";
@@ -892,81 +851,10 @@ void fdbcliCompCmd(std::string const& text, std::vector<std::string>& lc) {
 		onOffGenerator(ntext.c_str(), base_input.c_str(), lc);
 	}
 
-	if (tokencmp(tokens[0], "configure")) {
-		configureGenerator(ntext.c_str(), base_input.c_str(), lc);
+	auto itr = CommandFactory::completionGenerators().find(tokens[0].toString());
+	if (itr != CommandFactory::completionGenerators().end()) {
+		itr->second(ntext.c_str(), base_input.c_str(), lc, tokens);
 	}
-
-	if (tokencmp(tokens[0], "status") && count == 1) {
-		statusGenerator(ntext.c_str(), base_input.c_str(), lc);
-	}
-
-	if (tokencmp(tokens[0], "kill") && count == 1) {
-		killGenerator(ntext.c_str(), base_input.c_str(), lc);
-	}
-
-	if (tokencmp(tokens[0], "throttle")) {
-		throttleGenerator(ntext.c_str(), base_input.c_str(), lc, tokens);
-	}
-}
-
-std::vector<const char*> throttleHintGenerator(std::vector<StringRef> const& tokens, bool inArgument) {
-	if (tokens.size() == 1) {
-		return { "<on|off|enable auto|disable auto|list>", "[ARGS]" };
-	} else if (tokencmp(tokens[1], "on")) {
-		std::vector<const char*> opts = { "tag", "<TAG>", "[RATE]", "[DURATION]", "[default|immediate|batch]" };
-		if (tokens.size() == 2) {
-			return opts;
-		} else if (((tokens.size() == 3 && inArgument) || tokencmp(tokens[2], "tag")) && tokens.size() < 7) {
-			return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
-		}
-	} else if (tokencmp(tokens[1], "off")) {
-		if (tokencmp(tokens[tokens.size() - 1], "tag")) {
-			return { "<TAG>" };
-		} else {
-			bool hasType = false;
-			bool hasTag = false;
-			bool hasPriority = false;
-			for (int i = 2; i < tokens.size(); ++i) {
-				if (tokencmp(tokens[i], "all") || tokencmp(tokens[i], "auto") || tokencmp(tokens[i], "manual")) {
-					hasType = true;
-				} else if (tokencmp(tokens[i], "default") || tokencmp(tokens[i], "immediate") ||
-				           tokencmp(tokens[i], "batch")) {
-					hasPriority = true;
-				} else if (tokencmp(tokens[i], "tag")) {
-					hasTag = true;
-					++i;
-				} else {
-					return {};
-				}
-			}
-
-			std::vector<const char*> options;
-			if (!hasType) {
-				options.push_back("[all|auto|manual]");
-			}
-			if (!hasTag) {
-				options.push_back("[tag <TAG>]");
-			}
-			if (!hasPriority) {
-				options.push_back("[default|immediate|batch]");
-			}
-
-			return options;
-		}
-	} else if ((tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable")) && tokens.size() == 2) {
-		return { "auto" };
-	} else if (tokens.size() >= 2 && tokencmp(tokens[1], "list")) {
-		if (tokens.size() == 2) {
-			return { "[throttled|recommended|all]", "[LIMITS]" };
-		} else if (tokens.size() == 3 && (tokencmp(tokens[2], "throttled") || tokencmp(tokens[2], "recommended") ||
-		                                  tokencmp(tokens[2], "all"))) {
-			return { "[LIMITS]" };
-		}
-	} else if (tokens.size() == 2 && inArgument) {
-		return { "[ARGS]" };
-	}
-
-	return std::vector<const char*>();
 }
 
 void LogCommand(std::string line, UID randomID, std::string errMsg) {
@@ -989,6 +877,7 @@ struct CLIOptions {
 	Optional<std::string> exec;
 	bool initialStatusCheck = true;
 	bool cliHints = true;
+	bool useFutureProtocolVersion = false;
 	bool debugTLS = false;
 	std::string tlsCertPath;
 	std::string tlsKeyPath;
@@ -1000,7 +889,7 @@ struct CLIOptions {
 	std::vector<std::pair<std::string, std::string>> knobs;
 
 	// api version, using the latest version by default
-	int api_version = FDB_API_VERSION;
+	int apiVersion = FDB_API_VERSION;
 
 	CLIOptions(int argc, char* argv[]) {
 		program_name = argv[0];
@@ -1045,11 +934,11 @@ struct CLIOptions {
 			break;
 		case OPT_API_VERSION: {
 			char* endptr;
-			api_version = strtoul((char*)args.OptionArg(), &endptr, 10);
+			apiVersion = strtoul((char*)args.OptionArg(), &endptr, 10);
 			if (*endptr != '\0') {
 				fprintf(stderr, "ERROR: invalid client version %s\n", args.OptionArg());
 				return 1;
-			} else if (api_version < 700 || api_version > FDB_API_VERSION) {
+			} else if (apiVersion < 700 || apiVersion > FDB_API_VERSION) {
 				// multi-version fdbcli only available after 7.0
 				fprintf(stderr,
 				        "ERROR: api version %s is not supported. (Min: 700, Max: %d)\n",
@@ -1090,8 +979,11 @@ struct CLIOptions {
 			break;
 		case OPT_NO_HINTS:
 			cliHints = false;
+			break;
+		case OPT_USE_FUTURE_PROTOCOL_VERSION:
+			useFutureProtocolVersion = true;
+			break;
 
-#ifndef TLS_DISABLED
 		// TLS Options
 		case TLSConfig::OPT_TLS_PLUGIN:
 			args.OptionArg();
@@ -1111,7 +1003,7 @@ struct CLIOptions {
 		case TLSConfig::OPT_TLS_VERIFY_PEERS:
 			tlsVerifyPeers = args.OptionArg();
 			break;
-#endif
+
 		case OPT_HELP:
 			printProgramUsage(program_name.c_str());
 			return 0;
@@ -1158,6 +1050,36 @@ Future<T> stopNetworkAfter(Future<T> what) {
 	}
 }
 
+ACTOR Future<Void> addInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
+                                Reference<FlowLock> connectLock,
+                                KeyValue kv) {
+	wait(connectLock->take());
+	state FlowLock::Releaser releaser(*connectLock);
+	state ClientWorkerInterface workerInterf =
+	    BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
+	state ClientLeaderRegInterface leaderInterf(workerInterf.address());
+	choose {
+		when(Optional<LeaderInfo> rep =
+		         wait(brokenPromiseToNever(leaderInterf.getLeader.getReply(GetLeaderRequest())))) {
+			StringRef ip_port =
+			    (kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key)
+			        .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
+			(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
+
+			if (workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
+				Key full_ip_port2 =
+				    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
+				StringRef ip_port2 = full_ip_port2.endsWith(LiteralStringRef(":tls"))
+				                         ? full_ip_port2.removeSuffix(LiteralStringRef(":tls"))
+				                         : full_ip_port2;
+				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
+			}
+		}
+		when(wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT))) {}
+	}
+	return Void();
+}
+
 ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state LineNoise& linenoise = *plinenoise;
 	state bool intrans = false;
@@ -1165,7 +1087,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state Database localDb;
 	state Reference<IDatabase> db;
 	state Reference<ITenant> tenant;
-	state Optional<Standalone<StringRef>> tenantName;
+	state Optional<TenantName> tenantName;
 	state Optional<TenantMapEntry> tenantEntry;
 
 	// This tenant is kept empty for operations that perform management tasks (e.g. killing a process)
@@ -1189,7 +1111,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	    ClusterConnectionFile::lookupClusterFileName(opt.clusterFile);
 	try {
 		ccf = makeReference<ClusterConnectionFile>(resolvedClusterFile.first);
-		wait(ccf->resolveHostnames());
 	} catch (Error& e) {
 		if (e.code() == error_code_operation_cancelled) {
 			throw;
@@ -1203,7 +1124,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	TraceEvent::setNetworkThread();
 
 	try {
-		localDb = Database::createDatabase(ccf, opt.api_version, IsInternal::False);
+		localDb = Database::createDatabase(ccf, opt.apiVersion, IsInternal::False);
 		if (!opt.exec.present()) {
 			printf("Using cluster file `%s'.\n", ccf->getLocation().c_str());
 		}
@@ -1584,6 +1505,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "quota")) {
+					bool _result = wait(makeInterruptable(quotaCommandActor(db, tokens)));
+					if (!_result) {
+						is_error = true;
+					}
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "reset")) {
 					if (tokens.size() != 1) {
 						printUsage(tokens[0]);
@@ -1699,7 +1628,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "profile")) {
 					getTransaction(db, managementTenant, tr, options, intrans);
-					bool _result = wait(makeInterruptable(profileCommandActor(tr, tokens, intrans)));
+					bool _result = wait(makeInterruptable(profileCommandActor(localDb, tr, tokens, intrans)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -1957,7 +1886,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 					} else {
 						Optional<TenantMapEntry> entry =
-						    wait(makeInterruptable(ManagementAPI::tryGetTenant(db, tokens[1])));
+						    wait(makeInterruptable(TenantAPI::tryGetTenant(db, tokens[1])));
 						if (!entry.present()) {
 							fprintf(stderr, "ERROR: Tenant `%s' does not exist\n", printable(tokens[1]).c_str());
 							is_error = true;
@@ -1990,14 +1919,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "createtenant")) {
-					bool _result = wait(makeInterruptable(createTenantCommandActor(db, tokens)));
+					bool _result = wait(makeInterruptable(createTenantCommandActor(db, tokens, opt.apiVersion)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "deletetenant")) {
-					bool _result = wait(makeInterruptable(deleteTenantCommandActor(db, tokens)));
+					bool _result = wait(makeInterruptable(deleteTenantCommandActor(db, tokens, opt.apiVersion)));
 					if (!_result)
 						is_error = true;
 					else if (tenantName.present() && tokens[1] == tenantName.get()) {
@@ -2009,14 +1938,47 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "listtenants")) {
-					bool _result = wait(makeInterruptable(listTenantsCommandActor(db, tokens)));
+					bool _result = wait(makeInterruptable(listTenantsCommandActor(db, tokens, opt.apiVersion)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "gettenant")) {
-					bool _result = wait(makeInterruptable(getTenantCommandActor(db, tokens)));
+					bool _result = wait(makeInterruptable(getTenantCommandActor(db, tokens, opt.apiVersion)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "configuretenant")) {
+					if (opt.apiVersion < 720) {
+						fmt::print(stderr, "ERROR: tenants cannot be configured before API version 720.\n");
+						is_error = true;
+						continue;
+					}
+
+					bool _result = wait(makeInterruptable(configureTenantCommandActor(db, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "renametenant")) {
+					if (opt.apiVersion < 720) {
+						fmt::print(stderr, "ERROR: tenants cannot be renamed before API version 720.\n");
+						is_error = true;
+						continue;
+					}
+
+					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens, opt.apiVersion)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "metacluster")) {
+					bool _result = wait(makeInterruptable(metaclusterCommand(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -2081,8 +2043,9 @@ ACTOR Future<int> runCli(CLIOptions opt) {
 
 		    bool inArgument = *(line.end() - 1) != ' ';
 		    std::string hintLine = inArgument ? " " : "";
-		    if (tokencmp(command, "throttle")) {
-			    std::vector<const char*> hintItems = throttleHintGenerator(parsed.back(), inArgument);
+		    auto itr = CommandFactory::hintGenerators().find(command.toString());
+		    if (itr != CommandFactory::hintGenerators().end()) {
+			    std::vector<const char*> hintItems = itr->second(parsed.back(), inArgument);
 			    if (hintItems.empty()) {
 				    return LineNoise::Hint();
 			    }
@@ -2225,7 +2188,6 @@ int main(int argc, char** argv) {
 	}
 
 	if (opt.debugTLS) {
-#ifndef TLS_DISABLED
 		// Backdoor into NativeAPI's tlsConfig, which is where the above network option settings ended up.
 		extern TLSConfig tlsConfig;
 		printf("TLS Configuration:\n");
@@ -2242,14 +2204,14 @@ int main(int argc, char** argv) {
 			printf("Use --log and look at the trace logs for more detailed information on the failure.\n");
 			return 1;
 		}
-#else
-		printf("This fdbcli was built with TLS disabled.\n");
-#endif
 		return 0;
 	}
 
 	try {
-		API->selectApiVersion(opt.api_version);
+		API->selectApiVersion(opt.apiVersion);
+		if (opt.useFutureProtocolVersion) {
+			API->useFutureProtocolVersion();
+		}
 		API->setupNetwork();
 		opt.setupKnobs();
 		if (opt.exit_code != -1) {

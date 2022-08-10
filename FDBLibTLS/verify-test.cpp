@@ -25,6 +25,9 @@
 #include <string.h>
 #include <boost/lexical_cast.hpp>
 
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
 #include <openssl/objects.h>
 
 #include "fdbrpc/ITLSPlugin.h"

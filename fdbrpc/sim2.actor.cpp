@@ -22,8 +22,10 @@
 #include <memory>
 #include <string>
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "flow/MkCert.h"
+#include "fmt/format.h"
 #include "fdbrpc/simulator.h"
+#include "flow/Arena.h"
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
@@ -34,12 +36,12 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/Util.h"
 #include "flow/WriteOnlySet.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
-#include "fdbrpc/AsyncFileChaos.actor.h"
-#include "flow/crc32c.h"
+#include "fdbrpc/AsyncFileChaos.h"
+#include "crc32/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/FaultInjection.h"
 #include "flow/flow.h"
@@ -53,6 +55,16 @@
 #include "flow/FaultInjection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+ISimulator* g_pSimulator = nullptr;
+thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
+
+ISimulator::ISimulator()
+  : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
+    allowLogSetKills(true), tssMode(TSSMode::Disabled), isStopped(false), lastConnectionFailure(0),
+    connectionFailuresDisableDuration(0), speedUpSimulation(false), backupAgents(BackupAgentType::WaitForType),
+    drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false) {}
+ISimulator::~ISimulator() = default;
+
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
 	if (!g_network->isSimulated() || !faultInjectionActivated)
 		return false;
@@ -64,10 +76,19 @@ bool simulator_should_inject_fault(const char* context, const char* file, int li
 		uint32_t h1 = line + (p->fault_injection_r >> 32);
 
 		if (h1 < p->fault_injection_p1 * std::numeric_limits<uint32_t>::max()) {
-			TEST(true); // A fault was injected
-			TEST(error_code == error_code_io_timeout); // An io timeout was injected
-			TEST(error_code == error_code_io_error); // An io error was injected
-			TEST(error_code == error_code_platform_error); // A platform error was injected.
+			CODE_PROBE(true, "A fault was injected", probe::assert::simOnly, probe::context::sim2);
+			CODE_PROBE(error_code == error_code_io_timeout,
+			           "An io timeout was injected",
+			           probe::assert::simOnly,
+			           probe::context::sim2);
+			CODE_PROBE(error_code == error_code_io_error,
+			           "An io error was injected",
+			           probe::assert::simOnly,
+			           probe::context::sim2);
+			CODE_PROBE(error_code == error_code_platform_error,
+			           "A platform error was injected.",
+			           probe::assert::simOnly,
+			           probe::context::sim2);
 			TraceEvent(SevWarn, "FaultInjected")
 			    .detail("Context", context)
 			    .detail("File", file)
@@ -105,14 +126,14 @@ void ISimulator::displayWorkers() const {
 		for (auto& processInfo : machineRecord.second) {
 			printf("                  %9s %-10s%-13s%-8s %-6s %-9s %-8s %-48s %-40s\n",
 			       processInfo->address.toString().c_str(),
-			       processInfo->name,
+			       processInfo->name.c_str(),
 			       processInfo->startingClass.toString().c_str(),
 			       (processInfo->isExcluded() ? "True" : "False"),
 			       (processInfo->failed ? "True" : "False"),
 			       (processInfo->rebooting ? "True" : "False"),
 			       (processInfo->isCleared() ? "True" : "False"),
 			       getRoles(processInfo->address).c_str(),
-			       processInfo->dataFolder);
+			       processInfo->dataFolder.c_str());
 		}
 	}
 
@@ -171,7 +192,7 @@ private:
 	double halfLatency() const {
 		double a = deterministicRandom()->random01();
 		const double pFast = 0.999;
-		if (a <= pFast) {
+		if (a <= pFast || g_simulator.speedUpSimulation) {
 			a = a / pFast;
 			return 0.5 * (FLOW_KNOBS->MIN_NETWORK_LATENCY * (1 - a) +
 			              FLOW_KNOBS->FAST_NETWORK_LATENCY / pFast * a); // 0.5ms average
@@ -304,6 +325,8 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	NetworkAddress getPeerAddress() const override { return peerEndpoint; }
 	UID getDebugID() const override { return dbgid; }
 
+	boost::asio::ip::tcp::socket& getSocket() override { throw operation_failed(); }
+
 	bool opened, closedByCaller, stableConnection;
 
 private:
@@ -415,7 +438,7 @@ private:
 		    deterministicRandom()->random01() < .00001) {
 			g_simulator.lastConnectionFailure = now();
 			double a = deterministicRandom()->random01(), b = deterministicRandom()->random01();
-			TEST(true); // Simulated connection failure
+			CODE_PROBE(true, "Simulated connection failure", probe::context::sim2, probe::assert::simOnly);
 			TraceEvent("ConnectionFailure", dbgid)
 			    .detail("MyAddr", process->address)
 			    .detail("PeerAddr", peerProcess->address)
@@ -928,8 +951,9 @@ public:
 	TaskPriority getCurrentTask() const override { return currentTaskID; }
 	void setCurrentTask(TaskPriority taskID) override { currentTaskID = taskID; }
 	// Sets the taskID/priority of the current task, without yielding
-	Future<Reference<IConnection>> connect(NetworkAddress toAddr, const std::string& host) override {
-		ASSERT(host.empty());
+	Future<Reference<IConnection>> connect(NetworkAddress toAddr,
+	                                       boost::asio::ip::tcp::socket* existingSocket = nullptr) override {
+		ASSERT(existingSocket == nullptr);
 		if (!addressMap.count(toAddr)) {
 			return waitForProcessAndConnect(toAddr, this);
 		}
@@ -955,7 +979,7 @@ public:
 		return onConnect(::delay(0.5 * deterministicRandom()->random01()), myc);
 	}
 
-	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, const std::string& host) override {
+	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) override {
 		return SimExternalConnection::connect(toAddr);
 	}
 
@@ -991,9 +1015,11 @@ public:
 		if (mock.present()) {
 			return mock.get();
 		}
-		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
-		if (cache.present()) {
-			return cache.get();
+		if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
+			Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+			if (cache.present()) {
+				return cache.get();
+			}
 		}
 		return SimExternalConnection::resolveTCPEndpoint(host, service, &dnsCache);
 	}
@@ -1013,9 +1039,11 @@ public:
 		if (mock.present()) {
 			return mock.get();
 		}
-		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
-		if (cache.present()) {
-			return cache.get();
+		if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
+			Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+			if (cache.present()) {
+				return cache.get();
+			}
 		}
 		return SimExternalConnection::resolveTCPEndpointBlocking(host, service, &dnsCache);
 	}
@@ -1147,7 +1175,7 @@ public:
 		// for the existence of a non-durably deleted file BEFORE a reboot will show that it apparently doesn't exist.
 		if (g_simulator.getCurrentProcess()->machine->openFiles.count(filename)) {
 			g_simulator.getCurrentProcess()->machine->openFiles.erase(filename);
-			g_simulator.getCurrentProcess()->machine->deletingFiles.insert(filename);
+			g_simulator.getCurrentProcess()->machine->deletingOrClosingFiles.insert(filename);
 		}
 		if (mustBeDurable || deterministicRandom()->random01() < 0.5) {
 			state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
@@ -1163,7 +1191,7 @@ public:
 					auto f = IAsyncFileSystem::filesystem(self->net2)->deleteFile(filename, false);
 					ASSERT(f.isReady());
 					wait(::delay(0.05 * deterministicRandom()->random01()));
-					TEST(true); // Simulated durable delete
+					CODE_PROBE(true, "Simulated durable delete", probe::context::sim2, probe::assert::simOnly);
 				}
 				wait(g_simulator.onProcess(currentProcess, currentTaskID));
 				return Void();
@@ -1176,7 +1204,7 @@ public:
 			TraceEvent(SevDebug, "Sim2DeleteFileImplNonDurable")
 			    .detail("Filename", filename)
 			    .detail("Durable", mustBeDurable);
-			TEST(true); // Simulated non-durable delete
+			CODE_PROBE(true, "Simulated non-durable delete", probe::context::sim2, probe::assert::simOnly);
 			return Void();
 		}
 	}
@@ -1313,7 +1341,8 @@ public:
 		std::vector<LocalityData> primaryLocalitiesDead, primaryLocalitiesLeft;
 
 		for (auto processInfo : getAllProcesses()) {
-			if (processInfo->isAvailableClass() && processInfo->locality.dcId() == dcId) {
+			if (!processInfo->isSpawnedKVProcess() && processInfo->isAvailableClass() &&
+			    processInfo->locality.dcId() == dcId) {
 				if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
 					primaryProcessesDead.add(processInfo->locality);
 					primaryLocalitiesDead.push_back(processInfo->locality);
@@ -1333,7 +1362,6 @@ public:
 		if (usableRegions > 1 && remoteTLogPolicy && !primaryTLogsDead) {
 			primaryTLogsDead = primaryProcessesDead.validate(remoteTLogPolicy);
 		}
-
 		return primaryTLogsDead || primaryProcessesDead.validate(storagePolicy);
 	}
 
@@ -1572,10 +1600,20 @@ public:
 		killProcess_internal(p, KillInstantly);
 	}
 	void killProcess_internal(ProcessInfo* machine, KillType kt) {
-		TEST(true); // Simulated machine was killed with any kill type
-		TEST(kt == KillInstantly); // Simulated machine was killed instantly
-		TEST(kt == InjectFaults); // Simulated machine was killed with faults
-		TEST(kt == FailDisk); // Simulated machine was killed with a failed disk
+		CODE_PROBE(
+		    true, "Simulated machine was killed with any kill type", probe::context::sim2, probe::assert::simOnly);
+		CODE_PROBE(kt == KillInstantly,
+		           "Simulated machine was killed instantly",
+		           probe::context::sim2,
+		           probe::assert::simOnly);
+		CODE_PROBE(kt == InjectFaults,
+		           "Simulated machine was killed with faults",
+		           probe::context::sim2,
+		           probe::assert::simOnly);
+		CODE_PROBE(kt == FailDisk,
+		           "Simulated machine was killed with a failed disk",
+		           probe::context::sim2,
+		           probe::assert::simOnly);
 
 		if (kt == KillInstantly) {
 			TraceEvent(SevWarn, "FailMachine")
@@ -1587,7 +1625,7 @@ public:
 			    .detail("Protected", protectedAddresses.count(machine->address))
 			    .backtrace();
 			// This will remove all the "tracked" messages that came from the machine being killed
-			if (std::string(machine->name) != "remote flow process")
+			if (!machine->isSpawnedKVProcess())
 				latestEventCache.clear();
 			machine->failed = true;
 		} else if (kt == InjectFaults) {
@@ -1616,8 +1654,7 @@ public:
 		} else {
 			ASSERT(false);
 		}
-		ASSERT(!protectedAddresses.count(machine->address) || machine->rebooting ||
-		       std::string(machine->name) == "remote flow process");
+		ASSERT(!protectedAddresses.count(machine->address) || machine->rebooting || machine->isSpawnedKVProcess());
 	}
 	void rebootProcess(ProcessInfo* process, KillType kt) override {
 		if (kt == RebootProcessAndDelete && protectedAddresses.count(process->address)) {
@@ -1676,15 +1713,35 @@ public:
 		}
 		return result;
 	}
+	bool killDataHall(Optional<Standalone<StringRef>> dataHallId,
+	                  KillType kt,
+	                  bool forceKill,
+	                  KillType* ktFinal) override {
+		auto processes = getAllProcesses();
+		std::set<Optional<Standalone<StringRef>>> dataHallMachines;
+		for (auto& process : processes) {
+			if (process->locality.dataHallId() == dataHallId) {
+				dataHallMachines.insert(process->locality.machineId());
+			}
+		}
+		bool result = false;
+		for (auto& machineId : dataHallMachines) {
+			if (killMachine(machineId, kt, forceKill, ktFinal)) {
+				result = true;
+			}
+		}
+		return result;
+	}
 	bool killMachine(Optional<Standalone<StringRef>> machineId,
 	                 KillType kt,
 	                 bool forceKill,
 	                 KillType* ktFinal) override {
 		auto ktOrig = kt;
 
-		TEST(true); // Trying to killing a machine
-		TEST(kt == KillInstantly); // Trying to kill instantly
-		TEST(kt == InjectFaults); // Trying to kill by injecting faults
+		CODE_PROBE(true, "Trying to killing a machine", probe::context::sim2, probe::assert::simOnly);
+		CODE_PROBE(kt == KillInstantly, "Trying to kill instantly", probe::context::sim2, probe::assert::simOnly);
+		CODE_PROBE(
+		    kt == InjectFaults, "Trying to kill by injecting faults", probe::context::sim2, probe::assert::simOnly);
 
 		if (speedUpSimulation && !forceKill) {
 			TraceEvent(SevWarn, "AbortedKill")
@@ -1818,11 +1875,17 @@ public:
 			}
 		}
 
-		TEST(originalKt != kt); // Kill type was changed from requested to reboot.
+		CODE_PROBE(originalKt != kt,
+		           "Kill type was changed from requested to reboot.",
+		           probe::context::sim2,
+		           probe::assert::simOnly);
 
 		// Check if any processes on machine are rebooting
 		if (processesOnMachine != processesPerMachine && kt >= RebootAndDelete) {
-			TEST(true); // Attempted reboot, but the target did not have all of its processes running
+			CODE_PROBE(true,
+			           "Attempted reboot, but the target did not have all of its processes running",
+			           probe::context::sim2,
+			           probe::assert::simOnly);
 			TraceEvent(SevWarn, "AbortedKill")
 			    .detail("KillType", kt)
 			    .detail("MachineId", machineId)
@@ -1837,7 +1900,10 @@ public:
 
 		// Check if any processes on machine are rebooting
 		if (processesOnMachine != processesPerMachine) {
-			TEST(true); // Attempted reboot and kill, but the target did not have all of its processes running
+			CODE_PROBE(true,
+			           "Attempted reboot and kill, but the target did not have all of its processes running",
+			           probe::context::sim2,
+			           probe::assert::simOnly);
 			TraceEvent(SevWarn, "AbortedKill")
 			    .detail("KillType", kt)
 			    .detail("MachineId", machineId)
@@ -1887,10 +1953,12 @@ public:
 			}
 		}
 
-		TEST(kt == RebootAndDelete); // Resulted in a reboot and delete
-		TEST(kt == Reboot); // Resulted in a reboot
-		TEST(kt == KillInstantly); // Resulted in an instant kill
-		TEST(kt == InjectFaults); // Resulted in a kill by injecting faults
+		CODE_PROBE(
+		    kt == RebootAndDelete, "Resulted in a reboot and delete", probe::context::sim2, probe::assert::simOnly);
+		CODE_PROBE(kt == Reboot, "Resulted in a reboot", probe::context::sim2, probe::assert::simOnly);
+		CODE_PROBE(kt == KillInstantly, "Resulted in an instant kill", probe::context::sim2, probe::assert::simOnly);
+		CODE_PROBE(
+		    kt == InjectFaults, "Resulted in a kill by injecting faults", probe::context::sim2, probe::assert::simOnly);
 
 		if (ktFinal)
 			*ktFinal = kt;
@@ -2004,13 +2072,32 @@ public:
 		    .detail("KillTypeMin", ktMin)
 		    .detail("KilledDC", kt == ktMin);
 
-		TEST(kt != ktMin); // DataCenter kill was rejected by killMachine
-		TEST((kt == ktMin) && (kt == RebootAndDelete)); // Datacenter kill Resulted in a reboot and delete
-		TEST((kt == ktMin) && (kt == Reboot)); // Datacenter kill Resulted in a reboot
-		TEST((kt == ktMin) && (kt == KillInstantly)); // Datacenter kill Resulted in an instant kill
-		TEST((kt == ktMin) && (kt == InjectFaults)); // Datacenter kill Resulted in a kill by injecting faults
-		TEST((kt == ktMin) && (kt != ktOrig)); // Datacenter Kill request was downgraded
-		TEST((kt == ktMin) && (kt == ktOrig)); // Datacenter kill - Requested kill was done
+		CODE_PROBE(
+		    kt != ktMin, "DataCenter kill was rejected by killMachine", probe::context::sim2, probe::assert::simOnly);
+		CODE_PROBE((kt == ktMin) && (kt == RebootAndDelete),
+		           "Datacenter kill Resulted in a reboot and delete",
+		           probe::context::sim2,
+		           probe::assert::simOnly);
+		CODE_PROBE((kt == ktMin) && (kt == Reboot),
+		           "Datacenter kill Resulted in a reboot",
+		           probe::context::sim2,
+		           probe::assert::simOnly);
+		CODE_PROBE((kt == ktMin) && (kt == KillInstantly),
+		           "Datacenter kill Resulted in an instant kill",
+		           probe::context::sim2,
+		           probe::assert::simOnly);
+		CODE_PROBE((kt == ktMin) && (kt == InjectFaults),
+		           "Datacenter kill Resulted in a kill by injecting faults",
+		           probe::context::sim2,
+		           probe::assert::simOnly);
+		CODE_PROBE((kt == ktMin) && (kt != ktOrig),
+		           "Datacenter Kill request was downgraded",
+		           probe::context::sim2,
+		           probe::assert::simOnly);
+		CODE_PROBE((kt == ktMin) && (kt == ktOrig),
+		           "Datacenter kill - Requested kill was done",
+		           probe::context::sim2,
+		           probe::assert::simOnly);
 
 		if (ktFinal)
 			*ktFinal = ktMin;
@@ -2092,6 +2179,9 @@ public:
 		                    this,
 		                    "",
 		                    "");
+		// create a key pair for AuthZ testing
+		auto key = mkcert::makeEcP256();
+		authKeys.insert(std::make_pair(Standalone<StringRef>("DefaultKey"_sr), key));
 		g_network = net2 = newNet2(TLSConfig(), false, true);
 		g_network->addStopCallback(Net2FileSystem::stop);
 		Net2FileSystem::newFileSystem();
@@ -2243,7 +2333,7 @@ class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
 	NetworkAddress _localAddress;
 	bool randomDropPacket() {
 		auto res = deterministicRandom()->random01() < .000001;
-		TEST(res); // UDP packet drop
+		CODE_PROBE(res, "UDP packet drop", probe::context::sim2, probe::assert::simOnly);
 		return res;
 	}
 
@@ -2452,19 +2542,27 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 		ASSERT(kt == ISimulator::RebootProcess || kt == ISimulator::Reboot || kt == ISimulator::RebootAndDelete ||
 		       kt == ISimulator::RebootProcessAndDelete);
 
-		TEST(kt == ISimulator::RebootProcess); // Simulated process rebooted
-		TEST(kt == ISimulator::Reboot); // Simulated machine rebooted
-		TEST(kt == ISimulator::RebootAndDelete); // Simulated machine rebooted with data and coordination state deletion
-		TEST(
-		    kt ==
-		    ISimulator::RebootProcessAndDelete); // Simulated process rebooted with data and coordination state deletion
+		CODE_PROBE(kt == ISimulator::RebootProcess,
+		           "Simulated process rebooted",
+		           probe::assert::simOnly,
+		           probe::context::sim2);
+		CODE_PROBE(
+		    kt == ISimulator::Reboot, "Simulated machine rebooted", probe::assert::simOnly, probe::context::sim2);
+		CODE_PROBE(kt == ISimulator::RebootAndDelete,
+		           "Simulated machine rebooted with data and coordination state deletion",
+		           probe::assert::simOnly,
+		           probe::context::sim2);
+		CODE_PROBE(kt == ISimulator::RebootProcessAndDelete,
+		           "Simulated process rebooted with data and coordination state deletion",
+		           probe::assert::simOnly,
+		           probe::context::sim2);
 
 		if (p->rebooting || !p->isReliable()) {
 			TraceEvent(SevDebug, "DoRebootFailed")
 			    .detail("Rebooting", p->rebooting)
 			    .detail("Reliable", p->isReliable());
 			return;
-		} else if (std::string(p->name) == "remote flow process") {
+		} else if (p->isSpawnedKVProcess()) {
 			TraceEvent(SevDebug, "DoRebootFailed").detail("Name", p->name).detail("Address", p->address);
 			return;
 		} else if (p->getChilds().size()) {
@@ -2593,14 +2691,12 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
 		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileChaos(r)); });
-#if ENCRYPTION_ENABLED
 		if (flags & IAsyncFile::OPEN_ENCRYPTED)
 			f = map(f, [flags](Reference<IAsyncFile> r) {
 				auto mode = flags & IAsyncFile::OPEN_READWRITE ? AsyncFileEncrypted::Mode::APPEND_ONLY
 				                                               : AsyncFileEncrypted::Mode::READ_ONLY;
 				return Reference<IAsyncFile>(new AsyncFileEncrypted(r, mode));
 			});
-#endif // ENCRYPTION_ENABLED
 		return f;
 	} else
 		return AsyncFileCached::open(filename, flags, mode);

@@ -19,8 +19,8 @@
  */
 
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
-#include "flow/crc32c.h"
+#include "fmt/format.h"
+#include "crc32/crc32c.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/Knobs.h"
@@ -31,7 +31,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 
 extern "C" {
-#include "fdbserver/sqlite/sqliteInt.h"
+#include "sqliteInt.h"
 u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 }
 #include "flow/ThreadPrimitives.h"
@@ -117,7 +117,7 @@ struct PageChecksumCodec {
 			crc32Sum.part1 = 0;
 			crc32Sum.part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
 			if (crc32Sum == *pSumInPage) {
-				TEST(true); // Read CRC32 checksum
+				CODE_PROBE(true, "Read CRC32 checksum");
 				return true;
 			}
 		}
@@ -133,7 +133,7 @@ struct PageChecksumCodec {
 			xxHash3Sum.part1 = static_cast<uint32_t>((xxHash3 >> 32) & 0x00ffffff);
 			xxHash3Sum.part2 = static_cast<uint32_t>(xxHash3 & 0xffffffff);
 			if (xxHash3Sum == *pSumInPage) {
-				TEST(true); // Read xxHash3 checksum
+				CODE_PROBE(true, "Read xxHash3 checksum");
 				return true;
 			}
 		}
@@ -144,7 +144,7 @@ struct PageChecksumCodec {
 		hashLittle2Sum.part2 = 0x5ca1ab1e;
 		hashlittle2(pData, dataLen, &hashLittle2Sum.part1, &hashLittle2Sum.part2);
 		if (hashLittle2Sum == *pSumInPage) {
-			TEST(true); // Read HashLittle2 checksum
+			CODE_PROBE(true, "Read HashLittle2 checksum");
 			return true;
 		}
 
@@ -357,7 +357,7 @@ struct SQLiteDB : NonCopyable {
 					lineStart = lineEnd;
 				}
 			}
-			TEST(true); // BTree integrity checked
+			CODE_PROBE(true, "BTree integrity checked");
 		}
 		if (e)
 			sqlite3_free(e);
@@ -1423,7 +1423,7 @@ void SQLiteDB::open(bool writable) {
 			renameFile(walpath, walpath + "-old-" + deterministicRandom()->randomUniqueID().toString());
 			ASSERT_WE_THINK(false); //< This code should not be hit in FoundationDB at the moment, because worker looks
 			                        // for databases to open by listing .fdb files, not .fdb-wal files
-			// TEST(true);  // Replace a partially constructed or destructed DB
+			// CODE_PROBE(true, "Replace a partially constructed or destructed DB");
 		}
 
 		if (dbFile.isError() && walFile.isError() && writable &&
@@ -1942,8 +1942,8 @@ private:
 				}
 
 				if (canDelete && (!canVacuum || deterministicRandom()->random01() < lazyDeleteBatchProbability)) {
-					TEST(canVacuum); // SQLite lazy deletion when vacuuming is active
-					TEST(!canVacuum); // SQLite lazy deletion when vacuuming is inactive
+					CODE_PROBE(canVacuum, "SQLite lazy deletion when vacuuming is active");
+					CODE_PROBE(!canVacuum, "SQLite lazy deletion when vacuuming is inactive");
 
 					int pagesToDelete = std::max(
 					    1,
@@ -1955,10 +1955,10 @@ private:
 					lazyDeleteTime += now() - begin;
 				} else {
 					ASSERT(canVacuum);
-					TEST(canDelete); // SQLite vacuuming when lazy delete is active
-					TEST(!canDelete); // SQLite vacuuming when lazy delete is inactive
-					TEST(SERVER_KNOBS->SPRING_CLEANING_VACUUMS_PER_LAZY_DELETE_PAGE !=
-					     0); // SQLite vacuuming with nonzero vacuums_per_lazy_delete_page
+					CODE_PROBE(canDelete, "SQLite vacuuming when lazy delete is active");
+					CODE_PROBE(!canDelete, "SQLite vacuuming when lazy delete is inactive");
+					CODE_PROBE(SERVER_KNOBS->SPRING_CLEANING_VACUUMS_PER_LAZY_DELETE_PAGE != 0,
+					           "SQLite vacuuming with nonzero vacuums_per_lazy_delete_page");
 
 					vacuumFinished = conn.vacuum();
 					if (!vacuumFinished) {
@@ -1973,10 +1973,10 @@ private:
 
 			freeListPages = conn.freePages();
 
-			TEST(workPerformed.lazyDeletePages > 0); // Pages lazily deleted
-			TEST(workPerformed.vacuumedPages > 0); // Pages vacuumed
-			TEST(vacuumTime > 0); // Time spent vacuuming
-			TEST(lazyDeleteTime > 0); // Time spent lazy deleting
+			CODE_PROBE(workPerformed.lazyDeletePages > 0, "Pages lazily deleted");
+			CODE_PROBE(workPerformed.vacuumedPages > 0, "Pages vacuumed");
+			CODE_PROBE(vacuumTime > 0, "Time spent vacuuming");
+			CODE_PROBE(lazyDeleteTime > 0, "Time spent lazy deleting");
 
 			++springCleaningStats.springCleaningCount;
 			springCleaningStats.lazyDeletePages += workPerformed.lazyDeletePages;
@@ -1996,7 +1996,7 @@ private:
 		state int64_t lastReadsComplete = 0;
 		state int64_t lastWritesComplete = 0;
 		loop {
-			wait(delay(SERVER_KNOBS->DISK_METRIC_LOGGING_INTERVAL));
+			wait(delay(FLOW_KNOBS->DISK_METRIC_LOGGING_INTERVAL));
 
 			int64_t rc = self->readsComplete, wc = self->writesComplete;
 			TraceEvent("DiskMetrics", self->logID)

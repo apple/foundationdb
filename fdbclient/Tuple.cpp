@@ -19,6 +19,9 @@
  */
 
 #include "fdbclient/Tuple.h"
+#include "flow/UnitTest.h"
+
+const uint8_t VERSIONSTAMP_96_CODE = 0x33;
 
 // TODO: Many functions copied from bindings/flow/Tuple.cpp. Merge at some point.
 static float bigEndianFloat(float orig) {
@@ -75,6 +78,8 @@ Tuple::Tuple(StringRef const& str, bool exclude_incomplete) {
 			i += 1;
 		} else if (data[i] == '\x00') {
 			i += 1;
+		} else if (data[i] == VERSIONSTAMP_96_CODE) {
+			i += VERSIONSTAMP_TUPLE_SIZE + 1;
 		} else {
 			throw invalid_tuple_data_type();
 		}
@@ -99,6 +104,15 @@ Tuple& Tuple::append(Tuple const& tuple) {
 	return *this;
 }
 
+Tuple& Tuple::append(Versionstamp const& vs) {
+	offsets.push_back(data.size());
+
+	data.push_back(data.arena(), VERSIONSTAMP_96_CODE);
+	data.append(data.arena(), vs.begin(), vs.size());
+
+	return *this;
+}
+
 Tuple& Tuple::append(StringRef const& str, bool utf8) {
 	offsets.push_back(data.size());
 
@@ -118,6 +132,17 @@ Tuple& Tuple::append(StringRef const& str, bool utf8) {
 	data.append(data.arena(), str.begin() + lastPos, str.size() - lastPos);
 	data.push_back(data.arena(), (uint8_t)'\x00');
 
+	return *this;
+}
+
+Tuple& Tuple::append(UnicodeStr const& str) {
+	return append(str.str, true);
+}
+
+Tuple& Tuple::appendRaw(StringRef const& str) {
+	offsets.push_back(data.size());
+
+	data.append(data.arena(), str.begin(), str.size());
 	return *this;
 }
 
@@ -146,7 +171,11 @@ Tuple& Tuple::append(int64_t value) {
 	return *this;
 }
 
-Tuple& Tuple::appendBool(bool value) {
+Tuple& Tuple::append(int32_t value) {
+	return append((int64_t)value);
+}
+
+Tuple& Tuple::append(bool value) {
 	offsets.push_back(data.size());
 	if (value) {
 		data.push_back(data.arena(), 0x27);
@@ -156,7 +185,7 @@ Tuple& Tuple::appendBool(bool value) {
 	return *this;
 }
 
-Tuple& Tuple::appendFloat(float value) {
+Tuple& Tuple::append(float value) {
 	offsets.push_back(data.size());
 	float swap = bigEndianFloat(value);
 	uint8_t* bytes = (uint8_t*)&swap;
@@ -167,7 +196,7 @@ Tuple& Tuple::appendFloat(float value) {
 	return *this;
 }
 
-Tuple& Tuple::appendDouble(double value) {
+Tuple& Tuple::append(double value) {
 	offsets.push_back(data.size());
 	double swap = value;
 	swap = bigEndianDouble(swap);
@@ -179,10 +208,14 @@ Tuple& Tuple::appendDouble(double value) {
 	return *this;
 }
 
-Tuple& Tuple::appendNull() {
+Tuple& Tuple::append(nullptr_t) {
 	offsets.push_back(data.size());
 	data.push_back(data.arena(), (uint8_t)'\x00');
 	return *this;
+}
+
+Tuple& Tuple::appendNull() {
+	return append(nullptr);
 }
 
 Tuple::ElementType Tuple::getType(size_t index) const {
@@ -206,6 +239,8 @@ Tuple::ElementType Tuple::getType(size_t index) const {
 		return ElementType::DOUBLE;
 	} else if (code == 0x26 || code == 0x27) {
 		return ElementType::BOOL;
+	} else if (code == VERSIONSTAMP_96_CODE) {
+		return ElementType::VERSIONSTAMP;
 	} else {
 		throw invalid_tuple_data_type();
 	}
@@ -354,6 +389,18 @@ double Tuple::getDouble(size_t index) const {
 	return bigEndianDouble(swap);
 }
 
+Versionstamp Tuple::getVersionstamp(size_t index) const {
+	if (index >= offsets.size()) {
+		throw invalid_tuple_index();
+	}
+	ASSERT_LT(offsets[index], data.size());
+	uint8_t code = data[offsets[index]];
+	if (code != VERSIONSTAMP_96_CODE) {
+		throw invalid_tuple_data_type();
+	}
+	return Versionstamp(StringRef(data.begin() + offsets[index] + 1, VERSIONSTAMP_TUPLE_SIZE));
+}
+
 KeyRange Tuple::range(Tuple const& tuple) const {
 	VectorRef<uint8_t> begin;
 	VectorRef<uint8_t> end;
@@ -382,4 +429,40 @@ Tuple Tuple::subTuple(size_t start, size_t end) const {
 
 	size_t endPos = end < offsets.size() ? offsets[end] : data.size();
 	return Tuple(StringRef(data.begin() + offsets[start], endPos - offsets[start]));
+}
+
+StringRef Tuple::subTupleRawString(size_t index) const {
+	if (index >= offsets.size()) {
+		return StringRef();
+	}
+	size_t end = index + 1;
+	size_t endPos = end < offsets.size() ? offsets[end] : data.size();
+	return StringRef(data.begin() + offsets[index], endPos - offsets[index]);
+}
+
+TEST_CASE("fdbclient/Tuple/makeTuple") {
+	Tuple t1 = Tuple::makeTuple(
+	    1, 1.0f, 1.0, false, "byteStr"_sr, Tuple::UnicodeStr("str"_sr), nullptr, Versionstamp("000000000000"_sr));
+	Tuple t2 = Tuple()
+	               .append(1)
+	               .append(1.0f)
+	               .append(1.0)
+	               .append(false)
+	               .append("byteStr"_sr)
+	               .append(Tuple::UnicodeStr("str"_sr))
+	               .append(nullptr)
+	               .append(Versionstamp("000000000000"_sr));
+
+	ASSERT(t1.pack() == t2.pack());
+	ASSERT(t1.getType(0) == Tuple::INT);
+	ASSERT(t1.getType(1) == Tuple::FLOAT);
+	ASSERT(t1.getType(2) == Tuple::DOUBLE);
+	ASSERT(t1.getType(3) == Tuple::BOOL);
+	ASSERT(t1.getType(4) == Tuple::BYTES);
+	ASSERT(t1.getType(5) == Tuple::UTF8);
+	ASSERT(t1.getType(6) == Tuple::NULL_TYPE);
+	ASSERT(t1.getType(7) == Tuple::VERSIONSTAMP);
+	ASSERT(t1.size() == 8);
+
+	return Void();
 }

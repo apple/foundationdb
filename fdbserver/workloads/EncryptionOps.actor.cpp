@@ -34,8 +34,6 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-#if ENCRYPTION_ENABLED
-
 #define MEGA_BYTES (1024 * 1024)
 #define NANO_SECOND (1000 * 1000 * 1000)
 
@@ -161,7 +159,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 	void generateRandomBaseCipher(const int maxLen, uint8_t* buff, int* retLen) {
 		memset(buff, 0, maxLen);
 		*retLen = deterministicRandom()->randomInt(maxLen / 2, maxLen);
-		generateRandomData(buff, *retLen);
+		deterministicRandom()->randomBytes(buff, *retLen);
 	}
 
 	void setupCipherEssentials() {
@@ -228,7 +226,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		Reference<BlobCipherKey> cipherKey = cipherKeyCache->getCipherKey(domainId, baseCipherId, salt);
 
 		if (simCacheMiss) {
-			TraceEvent("SimKeyCacheMiss").detail("EncyrptDomainId", domainId).detail("BaseCipherId", baseCipherId);
+			TraceEvent("SimKeyCacheMiss").detail("EncryptDomainId", domainId).detail("BaseCipherId", baseCipherId);
 			// simulate KeyCache miss that may happen during decryption; insert a CipherKey with known 'salt'
 			cipherKeyCache->insertCipherKey(domainId,
 			                                baseCipherId,
@@ -249,7 +247,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 	                                   const EncryptAuthTokenMode authMode,
 	                                   BlobCipherEncryptHeader* header) {
 		uint8_t iv[AES_256_IV_LENGTH];
-		generateRandomData(&iv[0], AES_256_IV_LENGTH);
+		deterministicRandom()->randomBytes(&iv[0], AES_256_IV_LENGTH);
 		EncryptBlobCipherAes265Ctr encryptor(textCipherKey, headerCipherKey, &iv[0], AES_256_IV_LENGTH, authMode);
 
 		auto start = std::chrono::high_resolution_clock::now();
@@ -282,7 +280,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		ASSERT(cipherKey.isValid());
 		ASSERT(cipherKey->isEqual(orgCipherKey));
 
-		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, &header.cipherTextDetails.iv[0]);
+		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, header.iv);
 		const bool validateHeaderAuthToken = deterministicRandom()->randomInt(0, 100) < 65;
 
 		auto start = std::chrono::high_resolution_clock::now();
@@ -343,7 +341,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 			}
 
 			int dataLen = isFixedSizePayload() ? pageSize : deterministicRandom()->randomInt(100, maxBufSize);
-			generateRandomData(buff.get(), dataLen);
+			deterministicRandom()->randomBytes(buff.get(), dataLen);
 
 			// Encrypt the payload - generates BlobCipherEncryptHeader to assist decryption later
 			BlobCipherEncryptHeader header;
@@ -379,5 +377,3 @@ struct EncryptionOpsWorkload : TestWorkload {
 };
 
 WorkloadFactory<EncryptionOpsWorkload> EncryptionOpsWorkloadFactory("EncryptionOps");
-
-#endif // ENCRYPTION_ENABLED

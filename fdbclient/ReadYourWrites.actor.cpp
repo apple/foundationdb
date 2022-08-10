@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
@@ -76,11 +77,12 @@ public:
 
 	template <bool reverse>
 	struct GetMappedRangeReq {
-		GetMappedRangeReq(KeySelector begin, KeySelector end, Key mapper, GetRangeLimits limits)
-		  : begin(begin), end(end), mapper(mapper), limits(limits) {}
+		GetMappedRangeReq(KeySelector begin, KeySelector end, Key mapper, int matchIndex, GetRangeLimits limits)
+		  : begin(begin), end(end), mapper(mapper), limits(limits), matchIndex(matchIndex) {}
 		KeySelector begin, end;
 		Key mapper;
 		GetRangeLimits limits;
+		int matchIndex;
 		using Result = MappedRangeResult;
 	};
 
@@ -251,6 +253,8 @@ public:
 
 		if (read.begin.getKey() < read.end.getKey()) {
 			rangeBegin = read.begin.getKey();
+			// If the end offset is 1 (first greater than / first greater or equal) or more, then no changes to the
+			// range after the returned results can change the outcome.
 			rangeEnd = read.end.offset > 0 && result.more ? read.begin.getKey() : read.end.getKey();
 		} else {
 			rangeBegin = read.end.getKey();
@@ -287,7 +291,9 @@ public:
 		bool endInArena = false;
 
 		if (read.begin.getKey() < read.end.getKey()) {
-			rangeBegin = read.begin.offset <= 0 && result.more ? read.end.getKey() : read.begin.getKey();
+			// If the begin offset is 1 (first greater than / first greater or equal) or less, then no changes to the
+			// range prior to the returned results can change the outcome.
+			rangeBegin = read.begin.offset <= 1 && result.more ? read.end.getKey() : read.begin.getKey();
 			rangeEnd = read.end.getKey();
 		} else {
 			rangeBegin = read.end.getKey();
@@ -1139,9 +1145,13 @@ public:
 			else
 				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
 		}
-
-		MappedRangeResult v = wait(ryw->tr.getMappedRange(
-		    read.begin, read.end, read.mapper, read.limits, snapshot, backwards ? Reverse::True : Reverse::False));
+		MappedRangeResult v = wait(ryw->tr.getMappedRange(read.begin,
+		                                                  read.end,
+		                                                  read.mapper,
+		                                                  read.limits,
+		                                                  read.matchIndex,
+		                                                  snapshot,
+		                                                  backwards ? Reverse::True : Reverse::False));
 		return v;
 	}
 
@@ -1203,7 +1213,7 @@ public:
 		// isolation support. But it is not default and is rarely used. So we disallow it until we have thorough test
 		// coverage for it.)
 		if (snapshot) {
-			TEST(true); // getMappedRange not supported for snapshot.
+			CODE_PROBE(true, "getMappedRange not supported for snapshot.");
 			throw unsupported_operation();
 		}
 		// For now, getMappedRange requires read-your-writes being NOT disabled. But the support of RYW is limited
@@ -1212,7 +1222,7 @@ public:
 		// which returns the written value transparently. In another word, it makes sure not break RYW semantics without
 		// actually implementing reading from the writes.
 		if (ryw->options.readYourWritesDisabled) {
-			TEST(true); // getMappedRange not supported for read-your-writes disabled.
+			CODE_PROBE(true, "getMappedRange not supported for read-your-writes disabled.");
 			throw unsupported_operation();
 		}
 
@@ -1232,7 +1242,7 @@ public:
 			++it;
 
 			ASSERT(itCopy->value.size());
-			TEST(itCopy->value.size() > 1); // Multiple watches on the same key triggered by RYOW
+			CODE_PROBE(itCopy->value.size() > 1, "Multiple watches on the same key triggered by RYOW");
 
 			for (int i = 0; i < itCopy->value.size(); i++) {
 				if (itCopy->value[i]->onChangeTrigger.isSet()) {
@@ -1525,11 +1535,11 @@ ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord
 }
 
 Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot snapshot) {
-	TEST(true); // ReadYourWritesTransaction::get
+	CODE_PROBE(true, "ReadYourWritesTransaction::get");
 
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(key)) {
-			TEST(true); // Special keys get
+			CODE_PROBE(true, "Special keys get");
 			return getDatabase()->specialKeySpace->get(this, key);
 		}
 	} else {
@@ -1578,10 +1588,10 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 	if (key >= getMaxReadKey() && key != metadataVersionKey)
 		return key_outside_legal_range();
 
-	// There are no keys in the database with size greater than KEY_SIZE_LIMIT
-	if (key.size() >
-	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+	// There are no keys in the database with size greater than the max key size
+	if (key.size() > getMaxReadKeySize(key)) {
 		return Optional<Value>();
+	}
 
 	Future<Optional<Value>> result = RYWImpl::readWithConflictRange(this, RYWImpl::GetValueReq(key), snapshot);
 	reading.add(success(result));
@@ -1612,7 +1622,7 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
 		    end.getKey() <= specialKeys.end) {
-			TEST(true); // Special key space get range
+			CODE_PROBE(true, "Special key space get range");
 			return getDatabase()->specialKeySpace->getRange(this, begin, end, limits, reverse);
 		}
 	} else {
@@ -1638,7 +1648,7 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 
 	// This optimization prevents nullptr operations from being added to the conflict range
 	if (limits.isReached()) {
-		TEST(true); // RYW range read limit 0
+		CODE_PROBE(true, "RYW range read limit 0");
 		return RangeResult();
 	}
 
@@ -1652,7 +1662,7 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 		end.removeOrEqual(end.arena());
 
 	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
-		TEST(true); // RYW range inverted
+		CODE_PROBE(true, "RYW range inverted");
 		return RangeResult();
 	}
 
@@ -1676,12 +1686,13 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
                                                                     KeySelector end,
                                                                     Key mapper,
                                                                     GetRangeLimits limits,
+                                                                    int matchIndex,
                                                                     Snapshot snapshot,
                                                                     Reverse reverse) {
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
 		    end.getKey() <= specialKeys.end) {
-			TEST(true); // Special key space get range (getMappedRange)
+			CODE_PROBE(true, "Special key space get range (getMappedRange)");
 			throw client_invalid_operation(); // Not support special keys.
 		}
 	} else {
@@ -1703,7 +1714,7 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 
 	// This optimization prevents nullptr operations from being added to the conflict range
 	if (limits.isReached()) {
-		TEST(true); // RYW range read limit 0 (getMappedRange)
+		CODE_PROBE(true, "RYW range read limit 0 (getMappedRange)");
 		return MappedRangeResult();
 	}
 
@@ -1717,15 +1728,15 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 		end.removeOrEqual(end.arena());
 
 	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
-		TEST(true); // RYW range inverted (getMappedRange)
+		CODE_PROBE(true, "RYW range inverted (getMappedRange)");
 		return MappedRangeResult();
 	}
 
 	Future<MappedRangeResult> result =
 	    reverse ? RYWImpl::readWithConflictRangeForGetMappedRange(
-	                  this, RYWImpl::GetMappedRangeReq<true>(begin, end, mapper, limits), snapshot)
+	                  this, RYWImpl::GetMappedRangeReq<true>(begin, end, mapper, matchIndex, limits), snapshot)
 	            : RYWImpl::readWithConflictRangeForGetMappedRange(
-	                  this, RYWImpl::GetMappedRangeReq<false>(begin, end, mapper, limits), snapshot);
+	                  this, RYWImpl::GetMappedRangeReq<false>(begin, end, mapper, matchIndex, limits), snapshot);
 
 	return result;
 }
@@ -1822,23 +1833,19 @@ void ReadYourWritesTransaction::addReadConflictRange(KeyRangeRef const& keys) {
 		}
 	}
 
-	// There aren't any keys in the database with size larger than KEY_SIZE_LIMIT, so if range contains large keys
+	// There aren't any keys in the database with size larger than max key size, so if range contains large keys
 	// we can translate it to an equivalent one with smaller keys
 	KeyRef begin = keys.begin;
 	KeyRef end = keys.end;
 
-	if (begin.size() >
-	    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		begin = begin.substr(
-		    0,
-		    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
-	if (end.size() >
-	    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		end = end.substr(
-		    0,
-		    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
+	int64_t beginMaxSize = getMaxReadKeySize(begin);
+	int64_t endMaxSize = getMaxReadKeySize(end);
+	if (begin.size() > beginMaxSize) {
+		begin = begin.substr(0, beginMaxSize + 1);
+	}
+	if (end.size() > endMaxSize) {
+		end = end.substr(0, endMaxSize + 1);
+	}
 
 	KeyRangeRef r = KeyRangeRef(begin, end);
 
@@ -1982,7 +1989,7 @@ void ReadYourWritesTransaction::getWriteConflicts(KeyRangeMap<bool>* result) {
 	}
 }
 
-void ReadYourWritesTransaction::setTransactionID(uint64_t id) {
+void ReadYourWritesTransaction::setTransactionID(UID id) {
 	tr.setTransactionID(id);
 }
 
@@ -1991,7 +1998,7 @@ void ReadYourWritesTransaction::setToken(uint64_t token) {
 }
 
 RangeResult ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRangeRef kr) {
-	TEST(true); // Special keys read conflict range
+	CODE_PROBE(true, "Special keys read conflict range");
 	ASSERT(readConflictRangeKeysRange.contains(kr));
 	ASSERT(!tr.trState->options.checkWritesEnabled);
 	RangeResult result;
@@ -2033,7 +2040,7 @@ RangeResult ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRange
 }
 
 RangeResult ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRangeRef kr) {
-	TEST(true); // Special keys write conflict range
+	CODE_PROBE(true, "Special keys write conflict range");
 	ASSERT(writeConflictRangeKeysRange.contains(kr));
 	RangeResult result;
 
@@ -2111,9 +2118,9 @@ void ReadYourWritesTransaction::atomicOp(const KeyRef& key, const ValueRef& oper
 	if (!isValidMutationType(operationType) || !isAtomicOp((MutationRef::Type)operationType))
 		throw invalid_mutation_type();
 
-	if (key.size() >
-	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+	if (key.size() > getMaxWriteKeySize(key, getTransactionState()->options.rawAccess)) {
 		throw key_too_large();
+	}
 	if (operand.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT)
 		throw value_too_large();
 
@@ -2138,7 +2145,7 @@ void ReadYourWritesTransaction::atomicOp(const KeyRef& key, const ValueRef& oper
 	}
 
 	if (operationType == MutationRef::SetVersionstampedKey) {
-		TEST(options.readYourWritesDisabled); // SetVersionstampedKey without ryw enabled
+		CODE_PROBE(options.readYourWritesDisabled, "SetVersionstampedKey without ryw enabled");
 		// this does validation of the key and needs to be performed before the readYourWritesDisabled path
 		KeyRangeRef range = getVersionstampKeyRange(arena, k, tr.getCachedReadVersion().orDefault(0), getMaxReadKey());
 		versionStampKeys.push_back(arena, k);
@@ -2218,9 +2225,9 @@ void ReadYourWritesTransaction::set(const KeyRef& key, const ValueRef& value) {
 	}
 
 	// TODO: check transaction size here
-	if (key.size() >
-	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+	if (key.size() > getMaxWriteKeySize(key, getTransactionState()->options.rawAccess)) {
 		throw key_too_large();
+	}
 	if (value.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT)
 		throw value_too_large();
 
@@ -2254,23 +2261,19 @@ void ReadYourWritesTransaction::clear(const KeyRangeRef& range) {
 		return tr.clear(range, addWriteConflict);
 	}
 
-	// There aren't any keys in the database with size larger than KEY_SIZE_LIMIT, so if range contains large keys
+	// There aren't any keys in the database with size larger than the max key size, so if range contains large keys
 	// we can translate it to an equivalent one with smaller keys
 	KeyRef begin = range.begin;
 	KeyRef end = range.end;
 
-	if (begin.size() >
-	    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		begin = begin.substr(
-		    0,
-		    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
-	if (end.size() >
-	    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		end = end.substr(
-		    0,
-		    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
+	int64_t beginMaxSize = getMaxClearKeySize(begin);
+	int64_t endMaxSize = getMaxClearKeySize(end);
+	if (begin.size() > beginMaxSize) {
+		begin = begin.substr(0, beginMaxSize + 1);
+	}
+	if (end.size() > endMaxSize) {
+		end = end.substr(0, endMaxSize + 1);
+	}
 
 	KeyRangeRef r = KeyRangeRef(begin, end);
 
@@ -2300,9 +2303,9 @@ void ReadYourWritesTransaction::clear(const KeyRef& key) {
 	if (key >= getMaxWriteKey())
 		throw key_outside_legal_range();
 
-	if (key.size() >
-	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+	if (key.size() > getMaxClearKeySize(key)) {
 		return;
+	}
 
 	if (options.readYourWritesDisabled) {
 		return tr.clear(key, addWriteConflict);
@@ -2332,9 +2335,9 @@ Future<Void> ReadYourWritesTransaction::watch(const Key& key) {
 	if (key >= allKeys.end || (key >= getMaxReadKey() && key != metadataVersionKey && tr.apiVersionAtLeast(300)))
 		return key_outside_legal_range();
 
-	if (key.size() >
-	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+	if (key.size() > getMaxWriteKeySize(key, getTransactionState()->options.rawAccess)) {
 		return key_too_large();
+	}
 
 	return RYWImpl::watch(this, key);
 }
@@ -2350,23 +2353,19 @@ void ReadYourWritesTransaction::addWriteConflictRange(KeyRangeRef const& keys) {
 		}
 	}
 
-	// There aren't any keys in the database with size larger than KEY_SIZE_LIMIT, so if range contains large keys
+	// There aren't any keys in the database with size larger than the max key size, so if range contains large keys
 	// we can translate it to an equivalent one with smaller keys
 	KeyRef begin = keys.begin;
 	KeyRef end = keys.end;
 
-	if (begin.size() >
-	    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		begin = begin.substr(
-		    0,
-		    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
-	if (end.size() >
-	    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		end = end.substr(
-		    0,
-		    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
+	int64_t beginMaxSize = getMaxKeySize(begin);
+	int64_t endMaxSize = getMaxKeySize(end);
+	if (begin.size() > beginMaxSize) {
+		begin = begin.substr(0, beginMaxSize + 1);
+	}
+	if (end.size() > endMaxSize) {
+		end = end.substr(0, endMaxSize + 1);
+	}
 
 	KeyRangeRef r = KeyRangeRef(begin, end);
 

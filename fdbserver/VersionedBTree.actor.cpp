@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Error.h"
@@ -37,8 +37,7 @@
 #include "flow/serialize.h"
 #include "flow/genericactors.actor.h"
 #include "flow/UnitTest.h"
-#include "fdbserver/IPager.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/ActorCollection.h"
 #include <map>
 #include <string>
@@ -2108,7 +2107,9 @@ public:
 			return !reading() && !writing();
 		}
 
-		Future<Void> onEvictable() const { return ready(readFuture) && writeFuture; }
+		// Entry is evictable when its write and read futures are ready, even if they are
+		// errors, so any buffers they hold are no longer needed by the underlying file actors
+		Future<Void> onEvictable() const { return ready(readFuture) && ready(writeFuture); }
 	};
 	typedef ObjectCache<LogicalPageID, PageCacheEntry> PageCacheT;
 
@@ -3761,7 +3762,9 @@ public:
 		// Must wait for pending operations to complete, canceling them can cause a crash because the underlying
 		// operations may be uncancellable and depend on memory from calling scope's page reference
 		debug_printf("DWALPager(%s) shutdown wait for operations\n", self->filename.c_str());
-		wait(waitForAll(self->operations));
+
+		// Pending ops must be all ready, errors are okay
+		wait(waitForAllReady(self->operations));
 		self->operations.clear();
 
 		debug_printf("DWALPager(%s) shutdown destroy page cache\n", self->filename.c_str());
@@ -7816,10 +7819,10 @@ public:
 		if (rowLimit > 0) {
 			f = cur.seekGTE(keys.begin);
 			if (f.isReady()) {
-				TEST(true); // Cached forward range read seek
+				CODE_PROBE(true, "Cached forward range read seek");
 				f.get();
 			} else {
-				TEST(true); // Uncached forward range read seek
+				CODE_PROBE(true, "Uncached forward range read seek");
 				wait(store(lock, self->m_concurrentReads.lock()));
 				wait(f);
 			}
@@ -7872,10 +7875,10 @@ public:
 		} else {
 			f = cur.seekLT(keys.end);
 			if (f.isReady()) {
-				TEST(true); // Cached reverse range read seek
+				CODE_PROBE(true, "Cached reverse range read seek");
 				f.get();
 			} else {
-				TEST(true); // Uncached reverse range read seek
+				CODE_PROBE(true, "Uncached reverse range read seek");
 				wait(store(lock, self->m_concurrentReads.lock()));
 				wait(f);
 			}
@@ -9737,7 +9740,9 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state int maxValueSize = params.getInt("maxValueSize").orDefault(randomSize(pageSize * 25));
 	state int maxCommitSize =
 	    params.getInt("maxCommitSize")
-	        .orDefault(shortTest ? 1000 : randomSize(std::min<int>((maxKeySize + maxValueSize) * 20000, 10e6)));
+	        .orDefault(shortTest
+	                       ? 1000
+	                       : randomSize((int)std::min<int64_t>((maxKeySize + maxValueSize) * int64_t(20000), 10e6)));
 	state double setExistingKeyProbability =
 	    params.getDouble("setExistingKeyProbability").orDefault(deterministicRandom()->random01() * .5);
 	state double clearProbability =
@@ -10270,7 +10275,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 
 		state int v;
 		state ExtentQueueEntry<16> e;
-		generateRandomData(e.entry, 16);
+		deterministicRandom()->randomBytes(e.entry, 16);
 		state int sinceYield = 0;
 		for (v = 1; v <= numEntries; ++v) {
 			// Sometimes do a commit

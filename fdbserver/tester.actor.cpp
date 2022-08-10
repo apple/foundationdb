@@ -31,6 +31,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/KnobProtectiveGroups.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -99,6 +100,20 @@ Key KVWorkload::keyForIndex(uint64_t index) const {
 	}
 }
 
+int64_t KVWorkload::indexForKey(const KeyRef& key, bool absent) const {
+	int idx = 0;
+	if (nodePrefix > 0) {
+		ASSERT(keyBytes >= 32);
+		idx += 16;
+	}
+	ASSERT(keyBytes >= 16);
+	// extract int64_t index, the reverse process of emplaceIndex()
+	auto end = key.size() - idx - (absent ? 1 : 0);
+	std::string str((char*)key.begin() + idx, end);
+	int64_t res = std::stoll(str, nullptr, 16);
+	return res;
+}
+
 Key KVWorkload::keyForIndex(uint64_t index, bool absent) const {
 	int adjustedKeyBytes = (absent) ? (keyBytes + 1) : keyBytes;
 	Key result = makeString(adjustedKeyBytes);
@@ -112,8 +127,8 @@ Key KVWorkload::keyForIndex(uint64_t index, bool absent) const {
 		idx += 16;
 	}
 	ASSERT(keyBytes >= 16);
-	double d = double(index) / nodeCount;
-	emplaceIndex(data, idx, *(int64_t*)&d);
+	emplaceIndex(data, idx, (int64_t)index);
+	// ASSERT(indexForKey(result) == (int64_t)index); // debug assert
 
 	return result;
 }
@@ -370,7 +385,9 @@ ACTOR Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
 
 	workload = IWorkloadFactory::create(testName.toString(), wcx);
-	wait(workload->initialized());
+	if (workload) {
+		wait(workload->initialized());
+	}
 
 	auto unconsumedOptions = checkAllOptionsConsumed(workload ? workload->options : VectorRef<KeyValueRef>());
 	if (!workload || unconsumedOptions.size()) {
@@ -480,7 +497,7 @@ void printSimulatedTopology() {
 		printf("%sAddress: %s\n", indent.c_str(), p->address.toString().c_str());
 		indent += "  ";
 		printf("%sClass: %s\n", indent.c_str(), p->startingClass.toString().c_str());
-		printf("%sName: %s\n", indent.c_str(), p->name);
+		printf("%sName: %s\n", indent.c_str(), p->name.c_str());
 	}
 }
 
@@ -693,6 +710,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 
 		endRole(Role::TESTER, workIface.id(), "Complete");
 	} catch (Error& e) {
+		TraceEvent(SevDebug, "TesterWorkloadFailed").errorUnsuppressed(e);
 		if (!replied) {
 			if (e.code() == error_code_test_specification_invalid)
 				work.reply.sendError(e);
@@ -765,7 +783,7 @@ ACTOR Future<Void> clearData(Database cx) {
 			//    it should disable the default tenant.
 			if (!rangeResult.empty()) {
 				if (cx->defaultTenant.present()) {
-					TenantMapEntry entry = wait(ManagementAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
+					TenantMapEntry entry = wait(TenantAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
 					tenantPrefix = entry.prefix;
 				}
 
@@ -982,6 +1000,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 
 	state double connectionFailures;
 	if (g_network->isSimulated()) {
+		// NOTE: the value will be reset after consistency check
 		connectionFailures = g_simulator.connectionFailuresDisableDuration;
 		g_simulator.connectionFailuresDisableDuration = 1e6;
 		g_simulator.speedUpSimulation = true;
@@ -1127,7 +1146,10 @@ ACTOR Future<bool> runTest(Database cx,
 std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKeys = {
 	// These are read by SimulatedCluster and used before testers exist.  Thus, they must
 	// be recognized and accepted, but there's no point in placing them into a testSpec.
-	{ "extraDB", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedExtraDB", ""); } },
+	{ "extraDatabaseMode",
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedExtraDatabaseMode", ""); } },
+	{ "extraDatabaseCount",
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedExtraDatabaseCount", ""); } },
 	{ "configureLocked",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedConfigureLocked", ""); } },
 	{ "minimumReplication",
@@ -1156,7 +1178,10 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	{ "disableTss", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableTSS", ""); } },
 	{ "disableHostname",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableHostname", ""); } },
-	{ "disableRemoteKVS", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } }
+	{ "disableRemoteKVS",
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } },
+	{ "disableEncryption",
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } }
 };
 
 std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
@@ -1534,7 +1559,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
                             std::vector<TestSpec> tests,
                             StringRef startingConfiguration,
                             LocalityData locality,
-                            Optional<TenantName> defaultTenant) {
+                            Optional<TenantName> defaultTenant,
+                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate) {
 	state Database cx;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>);
 	state Future<Void> ccMonitor = monitorServerDBInfo(cc, LocalityData(), dbInfo); // FIXME: locality
@@ -1610,9 +1636,19 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 	}
 
-	if (useDB && defaultTenant.present()) {
-		TraceEvent("CreatingDefaultTenant").detail("Tenant", defaultTenant.get());
-		wait(ManagementAPI::createTenant(cx.getReference(), defaultTenant.get()));
+	if (useDB) {
+		std::vector<Future<Void>> tenantFutures;
+		for (auto tenant : tenantsToCreate) {
+			TenantMapEntry entry;
+			if (deterministicRandom()->coinflip()) {
+				entry.tenantGroup = "TestTenantGroup"_sr;
+			}
+			entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
+			TraceEvent("CreatingTenant").detail("Tenant", tenant).detail("TenantGroup", entry.tenantGroup);
+			tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenant, entry)));
+		}
+
+		wait(waitForAll(tenantFutures));
 	}
 
 	if (useDB && waitForQuiescenceBegin) {
@@ -1631,7 +1667,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 
 		if (perpetualWiggleEnabled) { // restore the enabled perpetual storage wiggle setting
 			printf("Set perpetual_storage_wiggle=1 ...\n");
-			wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
+			Version cVer = wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
 			printf("Set perpetual_storage_wiggle=1 Done.\n");
 		}
 	}
@@ -1694,7 +1730,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
                             int minTestersExpected,
                             StringRef startingConfiguration,
                             LocalityData locality,
-                            Optional<TenantName> defaultTenant) {
+                            Optional<TenantName> defaultTenant,
+                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate) {
 	state int flags = (at == TEST_ON_SERVERS ? 0 : GetWorkersRequest::TESTER_CLASS_ONLY) |
 	                  GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY;
 	state Future<Void> testerTimeout = delay(600.0); // wait 600 sec for testers to show up
@@ -1725,7 +1762,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	for (int i = 0; i < workers.size(); i++)
 		ts.push_back(workers[i].interf.testerInterface);
 
-	wait(runTests(cc, ci, ts, tests, startingConfiguration, locality, defaultTenant));
+	wait(runTests(cc, ci, ts, tests, startingConfiguration, locality, defaultTenant, tenantsToCreate));
 	return Void();
 }
 
@@ -1763,7 +1800,8 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
                             StringRef startingConfiguration,
                             LocalityData locality,
                             UnitTestParameters testOptions,
-                            Optional<TenantName> defaultTenant) {
+                            Optional<TenantName> defaultTenant,
+                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate) {
 	state TestSet testSet;
 	state std::unique_ptr<KnobProtectiveGroup> knobProtectiveGroup(nullptr);
 	auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
@@ -1847,11 +1885,19 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		actors.push_back(
 		    reportErrors(monitorServerDBInfo(cc, LocalityData(), db), "MonitorServerDBInfo")); // FIXME: Locality
 		actors.push_back(reportErrors(testerServerCore(iTesters[0], connRecord, db, locality), "TesterServerCore"));
-		tests = runTests(cc, ci, iTesters, testSet.testSpecs, startingConfiguration, locality, defaultTenant);
+		tests = runTests(
+		    cc, ci, iTesters, testSet.testSpecs, startingConfiguration, locality, defaultTenant, tenantsToCreate);
 	} else {
-		tests = reportErrors(
-		    runTests(cc, ci, testSet.testSpecs, at, minTestersExpected, startingConfiguration, locality, defaultTenant),
-		    "RunTests");
+		tests = reportErrors(runTests(cc,
+		                              ci,
+		                              testSet.testSpecs,
+		                              at,
+		                              minTestersExpected,
+		                              startingConfiguration,
+		                              locality,
+		                              defaultTenant,
+		                              tenantsToCreate),
+		                     "RunTests");
 	}
 
 	choose {

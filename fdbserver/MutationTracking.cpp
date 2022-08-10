@@ -21,9 +21,11 @@
 #include <algorithm>
 #include <vector>
 #include "fdbclient/FDBTypes.h"
+#include "fdbserver/EncryptedMutationMessage.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/SpanContextMessage.h"
+#include "fdbserver/OTELSpanContextMessage.h"
 #include "fdbclient/SystemData.h"
 #if defined(FDB_CLEAN_BUILD) && MUTATION_TRACKING_ENABLED
 #error "You cannot use mutation tracking in a clean/release build."
@@ -96,6 +98,13 @@ TraceEvent debugTagsAndMessageEnabled(const char* context, Version version, Stri
 			BinaryReader br(mutationData, AssumeVersion(rdr.protocolVersion()));
 			SpanContextMessage scm;
 			br >> scm;
+		} else if (OTELSpanContextMessage::startsOTELSpanContextMessage(mutationType)) {
+			CODE_PROBE(true, "MutationTracking reading OTELSpanContextMessage");
+			BinaryReader br(mutationData, AssumeVersion(rdr.protocolVersion()));
+			OTELSpanContextMessage scm;
+			br >> scm;
+		} else if (EncryptedMutationMessage::startsEncryptedMutationMessage(mutationType)) {
+			throw encrypt_unsupported();
 		} else {
 			MutationRef m;
 			BinaryReader br(mutationData, AssumeVersion(rdr.protocolVersion()));

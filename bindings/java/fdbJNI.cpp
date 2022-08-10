@@ -533,10 +533,14 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureMappedResults_Future
 		FDBMappedKeyValue kvm = kvms[i];
 		int kvm_count = kvm.getRange.m_size;
 
-		const int totalLengths = 4 + kvm_count * 2;
+		// now it has 5 field, key, value, getRange.begin, getRange.end, boundaryAndExist
+		// this needs to change if FDBMappedKeyValue definition is changed.
+		const int totalFieldFDBMappedKeyValue = 5;
+
+		const int totalLengths = totalFieldFDBMappedKeyValue + kvm_count * 2;
 
 		int totalBytes = kvm.key.key_length + kvm.value.key_length + kvm.getRange.begin.key.key_length +
-		                 kvm.getRange.end.key.key_length;
+		                 kvm.getRange.end.key.key_length + sizeof(kvm.boundaryAndExist);
 		for (int i = 0; i < kvm_count; i++) {
 			auto kv = kvm.getRange.data[i];
 			totalBytes += kv.key_length + kv.value_length;
@@ -580,6 +584,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureMappedResults_Future
 				cpBytesAndLength(pByte, pLength, kvm.value);
 				cpBytesAndLength(pByte, pLength, kvm.getRange.begin.key);
 				cpBytesAndLength(pByte, pLength, kvm.getRange.end.key);
+				cpBytesAndLengthInner(pByte, pLength, (uint8_t*)&(kvm.boundaryAndExist), sizeof(kvm.boundaryAndExist));
 				for (int kvm_i = 0; kvm_i < kvm_count; kvm_i++) {
 					auto kv = kvm.getRange.data[kvm_i];
 					cpBytesAndLengthInner(pByte, pLength, kv.key, kv.key_length);
@@ -588,6 +593,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureMappedResults_Future
 			}
 		}
 		// After native arrays are released
+		// call public static method MappedKeyValue::fromBytes()
 		jobject mkv = jenv->CallStaticObjectMethod(
 		    mapped_key_value_class, mapped_key_value_from_bytes, (jbyteArray)bytesArray, (jintArray)lengthArray);
 		if (jenv->ExceptionOccurred())
@@ -757,6 +763,71 @@ JNIEXPORT jdouble JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1getM
 	}
 	FDBDatabase* database = (FDBDatabase*)dbPtr;
 	return (jdouble)fdb_database_get_main_thread_busyness(database);
+}
+
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1purgeBlobGranules(JNIEnv* jenv,
+                                                                                            jobject,
+                                                                                            jlong dbPtr,
+                                                                                            jbyteArray beginKeyBytes,
+                                                                                            jbyteArray endKeyBytes,
+                                                                                            jlong purgeVersion,
+                                                                                            jboolean force) {
+	if (!dbPtr || !beginKeyBytes || !endKeyBytes) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+
+	FDBDatabase* database = (FDBDatabase*)dbPtr;
+
+	uint8_t* beginKeyArr = (uint8_t*)jenv->GetByteArrayElements(beginKeyBytes, JNI_NULL);
+	if (!beginKeyArr) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	uint8_t* endKeyArr = (uint8_t*)jenv->GetByteArrayElements(endKeyBytes, JNI_NULL);
+	if (!endKeyArr) {
+		jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)beginKeyArr, JNI_ABORT);
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	FDBFuture* f = fdb_database_purge_blob_granules(database,
+	                                                beginKeyArr,
+	                                                jenv->GetArrayLength(beginKeyBytes),
+	                                                endKeyArr,
+	                                                jenv->GetArrayLength(endKeyBytes),
+	                                                purgeVersion,
+	                                                (fdb_bool_t)force);
+	jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)beginKeyArr, JNI_ABORT);
+	jenv->ReleaseByteArrayElements(endKeyBytes, (jbyte*)endKeyArr, JNI_ABORT);
+	return (jlong)f;
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_apple_foundationdb_FDBDatabase_Database_1waitPurgeGranulesComplete(JNIEnv* jenv,
+                                                                            jobject,
+                                                                            jlong dbPtr,
+                                                                            jbyteArray purgeKeyBytes) {
+	if (!dbPtr || !purgeKeyBytes) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBDatabase* database = (FDBDatabase*)dbPtr;
+	uint8_t* purgeKeyArr = (uint8_t*)jenv->GetByteArrayElements(purgeKeyBytes, JNI_NULL);
+
+	if (!purgeKeyArr) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+	FDBFuture* f =
+	    fdb_database_wait_purge_granules_complete(database, purgeKeyArr, jenv->GetArrayLength(purgeKeyBytes));
+	jenv->ReleaseByteArrayElements(purgeKeyBytes, (jbyte*)purgeKeyArr, JNI_ABORT);
+
+	return (jlong)f;
 }
 
 JNIEXPORT jboolean JNICALL Java_com_apple_foundationdb_FDB_Error_1predicate(JNIEnv* jenv,
@@ -960,6 +1031,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
                                                                                                jint targetBytes,
                                                                                                jint streamingMode,
                                                                                                jint iteration,
+                                                                                               jint matchIndex,
                                                                                                jboolean snapshot,
                                                                                                jboolean reverse) {
 	if (!tPtr || !keyBeginBytes || !keyEndBytes || !mapperBytes) {
@@ -1007,6 +1079,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 	                                                targetBytes,
 	                                                (FDBStreamingMode)streamingMode,
 	                                                iteration,
+	                                                matchIndex,
 	                                                snapshot,
 	                                                reverse);
 	jenv->ReleaseByteArrayElements(keyBeginBytes, (jbyte*)barrBegin, JNI_ABORT);

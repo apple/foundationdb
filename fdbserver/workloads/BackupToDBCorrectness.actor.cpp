@@ -128,7 +128,9 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			}
 		}
 
-		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
+		ASSERT(g_simulator.extraDatabases.size() == 1);
+		auto extraFile =
+		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
 		extraDB = Database::createDatabase(extraFile, -1);
 
 		TraceEvent("BARW_Start").detail("Locked", locked);
@@ -327,7 +329,8 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 		// Stop the differential backup, if enabled
 		if (stopDifferentialDelay) {
-			TEST(!stopDifferentialFuture.isReady()); // Restore starts at specified time - stopDifferential not ready
+			CODE_PROBE(!stopDifferentialFuture.isReady(),
+			           "Restore starts at specified time - stopDifferential not ready");
 			wait(stopDifferentialFuture);
 			TraceEvent("BARW_DoBackupWaitToDiscontinue", randomID)
 			    .detail("Tag", printable(tag))
@@ -632,7 +635,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				}
 			}
 
-			TEST(!startRestore.isReady()); // Restore starts at specified time
+			CODE_PROBE(!startRestore.isReady(), "Restore starts at specified time");
 			wait(startRestore);
 
 			if (self->performRestore) {

@@ -19,7 +19,9 @@
  */
 
 #include "fdbclient/BackupAgent.actor.h"
+#ifdef BUILD_AZURE_BACKUP
 #include "fdbclient/BackupContainerAzureBlobStore.h"
+#endif
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
 #include "fdbclient/BackupContainerS3BlobStore.h"
@@ -1128,7 +1130,6 @@ public:
 		return false;
 	}
 
-#if ENCRYPTION_ENABLED
 	ACTOR static Future<Void> createTestEncryptionKeyFile(std::string filename) {
 		state Reference<IAsyncFile> keyFile = wait(IAsyncFileSystem::filesystem()->open(
 		    filename,
@@ -1164,7 +1165,6 @@ public:
 		ASSERT_EQ(bytesRead, cipherKey->size());
 		return Void();
 	}
-#endif // ENCRYPTION_ENABLED
 
 }; // class BackupContainerFileSystemImpl
 
@@ -1481,19 +1481,11 @@ Future<Void> BackupContainerFileSystem::encryptionSetupComplete() const {
 
 void BackupContainerFileSystem::setEncryptionKey(Optional<std::string> const& encryptionKeyFileName) {
 	if (encryptionKeyFileName.present()) {
-#if ENCRYPTION_ENABLED
 		encryptionSetupFuture = BackupContainerFileSystemImpl::readEncryptionKey(encryptionKeyFileName.get());
-#else
-		encryptionSetupFuture = Void();
-#endif
 	}
 }
 Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string const& filename) {
-#if ENCRYPTION_ENABLED
 	return BackupContainerFileSystemImpl::createTestEncryptionKeyFile(filename);
-#else
-	return Void();
-#endif
 }
 
 // Get a BackupContainerFileSystem based on a container URL string
@@ -1531,11 +1523,44 @@ Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
 #ifdef BUILD_AZURE_BACKUP
 		else if (u.startsWith("azure://"_sr)) {
 			u.eat("azure://"_sr);
-			auto accountName = u.eat("@"_sr).toString();
-			auto endpoint = u.eat("/"_sr).toString();
-			auto containerName = u.eat("/"_sr).toString();
-			r = makeReference<BackupContainerAzureBlobStore>(
-			    endpoint, accountName, containerName, encryptionKeyFileName);
+			auto address = u.eat("/"_sr);
+			if (address.endsWith(std::string(azure::storage_lite::constants::default_endpoint_suffix))) {
+				// <account>.<service>.core.windows.net/<resource_path>
+				auto endPoint = address.toString();
+				auto accountName = address.eat("."_sr).toString();
+				auto containerName = u.eat("/"_sr).toString();
+				r = makeReference<BackupContainerAzureBlobStore>(
+				    endPoint, accountName, containerName, encryptionKeyFileName);
+			} else {
+				// resolve the network address if necessary
+				std::string endpoint(address.toString());
+				Optional<NetworkAddress> parsedAddress = NetworkAddress::parseOptional(endpoint);
+				if (!parsedAddress.present()) {
+					try {
+						auto hostname = Hostname::parse(endpoint);
+						auto resolvedAddress = hostname.resolveBlocking();
+						if (resolvedAddress.present()) {
+							parsedAddress = resolvedAddress.get();
+						}
+					} catch (Error& e) {
+						TraceEvent(SevError, "InvalidAzureBackupUrl").error(e).detail("Endpoint", endpoint);
+						throw backup_invalid_url();
+					}
+				}
+				if (!parsedAddress.present()) {
+					TraceEvent(SevError, "InvalidAzureBackupUrl").detail("Endpoint", endpoint);
+					throw backup_invalid_url();
+				}
+				auto accountName = u.eat("/"_sr).toString();
+				// Avoid including ":tls" and "(fromHostname)"
+				// note: the endpoint needs to contain the account name
+				// so either "<account_name>.blob.core.windows.net" or "<ip>:<port>/<account_name>"
+				endpoint =
+				    fmt::format("{}/{}", formatIpPort(parsedAddress.get().ip, parsedAddress.get().port), accountName);
+				auto containerName = u.eat("/"_sr).toString();
+				r = makeReference<BackupContainerAzureBlobStore>(
+				    endpoint, accountName, containerName, encryptionKeyFileName);
+			}
 		}
 #endif
 		else {

@@ -125,7 +125,7 @@ function(add_fdb_test)
   list(TRANSFORM ADD_FDB_TEST_TEST_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
   if (ENABLE_SIMULATION_TESTS)
     add_test(NAME ${test_name}
-      COMMAND $<TARGET_FILE:Python::Interpreter> ${TestRunner}
+      COMMAND $<TARGET_FILE:Python3::Interpreter> ${TestRunner}
       -n ${test_name}
       -b ${PROJECT_BINARY_DIR}
       -t ${test_type}
@@ -172,8 +172,7 @@ function(stage_correctness_package)
   file(MAKE_DIRECTORY ${STAGE_OUT_DIR}/bin)
   string(LENGTH "${CMAKE_SOURCE_DIR}/tests/" base_length)
   foreach(test IN LISTS TEST_NAMES)
-    if(("${TEST_TYPE_${test}}" STREQUAL "simulation") AND
-        (${test} MATCHES ${TEST_PACKAGE_INCLUDE}) AND
+    if((${test} MATCHES ${TEST_PACKAGE_INCLUDE}) AND
         (NOT ${test} MATCHES ${TEST_PACKAGE_EXCLUDE}))
       foreach(file IN LISTS TEST_FILES_${test})
         string(SUBSTRING ${file} ${base_length} -1 rel_out_file)
@@ -404,8 +403,7 @@ endfunction()
 
 # Creates a single cluster before running the specified command (usually a ctest test)
 function(add_fdbclient_test)
-  set(options DISABLED ENABLED DISABLE_LOG_DUMP)
-  set(options DISABLED ENABLED API_TEST_BLOB_GRANULES_ENABLED)
+  set(options DISABLED ENABLED DISABLE_LOG_DUMP API_TEST_BLOB_GRANULES_ENABLED TLS_ENABLED)
   set(oneValueArgs NAME PROCESS_NUMBER TEST_TIMEOUT WORKING_DIRECTORY)
   set(multiValueArgs COMMAND)
   cmake_parse_arguments(T "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
@@ -435,10 +433,13 @@ function(add_fdbclient_test)
   if(T_API_TEST_BLOB_GRANULES_ENABLED)
     list(APPEND TMP_CLUSTER_CMD --blob-granules-enabled)
   endif()
+  if(T_TLS_ENABLED)
+    list(APPEND TMP_CLUSTER_CMD --tls-enabled)
+  endif()
   message(STATUS "Adding Client test ${T_NAME}")
   add_test(NAME "${T_NAME}"
     WORKING_DIRECTORY ${T_WORKING_DIRECTORY}
-    COMMAND ${Python_EXECUTABLE} ${TMP_CLUSTER_CMD}
+    COMMAND ${Python3_EXECUTABLE} ${TMP_CLUSTER_CMD}
             --
             ${T_COMMAND})
   if (T_TEST_TIMEOUT)
@@ -471,7 +472,7 @@ function(add_unavailable_fdbclient_test)
   endif()
   message(STATUS "Adding unavailable client test ${T_NAME}")
   add_test(NAME "${T_NAME}"
-  COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/fake_cluster.py
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/fake_cluster.py
           --output-dir ${CMAKE_BINARY_DIR}
           --
           ${T_COMMAND})
@@ -506,7 +507,7 @@ function(add_multi_fdbclient_test)
   endif()
   message(STATUS "Adding Client test ${T_NAME}")
   add_test(NAME "${T_NAME}"
-    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_multi_cluster.py
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_multi_cluster.py
             --build-dir ${CMAKE_BINARY_DIR}
             --clusters 3
             --

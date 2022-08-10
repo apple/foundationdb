@@ -70,6 +70,15 @@ DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_error_t code);
 
 #define /* fdb_error_t */ fdb_select_api_version(v) fdb_select_api_version_impl(v, FDB_API_VERSION)
 
+/*
+ * A variant of fdb_select_api_version that caps the header API version by the maximum API version
+ * supported by the client library. It is intended mainly for use in combination with the shim
+ * layer, which loads the client library dynamically.
+ */
+#define /* fdb_error_t */ fdb_select_api_version_capped(v)                                                             \
+	fdb_select_api_version_impl(                                                                                       \
+	    v, FDB_API_VERSION < fdb_get_max_api_version() ? FDB_API_VERSION : fdb_get_max_api_version())
+
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_network_set_option(FDBNetworkOption option,
                                                                 uint8_t const* value,
                                                                 int value_length);
@@ -160,6 +169,7 @@ typedef struct mappedkeyvalue {
 	 * take the shortcut. */
 	FDBGetRangeReqAndResult getRange;
 	unsigned char buffer[32];
+	fdb_bool_t boundaryAndExist;
 } FDBMappedKeyValue;
 
 #pragma pack(push, 4)
@@ -314,6 +324,18 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_wait_purge_granules_complet
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant,
                                                                        FDBTransaction** out_transaction);
 
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_purge_blob_granules(FDBTenant* db,
+                                                                       uint8_t const* begin_key_name,
+                                                                       int begin_key_name_length,
+                                                                       uint8_t const* end_key_name,
+                                                                       int end_key_name_length,
+                                                                       int64_t purge_version,
+                                                                       fdb_bool_t force);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_tenant_wait_purge_granules_complete(FDBTenant* db,
+                                                                                uint8_t const* purge_key_name,
+                                                                                int purge_key_name_length);
+
 DLLEXPORT void fdb_tenant_destroy(FDBTenant* tenant);
 
 DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr);
@@ -384,6 +406,7 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_mapped_range(FDBTran
                                                                          int target_bytes,
                                                                          FDBStreamingMode mode,
                                                                          int iteration,
+                                                                         int matchIndex,
                                                                          fdb_bool_t snapshot,
                                                                          fdb_bool_t reverse);
 

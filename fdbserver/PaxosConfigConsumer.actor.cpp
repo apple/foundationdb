@@ -99,8 +99,17 @@ class GetCommittedVersionQuorum {
 
 			// Now roll node forward to match the largest committed version of
 			// the replies.
-			state Reference<ConfigFollowerInfo> quorumCfi(new ConfigFollowerInfo(self->replies[target]));
 			try {
+				state std::vector<ConfigFollowerInterface> interfs = self->replies[target];
+				std::vector<Future<Void>> fs;
+				for (ConfigFollowerInterface& interf : interfs) {
+					if (interf.hostname.present()) {
+						fs.push_back(tryInitializeRequestStream(
+						    &interf.getChanges, interf.hostname.get(), WLTOKEN_CONFIGFOLLOWER_GETCHANGES));
+					}
+				}
+				wait(waitForAll(fs));
+				state Reference<ConfigFollowerInfo> quorumCfi(new ConfigFollowerInfo(interfs));
 				state Version lastSeenVersion = std::max(
 				    rollback.present() ? rollback.get() : nodeVersion.lastCommitted, self->largestCompactedResponse);
 				ConfigFollowerGetChangesReply reply =
@@ -108,9 +117,21 @@ class GetCommittedVersionQuorum {
 				                                       &ConfigFollowerInterface::getChanges,
 				                                       ConfigFollowerGetChangesRequest{ lastSeenVersion, target }),
 				                      SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
-				wait(timeoutError(cfi.rollforward.getReply(ConfigFollowerRollforwardRequest{
-				                      rollback, nodeVersion.lastCommitted, target, reply.changes, reply.annotations }),
-				                  SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
+
+				if (cfi.hostname.present()) {
+					wait(timeoutError(
+					    retryGetReplyFromHostname(
+					        ConfigFollowerRollforwardRequest{
+					            rollback, nodeVersion.lastCommitted, target, reply.changes, reply.annotations },
+					        cfi.hostname.get(),
+					        WLTOKEN_CONFIGFOLLOWER_ROLLFORWARD),
+					    SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
+				} else {
+					wait(timeoutError(
+					    cfi.rollforward.getReply(ConfigFollowerRollforwardRequest{
+					        rollback, nodeVersion.lastCommitted, target, reply.changes, reply.annotations }),
+					    SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
+				}
 			} catch (Error& e) {
 				if (e.code() == error_code_transaction_too_old) {
 					// Seeing this trace is not necessarily a problem. There
@@ -129,9 +150,18 @@ class GetCommittedVersionQuorum {
 
 	ACTOR static Future<Void> getCommittedVersionActor(GetCommittedVersionQuorum* self, ConfigFollowerInterface cfi) {
 		try {
-			ConfigFollowerGetCommittedVersionReply reply =
-			    wait(timeoutError(cfi.getCommittedVersion.getReply(ConfigFollowerGetCommittedVersionRequest{}),
-			                      SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
+			state ConfigFollowerGetCommittedVersionReply reply;
+			if (cfi.hostname.present()) {
+				wait(timeoutError(store(reply,
+				                        retryGetReplyFromHostname(ConfigFollowerGetCommittedVersionRequest{},
+				                                                  cfi.hostname.get(),
+				                                                  WLTOKEN_CONFIGFOLLOWER_GETCOMMITTEDVERSION)),
+				                  SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
+			} else {
+				wait(timeoutError(
+				    store(reply, cfi.getCommittedVersion.getReply(ConfigFollowerGetCommittedVersionRequest{})),
+				    SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
+			}
 
 			++self->totalRepliesReceived;
 			self->largestCompactedResponse = std::max(self->largestCompactedResponse, reply.lastCompacted);
@@ -185,11 +215,15 @@ class GetCommittedVersionQuorum {
 			++self->totalRepliesReceived;
 			if (e.code() == error_code_version_already_compacted) {
 				if (self->quorumVersion.canBeSet()) {
-					self->quorumVersion.sendError(e);
+					// Calling sendError could delete self
+					auto local = self->quorumVersion;
+					local.sendError(e);
 				}
 			} else if (e.code() != error_code_timed_out && e.code() != error_code_broken_promise) {
 				if (self->quorumVersion.canBeSet()) {
-					self->quorumVersion.sendError(e);
+					// Calling sendError could delete self
+					auto local = self->quorumVersion;
+					local.sendError(e);
 				}
 			} else if (self->totalRepliesReceived == self->cfis.size() && self->quorumVersion.canBeSet() &&
 			           !self->quorumVersion.isError()) {
@@ -208,7 +242,10 @@ class GetCommittedVersionQuorum {
 				} else if (!self->quorumVersion.isSet()) {
 					// Otherwise, if a quorum agree on the committed version,
 					// some other occurred. Notify the caller of it.
-					self->quorumVersion.sendError(e);
+
+					// Calling sendError could delete self
+					auto local = self->quorumVersion;
+					local.sendError(e);
 				}
 			}
 		}
@@ -279,10 +316,19 @@ class PaxosConfigConsumerImpl {
 			std::vector<Future<Void>> compactionRequests;
 			compactionRequests.reserve(compactionRequests.size());
 			for (const auto& cfi : self->cfis) {
-				compactionRequests.push_back(cfi.compact.getReply(ConfigFollowerCompactRequest{ compactionVersion }));
+				if (cfi.hostname.present()) {
+					compactionRequests.push_back(
+					    retryGetReplyFromHostname(ConfigFollowerCompactRequest{ compactionVersion },
+					                              cfi.hostname.get(),
+					                              WLTOKEN_CONFIGFOLLOWER_COMPACT));
+				} else {
+					compactionRequests.push_back(
+					    cfi.compact.getReply(ConfigFollowerCompactRequest{ compactionVersion }));
+				}
 			}
 			try {
 				wait(timeoutError(waitForAll(compactionRequests), 1.0));
+				broadcaster->compact(compactionVersion);
 			} catch (Error& e) {
 				TraceEvent(SevWarn, "ErrorSendingCompactionRequest").error(e);
 			}
@@ -294,8 +340,18 @@ class PaxosConfigConsumerImpl {
 			self->resetCommittedVersionQuorum(); // TODO: This seems to fix a segfault, investigate more
 			try {
 				state Version committedVersion = wait(getCommittedVersion(self));
-				state Reference<ConfigFollowerInfo> configNodes(
-				    new ConfigFollowerInfo(self->getCommittedVersionQuorum.getReadReplicas()));
+				state std::vector<ConfigFollowerInterface> readReplicas =
+				    self->getCommittedVersionQuorum.getReadReplicas();
+				std::vector<Future<Void>> fs;
+				for (ConfigFollowerInterface& readReplica : readReplicas) {
+					if (readReplica.hostname.present()) {
+						fs.push_back(tryInitializeRequestStream(&readReplica.getSnapshotAndChanges,
+						                                        readReplica.hostname.get(),
+						                                        WLTOKEN_CONFIGFOLLOWER_GETSNAPSHOTANDCHANGES));
+					}
+				}
+				wait(waitForAll(fs));
+				state Reference<ConfigFollowerInfo> configNodes(new ConfigFollowerInfo(readReplicas));
 				ConfigFollowerGetSnapshotAndChangesReply reply =
 				    wait(timeoutError(basicLoadBalance(configNodes,
 				                                       &ConfigFollowerInterface::getSnapshotAndChanges,
@@ -349,8 +405,18 @@ class PaxosConfigConsumerImpl {
 				// returned would be 1.
 				if (committedVersion > self->lastSeenVersion) {
 					ASSERT(self->getCommittedVersionQuorum.getReadReplicas().size() >= self->cfis.size() / 2 + 1);
-					state Reference<ConfigFollowerInfo> configNodes(
-					    new ConfigFollowerInfo(self->getCommittedVersionQuorum.getReadReplicas()));
+					state std::vector<ConfigFollowerInterface> readReplicas =
+					    self->getCommittedVersionQuorum.getReadReplicas();
+					std::vector<Future<Void>> fs;
+					for (ConfigFollowerInterface& readReplica : readReplicas) {
+						if (readReplica.hostname.present()) {
+							fs.push_back(tryInitializeRequestStream(&readReplica.getChanges,
+							                                        readReplica.hostname.get(),
+							                                        WLTOKEN_CONFIGFOLLOWER_GETCHANGES));
+						}
+					}
+					wait(waitForAll(fs));
+					state Reference<ConfigFollowerInfo> configNodes(new ConfigFollowerInfo(readReplicas));
 					ConfigFollowerGetChangesReply reply = wait(timeoutError(
 					    basicLoadBalance(configNodes,
 					                     &ConfigFollowerInterface::getChanges,
@@ -383,7 +449,7 @@ class PaxosConfigConsumerImpl {
 				if (e.code() == error_code_version_already_compacted || e.code() == error_code_timed_out ||
 				    e.code() == error_code_failed_to_reach_quorum || e.code() == error_code_version_already_compacted ||
 				    e.code() == error_code_process_behind) {
-					TEST(true); // PaxosConfigConsumer get version_already_compacted error
+					CODE_PROBE(true, "PaxosConfigConsumer get version_already_compacted error");
 					if (e.code() == error_code_failed_to_reach_quorum) {
 						try {
 							wait(self->getCommittedVersionQuorum.complete());

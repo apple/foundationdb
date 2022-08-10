@@ -18,11 +18,15 @@
  * limitations under the License.
  */
 
-#include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/Tuple.h"
 
 #include "flow/actorcompiler.h" // has to be last include
+
+double const ClientTagThrottleLimits::NO_EXPIRATION = std::numeric_limits<double>::max();
 
 void TagSet::addTag(TransactionTagRef tag) {
 	ASSERT(CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH < 256); // Tag length is encoded with a single byte
@@ -122,6 +126,48 @@ TagThrottleValue TagThrottleValue::fromValue(const ValueRef& value) {
 	BinaryReader reader(value, IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
 	reader >> throttleValue;
 	return throttleValue;
+}
+
+KeyRangeRef const tagQuotaKeys = KeyRangeRef("\xff/tagQuota/"_sr, "\xff/tagQuota0"_sr);
+KeyRef const tagQuotaPrefix = tagQuotaKeys.begin;
+
+Key ThrottleApi::getTagQuotaKey(TransactionTagRef tag) {
+	return tag.withPrefix(tagQuotaPrefix);
+}
+
+bool ThrottleApi::TagQuotaValue::isValid() const {
+	return reservedReadQuota <= totalReadQuota && reservedWriteQuota <= totalWriteQuota && reservedReadQuota >= 0 &&
+	       reservedWriteQuota >= 0;
+}
+
+Value ThrottleApi::TagQuotaValue::toValue() const {
+	return Tuple::makeTuple(reservedReadQuota, totalReadQuota, reservedWriteQuota, totalWriteQuota).pack();
+}
+
+ThrottleApi::TagQuotaValue ThrottleApi::TagQuotaValue::fromValue(ValueRef value) {
+	auto tuple = Tuple::unpack(value);
+	if (tuple.size() != 4) {
+		throw invalid_throttle_quota_value();
+	}
+	TagQuotaValue result;
+	try {
+		result.reservedReadQuota = tuple.getDouble(0);
+		result.totalReadQuota = tuple.getDouble(1);
+		result.reservedWriteQuota = tuple.getDouble(2);
+		result.totalWriteQuota = tuple.getDouble(3);
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "TagQuotaValueFailedToDeserialize").error(e);
+		throw invalid_throttle_quota_value();
+	}
+	if (!result.isValid()) {
+		TraceEvent(SevWarnAlways, "TagQuotaValueInvalidQuotas")
+		    .detail("ReservedReadQuota", result.reservedReadQuota)
+		    .detail("TotalReadQuota", result.totalReadQuota)
+		    .detail("ReservedWriteQuota", result.reservedWriteQuota)
+		    .detail("TotalWriteQuota", result.totalWriteQuota);
+		throw invalid_throttle_quota_value();
+	}
+	return result;
 }
 
 FDB_DEFINE_BOOLEAN_PARAM(ContainsRecommended);
