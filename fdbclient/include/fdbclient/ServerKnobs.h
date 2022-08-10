@@ -125,6 +125,8 @@ public:
 	double DD_QUEUE_LOGGING_INTERVAL;
 	double DD_QUEUE_COUNTER_REFRESH_INTERVAL;
 	double DD_QUEUE_COUNTER_MAX_LOG; // max trace event the counter will generate in a refresh round
+	bool DD_QUEUE_COUNTER_SUMMARIZE; // whether to summarize remaining server when #(countItems) >
+	                                 // DD_QUEUE_COUNTER_MAX_LOG
 	double RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	double RELOCATION_PARALLELISM_PER_DEST_SERVER;
 	int DD_QUEUE_MAX_KEY_SERVERS;

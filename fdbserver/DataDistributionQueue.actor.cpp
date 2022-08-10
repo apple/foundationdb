@@ -560,6 +560,24 @@ struct DDQueue {
 			counter[id][idx][(int)type] += 1;
 		}
 
+		void summarizeLaunchedServers(decltype(counter.cbegin()) begin,
+		                              decltype(counter.cend()) end,
+		                              TraceEvent* event) const {
+			if (begin == end)
+				return;
+
+			std::string execSrc, execDest;
+			for (; begin != end; ++begin) {
+				if (countNonZero(begin->second, LaunchedSource)) {
+					execSrc += begin->first.shortString() + ",";
+				}
+				if (countNonZero(begin->second, LaunchedDest)) {
+					execDest += begin->first.shortString() + ",";
+				}
+			}
+			event->detail("RemainedLaunchedSources", execSrc).detail("RemainedLaunchedDestinations", execDest);
+		}
+
 	public:
 		void clear() { counter.clear(); }
 
@@ -581,19 +599,14 @@ struct DDQueue {
 				event.detail("ServerId", it->first);
 				traceReasonItem(&event, it->second);
 			}
+
 			if (it != counter.cend()) {
-				std::string execSrc, execDest;
-				for (; it != counter.cend(); ++it) {
-					if (countNonZero(it->second, LaunchedSource)) {
-						execSrc += it->first.shortString() + ",";
-					}
-					if (countNonZero(it->second, LaunchedDest)) {
-						execDest += it->first.shortString() + ",";
-					}
+				TraceEvent e(SevWarn, "DDQueueServerCounterTooMany", debugId);
+				e.detail("Servers", size());
+				if (SERVER_KNOBS->DD_QUEUE_COUNTER_SUMMARIZE) {
+					summarizeLaunchedServers(it, counter.cend(), &e);
+					return;
 				}
-				TraceEvent("DDQueueServerCounterTooMany", debugId)
-				    .detail("RemainedLaunchedSources", execSrc)
-				    .detail("RemainedLaunchedDestinations", execDest);
 			}
 		}
 
@@ -2488,7 +2501,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 }
 
 TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
-	state double duration = 2 * SERVER_KNOBS->DD_QUEUE_COUNTER_REFRESH_INTERVAL;
+	state double duration = 2.5 * SERVER_KNOBS->DD_QUEUE_COUNTER_REFRESH_INTERVAL;
 	state DDQueue self;
 	state Future<Void> counterFuture = self.periodicalRefreshCounter();
 	state Future<Void> finishFuture = delay(duration);

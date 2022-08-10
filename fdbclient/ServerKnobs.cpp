@@ -136,6 +136,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_QUEUE_COUNTER_REFRESH_INTERVAL,                    60.0 );
 	// 100 / 60 < 2 trace/sec ~ 2 * 200 = 400b/sec
 	init( DD_QUEUE_COUNTER_MAX_LOG,                              100 ); if( randomize && BUGGIFY ) DD_QUEUE_COUNTER_MAX_LOG = 1;
+	init( DD_QUEUE_COUNTER_SUMMARIZE,                           true );
 	init( RELOCATION_PARALLELISM_PER_SOURCE_SERVER,                2 ); if( randomize && BUGGIFY ) RELOCATION_PARALLELISM_PER_SOURCE_SERVER = 1;
 	init( RELOCATION_PARALLELISM_PER_DEST_SERVER,                 10 ); if( randomize && BUGGIFY ) RELOCATION_PARALLELISM_PER_DEST_SERVER = 1; // Note: if this is smaller than FETCH_KEYS_PARALLELISM, this will artificially reduce performance. The current default of 10 is probably too high but is set conservatively for now.
 	init( DD_QUEUE_MAX_KEY_SERVERS,                              100 ); if( randomize && BUGGIFY ) DD_QUEUE_MAX_KEY_SERVERS = 1;
