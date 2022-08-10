@@ -1415,13 +1415,33 @@ struct DeleteTenantImpl {
 				// before we could mark it as removed and we are trying to remove the "new" name.
 				// We can proceed as normal, but treat it as a standalone remove instead of paired
 				if (!pairEntry.present() || pairEntry.get().id != self->tenantId) {
-					self->pairName.reset();
-					return Void();
+					// Another edge case when chaining renames together and a delete comes in between:
+					// Rename A->B. Mark both as renaming
+					// Delete B. It sees pair A in getAssignedLocation
+					// Rename A->B completes. Entry A is removed from management cluster
+					// Rename B->C. Mark both as renaming (before we mark B as Removing here)
+					// Reach here and see A is no longer present. Instead of resetting the pair
+					// we need to update our pair here to C, so we don't have inconsistent state
+					if (updatedEntry.renamePair.present() && updatedEntry.renamePair.get() != self->pairName.get()) {
+						self->pairName = updatedEntry.renamePair.get();
+						Optional<TenantMapEntry> newPairEntry = wait(tryGetTenantTransaction(tr, self->pairName.get()));
+						// This entry should be present because the only way for it to be removed is if another
+						// delete operation finished fully before we got here, in which case the original
+						// updatedEntry should also be missing, so we wouldn't make it this far
+						ASSERT(newPairEntry.present());
+						pairEntry = newPairEntry.get();
+					} else {
+						self->pairName.reset();
+						return Void();
+					}
 				}
 				TenantMapEntry updatedPairEntry = pairEntry.get();
 				// Sanity check that our pair has us named as their partner
 				ASSERT(updatedPairEntry.renamePair.present());
 				ASSERT(updatedPairEntry.renamePair.get() == self->tenantName);
+				// Also check that we have our pair named properly
+				ASSERT(updatedEntry.renamePair.present());
+				ASSERT(updatedEntry.renamePair.get() == self->pairName.get());
 				ASSERT(updatedPairEntry.id == self->tenantId);
 				CODE_PROBE(true, "marking pair tenant in removing state");
 				updatedPairEntry.tenantState = TenantState::REMOVING;
@@ -1478,14 +1498,26 @@ struct DeleteTenantImpl {
 		// Get information about the tenant and where it is assigned
 		bool deletionInProgress = wait(self->ctx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return getAssignedLocation(self, tr); }));
+		TraceEvent("BreakpointDeleteAfterAssigned")
+		    .detail("TenantName", self->tenantName)
+		    .detail("PairName", self->pairName.present() ? self->pairName.get() : TenantName())
+		    .detail("TenantId", self->tenantId);
 
 		if (!deletionInProgress) {
 			wait(self->ctx.runDataClusterTransaction(
 			    [self = self](Reference<ITransaction> tr) { return checkTenantEmpty(self, tr); }));
+			TraceEvent("BreakpointDeleteAfterCheckEmpty")
+			    .detail("TenantName", self->tenantName)
+			    .detail("PairName", self->pairName.present() ? self->pairName.get() : TenantName())
+			    .detail("TenantId", self->tenantId);
 
 			wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 				return markTenantInRemovingState(self, tr);
 			}));
+			TraceEvent("BreakpointDeleteAfterMark")
+			    .detail("TenantName", self->tenantName)
+			    .detail("PairName", self->pairName.present() ? self->pairName.get() : TenantName())
+			    .detail("TenantId", self->tenantId);
 		}
 
 		// Delete tenant on the data cluster
@@ -1507,10 +1539,18 @@ struct DeleteTenantImpl {
 			return pairDelete && TenantAPI::deleteTenantTransaction(
 			                         tr, self->tenantName, self->tenantId, ClusterType::METACLUSTER_DATA);
 		}));
+		TraceEvent("BreakpointDeleteAfterDataUpdate")
+		    .detail("TenantName", self->tenantName)
+		    .detail("PairName", self->pairName.present() ? self->pairName.get() : TenantName())
+		    .detail("TenantId", self->tenantId);
 
 		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return deleteTenantFromManagementCluster(self, tr);
 		}));
+		TraceEvent("BreakpointDeleteAfterFinish")
+		    .detail("TenantName", self->tenantName)
+		    .detail("PairName", self->pairName.present() ? self->pairName.get() : TenantName())
+		    .detail("TenantId", self->tenantId);
 
 		return Void();
 	}
@@ -1520,7 +1560,7 @@ struct DeleteTenantImpl {
 ACTOR template <class DB>
 Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 	state DeleteTenantImpl<DB> impl(db, name);
-	TraceEvent("BreakpointAttemptDelete").detail("Name", name).detail("TenantId", impl.tenantId);
+	TraceEvent("BreakpointAttemptDelete").detail("Name", name);
 	wait(impl.run());
 	TraceEvent("BreakpointDeleteSuccess").detail("Name", name).detail("TenantId", impl.tenantId);
 	return Void();
@@ -1912,6 +1952,10 @@ struct RenameTenantImpl {
 	ACTOR static Future<Void> run(RenameTenantImpl* self) {
 		wait(self->ctx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return markTenantsInRenamingState(self, tr); }));
+		TraceEvent("BreakpointRenameAfterMark")
+		    .detail("OldName", self->oldName)
+		    .detail("NewName", self->newName)
+		    .detail("TenantId", self->tenantId);
 
 		// Rename tenant on the data cluster
 		try {
@@ -1928,10 +1972,18 @@ struct RenameTenantImpl {
 				throw e;
 			}
 		}
+		TraceEvent("BreakpointRenameAfterDataUpdate")
+		    .detail("OldName", self->oldName)
+		    .detail("NewName", self->newName)
+		    .detail("TenantId", self->tenantId);
 
 		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return finishRenameFromManagementCluster(self, tr);
 		}));
+		TraceEvent("BreakpointRenameAfterFinish")
+		    .detail("OldName", self->oldName)
+		    .detail("NewName", self->newName)
+		    .detail("TenantId", self->tenantId);
 		return Void();
 	}
 	Future<Void> run() { return run(this); }
@@ -1940,10 +1992,7 @@ struct RenameTenantImpl {
 ACTOR template <class DB>
 Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newName) {
 	state RenameTenantImpl<DB> impl(db, oldName, newName);
-	TraceEvent("BreakpointAttemptRename")
-	    .detail("OldName", oldName)
-	    .detail("NewName", newName)
-	    .detail("TenantId", impl.tenantId);
+	TraceEvent("BreakpointAttemptRename").detail("OldName", oldName).detail("NewName", newName);
 	wait(impl.run());
 	TraceEvent("BreakpointRenameSuccess")
 	    .detail("OldName", oldName)
