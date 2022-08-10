@@ -2227,7 +2227,10 @@ Future<Optional<Value>> KeyValueStoreSQLite::readValuePrefix(KeyRef key, int max
 	readThreads->post(p);
 	return f;
 }
-Future<RangeResult> KeyValueStoreSQLite::readRange(KeyRangeRef keys, int rowLimit, int byteLimit, ReadOptions const& options) {
+Future<RangeResult> KeyValueStoreSQLite::readRange(KeyRangeRef keys,
+                                                   int rowLimit,
+                                                   int byteLimit,
+                                                   ReadOptions const& options) {
 	++readsRequested;
 	auto p = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 	auto f = p->result.getFuture();

@@ -4767,7 +4767,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 			req.limitBytes = std::numeric_limits<int>::max();
 			// leaving the flag off for now to prevent data fetches stall under heavy load
 			// it is used to inform the storage that the rangeRead is for Fetch
-			// update to FETCH once the priority multi lock is used.
+			// TODO: update to FETCH once the priority multi lock is used.
 			req.options = trState->readOptions;
 			req.options.type = ReadType::NORMAL;
 
