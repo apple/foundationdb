@@ -107,8 +107,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 		ASSERT(threads >= 1);
 
-		
-
 		startedForcePurge = false;
 
 		if (doSetup && BGV_DEBUG) {

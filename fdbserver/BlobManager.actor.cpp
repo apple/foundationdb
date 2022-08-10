@@ -4768,7 +4768,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		// although we start the recruiter, we wait until existing workers are ack'd
 		auto recruitBlobWorker = IAsyncListener<RequestStream<RecruitBlobWorkerRequest>>::create(
 		    dbInfo, [](auto const& info) { return info.clusterInterface.recruitBlobWorker; });
-		
+
 		self->addActor.send(blobWorkerRecruiter(self, recruitBlobWorker));
 
 		// we need to recover the old blob manager's state (e.g. granule assignments) before
