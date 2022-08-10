@@ -186,6 +186,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 			return Void();
 		} catch (Error& e) {
+			TraceEvent("BreakpointCreateFailed").error(e).detail("Tenant", tenant);
 			if (e.code() == error_code_tenant_removed) {
 				ASSERT(self->useMetacluster);
 			} else if (e.code() != error_code_tenant_already_exists && e.code() != error_code_cluster_no_capacity) {
@@ -214,6 +215,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 			return Void();
 		} catch (Error& e) {
+			TraceEvent("BreakpointDeleteFailed").error(e).detail("Tenant", tenant);
 			if (e.code() != error_code_tenant_not_found) {
 				TraceEvent(SevError, "DeleteTenantFailure").error(e).detail("TenantName", tenant);
 			}
@@ -264,6 +266,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 			return Void();
 		} catch (Error& e) {
+			TraceEvent("BreakpointConfigureFailed").error(e).detail("Tenant", tenant);
 			if (e.code() != error_code_tenant_not_found && e.code() != error_code_invalid_tenant_state) {
 				TraceEvent(SevError, "ConfigureTenantFailure").error(e).detail("TenantName", tenant);
 			}
@@ -289,6 +292,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 			return Void();
 		} catch (Error& e) {
+			TraceEvent("BreakpointRenameFailed").error(e).detail("OldTenant", oldTenant).detail("NewTenant", newTenant);
 			if (e.code() == error_code_invalid_tenant_state || e.code() == error_code_tenant_removed ||
 			    e.code() == error_code_cluster_no_capacity) {
 				ASSERT(self->useMetacluster);

@@ -1302,7 +1302,9 @@ struct CreateTenantImpl {
 ACTOR template <class DB>
 Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tenantEntry) {
 	state CreateTenantImpl<DB> impl(db, name, tenantEntry);
+	TraceEvent("BreakpointAttemptCreate").detail("Name", name);
 	wait(impl.run());
+	TraceEvent("BreakpointCreateSuccess").detail("Name", name);
 	return Void();
 }
 
@@ -1354,8 +1356,6 @@ struct DeleteTenantImpl {
 		    wait(TenantAPI::tryGetTenantTransaction(tr, checkPair ? self->pairName.get() : self->tenantName));
 		if (!tenantEntry.present() || tenantEntry.get().id != self->tenantId) {
 			// The tenant must have been removed simultaneously
-			// Reset pair name because the rest should all be no-op
-			self->pairName.reset();
 			return Void();
 		}
 
@@ -1375,10 +1375,7 @@ struct DeleteTenantImpl {
 		state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
 
 		if (!tenantEntry.present() || tenantEntry.get().id != self->tenantId) {
-			// The tenant must have been removed simultaneously
-			// Reset pair name because the rest should all be no-op
-			self->pairName.reset();
-			return Void();
+			throw tenant_not_found();
 		}
 
 		if (tenantEntry.get().tenantState != TenantState::REMOVING) {
@@ -1454,7 +1451,7 @@ struct DeleteTenantImpl {
 
 		// Remove the tenant from its tenant group
 		wait(managementClusterRemoveTenantFromGroup(
-		    tr, self->tenantName, tenantEntry.get(), &self->ctx.dataClusterMetadata.get()));
+		    tr, tenantName, tenantEntry.get(), &self->ctx.dataClusterMetadata.get(), pairDelete));
 
 		wait(pairFuture);
 		return Void();
@@ -1480,7 +1477,7 @@ struct DeleteTenantImpl {
 			// 1. Rename marked on management cluster (RENAMING_FROM & RENAMING_TO, foo & bar)
 			// 2. Rename on data cluster (foo->bar)
 			// 3. Delete marked on management cluster (delete foo, foo & bar now in REMOVING state)
-			// 4. Delete foo (above) on data cluster should have no effect. Delete bar here.
+			// 4. Delete foo on data cluster should have no effect. Delete bar here as pairDelete.
 			// In all cases, only one of delete foo or delete bar should have any effect because
 			// of the existence check in deleteTenantTransaction.
 			// However, this may cause duplication of tombstone code. Is that going to behave properly?
@@ -1506,7 +1503,9 @@ struct DeleteTenantImpl {
 ACTOR template <class DB>
 Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 	state DeleteTenantImpl<DB> impl(db, name);
+	TraceEvent("BreakpointAttemptDelete").detail("Name", name).detail("TenantId", impl.tenantId);
 	wait(impl.run());
+	TraceEvent("BreakpointDeleteSuccess").detail("Name", name).detail("TenantId", impl.tenantId);
 	return Void();
 }
 
@@ -1702,7 +1701,9 @@ Future<Void> configureTenant(Reference<DB> db,
                              TenantName name,
                              std::map<Standalone<StringRef>, Optional<Value>> configurationParameters) {
 	state ConfigureTenantImpl<DB> impl(db, name, configurationParameters);
+	TraceEvent("BreakpointAttemptConfigure").detail("Name", name);
 	wait(impl.run());
+	TraceEvent("BreakpointConfigureSuccess").detail("Name", name);
 	return Void();
 }
 
@@ -1773,6 +1774,8 @@ struct RenameTenantImpl {
 			    newTenantEntry.get().renamePair.present() && newTenantEntry.get().renamePair.get() == self->oldName &&
 			    oldTenantEntry.get().renamePair.present() && oldTenantEntry.get().renamePair.get() == self->newName) {
 				wait(self->ctx.setCluster(tr, oldTenantEntry.get().assignedCluster.get()));
+				self->tenantId = newTenantEntry.get().id;
+				self->configurationSequenceNum = newTenantEntry.get().configurationSequenceNum;
 				CODE_PROBE(true, "Metacluster rename retry in progress");
 				return Void();
 			} else {
@@ -1784,9 +1787,7 @@ struct RenameTenantImpl {
 				self->tenantId = oldTenantEntry.get().id;
 			}
 			++oldTenantEntry.get().configurationSequenceNum;
-			if (self->configurationSequenceNum == -1) {
-				self->configurationSequenceNum = oldTenantEntry.get().configurationSequenceNum;
-			}
+			self->configurationSequenceNum = oldTenantEntry.get().configurationSequenceNum;
 			wait(self->ctx.setCluster(tr, oldTenantEntry.get().assignedCluster.get()));
 			if (oldTenantEntry.get().tenantState != TenantState::READY) {
 				CODE_PROBE(true, "Metacluster unable to proceed with rename operation");
@@ -1809,6 +1810,8 @@ struct RenameTenantImpl {
 
 		TenantMapEntry updatedOldEntry = oldTenantEntry.get();
 		TenantMapEntry updatedNewEntry(updatedOldEntry);
+		ASSERT(updatedNewEntry.id == updatedOldEntry.id);
+		ASSERT(updatedNewEntry.id == self->tenantId);
 		ASSERT(updatedOldEntry.configurationSequenceNum == self->configurationSequenceNum);
 		ASSERT(updatedNewEntry.configurationSequenceNum == self->configurationSequenceNum);
 		updatedOldEntry.tenantState = TenantState::RENAMING_FROM;
@@ -1920,7 +1923,15 @@ struct RenameTenantImpl {
 ACTOR template <class DB>
 Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newName) {
 	state RenameTenantImpl<DB> impl(db, oldName, newName);
+	TraceEvent("BreakpointAttemptRename")
+	    .detail("OldName", oldName)
+	    .detail("NewName", newName)
+	    .detail("TenantId", impl.tenantId);
 	wait(impl.run());
+	TraceEvent("BreakpointRenameSuccess")
+	    .detail("OldName", oldName)
+	    .detail("NewName", newName)
+	    .detail("TenantId", impl.tenantId);
 	return Void();
 }
 
