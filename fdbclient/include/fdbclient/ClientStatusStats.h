@@ -32,7 +32,7 @@ struct ClientStatusStats {
 	// reached maximum number of examples.
 	int count;
 
-    // The examples of the status, in our situation it is the NetworkAddress/traceLogGroup pair
+	// The examples of the status, in our situation it is the NetworkAddress/traceLogGroup pair
 	std::set<std::pair<NetworkAddress, Key>> examples;
 
 	ClientStatusStats() : count(0) {}
@@ -46,12 +46,12 @@ struct ClientStatusStatsCollector : ClientStatusStats {
 	ClientStatusStatsCollector(int maxExamples_ = CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT)
 	  : ClientStatusStats(), maxExamples(maxExamples_) {}
 
-    // Tries to add an example unless reached maxExamples
+	// Tries to add an example unless reached maxExamples
 	void tryAddExample(const NetworkAddress& networkAddress, const Key& key) {
 		++count;
 
 		if (static_cast<int>(examples.size()) < maxExamples) {
-		    examples.insert({ networkAddress, key });
+			examples.insert({ networkAddress, key });
 		}
 	}
 };
