@@ -78,7 +78,7 @@ ACTOR Future<Void> printAfterDelay(double delaySeconds, std::string message) {
 	return Void();
 }
 
-ACTOR Future<Void> doBlobPurge(Database db, Key startKey, Key endKey, Optional<Version> version) {
+ACTOR Future<Void> doBlobPurge(Database db, Key startKey, Key endKey, Optional<Version> version, bool force) {
 	state Version purgeVersion;
 	if (version.present()) {
 		purgeVersion = version.get();
@@ -86,7 +86,7 @@ ACTOR Future<Void> doBlobPurge(Database db, Key startKey, Key endKey, Optional<V
 		wait(store(purgeVersion, getLatestReadVersion(db)));
 	}
 
-	state Key purgeKey = wait(db->purgeBlobGranules(KeyRange(KeyRangeRef(startKey, endKey)), purgeVersion, {}));
+	state Key purgeKey = wait(db->purgeBlobGranules(KeyRange(KeyRangeRef(startKey, endKey)), purgeVersion, {}, force));
 
 	fmt::print("Blob purge registered for [{0} - {1}) @ {2}\n", startKey.printable(), endKey.printable(), purgeVersion);
 
@@ -211,8 +211,9 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 			           tokens[2].printable().c_str(),
 			           tokens[3].printable().c_str());
 			wait(setBlobRange(localDb, begin, end, starting ? LiteralStringRef("1") : StringRef()));
-		} else if (tokencmp(tokens[1], "purge") || tokencmp(tokens[1], "check")) {
-			bool purge = tokencmp(tokens[1], "purge");
+		} else if (tokencmp(tokens[1], "purge") || tokencmp(tokens[1], "forcepurge") || tokencmp(tokens[1], "check")) {
+			bool purge = tokencmp(tokens[1], "purge") || tokencmp(tokens[1], "forcepurge");
+			bool forcePurge = tokencmp(tokens[1], "forcepurge");
 
 			Optional<Version> version;
 			if (tokens.size() > 4) {
@@ -225,17 +226,18 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 				version = v;
 			}
 
-			fmt::print("{0} blob range [{1} - {2})",
+			fmt::print("{0} blob range [{1} - {2}){3}",
 			           purge ? "Purging" : "Checking",
 			           tokens[2].printable(),
-			           tokens[3].printable());
+			           tokens[3].printable(),
+			           forcePurge ? " (force)" : "");
 			if (version.present()) {
 				fmt::print(" @ {0}", version.get());
 			}
 			fmt::print("\n");
 
 			if (purge) {
-				wait(doBlobPurge(localDb, begin, end, version));
+				wait(doBlobPurge(localDb, begin, end, version, forcePurge));
 			} else {
 				wait(doBlobCheck(localDb, begin, end, version));
 			}
@@ -247,8 +249,7 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 	return true;
 }
 
-CommandFactory blobRangeFactory("blobrange",
-                                CommandHelp("blobrange <start|stop|purge|check> <startkey> <endkey> [version]",
-                                            "",
-                                            ""));
+CommandFactory blobRangeFactory(
+    "blobrange",
+    CommandHelp("blobrange <start|stop|check|purge|forcepurge> <startkey> <endkey> [version]", "", ""));
 } // namespace fdb_cli
