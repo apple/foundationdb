@@ -1659,10 +1659,6 @@ private:
 			case TLSConfig::OPT_TLS_VERIFY_PEERS:
 				tlsConfig.addVerifyPeers(args.OptionArg());
 				break;
-			case OPT_KMS_CONN_DISCOVERY_URL_FILE: {
-				knobs.emplace_back("rest_kms_connector_kms_discovery_url_file", args.OptionArg());
-				break;
-			}
 			case OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS: {
 				knobs.emplace_back("rest_kms_connector_validation_token_details", args.OptionArg());
 				break;
