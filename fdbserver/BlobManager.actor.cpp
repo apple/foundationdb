@@ -2019,6 +2019,15 @@ ACTOR Future<std::pair<UID, Version>> persistMergeGranulesStart(Reference<BlobMa
 				TraceEvent("GranuleMergeStartCancelledForcePurge", bmData->id)
 				    .detail("Epoch", bmData->epoch)
 				    .detail("GranuleRange", mergeRange);
+
+				// destroy already created change feed from earlier so it doesn't leak
+				wait(updateChangeFeed(&tr->getTransaction(),
+				                      granuleIDToCFKey(mergeGranuleID),
+				                      ChangeFeedStatus::CHANGE_FEED_DESTROY,
+				                      mergeRange));
+
+				wait(tr->commit());
+
 				// TODO better error?
 				return std::pair(UID(), invalidVersion);
 			}
@@ -2104,6 +2113,15 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 				TraceEvent("GranuleMergeCancelledForcePurge", bmData->id)
 				    .detail("Epoch", bmData->epoch)
 				    .detail("GranuleRange", mergeRange);
+
+				// destroy already created change feed from earlier so it doesn't leak
+				wait(updateChangeFeed(&tr->getTransaction(),
+				                      granuleIDToCFKey(mergeGranuleID),
+				                      ChangeFeedStatus::CHANGE_FEED_DESTROY,
+				                      mergeRange));
+
+				wait(tr->commit());
+
 				return Void();
 				// TODO: check this in split re-eval too once that is merged!!
 			}
