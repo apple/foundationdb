@@ -426,7 +426,24 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 		return v;
 	}
 
+	// FIXME: is it possible for merge/split/re-merge to call this with same range but a different granule id or
+	// startVersion? Unlikely but could cause weird history problems
 	void setMergeCandidate(const KeyRangeRef& range, UID granuleID, Version startVersion) {
+		// if this granule is not an active granule, it can't be merged
+		auto gIt = workerAssignments.rangeContaining(range.begin);
+		if (gIt->begin() != range.begin || gIt->end() != range.end) {
+			CODE_PROBE(true, "non-active granule reported merge eligible, ignoring");
+			if (BM_DEBUG) {
+				fmt::print(
+				    "BM {0} Ignoring Merge Candidate [{1} - {2}): range mismatch with active granule [{3} - {4})\n",
+				    epoch,
+				    range.begin.printable(),
+				    range.end.printable(),
+				    gIt->begin().printable(),
+				    gIt->end().printable());
+			}
+			return;
+		}
 		// Want this to be idempotent. If a granule was already reported as merge-eligible, we want to use the existing
 		// merge and mergeNow state.
 		auto it = mergeCandidates.rangeContaining(range.begin);
@@ -1548,12 +1565,15 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		coalescedRanges.push_back(coalescedRanges.arena(), splitPoints.keys.back());
 		ASSERT(coalescedRanges.size() == SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1);
 		if (BM_DEBUG) {
-			fmt::print("Downsampled split from {0} -> {1} granules\n",
+			fmt::print("Downsampled split [{0} - {1}) from {2} -> {3} granules\n",
+			           granuleRange.begin.printable(),
+			           granuleRange.end.printable(),
 			           splitPoints.keys.size() - 1,
 			           SERVER_KNOBS->BG_MAX_SPLIT_FANOUT);
 		}
 
-		splitPoints.keys = coalescedRanges;
+		// TODO probably do something better here?
+		wait(store(splitPoints, alignKeys(bmData, granuleRange, coalescedRanges)));
 		ASSERT(splitPoints.keys.size() <= SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1);
 	}
 
@@ -1946,6 +1966,9 @@ ACTOR Future<std::pair<UID, Version>> persistMergeGranulesStart(Reference<BlobMa
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			wait(checkManagerLock(tr, bmData));
+
+			// FIXME: extra safeguard: check that granuleID of active lock == parentGranuleID for each parent, abort
+			// merge if so
 
 			tr->atomicOp(
 			    blobGranuleMergeKeyFor(mergeGranuleID),
