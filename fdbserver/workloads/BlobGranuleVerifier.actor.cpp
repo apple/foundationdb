@@ -105,8 +105,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		clearAndMergeCheck = getOption(options, LiteralStringRef("clearAndMergeCheck"), sharedRandomNumber % 10 == 0);
 		sharedRandomNumber /= 10;
 
-		ASSERT(threads >= 1);
-
 		startedForcePurge = false;
 
 		if (doSetup && BGV_DEBUG) {
@@ -311,7 +309,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					// before doing read, purge just before read version
 					state Version newPurgeVersion = 0;
 					state bool doPurging = allowPurging && deterministicRandom()->random01() < 0.5;
-					state bool forcePurge = doPurging && deterministicRandom()->random01() < 0.25;
+					state bool forcePurge = doPurging && self->doForcePurge && deterministicRandom()->random01() < 0.25;
 					if (doPurging) {
 						CODE_PROBE(true, "BGV considering purge");
 						Version maxPurgeVersion = oldRead.v;
