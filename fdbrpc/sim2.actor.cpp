@@ -107,7 +107,7 @@ bool simulator_should_inject_fault(const char* context, const char* file, int li
 void ISimulator::displayWorkers() const {
 	std::map<std::string, std::vector<ISimulator::ProcessInfo*>> machineMap;
 
-	// Create a map of machine id
+	// Create a map of machine Id
 	for (auto processInfo : getAllProcesses()) {
 		std::string dataHall = processInfo->locality.dataHallId().present()
 		                           ? processInfo->locality.dataHallId().get().printable()

@@ -202,7 +202,7 @@
             <!-- Update backup-agent "command" line even if changed from original -->
             <IniFile Id='WriteIntoIniFileBackupAgent' Action='addLine' Key='command' Directory='CONFIGFOLDER'
                      Name='$(var.ConfFileName)' Section='backup-agent' Value='[INSTALLDIR]bin\backup_agent.exe' />
-            <IniFile id='WriteIntoBackupIniFileLogs' Action='createLine' Key='logdir' Directory='CONFIGFOLDER'
+            <IniFile Id='WriteIntoBackupIniFileLogs' Action='createLine' Key='logdir' Directory='CONFIGFOLDER'
                      Name='$(var.ConfFileName)' Section='backup-agent' Value='[CONFIGFOLDER]$(var.LogFilePath)' />
           </Component>
 

@@ -396,8 +396,8 @@ public:
 	                                         int baseCipherLen,
 	                                         const EncryptCipherRandomSalt& salt);
 
-	// API returns the last insert cipherKey for a given encryption domain id.
-	// If domain id is invalid, it would throw 'encrypt_invalid_id' exception,
+	// API returns the last insert cipherKey for a given encryption domain Id.
+	// If domain Id is invalid, it would throw 'encrypt_invalid_id' exception,
 	// otherwise, and if none exists, it would return null reference.
 
 	Reference<BlobCipherKey> getLatestCipherKey(const EncryptCipherDomainId& domainId);
@@ -412,7 +412,7 @@ public:
 	// API returns point in time list of all 'cached' cipherKeys for a given encryption domainId.
 	std::vector<Reference<BlobCipherKey>> getAllCiphers(const EncryptCipherDomainId& domainId);
 
-	// API enables dropping all 'cached' cipherKeys for a given encryption domain id.
+	// API enables dropping all 'cached' cipherKeys for a given encryption domain Id.
 	// Useful to cleanup cache if an encryption domain gets removed/destroyed etc.
 
 	void resetEncryptDomainId(const EncryptCipherDomainId domainId);
