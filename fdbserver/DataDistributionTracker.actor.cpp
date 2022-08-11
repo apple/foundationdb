@@ -694,9 +694,9 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	ShardSizeBounds shardBounds = getShardSizeBounds(keys, self->maxShardSize->get().get());
 	StorageMetrics const& stats = shardSize->get().get().metrics;
 	auto bandwidthStatus = getBandwidthStatus(stats);
-
-	bool shouldSplit = stats.bytes > shardBounds.max.bytes ||
-	                   (bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin);
+	bool sizeSplit = stats.bytes > shardBounds.max.bytes,
+	     writeSplit = bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin;
+	bool shouldSplit = sizeSplit || writeSplit;
 	bool shouldMerge = stats.bytes < shardBounds.min.bytes && bandwidthStatus == BandwidthStatusLow;
 
 	// Every invocation must set this or clear it
@@ -722,16 +722,13 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	//     .detail("ShardBoundsMaxBytes", shardBounds.max.bytes)
 	//     .detail("ShardBoundsMinBytes", shardBounds.min.bytes)
 	//     .detail("WriteBandwitdhStatus", bandwidthStatus)
-	//     .detail("SplitBecauseHighWriteBandWidth",
-	//             (bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin) ? "Yes" : "No");
+	//     .detail("SplitBecauseHighWriteBandWidth", writeSplit ? "Yes" : "No");
 
 	if (!self->anyZeroHealthyTeams->get() && wantsToMerge->hasBeenTrueForLongEnough()) {
 		onChange = onChange || shardMerger(self, keys, shardSize);
 	}
 	if (shouldSplit) {
-		RelocateReason reason = (bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin)
-		                            ? RelocateReason::WRITE_SPLIT
-		                            : RelocateReason::SIZE_SPLIT;
+		RelocateReason reason = writeSplit ? RelocateReason::WRITE_SPLIT : RelocateReason::SIZE_SPLIT;
 		onChange = onChange || shardSplitter(self, keys, shardSize, shardBounds, reason);
 	}
 
@@ -994,7 +991,9 @@ ACTOR Future<Void> fetchShardMetricsList_impl(DataDistributionTracker* self, Get
 ACTOR Future<Void> fetchShardMetricsList(DataDistributionTracker* self, GetMetricsListRequest req) {
 	choose {
 		when(wait(fetchShardMetricsList_impl(self, req))) {}
-		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) { req.reply.sendError(timed_out()); }
+		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) {
+			req.reply.sendError(timed_out());
+		}
 	}
 	return Void();
 }
