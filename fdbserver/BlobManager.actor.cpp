@@ -273,6 +273,7 @@ struct BlobManagerStats {
 	Counter filesPurged;
 	Future<Void> logger;
 	int64_t activeMerges;
+	int64_t blockedAssignments;
 
 	// Current stats maintained for a given blob worker process
 	explicit BlobManagerStats(UID id,
@@ -287,12 +288,13 @@ struct BlobManagerStats {
 	    ccBytesChecked("CCBytesChecked", cc), ccMismatches("CCMismatches", cc), ccTimeouts("CCTimeouts", cc),
 	    ccErrors("CCErrors", cc), purgesProcessed("PurgesProcessed", cc),
 	    granulesFullyPurged("GranulesFullyPurged", cc), granulesPartiallyPurged("GranulesPartiallyPurged", cc),
-	    filesPurged("FilesPurged", cc), activeMerges(0) {
+	    filesPurged("FilesPurged", cc), activeMerges(0), blockedAssignments(0) {
 		specialCounter(cc, "WorkerCount", [workers]() { return workers->size(); });
 		specialCounter(cc, "Epoch", [epoch]() { return epoch; });
 		specialCounter(cc, "ActiveMerges", [this]() { return this->activeMerges; });
 		specialCounter(cc, "HardBoundaries", [mergeHardBoundaries]() { return mergeHardBoundaries->size(); });
 		specialCounter(cc, "SoftBoundaries", [mergeBoundaries]() { return mergeBoundaries->size(); });
+		specialCounter(cc, "BlockedAssignments", [this]() { return this->blockedAssignments; });
 		logger = traceCounters("BlobManagerMetrics", id, interval, &cc, "BlobManagerMetrics");
 	}
 };
@@ -756,31 +758,49 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
                                      Optional<UID> workerID,
                                      int64_t epoch,
                                      int64_t seqNo) {
+	state bool blockedWaitingForWorker = false;
 	// WorkerId is set, except in case of assigning to any worker. Then we pick the worker to assign to in here
-
-	// inject delay into range assignments
-	if (BUGGIFY_WITH_PROB(0.05)) {
-		wait(delay(deterministicRandom()->random01()));
-	} else {
-		// otherwise, do delay(0) to ensure rest of code in calling handleRangeAssign runs, before this function can
-		// recursively call handleRangeAssign on error
-		wait(delay(0.0));
-	}
-
-	if (!workerID.present()) {
-		ASSERT(assignment.isAssign && assignment.assign.get().type != AssignRequestType::Continue);
-		UID _workerId = wait(pickWorkerForAssign(bmData, assignment.previousFailure));
-		if (BM_DEBUG) {
-			fmt::print("Chose BW {0} for seqno {1} in BM {2}\n", _workerId.toString(), seqNo, bmData->epoch);
+	try {
+		// inject delay into range assignments
+		if (BUGGIFY_WITH_PROB(0.05)) {
+			wait(delay(deterministicRandom()->random01()));
+		} else {
+			// otherwise, do delay(0) to ensure rest of code in calling handleRangeAssign runs, before this function can
+			// recursively call handleRangeAssign on error
+			wait(delay(0.0));
 		}
-		workerID = _workerId;
-		// We don't have to check for races with an overlapping assignment because it would insert over us in the actor
-		// map, cancelling this actor before it got here
-		bmData->workerAssignments.insert(assignment.keyRange, workerID.get());
+		if (!workerID.present()) {
+			ASSERT(assignment.isAssign && assignment.assign.get().type != AssignRequestType::Continue);
 
-		if (bmData->workerStats.count(workerID.get())) {
-			bmData->workerStats[workerID.get()].numGranulesAssigned += 1;
+			blockedWaitingForWorker = true;
+			if (!assignment.previousFailure.present()) {
+				// if not already blocked, now blocked
+				++bmData->stats.blockedAssignments;
+			}
+
+			UID _workerId = wait(pickWorkerForAssign(bmData, assignment.previousFailure));
+			if (BM_DEBUG) {
+				fmt::print("Chose BW {0} for seqno {1} in BM {2}\n", _workerId.toString(), seqNo, bmData->epoch);
+			}
+			workerID = _workerId;
+			// We don't have to check for races with an overlapping assignment because it would insert over us in the
+			// actor map, cancelling this actor before it got here
+			bmData->workerAssignments.insert(assignment.keyRange, workerID.get());
+
+			if (bmData->workerStats.count(workerID.get())) {
+				bmData->workerStats[workerID.get()].numGranulesAssigned += 1;
+			}
+
+			if (!assignment.previousFailure.present()) {
+				// if only blocked waiting for worker, now not blocked
+				--bmData->stats.blockedAssignments;
+			}
 		}
+	} catch (Error& e) {
+		if (assignment.previousFailure.present() || blockedWaitingForWorker) {
+			--bmData->stats.blockedAssignments;
+		}
+		throw e;
 	}
 
 	if (BM_DEBUG) {
@@ -811,6 +831,12 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 				throw no_more_servers();
 			}
 			wait(bmData->workersById[workerID.get()].assignBlobRangeRequest.getReply(req));
+			if (assignment.previousFailure.present()) {
+				// previous assign failed and this one succeeded
+				--bmData->stats.blockedAssignments;
+			}
+
+			return Void();
 		} else {
 			ASSERT(!assignment.assign.present());
 			ASSERT(assignment.revoke.present());
@@ -830,6 +856,10 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			}
 		}
 	} catch (Error& e) {
+		if (assignment.previousFailure.present()) {
+			// previous assign failed, consider it unblocked if it's not a retriable error
+			--bmData->stats.blockedAssignments;
+		}
 		state Error e2 = e;
 		if (e.code() == error_code_operation_cancelled) {
 			throw;
@@ -870,9 +900,23 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			throw;
 		}
 
+		// this assign failed and we will retry, consider it blocked until it successfully retries
+		if (assignment.isAssign) {
+			++bmData->stats.blockedAssignments;
+		}
+
 		if (e.code() == error_code_blob_worker_full) {
+			CODE_PROBE(true, "blob worker too full");
 			ASSERT(assignment.isAssign);
-			wait(delay(1.0)); // wait a bit before retrying
+			if (assignment.previousFailure.present() &&
+			    assignment.previousFailure.get().second.code() == error_code_blob_worker_full) {
+				// if previous assignment also failed due to blob_worker_full, multiple workers are full, so wait even
+				// longer
+				CODE_PROBE(true, "multiple blob workers too full");
+				wait(delayJittered(10.0));
+			} else {
+				wait(delayJittered(1.0)); // wait a bit before retrying
+			}
 		}
 
 		CODE_PROBE(true, "BM retrying range assign");
