@@ -472,7 +472,12 @@ ACTOR Future<Void> readAndCheckGranuleLock(Reference<ReadYourWritesTransaction> 
 	state Key lockKey = blobGranuleLockKeyFor(granuleRange);
 	Optional<Value> lockValue = wait(tr->get(lockKey));
 
-	ASSERT(lockValue.present());
+	if (!lockValue.present()) {
+		// FIXME: could add some validation for simulation that a force purge was initiated
+		// for lock to be deleted out from under an active granule means a force purge must have happened.
+		throw granule_assignment_conflict();
+	}
+
 	std::tuple<int64_t, int64_t, UID> currentOwner = decodeBlobGranuleLockValue(lockValue.get());
 	checkGranuleLock(epoch, seqno, std::get<0>(currentOwner), std::get<1>(currentOwner));
 
@@ -3649,12 +3654,28 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			info.changeFeedStartVersion = invalidVersion;
 
 			state Future<Optional<Value>> fLockValue = tr.get(lockKey);
+			state Future<ForcedPurgeState> fForcedPurgeState = getForcePurgedState(&tr, req.keyRange);
 			Future<Optional<GranuleHistory>> fHistory = getLatestGranuleHistory(&tr, req.keyRange);
+
 			Optional<GranuleHistory> history = wait(fHistory);
 			info.history = history;
+
+			ForcedPurgeState purgeState = wait(fForcedPurgeState);
+			if (purgeState != ForcedPurgeState::NonePurged) {
+				CODE_PROBE(true, "Worker trying to open force purged granule");
+				if (BW_DEBUG) {
+					fmt::print("Granule [{0} - {1}) is force purged on BW {2}, abandoning\n",
+					           req.keyRange.begin.printable(),
+					           req.keyRange.end.printable(),
+					           bwData->id.toString().substr(0, 5));
+				}
+				throw granule_assignment_conflict();
+			}
+
 			Optional<Value> prevLockValue = wait(fLockValue);
 			state bool hasPrevOwner = prevLockValue.present();
 			state bool createChangeFeed = false;
+
 			if (hasPrevOwner) {
 				CODE_PROBE(true, "Granule open found previous owner");
 				std::tuple<int64_t, int64_t, UID> prevOwner = decodeBlobGranuleLockValue(prevLockValue.get());
@@ -4339,7 +4360,7 @@ void handleGetGranuleAssignmentsRequest(Reference<BlobWorkerData> self, const Ge
 	GetGranuleAssignmentsReply reply;
 	auto allRanges = self->granuleMetadata.intersectingRanges(normalKeys);
 	for (auto& it : allRanges) {
-		if (it.value().activeMetadata.isValid()) {
+		if (it.value().activeMetadata.isValid() && it.value().activeMetadata->cancelled.canBeSet()) {
 			// range is active, copy into reply's arena
 			StringRef start = StringRef(reply.arena, it.begin());
 			StringRef end = StringRef(reply.arena, it.end());
@@ -4721,7 +4742,8 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				self->addActor.send(handleRangeAssign(self, granuleToReassign, true));
 			}
 			when(GetGranuleAssignmentsRequest req = waitNext(bwInterf.granuleAssignmentsRequest.getFuture())) {
-				if (self->managerEpochOk(req.managerEpoch)) {
+				// if request isn't from a manager and is just validation, let it check
+				if (req.managerEpoch == -1 || self->managerEpochOk(req.managerEpoch)) {
 					if (BW_DEBUG) {
 						fmt::print("Worker {0} got granule assignments request from BM {1}\n",
 						           self->id.toString(),
