@@ -2311,7 +2311,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					for (auto& logRouter : tlogSet.logRouters) {
 						if (!nonExcludedWorkerProcessMap.count(logRouter.interf().address())) {
 							TraceEvent("ConsistencyCheck_LogRouterNotInNonExcludedWorkers")
-							    .detail("id", logRouter.id());
+							    .detail("Id", logRouter.id());
 							return false;
 						}
 						if (logRouter.interf().filteredLocality.dcId() != expectedRemoteDcId) {

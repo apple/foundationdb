@@ -98,7 +98,7 @@ struct RatekeeperSingleton : Singleton<RatekeeperInterface> {
 
 	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
 		if (interface.present()) {
-			TraceEvent("CCRK_SetInf", cc->id).detail("id", interface.get().id());
+			TraceEvent("CCRK_SetInf", cc->id).detail("Id", interface.get().id());
 			cc->db.setRatekeeper(interface.get());
 		}
 	}
@@ -123,7 +123,7 @@ struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
 
 	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
 		if (interface.present()) {
-			TraceEvent("CCDD_SetInf", cc->id).detail("id", interface.get().id());
+			TraceEvent("CCDD_SetInf", cc->id).detail("Id", interface.get().id());
 			cc->db.setDistributor(interface.get());
 		}
 	}
@@ -148,7 +148,7 @@ struct BlobManagerSingleton : Singleton<BlobManagerInterface> {
 
 	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
 		if (interface.present()) {
-			TraceEvent("CCBM_SetInf", cc->id).detail("id", interface.get().id());
+			TraceEvent("CCBM_SetInf", cc->id).detail("Id", interface.get().id());
 			cc->db.setBlobManager(interface.get());
 		}
 	}
@@ -180,7 +180,7 @@ struct EncryptKeyProxySingleton : Singleton<EncryptKeyProxyInterface> {
 
 	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
 		if (interface.present()) {
-			TraceEvent("CCEKP_SetInf", cc->id).detail("id", interface.get().id());
+			TraceEvent("CCEKP_SetInf", cc->id).detail("Id", interface.get().id());
 			cc->db.setEncryptKeyProxy(interface.get());
 		}
 	}
@@ -2192,7 +2192,7 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, double wait
 			}
 
 			self->recruitingEncryptKeyProxyID = req.reqId;
-			TraceEvent("CCEKP_Recruit", self->id).detail("Addr", worker.interf.address()).detail("id", req.reqId);
+			TraceEvent("CCEKP_Recruit", self->id).detail("Addr", worker.interf.address()).detail("Id", req.reqId);
 
 			ErrorOr<EncryptKeyProxyInterface> interf = wait(worker.interf.encryptKeyProxy.getReplyUnlessFailedFor(
 			    req, SERVER_KNOBS->WAIT_FOR_ENCRYPT_KEY_PROXY_JOIN_DELAY, 0));
@@ -2202,19 +2202,19 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, double wait
 				const auto& encryptKeyProxy = self->db.serverInfo->get().encryptKeyProxy;
 				TraceEvent("CCEKP_Recruited", self->id)
 				    .detail("Addr", worker.interf.address())
-				    .detail("id", interf.get().id())
+				    .detail("Id", interf.get().id())
 				    .detail("ProcessId", interf.get().locality.processId());
 				if (encryptKeyProxy.present() && encryptKeyProxy.get().id() != interf.get().id() &&
 				    self->id_worker.count(encryptKeyProxy.get().locality.processId())) {
 					TraceEvent("CCEKP_HaltAfterRecruit", self->id)
-					    .detail("id", encryptKeyProxy.get().id())
+					    .detail("Id", encryptKeyProxy.get().id())
 					    .detail("DcId", printable(self->clusterControllerDcId));
 					EncryptKeyProxySingleton(encryptKeyProxy).halt(self, encryptKeyProxy.get().locality.processId());
 				}
 				if (!encryptKeyProxy.present() || encryptKeyProxy.get().id() != interf.get().id()) {
 					self->db.setEncryptKeyProxy(interf.get());
 					TraceEvent("CCEKP_UpdateInf", self->id)
-					    .detail("id", self->db.serverInfo->get().encryptKeyProxy.get().id());
+					    .detail("Id", self->db.serverInfo->get().encryptKeyProxy.get().id());
 				}
 				checkOutstandingRequests(self);
 				return Void();
