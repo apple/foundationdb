@@ -212,6 +212,12 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	int changeFeedStreamReplyBufferSize = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 4;
 
 	bool isEncryptionEnabled = false;
+	bool buggifyFull = false;
+
+	int64_t memoryFullThreshold =
+	    (int64_t)(SERVER_KNOBS->BLOB_WORKER_REJECT_WHEN_FULL_THRESHOLD * SERVER_KNOBS->SERVER_MEM_LIMIT);
+	int64_t lastResidentMemory = 0;
+	double lastResidentMemoryCheckTime = -100.0;
 
 	BlobWorkerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db)
 	  : id(id), db(db), tenantData(BGTenantMap(dbInfo)), dbInfo(dbInfo),
@@ -241,6 +247,48 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 			return true;
 		}
+	}
+
+	bool isFull() {
+		if (!SERVER_KNOBS->BLOB_WORKER_DO_REJECT_WHEN_FULL) {
+			return false;
+		}
+		if (g_network->isSimulated()) {
+			return buggifyFull;
+		}
+
+		// TODO knob?
+		if (now() >= 1.0 + lastResidentMemoryCheckTime) {
+			// fdb as of 7.1 limits on resident memory instead of virtual memory
+			stats.lastResidentMemory = getResidentMemoryUsage();
+			lastResidentMemoryCheckTime = now();
+		}
+
+		// if we are already over threshold, no need to estimate extra memory
+		if (stats.lastResidentMemory >= memoryFullThreshold) {
+			return true;
+		}
+
+		// FIXME: since this isn't tested in simulation, could unit test this
+		// Try to model how much memory we *could* use given the already existing assignments and workload on this blob
+		// worker, before agreeing to take on a new assignment, given that several large sources of memory can grow and
+		// change post-assignment
+
+		// estimate slack in bytes buffered as max(0, assignments * (delta file size / 2) - bytesBuffered)
+		int64_t expectedExtraBytesBuffered = std::max(
+		    0, stats.numRangesAssigned * (SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 2) - stats.mutationBytesBuffered);
+		// estimate slack in potential pending delta file writes
+		int64_t maximumExtraDeltaWrite = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES * deltaWritesLock->available();
+		// estimate slack in potential pending resnapshot
+		int64_t maximumExtraReSnapshot =
+		    (SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES + SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) * 2 *
+		    resnapshotLock->available();
+
+		int64_t totalExtra = expectedExtraBytesBuffered + maximumExtraDeltaWrite + maximumExtraReSnapshot;
+		// assumes initial snapshot parallelism is small enough and uncommon enough to not add it to this computation
+		stats.estimatedMaxResidentMemory = stats.lastResidentMemory + totalExtra;
+
+		return stats.estimatedMaxResidentMemory >= memoryFullThreshold;
 	}
 };
 
@@ -3076,7 +3124,7 @@ std::vector<std::pair<KeyRange, Future<GranuleFiles>>> loadHistoryChunks(Referen
 }
 
 // TODO might want to separate this out for valid values for range assignments vs read requests. Assignment
-// conflict isn't valid for read requests but is for assignments
+// conflict and blob_worker_full isn't valid for read requests but is for assignments
 bool canReplyWith(Error e) {
 	switch (e.code()) {
 	case error_code_blob_granule_transaction_too_old:
@@ -3084,6 +3132,7 @@ bool canReplyWith(Error e) {
 	case error_code_future_version: // not thrown yet
 	case error_code_wrong_shard_server:
 	case error_code_process_behind: // not thrown yet
+	case error_code_blob_worker_full:
 		return true;
 	default:
 		return false;
@@ -4053,6 +4102,17 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 		if (req.type == AssignRequestType::Continue) {
 			resumeBlobRange(bwData, req.keyRange, req.managerEpoch, req.managerSeqno);
 		} else {
+			if (!isSelfReassign && bwData->isFull()) {
+				if (BW_DEBUG) {
+					fmt::print("BW {0}: rejecting assignment [{1} - {2}) b/c full\n",
+					           bwData->id.toString().substr(0, 6),
+					           req.keyRange.begin.printable(),
+					           req.keyRange.end.printable());
+				}
+				++bwData->stats.fullRejections;
+				req.reply.sendError(blob_worker_full());
+				return Void();
+			}
 			std::vector<Future<Void>> toWait;
 			state bool shouldStart = changeBlobRange(bwData,
 			                                         req.keyRange,
@@ -4506,6 +4566,26 @@ ACTOR Future<Void> simForceFileWriteContention(Reference<BlobWorkerData> bwData)
 	}
 }
 
+ACTOR Future<Void> simForceFullMemory(Reference<BlobWorkerData> bwData) {
+	// instead of randomly rejecting each request or not, simulate periods in which BW is full
+	loop {
+		wait(delayJittered(deterministicRandom()->randomInt(5, 20)));
+		if (g_simulator.speedUpSimulation) {
+			bwData->buggifyFull = false;
+			if (BW_DEBUG) {
+				fmt::print("BW {0}: ForceFullMemory exiting\n", bwData->id.toString().substr(0, 6));
+			}
+			return Void();
+		}
+		bwData->buggifyFull = !bwData->buggifyFull;
+		if (BW_DEBUG) {
+			fmt::print("BW {0}: ForceFullMemory {1}\n",
+			           bwData->id.toString().substr(0, 6),
+			           bwData->buggifyFull ? "starting" : "stopping");
+		}
+	}
+}
+
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
                               ReplyPromise<InitializeBlobWorkerReply> recruitReply,
                               Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
@@ -4558,6 +4638,9 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	state Future<Void> selfRemoved = monitorRemoval(self);
 	if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.25)) {
 		self->addActor.send(simForceFileWriteContention(self));
+	}
+	if (g_network->isSimulated() && SERVER_KNOBS->BLOB_WORKER_DO_REJECT_WHEN_FULL && BUGGIFY_WITH_PROB(0.25)) {
+		self->addActor.send(simForceFullMemory(self));
 	}
 
 	TraceEvent("BlobWorkerInit", self->id).log();
