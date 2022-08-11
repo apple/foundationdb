@@ -727,6 +727,11 @@ bool isNear(Optional<double> a, Optional<double> b) {
 	}
 }
 
+bool isNear(GlobalTagThrottlerStatusReply::TagStats const& a, GlobalTagThrottlerStatusReply::TagStats const& b) {
+	return isNear(a.desiredTps, b.desiredTps) && isNear(a.targetTps, b.targetTps) &&
+	       isNear(a.reservedTps, b.reservedTps) && isNear(a.limitingTps, b.limitingTps);
+}
+
 bool targetRateIsNear(GlobalTagThrottler& globalTagThrottler, TransactionTag tag, Optional<double> expected) {
 	Optional<double> rate;
 	auto targetRates = globalTagThrottler.getProxyRates(1);
@@ -763,22 +768,18 @@ bool clientRateIsNear(GlobalTagThrottler& globalTagThrottler, TransactionTag tag
 
 bool statusIsNear(GlobalTagThrottler const& globalTagThrottler,
                   TransactionTag tag,
-                  double expectedDesiredTps,
-                  Optional<double> expectedLimitingTps,
-                  double expectedTargetTps,
-                  double expectedReservedTps) {
+                  GlobalTagThrottlerStatusReply::TagStats expectedStats) {
 	auto const stats = globalTagThrottler.getGlobalTagThrottlerStatusReply().status[tag];
 	TraceEvent("GlobalTagThrottling_StatusMonitor")
 	    .detail("DesiredTps", stats.desiredTps)
-	    .detail("ExpectedDesiredTps", expectedDesiredTps)
+	    .detail("ExpectedDesiredTps", expectedStats.desiredTps)
 	    .detail("LimitingTps", stats.limitingTps)
-	    .detail("ExpectedLimitingTps", expectedLimitingTps)
+	    .detail("ExpectedLimitingTps", expectedStats.limitingTps)
 	    .detail("TargetTps", stats.targetTps)
-	    .detail("ExpectedTargetTps", expectedTargetTps)
+	    .detail("ExpectedTargetTps", expectedStats.targetTps)
 	    .detail("ReservedTps", stats.reservedTps)
-	    .detail("ExpectedReservedTps", expectedReservedTps);
-	return isNear(stats.desiredTps, expectedDesiredTps) && isNear(stats.targetTps, expectedTargetTps) &&
-	       isNear(stats.reservedTps, expectedReservedTps) && isNear(stats.limitingTps, expectedLimitingTps);
+	    .detail("ExpectedReservedTps", expectedStats.reservedTps);
+	return isNear(stats, expectedStats);
 }
 
 ACTOR Future<Void> updateGlobalTagThrottler(GlobalTagThrottler* globalTagThrottler,
@@ -1123,15 +1124,21 @@ TEST_CASE("/GlobalTagThrottler/ReservedWriteQuota") {
 TEST_CASE("/GlobalTagThrottler/Status") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
+	GlobalTagThrottlerStatusReply::TagStats expectedStats;
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
 	tagQuotaValue.totalReadQuota = tagQuotaValue.totalWriteQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	expectedStats.desiredTps = 100.0 / 6.0;
+	expectedStats.limitingTps = {};
+	expectedStats.targetTps = 100.0 / 6.0;
+	expectedStats.reservedTps = 0.0;
 	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
 	    &globalTagThrottler, &storageServers, testTag, 5.0, 6.0, GlobalTagThrottlerTesting::OpType::READ);
-	state Future<Void> monitor = GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [testTag](auto& gtt) {
-		return GlobalTagThrottlerTesting::statusIsNear(gtt, testTag, 100.0 / 6.0, {}, 100.0 / 6.0, 0.0);
-	});
+	state Future<Void> monitor =
+	    GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [testTag, expectedStats](auto& gtt) {
+		    return GlobalTagThrottlerTesting::statusIsNear(gtt, testTag, expectedStats);
+	    });
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 300.0));
