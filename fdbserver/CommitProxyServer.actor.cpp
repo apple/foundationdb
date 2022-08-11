@@ -29,6 +29,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/Tenant.h"
 #include "fdbclient/TransactionLineage.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/ApplyMetadataMutation.h"
@@ -52,6 +53,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/BlobCipher.h"
+#include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
@@ -927,10 +929,29 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 			TenantInfo const& tenantInfo = trs[t].tenantInfo;
 			int64_t tenantId = tenantInfo.tenantId;
 			Optional<TenantNameRef> const& tenantName = tenantInfo.name;
-			// TODO(yiwu): In raw access mode, use tenant prefix to figure out tenant id for user data
 			if (tenantId != TenantInfo::INVALID_TENANT) {
 				ASSERT(tenantName.present());
 				encryptDomains[tenantId] = tenantName.get();
+			} else {
+				// For raw-access mode parse transaction mutation to obtain 'tenantName'
+				// For a given transaction, contained mutations can't cross tenant boundaries.
+				StringRef keyRef = trs[t].transaction.mutations[0].param1;
+				// Should this be an assert? Or raw-access can't be for FDB internal keyspace.
+				if (isSystemKey(keyRef)) {
+					encryptDomains[SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID] =
+					    Standalone<StringRef>(StringRef(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME));
+				} else {
+					KeyRef prefix = TenantMetadata::tenantMap().subspace.begin;
+					MutationRef m = trs[t].transaction.mutations[0];
+					ASSERT(m.param1.startsWith(prefix));
+					TenantName name = m.param1.removePrefix(prefix);
+					ErrorOr<Optional<TenantMapEntry>> result =
+					    getTenantEntry(pProxyCommitData, name, Optional<int64_t>(), true);
+					ASSERT(!result.isError() && result.get().present());
+					encryptDomains[result.get().get().id] = name;
+
+					CODE_PROBE(true, "Raw access mode encryptDomains populate");
+				}
 			}
 		}
 		getCipherKeys = getLatestEncryptCipherKeys(pProxyCommitData->db, encryptDomains);
