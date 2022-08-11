@@ -414,7 +414,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_COMPACTION_READAHEAD_SIZE,                   32768 ); // 32 KB, performs bigger reads when doing compaction.
 	init( ROCKSDB_BLOCK_SIZE,                                  32768 ); // 32 KB, size of the block in rocksdb cache.
  	init( ENABLE_SHARDED_ROCKSDB,                              false );
-	init( ROCKSDB_WRITE_BUFFER_SIZE,						 1 << 30 ); // 1G
+	init( ROCKSDB_WRITE_BUFFER_SIZE,                         1 << 30 ); // 1G
+	init( ROCKSDB_MAX_TOTAL_WAL_SIZE,                              0 ); // RocksDB default.
+	init( ROCKSDB_MAX_BACKGROUND_JOBS,                             2 ); // RocksDB default.
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
