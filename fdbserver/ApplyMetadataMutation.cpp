@@ -84,8 +84,9 @@ public:
 	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
-	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap), initialCommit(initialCommit_),
-	    dbInfo(proxyCommitData_.db) {}
+	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
+	    tenantIdNameMap(&proxyCommitData_.tenantIdNameMap), initialCommit(initialCommit_), dbInfo(proxyCommitData_.db) {
+	}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           ResolverData& resolverData_,
@@ -135,6 +136,7 @@ private:
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
 	std::map<TenantName, TenantMapEntry>* tenantMap = nullptr;
+	std::map<int64_t, TenantName>* tenantIdNameMap = nullptr;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
 	bool initialCommit = false;
@@ -658,13 +660,20 @@ private:
 	void checkSetTenantMapPrefix(MutationRef m) {
 		KeyRef prefix = TenantMetadata::tenantMap().subspace.begin;
 		if (m.param1.startsWith(prefix)) {
+
 			if (tenantMap) {
+				ASSERT(tenantIdNameMap != nullptr);
 				ASSERT(version != invalidVersion);
+
 				TenantName tenantName = m.param1.removePrefix(prefix);
 				TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
 
-				TraceEvent("CommitProxyInsertTenant", dbgid).detail("Tenant", tenantName).detail("Version", version);
+				TraceEvent("CommitProxyInsertTenant", dbgid)
+				    .detail("Tenant", tenantName)
+				    .detail("Version", version)
+				    .detail("Id", tenantEntry.id);
 				(*tenantMap)[tenantName] = tenantEntry;
+				(*tenantIdNameMap)[tenantEntry.id] = tenantName;
 			}
 
 			if (!initialCommit) {
@@ -1057,8 +1066,10 @@ private:
 	void checkClearTenantMapPrefix(KeyRangeRef range) {
 		KeyRangeRef subspace = TenantMetadata::tenantMap().subspace;
 		if (subspace.intersects(range)) {
+
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
+				ASSERT(tenantIdNameMap != nullptr);
 
 				StringRef startTenant = std::max(range.begin, subspace.begin).removePrefix(subspace.begin);
 				StringRef endTenant =
@@ -1071,7 +1082,12 @@ private:
 
 				auto startItr = tenantMap->lower_bound(startTenant);
 				auto endItr = tenantMap->lower_bound(endTenant);
+
+				auto startIdItr = tenantIdNameMap->lower_bound(startItr->second.id);
+				auto endIdItr = tenantIdNameMap->lower_bound(endItr->second.id);
+
 				tenantMap->erase(startItr, endItr);
+				tenantIdNameMap->erase(startIdItr, endIdItr);
 			}
 
 			if (!initialCommit) {

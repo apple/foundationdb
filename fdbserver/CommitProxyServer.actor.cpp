@@ -271,6 +271,19 @@ ErrorOr<Optional<TenantMapEntry>> getTenantEntry(ProxyCommitData* commitData,
 	return Optional<TenantMapEntry>();
 }
 
+ErrorOr<Optional<TenantName>> getTenantName(ProxyCommitData* commitData, int64_t tenantId, bool logOnFailure) {
+	auto itr = commitData->tenantIdNameMap.find(tenantId);
+	if (itr == commitData->tenantIdNameMap.end()) {
+		if (logOnFailure) {
+			TraceEvent(SevWarn, "CommitProxyUnknownTenant", commitData->dbgid).detail("TenantId", tenantId);
+		}
+
+		return unknown_tenant();
+	}
+
+	return ErrorOr<Optional<TenantName>>(Optional<TenantName>(itr->second));
+}
+
 bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransactionRequest& req) {
 	ErrorOr<Optional<TenantMapEntry>> tenantEntry =
 	    getTenantEntry(commitData, req.tenantInfo.name.castTo<TenantNameRef>(), req.tenantInfo.tenantId, true);
@@ -877,6 +890,11 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	return Void();
 }
 
+int64_t getTenantIdFromMutation(const MutationRef& m) {
+	StringRef prefix = m.param1.substr(0, 8);
+	return TenantMapEntry::prefixToId(prefix);
+}
+
 ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	state double resolutionStart = now();
 	// Sending these requests is the fuzzy border between phase 1 and phase 2; it could conceivably overlap with
@@ -932,25 +950,28 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 			if (tenantId != TenantInfo::INVALID_TENANT) {
 				ASSERT(tenantName.present());
 				encryptDomains[tenantId] = tenantName.get();
-			} else {
-				// For raw-access mode parse transaction mutation to obtain 'tenantName'
-				// For a given transaction, contained mutations can't cross tenant boundaries.
-				StringRef keyRef = trs[t].transaction.mutations[0].param1;
-				// Should this be an assert? Or raw-access can't be for FDB internal keyspace.
+			} else if (!trs[t].transaction.mutations.empty()) {
+				// For raw-access mode, parse 'tenantId' from transaction mutations by accessing first 8 bytes.
+				// For a given transaction, participant mutations can't cross tenant boundaries.
+				MutationRef const& m = trs[t].transaction.mutations[0];
+				StringRef keyRef = m.param1;
+
+				// Should this be an assert?
 				if (isSystemKey(keyRef)) {
 					encryptDomains[SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID] =
 					    Standalone<StringRef>(StringRef(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME));
 				} else {
-					KeyRef prefix = TenantMetadata::tenantMap().subspace.begin;
-					MutationRef m = trs[t].transaction.mutations[0];
-					ASSERT(m.param1.startsWith(prefix));
-					TenantName name = m.param1.removePrefix(prefix);
-					ErrorOr<Optional<TenantMapEntry>> result =
-					    getTenantEntry(pProxyCommitData, name, Optional<int64_t>(), true);
-					ASSERT(!result.isError() && result.get().present());
-					encryptDomains[result.get().get().id] = name;
+					int64_t tenantId = getTenantIdFromMutation(m);
+					ASSERT(tenantId != TenantInfo::INVALID_TENANT);
+					ErrorOr<Optional<TenantName>> result =
+					    getTenantName(pProxyCommitData, tenantId, true /*logOnFailure*/);
+					if (result.isError()) {
+						throw result.getError();
+					}
 
-					CODE_PROBE(true, "Raw access mode encryptDomains populate");
+					ASSERT(result.get().present());
+					encryptDomains[tenantId] = result.get().get();
+					CODE_PROBE(true, "Raw access mode encryptDomain populate");
 				}
 			}
 		}
@@ -1181,12 +1202,20 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 void writeMutation(CommitBatchContext* self, int64_t tenantId, const MutationRef& mutation) {
 	static_assert(TenantInfo::INVALID_TENANT == ENCRYPT_INVALID_DOMAIN_ID);
 	if (!self->pProxyCommitData->isEncryptionEnabled || tenantId == TenantInfo::INVALID_TENANT) {
-		// TODO(yiwu): In raw access mode, use tenant prefix to figure out tenant id for user data
 		bool isRawAccess = tenantId == TenantInfo::INVALID_TENANT && !isSystemKey(mutation.param1) &&
 		                   !(mutation.type == MutationRef::ClearRange && isSystemKey(mutation.param2)) &&
 		                   self->pProxyCommitData->db->get().client.tenantMode == TenantMode::REQUIRED;
-		CODE_PROBE(isRawAccess, "Raw access to tenant key space");
-		self->toCommit.writeTypedMessage(mutation);
+
+		if (isRawAccess) {
+			Arena arena;
+			int64_t tenantId = getTenantIdFromMutation(mutation);
+
+			self->toCommit.writeTypedMessage(
+			    EncryptedMutationMessage::encrypt(arena, self->cipherKeys, tenantId /*domainId*/, mutation));
+			CODE_PROBE(isRawAccess, "Raw access to tenant key space");
+		} else {
+			self->toCommit.writeTypedMessage(mutation);
+		}
 	} else {
 		Arena arena;
 		self->toCommit.writeTypedMessage(
