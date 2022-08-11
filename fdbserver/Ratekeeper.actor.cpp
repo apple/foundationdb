@@ -324,15 +324,9 @@ public:
 
 						bool returningTagsToProxy{ false };
 						if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
-							reply.proxyThrottledTags = self.tagThrottler->getRates();
-							if (reply.proxyThrottledTags.present()) {
-								for (auto& [priority, tagToRate] : reply.proxyThrottledTags.get()) {
-									for (auto& [tag, rate] : tagToRate) {
-										rate /= self.grvProxyInfo.size();
-									}
-								}
-								returningTagsToProxy = reply.proxyThrottledTags.get().size() > 0;
-							}
+							reply.proxyThrottledTags = self.tagThrottler->getProxyRates(self.grvProxyInfo.size());
+							returningTagsToProxy =
+							    reply.proxyThrottledTags.present() && reply.proxyThrottledTags.get().size() > 0;
 						} else {
 							reply.clientThrottledTags = self.tagThrottler->getClientRates();
 							returningTagsToProxy =

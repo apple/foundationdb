@@ -437,7 +437,7 @@ public:
 	void addRequests(TransactionTag tag, int count) { tagStatistics[tag].addTransactions(static_cast<double>(count)); }
 	uint64_t getThrottledTagChangeId() const { return throttledTagChangeId; }
 
-	PrioritizedTransactionTagMap<double> getRates() {
+	PrioritizedTransactionTagMap<double> getProxyRates(int numProxies) {
 		PrioritizedTransactionTagMap<double> result;
 		lastBusyReadTagCount = lastBusyWriteTagCount = 0;
 		statusReply = {};
@@ -455,7 +455,8 @@ public:
 			}
 			if (targetTps.present()) {
 				auto const smoothedTargetTps = stats.updateAndGetTargetLimit(targetTps.get());
-				result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] = smoothedTargetTps;
+				result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] =
+				    smoothedTargetTps / numProxies;
 			} else {
 				te.disable();
 			}
@@ -543,8 +544,8 @@ uint64_t GlobalTagThrottler::getThrottledTagChangeId() const {
 PrioritizedTransactionTagMap<ClientTagThrottleLimits> GlobalTagThrottler::getClientRates() {
 	return impl->getClientRates();
 }
-PrioritizedTransactionTagMap<double> GlobalTagThrottler::getRates() {
-	return impl->getRates();
+PrioritizedTransactionTagMap<double> GlobalTagThrottler::getProxyRates(int numProxies) {
+	return impl->getProxyRates(numProxies);
 }
 int64_t GlobalTagThrottler::autoThrottleCount() const {
 	return impl->autoThrottleCount();
@@ -728,7 +729,7 @@ bool isNear(Optional<double> a, Optional<double> b) {
 
 bool targetRateIsNear(GlobalTagThrottler& globalTagThrottler, TransactionTag tag, Optional<double> expected) {
 	Optional<double> rate;
-	auto targetRates = globalTagThrottler.getRates();
+	auto targetRates = globalTagThrottler.getProxyRates(1);
 	auto it1 = targetRates.find(TransactionPriority::DEFAULT);
 	if (it1 != targetRates.end()) {
 		auto it2 = it1->second.find(tag);
