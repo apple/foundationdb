@@ -1318,9 +1318,7 @@ struct CreateTenantImpl {
 ACTOR template <class DB>
 Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tenantEntry) {
 	state CreateTenantImpl<DB> impl(db, name, tenantEntry);
-	TraceEvent("BreakpointAttemptCreate").detail("Name", name);
 	wait(impl.run());
-	TraceEvent("BreakpointCreateSuccess").detail("Name", name);
 	return Void();
 }
 
@@ -1461,26 +1459,14 @@ struct DeleteTenantImpl {
 		// Get information about the tenant and where it is assigned
 		bool deletionInProgress = wait(self->ctx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return getAssignedLocation(self, tr); }));
-		TraceEvent("BreakpointDeleteAfterAssigned")
-		    .detail("TenantName", self->tenantName)
-		    .detail("PairName", self->pairName.present() ? self->pairName.get() : TenantName())
-		    .detail("TenantId", self->tenantId);
 
 		if (!deletionInProgress) {
 			wait(self->ctx.runDataClusterTransaction(
 			    [self = self](Reference<ITransaction> tr) { return checkTenantEmpty(self, tr); }));
-			TraceEvent("BreakpointDeleteAfterCheckEmpty")
-			    .detail("TenantName", self->tenantName)
-			    .detail("PairName", self->pairName.present() ? self->pairName.get() : TenantName())
-			    .detail("TenantId", self->tenantId);
 
 			wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 				return markTenantInRemovingState(self, tr);
 			}));
-			TraceEvent("BreakpointDeleteAfterMark")
-			    .detail("TenantName", self->tenantName)
-			    .detail("PairName", self->pairName.present() ? self->pairName.get() : TenantName())
-			    .detail("TenantId", self->tenantId);
 		}
 
 		// Delete tenant on the data cluster
@@ -1496,18 +1482,9 @@ struct DeleteTenantImpl {
 			return pairDelete && TenantAPI::deleteTenantTransaction(
 			                         tr, self->tenantName, self->tenantId, ClusterType::METACLUSTER_DATA);
 		}));
-		TraceEvent("BreakpointDeleteAfterDataUpdate")
-		    .detail("TenantName", self->tenantName)
-		    .detail("PairName", self->pairName.present() ? self->pairName.get() : TenantName())
-		    .detail("TenantId", self->tenantId);
-
 		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return deleteTenantFromManagementCluster(self, tr);
 		}));
-		TraceEvent("BreakpointDeleteAfterFinish")
-		    .detail("TenantName", self->tenantName)
-		    .detail("PairName", self->pairName.present() ? self->pairName.get() : TenantName())
-		    .detail("TenantId", self->tenantId);
 
 		return Void();
 	}
@@ -1517,9 +1494,7 @@ struct DeleteTenantImpl {
 ACTOR template <class DB>
 Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 	state DeleteTenantImpl<DB> impl(db, name);
-	TraceEvent("BreakpointAttemptDelete").detail("Name", name);
 	wait(impl.run());
-	TraceEvent("BreakpointDeleteSuccess").detail("Name", name).detail("TenantId", impl.tenantId);
 	return Void();
 }
 
@@ -1715,9 +1690,7 @@ Future<Void> configureTenant(Reference<DB> db,
                              TenantName name,
                              std::map<Standalone<StringRef>, Optional<Value>> configurationParameters) {
 	state ConfigureTenantImpl<DB> impl(db, name, configurationParameters);
-	TraceEvent("BreakpointAttemptConfigure").detail("Name", name);
 	wait(impl.run());
-	TraceEvent("BreakpointConfigureSuccess").detail("Name", name);
 	return Void();
 }
 
@@ -1901,10 +1874,6 @@ struct RenameTenantImpl {
 	ACTOR static Future<Void> run(RenameTenantImpl* self) {
 		wait(self->ctx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return markTenantsInRenamingState(self, tr); }));
-		TraceEvent("BreakpointRenameAfterMark")
-		    .detail("OldName", self->oldName)
-		    .detail("NewName", self->newName)
-		    .detail("TenantId", self->tenantId);
 
 		// Rename tenant on the data cluster
 		try {
@@ -1921,18 +1890,10 @@ struct RenameTenantImpl {
 				throw e;
 			}
 		}
-		TraceEvent("BreakpointRenameAfterDataUpdate")
-		    .detail("OldName", self->oldName)
-		    .detail("NewName", self->newName)
-		    .detail("TenantId", self->tenantId);
 
 		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return finishRenameFromManagementCluster(self, tr);
 		}));
-		TraceEvent("BreakpointRenameAfterFinish")
-		    .detail("OldName", self->oldName)
-		    .detail("NewName", self->newName)
-		    .detail("TenantId", self->tenantId);
 		return Void();
 	}
 	Future<Void> run() { return run(this); }
@@ -1941,12 +1902,7 @@ struct RenameTenantImpl {
 ACTOR template <class DB>
 Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newName) {
 	state RenameTenantImpl<DB> impl(db, oldName, newName);
-	TraceEvent("BreakpointAttemptRename").detail("OldName", oldName).detail("NewName", newName);
 	wait(impl.run());
-	TraceEvent("BreakpointRenameSuccess")
-	    .detail("OldName", oldName)
-	    .detail("NewName", newName)
-	    .detail("TenantId", impl.tenantId);
 	return Void();
 }
 

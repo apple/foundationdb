@@ -1211,13 +1211,9 @@ struct TenantManagementWorkload : TestWorkload {
 				wait(verifyTenantRenames(self, tenantRenames));
 				// Check that using the wrong rename API fails depending on whether we are using a metacluster
 				ASSERT(self->useMetacluster == (operationType == OperationType::METACLUSTER));
-				TraceEvent("RenameTenantSuccessful").detail("TenantRenames", describe(tenantRenames));
 				return Void();
 			} catch (Error& e) {
 				if (e.code() == error_code_tenant_not_found) {
-					TraceEvent("RenameTenantOldTenantNotFound")
-					    .detail("TenantRenames", describe(tenantRenames))
-					    .detail("CommitUnknownResult", unknownResult);
 					if (unknownResult) {
 						wait(verifyTenantRenames(self, tenantRenames));
 					} else {
@@ -1225,9 +1221,6 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 					return Void();
 				} else if (e.code() == error_code_tenant_already_exists) {
-					TraceEvent("RenameTenantNewTenantAlreadyExists")
-					    .detail("TenantRenames", describe(tenantRenames))
-					    .detail("CommitUnknownResult", unknownResult);
 					if (unknownResult) {
 						wait(verifyTenantRenames(self, tenantRenames));
 					} else {
@@ -1235,25 +1228,20 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 					return Void();
 				} else if (e.code() == error_code_special_keys_api_failure) {
-					TraceEvent("RenameTenantNameConflict").detail("TenantRenames", describe(tenantRenames));
 					ASSERT(tenantOverlap);
 					return Void();
 				} else if (e.code() == error_code_invalid_metacluster_operation) {
-					TraceEvent("RenameTenantInvalidMetaclusterOp").detail("TenantRenames", describe(tenantRenames));
 					ASSERT(operationType == OperationType::METACLUSTER != self->useMetacluster);
 					return Void();
 				} else if (e.code() == error_code_tenant_removed) {
-					TraceEvent("RenameTenantTenantRemoved").detail("TenantRenames", describe(tenantRenames));
 					ASSERT(operationType == OperationType::METACLUSTER);
 					return Void();
 				} else if (e.code() == error_code_invalid_tenant_state) {
-					TraceEvent("RenameTenantInvalidTenantState").detail("TenantRenames", describe(tenantRenames));
 					ASSERT(operationType == OperationType::METACLUSTER);
 					return Void();
 				} else if (e.code() == error_code_cluster_no_capacity) {
 					// This error should only occur on metacluster due to the multi-stage process.
 					// Having temporary tenants may exceed capacity, so we disallow the rename.
-					TraceEvent("RenameTenanClusterNoCapacity").detail("TenantRenames", describe(tenantRenames));
 					ASSERT(operationType == OperationType::METACLUSTER);
 					return Void();
 				} else {
@@ -1262,7 +1250,6 @@ struct TenantManagementWorkload : TestWorkload {
 						// until it's successful. Next loop around may throw error because it's
 						// already been moved, so account for that and update internal map as needed.
 						if (e.code() == error_code_commit_unknown_result) {
-							TraceEvent("RenameTenantCommitUnknownResult").error(e);
 							ASSERT(operationType != OperationType::MANAGEMENT_DATABASE &&
 							       operationType != OperationType::METACLUSTER);
 							unknownResult = true;
