@@ -411,9 +411,7 @@ class GlobalTagThrottlerImpl {
 		Optional<double> reservedTps;
 		reservedTps = getMax(readReservedTps, writeReservedTps);
 
-		auto targetTps = desiredTps;
-		targetTps = getMin(targetTps, limitingTps);
-		targetTps = getMax(targetTps, reservedTps);
+		auto targetTps = getMax(reservedTps, getMin(desiredTps, limitingTps));
 
 		te.detail("Tag", printable(tag))
 		    .detail("TargetTps", targetTps)
