@@ -220,19 +220,6 @@ private:
 				// allocation)
 				++clusterAllocated[entry.assignedCluster.get()];
 			}
-
-			// If the rename pair is present, it should be in the map and match our current entry
-			if (entry.renamePair.present()) {
-				auto pairMapEntry = managementMetadata.tenantMap[entry.renamePair.get()];
-				ASSERT(pairMapEntry.id == entry.id);
-				ASSERT(pairMapEntry.prefix == entry.prefix);
-				ASSERT(pairMapEntry.encrypted == entry.encrypted);
-				ASSERT(pairMapEntry.configurationSequenceNum == entry.configurationSequenceNum);
-				ASSERT(pairMapEntry.assignedCluster.present());
-				ASSERT(pairMapEntry.assignedCluster.get() == entry.assignedCluster.get());
-				ASSERT(pairMapEntry.renamePair.present());
-				ASSERT(pairMapEntry.renamePair.get() == name);
-			}
 		}
 
 		// The actual allocation for each cluster should match what is stored in the cluster metadata

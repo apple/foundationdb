@@ -166,6 +166,15 @@ private:
 					ASSERT(pairMapEntry.assignedCluster.get() == tenantMapEntry.assignedCluster.get());
 					ASSERT(pairMapEntry.renamePair.present());
 					ASSERT(pairMapEntry.renamePair.get() == tenantName);
+					if (tenantMapEntry.tenantState == TenantState::RENAMING_FROM) {
+						ASSERT(pairMapEntry.tenantState == TenantState::RENAMING_TO);
+					} else if (tenantMapEntry.tenantState == TenantState::RENAMING_TO) {
+						ASSERT(pairMapEntry.tenantState == TenantState::RENAMING_FROM);
+					} else if (tenantMapEntry.tenantState == TenantState::REMOVING) {
+						ASSERT(pairMapEntry.tenantState == TenantState::REMOVING);
+					} else {
+						ASSERT(false); // Entry in an invalid state if we have a rename pair
+					}
 				}
 			} else {
 				ASSERT(tenantMapEntry.tenantState == TenantState::READY);
