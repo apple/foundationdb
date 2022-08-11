@@ -72,7 +72,8 @@ private:
 	DatabaseContext* db;
 
 public: // Internal use only
-	ThreadSafeDatabase(Reference<IClusterConnectionRecord> connectionRecord, int apiVersion);
+	enum class ConnectionRecordType { FILE, CONNECTION_STRING };
+	ThreadSafeDatabase(ConnectionRecordType connectionRecordType, std::string connectionRecord, int apiVersion);
 	ThreadSafeDatabase(DatabaseContext* db) : db(db) {}
 	DatabaseContext* unsafeGetPtr() const { return db; }
 };

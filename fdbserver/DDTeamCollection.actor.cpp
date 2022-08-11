@@ -3080,7 +3080,7 @@ public:
 					server_status[key] = self->server_status.get(key);
 				}
 
-				TraceEvent("DDPrintSnapshotTeasmInfo", self->getDistributorId())
+				TraceEvent("DDPrintSnapshotTeamsInfo", self->getDistributorId())
 				    .detail("SnapshotSpeed", now() - snapshotStart)
 				    .detail("Primary", self->isPrimary());
 
