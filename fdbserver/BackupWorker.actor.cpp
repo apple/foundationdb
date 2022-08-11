@@ -449,7 +449,7 @@ struct BackupData {
 				if (e.code() == error_code_batch_transaction_throttled ||
 				    e.code() == error_code_proxy_memory_limit_exceeded) {
 					// GRV Proxy returns an error
-					wait(delayJittered(5.0));
+					wait(delayJittered(CLIENT_KNOBS->GRV_ERROR_RETRY_DELAY));
 				} else {
 					throw;
 				}
