@@ -18,6 +18,7 @@ class TempCluster(LocalCluster):
         port: str = None,
         blob_granules_enabled: bool = False,
         tls_config: TLSConfig = None,
+        enable_tenants: bool = True,
     ):
         self.build_dir = Path(build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(build_dir)
@@ -25,6 +26,7 @@ class TempCluster(LocalCluster):
         tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
         tmp_dir.mkdir(parents=True)
         self.tmp_dir = tmp_dir
+        self.enable_tenants = enable_tenants
         super().__init__(
             tmp_dir,
             self.build_dir.joinpath("bin", "fdbserver"),
@@ -39,7 +41,10 @@ class TempCluster(LocalCluster):
 
     def __enter__(self):
         super().__enter__()
-        super().create_database()
+        if self.enable_tenants:
+            super().create_database()
+        else:
+            super().create_database(enable_tenants=False)
         return self
 
     def __exit__(self, xc_type, exc_value, traceback):
@@ -92,6 +97,12 @@ if __name__ == "__main__":
         action="store_true",
     )
     parser.add_argument(
+        "--disable-tenants",
+        help="Do not enable tenant mode",
+        action="store_true",
+        default=False
+    )
+    parser.add_argument(
         "--blob-granules-enabled", help="Enable blob granules", action="store_true"
     )
     parser.add_argument(
@@ -115,6 +126,12 @@ if __name__ == "__main__":
         default="Check.Valid=1",
     )
     args = parser.parse_args()
+
+    if args.disable_tenants:
+        enable_tenants = False
+    else:
+        enable_tenants = True
+
     tls_config = None
     if args.tls_enabled:
         tls_config = TLSConfig(server_chain_len=args.server_cert_chain_len,
@@ -125,6 +142,7 @@ if __name__ == "__main__":
         args.process_number,
         blob_granules_enabled=args.blob_granules_enabled,
         tls_config=tls_config,
+        enable_tenants=enable_tenants,
     ) as cluster:
         print("log-dir: {}".format(cluster.log))
         print("etc-dir: {}".format(cluster.etc))
