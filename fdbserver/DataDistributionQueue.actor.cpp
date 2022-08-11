@@ -528,10 +528,10 @@ struct DDQueue {
 	};
 
 	struct ServerCounter {
-		enum CountType : uint8_t { ProposedSource = 0, QueuedSource, LaunchedSource, LaunchedDest };
+		enum CountType : uint8_t { ProposedSource = 0, QueuedSource, LaunchedSource, LaunchedDest, __COUNT };
 
 	private:
-		typedef std::array<int, 4> Item; // one for each CountType
+		typedef std::array<int, (int)__COUNT> Item; // one for each CountType
 		typedef std::array<Item, RelocateReason::typeCount()> ReasonItem; // one for each RelocateReason
 
 		std::unordered_map<UID, ReasonItem> counter;
@@ -542,8 +542,10 @@ struct DDQueue {
 
 		void traceReasonItem(TraceEvent* event, const ReasonItem& item) const {
 			for (int i = 0; i < item.size(); ++i) {
-				// "PQSD" corresponding to CounterType
-				event->detail(RelocateReason(i).toString() + "PQSD", toString(item[i]));
+				if (std::accumulate(item[i].cbegin(), item[i].cend(), 0) > 0) {
+					// "PQSD" corresponding to CounterType
+					event->detail(RelocateReason(i).toString() + "_PQSD", toString(item[i]));
+				}
 			}
 		}
 
@@ -614,7 +616,7 @@ struct DDQueue {
 
 		// for random test
 		static CountType randomCountType() {
-			int i = deterministicRandom()->randomInt(0, (int)LaunchedDest + 1);
+			int i = deterministicRandom()->randomInt(0, (int)__COUNT);
 			return (CountType)i;
 		}
 	};

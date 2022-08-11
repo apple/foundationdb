@@ -40,9 +40,9 @@
 // RelocateReason to DataMovementReason is one-to-N mapping
 class RelocateReason {
 public:
-	enum Value : int8_t { OTHER = 0, REBALANCE_DISK, REBALANCE_READ, MERGE_SHARD, SIZE_SPLIT, WRITE_SPLIT };
-	RelocateReason(Value v) : value(v) {}
-	explicit RelocateReason(int v) : value((Value)v) {}
+	enum Value : int8_t { OTHER = 0, REBALANCE_DISK, REBALANCE_READ, MERGE_SHARD, SIZE_SPLIT, WRITE_SPLIT, __COUNT };
+	RelocateReason(Value v) : value(v) { ASSERT(value != __COUNT); }
+	explicit RelocateReason(int v) : value((Value)v) { ASSERT(value != __COUNT); }
 	std::string toString() const {
 		switch (value) {
 		case OTHER:
@@ -57,13 +57,13 @@ public:
 			return "SizeSplit";
 		case WRITE_SPLIT:
 			return "WriteSplit";
-		default:
+		case __COUNT:
 			ASSERT(false);
 		}
 		return "";
 	}
 	operator int() const { return (int)value; }
-	constexpr static int8_t typeCount() { return (int)WRITE_SPLIT + 1; }
+	constexpr static int8_t typeCount() { return (int)__COUNT; }
 
 private:
 	Value value;
