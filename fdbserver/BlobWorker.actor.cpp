@@ -214,6 +214,11 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	bool isEncryptionEnabled = false;
 	bool buggifyFull = false;
 
+	int64_t memoryFullThreshold =
+	    (int64_t)(SERVER_KNOBS->BLOB_WORKER_REJECT_WHEN_FULL_THRESHOLD * SERVER_KNOBS->SERVER_MEM_LIMIT);
+	int64_t lastResidentMemory = 0;
+	double lastResidentMemoryCheckTime = -100.0;
+
 	BlobWorkerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db)
 	  : id(id), db(db), tenantData(BGTenantMap(dbInfo)), dbInfo(dbInfo),
 	    initialSnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM)),
@@ -249,16 +254,41 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 			return false;
 		}
 		if (g_network->isSimulated()) {
-			// TODO could have slightly more realistic version in simulation, eg one blob worker would likely do this
-			// for all requests for a period of time0
 			return buggifyFull;
 		}
 
-		// TODO implement for not simulation!
-		// TODO check if we have enough memory to handle assignment
-		// getSystemStatistics().processMemory - current memory
-		// TODO: how to get configured memory?
-		return false;
+		// TODO knob?
+		if (now() >= 1.0 + lastResidentMemoryCheckTime) {
+			// fdb as of 7.1 limits on resident memory instead of virtual memory
+			stats.lastResidentMemory = getResidentMemoryUsage();
+			lastResidentMemoryCheckTime = now();
+		}
+
+		// if we are already over threshold, no need to estimate extra memory
+		if (stats.lastResidentMemory >= memoryFullThreshold) {
+			return true;
+		}
+
+		// FIXME: since this isn't tested in simulation, could unit test this
+		// Try to model how much memory we *could* use given the already existing assignments and workload on this blob
+		// worker, before agreeing to take on a new assignment, given that several large sources of memory can grow and
+		// change post-assignment
+
+		// estimate slack in bytes buffered as max(0, assignments * (delta file size / 2) - bytesBuffered)
+		int64_t expectedExtraBytesBuffered = std::max(
+		    0, stats.numRangesAssigned * (SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 2) - stats.mutationBytesBuffered);
+		// estimate slack in potential pending delta file writes
+		int64_t maximumExtraDeltaWrite = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES * deltaWritesLock->available();
+		// estimate slack in potential pending resnapshot
+		int64_t maximumExtraReSnapshot =
+		    (SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES + SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) * 2 *
+		    resnapshotLock->available();
+
+		int64_t totalExtra = expectedExtraBytesBuffered + maximumExtraDeltaWrite + maximumExtraReSnapshot;
+		// assumes initial snapshot parallelism is small enough and uncommon enough to not add it to this computation
+		stats.estimatedMaxResidentMemory = stats.lastResidentMemory + totalExtra;
+
+		return stats.estimatedMaxResidentMemory >= memoryFullThreshold;
 	}
 };
 

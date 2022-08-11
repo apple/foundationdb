@@ -49,6 +49,8 @@ struct BlobWorkerStats {
 	int mutationBytesBuffered;
 	int activeReadRequests;
 	int granulesPendingSplitCheck;
+	int64_t lastResidentMemory;
+	int64_t estimatedMaxResidentMemory;
 
 	Reference<FlowLock> initialSnapshotLock;
 	Reference<FlowLock> resnapshotLock;
@@ -89,6 +91,8 @@ struct BlobWorkerStats {
 		specialCounter(cc, "ReSnapshotsWaiting", [this]() { return this->resnapshotLock->waiters(); });
 		specialCounter(cc, "DeltaFileWritesActive", [this]() { return this->deltaWritesLock->activePermits(); });
 		specialCounter(cc, "DeltaFileWritesWaiting", [this]() { return this->deltaWritesLock->waiters(); });
+		specialCounter(cc, "LastResidentMemory", [this]() { return this->lastResidentMemory; });
+		specialCounter(cc, "EstimatedMaxResidentMemory", [this]() { return this->estimatedMaxResidentMemory; });
 
 		logger = traceCounters("BlobWorkerMetrics", id, interval, &cc, "BlobWorkerMetrics");
 	}
