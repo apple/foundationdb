@@ -20,10 +20,13 @@
 
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/TenantEntryCache.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
+
+#include "fdbserver/Knobs.h"
+#include "fdbserver/TenantEntryCache.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
+#include "flow/Error.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -81,6 +84,8 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		TraceEvent("TenantNotFound.Start").log();
 
 		wait(cache->init());
+		// Ensure associated counter values gets updated
+		ASSERT_EQ(cache->numRefreshByInit(), 1);
 
 		state TenantMapEntry dummy(std::numeric_limits<int64_t>::max(), TenantState::READY, true /* encrypted */);
 		Optional<TenantEntryCachePayload<int64_t>> value = wait(cache->getById(dummy.id));
@@ -88,6 +93,9 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 		Optional<TenantEntryCachePayload<int64_t>> value1 = wait(cache->getByPrefix(dummy.prefix));
 		ASSERT(!value1.present());
+
+		// Ensure associated counter values gets updated
+		ASSERT_EQ(cache->numRefreshByMisses(), 2);
 
 		TraceEvent("TenantNotFound.End").log();
 		return Void();
@@ -103,6 +111,9 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		TraceEvent("CreateTenantsAndLookup.Start").log();
 
 		wait(cache->init());
+		// Ensure associated counter values gets updated
+		ASSERT_EQ(cache->numRefreshByInit(), 1);
+		ASSERT_GE(cache->numCacheRefreshes(), 1);
 
 		tenantList->clear();
 		state int i = 0;
@@ -137,6 +148,10 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		TraceEvent("CacheReload.Start").log();
 
 		wait(cache->init());
+		// Ensure associated counter values gets updated
+		ASSERT_EQ(cache->numRefreshByInit(), 1);
+		ASSERT_GE(cache->numCacheRefreshes(), 1);
+
 		wait(compareContents(tenantList, cache));
 
 		TraceEvent("CacheReload.End").log();
@@ -145,6 +160,36 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 	ACTOR static Future<Void> testTenantCacheDefaultFunc(Database cx) {
 		wait(delay(0.0));
+		return Void();
+	}
+
+	ACTOR static Future<Void> testCacheRefresh(Database cx) {
+		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(cx, createPayload);
+
+		TraceEvent("TestCacheRefresh.Start").log();
+
+		wait(cache->init());
+		// Ensure associated counter values gets updated
+		ASSERT_EQ(cache->numRefreshByInit(), 1);
+		ASSERT_GE(cache->numCacheRefreshes(), 1);
+
+		int refreshWait =
+		    SERVER_KNOBS->TENANT_CACHE_LIST_REFRESH_INTERVAL * 10; // initial delay + multiple refresh runs
+		wait(delay(refreshWait));
+
+		// InitRefresh + multiple timer based invocations
+		ASSERT_GE(cache->numCacheRefreshes(), 3);
+
+		TraceEvent("TestCacheRefresh.End").log();
+		return Void();
+	}
+
+	Future<Void> setup(Database const& cx) override {
+		if (clientId == 0 && g_network->isSimulated() && BUGGIFY) {
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob("tenant_cache_list_refresh_interval",
+			                                                          KnobValueRef::create(int{ 2 }));
+		}
+
 		return Void();
 	}
 
@@ -161,6 +206,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		wait(testTenantNotFound(cx));
 		wait(testCreateTenantsAndLookup(cx, self, &tenantList));
 		wait(testTenantCacheDefaultFunc(cx));
+		wait(testCacheRefresh(cx));
 
 		return Void();
 	}

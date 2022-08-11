@@ -92,6 +92,7 @@ private:
 	Counter refreshByCacheInit;
 	Counter refreshByCacheMiss;
 	Counter numSweeps;
+	Counter numRefreshes;
 
 	ACTOR static Future<TenantNameEntryPairVec> getTenantList(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -113,6 +114,8 @@ private:
 		} else if (reason == TenantEntryCacheRefreshReason::CACHE_MISS) {
 			cache->refreshByCacheMiss += 1;
 		}
+
+		cache->numRefreshes += 1;
 	}
 
 	ACTOR static Future<Void> refreshImpl(TenantEntryCache<T>* cache, TenantEntryCacheRefreshReason reason) {
@@ -271,7 +274,8 @@ public:
 	    createPayloadFunc(defaultCreatePayload), metrics("TenantEntryCacheMetrics", uid.toString()),
 	    hits("TenantEntryCacheHits", metrics), misses("TenantEntryCacheMisses", metrics),
 	    refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
-	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics), numSweeps("TenantEntryCacheNumSweeps", metrics) {
+	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics), numSweeps("TenantEntryCacheNumSweeps", metrics),
+	    numRefreshes("TenantEntryCacheNumRefreshes", metrics) {
 		TraceEvent("TenantEntryCache.CreatedDefaultFunc", uid).detail("Gen", curGen);
 	}
 
@@ -279,7 +283,8 @@ public:
 	  : uid(deterministicRandom()->randomUniqueID()), db(db), curGen(INITIAL_CACHE_GEN), createPayloadFunc(fn),
 	    metrics("TenantEntryCacheMetrics", uid.toString()), hits("TenantEntryCacheHits", metrics),
 	    misses("TenantEntryCacheMisses", metrics), refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
-	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics), numSweeps("TenantEntryCacheNumSweeps", metrics) {
+	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics), numSweeps("TenantEntryCacheNumSweeps", metrics),
+	    numRefreshes("TenantEntryCacheNumRefreshes", metrics) {
 		TraceEvent("TenantEntryCache.Created", uid).detail("Gen", curGen);
 	}
 
@@ -287,7 +292,8 @@ public:
 	  : uid(id), db(db), curGen(INITIAL_CACHE_GEN), createPayloadFunc(fn),
 	    metrics("TenantEntryCacheMetrics", uid.toString()), hits("TenantEntryCacheHits", metrics),
 	    misses("TenantEntryCacheMisses", metrics), refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
-	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics), numSweeps("TenantEntryCacheNumSweeps", metrics) {
+	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics), numSweeps("TenantEntryCacheNumSweeps", metrics),
+	    numRefreshes("TenantEntryCacheNumRefreshes", metrics) {
 		TraceEvent("TenantEntryCache.Created", uid).detail("Gen", curGen);
 	}
 
@@ -350,6 +356,11 @@ public:
 		return getByIdImpl(this, id);
 	}
 	Future<Optional<TenantEntryCachePayload<T>>> getByName(TenantName name) { return getByNameImpl(this, name); }
+
+	// Counter access APIs
+	Counter::Value numCacheRefreshes() const { return numRefreshes.getValue(); }
+	Counter::Value numRefreshByMisses() const { return refreshByCacheMiss.getValue(); }
+	Counter::Value numRefreshByInit() const { return refreshByCacheInit.getValue(); }
 };
 
 #include "flow/unactorcompiler.h"

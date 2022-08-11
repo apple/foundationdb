@@ -1220,9 +1220,11 @@ Future<Void> recurringAsync(
 
 	wait(delay(initialDelay));
 
-	state Future<Void> val = actorFunc();
+	state Future<Void> val;
 
 	loop {
+		val = actorFunc();
+
 		if (absoluteIntervalDelay) {
 			wait(val);
 			// Ensure subsequent actorFunc executions observe client supplied delay interval.
