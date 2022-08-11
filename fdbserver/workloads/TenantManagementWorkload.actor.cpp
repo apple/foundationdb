@@ -1209,7 +1209,7 @@ struct TenantManagementWorkload : TestWorkload {
 			try {
 				wait(renameImpl(tr, operationType, tenantRenames, tenantNotFound, tenantExists, tenantOverlap, self));
 				wait(verifyTenantRenames(self, tenantRenames));
-				// Check that using the wrong deletion type fails depending on whether we are using a metacluster
+				// Check that using the wrong rename API fails depending on whether we are using a metacluster
 				ASSERT(self->useMetacluster == (operationType == OperationType::METACLUSTER));
 				TraceEvent("RenameTenantSuccessful").detail("TenantRenames", describe(tenantRenames));
 				return Void();

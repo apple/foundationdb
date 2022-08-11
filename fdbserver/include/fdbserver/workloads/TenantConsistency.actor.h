@@ -155,11 +155,23 @@ private:
 
 			if (metadata.clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 				ASSERT(tenantMapEntry.assignedCluster.present());
+				// If the rename pair is present, it should be in the map and match our current entry
+				if (tenantMapEntry.renamePair.present()) {
+					auto pairMapEntry = metadata.tenantMap[tenantMapEntry.renamePair.get()];
+					ASSERT(pairMapEntry.id == tenantMapEntry.id);
+					ASSERT(pairMapEntry.prefix == tenantMapEntry.prefix);
+					ASSERT(pairMapEntry.encrypted == tenantMapEntry.encrypted);
+					ASSERT(pairMapEntry.configurationSequenceNum == tenantMapEntry.configurationSequenceNum);
+					ASSERT(pairMapEntry.assignedCluster.present());
+					ASSERT(pairMapEntry.assignedCluster.get() == tenantMapEntry.assignedCluster.get());
+					ASSERT(pairMapEntry.renamePair.present());
+					ASSERT(pairMapEntry.renamePair.get() == tenantName);
+				}
 			} else {
 				ASSERT(tenantMapEntry.tenantState == TenantState::READY);
 				ASSERT(!tenantMapEntry.assignedCluster.present());
+				ASSERT(!tenantMapEntry.renamePair.present());
 			}
-			ASSERT(!tenantMapEntry.renamePair.present());
 		}
 	}
 
