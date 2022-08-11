@@ -923,6 +923,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	if ( randomize && BUGGIFY) { BLOB_METADATA_REFRESH_INTERVAL = deterministicRandom()->randomInt(20, 40); }
 
 	// HTTP KMS Connector
+	init( REST_KMS_CONNECTOR_KMS_DISCOVERY_URL_MODE,           "file");
 	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_MODE,            "file");
 	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE,          1024);
 	init( REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE, 10 * 1024);
