@@ -1347,11 +1347,12 @@ struct DeleteTenantImpl {
 			throw tenant_not_found();
 		}
 
-		self->tenantId = tenantEntry.get().id;
-		if (tenantEntry.get().renamePair.present()) {
-			self->pairName = tenantEntry.get().renamePair.get();
+		// Disallow removing the "new" name of a renamed tenant before it completes
+		if (tenantEntry.get().tenantState == TenantState::RENAMING_TO) {
+			throw tenant_not_found();
 		}
 
+		self->tenantId = tenantEntry.get().id;
 		wait(self->ctx.setCluster(tr, tenantEntry.get().assignedCluster.get()));
 		return tenantEntry.get().tenantState == TenantState::REMOVING;
 	}
@@ -1361,16 +1362,10 @@ struct DeleteTenantImpl {
 	// point.
 	//
 	// SOMEDAY: should this also lock the tenant when locking is supported?
-	ACTOR static Future<Void> checkTenantEmpty(DeleteTenantImpl* self,
-	                                           Reference<ITransaction> tr,
-	                                           bool checkPair = false) {
+	ACTOR static Future<Void> checkTenantEmpty(DeleteTenantImpl* self, Reference<ITransaction> tr) {
 		// If pair is present, and this is not already a pair check, call this function recursively
 		state Future<Void> pairFuture = Void();
-		if (!checkPair && self->pairName.present()) {
-			pairFuture = checkTenantEmpty(self, tr, true);
-		}
-		state Optional<TenantMapEntry> tenantEntry =
-		    wait(TenantAPI::tryGetTenantTransaction(tr, checkPair ? self->pairName.get() : self->tenantName));
+		state Optional<TenantMapEntry> tenantEntry = wait(TenantAPI::tryGetTenantTransaction(tr, self->tenantName));
 		if (!tenantEntry.present() || tenantEntry.get().id != self->tenantId) {
 			// The tenant must have been removed simultaneously
 			return Void();
@@ -1396,52 +1391,25 @@ struct DeleteTenantImpl {
 		}
 
 		if (tenantEntry.get().tenantState != TenantState::REMOVING) {
+			// Disallow removing the "new" name of a renamed tenant before it completes
+			if (tenantEntry.get().tenantState == TenantState::RENAMING_TO) {
+				throw tenant_not_found();
+			}
 			state TenantMapEntry updatedEntry = tenantEntry.get();
-			// Very specific timing edge case. Since we check for the rename pair
-			// in getAssignedLocation, it's possible that a rename has started after
-			// that check and before this state change. This will leave things in
-			// a bad state for the rename operation, so we check again here.
-			if (updatedEntry.renamePair.present() && !self->pairName.present()) {
+			// Check if we are deleting a tenant in the middle of a rename
+			if (updatedEntry.renamePair.present()) {
+				ASSERT(updatedEntry.tenantState == TenantState::RENAMING_FROM);
 				self->pairName = updatedEntry.renamePair.get();
-				wait(markTenantInRemovingState(self, tr));
-				return Void();
 			}
 			updatedEntry.tenantState = TenantState::REMOVING;
 			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->tenantName, updatedEntry);
 			// If this has a rename pair, also mark the other entry for deletion
 			if (self->pairName.present()) {
 				state Optional<TenantMapEntry> pairEntry = wait(tryGetTenantTransaction(tr, self->pairName.get()));
-				// If the entry is not present or does not match, that means the rename completed
-				// before we could mark it as removed and we are trying to remove the "new" name.
-				// We can proceed as normal, but treat it as a standalone remove instead of paired
-				if (!pairEntry.present() || pairEntry.get().id != self->tenantId) {
-					// Another edge case when chaining renames together and a delete comes in between:
-					// Rename A->B. Mark both as renaming
-					// Delete B. It sees pair A in getAssignedLocation
-					// Rename A->B completes. Entry A is removed from management cluster
-					// Rename B->C. Mark both as renaming (before we mark B as Removing here)
-					// Reach here and see A is no longer present. Instead of resetting the pair
-					// we need to update our pair here to C, so we don't have inconsistent state
-					if (updatedEntry.renamePair.present() && updatedEntry.renamePair.get() != self->pairName.get()) {
-						self->pairName = updatedEntry.renamePair.get();
-						Optional<TenantMapEntry> newPairEntry = wait(tryGetTenantTransaction(tr, self->pairName.get()));
-						// This entry should be present because the only way for it to be removed is if another
-						// delete operation finished fully before we got here, in which case the original
-						// updatedEntry should also be missing, so we wouldn't make it this far
-						ASSERT(newPairEntry.present());
-						pairEntry = newPairEntry.get();
-					} else {
-						self->pairName.reset();
-						return Void();
-					}
-				}
 				TenantMapEntry updatedPairEntry = pairEntry.get();
 				// Sanity check that our pair has us named as their partner
 				ASSERT(updatedPairEntry.renamePair.present());
 				ASSERT(updatedPairEntry.renamePair.get() == self->tenantName);
-				// Also check that we have our pair named properly
-				ASSERT(updatedEntry.renamePair.present());
-				ASSERT(updatedEntry.renamePair.get() == self->pairName.get());
 				ASSERT(updatedPairEntry.id == self->tenantId);
 				CODE_PROBE(true, "marking pair tenant in removing state");
 				updatedPairEntry.tenantState = TenantState::REMOVING;
@@ -1813,6 +1781,19 @@ struct RenameTenantImpl {
 			throw tenant_not_found();
 		}
 
+		if (oldTenantEntry.get().id != self->tenantId) {
+			// The tenant must have been removed simultaneously
+			CODE_PROBE(true, "Metacluster rename old tenant ID mismatch");
+			throw tenant_removed();
+		}
+
+		// If marked for deletion, abort the rename
+		// newTenantEntry.get().tenantState == TenantState::REMOVING is already checked above
+		if (oldTenantEntry.get().tenantState == TenantState::REMOVING) {
+			CODE_PROBE(true, "Metacluster rename candidates marked for deletion");
+			throw tenant_removed();
+		}
+
 		// Check cluster capacity. If we would exceed the amount due to temporary extra tenants
 		// then we deny the rename request altogether.
 		int64_t clusterTenantCount = wait(ManagementClusterMetadata::clusterTenantCount.getD(
@@ -1850,19 +1831,6 @@ struct RenameTenantImpl {
 				CODE_PROBE(true, "Metacluster unable to proceed with rename operation");
 				throw invalid_tenant_state();
 			}
-		}
-
-		if (oldTenantEntry.get().id != self->tenantId) {
-			// The tenant must have been removed simultaneously
-			CODE_PROBE(true, "Metacluster rename old tenant ID mismatch");
-			throw tenant_removed();
-		}
-
-		// If marked for deletion, abort the rename
-		// newTenantEntry.get().tenantState == TenantState::REMOVING is already checked above
-		if (oldTenantEntry.get().tenantState == TenantState::REMOVING) {
-			CODE_PROBE(true, "Metacluster rename candidates marked for deletion");
-			throw tenant_removed();
 		}
 
 		TenantMapEntry updatedOldEntry = oldTenantEntry.get();
