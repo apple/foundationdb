@@ -331,7 +331,7 @@ class UpgradeTest:
             # correct asan annotations so that it shouldn't produce any false positives.
             if line.endswith(
                 "WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false "
-                "positives in some cases! "
+                "positives in some cases!"
             ):
                 continue
             if err_cnt < error_limit:
