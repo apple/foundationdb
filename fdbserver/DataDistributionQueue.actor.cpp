@@ -544,7 +544,7 @@ struct DDQueue {
 			for (int i = 0; i < item.size(); ++i) {
 				if (std::accumulate(item[i].cbegin(), item[i].cend(), 0) > 0) {
 					// "PQSD" corresponding to CounterType
-					event->detail(RelocateReason(i).toString() + "_PQSD", toString(item[i]));
+					event->detail(RelocateReason(i).toString() + "PQSD", toString(item[i]));
 				}
 			}
 		}

@@ -165,7 +165,7 @@ CPU utilization. This metric is in a positive relationship with “FinishedQueri
   ```
   ) for different relocation reason (`Other`, `RebalanceDisk` and so on) in different phase within `DD_QUEUE_COUNTER_REFRESH_INTERVAL` (default 60) seconds. For example, 
   ```xml
-  <Event Severity="10" Time="1659974950.984176" DateTime="2022-08-08T16:09:10Z" Type="DDQueueServerCounter" ID="0000000000000000" ServerId="0000000000000004" Other_PQSD="0 1 3 2" RebalanceDisk_PQSD="0 0 1 4" RebalanceRead_PQSD="2 0 0 5" MergeShard_PQSD="0 0 1 0" SizeSplit_PQSD="0 0 5 0" WriteSplit_PQSD="1 0 0 0" ThreadID="9733255463206053180" Machine="0.0.0.0:0" LogGroup="default" Roles="TS" />
+  <Event Severity="10" Time="1659974950.984176" DateTime="2022-08-08T16:09:10Z" Type="DDQueueServerCounter" ID="0000000000000000" ServerId="0000000000000004" OtherPQSD="0 1 3 2" RebalanceDiskPQSD="0 0 1 4" RebalanceReadPQSD="2 0 0 5" MergeShardPQSD="0 0 1 0" SizeSplitPQSD="0 0 5 0" WriteSplitPQSD="1 0 0 0" ThreadID="9733255463206053180" Machine="0.0.0.0:0" LogGroup="default" Roles="TS" />
   ```
   `RebalanceRead_PQSD="2 0 0 5"` means server `0000000000000004` has been selected as for read balancing for twice, but it's not queued and executed yet. This server also has been a destination for read balancing for 5 times in the past 1 min. Note that the field will be skipped if all 4 numbers are 0. To avoid spammy traces, if is enabled with knob `DD_QUEUE_COUNTER_SUMMARIZE = true`, event `DDQueueServerCounterTooMany` will summarize the unreported servers that involved in launched relocations (aka. `LaunchedSource`, `LaunchedDest` count are non-zero):
     ```xml
