@@ -5769,7 +5769,9 @@ double Transaction::getBackoff(int errCode) {
 	returnedBackoff *= deterministicRandom()->random01();
 
 	// Set backoff for next time
-	if (errCode == error_code_proxy_memory_limit_exceeded) {
+	if (errCode == error_code_commit_proxy_memory_limit_exceeded ||
+	    errCode == error_code_grv_proxy_memory_limit_exceeded) {
+
 		backoff = std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->RESOURCE_CONSTRAINED_MAX_BACKOFF);
 	} else {
 		backoff = std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, trState->options.maxBackoff);
@@ -6153,8 +6155,11 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 	}
 	try {
 		if (CLIENT_BUGGIFY) {
-			throw deterministicRandom()->randomChoice(std::vector<Error>{
-			    not_committed(), transaction_too_old(), proxy_memory_limit_exceeded(), commit_unknown_result() });
+			throw deterministicRandom()->randomChoice(std::vector<Error>{ not_committed(),
+			                                                              transaction_too_old(),
+			                                                              commit_proxy_memory_limit_exceeded(),
+			                                                              grv_proxy_memory_limit_exceeded(),
+			                                                              commit_unknown_result() });
 		}
 
 		if (req.tagSet.present() && trState->options.priority < TransactionPriority::IMMEDIATE) {
@@ -6320,7 +6325,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			throw;
 		} else {
 			if (e.code() != error_code_transaction_too_old && e.code() != error_code_not_committed &&
-			    e.code() != error_code_database_locked && e.code() != error_code_proxy_memory_limit_exceeded &&
+			    e.code() != error_code_database_locked && e.code() != error_code_commit_proxy_memory_limit_exceeded &&
+			    e.code() != error_code_grv_proxy_memory_limit_exceeded &&
 			    e.code() != error_code_batch_transaction_throttled && e.code() != error_code_tag_throttled &&
 			    e.code() != error_code_process_behind && e.code() != error_code_future_version &&
 			    e.code() != error_code_tenant_not_found) {
@@ -7210,14 +7216,15 @@ Future<Void> Transaction::onError(Error const& e) {
 		return client_invalid_operation();
 	}
 	if (e.code() == error_code_not_committed || e.code() == error_code_commit_unknown_result ||
-	    e.code() == error_code_database_locked || e.code() == error_code_proxy_memory_limit_exceeded ||
-	    e.code() == error_code_process_behind || e.code() == error_code_batch_transaction_throttled ||
-	    e.code() == error_code_tag_throttled) {
+	    e.code() == error_code_database_locked || e.code() == error_code_commit_proxy_memory_limit_exceeded ||
+	    e.code() == error_code_grv_proxy_memory_limit_exceeded || e.code() == error_code_process_behind ||
+	    e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled) {
 		if (e.code() == error_code_not_committed)
 			++trState->cx->transactionsNotCommitted;
 		else if (e.code() == error_code_commit_unknown_result)
 			++trState->cx->transactionsMaybeCommitted;
-		else if (e.code() == error_code_proxy_memory_limit_exceeded)
+		else if (e.code() == error_code_commit_proxy_memory_limit_exceeded ||
+		         e.code() == error_code_grv_proxy_memory_limit_exceeded)
 			++trState->cx->transactionsResourceConstrained;
 		else if (e.code() == error_code_process_behind)
 			++trState->cx->transactionsProcessBehind;

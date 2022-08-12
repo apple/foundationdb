@@ -513,7 +513,7 @@ ACTOR Future<Void> getRate(UID myID,
 // Respond with an error to the GetReadVersion request when the GRV limit is hit.
 void proxyGRVThresholdExceeded(const GetReadVersionRequest* req, GrvProxyStats* stats) {
 	++stats->txnRequestErrors;
-	req->reply.sendError(proxy_memory_limit_exceeded());
+	req->reply.sendError(grv_proxy_memory_limit_exceeded());
 	if (req->priority == TransactionPriority::IMMEDIATE) {
 		TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceededSystem").suppressFor(60);
 	} else if (req->priority == TransactionPriority::DEFAULT) {
