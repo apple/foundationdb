@@ -1371,6 +1371,42 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 	return reSnapshotIdx;
 }
 
+ACTOR Future<BlobFileIndex> reSnapshotNoCheck(Reference<BlobWorkerData> bwData,
+                                              Reference<BlobConnectionProvider> bstore,
+                                              Reference<GranuleMetadata> metadata,
+                                              UID granuleID,
+                                              Future<BlobFileIndex> lastDeltaBeforeSnapshot) {
+	BlobFileIndex lastDeltaIdx = wait(lastDeltaBeforeSnapshot);
+	state Version reSnapshotVersion = lastDeltaIdx.version;
+	wait(delay(0, TaskPriority::BlobWorkerUpdateFDB));
+
+	CODE_PROBE(true, "re-snapshotting without BM check because still on old change feed!");
+
+	if (BW_DEBUG) {
+		fmt::print("Granule [{0} - {1}) re-snapshotting @ {2} WITHOUT checking with BM, because it is still on old "
+		           "change feed!\n",
+		           metadata->keyRange.begin.printable(),
+		           metadata->keyRange.end.printable(),
+		           reSnapshotVersion);
+	}
+
+	TraceEvent(SevDebug, "BlobGranuleReSnapshotOldFeed", bwData->id)
+	    .detail("Granule", metadata->keyRange)
+	    .detail("Version", reSnapshotVersion);
+
+	// wait for file updater to make sure that last delta file is in the metadata before
+	while (metadata->files.deltaFiles.empty() || metadata->files.deltaFiles.back().version < reSnapshotVersion) {
+		wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+	}
+
+	std::vector<GranuleFiles> toSnapshot;
+	toSnapshot.push_back(metadata->files);
+	BlobFileIndex reSnapshotIdx =
+	    wait(compactFromBlob(bwData, bstore, metadata, granuleID, toSnapshot, reSnapshotVersion));
+
+	return reSnapshotIdx;
+}
+
 // wait indefinitely to tell manager to re-evaluate this split, until the granule is revoked
 ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
                                           UID granuleID,
@@ -2412,8 +2448,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			// yet
 
 			// If we have enough delta files, try to re-snapshot
-			if (snapshotEligible && metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT &&
-			    metadata->pendingDeltaVersion >= startState.changeFeedStartVersion) {
+			if (snapshotEligible && metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) {
 				if (BW_DEBUG && !inFlightFiles.empty()) {
 					fmt::print("Granule [{0} - {1}) ready to re-snapshot at {2} after {3} > {4} bytes, "
 					           "waiting for "
@@ -2441,13 +2476,19 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					previousFuture = Future<BlobFileIndex>(metadata->files.deltaFiles.back());
 				}
 				int64_t versionsSinceLastSnapshot = metadata->pendingDeltaVersion - metadata->pendingSnapshotVersion;
-				Future<BlobFileIndex> inFlightBlobSnapshot = checkSplitAndReSnapshot(bwData,
-				                                                                     bstore,
-				                                                                     metadata,
-				                                                                     startState.granuleID,
-				                                                                     metadata->bytesInNewDeltaFiles,
-				                                                                     previousFuture,
-				                                                                     versionsSinceLastSnapshot);
+				Future<BlobFileIndex> inFlightBlobSnapshot;
+				if (metadata->pendingDeltaVersion >= startState.changeFeedStartVersion) {
+					inFlightBlobSnapshot = checkSplitAndReSnapshot(bwData,
+					                                               bstore,
+					                                               metadata,
+					                                               startState.granuleID,
+					                                               metadata->bytesInNewDeltaFiles,
+					                                               previousFuture,
+					                                               versionsSinceLastSnapshot);
+				} else {
+					inFlightBlobSnapshot =
+					    reSnapshotNoCheck(bwData, bstore, metadata, startState.granuleID, previousFuture);
+				}
 				inFlightFiles.push_back(InFlightFile(inFlightBlobSnapshot, metadata->pendingDeltaVersion, 0, true));
 				pendingSnapshots++;
 
