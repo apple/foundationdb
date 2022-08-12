@@ -44,6 +44,7 @@ enum limitReason_t {
 	storage_server_durability_lag, // 10
 	storage_server_list_fetch_failed,
 	blob_worker_lag,
+	blob_worker_missing,
 	limitReason_t_end
 };
 
@@ -104,9 +105,7 @@ struct RatekeeperLimits {
 	int64_t lastDurabilityLag;
 	double durabilityLagLimit;
 
-	int64_t bwLagTargetVersions;
-	double bwLagLimit;
-	double bwLagTime;
+	double bwLagTarget;
 
 	TransactionPriority priority;
 	std::string context;
@@ -121,7 +120,7 @@ struct RatekeeperLimits {
 	                 int64_t logSpringBytes,
 	                 double maxVersionDifference,
 	                 int64_t durabilityLagTargetVersions,
-	                 int64_t bwLagTargetVersions);
+	                 double bwLagTarget);
 };
 
 class Ratekeeper {
@@ -135,6 +134,18 @@ class Ratekeeper {
 
 		double lastUpdateTime{ 0.0 };
 		double lastTagPushTime{ 0.0 };
+		Version version{ 0 };
+	};
+
+	struct VersionInfo {
+		int64_t totalTransactions;
+		int64_t batchTransactions;
+		double created;
+
+		VersionInfo(int64_t totalTransactions, int64_t batchTransactions, double created)
+		  : totalTransactions(totalTransactions), batchTransactions(batchTransactions), created(created) {}
+
+		VersionInfo() : totalTransactions(0), batchTransactions(0), created(0.0) {}
 	};
 
 	UID id;
@@ -160,10 +171,10 @@ class Ratekeeper {
 	RatekeeperLimits batchLimits;
 
 	Deque<double> actualTpsHistory;
-	Version minBlobWorkerVersion;
-	Version minBlobWorkerGRV;
-	double minBlobWorkerTime;
-	double minBlobWorkerRate;
+	Version maxVersion;
+	double blobWorkerTime;
+	std::map<Version, Ratekeeper::VersionInfo> version_transactions;
+	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
 	Optional<Key> remoteDC;
 
 	Ratekeeper(UID id, Database db);

@@ -661,14 +661,13 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DURABILITY_LAG_REDUCTION_RATE,                      0.9999 );
 	init( DURABILITY_LAG_INCREASE_RATE,                        1.001 );
 	init( STORAGE_SERVER_LIST_FETCH_TIMEOUT,                    20.0 );
-	init( TARGET_BW_LAG_VERSIONS,                               60e6 );
-	init( TARGET_BW_LAG_VERSIONS_BATCH,                         30e6 );
-	init( TARGET_BW_LAG_VERSIONS_UPDATE,                        15e6 );
-	init( BW_LAG_UNLIMITED_THRESHOLD,                           15e6 );
-	init( INITIAL_BW_LAG_MULTIPLIER,                            1.02 );
-	init( BW_LAG_REDUCTION_RATE,                               0.999 );
-	init( BW_LAG_INCREASE_RATE,                                1.001 );
-	init( BW_LAG_DELAY,                                          5.0 );
+	init( TARGET_BW_LAG,                                        50.0 );
+	init( TARGET_BW_LAG_BATCH,                                  20.0 );
+	init( TARGET_BW_LAG_UPDATE,                                  9.0 );
+	init( MIN_BW_HISTORY,                                         10 );
+	init( BW_ESTIMATION_INTERVAL,                               10.0 );
+	init( BW_LAG_INCREASE_AMOUNT,                                1.1 );
+	init( BW_LAG_DECREASE_AMOUNT,                                0.9 );
 	init( BW_FETCH_WORKERS_INTERVAL,                             5.0 );
 	init( BW_RW_LOGGING_INTERVAL,                                5.0 );
 
