@@ -613,7 +613,7 @@ struct TenantManagementWorkload : TestWorkload {
 				Version version = wait(tr->getReadVersion());
 				return version;
 			} catch (Error& e) {
-				if (e.code() == error_code_proxy_memory_limit_exceeded ||
+				if (e.code() == error_code_grv_proxy_memory_limit_exceeded ||
 				    e.code() == error_code_batch_transaction_throttled) {
 					wait(tr->onError(e));
 				} else {
@@ -744,7 +744,7 @@ struct TenantManagementWorkload : TestWorkload {
 							       operationType == OperationType::MANAGEMENT_DATABASE);
 							ASSERT(retried);
 							break;
-						} else if (e.code() == error_code_proxy_memory_limit_exceeded ||
+						} else if (e.code() == error_code_grv_proxy_memory_limit_exceeded ||
 						           e.code() == error_code_batch_transaction_throttled) {
 							// GRV proxy returns an error
 							wait(tr->onError(e));

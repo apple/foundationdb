@@ -881,7 +881,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled)
 					throw;
-				if (e.code() == error_code_proxy_memory_limit_exceeded ||
+				if (e.code() == error_code_grv_proxy_memory_limit_exceeded ||
 				    e.code() == error_code_batch_transaction_throttled) {
 					wait(tx->onError(e));
 				} else {
