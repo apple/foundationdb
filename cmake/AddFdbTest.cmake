@@ -142,7 +142,7 @@ function(add_fdb_test)
       ${VALGRIND_OPTION}
       ${ADD_FDB_TEST_TEST_FILES}
       WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
-    set_tests_properties("${test_name}" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
+    set_tests_properties("${test_name}" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
     get_filename_component(test_dir_full ${first_file} DIRECTORY)
     if(NOT ${test_dir_full} STREQUAL "")
       get_filename_component(test_dir ${test_dir_full} NAME)
@@ -451,7 +451,7 @@ function(add_fdbclient_test)
     # default timeout
     set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 300)
   endif()
-  set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
+  set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
 endfunction()
 
 # Creates a cluster file for a nonexistent cluster before running the specified command
@@ -485,7 +485,7 @@ function(add_unavailable_fdbclient_test)
     # default timeout
     set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 60)
   endif()
-  set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
+  set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
 endfunction()
 
 # Creates 3 distinct clusters before running the specified command.
