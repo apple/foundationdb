@@ -1278,32 +1278,6 @@ void DatabaseContext::registerSpecialKeysImpl(SpecialKeySpace::MODULE module,
 ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
 ACTOR Future<Optional<Value>> getJSON(Database db);
 
-struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeReadImpl {
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
-	                             KeyRangeRef kr,
-	                             GetRangeLimits limitsHint) const override {
-		if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
-			Key prefix = Key(getKeyRange().begin);
-			return map(getWorkerInterfaces(ryw->getDatabase()->getConnectionRecord()),
-			           [prefix = prefix, kr = KeyRange(kr)](const RangeResult& in) {
-				           RangeResult result;
-				           for (const auto& [k_, v] : in) {
-					           auto k = k_.withPrefix(prefix);
-					           if (kr.contains(k))
-						           result.push_back_deep(result.arena(), KeyValueRef(k, v));
-				           }
-
-				           std::sort(result.begin(), result.end(), KeyValueRef::OrderByKey{});
-				           return result;
-			           });
-		} else {
-			return RangeResult();
-		}
-	}
-
-	explicit WorkerInterfacesSpecialKeyImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
-};
-
 struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,

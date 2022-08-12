@@ -98,20 +98,56 @@ ACTOR Future<Void> verifyAndAddInterface(std::map<Key, std::pair<Value, ClientLe
 	return Void();
 }
 
+void addInterfaces(RangeResult& kvs, std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
+	for (const auto& kv : kvs) {
+		// addInterfs.push_back(verifyAndAddInterface(address_interface, connectLock, it));
+		ClientWorkerInterface workerInterf;
+		try {
+			// the interface is back-ward compatible, thus if parsing failed, it needs to upgrade cli version
+			workerInterf = BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
+		} catch (Error& e) {
+			fprintf(stderr, "Error: %s; CLI version is too old, please update to use a newer version\n", e.what());
+			return;
+		}
+		ClientLeaderRegInterface leaderInterf(workerInterf.address());
+		StringRef ip_port =
+		    (kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key)
+		        .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
+		(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
+
+		if (workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
+			Key full_ip_port2 =
+			    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
+			StringRef ip_port2 = full_ip_port2.endsWith(LiteralStringRef(":tls"))
+			                         ? full_ip_port2.removeSuffix(LiteralStringRef(":tls"))
+			                         : full_ip_port2;
+			(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
+		}
+	}
+}
+
 ACTOR Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
-                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
+                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
+                                       bool verify) {
+	if (verify) {
+		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		tr->set(workerInterfacesVerifyOptionSpecialKey, ValueRef());
+	}
 	// Hold the reference to the standalone's memory
 	state ThreadFuture<RangeResult> kvsFuture = tr->getRange(
 	    KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0")),
 	    CLIENT_KNOBS->TOO_MANY);
-	RangeResult kvs = wait(safeThreadFutureToFuture(kvsFuture));
+	state RangeResult kvs = wait(safeThreadFutureToFuture(kvsFuture));
 	ASSERT(!kvs.more);
-	auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
-	std::vector<Future<Void>> addInterfs;
-	for (auto it : kvs) {
-		addInterfs.push_back(verifyAndAddInterface(address_interface, connectLock, it));
+	if (verify) {
+		// remove the option
+		tr->clear(workerInterfacesVerifyOptionSpecialKey);
 	}
-	wait(waitForAll(addInterfs));
+	// auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
+	// std::vector<Future<Void>> addInterfs;
+	addInterfaces(kvs, address_interface);
+	
+	// wait(waitForAll(addInterfs));
 	return Void();
 }
 

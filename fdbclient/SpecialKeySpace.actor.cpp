@@ -133,7 +133,8 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::actorLineageApiComman
 std::set<std::string> SpecialKeySpace::options = { "excluded/force",
 	                                               "failed/force",
 	                                               "excluded_locality/force",
-	                                               "failed_locality/force" };
+	                                               "failed_locality/force",
+	                                               "worker_interfaces/verify" };
 
 std::set<std::string> SpecialKeySpace::tracingOptions = { kTracingTransactionIdKey, kTracingTokenKey };
 
@@ -2752,6 +2753,62 @@ Key FailedLocalitiesRangeImpl::encode(const KeyRef& key) const {
 Future<Optional<std::string>> FailedLocalitiesRangeImpl::commit(ReadYourWritesTransaction* ryw) {
 	// exclude locality with failed option as true.
 	return excludeLocalityCommitActor(ryw, true);
+}
+
+ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
+ACTOR Future<bool> verifyInterfaceActor(Reference<FlowLock> connectLock, ClientWorkerInterface workerInterf);
+
+ACTOR static Future<RangeResult> workerInterfacesImplGetRangeActor(ReadYourWritesTransaction* ryw,
+                                                                   KeyRef prefix,
+                                                                   KeyRangeRef kr) {
+	if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
+		state RangeResult interfs = wait(getWorkerInterfaces(ryw->getDatabase()->getConnectionRecord()));
+		auto verify = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
+		    "worker_interfaces", "verify")];
+		state RangeResult result;
+		if (verify.first) {
+			// if verify option is set, we try to talk to every worker and only returns those we can talk to
+			Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+			state std::vector<Future<bool>> verifyInterfs;
+			for (const auto& [k_, value] : interfs) {
+				auto k = k_.withPrefix(prefix);
+				if (kr.contains(k)) {
+					ClientWorkerInterface workerInterf =
+					    BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion());
+					verifyInterfs.push_back(verifyInterfaceActor(connectLock, workerInterf));
+				} else {
+					verifyInterfs.push_back(false);
+				}
+			}
+			wait(waitForAll(verifyInterfs));
+			state int index;
+			for (index = 0; index < interfs.size(); index++) {
+				if (verifyInterfs[index].get()) {
+					// if we can establish a connection, add it into the result
+					result.push_back_deep(result.arena(),
+					                      KeyValueRef(interfs[index].key.withPrefix(prefix), interfs[index].value));
+				}
+			}
+		} else {
+			for (const auto& [k_, v] : interfs) {
+				auto k = k_.withPrefix(prefix);
+				if (kr.contains(k))
+					result.push_back_deep(result.arena(), KeyValueRef(k, v));
+			}
+		}
+		std::sort(result.begin(), result.end(), KeyValueRef::OrderByKey{});
+		return result;
+	} else {
+		return RangeResult();
+	}
+}
+
+WorkerInterfacesSpecialKeyImpl::WorkerInterfacesSpecialKeyImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
+
+Future<RangeResult> WorkerInterfacesSpecialKeyImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                             KeyRangeRef kr,
+                                                             GetRangeLimits limitsHint) const {
+	return workerInterfacesImplGetRangeActor(ryw, getKeyRange().begin, kr);
 }
 
 ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,

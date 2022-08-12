@@ -120,6 +120,7 @@ extern const KeyRangeRef processClassSourceSpecialKeyRange;
 extern const KeyRangeRef processClassTypeSpecialKeyRange;
 // Other special keys
 inline const KeyRef errorMsgSpecialKey = LiteralStringRef("\xff\xff/error_message");
+inline const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/management/options/worker_interfaces/verify"_sr;
 // help functions (Copied from fdbcli.actor.cpp)
 
 // get all workers' info
@@ -134,7 +135,8 @@ void printUsage(StringRef command);
 ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
 // Using \xff\xff/worker_interfaces/ special key, get all worker interfaces
 ACTOR Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
-                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
+                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
+                                       bool verify = false);
 // Deserialize \xff\xff/worker_interfaces/<address>:=<ClientInterface> k-v pair and verify by a RPC call
 ACTOR Future<Void> verifyAndAddInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
                                          Reference<FlowLock> connectLock,
