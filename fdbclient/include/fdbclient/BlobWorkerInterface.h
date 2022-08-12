@@ -39,6 +39,7 @@ struct BlobWorkerInterface {
 	RequestStream<struct GranuleStatusStreamRequest> granuleStatusStreamRequest;
 	RequestStream<struct HaltBlobWorkerRequest> haltBlobWorker;
 	RequestStream<struct FlushGranuleRequest> flushGranuleRequest;
+	RequestStream<struct MinBlobVersionRequest> minBlobVersionRequest;
 
 	struct LocalityData locality;
 	UID myId;
@@ -57,6 +58,7 @@ struct BlobWorkerInterface {
 		streams.push_back(granuleStatusStreamRequest.getReceiver());
 		streams.push_back(haltBlobWorker.getReceiver());
 		streams.push_back(flushGranuleRequest.getReceiver());
+		streams.push_back(minBlobVersionRequest.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 	UID id() const { return myId; }
@@ -85,6 +87,8 @@ struct BlobWorkerInterface {
 			    RequestStream<struct HaltBlobWorkerRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(6));
 			flushGranuleRequest =
 			    RequestStream<struct FlushGranuleRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(7));
+			minBlobVersionRequest =
+			    RequestStream<struct MinBlobVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(8));
 		}
 	}
 };
@@ -139,6 +143,28 @@ struct RevokeBlobRangeRequest {
 	}
 };
 
+struct MinBlobVersionReply {
+	constexpr static FileIdentifier file_identifier = 6857512;
+	Version version;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version);
+	}
+};
+
+struct MinBlobVersionRequest {
+	constexpr static FileIdentifier file_identifier = 4833278;
+	Version grv;
+	ReplyPromise<MinBlobVersionReply> reply;
+
+	MinBlobVersionRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, grv, reply);
+	}
+};
 /*
  * Continue: Blob worker should continue handling a granule that was evaluated for a split
  * Normal: Blob worker should open the granule and start processing it
