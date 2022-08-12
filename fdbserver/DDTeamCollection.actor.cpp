@@ -949,11 +949,13 @@ public:
 								}
 							}
 
-							RelocateShard rs(shards[i], maxPriority, RelocateReason::OTHER);
+							RelocateShard rs(
+							    shards[i], maxPriority, RelocateReason::OTHER, deterministicRandom()->randomUniqueID());
 
 							self->output.send(rs);
 							TraceEvent("SendRelocateToDDQueue", self->distributorId)
 							    .suppressFor(1.0)
+							    .detail("TraceId", rs.traceId)
 							    .detail("ServerPrimary", self->primary)
 							    .detail("ServerTeam", team->getDesc())
 							    .detail("KeyBegin", rs.keys.begin)

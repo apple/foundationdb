@@ -36,7 +36,38 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-enum class RelocateReason { OTHER = 0, REBALANCE_DISK, REBALANCE_READ };
+// SOMEDAY: whether it's possible to combine RelocateReason and DataMovementReason together?
+// RelocateReason to DataMovementReason is one-to-N mapping
+class RelocateReason {
+public:
+	enum Value : int8_t { OTHER = 0, REBALANCE_DISK, REBALANCE_READ, MERGE_SHARD, SIZE_SPLIT, WRITE_SPLIT, __COUNT };
+	RelocateReason(Value v) : value(v) { ASSERT(value != __COUNT); }
+	explicit RelocateReason(int v) : value((Value)v) { ASSERT(value != __COUNT); }
+	std::string toString() const {
+		switch (value) {
+		case OTHER:
+			return "Other";
+		case REBALANCE_DISK:
+			return "RebalanceDisk";
+		case REBALANCE_READ:
+			return "RebalanceRead";
+		case MERGE_SHARD:
+			return "MergeShard";
+		case SIZE_SPLIT:
+			return "SizeSplit";
+		case WRITE_SPLIT:
+			return "WriteSplit";
+		case __COUNT:
+			ASSERT(false);
+		}
+		return "";
+	}
+	operator int() const { return (int)value; }
+	constexpr static int8_t typeCount() { return (int)__COUNT; }
+
+private:
+	Value value;
+};
 
 // One-to-one relationship to the priority knobs
 enum class DataMovementReason {
@@ -95,16 +126,18 @@ struct RelocateShard {
 	RelocateReason reason;
 	DataMovementReason moveReason;
 
+	UID traceId; // track the lifetime of this relocate shard
+
 	// Initialization when define is a better practice. We should avoid assignment of member after definition.
 	// static RelocateShard emptyRelocateShard() { return {}; }
 
-	RelocateShard(KeyRange const& keys, DataMovementReason moveReason, RelocateReason reason)
+	RelocateShard(KeyRange const& keys, DataMovementReason moveReason, RelocateReason reason, UID traceId = UID())
 	  : keys(keys), priority(dataMovementPriority(moveReason)), cancelled(false), dataMoveId(anonymousShardId),
-	    reason(reason), moveReason(moveReason) {}
+	    reason(reason), moveReason(moveReason), traceId(traceId) {}
 
-	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason)
+	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason, UID traceId = UID())
 	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason),
-	    moveReason(priorityToDataMovementReason(priority)) {}
+	    moveReason(priorityToDataMovementReason(priority)), traceId(traceId) {}
 
 	bool isRestore() const { return this->dataMove != nullptr; }
 
