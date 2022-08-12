@@ -89,6 +89,7 @@ class UpgradeTest:
         self.tester_proc = None
         self.output_pipe = None
         self.ctrl_pipe = None
+        self.determine_api_version()
 
     # Download all old binaries required for testing the specified upgrade path
     def download_old_binaries(self):
@@ -159,7 +160,7 @@ class UpgradeTest:
     def __enter__(self):
         print("Starting cluster version {}".format(self.cluster_version))
         self.cluster.start_cluster()
-        self.cluster.create_database(enable_tenants=False)
+        self.cluster.create_database(enable_tenants=(self.api_version >= 720))
         return self
 
     def __exit__(self, xc_type, exc_value, traceback):
@@ -176,7 +177,6 @@ class UpgradeTest:
     def exec_workload(self, test_file):
         self.tester_retcode = 1
         try:
-            self.determine_api_version()
             cmd_args = [
                 self.tester_bin,
                 "--cluster-file",
