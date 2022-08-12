@@ -1057,7 +1057,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			DEBUG_KEY_RANGE("BlobWorkerFDBSnapshot", readVersion, metadata->keyRange, bwData->id);
 
 			// initial snapshot is committed in fdb, we can pop the change feed up to this version
-			inFlightPops->push_back(bwData->db->popChangeFeedMutations(cfKey, readVersion));
+			inFlightPops->push_back(bwData->db->popChangeFeedMutations(cfKey, readVersion + 1));
 			return snapshotWriter.get();
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled) {
@@ -1534,11 +1534,10 @@ void handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
 		}
 		// FIXME: for a write-hot shard, we could potentially batch these and only pop the largest one after
 		// several have completed
-		// FIXME: we actually want to pop at this version + 1 because pop is exclusive?
 		// FIXME: since this is async, and worker could die, new blob worker that opens granule should probably
 		// kick off an async pop at its previousDurableVersion after opening the granule to guarantee it is
 		// eventually popped?
-		Future<Void> popFuture = bwData->db->popChangeFeedMutations(cfKey, completedDeltaFile.version);
+		Future<Void> popFuture = bwData->db->popChangeFeedMutations(cfKey, completedDeltaFile.version + 1);
 		// Do pop asynchronously
 		inFlightPops.push_back(popFuture);
 	}
