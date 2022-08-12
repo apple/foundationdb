@@ -22,7 +22,8 @@ Each special key that existed before api version 630 is its own module. These ar
 #. ``\xff\xff/cluster_file_path`` - See :ref:`cluster file client access <cluster-file-client-access>`
 #. ``\xff\xff/status/json`` - See :doc:`Machine-readable status <mr-status>`
 
-#. ``\xff\xff/worker_interfaces`` - key as the worker's network address and value as the serialized ClientWorkerInterface
+#. ``\xff\xff/worker_interfaces`` - key as the worker's network address and value as the serialized ClientWorkerInterface, not transactional
+
 Prior to api version 630, it was also possible to read a range starting at ``\xff\xff/worker_interfaces``. This is mostly an implementation detail of fdbcli,
 but it's available in api version 630 as a module with prefix ``\xff\xff/worker_interfaces/``.
 
