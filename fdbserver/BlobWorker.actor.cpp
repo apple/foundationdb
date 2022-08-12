@@ -1959,6 +1959,13 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			                                                   metadata->keyRange,
 			                                                   bwData->changeFeedStreamReplyBufferSize,
 			                                                   false);
+			// in case previous worker died before popping the latest version, start another pop
+			if (startState.previousDurableVersion != invalidVersion) {
+				ASSERT(startState.previousDurableVersion >= startState.changeFeedStartVersion);
+				Future<Void> popFuture =
+				    bwData->db->popChangeFeedMutations(cfKey, startState.previousDurableVersion + 1);
+				inFlightPops.push_back(popFuture);
+			}
 		}
 
 		// Start actors BEFORE setting new change feed data to ensure the change feed data is properly
