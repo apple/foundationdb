@@ -104,7 +104,7 @@ void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int pr
 }
 
 Future<Void> StorageWiggler::onCheck() const {
-	return delay(MIN_ON_CHECK_DELAY_SEC) || pqCanCheck.onTrigger();
+	return delay(MIN_ON_CHECK_DELAY_SEC);
 }
 
 // add server to wiggling queue
@@ -133,7 +133,6 @@ void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataTy
 		return;
 	}
 	wiggle_pq.update(handle, std::make_pair(metadata, serverId));
-	pqCanCheck.trigger();
 }
 
 bool StorageWiggler::eligible(const UID& serverId, const StorageMetadataType& metadata) const {

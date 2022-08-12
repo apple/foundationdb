@@ -492,11 +492,6 @@ struct StorageWiggleMetrics {
 
 struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	static constexpr double MIN_ON_CHECK_DELAY_SEC = 5.0;
-
-private:
-	mutable Debouncer pqCanCheck{ MIN_ON_CHECK_DELAY_SEC };
-
-public:
 	enum State : uint8_t { INVALID = 0, RUN = 1, PAUSE = 2 };
 
 	DDTeamCollection const* teamCollection;

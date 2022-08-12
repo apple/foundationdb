@@ -5886,19 +5886,23 @@ TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithMinAge") {
 		auto id = wiggler.getNextServerId();
 		ASSERT(id == correctResult[i]);
 	}
-	std::cout << "Finish Initial Check. Start test getNextWigglingServerID() loop...\n";
-	// test the getNextWigglingServerID() loop
-	state UID id = wait(DDTeamCollectionImpl::getNextWigglingServerID(Reference<StorageWiggler>::addRef(&wiggler)));
-	ASSERT(id == UID(1, 0));
+
+	{
+		std::cout << "Finish Initial Check. Start test getNextWigglingServerID() loop...\n";
+		// test the getNextWigglingServerID() loop
+		UID id = wait(DDTeamCollectionImpl::getNextWigglingServerID(Reference<StorageWiggler>::addRef(&wiggler)));
+		ASSERT(id == UID(1, 0));
+	}
 
 	std::cout << "Test after addServer() ...\n";
 	state Future<UID> nextFuture =
 	    DDTeamCollectionImpl::getNextWigglingServerID(Reference<StorageWiggler>::addRef(&wiggler));
+	ASSERT(!nextFuture.isReady());
 	startTime = now();
 	StorageMetadataType metadata(startTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 100.0,
 	                             KeyValueStoreType::SSD_BTREE_V2);
 	wiggler.addServer(UID(5, 0), metadata);
-	ASSERT(!nextFuture.isReady() || now() - metadata.createdTime >= SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC);
+	ASSERT(!nextFuture.isReady());
 
 	std::cout << "Test after updateServer() ...\n";
 	StorageWiggler* ptr = &wiggler;
@@ -5909,8 +5913,8 @@ TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithMinAge") {
 		                                            KeyValueStoreType::SSD_BTREE_V2));
 	    },
 	    delay(5.0)));
-	wait(store(id, nextFuture));
+	wait(success(nextFuture));
 
-	ASSERT(id == UID(5, 0));
+	ASSERT(nextFuture.get() == UID(5, 0));
 	return Void();
 }
