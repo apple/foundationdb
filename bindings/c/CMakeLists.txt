@@ -339,6 +339,7 @@ if(NOT WIN32)
         --upgrade-path "7.2.0" "7.3.0" "7.2.0"
         --process-number 3
       )
+  set_tests_properties("fdb_c_upgrade_to_future_version" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
 
   if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
     add_test(NAME fdb_c_upgrade_single_threaded_630api
