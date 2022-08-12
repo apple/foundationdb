@@ -2174,7 +2174,8 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 				TraceEvent("SnapCommitProxy_DDSnapResponseError")
 				    .errorUnsuppressed(e)
 				    .detail("SnapPayload", snapReq.snapPayload)
-				    .detail("SnapUID", snapReq.snapUID);
+				    .detail("SnapUID", snapReq.snapUID)
+					.detail("Retry", snapReqRetry);
 				// Retry if we have network issues
 				if (e.code() != error_code_request_maybe_delivered ||
 				    ++snapReqRetry > SERVER_KNOBS->SNAP_NETWORK_FAILURE_RETRY_LIMIT)

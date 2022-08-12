@@ -806,7 +806,8 @@ ACTOR Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stre
 		if (reply.isError()) {
 			TraceEvent("SnapDataDistributor_ReqError")
 			    .errorUnsuppressed(reply.getError())
-			    .detail("Peer", stream.getEndpoint().getPrimaryAddress());
+			    .detail("Peer", stream.getEndpoint().getPrimaryAddress())
+			    .detail("Retry", snapReqRetry);
 			if (reply.getError().code() != error_code_request_maybe_delivered ||
 			    ++snapReqRetry > SERVER_KNOBS->SNAP_NETWORK_FAILURE_RETRY_LIMIT)
 				return ErrorOr<Void>(reply.getError());
@@ -912,6 +913,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 			// get coordinators
 			Optional<Value> coordinators = wait(tr.get(coordinatorsKey));
 			if (!coordinators.present()) {
+				CODE_PROBE(true, "Failed to read the coordinatorsKey");
 				throw operation_failed();
 			}
 			ClusterConnectionString ccs(coordinators.get().toString());
@@ -1002,7 +1004,8 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 
 		TraceEvent("SnapDataDistributor_GotStatefulWorkers")
 		    .detail("SnapPayload", snapReq.snapPayload)
-		    .detail("SnapUID", snapReq.snapUID);
+		    .detail("SnapUID", snapReq.snapUID)
+		    .detail("StorageFaultTolerance", storageFaultTolerance);
 
 		// we need to snapshot storage nodes before snapshot any tlogs
 		std::vector<Future<ErrorOr<Void>>> storageSnapReqs;
@@ -1014,7 +1017,6 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		}
 		wait(waitForMost(storageSnapReqs, storageFaultTolerance, snap_storage_failed()));
 		TraceEvent("SnapDataDistributor_AfterSnapStorage")
-		    .detail("FaultTolerance", storageFaultTolerance)
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
 
@@ -1337,14 +1339,14 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
 				auto& snapUID = snapReq.snapUID;
 				if (ddSnapReqResultMap.count(snapUID)) {
-					CODE_PROBE(true, "Data distributor received a duplicate finished snap request");
+					CODE_PROBE(true, "Data distributor received a duplicate finished snapshot request");
 					auto result = ddSnapReqResultMap[snapUID];
 					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
 					TraceEvent("RetryFinishedDistributorSnapRequest")
 					    .detail("SnapUID", snapUID)
 					    .detail("Result", result.isError() ? result.getError().code() : 0);
 				} else if (ddSnapReqMap.count(snapReq.snapUID)) {
-					CODE_PROBE(true, "Data distributor received a duplicate ongoing snap request");
+					CODE_PROBE(true, "Data distributor received a duplicate ongoing snapshot request");
 					TraceEvent("RetryOngoingDistributorSnapRequest").detail("SnapUID", snapUID);
 					ASSERT(snapReq.snapPayload == ddSnapReqMap[snapUID].snapPayload);
 					ddSnapReqMap[snapUID] = snapReq;
