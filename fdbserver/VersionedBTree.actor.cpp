@@ -9740,7 +9740,9 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state int maxValueSize = params.getInt("maxValueSize").orDefault(randomSize(pageSize * 25));
 	state int maxCommitSize =
 	    params.getInt("maxCommitSize")
-	        .orDefault(shortTest ? 1000 : randomSize(std::min<int>((maxKeySize + maxValueSize) * 20000, 10e6)));
+	        .orDefault(shortTest
+	                       ? 1000
+	                       : randomSize((int)std::min<int64_t>((maxKeySize + maxValueSize) * int64_t(20000), 10e6)));
 	state double setExistingKeyProbability =
 	    params.getDouble("setExistingKeyProbability").orDefault(deterministicRandom()->random01() * .5);
 	state double clearProbability =
@@ -10273,7 +10275,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 
 		state int v;
 		state ExtentQueueEntry<16> e;
-		generateRandomData(e.entry, 16);
+		deterministicRandom()->randomBytes(e.entry, 16);
 		state int sinceYield = 0;
 		for (v = 1; v <= numEntries; ++v) {
 			// Sometimes do a commit

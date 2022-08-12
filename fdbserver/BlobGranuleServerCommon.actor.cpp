@@ -120,6 +120,20 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Database cx, UID granuleID) {
 	}
 }
 
+ACTOR Future<ForcedPurgeState> getForcePurgedState(Transaction* tr, KeyRange keyRange) {
+	// because map is coalesced, if the result returns more than 1, they must be alternating
+	RangeResult values =
+	    wait(krmGetRanges(tr, blobGranuleForcePurgedKeys.begin, keyRange, 3, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+
+	ASSERT(!values.empty());
+	if (values.size() > 2) {
+		ASSERT(values[0].value != values[1].value);
+		return ForcedPurgeState::SomePurged;
+	} else {
+		return values[0].value == LiteralStringRef("1") ? ForcedPurgeState::AllPurged : ForcedPurgeState::NonePurged;
+	}
+}
+
 // Normally a beginVersion != 0 means the caller wants all mutations between beginVersion and readVersion, instead of
 // the latest snapshot before readVersion + deltas after the snapshot. When canCollapse is set, the beginVersion is
 // essentially just an optimization hint. The caller is still concerned with reconstructing rows at readVersion, it just
@@ -128,6 +142,10 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Database cx, UID granuleID) {
 // key range, the granule may have a snapshot file at version X, where beginVersion < X <= readVersion. In this case, if
 // the number of bytes in delta files between beginVersion and X is larger than the snapshot file at version X, it is
 // strictly more efficient (in terms of files and bytes read) to just use the snapshot file at version X instead.
+//
+// To assist BlobGranule file (snapshot and/or delta) file encryption, the routine while populating snapshot and/or
+// delta files, constructs BlobFilePointerRef->cipherKeysMeta field. Approach avoids this method to be defined as an
+// ACTOR, as fetching desired EncryptionKey may potentially involve reaching out to EncryptKeyProxy or external KMS.
 void GranuleFiles::getFiles(Version beginVersion,
                             Version readVersion,
                             bool canCollapse,
@@ -195,8 +213,12 @@ void GranuleFiles::getFiles(Version beginVersion,
 	}
 
 	while (deltaF != deltaFiles.end() && deltaF->version < readVersion) {
-		chunk.deltaFiles.emplace_back_deep(
-		    replyArena, deltaF->filename, deltaF->offset, deltaF->length, deltaF->fullFileLength);
+		chunk.deltaFiles.emplace_back_deep(replyArena,
+		                                   deltaF->filename,
+		                                   deltaF->offset,
+		                                   deltaF->length,
+		                                   deltaF->fullFileLength,
+		                                   deltaF->cipherKeysMeta);
 		deltaBytesCounter += deltaF->length;
 		ASSERT(lastIncluded < deltaF->version);
 		lastIncluded = deltaF->version;
@@ -204,8 +226,12 @@ void GranuleFiles::getFiles(Version beginVersion,
 	}
 	// include last delta file that passes readVersion, if it exists
 	if (deltaF != deltaFiles.end() && lastIncluded < readVersion) {
-		chunk.deltaFiles.emplace_back_deep(
-		    replyArena, deltaF->filename, deltaF->offset, deltaF->length, deltaF->fullFileLength);
+		chunk.deltaFiles.emplace_back_deep(replyArena,
+		                                   deltaF->filename,
+		                                   deltaF->offset,
+		                                   deltaF->length,
+		                                   deltaF->fullFileLength,
+		                                   deltaF->cipherKeysMeta);
 		deltaBytesCounter += deltaF->length;
 		lastIncluded = deltaF->version;
 	}

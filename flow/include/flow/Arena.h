@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <boost/functional/hash.hpp>
 #include <stdint.h>
+#include <string_view>
 #include <string>
 #include <cstring>
 #include <limits>
@@ -532,7 +533,9 @@ public:
 		return substr(0, size() - s.size());
 	}
 
-	std::string toString() const { return std::string((const char*)data, length); }
+	std::string toString() const { return std::string(reinterpret_cast<const char*>(data), length); }
+
+	std::string_view toStringView() const { return std::string_view(reinterpret_cast<const char*>(data), length); }
 
 	static bool isPrintable(char c) { return c > 32 && c < 127; }
 	inline std::string printable() const;
@@ -848,6 +851,40 @@ inline bool operator<=(const StringRef& lhs, const StringRef& rhs) {
 }
 inline bool operator>=(const StringRef& lhs, const StringRef& rhs) {
 	return !(lhs < rhs);
+}
+
+typedef uint64_t Word;
+// Get the number of prefix bytes that are the same between a and b, up to their common length of cl
+static inline int commonPrefixLength(uint8_t const* ap, uint8_t const* bp, int cl) {
+	int i = 0;
+	const int wordEnd = cl - sizeof(Word) + 1;
+
+	for (; i < wordEnd; i += sizeof(Word)) {
+		Word a = *(Word*)ap;
+		Word b = *(Word*)bp;
+		if (a != b) {
+			return i + ctzll(a ^ b) / 8;
+		}
+		ap += sizeof(Word);
+		bp += sizeof(Word);
+	}
+
+	for (; i < cl; i++) {
+		if (*ap != *bp) {
+			return i;
+		}
+		++ap;
+		++bp;
+	}
+	return cl;
+}
+
+static inline int commonPrefixLength(const StringRef& a, const StringRef& b) {
+	return commonPrefixLength(a.begin(), b.begin(), std::min(a.size(), b.size()));
+}
+
+static inline int commonPrefixLength(const StringRef& a, const StringRef& b, int skipLen) {
+	return commonPrefixLength(a.begin() + skipLen, b.begin() + skipLen, std::min(a.size(), b.size()) - skipLen);
 }
 
 // This trait is used by VectorRef to determine if deep copy constructor should recursively

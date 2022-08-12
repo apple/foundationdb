@@ -49,7 +49,7 @@ All operations performed within a tenant transaction will occur within the tenan
 Raw access
 ----------
 
-When operating in the tenant mode ``required_experimental``, transactions are not ordinarily permitted to run without using a tenant. In order to access the system keys or perform maintenance operations that span multiple tenants, it is required to use the ``RAW_ACCESS`` transaction option to access the global key-space. It is an error to specify ``RAW_ACCESS`` on a transaction that is configured to use a tenant.
+When operating in the tenant mode ``required_experimental`` or using a metacluster, transactions are not ordinarily permitted to run without using a tenant. In order to access the system keys or perform maintenance operations that span multiple tenants, it is required to use the ``RAW_ACCESS`` transaction option to access the global key-space. It is an error to specify ``RAW_ACCESS`` on a transaction that is configured to use a tenant.
 
 .. note :: Setting the ``READ_SYSTEM_KEYS`` or ``ACCESS_SYSTEM_KEYS`` options implies ``RAW_ACCESS`` for your transaction.
 

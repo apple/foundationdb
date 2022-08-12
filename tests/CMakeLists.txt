@@ -128,10 +128,12 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BackupCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectnessClean.toml)
-  add_fdb_test(TEST_FILES fast/BlobGranuleVerifySmall.toml)
-  add_fdb_test(TEST_FILES fast/BlobGranuleVerifySmallClean.toml)
   add_fdb_test(TEST_FILES fast/BlobGranuleVerifyAtomicOps.toml)
   add_fdb_test(TEST_FILES fast/BlobGranuleVerifyCycle.toml)
+  add_fdb_test(TEST_FILES fast/BlobGranuleVerifySmall.toml)
+  add_fdb_test(TEST_FILES fast/BlobGranuleVerifySmallClean.toml)
+  # TODO: test occasionally times out due to too many change feed shard parts
+  add_fdb_test(TEST_FILES fast/BlobGranuleMoveVerifyCycle.toml IGNORE)
   add_fdb_test(TEST_FILES fast/CacheTest.toml)
   add_fdb_test(TEST_FILES fast/CloggedSideband.toml)
   add_fdb_test(TEST_FILES fast/CompressionUtilsUnit.toml)
@@ -140,6 +142,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/CycleAndLock.toml)
   add_fdb_test(TEST_FILES fast/CycleTest.toml)
   add_fdb_test(TEST_FILES fast/ChangeFeeds.toml)
+  add_fdb_test(TEST_FILES fast/ChangeFeedOperations.toml)
+  add_fdb_test(TEST_FILES fast/ChangeFeedOperationsMove.toml)
   add_fdb_test(TEST_FILES fast/DataLossRecovery.toml)
   add_fdb_test(TEST_FILES fast/EncryptionOps.toml)
   # TODO: fix failures and renable the test
@@ -178,6 +182,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/SwizzledRollbackSideband.toml)
   add_fdb_test(TEST_FILES fast/SystemRebootTestCycle.toml)
   add_fdb_test(TEST_FILES fast/TaskBucketCorrectness.toml)
+  add_fdb_test(TEST_FILES fast/TenantCycle.toml)
   add_fdb_test(TEST_FILES fast/TimeKeeperCorrectness.toml)
   add_fdb_test(TEST_FILES fast/TxnStateStoreCycleTest.toml)
   add_fdb_test(TEST_FILES fast/UDP.toml)
@@ -187,15 +192,16 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/WriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/WriteDuringReadClean.toml)
   add_fdb_test(TEST_FILES noSim/RandomUnitTests.toml UNIT)
-  add_fdb_test(TEST_FILES noSim/SystemDataTest.toml UNIT)
   if (WITH_ROCKSDB_EXPERIMENTAL)
-    add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml)
+    add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml)
+    add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml)
   else()
     add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml IGNORE)
     add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml IGNORE)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml IGNORE)
+    add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml  IGNORE)
   endif()
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
   add_fdb_test(TEST_FILES rare/ClogUnclog.toml)
@@ -253,11 +259,11 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_6.3.13/CycleTestRestart-1.txt
                restarting/from_6.3.13/CycleTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.3.13/DrUpgradeRestart-1.txt
-               restarting/from_6.3.13/DrUpgradeRestart-2.txt)
-  add_fdb_test(
     TEST_FILES restarting/from_6.3.13/StorefrontTestRestart-1.txt
                restarting/from_6.3.13/StorefrontTestRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_6.3.13_until_7.2.0/DrUpgradeRestart-1.txt
+               restarting/from_6.3.13_until_7.2.0/DrUpgradeRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
                restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
@@ -288,6 +294,9 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0/VersionVectorEnableRestart-1.toml
                restarting/from_7.1.0/VersionVectorEnableRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.2.0/DrUpgradeRestart-1.txt
+               restarting/from_7.2.0/DrUpgradeRestart-2.txt)
 
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
@@ -312,6 +321,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/DiskFailureCycle.toml)
   add_fdb_test(TEST_FILES slow/FastTriggeredWatches.toml)
   add_fdb_test(TEST_FILES slow/LowLatencyWithFailures.toml)
+  add_fdb_test(TEST_FILES slow/MetaclusterManagement.toml)
   add_fdb_test(TEST_FILES slow/MoveKeysClean.toml)
   add_fdb_test(TEST_FILES slow/MoveKeysSideband.toml)
   add_fdb_test(TEST_FILES slow/RyowCorrectness.toml)
@@ -325,7 +335,9 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/SwizzledRollbackTimeLapse.toml)
   add_fdb_test(TEST_FILES slow/SwizzledRollbackTimeLapseIncrement.toml)
   add_fdb_test(TEST_FILES slow/SwizzledTenantManagement.toml)
+  add_fdb_test(TEST_FILES slow/SwizzledTenantManagementMetacluster.toml)
   add_fdb_test(TEST_FILES slow/TenantManagement.toml)
+  add_fdb_test(TEST_FILES slow/TenantManagementConcurrency.toml)
   add_fdb_test(TEST_FILES slow/VersionStampBackupToDB.toml)
   add_fdb_test(TEST_FILES slow/VersionStampSwitchover.toml)
   add_fdb_test(TEST_FILES slow/WriteDuringReadAtomicRestore.toml)
@@ -370,7 +382,7 @@ if(WITH_PYTHON)
   if(NOT OPEN_FOR_IDE)
     add_test(
       NAME command_line_argument_test
-      COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/argument_parsing/test_argument_parsing.py ${CMAKE_BINARY_DIR}
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/argument_parsing/test_argument_parsing.py ${CMAKE_BINARY_DIR}
     )
   endif()
 

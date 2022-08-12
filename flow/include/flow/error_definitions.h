@@ -97,6 +97,7 @@ ERROR( unexpected_encoding_type, 1073, "Page content decoding failed" )
 ERROR( encryption_key_not_found, 1074, "Encryption key not found" )
 ERROR( data_move_cancelled, 1075, "Data move was cancelled" )
 ERROR( data_move_dest_team_not_found, 1076, "Dest team was not found for data move" )
+ERROR( blob_worker_full, 1077, "Blob worker cannot take on more granule assignments" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -228,11 +229,27 @@ ERROR( tenant_name_required, 2130, "Tenant name must be specified to access data
 ERROR( tenant_not_found, 2131, "Tenant does not exist" )
 ERROR( tenant_already_exists, 2132, "A tenant with the given name already exists" )
 ERROR( tenant_not_empty, 2133, "Cannot delete a non-empty tenant" )
-ERROR( invalid_tenant_name, 2134, "Tenant name cannot begin with \\xff");
-ERROR( tenant_prefix_allocator_conflict, 2135, "The database already has keys stored at the prefix allocated for the tenant");
-ERROR( tenants_disabled, 2136, "Tenants have been disabled in the cluster");
-ERROR( unknown_tenant, 2137, "Tenant is not available from this server")
-ERROR( illegal_tenant_access, 2138, "Illegal tenant access")
+ERROR( invalid_tenant_name, 2134, "Tenant name cannot begin with \\xff" )
+ERROR( tenant_prefix_allocator_conflict, 2135, "The database already has keys stored at the prefix allocated for the tenant" )
+ERROR( tenants_disabled, 2136, "Tenants have been disabled in the cluster" )
+ERROR( unknown_tenant, 2137, "Tenant is not available from this server" )
+ERROR( illegal_tenant_access, 2138, "Illegal tenant access" )
+ERROR( invalid_tenant_group_name, 2139, "Tenant group name cannot begin with \\xff" )
+ERROR( invalid_tenant_configuration, 2140, "Tenant configuration is invalid" )
+ERROR( cluster_no_capacity, 2141, "Cluster does not have capacity to perform the specified operation" )
+ERROR( tenant_removed, 2142, "The tenant was removed" )
+ERROR( invalid_tenant_state, 2143, "Operation cannot be applied to tenant in its current state" )
+
+ERROR( invalid_cluster_name, 2160, "Data cluster name cannot begin with \\xff" )
+ERROR( invalid_metacluster_operation, 2161, "Metacluster operation performed on non-metacluster" )
+ERROR( cluster_already_exists, 2162, "A data cluster with the given name already exists" )
+ERROR( cluster_not_found, 2163, "Data cluster does not exist" )
+ERROR( cluster_not_empty, 2164, "Cluster must be empty" )
+ERROR( cluster_already_registered, 2165, "Data cluster is already registered with a metacluster" )
+ERROR( metacluster_no_capacity, 2166, "Metacluster does not have capacity to create new tenants" )
+ERROR( management_cluster_invalid_access, 2167, "Standard transactions cannot be run against the management cluster" )
+ERROR( tenant_creation_permanently_failed, 2168, "The tenant creation did not complete in a timely manner and has permanently failed" )
+ERROR( cluster_removed, 2169, "The cluster is being removed from the metacluster" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

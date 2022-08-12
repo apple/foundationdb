@@ -41,6 +41,7 @@
 #include "fdbserver/TenantCache.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WaitFailure.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/BooleanParam.h"
@@ -102,13 +103,16 @@ void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int pr
 	}
 }
 
+Future<Void> StorageWiggler::onCheck() const {
+	return delay(MIN_ON_CHECK_DELAY_SEC);
+}
+
 // add server to wiggling queue
 void StorageWiggler::addServer(const UID& serverId, const StorageMetadataType& metadata) {
 	// std::cout << "size: " << pq_handles.size() << " add " << serverId.toString() << " DC: "
 	//           << teamCollection->isPrimary() << std::endl;
 	ASSERT(!pq_handles.count(serverId));
 	pq_handles[serverId] = wiggle_pq.emplace(metadata, serverId);
-	nonEmpty.set(true);
 }
 
 void StorageWiggler::removeServer(const UID& serverId) {
@@ -119,7 +123,6 @@ void StorageWiggler::removeServer(const UID& serverId) {
 		pq_handles.erase(serverId);
 		wiggle_pq.erase(handle);
 	}
-	nonEmpty.set(!wiggle_pq.empty());
 }
 
 void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataType& metadata) {
@@ -132,9 +135,16 @@ void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataTy
 	wiggle_pq.update(handle, std::make_pair(metadata, serverId));
 }
 
+bool StorageWiggler::eligible(const UID& serverId, const StorageMetadataType& metadata) const {
+	return metadata.wrongConfigured || (now() - metadata.createdTime > SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC);
+}
+
 Optional<UID> StorageWiggler::getNextServerId() {
 	if (!wiggle_pq.empty()) {
 		auto [metadata, id] = wiggle_pq.top();
+		if (!eligible(id, metadata)) {
+			return {};
+		}
 		wiggle_pq.pop();
 		pq_handles.erase(id);
 		return Optional<UID>(id);
@@ -290,6 +300,7 @@ ACTOR Future<Void> pollMoveKeysLock(Database cx, MoveKeysLock lock, const DDEnab
 }
 
 struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
+public:
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	UID ddId;
 	PromiseStream<Future<Void>> addActor;
@@ -311,7 +322,9 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 	// fully-functional.
 	DDTeamCollection* teamCollection;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
-	PromiseStream<RelocateShard> relocationProducer, relocationConsumer; // comsumer is a yield stream from producer
+	// consumer is a yield stream from producer. The RelocateShard is pushed into relocationProducer and popped from
+	// relocationConsumer (by DDQueue)
+	PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
 
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id)
 	  : dbInfo(db), ddId(id), txnProcessor(nullptr), initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
@@ -436,11 +449,7 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 		return Void();
 	}
 
-	// Resume inflight relocations from the previous DD
-	// TODO: add a test to verify the inflight relocation correctness and measure the memory usage with 4 million shards
-	ACTOR static Future<Void> resumeRelocations(Reference<DataDistributor> self) {
-		ASSERT(self->shardsAffectedByTeamFailure); // has to be allocated
-
+	ACTOR static Future<Void> resumeFromShards(Reference<DataDistributor> self, bool traceShard) {
 		state int shard = 0;
 		for (; shard < self->initData->shards.size() - 1; shard++) {
 			const DDShardInfo& iShard = self->initData->shards[shard];
@@ -452,8 +461,8 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 			if (self->configuration.usableRegions > 1) {
 				teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteSrc, false));
 			}
-			if (g_network->isSimulated()) {
-				TraceEvent("DDInitShard")
+			if (traceShard) {
+				TraceEvent(SevDebug, "DDInitShard")
 				    .detail("Keys", keys)
 				    .detail("PrimarySrc", describe(iShard.primarySrc))
 				    .detail("RemoteSrc", describe(iShard.remoteSrc))
@@ -472,20 +481,27 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 				if (!unhealthy && self->configuration.usableRegions > 1) {
 					unhealthy = iShard.remoteSrc.size() != self->configuration.storageTeamSize;
 				}
-				self->relocationProducer.send(RelocateShard(keys,
-				                                            unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY
-				                                                      : SERVER_KNOBS->PRIORITY_RECOVER_MOVE,
-				                                            RelocateReason::OTHER));
+				self->relocationProducer.send(
+				    RelocateShard(keys,
+				                  unhealthy ? DataMovementReason::TEAM_UNHEALTHY : DataMovementReason::RECOVER_MOVE,
+				                  RelocateReason::OTHER));
 			}
 
 			wait(yield(TaskPriority::DataDistribution));
 		}
+		return Void();
+	}
 
+	// TODO: unit test needed
+	ACTOR static Future<Void> resumeFromDataMoves(Reference<DataDistributor> self, Future<Void> readyToStart) {
 		state KeyRangeMap<std::shared_ptr<DataMove>>::iterator it = self->initData->dataMoveMap.ranges().begin();
+
+		wait(readyToStart);
+
 		for (; it != self->initData->dataMoveMap.ranges().end(); ++it) {
 			const DataMoveMetaData& meta = it.value()->meta;
-			if (it.value()->isCancelled() || (it.value()->valid && !CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
-				RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE, RelocateReason::OTHER);
+			if (it.value()->isCancelled() || (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
+				RelocateShard rs(meta.range, DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 				rs.dataMoveId = meta.id;
 				rs.cancelled = true;
 				self->relocationProducer.send(rs);
@@ -494,7 +510,7 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 				TraceEvent(SevDebug, "DDInitFoundDataMove", self->ddId).detail("DataMove", meta.toString());
 				ASSERT(meta.range == it.range());
 				// TODO: Persist priority in DataMoveMetaData.
-				RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE, RelocateReason::OTHER);
+				RelocateShard rs(meta.range, DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 				rs.dataMoveId = meta.id;
 				rs.dataMove = it.value();
 				std::vector<ShardsAffectedByTeamFailure::Team> teams;
@@ -516,6 +532,16 @@ struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 			}
 		}
 		return Void();
+	}
+
+	// Resume inflight relocations from the previous DD
+	// TODO: The initialDataDistribution is unused once resumeRelocations and
+	// DataDistributionTracker::trackInitialShards are done. In the future, we can release the object to save memory
+	// usage if it turns out to be a problem.
+	Future<Void> resumeRelocations() {
+		ASSERT(shardsAffectedByTeamFailure); // has to be allocated
+		Future<Void> shardsReady = resumeFromShards(Reference<DataDistributor>::addRef(this), g_network->isSimulated());
+		return resumeFromDataMoves(Reference<DataDistributor>::addRef(this), shardsReady);
 	}
 };
 
@@ -564,18 +590,19 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 			state Promise<Void> readyToStart;
+
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
-			wait(DataDistributor::resumeRelocations(self));
+			wait(self->resumeRelocations());
 
-			std::vector<TeamCollectionInterface> tcis;
+			std::vector<TeamCollectionInterface> tcis; // primary and remote region interface
+			Reference<AsyncVar<bool>> anyZeroHealthyTeams; // true if primary or remote has zero healthy team
+			std::vector<Reference<AsyncVar<bool>>> zeroHealthyTeams; // primary and remote
 
-			Reference<AsyncVar<bool>> anyZeroHealthyTeams;
-			std::vector<Reference<AsyncVar<bool>>> zeroHealthyTeams;
 			tcis.push_back(TeamCollectionInterface());
 			zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
 			int storageTeamSize = self->configuration.storageTeamSize;
 
-			std::vector<Future<Void>> actors;
+			std::vector<Future<Void>> actors; // the container of ACTORs
 			if (self->configuration.usableRegions > 1) {
 				tcis.push_back(TeamCollectionInterface());
 				storageTeamSize = 2 * self->configuration.storageTeamSize;
@@ -792,24 +819,6 @@ ACTOR Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stre
 			break;
 	}
 	return ErrorOr<Void>(Void());
-}
-
-ACTOR static Future<Void> waitForMost(std::vector<Future<ErrorOr<Void>>> futures,
-                                      int faultTolerance,
-                                      Error e,
-                                      double waitMultiplierForSlowFutures = 1.0) {
-	state std::vector<Future<bool>> successFutures;
-	state double startTime = now();
-	successFutures.reserve(futures.size());
-	for (const auto& future : futures) {
-		successFutures.push_back(fmap([](auto const& result) { return result.present(); }, future));
-	}
-	bool success = wait(quorumEqualsTrue(successFutures, successFutures.size() - faultTolerance));
-	if (!success) {
-		throw e;
-	}
-	wait(delay((now() - startTime) * waitMultiplierForSlowFutures) || waitForAll(successFutures));
-	return Void();
 }
 
 ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getStatefulWorkers(
@@ -1371,65 +1380,33 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 
 namespace data_distribution_test {
 
-static Future<ErrorOr<Void>> goodTestFuture(double duration) {
-	return tag(delay(duration), ErrorOr<Void>(Void()));
+inline DDShardInfo doubleToNoLocationShardInfo(double d, bool hasDest) {
+	DDShardInfo res(doubleToTestKey(d), anonymousShardId, anonymousShardId);
+	res.primarySrc.emplace_back((uint64_t)d, 0);
+	if (hasDest) {
+		res.primaryDest.emplace_back((uint64_t)d + 1, 0);
+		res.hasDest = true;
+	}
+	return res;
 }
 
-static Future<ErrorOr<Void>> badTestFuture(double duration, Error e) {
-	return tag(delay(duration), ErrorOr<Void>(e));
+inline int getRandomShardCount() {
+#if defined(USE_SANITIZER)
+	return deterministicRandom()->randomInt(1000, 24000); // 24000 * MAX_SHARD_SIZE = 12TB
+#else
+	return deterministicRandom()->randomInt(1000, CLIENT_KNOBS->TOO_MANY); // 2000000000; OOM
+#endif
 }
 
 } // namespace data_distribution_test
 
-TEST_CASE("/DataDistribution/WaitForMost") {
-	state std::vector<Future<ErrorOr<Void>>> futures;
-	{
-		futures = { data_distribution_test::goodTestFuture(1),
-			        data_distribution_test::goodTestFuture(2),
-			        data_distribution_test::goodTestFuture(3) };
-		wait(waitForMost(futures, 1, operation_failed(), 0.0)); // Don't wait for slowest future
-		ASSERT(!futures[2].isReady());
-	}
-	{
-		futures = { data_distribution_test::goodTestFuture(1),
-			        data_distribution_test::goodTestFuture(2),
-			        data_distribution_test::goodTestFuture(3) };
-		wait(waitForMost(futures, 0, operation_failed(), 0.0)); // Wait for all futures
-		ASSERT(futures[2].isReady());
-	}
-	{
-		futures = { data_distribution_test::goodTestFuture(1),
-			        data_distribution_test::goodTestFuture(2),
-			        data_distribution_test::goodTestFuture(3) };
-		wait(waitForMost(futures, 1, operation_failed(), 1.0)); // Wait for slowest future
-		ASSERT(futures[2].isReady());
-	}
-	{
-		futures = { data_distribution_test::goodTestFuture(1),
-			        data_distribution_test::goodTestFuture(2),
-			        data_distribution_test::badTestFuture(1, success()) };
-		wait(waitForMost(futures, 1, operation_failed(), 1.0)); // Error ignored
-	}
-	{
-		futures = { data_distribution_test::goodTestFuture(1),
-			        data_distribution_test::goodTestFuture(2),
-			        data_distribution_test::badTestFuture(1, success()) };
-		try {
-			wait(waitForMost(futures, 0, operation_failed(), 1.0));
-			ASSERT(false);
-		} catch (Error& e) {
-			ASSERT_EQ(e.code(), error_code_operation_failed);
-		}
-	}
-	return Void();
-}
-
-TEST_CASE("/DataDistributor/StorageWiggler/Order") {
+TEST_CASE("/DataDistribution/StorageWiggler/Order") {
 	StorageWiggler wiggler(nullptr);
-	wiggler.addServer(UID(1, 0), StorageMetadataType(1, KeyValueStoreType::SSD_BTREE_V2));
-	wiggler.addServer(UID(2, 0), StorageMetadataType(2, KeyValueStoreType::MEMORY, true));
-	wiggler.addServer(UID(3, 0), StorageMetadataType(3, KeyValueStoreType::SSD_ROCKSDB_V1, true));
-	wiggler.addServer(UID(4, 0), StorageMetadataType(4, KeyValueStoreType::SSD_BTREE_V2));
+	double startTime = now() - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC - 0.4;
+	wiggler.addServer(UID(1, 0), StorageMetadataType(startTime, KeyValueStoreType::SSD_BTREE_V2));
+	wiggler.addServer(UID(2, 0), StorageMetadataType(startTime + 0.1, KeyValueStoreType::MEMORY, true));
+	wiggler.addServer(UID(3, 0), StorageMetadataType(startTime + 0.2, KeyValueStoreType::SSD_ROCKSDB_V1, true));
+	wiggler.addServer(UID(4, 0), StorageMetadataType(startTime + 0.3, KeyValueStoreType::SSD_BTREE_V2));
 
 	std::vector<UID> correctOrder{ UID(2, 0), UID(3, 0), UID(1, 0), UID(4, 0) };
 	for (int i = 0; i < correctOrder.size(); ++i) {
@@ -1438,5 +1415,46 @@ TEST_CASE("/DataDistributor/StorageWiggler/Order") {
 		ASSERT(id == correctOrder[i]);
 	}
 	ASSERT(!wiggler.getNextServerId().present());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Initialization/ResumeFromShard") {
+	state Reference<AsyncVar<ServerDBInfo> const> dbInfo;
+	state Reference<DataDistributor> self(new DataDistributor(dbInfo, UID()));
+
+	self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
+	self->initData = makeReference<InitialDataDistribution>();
+	self->configuration.usableRegions = 1;
+	self->configuration.storageTeamSize = 1;
+
+	// add DDShardInfo
+	self->shardsAffectedByTeamFailure->setCheckMode(
+	    ShardsAffectedByTeamFailure::CheckMode::ForceNoCheck); // skip check when build
+	int shardNum = data_distribution_test::getRandomShardCount();
+	std::cout << "generating " << shardNum << " shards...\n";
+	for (int i = 1; i <= SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM; ++i) {
+		self->initData->shards.emplace_back(data_distribution_test::doubleToNoLocationShardInfo(i, true));
+	}
+	for (int i = SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM + 1; i <= shardNum; ++i) {
+		self->initData->shards.emplace_back(data_distribution_test::doubleToNoLocationShardInfo(i, false));
+	}
+	self->initData->shards.emplace_back(DDShardInfo(allKeys.end));
+	std::cout << "Start resuming...\n";
+	wait(DataDistributor::resumeFromShards(self, false));
+	std::cout << "Start validation...\n";
+	auto relocateFuture = self->relocationProducer.getFuture();
+	for (int i = 0; i < SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM; ++i) {
+		ASSERT(relocateFuture.isReady());
+		auto rs = relocateFuture.pop();
+		ASSERT(rs.isRestore() == false);
+		ASSERT(rs.cancelled == false);
+		ASSERT(rs.dataMoveId == anonymousShardId);
+		ASSERT(rs.priority == SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
+		// std::cout << rs.keys.begin.toString() << " " << self->initData->shards[i].key.toString() << " \n";
+		ASSERT(rs.keys.begin.compare(self->initData->shards[i].key) == 0);
+		ASSERT(rs.keys.end == self->initData->shards[i + 1].key);
+	}
+	self->shardsAffectedByTeamFailure->setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
+	self->shardsAffectedByTeamFailure->check();
 	return Void();
 }

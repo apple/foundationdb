@@ -235,9 +235,11 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	void setWatch(Future<Void> watchFuture);
 };
 
+FDB_DECLARE_BOOLEAN_PARAM(AllowInvalidTenantID);
+
 struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
-	int64_t tenantId = TenantInfo::INVALID_TENANT;
+	Optional<Standalone<StringRef>> authToken;
 	Reference<TransactionLogInfo> trLogInfo;
 	TransactionOptions options;
 
@@ -246,6 +248,13 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	SpanContext spanContext;
 	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
 	bool readVersionObtainedFromGrvProxy;
+
+	// Special flag to skip prepending tenant prefix to mutations and conflict ranges
+	// when a dummy, internal transaction gets commited. The sole purpose of commitDummyTransaction() is to
+	// resolve the state of earlier transaction that returned commit_unknown_result or request_maybe_delivered.
+	// Therefore, the dummy transaction can simply reuse one conflict range of the earlier commit, if it already has
+	// been prefixed.
+	bool skipApplyTenantPrefix = false;
 
 	int numErrors = 0;
 	double startTime = 0;
@@ -270,13 +279,23 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	                 Reference<TransactionLogInfo> trLogInfo);
 
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
-	TenantInfo getTenantInfo();
+	TenantInfo getTenantInfo(AllowInvalidTenantID allowInvalidId = AllowInvalidTenantID::False);
 
 	Optional<TenantName> const& tenant();
 	bool hasTenant() const;
 
+	int64_t tenantId() const { return tenantId_; }
+	void trySetTenantId(int64_t tenantId) {
+		if (tenantId_ == TenantInfo::INVALID_TENANT) {
+			tenantId_ = tenantId;
+		}
+	}
+
+	Future<Void> handleUnknownTenant();
+
 private:
 	Optional<TenantName> tenant_;
+	int64_t tenantId_ = TenantInfo::INVALID_TENANT;
 	bool tenantSet;
 };
 

@@ -96,13 +96,16 @@ func CreatePodClient(logger logr.Logger) (*PodClient, error) {
 
 // retrieveEnvironmentVariables extracts the environment variables we have for
 // an argument into a map.
-func retrieveEnvironmentVariables(argument api.Argument, target map[string]string) {
+func retrieveEnvironmentVariables(monitor *Monitor, argument api.Argument, target map[string]string) {
 	if argument.Source != "" {
-		target[argument.Source] = os.Getenv(argument.Source)
+		value, err := argument.LookupEnv(monitor.CustomEnvironment)
+		if err == nil {
+			target[argument.Source] = value
+		}
 	}
 	if argument.Values != nil {
 		for _, childArgument := range argument.Values {
-			retrieveEnvironmentVariables(childArgument, target)
+			retrieveEnvironmentVariables(monitor, childArgument, target)
 		}
 	}
 }
@@ -112,7 +115,7 @@ func retrieveEnvironmentVariables(argument api.Argument, target map[string]strin
 func (client *PodClient) UpdateAnnotations(monitor *Monitor) error {
 	environment := make(map[string]string)
 	for _, argument := range monitor.ActiveConfiguration.Arguments {
-		retrieveEnvironmentVariables(argument, environment)
+		retrieveEnvironmentVariables(monitor, argument, environment)
 	}
 	environment["BINARY_DIR"] = path.Dir(monitor.ActiveConfiguration.BinaryPath)
 	jsonEnvironment, err := json.Marshal(environment)

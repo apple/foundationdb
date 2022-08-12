@@ -50,7 +50,6 @@ public:
 	bool PEEK_USING_STREAMING;
 	double TLOG_TIMEOUT; // tlog OR commit proxy failure - master's reaction time
 	double TLOG_SLOW_REJOIN_WARN_TIMEOUT_SECS; // Warns if a tlog takes too long to rejoin
-	double RECOVERY_TLOG_SMART_QUORUM_DELAY; // smaller might be better for bug amplification
 	double TLOG_STORAGE_MIN_UPDATE_INTERVAL;
 	double BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL;
 	int DESIRED_TOTAL_BYTES;
@@ -58,10 +57,6 @@ public:
 	double UPDATE_DELAY;
 	int MAXIMUM_PEEK_BYTES;
 	int APPLY_MUTATION_BYTES;
-	int RECOVERY_DATA_BYTE_LIMIT;
-	int BUGGIFY_RECOVERY_DATA_LIMIT;
-	double LONG_TLOG_COMMIT_TIME;
-	int64_t LARGE_TLOG_COMMIT_BYTES;
 	double BUGGIFY_RECOVER_MEMORY_LIMIT;
 	double BUGGIFY_WORKER_REMOVED_MAX_LAG;
 	int64_t UPDATE_STORAGE_BYTE_LIMIT;
@@ -128,11 +123,6 @@ public:
 	int DD_QUEUE_MAX_KEY_SERVERS;
 	int DD_REBALANCE_PARALLELISM;
 	int DD_REBALANCE_RESET_AMOUNT;
-	double BG_DD_MAX_WAIT;
-	double BG_DD_MIN_WAIT;
-	double BG_DD_INCREASE_RATE;
-	double BG_DD_DECREASE_RATE;
-	double BG_DD_SATURATION_DELAY;
 	double INFLIGHT_PENALTY_HEALTHY;
 	double INFLIGHT_PENALTY_REDUNDANT;
 	double INFLIGHT_PENALTY_UNHEALTHY;
@@ -163,6 +153,8 @@ public:
 	int PRIORITY_SPLIT_SHARD;
 
 	// Data distribution
+	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
+
 	double READ_REBALANCE_CPU_THRESHOLD; // read rebalance only happens if the source servers' CPU > threshold
 	int READ_REBALANCE_SRC_PARALLELISM; // the max count a server become a source server within a certain interval
 	int READ_REBALANCE_SHARD_TOPK; // top k shards from which to select randomly for read-rebalance
@@ -193,7 +185,6 @@ public:
 	double SERVER_LIST_DELAY;
 	double RECRUITMENT_IDLE_DELAY;
 	double STORAGE_RECRUITMENT_DELAY;
-	double BLOB_WORKER_RECRUITMENT_DELAY;
 	bool TSS_HACK_IDENTITY_MAPPING;
 	double TSS_RECRUITMENT_TIMEOUT;
 	double TSS_DD_CHECK_INTERVAL;
@@ -232,6 +223,8 @@ public:
 	int DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY;
 	int DD_STORAGE_WIGGLE_PAUSE_THRESHOLD; // How many unhealthy relocations are ongoing will pause storage wiggle
 	int DD_STORAGE_WIGGLE_STUCK_THRESHOLD; // How many times bestTeamStuck accumulate will pause storage wiggle
+	int64_t
+	    DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC; // Minimal age of a correct-configured server before it's chosen to be wiggled
 	bool DD_TENANT_AWARENESS_ENABLED;
 	int TENANT_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantCache is refreshed
 
@@ -399,6 +392,10 @@ public:
 	double RESET_MASTER_DELAY;
 	double RESET_RESOLVER_DELAY;
 
+	double GLOBAL_CONFIG_MIGRATE_TIMEOUT;
+	double GLOBAL_CONFIG_REFRESH_INTERVAL;
+	double GLOBAL_CONFIG_REFRESH_TIMEOUT;
+
 	// Master Server
 	double COMMIT_SLEEP_TIME;
 	double MIN_BALANCE_TIME;
@@ -542,6 +539,8 @@ public:
 	double RATEKEEPER_DEFAULT_LIMIT;
 	double RATEKEEPER_LIMIT_REASON_SAMPLE_RATE;
 	bool RATEKEEPER_PRINT_LIMIT_REASON;
+	double RATEKEEPER_MIN_RATE;
+	double RATEKEEPER_MAX_RATE;
 
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER;
 	int64_t SPRING_BYTES_STORAGE_SERVER;
@@ -585,6 +584,8 @@ public:
 	// Use global tag throttling strategy. i.e. throttle based on the cluster-wide
 	// throughput for tags and their associated quotas.
 	bool GLOBAL_TAG_THROTTLING;
+	// Enforce tag throttling on proxies rather than on clients
+	bool ENFORCE_TAG_THROTTLING_ON_PROXIES;
 	// Minimum number of transactions per second that the global tag throttler must allow for each tag
 	double GLOBAL_TAG_THROTTLING_MIN_RATE;
 	// Used by global tag throttling counters
@@ -655,8 +656,8 @@ public:
 	int FETCH_BLOCK_BYTES;
 	int FETCH_KEYS_PARALLELISM_BYTES;
 	int FETCH_KEYS_PARALLELISM;
+	int FETCH_KEYS_PARALLELISM_FULL;
 	int FETCH_KEYS_LOWER_PRIORITY;
-	int FETCH_CHANGEFEED_PARALLELISM;
 	int SERVE_FETCH_CHECKPOINT_PARALLELISM;
 	int BUGGIFY_BLOCK_BYTES;
 	int64_t STORAGE_RECOVERY_VERSION_LAG_LIMIT;
@@ -665,7 +666,6 @@ public:
 	int STORAGE_COMMIT_BYTES;
 	int STORAGE_FETCH_BYTES;
 	double STORAGE_COMMIT_INTERVAL;
-	double UPDATE_SHARD_VERSION_INTERVAL;
 	int BYTE_SAMPLING_FACTOR;
 	int BYTE_SAMPLING_OVERHEAD;
 	int MAX_STORAGE_SERVER_WATCH_BYTES;
@@ -674,7 +674,6 @@ public:
 	int BYTE_SAMPLE_LOAD_PARALLELISM;
 	double BYTE_SAMPLE_LOAD_DELAY;
 	double BYTE_SAMPLE_START_DELAY;
-	double UPDATE_STORAGE_PROCESS_STATS_INTERVAL;
 	double BEHIND_CHECK_DELAY;
 	int BEHIND_CHECK_COUNT;
 	int64_t BEHIND_CHECK_VERSIONS;
@@ -698,6 +697,7 @@ public:
 	int CHECKPOINT_TRANSFER_BLOCK_BYTES;
 	int QUICK_GET_KEY_VALUES_LIMIT;
 	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
+	bool STORAGE_SERVER_SHARD_AWARE;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -744,7 +744,6 @@ public:
 
 	// Dynamic Knobs (implementation)
 	double COMPACTION_INTERVAL;
-	double UPDATE_NODE_TIMEOUT;
 	double GET_COMMITTED_VERSION_TIMEOUT;
 	double GET_SNAPSHOT_AND_CHANGES_TIMEOUT;
 	double FETCH_CHANGES_TIMEOUT;
@@ -759,14 +758,6 @@ public:
 	int CONFIGURATION_ROWS_TO_FETCH;
 	bool DISABLE_DUPLICATE_LOG_WARNING;
 	double HISTOGRAM_REPORT_INTERVAL;
-
-	// IPager
-	int PAGER_RESERVED_PAGES;
-
-	// IndirectShadowPager
-	int FREE_PAGE_VACUUM_THRESHOLD;
-	int VACUUM_QUEUE_SIZE;
-	int VACUUM_BYTES_PER_SECOND;
 
 	// Timekeeper
 	int64_t TIME_KEEPER_DELAY;
@@ -790,11 +781,9 @@ public:
 	int64_t FASTRESTORE_ROLE_LOGGING_DELAY;
 	int64_t FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL; // How quickly to update process metrics for restore
 	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
-	int64_t FASTRESTORE_APPLYING_PARALLELISM; // number of outstanding txns writing to dest. DB
 	int64_t FASTRESTORE_MONITOR_LEADER_DELAY;
 	int64_t FASTRESTORE_STRAGGLER_THRESHOLD_SECONDS;
 	bool FASTRESTORE_TRACK_REQUEST_LATENCY; // true to track reply latency of each request in a request batch
-	bool FASTRESTORE_TRACK_LOADER_SEND_REQUESTS; // track requests of load send mutations to appliers?
 	int64_t FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT; // threshold when pipelined actors should be delayed
 	int64_t FASTRESTORE_WAIT_FOR_MEMORY_LATENCY;
 	int64_t FASTRESTORE_HEARTBEAT_DELAY; // interval for master to ping loaders and appliers
@@ -876,14 +865,13 @@ public:
 	// FIXME: configure url with database configuration instead of knob eventually
 	std::string BG_URL;
 
-	// whether to use blobRangeKeys or tenants for blob granule range sources
-	std::string BG_RANGE_SOURCE;
 	// Whether to use knobs or EKP for blob metadata and credentials
 	std::string BG_METADATA_SOURCE;
 
 	int BG_SNAPSHOT_FILE_TARGET_BYTES;
-	int BG_SNAPSHOT_FILE_TARGET_CHUNKS;
+	int BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES;
 	int BG_DELTA_FILE_TARGET_BYTES;
+	int BG_DELTA_FILE_TARGET_CHUNK_BYTES;
 	int BG_DELTA_BYTES_BEFORE_COMPACT;
 	int BG_MAX_SPLIT_FANOUT;
 	int BG_MAX_MERGE_FANIN;
@@ -893,12 +881,18 @@ public:
 	bool BG_ENABLE_MERGING;
 	int BG_MERGE_CANDIDATE_THRESHOLD_SECONDS;
 	int BG_MERGE_CANDIDATE_DELAY_SECONDS;
+	int BG_KEY_TUPLE_TRUNCATE_OFFSET;
 
 	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
+	int BLOB_WORKER_RESNAPSHOT_PARALLELISM;
+	int BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM;
+
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
 	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
 	double BLOB_WORKERLIST_FETCH_INTERVAL;
 	double BLOB_WORKER_BATCH_GRV_INTERVAL;
+	bool BLOB_WORKER_DO_REJECT_WHEN_FULL;
+	double BLOB_WORKER_REJECT_WHEN_FULL_THRESHOLD;
 
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN;
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX;

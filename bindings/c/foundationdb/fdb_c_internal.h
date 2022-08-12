@@ -49,6 +49,8 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_shared_state(FDBFuture* 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_create_database_from_connection_string(const char* connection_string,
                                                                                     FDBDatabase** out_database);
 
+DLLEXPORT void fdb_use_future_protocol_version();
+
 #ifdef __cplusplus
 }
 #endif

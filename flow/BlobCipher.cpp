@@ -389,7 +389,7 @@ EncryptBlobCipherAes265Ctr::EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> 
                                                        const EncryptAuthTokenMode mode)
   : ctx(EVP_CIPHER_CTX_new()), textCipherKey(tCipherKey), headerCipherKey(hCipherKey), authTokenMode(mode) {
 	ASSERT(isEncryptHeaderAuthTokenModeValid(mode));
-	generateRandomData(iv, AES_256_IV_LENGTH);
+	deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
 	init();
 }
 
@@ -796,7 +796,7 @@ TEST_CASE("flow/BlobCipher") {
 		BaseCipher(const EncryptCipherDomainId& dId, const EncryptCipherBaseKeyId& kId)
 		  : domainId(dId), len(deterministicRandom()->randomInt(AES_256_KEY_LENGTH / 2, AES_256_KEY_LENGTH + 1)),
 		    keyId(kId), key(std::make_unique<uint8_t[]>(len)) {
-			generateRandomData(key.get(), len);
+			deterministicRandom()->randomBytes(key.get(), len);
 		}
 	};
 
@@ -899,11 +899,11 @@ TEST_CASE("flow/BlobCipher") {
 	Reference<BlobCipherKey> headerCipherKey = cipherKeyCache->getLatestCipherKey(ENCRYPT_HEADER_DOMAIN_ID);
 	const int bufLen = deterministicRandom()->randomInt(786, 2127) + 512;
 	uint8_t orgData[bufLen];
-	generateRandomData(&orgData[0], bufLen);
+	deterministicRandom()->randomBytes(&orgData[0], bufLen);
 
 	Arena arena;
 	uint8_t iv[AES_256_IV_LENGTH];
-	generateRandomData(&iv[0], AES_256_IV_LENGTH);
+	deterministicRandom()->randomBytes(&iv[0], AES_256_IV_LENGTH);
 
 	BlobCipherEncryptHeader headerCopy;
 	// validate basic encrypt followed by decrypt operation for AUTH_MODE_NONE
