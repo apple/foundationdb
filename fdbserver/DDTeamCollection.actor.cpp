@@ -2466,16 +2466,7 @@ public:
 
 		loop {
 			try {
-				// Divide TSS evenly in each DC if there are multiple
-				// TODO would it be better to put all of them in primary DC?
-				targetTSSInDC = self->configuration.desiredTSSCount;
-				if (self->configuration.usableRegions > 1) {
-					targetTSSInDC /= self->configuration.usableRegions;
-					if (self->primary) {
-						// put extras in primary DC if it's uneven
-						targetTSSInDC += (self->configuration.desiredTSSCount % self->configuration.usableRegions);
-					}
-				}
+				targetTSSInDC = self->getTargetTSSInDC();
 				int newTssToRecruit = targetTSSInDC - self->tss_info_by_pair.size() - inProgressTSSCount;
 				// FIXME: Should log this if the recruit count stays the same but the other numbers update?
 				if (newTssToRecruit != tssToRecruit) {
@@ -3256,6 +3247,22 @@ public:
 	}
 
 }; // class DDTeamCollectionImpl
+
+int32_t DDTeamCollection::getTargetTSSInDC() const {
+	int32_t targetTSSInDC = configuration.desiredTSSCount;
+	if (configuration.usableRegions > 1) {
+		targetTSSInDC /= configuration.usableRegions;
+		if (primary) {
+			// put extras in primary DC if it's uneven
+			targetTSSInDC += (configuration.desiredTSSCount % configuration.usableRegions);
+		}
+	}
+	return targetTSSInDC;
+}
+
+bool DDTeamCollection::reachTSSPairTarget() const {
+	return tss_info_by_pair.size() >= getTargetTSSInDC();
+}
 
 Reference<TCMachineTeamInfo> DDTeamCollection::findMachineTeam(
     std::vector<Standalone<StringRef>> const& machineIDs) const {
