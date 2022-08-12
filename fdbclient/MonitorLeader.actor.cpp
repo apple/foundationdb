@@ -669,7 +669,7 @@ void tryInsertIntoSamples(OpenDatabaseRequest::Samples& samples,
                           const NetworkAddress& networkAddress,
                           const Key& traceLogGroup) {
 	++samples.count;
-	if (samples.samples.size() > static_cast<size_t>(CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT)) {
+	if (samples.samples.size() < static_cast<size_t>(CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT)) {
 		samples.samples.insert({ networkAddress, traceLogGroup });
 	}
 }
