@@ -2823,8 +2823,11 @@ public:
 	                                                 Optional<Value> localityKey = Optional<Value>(),
 	                                                 Optional<Value> localityValue = Optional<Value>(),
 	                                                 DDTeamCollection* teamCollection = nullptr) {
+		ASSERT(wiggler->teamCollection == teamCollection);
 		loop {
-			state Optional<UID> id = wiggler->getNextServerId();
+			// when the DC need more
+			state Optional<UID> id =
+			    wiggler->getNextServerId(teamCollection == nullptr || teamCollection->reachTSSPairTarget());
 			if (!id.present()) {
 				wait(wiggler->onCheck());
 				continue;
@@ -5136,6 +5139,7 @@ Future<Void> DDTeamCollection::printSnapshotTeamsInfo(Reference<DDTeamCollection
 }
 
 class DDTeamCollectionUnitTest {
+public:
 	static std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
 	                                                            Reference<IReplicationPolicy> policy,
 	                                                            int processCount) {
@@ -5240,7 +5244,6 @@ class DDTeamCollectionUnitTest {
 		return collection;
 	}
 
-public:
 	ACTOR static Future<Void> AddTeamsBestOf_UseMachineID() {
 		wait(Future<Void>(Void()));
 
@@ -5921,7 +5924,31 @@ TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithMinAge") {
 	    },
 	    delay(5.0)));
 	wait(success(nextFuture));
-
+	ASSERT(now() - startTime < SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 100.0);
 	ASSERT(nextFuture.get() == UID(5, 0));
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithTSS") {
+	state std::unique_ptr<DDTeamCollection> collection =
+	    DDTeamCollectionUnitTest::testMachineTeamCollection(1, Reference<IReplicationPolicy>(new PolicyOne()), 5);
+	state StorageWiggler wiggler(collection.get());
+
+	std::cout << "Test when need TSS ... \n";
+	collection->configuration.usableRegions = 1;
+	collection->configuration.desiredTSSCount = 1;
+	state double startTime = now();
+	wiggler.addServer(UID(1, 0),
+	                  StorageMetadataType(startTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 150.0,
+	                                      KeyValueStoreType::SSD_BTREE_V2));
+	wiggler.addServer(UID(2, 0),
+	                  StorageMetadataType(startTime + SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 150.0,
+	                                      KeyValueStoreType::SSD_BTREE_V2));
+	ASSERT(!wiggler.getNextServerId(true).present());
+	ASSERT(wiggler.getNextServerId(collection->reachTSSPairTarget()) == UID(1, 0));
+	UID id = wait(DDTeamCollectionImpl::getNextWigglingServerID(
+	    Reference<StorageWiggler>::addRef(&wiggler), Optional<Value>(), Optional<Value>(), collection.get()));
+	ASSERT(now() - startTime < SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 150.0);
+	ASSERT(id == UID(2, 0));
 	return Void();
 }

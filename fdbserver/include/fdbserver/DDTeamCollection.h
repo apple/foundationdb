@@ -278,11 +278,6 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	// "storageRecruiter" actor).
 	Promise<Void> shutdown;
 
-	// Divide TSS evenly in each DC if there are multiple
-	// TODO would it be better to put all of them in primary DC?
-	int32_t getTargetTSSInDC() const;
-
-	bool reachTSSPairTarget() const;
 	// Randomly choose one machine team that has chosenServer and has the correct size
 	// When configuration is changed, we may have machine teams with old storageTeamSize
 	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(TCServerInfo const& chosenServer) const;
@@ -673,6 +668,12 @@ public:
 	std::pair<StorageWiggler::State, double> getStorageWigglerState() const;
 
 	UID getDistributorId() const { return distributorId; }
+
+	// Divide TSS evenly in each DC if there are multiple
+	// TODO would it be better to put all of them in primary DC?
+	int32_t getTargetTSSInDC() const;
+
+	bool reachTSSPairTarget() const;
 
 	// Keep track of servers and teams -- serves requests for getRandomTeam
 	static Future<Void> run(Reference<DDTeamCollection> teamCollection,

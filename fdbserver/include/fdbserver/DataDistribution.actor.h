@@ -516,11 +516,11 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	bool contains(const UID& serverId) const { return pq_handles.count(serverId) > 0; }
 	bool empty() const { return wiggle_pq.empty(); }
 
-	// It's guarantee that When a.metadata >= b.metadata, if !eligible(a) then !eligible(b)
-	bool eligible(const UID& serverId, const StorageMetadataType& metadata) const;
+	// It's guarantee that When a.metadata >= b.metadata, if !necessary(a) then !necessary(b)
+	bool necessary(const UID& serverId, const StorageMetadataType& metadata) const;
 
-	// try to return the next storage server that is eligible for wiggle
-	Optional<UID> getNextServerId();
+	// try to return the next storage server that is necessary to wiggle
+	Optional<UID> getNextServerId(bool necessaryOnly = true);
 	// next check time to avoid busy loop
 	Future<Void> onCheck() const;
 	State getWiggleState() const { return wiggleState; }
