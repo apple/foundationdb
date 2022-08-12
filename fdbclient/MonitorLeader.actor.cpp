@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ClientStatusStats.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/CoordinationInterface.h"
@@ -664,46 +663,43 @@ ACTOR Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> s
 	}
 }
 
+namespace {
+
+void tryInsertIntoSamples(OpenDatabaseRequest::Samples& samples,
+                          const NetworkAddress& networkAddress,
+                          const Key& traceLogGroup) {
+	++samples.count;
+	if (samples.samples.size() > static_cast<size_t>(CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT)) {
+		samples.samples.insert({ networkAddress, traceLogGroup });
+	}
+}
+
+} // namespace
+
 OpenDatabaseRequest ClientData::getRequest() {
 	OpenDatabaseRequest req;
 
-	std::map<StringRef, ClientStatusStatsCollector> issueMap;
-	std::map<ClientVersionRef, ClientStatusStatsCollector> versionMap;
-	std::map<StringRef, ClientStatusStatsCollector> maxProtocolMap;
-	int clientCount = 0;
-
-	// SOMEDAY: add a yield in this loop
 	for (auto& ci : clientStatusInfoMap) {
-		for (auto& it : ci.second.issues) {
-			issueMap[it].tryAddExample(ci.first, ci.second.traceLogGroup);
-		}
-		if (ci.second.versions.size()) {
-			clientCount++;
-			StringRef maxProtocol;
-			for (auto& it : ci.second.versions) {
-				maxProtocol = std::max(maxProtocol, it.protocolVersion);
-				versionMap[it].tryAddExample(ci.first, ci.second.traceLogGroup);
-			}
-			maxProtocolMap[maxProtocol].tryAddExample(ci.first, ci.second.traceLogGroup);
-		} else {
-			versionMap[ClientVersionRef()].tryAddExample(ci.first, ci.second.traceLogGroup);
-		}
-	}
+		const auto& networkAddress = ci.first;
+		const auto& traceLogGroup = ci.second.traceLogGroup;
 
-	req.issues.reserve(issueMap.size());
-	for (auto& it : issueMap) {
-		req.issues.push_back(ItemWithExamples<Key>(it.first, it.second.count, it.second.examples));
+		for (auto& issue : ci.second.issues) {
+			tryInsertIntoSamples(req.issues[issue], networkAddress, traceLogGroup);
+		}
+
+		if (!ci.second.versions.size()) {
+			tryInsertIntoSamples(req.supportedVersions[ClientVersionRef()], networkAddress, traceLogGroup);
+			continue;
+		}
+
+		++req.clientCount;
+		StringRef maxProtocol;
+		for (auto& it : ci.second.versions) {
+			maxProtocol = std::max(maxProtocol, it.protocolVersion);
+			tryInsertIntoSamples(req.supportedVersions[it], networkAddress, traceLogGroup);
+		}
+		tryInsertIntoSamples(req.maxProtocolSupported[maxProtocol], networkAddress, traceLogGroup);
 	}
-	req.supportedVersions.reserve(versionMap.size());
-	for (auto& it : versionMap) {
-		req.supportedVersions.push_back(
-		    ItemWithExamples<Standalone<ClientVersionRef>>(it.first, it.second.count, it.second.examples));
-	}
-	req.maxProtocolSupported.reserve(maxProtocolMap.size());
-	for (auto& it : maxProtocolMap) {
-		req.maxProtocolSupported.push_back(ItemWithExamples<Key>(it.first, it.second.count, it.second.examples));
-	}
-	req.clientCount = clientCount;
 
 	return req;
 }
