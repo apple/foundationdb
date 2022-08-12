@@ -42,10 +42,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( FAILURE_MAX_DELAY,                       5.0 );
 	init( FAILURE_MIN_DELAY,                       4.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 1.0;
-	init( FAILURE_TIMEOUT_DELAY,     FAILURE_MIN_DELAY );
-	init( CLIENT_FAILURE_TIMEOUT_DELAY, FAILURE_MIN_DELAY );
-	init( FAILURE_EMERGENCY_DELAY,                30.0 );
-	init( FAILURE_MAX_GENERATIONS,                  10 );
 	init( RECOVERY_DELAY_START_GENERATION,          70 );
 	init( RECOVERY_DELAY_SECONDS_PER_GENERATION,  60.0 );
 	init( MAX_GENERATIONS,                         100 );
@@ -111,7 +107,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT,     20 );
 	init( QUARANTINE_TSS_ON_MISMATCH,             true ); if( randomize && BUGGIFY ) QUARANTINE_TSS_ON_MISMATCH = false; // if true, a tss mismatch will put the offending tss in quarantine. If false, it will just be killed
 	init( CHANGE_FEED_EMPTY_BATCH_TIME,          0.005 );
-	init( SHARD_ENCODE_LOCATION_METADATA,        false ); if( randomize && BUGGIFY )  SHARD_ENCODE_LOCATION_METADATA = true;
 
 	//KeyRangeMap
 	init( KRM_GET_RANGE_LIMIT,                     1e5 ); if( randomize && BUGGIFY ) KRM_GET_RANGE_LIMIT = 10;
@@ -160,8 +155,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BACKUP_AGGREGATE_POLL_RATE_UPDATE_INTERVAL, 60);
 	init( BACKUP_AGGREGATE_POLL_RATE,              2.0 ); // polls per second target for all agents on the cluster
 	init( BACKUP_LOG_WRITE_BATCH_MAX_SIZE,         1e6 ); //Must be much smaller than TRANSACTION_SIZE_LIMIT
-	init( BACKUP_LOG_ATOMIC_OPS_SIZE,			  1000 );
-	init( BACKUP_OPERATION_COST_OVERHEAD,		    50 );
 	init( BACKUP_MAX_LOG_RANGES,                    21 ); if( randomize && BUGGIFY ) BACKUP_MAX_LOG_RANGES = 4;
 	init( BACKUP_SIM_COPY_LOG_RANGES,              100 );
 	init( BACKUP_VERSION_DELAY,           5*CORE_VERSIONSPERSECOND );
@@ -280,18 +273,21 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );
 	init( BUSYNESS_SPIKE_SATURATED_THRESHOLD,     0.500 );
 
-	// multi-version client control
-	init( MVC_CLIENTLIB_CHUNK_SIZE,              8*1024 );
-	init( MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION,      32 );
-
 	// Blob granules
 	init( BG_MAX_GRANULE_PARALLELISM,                10 );
+	init( BG_TOO_MANY_GRANULES,                    1000 );
 
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_TIMES,        3 );
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_DELAY,      2.0 );
 
 	// Tenants and Metacluster
-	init( MAX_TENANTS_PER_CLUSTER,                  1e6 ); if ( randomize && BUGGIFY ) MAX_TENANTS_PER_CLUSTER = deterministicRandom()->randomInt(20, 100);
+	init( MAX_TENANTS_PER_CLUSTER,                  1e6 );
+	init( TENANT_TOMBSTONE_CLEANUP_INTERVAL,         60 ); if ( randomize && BUGGIFY ) TENANT_TOMBSTONE_CLEANUP_INTERVAL = deterministicRandom()->random01() * 30;
+	init( MAX_DATA_CLUSTERS,                        1e5 );
+	init( REMOVE_CLUSTER_TENANT_BATCH_SIZE,         1e4 ); if ( randomize && BUGGIFY ) REMOVE_CLUSTER_TENANT_BATCH_SIZE = 1;
+	init( METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK,   5 ); if ( randomize && BUGGIFY ) METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK = 1;
+	init( METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY, 1.0 ); if ( randomize && BUGGIFY ) METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY = deterministicRandom()->random01() * 60;
+	init( METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT, 10.0 ); if ( randomize && BUGGIFY ) METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT = 1 + deterministicRandom()->random01() * 59;
 
 	// clang-format on
 }

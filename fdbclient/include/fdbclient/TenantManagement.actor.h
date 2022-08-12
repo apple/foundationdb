@@ -21,6 +21,7 @@
 #pragma once
 #include "fdbclient/ClientBooleanParams.h"
 #include "flow/IRandom.h"
+#include "flow/ThreadHelper.actor.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_TENANT_MANAGEMENT_ACTOR_G_H)
 #define FDBCLIENT_TENANT_MANAGEMENT_ACTOR_G_H
 #include "fdbclient/TenantManagement.actor.g.h"
@@ -30,6 +31,7 @@
 #include <string>
 #include <map>
 #include "fdbclient/GenericTransactionHelper.h"
+#include "fdbclient/Metacluster.h"
 #include "fdbclient/SystemData.h"
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -38,7 +40,7 @@ namespace TenantAPI {
 template <class Transaction>
 Future<Optional<TenantMapEntry>> tryGetTenantTransaction(Transaction tr, TenantName name) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	return TenantMetadata::tenantMap.get(tr, name);
+	return TenantMetadata::tenantMap().get(tr, name);
 }
 
 ACTOR template <class DB>
@@ -78,26 +80,60 @@ Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
 }
 
 ACTOR template <class Transaction>
-Future<Void> checkTenantMode(Transaction tr) {
+Future<ClusterType> getClusterType(Transaction tr) {
+	Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
+	    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
+
+	return metaclusterRegistration.present() ? metaclusterRegistration.get().clusterType : ClusterType::STANDALONE;
+}
+
+ACTOR template <class Transaction>
+Future<Void> checkTenantMode(Transaction tr, ClusterType expectedClusterType) {
 	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
 	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
 
+	state ClusterType actualClusterType = wait(getClusterType(tr));
 	Optional<Value> tenantModeValue = wait(safeThreadFutureToFuture(tenantModeFuture));
 
 	TenantMode tenantMode = TenantMode::fromValue(tenantModeValue.castTo<ValueRef>());
-	if (tenantMode == TenantMode::DISABLED) {
+	if (actualClusterType != expectedClusterType) {
+		throw invalid_metacluster_operation();
+	} else if (actualClusterType == ClusterType::STANDALONE && tenantMode == TenantMode::DISABLED) {
 		throw tenants_disabled();
 	}
 
 	return Void();
 }
 
+TenantMode tenantModeForClusterType(ClusterType clusterType, TenantMode tenantMode);
+
+// Returns true if the specified ID has already been deleted and false if not. If the ID is old enough
+// that we no longer keep tombstones for it, an error is thrown.
+ACTOR template <class Transaction>
+Future<bool> checkTombstone(Transaction tr, int64_t id) {
+	state Future<bool> tombstoneFuture = TenantMetadata::tenantTombstones().exists(tr, id);
+
+	// If we are trying to create a tenant older than the oldest tombstones we still maintain, then we fail it
+	// with an error.
+	Optional<TenantTombstoneCleanupData> tombstoneCleanupData = wait(TenantMetadata::tombstoneCleanupData().get(tr));
+	if (tombstoneCleanupData.present() && tombstoneCleanupData.get().tombstonesErasedThrough >= id) {
+		throw tenant_creation_permanently_failed();
+	}
+
+	state bool hasTombstone = wait(tombstoneFuture);
+	return hasTombstone;
+}
+
 // Creates a tenant with the given name. If the tenant already exists, the boolean return parameter will be false
 // and the existing entry will be returned. If the tenant cannot be created, then the optional will be empty.
 ACTOR template <class Transaction>
-Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(Transaction tr,
-                                                                          TenantNameRef name,
-                                                                          TenantMapEntry tenantEntry) {
+Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
+    Transaction tr,
+    TenantNameRef name,
+    TenantMapEntry tenantEntry,
+    ClusterType clusterType = ClusterType::STANDALONE) {
+
+	ASSERT(clusterType != ClusterType::METACLUSTER_MANAGEMENT);
 	ASSERT(tenantEntry.id >= 0);
 
 	if (name.startsWith("\xff"_sr)) {
@@ -110,15 +146,23 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(Transa
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 	state Future<Optional<TenantMapEntry>> existingEntryFuture = tryGetTenantTransaction(tr, name);
-	wait(checkTenantMode(tr));
+	state Future<Void> tenantModeCheck = checkTenantMode(tr, clusterType);
+	state Future<bool> tombstoneFuture =
+	    (clusterType == ClusterType::STANDALONE) ? false : checkTombstone(tr, tenantEntry.id);
 	state Future<Optional<TenantGroupEntry>> existingTenantGroupEntryFuture;
 	if (tenantEntry.tenantGroup.present()) {
-		existingTenantGroupEntryFuture = TenantMetadata::tenantGroupMap.get(tr, tenantEntry.tenantGroup.get());
+		existingTenantGroupEntryFuture = TenantMetadata::tenantGroupMap().get(tr, tenantEntry.tenantGroup.get());
 	}
 
+	wait(tenantModeCheck);
 	Optional<TenantMapEntry> existingEntry = wait(existingEntryFuture);
 	if (existingEntry.present()) {
 		return std::make_pair(existingEntry.get(), false);
+	}
+
+	state bool hasTombstone = wait(tombstoneFuture);
+	if (hasTombstone) {
+		return std::make_pair(Optional<TenantMapEntry>(), false);
 	}
 
 	state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
@@ -130,23 +174,25 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(Transa
 	}
 
 	tenantEntry.tenantState = TenantState::READY;
-	TenantMetadata::tenantMap.set(tr, name, tenantEntry);
+	tenantEntry.assignedCluster = Optional<ClusterName>();
+
+	TenantMetadata::tenantMap().set(tr, name, tenantEntry);
 	if (tenantEntry.tenantGroup.present()) {
-		TenantMetadata::tenantGroupTenantIndex.insert(tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), name));
+		TenantMetadata::tenantGroupTenantIndex().insert(tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), name));
 
 		// Create the tenant group associated with this tenant if it doesn't already exist
 		Optional<TenantGroupEntry> existingTenantGroup = wait(existingTenantGroupEntryFuture);
 		if (!existingTenantGroup.present()) {
-			TenantMetadata::tenantGroupMap.set(tr, tenantEntry.tenantGroup.get(), TenantGroupEntry());
+			TenantMetadata::tenantGroupMap().set(tr, tenantEntry.tenantGroup.get(), TenantGroupEntry());
 		}
 	}
 
 	// This is idempotent because we only add an entry to the tenant map if it isn't already there
-	TenantMetadata::tenantCount.atomicOp(tr, 1, MutationRef::AddValue);
+	TenantMetadata::tenantCount().atomicOp(tr, 1, MutationRef::AddValue);
 
 	// Read the tenant count after incrementing the counter so that simultaneous attempts to create
 	// tenants in the same transaction are properly reflected.
-	int64_t tenantCount = wait(TenantMetadata::tenantCount.getD(tr, Snapshot::False, 0));
+	int64_t tenantCount = wait(TenantMetadata::tenantCount().getD(tr, Snapshot::False, 0));
 	if (tenantCount > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
 		throw cluster_no_capacity();
 	}
@@ -156,7 +202,7 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(Transa
 
 ACTOR template <class Transaction>
 Future<int64_t> getNextTenantId(Transaction tr) {
-	Optional<int64_t> lastId = wait(TenantMetadata::lastTenantId.get(tr));
+	Optional<int64_t> lastId = wait(TenantMetadata::lastTenantId().get(tr));
 	int64_t tenantId = lastId.orDefault(-1) + 1;
 	if (BUGGIFY) {
 		tenantId += deterministicRandom()->randomSkewedUInt32(1, 1e9);
@@ -167,11 +213,14 @@ Future<int64_t> getNextTenantId(Transaction tr) {
 ACTOR template <class DB>
 Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
                                               TenantName name,
-                                              TenantMapEntry tenantEntry = TenantMapEntry()) {
+                                              TenantMapEntry tenantEntry = TenantMapEntry(),
+                                              ClusterType clusterType = ClusterType::STANDALONE) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
-	state bool checkExistence = true;
+	state bool checkExistence = clusterType != ClusterType::METACLUSTER_DATA;
 	state bool generateTenantId = tenantEntry.id < 0;
+
+	ASSERT(clusterType == ClusterType::STANDALONE || !generateTenantId);
 
 	loop {
 		try {
@@ -195,11 +244,11 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 			if (generateTenantId) {
 				int64_t tenantId = wait(tenantIdFuture);
 				tenantEntry.setId(tenantId);
-				TenantMetadata::lastTenantId.set(tr, tenantId);
+				TenantMetadata::lastTenantId().set(tr, tenantId);
 			}
 
 			state std::pair<Optional<TenantMapEntry>, bool> newTenant =
-			    wait(createTenantTransaction(tr, name, tenantEntry));
+			    wait(createTenantTransaction(tr, name, tenantEntry, clusterType));
 
 			if (newTenant.second) {
 				ASSERT(newTenant.first.present());
@@ -227,11 +276,15 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 ACTOR template <class Transaction>
 Future<Void> deleteTenantTransaction(Transaction tr,
                                      TenantNameRef name,
-                                     Optional<int64_t> tenantId = Optional<int64_t>()) {
+                                     Optional<int64_t> tenantId = Optional<int64_t>(),
+                                     ClusterType clusterType = ClusterType::STANDALONE) {
+	ASSERT(clusterType == ClusterType::STANDALONE || tenantId.present());
+	ASSERT(clusterType != ClusterType::METACLUSTER_MANAGEMENT);
+
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 	state Future<Optional<TenantMapEntry>> tenantEntryFuture = tryGetTenantTransaction(tr, name);
-	wait(checkTenantMode(tr));
+	wait(checkTenantMode(tr, clusterType));
 
 	state Optional<TenantMapEntry> tenantEntry = wait(tenantEntryFuture);
 	if (tenantEntry.present() && (!tenantId.present() || tenantEntry.get().id == tenantId.get())) {
@@ -244,21 +297,64 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 		}
 
 		// This is idempotent because we only erase an entry from the tenant map if it is present
-		TenantMetadata::tenantMap.erase(tr, name);
-		TenantMetadata::tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
+		TenantMetadata::tenantMap().erase(tr, name);
+		TenantMetadata::tenantCount().atomicOp(tr, -1, MutationRef::AddValue);
 
 		if (tenantEntry.get().tenantGroup.present()) {
-			TenantMetadata::tenantGroupTenantIndex.erase(tr,
-			                                             Tuple::makeTuple(tenantEntry.get().tenantGroup.get(), name));
-			KeyBackedSet<Tuple>::RangeResultType tenantsInGroup = wait(TenantMetadata::tenantGroupTenantIndex.getRange(
-			    tr,
-			    Tuple::makeTuple(tenantEntry.get().tenantGroup.get()),
-			    Tuple::makeTuple(keyAfter(tenantEntry.get().tenantGroup.get())),
-			    2));
+			TenantMetadata::tenantGroupTenantIndex().erase(tr,
+			                                               Tuple::makeTuple(tenantEntry.get().tenantGroup.get(), name));
+			KeyBackedSet<Tuple>::RangeResultType tenantsInGroup =
+			    wait(TenantMetadata::tenantGroupTenantIndex().getRange(
+			        tr,
+			        Tuple::makeTuple(tenantEntry.get().tenantGroup.get()),
+			        Tuple::makeTuple(keyAfter(tenantEntry.get().tenantGroup.get())),
+			        2));
 			if (tenantsInGroup.results.empty() ||
 			    (tenantsInGroup.results.size() == 1 && tenantsInGroup.results[0].getString(1) == name)) {
-				TenantMetadata::tenantGroupMap.erase(tr, tenantEntry.get().tenantGroup.get());
+				TenantMetadata::tenantGroupMap().erase(tr, tenantEntry.get().tenantGroup.get());
 			}
+		}
+	}
+
+	if (clusterType == ClusterType::METACLUSTER_DATA) {
+		// In data clusters, we store a tombstone
+		state Future<KeyBackedRangeResult<int64_t>> latestTombstoneFuture =
+		    TenantMetadata::tenantTombstones().getRange(tr, {}, {}, 1, Snapshot::False, Reverse::True);
+		state Optional<TenantTombstoneCleanupData> cleanupData = wait(TenantMetadata::tombstoneCleanupData().get(tr));
+		state Version transactionReadVersion = wait(safeThreadFutureToFuture(tr->getReadVersion()));
+
+		// If it has been long enough since we last cleaned up the tenant tombstones, we do that first
+		if (!cleanupData.present() || cleanupData.get().nextTombstoneEraseVersion <= transactionReadVersion) {
+			state int64_t deleteThroughId = cleanupData.present() ? cleanupData.get().nextTombstoneEraseId : -1;
+			// Delete all tombstones up through the one currently marked in the cleanup data
+			if (deleteThroughId >= 0) {
+				TenantMetadata::tenantTombstones().erase(tr, 0, deleteThroughId + 1);
+			}
+
+			KeyBackedRangeResult<int64_t> latestTombstone = wait(latestTombstoneFuture);
+			int64_t nextDeleteThroughId = std::max(deleteThroughId, tenantId.get());
+			if (!latestTombstone.results.empty()) {
+				nextDeleteThroughId = std::max(nextDeleteThroughId, latestTombstone.results[0]);
+			}
+
+			// The next cleanup will happen at or after TENANT_TOMBSTONE_CLEANUP_INTERVAL seconds have elapsed and
+			// will clean up tombstones through the most recently allocated ID.
+			TenantTombstoneCleanupData updatedCleanupData;
+			updatedCleanupData.tombstonesErasedThrough = deleteThroughId;
+			updatedCleanupData.nextTombstoneEraseId = nextDeleteThroughId;
+			updatedCleanupData.nextTombstoneEraseVersion =
+			    transactionReadVersion +
+			    CLIENT_KNOBS->TENANT_TOMBSTONE_CLEANUP_INTERVAL * CLIENT_KNOBS->VERSIONS_PER_SECOND;
+
+			TenantMetadata::tombstoneCleanupData().set(tr, updatedCleanupData);
+
+			// If the tenant being deleted is within the tombstone window, record the tombstone
+			if (tenantId.get() > updatedCleanupData.tombstonesErasedThrough) {
+				TenantMetadata::tenantTombstones().insert(tr, tenantId.get());
+			}
+		} else if (tenantId.get() > cleanupData.get().tombstonesErasedThrough) {
+			// If the tenant being deleted is within the tombstone window, record the tombstone
+			TenantMetadata::tenantTombstones().insert(tr, tenantId.get());
 		}
 	}
 
@@ -268,10 +364,13 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 // Deletes the tenant with the given name. If tenantId is specified, the tenant being deleted must also have the same
 // ID.
 ACTOR template <class DB>
-Future<Void> deleteTenant(Reference<DB> db, TenantName name, Optional<int64_t> tenantId = Optional<int64_t>()) {
+Future<Void> deleteTenant(Reference<DB> db,
+                          TenantName name,
+                          Optional<int64_t> tenantId = Optional<int64_t>(),
+                          ClusterType clusterType = ClusterType::STANDALONE) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
-	state bool checkExistence = true;
+	state bool checkExistence = clusterType == ClusterType::STANDALONE;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -289,7 +388,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name, Optional<int64_t> t
 				checkExistence = false;
 			}
 
-			wait(deleteTenantTransaction(tr, name, tenantId));
+			wait(deleteTenantTransaction(tr, name, tenantId, clusterType));
 			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 
 			TraceEvent("DeletedTenant").detail("Tenant", name).detail("Version", tr->getCommittedVersion());
@@ -309,7 +408,7 @@ Future<Void> configureTenantTransaction(Transaction tr,
                                         TenantMapEntry originalEntry,
                                         TenantMapEntry updatedTenantEntry) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	TenantMetadata::tenantMap.set(tr, tenantName, updatedTenantEntry);
+	TenantMetadata::tenantMap().set(tr, tenantName, updatedTenantEntry);
 
 	// If the tenant group was changed, we need to update the tenant group metadata structures
 	if (originalEntry.tenantGroup != updatedTenantEntry.tenantGroup) {
@@ -318,11 +417,11 @@ Future<Void> configureTenantTransaction(Transaction tr,
 		}
 		if (originalEntry.tenantGroup.present()) {
 			// Remove this tenant from the original tenant group index
-			TenantMetadata::tenantGroupTenantIndex.erase(tr,
-			                                             Tuple::makeTuple(originalEntry.tenantGroup.get(), tenantName));
+			TenantMetadata::tenantGroupTenantIndex().erase(
+			    tr, Tuple::makeTuple(originalEntry.tenantGroup.get(), tenantName));
 
 			// Check if the original tenant group is now empty. If so, remove the tenant group.
-			KeyBackedSet<Tuple>::RangeResultType tenants = wait(TenantMetadata::tenantGroupTenantIndex.getRange(
+			KeyBackedSet<Tuple>::RangeResultType tenants = wait(TenantMetadata::tenantGroupTenantIndex().getRange(
 			    tr,
 			    Tuple::makeTuple(originalEntry.tenantGroup.get()),
 			    Tuple::makeTuple(keyAfter(originalEntry.tenantGroup.get())),
@@ -330,19 +429,19 @@ Future<Void> configureTenantTransaction(Transaction tr,
 
 			if (tenants.results.empty() ||
 			    (tenants.results.size() == 1 && tenants.results[0].getString(1) == tenantName)) {
-				TenantMetadata::tenantGroupMap.erase(tr, originalEntry.tenantGroup.get());
+				TenantMetadata::tenantGroupMap().erase(tr, originalEntry.tenantGroup.get());
 			}
 		}
 		if (updatedTenantEntry.tenantGroup.present()) {
 			// If this is creating a new tenant group, add it to the tenant group map
 			Optional<TenantGroupEntry> entry =
-			    wait(TenantMetadata::tenantGroupMap.get(tr, updatedTenantEntry.tenantGroup.get()));
+			    wait(TenantMetadata::tenantGroupMap().get(tr, updatedTenantEntry.tenantGroup.get()));
 			if (!entry.present()) {
-				TenantMetadata::tenantGroupMap.set(tr, updatedTenantEntry.tenantGroup.get(), TenantGroupEntry());
+				TenantMetadata::tenantGroupMap().set(tr, updatedTenantEntry.tenantGroup.get(), TenantGroupEntry());
 			}
 
 			// Insert this tenant in the tenant group index
-			TenantMetadata::tenantGroupTenantIndex.insert(
+			TenantMetadata::tenantGroupTenantIndex().insert(
 			    tr, Tuple::makeTuple(updatedTenantEntry.tenantGroup.get(), tenantName));
 		}
 	}
@@ -358,7 +457,7 @@ Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantsTransactio
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 	KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> results =
-	    wait(TenantMetadata::tenantMap.getRange(tr, begin, end, limit));
+	    wait(TenantMetadata::tenantMap().getRange(tr, begin, end, limit));
 
 	return results.results;
 }
@@ -396,13 +495,14 @@ Future<Void> renameTenantTransaction(Transaction tr, TenantNameRef oldName, Tena
 	if (newEntry.present()) {
 		throw tenant_already_exists();
 	}
-	TenantMetadata::tenantMap.erase(tr, oldName);
-	TenantMetadata::tenantMap.set(tr, newName, oldEntry.get());
+	TenantMetadata::tenantMap().erase(tr, oldName);
+	TenantMetadata::tenantMap().set(tr, newName, oldEntry.get());
 
 	// Update the tenant group index to reflect the new tenant name
 	if (oldEntry.get().tenantGroup.present()) {
-		TenantMetadata::tenantGroupTenantIndex.erase(tr, Tuple::makeTuple(oldEntry.get().tenantGroup.get(), oldName));
-		TenantMetadata::tenantGroupTenantIndex.insert(tr, Tuple::makeTuple(oldEntry.get().tenantGroup.get(), newName));
+		TenantMetadata::tenantGroupTenantIndex().erase(tr, Tuple::makeTuple(oldEntry.get().tenantGroup.get(), oldName));
+		TenantMetadata::tenantGroupTenantIndex().insert(tr,
+		                                                Tuple::makeTuple(oldEntry.get().tenantGroup.get(), newName));
 	}
 
 	return Void();
