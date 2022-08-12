@@ -4276,13 +4276,20 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
-			req.debugID = trState->debugID;
+                        state Optional<UID> getRangeID = Optional<UID>();
+                        if (trState->debugID.present()) {
+				getRangeID = nondeterministicRandom()->randomUniqueID();
+				g_traceBatch.addAttach("TransactionAttachID", trState->debugID.get().first(), getRangeID.get().first());
+                        }
+			req.debugID = getRangeID;
 			req.spanContext = span.context;
 			try {
-				if (trState->debugID.present()) {
+				if (getRangeID.present()) {
 					g_traceBatch.addEvent(
-					    "TransactionDebug", trState->debugID.get().first(), "NativeAPI.getRange.Before");
-					/*TraceEvent("TransactionDebugGetRangeInfo", trState->debugID.get())
+					    "TransactionDebug", getRangeID.get().first(), "NativeAPI.getRange.Before");
+					/*TraceEvent("TransactionDebugGetRangeInfo")
+				            .detail("ID", getRangeID.get())
+                                            .detail("DcID", trState->cx->clientLocality.dcId())
 					    .detail("ReqBeginKey", req.begin.getKey())
 					    .detail("ReqEndKey", req.end.getKey())
 					    .detail("OriginalBegin", originalBegin.toString())
@@ -4295,7 +4302,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					    .detail("ReqVersion", req.version)
 					    .detail("Reverse", reverse)
 					    .detail("ModifiedSelectors", modifiedSelectors)
-					    .detail("Servers", beginServer.second->description());*/
+					    .detail("Servers", beginServer.locations); */
 				}
 
 				++trState->cx->transactionPhysicalReads;
@@ -4321,11 +4328,11 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					throw;
 				}
 
-				if (trState->debugID.present()) {
+				if (getRangeID.present()) {
 					g_traceBatch.addEvent("TransactionDebug",
-					                      trState->debugID.get().first(),
+					                      getRangeID.get().first(),
 					                      "NativeAPI.getRange.After"); //.detail("SizeOf", rep.data.size());
-					/*TraceEvent("TransactionDebugGetRangeDone", trState->debugID.get())
+					/*TraceEvent("TransactionDebugGetRangeDone", getRangeID.get())
 					    .detail("ReqBeginKey", req.begin.getKey())
 					    .detail("ReqEndKey", req.end.getKey())
 					    .detail("RepIsMore", rep.more)
@@ -4436,10 +4443,10 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 				}
 
 			} catch (Error& e) {
-				if (trState->debugID.present()) {
+				if (getRangeID.present()) {
 					g_traceBatch.addEvent(
-					    "TransactionDebug", trState->debugID.get().first(), "NativeAPI.getRange.Error");
-					TraceEvent("TransactionDebugError", trState->debugID.get()).error(e);
+					    "TransactionDebug", getRangeID.get().first(), "NativeAPI.getRange.Error");
+					TraceEvent("TransactionDebugError", getRangeID.get()).error(e);
 				}
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 				    (e.code() == error_code_transaction_too_old && readVersion == latestVersion)) {
