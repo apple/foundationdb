@@ -1,0 +1,16 @@
+[configuration]
+blobGranulesEnabled = true 
+allowDefaultTenant = false
+injectTargetedSSRestart = true
+injectSSDelay = true
+# FIXME: re-enable rocks at some point
+storageEngineExcludeTypes = [4, 5]
+
+[[test]]
+testTitle = 'BlobRanges'
+
+    [[test.workload]]
+    testName = 'BlobRanges'
+    testDuration = 30.0
+
+# TODO add chaos
