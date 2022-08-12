@@ -124,9 +124,10 @@ public:
 	double BG_REBALANCE_SWITCH_CHECK_INTERVAL;
 	double DD_QUEUE_LOGGING_INTERVAL;
 	double DD_QUEUE_COUNTER_REFRESH_INTERVAL;
-	double DD_QUEUE_COUNTER_MAX_LOG; // max number of servers for which trace events will be generated in each round of DD_QUEUE_COUNTER_REFRESH_INTERVAL duration
-	bool DD_QUEUE_COUNTER_SUMMARIZE; // Enable summary of remaining servers when the number of servers with ongoing relocations in the last minute exceeds DD_QUEUE_COUNTER_MAX_LOG
-	                                 // DD_QUEUE_COUNTER_MAX_LOG
+	double DD_QUEUE_COUNTER_MAX_LOG; // max number of servers for which trace events will be generated in each round of
+	                                 // DD_QUEUE_COUNTER_REFRESH_INTERVAL duration
+	bool DD_QUEUE_COUNTER_SUMMARIZE; // Enable summary of remaining servers when the number of servers with ongoing
+	                                 // relocations in the last minute exceeds DD_QUEUE_COUNTER_MAX_LOG
 	double RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	double RELOCATION_PARALLELISM_PER_DEST_SERVER;
 	int DD_QUEUE_MAX_KEY_SERVERS;
