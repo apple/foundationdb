@@ -503,40 +503,67 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> checkGranuleMetadataPurged(Transaction* tr,
+	ACTOR Future<bool> checkGranuleMetadataPurged(Transaction* tr,
 	                                              KeyRange granuleRange,
 	                                              Version historyVersion,
 	                                              UID granuleId,
-	                                              bool strictMetadataCheck) {
+	                                              bool strictMetadataCheck,
+	                                              bool possiblyInFlight) {
 		// change feed
 		Optional<Value> changeFeed = wait(tr->get(granuleIDToCFKey(granuleId).withPrefix(changeFeedPrefix)));
+		if (possiblyInFlight && changeFeed.present()) {
+			fmt::print("WARN: Change Feed for [{0} - {1}): {2} not purged, retrying\n",
+			           granuleRange.begin.printable(),
+			           granuleRange.end.printable(),
+			           granuleId.toString().substr(0, 6));
+			return false;
+		}
 		ASSERT(!changeFeed.present());
 
 		// file metadata
 		RangeResult fileMetadata = wait(tr->getRange(blobGranuleFileKeyRangeFor(granuleId), 1));
+		if (possiblyInFlight && !fileMetadata.empty()) {
+			fmt::print("WARN: File metadata for [{0} - {1}): {2} not purged, retrying\n",
+			           granuleRange.begin.printable(),
+			           granuleRange.end.printable(),
+			           granuleId.toString().substr(0, 6));
+			return false;
+		}
 		ASSERT(fileMetadata.empty());
 
 		if (strictMetadataCheck) {
 			// lock
 			Optional<Value> lock = wait(tr->get(blobGranuleLockKeyFor(granuleRange)));
+			if (possiblyInFlight && lock.present()) {
+				return false;
+			}
 			ASSERT(!lock.present());
 
 			// history entry
 			Optional<Value> history = wait(tr->get(blobGranuleHistoryKeyFor(granuleRange, historyVersion)));
+			if (possiblyInFlight && history.present()) {
+				return false;
+			}
 			ASSERT(!history.present());
 
 			// split state
 			RangeResult splitData = wait(tr->getRange(blobGranuleSplitKeyRangeFor(granuleId), 1));
+			if (possiblyInFlight && !splitData.empty()) {
+				return false;
+			}
 			ASSERT(splitData.empty());
 
 			// merge state
 			Optional<Value> merge = wait(tr->get(blobGranuleMergeKeyFor(granuleId)));
+			if (possiblyInFlight && merge.present()) {
+				return false;
+			}
 			ASSERT(!merge.present());
 
 			// FIXME: add merge boundaries!
 		}
 
-		return Void();
+		return true;
 	}
 
 	ACTOR Future<Void> checkPurgedHistoryEntries(Database cx,
@@ -597,12 +624,16 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			loop {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				try {
-					wait(self->checkGranuleMetadataPurged(&tr,
-					                                      std::get<0>(granulesToCheck[i]),
-					                                      std::get<1>(granulesToCheck[i]),
-					                                      std::get<2>(granulesToCheck[i]),
-					                                      strictMetadataCheck));
-					break;
+					bool success = wait(self->checkGranuleMetadataPurged(&tr,
+					                                                     std::get<0>(granulesToCheck[i]),
+					                                                     std::get<1>(granulesToCheck[i]),
+					                                                     std::get<2>(granulesToCheck[i]),
+					                                                     strictMetadataCheck,
+					                                                     true));
+					if (success) {
+						break;
+					}
+					wait(delay(5.0));
 				} catch (Error& e) {
 					wait(tr.onError(e));
 				}
@@ -612,7 +643,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> checkPurgedChangeFeeds(Database cx, BlobGranuleVerifierWorkload* self, KeyRange purgeRange) {
+	ACTOR Future<bool> checkPurgedChangeFeeds(Database cx, BlobGranuleVerifierWorkload* self, KeyRange purgeRange) {
 		// quick check to make sure we didn't miss any change feeds
 		state Transaction tr(cx);
 		state KeyRange cur = changeFeedKeys;
@@ -637,8 +668,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 							    purgeRange.end.printable(),
 							    self->forcePurgeVersion);
 						}
+						return false;
 					}
-					ASSERT(!purgeRange.intersects(keyRange));
+					// ASSERT(!purgeRange.intersects(keyRange));
 				}
 				if (!feeds.empty() && feeds.more) {
 					cur = KeyRangeRef(keyAfter(feeds.back().key), cur.end);
@@ -650,7 +682,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			}
 		}
 
-		return Void();
+		return true;
 	}
 
 	ACTOR Future<Void> validateForcePurge(Database cx, BlobGranuleVerifierWorkload* self, KeyRange purgeRange) {
@@ -721,8 +753,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			loop {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				try {
-					wait(self->checkGranuleMetadataPurged(
-					    &tr, granuleRange, historyVersion, granuleId, strictMetadataCheck));
+					bool success = wait(self->checkGranuleMetadataPurged(
+					    &tr, granuleRange, historyVersion, granuleId, strictMetadataCheck, false));
+					ASSERT(success);
 					break;
 				} catch (Error& e) {
 					wait(tr.onError(e));
@@ -761,7 +794,12 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			fmt::print("BGV force purge checked for new granule history entries\n");
 		}
 
-		wait(self->checkPurgedChangeFeeds(cx, self, purgeRange));
+		loop {
+			bool success = wait(self->checkPurgedChangeFeeds(cx, self, purgeRange));
+			if (success) {
+				break;
+			}
+		}
 
 		if (BGV_DEBUG) {
 			fmt::print("BGV force purge checked for leaked change feeds\n");
