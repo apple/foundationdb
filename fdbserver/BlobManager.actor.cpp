@@ -3363,6 +3363,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 			wait(checkManagerLock(tr, bmData));
 			wait(krmSetRange(tr, blobGranuleForcePurgedKeys.begin, normalKeys, LiteralStringRef("0")));
 			wait(tr->commit());
+			tr->reset();
 			break;
 		} catch (Error& e) {
 			wait(tr->onError(e));
