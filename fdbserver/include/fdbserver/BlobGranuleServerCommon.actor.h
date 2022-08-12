@@ -102,6 +102,9 @@ ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, 
 
 ACTOR Future<GranuleFiles> loadHistoryFiles(Database cx, UID granuleID);
 
+enum ForcedPurgeState { NonePurged, SomePurged, AllPurged };
+ACTOR Future<ForcedPurgeState> getForcePurgedState(Transaction* tr, KeyRange keyRange);
+
 // TODO: versioned like SS has?
 struct GranuleTenantData : NonCopyable, ReferenceCounted<GranuleTenantData> {
 	TenantName name;

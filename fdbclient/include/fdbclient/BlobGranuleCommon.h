@@ -252,7 +252,6 @@ struct BlobGranuleMergeBoundary {
 struct BlobGranuleHistoryValue {
 	constexpr static FileIdentifier file_identifier = 991434;
 	UID granuleID;
-	// VectorRef<std::pair<KeyRangeRef, Version>> parentGranules;
 	VectorRef<KeyRef> parentBoundaries;
 	VectorRef<Version> parentVersions;
 

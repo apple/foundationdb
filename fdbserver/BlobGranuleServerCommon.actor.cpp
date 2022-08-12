@@ -120,6 +120,20 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Database cx, UID granuleID) {
 	}
 }
 
+ACTOR Future<ForcedPurgeState> getForcePurgedState(Transaction* tr, KeyRange keyRange) {
+	// because map is coalesced, if the result returns more than 1, they must be alternating
+	RangeResult values =
+	    wait(krmGetRanges(tr, blobGranuleForcePurgedKeys.begin, keyRange, 3, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+
+	ASSERT(!values.empty());
+	if (values.size() > 2) {
+		ASSERT(values[0].value != values[1].value);
+		return ForcedPurgeState::SomePurged;
+	} else {
+		return values[0].value == LiteralStringRef("1") ? ForcedPurgeState::AllPurged : ForcedPurgeState::NonePurged;
+	}
+}
+
 // Normally a beginVersion != 0 means the caller wants all mutations between beginVersion and readVersion, instead of
 // the latest snapshot before readVersion + deltas after the snapshot. When canCollapse is set, the beginVersion is
 // essentially just an optimization hint. The caller is still concerned with reconstructing rows at readVersion, it just

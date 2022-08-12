@@ -115,23 +115,34 @@ bool compareFDBAndBlob(RangeResult fdb,
 			Optional<KeyValueRef> lastCorrect;
 			for (int i = 0; i < std::max(fdb.size(), blob.first.size()); i++) {
 				if (i >= fdb.size() || i >= blob.first.size() || fdb[i] != blob.first[i]) {
+					TraceEvent ev("GranuleMismatchInfo");
+					ev.detail("Idx", i);
 					printf("  Found mismatch at %d.\n", i);
 					if (lastCorrect.present()) {
 						printf("    last correct: %s=%s\n",
 						       lastCorrect.get().key.printable().c_str(),
 						       lastCorrect.get().value.printable().c_str());
+						ev.detail("LastCorrectKey", lastCorrect.get().key);
 					}
 					if (i < fdb.size()) {
 						printf("    FDB: %s=%s\n", fdb[i].key.printable().c_str(), fdb[i].value.printable().c_str());
+						ev.detail("FDBKey", fdb[i].key);
 					} else {
 						printf("    FDB: <missing>\n");
+						ev.detail("FDBKey", "Missing");
 					}
 					if (i < blob.first.size()) {
 						printf("    BLB: %s=%s\n",
 						       blob.first[i].key.printable().c_str(),
 						       blob.first[i].value.printable().c_str());
+						ev.detail("BlobKey", blob.first[i].key);
 					} else {
 						printf("    BLB: <missing>\n");
+						ev.detail("BlobKey", "Missing");
+					}
+					if (i < fdb.size() && i < blob.first.size() && fdb[i].key == blob.first[i].key) {
+						// value mismatch
+						ev.detail("FDBValue", fdb[i].value).detail("BlobValue", blob.first[i].value);
 					}
 					printf("\n");
 					break;

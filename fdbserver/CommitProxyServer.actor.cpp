@@ -381,7 +381,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 					// Drop requests if memory is under severe pressure
 					if (commitData->commitBatchesMemBytesCount + bytes > memBytesLimit) {
 						++commitData->stats.txnCommitErrors;
-						req.reply.sendError(proxy_memory_limit_exceeded());
+						req.reply.sendError(commit_proxy_memory_limit_exceeded());
 						TraceEvent(SevWarnAlways, "ProxyCommitBatchMemoryThresholdExceeded")
 						    .suppressFor(60)
 						    .detail("MemBytesCount", commitData->commitBatchesMemBytesCount)
@@ -1948,7 +1948,7 @@ ACTOR static Future<Void> readRequestServer(CommitProxyInterface proxy,
 		    commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() >
 		        SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE) {
 			++commitData->stats.keyServerLocationErrors;
-			req.reply.sendError(proxy_memory_limit_exceeded());
+			req.reply.sendError(commit_proxy_memory_limit_exceeded());
 			TraceEvent(SevWarnAlways, "ProxyLocationRequestThresholdExceeded").suppressFor(60);
 		} else {
 			++commitData->stats.keyServerLocationIn;

@@ -599,7 +599,7 @@
                "counter":0,
                "roughness":0.0
             },
-            "memory_errors":{ // measures number of proxy_memory_limit_exceeded errors
+            "memory_errors":{ // measures number of (commit/grv)_proxy_memory_limit_exceeded errors
                "hz":0.0,
                "counter":0,
                "roughness":0.0
