@@ -781,13 +781,22 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> _check(Database cx, BlobGranuleVerifierWorkload* self) {
-		if (self->startedForcePurge) {
-			// data may or may not be gone, depending on whether force purge was registered or not. Only do force purge
-			// check if we're sure it was registerd, otherwise, only do actual checks if we're sure no force purge was
-			// started.
+		state Transaction tr(cx);
+		if (self->doForcePurge) {
+			// initial reads > 0 means there are granules to purge
+			if (!self->startedForcePurge && self->initialReads > 0) {
+				// if we didn't start a force purge during the test, do it now
+				Version rv = wait(self->doGrv(&tr));
+				self->forcePurgeVersion = rv;
+				self->purgedDataToCheck.clear(); //  in case we started but didn't finish loading it, reset it
+				wait(self->loadGranuleMetadataBeforeForcePurge(cx, self));
+				Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, self->forcePurgeVersion, {}, true));
+				self->forcePurgeKey = purgeKey;
+			}
 			if (self->forcePurgeKey.present()) {
 				wait(self->validateForcePurge(cx, self, normalKeys));
-			}
+			} // else if we had already started purge during the test but aren't sure whether it was registered or not,
+			  // don't validate that data was purged since it may never be
 			return true;
 		}
 		// check error counts, and do an availability check at the end
@@ -797,7 +806,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			wait(self->setUpBlobRange(cx));
 		}
 
-		state Transaction tr(cx);
 		state Version readVersion = wait(self->doGrv(&tr));
 		state Version startReadVersion = readVersion;
 		state int checks = 0;
