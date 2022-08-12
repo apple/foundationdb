@@ -124,7 +124,7 @@ public:
 	double BG_REBALANCE_SWITCH_CHECK_INTERVAL;
 	double DD_QUEUE_LOGGING_INTERVAL;
 	double DD_QUEUE_COUNTER_REFRESH_INTERVAL;
-	double DD_QUEUE_COUNTER_MAX_LOG; // max trace event the counter will generate in a refresh round
+	double DD_QUEUE_COUNTER_MAX_LOG; // max number of servers for which trace events will be generated in each round of DD_QUEUE_COUNTER_REFRESH_INTERVAL duration
 	bool DD_QUEUE_COUNTER_SUMMARIZE; // whether to summarize remaining server when #(countItems) >
 	                                 // DD_QUEUE_COUNTER_MAX_LOG
 	double RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
