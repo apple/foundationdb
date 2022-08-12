@@ -3587,6 +3587,8 @@ void crashHandler(int sig) {
 #ifdef __linux__
 	// Pretty much all of this handler is risking undefined behavior and hangs,
 	//  but the idea is that we're about to crash anyway...
+	std::string backtrace = platform::get_backtrace();
+
 	bool error = (sig != SIGUSR2 && sig != SIGTERM);
 
 	StreamCipherKey::cleanup();
@@ -3594,15 +3596,15 @@ void crashHandler(int sig) {
 	BlobCipherKeyCache::cleanup();
 
 	fprintf(error ? stderr : stdout, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
+	if (error) {
+		fprintf(stderr, "Trace: %s\n", backtrace.c_str());
+	}
 
 	fflush(stdout);
 	{
 		TraceEvent te(error ? SevError : SevInfo, error ? "Crash" : "ProcessTerminated");
-		te.detail("Signal", sig).detail("Name", strsignal(sig));
+		te.detail("Signal", sig).detail("Name", strsignal(sig)).detail("Trace", backtrace);
 		if (error) {
-      std::string backtrace = platform::get_backtrace();
-      fprintf(stderr, "Trace: %s\n", backtrace.c_str());
-      te.detail("Trace", backtrace);
 			te.setErrorKind(ErrorKind::BugDetected);
 		}
 	}
