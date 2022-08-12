@@ -379,6 +379,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	AsyncVar<int> recruitingStream;
 	Promise<Void> foundBlobWorkers;
 	Promise<Void> doneRecovering;
+	Promise<Void> loadedClientRanges;
 
 	int64_t epoch;
 	int64_t seqNo = 1;
@@ -545,10 +546,11 @@ ACTOR Future<BlobGranuleSplitPoints> alignKeys(Reference<BlobManagerData> bmData
 	splitPoints.keys.push_back_deep(splitPoints.keys.arena(), splits.front());
 
 	state Transaction tr = Transaction(bmData->db);
-	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	state int idx = 1;
 	for (; idx < splits.size() - 1; idx++) {
 		loop {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				// Get the next full key in the granule.
 				RangeResult nextKeyRes = wait(
@@ -1146,8 +1148,9 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 		state int j = 0;
 		loop {
 			try {
-				tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(checkManagerLock(tr, bmData));
 				// Instead of doing a krmSetRange for each granule, because it does a read-modify-write, we do one
 				// krmSetRange for the whole batch, and then just individual sets for each intermediate boundary This
@@ -1204,6 +1207,7 @@ ACTOR Future<Void> monitorTenants(Reference<BlobManagerData> bmData) {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(loadTenantMap(tr, bmData));
 
 				state Future<Void> watchChange = tr->watch(TenantMetadata::lastTenantId().key);
@@ -1221,6 +1225,7 @@ ACTOR Future<Void> monitorTenants(Reference<BlobManagerData> bmData) {
 ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 	state Optional<Value> lastChangeKeyValue;
 	state bool needToCoalesce = bmData->epoch > 1;
+	state bool firstLoad = true;
 
 	loop {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
@@ -1232,6 +1237,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				// read change key at this point along with data
 				state Optional<Value> ckvBegin = wait(tr->get(blobRangeChangeKey));
@@ -1300,6 +1306,11 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 					splitFutures.push_back(splitRange(bmData, range, false, true));
 				}
 
+				if (firstLoad) {
+					bmData->loadedClientRanges.send(Void());
+					firstLoad = false;
+				}
+
 				for (auto f : splitFutures) {
 					state BlobGranuleSplitPoints splitPoints = wait(f);
 					if (BM_DEBUG) {
@@ -1336,6 +1347,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				tr->reset();
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				state Future<Void> watchFuture;
 
 				Optional<Value> ckvEnd = wait(tr->get(blobRangeChangeKey));
@@ -1468,8 +1480,9 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 	state bool retried = false;
 	loop {
 		try {
-			tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			// make sure we're still manager when this transaction gets committed
 			wait(checkManagerLock(tr, bmData));
 
@@ -1717,8 +1730,9 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 	loop {
 		try {
 			tr->reset();
-			tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			ASSERT(splitPoints.keys.size() > 2);
 
 			// make sure we're still manager when this transaction gets committed
@@ -1949,6 +1963,8 @@ ACTOR Future<Void> forceGranuleFlush(Reference<BlobManagerData> bmData, KeyRange
 
 	loop {
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		if (currentRange.begin == currentRange.end) {
 			break;
 		}
@@ -2091,6 +2107,7 @@ ACTOR Future<std::pair<UID, Version>> persistMergeGranulesStart(Reference<BlobMa
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			wait(checkManagerLock(tr, bmData));
 
@@ -2185,6 +2202,7 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			wait(checkManagerLock(tr, bmData));
 
@@ -2297,8 +2315,9 @@ ACTOR Future<Void> finishMergeGranules(Reference<BlobManagerData> bmData,
                                        std::vector<Version> parentGranuleStartVersions) {
 	++bmData->stats.activeMerges;
 
-	// wait for BM to be fully recovered before starting actual merges
+	// wait for BM to be fully recovered and have loaded hard boundaries before starting actual merges
 	wait(bmData->doneRecovering.getFuture());
+	wait(bmData->loadedClientRanges.getFuture());
 	wait(delay(0));
 
 	// Assert that none of the subsequent granules are hard boundaries.
@@ -2488,6 +2507,8 @@ ACTOR Future<Void> attemptMerges(Reference<BlobManagerData> bmData,
 // To ensure each granule waits to see whether all of its neighbors are merge-eligible before merging it, a newly
 // merge-eligible granule will be ignored on the first pass
 ACTOR Future<Void> granuleMergeChecker(Reference<BlobManagerData> bmData) {
+	// wait for BM data to have loaded hard boundaries before starting
+	wait(bmData->loadedClientRanges.getFuture());
 	// initial sleep
 	wait(delayJittered(SERVER_KNOBS->BG_MERGE_CANDIDATE_DELAY_SECONDS));
 	// TODO could optimize to not check if there are no new merge-eligible granules and none in merge pending state
@@ -2566,6 +2587,7 @@ ACTOR Future<Void> deregisterBlobWorker(Reference<BlobManagerData> bmData, BlobW
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			wait(checkManagerLock(tr, bmData));
 			Key blobWorkerListKey = blobWorkerListKeyFor(interf.id());
@@ -3161,6 +3183,7 @@ ACTOR Future<Void> loadForcePurgedRanges(Reference<BlobManagerData> bmData) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			// using the krm functions can produce incorrect behavior here as it does weird stuff with beginKey
 			KeyRange nextRange(KeyRangeRef(beginKey, blobGranuleForcePurgedKeys.end));
@@ -3207,6 +3230,7 @@ ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData, Future<
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			RangeResult result = wait(tr->getRange(currentRange, rowLimit));
 			state bool anyMore = result.more;
@@ -3291,6 +3315,7 @@ ACTOR Future<Void> loadBlobGranuleMergeBoundaries(Reference<BlobManagerData> bmD
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			KeyRange nextRange(KeyRangeRef(beginKey, blobGranuleMergeBoundaryKeys.end));
 			// using the krm functions can produce incorrect behavior here as it does weird stuff with beginKey
@@ -3340,6 +3365,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			RangeResult existingForcePurgeKeys = wait(tr->getRange(blobGranuleForcePurgedKeys, 1));
 			if (!existingForcePurgeKeys.empty()) {
 				break;
@@ -3347,6 +3373,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 			wait(checkManagerLock(tr, bmData));
 			wait(krmSetRange(tr, blobGranuleForcePurgedKeys.begin, normalKeys, LiteralStringRef("0")));
 			wait(tr->commit());
+			tr->reset();
 			break;
 		} catch (Error& e) {
 			wait(tr->onError(e));
@@ -3468,6 +3495,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			KeyRange nextRange(KeyRangeRef(beginKey, blobGranuleMappingKeys.end));
 			// using the krm functions can produce incorrect behavior here as it does weird stuff with beginKey
@@ -3529,6 +3557,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(checkManagerLock(tr, bmData));
 			wait(tr->commit());
 			break;
@@ -3605,6 +3634,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(loadTenantMap(tr, bmData));
 			break;
 		} catch (Error& e) {
@@ -3864,6 +3894,8 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobManagerData> bmData, U
 	state GranuleFiles files;
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(readGranuleFiles(&tr, &startKey, range.end, &files, granuleID));
 			return files;
 		} catch (Error& e) {
@@ -3886,6 +3918,7 @@ ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID gra
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			int lim = SERVER_KNOBS->BG_MAX_SPLIT_FANOUT;
 			if (BUGGIFY_WITH_PROB(0.1)) {
@@ -4054,10 +4087,11 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 	}
 
 	state Transaction tr(self->db);
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 	loop {
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			KeyRange fileRangeKey = blobGranuleFileKeyRangeFor(granuleId);
 			if (canDeleteHistoryKey) {
@@ -4190,10 +4224,11 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
 	}
 
 	state Transaction tr(self->db);
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 	loop {
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			for (auto& key : deletedFileKeys) {
 				tr.clear(key);
@@ -4260,14 +4295,15 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	// find all active granules (that comprise the range) and add to the queue
 
 	state Transaction tr(self->db);
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 	if (force) {
 		// TODO could clean this up after force purge is done, but it's safer not to
 		self->forcePurgingRanges.insert(range, true);
 		// set force purged range, to prevent future operations on this range
 		loop {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				// set force purged range, but don't clear mapping range yet, so that if a new BM recovers in the middle
 				// of purging, it still knows what granules to purge
@@ -4324,6 +4360,9 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		}
 
 		loop {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				if (BM_PURGE_DEBUG) {
 					fmt::print("BM {0} Fetching latest history entry for range [{1} - {2})\n",
@@ -4384,6 +4423,9 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		state Key historyKey = blobGranuleHistoryKeyFor(currRange, startVersion);
 		state bool foundHistory = false;
 		loop {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				Optional<Value> persistedHistory = wait(tr.get(historyKey));
 				if (persistedHistory.present()) {
@@ -4532,6 +4574,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		tr.reset();
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		loop {
 			try {
 				// clear mapping range, so that a new BM doesn't try to recover force purged granules, and clients can't
@@ -4609,6 +4652,7 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 		loop {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			state std::vector<Future<Void>> purges;
 			state CoalescedKeyRangeMap<std::pair<Version, bool>> purgeMap;
@@ -4685,6 +4729,7 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr->clear(KeyRangeRef(blobGranulePurgeKeys.begin, keyAfter(lastPurgeKey)));
 				wait(tr->commit());
 				break;
@@ -4715,6 +4760,7 @@ ACTOR Future<Void> doLockChecks(Reference<BlobManagerData> bmData) {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(checkManagerLock(tr, bmData));
 				wait(tr->commit());
 				break;

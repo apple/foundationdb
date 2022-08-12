@@ -254,6 +254,9 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 			return false;
 		}
 		if (g_network->isSimulated()) {
+			if (g_simulator.speedUpSimulation) {
+				return false;
+			}
 			return buggifyFull;
 		}
 
@@ -497,6 +500,8 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobWorkerData> bwData, UI
 	state GranuleFiles files;
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(readGranuleFiles(&tr, &startKey, range.end, &files, granuleID));
 			return files;
 		} catch (Error& e) {
@@ -743,6 +748,8 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
 		loop {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				wait(readAndCheckGranuleLock(tr, keyRange, epoch, seqno));
 				numIterations++;
@@ -941,6 +948,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	try {
 		loop {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				wait(readAndCheckGranuleLock(tr, keyRange, epoch, seqno));
 				numIterations++;
@@ -1025,6 +1034,8 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		// FIXME: proper tenant support in Blob Worker
 		tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			Version rv = wait(tr->getReadVersion());
 			readVersion = rv;
@@ -1080,7 +1091,9 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			// snapshot
 			// Also somewhat servers as a rate limiting function and checking that the database is available for this
 			// key range
-			wait(bwData->db->popChangeFeedMutations(cfKey, readVersion));
+			// FIXME: can't do this because this granule might not own the shard anymore and another worker might have
+			// successfully snapshotted already, but if it got an error before even getting to the lock check, it
+			// wouldn't realize wait(bwData->db->popChangeFeedMutations(cfKey, readVersion));
 		}
 	}
 }
@@ -1922,7 +1935,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		metadata->bufferedDeltaVersion = startVersion;
 		metadata->knownCommittedVersion = startVersion;
 
-		Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>();
+		Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>(bwData->db.getPtr());
 
 		if (startState.splitParentGranule.present() && startVersion < startState.changeFeedStartVersion) {
 			// read from parent change feed up until our new change feed is started
@@ -2079,7 +2092,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				// update this for change feed popped detection
 				metadata->bufferedDeltaVersion = metadata->activeCFData.get()->getVersion();
 
-				Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>();
+				Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>(bwData->db.getPtr());
 
 				changeFeedFuture = bwData->db->getChangeFeedStream(cfData,
 				                                                   cfKey,
@@ -2189,7 +2202,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									lastForceFlushVersion = 0;
 									metadata->forceFlushVersion = NotifiedVersion();
 
-									Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>();
+									Reference<ChangeFeedData> cfData =
+									    makeReference<ChangeFeedData>(bwData->db.getPtr());
 
 									if (!readOldChangeFeed && cfRollbackVersion < startState.changeFeedStartVersion) {
 										// It isn't possible to roll back across the parent/child feed boundary,
@@ -2705,6 +2719,8 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 						break;
 					}
 					try {
+						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 						state KeyRangeRef parentRange(curHistory.value.parentBoundaries[pIdx],
 						                              curHistory.value.parentBoundaries[pIdx + 1]);
 						state Version parentVersion = curHistory.value.parentVersions[pIdx];
@@ -3649,6 +3665,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			state GranuleStartState info;
 			info.changeFeedStartVersion = invalidVersion;
@@ -4230,12 +4247,23 @@ ACTOR Future<Void> handleRangeRevoke(Reference<BlobWorkerData> bwData, RevokeBlo
 	}
 }
 
+void handleBlobVersionRequest(Reference<BlobWorkerData> bwData, MinBlobVersionRequest req) {
+	bwData->db->setDesiredChangeFeedVersion(
+	    std::max<Version>(0, req.grv - (SERVER_KNOBS->TARGET_BW_LAG_UPDATE * SERVER_KNOBS->VERSIONS_PER_SECOND)));
+	MinBlobVersionReply rep;
+	rep.version = bwData->db->getMinimumChangeFeedVersion();
+	bwData->stats.minimumCFVersion = rep.version;
+	bwData->stats.notAtLatestChangeFeeds = bwData->db->notAtLatestChangeFeeds.size();
+	req.reply.send(rep);
+}
+
 ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData, BlobWorkerInterface interf) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
 	TraceEvent("BlobWorkerRegister", bwData->id);
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			Key blobWorkerListKey = blobWorkerListKeyFor(interf.id());
 			// FIXME: should be able to remove this conflict range
@@ -4272,6 +4300,7 @@ ACTOR Future<Void> monitorRemoval(Reference<BlobWorkerData> bwData) {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				Optional<Value> val = wait(tr.get(blobWorkerListKey));
 				if (!val.present()) {
@@ -4309,6 +4338,8 @@ ACTOR Future<Void> runGRVChecks(Reference<BlobWorkerData> bwData) {
 
 		tr.reset();
 		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Version readVersion = wait(tr.getReadVersion());
 			ASSERT(readVersion >= bwData->grvVersion.get());
 			bwData->grvVersion.set(readVersion);
@@ -4329,6 +4360,7 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
 				wait(store(tenantResults,
 				           TenantMetadata::tenantMap().getRange(tr,
@@ -4767,6 +4799,9 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				} else {
 					req.reply.sendError(blob_manager_replaced());
 				}
+			}
+			when(MinBlobVersionRequest req = waitNext(bwInterf.minBlobVersionRequest.getFuture())) {
+				handleBlobVersionRequest(self, req);
 			}
 			when(FlushGranuleRequest req = waitNext(bwInterf.flushGranuleRequest.getFuture())) {
 				if (self->managerEpochOk(req.managerEpoch)) {

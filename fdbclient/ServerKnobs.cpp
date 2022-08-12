@@ -128,6 +128,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BG_REBALANCE_POLLING_INTERVAL,                        10.0 );
 	init( BG_REBALANCE_SWITCH_CHECK_INTERVAL,                    5.0 ); if (randomize && BUGGIFY) BG_REBALANCE_SWITCH_CHECK_INTERVAL = 1.0;
 	init( DD_QUEUE_LOGGING_INTERVAL,                             5.0 );
+	init( DD_QUEUE_COUNTER_REFRESH_INTERVAL,                    60.0 );
+	// 100 / 60 < 2 trace/sec ~ 2 * 200 = 400b/sec
+	init( DD_QUEUE_COUNTER_MAX_LOG,                              100 ); if( randomize && BUGGIFY ) DD_QUEUE_COUNTER_MAX_LOG = 1;
+	init( DD_QUEUE_COUNTER_SUMMARIZE,                           true );
 	init( RELOCATION_PARALLELISM_PER_SOURCE_SERVER,                2 ); if( randomize && BUGGIFY ) RELOCATION_PARALLELISM_PER_SOURCE_SERVER = 1;
 	init( RELOCATION_PARALLELISM_PER_DEST_SERVER,                 10 ); if( randomize && BUGGIFY ) RELOCATION_PARALLELISM_PER_DEST_SERVER = 1; // Note: if this is smaller than FETCH_KEYS_PARALLELISM, this will artificially reduce performance. The current default of 10 is probably too high but is set conservatively for now.
 	init( DD_QUEUE_MAX_KEY_SERVERS,                              100 ); if( randomize && BUGGIFY ) DD_QUEUE_MAX_KEY_SERVERS = 1;
@@ -654,6 +658,16 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DURABILITY_LAG_REDUCTION_RATE,                      0.9999 );
 	init( DURABILITY_LAG_INCREASE_RATE,                        1.001 );
 	init( STORAGE_SERVER_LIST_FETCH_TIMEOUT,                    20.0 );
+	init( BW_THROTTLING_ENABLED,                                true );
+	init( TARGET_BW_LAG,                                        50.0 );
+	init( TARGET_BW_LAG_BATCH,                                  20.0 );
+	init( TARGET_BW_LAG_UPDATE,                                  9.0 );
+	init( MIN_BW_HISTORY,                                         10 );
+	init( BW_ESTIMATION_INTERVAL,                               10.0 );
+	init( BW_LAG_INCREASE_AMOUNT,                                1.1 );
+	init( BW_LAG_DECREASE_AMOUNT,                                0.9 );
+	init( BW_FETCH_WORKERS_INTERVAL,                             5.0 );
+	init( BW_RW_LOGGING_INTERVAL,                                5.0 );
 
 	init( MAX_AUTO_THROTTLED_TRANSACTION_TAGS,                     5 ); if(randomize && BUGGIFY) MAX_AUTO_THROTTLED_TRANSACTION_TAGS = 1;
 	init( MAX_MANUAL_THROTTLED_TRANSACTION_TAGS,                  40 ); if(randomize && BUGGIFY) MAX_MANUAL_THROTTLED_TRANSACTION_TAGS = 1;

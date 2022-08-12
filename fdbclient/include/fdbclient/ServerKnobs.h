@@ -118,6 +118,11 @@ public:
 	double BG_REBALANCE_POLLING_INTERVAL;
 	double BG_REBALANCE_SWITCH_CHECK_INTERVAL;
 	double DD_QUEUE_LOGGING_INTERVAL;
+	double DD_QUEUE_COUNTER_REFRESH_INTERVAL;
+	double DD_QUEUE_COUNTER_MAX_LOG; // max number of servers for which trace events will be generated in each round of
+	                                 // DD_QUEUE_COUNTER_REFRESH_INTERVAL duration
+	bool DD_QUEUE_COUNTER_SUMMARIZE; // Enable summary of remaining servers when the number of servers with ongoing
+	                                 // relocations in the last minute exceeds DD_QUEUE_COUNTER_MAX_LOG
 	double RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	double RELOCATION_PARALLELISM_PER_DEST_SERVER;
 	int DD_QUEUE_MAX_KEY_SERVERS;
@@ -613,8 +618,17 @@ public:
 	double INITIAL_DURABILITY_LAG_MULTIPLIER;
 	double DURABILITY_LAG_REDUCTION_RATE;
 	double DURABILITY_LAG_INCREASE_RATE;
-
 	double STORAGE_SERVER_LIST_FETCH_TIMEOUT;
+	bool BW_THROTTLING_ENABLED;
+	double TARGET_BW_LAG;
+	double TARGET_BW_LAG_BATCH;
+	double TARGET_BW_LAG_UPDATE;
+	int MIN_BW_HISTORY;
+	double BW_ESTIMATION_INTERVAL;
+	double BW_LAG_INCREASE_AMOUNT;
+	double BW_LAG_DECREASE_AMOUNT;
+	double BW_FETCH_WORKERS_INTERVAL;
+	double BW_RW_LOGGING_INTERVAL;
 
 	// disk snapshot
 	int64_t MAX_FORKED_PROCESS_OUTPUT;

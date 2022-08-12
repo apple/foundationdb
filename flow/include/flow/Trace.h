@@ -583,7 +583,7 @@ private:
 class StringRef;
 
 struct TraceInterval {
-	TraceInterval(const char* type) : type(type), count(-1), severity(SevInfo) {}
+	TraceInterval(const char* type, UID id = UID()) : type(type), pairID(id), count(-1), severity(SevInfo) {}
 
 	TraceInterval& begin();
 	TraceInterval& end() { return *this; }
