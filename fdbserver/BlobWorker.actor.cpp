@@ -3915,6 +3915,8 @@ void handleBlobVersionRequest(Reference<BlobWorkerData> bwData, MinBlobVersionRe
 	    std::max<Version>(0, req.grv - (SERVER_KNOBS->TARGET_BW_LAG_UPDATE * SERVER_KNOBS->VERSIONS_PER_SECOND)));
 	MinBlobVersionReply rep;
 	rep.version = bwData->db->getMinimumChangeFeedVersion();
+	bwData->stats.minimumCFVersion = rep.version;
+	bwData->stats.notAtLatestChangeFeeds = bwData->db->notAtLatestChangeFeeds.size();
 	req.reply.send(rep);
 }
 
