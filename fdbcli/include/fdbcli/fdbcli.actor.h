@@ -133,14 +133,14 @@ void printUsage(StringRef command);
 // Pre: tr failed with special_keys_api_failure error
 // Read the error message special key and return the message
 ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
-// Using \xff\xff/worker_interfaces/ special key, get all worker interfaces
+// Using \xff\xff/worker_interfaces/ special key, get all worker interfaces.
+// A worker list will be returned from CC.
+// If verify, we will try to establish connections to all workers returned.
+// in particular, deserialize \xff\xff/worker_interfaces/<address>:=<ClientInterface> k-v pair and verify by a RPC call
+// then only return interfaces(kv pairs) we can talk to
 ACTOR Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
                                        std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
                                        bool verify = false);
-// Deserialize \xff\xff/worker_interfaces/<address>:=<ClientInterface> k-v pair and verify by a RPC call
-ACTOR Future<Void> verifyAndAddInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
-                                         Reference<FlowLock> connectLock,
-                                         KeyValue kv);
 // print cluster status info
 void printStatus(StatusObjectReader statusObj,
                  StatusClient::StatusLevel level,

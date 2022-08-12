@@ -62,45 +62,9 @@ ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransacti
 	return valueObj["message"].get_str();
 }
 
-ACTOR Future<Void> verifyAndAddInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
-                                         Reference<FlowLock> connectLock,
-                                         KeyValue kv) {
-	wait(connectLock->take());
-	state FlowLock::Releaser releaser(*connectLock);
-	state ClientWorkerInterface workerInterf;
-	try {
-		// the interface is back-ward compatible, thus if parsing failed, it needs to upgrade cli version
-		workerInterf = BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
-	} catch (Error& e) {
-		fprintf(stderr, "Error: %s; CLI version is too old, please update to use a newer version\n", e.what());
-		return Void();
-	}
-	state ClientLeaderRegInterface leaderInterf(workerInterf.address());
-	choose {
-		when(Optional<LeaderInfo> rep =
-		         wait(brokenPromiseToNever(leaderInterf.getLeader.getReply(GetLeaderRequest())))) {
-			StringRef ip_port =
-			    (kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key)
-			        .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
-			(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
-
-			if (workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
-				Key full_ip_port2 =
-				    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
-				StringRef ip_port2 = full_ip_port2.endsWith(LiteralStringRef(":tls"))
-				                         ? full_ip_port2.removeSuffix(LiteralStringRef(":tls"))
-				                         : full_ip_port2;
-				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
-			}
-		}
-		when(wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT))) {}
-	}
-	return Void();
-}
-
-void addInterfaces(RangeResult& kvs, std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
+void addInterfacesFromKVs(RangeResult& kvs,
+                          std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
 	for (const auto& kv : kvs) {
-		// addInterfs.push_back(verifyAndAddInterface(address_interface, connectLock, it));
 		ClientWorkerInterface workerInterf;
 		try {
 			// the interface is back-ward compatible, thus if parsing failed, it needs to upgrade cli version
@@ -140,14 +104,10 @@ ACTOR Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
 	state RangeResult kvs = wait(safeThreadFutureToFuture(kvsFuture));
 	ASSERT(!kvs.more);
 	if (verify) {
-		// remove the option
+		// remove the option if set
 		tr->clear(workerInterfacesVerifyOptionSpecialKey);
 	}
-	// auto connectLock = makeReference<FlowLock>(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM);
-	// std::vector<Future<Void>> addInterfs;
-	addInterfaces(kvs, address_interface);
-	
-	// wait(waitForAll(addInterfs));
+	addInterfacesFromKVs(kvs, address_interface);
 	return Void();
 }
 
