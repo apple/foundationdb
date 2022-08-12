@@ -2309,7 +2309,8 @@ ACTOR Future<Void> startBlobManager(ClusterControllerData* self, double waitTime
 			self->recruitingBlobManagerID = req.reqId;
 			TraceEvent("CCRecruitBlobManager", self->id)
 			    .detail("Addr", worker.interf.address())
-			    .detail("BMID", req.reqId);
+			    .detail("BMID", req.reqId)
+			    .detail("Epoch", nextEpoch);
 
 			ErrorOr<BlobManagerInterface> interf = wait(worker.interf.blobManager.getReplyUnlessFailedFor(
 			    req, SERVER_KNOBS->WAIT_FOR_BLOB_MANAGER_JOIN_DELAY, 0));

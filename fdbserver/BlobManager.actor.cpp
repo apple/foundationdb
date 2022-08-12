@@ -379,6 +379,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	AsyncVar<int> recruitingStream;
 	Promise<Void> foundBlobWorkers;
 	Promise<Void> doneRecovering;
+	Promise<Void> loadedClientRanges;
 
 	int64_t epoch;
 	int64_t seqNo = 1;
@@ -1224,6 +1225,7 @@ ACTOR Future<Void> monitorTenants(Reference<BlobManagerData> bmData) {
 ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 	state Optional<Value> lastChangeKeyValue;
 	state bool needToCoalesce = bmData->epoch > 1;
+	state bool firstLoad = true;
 
 	loop {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
@@ -1302,6 +1304,11 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				for (KeyRangeRef range : rangesToAdd) {
 					TraceEvent("ClientBlobRangeAdded", bmData->id).detail("Range", range);
 					splitFutures.push_back(splitRange(bmData, range, false, true));
+				}
+
+				if (firstLoad) {
+					bmData->loadedClientRanges.send(Void());
+					firstLoad = false;
 				}
 
 				for (auto f : splitFutures) {
@@ -2308,8 +2315,9 @@ ACTOR Future<Void> finishMergeGranules(Reference<BlobManagerData> bmData,
                                        std::vector<Version> parentGranuleStartVersions) {
 	++bmData->stats.activeMerges;
 
-	// wait for BM to be fully recovered before starting actual merges
+	// wait for BM to be fully recovered and have loaded hard boundaries before starting actual merges
 	wait(bmData->doneRecovering.getFuture());
+	wait(bmData->loadedClientRanges.getFuture());
 	wait(delay(0));
 
 	// Assert that none of the subsequent granules are hard boundaries.
@@ -2499,6 +2507,8 @@ ACTOR Future<Void> attemptMerges(Reference<BlobManagerData> bmData,
 // To ensure each granule waits to see whether all of its neighbors are merge-eligible before merging it, a newly
 // merge-eligible granule will be ignored on the first pass
 ACTOR Future<Void> granuleMergeChecker(Reference<BlobManagerData> bmData) {
+	// wait for BM data to have loaded hard boundaries before starting
+	wait(bmData->loadedClientRanges.getFuture());
 	// initial sleep
 	wait(delayJittered(SERVER_KNOBS->BG_MERGE_CANDIDATE_DELAY_SECONDS));
 	// TODO could optimize to not check if there are no new merge-eligible granules and none in merge pending state
@@ -3363,6 +3373,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 			wait(checkManagerLock(tr, bmData));
 			wait(krmSetRange(tr, blobGranuleForcePurgedKeys.begin, normalKeys, LiteralStringRef("0")));
 			wait(tr->commit());
+			tr->reset();
 			break;
 		} catch (Error& e) {
 			wait(tr->onError(e));
