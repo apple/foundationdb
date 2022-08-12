@@ -135,14 +135,14 @@ void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataTy
 	wiggle_pq.update(handle, std::make_pair(metadata, serverId));
 }
 
-bool StorageWiggler::eligible(const UID& serverId, const StorageMetadataType& metadata) const {
+bool StorageWiggler::necessary(const UID& serverId, const StorageMetadataType& metadata) const {
 	return metadata.wrongConfigured || (now() - metadata.createdTime > SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC);
 }
 
-Optional<UID> StorageWiggler::getNextServerId() {
+Optional<UID> StorageWiggler::getNextServerId(bool necessaryOnly) {
 	if (!wiggle_pq.empty()) {
 		auto [metadata, id] = wiggle_pq.top();
-		if (!eligible(id, metadata)) {
+		if (necessaryOnly && !necessary(id, metadata)) {
 			return {};
 		}
 		wiggle_pq.pop();
