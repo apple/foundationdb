@@ -254,6 +254,9 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 			return false;
 		}
 		if (g_network->isSimulated()) {
+			if (g_simulator.speedUpSimulation) {
+				return false;
+			}
 			return buggifyFull;
 		}
 
@@ -1088,7 +1091,9 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			// snapshot
 			// Also somewhat servers as a rate limiting function and checking that the database is available for this
 			// key range
-			wait(bwData->db->popChangeFeedMutations(cfKey, readVersion));
+			// FIXME: can't do this because this granule might not own the shard anymore and another worker might have
+			// successfully snapshotted already, but if it got an error before even getting to the lock check, it
+			// wouldn't realize wait(bwData->db->popChangeFeedMutations(cfKey, readVersion));
 		}
 	}
 }
