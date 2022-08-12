@@ -181,7 +181,7 @@ ACTOR Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Datab
 
 ACTOR template <class T>
 Future<Void> waitForLowInFlight(Database cx, T* workload) {
-	state Future<Void> timeout = delay(300.0);
+	state Future<Void> timeout = delay(600.0);
 	loop {
 		try {
 			if (timeout.isReady()) {
