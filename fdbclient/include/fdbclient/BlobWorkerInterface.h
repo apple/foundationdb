@@ -32,7 +32,7 @@ struct BlobWorkerInterface {
 	constexpr static FileIdentifier file_identifier = 8358753;
 	// TODO: mimic what StorageServerInterface does with sequential endpoint IDs
 	RequestStream<ReplyPromise<Void>> waitFailure;
-	RequestStream<struct BlobGranuleFileRequest> blobGranuleFileRequest;
+	PublicRequestStream<struct BlobGranuleFileRequest> blobGranuleFileRequest;
 	RequestStream<struct AssignBlobRangeRequest> assignBlobRangeRequest;
 	RequestStream<struct RevokeBlobRangeRequest> revokeBlobRangeRequest;
 	RequestStream<struct GetGranuleAssignmentsRequest> granuleAssignmentsRequest;
@@ -72,7 +72,7 @@ struct BlobWorkerInterface {
 		serializer(ar, myId, locality, waitFailure);
 		if (Archive::isDeserializing) {
 			blobGranuleFileRequest =
-			    RequestStream<struct BlobGranuleFileRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(1));
+			    PublicRequestStream<struct BlobGranuleFileRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(1));
 			assignBlobRangeRequest =
 			    RequestStream<struct AssignBlobRangeRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(2));
 			revokeBlobRangeRequest =
@@ -113,6 +113,8 @@ struct BlobGranuleFileRequest {
 	ReplyPromise<BlobGranuleFileReply> reply;
 
 	BlobGranuleFileRequest() {}
+
+	bool verify() const { return tenantInfo.isAuthorized(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
