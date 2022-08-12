@@ -343,7 +343,9 @@ public:
 		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
 
 		self.addActor.send(self.monitorThrottlingChanges());
-		self.addActor.send(self.monitorBlobWorkers());
+		if (SERVER_KNOBS->BW_THROTTLING_ENABLED) {
+			self.addActor.send(self.monitorBlobWorkers());
+		}
 		self.addActor.send(self.refreshStorageServerCommitCosts());
 
 		TraceEvent("RkTLogQueueSizeParameters", rkInterf.id())
@@ -387,7 +389,7 @@ public:
 					}
 					self.actualTpsHistory.push_back(actualTps);
 
-					if (self.configuration.blobGranulesEnabled) {
+					if (self.configuration.blobGranulesEnabled && SERVER_KNOBS->BW_THROTTLING_ENABLED) {
 						Version maxVersion = 0;
 						int64_t totalReleased = 0;
 						int64_t batchReleased = 0;
@@ -846,7 +848,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		break;
 	}
 
-	if (configuration.blobGranulesEnabled) {
+	if (configuration.blobGranulesEnabled && SERVER_KNOBS->BW_THROTTLING_ENABLED) {
 		Version lastBWVer = 0;
 		auto lastIter = version_transactions.end();
 		if (!blobWorkerVersionHistory.empty()) {
@@ -933,31 +935,27 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 						limitReason = limitReason_t::blob_worker_lag;
 					}
 				}
-			} else {
-				if (blobWorkerLag > 3 * limits->bwLagTarget) {
-					limits->tpsLimit = 0.0;
-					if (printRateKeepLimitReasonDetails) {
-						TraceEvent("RatekeeperLimitReasonDetails")
-						    .detail("Reason", limitReason_t::blob_worker_missing)
-						    .detail("Elapsed", elapsed)
-						    .detail("LastVer", lastBWVer)
-						    .detail("FirstVer", firstBWVer);
-						;
-					}
-					limitReason = limitReason_t::blob_worker_missing;
-				}
-			}
-		} else {
-			if (blobWorkerLag > 3 * limits->bwLagTarget) {
+			} else if (blobWorkerLag > 3 * limits->bwLagTarget) {
 				limits->tpsLimit = 0.0;
 				if (printRateKeepLimitReasonDetails) {
 					TraceEvent("RatekeeperLimitReasonDetails")
 					    .detail("Reason", limitReason_t::blob_worker_missing)
-					    .detail("BWLag", blobWorkerLag)
-					    .detail("HistorySize", blobWorkerVersionHistory.size());
+					    .detail("Elapsed", elapsed)
+					    .detail("LastVer", lastBWVer)
+					    .detail("FirstVer", firstBWVer);
+					;
 				}
 				limitReason = limitReason_t::blob_worker_missing;
 			}
+		} else if (blobWorkerLag > 3 * limits->bwLagTarget) {
+			limits->tpsLimit = 0.0;
+			if (printRateKeepLimitReasonDetails) {
+				TraceEvent("RatekeeperLimitReasonDetails")
+				    .detail("Reason", limitReason_t::blob_worker_missing)
+				    .detail("BWLag", blobWorkerLag)
+				    .detail("HistorySize", blobWorkerVersionHistory.size());
+			}
+			limitReason = limitReason_t::blob_worker_missing;
 		}
 	} else {
 		blobWorkerTime = now();

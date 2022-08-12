@@ -654,6 +654,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DURABILITY_LAG_REDUCTION_RATE,                      0.9999 );
 	init( DURABILITY_LAG_INCREASE_RATE,                        1.001 );
 	init( STORAGE_SERVER_LIST_FETCH_TIMEOUT,                    20.0 );
+	init( BW_THROTTLING_ENABLED,                                true );
 	init( TARGET_BW_LAG,                                        50.0 );
 	init( TARGET_BW_LAG_BATCH,                                  20.0 );
 	init( TARGET_BW_LAG_UPDATE,                                  9.0 );
