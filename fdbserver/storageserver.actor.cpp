@@ -552,7 +552,6 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	Version storageVersion = invalidVersion; // The version between the storage version and the durable version are
 	                                         // being written to disk as part of the current commit in updateStorage.
 	Version durableVersion = invalidVersion; // All versions before the durable version are durable on disk
-	// FIXME: this needs to get persisted to disk to still fix same races across restart!
 	Version metadataVersion = invalidVersion; // Last update to the change feed metadata. Used for reasoning about
 	                                          // fetched metadata vs local metadata
 	Version emptyVersion = 0; // The change feed does not have any mutations before emptyVersion

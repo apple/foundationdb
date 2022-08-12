@@ -84,7 +84,6 @@ struct GranuleStartState {
 	Optional<GranuleHistory> history;
 };
 
-// FIXME: add global byte limit for pending and buffered deltas
 struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	KeyRange keyRange;
 
@@ -1032,7 +1031,6 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		// FIXME: proper tenant support in Blob Worker
 		tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -3494,8 +3492,6 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					}
 				}
 
-				// FIXME: get cipher keys for delta files too!
-
 				// new deltas (if version is larger than version of last delta file)
 				// FIXME: do trivial key bounds here if key range is not fully contained in request key
 				// range
@@ -3512,8 +3508,6 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 
 					// prune mutations based on begin version, if possible
 					ASSERT(metadata->durableDeltaVersion.get() == metadata->pendingDeltaVersion);
-					// FIXME: I think we can remove this dependsOn since we are doing push_back_deep
-					rep.arena.dependsOn(metadata->currentDeltas.arena());
 					MutationsAndVersionRef* mutationIt = metadata->currentDeltas.begin();
 					if (granuleBeginVersion > metadata->currentDeltas.back().version) {
 						CODE_PROBE(true, "beginVersion pruning all in-memory mutations");
@@ -4724,7 +4718,6 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 					if (self->statusStreamInitialized) {
 						copy = self->currentManagerStatusStream.get();
 					}
-					// TODO: pick a reasonable byte limit instead of just piggy-backing
 					req.reply.setByteLimit(SERVER_KNOBS->BLOBWORKERSTATUSSTREAM_LIMIT_BYTES);
 					self->statusStreamInitialized = true;
 

@@ -30,7 +30,6 @@
 
 struct BlobWorkerInterface {
 	constexpr static FileIdentifier file_identifier = 8358753;
-	// TODO: mimic what StorageServerInterface does with sequential endpoint IDs
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	PublicRequestStream<struct BlobGranuleFileRequest> blobGranuleFileRequest;
 	RequestStream<struct AssignBlobRangeRequest> assignBlobRangeRequest;
