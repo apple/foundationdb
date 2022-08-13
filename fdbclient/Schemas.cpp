@@ -848,6 +848,11 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "disabled",
              "optional_experimental",
              "required_experimental"
+         ]},
+         "encryption_data_at_rest_mode": {
+             "$enum":[
+             "disabled",
+             "aes_256_ctr"
          ]}
       },
       "data":{

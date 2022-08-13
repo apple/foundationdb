@@ -254,7 +254,11 @@ struct DatabaseConfiguration {
 
 	// Blob Granules
 	bool blobGranulesEnabled;
+
 	TenantMode tenantMode;
+
+	// Encryption data at-rest mode
+	EncryptionDataAtRestMode encryptionDataAtRestMode;
 
 	// Excluded servers (no state should be here)
 	bool isExcludedServer(NetworkAddressList) const;
