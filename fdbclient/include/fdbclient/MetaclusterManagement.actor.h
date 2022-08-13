@@ -108,10 +108,10 @@ struct ManagementClusterMetadata {
 	// A map from cluster name to a count of tenants
 	static KeyBackedMap<ClusterName, int64_t, TupleCodec<ClusterName>, BinaryCodec<int64_t>> clusterTenantCount;
 
-	// A set of cluster/tenant pairings ordered by cluster
+	// A set of (cluster name, tenant name, tenant ID) tuples ordered by cluster
 	static KeyBackedSet<Tuple> clusterTenantIndex;
 
-	// A set of cluster/tenant group pairings ordered by cluster
+	// A set of (cluster, tenant group name) tuples ordered by cluster
 	static KeyBackedSet<Tuple> clusterTenantGroupIndex;
 };
 
@@ -787,6 +787,7 @@ struct RemoveClusterImpl {
 		for (Tuple entry : tenantEntries.results) {
 			ASSERT(entry.getString(0) == self->ctx.clusterName.get());
 			ManagementClusterMetadata::tenantMetadata.tenantMap.erase(tr, entry.getString(1));
+			ManagementClusterMetadata::tenantMetadata.tenantIdIndex.erase(tr, entry.getInt(2));
 		}
 
 		// Erase all of the tenants processed in this transaction from the cluster tenant index
@@ -1109,11 +1110,14 @@ struct CreateTenantImpl {
 				// We don't need to remove it from the tenant map because we will overwrite the existing entry later in
 				// this transaction.
 				ManagementClusterMetadata::tenantMetadata.tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
+				ManagementClusterMetadata::tenantMetadata.tenantIdIndex.erase(tr, existingEntry.get().id);
 				ManagementClusterMetadata::clusterTenantCount.atomicOp(
 				    tr, existingEntry.get().assignedCluster.get(), -1, MutationRef::AddValue);
 
 				ManagementClusterMetadata::clusterTenantIndex.erase(
-				    tr, Tuple::makeTuple(existingEntry.get().assignedCluster.get(), self->tenantName));
+				    tr,
+				    Tuple::makeTuple(
+				        existingEntry.get().assignedCluster.get(), self->tenantName, existingEntry.get().id));
 
 				state DataClusterMetadata previousAssignedClusterMetadata =
 				    wait(getClusterTransaction(tr, existingEntry.get().assignedCluster.get()));
@@ -1214,6 +1218,7 @@ struct CreateTenantImpl {
 
 		self->tenantEntry.tenantState = TenantState::REGISTERING;
 		ManagementClusterMetadata::tenantMetadata.tenantMap.set(tr, self->tenantName, self->tenantEntry);
+		ManagementClusterMetadata::tenantMetadata.tenantIdIndex.set(tr, self->tenantEntry.id, self->tenantName);
 
 		ManagementClusterMetadata::tenantMetadata.tenantCount.atomicOp(tr, 1, MutationRef::AddValue);
 		ManagementClusterMetadata::clusterTenantCount.atomicOp(
@@ -1228,7 +1233,7 @@ struct CreateTenantImpl {
 
 		// Updated indexes to include the new tenant
 		ManagementClusterMetadata::clusterTenantIndex.insert(
-		    tr, Tuple::makeTuple(self->tenantEntry.assignedCluster.get(), self->tenantName));
+		    tr, Tuple::makeTuple(self->tenantEntry.assignedCluster.get(), self->tenantName, self->tenantEntry.id));
 
 		wait(setClusterFuture);
 
@@ -1395,6 +1400,7 @@ struct DeleteTenantImpl {
 
 		// Erase the tenant entry itself
 		ManagementClusterMetadata::tenantMetadata.tenantMap.erase(tr, self->tenantName);
+		ManagementClusterMetadata::tenantMetadata.tenantIdIndex.erase(tr, tenantEntry.get().id);
 
 		// This is idempotent because this function is only called if the tenant is in the map
 		ManagementClusterMetadata::tenantMetadata.tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
@@ -1403,7 +1409,7 @@ struct DeleteTenantImpl {
 
 		// Remove the tenant from the cluster -> tenant index
 		ManagementClusterMetadata::clusterTenantIndex.erase(
-		    tr, Tuple::makeTuple(tenantEntry.get().assignedCluster.get(), self->tenantName));
+		    tr, Tuple::makeTuple(tenantEntry.get().assignedCluster.get(), self->tenantName, tenantEntry.get().id));
 
 		// Remove the tenant from its tenant group
 		wait(managementClusterRemoveTenantFromGroup(

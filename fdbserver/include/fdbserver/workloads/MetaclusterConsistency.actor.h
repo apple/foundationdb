@@ -116,8 +116,11 @@ private:
 		self->managementMetadata.tenantMap = std::map<TenantName, TenantMapEntry>(tenantList.begin(), tenantList.end());
 
 		for (auto t : self->managementMetadata.clusterTenantTuples.results) {
-			ASSERT(t.size() == 2);
-			self->managementMetadata.clusterTenantMap[t.getString(0)].insert(t.getString(1));
+			ASSERT(t.size() == 3);
+			TenantName tenantName = t.getString(1);
+			int64_t tenantId = t.getInt(2);
+			ASSERT(tenantId == self->managementMetadata.tenantMap[tenantName].id);
+			self->managementMetadata.clusterTenantMap[t.getString(0)].insert(tenantName);
 		}
 
 		for (auto t : self->managementMetadata.clusterTenantGroupTuples.results) {

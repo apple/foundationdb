@@ -164,6 +164,7 @@ struct TenantMetadataSpecification {
 	Key subspace;
 
 	KeyBackedObjectMap<TenantName, TenantMapEntry, decltype(IncludeVersion()), NullCodec> tenantMap;
+	KeyBackedMap<int64_t, TenantName> tenantIdIndex;
 	KeyBackedProperty<int64_t> lastTenantId;
 	KeyBackedBinaryValue<int64_t> tenantCount;
 	KeyBackedSet<int64_t> tenantTombstones;
@@ -173,8 +174,8 @@ struct TenantMetadataSpecification {
 
 	TenantMetadataSpecification(KeyRef prefix)
 	  : subspace(prefix.withSuffix("tenant/"_sr)), tenantMap(subspace.withSuffix("map/"_sr), IncludeVersion()),
-	    lastTenantId(subspace.withSuffix("lastId"_sr)), tenantCount(subspace.withSuffix("count"_sr)),
-	    tenantTombstones(subspace.withSuffix("tombstones/"_sr)),
+	    tenantIdIndex(subspace.withSuffix("idIndex/"_sr)), lastTenantId(subspace.withSuffix("lastId"_sr)),
+	    tenantCount(subspace.withSuffix("count"_sr)), tenantTombstones(subspace.withSuffix("tombstones/"_sr)),
 	    tombstoneCleanupData(subspace.withSuffix("tombstoneCleanup"_sr), IncludeVersion()),
 	    tenantGroupTenantIndex(subspace.withSuffix("tenantGroup/tenantIndex/"_sr)),
 	    tenantGroupMap(subspace.withSuffix("tenantGroup/map/"_sr), IncludeVersion()) {}
@@ -185,6 +186,7 @@ struct TenantMetadata {
 
 	static inline auto& subspace = instance.subspace;
 	static inline auto& tenantMap = instance.tenantMap;
+	static inline auto& tenantIdIndex = instance.tenantIdIndex;
 	static inline auto& lastTenantId = instance.lastTenantId;
 	static inline auto& tenantCount = instance.tenantCount;
 	static inline auto& tenantTombstones = instance.tenantTombstones;
