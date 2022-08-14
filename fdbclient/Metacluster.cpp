@@ -30,6 +30,8 @@ std::string DataClusterEntry::clusterStateToString(DataClusterState clusterState
 		return "ready";
 	case DataClusterState::REMOVING:
 		return "removing";
+	case DataClusterState::RESTORING:
+		return "restoring";
 	default:
 		UNREACHABLE();
 	}
@@ -40,6 +42,8 @@ DataClusterState DataClusterEntry::stringToClusterState(std::string stateStr) {
 		return DataClusterState::READY;
 	} else if (stateStr == "removing") {
 		return DataClusterState::REMOVING;
+	} else if (stateStr == "restoring") {
+		return DataClusterState::RESTORING;
 	}
 
 	UNREACHABLE();
