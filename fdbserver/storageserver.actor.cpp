@@ -6337,7 +6337,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					Version grvVersion = wait(tr.getRawReadVersion());
 					if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01)) {
 						// Test failed GRV request.
-						throw proxy_memory_limit_exceeded();
+						throw grv_proxy_memory_limit_exceeded();
 					}
 					fetchVersion = std::max(grvVersion, fetchVersion);
 				} catch (Error& e) {

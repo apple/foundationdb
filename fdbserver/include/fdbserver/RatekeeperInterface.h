@@ -108,6 +108,7 @@ struct GetRateInfoRequest {
 	UID requesterID;
 	int64_t totalReleasedTransactions;
 	int64_t batchReleasedTransactions;
+	Version version;
 
 	TransactionTagMap<uint64_t> throttledTagCounts;
 	bool detailed;
@@ -117,16 +118,23 @@ struct GetRateInfoRequest {
 	GetRateInfoRequest(UID const& requesterID,
 	                   int64_t totalReleasedTransactions,
 	                   int64_t batchReleasedTransactions,
+	                   Version version,
 	                   TransactionTagMap<uint64_t> throttledTagCounts,
 	                   bool detailed)
 	  : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions),
-	    batchReleasedTransactions(batchReleasedTransactions), throttledTagCounts(throttledTagCounts),
+	    batchReleasedTransactions(batchReleasedTransactions), version(version), throttledTagCounts(throttledTagCounts),
 	    detailed(detailed) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, requesterID, totalReleasedTransactions, batchReleasedTransactions, throttledTagCounts, detailed, reply);
+		serializer(ar,
+		           requesterID,
+		           totalReleasedTransactions,
+		           batchReleasedTransactions,
+		           version,
+		           throttledTagCounts,
+		           detailed,
+		           reply);
 	}
 };
 

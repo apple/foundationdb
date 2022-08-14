@@ -25,3 +25,4 @@ testTitle = 'BlobGranuleVerifyLargeClean'
     [[test.workload]]
     testName = 'BlobGranuleVerifier'
     testDuration = 120.0
+    enablePurging = false

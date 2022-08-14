@@ -51,6 +51,10 @@ std::string TenantMapEntry::tenantStateToString(TenantState tenantState) {
 		return "removing";
 	case TenantState::UPDATING_CONFIGURATION:
 		return "updating configuration";
+	case TenantState::RENAMING_FROM:
+		return "renaming from";
+	case TenantState::RENAMING_TO:
+		return "renaming to";
 	case TenantState::ERROR:
 		return "error";
 	default:
@@ -71,6 +75,10 @@ TenantState TenantMapEntry::stringToTenantState(std::string stateStr) {
 		return TenantState::REMOVING;
 	} else if (stateStr == "updating configuration") {
 		return TenantState::UPDATING_CONFIGURATION;
+	} else if (stateStr == "renaming from") {
+		return TenantState::RENAMING_FROM;
+	} else if (stateStr == "renaming to") {
+		return TenantState::RENAMING_TO;
 	} else if (stateStr == "error") {
 		return TenantState::ERROR;
 	}
@@ -160,7 +168,7 @@ std::string TenantMapEntry::toJson(int apiVersion) const {
 }
 
 bool TenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const {
-	return tenantGroup == other.tenantGroup;
+	return tenantGroup == other.tenantGroup && encrypted == other.encrypted;
 }
 
 void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> value) {

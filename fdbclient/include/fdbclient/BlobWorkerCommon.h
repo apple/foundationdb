@@ -43,11 +43,16 @@ struct BlobWorkerStats {
 	Counter flushGranuleReqs;
 	Counter compressionBytesRaw;
 	Counter compressionBytesFinal;
+	Counter fullRejections;
 
 	int numRangesAssigned;
 	int mutationBytesBuffered;
 	int activeReadRequests;
 	int granulesPendingSplitCheck;
+	Version minimumCFVersion;
+	int notAtLatestChangeFeeds;
+	int64_t lastResidentMemory;
+	int64_t estimatedMaxResidentMemory;
 
 	Reference<FlowLock> initialSnapshotLock;
 	Reference<FlowLock> resnapshotLock;
@@ -75,13 +80,18 @@ struct BlobWorkerStats {
 	    granuleUpdateErrors("GranuleUpdateErrors", cc), granuleRequestTimeouts("GranuleRequestTimeouts", cc),
 	    readRequestsWithBegin("ReadRequestsWithBegin", cc), readRequestsCollapsed("ReadRequestsCollapsed", cc),
 	    flushGranuleReqs("FlushGranuleReqs", cc), compressionBytesRaw("CompressionBytesRaw", cc),
-	    compressionBytesFinal("CompressionBytesFinal", cc), numRangesAssigned(0), mutationBytesBuffered(0),
-	    activeReadRequests(0), granulesPendingSplitCheck(0), initialSnapshotLock(initialSnapshotLock),
-	    resnapshotLock(resnapshotLock), deltaWritesLock(deltaWritesLock) {
+	    compressionBytesFinal("CompressionBytesFinal", cc), fullRejections("FullRejections", cc), numRangesAssigned(0),
+	    mutationBytesBuffered(0), activeReadRequests(0), granulesPendingSplitCheck(0), minimumCFVersion(0),
+	    notAtLatestChangeFeeds(0), lastResidentMemory(0), estimatedMaxResidentMemory(0),
+	    initialSnapshotLock(initialSnapshotLock), resnapshotLock(resnapshotLock), deltaWritesLock(deltaWritesLock) {
 		specialCounter(cc, "NumRangesAssigned", [this]() { return this->numRangesAssigned; });
 		specialCounter(cc, "MutationBytesBuffered", [this]() { return this->mutationBytesBuffered; });
 		specialCounter(cc, "ActiveReadRequests", [this]() { return this->activeReadRequests; });
 		specialCounter(cc, "GranulesPendingSplitCheck", [this]() { return this->granulesPendingSplitCheck; });
+		specialCounter(cc, "MinimumChangeFeedVersion", [this]() { return this->minimumCFVersion; });
+		specialCounter(cc, "NotAtLatestChangeFeeds", [this]() { return this->notAtLatestChangeFeeds; });
+		specialCounter(cc, "LastResidentMemory", [this]() { return this->lastResidentMemory; });
+		specialCounter(cc, "EstimatedMaxResidentMemory", [this]() { return this->estimatedMaxResidentMemory; });
 		specialCounter(cc, "InitialSnapshotsActive", [this]() { return this->initialSnapshotLock->activePermits(); });
 		specialCounter(cc, "InitialSnapshotsWaiting", [this]() { return this->initialSnapshotLock->waiters(); });
 		specialCounter(cc, "ReSnapshotsActive", [this]() { return this->resnapshotLock->activePermits(); });

@@ -1337,7 +1337,9 @@ std::string BaseTraceEvent::printRealTime(double time) {
 }
 
 TraceInterval& TraceInterval::begin() {
-	pairID = nondeterministicRandom()->randomUniqueID();
+	if (!pairID.isValid()) {
+		pairID = nondeterministicRandom()->randomUniqueID();
+	}
 	count = 0;
 	return *this;
 }

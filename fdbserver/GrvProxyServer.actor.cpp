@@ -254,6 +254,7 @@ struct GrvProxyData {
 	int updateCommitRequests;
 	NotifiedDouble lastCommitTime;
 
+	Version version;
 	Version minKnownCommittedVersion; // we should ask master for this version.
 
 	// Cache of the latest commit versions of storage servers.
@@ -286,7 +287,7 @@ struct GrvProxyData {
 	                                dbgid,
 	                                SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                                SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-	    updateCommitRequests(0), lastCommitTime(0), minKnownCommittedVersion(invalidVersion) {}
+	    updateCommitRequests(0), lastCommitTime(0), version(0), minKnownCommittedVersion(invalidVersion) {}
 };
 
 ACTOR Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
@@ -437,7 +438,8 @@ ACTOR Future<Void> getRate(UID myID,
                            TransactionTagMap<uint64_t>* transactionTagCounter,
                            PrioritizedTransactionTagMap<ClientTagThrottleLimits>* clientThrottledTags,
                            PrioritizedTransactionTagMap<GrvTransactionRateInfo>* perTagRateInfo,
-                           GrvProxyStats* stats) {
+                           GrvProxyStats* stats,
+                           GrvProxyData* proxyData) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
@@ -462,8 +464,13 @@ ACTOR Future<Void> getRate(UID myID,
 			nextRequestTimer = Never();
 			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
 
-			reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(GetRateInfoRequest(
-			    myID, *inTransactionCount, *inBatchTransactionCount, *transactionTagCounter, detailed)));
+			reply = brokenPromiseToNever(
+			    db->get().ratekeeper.get().getRateInfo.getReply(GetRateInfoRequest(myID,
+			                                                                       *inTransactionCount,
+			                                                                       *inBatchTransactionCount,
+			                                                                       proxyData->version,
+			                                                                       *transactionTagCounter,
+			                                                                       detailed)));
 			transactionTagCounter->clear();
 			expectingDetailedReply = detailed;
 		}
@@ -513,7 +520,7 @@ ACTOR Future<Void> getRate(UID myID,
 // Respond with an error to the GetReadVersion request when the GRV limit is hit.
 void proxyGRVThresholdExceeded(const GetReadVersionRequest* req, GrvProxyStats* stats) {
 	++stats->txnRequestErrors;
-	req->reply.sendError(proxy_memory_limit_exceeded());
+	req->reply.sendError(grv_proxy_memory_limit_exceeded());
 	if (req->priority == TransactionPriority::IMMEDIATE) {
 		TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceededSystem").suppressFor(60);
 	} else if (req->priority == TransactionPriority::DEFAULT) {
@@ -707,6 +714,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanContext parentSpan
 	}
 
 	GetRawCommittedVersionReply repFromMaster = wait(replyFromMasterFuture);
+	grvProxyData->version = std::max(grvProxyData->version, repFromMaster.version);
 	grvProxyData->minKnownCommittedVersion =
 	    std::max(grvProxyData->minKnownCommittedVersion, repFromMaster.minKnownCommittedVersion);
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
@@ -913,7 +921,8 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	                      &transactionTagCounter,
 	                      &clientThrottledTags,
 	                      &perTagRateInfo,
-	                      &grvProxyData->stats));
+	                      &grvProxyData->stats,
+	                      grvProxyData));
 	addActor.send(queueGetReadVersionRequests(db,
 	                                          &systemQueue,
 	                                          &defaultQueue,

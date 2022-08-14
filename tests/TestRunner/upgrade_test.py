@@ -140,7 +140,8 @@ class UpgradeTest:
         self.cluster.fdbmonitor_binary = self.downloader.binary_path(version, "fdbmonitor")
         self.cluster.fdbserver_binary = self.downloader.binary_path(version, "fdbserver")
         self.cluster.fdbcli_binary = self.downloader.binary_path(version, "fdbcli")
-        self.cluster.set_env_var("LD_LIBRARY_PATH", self.downloader.lib_dir(version))
+        self.cluster.set_env_var("LD_LIBRARY_PATH", "%s:%s" % (
+            self.downloader.lib_dir(version), os.getenv("LD_LIBRARY_PATH")))
         self.cluster.use_legacy_conf_syntax = version_before(version, "7.1.0")
         self.cluster.use_future_protocol_version = version == FUTURE_VERSION
         self.cluster.save_config()
