@@ -125,6 +125,10 @@ struct UnitTestWorkload : TestWorkload {
 			}
 		}
 
+		std::sort(tests.begin(), tests.end(), [](auto lhs, auto rhs) {
+			return std::string_view(lhs->name) < std::string_view(rhs->name);
+		});
+
 		fprintf(stdout, "Found %zu tests\n", tests.size());
 
 		if (tests.size() == 0) {
