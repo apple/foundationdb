@@ -647,7 +647,7 @@ public:
 			RangeResult metadata;
 			readRangeInDb(metadataShard.get(), prefixRange(shardMappingPrefix), UINT16_MAX, UINT16_MAX, &metadata);
 
-			std::vector<std::pair<KeyRange, std::string>> mapping = decodeShardMapping(metadata, shardMappingPrefix);
+			std::vector<std::pair<KeyRange, std::string>> mapping = decodeShardMapping(metadata, shardMappingPrefix)
 
 			for (const auto& [range, name] : mapping) {
 				TraceEvent(SevVerbose, "ShardedRocksLoadRange", this->logId)
@@ -942,6 +942,10 @@ public:
 		writeBatch->Put(metadataShard->cf,
 		                getShardMappingKey(lastKey, shardMappingPrefix),
 		                nextShard == nullptr ? "" : nextShard->physicalShard->id);
+		TraceEvent(SevDebug, "ShardedRocksDB", this->logId)
+		    .detail("Action", "PersistRangeMappingEnd")
+		    .detail("NextShardKey", lastKey)
+		    .detail("Value", nextShard == nullptr ? "" : nextShard->physicalShard->id);
 		dirtyShards->insert(metadataShard.get());
 	}
 

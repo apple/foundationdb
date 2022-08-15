@@ -2257,19 +2257,6 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 	return Void();
 }
 
-// Serves FetchCheckpointKeyValuesRequest, reads local checkpoint and sends it to the client over wire.
-ACTOR Future<Void> validateStorageQ(StorageServer* self, ValidateStorageRequest req) {
-	wait(self->serveValidateStorageParallelismLock.take(TaskPriority::DefaultYield));
-	state FlowLock::Releaser holder(self->serveValidateStorageParallelismLock);
-
-	TraceEvent("ServeValidateStorageBegin", self->thisServerID)
-	    .detail("RequestID", req.requestId)
-	    .detail("Range", req.range);
-	
-	req.reply.send(ValidateStorageResult(req.requestId));
-	return Void();
-}
-
 ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChangeFeedsRequest req) {
 	wait(delay(0));
 	wait(data->version.whenAtLeast(req.minVersion));
@@ -3503,6 +3490,369 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 	result.more = limit == 0 || *pLimitBytes <= 0; // FIXME: Does this have to be exact?
 	result.version = version;
 	return result;
+}
+
+ACTOR Future<Void> validateRangeAgainstServer(StorageServer* self,
+                                              KeyRange range,
+                                              Version version,
+                                              StorageServerInterface remoteServer) {
+	TraceEvent("ServeValidateRangeAgainstServerBegin", self->thisServerID)
+	    .detail("Range", range)
+	    .detail("Version", version)
+	    .detail("Servers", remoteServer);
+	Key begin = range.begin;
+
+	loop {
+		try {
+			state GetKeyValuesRequest req;
+			req.begin = begin;
+			req.end = range.end;
+			req.limit = 1e4;
+			req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+			req.version = version;
+			req.tags = TagSet();
+
+			// Try getting the entries in the specified range
+			state ErrorOr<GetKeyValuesReply> keyValueFuture =
+			    wait(remoteServer.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
+
+			// Read the resulting entries
+			state int firstValidServer = -1;
+			totalReadAmount = 0;
+			for (j = 0; j < keyValueFutures.size(); j++) {
+				ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
+
+				// Compare the results with other storage servers
+				if (rangeResult.present() && !rangeResult.get().error.present()) {
+					state GetKeyValuesReply current = rangeResult.get();
+					totalReadAmount += current.data.expectedSize();
+					// If we haven't encountered a valid storage server yet, then mark this as the baseline
+					// to compare against
+					if (firstValidServer == -1)
+						firstValidServer = j;
+
+					// Compare this shard against the first
+					else {
+						GetKeyValuesReply reference = keyValueFutures[firstValidServer].get().get();
+
+						if (current.data != reference.data || current.more != reference.more) {
+							// Be especially verbose if in simulation
+							if (g_network->isSimulated()) {
+								int invalidIndex = -1;
+								printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
+								       storageServerInterfaces[j].isTss() ? "TSS " : "",
+								       j,
+								       storageServerInterfaces[j].address().toString().c_str(),
+								       printable(req.begin.getKey()).c_str(),
+								       printable(req.end.getKey()).c_str());
+								for (int k = 0; k < current.data.size(); k++) {
+									printf("%d. %s => %s\n",
+									       k,
+									       printable(current.data[k].key).c_str(),
+									       printable(current.data[k].value).c_str());
+									if (invalidIndex < 0 &&
+									    (k >= reference.data.size() || current.data[k].key != reference.data[k].key ||
+									     current.data[k].value != reference.data[k].value))
+										invalidIndex = k;
+								}
+
+								printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
+								       storageServerInterfaces[firstValidServer].isTss() ? "TSS " : "",
+								       firstValidServer,
+								       storageServerInterfaces[firstValidServer].address().toString().c_str(),
+								       printable(req.begin.getKey()).c_str(),
+								       printable(req.end.getKey()).c_str());
+								for (int k = 0; k < reference.data.size(); k++) {
+									printf("%d. %s => %s\n",
+									       k,
+									       printable(reference.data[k].key).c_str(),
+									       printable(reference.data[k].value).c_str());
+									if (invalidIndex < 0 &&
+									    (k >= current.data.size() || reference.data[k].key != current.data[k].key ||
+									     reference.data[k].value != current.data[k].value))
+										invalidIndex = k;
+								}
+
+								printf("\nMISMATCH AT %d\n\n", invalidIndex);
+							}
+
+							// Data for trace event
+							// The number of keys unique to the current shard
+							int currentUniques = 0;
+							// The number of keys unique to the reference shard
+							int referenceUniques = 0;
+							// The number of keys in both shards with conflicting values
+							int valueMismatches = 0;
+							// The number of keys in both shards with matching values
+							int matchingKVPairs = 0;
+							// Last unique key on the current shard
+							KeyRef currentUniqueKey;
+							// Last unique key on the reference shard
+							KeyRef referenceUniqueKey;
+							// Last value mismatch
+							KeyRef valueMismatchKey;
+
+							// Loop indeces
+							int currentI = 0;
+							int referenceI = 0;
+							while (currentI < current.data.size() || referenceI < reference.data.size()) {
+								if (currentI >= current.data.size()) {
+									referenceUniqueKey = reference.data[referenceI].key;
+									referenceUniques++;
+									referenceI++;
+								} else if (referenceI >= reference.data.size()) {
+									currentUniqueKey = current.data[currentI].key;
+									currentUniques++;
+									currentI++;
+								} else {
+									KeyValueRef currentKV = current.data[currentI];
+									KeyValueRef referenceKV = reference.data[referenceI];
+
+									if (currentKV.key == referenceKV.key) {
+										if (currentKV.value == referenceKV.value)
+											matchingKVPairs++;
+										else {
+											valueMismatchKey = currentKV.key;
+											valueMismatches++;
+										}
+
+										currentI++;
+										referenceI++;
+									} else if (currentKV.key < referenceKV.key) {
+										currentUniqueKey = currentKV.key;
+										currentUniques++;
+										currentI++;
+									} else {
+										referenceUniqueKey = referenceKV.key;
+										referenceUniques++;
+										referenceI++;
+									}
+								}
+							}
+
+							TraceEvent("ConsistencyCheck_DataInconsistent")
+							    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString())
+							    .detail(format("StorageServer%d", firstValidServer).c_str(),
+							            storageServers[firstValidServer].toString())
+							    .detail("ShardBegin", req.begin.getKey())
+							    .detail("ShardEnd", req.end.getKey())
+							    .detail("VersionNumber", req.version)
+							    .detail(format("Server%dUniques", j).c_str(), currentUniques)
+							    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
+							    .detail(format("Server%dUniques", firstValidServer).c_str(), referenceUniques)
+							    .detail(format("Server%dUniqueKey", firstValidServer).c_str(), referenceUniqueKey)
+							    .detail("ValueMismatches", valueMismatches)
+							    .detail("ValueMismatchKey", valueMismatchKey)
+							    .detail("MatchingKVPairs", matchingKVPairs)
+							    .detail("IsTSS",
+							            storageServerInterfaces[j].isTss() ||
+							                    storageServerInterfaces[firstValidServer].isTss()
+							                ? "True"
+							                : "False");
+
+							if ((g_network->isSimulated() &&
+							     g_simulator.tssMode != ISimulator::TSSMode::EnabledDropMutations) ||
+							    (!storageServerInterfaces[j].isTss() &&
+							     !storageServerInterfaces[firstValidServer].isTss())) {
+								self->testFailure("Data inconsistent", true);
+								return false;
+							}
+						}
+					}
+				}
+
+				// If the data is not available and we aren't relocating this shard
+				else if (!isRelocating) {
+					Error e = rangeResult.isError() ? rangeResult.getError() : rangeResult.get().error.get();
+
+					TraceEvent("ConsistencyCheck_StorageServerUnavailable")
+					    .errorUnsuppressed(e)
+					    .suppressFor(1.0)
+					    .detail("StorageServer", storageServers[j])
+					    .detail("ShardBegin", printable(range.begin))
+					    .detail("ShardEnd", printable(range.end))
+					    .detail("Address", storageServerInterfaces[j].address())
+					    .detail("UID", storageServerInterfaces[j].id())
+					    .detail("GetKeyValuesToken", storageServerInterfaces[j].getKeyValues.getEndpoint().token)
+					    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False");
+
+					// All shards should be available in quiscence
+					if (self->performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
+						self->testFailure("Storage server unavailable");
+						return false;
+					}
+				}
+			}
+
+			if (firstValidServer >= 0) {
+				VectorRef<KeyValueRef> data = keyValueFutures[firstValidServer].get().get().data;
+				// Calculate the size of the shard, the variance of the shard size estimate, and the correct
+				// shard size estimate
+				for (int k = 0; k < data.size(); k++) {
+					ByteSampleInfo sampleInfo = isKeyValueInSample(data[k]);
+					shardBytes += sampleInfo.size;
+					double itemProbability = ((double)sampleInfo.size) / sampleInfo.sampledSize;
+					if (itemProbability < 1)
+						shardVariance +=
+						    itemProbability * (1 - itemProbability) * pow((double)sampleInfo.sampledSize, 2);
+
+					if (sampleInfo.inSample) {
+						sampledBytes += sampleInfo.sampledSize;
+						if (!canSplit && sampledBytes >= shardBounds.min.bytes &&
+						    data[k].key.size() <= CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT &&
+						    sampledBytes <=
+						        shardBounds.max.bytes * CLIENT_KNOBS->STORAGE_METRICS_UNFAIR_SPLIT_LIMIT / 2) {
+							canSplit = true;
+							splitBytes = sampledBytes;
+						}
+
+						/*TraceEvent("ConsistencyCheck_ByteSample").detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end))
+						    .detail("SampledBytes", sampleInfo.sampledSize).detail("Key",
+						   printable(data[k].key)).detail("KeySize", data[k].key.size()).detail("ValueSize",
+						   data[k].value.size());*/
+
+						// In data distribution, the splitting process ignores the first key in a shard.
+						// Thus, we shouldn't consider it when validating the upper bound of estimated shard
+						// sizes
+						if (k == 0)
+							firstKeySampledBytes += sampleInfo.sampledSize;
+
+						sampledKeys++;
+						if (itemProbability < 1) {
+							sampledKeysWithProb++;
+						}
+					}
+				}
+
+				// Accumulate number of keys in this shard
+				shardKeys += data.size();
+			}
+			// after requesting each shard, enforce rate limit based on how much data will likely be read
+			if (rateLimitForThisRound > 0) {
+				wait(rateLimiter->getAllowance(totalReadAmount));
+				// Set ratelimit to max allowed if current round has been going on for a while
+				if (now() - rateLimiterStartTime >
+				        1.1 * CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME &&
+				    rateLimitForThisRound != self->rateLimitMax) {
+					rateLimitForThisRound = self->rateLimitMax;
+					rateLimiter = Reference<IRateControl>(new SpeedLimit(rateLimitForThisRound, 1));
+					rateLimiterStartTime = now();
+					TraceEvent(SevInfo, "ConsistencyCheck_RateLimitSetMaxForThisRound")
+					    .detail("RateLimit", rateLimitForThisRound);
+				}
+			}
+			bytesReadInRange += totalReadAmount;
+			bytesReadInthisRound += totalReadAmount;
+
+			// Advance to the next set of entries
+			if (firstValidServer >= 0 && keyValueFutures[firstValidServer].get().get().more) {
+				VectorRef<KeyValueRef> result = keyValueFutures[firstValidServer].get().get().data;
+				ASSERT(result.size() > 0);
+				begin = firstGreaterThan(result[result.size() - 1].key);
+				ASSERT(begin.getKey() != allKeys.end);
+				lastStartSampleKey = lastSampleKey;
+			} else
+				break;
+		} catch (Error& e) {
+			state Error err = e;
+			wait(onErrorTr.onError(err));
+			TraceEvent("ConsistencyCheck_RetryDataConsistency").error(err);
+		}
+	}
+}
+
+ACTOR Future<Void> validateRangeShard(StorageServer* self, KeyRange range, std::vector<UID> candidates) {
+	TraceEvent("ServeValidateRangeShardBegin", self->thisServerID)
+	    .detail("Range", req.range)
+	    .detail("Servers", describe(servers));
+
+	std::vector<Future<Optional<Value>>> serverListEntries;
+
+	for (const UID& id : candidates) {
+		serverListEntries.push_back(tr->get(serverListKeyFor(id)));
+	}
+
+	std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+
+	std::unordered_map<std::string, std::vector<StorageServerInterface>> ssis;
+	std::string thisDCId;
+	for (const auto& v : serverListValues) {
+		const StorageServerInterface ssi = decodeServerListValue(v.get());
+		if (ssi.uniqueID == self->thisServerID) {
+			thisDcId = ssi.locality.describeDcId();
+		}
+		ssis[ssi.locality.describeDcId()].push_back(ssi);
+	}
+	for (auto& [dcId, ssiList] : ssis) {
+		if (dcId != thisDcId) {
+			if (ssiList.empty()) {
+				return Void();
+			}
+		}
+	}
+}
+
+ACTOR Future<Void> validateRange(StorageServer* self, KeyRange range) {
+	TraceEvent("ServeValidateRangeBegin", self->thisServerID).detail("Range", req.range);
+
+	state Transaction(self->cx);
+	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+	state RangeResult currentShards = wait(krmGetRanges(
+	    &tr, keyServersPrefix, range, SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT, SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
+	ASSERT(!currentShards.empty() && !currentShards.more);
+
+	state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+	ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+
+	std::vector<UID> src;
+	std::vector<UID> dest;
+	UID srcId, destId;
+	decodeKeyServersValue(UIDtoTagMap, currentShards[0].value, src, dest, srcId, destId);
+
+	if (dest.empty() || destId != anonymousShardId) {
+		return Void();
+	}
+
+	return Void();
+}
+
+// Serves FetchCheckpointKeyValuesRequest, reads local checkpoint and sends it to the client over wire.
+ACTOR Future<Void> validateStorageQ(StorageServer* self, ValidateStorageRequest req) {
+	wait(self->serveValidateStorageParallelismLock.take(TaskPriority::DefaultYield));
+	state FlowLock::Releaser holder(self->serveValidateStorageParallelismLock);
+
+	TraceEvent("ServeValidateStorageBegin", self->thisServerID)
+	    .detail("RequestID", req.requestId)
+	    .detail("Range", req.range);
+
+	state Transaction(self->cx);
+	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+	state RangeResult currentShards = wait(krmGetRanges(
+	    &tr, keyServersPrefix, keys, SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT, SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
+	ASSERT(!currentShards.empty() && !currentShards.more);
+
+	state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+	ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+
+	if (KeyRangeRef(currentShards[0].key, currentShards[1].key) != keys) {
+		throw operation_cancelled();
+	}
+
+	std::vector<UID> src;
+	std::vector<UID> dest;
+	UID srcId, destId;
+	decodeKeyServersValue(UIDtoTagMap, currentShards[0].value, src, dest, srcId, destId);
+
+	if (dest.empty() || destId != anonymousShardId) {
+		return Void();
+	}
+
+	req.reply.send(ValidateStorageResult(req.requestId));
+	return Void();
 }
 
 KeyRangeRef StorageServer::clampRangeToTenant(KeyRangeRef range, Optional<TenantMapEntry> tenantEntry, Arena& arena) {
