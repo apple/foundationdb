@@ -69,6 +69,7 @@ if(WIN32)
   add_definitions(-DWIN32_LEAN_AND_MEAN)
   add_definitions(-D_ITERATOR_DEBUG_LEVEL=0)
   add_definitions(-DNOGDI) # WinGDI.h defines macro ERROR
+  add_definitions(-D_USE_MATH_DEFINES) # Math constants
 endif()
 
 if (USE_CCACHE)

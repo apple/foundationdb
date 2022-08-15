@@ -31,3 +31,13 @@ maxClients = 8
     initialSize = 100
     runUntilStop = true
     readExistingKeysRatio = 0.9
+
+    [[test.workload]]
+    name = 'AtomicOpsCorrectness'
+    initialSize = 0
+    runUntilStop = true
+
+    [[test.workload]]
+    name = 'WatchAndWait'
+    initialSize = 0
+    runUntilStop = true

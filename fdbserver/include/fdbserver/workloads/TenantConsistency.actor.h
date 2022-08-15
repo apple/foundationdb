@@ -46,6 +46,7 @@ private:
 	struct TenantData {
 		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
 		std::map<TenantName, TenantMapEntry> tenantMap;
+		std::map<int64_t, TenantName> tenantIdIndex;
 		int64_t lastTenantId;
 		int64_t tenantCount;
 		std::set<int64_t> tenantTombstones;
@@ -67,6 +68,7 @@ private:
 	ACTOR static Future<Void> loadTenantMetadata(TenantConsistencyCheck* self) {
 		state Reference<typename DB::TransactionT> tr = self->db->createTransaction();
 		state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantList;
+		state KeyBackedRangeResult<std::pair<int64_t, TenantName>> tenantIdIndexList;
 		state KeyBackedRangeResult<int64_t> tenantTombstoneList;
 		state KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroupList;
 		state KeyBackedRangeResult<Tuple> tenantGroupTenantTuples;
@@ -90,6 +92,8 @@ private:
 
 				wait(
 				    store(tenantList, tenantMetadata->tenantMap.getRange(tr, {}, {}, metaclusterMaxTenants)) &&
+				    store(tenantIdIndexList,
+				          tenantMetadata->tenantIdIndex.getRange(tr, {}, {}, metaclusterMaxTenants)) &&
 				    store(self->metadata.lastTenantId, tenantMetadata->lastTenantId.getD(tr, Snapshot::False, -1)) &&
 				    store(self->metadata.tenantCount, tenantMetadata->tenantCount.getD(tr, Snapshot::False, 0)) &&
 				    store(tenantTombstoneList,
@@ -108,8 +112,16 @@ private:
 		ASSERT(!tenantList.more);
 		self->metadata.tenantMap =
 		    std::map<TenantName, TenantMapEntry>(tenantList.results.begin(), tenantList.results.end());
+
+		ASSERT(!tenantIdIndexList.more);
+		self->metadata.tenantIdIndex =
+		    std::map<int64_t, TenantName>(tenantIdIndexList.results.begin(), tenantIdIndexList.results.end());
+
+		ASSERT(!tenantTombstoneList.more);
 		self->metadata.tenantTombstones =
 		    std::set<int64_t>(tenantTombstoneList.results.begin(), tenantTombstoneList.results.end());
+
+		ASSERT(!tenantGroupList.more);
 		self->metadata.tenantGroupMap =
 		    std::map<TenantGroupName, TenantGroupEntry>(tenantGroupList.results.begin(), tenantGroupList.results.end());
 
@@ -135,13 +147,13 @@ private:
 		}
 
 		ASSERT(metadata.tenantMap.size() == metadata.tenantCount);
+		ASSERT(metadata.tenantIdIndex.size() == metadata.tenantCount);
 
-		std::set<int64_t> tenantIds;
 		for (auto [tenantName, tenantMapEntry] : metadata.tenantMap) {
 			if (metadata.clusterType != ClusterType::METACLUSTER_DATA) {
 				ASSERT(tenantMapEntry.id <= metadata.lastTenantId);
 			}
-			ASSERT(tenantIds.insert(tenantMapEntry.id).second);
+			ASSERT(metadata.tenantIdIndex[tenantMapEntry.id] == tenantName);
 			ASSERT(!metadata.tenantTombstones.count(tenantMapEntry.id));
 
 			if (tenantMapEntry.tenantGroup.present()) {
