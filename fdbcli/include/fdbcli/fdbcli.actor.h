@@ -120,6 +120,7 @@ extern const KeyRangeRef processClassSourceSpecialKeyRange;
 extern const KeyRangeRef processClassTypeSpecialKeyRange;
 // Other special keys
 inline const KeyRef errorMsgSpecialKey = LiteralStringRef("\xff\xff/error_message");
+inline const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/management/options/worker_interfaces/verify"_sr;
 // help functions (Copied from fdbcli.actor.cpp)
 
 // get all workers' info
@@ -132,13 +133,14 @@ void printUsage(StringRef command);
 // Pre: tr failed with special_keys_api_failure error
 // Read the error message special key and return the message
 ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
-// Using \xff\xff/worker_interfaces/ special key, get all worker interfaces
+// Using \xff\xff/worker_interfaces/ special key, get all worker interfaces.
+// A worker list will be returned from CC.
+// If verify, we will try to establish connections to all workers returned.
+// In particular, it will deserialize \xff\xff/worker_interfaces/<address>:=<ClientInterface> kv pairs and issue RPC
+// calls, then only return interfaces(kv pairs) the client can talk to
 ACTOR Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
-                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
-// Deserialize \xff\xff/worker_interfaces/<address>:=<ClientInterface> k-v pair and verify by a RPC call
-ACTOR Future<Void> verifyAndAddInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
-                                         Reference<FlowLock> connectLock,
-                                         KeyValue kv);
+                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
+                                       bool verify = false);
 // print cluster status info
 void printStatus(StatusObjectReader statusObj,
                  StatusClient::StatusLevel level,
