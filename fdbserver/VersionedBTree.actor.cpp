@@ -1472,6 +1472,8 @@ struct RedwoodMetrics {
 		kvSizeReadByGetRange = Reference<Histogram>(
 		    new Histogram(Reference<HistogramRegistry>(), "kvSize", "ReadByGetRange", Histogram::Unit::bytes));
 
+		ioLock = nullptr;
+
 		// These histograms are used for Btree events, hence level > 0
 		unsigned int levelCounter = 0;
 		for (RedwoodMetrics::Level& level : levels) {
@@ -1514,6 +1516,8 @@ struct RedwoodMetrics {
 	// btree levels and one extra level for non btree level.
 	Level levels[btreeLevels + 1];
 	metrics metric;
+	// pointer to the priority multi lock used in pager
+	PriorityMultiLock* ioLock;
 
 	Reference<Histogram> kvSizeWritten;
 	Reference<Histogram> kvSizeReadByGet;
@@ -1568,9 +1572,12 @@ struct RedwoodMetrics {
 	// The string is a reasonably well formatted page of information
 	void getFields(TraceEvent* e, std::string* s = nullptr, bool skipZeroes = false);
 
+	void getIOLockFields(TraceEvent* e, std::string* s = nullptr);
+
 	std::string toString(bool clearAfter) {
 		std::string s;
 		getFields(nullptr, &s);
+		getIOLockFields(nullptr, &s);
 
 		if (clearAfter) {
 			clear();
@@ -1605,6 +1612,7 @@ ACTOR Future<Void> redwoodMetricsLogger() {
 		double elapsed = now() - g_redwoodMetrics.startTime;
 		e.detail("Elapsed", elapsed);
 		g_redwoodMetrics.getFields(&e);
+		g_redwoodMetrics.getIOLockFields(&e);
 		g_redwoodMetrics.clear();
 	}
 }
@@ -2018,6 +2026,7 @@ public:
 		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();
 		}
+		g_redwoodMetrics.ioLock = &ioLock;
 
 		commitFuture = Void();
 		recoverFuture = forwardError(recover(this), errorPromise);
@@ -8423,6 +8432,43 @@ void RedwoodMetrics::getFields(TraceEvent* e, std::string* s, bool skipZeroes) {
 				}
 			}
 			*s += metric.events.toString(i, elapsed);
+		}
+	}
+}
+
+void RedwoodMetrics::getIOLockFields(TraceEvent* e, std::string* s) {
+	if (ioLock == nullptr)
+		return;
+
+	int maxPriority = ioLock->maxPriority();
+
+	if (e != nullptr) {
+		e->detail("ActiveReads", ioLock->totalWorkers());
+		e->detail("AwaitReads", ioLock->totalWaiters());
+
+		for (int priority = 0; priority <= maxPriority; ++priority) {
+			e->detail(format("ActiveP%d", priority), ioLock->numWorkers(priority));
+			e->detail(format("AwaitP%d", priority), ioLock->numWaiters(priority));
+		}
+	}
+
+	if (s != nullptr) {
+		std::string active = "Active";
+		std::string await = "Await";
+
+		*s += "\n";
+		*s += format("%-15s %-8u  ", "ActiveReads", ioLock->totalWorkers());
+		*s += format("%-15s %-8u  ", "AwaitReads", ioLock->totalWaiters());
+		*s += "\n";
+
+		for (int priority = 0; priority <= maxPriority; ++priority) {
+			*s +=
+			    format("%-15s %-8u  ", (active + 'P' + std::to_string(priority)).c_str(), ioLock->numWorkers(priority));
+		}
+		*s += "\n";
+		for (int priority = 0; priority <= maxPriority; ++priority) {
+			*s +=
+			    format("%-15s %-8u  ", (await + 'P' + std::to_string(priority)).c_str(), ioLock->numWaiters(priority));
 		}
 	}
 }

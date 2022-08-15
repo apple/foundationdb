@@ -2245,17 +2245,18 @@ public:
 		s += "}";
 		return s;
 	}
+	int maxPriority() const { return launchLimit.size() - 1; }
 
-	int totalWaiters() { return waiting; }
+	int totalWaiters() const { return waiting; }
 
-	int numWaiters(const unsigned int priority) {
+	int numWaiters(const unsigned int priority) const {
 		ASSERT(priority < waiters.size());
 		return waiters[priority].size();
 	}
 
-	int totalWorkers() { return concurrency - available; }
+	int totalWorkers() const { return concurrency - available; }
 
-	int numWorkers(const unsigned int priority) {
+	int numWorkers(const unsigned int priority) const {
 		ASSERT(priority < waiters.size());
 		return workerCounts[priority];
 	}
