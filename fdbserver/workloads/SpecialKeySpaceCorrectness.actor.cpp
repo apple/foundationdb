@@ -873,31 +873,34 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		}
 		TraceEvent(SevDebug, "DatabaseLocked").log();
 		// if database locked, fdb read should get database_locked error
-		try {
-			tx->reset();
-			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			RangeResult res = wait(tx->getRange(normalKeys, 1));
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled)
-				throw;
-			ASSERT(e.code() == error_code_database_locked);
+		tx->reset();
+		loop {
+			try {
+				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
+				RangeResult res = wait(tx->getRange(normalKeys, 1));
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled)
+					throw;
+				if (e.code() == error_code_grv_proxy_memory_limit_exceeded ||
+				    e.code() == error_code_batch_transaction_throttled) {
+					wait(tx->onError(e));
+				} else {
+					ASSERT(e.code() == error_code_database_locked);
+					break;
+				}
+			}
 		}
 		// make sure we unlock the database
 		// unlock is idempotent, thus we can commit many times until successful
+		tx->reset();
 		loop {
 			try {
-				tx->reset();
 				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				// unlock the database
 				tx->clear(SpecialKeySpace::getManagementApiCommandPrefix("lock"));
 				wait(tx->commit());
 				TraceEvent(SevDebug, "DatabaseUnlocked").log();
-				tx->reset();
-				// read should be successful
-				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-				RangeResult res = wait(tx->getRange(normalKeys, 1));
-				tx->reset();
 				break;
 			} catch (Error& e) {
 				TraceEvent(SevDebug, "DatabaseUnlockFailure").error(e);
@@ -905,9 +908,23 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				wait(tx->onError(e));
 			}
 		}
+
+		tx->reset();
+		loop {
+			try {
+				// read should be successful
+				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
+				RangeResult res = wait(tx->getRange(normalKeys, 1));
+				break;
+			} catch (Error& e) {
+				wait(tx->onError(e));
+			}
+		}
+
 		// test consistencycheck which only used by ConsistencyCheck Workload
 		// Note: we have exclusive ownership of fdbShouldConsistencyCheckBeSuspended,
 		// no existing workloads can modify the key
+		tx->reset();
 		{
 			try {
 				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);

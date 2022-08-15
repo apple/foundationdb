@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ClientKnobs.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
@@ -31,6 +32,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbrpc/sim_validation.h"
+#include "flow/IRandom.h"
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -560,7 +562,9 @@ ACTOR Future<Void> queueGetReadVersionRequests(
 			// WARNING: this code is run at a high priority, so it needs to do as little work as possible
 			bool canBeQueued = true;
 			if (stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() >
-			    SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE) {
+			        SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE ||
+			    (g_network->isSimulated() && !g_simulator.speedUpSimulation &&
+			     deterministicRandom()->random01() < 0.01)) {
 				// When the limit is hit, try to drop requests from the lower priority queues.
 				if (req.priority == TransactionPriority::BATCH) {
 					canBeQueued = false;
