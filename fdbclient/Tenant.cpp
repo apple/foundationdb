@@ -43,10 +43,6 @@ std::string TenantMapEntry::tenantStateToString(TenantState tenantState) {
 		return "registering";
 	case TenantState::READY:
 		return "ready";
-	case TenantState::RENAMING_FROM:
-		return "renaming from";
-	case TenantState::RENAMING_TO:
-		return "renaming to";
 	case TenantState::REMOVING:
 		return "removing";
 	case TenantState::UPDATING_CONFIGURATION:
@@ -67,10 +63,6 @@ TenantState TenantMapEntry::stringToTenantState(std::string stateStr) {
 		return TenantState::REGISTERING;
 	} else if (stateStr == "ready") {
 		return TenantState::READY;
-	} else if (stateStr == "renaming from") {
-		return TenantState::RENAMING_FROM;
-	} else if (stateStr == "renaming to") {
-		return TenantState::RENAMING_TO;
 	} else if (stateStr == "removing") {
 		return TenantState::REMOVING;
 	} else if (stateStr == "updating configuration") {
