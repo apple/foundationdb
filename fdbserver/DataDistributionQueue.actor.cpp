@@ -2091,14 +2091,14 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 				                        WantTrueBest(mcMove),
 				                        PreferLowerDiskUtil::False,
 				                        TeamMustHaveShards::True,
-                                teamSetIndex,
+				                        teamSetIndex,
 				                        ForReadBalance(readRebalance),
 				                        PreferLowerReadUtil::False);
 				destReq = GetTeamRequest(WantNewServers::True,
 				                         WantTrueBest(!mcMove),
 				                         PreferLowerDiskUtil::True,
 				                         TeamMustHaveShards::False,
-                                 teamSetIndex,
+				                         teamSetIndex,
 				                         ForReadBalance(readRebalance),
 				                         PreferLowerReadUtil::True);
 
