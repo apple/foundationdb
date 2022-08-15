@@ -72,8 +72,9 @@ ACTOR Future<Void> updateMaxShardSize(Reference<AsyncVar<int64_t>> dbSizeEstimat
 struct DataDistributionTracker {
 	Database cx;
 	UID distributorId;
+
 	// At now, the lifetime of shards is guaranteed longer than DataDistributionTracker.
-	std::shared_ptr<KeyRangeMap<ShardTrackedData>> shards;
+	KeyRangeMap<ShardTrackedData>* shards;
 	ActorCollection sizeChanges;
 
 	int64_t systemSizeEstimate = 0;
@@ -94,7 +95,7 @@ struct DataDistributionTracker {
 	// The reference to trackerCancelled must be extracted by actors,
 	// because by the time (trackerCancelled == true) this memory cannot
 	// be accessed
-	std::shared_ptr<bool> trackerCancelled;
+	bool* trackerCancelled;
 
 	// This class extracts the trackerCancelled reference from a DataDistributionTracker object
 	// Because some actors spawned by the dataDistributionTracker outlive the DataDistributionTracker
@@ -127,8 +128,8 @@ struct DataDistributionTracker {
 	                        PromiseStream<RelocateShard> const& output,
 	                        Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
 	                        Reference<AsyncVar<bool>> anyZeroHealthyTeams,
-	                        std::shared_ptr<KeyRangeMap<ShardTrackedData>> shards,
-	                        std::shared_ptr<bool> trackerCancelled)
+	                        KeyRangeMap<ShardTrackedData>* shards,
+	                        bool* trackerCancelled)
 	  : cx(cx), distributorId(distributorId), shards(shards), sizeChanges(false), systemSizeEstimate(0),
 	    dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), readyToStart(readyToStart),
