@@ -52,6 +52,8 @@
 #include "flow/TLSConfig.actor.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Util.h"
+#include "flow/UnitTest.h"
+#include "flow/ScopeExit.h"
 
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
@@ -146,8 +148,8 @@ public:
 	void initMetrics() override;
 
 	// INetworkConnections interface
-	Future<Reference<IConnection>> connect(NetworkAddress toAddr, const std::string& host) override;
-	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, const std::string& host) override;
+	Future<Reference<IConnection>> connect(NetworkAddress toAddr, tcp::socket* existingSocket = nullptr) override;
+	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6) override;
 	// The mock DNS methods should only be used in simulation.
@@ -214,7 +216,7 @@ public:
 		globals[id] = v;
 	}
 
-	ProtocolVersion protocolVersion() const override { return currentProtocolVersion; }
+	ProtocolVersion protocolVersion() const override { return currentProtocolVersion(); }
 
 	std::vector<flowGlobalType> globals;
 
@@ -507,7 +509,7 @@ public:
 
 	UID getDebugID() const override { return id; }
 
-	tcp::socket& getSocket() { return socket; }
+	tcp::socket& getSocket() override { return socket; }
 
 private:
 	UID id;
@@ -839,10 +841,15 @@ public:
 	  : id(nondeterministicRandom()->randomUniqueID()), socket(io_service), ssl_sock(socket, context->mutate()),
 	    sslContext(context) {}
 
+	explicit SSLConnection(Reference<ReferencedObject<boost::asio::ssl::context>> context, tcp::socket* existingSocket)
+	  : id(nondeterministicRandom()->randomUniqueID()), socket(std::move(*existingSocket)),
+	    ssl_sock(socket, context->mutate()), sslContext(context) {}
+
 	// This is not part of the IConnection interface, because it is wrapped by INetwork::connect()
 	ACTOR static Future<Reference<IConnection>> connect(boost::asio::io_service* ios,
 	                                                    Reference<ReferencedObject<boost::asio::ssl::context>> context,
-	                                                    NetworkAddress addr) {
+	                                                    NetworkAddress addr,
+	                                                    tcp::socket* existingSocket = nullptr) {
 		std::pair<IPAddress, uint16_t> peerIP = std::make_pair(addr.ip, addr.port);
 		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
 		if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
@@ -857,9 +864,15 @@ public:
 			}
 		}
 
+		if (existingSocket != nullptr) {
+			Reference<SSLConnection> self(new SSLConnection(context, existingSocket));
+			self->peer_address = addr;
+			self->init();
+			return self;
+		}
+
 		state Reference<SSLConnection> self(new SSLConnection(*ios, context));
 		self->peer_address = addr;
-
 		try {
 			auto to = tcpEndpoint(self->peer_address);
 			BindPromise p("N2_ConnectError", self->id);
@@ -869,7 +882,7 @@ public:
 			wait(onConnected);
 			self->init();
 			return self;
-		} catch (Error& e) {
+		} catch (Error&) {
 			// Either the connection failed, or was cancelled by the caller
 			self->closeSocket();
 			throw;
@@ -1097,7 +1110,7 @@ public:
 
 	UID getDebugID() const override { return id; }
 
-	tcp::socket& getSocket() { return socket; }
+	tcp::socket& getSocket() override { return socket; }
 
 	ssl_socket& getSSLSocket() { return ssl_sock; }
 
@@ -1818,17 +1831,17 @@ THREAD_HANDLE Net2::startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, in
 	return ::startThread(func, arg, stackSize, name);
 }
 
-Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, const std::string& host) {
+Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, tcp::socket* existingSocket) {
 	if (toAddr.isTLS()) {
 		initTLS(ETLSInitState::CONNECT);
-		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr);
+		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr, existingSocket);
 	}
 
 	return Connection::connect(&this->reactor.ios, toAddr);
 }
 
-Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr, const std::string& host) {
-	return connect(toAddr, host);
+Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr) {
+	return connect(toAddr);
 }
 
 Future<Reference<IUDPSocket>> Net2::createUDPSocket(NetworkAddress toAddr) {
@@ -2127,71 +2140,141 @@ void startThreadF(F&& func) {
 		}
 	};
 	Thing* t = new Thing(std::move(func));
-	startThread(Thing::start, t);
+	g_network->startThread(Thing::start, t);
+}
+
+TEST_CASE("/flow/Net2/ThreadSafeQueue/Interface") {
+	ThreadSafeQueue<int> tq;
+	ASSERT(!tq.pop().present());
+	ASSERT(tq.canSleep());
+
+	ASSERT(tq.push(1) == true);
+	ASSERT(!tq.canSleep());
+	ASSERT(!tq.canSleep());
+	ASSERT(tq.push(2) == false);
+	ASSERT(tq.push(3) == false);
+
+	ASSERT(tq.pop().get() == 1);
+	ASSERT(tq.pop().get() == 2);
+	ASSERT(tq.push(4) == false);
+	ASSERT(tq.pop().get() == 3);
+	ASSERT(tq.pop().get() == 4);
+	ASSERT(!tq.pop().present());
+	ASSERT(tq.canSleep());
+	return Void();
+}
+
+// A helper struct used by queueing tests which use multiple threads.
+struct QueueTestThreadState {
+	QueueTestThreadState(int threadId, int toProduce) : threadId(threadId), toProduce(toProduce) {}
+	int threadId;
+	int toProduce;
+	int produced = 0;
+	Promise<Void> doneProducing;
+	int consumed = 0;
+
+	static int valueToThreadId(int value) { return value >> 20; }
+	int elementValue(int index) { return index + (threadId << 20); }
+	int nextProduced() { return elementValue(produced++); }
+	int nextConsumed() { return elementValue(consumed++); }
+	void checkDone() {
+		ASSERT_EQ(produced, toProduce);
+		ASSERT_EQ(consumed, produced);
+	}
+};
+
+TEST_CASE("/flow/Net2/ThreadSafeQueue/Threaded") {
+	// Uses ThreadSafeQueue from multiple threads. Verifies that all pushed elements are popped, maintaining the
+	// ordering within a thread.
+	ThreadSafeQueue<int> queue;
+	state std::vector<QueueTestThreadState> perThread = { QueueTestThreadState(0, 1000000),
+		                                                  QueueTestThreadState(1, 100000),
+		                                                  QueueTestThreadState(2, 1000000) };
+	state std::vector<Future<Void>> doneProducing;
+
+	int total = 0;
+	for (int t = 0; t < perThread.size(); ++t) {
+		auto& s = perThread[t];
+		doneProducing.push_back(s.doneProducing.getFuture());
+		total += s.toProduce;
+		startThreadF([&queue, &s]() {
+			printf("Thread%d\n", s.threadId);
+			int nextYield = 0;
+			while (s.produced < s.toProduce) {
+				queue.push(s.nextProduced());
+				if (nextYield-- == 0) {
+					std::this_thread::yield();
+					nextYield = nondeterministicRandom()->randomInt(0, 100);
+				}
+			}
+			printf("T%dDone\n", s.threadId);
+			s.doneProducing.send(Void());
+		});
+	}
+	int consumed = 0;
+	while (consumed < total) {
+		Optional<int> element = queue.pop();
+		if (element.present()) {
+			int v = element.get();
+			auto& s = perThread[QueueTestThreadState::valueToThreadId(v)];
+			++consumed;
+			ASSERT(v == s.nextConsumed());
+		} else {
+			std::this_thread::yield();
+		}
+		if ((consumed & 3) == 0)
+			queue.canSleep();
+	}
+
+	wait(waitForAll(doneProducing));
+
+	for (int t = 0; t < std::size(perThread); ++t) {
+		perThread[t].checkDone();
+	}
+	return Void();
+}
+
+// NB: This could be a test for any INetwork implementation, but Sim2 doesn't
+// satisfy this requirement yet.
+TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
+	// Verifies that signals processed by onMainThread() are executed in order.
+
+	state std::vector<QueueTestThreadState> perThread = { QueueTestThreadState(0, 1000000),
+		                                                  QueueTestThreadState(1, 100000),
+		                                                  QueueTestThreadState(2, 1000000) };
+	state std::vector<Future<Void>> doneProducing;
+	for (int t = 0; t < perThread.size(); ++t) {
+		auto& s = perThread[t];
+		doneProducing.push_back(s.doneProducing.getFuture());
+		startThreadF([&s]() {
+			int nextYield = 0;
+			while (s.produced < s.toProduce) {
+				if (nextYield-- == 0) {
+					std::this_thread::yield();
+					nextYield = nondeterministicRandom()->randomInt(0, 100);
+				}
+				int v = s.nextProduced();
+				onMainThreadVoid([&s, v]() { ASSERT_EQ(v, s.nextConsumed()); });
+			}
+			s.doneProducing.send(Void());
+		});
+	}
+	wait(waitForAll(doneProducing));
+
+	// Wait for one more onMainThread to wait for all scheduled signals to be executed.
+	Promise<Void> signal;
+	state Future<Void> doneConsuming = signal.getFuture();
+	g_network->onMainThread(std::move(signal), TaskPriority::DefaultOnMainThread);
+	wait(doneConsuming);
+
+	for (int t = 0; t < std::size(perThread); ++t) {
+		perThread[t].checkDone();
+	}
+	return Void();
 }
 
 void net2_test(){
-	/*printf("ThreadSafeQueue test\n");
-	printf("  Interface: ");
-	ThreadSafeQueue<int> tq;
-	ASSERT( tq.canSleep() == true );
-
-	ASSERT( tq.push( 1 ) == true ) ;
-	ASSERT( tq.push( 2 ) == false );
-	ASSERT( tq.push( 3 ) == false );
-
-	ASSERT( tq.pop().get() == 1 );
-	ASSERT( tq.pop().get() == 2 );
-	ASSERT( tq.push( 4 ) == false );
-	ASSERT( tq.pop().get() == 3 );
-	ASSERT( tq.pop().get() == 4 );
-	ASSERT( !tq.pop().present() );
-	printf("OK\n");
-
-	printf("Threaded: ");
-	Event finished, finished2;
-	int thread1Iterations = 1000000, thread2Iterations = 100000;
-
-	if (thread1Iterations)
-	    startThreadF([&](){
-	        printf("Thread1\n");
-	        for(int i=0; i<thread1Iterations; i++)
-	            tq.push(i);
-	        printf("T1Done\n");
-	        finished.set();
-	    });
-	if (thread2Iterations)
-	    startThreadF([&](){
-	        printf("Thread2\n");
-	        for(int i=0; i<thread2Iterations; i++)
-	            tq.push(i + (1<<20));
-	        printf("T2Done\n");
-	        finished2.set();
-	    });
-	int c = 0, mx[2]={0, 1<<20}, p = 0;
-	while (c < thread1Iterations + thread2Iterations)
-	{
-	    Optional<int> i = tq.pop();
-	    if (i.present()) {
-	        int v = i.get();
-	        ++c;
-	        if (mx[v>>20] != v)
-	            printf("Wrong value dequeued!\n");
-	        ASSERT( mx[v>>20] == v );
-	        mx[v>>20] = v + 1;
-	    } else {
-	        ++p;
-	        _mm_pause();
-	    }
-	    if ((c&3)==0) tq.canSleep();
-	}
-	printf("%d %d %x %x %s\n", c, p, mx[0], mx[1], mx[0]==thread1Iterations && mx[1]==(1<<20)+thread2Iterations ? "OK" :
-	"FAIL");
-
-	finished.block();
-	finished2.block();
-
-
+	/*
 	g_network = newNet2();  // for promise serialization below
 
 	Endpoint destination;

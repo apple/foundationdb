@@ -122,6 +122,8 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	// Network
 	fdb_error_t (*selectApiVersion)(int runtimeVersion, int headerVersion);
 	const char* (*getClientVersion)();
+	void (*useFutureProtocolVersion)();
+
 	fdb_error_t (*setNetworkOption)(FDBNetworkOption option, uint8_t const* value, int valueLength);
 	fdb_error_t (*setupNetwork)();
 	fdb_error_t (*runNetwork)();
@@ -492,6 +494,7 @@ public:
 
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
+	void useFutureProtocolVersion() override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	void setupNetwork() override;
@@ -655,8 +658,10 @@ private:
 struct ClientDesc {
 	std::string const libPath;
 	bool const external;
+	bool const useFutureVersion;
 
-	ClientDesc(std::string libPath, bool external) : libPath(libPath), external(external) {}
+	ClientDesc(std::string libPath, bool external, bool useFutureVersion)
+	  : libPath(libPath), external(external), useFutureVersion(useFutureVersion) {}
 };
 
 struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
@@ -668,11 +673,11 @@ struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 
 	ClientInfo()
-	  : ClientDesc(std::string(), false), protocolVersion(0), api(nullptr), failed(true), initialized(false) {}
+	  : ClientDesc(std::string(), false, false), protocolVersion(0), api(nullptr), failed(true), initialized(false) {}
 	ClientInfo(IClientApi* api)
-	  : ClientDesc("internal", false), protocolVersion(0), api(api), failed(false), initialized(false) {}
-	ClientInfo(IClientApi* api, std::string libPath)
-	  : ClientDesc(libPath, true), protocolVersion(0), api(api), failed(false), initialized(false) {}
+	  : ClientDesc("internal", false, false), protocolVersion(0), api(api), failed(false), initialized(false) {}
+	ClientInfo(IClientApi* api, std::string libPath, bool useFutureVersion)
+	  : ClientDesc(libPath, true, useFutureVersion), protocolVersion(0), api(api), failed(false), initialized(false) {}
 
 	void loadVersion();
 	bool canReplace(Reference<ClientInfo> other) const;
@@ -919,6 +924,7 @@ class MultiVersionApi : public IClientApi {
 public:
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
+	void useFutureProtocolVersion() override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	void setupNetwork() override;
@@ -965,7 +971,7 @@ private:
 
 	void disableMultiVersionClientApi();
 	void setCallbacksOnExternalThreads();
-	void addExternalLibrary(std::string path);
+	void addExternalLibrary(std::string path, bool useFutureVersion);
 	void addExternalLibraryDirectory(std::string path);
 	// Return a vector of (pathname, unlink_on_close) pairs.  Makes threadCount - 1 copies of the library stored in
 	// path, and returns a vector of length threadCount.

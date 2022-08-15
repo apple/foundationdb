@@ -46,7 +46,7 @@ ACTOR Future<bool> expensiveDataCheckCommandActor(
 	if (tokens.size() == 1) {
 		// initialize worker interfaces
 		address_interface->clear();
-		wait(getWorkerInterfaces(tr, address_interface));
+		wait(getWorkerInterfaces(tr, address_interface, true));
 	}
 	if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
 		if (address_interface->size() == 0) {

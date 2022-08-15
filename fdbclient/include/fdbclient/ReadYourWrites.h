@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_READYOURWRITES_H
 #define FDBCLIENT_READYOURWRITES_H
+#include "Status.h"
 #pragma once
 
 #include "fdbclient/NativeAPI.actor.h"
@@ -192,7 +193,17 @@ public:
 	KeyRangeMap<std::pair<bool, Optional<Value>>>& getSpecialKeySpaceWriteMap() { return specialKeySpaceWriteMap; }
 	bool readYourWritesDisabled() const { return options.readYourWritesDisabled; }
 	const Optional<std::string>& getSpecialKeySpaceErrorMsg() { return specialKeySpaceErrorMsg; }
-	void setSpecialKeySpaceErrorMsg(const std::string& msg) { specialKeySpaceErrorMsg = msg; }
+	void setSpecialKeySpaceErrorMsg(const std::string& msg) {
+		if (g_network && g_network->isSimulated()) {
+			try {
+				readJSONStrictly(msg);
+			} catch (Error& e) {
+				TraceEvent(SevError, "InvalidSpecialKeySpaceErrorMessage").error(e).detail("Message", msg);
+				ASSERT(false);
+			}
+		}
+		specialKeySpaceErrorMsg = msg;
+	}
 	Transaction& getTransaction() { return tr; }
 
 	Optional<TenantName> getTenant() { return tr.getTenant(); }

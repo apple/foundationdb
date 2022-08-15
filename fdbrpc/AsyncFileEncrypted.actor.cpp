@@ -258,7 +258,7 @@ Optional<Standalone<StringRef>> AsyncFileEncrypted::RandomCache::get(uint32_t bl
 TEST_CASE("fdbrpc/AsyncFileEncrypted") {
 	state const int bytes = FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * deterministicRandom()->randomInt(0, 1000);
 	state std::vector<unsigned char> writeBuffer(bytes, 0);
-	generateRandomData(&writeBuffer.front(), bytes);
+	deterministicRandom()->randomBytes(&writeBuffer.front(), bytes);
 	state std::vector<unsigned char> readBuffer(bytes, 0);
 	ASSERT(g_network->isSimulated());
 	StreamCipherKey::initializeGlobalRandomTestKey();
