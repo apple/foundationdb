@@ -1958,7 +1958,10 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 // read mapping from db to handle any in flight granules or other issues
 // Forces all granules in the specified key range to flush data to blob up to the specified version. This is required
 // for executing a merge.
-ACTOR Future<bool> forceGranuleFlush(Reference<BlobManagerData> bmData, KeyRange keyRange, Version version) {
+ACTOR Future<bool> forceGranuleFlush(Reference<BlobManagerData> bmData,
+                                     UID mergeGranuleID,
+                                     KeyRange keyRange,
+                                     Version version) {
 	state Transaction tr(bmData->db);
 	state KeyRange currentRange = keyRange;
 
@@ -1981,6 +1984,12 @@ ACTOR Future<bool> forceGranuleFlush(Reference<BlobManagerData> bmData, KeyRange
 				TraceEvent("GranuleFlushCancelledForcePurge", bmData->id)
 				    .detail("Epoch", bmData->epoch)
 				    .detail("KeyRange", keyRange);
+
+				// destroy already created change feed from earlier so it doesn't leak
+				wait(updateChangeFeed(
+				    &tr, granuleIDToCFKey(mergeGranuleID), ChangeFeedStatus::CHANGE_FEED_DESTROY, keyRange));
+
+				wait(tr.commit());
 				return false;
 			}
 
@@ -2340,7 +2349,7 @@ ACTOR Future<Void> finishMergeGranules(Reference<BlobManagerData> bmData,
 	}
 
 	// force granules to persist state up to mergeVersion
-	bool success = wait(forceGranuleFlush(bmData, mergeRange, mergeVersion));
+	bool success = wait(forceGranuleFlush(bmData, mergeGranuleID, mergeRange, mergeVersion));
 	if (!success) {
 		bmData->activeGranuleMerges.insert(mergeRange, invalidVersion);
 		bmData->activeGranuleMerges.coalesce(mergeRange.begin);
@@ -4347,35 +4356,24 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	}
 
-	fmt::print("DBG: BM {0} waiting on active boundary changes to finish\n", self->epoch);
 	// wait for all active splits and merges in the range to come to a stop, so no races with purging
 	std::vector<Future<Void>> activeBoundaryEvals;
 	auto boundaries = self->boundaryEvaluations.intersectingRanges(range);
 	for (auto& it : boundaries) {
 		auto& f = it.cvalue().inProgress;
 		if (f.isValid() && !f.isReady() && !f.isError()) {
-			fmt::print("DBG:   BM {0} waiting on [{1} - {2}) boundary change\n",
-			           self->epoch,
-			           it.begin().printable(),
-			           it.end().printable());
 			activeBoundaryEvals.push_back(f);
 		}
 	}
 
 	if (!activeBoundaryEvals.empty()) {
-		fmt::print("DBG: BM {0} waiting for {1} boundary changes\n", self->epoch, activeBoundaryEvals.size());
 		wait(waitForAll(activeBoundaryEvals));
-		fmt::print("DBG: BM {0} got {1} boundary changes complete\n", self->epoch);
 	}
-
-	fmt::print("DBG: BM {0} waiting for merges to finish\n", self->epoch);
 
 	// some merges aren't counted in boundary evals, for merge/split race reasons
 	while (self->isMergeActive(range)) {
 		wait(delayJittered(1.0));
 	}
-
-	fmt::print("DBG: BM {0} got merges to finish\n", self->epoch);
 
 	auto ranges = self->workerAssignments.intersectingRanges(range);
 	state std::vector<KeyRange> activeRanges;
