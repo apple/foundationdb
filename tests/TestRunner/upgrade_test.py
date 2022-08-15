@@ -72,6 +72,7 @@ class UpgradeTest:
             args.process_number,
             create_config=False,
             redundancy=args.redundancy,
+            blob_granules_enabled=args.blob_granules_enabled,
         )
         self.cluster.create_cluster_file()
         self.configure_version(init_version)
@@ -88,6 +89,7 @@ class UpgradeTest:
         self.tester_proc = None
         self.output_pipe = None
         self.ctrl_pipe = None
+        self.determine_api_version()
 
     # Download all old binaries required for testing the specified upgrade path
     def download_old_binaries(self):
@@ -159,7 +161,7 @@ class UpgradeTest:
     def __enter__(self):
         print("Starting cluster version {}".format(self.cluster_version))
         self.cluster.start_cluster()
-        self.cluster.create_database(enable_tenants=False)
+        self.cluster.create_database(enable_tenants=(self.api_version >= 720))
         return self
 
     def __exit__(self, xc_type, exc_value, traceback):
@@ -176,7 +178,6 @@ class UpgradeTest:
     def exec_workload(self, test_file):
         self.tester_retcode = 1
         try:
-            self.determine_api_version()
             cmd_args = [
                 self.tester_bin,
                 "--cluster-file",
@@ -206,6 +207,8 @@ class UpgradeTest:
                 cmd_args = ["gdb", "-ex", "run", "--args"] + cmd_args
             if FUTURE_VERSION in self.upgrade_path:
                 cmd_args += ["--future-version-client-library", self.future_version_client_lib_path]
+            if self.cluster.blob_granules_enabled:
+                cmd_args += ["--blob-granule-local-file-path", str(self.cluster.data.joinpath("fdbblob")) + "/"]
             print("Executing test command: {}".format(" ".join([str(c) for c in cmd_args])))
 
             self.tester_proc = subprocess.Popen(cmd_args, stdout=sys.stdout, stderr=sys.stderr)
@@ -422,6 +425,7 @@ if __name__ == "__main__":
         help="Do not dump cluster log on error",
         action="store_true",
     )
+    parser.add_argument("--blob-granules-enabled", help="Enable blob granules", action="store_true")
     parser.add_argument("--run-with-gdb", help="Execute the tester binary from gdb", action="store_true")
     args = parser.parse_args()
     if args.process_number == 0:
