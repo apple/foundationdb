@@ -2128,7 +2128,7 @@ struct TestGVR {
 };
 
 template <class F>
-void startThreadF(F&& func) {
+THREAD_HANDLE startThreadF(F&& func) {
 	struct Thing {
 		F f;
 		Thing(F&& f) : f(std::move(f)) {}
@@ -2140,7 +2140,7 @@ void startThreadF(F&& func) {
 		}
 	};
 	Thing* t = new Thing(std::move(func));
-	g_network->startThread(Thing::start, t);
+	return g_network->startThread(Thing::start, t);
 }
 
 TEST_CASE("/flow/Net2/ThreadSafeQueue/Interface") {
@@ -2168,6 +2168,7 @@ TEST_CASE("/flow/Net2/ThreadSafeQueue/Interface") {
 struct QueueTestThreadState {
 	QueueTestThreadState(int threadId, int toProduce) : threadId(threadId), toProduce(toProduce) {}
 	int threadId;
+	THREAD_HANDLE handle;
 	int toProduce;
 	int produced = 0;
 	Promise<Void> doneProducing;
@@ -2186,6 +2187,8 @@ struct QueueTestThreadState {
 TEST_CASE("/flow/Net2/ThreadSafeQueue/Threaded") {
 	// Uses ThreadSafeQueue from multiple threads. Verifies that all pushed elements are popped, maintaining the
 	// ordering within a thread.
+	noUnseed = true; // multi-threading inherently non-deterministic
+
 	ThreadSafeQueue<int> queue;
 	state std::vector<QueueTestThreadState> perThread = { QueueTestThreadState(0, 1000000),
 		                                                  QueueTestThreadState(1, 100000),
@@ -2197,7 +2200,7 @@ TEST_CASE("/flow/Net2/ThreadSafeQueue/Threaded") {
 		auto& s = perThread[t];
 		doneProducing.push_back(s.doneProducing.getFuture());
 		total += s.toProduce;
-		startThreadF([&queue, &s]() {
+		s.handle = startThreadF([&queue, &s]() {
 			printf("Thread%d\n", s.threadId);
 			int nextYield = 0;
 			while (s.produced < s.toProduce) {
@@ -2228,7 +2231,14 @@ TEST_CASE("/flow/Net2/ThreadSafeQueue/Threaded") {
 
 	wait(waitForAll(doneProducing));
 
-	for (int t = 0; t < std::size(perThread); ++t) {
+	// Make sure we continue on the main thread.
+	Promise<Void> signal;
+	state Future<Void> doneConsuming = signal.getFuture();
+	g_network->onMainThread(std::move(signal), TaskPriority::DefaultOnMainThread);
+	wait(doneConsuming);
+
+	for (int t = 0; t < perThread.size(); ++t) {
+		waitThread(perThread[t].handle);
 		perThread[t].checkDone();
 	}
 	return Void();
@@ -2238,6 +2248,7 @@ TEST_CASE("/flow/Net2/ThreadSafeQueue/Threaded") {
 // satisfy this requirement yet.
 TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 	// Verifies that signals processed by onMainThread() are executed in order.
+	noUnseed = true; // multi-threading inherently non-deterministic
 
 	state std::vector<QueueTestThreadState> perThread = { QueueTestThreadState(0, 1000000),
 		                                                  QueueTestThreadState(1, 100000),
@@ -2246,7 +2257,7 @@ TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 	for (int t = 0; t < perThread.size(); ++t) {
 		auto& s = perThread[t];
 		doneProducing.push_back(s.doneProducing.getFuture());
-		startThreadF([&s]() {
+		s.handle = startThreadF([&s]() {
 			int nextYield = 0;
 			while (s.produced < s.toProduce) {
 				if (nextYield-- == 0) {
@@ -2267,7 +2278,8 @@ TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 	g_network->onMainThread(std::move(signal), TaskPriority::DefaultOnMainThread);
 	wait(doneConsuming);
 
-	for (int t = 0; t < std::size(perThread); ++t) {
+	for (int t = 0; t < perThread.size(); ++t) {
+		waitThread(perThread[t].handle);
 		perThread[t].checkDone();
 	}
 	return Void();
