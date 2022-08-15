@@ -63,6 +63,8 @@ public:
 	}
 
 	virtual Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const { return Void(); };
+
+	virtual Future<Void> pollMoveKeysLock(MoveKeysLock lock, const DDEnabledState* ddEnabledState) const = 0;
 };
 
 class DDTxnProcessorImpl;
@@ -96,6 +98,8 @@ public:
 	                               const DatabaseConfiguration& configuration) const override;
 
 	Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const override;
+
+	Future<Void> pollMoveKeysLock(MoveKeysLock lock, const DDEnabledState* ddEnabledState) const override;
 };
 
 // A mock transaction implementation for test usage.
