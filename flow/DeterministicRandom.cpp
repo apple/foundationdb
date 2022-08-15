@@ -94,10 +94,10 @@ uint64_t DeterministicRandom::randomUInt64() {
 
 uint32_t DeterministicRandom::randomSkewedUInt32(uint32_t min, uint32_t maxPlusOne) {
 	ASSERT(min < maxPlusOne);
-	std::uniform_real_distribution<double> distribution(std::log(std::max<double>(min, 1.0 / M_E)),
-	                                                    std::log(maxPlusOne));
+	std::uniform_real_distribution<double> distribution(std::log10(std::max<double>(min, 1.0 / 10.0)),
+	                                                    std::log10(maxPlusOne));
 	double exponent = distribution(random);
-	uint32_t value = static_cast<uint32_t>(std::pow(M_E, exponent));
+	uint32_t value = static_cast<uint32_t>(std::pow(10.0, exponent));
 	return std::max(std::min(value, maxPlusOne - 1), min);
 }
 
