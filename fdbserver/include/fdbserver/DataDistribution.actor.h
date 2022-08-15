@@ -31,14 +31,47 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include <boost/heap/policies.hpp>
 #include <boost/heap/skew_heap.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ };
+// SOMEDAY: whether it's possible to combine RelocateReason and DataMovementReason together?
+// RelocateReason to DataMovementReason is one-to-N mapping
+class RelocateReason {
+public:
+	enum Value : int8_t { OTHER = 0, REBALANCE_DISK, REBALANCE_READ, MERGE_SHARD, SIZE_SPLIT, WRITE_SPLIT, __COUNT };
+	RelocateReason(Value v) : value(v) { ASSERT(value != __COUNT); }
+	explicit RelocateReason(int v) : value((Value)v) { ASSERT(value != __COUNT); }
+	std::string toString() const {
+		switch (value) {
+		case OTHER:
+			return "Other";
+		case REBALANCE_DISK:
+			return "RebalanceDisk";
+		case REBALANCE_READ:
+			return "RebalanceRead";
+		case MERGE_SHARD:
+			return "MergeShard";
+		case SIZE_SPLIT:
+			return "SizeSplit";
+		case WRITE_SPLIT:
+			return "WriteSplit";
+		case __COUNT:
+			ASSERT(false);
+		}
+		return "";
+	}
+	operator int() const { return (int)value; }
+	constexpr static int8_t typeCount() { return (int)__COUNT; }
+
+private:
+	Value value;
+};
 
 // One-to-one relationship to the priority knobs
 enum class DataMovementReason {
+	INVALID,
 	RECOVER_MOVE,
 	REBALANCE_UNDERUTILIZED_TEAM,
 	REBALANCE_OVERUTILIZED_TEAM,
@@ -57,6 +90,8 @@ enum class DataMovementReason {
 	TEAM_0_LEFT,
 	SPLIT_SHARD
 };
+extern int dataMovementPriority(DataMovementReason moveReason);
+extern DataMovementReason priorityToDataMovementReason(int priority);
 
 struct DDShardInfo;
 
@@ -89,11 +124,27 @@ struct RelocateShard {
 	std::shared_ptr<DataMove> dataMove; // Not null if this is a restored data move.
 	UID dataMoveId;
 	RelocateReason reason;
-	RelocateShard() : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::INVALID) {}
-	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason)
-	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason) {}
+	DataMovementReason moveReason;
+
+	UID traceId; // track the lifetime of this relocate shard
+
+	// Initialization when define is a better practice. We should avoid assignment of member after definition.
+	// static RelocateShard emptyRelocateShard() { return {}; }
+
+	RelocateShard(KeyRange const& keys, DataMovementReason moveReason, RelocateReason reason, UID traceId = UID())
+	  : keys(keys), priority(dataMovementPriority(moveReason)), cancelled(false), dataMoveId(anonymousShardId),
+	    reason(reason), moveReason(moveReason), traceId(traceId) {}
+
+	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason, UID traceId = UID())
+	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason),
+	    moveReason(priorityToDataMovementReason(priority)), traceId(traceId) {}
 
 	bool isRestore() const { return this->dataMove != nullptr; }
+
+private:
+	RelocateShard()
+	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::OTHER),
+	    moveReason(DataMovementReason::INVALID) {}
 };
 
 struct IDataDistributionTeam {
@@ -473,8 +524,9 @@ struct StorageWiggleMetrics {
 };
 
 struct StorageWiggler : ReferenceCounted<StorageWiggler> {
+	static constexpr double MIN_ON_CHECK_DELAY_SEC = 5.0;
 	enum State : uint8_t { INVALID = 0, RUN = 1, PAUSE = 2 };
-	AsyncVar<bool> nonEmpty;
+
 	DDTeamCollection const* teamCollection;
 	StorageWiggleMetrics metrics;
 	// data structures
@@ -487,7 +539,7 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	State wiggleState = State::INVALID;
 	double lastStateChangeTs = 0.0; // timestamp describes when did the state change
 
-	explicit StorageWiggler(DDTeamCollection* collection) : nonEmpty(false), teamCollection(collection){};
+	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection){};
 	// add server to wiggling queue
 	void addServer(const UID& serverId, const StorageMetadataType& metadata);
 	// remove server from wiggling queue
@@ -496,8 +548,14 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	void updateMetadata(const UID& serverId, const StorageMetadataType& metadata);
 	bool contains(const UID& serverId) const { return pq_handles.count(serverId) > 0; }
 	bool empty() const { return wiggle_pq.empty(); }
-	Optional<UID> getNextServerId();
 
+	// It's guarantee that When a.metadata >= b.metadata, if !necessary(a) then !necessary(b)
+	bool necessary(const UID& serverId, const StorageMetadataType& metadata) const;
+
+	// try to return the next storage server that is necessary to wiggle
+	Optional<UID> getNextServerId(bool necessaryOnly = true);
+	// next check time to avoid busy loop
+	Future<Void> onCheck() const;
 	State getWiggleState() const { return wiggleState; }
 	void setWiggleState(State s) {
 		if (wiggleState != s) {

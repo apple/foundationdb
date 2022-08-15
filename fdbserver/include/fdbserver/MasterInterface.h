@@ -83,13 +83,15 @@ struct ChangeCoordinatorsRequest {
 	constexpr static FileIdentifier file_identifier = 13605416;
 	Standalone<StringRef> newConnectionString;
 	ReplyPromise<Void> reply; // normally throws even on success!
+	UID masterId;
 
 	ChangeCoordinatorsRequest() {}
-	ChangeCoordinatorsRequest(Standalone<StringRef> newConnectionString) : newConnectionString(newConnectionString) {}
+	ChangeCoordinatorsRequest(Standalone<StringRef> newConnectionString, UID masterId)
+	  : newConnectionString(newConnectionString), masterId(masterId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, newConnectionString, reply);
+		serializer(ar, newConnectionString, reply, masterId);
 	}
 };
 

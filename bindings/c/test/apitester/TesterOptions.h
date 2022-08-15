@@ -38,6 +38,7 @@ public:
 	std::string logGroup;
 	std::string externalClientLibrary;
 	std::string externalClientDir;
+	std::string futureVersionClientLibrary;
 	std::string tmpDir;
 	bool disableLocalClient = false;
 	std::string testFile;

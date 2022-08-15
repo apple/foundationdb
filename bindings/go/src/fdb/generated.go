@@ -239,6 +239,13 @@ func (o NetworkOptions) SetClientThreadsPerVersion(param int64) error {
 	return o.setOpt(65, int64ToBytes(param))
 }
 
+// Adds an external client library to be used with a future version protocol. This option can be used testing purposes only!
+//
+// Parameter: path to client library
+func (o NetworkOptions) SetFutureVersionClientLibrary(param string) error {
+	return o.setOpt(66, []byte(param))
+}
+
 // Disables logging of client statistics, such as sampled transaction activity.
 func (o NetworkOptions) SetDisableClientStatisticsLogging() error {
 	return o.setOpt(70, nil)

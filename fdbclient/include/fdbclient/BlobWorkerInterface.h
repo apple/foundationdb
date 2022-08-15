@@ -32,13 +32,14 @@ struct BlobWorkerInterface {
 	constexpr static FileIdentifier file_identifier = 8358753;
 	// TODO: mimic what StorageServerInterface does with sequential endpoint IDs
 	RequestStream<ReplyPromise<Void>> waitFailure;
-	RequestStream<struct BlobGranuleFileRequest> blobGranuleFileRequest;
+	PublicRequestStream<struct BlobGranuleFileRequest> blobGranuleFileRequest;
 	RequestStream<struct AssignBlobRangeRequest> assignBlobRangeRequest;
 	RequestStream<struct RevokeBlobRangeRequest> revokeBlobRangeRequest;
 	RequestStream<struct GetGranuleAssignmentsRequest> granuleAssignmentsRequest;
 	RequestStream<struct GranuleStatusStreamRequest> granuleStatusStreamRequest;
 	RequestStream<struct HaltBlobWorkerRequest> haltBlobWorker;
 	RequestStream<struct FlushGranuleRequest> flushGranuleRequest;
+	RequestStream<struct MinBlobVersionRequest> minBlobVersionRequest;
 
 	struct LocalityData locality;
 	UID myId;
@@ -57,6 +58,7 @@ struct BlobWorkerInterface {
 		streams.push_back(granuleStatusStreamRequest.getReceiver());
 		streams.push_back(haltBlobWorker.getReceiver());
 		streams.push_back(flushGranuleRequest.getReceiver());
+		streams.push_back(minBlobVersionRequest.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 	UID id() const { return myId; }
@@ -72,7 +74,7 @@ struct BlobWorkerInterface {
 		serializer(ar, myId, locality, waitFailure);
 		if (Archive::isDeserializing) {
 			blobGranuleFileRequest =
-			    RequestStream<struct BlobGranuleFileRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(1));
+			    PublicRequestStream<struct BlobGranuleFileRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(1));
 			assignBlobRangeRequest =
 			    RequestStream<struct AssignBlobRangeRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(2));
 			revokeBlobRangeRequest =
@@ -85,6 +87,8 @@ struct BlobWorkerInterface {
 			    RequestStream<struct HaltBlobWorkerRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(6));
 			flushGranuleRequest =
 			    RequestStream<struct FlushGranuleRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(7));
+			minBlobVersionRequest =
+			    RequestStream<struct MinBlobVersionRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(8));
 		}
 	}
 };
@@ -114,6 +118,8 @@ struct BlobGranuleFileRequest {
 
 	BlobGranuleFileRequest() {}
 
+	bool verify() const { return tenantInfo.isAuthorized(); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keyRange, beginVersion, readVersion, canCollapseBegin, tenantInfo, reply, arena);
@@ -137,6 +143,28 @@ struct RevokeBlobRangeRequest {
 	}
 };
 
+struct MinBlobVersionReply {
+	constexpr static FileIdentifier file_identifier = 6857512;
+	Version version;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version);
+	}
+};
+
+struct MinBlobVersionRequest {
+	constexpr static FileIdentifier file_identifier = 4833278;
+	Version grv;
+	ReplyPromise<MinBlobVersionReply> reply;
+
+	MinBlobVersionRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, grv, reply);
+	}
+};
 /*
  * Continue: Blob worker should continue handling a granule that was evaluated for a split
  * Normal: Blob worker should open the granule and start processing it
@@ -172,6 +200,7 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 	KeyRange granuleRange;
 	bool doSplit;
 	bool writeHotSplit;
+	bool initialSplitTooBig;
 	int64_t continueEpoch;
 	int64_t continueSeqno;
 	UID granuleID;
@@ -180,11 +209,13 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 	bool mergeCandidate;
 	int64_t originalEpoch;
 	int64_t originalSeqno;
+	Optional<Key> proposedSplitKey;
 
 	GranuleStatusReply() {}
 	explicit GranuleStatusReply(KeyRange range,
 	                            bool doSplit,
 	                            bool writeHotSplit,
+	                            bool initialSplitTooBig,
 	                            int64_t continueEpoch,
 	                            int64_t continueSeqno,
 	                            UID granuleID,
@@ -193,11 +224,15 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 	                            bool mergeCandidate,
 	                            int64_t originalEpoch,
 	                            int64_t originalSeqno)
-	  : granuleRange(range), doSplit(doSplit), writeHotSplit(writeHotSplit), continueEpoch(continueEpoch),
-	    continueSeqno(continueSeqno), granuleID(granuleID), startVersion(startVersion), blockedVersion(blockedVersion),
-	    mergeCandidate(mergeCandidate), originalEpoch(originalEpoch), originalSeqno(originalSeqno) {}
+	  : granuleRange(range), doSplit(doSplit), writeHotSplit(writeHotSplit), initialSplitTooBig(initialSplitTooBig),
+	    continueEpoch(continueEpoch), continueSeqno(continueSeqno), granuleID(granuleID), startVersion(startVersion),
+	    blockedVersion(blockedVersion), mergeCandidate(mergeCandidate), originalEpoch(originalEpoch),
+	    originalSeqno(originalSeqno) {}
 
-	int expectedSize() const { return sizeof(GranuleStatusReply) + granuleRange.expectedSize(); }
+	int expectedSize() const {
+		return sizeof(GranuleStatusReply) + granuleRange.expectedSize() +
+		       (proposedSplitKey.present() ? proposedSplitKey.get().expectedSize() : 0);
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -207,6 +242,7 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 		           granuleRange,
 		           doSplit,
 		           writeHotSplit,
+		           initialSplitTooBig,
 		           continueEpoch,
 		           continueSeqno,
 		           granuleID,
@@ -214,7 +250,8 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 		           blockedVersion,
 		           mergeCandidate,
 		           originalEpoch,
-		           originalSeqno);
+		           originalSeqno,
+		           proposedSplitKey);
 	}
 };
 

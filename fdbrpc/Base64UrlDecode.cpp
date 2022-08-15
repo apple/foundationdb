@@ -117,6 +117,9 @@ Optional<StringRef> decode(Arena& arena, StringRef base64UrlStr) {
 	}
 	auto out = new (arena) uint8_t[decodedLen];
 	auto actualLen = decode(base64UrlStr.begin(), base64UrlStr.size(), out);
+	if (actualLen == -1) {
+		return {};
+	}
 	ASSERT_EQ(decodedLen, actualLen);
 	return StringRef(out, decodedLen);
 }

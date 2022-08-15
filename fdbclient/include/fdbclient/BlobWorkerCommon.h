@@ -41,16 +41,31 @@ struct BlobWorkerStats {
 	Counter readRequestsWithBegin;
 	Counter readRequestsCollapsed;
 	Counter flushGranuleReqs;
+	Counter compressionBytesRaw;
+	Counter compressionBytesFinal;
+	Counter fullRejections;
 
 	int numRangesAssigned;
 	int mutationBytesBuffered;
 	int activeReadRequests;
 	int granulesPendingSplitCheck;
+	Version minimumCFVersion;
+	int notAtLatestChangeFeeds;
+	int64_t lastResidentMemory;
+	int64_t estimatedMaxResidentMemory;
+
+	Reference<FlowLock> initialSnapshotLock;
+	Reference<FlowLock> resnapshotLock;
+	Reference<FlowLock> deltaWritesLock;
 
 	Future<Void> logger;
 
 	// Current stats maintained for a given blob worker process
-	explicit BlobWorkerStats(UID id, double interval)
+	explicit BlobWorkerStats(UID id,
+	                         double interval,
+	                         Reference<FlowLock> initialSnapshotLock,
+	                         Reference<FlowLock> resnapshotLock,
+	                         Reference<FlowLock> deltaWritesLock)
 	  : cc("BlobWorkerStats", id.toString()),
 
 	    s3PutReqs("S3PutReqs", cc), s3GetReqs("S3GetReqs", cc), s3DeleteReqs("S3DeleteReqs", cc),
@@ -59,17 +74,30 @@ struct BlobWorkerStats {
 	    bytesReadFromFDBForInitialSnapshot("BytesReadFromFDBForInitialSnapshot", cc),
 	    bytesReadFromS3ForCompaction("BytesReadFromS3ForCompaction", cc),
 	    rangeAssignmentRequests("RangeAssignmentRequests", cc), readRequests("ReadRequests", cc),
-	    wrongShardServer("WrongShardServer", cc), changeFeedInputBytes("RangeFeedInputBytes", cc),
+	    wrongShardServer("WrongShardServer", cc), changeFeedInputBytes("ChangeFeedInputBytes", cc),
 	    readReqTotalFilesReturned("ReadReqTotalFilesReturned", cc),
 	    readReqDeltaBytesReturned("ReadReqDeltaBytesReturned", cc), commitVersionChecks("CommitVersionChecks", cc),
 	    granuleUpdateErrors("GranuleUpdateErrors", cc), granuleRequestTimeouts("GranuleRequestTimeouts", cc),
 	    readRequestsWithBegin("ReadRequestsWithBegin", cc), readRequestsCollapsed("ReadRequestsCollapsed", cc),
-	    flushGranuleReqs("FlushGranuleReqs", cc), numRangesAssigned(0), mutationBytesBuffered(0), activeReadRequests(0),
-	    granulesPendingSplitCheck(0) {
+	    flushGranuleReqs("FlushGranuleReqs", cc), compressionBytesRaw("CompressionBytesRaw", cc),
+	    compressionBytesFinal("CompressionBytesFinal", cc), fullRejections("FullRejections", cc), numRangesAssigned(0),
+	    mutationBytesBuffered(0), activeReadRequests(0), granulesPendingSplitCheck(0), minimumCFVersion(0),
+	    notAtLatestChangeFeeds(0), lastResidentMemory(0), estimatedMaxResidentMemory(0),
+	    initialSnapshotLock(initialSnapshotLock), resnapshotLock(resnapshotLock), deltaWritesLock(deltaWritesLock) {
 		specialCounter(cc, "NumRangesAssigned", [this]() { return this->numRangesAssigned; });
 		specialCounter(cc, "MutationBytesBuffered", [this]() { return this->mutationBytesBuffered; });
 		specialCounter(cc, "ActiveReadRequests", [this]() { return this->activeReadRequests; });
 		specialCounter(cc, "GranulesPendingSplitCheck", [this]() { return this->granulesPendingSplitCheck; });
+		specialCounter(cc, "MinimumChangeFeedVersion", [this]() { return this->minimumCFVersion; });
+		specialCounter(cc, "NotAtLatestChangeFeeds", [this]() { return this->notAtLatestChangeFeeds; });
+		specialCounter(cc, "LastResidentMemory", [this]() { return this->lastResidentMemory; });
+		specialCounter(cc, "EstimatedMaxResidentMemory", [this]() { return this->estimatedMaxResidentMemory; });
+		specialCounter(cc, "InitialSnapshotsActive", [this]() { return this->initialSnapshotLock->activePermits(); });
+		specialCounter(cc, "InitialSnapshotsWaiting", [this]() { return this->initialSnapshotLock->waiters(); });
+		specialCounter(cc, "ReSnapshotsActive", [this]() { return this->resnapshotLock->activePermits(); });
+		specialCounter(cc, "ReSnapshotsWaiting", [this]() { return this->resnapshotLock->waiters(); });
+		specialCounter(cc, "DeltaFileWritesActive", [this]() { return this->deltaWritesLock->activePermits(); });
+		specialCounter(cc, "DeltaFileWritesWaiting", [this]() { return this->deltaWritesLock->waiters(); });
 
 		logger = traceCounters("BlobWorkerMetrics", id, interval, &cc, "BlobWorkerMetrics");
 	}

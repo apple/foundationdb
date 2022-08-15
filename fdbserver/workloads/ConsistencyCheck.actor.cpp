@@ -885,16 +885,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			for (int i = 0; i < commitProxyInfo->size(); i++)
 				keyServerLocationFutures.push_back(
 				    commitProxyInfo->get(i, &CommitProxyInterface::getKeyServersLocations)
-				        .getReplyUnlessFailedFor(GetKeyServerLocationsRequest(span.context,
-				                                                              Optional<TenantNameRef>(),
-				                                                              begin,
-				                                                              end,
-				                                                              limitKeyServers,
-				                                                              false,
-				                                                              latestVersion,
-				                                                              Arena()),
-				                                 2,
-				                                 0));
+				        .getReplyUnlessFailedFor(
+				            GetKeyServerLocationsRequest(
+				                span.context, TenantInfo(), begin, end, limitKeyServers, false, latestVersion, Arena()),
+				            2,
+				            0));
 
 			state bool keyServersInsertedForThisIteration = false;
 			choose {
@@ -2039,8 +2034,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> checkWorkerList(Database cx, ConsistencyCheckWorkload* self) {
-		if (g_simulator.extraDB)
+		if (!g_simulator.extraDatabases.empty()) {
 			return true;
+		}
 
 		std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		std::set<NetworkAddress> workerAddresses;

@@ -45,6 +45,9 @@ ShardsAffectedByTeamFailure::getTeamsFor(KeyRangeRef keys) {
 }
 
 void ShardsAffectedByTeamFailure::erase(Team team, KeyRange const& range) {
+	DisabledTraceEvent(SevDebug, "ShardsAffectedByTeamFailureErase")
+	    .detail("Range", range)
+	    .detail("Team", team.toString());
 	if (team_shards.erase(std::pair<Team, KeyRange>(team, range)) > 0) {
 		for (auto uid = team.servers.begin(); uid != team.servers.end(); ++uid) {
 			// Safeguard against going negative after eraseServer() sets value to 0
@@ -56,6 +59,9 @@ void ShardsAffectedByTeamFailure::erase(Team team, KeyRange const& range) {
 }
 
 void ShardsAffectedByTeamFailure::insert(Team team, KeyRange const& range) {
+	DisabledTraceEvent(SevDebug, "ShardsAffectedByTeamFailureInsert")
+	    .detail("Range", range)
+	    .detail("Team", team.toString());
 	if (team_shards.insert(std::pair<Team, KeyRange>(team, range)).second) {
 		for (auto uid = team.servers.begin(); uid != team.servers.end(); ++uid)
 			storageServerShards[*uid]++;
@@ -153,8 +159,14 @@ void ShardsAffectedByTeamFailure::finishMove(KeyRangeRef keys) {
 	}
 }
 
+void ShardsAffectedByTeamFailure::setCheckMode(CheckMode mode) {
+	checkMode = mode;
+}
+
 void ShardsAffectedByTeamFailure::check() const {
-	if (EXPENSIVE_VALIDATION) {
+	if (checkMode == CheckMode::ForceNoCheck)
+		return;
+	if (EXPENSIVE_VALIDATION || checkMode == CheckMode::ForceCheck) {
 		for (auto t = team_shards.begin(); t != team_shards.end(); ++t) {
 			auto i = shard_teams.rangeContaining(t->second.begin);
 			if (i->range() != t->second || !std::count(i->value().first.begin(), i->value().first.end(), t->first)) {

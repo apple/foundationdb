@@ -125,7 +125,7 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint,
-	                             Optional<RangeResult>* cache) const {
+	                             KeyRangeMap<Optional<RangeResult>>* cache) const {
 		return getRangeAsyncActor(this, ryw, kr, limitsHint, cache);
 	}
 
@@ -135,17 +135,18 @@ public:
 	                                                    ReadYourWritesTransaction* ryw,
 	                                                    KeyRangeRef kr,
 	                                                    GetRangeLimits limits,
-	                                                    Optional<RangeResult>* cache) {
+	                                                    KeyRangeMap<Optional<RangeResult>>* cache) {
 		ASSERT(skrAyncImpl->getKeyRange().contains(kr));
 		ASSERT(cache != nullptr);
-		if (!cache->present()) {
+		ASSERT(cache->rangeContaining(kr.begin) == cache->rangeContainingKeyBefore(kr.end));
+		if (!(*cache)[kr.begin].present()) {
 			// For simplicity, every time we need to cache, we read the whole range
 			// Although sometimes the range can be narrowed,
 			// there is not a general way to do it in complicated scenarios
 			RangeResult result_ = wait(skrAyncImpl->getRange(ryw, skrAyncImpl->getKeyRange(), limits));
-			*cache = result_;
+			cache->insert(skrAyncImpl->getKeyRange(), result_);
 		}
-		const auto& allResults = cache->get();
+		const auto& allResults = (*cache)[kr.begin].get();
 		int start = 0, end = allResults.size();
 		while (start < allResults.size() && allResults[start].key < kr.begin)
 			++start;
@@ -271,13 +272,21 @@ private:
 };
 
 // Used for SpecialKeySpaceCorrectnessWorkload
-class SKSCTestImpl : public SpecialKeyRangeRWImpl {
+class SKSCTestRWImpl : public SpecialKeyRangeRWImpl {
 public:
-	explicit SKSCTestImpl(KeyRangeRef kr);
+	explicit SKSCTestRWImpl(KeyRangeRef kr);
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
+class SKSCTestAsyncReadImpl : public SpecialKeyRangeAsyncImpl {
+public:
+	explicit SKSCTestAsyncReadImpl(KeyRangeRef kr);
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	                             KeyRangeRef kr,
+	                             GetRangeLimits limitsHint) const override;
 };
 
 // Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
@@ -538,6 +547,16 @@ public:
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
+
+// If the underlying set of key-value pairs of a key space is not changing, then we expect repeating a read to give the
+// same result. Additionally, we can generate the expected result of any read if that read is reading a subrange. This
+// actor performs a read of an arbitrary subrange of [begin, end) and validates the results.
+ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
+                                               KeySelector begin,
+                                               KeySelector end,
+                                               GetRangeLimits limits,
+                                               Reverse reverse,
+                                               RangeResult result);
 
 #include "flow/unactorcompiler.h"
 #endif

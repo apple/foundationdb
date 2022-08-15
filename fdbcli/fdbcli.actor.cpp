@@ -103,6 +103,7 @@ enum {
 	OPT_DEBUG_TLS,
 	OPT_API_VERSION,
 	OPT_MEMORY,
+	OPT_USE_FUTURE_PROTOCOL_VERSION
 };
 
 CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -127,6 +128,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_DEBUG_TLS, "--debug-tls", SO_NONE },
 	                                  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
 	                                  { OPT_MEMORY, "--memory", SO_REQ_SEP },
+	                                  { OPT_USE_FUTURE_PROTOCOL_VERSION, "--use-future-protocol-version", SO_NONE },
 	                                  TLS_OPTION_FLAGS,
 	                                  SO_END_OF_OPTIONS };
 
@@ -475,6 +477,9 @@ static void printProgramUsage(const char* name) {
 	       "                 Useful in reporting and diagnosing TLS issues.\n"
 	       "  --build-flags  Print build information and exit.\n"
 	       "  --memory       Resident memory limit of the CLI (defaults to 8GiB).\n"
+	       "  --use-future-protocol-version\n"
+	       "                 Use the simulated future protocol version to connect to the cluster.\n"
+	       "                 This option can be used testing purposes only!\n"
 	       "  -v, --version  Print FoundationDB CLI version information and exit.\n"
 	       "  -h, --help     Display this help and exit.\n");
 }
@@ -578,7 +583,7 @@ void initHelp() {
 void printVersion() {
 	printf("FoundationDB CLI " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getSourceVersion());
-	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion().version());
 }
 
 void printBuildInformation() {
@@ -872,6 +877,7 @@ struct CLIOptions {
 	Optional<std::string> exec;
 	bool initialStatusCheck = true;
 	bool cliHints = true;
+	bool useFutureProtocolVersion = false;
 	bool debugTLS = false;
 	std::string tlsCertPath;
 	std::string tlsKeyPath;
@@ -973,6 +979,10 @@ struct CLIOptions {
 			break;
 		case OPT_NO_HINTS:
 			cliHints = false;
+			break;
+		case OPT_USE_FUTURE_PROTOCOL_VERSION:
+			useFutureProtocolVersion = true;
+			break;
 
 		// TLS Options
 		case TLSConfig::OPT_TLS_PLUGIN:
@@ -1909,14 +1919,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "createtenant")) {
-					bool _result = wait(makeInterruptable(createTenantCommandActor(db, tokens)));
+					bool _result = wait(makeInterruptable(createTenantCommandActor(db, tokens, opt.apiVersion)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "deletetenant")) {
-					bool _result = wait(makeInterruptable(deleteTenantCommandActor(db, tokens)));
+					bool _result = wait(makeInterruptable(deleteTenantCommandActor(db, tokens, opt.apiVersion)));
 					if (!_result)
 						is_error = true;
 					else if (tenantName.present() && tokens[1] == tenantName.get()) {
@@ -1928,7 +1938,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "listtenants")) {
-					bool _result = wait(makeInterruptable(listTenantsCommandActor(db, tokens)));
+					bool _result = wait(makeInterruptable(listTenantsCommandActor(db, tokens, opt.apiVersion)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -1941,8 +1951,34 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "configuretenant")) {
+					if (opt.apiVersion < 720) {
+						fmt::print(stderr, "ERROR: tenants cannot be configured before API version 720.\n");
+						is_error = true;
+						continue;
+					}
+
+					bool _result = wait(makeInterruptable(configureTenantCommandActor(db, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "renametenant")) {
-					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens)));
+					if (opt.apiVersion < 720) {
+						fmt::print(stderr, "ERROR: tenants cannot be renamed before API version 720.\n");
+						is_error = true;
+						continue;
+					}
+
+					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens, opt.apiVersion)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "metacluster")) {
+					bool _result = wait(makeInterruptable(metaclusterCommand(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -2173,6 +2209,9 @@ int main(int argc, char** argv) {
 
 	try {
 		API->selectApiVersion(opt.apiVersion);
+		if (opt.useFutureProtocolVersion) {
+			API->useFutureProtocolVersion();
+		}
 		API->setupNetwork();
 		opt.setupKnobs();
 		if (opt.exit_code != -1) {
