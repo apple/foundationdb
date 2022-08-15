@@ -1,5 +1,5 @@
 /*
- * DebugTrace.h
+ * ProtocolVersion.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -17,16 +17,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "flow/ProtocolVersion.h"
 
-#ifndef FOUNDATIONDB_DEBUGTRACE_H
-#define FOUNDATIONDB_DEBUGTRACE_H
+namespace {
 
-#define DebugTraceEvent(enable, ...) enable&& TraceEvent(__VA_ARGS__)
+ProtocolVersion g_currentProtocolVersion(defaultProtocolVersionValue);
 
-constexpr bool debugLogTraces = false;
-#define DebugLogTraceEvent(...) DebugTraceEvent(debugLogTraces, __VA_ARGS__)
+}
 
-constexpr bool debugRelocationTraces = false;
-#define DebugRelocationTraceEvent(...) DebugTraceEvent(debugRelocationTraces, __VA_ARGS__)
+ProtocolVersion currentProtocolVersion() {
+	static ProtocolVersion firstReturnedProtocolVersion = g_currentProtocolVersion;
+	// Make sure the protocol version is not changed, once it is already in use
+	ASSERT(firstReturnedProtocolVersion == g_currentProtocolVersion);
+	return g_currentProtocolVersion;
+}
 
-#endif // FOUNDATIONDB_DEBUGTRACE_H
+void useFutureProtocolVersion() {
+	g_currentProtocolVersion = ProtocolVersion(futureProtocolVersionValue);
+}

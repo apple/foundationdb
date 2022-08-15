@@ -1533,10 +1533,10 @@ struct ProtocolVersionData {
 	ProtocolVersion runningProtocolVersion;
 	ProtocolVersion newestProtocolVersion;
 	ProtocolVersion lowestCompatibleProtocolVersion;
-	ProtocolVersionData() : runningProtocolVersion(currentProtocolVersion) {}
+	ProtocolVersionData() : runningProtocolVersion(currentProtocolVersion()) {}
 
 	ProtocolVersionData(uint64_t newestProtocolVersionValue, uint64_t lowestCompatibleProtocolVersionValue)
-	  : runningProtocolVersion(currentProtocolVersion), newestProtocolVersion(newestProtocolVersionValue),
+	  : runningProtocolVersion(currentProtocolVersion()), newestProtocolVersion(newestProtocolVersionValue),
 	    lowestCompatibleProtocolVersion(lowestCompatibleProtocolVersionValue) {}
 };
 
@@ -2170,10 +2170,20 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 
 	// Transactions
 	try {
-		state TraceEventFields ratekeeper = wait(
-		    timeoutError(rkWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("RkUpdate"))), 1.0));
-		TraceEventFields batchRatekeeper = wait(timeoutError(
-		    rkWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("RkUpdateBatch"))), 1.0));
+		state Future<TraceEventFields> f1 =
+		    timeoutError(rkWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("RkUpdate"))), 1.0);
+		state Future<TraceEventFields> f2 = timeoutError(
+		    rkWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("RkUpdateBatch"))), 1.0);
+		state Future<GlobalTagThrottlerStatusReply> f3 =
+		    SERVER_KNOBS->GLOBAL_TAG_THROTTLING
+		        ? timeoutError(db->get().ratekeeper.get().getGlobalTagThrottlerStatus.getReply(
+		                           GlobalTagThrottlerStatusRequest{}),
+		                       1.0)
+		        : Future<GlobalTagThrottlerStatusReply>(GlobalTagThrottlerStatusReply{});
+		wait(success(f1) && success(f2) && success(f3));
+		TraceEventFields ratekeeper = f1.get();
+		TraceEventFields batchRatekeeper = f2.get();
+		auto const globalTagThrottlerStatus = f3.get();
 
 		bool autoThrottlingEnabled = ratekeeper.getInt("AutoThrottlingEnabled");
 		double tpsLimit = ratekeeper.getDouble("TPSLimit");
@@ -2234,6 +2244,23 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 		throttledTagsObj["manual"] = manualThrottledTagsObj;
 
 		(*qos)["throttled_tags"] = throttledTagsObj;
+
+		if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
+			JsonBuilderObject globalTagThrottlerObj;
+			for (const auto& [tag, tagStats] : globalTagThrottlerStatus.status) {
+				JsonBuilderObject tagStatsObj;
+				tagStatsObj["desired_tps"] = tagStats.desiredTps;
+				tagStatsObj["reserved_tps"] = tagStats.reservedTps;
+				if (tagStats.limitingTps.present()) {
+					tagStatsObj["limiting_tps"] = tagStats.limitingTps.get();
+				} else {
+					tagStatsObj["limiting_tps"] = "<unset>"_sr;
+				}
+				tagStatsObj["target_tps"] = tagStats.targetTps;
+				globalTagThrottlerObj[printable(tag)] = tagStatsObj;
+			}
+			(*qos)["global_tag_throttler"] = globalTagThrottlerObj;
+		}
 
 		JsonBuilderObject perfLimit = getPerfLimit(ratekeeper, transPerSec, tpsLimit);
 		if (!perfLimit.empty()) {
@@ -2364,7 +2391,6 @@ ACTOR static Future<JsonBuilderObject> blobWorkerStatusFetcher(
     std::set<std::string>* incompleteReason) {
 
 	state JsonBuilderObject statusObj;
-	state int totalRanges = 0;
 	state std::vector<Future<Optional<TraceEventFields>>> futures;
 
 	statusObj["number_of_blob_workers"] = static_cast<int>(servers.size());
@@ -2377,10 +2403,24 @@ ACTOR static Future<JsonBuilderObject> blobWorkerStatusFetcher(
 
 		wait(waitForAll(futures));
 
+		state int totalRanges = 0;
 		for (auto future : futures) {
 			if (future.get().present()) {
 				auto latestTrace = future.get().get();
-				totalRanges += latestTrace.getInt("NumRangesAssigned");
+				int numRanges = latestTrace.getInt("NumRangesAssigned");
+				totalRanges += numRanges;
+
+				JsonBuilderObject workerStatusObj;
+				workerStatusObj["number_of_key_ranges"] = numRanges;
+				workerStatusObj["put_requests"] = StatusCounter(latestTrace.getValue("S3PutReqs")).getStatus();
+				workerStatusObj["get_requests"] = StatusCounter(latestTrace.getValue("S3GetReqs")).getStatus();
+				workerStatusObj["delete_requests"] = StatusCounter(latestTrace.getValue("S3DeleteReqs")).getStatus();
+				workerStatusObj["bytes_buffered"] = latestTrace.getInt64("MutationBytesBuffered");
+				workerStatusObj["compression_bytes_raw"] =
+				    StatusCounter(latestTrace.getValue("CompressionBytesRaw")).getStatus();
+				workerStatusObj["compression_bytes_final"] =
+				    StatusCounter(latestTrace.getValue("CompressionBytesFinal")).getStatus();
+				statusObj[latestTrace.getValue("ID")] = workerStatusObj;
 			}
 		}
 		statusObj["number_of_key_ranges"] = totalRanges;

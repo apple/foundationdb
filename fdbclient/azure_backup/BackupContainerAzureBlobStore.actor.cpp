@@ -29,7 +29,7 @@ namespace {
 std::string const notFoundErrorCode = "404";
 
 void printAzureError(std::string const& operationName, azure::storage_lite::storage_error const& err) {
-	printf("(%s) : Error from Azure SDK : %s (%s) : %s",
+	printf("(%s) : Error from Azure SDK : %s (%s) : %s\n",
 	       operationName.c_str(),
 	       err.code_name.c_str(),
 	       err.code.c_str(),
@@ -109,9 +109,9 @@ public:
 
 	class WriteFile final : public IAsyncFile, ReferenceCounted<WriteFile> {
 		AsyncTaskThread* asyncTaskThread;
-		std::shared_ptr<AzureClient> client;
 		std::string containerName;
 		std::string blobName;
+		std::shared_ptr<AzureClient> client;
 		int64_t m_cursor{ 0 };
 		// Ideally this buffer should not be a string, but
 		// the Azure SDK only supports/tests uploading to append
@@ -318,7 +318,7 @@ BackupContainerAzureBlobStore::BackupContainerAzureBlobStore(const std::string& 
 	std::string accountKey = _accountKey;
 	auto credential = std::make_shared<azure::storage_lite::shared_key_credential>(accountName, accountKey);
 	auto storageAccount = std::make_shared<azure::storage_lite::storage_account>(
-	    accountName, credential, true, format("https://%s", endpoint.c_str()));
+	    accountName, credential, true, fmt::format("https://{}", endpoint));
 	client = std::make_unique<AzureClient>(storageAccount, 1);
 }
 
@@ -342,6 +342,7 @@ Future<Void> BackupContainerAzureBlobStore::create() {
 	Future<Void> encryptionSetupFuture = usesEncryption() ? encryptionSetupComplete() : Void();
 	return createContainerFuture && encryptionSetupFuture;
 }
+
 Future<bool> BackupContainerAzureBlobStore::exists() {
 	TraceEvent(SevDebug, "BCAzureBlobStoreCheckContainerExists").detail("ContainerName", containerName);
 	return asyncTaskThread.execAsync([containerName = this->containerName, client = this->client] {

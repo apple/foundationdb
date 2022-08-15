@@ -128,3 +128,17 @@ On storage servers, every `SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL` seconds, ther
 
 ### Status
 For each storage server, the busiest read tag is reported in the full status output, along with its cost and fractional busyness. 
+
+At path `.cluster.qos.global_tag_throttler`, throttling limitations for each tag are reported:
+
+```
+{
+  "<tagName>": {
+    "desired_tps": <number>,
+    "reserved_tps": <number>,
+    "limiting_tps": [<number>|"unset"],
+    "target_tps": <number>
+  },
+  ...
+}
+```

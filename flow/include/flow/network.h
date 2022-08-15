@@ -579,7 +579,7 @@ public:
 	// Returns true if the current thread is the main thread
 
 	virtual void onMainThread(Promise<Void>&& signal, TaskPriority taskID) = 0;
-	// Executes signal.send(Void()) on a/the thread belonging to this network
+	// Executes signal.send(Void()) on a/the thread belonging to this network in FIFO order
 
 	virtual THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*),
 	                                  void* arg,

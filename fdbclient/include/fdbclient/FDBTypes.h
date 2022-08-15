@@ -1418,7 +1418,7 @@ struct DatabaseSharedState {
 	std::atomic<int> refCount;
 
 	DatabaseSharedState()
-	  : protocolVersion(currentProtocolVersion), mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
+	  : protocolVersion(currentProtocolVersion()), mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
 };
 
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
@@ -1465,7 +1465,7 @@ struct StorageMetadataType {
 	bool wrongConfigured = false;
 
 	StorageMetadataType() : createdTime(0) {}
-	StorageMetadataType(uint64_t t, KeyValueStoreType storeType = KeyValueStoreType::END, bool wrongConfigured = false)
+	StorageMetadataType(double t, KeyValueStoreType storeType = KeyValueStoreType::END, bool wrongConfigured = false)
 	  : createdTime(t), storeType(storeType), wrongConfigured(wrongConfigured) {}
 
 	static double currentTime() { return g_network->timer(); }

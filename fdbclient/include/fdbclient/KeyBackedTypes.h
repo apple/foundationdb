@@ -25,6 +25,7 @@
 
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/GenericTransactionHelper.h"
 #include "fdbclient/Subspace.h"
 #include "flow/ObjectSerializer.h"

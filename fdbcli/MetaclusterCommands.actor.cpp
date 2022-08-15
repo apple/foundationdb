@@ -257,11 +257,9 @@ ACTOR Future<bool> metaclusterGetCommand(Reference<IDatabase> db, std::vector<St
 			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
 		} else {
 			fmt::print("  connection string: {}\n", metadata.connectionString.toString().c_str());
+			fmt::print("  cluster state: {}\n", DataClusterEntry::clusterStateToString(metadata.entry.clusterState));
 			fmt::print("  tenant group capacity: {}\n", metadata.entry.capacity.numTenantGroups);
 			fmt::print("  allocated tenant groups: {}\n", metadata.entry.allocated.numTenantGroups);
-			if (metadata.entry.locked) {
-				fmt::print("  locked: true\n");
-			}
 		}
 	} catch (Error& e) {
 		if (useJson) {

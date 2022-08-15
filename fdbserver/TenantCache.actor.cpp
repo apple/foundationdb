@@ -32,7 +32,7 @@ class TenantCacheImpl {
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
 		KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantList =
-		    wait(TenantMetadata::tenantMap.getRange(
+		    wait(TenantMetadata::tenantMap().getRange(
 		        tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 		ASSERT(tenantList.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantList.more);
 
