@@ -64,7 +64,7 @@ public:
 
 	virtual Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const { return Void(); };
 
-	virtual Future<Void> pollMoveKeysLock(MoveKeysLock lock, const DDEnabledState* ddEnabledState) const = 0;
+	virtual Future<Void> pollMoveKeysLock(MoveKeysLock lock, const DDEnabledState* ddEnabledState) const { return Never();};
 };
 
 class DDTxnProcessorImpl;
