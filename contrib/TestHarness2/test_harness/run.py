@@ -17,7 +17,7 @@ import uuid
 
 from test_harness import version
 from test_harness.config import config
-from typing import List, Pattern, Callable, OrderedDict
+from typing import List, Pattern, Callable, OrderedDict, Dict
 from pathlib import Path
 
 from test_harness.summarize import Summary, SummaryTree
@@ -47,7 +47,7 @@ class FileStatsFetcher(StatFetcher):
     def __init__(self, stat_file: str, tests: OrderedDict[str, TestDescription]):
         super().__init__(tests)
         self.stat_file = stat_file
-        self.last_state = {}
+        self.last_state: Dict[str, int] = {}
 
     def read_stats(self):
         p = Path(self.stat_file)
@@ -81,7 +81,7 @@ class TestPicker:
         self.follow_test: Pattern = re.compile(r".*-[2-9]\d*\.(txt|toml)")
 
         for subdir in self.test_dir.iterdir():
-            if subdir.is_dir() and subdir.name in config.TEST_DIRS:
+            if subdir.is_dir() and subdir.name in config.test_dirs:
                 self.walk_test_dir(subdir)
         self.fetcher = fetcher(self.tests)
 
@@ -196,7 +196,7 @@ class TestPicker:
 class OldBinaries:
     def __init__(self):
         self.first_file_expr = re.compile(r'.*-1\.(txt|toml)')
-        self.old_binaries_path: Path = config.OLD_BINARIES_PATH
+        self.old_binaries_path: Path = config.old_binaries_path
         self.binaries: OrderedDict[version.Version, Path] = collections.OrderedDict()
         if not self.old_binaries_path.exists() or not self.old_binaries_path.is_dir():
             return
@@ -215,20 +215,20 @@ class OldBinaries:
 
     def choose_binary(self, test_file: Path) -> Path:
         if len(self.binaries) == 0:
-            return config.BINARY
+            return config.binary
         max_version = version.Version.max_version()
         min_version = version.Version.parse('5.0.0')
         dirs = test_file.parent.parts
         if 'restarting' not in dirs:
-            return config.BINARY
+            return config.binary
         version_expr = dirs[-1].split('_')
         first_file = self.first_file_expr.match(test_file.name) is not None
         if first_file and version_expr[0] == 'to':
             # downgrade test -- first binary should be current one
-            return config.BINARY
+            return config.binary
         if not first_file and version_expr[0] == 'from':
             # upgrade test -- we only return an old version for the first test file
-            return config.BINARY
+            return config.binary
         if version_expr[0] == 'from' or version_expr[0] == 'to':
             min_version = version.Version.parse(version_expr[1])
         if len(version_expr) == 4 and version_expr[2] == 'until':
@@ -286,11 +286,11 @@ class TestRun:
         self.stats: str | None = stats
         self.expected_unseed: int | None = expected_unseed
         self.err_out: str = 'error.xml'
-        self.use_valgrind: bool = config.USE_VALGRIND
-        self.old_binary_path: str = config.OLD_BINARIES_PATH
-        self.buggify_enabled: bool = random.random() < config.BUGGIFY_ON_RATIO
+        self.use_valgrind: bool = config.use_valgrind
+        self.old_binary_path: Path = config.old_binaries_path
+        self.buggify_enabled: bool = random.random() < config.buggify_on_ratio
         self.fault_injection_enabled: bool = True
-        self.trace_format = config.TRACE_FORMAT
+        self.trace_format = config.trace_format
         # state for the run
         self.retryable_error: bool = False
         self.summary: Summary | None = None
@@ -326,9 +326,9 @@ class TestRun:
             command.append('--restarting')
         if self.buggify_enabled:
             command += ['-b', 'on']
-        if config.CRASH_ON_ERROR:
+        if config.crash_on_error:
             command.append('--crash')
-        temp_path = config.RUN_DIR / str(self.uid)
+        temp_path = config.run_dir / str(self.uid)
         temp_path.mkdir(parents=True, exist_ok=True)
 
         # self.log_test_plan(out)
@@ -337,7 +337,7 @@ class TestRun:
         process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=temp_path)
         did_kill = False
         try:
-            process.wait(20 * config.KILL_SECONDS if self.use_valgrind else config.KILL_SECONDS)
+            process.wait(20 * config.kill_seconds if self.use_valgrind else config.kill_seconds)
         except subprocess.TimeoutExpired:
             process.kill()
             did_kill = True
@@ -363,12 +363,12 @@ class TestRunner:
     def fetch_stats_from_fdb(self, cluster_file: str, app_dir: str):
         def fdb_fetcher(tests: OrderedDict[str, TestDescription]):
             from . import fdb
-            self.stat_fetcher = fdb.FDBStatFetcher(cluster_file, app_dir, tests)
+            self.stat_fetcher = lambda x: fdb.FDBStatFetcher(cluster_file, app_dir, x)
 
         self.stat_fetcher = fdb_fetcher
 
     def backup_sim_dir(self, seed: int):
-        temp_dir = config.RUN_DIR / str(self.uid)
+        temp_dir = config.run_dir / str(self.uid)
         src_dir = temp_dir / 'simfdb'
         assert src_dir.is_dir()
         dest_dir = temp_dir / 'simfdb.{}'.format(seed)
@@ -376,7 +376,7 @@ class TestRunner:
         shutil.copytree(src_dir, dest_dir)
 
     def restore_sim_dir(self, seed: int):
-        temp_dir = config.RUN_DIR / str(self.uid)
+        temp_dir = config.run_dir / str(self.uid)
         src_dir = temp_dir / 'simfdb.{}'.format(seed)
         assert src_dir.exists()
         dest_dir = temp_dir / 'simfdb'
@@ -387,7 +387,7 @@ class TestRunner:
         count = 0
         for file in test_files:
             binary = self.binary_chooser.choose_binary(file)
-            unseed_check = random.random() < config.UNSEED_CHECK_RATIO
+            unseed_check = random.random() < config.unseed_check_ratio
             if unseed_check and count != 0:
                 # for restarting tests we will need to restore the sim2 after the first run
                 self.backup_sim_dir(seed + count - 1)
@@ -395,14 +395,18 @@ class TestRunner:
                           stats=test_picker.dump_stats())
             success = run.run()
             test_picker.add_time(file, run.run_time)
-            if success and unseed_check and run.summary.unseed is not None:
+            assert not success or run.summary is not None
+            if success and unseed_check and run.summary is not None and run.summary.unseed is not None:
                 self.restore_sim_dir(seed + count - 1)
                 run2 = TestRun(binary, file.absolute(), seed + count, self.uid, restarting=count != 0,
                                stats=test_picker.dump_stats(), expected_unseed=run.summary.unseed)
                 success = run2.run()
-                test_picker.add_time(file, run2.run_time)
-                run2.summary.out.dump(sys.stdout)
-            run.summary.out.dump(sys.stdout)
+                assert not success or run2.summary is not None
+                if success and run2.summary is not None:
+                    test_picker.add_time(file, run2.run_time)
+                    run2.summary.out.dump(sys.stdout)
+            if run.summary is not None:
+                run.summary.out.dump(sys.stdout)
             if not success:
                 return False
             count += 1
@@ -410,7 +414,6 @@ class TestRunner:
 
     def run(self, stats: str | None) -> bool:
         seed = random.randint(0, 2 ** 32 - 1)
-        # unseed_check: bool = random.random() < Config.UNSEED_CHECK_RATIO
         test_picker = TestPicker(Path(self.test_path), self.stat_fetcher)
         if stats is not None:
             test_picker.load_stats(stats)
@@ -418,6 +421,6 @@ class TestRunner:
             test_picker.fetch_stats()
         test_files = test_picker.choose_test()
         success = self.run_tests(test_files, seed, test_picker)
-        if config.CLEAN_UP:
-            shutil.rmtree(config.RUN_DIR / str(self.uid))
+        if config.clean_up:
+            shutil.rmtree(config.run_dir / str(self.uid))
         return success

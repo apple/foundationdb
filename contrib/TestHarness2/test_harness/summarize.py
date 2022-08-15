@@ -12,7 +12,7 @@ import xml.sax.handler
 import xml.sax.saxutils
 
 from pathlib import Path
-from typing import List, Dict, TextIO, Callable, Optional, OrderedDict
+from typing import List, Dict, TextIO, Callable, Optional, OrderedDict, Any, Tuple
 from xml.dom import minidom
 
 from test_harness.config import config
@@ -27,8 +27,8 @@ class SummaryTree:
     def append(self, element: SummaryTree):
         self.children.append(element)
 
-    def to_dict(self) -> Dict:
-        res = {'Type': self.name}
+    def to_dict(self) -> Dict[str, Any]:
+        res: Dict[str, Any] = {'Type': self.name}
         for k, v in self.attributes.items():
             res[k] = v
         children = []
@@ -39,17 +39,7 @@ class SummaryTree:
         return res
 
     def to_json(self, out: TextIO):
-        json.dump(self.to_dict(), out, indent=('  ' if config.PRETTY_PRINT else None))
-
-    def append_xml_element(self, doc: minidom.Document, root=True, parent: minidom.Element | None = None):
-        assert root or parent is not None
-        this: minidom.Element = doc.createElement(self.name)
-        for k, v in self.attributes:
-            this.setAttribute(k, v)
-        for child in self.children:
-            child.append_xml_element(doc, root=False, parent=this)
-        if not root:
-            parent.appendChild(this)
+        json.dump(self.to_dict(), out, indent=('  ' if config.pretty_print else None))
 
     def to_xml(self, out: TextIO, prefix: str = ''):
         # minidom doesn't support omitting the xml declaration which is a problem for joshua
@@ -59,7 +49,7 @@ class SummaryTree:
             attrs.append('{}="{}"'.format(k, xml.sax.saxutils.escape(v)))
         elem = '{}<{}{}'.format(prefix, self.name, ('' if len(attrs) == 0 else ' '))
         out.write(elem)
-        if config.PRETTY_PRINT:
+        if config.pretty_print:
             curr_line_len = len(elem)
             for i in range(len(attrs)):
                 attr_len = len(attrs[i])
@@ -80,28 +70,28 @@ class SummaryTree:
         else:
             out.write('>')
         for child in self.children:
-            if config.PRETTY_PRINT:
+            if config.pretty_print:
                 out.write('\n')
-            child.to_xml(out, prefix=('  {}'.format(prefix) if config.PRETTY_PRINT else prefix))
+            child.to_xml(out, prefix=('  {}'.format(prefix) if config.pretty_print else prefix))
         if len(self.children) > 0:
-            out.write('{}</{}>'.format(('\n' if config.PRETTY_PRINT else ''), self.name))
+            out.write('{}</{}>'.format(('\n' if config.pretty_print else ''), self.name))
 
     def dump(self, out: TextIO):
-        if config.OUTPUT_FORMAT == 'json':
+        if config.output_format == 'json':
             self.to_json(out)
         else:
             self.to_xml(out)
 
 
-ParserCallback = Callable[[Optional[Dict[str, Optional[str]]]], Optional[str]]
+ParserCallback = Callable[[Dict[str, str]], Optional[str]]
 
 
 class ParseHandler:
     def __init__(self, out: SummaryTree):
         self.out = out
-        self.events: OrderedDict[(str, str), List[ParserCallback]] = collections.OrderedDict()
+        self.events: OrderedDict[Optional[Tuple[str, Optional[str]]], List[ParserCallback]] = collections.OrderedDict()
 
-    def add_handler(self, attr: (str, str), callback: ParserCallback) -> None:
+    def add_handler(self, attr: Tuple[str, str], callback: ParserCallback) -> None:
         if attr in self.events:
             self.events[attr].append(callback)
         else:
@@ -155,6 +145,7 @@ class XmlParser(Parser, xml.sax.handler.ContentHandler):
         attributes: Dict[str, str] = {}
         for name in attrs.getNames():
             attributes[name] = attrs.getValue(name)
+        assert self.handler is not None
         self.handler.handle(attributes)
 
 
@@ -266,32 +257,48 @@ class Coverage:
         self.line = int(line)
         self.comment = comment
 
-    def __eq__(self, other: Coverage) -> bool:
-        return self.file == other.file and self.line == other.line and self.comment == other.comment
+    def to_tuple(self) -> Tuple[str, int, str | None]:
+        return self.file, self.line, self.comment
 
-    def __lt__(self, other: Coverage) -> bool:
-        if self.file != other.file:
-            return self.file < other.file
-        elif self.line != other.line:
-            return self.line < other.line
-        elif self.comment != other.comment:
-            if self.comment is None:
-                return True
-            elif other.comment is None:
-                return False
-            else:
-                return self.comment < other.comment
+    def __eq__(self, other) -> bool:
+        if isinstance(other, tuple) and len(other) == 3:
+            return self.to_tuple() == other
+        elif isinstance(other, Coverage):
+            return self.to_tuple() == other.to_tuple()
         else:
             return False
 
-    def __le__(self, other: Coverage) -> bool:
-        return self.__eq__(other) or self.__lt__(other)
+    def __lt__(self, other) -> bool:
+        if isinstance(other, tuple) and len(other) == 3:
+            return self.to_tuple() < other
+        elif isinstance(other, Coverage):
+            return self.to_tuple() < other.to_tuple()
+        else:
+            return False
+
+    def __le__(self, other) -> bool:
+        if isinstance(other, tuple) and len(other) == 3:
+            return self.to_tuple() <= other
+        elif isinstance(other, Coverage):
+            return self.to_tuple() <= other.to_tuple()
+        else:
+            return False
 
     def __gt__(self, other: Coverage) -> bool:
-        return not self.__le__(other)
+        if isinstance(other, tuple) and len(other) == 3:
+            return self.to_tuple() > other
+        elif isinstance(other, Coverage):
+            return self.to_tuple() > other.to_tuple()
+        else:
+            return False
 
     def __ge__(self, other):
-        return self.__eq__(other) or self.__gt__(other)
+        if isinstance(other, tuple) and len(other) == 3:
+            return self.to_tuple() >= other
+        elif isinstance(other, Coverage):
+            return self.to_tuple() >= other.to_tuple()
+        else:
+            return False
 
     def __hash__(self):
         return hash((self.file, self.line, self.comment))
@@ -350,7 +357,7 @@ class Summary:
             self.out.attributes['TestUID'] = str(uid)
         if stats is not None:
             self.out.attributes['Statistics'] = stats
-        self.out.attributes['JoshuaSeed'] = str(config.JOSHUA_SEED)
+        self.out.attributes['JoshuaSeed'] = str(config.joshua_seed)
 
         self.handler = ParseHandler(self.out)
         self.register_handlers()
@@ -372,7 +379,7 @@ class Summary:
                and self.test_end_found
 
     def done(self):
-        if config.PRINT_COVERAGE:
+        if config.print_coverage:
             for k, v in self.coverage.items():
                 child = SummaryTree('CodeCoverage')
                 child.attributes['File'] = k.file
@@ -382,12 +389,12 @@ class Summary:
                 if k.comment is not None and len(k.comment):
                     child.attributes['Comment'] = k.comment
                 self.out.append(child)
-        if self.warnings > config.MAX_WARNINGS:
+        if self.warnings > config.max_warnings:
             child = SummaryTree('WarningLimitExceeded')
             child.attributes['Severity'] = '30'
             child.attributes['WarningCount'] = str(self.warnings)
             self.out.append(child)
-        if self.errors > config.MAX_ERRORS:
+        if self.errors > config.max_errors:
             child = SummaryTree('ErrorLimitExceeded')
             child.attributes['Severity'] = '40'
             child.attributes['ErrorCount'] = str(self.warnings)
@@ -423,6 +430,7 @@ class Summary:
         self.out.attributes['Ok'] = '1' if self.ok() else '0'
 
     def parse_file(self, file: Path):
+        parser: Parser
         if file.suffix == '.json':
             parser = JsonParser()
         elif file.suffix == '.xml':
@@ -430,7 +438,9 @@ class Summary:
         else:
             child = SummaryTree('TestHarnessBug')
             child.attributes['File'] = __file__
-            child.attributes['Line'] = str(inspect.getframeinfo(inspect.currentframe()).lineno)
+            frame = inspect.currentframe()
+            if frame is not None:
+                child.attributes['Line'] = str(inspect.getframeinfo(frame).lineno)
             child.attributes['Details'] = 'Unexpected suffix {} for file {}'.format(file.suffix, file.name)
             self.error = True
             self.out.append(child)
@@ -509,7 +519,7 @@ class Summary:
 
         def parse_warning(attrs: Dict[str, str]):
             self.warnings += 1
-            if self.warnings > config.MAX_WARNINGS:
+            if self.warnings > config.max_warnings:
                 return
             child = SummaryTree(attrs['Type'])
             for k, v in attrs.items():
@@ -522,7 +532,7 @@ class Summary:
         def parse_error(attrs: Dict[str, str]):
             self.errors += 1
             self.error = True
-            if self.errors > config.MAX_ERRORS:
+            if self.errors > config.max_errors:
                 return
             child = SummaryTree(attrs['Type'])
             for k, v in attrs.items():

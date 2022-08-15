@@ -5,7 +5,7 @@ from typing import OrderedDict
 import fdb
 import struct
 
-from run import StatFetcher, TestDescription
+from test_harness.run import StatFetcher, TestDescription
 
 
 class FDBStatFetcher(StatFetcher):

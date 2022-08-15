@@ -1,5 +1,6 @@
-from typing import Generic, TypeVar, Callable
-from . import fdboptions
+import fdboptions
+
+from typing import Generic, TypeVar, Callable, List
 from fdboptions import StreamingMode
 
 def api_version(version: int) -> None: ...
@@ -34,7 +35,6 @@ class Future(Generic[T]):
 
 
 class FutureString(Future[bytes]):
-    __class__ = property(bytes)
     def as_foundationdb_key(self) -> bytes:
         ...
 
@@ -234,6 +234,7 @@ class Database:
         ...
 
     def clear(self, ):
+        ...
 
     def __getitem__(self, key: Key | slice) -> bytes:
         ...
