@@ -4954,6 +4954,9 @@ public:
 		constexpr static FileIdentifier file_identifier = 10847329;
 		constexpr static unsigned int FORMAT_VERSION = 17;
 
+		// Maximum size of the root pointer
+		constexpr static int maxRootPointerSize = 3000 / sizeof(LogicalPageID);
+
 		// This serves as the format version for the entire tree, individual pages will not be versioned
 		uint32_t formatVersion;
 		EncodingType encodingType;
@@ -5961,15 +5964,22 @@ private:
 		return records;
 	}
 
-	ACTOR static Future<Standalone<VectorRef<RedwoodRecordRef>>> buildNewRoot(
+	// Takes a list of records commitSubtree() on the root and builds new root pages
+	// until there is only 1 root records which is small enough to fit in the BTree commit header.
+	ACTOR static Future<Standalone<VectorRef<RedwoodRecordRef>>> buildNewRootsIfNeeded(
 	    VersionedBTree* self,
 	    Version version,
 	    Standalone<VectorRef<RedwoodRecordRef>> records,
 	    unsigned int height) {
 		debug_printf("buildNewRoot start version %" PRId64 ", %d records\n", version, records.size());
 
-		// While there are multiple child pages for this version we must write new tree levels.
-		while (records.size() > 1) {
+		// While there are multiple child records or there is only one but it is too large to fit in the BTree
+		// commit record, build a new root page and update records to be a link to that new page.
+		// Root pointer size is limited because the pager commit header is limited to smallestPhysicalBlock in
+		// size.
+		while (records.size() > 1 ||
+		       records.front().getChildPage().size() > (BUGGIFY ? 1 : BTreeCommitHeader::maxRootPointerSize)) {
+			CODE_PROBE(records.size() == 1, "Writing a new root because the current root pointer would be too large");
 			self->m_header.height = ++height;
 			ASSERT(height < std::numeric_limits<int8_t>::max());
 			Standalone<VectorRef<RedwoodRecordRef>> newRecords = wait(
@@ -7299,14 +7309,10 @@ private:
 				self->m_pager->updatePage(PagerEventReasons::Commit, self->m_header.height, rootNodeLink, page);
 			} else {
 				Standalone<VectorRef<RedwoodRecordRef>> newRootRecords(all.newLinks, all.newLinks.arena());
-				if (newRootRecords.size() == 1) {
-					rootNodeLink = newRootRecords.front().getChildPage();
-				} else {
-					// If the new root level's size is not 1 then build new root level(s)
-					Standalone<VectorRef<RedwoodRecordRef>> newRootPage =
-					    wait(buildNewRoot(self, batch.writeVersion, newRootRecords, self->m_header.height));
-					rootNodeLink = newRootPage.front().getChildPage();
-				}
+				// Build new root levels if there are multiple new root records or if the root pointer is too large
+				Standalone<VectorRef<RedwoodRecordRef>> newRootPage =
+				    wait(buildNewRootsIfNeeded(self, batch.writeVersion, newRootRecords, self->m_header.height));
+				rootNodeLink = newRootPage.front().getChildPage();
 			}
 		}
 
