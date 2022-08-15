@@ -2761,46 +2761,46 @@ ACTOR Future<bool> verifyInterfaceActor(Reference<FlowLock> connectLock, ClientW
 ACTOR static Future<RangeResult> workerInterfacesImplGetRangeActor(ReadYourWritesTransaction* ryw,
                                                                    KeyRef prefix,
                                                                    KeyRangeRef kr) {
-	if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
-		state RangeResult interfs = wait(getWorkerInterfaces(ryw->getDatabase()->getConnectionRecord()));
-		auto verify = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
-		    "worker_interfaces", "verify")];
-		state RangeResult result;
-		if (verify.first) {
-			// if verify option is set, we try to talk to every worker and only returns those we can talk to
-			Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
-			state std::vector<Future<bool>> verifyInterfs;
-			for (const auto& [k_, value] : interfs) {
-				auto k = k_.withPrefix(prefix);
-				if (kr.contains(k)) {
-					ClientWorkerInterface workerInterf =
-					    BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion());
-					verifyInterfs.push_back(verifyInterfaceActor(connectLock, workerInterf));
-				} else {
-					verifyInterfs.push_back(false);
-				}
-			}
-			wait(waitForAll(verifyInterfs));
-			state int index;
-			for (index = 0; index < interfs.size(); index++) {
-				if (verifyInterfs[index].get()) {
-					// if we can establish a connection, add it into the result
-					result.push_back_deep(result.arena(),
-					                      KeyValueRef(interfs[index].key.withPrefix(prefix), interfs[index].value));
-				}
-			}
-		} else {
-			for (const auto& [k_, v] : interfs) {
-				auto k = k_.withPrefix(prefix);
-				if (kr.contains(k))
-					result.push_back_deep(result.arena(), KeyValueRef(k, v));
+	if (!ryw->getDatabase().getPtr() || !ryw->getDatabase()->getConnectionRecord())
+		return RangeResult();
+
+	state RangeResult interfs = wait(getWorkerInterfaces(ryw->getDatabase()->getConnectionRecord()));
+	// for options special keys, the boolean flag indicates if it's a SET operation
+	auto [verify, _] = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
+	    "worker_interfaces", "verify")];
+	state RangeResult result;
+	if (verify) {
+		// if verify option is set, we try to talk to every worker and only returns those we can talk to
+		Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+		state std::vector<Future<bool>> verifyInterfs;
+		for (const auto& [k_, value] : interfs) {
+			auto k = k_.withPrefix(prefix);
+			if (kr.contains(k)) {
+				ClientWorkerInterface workerInterf =
+				    BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion());
+				verifyInterfs.push_back(verifyInterfaceActor(connectLock, workerInterf));
+			} else {
+				verifyInterfs.push_back(false);
 			}
 		}
-		std::sort(result.begin(), result.end(), KeyValueRef::OrderByKey{});
-		return result;
+		wait(waitForAll(verifyInterfs));
+		// state int index;
+		for (int index = 0; index < interfs.size(); index++) {
+			if (verifyInterfs[index].get()) {
+				// if we can establish a connection, add it into the result
+				result.push_back_deep(result.arena(),
+				                      KeyValueRef(interfs[index].key.withPrefix(prefix), interfs[index].value));
+			}
+		}
 	} else {
-		return RangeResult();
+		for (const auto& [k_, v] : interfs) {
+			auto k = k_.withPrefix(prefix);
+			if (kr.contains(k))
+				result.push_back_deep(result.arena(), KeyValueRef(k, v));
+		}
 	}
+	std::sort(result.begin(), result.end(), KeyValueRef::OrderByKey{});
+	return result;
 }
 
 WorkerInterfacesSpecialKeyImpl::WorkerInterfacesSpecialKeyImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
