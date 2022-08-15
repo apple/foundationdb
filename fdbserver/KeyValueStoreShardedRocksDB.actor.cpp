@@ -646,28 +646,42 @@ public:
 					physicalShards[handle->GetName()] = std::make_shared<PhysicalShard>(db, handle->GetName(), handle);
 				}
 				columnFamilyMap[handle->GetID()] = handle;
-				TraceEvent(SevVerbose, "ShardedRocksInitPhysicalShard", this->logId)
+				TraceEvent(SevInfo, "ShardedRocksInitPhysicalShard", this->logId)
 				    .detail("PhysicalShard", handle->GetName());
 			}
-			RangeResult metadata;
-			readRangeInDb(metadataShard.get(), prefixRange(shardMappingPrefix), UINT16_MAX, UINT16_MAX, &metadata);
-
-			std::vector<std::pair<KeyRange, std::string>> mapping = decodeShardMapping(metadata, shardMappingPrefix);
-
-			for (const auto& [range, name] : mapping) {
-				TraceEvent(SevVerbose, "ShardedRocksLoadRange", this->logId)
-				    .detail("Range", range)
-				    .detail("PhysicalShard", name);
-				auto it = physicalShards.find(name);
-				// Raise error if physical shard is missing.
-				if (it == physicalShards.end()) {
-					TraceEvent(SevError, "ShardedRocksDB").detail("MissingShard", name);
-					return rocksdb::Status::NotFound();
+			KeyRange keyRange = prefixRange(shardMappingPrefix);
+			while (true) {
+				RangeResult metadata;
+				// metadata.clear();
+				const int bytes = readRangeInDb(metadataShard.get(), keyRange, UINT16_MAX, UINT16_MAX, &metadata);
+				if (bytes <= 0) {
+					break;
 				}
-				std::unique_ptr<DataShard> dataShard = std::make_unique<DataShard>(range, it->second.get());
-				dataShardMap.insert(range, dataShard.get());
-				it->second->dataShards[range.begin.toString()] = std::move(dataShard);
-				activePhysicalShardIds.emplace(name);
+
+				std::vector<std::pair<KeyRange, std::string>> mapping =
+				    decodeShardMapping(metadata, shardMappingPrefix);
+
+				Key end = keyRange.begin.removePrefix(shardMappingPrefix);
+				for (const auto& [range, name] : mapping) {
+					TraceEvent(SevInfo, "ShardedRocksLoadRange", this->logId)
+					    .detail("Range", range)
+					    .detail("PhysicalShard", name);
+					auto it = physicalShards.find(name);
+					// Raise error if physical shard is missing.
+					if (it == physicalShards.end()) {
+						TraceEvent(SevError, "ShardedRocksDB").detail("MissingShard", name);
+						return rocksdb::Status::NotFound();
+					}
+					std::unique_ptr<DataShard> dataShard = std::make_unique<DataShard>(range, it->second.get());
+					dataShardMap.insert(range, dataShard.get());
+					it->second->dataShards[range.begin.toString()] = std::move(dataShard);
+					activePhysicalShardIds.emplace(name);
+					end = range.end;
+				}
+				if (end == specialKeys.end) {
+					break;
+				}
+				keyRange = KeyRangeRef(end.withPrefix(shardMappingPrefix), keyRange.end);
 			}
 			// TODO: remove unused column families.
 		} else {
