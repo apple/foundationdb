@@ -453,20 +453,30 @@ struct BackupData {
 	ACTOR static Future<Version> _getMinKnownCommittedVersion(BackupData* self) {
 		state Span span("BA:GetMinCommittedVersion"_loc);
 		loop {
-			GetReadVersionRequest request(span.context,
-			                              0,
-			                              TransactionPriority::DEFAULT,
-			                              invalidVersion,
-			                              GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
-			choose {
-				when(wait(self->cx->onProxiesChanged())) {}
-				when(GetReadVersionReply reply =
-				         wait(basicLoadBalance(self->cx->getGrvProxies(UseProvisionalProxies::False),
-				                               &GrvProxyInterface::getConsistentReadVersion,
-				                               request,
-				                               self->cx->taskID))) {
-					self->cx->ssVersionVectorCache.applyDelta(reply.ssVersionVectorDelta);
-					return reply.version;
+			try {
+				GetReadVersionRequest request(span.context,
+				                              0,
+				                              TransactionPriority::DEFAULT,
+				                              invalidVersion,
+				                              GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
+				choose {
+					when(wait(self->cx->onProxiesChanged())) {}
+					when(GetReadVersionReply reply =
+					         wait(basicLoadBalance(self->cx->getGrvProxies(UseProvisionalProxies::False),
+					                               &GrvProxyInterface::getConsistentReadVersion,
+					                               request,
+					                               self->cx->taskID))) {
+						self->cx->ssVersionVectorCache.applyDelta(reply.ssVersionVectorDelta);
+						return reply.version;
+					}
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_batch_transaction_throttled ||
+				    e.code() == error_code_grv_proxy_memory_limit_exceeded) {
+					// GRV Proxy returns an error
+					wait(delayJittered(CLIENT_KNOBS->GRV_ERROR_RETRY_DELAY));
+				} else {
+					throw;
 				}
 			}
 		}
