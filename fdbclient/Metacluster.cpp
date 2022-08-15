@@ -24,6 +24,39 @@
 FDB_DEFINE_BOOLEAN_PARAM(AddNewTenants);
 FDB_DEFINE_BOOLEAN_PARAM(RemoveMissingTenants);
 
+std::string DataClusterEntry::clusterStateToString(DataClusterState clusterState) {
+	switch (clusterState) {
+	case DataClusterState::READY:
+		return "ready";
+	case DataClusterState::REMOVING:
+		return "removing";
+	case DataClusterState::RESTORING:
+		return "restoring";
+	default:
+		UNREACHABLE();
+	}
+}
+
+DataClusterState DataClusterEntry::stringToClusterState(std::string stateStr) {
+	if (stateStr == "ready") {
+		return DataClusterState::READY;
+	} else if (stateStr == "removing") {
+		return DataClusterState::REMOVING;
+	} else if (stateStr == "restoring") {
+		return DataClusterState::RESTORING;
+	}
+
+	UNREACHABLE();
+}
+
+json_spirit::mObject DataClusterEntry::toJson() const {
+	json_spirit::mObject obj;
+	obj["capacity"] = capacity.toJson();
+	obj["allocated"] = allocated.toJson();
+	obj["cluster_state"] = DataClusterEntry::clusterStateToString(clusterState);
+	return obj;
+}
+
 json_spirit::mObject ClusterUsage::toJson() const {
 	json_spirit::mObject obj;
 	obj["num_tenant_groups"] = numTenantGroups;

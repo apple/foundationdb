@@ -53,16 +53,25 @@ struct Traceable<ClusterUsage> : std::true_type {
 	}
 };
 
+// Represents the various states that a data cluster could be in.
+//
+// READY - the data cluster is active
+// REMOVING - the data cluster is being removed and cannot have its configuration changed or any tenants created
+// RESTORING - the data cluster is being restored and cannot have its configuration changed or any tenants
+//             created/updated/deleted.
+enum class DataClusterState { READY, REMOVING, RESTORING };
+
 struct DataClusterEntry {
 	constexpr static FileIdentifier file_identifier = 929511;
+
+	static std::string clusterStateToString(DataClusterState clusterState);
+	static DataClusterState stringToClusterState(std::string stateStr);
 
 	UID id;
 	ClusterUsage capacity;
 	ClusterUsage allocated;
 
-	// If true, then tenant groups cannot be assigned to this cluster. This is used when a cluster is being forcefully
-	// removed.
-	bool locked = false;
+	DataClusterState clusterState = DataClusterState::READY;
 
 	DataClusterEntry() = default;
 	DataClusterEntry(ClusterUsage capacity) : capacity(capacity) {}
@@ -81,19 +90,11 @@ struct DataClusterEntry {
 		return ObjectReader::fromStringRef<DataClusterEntry>(value, IncludeVersion());
 	}
 
-	json_spirit::mObject toJson() const {
-		json_spirit::mObject obj;
-		obj["capacity"] = capacity.toJson();
-		obj["allocated"] = allocated.toJson();
-		if (locked) {
-			obj["locked"] = locked;
-		}
-		return obj;
-	}
+	json_spirit::mObject toJson() const;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, capacity, allocated, locked);
+		serializer(ar, id, capacity, allocated, clusterState);
 	}
 };
 

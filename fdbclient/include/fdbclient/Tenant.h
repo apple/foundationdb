@@ -44,14 +44,23 @@ typedef Standalone<TenantGroupNameRef> TenantGroupName;
 // REMOVING - the tenant has been marked for removal and is being removed on the data cluster
 // UPDATING_CONFIGURATION - the tenant configuration has changed on the management cluster and is being applied to the
 //                          data cluster
-// ERROR - currently unused
+// RENAMING_FROM - the tenant is being renamed to a new name and is awaiting the rename to complete on the data cluster
+// RENAMING_TO - the tenant is being created as a rename from an existing tenant and is awaiting the rename to complete
+//               on the data cluster
+// ERROR - the tenant is in an error state
 //
 // A tenant in any configuration is allowed to be removed. Only tenants in the READY or UPDATING_CONFIGURATION phases
-// can have their configuration updated. A tenant must not exist or be in the REGISTERING phase to be created.
+// can have their configuration updated. A tenant must not exist or be in the REGISTERING phase to be created. To be
+// renamed, a tenant must be in the READY or RENAMING_FROM state. In the latter case, the rename destination must match
+// the original rename attempt.
 //
 // If an operation fails and the tenant is left in a non-ready state, re-running the same operation is legal. If
 // successful, the tenant will return to the READY state.
-enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, ERROR };
+enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, RENAMING_FROM, RENAMING_TO, ERROR };
+
+// Represents the lock state the tenant could be in.
+// Can be used in conjunction with the other tenant states above.
+enum class TenantLockState { UNLOCKED, READ_ONLY, LOCKED };
 
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
@@ -65,10 +74,15 @@ struct TenantMapEntry {
 	int64_t id = -1;
 	Key prefix;
 	TenantState tenantState = TenantState::READY;
+	TenantLockState tenantLockState = TenantLockState::UNLOCKED;
 	Optional<TenantGroupName> tenantGroup;
 	bool encrypted = false;
 	Optional<ClusterName> assignedCluster;
 	int64_t configurationSequenceNum = 0;
+	Optional<TenantName> renamePair;
+
+	// Can be set to an error string if the tenant is in the ERROR state
+	std::string error;
 
 	constexpr static int PREFIX_SIZE = sizeof(id);
 
@@ -89,7 +103,16 @@ struct TenantMapEntry {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, tenantState, tenantGroup, encrypted, assignedCluster, configurationSequenceNum);
+		serializer(ar,
+		           id,
+		           tenantState,
+		           tenantLockState,
+		           tenantGroup,
+		           encrypted,
+		           assignedCluster,
+		           configurationSequenceNum,
+		           renamePair,
+		           error);
 		if constexpr (Ar::isDeserializing) {
 			if (id >= 0) {
 				prefix = idToPrefix(id);
@@ -141,6 +164,7 @@ struct TenantMetadataSpecification {
 	Key subspace;
 
 	KeyBackedObjectMap<TenantName, TenantMapEntry, decltype(IncludeVersion()), NullCodec> tenantMap;
+	KeyBackedMap<int64_t, TenantName> tenantIdIndex;
 	KeyBackedProperty<int64_t> lastTenantId;
 	KeyBackedBinaryValue<int64_t> tenantCount;
 	KeyBackedSet<int64_t> tenantTombstones;
@@ -150,8 +174,8 @@ struct TenantMetadataSpecification {
 
 	TenantMetadataSpecification(KeyRef prefix)
 	  : subspace(prefix.withSuffix("tenant/"_sr)), tenantMap(subspace.withSuffix("map/"_sr), IncludeVersion()),
-	    lastTenantId(subspace.withSuffix("lastId"_sr)), tenantCount(subspace.withSuffix("count"_sr)),
-	    tenantTombstones(subspace.withSuffix("tombstones/"_sr)),
+	    tenantIdIndex(subspace.withSuffix("idIndex/"_sr)), lastTenantId(subspace.withSuffix("lastId"_sr)),
+	    tenantCount(subspace.withSuffix("count"_sr)), tenantTombstones(subspace.withSuffix("tombstones/"_sr)),
 	    tombstoneCleanupData(subspace.withSuffix("tombstoneCleanup"_sr), IncludeVersion()),
 	    tenantGroupTenantIndex(subspace.withSuffix("tenantGroup/tenantIndex/"_sr)),
 	    tenantGroupMap(subspace.withSuffix("tenantGroup/map/"_sr), IncludeVersion()) {}
@@ -162,6 +186,7 @@ struct TenantMetadata {
 
 	static inline auto& subspace() { return instance().subspace; }
 	static inline auto& tenantMap() { return instance().tenantMap; }
+	static inline auto& tenantIdIndex() { return instance().tenantIdIndex; }
 	static inline auto& lastTenantId() { return instance().lastTenantId; }
 	static inline auto& tenantCount() { return instance().tenantCount; }
 	static inline auto& tenantTombstones() { return instance().tenantTombstones; }

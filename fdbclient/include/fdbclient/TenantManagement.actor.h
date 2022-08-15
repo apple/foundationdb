@@ -177,6 +177,8 @@ Future<std::pair<Optional<TenantMapEntry>, bool>> createTenantTransaction(
 	tenantEntry.assignedCluster = Optional<ClusterName>();
 
 	TenantMetadata::tenantMap().set(tr, name, tenantEntry);
+	TenantMetadata::tenantIdIndex().set(tr, tenantEntry.id, name);
+
 	if (tenantEntry.tenantGroup.present()) {
 		TenantMetadata::tenantGroupTenantIndex().insert(tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), name));
 
@@ -298,6 +300,7 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 
 		// This is idempotent because we only erase an entry from the tenant map if it is present
 		TenantMetadata::tenantMap().erase(tr, name);
+		TenantMetadata::tenantIdIndex().erase(tr, tenantEntry.get().id);
 		TenantMetadata::tenantCount().atomicOp(tr, -1, MutationRef::AddValue);
 
 		if (tenantEntry.get().tenantGroup.present()) {
@@ -407,6 +410,8 @@ Future<Void> configureTenantTransaction(Transaction tr,
                                         TenantNameRef tenantName,
                                         TenantMapEntry originalEntry,
                                         TenantMapEntry updatedTenantEntry) {
+	ASSERT(updatedTenantEntry.id == originalEntry.id);
+
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	TenantMetadata::tenantMap().set(tr, tenantName, updatedTenantEntry);
 
@@ -497,6 +502,7 @@ Future<Void> renameTenantTransaction(Transaction tr, TenantNameRef oldName, Tena
 	}
 	TenantMetadata::tenantMap().erase(tr, oldName);
 	TenantMetadata::tenantMap().set(tr, newName, oldEntry.get());
+	TenantMetadata::tenantIdIndex().set(tr, oldEntry.get().id, newName);
 
 	// Update the tenant group index to reflect the new tenant name
 	if (oldEntry.get().tenantGroup.present()) {

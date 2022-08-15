@@ -42,10 +42,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( FAILURE_MAX_DELAY,                       5.0 );
 	init( FAILURE_MIN_DELAY,                       4.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 1.0;
-	init( FAILURE_TIMEOUT_DELAY,     FAILURE_MIN_DELAY );
-	init( CLIENT_FAILURE_TIMEOUT_DELAY, FAILURE_MIN_DELAY );
-	init( FAILURE_EMERGENCY_DELAY,                30.0 );
-	init( FAILURE_MAX_GENERATIONS,                  10 );
 	init( RECOVERY_DELAY_START_GENERATION,          70 );
 	init( RECOVERY_DELAY_SECONDS_PER_GENERATION,  60.0 );
 	init( MAX_GENERATIONS,                         100 );
@@ -159,8 +155,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BACKUP_AGGREGATE_POLL_RATE_UPDATE_INTERVAL, 60);
 	init( BACKUP_AGGREGATE_POLL_RATE,              2.0 ); // polls per second target for all agents on the cluster
 	init( BACKUP_LOG_WRITE_BATCH_MAX_SIZE,         1e6 ); //Must be much smaller than TRANSACTION_SIZE_LIMIT
-	init( BACKUP_LOG_ATOMIC_OPS_SIZE,			  1000 );
-	init( BACKUP_OPERATION_COST_OVERHEAD,		    50 );
 	init( BACKUP_MAX_LOG_RANGES,                    21 ); if( randomize && BUGGIFY ) BACKUP_MAX_LOG_RANGES = 4;
 	init( BACKUP_SIM_COPY_LOG_RANGES,              100 );
 	init( BACKUP_VERSION_DELAY,           5*CORE_VERSIONSPERSECOND );
@@ -278,10 +272,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	// busyness reporting
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );
 	init( BUSYNESS_SPIKE_SATURATED_THRESHOLD,     0.500 );
-
-	// multi-version client control
-	init( MVC_CLIENTLIB_CHUNK_SIZE,              8*1024 );
-	init( MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION,      32 );
 
 	// Blob granules
 	init( BG_MAX_GRANULE_PARALLELISM,                10 );

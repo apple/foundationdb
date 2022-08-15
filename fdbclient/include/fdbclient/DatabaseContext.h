@@ -25,6 +25,7 @@
 #include "flow/FastRef.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
 #include <vector>
 #include <unordered_map>
@@ -180,6 +181,8 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	Version getVersion();
 	Future<Void> whenAtLeast(Version version);
 
+	UID dbgid;
+	DatabaseContext* context;
 	NotifiedVersion lastReturnedVersion;
 	std::vector<Reference<ChangeFeedStorageData>> storageData;
 	AsyncVar<int> notAtLatest;
@@ -189,7 +192,8 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	Version popVersion =
 	    invalidVersion; // like TLog pop version, set by SS and client can check it to see if they missed data
 
-	ChangeFeedData() : notAtLatest(1) {}
+	explicit ChangeFeedData(DatabaseContext* context = nullptr);
+	~ChangeFeedData();
 };
 
 struct EndpointFailureInfo {
@@ -468,8 +472,11 @@ public:
 	// map from changeFeedId -> changeFeedRange
 	std::unordered_map<Key, KeyRange> changeFeedCache;
 	std::unordered_map<UID, Reference<ChangeFeedStorageData>> changeFeedUpdaters;
+	std::map<UID, ChangeFeedData*> notAtLatestChangeFeeds;
 
 	Reference<ChangeFeedStorageData> getStorageData(StorageServerInterface interf);
+	Version getMinimumChangeFeedVersion();
+	void setDesiredChangeFeedVersion(Version v);
 
 	// map from ssid -> ss tag
 	// @note this map allows the client to identify the latest commit versions
