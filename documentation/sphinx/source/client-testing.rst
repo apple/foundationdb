@@ -421,8 +421,8 @@ workload.
    creates and executes an FDB transaction. Here ``start`` is a function that takes a transaction context
    as parameter and implements the starting point of the transaction, and ``cont`` is a function implementing
    a continuation to be executed after finishing the transaction execution. Transactions are automatically
-   retried on retryable errors. In case of a fatal error, the entire workload is considered as failed
-   unless ``failOnError`` is set to ``false``.
+   retried on retryable errors. Transactions are retried by calling the ``start`` function again. In case
+   of a fatal error, the entire workload is considered as failed unless ``failOnError`` is set to ``false``.
 
 .. function:: schedule(task)
 
@@ -444,7 +444,7 @@ The transaction context provides methods for implementation of the transaction l
 .. function:: continueAfter(future, cont, retryOnError = true)
    
    set a continuation to be executed when the future is ready. The ``retryOnError`` flag controls whether
-   the transaction should be automatically retried in case the future results in an error.
+   the transaction should be automatically retried in case the future results in a retriable error.
 
 .. function:: continueAfterAll(futures, cont)
    
@@ -455,17 +455,23 @@ The transaction context provides methods for implementation of the transaction l
 .. function:: commit() 
    
    commit and finish the transaction. If the commit is successful, the execution proceeds to the
-   continuation of ``execTransaction()``, otherwise the transaction is retried. 
+   continuation of ``execTransaction()``. In case of a retriable error the transaction is
+   automatically retried. A fatal error results in a failure of the workoad.
+
 
 .. function:: done() 
    
    finish the transaction without committing. This method should be used to finish read transactions. 
    The transaction gets destroyed and execution proceeds to the continuation of ``execTransaction()``.
+   Each transaction must be finished either by ``commit()`` or ``done()``, because otherwise
+   the framework considers that the transaction is still being executed, so it won't destroy it and
+   won't call the continuation.
 
 .. function:: onError(err) 
    
-   retry transaction on an error. This method is typically used in the continuation of continueAfter
-   called with ``retryOnError=false``.
+   Handle an error: restart the transaction in case of a retriable error, otherwise fail the workload.
+   This method is typically used in the continuation of ``continueAfter`` called with
+   ``retryOnError=false`` as a fallback to the default error handling.
 
 A workload execution ends automatically when it is marked as failed or its last continuation does not
 schedule any new task or transaction. 
@@ -579,7 +585,7 @@ In this way we avoid keeping ``setAndGetLoop`` in the call stack, when executing
 Subclassing ApiWorkload
 =======================
 
-``ApiWorkload`` is an abstract subclass of BaseWorkload that provides a framework for a typical
+``ApiWorkload`` is an abstract subclass of ``WorkloadBase`` that provides a framework for a typical
 implementation of API test workloads. It implements a workflow consisting of cleaning up the key space
 of the workload, populating it with newly generated data and then running a loop consisting of random
 database operations. The concrete subclasses of ``ApiWorkload`` are expected to override the method
