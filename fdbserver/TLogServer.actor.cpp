@@ -518,7 +518,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
 	std::vector<std::vector<Reference<TagData>>> tag_data; // tag.locality | tag.id
-	int unpoppedRecoveredTags;
+	int unpoppedRecoveredTagCount;
+	std::set<Tag> unpoppedRecoveredTags;
 	std::map<Tag, Promise<Void>> waitingTags;
 
 	Reference<TagData> getTagData(Tag tag) {
@@ -642,7 +643,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	                 std::string context)
 	  : stopped(false), initialized(false), queueCommittingVersion(0), knownCommittedVersion(0),
 	    durableKnownCommittedVersion(0), minKnownCommittedVersion(0), queuePoppedVersion(0), minPoppedTagVersion(0),
-	    minPoppedTag(invalidTag), unpoppedRecoveredTags(0), cc("TLog", interf.id().toString()),
+	    minPoppedTag(invalidTag), unpoppedRecoveredTagCount(0), cc("TLog", interf.id().toString()),
 	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), blockingPeeks("BlockingPeeks", cc),
 	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), emptyPeeks("EmptyPeeks", cc),
 	    nonEmptyPeeks("NonEmptyPeeks", cc), logId(interf.id()), protocolVersion(protocolVersion),
@@ -1091,7 +1092,10 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 	    BinaryWriter::toValue(logData->knownCommittedVersion, Unversioned())));
 	logData->persistentDataVersion = newPersistentDataVersion;
 
-	wait(self->persistentData->commit()); // SOMEDAY: This seems to be running pretty often, should we slow it down???
+	// SOMEDAY: This seems to be running pretty often, should we slow it down???
+	// This needs a timeout since nothing prevents I/O operations from hanging indefinitely.
+	wait(ioTimeoutError(self->persistentData->commit(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+
 	wait(delay(0, TaskPriority::UpdateStorage));
 
 	// Now that the changes we made to persistentData are durable, erase the data we moved from memory and the queue,
@@ -1196,14 +1200,20 @@ ACTOR Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Referen
 
 		if (tagData->unpoppedRecovered && upTo > logData->recoveredAt) {
 			tagData->unpoppedRecovered = false;
-			logData->unpoppedRecoveredTags--;
+			logData->unpoppedRecoveredTagCount--;
+			logData->unpoppedRecoveredTags.erase(tag);
 			TraceEvent("TLogPoppedTag", logData->logId)
-			    .detail("Tags", logData->unpoppedRecoveredTags)
+			    .detail("Tags", logData->unpoppedRecoveredTagCount)
 			    .detail("Tag", tag.toString())
 			    .detail("DurableKCVer", logData->durableKnownCommittedVersion)
-			    .detail("RecoveredAt", logData->recoveredAt);
-			if (logData->unpoppedRecoveredTags == 0 && logData->durableKnownCommittedVersion >= logData->recoveredAt &&
-			    logData->recoveryComplete.canBeSet()) {
+			    .detail("RecoveredAt", logData->recoveredAt)
+			    .detail("UnpoppedTags", describe(logData->unpoppedRecoveredTags));
+			if (logData->unpoppedRecoveredTagCount == 0 &&
+			    logData->durableKnownCommittedVersion >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
+				TraceEvent("TLogRecoveryComplete", logData->logId)
+				    .detail("Tags", logData->unpoppedRecoveredTagCount)
+				    .detail("DurableKCVer", logData->durableKnownCommittedVersion)
+				    .detail("RecoveredAt", logData->recoveredAt);
 				logData->recoveryComplete.send(Void());
 			}
 		}
@@ -2153,10 +2163,10 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 	ASSERT(ver > logData->queueCommittedVersion.get());
 
 	logData->durableKnownCommittedVersion = knownCommittedVersion;
-	if (logData->unpoppedRecoveredTags == 0 && knownCommittedVersion >= logData->recoveredAt &&
+	if (logData->unpoppedRecoveredTagCount == 0 && knownCommittedVersion >= logData->recoveredAt &&
 	    logData->recoveryComplete.canBeSet()) {
 		TraceEvent("TLogRecoveryComplete", logData->logId)
-		    .detail("Tags", logData->unpoppedRecoveredTags)
+		    .detail("Tags", logData->unpoppedRecoveredTagCount)
 		    .detail("DurableKCVer", logData->durableKnownCommittedVersion)
 		    .detail("RecoveredAt", logData->recoveredAt);
 		logData->recoveryComplete.send(Void());
@@ -2349,7 +2359,7 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 
 	// PERSIST: Initial setup of persistentData for a brand new tLog for a new database
 	state IKeyValueStore* storage = self->persistentData;
-	wait(ioTimeoutError(storage->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+	wait(storage->init());
 	storage->set(persistFormat);
 	storage->set(
 	    KeyValueRef(BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistCurrentVersionKeys.begin),
@@ -2381,7 +2391,7 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 	}
 
 	TraceEvent("TLogInitCommit", logData->logId).log();
-	wait(ioTimeoutError(self->persistentData->commit(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+	wait(self->persistentData->commit());
 	return Void();
 }
 
@@ -3408,8 +3418,10 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			logData->queueCommittedVersion.set(logData->unrecoveredBefore - 1);
 			logData->version.set(logData->unrecoveredBefore - 1);
 
-			logData->unpoppedRecoveredTags = req.allTags.size();
-			wait(initPersistentState(self, logData) || logData->removed);
+			logData->unpoppedRecoveredTagCount = req.allTags.size();
+			logData->unpoppedRecoveredTags = std::set<Tag>(req.allTags.begin(), req.allTags.end());
+			wait(ioTimeoutError(initPersistentState(self, logData) || logData->removed,
+			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
 
 			TraceEvent("TLogRecover", self->dbgid)
 			    .detail("LogId", logData->logId)
@@ -3473,7 +3485,8 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			logData->addActor.send(respondToRecovered(recruited, logData->recoveryComplete));
 		} else {
 			// Brand new tlog, initialization has already been done by caller
-			wait(initPersistentState(self, logData) || logData->removed);
+			wait(ioTimeoutError(initPersistentState(self, logData) || logData->removed,
+			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
 
 			if (logData->recoveryComplete.isSet()) {
 				throw worker_removed();

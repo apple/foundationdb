@@ -25,6 +25,7 @@
 #include "flow/FastRef.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
 #include <vector>
 #include <unordered_map>
@@ -180,6 +181,8 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	Version getVersion();
 	Future<Void> whenAtLeast(Version version);
 
+	UID dbgid;
+	DatabaseContext* context;
 	NotifiedVersion lastReturnedVersion;
 	std::vector<Reference<ChangeFeedStorageData>> storageData;
 	AsyncVar<int> notAtLatest;
@@ -189,7 +192,8 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	Version popVersion =
 	    invalidVersion; // like TLog pop version, set by SS and client can check it to see if they missed data
 
-	ChangeFeedData() : notAtLatest(1) {}
+	explicit ChangeFeedData(DatabaseContext* context = nullptr);
+	~ChangeFeedData();
 };
 
 struct EndpointFailureInfo {
@@ -205,6 +209,16 @@ struct KeyRangeLocationInfo {
 	KeyRangeLocationInfo() {}
 	KeyRangeLocationInfo(TenantMapEntry tenantEntry, KeyRange range, Reference<LocationInfo> locations)
 	  : tenantEntry(tenantEntry), range(range), locations(locations) {}
+};
+
+struct OverlappingChangeFeedsInfo {
+	Arena arena;
+	VectorRef<OverlappingChangeFeedEntry> feeds;
+	// would prefer to use key range map but it complicates copy/move constructors
+	std::vector<std::pair<KeyRangeRef, Version>> feedMetadataVersions;
+
+	// for a feed that wasn't present, returns the metadata version it would have been fetched at.
+	Version getFeedMetadataVersion(const KeyRangeRef& feedRange) const;
 };
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
@@ -245,16 +259,16 @@ public:
 		return cx;
 	}
 
-	Optional<KeyRangeLocationInfo> getCachedLocation(const Optional<TenantName>& tenant,
+	Optional<KeyRangeLocationInfo> getCachedLocation(const Optional<TenantNameRef>& tenant,
 	                                                 const KeyRef&,
 	                                                 Reverse isBackward = Reverse::False);
-	bool getCachedLocations(const Optional<TenantName>& tenant,
+	bool getCachedLocations(const Optional<TenantNameRef>& tenant,
 	                        const KeyRangeRef&,
 	                        std::vector<KeyRangeLocationInfo>&,
 	                        int limit,
 	                        Reverse reverse);
 	void cacheTenant(const TenantName& tenant, const TenantMapEntry& tenantEntry);
-	Reference<LocationInfo> setCachedLocation(const Optional<TenantName>& tenant,
+	Reference<LocationInfo> setCachedLocation(const Optional<TenantNameRef>& tenant,
 	                                          const TenantMapEntry& tenantEntry,
 	                                          const KeyRangeRef&,
 	                                          const std::vector<struct StorageServerInterface>&);
@@ -361,7 +375,7 @@ public:
 	                                 int replyBufferSize = -1,
 	                                 bool canReadPopped = true);
 
-	Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
+	Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
 
 	Future<Key> purgeBlobGranules(KeyRange keyRange,
@@ -458,8 +472,11 @@ public:
 	// map from changeFeedId -> changeFeedRange
 	std::unordered_map<Key, KeyRange> changeFeedCache;
 	std::unordered_map<UID, Reference<ChangeFeedStorageData>> changeFeedUpdaters;
+	std::map<UID, ChangeFeedData*> notAtLatestChangeFeeds;
 
 	Reference<ChangeFeedStorageData> getStorageData(StorageServerInterface interf);
+	Version getMinimumChangeFeedVersion();
+	void setDesiredChangeFeedVersion(Version v);
 
 	// map from ssid -> ss tag
 	// @note this map allows the client to identify the latest commit versions
@@ -517,6 +534,7 @@ public:
 	Counter transactionsExpensiveClearCostEstCount;
 	Counter transactionGrvFullBatches;
 	Counter transactionGrvTimedOutBatches;
+	Counter transactionCommitVersionNotFoundForSS;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
 	    bytesPerCommit, bgLatencies, bgGranulesPerRequest;
@@ -638,14 +656,18 @@ private:
 
 // Similar to tr.onError(), but doesn't require a DatabaseContext.
 struct Backoff {
+	Backoff(double backoff = CLIENT_KNOBS->DEFAULT_BACKOFF, double maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF)
+	  : backoff(backoff), maxBackoff(maxBackoff) {}
+
 	Future<Void> onError() {
 		double currentBackoff = backoff;
-		backoff = std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->DEFAULT_MAX_BACKOFF);
+		backoff = std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, maxBackoff);
 		return delay(currentBackoff * deterministicRandom()->random01());
 	}
 
 private:
-	double backoff = CLIENT_KNOBS->DEFAULT_BACKOFF;
+	double backoff;
+	double maxBackoff;
 };
 
 #endif

@@ -29,15 +29,17 @@
 
 class TenantCacheImpl {
 
-	ACTOR static Future<RangeResult> getTenantList(TenantCache* tenantCache, Transaction* tr) {
+	ACTOR static Future<std::vector<std::pair<TenantName, TenantMapEntry>>> getTenantList(TenantCache* tenantCache,
+	                                                                                      Transaction* tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
-		state Future<RangeResult> tenantList = tr->getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY);
-		wait(success(tenantList));
-		ASSERT(!tenantList.get().more && tenantList.get().size() < CLIENT_KNOBS->TOO_MANY);
+		KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantList =
+		    wait(TenantMetadata::tenantMap().getRange(
+		        tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
+		ASSERT(tenantList.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantList.more);
 
-		return tenantList.get();
+		return tenantList.results;
 	}
 
 public:
@@ -47,18 +49,15 @@ public:
 		TraceEvent(SevInfo, "BuildingTenantCache", tenantCache->id()).log();
 
 		try {
-			state RangeResult tenantList = wait(getTenantList(tenantCache, &tr));
+			state std::vector<std::pair<TenantName, TenantMapEntry>> tenantList = wait(getTenantList(tenantCache, &tr));
 
 			for (int i = 0; i < tenantList.size(); i++) {
-				TenantName tname = tenantList[i].key.removePrefix(tenantMapPrefix);
-				TenantMapEntry t = TenantMapEntry::decode(tenantList[i].value);
-
-				tenantCache->insert(tname, t);
+				tenantCache->insert(tenantList[i].first, tenantList[i].second);
 
 				TraceEvent(SevInfo, "TenantFound", tenantCache->id())
-				    .detail("TenantName", tname)
-				    .detail("TenantID", t.id)
-				    .detail("TenantPrefix", t.prefix);
+				    .detail("TenantName", tenantList[i].first)
+				    .detail("TenantID", tenantList[i].second.id)
+				    .detail("TenantPrefix", tenantList[i].second.prefix);
 			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -82,16 +81,14 @@ public:
 					TraceEvent(SevWarn, "TenantListRefreshDelay", tenantCache->id()).log();
 				}
 
-				state RangeResult tenantList = wait(getTenantList(tenantCache, &tr));
+				state std::vector<std::pair<TenantName, TenantMapEntry>> tenantList =
+				    wait(getTenantList(tenantCache, &tr));
 
 				tenantCache->startRefresh();
 				bool tenantListUpdated = false;
 
 				for (int i = 0; i < tenantList.size(); i++) {
-					TenantName tname = tenantList[i].key.removePrefix(tenantMapPrefix);
-					TenantMapEntry t = TenantMapEntry::decode(tenantList[i].value);
-
-					if (tenantCache->update(tname, t)) {
+					if (tenantCache->update(tenantList[i].first, tenantList[i].second)) {
 						tenantListUpdated = true;
 						TenantCacheTenantCreated req(t.prefix);
 						tenantCache->tenantCreationSignal.send(req);
@@ -125,7 +122,7 @@ void TenantCache::insert(TenantName& tenantName, TenantMapEntry& tenant) {
 	KeyRef tenantPrefix(tenant.prefix.begin(), tenant.prefix.size());
 	ASSERT(tenantCache.find(tenantPrefix) == tenantCache.end());
 
-	TenantInfo tenantInfo(tenantName, tenant.id);
+	TenantInfo tenantInfo(tenantName, Optional<Standalone<StringRef>>(), tenant.id);
 	tenantCache[tenantPrefix] = makeReference<TCTenantInfo>(tenantInfo, tenant.prefix);
 	tenantCache[tenantPrefix]->updateCacheGeneration(generation);
 }
@@ -239,7 +236,7 @@ public:
 
 		for (uint16_t i = 0; i < tenantCount; i++) {
 			TenantName tenantName(format("%s_%08d", "ddtc_test_tenant", tenantNumber + i));
-			TenantMapEntry tenant(tenantNumber + i);
+			TenantMapEntry tenant(tenantNumber + i, TenantState::READY, SERVER_KNOBS->ENABLE_ENCRYPTION);
 
 			tenantCache.insert(tenantName, tenant);
 		}
@@ -268,7 +265,7 @@ public:
 
 		for (uint16_t i = 0; i < tenantCount; i++) {
 			TenantName tenantName(format("%s_%08d", "ddtc_test_tenant", tenantNumber + i));
-			TenantMapEntry tenant(tenantNumber + i);
+			TenantMapEntry tenant(tenantNumber + i, TenantState::READY, SERVER_KNOBS->ENABLE_ENCRYPTION);
 
 			tenantCache.insert(tenantName, tenant);
 		}
@@ -282,7 +279,7 @@ public:
 
 			if (tenantOrdinal % staleTenantFraction != 0) {
 				TenantName tenantName(format("%s_%08d", "ddtc_test_tenant", tenantOrdinal));
-				TenantMapEntry tenant(tenantOrdinal);
+				TenantMapEntry tenant(tenantOrdinal, TenantState::READY, SERVER_KNOBS->ENABLE_ENCRYPTION);
 				bool newTenant = tenantCache.update(tenantName, tenant);
 				ASSERT(!newTenant);
 				keepCount++;

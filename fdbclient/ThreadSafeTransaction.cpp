@@ -21,6 +21,7 @@
 #include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
+#include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
@@ -143,13 +144,21 @@ ThreadFuture<Void> ThreadSafeDatabase::waitPurgeGranulesComplete(const KeyRef& p
 	return onMainThread([db, key]() -> Future<Void> { return db->waitPurgeGranulesComplete(key); });
 }
 
-ThreadSafeDatabase::ThreadSafeDatabase(Reference<IClusterConnectionRecord> connectionRecord, int apiVersion) {
+ThreadSafeDatabase::ThreadSafeDatabase(ConnectionRecordType connectionRecordType,
+                                       std::string connectionRecordString,
+                                       int apiVersion) {
 	// Allocate memory for the Database from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 	DatabaseContext* db = this->db = DatabaseContext::allocateOnForeignThread();
 
-	onMainThreadVoid([db, connectionRecord, apiVersion]() {
+	onMainThreadVoid([db, connectionRecordType, connectionRecordString, apiVersion]() {
 		try {
+			Reference<IClusterConnectionRecord> connectionRecord =
+			    connectionRecordType == ConnectionRecordType::FILE
+			        ? Reference<IClusterConnectionRecord>(ClusterConnectionFile::openOrDefault(connectionRecordString))
+			        : Reference<IClusterConnectionRecord>(
+			              new ClusterConnectionMemoryRecord(ClusterConnectionString(connectionRecordString)));
+
 			Database::createDatabase(connectionRecord, apiVersion, IsInternal::False, LocalityData(), db).extractPtr();
 		} catch (Error& e) {
 			new (db) DatabaseContext(e);
@@ -563,17 +572,23 @@ void ThreadSafeTransaction::reset() {
 
 extern const char* getSourceVersion();
 
-ThreadSafeApi::ThreadSafeApi()
-  : apiVersion(-1), clientVersion(format("%s,%s,%llx", FDB_VT_VERSION, getSourceVersion(), currentProtocolVersion)),
-    transportId(0) {}
+ThreadSafeApi::ThreadSafeApi() : apiVersion(-1), transportId(0) {}
 
 void ThreadSafeApi::selectApiVersion(int apiVersion) {
 	this->apiVersion = apiVersion;
 }
 
 const char* ThreadSafeApi::getClientVersion() {
-	// There is only one copy of the ThreadSafeAPI, and it never gets deleted. Also, clientVersion is never modified.
+	// There is only one copy of the ThreadSafeAPI, and it never gets deleted.
+	// Also, clientVersion is initialized on demand and never modified afterwards.
+	if (clientVersion.empty()) {
+		clientVersion = format("%s,%s,%llx", FDB_VT_VERSION, getSourceVersion(), currentProtocolVersion());
+	}
 	return clientVersion.c_str();
+}
+
+void ThreadSafeApi::useFutureProtocolVersion() {
+	::useFutureProtocolVersion();
 }
 
 void ThreadSafeApi::setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
@@ -632,12 +647,12 @@ void ThreadSafeApi::stopNetwork() {
 
 Reference<IDatabase> ThreadSafeApi::createDatabase(const char* clusterFilePath) {
 	return Reference<IDatabase>(
-	    new ThreadSafeDatabase(ClusterConnectionFile::openOrDefault(clusterFilePath), apiVersion));
+	    new ThreadSafeDatabase(ThreadSafeDatabase::ConnectionRecordType::FILE, clusterFilePath, apiVersion));
 }
 
 Reference<IDatabase> ThreadSafeApi::createDatabaseFromConnectionString(const char* connectionString) {
 	return Reference<IDatabase>(new ThreadSafeDatabase(
-	    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(connectionString)), apiVersion));
+	    ThreadSafeDatabase::ConnectionRecordType::CONNECTION_STRING, connectionString, apiVersion));
 }
 
 void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) {

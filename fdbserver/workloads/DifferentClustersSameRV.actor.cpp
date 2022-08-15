@@ -37,8 +37,9 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 	bool switchComplete = false;
 
 	DifferentClustersSameRVWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		ASSERT(g_simulator.extraDB != nullptr);
-		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
+		ASSERT(g_simulator.extraDatabases.size() == 1);
+		auto extraFile =
+		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
 		extraDB = Database::createDatabase(extraFile, -1);
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 100.0);
 		switchAfter = getOption(options, LiteralStringRef("switchAfter"), 50.0);

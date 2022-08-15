@@ -31,9 +31,12 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"
+
 #include "fdbserver/ServerDBInfo.h"
-#include "flow/actorcompiler.h" // has to be last include
+
 #include "flow/flow.h"
+
+#include "flow/actorcompiler.h" // has to be last include
 
 struct GranuleHistory {
 	KeyRange range;
@@ -98,6 +101,9 @@ ACTOR Future<Optional<GranuleHistory>> getLatestGranuleHistory(Transaction* tr, 
 ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, GranuleFiles* files, UID granuleID);
 
 ACTOR Future<GranuleFiles> loadHistoryFiles(Database cx, UID granuleID);
+
+enum ForcedPurgeState { NonePurged, SomePurged, AllPurged };
+ACTOR Future<ForcedPurgeState> getForcePurgedState(Transaction* tr, KeyRange keyRange);
 
 // TODO: versioned like SS has?
 struct GranuleTenantData : NonCopyable, ReferenceCounted<GranuleTenantData> {

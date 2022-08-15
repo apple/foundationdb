@@ -22,6 +22,7 @@
 #include <memory>
 #include <string>
 
+#include "flow/MkCert.h"
 #include "fmt/format.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Arena.h"
@@ -323,6 +324,8 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	// this may not be an address we can connect to!
 	NetworkAddress getPeerAddress() const override { return peerEndpoint; }
 	UID getDebugID() const override { return dbgid; }
+
+	boost::asio::ip::tcp::socket& getSocket() override { throw operation_failed(); }
 
 	bool opened, closedByCaller, stableConnection;
 
@@ -948,8 +951,9 @@ public:
 	TaskPriority getCurrentTask() const override { return currentTaskID; }
 	void setCurrentTask(TaskPriority taskID) override { currentTaskID = taskID; }
 	// Sets the taskID/priority of the current task, without yielding
-	Future<Reference<IConnection>> connect(NetworkAddress toAddr, const std::string& host) override {
-		ASSERT(host.empty());
+	Future<Reference<IConnection>> connect(NetworkAddress toAddr,
+	                                       boost::asio::ip::tcp::socket* existingSocket = nullptr) override {
+		ASSERT(existingSocket == nullptr);
 		if (!addressMap.count(toAddr)) {
 			return waitForProcessAndConnect(toAddr, this);
 		}
@@ -975,7 +979,7 @@ public:
 		return onConnect(::delay(0.5 * deterministicRandom()->random01()), myc);
 	}
 
-	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, const std::string& host) override {
+	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) override {
 		return SimExternalConnection::connect(toAddr);
 	}
 
@@ -2175,6 +2179,9 @@ public:
 		                    this,
 		                    "",
 		                    "");
+		// create a key pair for AuthZ testing
+		auto key = mkcert::makeEcP256();
+		authKeys.insert(std::make_pair(Standalone<StringRef>("DefaultKey"_sr), key));
 		g_network = net2 = newNet2(TLSConfig(), false, true);
 		g_network->addStopCallback(Net2FileSystem::stop);
 		Net2FileSystem::newFileSystem();
