@@ -1451,7 +1451,7 @@ struct DeleteTenantImpl {
 
 		// Remove the tenant from the cluster -> tenant index
 		ManagementClusterMetadata::clusterTenantIndex.erase(
-		    tr, Tuple::makeTuple(tenantEntry.get().assignedCluster.get(), tenantName));
+		    tr, Tuple::makeTuple(tenantEntry.get().assignedCluster.get(), tenantName, self->tenantId));
 
 		// Remove the tenant from its tenant group
 		wait(managementClusterRemoveTenantFromGroup(
@@ -1730,7 +1730,7 @@ struct RenameTenantImpl {
 		// Clean up cluster based tenant indices and remove the old entry from its tenant group
 		// Remove the tenant from the cluster -> tenant index
 		ManagementClusterMetadata::clusterTenantIndex.erase(
-		    tr, Tuple::makeTuple(tenantEntry.assignedCluster.get(), self->oldName));
+		    tr, Tuple::makeTuple(tenantEntry.assignedCluster.get(), self->oldName, self->tenantId));
 
 		// Remove the tenant from its tenant group
 		wait(managementClusterRemoveTenantFromGroup(
@@ -1816,7 +1816,7 @@ struct RenameTenantImpl {
 
 		// Updated indexes to include the new tenant
 		ManagementClusterMetadata::clusterTenantIndex.insert(
-		    tr, Tuple::makeTuple(updatedNewEntry.assignedCluster.get(), self->newName));
+		    tr, Tuple::makeTuple(updatedNewEntry.assignedCluster.get(), self->newName, self->tenantId));
 
 		// Add new name to tenant group. It should already exist since the old name was part of it.
 		managementClusterAddTenantToGroup(
