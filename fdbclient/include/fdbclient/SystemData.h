@@ -621,7 +621,8 @@ extern const KeyRangeRef blobGranuleHistoryKeys;
 
 // \xff\x02/bgp/(start,end) = (version, force)
 extern const KeyRangeRef blobGranulePurgeKeys;
-extern const KeyRangeRef blobGranuleVersionKeys;
+// \xff\x02/bgpforce/(start) = {1|0} (key range map)
+extern const KeyRangeRef blobGranuleForcePurgedKeys;
 extern const KeyRef blobGranulePurgeChangeKey;
 
 const Key blobGranuleFileKeyFor(UID granuleID, Version fileVersion, uint8_t fileType);

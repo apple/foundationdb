@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <regex>
 #include <unordered_set>
@@ -1826,6 +1827,9 @@ DatabaseContext::~DatabaseContext() {
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT(server_interf.empty());
 	locationCache.insert(allKeys, Reference<LocationInfo>());
+	for (auto& it : notAtLatestChangeFeeds) {
+		it.second->context = nullptr;
+	}
 
 	TraceEvent("DatabaseContextDestructed", dbId).backtrace();
 }
@@ -5769,7 +5773,9 @@ double Transaction::getBackoff(int errCode) {
 	returnedBackoff *= deterministicRandom()->random01();
 
 	// Set backoff for next time
-	if (errCode == error_code_proxy_memory_limit_exceeded) {
+	if (errCode == error_code_commit_proxy_memory_limit_exceeded ||
+	    errCode == error_code_grv_proxy_memory_limit_exceeded) {
+
 		backoff = std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->RESOURCE_CONSTRAINED_MAX_BACKOFF);
 	} else {
 		backoff = std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, trState->options.maxBackoff);
@@ -6153,8 +6159,11 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 	}
 	try {
 		if (CLIENT_BUGGIFY) {
-			throw deterministicRandom()->randomChoice(std::vector<Error>{
-			    not_committed(), transaction_too_old(), proxy_memory_limit_exceeded(), commit_unknown_result() });
+			throw deterministicRandom()->randomChoice(std::vector<Error>{ not_committed(),
+			                                                              transaction_too_old(),
+			                                                              commit_proxy_memory_limit_exceeded(),
+			                                                              grv_proxy_memory_limit_exceeded(),
+			                                                              commit_unknown_result() });
 		}
 
 		if (req.tagSet.present() && trState->options.priority < TransactionPriority::IMMEDIATE) {
@@ -6320,7 +6329,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			throw;
 		} else {
 			if (e.code() != error_code_transaction_too_old && e.code() != error_code_not_committed &&
-			    e.code() != error_code_database_locked && e.code() != error_code_proxy_memory_limit_exceeded &&
+			    e.code() != error_code_database_locked && e.code() != error_code_commit_proxy_memory_limit_exceeded &&
+			    e.code() != error_code_grv_proxy_memory_limit_exceeded &&
 			    e.code() != error_code_batch_transaction_throttled && e.code() != error_code_tag_throttled &&
 			    e.code() != error_code_process_behind && e.code() != error_code_future_version &&
 			    e.code() != error_code_tenant_not_found) {
@@ -7210,14 +7220,15 @@ Future<Void> Transaction::onError(Error const& e) {
 		return client_invalid_operation();
 	}
 	if (e.code() == error_code_not_committed || e.code() == error_code_commit_unknown_result ||
-	    e.code() == error_code_database_locked || e.code() == error_code_proxy_memory_limit_exceeded ||
-	    e.code() == error_code_process_behind || e.code() == error_code_batch_transaction_throttled ||
-	    e.code() == error_code_tag_throttled) {
+	    e.code() == error_code_database_locked || e.code() == error_code_commit_proxy_memory_limit_exceeded ||
+	    e.code() == error_code_grv_proxy_memory_limit_exceeded || e.code() == error_code_process_behind ||
+	    e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled) {
 		if (e.code() == error_code_not_committed)
 			++trState->cx->transactionsNotCommitted;
 		else if (e.code() == error_code_commit_unknown_result)
 			++trState->cx->transactionsMaybeCommitted;
-		else if (e.code() == error_code_proxy_memory_limit_exceeded)
+		else if (e.code() == error_code_commit_proxy_memory_limit_exceeded ||
+		         e.code() == error_code_grv_proxy_memory_limit_exceeded)
 			++trState->cx->transactionsResourceConstrained;
 		else if (e.code() == error_code_process_behind)
 			++trState->cx->transactionsProcessBehind;
@@ -8698,6 +8709,39 @@ Reference<ChangeFeedStorageData> DatabaseContext::getStorageData(StorageServerIn
 	return it->second;
 }
 
+Version DatabaseContext::getMinimumChangeFeedVersion() {
+	Version minVersion = std::numeric_limits<Version>::max();
+	for (auto& it : changeFeedUpdaters) {
+		minVersion = std::min(minVersion, it.second->version.get());
+	}
+	for (auto& it : notAtLatestChangeFeeds) {
+		if (it.second->getVersion() > 0) {
+			minVersion = std::min(minVersion, it.second->getVersion());
+		}
+	}
+	return minVersion;
+}
+
+void DatabaseContext::setDesiredChangeFeedVersion(Version v) {
+	for (auto& it : changeFeedUpdaters) {
+		if (it.second->version.get() < v && it.second->desired.get() < v) {
+			it.second->desired.set(v);
+		}
+	}
+}
+
+ChangeFeedData::ChangeFeedData(DatabaseContext* context)
+  : dbgid(deterministicRandom()->randomUniqueID()), context(context), notAtLatest(1) {
+	if (context) {
+		context->notAtLatestChangeFeeds[dbgid] = this;
+	}
+}
+ChangeFeedData::~ChangeFeedData() {
+	if (context) {
+		context->notAtLatestChangeFeeds.erase(dbgid);
+	}
+}
+
 Version ChangeFeedData::getVersion() {
 	return lastReturnedVersion.get();
 }
@@ -8889,6 +8933,9 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 					if (refresh.canBeSet() && !atLatestVersion && rep.atLatestVersion) {
 						atLatestVersion = true;
 						feedData->notAtLatest.set(feedData->notAtLatest.get() - 1);
+						if (feedData->notAtLatest.get() == 0 && feedData->context) {
+							feedData->context->notAtLatestChangeFeeds.erase(feedData->dbgid);
+						}
 					}
 					if (refresh.canBeSet() && rep.minStreamVersion > storageData->version.get()) {
 						storageData->version.set(rep.minStreamVersion);
@@ -9092,6 +9139,9 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		results->storageData.push_back(db->getStorageData(interfs[i].first));
 	}
 	results->notAtLatest.set(interfs.size());
+	if (results->context) {
+		results->context->notAtLatestChangeFeeds[results->dbgid] = results.getPtr();
+	}
 	refresh.send(Void());
 
 	for (int i = 0; i < interfs.size(); i++) {
@@ -9244,6 +9294,9 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
 		if (!atLatest && feedReply.atLatestVersion) {
 			atLatest = true;
 			results->notAtLatest.set(0);
+			if (results->context) {
+				results->context->notAtLatestChangeFeeds.erase(results->dbgid);
+			}
 		}
 
 		if (feedReply.minStreamVersion > results->storageData[0]->version.get()) {
@@ -9295,6 +9348,9 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	Promise<Void> refresh = results->refresh;
 	results->refresh = Promise<Void>();
 	results->notAtLatest.set(1);
+	if (results->context) {
+		results->context->notAtLatestChangeFeeds[results->dbgid] = results.getPtr();
+	}
 	refresh.send(Void());
 
 	wait(results->streams[0].onError() || singleChangeFeedStreamInternal(range, results, rangeID, begin, end));
@@ -9421,6 +9477,9 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 			}
 			if (results->notAtLatest.get() == 0) {
 				results->notAtLatest.set(1);
+				if (results->context) {
+					results->context->notAtLatestChangeFeeds[results->dbgid] = results.getPtr();
+				}
 			}
 
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
@@ -9684,11 +9743,6 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 	state Key purgeKey;
 	state KeyRange purgeRange = range;
 	state bool loadedTenantPrefix = false;
-
-	// FIXME: implement force
-	if (force) {
-		throw unsupported_operation();
-	}
 
 	loop {
 		try {

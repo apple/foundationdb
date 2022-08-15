@@ -212,6 +212,12 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	int changeFeedStreamReplyBufferSize = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 4;
 
 	bool isEncryptionEnabled = false;
+	bool buggifyFull = false;
+
+	int64_t memoryFullThreshold =
+	    (int64_t)(SERVER_KNOBS->BLOB_WORKER_REJECT_WHEN_FULL_THRESHOLD * SERVER_KNOBS->SERVER_MEM_LIMIT);
+	int64_t lastResidentMemory = 0;
+	double lastResidentMemoryCheckTime = -100.0;
 
 	BlobWorkerData(UID id, Reference<AsyncVar<ServerDBInfo> const> dbInfo, Database db)
 	  : id(id), db(db), tenantData(BGTenantMap(dbInfo)), dbInfo(dbInfo),
@@ -241,6 +247,51 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 			return true;
 		}
+	}
+
+	bool isFull() {
+		if (!SERVER_KNOBS->BLOB_WORKER_DO_REJECT_WHEN_FULL) {
+			return false;
+		}
+		if (g_network->isSimulated()) {
+			if (g_simulator.speedUpSimulation) {
+				return false;
+			}
+			return buggifyFull;
+		}
+
+		// TODO knob?
+		if (now() >= 1.0 + lastResidentMemoryCheckTime) {
+			// fdb as of 7.1 limits on resident memory instead of virtual memory
+			stats.lastResidentMemory = getResidentMemoryUsage();
+			lastResidentMemoryCheckTime = now();
+		}
+
+		// if we are already over threshold, no need to estimate extra memory
+		if (stats.lastResidentMemory >= memoryFullThreshold) {
+			return true;
+		}
+
+		// FIXME: since this isn't tested in simulation, could unit test this
+		// Try to model how much memory we *could* use given the already existing assignments and workload on this blob
+		// worker, before agreeing to take on a new assignment, given that several large sources of memory can grow and
+		// change post-assignment
+
+		// estimate slack in bytes buffered as max(0, assignments * (delta file size / 2) - bytesBuffered)
+		int64_t expectedExtraBytesBuffered = std::max(
+		    0, stats.numRangesAssigned * (SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 2) - stats.mutationBytesBuffered);
+		// estimate slack in potential pending delta file writes
+		int64_t maximumExtraDeltaWrite = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES * deltaWritesLock->available();
+		// estimate slack in potential pending resnapshot
+		int64_t maximumExtraReSnapshot =
+		    (SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES + SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) * 2 *
+		    resnapshotLock->available();
+
+		int64_t totalExtra = expectedExtraBytesBuffered + maximumExtraDeltaWrite + maximumExtraReSnapshot;
+		// assumes initial snapshot parallelism is small enough and uncommon enough to not add it to this computation
+		stats.estimatedMaxResidentMemory = stats.lastResidentMemory + totalExtra;
+
+		return stats.estimatedMaxResidentMemory >= memoryFullThreshold;
 	}
 };
 
@@ -424,7 +475,12 @@ ACTOR Future<Void> readAndCheckGranuleLock(Reference<ReadYourWritesTransaction> 
 	state Key lockKey = blobGranuleLockKeyFor(granuleRange);
 	Optional<Value> lockValue = wait(tr->get(lockKey));
 
-	ASSERT(lockValue.present());
+	if (!lockValue.present()) {
+		// FIXME: could add some validation for simulation that a force purge was initiated
+		// for lock to be deleted out from under an active granule means a force purge must have happened.
+		throw granule_assignment_conflict();
+	}
+
 	std::tuple<int64_t, int64_t, UID> currentOwner = decodeBlobGranuleLockValue(lockValue.get());
 	checkGranuleLock(epoch, seqno, std::get<0>(currentOwner), std::get<1>(currentOwner));
 
@@ -444,6 +500,8 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobWorkerData> bwData, UI
 	state GranuleFiles files;
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(readGranuleFiles(&tr, &startKey, range.end, &files, granuleID));
 			return files;
 		} catch (Error& e) {
@@ -690,6 +748,8 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
 		loop {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				wait(readAndCheckGranuleLock(tr, keyRange, epoch, seqno));
 				numIterations++;
@@ -888,6 +948,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	try {
 		loop {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				wait(readAndCheckGranuleLock(tr, keyRange, epoch, seqno));
 				numIterations++;
@@ -972,6 +1034,8 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		// FIXME: proper tenant support in Blob Worker
 		tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			Version rv = wait(tr->getReadVersion());
 			readVersion = rv;
@@ -1027,7 +1091,9 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			// snapshot
 			// Also somewhat servers as a rate limiting function and checking that the database is available for this
 			// key range
-			wait(bwData->db->popChangeFeedMutations(cfKey, readVersion));
+			// FIXME: can't do this because this granule might not own the shard anymore and another worker might have
+			// successfully snapshotted already, but if it got an error before even getting to the lock check, it
+			// wouldn't realize wait(bwData->db->popChangeFeedMutations(cfKey, readVersion));
 		}
 	}
 }
@@ -1869,7 +1935,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		metadata->bufferedDeltaVersion = startVersion;
 		metadata->knownCommittedVersion = startVersion;
 
-		Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>();
+		Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>(bwData->db.getPtr());
 
 		if (startState.splitParentGranule.present() && startVersion < startState.changeFeedStartVersion) {
 			// read from parent change feed up until our new change feed is started
@@ -2026,7 +2092,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				// update this for change feed popped detection
 				metadata->bufferedDeltaVersion = metadata->activeCFData.get()->getVersion();
 
-				Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>();
+				Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>(bwData->db.getPtr());
 
 				changeFeedFuture = bwData->db->getChangeFeedStream(cfData,
 				                                                   cfKey,
@@ -2136,7 +2202,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									lastForceFlushVersion = 0;
 									metadata->forceFlushVersion = NotifiedVersion();
 
-									Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>();
+									Reference<ChangeFeedData> cfData =
+									    makeReference<ChangeFeedData>(bwData->db.getPtr());
 
 									if (!readOldChangeFeed && cfRollbackVersion < startState.changeFeedStartVersion) {
 										// It isn't possible to roll back across the parent/child feed boundary,
@@ -2652,6 +2719,8 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 						break;
 					}
 					try {
+						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 						state KeyRangeRef parentRange(curHistory.value.parentBoundaries[pIdx],
 						                              curHistory.value.parentBoundaries[pIdx + 1]);
 						state Version parentVersion = curHistory.value.parentVersions[pIdx];
@@ -3076,7 +3145,7 @@ std::vector<std::pair<KeyRange, Future<GranuleFiles>>> loadHistoryChunks(Referen
 }
 
 // TODO might want to separate this out for valid values for range assignments vs read requests. Assignment
-// conflict isn't valid for read requests but is for assignments
+// conflict and blob_worker_full isn't valid for read requests but is for assignments
 bool canReplyWith(Error e) {
 	switch (e.code()) {
 	case error_code_blob_granule_transaction_too_old:
@@ -3084,6 +3153,7 @@ bool canReplyWith(Error e) {
 	case error_code_future_version: // not thrown yet
 	case error_code_wrong_shard_server:
 	case error_code_process_behind: // not thrown yet
+	case error_code_blob_worker_full:
 		return true;
 	default:
 		return false;
@@ -3595,17 +3665,34 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			state GranuleStartState info;
 			info.changeFeedStartVersion = invalidVersion;
 
 			state Future<Optional<Value>> fLockValue = tr.get(lockKey);
+			state Future<ForcedPurgeState> fForcedPurgeState = getForcePurgedState(&tr, req.keyRange);
 			Future<Optional<GranuleHistory>> fHistory = getLatestGranuleHistory(&tr, req.keyRange);
+
 			Optional<GranuleHistory> history = wait(fHistory);
 			info.history = history;
+
+			ForcedPurgeState purgeState = wait(fForcedPurgeState);
+			if (purgeState != ForcedPurgeState::NonePurged) {
+				CODE_PROBE(true, "Worker trying to open force purged granule");
+				if (BW_DEBUG) {
+					fmt::print("Granule [{0} - {1}) is force purged on BW {2}, abandoning\n",
+					           req.keyRange.begin.printable(),
+					           req.keyRange.end.printable(),
+					           bwData->id.toString().substr(0, 5));
+				}
+				throw granule_assignment_conflict();
+			}
+
 			Optional<Value> prevLockValue = wait(fLockValue);
 			state bool hasPrevOwner = prevLockValue.present();
 			state bool createChangeFeed = false;
+
 			if (hasPrevOwner) {
 				CODE_PROBE(true, "Granule open found previous owner");
 				std::tuple<int64_t, int64_t, UID> prevOwner = decodeBlobGranuleLockValue(prevLockValue.get());
@@ -4053,6 +4140,17 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 		if (req.type == AssignRequestType::Continue) {
 			resumeBlobRange(bwData, req.keyRange, req.managerEpoch, req.managerSeqno);
 		} else {
+			if (!isSelfReassign && bwData->isFull()) {
+				if (BW_DEBUG) {
+					fmt::print("BW {0}: rejecting assignment [{1} - {2}) b/c full\n",
+					           bwData->id.toString().substr(0, 6),
+					           req.keyRange.begin.printable(),
+					           req.keyRange.end.printable());
+				}
+				++bwData->stats.fullRejections;
+				req.reply.sendError(blob_worker_full());
+				return Void();
+			}
 			std::vector<Future<Void>> toWait;
 			state bool shouldStart = changeBlobRange(bwData,
 			                                         req.keyRange,
@@ -4149,12 +4247,23 @@ ACTOR Future<Void> handleRangeRevoke(Reference<BlobWorkerData> bwData, RevokeBlo
 	}
 }
 
+void handleBlobVersionRequest(Reference<BlobWorkerData> bwData, MinBlobVersionRequest req) {
+	bwData->db->setDesiredChangeFeedVersion(
+	    std::max<Version>(0, req.grv - (SERVER_KNOBS->TARGET_BW_LAG_UPDATE * SERVER_KNOBS->VERSIONS_PER_SECOND)));
+	MinBlobVersionReply rep;
+	rep.version = bwData->db->getMinimumChangeFeedVersion();
+	bwData->stats.minimumCFVersion = rep.version;
+	bwData->stats.notAtLatestChangeFeeds = bwData->db->notAtLatestChangeFeeds.size();
+	req.reply.send(rep);
+}
+
 ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData, BlobWorkerInterface interf) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
 	TraceEvent("BlobWorkerRegister", bwData->id);
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			Key blobWorkerListKey = blobWorkerListKeyFor(interf.id());
 			// FIXME: should be able to remove this conflict range
@@ -4191,6 +4300,7 @@ ACTOR Future<Void> monitorRemoval(Reference<BlobWorkerData> bwData) {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				Optional<Value> val = wait(tr.get(blobWorkerListKey));
 				if (!val.present()) {
@@ -4228,6 +4338,8 @@ ACTOR Future<Void> runGRVChecks(Reference<BlobWorkerData> bwData) {
 
 		tr.reset();
 		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Version readVersion = wait(tr.getReadVersion());
 			ASSERT(readVersion >= bwData->grvVersion.get());
 			bwData->grvVersion.set(readVersion);
@@ -4248,6 +4360,7 @@ ACTOR Future<Void> monitorTenants(Reference<BlobWorkerData> bwData) {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantResults;
 				wait(store(tenantResults,
 				           TenantMetadata::tenantMap().getRange(tr,
@@ -4279,7 +4392,7 @@ void handleGetGranuleAssignmentsRequest(Reference<BlobWorkerData> self, const Ge
 	GetGranuleAssignmentsReply reply;
 	auto allRanges = self->granuleMetadata.intersectingRanges(normalKeys);
 	for (auto& it : allRanges) {
-		if (it.value().activeMetadata.isValid()) {
+		if (it.value().activeMetadata.isValid() && it.value().activeMetadata->cancelled.canBeSet()) {
 			// range is active, copy into reply's arena
 			StringRef start = StringRef(reply.arena, it.begin());
 			StringRef end = StringRef(reply.arena, it.end());
@@ -4506,6 +4619,26 @@ ACTOR Future<Void> simForceFileWriteContention(Reference<BlobWorkerData> bwData)
 	}
 }
 
+ACTOR Future<Void> simForceFullMemory(Reference<BlobWorkerData> bwData) {
+	// instead of randomly rejecting each request or not, simulate periods in which BW is full
+	loop {
+		wait(delayJittered(deterministicRandom()->randomInt(5, 20)));
+		if (g_simulator.speedUpSimulation) {
+			bwData->buggifyFull = false;
+			if (BW_DEBUG) {
+				fmt::print("BW {0}: ForceFullMemory exiting\n", bwData->id.toString().substr(0, 6));
+			}
+			return Void();
+		}
+		bwData->buggifyFull = !bwData->buggifyFull;
+		if (BW_DEBUG) {
+			fmt::print("BW {0}: ForceFullMemory {1}\n",
+			           bwData->id.toString().substr(0, 6),
+			           bwData->buggifyFull ? "starting" : "stopping");
+		}
+	}
+}
+
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
                               ReplyPromise<InitializeBlobWorkerReply> recruitReply,
                               Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
@@ -4558,6 +4691,9 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	state Future<Void> selfRemoved = monitorRemoval(self);
 	if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.25)) {
 		self->addActor.send(simForceFileWriteContention(self));
+	}
+	if (g_network->isSimulated() && SERVER_KNOBS->BLOB_WORKER_DO_REJECT_WHEN_FULL && BUGGIFY_WITH_PROB(0.25)) {
+		self->addActor.send(simForceFullMemory(self));
 	}
 
 	TraceEvent("BlobWorkerInit", self->id).log();
@@ -4638,7 +4774,8 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				self->addActor.send(handleRangeAssign(self, granuleToReassign, true));
 			}
 			when(GetGranuleAssignmentsRequest req = waitNext(bwInterf.granuleAssignmentsRequest.getFuture())) {
-				if (self->managerEpochOk(req.managerEpoch)) {
+				// if request isn't from a manager and is just validation, let it check
+				if (req.managerEpoch == -1 || self->managerEpochOk(req.managerEpoch)) {
 					if (BW_DEBUG) {
 						fmt::print("Worker {0} got granule assignments request from BM {1}\n",
 						           self->id.toString(),
@@ -4662,6 +4799,9 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				} else {
 					req.reply.sendError(blob_manager_replaced());
 				}
+			}
+			when(MinBlobVersionRequest req = waitNext(bwInterf.minBlobVersionRequest.getFuture())) {
+				handleBlobVersionRequest(self, req);
 			}
 			when(FlushGranuleRequest req = waitNext(bwInterf.flushGranuleRequest.getFuture())) {
 				if (self->managerEpochOk(req.managerEpoch)) {

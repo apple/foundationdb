@@ -194,6 +194,7 @@ struct RangeAssignment {
 	bool isAssign;
 	KeyRange keyRange;
 	Optional<UID> worker;
+	Optional<std::pair<UID, Error>> previousFailure;
 
 	// I tried doing this with a union and it was just kind of messy
 	Optional<RangeAssignmentData> assign;
@@ -272,6 +273,7 @@ struct BlobManagerStats {
 	Counter filesPurged;
 	Future<Void> logger;
 	int64_t activeMerges;
+	int64_t blockedAssignments;
 
 	// Current stats maintained for a given blob worker process
 	explicit BlobManagerStats(UID id,
@@ -286,12 +288,13 @@ struct BlobManagerStats {
 	    ccBytesChecked("CCBytesChecked", cc), ccMismatches("CCMismatches", cc), ccTimeouts("CCTimeouts", cc),
 	    ccErrors("CCErrors", cc), purgesProcessed("PurgesProcessed", cc),
 	    granulesFullyPurged("GranulesFullyPurged", cc), granulesPartiallyPurged("GranulesPartiallyPurged", cc),
-	    filesPurged("FilesPurged", cc), activeMerges(0) {
+	    filesPurged("FilesPurged", cc), activeMerges(0), blockedAssignments(0) {
 		specialCounter(cc, "WorkerCount", [workers]() { return workers->size(); });
 		specialCounter(cc, "Epoch", [epoch]() { return epoch; });
 		specialCounter(cc, "ActiveMerges", [this]() { return this->activeMerges; });
 		specialCounter(cc, "HardBoundaries", [mergeHardBoundaries]() { return mergeHardBoundaries->size(); });
 		specialCounter(cc, "SoftBoundaries", [mergeBoundaries]() { return mergeBoundaries->size(); });
+		specialCounter(cc, "BlockedAssignments", [this]() { return this->blockedAssignments; });
 		logger = traceCounters("BlobManagerMetrics", id, interval, &cc, "BlobManagerMetrics");
 	}
 };
@@ -366,6 +369,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	// TODO: consider switching to an iterator approach.
 	std::unordered_map<Key, bool> mergeHardBoundaries;
 	std::unordered_map<Key, BlobGranuleMergeBoundary> mergeBoundaries;
+	CoalescedKeyRangeMap<bool> forcePurgingRanges;
 
 	FlowLock concurrentMergeChecks;
 
@@ -375,6 +379,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	AsyncVar<int> recruitingStream;
 	Promise<Void> foundBlobWorkers;
 	Promise<Void> doneRecovering;
+	Promise<Void> loadedClientRanges;
 
 	int64_t epoch;
 	int64_t seqNo = 1;
@@ -390,7 +395,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	    stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, epoch, &workersById, &mergeHardBoundaries, &mergeBoundaries),
 	    knownBlobRanges(false, normalKeys.end), tenantData(BGTenantMap(dbInfo)),
 	    mergeCandidates(MergeCandidateInfo(MergeCandidateUnknown), normalKeys.end),
-	    activeGranuleMerges(invalidVersion, normalKeys.end),
+	    activeGranuleMerges(invalidVersion, normalKeys.end), forcePurgingRanges(false, normalKeys.end),
 	    concurrentMergeChecks(SERVER_KNOBS->BLOB_MANAGER_CONCURRENT_MERGE_CHECKS),
 	    restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), recruitingStream(0), epoch(epoch) {}
 
@@ -468,6 +473,16 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	}
 
 	void clearMergeCandidate(const KeyRangeRef& range) { setMergeCandidate(range, MergeCandidateCannotMerge); }
+
+	bool isForcePurging(const KeyRangeRef& range) {
+		auto ranges = forcePurgingRanges.intersectingRanges(range);
+		for (auto& it : ranges) {
+			if (it.value()) {
+				return true;
+			}
+		}
+		return false;
+	}
 };
 
 // Helper function for alignKeys().
@@ -531,10 +546,11 @@ ACTOR Future<BlobGranuleSplitPoints> alignKeys(Reference<BlobManagerData> bmData
 	splitPoints.keys.push_back_deep(splitPoints.keys.arena(), splits.front());
 
 	state Transaction tr = Transaction(bmData->db);
-	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	state int idx = 1;
 	for (; idx < splits.size() - 1; idx++) {
 		loop {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				// Get the next full key in the granule.
 				RangeResult nextKeyRes = wait(
@@ -667,7 +683,8 @@ ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmDat
 // Picks a worker with the fewest number of already assigned ranges.
 // If there is a tie, picks one such worker at random.
 // TODO: add desired per-blob-worker limit? don't assign ranges to each worker past that limit?
-ACTOR Future<UID> pickWorkerForAssign(Reference<BlobManagerData> bmData) {
+ACTOR Future<UID> pickWorkerForAssign(Reference<BlobManagerData> bmData,
+                                      Optional<std::pair<UID, Error>> previousFailure) {
 	// wait until there are BWs to pick from
 	loop {
 		state bool wasZeroWorkers = false;
@@ -694,15 +711,42 @@ ACTOR Future<UID> pickWorkerForAssign(Reference<BlobManagerData> bmData) {
 	int minGranulesAssigned = INT_MAX;
 	std::vector<UID> eligibleWorkers;
 
+	// because lowest number of granules worker(s) might not exactly have the lowest memory for various reasons, if we
+	// got blob_worker_full as the error last time, sometimes just pick a random worker that wasn't the last one we
+	// tried
+	if (bmData->workerStats.size() >= 2 && previousFailure.present() &&
+	    previousFailure.get().second.code() == error_code_blob_worker_full && deterministicRandom()->coinflip()) {
+		CODE_PROBE(true, "randomly picking worker due to blob_worker_full");
+		eligibleWorkers.reserve(bmData->workerStats.size());
+		for (auto& it : bmData->workerStats) {
+			if (it.first != previousFailure.get().first) {
+				eligibleWorkers.push_back(it.first);
+			}
+		}
+		ASSERT(!eligibleWorkers.empty());
+		int randomIdx = deterministicRandom()->randomInt(0, eligibleWorkers.size());
+		if (BM_DEBUG) {
+			fmt::print("picked worker {0} randomly since previous attempt got blob_worker_full\n",
+			           eligibleWorkers[randomIdx].toString().substr(0, 5));
+		}
+
+		return eligibleWorkers[randomIdx];
+	}
+
 	for (auto const& worker : bmData->workerStats) {
 		UID currId = worker.first;
 		int granulesAssigned = worker.second.numGranulesAssigned;
 
-		if (granulesAssigned < minGranulesAssigned) {
-			eligibleWorkers.resize(0);
-			minGranulesAssigned = granulesAssigned;
-			eligibleWorkers.emplace_back(currId);
-		} else if (granulesAssigned == minGranulesAssigned) {
+		// if previous attempt failed and that worker is still present, ignore it
+		if (bmData->workerStats.size() >= 2 && previousFailure.present() && previousFailure.get().first == currId) {
+			continue;
+		}
+
+		if (granulesAssigned <= minGranulesAssigned) {
+			if (granulesAssigned < minGranulesAssigned) {
+				eligibleWorkers.clear();
+				minGranulesAssigned = granulesAssigned;
+			}
 			eligibleWorkers.emplace_back(currId);
 		}
 	}
@@ -712,7 +756,7 @@ ACTOR Future<UID> pickWorkerForAssign(Reference<BlobManagerData> bmData) {
 	int idx = deterministicRandom()->randomInt(0, eligibleWorkers.size());
 	if (BM_DEBUG) {
 		fmt::print("picked worker {0}, which has a minimal number ({1}) of granules assigned\n",
-		           eligibleWorkers[idx].toString(),
+		           eligibleWorkers[idx].toString().substr(0, 5),
 		           minGranulesAssigned);
 	}
 
@@ -727,31 +771,49 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
                                      Optional<UID> workerID,
                                      int64_t epoch,
                                      int64_t seqNo) {
+	state bool blockedWaitingForWorker = false;
 	// WorkerId is set, except in case of assigning to any worker. Then we pick the worker to assign to in here
-
-	// inject delay into range assignments
-	if (BUGGIFY_WITH_PROB(0.05)) {
-		wait(delay(deterministicRandom()->random01()));
-	} else {
-		// otherwise, do delay(0) to ensure rest of code in calling handleRangeAssign runs, before this function can
-		// recursively call handleRangeAssign on error
-		wait(delay(0.0));
-	}
-
-	if (!workerID.present()) {
-		ASSERT(assignment.isAssign && assignment.assign.get().type != AssignRequestType::Continue);
-		UID _workerId = wait(pickWorkerForAssign(bmData));
-		if (BM_DEBUG) {
-			fmt::print("Chose BW {0} for seqno {1} in BM {2}\n", _workerId.toString(), seqNo, bmData->epoch);
+	try {
+		// inject delay into range assignments
+		if (BUGGIFY_WITH_PROB(0.05)) {
+			wait(delay(deterministicRandom()->random01()));
+		} else {
+			// otherwise, do delay(0) to ensure rest of code in calling handleRangeAssign runs, before this function can
+			// recursively call handleRangeAssign on error
+			wait(delay(0.0));
 		}
-		workerID = _workerId;
-		// We don't have to check for races with an overlapping assignment because it would insert over us in the actor
-		// map, cancelling this actor before it got here
-		bmData->workerAssignments.insert(assignment.keyRange, workerID.get());
+		if (!workerID.present()) {
+			ASSERT(assignment.isAssign && assignment.assign.get().type != AssignRequestType::Continue);
 
-		if (bmData->workerStats.count(workerID.get())) {
-			bmData->workerStats[workerID.get()].numGranulesAssigned += 1;
+			blockedWaitingForWorker = true;
+			if (!assignment.previousFailure.present()) {
+				// if not already blocked, now blocked
+				++bmData->stats.blockedAssignments;
+			}
+
+			UID _workerId = wait(pickWorkerForAssign(bmData, assignment.previousFailure));
+			if (BM_DEBUG) {
+				fmt::print("Chose BW {0} for seqno {1} in BM {2}\n", _workerId.toString(), seqNo, bmData->epoch);
+			}
+			workerID = _workerId;
+			// We don't have to check for races with an overlapping assignment because it would insert over us in the
+			// actor map, cancelling this actor before it got here
+			bmData->workerAssignments.insert(assignment.keyRange, workerID.get());
+
+			if (bmData->workerStats.count(workerID.get())) {
+				bmData->workerStats[workerID.get()].numGranulesAssigned += 1;
+			}
+
+			if (!assignment.previousFailure.present()) {
+				// if only blocked waiting for worker, now not blocked
+				--bmData->stats.blockedAssignments;
+			}
 		}
+	} catch (Error& e) {
+		if (assignment.previousFailure.present() || blockedWaitingForWorker) {
+			--bmData->stats.blockedAssignments;
+		}
+		throw e;
 	}
 
 	if (BM_DEBUG) {
@@ -782,6 +844,12 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 				throw no_more_servers();
 			}
 			wait(bmData->workersById[workerID.get()].assignBlobRangeRequest.getReply(req));
+			if (assignment.previousFailure.present()) {
+				// previous assign failed and this one succeeded
+				--bmData->stats.blockedAssignments;
+			}
+
+			return Void();
 		} else {
 			ASSERT(!assignment.assign.present());
 			ASSERT(assignment.revoke.present());
@@ -801,6 +869,11 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			}
 		}
 	} catch (Error& e) {
+		if (assignment.previousFailure.present()) {
+			// previous assign failed, consider it unblocked if it's not a retriable error
+			--bmData->stats.blockedAssignments;
+		}
+		state Error e2 = e;
 		if (e.code() == error_code_operation_cancelled) {
 			throw;
 		}
@@ -828,7 +901,8 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			return Void();
 		}
 
-		if (e.code() != error_code_broken_promise && e.code() != error_code_no_more_servers) {
+		if (e.code() != error_code_broken_promise && e.code() != error_code_no_more_servers &&
+		    e.code() != error_code_blob_worker_full) {
 			TraceEvent(SevWarn, "BlobManagerUnexpectedErrorDoRangeAssignment", bmData->id)
 			    .error(e)
 			    .detail("Epoch", bmData->epoch);
@@ -839,6 +913,25 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			throw;
 		}
 
+		// this assign failed and we will retry, consider it blocked until it successfully retries
+		if (assignment.isAssign) {
+			++bmData->stats.blockedAssignments;
+		}
+
+		if (e.code() == error_code_blob_worker_full) {
+			CODE_PROBE(true, "blob worker too full");
+			ASSERT(assignment.isAssign);
+			if (assignment.previousFailure.present() &&
+			    assignment.previousFailure.get().second.code() == error_code_blob_worker_full) {
+				// if previous assignment also failed due to blob_worker_full, multiple workers are full, so wait even
+				// longer
+				CODE_PROBE(true, "multiple blob workers too full");
+				wait(delayJittered(10.0));
+			} else {
+				wait(delayJittered(1.0)); // wait a bit before retrying
+			}
+		}
+
 		CODE_PROBE(true, "BM retrying range assign");
 
 		// We use reliable delivery (getReply), so the broken_promise means the worker is dead, and we may need to retry
@@ -846,7 +939,7 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 		if (assignment.isAssign) {
 			if (BM_DEBUG) {
 				fmt::print("BM got error {0} assigning range [{1} - {2}) to worker {3}, requeueing\n",
-				           e.name(),
+				           e2.name(),
 				           assignment.keyRange.begin.printable(),
 				           assignment.keyRange.end.printable(),
 				           workerID.get().toString());
@@ -867,8 +960,9 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			ASSERT(assignment.assign.present());
 			assignment.assign.get().type = AssignRequestType::Normal;
 			assignment.worker.reset();
+			std::pair<UID, Error> failure = { workerID.get(), e2 };
+			assignment.previousFailure = failure;
 			handleRangeAssign(bmData, assignment);
-			// FIXME: improvement would be to add history of failed workers to assignment so it can try other ones first
 		} else {
 			if (BM_DEBUG) {
 				fmt::print("BM got error revoking range [{0} - {1}) from worker",
@@ -972,6 +1066,13 @@ static bool handleRangeIsRevoke(Reference<BlobManagerData> bmData, RangeAssignme
 		auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
 		for (auto& it : currentAssignments) {
 			// ensure range doesn't truncate existing ranges
+			if (it.begin() < assignment.keyRange.begin || it.end() > assignment.keyRange.end) {
+				fmt::print("Assignment [{0} - {1}) truncates range [{2} - {3})\n",
+				           assignment.keyRange.begin.printable(),
+				           assignment.keyRange.end.printable(),
+				           it.begin().printable(),
+				           it.end().printable());
+			}
 			ASSERT(it.begin() >= assignment.keyRange.begin);
 			ASSERT(it.end() <= assignment.keyRange.end);
 
@@ -993,6 +1094,10 @@ static bool handleRangeIsRevoke(Reference<BlobManagerData> bmData, RangeAssignme
 }
 
 static bool handleRangeAssign(Reference<BlobManagerData> bmData, RangeAssignment assignment) {
+	if ((assignment.isAssign || !assignment.revoke.get().dispose) && bmData->isForcePurging(assignment.keyRange)) {
+		return false;
+	}
+
 	int64_t seqNo = bmData->seqNo;
 	bmData->seqNo++;
 
@@ -1004,7 +1109,7 @@ static bool handleRangeAssign(Reference<BlobManagerData> bmData, RangeAssignment
 	}
 }
 
-ACTOR Future<Void> checkManagerLock(Reference<ReadYourWritesTransaction> tr, Reference<BlobManagerData> bmData) {
+ACTOR Future<Void> checkManagerLock(Transaction* tr, Reference<BlobManagerData> bmData) {
 	Optional<Value> currentLockValue = wait(tr->get(blobManagerEpochKey));
 	ASSERT(currentLockValue.present());
 	int64_t currentEpoch = decodeBlobManagerEpochValue(currentLockValue.get());
@@ -1027,6 +1132,11 @@ ACTOR Future<Void> checkManagerLock(Reference<ReadYourWritesTransaction> tr, Ref
 	return Void();
 }
 
+ACTOR Future<Void> checkManagerLock(Reference<ReadYourWritesTransaction> tr, Reference<BlobManagerData> bmData) {
+	wait(checkManagerLock(&(tr->getTransaction()), bmData));
+	return Void();
+}
+
 ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData, BlobGranuleSplitPoints splitPoints) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 	// don't do too many in one transaction
@@ -1038,8 +1148,9 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 		state int j = 0;
 		loop {
 			try {
-				tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(checkManagerLock(tr, bmData));
 				// Instead of doing a krmSetRange for each granule, because it does a read-modify-write, we do one
 				// krmSetRange for the whole batch, and then just individual sets for each intermediate boundary This
@@ -1096,6 +1207,7 @@ ACTOR Future<Void> monitorTenants(Reference<BlobManagerData> bmData) {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(loadTenantMap(tr, bmData));
 
 				state Future<Void> watchChange = tr->watch(TenantMetadata::lastTenantId().key);
@@ -1113,6 +1225,7 @@ ACTOR Future<Void> monitorTenants(Reference<BlobManagerData> bmData) {
 ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 	state Optional<Value> lastChangeKeyValue;
 	state bool needToCoalesce = bmData->epoch > 1;
+	state bool firstLoad = true;
 
 	loop {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
@@ -1124,6 +1237,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				// read change key at this point along with data
 				state Optional<Value> ckvBegin = wait(tr->get(blobRangeChangeKey));
@@ -1192,6 +1306,11 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 					splitFutures.push_back(splitRange(bmData, range, false, true));
 				}
 
+				if (firstLoad) {
+					bmData->loadedClientRanges.send(Void());
+					firstLoad = false;
+				}
+
 				for (auto f : splitFutures) {
 					state BlobGranuleSplitPoints splitPoints = wait(f);
 					if (BM_DEBUG) {
@@ -1228,6 +1347,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				tr->reset();
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				state Future<Void> watchFuture;
 
 				Optional<Value> ckvEnd = wait(tr->get(blobRangeChangeKey));
@@ -1360,8 +1480,9 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 	state bool retried = false;
 	loop {
 		try {
-			tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			// make sure we're still manager when this transaction gets committed
 			wait(checkManagerLock(tr, bmData));
 
@@ -1609,12 +1730,21 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 	loop {
 		try {
 			tr->reset();
-			tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			ASSERT(splitPoints.keys.size() > 2);
 
 			// make sure we're still manager when this transaction gets committed
 			wait(checkManagerLock(tr, bmData));
+			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction(), granuleRange));
+			if (purgeState != ForcedPurgeState::NonePurged) {
+				CODE_PROBE(true, "Split stopped because of force purge");
+				TraceEvent("GranuleSplitCancelledForcePurge", bmData->id)
+				    .detail("Epoch", bmData->epoch)
+				    .detail("GranuleRange", granuleRange);
+				return Void();
+			}
 
 			// TODO can do this + lock in parallel
 			// Read splitState to see if anything was committed instead of reading granule mapping because we don't want
@@ -1833,10 +1963,21 @@ ACTOR Future<Void> forceGranuleFlush(Reference<BlobManagerData> bmData, KeyRange
 
 	loop {
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		if (currentRange.begin == currentRange.end) {
 			break;
 		}
 		try {
+			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr, keyRange));
+			if (purgeState != ForcedPurgeState::NonePurged) {
+				CODE_PROBE(true, "Granule flush stopped because of force purge");
+				TraceEvent("GranuleFlushCancelledForcePurge", bmData->id)
+				    .detail("Epoch", bmData->epoch)
+				    .detail("KeyRange", keyRange);
+				return Void();
+			}
+
 			// TODO KNOB
 			state RangeResult blobGranuleMapping = wait(krmGetRanges(
 			    &tr, blobGranuleMappingKeys.begin, currentRange, 64, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
@@ -1851,6 +1992,7 @@ ACTOR Future<Void> forceGranuleFlush(Reference<BlobManagerData> bmData, KeyRange
 						           blobGranuleMapping[i].key.printable(),
 						           blobGranuleMapping[i + 1].key.printable());
 					}
+					// range isn't force purged because of above check, so flush was for invalid range
 					throw blob_granule_transaction_too_old();
 				}
 
@@ -1861,6 +2003,7 @@ ACTOR Future<Void> forceGranuleFlush(Reference<BlobManagerData> bmData, KeyRange
 						           blobGranuleMapping[i].key.printable(),
 						           blobGranuleMapping[i + 1].key.printable());
 					}
+					// range isn't force purged because of above check, so flush was for invalid range
 					throw blob_granule_transaction_too_old();
 				}
 
@@ -1964,9 +2107,28 @@ ACTOR Future<std::pair<UID, Version>> persistMergeGranulesStart(Reference<BlobMa
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			wait(checkManagerLock(tr, bmData));
 
+			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction(), mergeRange));
+			if (purgeState != ForcedPurgeState::NonePurged) {
+				CODE_PROBE(true, "Merge start stopped because of force purge");
+				TraceEvent("GranuleMergeStartCancelledForcePurge", bmData->id)
+				    .detail("Epoch", bmData->epoch)
+				    .detail("GranuleRange", mergeRange);
+
+				// destroy already created change feed from earlier so it doesn't leak
+				wait(updateChangeFeed(&tr->getTransaction(),
+				                      granuleIDToCFKey(mergeGranuleID),
+				                      ChangeFeedStatus::CHANGE_FEED_DESTROY,
+				                      mergeRange));
+
+				wait(tr->commit());
+
+				// TODO better error?
+				return std::pair(UID(), invalidVersion);
+			}
 			// FIXME: extra safeguard: check that granuleID of active lock == parentGranuleID for each parent, abort
 			// merge if so
 
@@ -2040,8 +2202,28 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			wait(checkManagerLock(tr, bmData));
+
+			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction(), mergeRange));
+			if (purgeState != ForcedPurgeState::NonePurged) {
+				CODE_PROBE(true, "Merge finish stopped because of force purge");
+				TraceEvent("GranuleMergeCancelledForcePurge", bmData->id)
+				    .detail("Epoch", bmData->epoch)
+				    .detail("GranuleRange", mergeRange);
+
+				// destroy already created change feed from earlier so it doesn't leak
+				wait(updateChangeFeed(&tr->getTransaction(),
+				                      granuleIDToCFKey(mergeGranuleID),
+				                      ChangeFeedStatus::CHANGE_FEED_DESTROY,
+				                      mergeRange));
+
+				wait(tr->commit());
+
+				return Void();
+				// TODO: check this in split re-eval too once that is merged!!
+			}
 
 			tr->clear(blobGranuleMergeKeyFor(mergeGranuleID));
 
@@ -2133,8 +2315,9 @@ ACTOR Future<Void> finishMergeGranules(Reference<BlobManagerData> bmData,
                                        std::vector<Version> parentGranuleStartVersions) {
 	++bmData->stats.activeMerges;
 
-	// wait for BM to be fully recovered before starting actual merges
+	// wait for BM to be fully recovered and have loaded hard boundaries before starting actual merges
 	wait(bmData->doneRecovering.getFuture());
+	wait(bmData->loadedClientRanges.getFuture());
 	wait(delay(0));
 
 	// Assert that none of the subsequent granules are hard boundaries.
@@ -2202,6 +2385,10 @@ ACTOR Future<Void> doMerge(Reference<BlobManagerData> bmData,
 	try {
 		std::pair<UID, Version> persistMerge =
 		    wait(persistMergeGranulesStart(bmData, mergeRange, ids, ranges, startVersions));
+		if (persistMerge.second == invalidVersion) {
+			// cancelled because of force purge
+			return Void();
+		}
 		wait(finishMergeGranules(
 		    bmData, persistMerge.first, mergeRange, persistMerge.second, ids, ranges, startVersions));
 		return Void();
@@ -2320,6 +2507,8 @@ ACTOR Future<Void> attemptMerges(Reference<BlobManagerData> bmData,
 // To ensure each granule waits to see whether all of its neighbors are merge-eligible before merging it, a newly
 // merge-eligible granule will be ignored on the first pass
 ACTOR Future<Void> granuleMergeChecker(Reference<BlobManagerData> bmData) {
+	// wait for BM data to have loaded hard boundaries before starting
+	wait(bmData->loadedClientRanges.getFuture());
 	// initial sleep
 	wait(delayJittered(SERVER_KNOBS->BG_MERGE_CANDIDATE_DELAY_SECONDS));
 	// TODO could optimize to not check if there are no new merge-eligible granules and none in merge pending state
@@ -2398,6 +2587,7 @@ ACTOR Future<Void> deregisterBlobWorker(Reference<BlobManagerData> bmData, BlobW
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			wait(checkManagerLock(tr, bmData));
 			Key blobWorkerListKey = blobWorkerListKeyFor(interf.id());
@@ -2971,8 +3161,67 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 	}
 }
 
-ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData) {
+// essentially just error handling for resumed merge, since doMerge does it for new merge
+ACTOR Future<Void> resumeMerge(Future<Void> finishMergeFuture, KeyRange mergeRange) {
+	try {
+		wait(finishMergeFuture);
+		return Void();
+	} catch (Error& e) {
+		if (e.code() == error_code_operation_cancelled || e.code() == error_code_blob_manager_replaced) {
+			throw;
+		}
+		TraceEvent(SevError, "UnexpectedErrorResumeGranuleMerge").error(e).detail("Range", mergeRange);
+		throw e;
+	}
+}
+
+ACTOR Future<Void> loadForcePurgedRanges(Reference<BlobManagerData> bmData) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
+	state Key beginKey = blobGranuleForcePurgedKeys.begin;
+	state int rowLimit = BUGGIFY ? deterministicRandom()->randomInt(2, 10) : 10000;
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			// using the krm functions can produce incorrect behavior here as it does weird stuff with beginKey
+			KeyRange nextRange(KeyRangeRef(beginKey, blobGranuleForcePurgedKeys.end));
+			state GetRangeLimits limits(rowLimit, GetRangeLimits::BYTE_LIMIT_UNLIMITED);
+			limits.minRows = 2;
+			RangeResult results = wait(tr->getRange(nextRange, limits));
+
+			// Add the mappings to our in memory key range map
+			for (int rangeIdx = 0; rangeIdx < results.size() - 1; rangeIdx++) {
+				if (results[rangeIdx].value == LiteralStringRef("1")) {
+					Key rangeStartKey = results[rangeIdx].key.removePrefix(blobGranuleForcePurgedKeys.begin);
+					Key rangeEndKey = results[rangeIdx + 1].key.removePrefix(blobGranuleForcePurgedKeys.begin);
+					// note: if the old owner is dead, we handle this in rangeAssigner
+					bmData->forcePurgingRanges.insert(KeyRangeRef(rangeStartKey, rangeEndKey), true);
+				}
+			}
+
+			if (!results.more || results.size() <= 1) {
+				break;
+			}
+
+			// re-read last key to get range that starts there
+			beginKey = results.back().key;
+		} catch (Error& e) {
+			if (BM_DEBUG) {
+				fmt::print("BM {0} got error reading granule mapping during recovery: {1}\n", bmData->epoch, e.name());
+			}
+			wait(tr->onError(e));
+		}
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData, Future<Void> loadForcePurgedRanges) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
+	wait(loadForcePurgedRanges); // load these first, to make sure to avoid resuming any merges that are being force
+	                             // purged
 
 	// FIXME: use range stream instead
 	state int rowLimit = BUGGIFY ? deterministicRandom()->randomInt(1, 10) : 10000;
@@ -2981,8 +3230,11 @@ ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			RangeResult result = wait(tr->getRange(currentRange, rowLimit));
+			state bool anyMore = result.more;
+			state std::vector<Future<Void>> cleanupForcePurged;
 			for (auto& it : result) {
 				CODE_PROBE(true, "Blob Manager Recovery found merging granule");
 				UID mergeGranuleID = decodeBlobGranuleMergeKey(it.key);
@@ -3002,25 +3254,51 @@ ACTOR Future<Void> resumeActiveMerges(Reference<BlobManagerData> bmData) {
 					           mergeVersion);
 				}
 
+				if (bmData->isForcePurging(mergeRange)) {
+					if (BM_DEBUG) {
+						fmt::print(
+						    "BM {0} cleaning up merge [{1} - {2}): {3} @ {4} in progress b/c it was force purged\n",
+						    bmData->epoch,
+						    mergeRange.begin.printable(),
+						    mergeRange.end.printable(),
+						    mergeGranuleID.toString().substr(0, 6),
+						    mergeVersion);
+					}
+					cleanupForcePurged.push_back(updateChangeFeed(&tr->getTransaction(),
+					                                              granuleIDToCFKey(mergeGranuleID),
+					                                              ChangeFeedStatus::CHANGE_FEED_DESTROY,
+					                                              mergeRange));
+					continue;
+				}
+
 				// want to mark in progress granule ranges as merging, BEFORE recovery is complete and workers can
 				// report updated status. Start with early (epoch, seqno) to guarantee lower than later status
 				BoundaryEvaluation eval(1, 0, BoundaryEvalType::MERGE, 1, 0);
 				ASSERT(!bmData->isMergeActive(mergeRange));
-				bmData->addActor.send(finishMergeGranules(bmData,
-				                                          mergeGranuleID,
-				                                          mergeRange,
-				                                          mergeVersion,
-				                                          parentGranuleIDs,
-				                                          parentGranuleRanges,
-				                                          parentGranuleStartVersions));
+				bmData->addActor.send(resumeMerge(finishMergeGranules(bmData,
+				                                                      mergeGranuleID,
+				                                                      mergeRange,
+				                                                      mergeVersion,
+				                                                      parentGranuleIDs,
+				                                                      parentGranuleRanges,
+				                                                      parentGranuleStartVersions),
+				                                  mergeRange));
 				bmData->boundaryEvaluations.insert(mergeRange, eval);
 				bmData->activeGranuleMerges.insert(mergeRange, mergeVersion);
 				bmData->setMergeCandidate(mergeRange, MergeCandidateMerging);
 			}
 
-			if (result.more) {
+			if (anyMore) {
 				currentRange = KeyRangeRef(keyAfter(result.back().key), currentRange.end);
-			} else {
+			}
+
+			if (!cleanupForcePurged.empty()) {
+				wait(waitForAll(cleanupForcePurged));
+				wait(tr->commit());
+				tr->reset();
+			}
+
+			if (!anyMore) {
 				return Void();
 			}
 		} catch (Error& e) {
@@ -3037,6 +3315,7 @@ ACTOR Future<Void> loadBlobGranuleMergeBoundaries(Reference<BlobManagerData> bmD
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			KeyRange nextRange(KeyRangeRef(beginKey, blobGranuleMergeBoundaryKeys.end));
 			// using the krm functions can produce incorrect behavior here as it does weird stuff with beginKey
@@ -3044,7 +3323,7 @@ ACTOR Future<Void> loadBlobGranuleMergeBoundaries(Reference<BlobManagerData> bmD
 			RangeResult results = wait(tr->getRange(nextRange, limits));
 
 			// Add the mappings to our in memory key range map
-			for (int i = 0; i < results.size() - 1; i++) {
+			for (int i = 0; i < results.size(); i++) {
 				bmData->mergeBoundaries[results[i].key] = decodeBlobGranuleMergeBoundaryValue(results[i].value);
 			}
 
@@ -3079,13 +3358,36 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	// Once we acknowledge the existing blob workers, we can go ahead and recruit new ones
 	bmData->startRecruiting.trigger();
 
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
+
+	// set up force purge keys if not done already
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			RangeResult existingForcePurgeKeys = wait(tr->getRange(blobGranuleForcePurgedKeys, 1));
+			if (!existingForcePurgeKeys.empty()) {
+				break;
+			}
+			wait(checkManagerLock(tr, bmData));
+			wait(krmSetRange(tr, blobGranuleForcePurgedKeys.begin, normalKeys, LiteralStringRef("0")));
+			wait(tr->commit());
+			tr->reset();
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+
 	// skip the rest of the algorithm for the first blob manager
 	if (bmData->epoch == 1) {
 		bmData->doneRecovering.send(Void());
 		return Void();
 	}
 
-	state Future<Void> resumeMergesFuture = resumeActiveMerges(bmData);
+	state Future<Void> forcePurgedRanges = loadForcePurgedRanges(bmData);
+	state Future<Void> resumeMergesFuture = resumeActiveMerges(bmData, forcePurgedRanges);
 
 	CODE_PROBE(true, "BM doing recovery");
 
@@ -3109,7 +3411,6 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 	state KeyRangeMap<std::tuple<UID, int64_t, int64_t>> workerAssignments;
 	workerAssignments.insert(normalKeys, std::tuple(UID(), 0, 0));
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 
 	// FIXME: use range stream instead
 	state int rowLimit = BUGGIFY ? deterministicRandom()->randomInt(2, 10) : 10000;
@@ -3194,6 +3495,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			KeyRange nextRange(KeyRangeRef(beginKey, blobGranuleMappingKeys.end));
 			// using the krm functions can produce incorrect behavior here as it does weird stuff with beginKey
@@ -3244,6 +3546,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		}
 	}
 
+	wait(forcePurgedRanges);
 	wait(resumeMergesFuture);
 
 	// Step 2. Send assign requests for all the granules and transfer assignments
@@ -3254,6 +3557,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(checkManagerLock(tr, bmData));
 			wait(tr->commit());
 			break;
@@ -3330,6 +3634,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(loadTenantMap(tr, bmData));
 			break;
 		} catch (Error& e) {
@@ -3589,6 +3894,8 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobManagerData> bmData, U
 	state GranuleFiles files;
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(readGranuleFiles(&tr, &startKey, range.end, &files, granuleID));
 			return files;
 		} catch (Error& e) {
@@ -3611,6 +3918,7 @@ ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID gra
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			int lim = SERVER_KNOBS->BG_MAX_SPLIT_FANOUT;
 			if (BUGGIFY_WITH_PROB(0.1)) {
@@ -3713,9 +4021,16 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
                                       UID granuleId,
                                       Key historyKey,
                                       Version purgeVersion,
-                                      KeyRange granuleRange) {
+                                      KeyRange granuleRange,
+                                      bool force) {
 	if (BM_PURGE_DEBUG) {
-		fmt::print("BM {0} Fully deleting granule {1}: init\n", self->epoch, granuleId.toString());
+		fmt::print("BM {0} Fully deleting granule [{1} - {2}): {3} @ {4}{5}\n",
+		           self->epoch,
+		           granuleRange.begin.printable(),
+		           granuleRange.end.printable(),
+		           granuleId.toString(),
+		           purgeVersion,
+		           force ? " (force)" : "");
 	}
 
 	// if granule is still splitting and files are needed for new sub-granules to re-snapshot, we can only partially
@@ -3723,7 +4038,12 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 	// Or, if the granule isn't finalized (still needs the history entry for the old change feed id, because all data
 	// from the old change feed hasn't yet been persisted in blob), we can delete the files but need to keep the granule
 	// history entry.
-	state bool canDeleteHistoryKey = wait(canDeleteFullGranule(self, granuleId));
+	state bool canDeleteHistoryKey;
+	if (force) {
+		canDeleteHistoryKey = true;
+	} else {
+		wait(store(canDeleteHistoryKey, canDeleteFullGranule(self, granuleId)));
+	}
 	state Reference<BlobConnectionProvider> bstore = wait(getBStoreForGranule(self, granuleRange));
 
 	// get files
@@ -3767,16 +4087,27 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 	}
 
 	state Transaction tr(self->db);
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 	loop {
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			KeyRange fileRangeKey = blobGranuleFileKeyRangeFor(granuleId);
 			if (canDeleteHistoryKey) {
 				tr.clear(historyKey);
 			}
 			tr.clear(fileRangeKey);
+			if (force) {
+				// check manager lock to not delete metadata out from under a later recovering manager
+				wait(checkManagerLock(&tr, self));
+				wait(updateChangeFeed(
+				    &tr, granuleIDToCFKey(granuleId), ChangeFeedStatus::CHANGE_FEED_DESTROY, granuleRange));
+				tr.clear(blobGranuleLockKeyFor(granuleRange));
+				tr.clear(blobGranuleSplitKeyRangeFor(granuleId));
+				tr.clear(blobGranuleMergeKeyFor(granuleId));
+				// FIXME: also clear merge boundaries!
+			}
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -3893,10 +4224,11 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
 	}
 
 	state Transaction tr(self->db);
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 	loop {
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			for (auto& key : deletedFileKeys) {
 				tr.clear(key);
@@ -3963,8 +4295,33 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	// find all active granules (that comprise the range) and add to the queue
 
 	state Transaction tr(self->db);
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+	if (force) {
+		// TODO could clean this up after force purge is done, but it's safer not to
+		self->forcePurgingRanges.insert(range, true);
+		// set force purged range, to prevent future operations on this range
+		loop {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			try {
+				// set force purged range, but don't clear mapping range yet, so that if a new BM recovers in the middle
+				// of purging, it still knows what granules to purge
+				wait(checkManagerLock(&tr, self));
+				// FIXME: need to handle this better if range is unaligned. Need to not truncate existing granules, and
+				// instead cover whole of intersecting granules at begin/end
+				wait(krmSetRangeCoalescing(
+				    &tr, blobGranuleForcePurgedKeys.begin, range, normalKeys, LiteralStringRef("1")));
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		tr.reset();
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	}
 
 	auto ranges = self->workerAssignments.intersectingRanges(range);
 	state std::vector<KeyRange> activeRanges;
@@ -3972,6 +4329,15 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	// copy into state variable before waits
 	for (auto& it : ranges) {
 		activeRanges.push_back(it.range());
+	}
+
+	if (force) {
+		// revoke range from all active blob workers - AFTER we copy set of active ranges to purge
+		RangeAssignment ra;
+		ra.isAssign = false;
+		ra.keyRange = range;
+		ra.revoke = RangeRevokeData(true); // dispose=true
+		handleRangeAssign(self, ra);
 	}
 
 	state int rangeIdx;
@@ -3993,11 +4359,10 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 			continue;
 		}
 
-		// TODO: if this is a force purge, then revoke the assignment from the corresponding BW first
-		// so that it doesn't try to interact with the granule (i.e. force it to give up gLock).
-		// we'll need some way to ack that the revoke was successful
-
 		loop {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				if (BM_PURGE_DEBUG) {
 					fmt::print("BM {0} Fetching latest history entry for range [{1} - {2})\n",
@@ -4058,6 +4423,9 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		state Key historyKey = blobGranuleHistoryKeyFor(currRange, startVersion);
 		state bool foundHistory = false;
 		loop {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				Optional<Value> persistedHistory = wait(tr.get(historyKey));
 				if (persistedHistory.present()) {
@@ -4170,6 +4538,10 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	if (BM_PURGE_DEBUG) {
 		fmt::print("BM {0}: {1} granules to fully delete\n", self->epoch, toFullyDelete.size());
 	}
+	// Go backwards through set of granules to guarantee deleting oldest first. This avoids orphaning granules in the
+	// deletion process
+	// FIXME: could track explicit parent dependencies and parallelize so long as a parent and child aren't running in
+	// parallel, but that's non-trivial
 	for (i = toFullyDelete.size() - 1; i >= 0; --i) {
 		state UID granuleId;
 		Key historyKey;
@@ -4179,7 +4551,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		if (BM_PURGE_DEBUG) {
 			fmt::print("BM {0}: About to fully delete granule {1}\n", self->epoch, granuleId.toString());
 		}
-		wait(fullyDeleteGranule(self, granuleId, historyKey, purgeVersion, range));
+		wait(fullyDeleteGranule(self, granuleId, historyKey, purgeVersion, keyRange, force));
 	}
 
 	if (BM_PURGE_DEBUG) {
@@ -4188,15 +4560,34 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 
 	for (i = toPartiallyDelete.size() - 1; i >= 0; --i) {
 		UID granuleId;
-		KeyRange range;
-		std::tie(granuleId, range) = toPartiallyDelete[i];
+		KeyRange keyRange;
+		std::tie(granuleId, keyRange) = toPartiallyDelete[i];
 		if (BM_PURGE_DEBUG) {
 			fmt::print("BM {0}: About to partially delete granule {1}\n", self->epoch, granuleId.toString());
 		}
-		partialDeletions.emplace_back(partiallyDeleteGranule(self, granuleId, purgeVersion, range));
+		partialDeletions.emplace_back(partiallyDeleteGranule(self, granuleId, purgeVersion, keyRange));
 	}
 
 	wait(waitForAll(partialDeletions));
+
+	if (force) {
+		tr.reset();
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		loop {
+			try {
+				// clear mapping range, so that a new BM doesn't try to recover force purged granules, and clients can't
+				// read them
+				wait(checkManagerLock(&tr, self));
+				wait(krmSetRange(&tr, blobGranuleMappingKeys.begin, range, blobGranuleMappingValueFor(UID())));
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
 
 	// Now that all the necessary granules and their files have been deleted, we can
 	// clear the purgeIntent key to signify that the work is done. However, there could have been
@@ -4261,6 +4652,7 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 		loop {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			state std::vector<Future<Void>> purges;
 			state CoalescedKeyRangeMap<std::pair<Version, bool>> purgeMap;
@@ -4337,6 +4729,7 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr->clear(KeyRangeRef(blobGranulePurgeKeys.begin, keyAfter(lastPurgeKey)));
 				wait(tr->commit());
 				break;
@@ -4367,6 +4760,7 @@ ACTOR Future<Void> doLockChecks(Reference<BlobManagerData> bmData) {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(checkManagerLock(tr, bmData));
 				wait(tr->commit());
 				break;
@@ -4536,32 +4930,34 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	}
 	TraceEvent("BlobManagerInit", bmInterf.id()).detail("Epoch", epoch).log();
 
-	// although we start the recruiter, we wait until existing workers are ack'd
-	auto recruitBlobWorker = IAsyncListener<RequestStream<RecruitBlobWorkerRequest>>::create(
-	    dbInfo, [](auto const& info) { return info.clusterInterface.recruitBlobWorker; });
-
-	self->addActor.send(blobWorkerRecruiter(self, recruitBlobWorker));
-
-	// we need to recover the old blob manager's state (e.g. granule assignments) before
-	// before the new blob manager does anything
-	wait(recoverBlobManager(self));
-
-	self->addActor.send(doLockChecks(self));
-	self->addActor.send(monitorClientRanges(self));
-	self->addActor.send(monitorTenants(self));
-	self->addActor.send(monitorPurgeKeys(self));
-	if (SERVER_KNOBS->BG_CONSISTENCY_CHECK_ENABLED) {
-		self->addActor.send(bgConsistencyCheck(self));
-	}
-	if (SERVER_KNOBS->BG_ENABLE_MERGING) {
-		self->addActor.send(granuleMergeChecker(self));
-	}
-
-	if (BUGGIFY) {
-		self->addActor.send(chaosRangeMover(self));
-	}
+	self->epoch = epoch;
 
 	try {
+		// although we start the recruiter, we wait until existing workers are ack'd
+		auto recruitBlobWorker = IAsyncListener<RequestStream<RecruitBlobWorkerRequest>>::create(
+		    dbInfo, [](auto const& info) { return info.clusterInterface.recruitBlobWorker; });
+
+		self->addActor.send(blobWorkerRecruiter(self, recruitBlobWorker));
+
+		// we need to recover the old blob manager's state (e.g. granule assignments) before
+		// before the new blob manager does anything
+		wait(recoverBlobManager(self));
+
+		self->addActor.send(doLockChecks(self));
+		self->addActor.send(monitorClientRanges(self));
+		self->addActor.send(monitorTenants(self));
+		self->addActor.send(monitorPurgeKeys(self));
+		if (SERVER_KNOBS->BG_CONSISTENCY_CHECK_ENABLED) {
+			self->addActor.send(bgConsistencyCheck(self));
+		}
+		if (SERVER_KNOBS->BG_ENABLE_MERGING) {
+			self->addActor.send(granuleMergeChecker(self));
+		}
+
+		if (BUGGIFY) {
+			self->addActor.send(chaosRangeMover(self));
+		}
+
 		loop choose {
 			when(wait(self->iAmReplaced.getFuture())) {
 				if (BM_DEBUG) {

@@ -57,7 +57,9 @@ struct Traceable<ClusterUsage> : std::true_type {
 //
 // READY - the data cluster is active
 // REMOVING - the data cluster is being removed and cannot have its configuration changed or any tenants created
-enum class DataClusterState { READY, REMOVING };
+// RESTORING - the data cluster is being restored and cannot have its configuration changed or any tenants
+//             created/updated/deleted.
+enum class DataClusterState { READY, REMOVING, RESTORING };
 
 struct DataClusterEntry {
 	constexpr static FileIdentifier file_identifier = 929511;

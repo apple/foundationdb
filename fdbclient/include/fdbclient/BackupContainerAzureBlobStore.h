@@ -25,9 +25,6 @@
 #include "fdbclient/AsyncTaskThread.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 
-#include "constants.h"
-#include "storage_credential.h"
-#include "storage_account.h"
 #include "blob/blob_client.h"
 
 class BackupContainerAzureBlobStore final : public BackupContainerFileSystem,

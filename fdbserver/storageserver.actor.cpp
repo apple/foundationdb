@@ -6337,7 +6337,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					Version grvVersion = wait(tr.getRawReadVersion());
 					if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01)) {
 						// Test failed GRV request.
-						throw proxy_memory_limit_exceeded();
+						throw grv_proxy_memory_limit_exceeded();
 					}
 					fetchVersion = std::max(grvVersion, fetchVersion);
 				} catch (Error& e) {
@@ -7962,7 +7962,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		start = now();
 		state UpdateEagerReadInfo eager;
 		state FetchInjectionInfo fii;
-		state Reference<ILogSystem::IPeekCursor> cloneCursor2;
+		state Reference<ILogSystem::IPeekCursor> cloneCursor2 = cursor->cloneNoMore();
 		state Optional<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> cipherKeys;
 		state bool collectingCipherKeys = false;
 
@@ -7977,8 +7977,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			std::unordered_set<BlobCipherDetails> cipherDetails;
 
-			Reference<ILogSystem::IPeekCursor> cloneCursor1 = cursor->cloneNoMore();
-			cloneCursor2 = cursor->cloneNoMore();
+			Reference<ILogSystem::IPeekCursor> cloneCursor1 = cloneCursor2->cloneNoMore();
 
 			cloneCursor1->setProtocolVersion(data->logProtocol);
 
@@ -8065,6 +8064,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the reads
 				// only selectively
 				eager = UpdateEagerReadInfo();
+				cloneCursor2 = cursor->cloneNoMore();
 			}
 		}
 		data->eagerReadsLatencyHistogram->sampleSeconds(now() - start);

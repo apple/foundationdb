@@ -379,7 +379,9 @@
                   "log_server_min_free_space",
                   "log_server_min_free_space_ratio",
                   "storage_server_durability_lag",
-                  "storage_server_list_fetch_failed"
+                  "storage_server_list_fetch_failed",
+                  "blob_worker_lag",
+                  "blob_worker_missing"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -400,7 +402,9 @@
                   "log_server_min_free_space",
                   "log_server_min_free_space_ratio",
                   "storage_server_durability_lag",
-                  "storage_server_list_fetch_failed"
+                  "storage_server_list_fetch_failed",
+                  "blob_worker_lag",
+                  "blob_worker_missing"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -599,7 +603,7 @@
                "counter":0,
                "roughness":0.0
             },
-            "memory_errors":{ // measures number of proxy_memory_limit_exceeded errors
+            "memory_errors":{ // measures number of (commit/grv)_proxy_memory_limit_exceeded errors
                "hz":0.0,
                "counter":0,
                "roughness":0.0

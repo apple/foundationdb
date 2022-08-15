@@ -290,6 +290,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			u.eat("azure://"_sr);
 			auto address = u.eat("/"_sr);
 			if (address.endsWith(std::string(azure::storage_lite::constants::default_endpoint_suffix))) {
+				CODE_PROBE(true, "Azure backup url with standard azure storage account endpoint");
 				// <account>.<service>.core.windows.net/<resource_path>
 				auto endPoint = address.toString();
 				auto accountName = address.eat("."_sr).toString();
@@ -305,6 +306,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 						auto hostname = Hostname::parse(endpoint);
 						auto resolvedAddress = hostname.resolveBlocking();
 						if (resolvedAddress.present()) {
+							CODE_PROBE(true, "Azure backup url with hostname in the endpoint");
 							parsedAddress = resolvedAddress.get();
 						}
 					} catch (Error& e) {
