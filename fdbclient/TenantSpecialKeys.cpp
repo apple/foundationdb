@@ -31,3 +31,13 @@ const KeyRangeRef TenantRangeImpl<false>::submoduleRange = KeyRangeRef(""_sr, "\
 
 template <>
 const KeyRangeRef TenantRangeImpl<false>::mapSubRange = KeyRangeRef("tenant_map/"_sr, "tenant_map0"_sr);
+
+template <>
+bool TenantRangeImpl<true>::subRangeIntersects(KeyRangeRef subRange, KeyRangeRef range) {
+	return subRange.intersects(range);
+}
+
+template <>
+bool TenantRangeImpl<false>::subRangeIntersects(KeyRangeRef subRange, KeyRangeRef range) {
+	return subRange == mapSubRange;
+}

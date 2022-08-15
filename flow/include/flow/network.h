@@ -472,6 +472,8 @@ public:
 	// At present, implemented by Sim2Conn where we want to disable bits flip for connections between parent process and
 	// child process, also reduce latency for this kind of connection
 	virtual bool isStableConnection() const { throw unsupported_operation(); }
+
+	virtual boost::asio::ip::tcp::socket& getSocket() = 0;
 };
 
 class IListener {
@@ -520,6 +522,7 @@ public:
 		enDiskFailureInjector = 16,
 		enBitFlipper = 17,
 		enHistogram = 18,
+		enTokenCache = 19,
 		COUNT // Add new fields before this enumerator
 	};
 
@@ -576,7 +579,7 @@ public:
 	// Returns true if the current thread is the main thread
 
 	virtual void onMainThread(Promise<Void>&& signal, TaskPriority taskID) = 0;
-	// Executes signal.send(Void()) on a/the thread belonging to this network
+	// Executes signal.send(Void()) on a/the thread belonging to this network in FIFO order
 
 	virtual THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*),
 	                                  void* arg,
@@ -688,9 +691,10 @@ public:
 
 	// Make an outgoing connection to the given address.  May return an error or block indefinitely in case of
 	// connection problems!
-	virtual Future<Reference<IConnection>> connect(NetworkAddress toAddr, const std::string& host = "") = 0;
+	virtual Future<Reference<IConnection>> connect(NetworkAddress toAddr,
+	                                               boost::asio::ip::tcp::socket* existingSocket = nullptr) = 0;
 
-	virtual Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, const std::string& host = "") = 0;
+	virtual Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) = 0;
 
 	// Make an outgoing udp connection and connect to the passed address.
 	virtual Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) = 0;
@@ -730,6 +734,22 @@ public:
 
 	static INetworkConnections* net() {
 		return static_cast<INetworkConnections*>((void*)g_network->global(INetwork::enNetworkConnections));
+	}
+
+	// If a DNS name can be resolved to both and IPv4 and IPv6 addresses, we want IPv6 addresses when running the
+	// clusters on IPv6.
+	// This function takes a vector of addresses and return a random one, preferring IPv6 over IPv4.
+	static NetworkAddress pickOneAddress(const std::vector<NetworkAddress>& addresses) {
+		std::vector<NetworkAddress> ipV6Addresses;
+		for (const NetworkAddress& addr : addresses) {
+			if (addr.isV6()) {
+				ipV6Addresses.push_back(addr);
+			}
+		}
+		if (ipV6Addresses.size() > 0) {
+			return ipV6Addresses[deterministicRandom()->randomInt(0, ipV6Addresses.size())];
+		}
+		return addresses[deterministicRandom()->randomInt(0, addresses.size())];
 	}
 
 	void removeCachedDNS(const std::string& host, const std::string& service) { dnsCache.remove(host, service); }

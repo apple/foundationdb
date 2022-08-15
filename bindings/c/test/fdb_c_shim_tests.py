@@ -7,13 +7,18 @@ import subprocess
 import sys
 import os
 
-sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', '..', 'tests', 'TestRunner')]
+sys.path[:0] = [os.path.join(os.path.dirname(
+    __file__), '..', '..', '..', 'tests', 'TestRunner')]
+
+# fmt: off
 from binary_download import FdbBinaryDownloader, CURRENT_VERSION
 from local_cluster import LocalCluster, random_secret_string
+# fmt: on
 
 LAST_RELEASE_VERSION = "7.1.5"
 TESTER_STATS_INTERVAL_SEC = 5
 DEFAULT_TEST_FILE = "CApiCorrectnessMultiThr.toml"
+IMPLIBSO_ERROR_CODE = -6  # SIGABORT
 
 
 def version_from_str(ver_str):
@@ -55,7 +60,8 @@ class TestEnv(LocalCluster):
         self.set_env_var("LD_LIBRARY_PATH", self.downloader.lib_dir(version))
         client_lib = self.downloader.lib_path(version)
         assert client_lib.exists(), "{} does not exist".format(client_lib)
-        self.client_lib_external = self.tmp_dir.joinpath("libfdb_c_external.so")
+        self.client_lib_external = self.tmp_dir.joinpath(
+            "libfdb_c_external.so")
         shutil.copyfile(client_lib, self.client_lib_external)
 
     def __enter__(self):
@@ -91,6 +97,9 @@ class FdbCShimTests:
         assert self.unit_tests_bin.exists(), "{} does not exist".format(self.unit_tests_bin)
         self.api_tester_bin = Path(args.api_tester_bin).resolve()
         assert self.api_tester_bin.exists(), "{} does not exist".format(self.api_tests_bin)
+        self.shim_lib_tester_bin = Path(args.shim_lib_tester_bin).resolve()
+        assert self.shim_lib_tester_bin.exists(
+        ), "{} does not exist".format(self.shim_lib_tester_bin)
         self.api_test_dir = Path(args.api_test_dir).resolve()
         assert self.api_test_dir.exists(), "{} does not exist".format(self.api_test_dir)
         self.downloader = FdbBinaryDownloader(args.build_dir)
@@ -98,6 +107,7 @@ class FdbCShimTests:
         self.platform = platform.machine()
         if (self.platform == "x86_64"):
             self.downloader.download_old_binaries(LAST_RELEASE_VERSION)
+            self.downloader.download_old_binaries("7.0.0")
 
     def build_c_api_tester_args(self, test_env, test_file):
         test_file_path = self.api_test_dir.joinpath(test_file)
@@ -128,7 +138,8 @@ class FdbCShimTests:
         with TestEnv(self.build_dir, self.downloader, version) as test_env:
             cmd_args = self.build_c_api_tester_args(test_env, test_file)
             env_vars = os.environ.copy()
-            env_vars["LD_LIBRARY_PATH"] = self.downloader.lib_dir(version)
+            env_vars["FDB_LOCAL_CLIENT_LIBRARY_PATH"] = self.downloader.lib_path(
+                version)
             test_env.exec_client_command(cmd_args, env_vars)
 
     def run_c_unit_tests(self, version):
@@ -143,38 +154,118 @@ class FdbCShimTests:
                 test_env.client_lib_external
             ]
             env_vars = os.environ.copy()
-            env_vars["LD_LIBRARY_PATH"] = self.downloader.lib_dir(version)
+            env_vars["FDB_LOCAL_CLIENT_LIBRARY_PATH"] = self.downloader.lib_path(
+                version)
             test_env.exec_client_command(cmd_args, env_vars)
 
-    def test_invalid_c_client_lib_env_var(self, version):
+    def run_c_shim_lib_tester(
+        self,
+        version,
+        test_env,
+        api_version=None,
+        invalid_lib_path=False,
+        call_set_path=False,
+        set_env_path=False,
+        set_ld_lib_path=False,
+        use_external_lib=True,
+        expected_ret_code=0
+    ):
         print('-' * 80)
-        print("Test invalid FDB_C_CLIENT_LIBRARY_PATH value")
+        if api_version is None:
+            api_version = api_version_from_str(version)
+        test_flags = []
+        if invalid_lib_path:
+            test_flags.append("invalid_lib_path")
+        if call_set_path:
+            test_flags.append("call_set_path")
+        if set_ld_lib_path:
+            test_flags.append("set_ld_lib_path")
+        if use_external_lib:
+            test_flags.append("use_external_lib")
+        else:
+            test_flags.append("use_local_lib")
+        print("C Shim Tests - version: {}, API version: {}, {}".format(version,
+              api_version, ", ".join(test_flags)))
         print('-' * 80)
-        with TestEnv(self.build_dir, self.downloader, version) as test_env:
-            cmd_args = self.build_c_api_tester_args(test_env, DEFAULT_TEST_FILE)
-            env_vars = os.environ.copy()
-            env_vars["FDB_C_CLIENT_LIBRARY_PATH"] = "dummy"
-            test_env.exec_client_command(cmd_args, env_vars, 1)
-
-    def test_valid_c_client_lib_env_var(self, version):
-        print('-' * 80)
-        print("Test valid FDB_C_CLIENT_LIBRARY_PATH value")
-        print('-' * 80)
-        with TestEnv(self.build_dir, self.downloader, version) as test_env:
-            cmd_args = self.build_c_api_tester_args(test_env, DEFAULT_TEST_FILE)
-            env_vars = os.environ.copy()
-            env_vars["FDB_C_CLIENT_LIBRARY_PATH"] = self.downloader.lib_path(version)
-            test_env.exec_client_command(cmd_args, env_vars)
+        cmd_args = [
+            self.shim_lib_tester_bin,
+            "--cluster-file",
+            test_env.cluster_file,
+            "--api-version",
+            str(api_version),
+        ]
+        if call_set_path:
+            cmd_args = cmd_args + [
+                "--local-client-library",
+                ("dummy" if invalid_lib_path else self.downloader.lib_path(version))
+            ]
+        if use_external_lib:
+            cmd_args = cmd_args + [
+                "--disable-local-client",
+                "--external-client-library",
+                test_env.client_lib_external
+            ]
+        env_vars = os.environ.copy()
+        env_vars["LD_LIBRARY_PATH"] = (
+            self.downloader.lib_dir(version) if set_ld_lib_path else "")
+        if set_env_path:
+            env_vars["FDB_LOCAL_CLIENT_LIBRARY_PATH"] = (
+                "dummy" if invalid_lib_path else self.downloader.lib_path(version))
+        test_env.exec_client_command(cmd_args, env_vars, expected_ret_code)
 
     def run_tests(self):
+        # Test the API workload with the dev version
+        self.run_c_api_test(CURRENT_VERSION, DEFAULT_TEST_FILE)
+
+        # Run unit tests with the dev version
+        self.run_c_unit_tests(CURRENT_VERSION)
+
+        with TestEnv(self.build_dir, self.downloader, CURRENT_VERSION) as test_env:
+            # Test lookup of the client library over LD_LIBRARY_PATH
+            self.run_c_shim_lib_tester(
+                CURRENT_VERSION, test_env, set_ld_lib_path=True)
+
+            # Test setting the client library path over an API call
+            self.run_c_shim_lib_tester(
+                CURRENT_VERSION, test_env, call_set_path=True)
+
+            # Test setting the client library path over an environment variable
+            self.run_c_shim_lib_tester(
+                CURRENT_VERSION, test_env, set_env_path=True)
+
+            # Test using the loaded client library as the local client
+            self.run_c_shim_lib_tester(
+                CURRENT_VERSION, test_env, call_set_path=True, use_external_lib=False)
+
+            # Test setting an invalid client library path over an API call
+            self.run_c_shim_lib_tester(
+                CURRENT_VERSION, test_env, call_set_path=True, invalid_lib_path=True, expected_ret_code=IMPLIBSO_ERROR_CODE)
+
+            # Test setting an invalid client library path over an environment variable
+            self.run_c_shim_lib_tester(
+                CURRENT_VERSION, test_env, set_env_path=True, invalid_lib_path=True, expected_ret_code=IMPLIBSO_ERROR_CODE)
+
+            # Test calling a function that exists in the loaded library, but not for the selected API version
+            self.run_c_shim_lib_tester(
+                CURRENT_VERSION, test_env, call_set_path=True, api_version=700)
+
         # binary downloads are currently available only for x86_64
-        if (self.platform == "x86_64"):
+        if self.platform == "x86_64":
+            # Test the API workload with the release version
             self.run_c_api_test(LAST_RELEASE_VERSION, DEFAULT_TEST_FILE)
 
-        self.run_c_api_test(CURRENT_VERSION, DEFAULT_TEST_FILE)
-        self.run_c_unit_tests(CURRENT_VERSION)
-        self.test_invalid_c_client_lib_env_var(CURRENT_VERSION)
-        self.test_valid_c_client_lib_env_var(CURRENT_VERSION)
+            with TestEnv(self.build_dir, self.downloader, LAST_RELEASE_VERSION) as test_env:
+                # Test using the loaded client library as the local client
+                self.run_c_shim_lib_tester(
+                    LAST_RELEASE_VERSION, test_env, call_set_path=True, use_external_lib=False)
+
+                # Test the client library of the release version in combination with the dev API version
+                self.run_c_shim_lib_tester(
+                    LAST_RELEASE_VERSION, test_env, call_set_path=True, api_version=api_version_from_str(CURRENT_VERSION), expected_ret_code=1)
+
+                # Test calling a function that does not exist in the loaded library
+                self.run_c_shim_lib_tester(
+                    "7.0.0", test_env, call_set_path=True, api_version=700, expected_ret_code=IMPLIBSO_ERROR_CODE)
 
 
 if __name__ == "__main__":
@@ -194,12 +285,26 @@ if __name__ == "__main__":
         help="FDB build directory",
         required=True,
     )
-    parser.add_argument('--unit-tests-bin', type=str,
-                        help='Path to the fdb_c_shim_unit_tests executable.')
-    parser.add_argument('--api-tester-bin', type=str,
-                        help='Path to the fdb_c_shim_api_tester executable.')
-    parser.add_argument('--api-test-dir', type=str,
-                        help='Path to a directory with api test definitions.')
+    parser.add_argument(
+        '--unit-tests-bin',
+        type=str,
+        help='Path to the fdb_c_shim_unit_tests executable.',
+        required=True)
+    parser.add_argument(
+        '--api-tester-bin',
+        type=str,
+        help='Path to the fdb_c_shim_api_tester executable.',
+        required=True)
+    parser.add_argument(
+        '--shim-lib-tester-bin',
+        type=str,
+        help='Path to the fdb_c_shim_lib_tester executable.',
+        required=True)
+    parser.add_argument(
+        '--api-test-dir',
+        type=str,
+        help='Path to a directory with api test definitions.',
+        required=True)
     args = parser.parse_args()
     test = FdbCShimTests(args)
     test.run_tests()

@@ -114,7 +114,7 @@ public:
 
 	explicit Error(CodeType err) noexcept : err(err) {}
 
-	char const* what() noexcept { return native::fdb_get_error(err); }
+	char const* what() const noexcept { return native::fdb_get_error(err); }
 
 	explicit operator bool() const noexcept { return err != 0; }
 
@@ -719,6 +719,20 @@ inline Error selectApiVersionNothrow(int version) {
 inline void selectApiVersion(int version) {
 	if (auto err = selectApiVersionNothrow(version)) {
 		throwError(fmt::format("ERROR: fdb_select_api_version({}): ", version), err);
+	}
+}
+
+inline Error selectApiVersionCappedNothrow(int version) {
+	if (version < 720) {
+		Tenant::tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
+	}
+	return Error(
+	    native::fdb_select_api_version_impl(version, std::min(native::fdb_get_max_api_version(), FDB_API_VERSION)));
+}
+
+inline void selectApiVersionCapped(int version) {
+	if (auto err = selectApiVersionCappedNothrow(version)) {
+		throwError(fmt::format("ERROR: fdb_select_api_version_capped({}): ", version), err);
 	}
 }
 

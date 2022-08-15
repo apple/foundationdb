@@ -613,12 +613,16 @@ extern const KeyRangeRef blobGranuleSplitKeys;
 // \xff\x02/bgmerge/mergeGranuleId = [[BlobGranuleMergeState]]
 extern const KeyRangeRef blobGranuleMergeKeys;
 
+// \xff\x02/bgmergebounds/beginkey = [[BlobGranuleMergeBoundary]]
+extern const KeyRangeRef blobGranuleMergeBoundaryKeys;
+
 // \xff\x02/bgh/(beginKey,endKey,startVersion) = { granuleUID, [parentGranuleHistoryKeys] }
 extern const KeyRangeRef blobGranuleHistoryKeys;
 
 // \xff\x02/bgp/(start,end) = (version, force)
 extern const KeyRangeRef blobGranulePurgeKeys;
-extern const KeyRangeRef blobGranuleVersionKeys;
+// \xff\x02/bgpforce/(start) = {1|0} (key range map)
+extern const KeyRangeRef blobGranuleForcePurgedKeys;
 extern const KeyRef blobGranulePurgeChangeKey;
 
 const Key blobGranuleFileKeyFor(UID granuleID, Version fileVersion, uint8_t fileType);
@@ -663,6 +667,11 @@ const Value blobGranuleMergeValueFor(KeyRange mergeKeyRange,
 // FIXME: probably just define object type for this?
 std::tuple<KeyRange, Version, std::vector<UID>, std::vector<Key>, std::vector<Version>> decodeBlobGranuleMergeValue(
     ValueRef const& value);
+
+// BlobGranuleMergeBoundary.
+const Key blobGranuleMergeBoundaryKeyFor(const KeyRef& key);
+const Value blobGranuleMergeBoundaryValueFor(BlobGranuleMergeBoundary const& boundary);
+Standalone<BlobGranuleMergeBoundary> decodeBlobGranuleMergeBoundaryValue(const ValueRef& value);
 
 const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version);
 std::pair<KeyRange, Version> decodeBlobGranuleHistoryKey(KeyRef const& key);
