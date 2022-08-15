@@ -136,8 +136,8 @@ ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransacti
 // Using \xff\xff/worker_interfaces/ special key, get all worker interfaces.
 // A worker list will be returned from CC.
 // If verify, we will try to establish connections to all workers returned.
-// in particular, deserialize \xff\xff/worker_interfaces/<address>:=<ClientInterface> k-v pair and verify by a RPC call
-// then only return interfaces(kv pairs) we can talk to
+// In particular, it will deserialize \xff\xff/worker_interfaces/<address>:=<ClientInterface> kv pairs and issue RPC
+// calls, then only return interfaces(kv pairs) the client can talk to
 ACTOR Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
                                        std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
                                        bool verify = false);

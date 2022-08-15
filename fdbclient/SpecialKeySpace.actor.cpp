@@ -2755,7 +2755,9 @@ Future<Optional<std::string>> FailedLocalitiesRangeImpl::commit(ReadYourWritesTr
 	return excludeLocalityCommitActor(ryw, true);
 }
 
+// Defined in ReadYourWrites.actor.cpp
 ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
+// Defined in NativeAPI.actor.cpp
 ACTOR Future<bool> verifyInterfaceActor(Reference<FlowLock> connectLock, ClientWorkerInterface workerInterf);
 
 ACTOR static Future<RangeResult> workerInterfacesImplGetRangeActor(ReadYourWritesTransaction* ryw,
@@ -2765,7 +2767,7 @@ ACTOR static Future<RangeResult> workerInterfacesImplGetRangeActor(ReadYourWrite
 		return RangeResult();
 
 	state RangeResult interfs = wait(getWorkerInterfaces(ryw->getDatabase()->getConnectionRecord()));
-	// for options special keys, the boolean flag indicates if it's a SET operation
+	// for options' special keys, the boolean flag indicates if it's a SET operation
 	auto [verify, _] = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
 	    "worker_interfaces", "verify")];
 	state RangeResult result;
@@ -2787,7 +2789,7 @@ ACTOR static Future<RangeResult> workerInterfacesImplGetRangeActor(ReadYourWrite
 		// state int index;
 		for (int index = 0; index < interfs.size(); index++) {
 			if (verifyInterfs[index].get()) {
-				// if we can establish a connection, add it into the result
+				// if we can establish a connection, add the kv pair into the result
 				result.push_back_deep(result.arena(),
 				                      KeyValueRef(interfs[index].key.withPrefix(prefix), interfs[index].value));
 			}
