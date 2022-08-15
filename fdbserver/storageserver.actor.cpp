@@ -6452,7 +6452,13 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						    .detail("N", fetchVersion)
 						    .detail("E", data->version.get());
 					}
-					wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+
+					if (e.code() == error_code_transaction_too_old) {
+						// transaction_too_old will need longer delay, as PREVENT_FAST_SPIN_DELAY is 0.01s by default
+						wait(delayJittered(SERVER_KNOBS->FETCH_KEY_TRANSACTION_TOO_OLD_RETRY_TIME));
+					} else {
+						wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+					}
 					continue;
 				}
 				if (nfk < keys.end) {
