@@ -1869,6 +1869,7 @@ struct RenameTenantImpl {
 			updatedNewEntry.tenantState = TenantState::READY;
 			updatedNewEntry.renamePair.reset();
 			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->newName, updatedNewEntry);
+			ManagementClusterMetadata::tenantMetadata().tenantIdIndex.set(tr, self->tenantId, self->newName);
 		}
 
 		// We will remove the old entry from the management cluster
