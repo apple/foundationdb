@@ -1017,6 +1017,8 @@ static bool handleRangeIsAssign(Reference<BlobManagerData> bmData, RangeAssignme
 	}
 	ASSERT(count == 1);
 
+	bool forcePurging = bmData->isForcePurging(assignment.keyRange);
+
 	if (assignment.worker.present() && assignment.worker.get().isValid()) {
 		if (BM_DEBUG) {
 			fmt::print("BW {0} already chosen for seqno {1} in BM {2}\n",
@@ -1034,8 +1036,10 @@ static bool handleRangeIsAssign(Reference<BlobManagerData> bmData, RangeAssignme
 			// assignsInProgress
 			bmData->addActor.send(doRangeAssignment(bmData, assignment, workerId, bmData->epoch, seqNo));
 		} else {
-			bmData->assignsInProgress.insert(assignment.keyRange,
-			                                 doRangeAssignment(bmData, assignment, workerId, bmData->epoch, seqNo));
+			if (!forcePurging) {
+				bmData->assignsInProgress.insert(assignment.keyRange,
+				                                 doRangeAssignment(bmData, assignment, workerId, bmData->epoch, seqNo));
+			}
 			if (bmData->workerStats.count(workerId)) {
 				bmData->workerStats[workerId].numGranulesAssigned += 1;
 			}
@@ -1044,8 +1048,10 @@ static bool handleRangeIsAssign(Reference<BlobManagerData> bmData, RangeAssignme
 		// Ensure the key boundaries are updated before we pick a worker
 		bmData->workerAssignments.insert(assignment.keyRange, UID());
 		ASSERT(assignment.assign.get().type != AssignRequestType::Continue);
-		bmData->assignsInProgress.insert(assignment.keyRange,
-		                                 doRangeAssignment(bmData, assignment, Optional<UID>(), bmData->epoch, seqNo));
+		if (!forcePurging) {
+			bmData->assignsInProgress.insert(
+			    assignment.keyRange, doRangeAssignment(bmData, assignment, Optional<UID>(), bmData->epoch, seqNo));
+		}
 	}
 	return true;
 }
@@ -1094,12 +1100,6 @@ static bool handleRangeIsRevoke(Reference<BlobManagerData> bmData, RangeAssignme
 }
 
 static bool handleRangeAssign(Reference<BlobManagerData> bmData, RangeAssignment assignment) {
-	if (((assignment.isAssign && assignment.assign.get().type != AssignRequestType::Continue) ||
-	     (!assignment.isAssign && !assignment.revoke.get().dispose)) &&
-	    bmData->isForcePurging(assignment.keyRange)) {
-		return false;
-	}
-
 	int64_t seqNo = bmData->seqNo;
 	bmData->seqNo++;
 
