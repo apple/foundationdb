@@ -222,15 +222,11 @@ class GetRangeInfo(BaseInfo):
         self.key_range = bb.get_key_range()
 
 
-class CommitInfo(BaseInfo):
+class ErrorCommitInfo(BaseInfo):
     def __init__(self, bb, protocol_version, full_output=True):
         super().__init__(bb, protocol_version)
-        self.latency = bb.get_double()
-        self.num_mutations = bb.get_int()
-        self.commit_bytes = bb.get_int()
+        self.error_code = bb.get_int()
 
-        if protocol_version >= PROTOCOL_VERSION_6_3:
-            self.commit_version = bb.get_long()
         read_conflict_range = bb.get_key_range_list()
         if full_output:
             self.read_conflict_range = read_conflict_range
@@ -244,7 +240,7 @@ class CommitInfo(BaseInfo):
         self.read_snapshot_version = bb.get_long()
         if protocol_version >= PROTOCOL_VERSION_6_3:
             self.report_conflicting_keys = bb.get_bool()
-        
+
         if protocol_version >= PROTOCOL_VERSION_7_1:
             lock_aware = bb.get_bool()
             if bb.get_bool():
