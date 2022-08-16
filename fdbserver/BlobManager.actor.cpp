@@ -2192,7 +2192,7 @@ ACTOR Future<std::pair<UID, Version>> persistMergeGranulesStart(Reference<BlobMa
 // FIXME: why not just make parentGranuleRanges vector of N+1 keys?
 // Persists the merge being complete in the database by clearing the merge intent. Once this transaction commits, the
 // merge is considered completed.
-ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
+ACTOR Future<bool> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
                                             UID mergeGranuleID,
                                             KeyRange mergeRange,
                                             Version mergeVersion,
@@ -2237,12 +2237,14 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 				                      ChangeFeedStatus::CHANGE_FEED_DESTROY,
 				                      mergeRange));
 
+				// TODO could also delete history entry here
+
 				wait(tr->commit());
 
 				bmData->activeGranuleMerges.insert(mergeRange, invalidVersion);
 				bmData->activeGranuleMerges.coalesce(mergeRange.begin);
 
-				return Void();
+				return false;
 				// TODO: check this in split re-eval too once that is merged!!
 			}
 
@@ -2319,7 +2321,7 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 				           tr->getCommittedVersion());
 			}
 			CODE_PROBE(true, "Granule merge complete");
-			return Void();
+			return true;
 		} catch (Error& e) {
 			wait(tr->onError(e));
 		}
@@ -2349,8 +2351,8 @@ ACTOR Future<Void> finishMergeGranules(Reference<BlobManagerData> bmData,
 	}
 
 	// force granules to persist state up to mergeVersion
-	bool success = wait(forceGranuleFlush(bmData, mergeGranuleID, mergeRange, mergeVersion));
-	if (!success) {
+	bool successFlush = wait(forceGranuleFlush(bmData, mergeGranuleID, mergeRange, mergeVersion));
+	if (!successFlush) {
 		bmData->activeGranuleMerges.insert(mergeRange, invalidVersion);
 		bmData->activeGranuleMerges.coalesce(mergeRange.begin);
 		--bmData->stats.activeMerges;
@@ -2358,13 +2360,19 @@ ACTOR Future<Void> finishMergeGranules(Reference<BlobManagerData> bmData,
 	}
 
 	// update state and clear merge intent
-	wait(persistMergeGranulesDone(bmData,
+	bool successFinish = wait(persistMergeGranulesDone(bmData,
 	                              mergeGranuleID,
 	                              mergeRange,
 	                              mergeVersion,
 	                              parentGranuleIDs,
 	                              parentGranuleRanges,
 	                              parentGranuleStartVersions));
+	if (!successFinish) {
+		bmData->activeGranuleMerges.insert(mergeRange, invalidVersion);
+		bmData->activeGranuleMerges.coalesce(mergeRange.begin);
+		--bmData->stats.activeMerges;
+		return Void();
+	}
 
 	int64_t seqnoForEval = bmData->seqNo;
 
@@ -4102,9 +4110,9 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 		           self->epoch,
 		           granuleId.toString(),
 		           filesToDelete.size());
-		for (auto filename : filesToDelete) {
+		/*for (auto filename : filesToDelete) {
 			fmt::print(" - {}\n", filename.c_str());
-		}
+		}*/
 	}
 
 	// delete the files before the corresponding metadata.
@@ -4236,9 +4244,9 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
 		           self->epoch,
 		           granuleId.toString(),
 		           filesToDelete.size());
-		for (auto filename : filesToDelete) {
+		/*for (auto filename : filesToDelete) {
 			fmt::print(" - {0}\n", filename);
-		}
+		}*/
 	}
 
 	// TODO: the following comment relies on the assumption that BWs will not get requests to
