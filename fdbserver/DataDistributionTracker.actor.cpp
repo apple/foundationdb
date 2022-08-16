@@ -1193,7 +1193,6 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            FutureStream<GetTopKMetricsRequest> getTopKMetrics,
                                            PromiseStream<GetMetricsListRequest> getShardMetricsList,
                                            FutureStream<Promise<int64_t>> getAverageShardBytes,
-                                           PromiseStream<TenantCacheTenantCreated> tenantCreationSignal,
                                            Promise<Void> readyToStart,
                                            Reference<AsyncVar<bool>> anyZeroHealthyTeams,
                                            UID distributorId,
@@ -1215,6 +1214,11 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	try {
 		wait(trackInitialShards(&self, initData));
 		initData = Reference<InitialDataDistribution>();
+
+		state PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
+		if (self.ddTenantCache.present()) {
+			tenantCreationSignal = self.ddTenantCache.get()->tenantCreationSignal;
+		}
 
 		loop choose {
 			when(Promise<int64_t> req = waitNext(getAverageShardBytes)) {

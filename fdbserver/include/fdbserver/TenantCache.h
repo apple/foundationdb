@@ -49,7 +49,6 @@ private:
 	Database cx;
 	uint64_t generation;
 	TenantMapByPrefix tenantCache;
-	PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
 
 	// mark the start of a new sweep of the tenant cache
 	void startRefresh();
@@ -68,10 +67,11 @@ private:
 	Database dbcx() const { return cx; }
 
 public:
-	TenantCache(Database cx, UID distributorID, PromiseStream<TenantCacheTenantCreated> tenantCreationSignal)
-	  : distributorID(distributorID), cx(cx), tenantCreationSignal(tenantCreationSignal) {
+	TenantCache(Database cx, UID distributorID) : distributorID(distributorID), cx(cx) {
 		generation = deterministicRandom()->randomUInt32();
 	}
+
+	PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
 
 	Future<Void> build();
 

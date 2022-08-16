@@ -226,8 +226,7 @@ public:
 		wait(Future<Void>(Void()));
 
 		Database cx;
-		PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
-		TenantCache tenantCache(cx, UID(1, 0), tenantCreationSignal);
+		TenantCache tenantCache(cx, UID(1, 0));
 
 		constexpr static uint16_t tenantLimit = 64;
 
@@ -255,8 +254,7 @@ public:
 		wait(Future<Void>(Void()));
 
 		Database cx;
-		PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
-		TenantCache tenantCache(cx, UID(1, 0), tenantCreationSignal);
+		TenantCache tenantCache(cx, UID(1, 0));
 
 		constexpr static uint16_t tenantLimit = 64;
 

@@ -570,14 +570,13 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			state PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 			state PromiseStream<GetMetricsRequest> getShardMetrics;
 			state PromiseStream<GetTopKMetricsRequest> getTopKShardMetrics;
-			state PromiseStream<TenantCacheTenantCreated> tenantCreationSignal;
 			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 			state Promise<Void> readyToStart;
 
 			state Optional<Reference<TenantCache>> ddTenantCache;
 			if (ddIsTenantAware) {
-				ddTenantCache = makeReference<TenantCache>(cx, self->ddId, tenantCreationSignal);
+				ddTenantCache = makeReference<TenantCache>(cx, self->ddId);
 				wait(ddTenantCache.get()->build());
 			}
 
@@ -613,7 +612,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                                            getTopKShardMetrics.getFuture(),
 			                                                            getShardMetricsList,
 			                                                            getAverageShardBytes.getFuture(),
-			                                                            tenantCreationSignal,
 			                                                            readyToStart,
 			                                                            anyZeroHealthyTeams,
 			                                                            self->ddId,
