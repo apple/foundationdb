@@ -114,7 +114,7 @@ struct OpenDatabaseRequest {
 
 		template <typename Ar>
 		void serialize(Ar& ar) {
-			serializer(ar, samples);
+			serializer(ar, count, samples);
 		}
 
 		// Merges a set of Samples into *this
