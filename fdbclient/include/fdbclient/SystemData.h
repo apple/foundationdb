@@ -594,6 +594,8 @@ const Value blobManagerEpochValueFor(int64_t epoch);
 int64_t decodeBlobManagerEpochValue(ValueRef const& value);
 
 // blob granule keys
+extern const StringRef blobRangeActive;
+extern const StringRef blobRangeInactive;
 
 extern const uint8_t BG_FILE_TYPE_DELTA;
 extern const uint8_t BG_FILE_TYPE_SNAPSHOT;
