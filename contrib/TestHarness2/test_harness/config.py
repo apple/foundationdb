@@ -53,38 +53,19 @@ class ConfigValue:
             del kwargs['short_name']
         long_name = long_name.replace('_', '-')
         if short_name is None:
+            # line below is useful for debugging
+            # print('add_argument(\'--{}\', [{{{}}}])'.format(long_name, ', '.join(['\'{}\': \'{}\''.format(k, v)
+            #                                                                       for k, v in kwargs.items()])))
             parser.add_argument('--{}'.format(long_name), **kwargs)
         else:
+            # line below is useful for debugging
+            # print('add_argument(\'-{}\', \'--{}\', [{{{}}}])'.format(short_name, long_name,
+            #                                                          ', '.join(['\'{}\': \'{}\''.format(k, v)
+            #                                                                     for k, v in kwargs.items()])))
             parser.add_argument('-{}'.format(short_name), '--{}'.format(long_name), **kwargs)
 
     def get_value(self, args: argparse.Namespace) -> tuple[str, Any]:
         return self.name, args.__getattribute__(self.get_arg_name())
-
-
-configuration: List[ConfigValue] = [
-    ConfigValue('kill_seconds', default=60 * 30, help='Timeout for individual test', type=int),
-    ConfigValue('buggify_on_ratio', default=0.8, help='Probability that buggify is turned on', type=float),
-    ConfigValue('write_run_times', default=False, help='Write back probabilities after each test run',
-                action='store_true'),
-    ConfigValue('unseed_check_ratio', default=0.05, help='Probability for doing determinism check', type=float),
-    ConfigValue('test_dirs', default=['slow', 'fast', 'restarting', 'rare', 'noSim'], nargs='*'),
-    ConfigValue('trace_format', default='json', choices=['json', 'xml']),
-    ConfigValue('crash_on_error', long_name='no_crash', default=True, action='store_false'),
-    ConfigValue('max_warnings', default=10, short_name='W', type=int),
-    ConfigValue('max_errors', default=10, short_name='E', type=int),
-    ConfigValue('old_binaries_path', default=Path('/opt/joshua/global_data/oldBinaries'), type=Path),
-    ConfigValue('use_valgrind', default=False, action='store_true'),
-    ConfigValue('buggify', short_name='b', default=BuggifyOption('random'), type=BuggifyOption,
-                choices=['on', 'off', 'random']),
-    ConfigValue('pretty_print', short_name='P', default=False, action='store_true'),
-    ConfigValue('clean_up', default=True),
-    ConfigValue('run_dir', default=Path('tmp'), type=Path),
-    ConfigValue('joshua_seed', default=int(os.getenv('JOSHUA_SEED', str(random.randint(0, 2 ** 32 - 1)))), type=int),
-    ConfigValue('print_coverage', default=False, action='store_true'),
-    ConfigValue('binary', default=Path('bin') / ('fdbserver.exe' if os.name == 'nt' else 'fdbserver'),
-                help='Path to executable', type=Path),
-    ConfigValue('output_format', short_name='O', type=str, choices=['json', 'xml'], default='xml'),
-]
 
 
 class Config:
@@ -99,17 +80,18 @@ class Config:
         self.unseed_check_ratio: float = 0.05
         self.unseed_check_ratio_args = {'help': 'Probability for doing determinism check'}
         self.test_dirs: List[str] = ['slow', 'fast', 'restarting', 'rare', 'noSim']
-        self.test_dirs_args: dict = {'nargs': '*'}
+        self.test_dirs_args: dict = {'nargs': '*', 'help': 'test_directories to look for files in'}
         self.trace_format: str = 'json'
-        self.trace_format_args = {'choices': ['json', 'xml']}
+        self.trace_format_args = {'choices': ['json', 'xml'], 'help': 'What format fdb should produce'}
         self.crash_on_error: bool = True
-        self.crash_on_error_args = {'long_name': 'no_crash', 'action': 'store_false'}
+        self.crash_on_error_args = {'long_name': 'no_crash', 'action': 'store_false',
+                                    'help': 'Don\'t crash on first error'}
         self.max_warnings: int = 10
         self.max_warnings_args = {'short_name': 'W'}
         self.max_errors: int = 10
         self.max_errors_args = {'short_name': 'E'}
         self.old_binaries_path: Path = Path('/opt/joshua/global_data/oldBinaries')
-        self.old_binaries_path = {'help': 'Path to the directory containing the old fdb binaries'}
+        self.old_binaries_path_args = {'help': 'Path to the directory containing the old fdb binaries'}
         self.use_valgrind: bool = False
         self.use_valgrind_args = {'action': 'store_true'}
         self.buggify = BuggifyOption('random')
@@ -117,7 +99,7 @@ class Config:
         self.pretty_print: bool = False
         self.pretty_print_args = {'short_name': 'P', 'action': 'store_true'}
         self.clean_up = True
-        self.clean_up_args = {'action': 'store_false'}
+        self.clean_up_args = {'long_name': 'no_clean_up', 'action': 'store_false'}
         self.run_dir: Path = Path('tmp')
         self.joshua_seed: int = int(os.getenv('JOSHUA_SEED', str(random.randint(0, 2 ** 32 - 1))))
         self.joshua_seed_args = {'short_name': 's', 'help': 'A random seed'}
@@ -138,12 +120,22 @@ class Config:
             if attr.endswith('_args'):
                 name = attr[0:-len('_args')]
                 assert name in config_map
-                print('assert isinstance({}, dict) type={}, obj={}'.format(attr, type(obj), obj))
                 assert isinstance(obj, dict)
                 for k, v in obj.items():
+                    if k == 'action' and v in ['store_true', 'store_false']:
+                        # we can't combine type and certain actions
+                        del config_map[name].kwargs['type']
                     config_map[name].kwargs[k] = v
             else:
-                kwargs = {'type': type(obj), 'default': obj}
+                val_type = type(obj)
+                env_name = 'TH_{}'.format(attr.upper())
+                new_val = os.getenv(env_name)
+                try:
+                    if new_val is not None:
+                        obj = val_type(new_val)
+                except:
+                    pass
+                kwargs = {'type': val_type, 'default': obj}
                 config_map[attr] = ConfigValue(attr, **kwargs)
         return config_map
 

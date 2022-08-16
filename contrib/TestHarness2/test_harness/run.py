@@ -237,6 +237,8 @@ class OldBinaries:
         for ver, binary in self.binaries.items():
             if min_version <= ver <= max_version:
                 candidates.append(binary)
+        if len(candidates) == 0:
+            return config.binary
         return random.choice(candidates)
 
 
@@ -293,12 +295,13 @@ class TestRun:
         self.trace_format = config.trace_format
         # state for the run
         self.retryable_error: bool = False
-        self.summary: Summary | None = None
+        self.summary: Summary = Summary(binary)
         self.run_time: int = 0
+        self.success = self.run()
 
     def log_test_plan(self, out: SummaryTree):
         test_plan: SummaryTree = SummaryTree('TestPlan')
-        test_plan.attributes['TestUID'] = str(uuid)
+        test_plan.attributes['TestUID'] = str(self.uid)
         test_plan.attributes['RandomSeed'] = str(self.random_seed)
         test_plan.attributes['TestFile'] = str(self.test_file)
         test_plan.attributes['Buggify'] = '1' if self.buggify_enabled else '0'
@@ -344,6 +347,9 @@ class TestRun:
         resources.stop()
         resources.join()
         self.run_time = round(resources.time())
+        self.summary.runtime = resources.time()
+        self.summary.max_rss = resources.max_rss
+        self.summary.was_killed = did_kill
         self.summary = Summary(self.binary, temp_path, runtime=resources.time(), max_rss=resources.max_rss,
                                was_killed=did_kill, uid=self.uid, stats=self.stats, valgrind_out_file=valgrind_file,
                                expected_unseed=self.expected_unseed)
@@ -363,7 +369,7 @@ class TestRunner:
     def fetch_stats_from_fdb(self, cluster_file: str, app_dir: str):
         def fdb_fetcher(tests: OrderedDict[str, TestDescription]):
             from . import fdb
-            self.stat_fetcher = lambda x: fdb.FDBStatFetcher(cluster_file, app_dir, x)
+            return fdb.FDBStatFetcher(cluster_file, app_dir, tests)
 
         self.stat_fetcher = fdb_fetcher
 
@@ -385,6 +391,7 @@ class TestRunner:
 
     def run_tests(self, test_files: List[Path], seed: int, test_picker: TestPicker) -> bool:
         count = 0
+        result: bool = True
         for file in test_files:
             binary = self.binary_chooser.choose_binary(file)
             unseed_check = random.random() < config.unseed_check_ratio
@@ -393,24 +400,19 @@ class TestRunner:
                 self.backup_sim_dir(seed + count - 1)
             run = TestRun(binary, file.absolute(), seed + count, self.uid, restarting=count != 0,
                           stats=test_picker.dump_stats())
-            success = run.run()
+            run.summary.out.dump(sys.stdout)
+            result = result and run.success
             test_picker.add_time(file, run.run_time)
-            assert not success or run.summary is not None
-            if success and unseed_check and run.summary is not None and run.summary.unseed is not None:
+            if run.success and unseed_check and run.summary.unseed is not None:
                 self.restore_sim_dir(seed + count - 1)
                 run2 = TestRun(binary, file.absolute(), seed + count, self.uid, restarting=count != 0,
                                stats=test_picker.dump_stats(), expected_unseed=run.summary.unseed)
-                success = run2.run()
-                assert not success or run2.summary is not None
-                if success and run2.summary is not None:
-                    test_picker.add_time(file, run2.run_time)
-                    run2.summary.out.dump(sys.stdout)
-            if run.summary is not None:
-                run.summary.out.dump(sys.stdout)
-            if not success:
+                test_picker.add_time(file, run2.run_time)
+                run2.summary.out.dump(sys.stdout)
+            if not result:
                 return False
             count += 1
-        return True
+        return result
 
     def run(self, stats: str | None) -> bool:
         seed = random.randint(0, 2 ** 32 - 1)

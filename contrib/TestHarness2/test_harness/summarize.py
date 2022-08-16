@@ -81,6 +81,7 @@ class SummaryTree:
             self.to_json(out)
         else:
             self.to_xml(out)
+        out.write('\n')
 
 
 ParserCallback = Callable[[Dict[str, str]], Optional[str]]
@@ -330,7 +331,7 @@ class TraceFiles:
 
 
 class Summary:
-    def __init__(self, binary: Path, trace_dir: Path, runtime: float = 0, max_rss: int | None = None,
+    def __init__(self, binary: Path, runtime: float = 0, max_rss: int | None = None,
                  was_killed: bool = False, uid: uuid.UUID | None = None, expected_unseed: int | None = None,
                  exit_code: int = 0, valgrind_out_file: Path | None = None, stats: str | None = None):
         self.binary = binary
@@ -362,6 +363,7 @@ class Summary:
         self.handler = ParseHandler(self.out)
         self.register_handlers()
 
+    def summarize(self, trace_dir: Path):
         trace_files = TraceFiles(trace_dir)
         if len(trace_files) == 0:
             self.error = True
