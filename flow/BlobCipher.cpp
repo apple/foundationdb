@@ -38,8 +38,13 @@
 #include <memory>
 #include <string>
 #include <thread>
-#include <unistd.h>
 #include <utility>
+
+#ifndef _WIN32
+#include <unistd.h>
+#else
+#include <io.h>
+#endif
 
 #define BLOB_CIPHER_DEBUG false
 
