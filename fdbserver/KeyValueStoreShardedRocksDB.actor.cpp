@@ -164,24 +164,6 @@ std::string getShardMappingKey(KeyRef key, StringRef prefix) {
 	return prefix.toString() + key.toString();
 }
 
-std::vector<std::pair<KeyRange, std::string>> decodeShardMapping(const RangeResult& result, StringRef prefix) {
-	std::vector<std::pair<KeyRange, std::string>> shards;
-	KeyRef endKey;
-	std::string name;
-
-	for (const auto& kv : result) {
-		auto keyWithoutPrefix = kv.key.removePrefix(prefix);
-		shards.push_back({ KeyRange(KeyRangeRef(endKey, keyWithoutPrefix)), name });
-		TraceEvent(SevDebug, "DecodeShardMapping")
-		    .detail("BeginKey", endKey)
-		    .detail("EndKey", keyWithoutPrefix)
-		    .detail("Name", name);
-		endKey = keyWithoutPrefix;
-		name = kv.value.toString();
-	}
-	return shards;
-}
-
 void logRocksDBError(const rocksdb::Status& status, const std::string& method) {
 	auto level = status.IsTimedOut() ? SevWarn : SevError;
 	TraceEvent e(level, "ShardedRocksDBError");
@@ -645,47 +627,57 @@ public:
 					physicalShards[handle->GetName()] = std::make_shared<PhysicalShard>(db, handle->GetName(), handle);
 				}
 				columnFamilyMap[handle->GetID()] = handle;
-				TraceEvent(SevInfo, "ShardedRocksInitPhysicalShard", this->logId)
+				TraceEvent(SevVerbose, "ShardedRocksInitPhysicalShard", this->logId)
 				    .detail("PhysicalShard", handle->GetName());
 			}
 
 			KeyRange keyRange = prefixRange(shardMappingPrefix);
 			while (true) {
 				RangeResult metadata;
-				const int bytes = readRangeInDb(
-				    metadataShard.get(), keyRange, SERVER_KNOBS->ROCKSDB_READ_RANGE_ROW_LIMIT, UINT32_MAX, &metadata);
+				const int bytes = readRangeInDb(metadataShard.get(),
+				                                keyRange,
+				                                std::max(2, SERVER_KNOBS->ROCKSDB_READ_RANGE_ROW_LIMIT),
+				                                UINT16_MAX,
+				                                &metadata);
 				if (bytes <= 0) {
 					break;
 				}
 
-				std::vector<std::pair<KeyRange, std::string>> mapping =
-				    decodeShardMapping(metadata, shardMappingPrefix);
+				ASSERT_GT(metadata.size(), 0);
+				for (int i = 0; i < metadata.size() - 1; ++i) {
+					const std::string name = metadata[i].value.toString();
+					KeyRangeRef range(metadata[i].key.removePrefix(shardMappingPrefix),
+					                  metadata[i + 1].key.removePrefix(shardMappingPrefix));
+					TraceEvent(SevVerbose, "DecodeShardMapping").detail("Range", range).detail("Name", name);
 
-				Key end = keyRange.begin.removePrefix(shardMappingPrefix);
-				for (const auto& [range, name] : mapping) {
-					TraceEvent(SevInfo, "ShardedRocksLoadRange", this->logId)
-					    .detail("Range", range)
-					    .detail("PhysicalShard", name)
-					    .log();
-					end = range.end;
+					// Shard with an empty name is an empty shard.
 					if (name.empty()) {
 						continue;
 					}
+
 					auto it = physicalShards.find(name);
 					// Raise error if physical shard is missing.
 					if (it == physicalShards.end()) {
 						TraceEvent(SevError, "ShardedRocksDB").detail("MissingShard", name);
 						return rocksdb::Status::NotFound();
 					}
+
 					std::unique_ptr<DataShard> dataShard = std::make_unique<DataShard>(range, it->second.get());
 					dataShardMap.insert(range, dataShard.get());
 					it->second->dataShards[range.begin.toString()] = std::move(dataShard);
 					activePhysicalShardIds.emplace(name);
 				}
-				if (end == specialKeys.end) {
+
+				if (metadata.back().key.removePrefix(shardMappingPrefix) == specialKeys.end) {
 					break;
 				}
-				keyRange = KeyRangeRef(end.withPrefix(shardMappingPrefix), keyRange.end);
+
+				if (metadata.size() == 1 && metadata.back().value.toString().empty()) {
+					// Should not happen, just being paranoid.
+					keyRange = KeyRangeRef(keyAfter(metadata.back().key), keyRange.end);
+				} else {
+					keyRange = KeyRangeRef(metadata.back().key, keyRange.end);
+				}
 			}
 			// TODO: remove unused column families.
 		} else {
