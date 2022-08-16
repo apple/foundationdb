@@ -27,16 +27,14 @@
 #include "fdbserver/workloads/workloads.actor.h"
 
 #include "flow/Error.h"
+#include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
-TenantEntryCachePayload<int64_t> createPayload(const TenantName& name,
-                                               const TenantMapEntry& entry,
-                                               const TenantEntryCacheGen gen) {
+TenantEntryCachePayload<int64_t> createPayload(const TenantName& name, const TenantMapEntry& entry) {
 	TenantEntryCachePayload<int64_t> payload;
 	payload.name = name;
 	payload.entry = entry;
-	payload.gen = gen;
 	payload.payload = entry.id;
 
 	return payload;
@@ -81,7 +79,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 	ACTOR static Future<Void> testTenantNotFound(Database cx) {
 		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(cx, createPayload);
-		TraceEvent("TenantNotFound.Start").log();
+		TraceEvent("TenantNotFoundStart").log();
 
 		wait(cache->init());
 		// Ensure associated counter values gets updated
@@ -97,7 +95,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		// Ensure associated counter values gets updated
 		ASSERT_EQ(cache->numRefreshByMisses(), 2);
 
-		TraceEvent("TenantNotFound.End").log();
+		TraceEvent("TenantNotFoundEnd").log();
 		return Void();
 	}
 
@@ -108,7 +106,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(cx, createPayload);
 		state int nTenants = deterministicRandom()->randomInt(5, self->maxTenants);
 
-		TraceEvent("CreateTenantsAndLookup.Start").log();
+		TraceEvent("CreateTenantsAndLookupStart").log();
 
 		wait(cache->init());
 		// Ensure associated counter values gets updated
@@ -135,7 +133,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 		wait(compareContents(tenantList, cache));
 
-		TraceEvent("CreateTenantsAndLookup.End").log();
+		TraceEvent("CreateTenantsAndLookupEnd").log();
 		return Void();
 	}
 
@@ -145,7 +143,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 		ASSERT(!tenantList->empty());
 
-		TraceEvent("CacheReload.Start").log();
+		TraceEvent("CacheReloadStart").log();
 
 		wait(cache->init());
 		// Ensure associated counter values gets updated
@@ -154,7 +152,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 		wait(compareContents(tenantList, cache));
 
-		TraceEvent("CacheReload.End").log();
+		TraceEvent("CacheReloadEnd").log();
 		return Void();
 	}
 
@@ -166,7 +164,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 	ACTOR static Future<Void> testCacheRefresh(Database cx) {
 		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(cx, createPayload);
 
-		TraceEvent("TestCacheRefresh.Start").log();
+		TraceEvent("TestCacheRefreshStart").log();
 
 		wait(cache->init());
 		// Ensure associated counter values gets updated
@@ -180,7 +178,52 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		// InitRefresh + multiple timer based invocations
 		ASSERT_GE(cache->numCacheRefreshes(), 3);
 
-		TraceEvent("TestCacheRefresh.End").log();
+		TraceEvent("TestCacheRefreshEnd").log();
+		return Void();
+	}
+
+	ACTOR static Future<Void> tenantEntryRemove(Database cx,
+	                                            std::vector<std::pair<TenantName, TenantMapEntry>>* tenantList) {
+		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(
+		    cx, deterministicRandom()->randomUniqueID(), createPayload, TenantEntryCacheRefreshMode::NONE);
+
+		wait(cache->init());
+
+		ASSERT(!tenantList->empty());
+
+		// Remove an entry from the cache
+		state int idx = deterministicRandom()->randomInt(0, tenantList->size());
+		Optional<TenantEntryCachePayload<int64_t>> entry = wait(cache->getByName(tenantList->at(idx).first));
+		ASSERT(entry.present());
+
+		TraceEvent("TestTenantEntryRemoveStart")
+		    .detail("Id", tenantList->at(idx).second.id)
+		    .detail("Name", tenantList->at(idx).first)
+		    .detail("Prefix", tenantList->at(idx).second.prefix);
+
+		wait(TenantAPI::deleteTenant(cx.getReference(), tenantList->at(idx).first));
+
+		if (deterministicRandom()->coinflip()) {
+			wait(cache->removeEntryById(tenantList->at(idx).second.id));
+		} else if (deterministicRandom()->coinflip()) {
+			wait(cache->removeEntryByPrefix(tenantList->at(idx).second.prefix));
+		} else {
+			wait(cache->removeEntryByName(tenantList->at(idx).first));
+		}
+
+		state Optional<TenantEntryCachePayload<int64_t>> e = wait(cache->getById(tenantList->at(idx).second.id));
+		ASSERT(!e.present());
+		state Optional<TenantEntryCachePayload<int64_t>> e1 =
+		    wait(cache->getByPrefix(tenantList->at(idx).second.prefix));
+		ASSERT(!e1.present());
+		state Optional<TenantEntryCachePayload<int64_t>> e2 = wait(cache->getByName(tenantList->at(idx).first));
+		ASSERT(!e2.present());
+
+		// Ensure remove-entry is an idempotent operation
+		cache->removeEntryByName(tenantList->at(idx).first);
+		Optional<TenantEntryCachePayload<int64_t>> e3 = wait(cache->getById(tenantList->at(idx).second.id));
+		ASSERT(!e3.present());
+
 		return Void();
 	}
 
@@ -205,6 +248,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 		wait(testTenantNotFound(cx));
 		wait(testCreateTenantsAndLookup(cx, self, &tenantList));
+		wait(tenantEntryRemove(cx, &tenantList));
 		wait(testTenantCacheDefaultFunc(cx));
 		wait(testCacheRefresh(cx));
 

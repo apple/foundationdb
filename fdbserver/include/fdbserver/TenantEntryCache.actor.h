@@ -33,6 +33,7 @@
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/Knobs.h"
+#include "fdbrpc/TenantName.h"
 #include "flow/IndexedSet.h"
 
 #include <functional>
@@ -40,26 +41,22 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-#define INITIAL_CACHE_GEN 1
-
-using TenantEntryCacheGen = uint64_t;
 using TenantNameEntryPair = std::pair<TenantName, TenantMapEntry>;
 using TenantNameEntryPairVec = std::vector<TenantNameEntryPair>;
 
-enum class TenantEntryCacheRefreshReason { INIT = 1, PERIODIC_TASK = 2, CACHE_MISS = 3 };
+enum class TenantEntryCacheRefreshReason { INIT = 1, PERIODIC_TASK = 2, CACHE_MISS = 3, REMOVE_ENTRY = 4 };
+enum class TenantEntryCacheRefreshMode { PERIODIC_TASK = 1, NONE = 2 };
 
 template <class T>
 struct TenantEntryCachePayload {
 	TenantName name;
 	TenantMapEntry entry;
-	TenantEntryCacheGen gen;
 	// Custom client payload
 	T payload;
 };
 
 template <class T>
-using TenantEntryCachePayloadFunc =
-    std::function<TenantEntryCachePayload<T>(const TenantName&, const TenantMapEntry&, const TenantEntryCacheGen)>;
+using TenantEntryCachePayloadFunc = std::function<TenantEntryCachePayload<T>(const TenantName&, const TenantMapEntry&)>;
 
 // In-memory cache for TenantEntryMap objects. It supports three indices:
 // 1. Lookup by 'TenantId'
@@ -68,20 +65,18 @@ using TenantEntryCachePayloadFunc =
 //
 // TODO:
 // ----
-// The cache allows user to construct the 'cached object' by supplying a callback to allow constructing the cached
-// object. The cache implements a periodic refresh mechanism, polling underlying database for updates (add/remove
-// tenants), in future we might want to implement database range-watch to monitor such updates
+// The cache allows user to construct the 'cached object' by supplying a callback. The cache implements a periodic
+// refresh mechanism, polling underlying database for updates (add/remove tenants), in future we might want to implement
+// database range-watch to monitor such updates
 
 template <class T>
 class TenantEntryCache : public ReferenceCounted<TenantEntryCache<T>>, NonCopyable {
 private:
 	UID uid;
 	Database db;
-	TenantEntryCacheGen curGen;
 	TenantEntryCachePayloadFunc<T> createPayloadFunc;
+	TenantEntryCacheRefreshMode refreshMode;
 
-	AsyncTrigger sweepTrigger;
-	Future<Void> sweeper;
 	Future<Void> refresher;
 	Map<int64_t, TenantEntryCachePayload<T>> mapByTenantId;
 	Map<TenantName, TenantEntryCachePayload<T>> mapByTenantName;
@@ -91,7 +86,6 @@ private:
 	Counter misses;
 	Counter refreshByCacheInit;
 	Counter refreshByCacheMiss;
-	Counter numSweeps;
 	Counter numRefreshes;
 
 	ACTOR static Future<TenantNameEntryPairVec> getTenantList(Reference<ReadYourWritesTransaction> tr) {
@@ -119,27 +113,24 @@ private:
 	}
 
 	ACTOR static Future<Void> refreshImpl(TenantEntryCache<T>* cache, TenantEntryCacheRefreshReason reason) {
-		TraceEvent(SevDebug, "TenantEntryCache.RefreshStart", cache->id()).detail("Reason", static_cast<int>(reason));
+		TraceEvent(SevDebug, "TenantEntryCacheRefreshStart", cache->id()).detail("Reason", static_cast<int>(reason));
 
-		// Increment cache generation count
-		cache->incGen();
-		ASSERT(cache->getCurGen() < std::numeric_limits<uint64_t>::max());
-
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cache->getDatabase());
+		state Reference<ReadYourWritesTransaction> tr = cache->getDatabase()->createTransaction();
 		loop {
 			try {
 				state TenantNameEntryPairVec tenantList = wait(getTenantList(tr));
 
+				// Refresh cache entries reflecting the latest database state
+				cache->clear();
 				for (auto& tenant : tenantList) {
 					cache->put(tenant);
 				}
 
-				cache->triggerSweeper();
 				updateCacheRefreshMetrics(cache, reason);
 				break;
 			} catch (Error& e) {
 				if (e.code() != error_code_actor_cancelled) {
-					TraceEvent(SevInfo, "TenantEntryCache.RefreshError", cache->id())
+					TraceEvent(SevInfo, "TenantEntryCacheRefreshError", cache->id())
 					    .errorUnsuppressed(e)
 					    .suppressFor(1.0);
 				}
@@ -147,24 +138,9 @@ private:
 			}
 		}
 
-		TraceEvent(SevDebug, "TenantEntryCache.RefreshEnd", cache->id())
-		    .detail("Reason", static_cast<int>(reason))
-		    .detail("CurGen", cache->getCurGen());
+		TraceEvent(SevDebug, "TenantEntryCacheRefreshEnd", cache->id()).detail("Reason", static_cast<int>(reason));
 
 		return Void();
-	}
-
-	ACTOR static Future<Void> sweepImpl(TenantEntryCache<T>* cache) {
-		state Future<Void> trigger = cache->waitForSweepTrigger();
-
-		loop {
-			wait(trigger);
-			wait(delay(.001)); // Coalesce multiple triggers
-
-			trigger = cache->waitForSweepTrigger();
-			cache->sweep();
-			cache->numSweeps += 1;
-		}
 	}
 
 	ACTOR static Future<Optional<TenantEntryCachePayload<T>>> getByIdImpl(TenantEntryCache<T>* cache,
@@ -175,7 +151,7 @@ private:
 			return ret;
 		}
 
-		TraceEvent(SevInfo, "TenantEntryCache.GetByIdRefresh").detail("TenantId", tenantId);
+		TraceEvent(SevInfo, "TenantEntryCacheGetByIdRefresh").detail("TenantId", tenantId);
 
 		// Entry not found. Refresh cacheEntries by scanning underlying KeyRange.
 		// TODO: Cache will implement a "KeyRange" watch, monitoring notification when a new entry gets added or any
@@ -194,7 +170,7 @@ private:
 			return ret;
 		}
 
-		TraceEvent(SevInfo, "TenantEntryCache.GetByNameRefresh").detail("TenantName", name.contents().toString());
+		TraceEvent(SevInfo, "TenantEntryCacheGetByNameRefresh").detail("TenantName", name.contents().toString());
 
 		// Entry not found. Refresh cacheEntries by scanning underlying KeyRange.
 		// TODO: Cache will implement a "KeyRange" watch, monitoring notification when a new entry gets added or any
@@ -203,36 +179,6 @@ private:
 
 		cache->misses += 1;
 		return cache->lookupByName(name);
-	}
-
-	void incGen() { curGen++; }
-	Future<Void> waitForSweepTrigger() { return sweepTrigger.onTrigger(); }
-	void triggerSweeper() { sweepTrigger.trigger(); }
-
-	void sweep() {
-		TraceEvent(SevDebug, "TenantEntryCache.SweepStart", uid).log();
-
-		// Sweep cache and clean up entries older than current generation
-		TenantNameEntryPairVec entriesToRemove;
-		for (auto& e : mapByTenantId) {
-			ASSERT(e.value.gen <= curGen);
-
-			if (e.value.gen != curGen) {
-				entriesToRemove.emplace_back(std::make_pair(e.value.name, e.value.entry));
-			}
-		}
-
-		for (auto& r : entriesToRemove) {
-			TraceEvent(SevInfo, "TenantEntryCache.Remove", uid)
-			    .detail("TenantName", r.first.contents())
-			    .detail("TenantID", r.second.id)
-			    .detail("TenantPrefix", r.second.prefix);
-
-			mapByTenantId.erase(r.second.id);
-			mapByTenantName.erase(r.first);
-		}
-
-		TraceEvent(SevInfo, "TenantEntryCache.SweepDone", uid).detail("Removed", entriesToRemove.size());
 	}
 
 	Optional<TenantEntryCachePayload<T>> lookupById(int64_t tenantId) {
@@ -257,96 +203,163 @@ private:
 
 	Future<Void> refresh(TenantEntryCacheRefreshReason reason) { return refreshImpl(this, reason); }
 
-	static TenantEntryCachePayload<Void> defaultCreatePayload(const TenantName& name,
-	                                                          const TenantMapEntry& entry,
-	                                                          const TenantEntryCacheGen gen) {
+	static TenantEntryCachePayload<Void> defaultCreatePayload(const TenantName& name, const TenantMapEntry& entry) {
 		TenantEntryCachePayload<Void> payload;
 		payload.name = name;
 		payload.entry = entry;
-		payload.gen = gen;
 
 		return payload;
 	}
 
+	Future<Void> removeEntryInt(Optional<int64_t> tenantId,
+	                            Optional<KeyRef> tenantPrefix,
+	                            Optional<TenantName> tenantName,
+	                            bool refreshCache) {
+		typename Map<int64_t, TenantEntryCachePayload<T>>::iterator itrId;
+		typename Map<TenantName, TenantEntryCachePayload<T>>::iterator itrName;
+
+		if (tenantId.present() || tenantPrefix.present()) {
+			// Ensure either tenantId OR tenantPrefix is valid (but not both)
+			ASSERT(tenantId.present() ^ tenantPrefix.present());
+			ASSERT(!tenantName.present());
+
+			int64_t tId = tenantId.present() ? tenantId.get() : TenantMapEntry::prefixToId(tenantPrefix.get());
+			TraceEvent("TenantEntryCacheRemoveEntry").detail("Id", tId);
+			itrId = mapByTenantId.find(tId);
+			if (itrId == mapByTenantId.end()) {
+				return Void();
+			}
+			// Ensure byId and byName cache are in-sync
+			itrName = mapByTenantName.find(itrId->value.name);
+			ASSERT(itrName != mapByTenantName.end());
+		} else if (tenantName.present()) {
+			ASSERT(!tenantId.present() && !tenantPrefix.present());
+
+			TraceEvent("TenantEntryCacheRemoveEntry").detail("Name", tenantName.get());
+			itrName = mapByTenantName.find(tenantName.get());
+			if (itrName == mapByTenantName.end()) {
+				return Void();
+			}
+			// Ensure byId and byName cache are in-sync
+			itrId = mapByTenantId.find(itrName->value.entry.id);
+			ASSERT(itrId != mapByTenantId.end());
+		} else {
+			// Invalid input, one of: tenantId, tenantPrefix or tenantName needs to be valid.
+			throw operation_failed();
+		}
+
+		ASSERT(itrId != mapByTenantId.end() && itrName != mapByTenantName.end());
+
+		TraceEvent("TenantEntryCacheRemoveEntry")
+		    .detail("Id", itrId->key)
+		    .detail("Prefix", itrId->value.entry.prefix)
+		    .detail("Name", itrName->key);
+
+		mapByTenantId.erase(itrId);
+		mapByTenantName.erase(itrName);
+
+		if (refreshCache) {
+			return refreshImpl(this, TenantEntryCacheRefreshReason::REMOVE_ENTRY);
+		}
+
+		return Void();
+	}
+
 public:
 	TenantEntryCache(Database db)
-	  : uid(deterministicRandom()->randomUniqueID()), db(db), curGen(INITIAL_CACHE_GEN),
-	    createPayloadFunc(defaultCreatePayload), metrics("TenantEntryCacheMetrics", uid.toString()),
+	  : uid(deterministicRandom()->randomUniqueID()), db(db), createPayloadFunc(defaultCreatePayload),
+	    refreshMode(TenantEntryCacheRefreshMode::PERIODIC_TASK), metrics("TenantEntryCacheMetrics", uid.toString()),
 	    hits("TenantEntryCacheHits", metrics), misses("TenantEntryCacheMisses", metrics),
 	    refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
-	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics), numSweeps("TenantEntryCacheNumSweeps", metrics),
+	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics),
 	    numRefreshes("TenantEntryCacheNumRefreshes", metrics) {
-		TraceEvent("TenantEntryCache.CreatedDefaultFunc", uid).detail("Gen", curGen);
+		TraceEvent("TenantEntryCacheCreatedDefaultFunc", uid);
 	}
 
 	TenantEntryCache(Database db, TenantEntryCachePayloadFunc<T> fn)
-	  : uid(deterministicRandom()->randomUniqueID()), db(db), curGen(INITIAL_CACHE_GEN), createPayloadFunc(fn),
-	    metrics("TenantEntryCacheMetrics", uid.toString()), hits("TenantEntryCacheHits", metrics),
-	    misses("TenantEntryCacheMisses", metrics), refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
-	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics), numSweeps("TenantEntryCacheNumSweeps", metrics),
+	  : uid(deterministicRandom()->randomUniqueID()), db(db), createPayloadFunc(fn),
+	    refreshMode(TenantEntryCacheRefreshMode::PERIODIC_TASK), metrics("TenantEntryCacheMetrics", uid.toString()),
+	    hits("TenantEntryCacheHits", metrics), misses("TenantEntryCacheMisses", metrics),
+	    refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
+	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics),
 	    numRefreshes("TenantEntryCacheNumRefreshes", metrics) {
-		TraceEvent("TenantEntryCache.Created", uid).detail("Gen", curGen);
+		TraceEvent("TenantEntryCacheCreated", uid);
 	}
 
 	TenantEntryCache(Database db, UID id, TenantEntryCachePayloadFunc<T> fn)
-	  : uid(id), db(db), curGen(INITIAL_CACHE_GEN), createPayloadFunc(fn),
+	  : uid(id), db(db), createPayloadFunc(fn), refreshMode(TenantEntryCacheRefreshMode::PERIODIC_TASK),
 	    metrics("TenantEntryCacheMetrics", uid.toString()), hits("TenantEntryCacheHits", metrics),
 	    misses("TenantEntryCacheMisses", metrics), refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
-	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics), numSweeps("TenantEntryCacheNumSweeps", metrics),
+	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics),
 	    numRefreshes("TenantEntryCacheNumRefreshes", metrics) {
-		TraceEvent("TenantEntryCache.Created", uid).detail("Gen", curGen);
+		TraceEvent("TenantEntryCacheCreated", uid);
+	}
+
+	TenantEntryCache(Database db, UID id, TenantEntryCachePayloadFunc<T> fn, TenantEntryCacheRefreshMode mode)
+	  : uid(id), db(db), createPayloadFunc(fn), refreshMode(mode), metrics("TenantEntryCacheMetrics", uid.toString()),
+	    hits("TenantEntryCacheHits", metrics), misses("TenantEntryCacheMisses", metrics),
+	    refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
+	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics),
+	    numRefreshes("TenantEntryCacheNumRefreshes", metrics) {
+		TraceEvent("TenantEntryCacheCreated", uid);
 	}
 
 	Future<Void> init() {
-		TraceEvent(SevInfo, "TenantEntryCache.Init", uid).log();
-
-		// Launch sweeper to cleanup stale entries.
-		sweeper = sweepImpl(this);
+		TraceEvent(SevInfo, "TenantEntryCacheInit", uid).log();
 
 		Future<Void> f = refreshImpl(this, TenantEntryCacheRefreshReason::INIT);
 
 		// Launch reaper task to periodically refresh cache by scanning database KeyRange
 		TenantEntryCacheRefreshReason reason = TenantEntryCacheRefreshReason::PERIODIC_TASK;
-		refresher = recurringAsync([&, reason]() { return refresh(reason); },
-		                           SERVER_KNOBS->TENANT_CACHE_LIST_REFRESH_INTERVAL, /* interval */
-		                           true, /* absoluteIntervalDelay */
-		                           SERVER_KNOBS->TENANT_CACHE_LIST_REFRESH_INTERVAL, /* intialDelay */
-		                           TaskPriority::Worker);
+		if (refreshMode == TenantEntryCacheRefreshMode::PERIODIC_TASK) {
+			refresher = recurringAsync([&, reason]() { return refresh(reason); },
+			                           SERVER_KNOBS->TENANT_CACHE_LIST_REFRESH_INTERVAL, /* interval */
+			                           true, /* absoluteIntervalDelay */
+			                           SERVER_KNOBS->TENANT_CACHE_LIST_REFRESH_INTERVAL, /* intialDelay */
+			                           TaskPriority::Worker);
+		}
 
 		return f;
 	}
 
 	Database getDatabase() const { return db; }
 	UID id() const { return uid; }
-	TenantEntryCacheGen getCurGen() const { return curGen; }
 
 	void clear() {
 		mapByTenantId.clear();
 		mapByTenantName.clear();
 	}
 
+	Future<Void> removeEntryById(int64_t tenantId, bool refreshCache = false) {
+		return removeEntryInt(tenantId, Optional<KeyRef>(), Optional<TenantName>(), refreshCache);
+	}
+	Future<Void> removeEntryByPrefix(KeyRef tenantPrefix, bool refreshCache = false) {
+		return removeEntryInt(Optional<int64_t>(), tenantPrefix, Optional<TenantName>(), refreshCache);
+	}
+	Future<Void> removeEntryByName(TenantName tenantName, bool refreshCache = false) {
+		return removeEntryInt(Optional<int64_t>(), Optional<KeyRef>(), tenantName, refreshCache);
+	}
+
 	void put(const TenantNameEntryPair& pair) {
-		TenantEntryCachePayload<T> payload = createPayloadFunc(pair.first, pair.second, curGen);
+		TenantEntryCachePayload<T> payload = createPayloadFunc(pair.first, pair.second);
 		if (mapByTenantId.find(pair.second.id) == mapByTenantId.end()) {
 			ASSERT(mapByTenantName.find(pair.first) == mapByTenantName.end());
 
 			mapByTenantId[pair.second.id] = payload;
 			mapByTenantName[pair.first] = payload;
 
-			TraceEvent(SevInfo, "TenantEntryCache.NewTenant", uid)
+			TraceEvent(SevInfo, "TenantEntryCacheNewTenant", uid)
 			    .detail("TenantName", pair.first.contents().toString())
 			    .detail("TenantID", pair.second.id)
-			    .detail("TenantPrefix", pair.second.prefix)
-			    .detail("Generation", curGen);
+			    .detail("TenantPrefix", pair.second.prefix);
 		} else {
 			mapByTenantId[pair.second.id] = payload;
 			mapByTenantName[pair.first] = payload;
 
-			TraceEvent(SevInfo, "TenantEntryCache.UpdateTenant", uid)
+			TraceEvent(SevInfo, "TenantEntryCacheUpdateTenant", uid)
 			    .detail("TenantName", pair.first.contents().toString())
 			    .detail("TenantID", pair.second.id)
-			    .detail("TenantPrefix", pair.second.prefix)
-			    .detail("Generation", curGen);
+			    .detail("TenantPrefix", pair.second.prefix);
 		}
 	}
 
