@@ -411,18 +411,9 @@ int64_t getMaxShardSize(double dbSizeEstimate);
 #endif
 class DDTeamCollection;
 
-// send request/signal to TeamCollection through interface
-// call synchronous method from components outside DDTeamCollection
-struct ITeamCollection {
-	struct Interface {
-		PromiseStream<GetTeamRequest> getTeam;
-	};
-	virtual ~ITeamCollection() {}
-};
-
 // send request/signal to DDTracker through interface
 // call synchronous method from components outside DDTracker
-struct IDDTracker {
+struct IDDShardTracker {
 	struct Interface {
 		Promise<Void> readyToStart;
 		PromiseStream<GetMetricsRequest> getShardMetrics;
@@ -432,7 +423,7 @@ struct IDDTracker {
 		PromiseStream<Promise<int64_t>> getAverageShardBytes; // FIXME(xwang): change it to a synchronous call
 	};
 	virtual double getAverageShardBytes() = 0;
-	virtual ~IDDTracker() = 0;
+	virtual ~IDDShardTracker() = 0;
 };
 
 // send request/signal to DDQueue through interface
@@ -453,7 +444,7 @@ struct DDContext : public ReferenceCounted<DDContext> {
 	// private:
 	std::shared_ptr<DDEnabledState>
 	    ddEnabledState; // Note: don't operate directly because it's shared with snapshot server
-	IDDTracker::Interface trackerInterface;
+	IDDShardTracker::Interface trackerInterface;
 	IDDQueue::Interface queueInterface;
 	// public:
 	UID ddId;

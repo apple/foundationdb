@@ -173,6 +173,15 @@ FDB_DECLARE_BOOLEAN_PARAM(IsRedundantTeam);
 FDB_DECLARE_BOOLEAN_PARAM(IsBadTeam);
 FDB_DECLARE_BOOLEAN_PARAM(WaitWiggle);
 
+// send request/signal to DDTeamCollection through interface
+// call synchronous method from components outside DDTeamCollection
+struct IDDTeamCollection {
+	struct Interface {
+		PromiseStream<GetTeamRequest> getTeam;
+	};
+	virtual ~IDDTeamCollection() {}
+};
+
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	friend class DDTeamCollectionImpl;
 	friend class DDTeamCollectionUnitTest;
