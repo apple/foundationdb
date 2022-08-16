@@ -1305,6 +1305,20 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				// Divide new ranges up into equal chunks by using SS byte sample
 				for (KeyRangeRef range : rangesToAdd) {
 					TraceEvent("ClientBlobRangeAdded", bmData->id).detail("Range", range);
+					// add client range as known "granule" until we determine initial split, in case a purge or
+					// unblobbify comes in before we finish splitting
+
+					// TODO can remove validation eventually
+					auto r = bmData->workerAssignments.intersectingRanges(range);
+					for (auto& it : r) {
+						ASSERT(it.cvalue() == UID());
+					}
+					bmData->workerAssignments.insert(range, UID());
+					fmt::print("Adding new client blob range [{0} - {1}) with dummy value\n",
+					           range.begin.printable(),
+					           range.end.printable());
+
+					// start initial split for range
 					splitFutures.push_back(splitRange(bmData, range, false, true));
 				}
 
@@ -3864,7 +3878,9 @@ ACTOR Future<Void> blobWorkerRecruiter(
 
 	// wait until existing blob workers have been acknowledged so we don't break recruitment invariants
 	loop choose {
-		when(wait(self->startRecruiting.onTrigger())) { break; }
+		when(wait(self->startRecruiting.onTrigger())) {
+			break;
+		}
 	}
 
 	loop {
@@ -3901,7 +3917,9 @@ ACTOR Future<Void> blobWorkerRecruiter(
 				}
 
 				// when the CC changes, so does the request stream so we need to restart recruiting here
-				when(wait(recruitBlobWorker->onChange())) { fCandidateWorker = Future<RecruitBlobWorkerReply>(); }
+				when(wait(recruitBlobWorker->onChange())) {
+					fCandidateWorker = Future<RecruitBlobWorkerReply>();
+				}
 
 				// signal used to restart the loop and try to recruit the next blob worker
 				when(wait(self->restartRecruiting.onTrigger())) {}
@@ -4362,6 +4380,26 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		tr.reset();
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	}
+
+	// if range isn't in known blob ranges, do nothing after writing force purge range to database
+	bool anyKnownRanges = false;
+	auto knownRanges = self->knownBlobRanges.intersectingRanges(range);
+	for (auto& it : knownRanges) {
+		if (it.cvalue()) {
+			anyKnownRanges = true;
+			break;
+		}
+	}
+
+	if (!anyKnownRanges) {
+		CODE_PROBE(true, "skipping purge because not in known blob ranges");
+		TraceEvent("PurgeGranulesSkippingUnknownRange", self->id)
+		    .detail("Epoch", self->epoch)
+		    .detail("Range", range)
+		    .detail("PurgeVersion", purgeVersion)
+		    .detail("Force", force);
+		return Void();
 	}
 
 	// wait for all active splits and merges in the range to come to a stop, so no races with purging
