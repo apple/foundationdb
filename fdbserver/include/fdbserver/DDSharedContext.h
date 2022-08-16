@@ -56,7 +56,7 @@ public:
 
 	bool isTrackerCancelled() const { return trackerCancelled; }
 
-	decltype(auto) usableRegions() { return configuration.usableRegions; }
+	decltype(auto) usableRegions() const { return configuration.usableRegions; }
 
 	bool isDDEnabled() const { return ddEnabledState->isDDEnabled(); };
 
