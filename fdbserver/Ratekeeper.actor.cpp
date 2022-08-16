@@ -246,7 +246,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> monitorBlobWorkers(Ratekeeper* self) {
+	ACTOR static Future<Void> monitorBlobWorkers(Ratekeeper* self, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		state std::vector<BlobWorkerInterface> blobWorkers;
 		state int workerFetchCount = 0;
 		state double lastStartTime = 0;
@@ -276,6 +276,13 @@ public:
 			startTime = now();
 
 			if (blobWorkers.size() > 0) {
+				state Future<Optional<BlobManagerBlockedReply>> blockedAssignments;
+				if (dbInfo->get().blobManager.present()) {
+					blockedAssignments =
+					    timeout(brokenPromiseToNever(dbInfo->get().blobManager.get().blobManagerBlockedReq.getReply(
+					                BlobManagerBlockedRequest())),
+					            SERVER_KNOBS->BLOB_WORKER_TIMEOUT);
+				}
 				state std::vector<Future<Optional<MinBlobVersionReply>>> aliveVersions;
 				aliveVersions.reserve(blobWorkers.size());
 				for (auto& it : blobWorkers) {
@@ -283,6 +290,12 @@ public:
 					req.grv = grv;
 					aliveVersions.push_back(timeout(brokenPromiseToNever(it.minBlobVersionRequest.getReply(req)),
 					                                SERVER_KNOBS->BLOB_WORKER_TIMEOUT));
+				}
+				if (blockedAssignments.isValid()) {
+					wait(success(blockedAssignments));
+					if (blockedAssignments.get().present() && blockedAssignments.get().get().blockedAssignments == 0) {
+						self->unblockedAssignmentTime = now();
+					}
 				}
 				wait(waitForAll(aliveVersions));
 				Version minVer = grv;
@@ -300,7 +313,8 @@ public:
 						break;
 					}
 				}
-				if (minVer > 0 && blobWorkers.size() > 0) {
+				if (minVer > 0 && blobWorkers.size() > 0 &&
+				    now() - self->unblockedAssignmentTime < SERVER_KNOBS->BW_MAX_BLOCKED_INTERVAL) {
 					while (!self->blobWorkerVersionHistory.empty() &&
 					       minVer < self->blobWorkerVersionHistory.back().second) {
 						self->blobWorkerVersionHistory.pop_back();
@@ -316,6 +330,7 @@ public:
 					lastLoggedTime = now();
 					TraceEvent("RkMinBlobWorkerVersion")
 					    .detail("BWVersion", minVer)
+					    .detail("MaxVer", self->maxVersion)
 					    .detail("MinId", blobWorkers[minIdx].id());
 				}
 			}
@@ -344,7 +359,7 @@ public:
 
 		self.addActor.send(self.monitorThrottlingChanges());
 		if (SERVER_KNOBS->BW_THROTTLING_ENABLED) {
-			self.addActor.send(self.monitorBlobWorkers());
+			self.addActor.send(self.monitorBlobWorkers(dbInfo));
 		}
 		self.addActor.send(self.refreshStorageServerCommitCosts());
 
@@ -553,8 +568,8 @@ Future<Void> Ratekeeper::monitorThrottlingChanges() {
 	return tagThrottler->monitorThrottlingChanges();
 }
 
-Future<Void> Ratekeeper::monitorBlobWorkers() {
-	return RatekeeperImpl::monitorBlobWorkers(this);
+Future<Void> Ratekeeper::monitorBlobWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	return RatekeeperImpl::monitorBlobWorkers(this, dbInfo);
 }
 
 Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
@@ -584,7 +599,7 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
                 SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH,
                 SERVER_KNOBS->TARGET_BW_LAG_BATCH),
-    maxVersion(0), blobWorkerTime(now()) {
+    maxVersion(0), blobWorkerTime(now()), unblockedAssignmentTime(now()) {
 	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
 		tagThrottler = std::make_unique<GlobalTagThrottler>(db, id);
 	} else {
@@ -959,6 +974,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		}
 	} else {
 		blobWorkerTime = now();
+		unblockedAssignmentTime = now();
 	}
 
 	healthMetrics.worstStorageQueue = worstStorageQueueStorageServer;

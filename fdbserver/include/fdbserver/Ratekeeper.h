@@ -184,6 +184,7 @@ class Ratekeeper {
 	Deque<double> actualTpsHistory;
 	Version maxVersion;
 	double blobWorkerTime;
+	double unblockedAssignmentTime;
 	std::map<Version, Ratekeeper::VersionInfo> version_transactions;
 	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
 	Optional<Key> remoteDC;
@@ -203,7 +204,7 @@ class Ratekeeper {
 	void tryAutoThrottleTag(TransactionTag, double rate, double busyness, TagThrottledReason);
 	void tryAutoThrottleTag(StorageQueueInfo&, int64_t storageQueue, int64_t storageDurabilityLag);
 	Future<Void> monitorThrottlingChanges();
-	Future<Void> monitorBlobWorkers();
+	Future<Void> monitorBlobWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 
 public:
 	static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
