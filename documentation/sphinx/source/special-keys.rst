@@ -22,6 +22,8 @@ Each special key that existed before api version 630 is its own module. These ar
 #. ``\xff\xff/cluster_file_path`` - See :ref:`cluster file client access <cluster-file-client-access>`
 #. ``\xff\xff/status/json`` - See :doc:`Machine-readable status <mr-status>`
 
+#. ``\xff\xff/worker_interfaces`` - key as the worker's network address and value as the serialized ClientWorkerInterface, not transactional
+
 Prior to api version 630, it was also possible to read a range starting at ``\xff\xff/worker_interfaces``. This is mostly an implementation detail of fdbcli,
 but it's available in api version 630 as a module with prefix ``\xff\xff/worker_interfaces/``.
 
@@ -210,6 +212,7 @@ that process, and wait for necessary data to be moved away.
 #. ``\xff\xff/management/options/failed_locality/force`` Read/write. Setting this key disables safety checks for writes to ``\xff\xff/management/failed_locality/<locality>``. Setting this key only has an effect in the current transaction and is not persisted on commit.
 #. ``\xff\xff/management/tenant/map/<tenant>`` Read/write. Setting a key in this range to any value will result in a tenant being created with name ``<tenant>``. Clearing a key in this range will delete the tenant with name ``<tenant>``. Reading all or a portion of this range will return the list of tenants currently present in the cluster, excluding any changes in this transaction. Values read in this range will be JSON objects containing the metadata for the associated tenants.
 #. ``\xff\xff/management/tenant/rename/<tenant>`` Read/write. Setting a key in this range to an unused tenant name will result in the tenant with the name ``<tenant>`` to be renamed to the value provided. If the rename operation is a transaction retried in a loop, it is possible for the rename to be applied twice, in which case ``tenant_not_found`` or ``tenant_already_exists`` errors may be returned. This can be avoided by checking for the tenant's existence first.
+#. ``\xff\xff/management/options/worker_interfaces/verify`` Read/write. Setting this key will add a verification phase in reading ``\xff\xff/worker_interfaces``. Setting this key only has an effect in the current transaction and is not persisted on commit. Try to establish connections with every worker from the list returned by Cluster Controller and only return those workers that the client can connect to. This option is now only used in fdbcli commands ``kill``, ``suspend`` and ``expensive_data_check`` to populate the worker list.
 
 An exclusion is syntactically either an ip address (e.g. ``127.0.0.1``), or
 an ip address and port (e.g. ``127.0.0.1:4500``) or any locality (e.g ``locality_dcid:primary-satellite`` or

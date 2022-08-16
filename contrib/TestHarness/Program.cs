@@ -302,6 +302,7 @@ namespace SummarizeTest
                         uniqueFileSet.Add(file.Substring(0, file.LastIndexOf("-"))); // all restarting tests end with -1.txt or -2.txt
                     }
                     uniqueFiles = uniqueFileSet.ToArray();
+                    Array.Sort(uniqueFiles);
                     testFile = random.Choice(uniqueFiles);
                     // The on-disk format changed in 4.0.0, and 5.x can't load files from 3.x.
                     string oldBinaryVersionLowerBound = "4.0.0";
@@ -334,8 +335,9 @@ namespace SummarizeTest
                         // thus, by definition, if "until_" appears, we do not want to run with the current binary version
                         oldBinaries = oldBinaries.Concat(currentBinary);
                     }
-                    List<string> oldBinariesList = oldBinaries.ToList<string>();
-                    if (oldBinariesList.Count == 0) {
+                    string[] oldBinariesList = oldBinaries.ToArray<string>();
+                    Array.Sort(oldBinariesList);
+                    if (oldBinariesList.Count() == 0) {
                         // In theory, restarting tests are named to have at least one old binary version to run
                         // But if none of the provided old binaries fall in the range, we just skip the test
                         Console.WriteLine("No available old binary version from {0} to {1}", oldBinaryVersionLowerBound, oldBinaryVersionUpperBound);
@@ -347,6 +349,7 @@ namespace SummarizeTest
                 else
                 {
                     uniqueFiles = Directory.GetFiles(testDir);
+                    Array.Sort(uniqueFiles);
                     testFile = random.Choice(uniqueFiles);
                 }
             }
@@ -718,7 +721,7 @@ namespace SummarizeTest
                         process.Refresh();
                         if (process.HasExited)
                             return;
-                        long mem = process.PrivateMemorySize64;
+                        long mem = process.PagedMemorySize64;
                         MaxMem = Math.Max(MaxMem, mem);
                         //Console.WriteLine(string.Format("Process used {0} bytes", MaxMem));
                         Thread.Sleep(1000);

@@ -1279,32 +1279,6 @@ void DatabaseContext::registerSpecialKeysImpl(SpecialKeySpace::MODULE module,
 ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
 ACTOR Future<Optional<Value>> getJSON(Database db);
 
-struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeReadImpl {
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
-	                             KeyRangeRef kr,
-	                             GetRangeLimits limitsHint) const override {
-		if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
-			Key prefix = Key(getKeyRange().begin);
-			return map(getWorkerInterfaces(ryw->getDatabase()->getConnectionRecord()),
-			           [prefix = prefix, kr = KeyRange(kr)](const RangeResult& in) {
-				           RangeResult result;
-				           for (const auto& [k_, v] : in) {
-					           auto k = k_.withPrefix(prefix);
-					           if (kr.contains(k))
-						           result.push_back_deep(result.arena(), KeyValueRef(k, v));
-				           }
-
-				           std::sort(result.begin(), result.end(), KeyValueRef::OrderByKey{});
-				           return result;
-			           });
-		} else {
-			return RangeResult();
-		}
-	}
-
-	explicit WorkerInterfacesSpecialKeyImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
-};
-
 struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
@@ -3535,8 +3509,8 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 
 ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanContext spanContext) {
 	state Span span("NAPI:waitForCommittedVersion"_loc, spanContext);
-	try {
-		loop {
+	loop {
+		try {
 			choose {
 				when(wait(cx->onProxiesChanged())) {}
 				when(GetReadVersionReply v = wait(basicLoadBalance(
@@ -3562,10 +3536,16 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, Span
 					wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, cx->taskID));
 				}
 			}
+		} catch (Error& e) {
+			if (e.code() == error_code_batch_transaction_throttled ||
+			    e.code() == error_code_grv_proxy_memory_limit_exceeded) {
+				// GRV Proxy returns an error
+				wait(delayJittered(CLIENT_KNOBS->GRV_ERROR_RETRY_DELAY));
+			} else {
+				TraceEvent(SevError, "WaitForCommittedVersionError").error(e);
+				throw;
+			}
 		}
-	} catch (Error& e) {
-		TraceEvent(SevError, "WaitForCommittedVersionError").error(e);
-		throw;
 	}
 }
 
@@ -6774,9 +6754,12 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 				}
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_broken_promise && e.code() != error_code_batch_transaction_throttled)
+			if (e.code() != error_code_broken_promise && e.code() != error_code_batch_transaction_throttled &&
+			    e.code() != error_code_grv_proxy_memory_limit_exceeded)
 				TraceEvent(SevError, "GetConsistentReadVersionError").error(e);
-			if (e.code() == error_code_batch_transaction_throttled && !cx->apiVersionAtLeast(630)) {
+			if ((e.code() == error_code_batch_transaction_throttled ||
+			     e.code() == error_code_grv_proxy_memory_limit_exceeded) &&
+			    !cx->apiVersionAtLeast(630)) {
 				wait(delayJittered(5.0));
 			} else {
 				throw;
