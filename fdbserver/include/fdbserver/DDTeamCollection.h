@@ -176,9 +176,7 @@ FDB_DECLARE_BOOLEAN_PARAM(WaitWiggle);
 // send request/signal to DDTeamCollection through interface
 // call synchronous method from components outside DDTeamCollection
 struct IDDTeamCollection {
-	struct Interface {
-		PromiseStream<GetTeamRequest> getTeam;
-	};
+	PromiseStream<GetTeamRequest> getTeam;
 	virtual ~IDDTeamCollection() {}
 };
 

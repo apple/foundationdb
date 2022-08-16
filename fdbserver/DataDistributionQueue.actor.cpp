@@ -29,6 +29,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/DDSharedContext.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
@@ -516,7 +517,7 @@ ACTOR Future<Void> dataDistributionRelocator(struct DDQueue* self,
                                              Future<Void> prevCleanup,
                                              const DDEnabledState* ddEnabledState);
 
-struct DDQueue {
+struct DDQueue : public IDDRelocationQueue {
 	struct DDDataMove {
 		DDDataMove() = default;
 		explicit DDDataMove(UID id) : id(id) {}
@@ -1312,6 +1313,8 @@ struct DDQueue {
 		};
 		return recurring(f, SERVER_KNOBS->DD_QUEUE_COUNTER_REFRESH_INTERVAL);
 	}
+
+	int getUnhealthyRelocationCount() override { return unhealthyRelocations; }
 };
 
 ACTOR Future<Void> cancelDataMove(struct DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState) {
@@ -2489,7 +2492,9 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
 				when(wait(waitForAll(ddQueueFutures))) {}
-				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) { r.send(self.unhealthyRelocations); }
+				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) {
+					r.send(self.getUnhealthyRelocationCount());
+				}
 			}
 		}
 	} catch (Error& e) {
@@ -2501,6 +2506,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 		throw e;
 	}
 }
+
+ACTOR Future<Void> dataDistributionQueue(Reference<DDSharedContext> context, Database cx);
 
 TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
 	state double duration = 2.5 * SERVER_KNOBS->DD_QUEUE_COUNTER_REFRESH_INTERVAL;

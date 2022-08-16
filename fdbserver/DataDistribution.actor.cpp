@@ -49,7 +49,7 @@
 #include "flow/serialize.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
-
+#include "fdbserver/DDSharedContext.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int priority) {

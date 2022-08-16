@@ -405,105 +405,6 @@ int64_t getMaxShardSize(double dbSizeEstimate);
 #pragma endregion
 #endif
 
-/////////////////////////////// DD Components //////////////////////////////////////
-#ifndef __INTEL_COMPILER
-#pragma region DD Components
-#endif
-class DDTeamCollection;
-
-// send request/signal to DDTracker through interface
-// call synchronous method from components outside DDTracker
-struct IDDShardTracker {
-	struct Interface {
-		Promise<Void> readyToStart;
-		PromiseStream<GetMetricsRequest> getShardMetrics;
-		PromiseStream<GetTopKMetricsRequest> getTopKMetrics;
-		PromiseStream<GetMetricsListRequest> getShardMetricsList;
-		PromiseStream<KeyRange> restartShardTracker;
-		PromiseStream<Promise<int64_t>> getAverageShardBytes; // FIXME(xwang): change it to a synchronous call
-	};
-	virtual double getAverageShardBytes() = 0;
-	virtual ~IDDShardTracker() = 0;
-};
-
-// send request/signal to DDQueue through interface
-// call synchronous method from components outside DDQueue
-struct IDDQueue {
-	struct Interface {
-		PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
-		PromiseStream<Promise<int>> getUnhealthyRelocationCount; // FIXME(xwang): change it to a synchronous call
-	};
-	virtual int getUnhealthyRelocationCount() = 0;
-	virtual ~IDDQueue() = 0;
-};
-
-// The common info shared by all DD components. Normally the DD components should share the reference to the same
-// context.
-struct DDContext : public ReferenceCounted<DDContext> {
-	// FIXME(xwang) mark fields privates
-	// private:
-	std::shared_ptr<DDEnabledState>
-	    ddEnabledState; // Note: don't operate directly because it's shared with snapshot server
-	IDDShardTracker::Interface trackerInterface;
-	IDDQueue::Interface queueInterface;
-	// public:
-	UID ddId;
-	MoveKeysLock lock;
-	bool trackerCancelled = false;
-	DatabaseConfiguration configuration;
-
-	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
-	Reference<AsyncVar<bool>> processingUnhealthy, processingWiggle;
-
-	DDContext() = default;
-
-	DDContext(UID id, std::shared_ptr<DDEnabledState> ddEnabledState)
-	  : ddEnabledState(std::move(ddEnabledState)), ddId(id),
-	    shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure), processingUnhealthy(new AsyncVar<bool>(false)),
-	    processingWiggle(new AsyncVar<bool>(false)) {}
-
-	void proposeRelocation(const RelocateShard& rs) const { return queueInterface.relocationProducer.send(rs); }
-
-	void requestRestartShardTracker(KeyRange keys) const { return trackerInterface.restartShardTracker.send(keys); }
-};
-
-// provide common behavior to manage shared state. Beware of expose too much details
-class DDComponent {
-protected:
-	Reference<DDContext> context;
-
-public:
-	DDComponent() : context(makeReference<DDContext>()) {}
-	explicit DDComponent(Reference<DDContext> context) : context(context) {}
-
-	UID id() const { return context->ddId; }
-
-	void markTrackerCancelled() { context->trackerCancelled = true; }
-
-	bool isTrackerCancelled() const { return context->trackerCancelled; }
-
-	decltype(auto) usableRegions() { return context->configuration.usableRegions; }
-
-	bool isDDEnabled() const { return context->ddEnabledState->isDDEnabled(); };
-
-	std::shared_ptr<DDEnabledState> getDDEnableState() { return context->ddEnabledState; }
-
-	Future<Standalone<VectorRef<DDMetricsRef>>> getDDMetricsList(const GetMetricsListRequest& req);
-
-	Reference<DDContext> rawContext() { return context; }
-};
-
-ACTOR Future<Void> dataDistributionTracker(Reference<DDContext> context,
-                                           Reference<InitialDataDistribution> initData,
-                                           Database cx,
-                                           KeyRangeMap<ShardTrackedData>* shards);
-
-ACTOR Future<Void> dataDistributionQueue(Reference<DDContext> context, Database cx);
-
-#ifndef __INTEL_COMPILER
-#pragma endregion
-#endif
-
 // FIXME(xwang): Delete Old DD Actors once the refactoring is done
 /////////////////////////////// Old DD Actors //////////////////////////////////////
 #ifndef __INTEL_COMPILER
@@ -552,6 +453,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 #ifndef __INTEL_COMPILER
 #pragma region Perpetual Storage Wiggle
 #endif
+class DDTeamCollection;
 
 struct StorageWiggleMetrics {
 	constexpr static FileIdentifier file_identifier = 4728961;

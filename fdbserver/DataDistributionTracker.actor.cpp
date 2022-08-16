@@ -21,6 +21,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/DDSharedContext.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/DatabaseContext.h"
 #include "flow/ActorCollection.h"
@@ -68,7 +69,7 @@ ACTOR Future<Void> updateMaxShardSize(Reference<AsyncVar<int64_t>> dbSizeEstimat
 	}
 }
 
-struct DataDistributionTracker {
+struct DataDistributionTracker : public IDDShardTracker {
 	Database cx;
 	UID distributorId;
 	KeyRangeMap<ShardTrackedData>* shards;
@@ -130,11 +131,13 @@ struct DataDistributionTracker {
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), readyToStart(readyToStart),
 	    anyZeroHealthyTeams(anyZeroHealthyTeams), trackerCancelled(trackerCancelled) {}
 
-	~DataDistributionTracker() {
+	~DataDistributionTracker() override {
 		*trackerCancelled = true;
 		// Cancel all actors so they aren't waiting on sizeChanged broken promise
 		sizeChanges.clear(false);
 	}
+
+	double getAverageShardBytes() override { return maxShardSize->get().get() / 2.0; }
 };
 
 void restartShardTrackers(DataDistributionTracker* self,
@@ -1025,9 +1028,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 		initData = Reference<InitialDataDistribution>();
 
 		loop choose {
-			when(Promise<int64_t> req = waitNext(getAverageShardBytes)) {
-				req.send(self.maxShardSize->get().get() / 2);
-			}
+			when(Promise<int64_t> req = waitNext(getAverageShardBytes)) { req.send(self.getAverageShardBytes()); }
 			when(wait(loggingTrigger)) {
 				TraceEvent("DDTrackerStats", self.distributorId)
 				    .detail("Shards", self.shards->size())
@@ -1056,3 +1057,9 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 		throw e;
 	}
 }
+
+// Not used yet
+ACTOR Future<Void> dataDistributionTracker(Reference<DDSharedContext> context,
+                                           Reference<InitialDataDistribution> initData,
+                                           Database cx,
+                                           KeyRangeMap<ShardTrackedData>* shards);
