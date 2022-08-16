@@ -143,7 +143,16 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 			} catch (Error& e) {
 				// Ignore being unable to parse lastKey as it may be a dummy key.
 			}
+
 			if (t2.size() > 0 && t.getInt(0) != t2.getInt(0)) {
+				if (t.size() > BGW_TUPLE_KEY_SIZE - SERVER_KNOBS->BG_KEY_TUPLE_TRUNCATE_OFFSET) {
+					fmt::print("K={0}, E={1}, LK={2}. {3} != {4}\n",
+					           k.printable(),
+					           e.printable(),
+					           lastKey.printable(),
+					           t.getInt(0),
+					           t2.getInt(0));
+				}
 				ASSERT(t.size() <= BGW_TUPLE_KEY_SIZE - SERVER_KNOBS->BG_KEY_TUPLE_TRUNCATE_OFFSET);
 			}
 		}
