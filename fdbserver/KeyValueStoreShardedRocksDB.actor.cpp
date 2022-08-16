@@ -171,13 +171,11 @@ std::vector<std::pair<KeyRange, std::string>> decodeShardMapping(const RangeResu
 
 	for (const auto& kv : result) {
 		auto keyWithoutPrefix = kv.key.removePrefix(prefix);
-		if (name.size() > 0) {
-			shards.push_back({ KeyRange(KeyRangeRef(endKey, keyWithoutPrefix)), name });
-			TraceEvent(SevDebug, "DecodeShardMapping")
-			    .detail("BeginKey", endKey)
-			    .detail("EndKey", keyWithoutPrefix)
-			    .detail("Name", name);
-		}
+		shards.push_back({ KeyRange(KeyRangeRef(endKey, keyWithoutPrefix)), name });
+		TraceEvent(SevDebug, "DecodeShardMapping")
+		    .detail("BeginKey", endKey)
+		    .detail("EndKey", keyWithoutPrefix)
+		    .detail("Name", name);
 		endKey = keyWithoutPrefix;
 		name = kv.value.toString();
 	}
@@ -652,8 +650,11 @@ public:
 			KeyRange keyRange = prefixRange(shardMappingPrefix);
 			while (true) {
 				RangeResult metadata;
-				// metadata.clear();
-				const int bytes = readRangeInDb(metadataShard.get(), keyRange, UINT16_MAX, UINT16_MAX, &metadata);
+				const int bytes = readRangeInDb(metadataShard.get(),
+				                                keyRange,
+				                                SERVER_KNOBS->ROCKSDB_READ_RANGE_ROW_LIMIT,
+				                                SERVER_KNOBS->ROCKSDB_READ_RANGE_ROW_LIMIT,
+				                                &metadata);
 				if (bytes <= 0) {
 					break;
 				}
@@ -665,7 +666,12 @@ public:
 				for (const auto& [range, name] : mapping) {
 					TraceEvent(SevInfo, "ShardedRocksLoadRange", this->logId)
 					    .detail("Range", range)
-					    .detail("PhysicalShard", name);
+					    .detail("PhysicalShard", name)
+					    .log();
+					end = range.end;
+					if (name.empty()) {
+						continue;
+					}
 					auto it = physicalShards.find(name);
 					// Raise error if physical shard is missing.
 					if (it == physicalShards.end()) {
@@ -676,7 +682,6 @@ public:
 					dataShardMap.insert(range, dataShard.get());
 					it->second->dataShards[range.begin.toString()] = std::move(dataShard);
 					activePhysicalShardIds.emplace(name);
-					end = range.end;
 				}
 				if (end == specialKeys.end) {
 					break;

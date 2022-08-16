@@ -1,3 +1,6 @@
+[[knobs]]
+ rocksdb_read_range_row_limit = 100
+
 [[test]]
  testTitle = 'UnitTests'
  useDB = false
@@ -6,4 +9,4 @@
      [[test.workload]]
      testName = 'UnitTests'
      maxTestCases = 10
-     testsMatching = 'noSim/ShardedRocksDB/'
+     testsMatching = 'noSim/ShardedRocksDB/Metadata'
