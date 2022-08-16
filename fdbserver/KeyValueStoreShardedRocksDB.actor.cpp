@@ -637,6 +637,7 @@ public:
 		if (foundMetadata) {
 			TraceEvent(SevInfo, "ShardedRocksInitLoadPhysicalShards", this->logId)
 			    .detail("PhysicalShardCount", handles.size());
+
 			for (auto handle : handles) {
 				if (handle->GetName() == "kvs-metadata") {
 					metadataShard = std::make_shared<PhysicalShard>(db, "kvs-metadata", handle);
@@ -647,14 +648,12 @@ public:
 				TraceEvent(SevInfo, "ShardedRocksInitPhysicalShard", this->logId)
 				    .detail("PhysicalShard", handle->GetName());
 			}
+
 			KeyRange keyRange = prefixRange(shardMappingPrefix);
 			while (true) {
 				RangeResult metadata;
-				const int bytes = readRangeInDb(metadataShard.get(),
-				                                keyRange,
-				                                SERVER_KNOBS->ROCKSDB_READ_RANGE_ROW_LIMIT,
-				                                SERVER_KNOBS->ROCKSDB_READ_RANGE_ROW_LIMIT,
-				                                &metadata);
+				const int bytes = readRangeInDb(
+				    metadataShard.get(), keyRange, SERVER_KNOBS->ROCKSDB_READ_RANGE_ROW_LIMIT, UINT32_MAX, &metadata);
 				if (bytes <= 0) {
 					break;
 				}

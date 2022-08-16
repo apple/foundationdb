@@ -1,6 +1,3 @@
-[[knobs]]
- rocksdb_read_range_row_limit = 100
-
 [[test]]
  testTitle = 'UnitTests'
  useDB = false

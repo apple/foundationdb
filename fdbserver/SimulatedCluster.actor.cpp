@@ -1427,6 +1427,10 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		                 storage_engine_type) != testConfig.storageEngineExcludeTypes.end()) {
 			storage_engine_type = deterministicRandom()->randomInt(0, 6);
 		}
+		if (std::find(testConfig.storageEngineExcludeTypes.begin(), testConfig.storageEngineExcludeTypes.end(), 5) ==
+		    testConfig.storageEngineExcludeTypes.end()) {
+			storage_engine_type = 5;
+		}
 	}
 
 	switch (storage_engine_type) {
