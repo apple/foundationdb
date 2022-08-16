@@ -2361,12 +2361,12 @@ ACTOR Future<Void> finishMergeGranules(Reference<BlobManagerData> bmData,
 
 	// update state and clear merge intent
 	bool successFinish = wait(persistMergeGranulesDone(bmData,
-	                              mergeGranuleID,
-	                              mergeRange,
-	                              mergeVersion,
-	                              parentGranuleIDs,
-	                              parentGranuleRanges,
-	                              parentGranuleStartVersions));
+	                                                   mergeGranuleID,
+	                                                   mergeRange,
+	                                                   mergeVersion,
+	                                                   parentGranuleIDs,
+	                                                   parentGranuleRanges,
+	                                                   parentGranuleStartVersions));
 	if (!successFinish) {
 		bmData->activeGranuleMerges.insert(mergeRange, invalidVersion);
 		bmData->activeGranuleMerges.coalesce(mergeRange.begin);
@@ -4111,7 +4111,7 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 		           granuleId.toString(),
 		           filesToDelete.size());
 		/*for (auto filename : filesToDelete) {
-			fmt::print(" - {}\n", filename.c_str());
+		    fmt::print(" - {}\n", filename.c_str());
 		}*/
 	}
 
@@ -4245,7 +4245,7 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self,
 		           granuleId.toString(),
 		           filesToDelete.size());
 		/*for (auto filename : filesToDelete) {
-			fmt::print(" - {0}\n", filename);
+		    fmt::print(" - {0}\n", filename);
 		}*/
 	}
 
