@@ -84,6 +84,7 @@ datadir = {datadir}/$ID
 logdir = {logdir}
 {bg_knob_line}
 {tls_config}
+{authz_public_key_config}
 # logsize = 10MiB
 # maxlogssize = 100MiB
 # machine-id =
@@ -113,6 +114,8 @@ logdir = {logdir}
         redundancy: str = "single",
         tls_config: TLSConfig = None,
         mkcert_binary: str = "",
+        custom_config: dict = {},
+        public_key_json_str: str = "",
     ):
         self.basedir = Path(basedir)
         self.etc = self.basedir.joinpath("etc")
@@ -153,6 +156,7 @@ logdir = {logdir}
         self.coordinators = set()
         self.active_servers = set(self.server_ports.keys())
         self.tls_config = tls_config
+        self.public_key_json_file = None
         self.mkcert_binary = Path(mkcert_binary)
         self.server_cert_file = self.cert.joinpath("server_cert.pem")
         self.client_cert_file = self.cert.joinpath("client_cert.pem")
@@ -167,6 +171,13 @@ logdir = {logdir}
 
         if self.tls_config is not None:
             self.create_tls_cert()
+
+        if public_key_json_str:
+            self.public_key_json_file = self.etc.joinpath("public_keys.json")
+            with open(self.public_key_json_file, "w") as pubkeyfile:
+                pubkeyfile.write(public_key_json_str)
+
+        self.cluster_file = self.etc.joinpath("fdb.cluster")
 
     def __next_port(self):
         if self.first_port is None:
@@ -193,7 +204,9 @@ logdir = {logdir}
                     ip_address=self.ip_address,
                     bg_knob_line=bg_knob_line,
                     tls_config=self.tls_conf_string(),
+                    authz_public_key_config=self.authz_public_key_conf_string(),
                     optional_tls=":tls" if self.tls_config is not None else "",
+                    custom_config='\n'.join(["{} = {}".format(key, value) for key, value in custom_config.items()]),
                 )
             )
             # By default, the cluster only has one process
@@ -343,6 +356,12 @@ logdir = {logdir}
                 "tls-verify-peers": self.tls_config.verify_peers,
             }
             return "\n".join("{} = {}".format(k, v) for k, v in conf_map.items())
+
+    def authz_public_key_conf_string(self):
+        if self.public_key_json_file:
+            return "authorization-public-key-file = {}".format(self.public_key_json_file)
+        else
+            return ""
 
     # Get cluster status using fdbcli
     def get_status(self):

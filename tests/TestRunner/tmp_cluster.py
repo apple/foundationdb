@@ -18,6 +18,7 @@ class TempCluster(LocalCluster):
         port: str = None,
         blob_granules_enabled: bool = False,
         tls_config: TLSConfig = None,
+        public_key_json_str: str = None,
     ):
         self.build_dir = Path(build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(build_dir)
@@ -35,6 +36,7 @@ class TempCluster(LocalCluster):
             blob_granules_enabled=blob_granules_enabled,
             tls_config=tls_config,
             mkcert_binary=self.build_dir.joinpath("bin", "mkcert"),
+            public_key_json_str=public_key_json_str,
         )
 
     def __enter__(self):
@@ -129,11 +131,11 @@ if __name__ == "__main__":
         print("log-dir: {}".format(cluster.log))
         print("etc-dir: {}".format(cluster.etc))
         print("data-dir: {}".format(cluster.data))
-        print("cluster-file: {}".format(cluster.etc.joinpath("fdb.cluster")))
+        print("cluster-file: {}".format(cluster.cluster_file))
         cmd_args = []
         for cmd in args.cmd:
             if cmd == "@CLUSTER_FILE@":
-                cmd_args.append(str(cluster.etc.joinpath("fdb.cluster")))
+                cmd_args.append(str(cluster.cluster_file))
             elif cmd == "@DATA_DIR@":
                 cmd_args.append(str(cluster.data))
             elif cmd == "@LOG_DIR@":
@@ -160,7 +162,7 @@ if __name__ == "__main__":
                 cmd_args.append(cmd)
         env = dict(**os.environ)
         env["FDB_CLUSTER_FILE"] = env.get(
-            "FDB_CLUSTER_FILE", cluster.etc.joinpath("fdb.cluster")
+            "FDB_CLUSTER_FILE", cluster.cluster_file
         )
         errcode = subprocess.run(
             cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env
