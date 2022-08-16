@@ -28,7 +28,6 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/TenantCache.h"
 #include "fdbserver/TCInfo.h"
-#include "fdbserver/LogSystem.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbserver/DDTxnProcessor.h"
 #include "fdbserver/Knobs.h"
@@ -44,7 +43,16 @@
 // RelocateReason to DataMovementReason is one-to-N mapping
 class RelocateReason {
 public:
-	enum Value : int8_t { OTHER = 0, REBALANCE_DISK, REBALANCE_READ, MERGE_SHARD, SIZE_SPLIT, WRITE_SPLIT, __COUNT };
+	enum Value : int8_t {
+		OTHER = 0,
+		REBALANCE_DISK,
+		REBALANCE_READ,
+		MERGE_SHARD,
+		SIZE_SPLIT,
+		WRITE_SPLIT,
+		TENANT_SPLIT,
+		__COUNT
+	};
 	RelocateReason(Value v) : value(v) { ASSERT(value != __COUNT); }
 	explicit RelocateReason(int v) : value((Value)v) { ASSERT(value != __COUNT); }
 	std::string toString() const {
@@ -61,6 +69,8 @@ public:
 			return "SizeSplit";
 		case WRITE_SPLIT:
 			return "WriteSplit";
+		case TENANT_SPLIT:
+			return "TenantSplit";
 		case __COUNT:
 			ASSERT(false);
 		}

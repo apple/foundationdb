@@ -90,7 +90,7 @@ public:
 				for (int i = 0; i < tenantList.size(); i++) {
 					if (tenantCache->update(tenantList[i].first, tenantList[i].second)) {
 						tenantListUpdated = true;
-						TenantCacheTenantCreated req(t.prefix);
+						TenantCacheTenantCreated req(tenantList[i].second.prefix);
 						tenantCache->tenantCreationSignal.send(req);
 					}
 				}

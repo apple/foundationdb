@@ -534,8 +534,8 @@ void executeShardSplit(DataDistributionTracker* self,
 }
 
 ACTOR Future<Void> tenantShardSplitter(DataDistributionTracker* self, KeyRange tenantKeys) {
-	auto shardContainingTenantStart = self->shards.rangeContaining(tenantKeys.begin);
-	auto shardContainingTenantEnd = self->shards.rangeContainingKeyBefore(tenantKeys.end);
+	auto shardContainingTenantStart = self->shards->rangeContaining(tenantKeys.begin);
+	auto shardContainingTenantEnd = self->shards->rangeContainingKeyBefore(tenantKeys.end);
 
 	if (shardContainingTenantStart == shardContainingTenantEnd) {
 		if (shardContainingTenantStart.begin() != tenantKeys.begin ||
@@ -561,7 +561,7 @@ ACTOR Future<Void> tenantShardSplitter(DataDistributionTracker* self, KeyRange t
 				auto s = describeSplit(startKeys, faultLines);
 				TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundStartAndEndKeys", s);
 
-				executeShardSplit(self, startKeys, faultLines, startShardSize, true, RELOCATE_REASON::OTHER);
+				executeShardSplit(self, startKeys, faultLines, startShardSize, true, RelocateReason::TENANT_SPLIT);
 			}
 		}
 		return Void();
@@ -581,7 +581,8 @@ ACTOR Future<Void> tenantShardSplitter(DataDistributionTracker* self, KeyRange t
 			auto s = describeSplit(startKeys, startShardFaultLines);
 			TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundStartKey", s);
 
-			executeShardSplit(self, startKeys, startShardFaultLines, startShardSize, true, RELOCATE_REASON::OTHER);
+			executeShardSplit(
+			    self, startKeys, startShardFaultLines, startShardSize, true, RelocateReason::TENANT_SPLIT);
 		}
 
 		if (shardContainingTenantStart->end() != tenantKeys.end) {
@@ -593,7 +594,7 @@ ACTOR Future<Void> tenantShardSplitter(DataDistributionTracker* self, KeyRange t
 			auto s = describeSplit(endKeys, endShardFaultLines);
 			TraceEvent(SevInfo, "ExecutingShardSplit").detail("SplttingAroundEndKey", s);
 
-			executeShardSplit(self, endKeys, endShardFaultLines, endShardSize, true, RELOCATE_REASON::OTHER);
+			executeShardSplit(self, endKeys, endShardFaultLines, endShardSize, true, RelocateReason::TENANT_SPLIT);
 		}
 
 		return Void();
@@ -874,12 +875,12 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	bool sizeSplit = stats.bytes > shardBounds.max.bytes,
 	     writeSplit = bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin;
 	bool shouldSplit = sizeSplit || writeSplit;
-  
-  	auto prevIter = self->shards.rangeContaining(keys.begin);
+
+	auto prevIter = self->shards->rangeContaining(keys.begin);
 	if (keys.begin > allKeys.begin)
 		--prevIter;
 
-	auto nextIter = self->shards.rangeContaining(keys.begin);
+	auto nextIter = self->shards->rangeContaining(keys.begin);
 	if (keys.end < allKeys.end)
 		++nextIter;
 
