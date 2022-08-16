@@ -67,6 +67,9 @@ static const uint32_t PARTITIONED_MLOG_VERSION = 4110;
 // Snapshot file version written by FileBackupAgent
 static const uint32_t BACKUP_AGENT_SNAPSHOT_FILE_VERSION = 1001;
 
+// Encrypted Snapshot file version written by FileBackupAgent
+static const uint32_t BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION = 1002;
+
 struct LogFile {
 	Version beginVersion;
 	Version endVersion;

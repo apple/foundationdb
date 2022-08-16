@@ -18,6 +18,12 @@
  * limitations under the License.
  */
 
+#include "flow/Arena.h"
+#include "flow/BlobCipher.h"
+#include "flow/ObjectSerializer.h"
+#include "flow/ProtocolVersion.h"
+#include "flow/Trace.h"
+#include "flow/serialize.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
@@ -36,6 +42,7 @@
 #include "flow/IAsyncFile.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
+#include <memory>
 #include <numeric>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
@@ -458,6 +465,203 @@ Value makePadding(int size) {
 	return pad.substr(0, size);
 }
 
+struct IRangeFileWriter {
+public:
+	virtual Future<Void> padEnd() = 0;
+
+	virtual Future<Void> writeKV(Key k, Value v) = 0;
+
+	virtual Future<Void> writeKey(Key k) = 0;
+
+	virtual Future<Void> finish() = 0;
+
+	virtual ~IRangeFileWriter() {}
+};
+
+// TODO (Nim): Add actual encryption to this class
+struct EncryptedRangeFileWriter : public IRangeFileWriter {
+	struct Options {
+		constexpr static FileIdentifier file_identifier = 3152016;
+
+		bool encryptionEnabled;
+		bool compressionEnabled;
+
+		Options(bool encryptionEnabled, bool compressionEnabled)
+		  : encryptionEnabled(encryptionEnabled), compressionEnabled(compressionEnabled) {}
+
+		Options() = default;
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, encryptionEnabled, compressionEnabled);
+		}
+	};
+
+	EncryptedRangeFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(),
+	                         int blockSize = 0,
+	                         Options options = Options(false, false))
+	  : file(file), blockSize(blockSize), blockEnd(0), fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION),
+	    options(options) {
+		buffer = makeString(blockSize);
+		wPtr = mutateString(buffer);
+	}
+
+	static void encrypt(EncryptedRangeFileWriter* self) {
+		uint8_t iv[AES_256_IV_LENGTH];
+		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
+		EncryptBlobCipherAes265Ctr encryptor(
+		    self->textCipherKey, self->headerCipherKey, iv, AES_256_IV_LENGTH, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+		BlobCipherEncryptHeader header;
+		Arena arena;
+		int64_t dataSize = self->wPtr - (self->encryptHeaderP + BlobCipherEncryptHeader::headerSize);
+		auto encryptedData =
+		    encryptor.encrypt(self->encryptHeaderP + BlobCipherEncryptHeader::headerSize, dataSize, &header, arena);
+
+		// write header to buffer
+		StringRef headerStr = BlobCipherEncryptHeader::toStringRef(header, arena);
+		std::memcpy(self->encryptHeaderP, headerStr.begin(), BlobCipherEncryptHeader::headerSize);
+
+		// write data to buffer
+		std::memcpy(self->encryptHeaderP + BlobCipherEncryptHeader::headerSize, encryptedData->begin(), dataSize);
+	}
+
+	static int64_t currentBufferSize(EncryptedRangeFileWriter* self) { return self->wPtr - self->buffer.begin(); }
+
+	static int64_t expectedFileSize(EncryptedRangeFileWriter* self) {
+		// Return what has already been written to file plus the size of the current buffer
+		return self->file->size() + currentBufferSize(self);
+	}
+
+	static void copyToBuffer(EncryptedRangeFileWriter* self, const void* src, size_t size) {
+		std::memcpy(self->wPtr, src, size);
+		self->wPtr += size;
+		ASSERT(currentBufferSize(self) <= self->blockSize);
+	}
+
+	static void appendStringRefWithLenToBuffer(EncryptedRangeFileWriter* self, StringRef* s) {
+		uint32_t lenBuf = bigEndian32((uint32_t)s->size());
+		copyToBuffer(self, &lenBuf, sizeof(lenBuf));
+		copyToBuffer(self, s->begin(), s->size());
+	}
+
+	// Handles the first block and internal blocks.  Ends current block if needed.
+	// The final flag is used in simulation to pad the file's final block to a whole block size
+	ACTOR static Future<Void> newBlock(EncryptedRangeFileWriter* self, int bytesNeeded, bool final = false) {
+		// Write padding to finish current block if needed
+		int bytesLeft = self->blockEnd - expectedFileSize(self);
+		if (bytesLeft > 0) {
+			state Value paddingFFs = makePadding(bytesLeft);
+			copyToBuffer(self, paddingFFs.begin(), bytesLeft);
+		}
+
+		// write buffer to file since block is finished
+		if (expectedFileSize(self) > 0) {
+			ASSERT(currentBufferSize(self) == self->blockSize);
+			encrypt(self);
+			wait(self->file->append(self->buffer.begin(), self->blockSize));
+
+			// reset write pointer to beginning of StringRef
+			self->wPtr = mutateString(self->buffer);
+		}
+
+		if (final) {
+			ASSERT(g_network->isSimulated());
+			return Void();
+		}
+
+		// Set new blockEnd
+		self->blockEnd += self->blockSize;
+
+		// write Header
+		copyToBuffer(self, (uint8_t*)&self->fileVersion, sizeof(self->fileVersion));
+
+		// write options struct
+		Value serialized =
+		    ObjectWriter::toValue(self->options, IncludeVersion(ProtocolVersion::withEncryptedSnapshotBackupFile()));
+		appendStringRefWithLenToBuffer(self, &serialized);
+
+		// leave space for encryption header
+		self->encryptHeaderP = self->wPtr;
+		self->wPtr += BlobCipherEncryptHeader::headerSize;
+
+		// If this is NOT the first block then write duplicate stuff needed from last block
+		if (self->blockEnd > self->blockSize) {
+			appendStringRefWithLenToBuffer(self, &self->lastKey);
+			appendStringRefWithLenToBuffer(self, &self->lastKey);
+			appendStringRefWithLenToBuffer(self, &self->lastValue);
+		}
+
+		// There must now be room in the current block for bytesNeeded or the block size is too small
+		if (self->expectedFileSize(self) + bytesNeeded > self->blockEnd)
+			throw backup_bad_block_size();
+
+		return Void();
+	}
+
+	// Used in simulation only to create backup file sizes which are an integer multiple of the block size
+	Future<Void> padEnd() {
+		ASSERT(g_network->isSimulated());
+		if (expectedFileSize(this) > 0) {
+			return newBlock(this, 0, true);
+		}
+		return Void();
+	}
+
+	// Ends the current block if necessary based on bytesNeeded.
+	Future<Void> newBlockIfNeeded(int bytesNeeded) {
+		if (expectedFileSize(this) + bytesNeeded > blockEnd)
+			return newBlock(this, bytesNeeded);
+		return Void();
+	}
+
+	// Start a new block if needed, then write the key and value
+	ACTOR static Future<Void> writeKV_impl(EncryptedRangeFileWriter* self, Key k, Value v) {
+		int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
+		wait(self->newBlockIfNeeded(toWrite));
+		appendStringRefWithLenToBuffer(self, &k);
+		appendStringRefWithLenToBuffer(self, &v);
+		self->lastKey = k;
+		self->lastValue = v;
+		return Void();
+	}
+
+	Future<Void> writeKV(Key k, Value v) { return writeKV_impl(this, k, v); }
+
+	// Write begin key or end key.
+	ACTOR static Future<Void> writeKey_impl(EncryptedRangeFileWriter* self, Key k) {
+		int toWrite = sizeof(uint32_t) + k.size();
+		wait(self->newBlockIfNeeded(toWrite));
+		appendStringRefWithLenToBuffer(self, &k);
+		return Void();
+	}
+
+	Future<Void> writeKey(Key k) { return writeKey_impl(this, k); }
+
+	Future<Void> finish() {
+		// Write any outstanding bytes to the file
+		if (currentBufferSize(this) > 0) {
+			encrypt(this);
+			return file->append(buffer.begin(), currentBufferSize(this));
+		}
+		return Void();
+	}
+
+	Reference<IBackupFile> file;
+	int blockSize;
+
+private:
+	Standalone<StringRef> buffer;
+	uint8_t* wPtr;
+	uint8_t* encryptHeaderP;
+	Reference<BlobCipherKey> textCipherKey;
+	Reference<BlobCipherKey> headerCipherKey;
+	int64_t blockEnd;
+	uint32_t fileVersion;
+	Options options;
+	Key lastKey;
+	Key lastValue;
+};
+
 // File Format handlers.
 // Both Range and Log formats are designed to be readable starting at any 1MB boundary
 // so they can be read in parallel.
@@ -490,7 +694,7 @@ Value makePadding(int size) {
 //   if the next KV pair wouldn't fit within the block after the value
 //   then the space after the final key to the next 1MB boundary would
 //   just be padding anyway.
-struct RangeFileWriter {
+struct RangeFileWriter : public IRangeFileWriter {
 	RangeFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0)
 	  : file(file), blockSize(blockSize), blockEnd(0), fileVersion(BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {}
 
@@ -568,6 +772,8 @@ struct RangeFileWriter {
 
 	Future<Void> writeKey(Key k) { return writeKey_impl(this, k); }
 
+	Future<Void> finish() { return Void(); }
+
 	Reference<IBackupFile> file;
 	int blockSize;
 
@@ -577,6 +783,40 @@ private:
 	Key lastKey;
 	Key lastValue;
 };
+
+void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* results) {
+	// Read begin key, if this fails then block was invalid.
+	uint32_t kLen = reader->consumeNetworkUInt32();
+	const uint8_t* k = reader->consume(kLen);
+	results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
+
+	// Read kv pairs and end key
+	while (1) {
+		// Read a key.
+		kLen = reader->consumeNetworkUInt32();
+		k = reader->consume(kLen);
+
+		// If eof reached or first value len byte is 0xFF then a valid block end was reached.
+		if (reader->eof() || *reader->rptr == 0xFF) {
+			results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
+			break;
+		}
+
+		// Read a value, which must exist or the block is invalid
+		uint32_t vLen = reader->consumeNetworkUInt32();
+		const uint8_t* v = reader->consume(vLen);
+		results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
+
+		// If eof reached or first byte of next key len is 0xFF then a valid block end was reached.
+		if (reader->eof() || *reader->rptr == 0xFF)
+			break;
+	}
+
+	// Make sure any remaining bytes in the block are 0xFF
+	for (auto b : reader->remainder())
+		if (b != 0xFF)
+			throw restore_corrupted_data_padding();
+}
 
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
@@ -592,44 +832,26 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 	state StringRefReader reader(buf, restore_corrupted_data());
 
 	try {
-		// Read header, currently only decoding BACKUP_AGENT_SNAPSHOT_FILE_VERSION
-		if (reader.consume<int32_t>() != BACKUP_AGENT_SNAPSHOT_FILE_VERSION)
+		// Read header, currently only decoding BACKUP_AGENT_SNAPSHOT_FILE_VERSION or
+		// BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION
+		int32_t file_version = reader.consume<int32_t>();
+		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
+			decodeKVPairs(&reader, &results);
+		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
+			// decode options struct
+			uint32_t optionsLen = reader.consumeNetworkUInt32();
+			const uint8_t* o = reader.consume(optionsLen);
+			StringRef optionsStringRef = StringRef(o, optionsLen);
+			EncryptedRangeFileWriter::Options options =
+			    ObjectReader::fromStringRef<EncryptedRangeFileWriter::Options>(optionsStringRef, IncludeVersion());
+
+			// read encryption header
+			reader.consume(BlobCipherEncryptHeader::headerSize);
+			decodeKVPairs(&reader, &results);
+		} else {
 			throw restore_unsupported_file_version();
-
-		// Read begin key, if this fails then block was invalid.
-		uint32_t kLen = reader.consumeNetworkUInt32();
-		const uint8_t* k = reader.consume(kLen);
-		results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
-
-		// Read kv pairs and end key
-		while (1) {
-			// Read a key.
-			kLen = reader.consumeNetworkUInt32();
-			k = reader.consume(kLen);
-
-			// If eof reached or first value len byte is 0xFF then a valid block end was reached.
-			if (reader.eof() || *reader.rptr == 0xFF) {
-				results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
-				break;
-			}
-
-			// Read a value, which must exist or the block is invalid
-			uint32_t vLen = reader.consumeNetworkUInt32();
-			const uint8_t* v = reader.consume(vLen);
-			results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
-
-			// If eof reached or first byte of next key len is 0xFF then a valid block end was reached.
-			if (reader.eof() || *reader.rptr == 0xFF)
-				break;
 		}
-
-		// Make sure any remaining bytes in the block are 0xFF
-		for (auto b : reader.remainder())
-			if (b != 0xFF)
-				throw restore_corrupted_data_padding();
-
 		return results;
-
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "FileRestoreDecodeRangeFileBlockFailed")
 		    .error(e)
@@ -1210,7 +1432,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		                                      Terminator::True,
 		                                      AccessSystemKeys::True,
 		                                      LockAware::True);
-		state RangeFileWriter rangeFile;
+		state std::unique_ptr<IRangeFileWriter> rangeFile;
 		state BackupConfig backup(task);
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but if
@@ -1241,11 +1463,13 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				if (outFile) {
 					CODE_PROBE(outVersion != invalidVersion, "Backup range task wrote multiple versions");
 					state Key nextKey = done ? endKey : keyAfter(lastKey);
-					wait(rangeFile.writeKey(nextKey));
+					wait(rangeFile->writeKey(nextKey));
 
 					if (BUGGIFY) {
-						wait(rangeFile.padEnd());
+						wait(rangeFile->padEnd());
 					}
+
+					wait(rangeFile->finish());
 
 					bool usedFile = wait(
 					    finishRangeFile(outFile, cx, task, taskBucket, KeyRangeRef(beginKey, nextKey), outVersion));
@@ -1297,15 +1521,15 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				outFile = f;
 
 				// Initialize range file writer and write begin key
-				rangeFile = RangeFileWriter(outFile, blockSize);
-				wait(rangeFile.writeKey(beginKey));
+				rangeFile = std::make_unique<EncryptedRangeFileWriter>(outFile, blockSize);
+				wait(rangeFile->writeKey(beginKey));
 			}
 
 			// write kvData to file, update lastKey and key count
 			if (values.first.size() != 0) {
 				state size_t i = 0;
 				for (; i < values.first.size(); ++i) {
-					wait(rangeFile.writeKV(values.first[i].key, values.first[i].value));
+					wait(rangeFile->writeKV(values.first[i].key, values.first[i].value));
 				}
 				lastKey = values.first.back().key;
 				nrKeys += values.first.size();
