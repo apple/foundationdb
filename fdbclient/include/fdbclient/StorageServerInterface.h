@@ -294,13 +294,12 @@ struct GetValueRequest : TimedRequest {
 	TenantInfo tenantInfo;
 	Key key;
 	Version version;
-	ReadOptions options;
 	Optional<TagSet> tags;
 	ReplyPromise<GetValueReply> reply;
+	ReadOptions options;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
-
 	GetValueRequest() {}
 
 	bool verify() const { return tenantInfo.isAuthorized(); }
@@ -309,15 +308,15 @@ struct GetValueRequest : TimedRequest {
 	                const TenantInfo& tenantInfo,
 	                const Key& key,
 	                Version ver,
-	                ReadOptions options,
 	                Optional<TagSet> tags,
+	                ReadOptions options,
 	                VersionVector latestCommitVersions)
-	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), options(options), tags(tags),
+	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), tags(tags), options(options),
 	    ssLatestCommitVersions(latestCommitVersions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, version, options, tags, reply, spanContext, tenantInfo, ssLatestCommitVersions);
+		serializer(ar, key, version, tags, reply, spanContext, tenantInfo, options, ssLatestCommitVersions);
 	}
 };
 
@@ -393,13 +392,13 @@ struct GetKeyValuesRequest : TimedRequest {
 	KeyRef mapper = KeyRef();
 	Version version; // or latestVersion
 	int limit, limitBytes;
-	ReadOptions options;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetKeyValuesReply> reply;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
+	ReadOptions options;
 
 	GetKeyValuesRequest() {}
 
@@ -452,9 +451,9 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	Version version; // or latestVersion
 	int limit, limitBytes;
 	int matchIndex;
-	ReadOptions options;
 	Optional<TagSet> tags;
 	ReplyPromise<GetMappedKeyValuesReply> reply;
+	ReadOptions options;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key range
@@ -472,11 +471,11 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 		           version,
 		           limit,
 		           limitBytes,
-		           options,
 		           tags,
 		           reply,
 		           spanContext,
 		           tenantInfo,
+		           options,
 		           arena,
 		           ssLatestCommitVersions,
 		           matchIndex);
@@ -518,8 +517,8 @@ struct GetKeyValuesStreamRequest {
 	KeySelectorRef begin, end;
 	Version version; // or latestVersion
 	int limit, limitBytes;
-	ReadOptions options;
 	Optional<TagSet> tags;
+	ReadOptions options;
 	ReplyPromiseStream<GetKeyValuesStreamReply> reply;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
@@ -537,11 +536,11 @@ struct GetKeyValuesStreamRequest {
 		           version,
 		           limit,
 		           limitBytes,
-		           options,
 		           tags,
 		           reply,
 		           spanContext,
 		           tenantInfo,
+		           options,
 		           arena,
 		           ssLatestCommitVersions);
 	}
@@ -568,9 +567,9 @@ struct GetKeyRequest : TimedRequest {
 	TenantInfo tenantInfo;
 	KeySelectorRef sel;
 	Version version; // or latestVersion
-	ReadOptions options;
 	Optional<TagSet> tags;
 	ReplyPromise<GetKeyReply> reply;
+	ReadOptions options;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
@@ -583,15 +582,15 @@ struct GetKeyRequest : TimedRequest {
 	              TenantInfo tenantInfo,
 	              KeySelectorRef const& sel,
 	              Version version,
-	              ReadOptions options,
 	              Optional<TagSet> tags,
+	              ReadOptions options,
 	              VersionVector latestCommitVersions)
-	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), options(options),
+	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), tags(tags), options(options),
 	    ssLatestCommitVersions(latestCommitVersions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sel, version, options, tags, reply, spanContext, tenantInfo, arena, ssLatestCommitVersions);
+		serializer(ar, sel, version, tags, reply, spanContext, tenantInfo, options, arena, ssLatestCommitVersions);
 	}
 };
 

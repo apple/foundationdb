@@ -1951,7 +1951,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 			CODE_PROBE(latest >= minVersion && latest < data->data().latestVersion,
 			           "Starting watch loop with latestVersion > data->version");
 			GetValueRequest getReq(
-			    span.context, TenantInfo(), metadata->key, latest, options, metadata->tags, VersionVector());
+			    span.context, TenantInfo(), metadata->key, latest, metadata->tags, options, VersionVector());
 			state Future<Void> getValue = getValueQ(
 			    data, getReq); // we are relying on the delay zero at the top of getValueQ, if removed we need one here
 			GetValueReply reply = wait(getReq.reply.getFuture());
@@ -3236,8 +3236,8 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 			                    pOriginalReq->tenantInfo,
 			                    key,
 			                    version,
-			                    pOriginalReq->options,
 			                    pOriginalReq->tags,
+			                    pOriginalReq->options,
 			                    VersionVector());
 			// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
 			// original request level, rather than individual underlying lookups. The reason is that throttle any
@@ -9884,7 +9884,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 					options.debugID = metadata->debugID;
 
 					GetValueRequest getReq(
-					    span.context, TenantInfo(), metadata->key, latest, options, metadata->tags, VersionVector());
+					    span.context, TenantInfo(), metadata->key, latest, metadata->tags, options, VersionVector());
 					state Future<Void> getValue = getValueQ(self, getReq);
 					GetValueReply reply = wait(getReq.reply.getFuture());
 					metadata = self->getWatchMetadata(req.key.contents());

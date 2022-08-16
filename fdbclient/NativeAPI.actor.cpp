@@ -3356,9 +3356,9 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 					                         useTenant ? trState->getTenantInfo() : TenantInfo(),
 					                         key,
 					                         ver,
-					                         readOptions,
 					                         trState->cx->sampleReadTags() ? trState->options.readTags
 					                                                       : Optional<TagSet>(),
+					                         readOptions,
 					                         ssLatestCommitVersions),
 					         TaskPriority::DefaultPromiseEndpoint,
 					         AtMostOnce::False,
@@ -3482,8 +3482,8 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 			                  useTenant ? trState->getTenantInfo() : TenantInfo(),
 			                  k,
 			                  version.get(),
-			                  readOptions,
 			                  trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>(),
+			                  readOptions,
 			                  ssLatestCommitVersions);
 			req.arena.dependsOn(k.arena());
 
