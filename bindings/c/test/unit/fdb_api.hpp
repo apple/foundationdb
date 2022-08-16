@@ -348,7 +348,7 @@ public:
 	// Wrapper around fdb_transaction_add_conflict_range.
 	fdb_error_t add_conflict_range(std::string_view begin_key, std::string_view end_key, FDBConflictRangeType type);
 
-	KeyRangeArrayFuture get_blob_granule_ranges(std::string_view begin_key, std::string_view end_key);
+	KeyRangeArrayFuture get_blob_granule_ranges(std::string_view begin_key, std::string_view end_key, int rangeLimit);
 	KeyValueArrayResult read_blob_granules(std::string_view begin_key,
 	                                       std::string_view end_key,
 	                                       int64_t beginVersion,

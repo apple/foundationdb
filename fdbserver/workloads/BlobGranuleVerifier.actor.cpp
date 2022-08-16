@@ -105,6 +105,10 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		clearAndMergeCheck = getOption(options, LiteralStringRef("clearAndMergeCheck"), sharedRandomNumber % 10 == 0);
 		sharedRandomNumber /= 10;
 
+		// don't do strictPurgeChecking or forcePurge if !enablePurging
+		strictPurgeChecking &= enablePurging;
+		doForcePurge &= enablePurging;
+
 		startedForcePurge = false;
 
 		if (doSetup && BGV_DEBUG) {
@@ -112,6 +116,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			fmt::print("  enablePurging={0}\n", enablePurging);
 			fmt::print("  strictPurgeChecking={0}\n", strictPurgeChecking);
 			fmt::print("  doForcePurge={0}\n", doForcePurge);
+			fmt::print("  initAtEnd={0}\n", initAtEnd);
+			fmt::print("  clearAndMergeCheck={0}\n", clearAndMergeCheck);
 		}
 
 		ASSERT(threads >= 1);
@@ -169,7 +175,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			state Transaction tr(cx);
 			loop {
 				try {
-					Standalone<VectorRef<KeyRangeRef>> allGranules = wait(tr.getBlobGranuleRanges(normalKeys));
+					Standalone<VectorRef<KeyRangeRef>> allGranules = wait(tr.getBlobGranuleRanges(normalKeys, 1000000));
 					self->granuleRanges.set(allGranules);
 					break;
 				} catch (Error& e) {

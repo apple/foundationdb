@@ -230,27 +230,6 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> setUpBlobRange(Database cx, KeyRange keyRange) {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->set(blobRangeChangeKey, deterministicRandom()->randomUniqueID().toString());
-				wait(krmSetRange(tr, blobRangeKeys.begin, keyRange, LiteralStringRef("1")));
-				wait(tr->commit());
-				if (BGW_DEBUG) {
-					fmt::print("Successfully set up blob granule range for tenant range [{0} - {1})\n",
-					           keyRange.begin.printable(),
-					           keyRange.end.printable());
-				}
-				return Void();
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
-	}
-
 	ACTOR Future<TenantMapEntry> setUpTenant(Database cx, TenantName name) {
 		if (BGW_DEBUG) {
 			fmt::print("Setting up blob granule range for tenant {0}\n", name.printable());
@@ -291,7 +270,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			self->directories[directoryIdx]->directoryRange =
 			    KeyRangeRef(tenantEntry.prefix, tenantEntry.prefix.withSuffix(normalKeys.end));
 			tenants.push_back({ self->directories[directoryIdx]->tenantName, tenantEntry });
-			wait(self->setUpBlobRange(cx, self->directories[directoryIdx]->directoryRange));
+			bool _success = wait(cx->blobbifyRange(self->directories[directoryIdx]->directoryRange));
+			ASSERT(_success);
 		}
 		tenantData.addTenants(tenants);
 
@@ -911,8 +891,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		loop {
 			state Transaction tr(cx, threadData->tenantName);
 			try {
-				Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(normalKeys));
-				ASSERT(ranges.size() >= 1);
+				Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(normalKeys, 1000000));
+				ASSERT(ranges.size() >= 1 && ranges.size() < 1000000);
 				ASSERT(ranges.front().begin == normalKeys.begin);
 				ASSERT(ranges.back().end == normalKeys.end);
 				for (int i = 0; i < ranges.size() - 1; i++) {
