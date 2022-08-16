@@ -26,6 +26,7 @@
 
 // The common info shared by all DD components. Normally the DD components should share the reference to the same
 // context.
+// NOTE: We should avoid the shared class become an insanely large class, think twice before add member to it.
 class DDSharedContext : public ReferenceCounted<DDSharedContext> {
 	// FIXME(xwang) mark fields privates
 public:
