@@ -75,6 +75,10 @@ class TestPicker:
     def __init__(self, test_dir: Path, fetcher: StatFetcherCreator):
         if not test_dir.exists():
             raise RuntimeError('{} is neither a directory nor a file'.format(test_dir))
+        self.include_files_regex = re.compile(config.include_test_files)
+        self.exclude_files_regex = re.compile(config.exclude_test_files)
+        self.include_tests_regex = re.compile(config.include_test_names)
+        self.exclude_tests_regex = re.compile(config.exclude_test_names)
         self.test_dir: Path = test_dir
         self.tests: OrderedDict[str, TestDescription] = collections.OrderedDict()
         self.restart_test: Pattern = re.compile(r".*-\d+\.(txt|toml)")
@@ -117,6 +121,8 @@ class TestPicker:
             idx += 1
 
     def parse_txt(self, path: Path):
+        if self.include_files_regex.match(str(path)) is None or self.exclude_files_regex.match(str(path)) is not None:
+            return
         with path.open('r') as f:
             test_name: str | None = None
             test_class: str | None = None
@@ -145,6 +151,9 @@ class TestPicker:
                 test_class = test_name
             if priority is None:
                 priority = 1.0
+            if self.include_tests_regex.match(test_class) is None \
+                    or self.exclude_tests_regex.match(test_class) is not None:
+                return
             if test_class not in self.tests:
                 self.tests[test_class] = TestDescription(path, test_class, priority)
             else:
@@ -293,6 +302,7 @@ class TestRun:
         self.buggify_enabled: bool = random.random() < config.buggify_on_ratio
         self.fault_injection_enabled: bool = True
         self.trace_format = config.trace_format
+        self.temp_path = config.run_dir / str(self.uid)
         # state for the run
         self.retryable_error: bool = False
         self.summary: Summary = Summary(binary)
@@ -331,13 +341,13 @@ class TestRun:
             command += ['-b', 'on']
         if config.crash_on_error:
             command.append('--crash')
-        temp_path = config.run_dir / str(self.uid)
-        temp_path.mkdir(parents=True, exist_ok=True)
+
+        self.temp_path.mkdir(parents=True, exist_ok=True)
 
         # self.log_test_plan(out)
         resources = ResourceMonitor()
         resources.start()
-        process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=temp_path)
+        process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=self.temp_path)
         did_kill = False
         try:
             process.wait(20 * config.kill_seconds if self.use_valgrind else config.kill_seconds)
@@ -350,9 +360,11 @@ class TestRun:
         self.summary.runtime = resources.time()
         self.summary.max_rss = resources.max_rss
         self.summary.was_killed = did_kill
-        self.summary = Summary(self.binary, temp_path, runtime=resources.time(), max_rss=resources.max_rss,
+        self.summary = Summary(self.binary, runtime=resources.time(), max_rss=resources.max_rss,
                                was_killed=did_kill, uid=self.uid, stats=self.stats, valgrind_out_file=valgrind_file,
                                expected_unseed=self.expected_unseed)
+        self.summary.summarize(self.temp_path)
+        self.summary.out.dump(sys.stdout)
         return self.summary.ok()
 
 
@@ -400,7 +412,6 @@ class TestRunner:
                 self.backup_sim_dir(seed + count - 1)
             run = TestRun(binary, file.absolute(), seed + count, self.uid, restarting=count != 0,
                           stats=test_picker.dump_stats())
-            run.summary.out.dump(sys.stdout)
             result = result and run.success
             test_picker.add_time(file, run.run_time)
             if run.success and unseed_check and run.summary.unseed is not None:
@@ -408,7 +419,6 @@ class TestRunner:
                 run2 = TestRun(binary, file.absolute(), seed + count, self.uid, restarting=count != 0,
                                stats=test_picker.dump_stats(), expected_unseed=run.summary.unseed)
                 test_picker.add_time(file, run2.run_time)
-                run2.summary.out.dump(sys.stdout)
             if not result:
                 return False
             count += 1

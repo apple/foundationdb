@@ -109,6 +109,10 @@ class Config:
         self.binary_args = {'help': 'Path to executable'}
         self.output_format: str = 'xml'
         self.output_format_args = {'short_name': 'O', 'choices': ['json', 'xml']}
+        self.include_test_files: str = r'.*'
+        self.exclude_test_files: str = r'.^'
+        self.include_test_names: str = r'.*'
+        self.exclude_test_names: str = r'.^'
         self.config_map = self._build_map()
 
     def _build_map(self):
