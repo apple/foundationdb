@@ -505,7 +505,7 @@ void executeShardSplit(DataDistributionTracker* self,
 	int skipRange = deterministicRandom()->randomInt(0, numShards);
 
 	auto s = describeSplit(keys, splitKeys);
-	TraceEvent(SevInfo, "ExecutingShardSplit").detail("Spltting", s).detail("NumShards", numShards);
+	TraceEvent(SevInfo, "ExecutingShardSplit").detail("Splitting", s).detail("NumShards", numShards);
 
 	// The queue can't deal with RelocateShard requests which split an existing shard into three pieces, so
 	// we have to send the unskipped ranges in this order (nibbling in from the edges of the old range)
