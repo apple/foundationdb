@@ -39,6 +39,7 @@ public:
 	}
 };
 
+// FIXME: avoid duplicating this between files!
 static int64_t granule_start_load(const char* filename,
                                   int filenameLength,
                                   int64_t offset,
@@ -51,8 +52,13 @@ static int64_t granule_start_load(const char* filename,
 
 	uint8_t* buffer = new uint8_t[length];
 	std::ifstream fin(ctx->basePath + std::string(filename, filenameLength), std::ios::in | std::ios::binary);
-	fin.seekg(offset);
-	fin.read((char*)buffer, length);
+	if (fin.fail()) {
+		delete[] buffer;
+		buffer = nullptr;
+	} else {
+		fin.seekg(offset);
+		fin.read((char*)buffer, length);
+	}
 
 	ctx->loadsInProgress.insert({ loadId, buffer });
 

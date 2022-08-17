@@ -1618,6 +1618,8 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 
 	GranuleLoadIds loadIds[files.size()];
 
+	bool fileError = false;
+
 	// Kick off first file reads if parallelism > 1
 	for (int i = 0; i < parallelism - 1 && i < files.size(); i++) {
 		startLoad(granuleContext, files[i], loadIds[i]);
@@ -1640,7 +1642,7 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 				    StringRef(granuleContext.get_load_f(loadIds[chunkIdx].snapshotId.get(), granuleContext.userContext),
 				              files[chunkIdx].snapshotFile.get().length);
 				if (!snapshotData.get().begin()) {
-					return ErrorOr<RangeResult>(blob_granule_file_load_error());
+					fileError = true;
 				}
 			}
 
@@ -1651,22 +1653,29 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 				              files[chunkIdx].deltaFiles[i].length);
 				// null data is error
 				if (!deltaData[i].begin()) {
-					return ErrorOr<RangeResult>(blob_granule_file_load_error());
+					fileError = true;
 				}
 			}
 
 			// materialize rows from chunk
-			chunkRows =
-			    materializeBlobGranule(files[chunkIdx], keyRange, beginVersion, readVersion, snapshotData, deltaData);
+			if (!fileError) {
+				chunkRows =
+					materializeBlobGranule(files[chunkIdx], keyRange, beginVersion, readVersion, snapshotData, deltaData);
 
-			results.arena().dependsOn(chunkRows.arena());
-			results.append(results.arena(), chunkRows.begin(), chunkRows.size());
+				results.arena().dependsOn(chunkRows.arena());
+				results.append(results.arena(), chunkRows.begin(), chunkRows.size());
+			}
 
+			// free whether we got an error or not
 			if (loadIds[chunkIdx].snapshotId.present()) {
 				granuleContext.free_load_f(loadIds[chunkIdx].snapshotId.get(), granuleContext.userContext);
 			}
 			for (int i = 0; i < loadIds[chunkIdx].deltaIds.size(); i++) {
 				granuleContext.free_load_f(loadIds[chunkIdx].deltaIds[i], granuleContext.userContext);
+			}
+
+			if (fileError) {
+				return ErrorOr<RangeResult>(blob_granule_file_load_error());
 			}
 		}
 		return ErrorOr<RangeResult>(results);
