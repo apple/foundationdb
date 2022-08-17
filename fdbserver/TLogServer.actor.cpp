@@ -294,6 +294,7 @@ struct SpilledData {
 };
 
 struct TLogData : NonCopyable {
+	Promise<Void> destroyed;
 	AsyncTrigger newLogData;
 	// A process has only 1 SharedTLog, which holds data for multiple logs, so that it obeys its assigned memory limit.
 	// A process has only 1 active log and multiple non-active log from old generations.
@@ -390,6 +391,8 @@ struct TLogData : NonCopyable {
 	                                                                  Histogram::Unit::microseconds)) {
 		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
+
+	~TLogData() { destroyed.send(Void()); }
 };
 
 struct LogData : NonCopyable, public ReferenceCounted<LogData> {
@@ -1408,7 +1411,9 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 ACTOR Future<Void> updateStorageLoop(TLogData* self) {
 	wait(delay(0, TaskPriority::UpdateStorage));
 
-	loop { wait(updateStorage(self)); }
+	loop {
+		wait(updateStorage(self));
+	}
 }
 
 void commitMessages(TLogData* self,
@@ -2005,9 +2010,16 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 	replyPromise.send(reply);
 	return Void();
 }
+struct ErrorCounter {
+	std::map<int, Counter> errorCounters;
+	CounterCollection collection;
+	explicit ErrorCounter(const std::string& name) : collection(name) {}
+};
+static ErrorCounter g_errorCounter("TlogDebugErrorCounter");
 
 // This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
 ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Reference<LogData> logData) {
+	state Promise<Void> destroyed = self->destroyed;
 	self->activePeekStreams++;
 
 	state Version begin = req.begin;
@@ -2031,10 +2043,16 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 				wait(delay(0, g_network->getCurrentTask()));
 			}
 		} catch (Error& e) {
+			ASSERT(!destroyed.isSet());
 			self->activePeekStreams--;
 			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId)
 			    .errorUnsuppressed(e)
 			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+
+			if (g_errorCounter.errorCounters.find(e.code()) == g_errorCounter.errorCounters.end()) {
+				g_errorCounter.errorCounters.emplace(e.code(), Counter(e.name(), g_errorCounter.collection));
+			}
+			++g_errorCounter.errorCounters.at(e.code());
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
 				req.reply.sendError(e);
@@ -2715,7 +2733,9 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 	while (!endVersion.present() || logData->version.get() < endVersion.get()) {
 		loop {
 			choose {
-				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) { break; }
+				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
+					break;
+				}
 				when(wait(dbInfoChange)) {
 					if (logData->logSystem->get()) {
 						r = logData->logSystem->get()->peek(logData->logId, tagAt, endVersion, tags, true);
@@ -3192,7 +3212,9 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 
 								choose {
 									when(wait(updateStorage(self))) {}
-									when(wait(allRemoved)) { throw worker_removed(); }
+									when(wait(allRemoved)) {
+										throw worker_removed();
+									}
 								}
 							}
 						} else {
@@ -3203,7 +3225,9 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 						}
 					}
 				}
-				when(wait(allRemoved)) { throw worker_removed(); }
+				when(wait(allRemoved)) {
+					throw worker_removed();
+				}
 			}
 		}
 	} catch (Error& e) {
@@ -3521,6 +3545,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 			self.sharedActors.send(commitQueue(&self));
 			self.sharedActors.send(updateStorageLoop(&self));
 			self.sharedActors.send(traceRole(Role::SHARED_TRANSACTION_LOG, tlogId));
+			self.sharedActors.send(traceCounters("TLogStreamErrorCount", tlogId, 60.0, &g_errorCounter.collection));
 			state Future<Void> activeSharedChange = Void();
 
 			loop {
@@ -3549,7 +3574,9 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 							forwardPromise(req.reply, self.tlogCache.get(req.recruitmentID));
 						}
 					}
-					when(wait(error)) { throw internal_error(); }
+					when(wait(error)) {
+						throw internal_error();
+					}
 					when(wait(activeSharedChange)) {
 						if (activeSharedTLog->get() == tlogId) {
 							TraceEvent("SharedTLogNowActive", self.dbgid).detail("NowActive", activeSharedTLog->get());
