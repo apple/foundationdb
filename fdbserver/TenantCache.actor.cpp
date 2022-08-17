@@ -111,6 +111,44 @@ public:
 			}
 		}
 	}
+
+	ACTOR static Future<Void> monitorStorageUsage(TenantCache* tenantCache) {
+		TraceEvent(SevInfo, "StartingTenantCacheStorageUsageMonitor", tenantCache->id()).log();
+
+		state ReadYourWritesTransaction tr(tenantCache->dbcx());
+
+		// Reuse the TENANT_CACHE_LIST_REFRESH_INTERVAL knob for now.
+		state int refreshInterval = SERVER_KNOBS->TENANT_CACHE_LIST_REFRESH_INTERVAL;
+		state double lastTenantListFetchTime = now();
+
+		loop {
+			try {
+				if (now() - lastTenantListFetchTime > (2 * refreshInterval)) {
+					TraceEvent(SevWarn, "TenantCacheGetStorageUsageRefreshDelay", tenantCache->id()).log();
+				}
+
+				state std::vector<KeyRef> tenantPrefixList = tenantCache->getTenantPrefixList();
+
+				state KeyRangeRef range("/"_sr, "0"_sr);
+				state int i;
+				for (i = 0; i < tenantPrefixList.size(); i++) {
+					state int64_t size = wait(tr.getEstimatedRangeSizeBytes(range.withPrefix(tenantPrefixList[i])));
+					tenantCache->updateStorageUsage(tenantPrefixList[i], size);
+				}
+
+				lastTenantListFetchTime = now();
+				tr.reset();
+				wait(delay(refreshInterval));
+			} catch (Error& e) {
+				if (e.code() != error_code_actor_cancelled) {
+					TraceEvent("TenantCacheGetStorageUsageError", tenantCache->id())
+					    .errorUnsuppressed(e)
+					    .suppressFor(1.0);
+				}
+				wait(tr.onError(e));
+			}
+		}
+	}
 };
 
 void TenantCache::insert(TenantName& tenantName, TenantMapEntry& tenant) {
@@ -165,6 +203,21 @@ int TenantCache::cleanup() {
 	return tenantsRemoved;
 }
 
+std::vector<KeyRef> TenantCache::getTenantPrefixList() const {
+	std::vector<KeyRef> prefixes;
+	for (const auto& [prefix, entry] : tenantCache) {
+		prefixes.push_back(prefix);
+	}
+	return prefixes;
+}
+
+void TenantCache::updateStorageUsage(KeyRef prefix, int64_t size) {
+	auto it = tenantCache.find(prefix);
+	if (it != tenantCache.end()) {
+		it->value->updateStorageUsage(size);
+	}
+}
+
 std::string TenantCache::desc() const {
 	std::string s("@Generation: ");
 	s += std::to_string(generation) + " ";
@@ -200,6 +253,10 @@ Future<Void> TenantCache::build(Database cx) {
 
 Future<Void> TenantCache::monitorTenantMap() {
 	return TenantCacheImpl::monitorTenantMap(this);
+}
+
+Future<Void> TenantCache::monitorStorageUsage() {
+	return TenantCacheImpl::monitorStorageUsage(this);
 }
 
 class TenantCacheUnitTest {

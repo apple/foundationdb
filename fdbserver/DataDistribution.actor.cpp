@@ -602,9 +602,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			} else {
 				anyZeroHealthyTeams = zeroHealthyTeams[0];
 			}
+
 			if (ddIsTenantAware) {
 				actors.push_back(reportErrorsExcept(
 				    ddTenantCache->monitorTenantMap(), "DDTenantCacheMonitor", self->ddId, &normalDDQueueErrors()));
+				actors.push_back(reportErrorsExcept(
+				    ddTenantCache->monitorStorageUsage(), "StorageUsageTracker", self->ddId, &normalDDQueueErrors()));
 			}
 
 			actors.push_back(self->pollMoveKeysLock(ddEnabledState));
