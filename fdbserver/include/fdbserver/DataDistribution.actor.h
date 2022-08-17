@@ -36,6 +36,11 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+/////////////////////////////// Data //////////////////////////////////////
+#ifndef __INTEL_COMPILER
+#pragma region Data
+#endif
+
 // SOMEDAY: whether it's possible to combine RelocateReason and DataMovementReason together?
 // RelocateReason to DataMovementReason is one-to-N mapping
 class RelocateReason {
@@ -291,6 +296,7 @@ struct GetTopKMetricsReply {
 	GetTopKMetricsReply(std::vector<KeyRangeStorageMetrics> const& m, double minReadLoad, double maxReadLoad)
 	  : shardMetrics(m), minReadLoad(minReadLoad), maxReadLoad(maxReadLoad) {}
 };
+
 struct GetTopKMetricsRequest {
 	int topK = 1; // default only return the top 1 shard based on the GetTopKMetricsRequest::compare function
 	std::vector<KeyRange> keys;
@@ -327,10 +333,6 @@ struct GetMetricsListRequest {
 
 	GetMetricsListRequest() {}
 	GetMetricsListRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
-};
-
-struct TeamCollectionInterface {
-	PromiseStream<GetTeamRequest> getTeam;
 };
 
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer
@@ -382,6 +384,37 @@ struct ShardTrackedData {
 	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
 };
 
+// Holds the permitted size and IO Bounds for a shard
+struct ShardSizeBounds {
+	StorageMetrics max;
+	StorageMetrics min;
+	StorageMetrics permittedError;
+
+	bool operator==(ShardSizeBounds const& rhs) const {
+		return max == rhs.max && min == rhs.min && permittedError == rhs.permittedError;
+	}
+};
+
+// Gets the permitted size and IO bounds for a shard
+ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
+
+// Determines the maximum shard size based on the size of the database
+int64_t getMaxShardSize(double dbSizeEstimate);
+
+#ifndef __INTEL_COMPILER
+#pragma endregion
+#endif
+
+// FIXME(xwang): Delete Old DD Actors once the refactoring is done
+/////////////////////////////// Old DD Actors //////////////////////////////////////
+#ifndef __INTEL_COMPILER
+#pragma region Old DD Actors
+#endif
+
+struct TeamCollectionInterface {
+	PromiseStream<GetTeamRequest> getTeam;
+};
+
 ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
                                            Database cx,
                                            PromiseStream<RelocateShard> output,
@@ -412,24 +445,14 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          int teamSize,
                                          int singleRegionTeamSize,
                                          const DDEnabledState* ddEnabledState);
+#ifndef __INTEL_COMPILER
+#pragma endregion
+#endif
 
-// Holds the permitted size and IO Bounds for a shard
-struct ShardSizeBounds {
-	StorageMetrics max;
-	StorageMetrics min;
-	StorageMetrics permittedError;
-
-	bool operator==(ShardSizeBounds const& rhs) const {
-		return max == rhs.max && min == rhs.min && permittedError == rhs.permittedError;
-	}
-};
-
-// Gets the permitted size and IO bounds for a shard
-ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
-
-// Determines the maximum shard size based on the size of the database
-int64_t getMaxShardSize(double dbSizeEstimate);
-
+/////////////////////////////// Perpetual Storage Wiggle //////////////////////////////////////
+#ifndef __INTEL_COMPILER
+#pragma region Perpetual Storage Wiggle
+#endif
 class DDTeamCollection;
 
 struct StorageWiggleMetrics {
@@ -590,6 +613,10 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 		return (wiggle_pq.top().first.createdTime >= metrics.last_round_start);
 	}
 };
+
+#ifndef __INTEL_COMPILER
+#pragma endregion
+#endif
 
 #include "flow/unactorcompiler.h"
 #endif
