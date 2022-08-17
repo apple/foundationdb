@@ -214,9 +214,7 @@ logdir = {logdir}
                     authz_public_key_config=self.authz_public_key_conf_string(),
                     optional_tls=":tls" if self.tls_config is not None else "",
                     custom_config='\n'.join(["{} = {}".format(key, value) for key, value in self.custom_config.items()]),
-                    use_future_protocol_version="use-future-protocol-version = true",
-                    if self.use_future_protocol_version
-                    else "",
+                    use_future_protocol_version="use-future-protocol-version = true" if self.use_future_protocol_version else "",
                 )
             )
             # By default, the cluster only has one process

@@ -90,9 +90,9 @@ struct TokenRef {
 	Optional<StringRef> issuer; // iss
 	Optional<StringRef> subject; // sub
 	Optional<VectorRef<StringRef>> audience; // aud
-	Optional<uint64_t> issuedAtUnixTime; // iat
-	Optional<uint64_t> expiresAtUnixTime; // exp
-	Optional<uint64_t> notBeforeUnixTime; // nbf
+	Optional<double> issuedAtUnixTime; // iat
+	Optional<double> expiresAtUnixTime; // exp
+	Optional<double> notBeforeUnixTime; // nbf
 	Optional<StringRef> tokenId; // jti
 	Optional<VectorRef<StringRef>> tenants; // tenants
 	// signature part

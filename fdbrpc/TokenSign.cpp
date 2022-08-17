@@ -205,12 +205,12 @@ void putField(Optional<FieldType> const& field, Writer& wr, const char* fieldNam
 		return;
 	wr.Key(fieldName);
 	auto const& value = field.get();
-	static_assert(std::is_same_v<StringRef, FieldType> || std::is_same_v<FieldType, uint64_t> ||
+	static_assert(std::is_same_v<StringRef, FieldType> || std::is_same_v<FieldType, double> ||
 	              std::is_same_v<FieldType, VectorRef<StringRef>>);
 	if constexpr (std::is_same_v<StringRef, FieldType>) {
 		wr.String(reinterpret_cast<const char*>(value.begin()), value.size());
-	} else if constexpr (std::is_same_v<FieldType, uint64_t>) {
-		wr.Uint64(value);
+	} else if constexpr (std::is_same_v<FieldType, double>) {
+		wr.Double(value);
 	} else {
 		wr.StartArray();
 		for (auto elem : value) {
@@ -328,16 +328,16 @@ bool parseField(Arena& arena, Optional<FieldType>& out, const rapidjson::Documen
 	if (fieldItr == d.MemberEnd())
 		return true;
 	auto const& field = fieldItr->value;
-	static_assert(std::is_same_v<StringRef, FieldType> || std::is_same_v<FieldType, uint64_t> ||
+	static_assert(std::is_same_v<StringRef, FieldType> || std::is_same_v<FieldType, double> ||
 	              std::is_same_v<FieldType, VectorRef<StringRef>>);
 	if constexpr (std::is_same_v<FieldType, StringRef>) {
 		if (!field.IsString())
 			return false;
 		out = StringRef(arena, reinterpret_cast<const uint8_t*>(field.GetString()), field.GetStringLength());
-	} else if constexpr (std::is_same_v<FieldType, uint64_t>) {
-		if (!field.IsUint64())
+	} else if constexpr (std::is_same_v<FieldType, double>) {
+		if (!field.IsNumber())
 			return false;
-		out = field.GetUint64();
+		out = field.GetDouble();
 	} else {
 		if (!field.IsArray())
 			return false;
@@ -460,7 +460,7 @@ TokenRef makeRandomTokenSpec(Arena& arena, IRandom& rng, Algorithm alg) {
 	for (auto i = 0; i < numAudience; i++)
 		aud[i] = genRandomAlphanumStringRef(arena, rng, MaxTenantNameLenPlus1);
 	ret.audience = VectorRef<StringRef>(aud, numAudience);
-	ret.issuedAtUnixTime = uint64_t(std::floor(g_network->timer()));
+	ret.issuedAtUnixTime = g_network->timer();
 	ret.notBeforeUnixTime = ret.issuedAtUnixTime.get();
 	ret.expiresAtUnixTime = ret.issuedAtUnixTime.get() + rng.randomInt(360, 1080 + 1);
 	auto numTenants = rng.randomInt(1, 3);
