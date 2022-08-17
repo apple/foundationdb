@@ -22,7 +22,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include "fdbserver/DDShardTracker.h"
-#include "fdbserver/DDRelocationQueue.actor.h"
+#include "fdbserver/DDRelocationQueue.h"
 #include "fdbserver/DDTeamCollection.h"
 
 // The common info shared by all DD components. Normally the DD components should share the reference to the same

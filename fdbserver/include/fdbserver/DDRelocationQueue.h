@@ -17,8 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef FOUNDATIONDB_DDRELOCATIONQUEUE_ACTOR_H
-#define FOUNDATIONDB_DDRELOCATIONQUEUE_ACTOR_H
+#ifndef FOUNDATIONDB_DDRELOCATIONQUEUE_H
+#define FOUNDATIONDB_DDRELOCATIONQUEUE_H
 
 #include "DataDistribution.actor.h"
 // send request/signal to DDRelocationQueue through interface
@@ -32,4 +32,4 @@ struct IDDRelocationQueue {
 	;
 };
 
-#endif // FOUNDATIONDB_DDRELOCATIONQUEUE_ACTOR_H
+#endif // FOUNDATIONDB_DDRELOCATIONQUEUE_H
