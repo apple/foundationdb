@@ -126,9 +126,9 @@ struct DataDistributionTracker : public IDDShardTracker {
 	                        Reference<AsyncVar<bool>> anyZeroHealthyTeams,
 	                        KeyRangeMap<ShardTrackedData>* shards,
 	                        bool* trackerCancelled)
-	  : IDDShardTracker(), cx(cx), distributorId(distributorId), shards(shards), sizeChanges(false), systemSizeEstimate(0),
-	    dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()), output(output),
-	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), readyToStart(readyToStart),
+	  : IDDShardTracker(), cx(cx), distributorId(distributorId), shards(shards), sizeChanges(false),
+	    systemSizeEstimate(0), dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()),
+	    output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), readyToStart(readyToStart),
 	    anyZeroHealthyTeams(anyZeroHealthyTeams), trackerCancelled(trackerCancelled) {}
 
 	~DataDistributionTracker() override {

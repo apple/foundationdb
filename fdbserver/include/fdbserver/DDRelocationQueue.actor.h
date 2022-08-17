@@ -28,7 +28,8 @@ struct IDDRelocationQueue {
 	// PromiseStream<Promise<int>> getUnhealthyRelocationCount; // FIXME(xwang): change it to a synchronous call
 
 	virtual int getUnhealthyRelocationCount() = 0;
-	virtual ~IDDRelocationQueue() = default;;
+	virtual ~IDDRelocationQueue() = default;
+	;
 };
 
 #endif // FOUNDATIONDB_DDRELOCATIONQUEUE_ACTOR_H

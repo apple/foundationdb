@@ -735,8 +735,9 @@ struct DDQueue : public IDDRelocationQueue {
 	        FutureStream<RelocateShard> input,
 	        PromiseStream<GetMetricsRequest> getShardMetrics,
 	        PromiseStream<GetTopKMetricsRequest> getTopKMetrics)
-	  : IDDRelocationQueue(), distributorId(mid), lock(lock), cx(cx), txnProcessor(new DDTxnProcessor(cx)), teamCollections(teamCollections),
-	    shardsAffectedByTeamFailure(sABTF), getAverageShardBytes(getAverageShardBytes),
+	  : IDDRelocationQueue(), distributorId(mid), lock(lock), cx(cx), txnProcessor(new DDTxnProcessor(cx)),
+	    teamCollections(teamCollections), shardsAffectedByTeamFailure(sABTF),
+	    getAverageShardBytes(getAverageShardBytes),
 	    startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    cleanUpDataMoveParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
