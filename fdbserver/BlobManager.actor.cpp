@@ -564,7 +564,7 @@ ACTOR Future<BlobGranuleSplitPoints> alignKeys(Reference<BlobManagerData> bmData
 				if (nextKeyRes.size() == 0) {
 					break;
 				}
-				
+
 				alignKeyBoundary(bmData, tenantData, nextKeyRes[0].key, offset, splitPoints);
 				break;
 			} catch (Error& e) {

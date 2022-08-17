@@ -147,7 +147,7 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 			if (t2.size() > 0 && t.getInt(0) != t2.getInt(0)) {
 				if (t.size() > BGW_TUPLE_KEY_SIZE - SERVER_KNOBS->BG_KEY_TUPLE_TRUNCATE_OFFSET) {
 					fmt::print("Tenant: {0}, K={1}, E={2}, LK={3}. {4} != {5}\n",
-								tenant.prefix.printable(),
+					           tenant.prefix.printable(),
 					           k.printable(),
 					           e.printable(),
 					           lastKey.printable(),
