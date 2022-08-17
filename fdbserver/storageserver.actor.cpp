@@ -2489,7 +2489,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	state int remainingLimitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	state int remainingDurableBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	state Version startVersion = data->version.get();
-	// TODO: Change feed reads should probably at least set cacheResult to false, possibly set a different ReadType as well, perhaps high priority?
+	// TODO: Change feed reads should probably at least set cacheResult to false, possibly set a different ReadType as
+	// well, perhaps high priority?
 	state ReadOptions options;
 
 	if (DEBUG_CF_TRACE) {
@@ -6375,7 +6376,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				shard->updates.pop_front();
 			tr.setVersion(fetchVersion);
 			tr.trState->taskID = TaskPriority::FetchKeys;
-			tr.trState->readOptions.type = ReadType::FETCH;
+			// TODO: update to FETCH once the priority multi lock is used.
+			// leaving the readtype off for now to prevent data fetches stall under heavy load
+			// it is used to inform the storage that the rangeRead is for Fetch
+			// tr.trState->readOptions.type = ReadType::FETCH;
+			tr.trState->readOptions.type = ReadType::NORMAL;
 			tr.trState->readOptions.cacheResult = false;
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold = SERVER_KNOBS->FETCH_USING_STREAMING

@@ -4311,8 +4311,6 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 			setMatchIndex<GetKeyValuesFamilyRequest>(req, matchIndex);
 			req.tenantInfo = useTenant ? trState->getTenantInfo() : TenantInfo();
 			req.options = trState->readOptions;
-			// Don't cache for fetch
-			req.options.cacheResult = (req.options.type != ReadType::FETCH);
 			req.version = readVersion;
 
 			trState->cx->getLatestCommitVersions(
@@ -4765,11 +4763,8 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 			req.spanContext = spanContext;
 			req.limit = reverse ? -CLIENT_KNOBS->REPLY_BYTE_LIMIT : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 			req.limitBytes = std::numeric_limits<int>::max();
-			// leaving the flag off for now to prevent data fetches stall under heavy load
-			// it is used to inform the storage that the rangeRead is for Fetch
-			// TODO: update to FETCH once the priority multi lock is used.
+
 			req.options = trState->readOptions;
-			req.options.type = ReadType::NORMAL;
 
 			trState->cx->getLatestCommitVersions(
 			    locations[shard].locations, req.version, trState, req.ssLatestCommitVersions);

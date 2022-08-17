@@ -10994,7 +10994,7 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
                                     int recordCountTarget,
                                     bool singlePrefix,
                                     int rowLimit,
-                                    int bitLimit,
+                                    int byteLimit,
                                     ReadOptions options = ReadOptions()) {
 	fmt::print("\nstoreType: {}\n", static_cast<int>(kvs->getType()));
 	fmt::print("prefixSource: {}\n", source.toString());
@@ -11028,7 +11028,7 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
 		KeyRangeRef range = source.getKeyRangeRef(singlePrefix, suffixSize);
 		int rowLim = (deterministicRandom()->randomInt(0, 2) != 0) ? rowLimit : -rowLimit;
 
-		RangeResult result = wait(kvs->readRange(range, rowLim, bitLimit, options));
+		RangeResult result = wait(kvs->readRange(range, rowLim, byteLimit, options));
 
 		recordsRead += result.size();
 		bytesRead += result.size() * recordSize;
