@@ -1785,6 +1785,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 				std::map<std::string, std::string> details;
 				details["StorageEngine"] = s.storeType.toString();
+
 				startRole(Role::SHARED_TRANSACTION_LOG, s.storeID, interf.id(), details, "Restored");
 
 				Promise<Void> oldLog;
