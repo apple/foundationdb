@@ -537,7 +537,9 @@ ACTOR Future<Void> tenantShardSplitter(DataDistributionTracker* self, KeyRange t
 	auto shardContainingTenantStart = self->shards->rangeContaining(tenantKeys.begin);
 	auto shardContainingTenantEnd = self->shards->rangeContainingKeyBefore(tenantKeys.end);
 
+        // same shard
 	if (shardContainingTenantStart == shardContainingTenantEnd) {
+	     // If tenant boundaries are not aligned with tenantKeys
 		if (shardContainingTenantStart.begin() != tenantKeys.begin ||
 		    shardContainingTenantStart.end() != tenantKeys.end) {
 
