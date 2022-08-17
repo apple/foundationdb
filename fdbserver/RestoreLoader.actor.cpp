@@ -24,7 +24,6 @@
 #include "flow/UnitTest.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupAgent.actor.h"
-#include "fdbserver/EncryptedMutationMessage.h"
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
 #include "fdbserver/MutationTracking.h"
@@ -423,11 +422,11 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			ASSERT(inserted);
 
 			ArenaReader rd(buf.arena(), StringRef(message, msgSize), AssumeVersion(g_network->protocolVersion()));
-			if (EncryptedMutationMessage::isNextIn(rd)) {
-				throw encrypt_unsupported();
-			}
 			MutationRef mutation;
 			rd >> mutation;
+			if (mutation.isEncrypted()) {
+				throw encrypt_unsupported();
+			}
 
 			// Skip mutation whose commitVesion < range kv's version
 			if (logMutationTooOld(pRangeVersions, mutation, msgVersion.version)) {
