@@ -17,8 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef FOUNDATIONDB_DDRELOCATIONQUEUE_H
-#define FOUNDATIONDB_DDRELOCATIONQUEUE_H
+#ifndef FOUNDATIONDB_DDRELOCATIONQUEUE_ACTOR_H
+#define FOUNDATIONDB_DDRELOCATIONQUEUE_ACTOR_H
 
 #include "DataDistribution.actor.h"
 // send request/signal to DDRelocationQueue through interface
@@ -28,7 +28,7 @@ struct IDDRelocationQueue {
 	// PromiseStream<Promise<int>> getUnhealthyRelocationCount; // FIXME(xwang): change it to a synchronous call
 
 	virtual int getUnhealthyRelocationCount() = 0;
-	virtual ~IDDRelocationQueue() = 0;
+	virtual ~IDDRelocationQueue() = default;;
 };
 
-#endif // FOUNDATIONDB_DDRELOCATIONQUEUE_H
+#endif // FOUNDATIONDB_DDRELOCATIONQUEUE_ACTOR_H

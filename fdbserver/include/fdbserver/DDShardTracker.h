@@ -34,7 +34,7 @@ struct IDDShardTracker {
 	// PromiseStream<Promise<int64_t>> averageShardBytes; // FIXME(xwang): change it to a synchronous call
 
 	virtual double getAverageShardBytes() = 0;
-	virtual ~IDDShardTracker() = 0;
+	virtual ~IDDShardTracker() = default;
 };
 
 #endif // FOUNDATIONDB_DDSHARDTRACKER_H
