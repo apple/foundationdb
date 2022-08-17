@@ -19,6 +19,8 @@ class TempCluster(LocalCluster):
         blob_granules_enabled: bool = False,
         tls_config: TLSConfig = None,
         public_key_json_str: str = None,
+        remove_at_exit: bool = True,
+        custom_config: dict = {},
     ):
         self.build_dir = Path(build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(build_dir)
@@ -26,6 +28,7 @@ class TempCluster(LocalCluster):
         tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
         tmp_dir.mkdir(parents=True)
         self.tmp_dir = tmp_dir
+        self.remove_at_exit = remove_at_exit
         super().__init__(
             tmp_dir,
             self.build_dir.joinpath("bin", "fdbserver"),
@@ -46,11 +49,13 @@ class TempCluster(LocalCluster):
 
     def __exit__(self, xc_type, exc_value, traceback):
         super().__exit__(xc_type, exc_value, traceback)
-        shutil.rmtree(self.tmp_dir)
+        if self.remove_at_exit:
+            shutil.rmtree(self.tmp_dir)
 
     def close(self):
         super().__exit__(None, None, None)
-        shutil.rmtree(self.tmp_dir)
+        if self.remove_at_exit:
+            shutil.rmtree(self.tmp_dir)
 
 
 if __name__ == "__main__":

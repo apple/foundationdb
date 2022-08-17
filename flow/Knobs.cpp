@@ -128,7 +128,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( NETWORK_TEST_SCRIPT_MODE,                          false );
 
 	//Authorization
-	init( PUBLIC_KEY_FILE_MAX_SIZE,                     512 * 1024 );
+	init( PUBLIC_KEY_FILE_MAX_SIZE,                    1024 * 1024 );
 	init( PUBLIC_KEY_FILE_REFRESH_INTERVAL_SECONDS,             30 );
 	init( MAX_CACHED_EXPIRED_TOKENS,                          1024 );
 

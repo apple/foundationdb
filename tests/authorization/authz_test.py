@@ -3,9 +3,9 @@ import argparse
 import fdb
 import pytest
 import time
+from conftest import random_alphanum_str
 
-if __name__ == "__main__":
-    fdb.api_version(720)
+fdb.api_version(720)
 
 def token_claim_1h(tenant_name: str):
     now = time.time()
@@ -20,8 +20,8 @@ def token_claim_1h(tenant_name: str):
         "tenants": [tenant_name],
     }
 
-def test_tenant_access(db, token_gen, default_tenant, default_tenant_tr_gen):
-    token = token_gen(token_claim_1h(default_tenant))
+def test_simple_tenant_access(db, token_gen, default_tenant, default_tenant_tr_gen):
+    token = token_gen(token_claim_1h(str(default_tenant)))
     tr = default_tenant_tr_gen()
     tr.options.set_authorization_token(token)
     tr[b'abc'] = b'def'

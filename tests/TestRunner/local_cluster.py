@@ -85,6 +85,7 @@ logdir = {logdir}
 {bg_knob_line}
 {tls_config}
 {authz_public_key_config}
+{custom_config}
 # logsize = 10MiB
 # maxlogssize = 100MiB
 # machine-id =
@@ -136,6 +137,7 @@ logdir = {logdir}
         self.redundancy = redundancy
         self.ip_address = "127.0.0.1" if ip_address is None else ip_address
         self.first_port = port
+        self.custom_config = custom_config
         self.blob_granules_enabled = blob_granules_enabled
         if blob_granules_enabled:
             # add extra process for blob_worker
@@ -165,17 +167,17 @@ logdir = {logdir}
         self.server_ca_file = self.cert.joinpath("server_ca.pem")
         self.client_ca_file = self.cert.joinpath("client_ca.pem")
 
+        if public_key_json_str:
+            self.public_key_json_file = self.etc.joinpath("public_keys.json")
+            with open(self.public_key_json_file, "w") as pubkeyfile:
+                pubkeyfile.write(public_key_json_str)
+
         if create_config:
             self.create_cluster_file()
             self.save_config()
 
         if self.tls_config is not None:
             self.create_tls_cert()
-
-        if public_key_json_str:
-            self.public_key_json_file = self.etc.joinpath("public_keys.json")
-            with open(self.public_key_json_file, "w") as pubkeyfile:
-                pubkeyfile.write(public_key_json_str)
 
         self.cluster_file = self.etc.joinpath("fdb.cluster")
 
@@ -206,7 +208,7 @@ logdir = {logdir}
                     tls_config=self.tls_conf_string(),
                     authz_public_key_config=self.authz_public_key_conf_string(),
                     optional_tls=":tls" if self.tls_config is not None else "",
-                    custom_config='\n'.join(["{} = {}".format(key, value) for key, value in custom_config.items()]),
+                    custom_config='\n'.join(["{} = {}".format(key, value) for key, value in self.custom_config.items()]),
                 )
             )
             # By default, the cluster only has one process
@@ -358,9 +360,9 @@ logdir = {logdir}
             return "\n".join("{} = {}".format(k, v) for k, v in conf_map.items())
 
     def authz_public_key_conf_string(self):
-        if self.public_key_json_file:
+        if self.public_key_json_file is not None:
             return "authorization-public-key-file = {}".format(self.public_key_json_file)
-        else
+        else:
             return ""
 
     # Get cluster status using fdbcli

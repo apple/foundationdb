@@ -1976,7 +1976,14 @@ int main(int argc, char* argv[]) {
 			    opts.publicAddresses.address, opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			g_network->initTLS();
 			if (!opts.authzPublicKeyFile.empty()) {
+				try {
+					FlowTransport::transport().loadPublicKeyFile(opts.authzPublicKeyFile);
+				} catch (Error& e) {
+					TraceEvent("AuthzPublicKeySetLoadError").error(e);
+				}
 				FlowTransport::transport().watchPublicKeyFile(opts.authzPublicKeyFile);
+			} else {
+				TraceEvent(SevInfo, "AuthzPublicKeyFileNotSet");
 			}
 
 			if (expectsPublicAddress) {

@@ -45,6 +45,7 @@
 #include "flow/Net2Packet.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/ObjectSerializer.h"
+#include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/WatchFile.actor.h"
@@ -311,6 +312,7 @@ public:
 
 	// Returns true if given network address 'address' is one of the address we are listening on.
 	bool isLocalAddress(const NetworkAddress& address) const;
+	void applyPublicKeySet(StringRef jwkSetString);
 
 	NetworkAddressCachedString localAddresses;
 	std::vector<Future<Void>> listeners;
@@ -1531,6 +1533,26 @@ bool TransportData::isLocalAddress(const NetworkAddress& address) const {
 	        address == localAddresses.getAddressList().secondaryAddress.get());
 }
 
+void TransportData::applyPublicKeySet(StringRef jwkSetString) {
+	auto jwks = JsonWebKeySet::parse(jwkSetString, {});
+	if (!jwks.present())
+		throw pkey_decode_error();
+	const auto& keySet = jwks.get().keys;
+	publicKeys.clear();
+	int numPrivateKeys = 0;
+	for (auto [keyName, key] : keySet) {
+		// ignore private keys
+		if (key.isPublic()) {
+			publicKeys[keyName] = key.getPublic();
+		} else {
+			numPrivateKeys++;
+		}
+	}
+	TraceEvent(SevInfo, "AuthzPublicKeySetApply")
+		.detail("NumPublicKeys", publicKeys.size())
+		.detail("NumSkippedPrivateKeys", numPrivateKeys);
+}
+
 ACTOR static Future<Void> multiVersionCleanupWorker(TransportData* self) {
 	loop {
 		wait(delay(FLOW_KNOBS->CONNECTION_CLEANUP_DELAY));
@@ -1970,6 +1992,21 @@ void FlowTransport::removeAllPublicKeys() {
 	self->publicKeys.clear();
 }
 
+void FlowTransport::loadPublicKeyFile(const std::string& filePath) {
+	if (!fileExists(filePath)) {
+		throw file_not_found();
+	}
+	int64_t const len = fileSize(filePath);
+	if (len <= 0) {
+		TraceEvent(SevWarn, "AuthzPublicKeySetEmpty").detail("Path", filePath);
+	} else if (len > FLOW_KNOBS->PUBLIC_KEY_FILE_MAX_SIZE) {
+		throw file_too_large();
+	} else {
+		auto json = readFileBytes(filePath, len);
+		self->applyPublicKeySet(StringRef(json));
+	}
+}
+
 ACTOR static Future<Void> watchPublicKeyJwksFile(std::string filePath, TransportData* self) {
 	state AsyncTrigger fileChanged;
 	state Future<Void> fileWatch;
@@ -1990,24 +2027,12 @@ ACTOR static Future<Void> watchPublicKeyJwksFile(std::string filePath, Transport
 			state std::string json(filesize, '\0');
 			if (filesize > FLOW_KNOBS->PUBLIC_KEY_FILE_MAX_SIZE)
 				throw file_too_large();
-			wait(success(file->read(&json[0], filesize, 0)));
-			auto jwks = JsonWebKeySet::parse(StringRef(json), {});
-			if (!jwks.present())
-				throw pkey_decode_error();
-			const auto& keySet = jwks.get().keys;
-			self->publicKeys.clear();
-			int numPrivateKeys = 0;
-			for (auto [keyName, key] : keySet) {
-				// ignore private keys
-				if (key.isPublic()) {
-					self->publicKeys[keyName] = key.getPublic();
-				} else {
-					numPrivateKeys++;
-				}
+			if (filesize <= 0) {
+				TraceEvent(SevWarn, "AuthzPublicKeySetEmpty").suppressFor(60);
+				continue;
 			}
-			TraceEvent(SevInfo, "AuthzPublicKeySetRefreshSuccess")
-			    .detail("NumPublicKeys", self->publicKeys.size())
-			    .detail("NumSkippedPrivateKeys", numPrivateKeys);
+			wait(success(file->read(&json[0], filesize, 0)));
+			self->applyPublicKeySet(StringRef(json));
 			errorCount = 0;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {

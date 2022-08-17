@@ -39,7 +39,7 @@ if(WITH_PYTHON)
 
   configure_testing(TEST_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
                     ERROR_ON_ADDITIONAL_FILES
-                    IGNORE_PATTERNS ".*/CMakeLists.txt")
+                    IGNORE_PATTERNS ".*/CMakeLists.txt" ".*/requirements.txt")
 
   add_fdb_test(TEST_FILES AsyncFileCorrectness.txt UNIT IGNORE)
   add_fdb_test(TEST_FILES AsyncFileMix.txt UNIT IGNORE)
@@ -392,39 +392,32 @@ if(WITH_PYTHON)
   if (WIN32)
     set(authz_venv_activate ${authz_venv_dir}/bin/activate.bat)
   else()
-    set(authz_venv_activate . ${authz_venv_dir}/bin/activate)
+    set(authz_venv_activate ". ${authz_venv_dir}/bin/activate")
   endif()
 
-  add_test(
-    NAME authorization_venv_setup
-    COMMAND ${Python3_EXECUTABLE} -m venv ${authz_venv_dir} &&
-            ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/tests/authorization/* ${authz_venv_dir}/ &&
-            ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/tests/TestRunner/*_cluster.py ${authz_venv_dir}/ &&
-            ${authz_venv_activate} &&
-            pip install --upgrade -r ${authz_venv_dir}/requirements.txt &&
-            python3 ${CMAKE_BINARY_DIR}/bindings/python/setup.py install &&
-            deactivate
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  if (NOT WIN32)
+    add_test(
+      NAME authorization_venv_setup
+      COMMAND bash -c "${Python3_EXECUTABLE} -m venv ${authz_venv_dir} && \
+              ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/tests/authorization/* ${authz_venv_dir}/ && \
+              ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/tests/TestRunner/*_cluster.py ${authz_venv_dir}/ && \
+              ${authz_venv_activate} && \
+              pip install --upgrade pip && \
+              pip install --upgrade -r ${authz_venv_dir}/requirements.txt && \
+              (cd ${CMAKE_BINARY_DIR}/bindings/python && python3 setup.py install) && \
+              deactivate"
+      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-  add_test(
-    NAME token_based_tenant_authorization
-    WORKING_DIRECTORY ${authz_venv_dir}
-    COMMAND ${authz_venv_activate} &&
-            bin/python3 tmp_cluster.py --disable-log-dump --tls-enabled --build-dir ${CMAKE_BINARY_DIR}
-            --
-            pytest
-            --cluster-file
-            @CLUSTER_FILE@
-            --tls-cert-file
-            @CLIENT_CERT_FILE@
-            --tls-key-file
-            @CLIENT_KEY_FILE@
-            --tls-ca-file
-            @SERVER_CA_FILE@ &&
-            deactivate
-        )
-  set_tests_properties(token_based_tenant_authorization PROPERTIES FIXTURES_REQUIRED authz_virtual_env)
-  set_tests_properties(authorization_venv_setup PROPERTIES FIXTURES_SETUP authz_virtual_env)
+    add_test(
+      NAME token_based_tenant_authorization
+      WORKING_DIRECTORY ${authz_venv_dir}
+      COMMAND bash -c "${authz_venv_activate} && \
+              LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib pytest authz_test.py --build-dir ${CMAKE_BINARY_DIR} && \
+              deactivate"
+          )
+    set_tests_properties(token_based_tenant_authorization PROPERTIES FIXTURES_REQUIRED authz_virtual_env)
+    set_tests_properties(authorization_venv_setup PROPERTIES FIXTURES_SETUP authz_virtual_env)
+  endif()
 else()
   message(WARNING "Python not found, won't configure ctest")
 endif()
