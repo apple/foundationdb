@@ -126,7 +126,7 @@ struct OpenDatabaseRequest {
 		}
 	};
 
-	int clientCount;
+	int clientCount = 0;
 
 	// Maps issue to Samples
 	std::map<Key, Samples> issues;
