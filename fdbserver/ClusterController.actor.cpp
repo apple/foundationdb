@@ -1224,12 +1224,11 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 			self->masterProcessId = w.locality.processId();
 		}
 		if (configBroadcaster != nullptr && req.lastSeenKnobVersion.present() && req.knobConfigClassSet.present()) {
-			self->addActor.send(configBroadcaster->registerNode(
-			    self->id_worker[w.locality.processId()].details.interf.configBroadcastInterface,
-			    req.lastSeenKnobVersion.get(),
-			    req.knobConfigClassSet.get(),
-			    self->id_worker[w.locality.processId()].watcher,
-			    isCoordinator));
+			self->addActor.send(configBroadcaster->registerNode(req.configBroadcastInterface,
+			                                                    req.lastSeenKnobVersion.get(),
+			                                                    req.knobConfigClassSet.get(),
+			                                                    self->id_worker[w.locality.processId()].watcher,
+			                                                    isCoordinator));
 		}
 		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 		self->updateDBInfo.trigger();
@@ -1261,7 +1260,7 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 			self->updateDBInfo.trigger();
 		}
 		if (configBroadcaster != nullptr && req.lastSeenKnobVersion.present() && req.knobConfigClassSet.present()) {
-			self->addActor.send(configBroadcaster->registerNode(info->second.details.interf.configBroadcastInterface,
+			self->addActor.send(configBroadcaster->registerNode(req.configBroadcastInterface,
 			                                                    req.lastSeenKnobVersion.get(),
 			                                                    req.knobConfigClassSet.get(),
 			                                                    info->second.watcher,

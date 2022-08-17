@@ -565,6 +565,7 @@ ACTOR Future<Void> registrationClient(
     Reference<AsyncVar<std::set<std::string>> const> issues,
     Reference<ConfigNode> configNode,
     Reference<LocalConfiguration> localConfig,
+    ConfigBroadcastInterface configBroadcastInterface,
     Reference<AsyncVar<ServerDBInfo>> dbInfo,
     Promise<Void> recoveredDiskFiles) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
@@ -602,7 +603,8 @@ ACTOR Future<Void> registrationClient(
 		    degraded->get(),
 		    localConfig.isValid() ? localConfig->lastSeenVersion() : Optional<Version>(),
 		    localConfig.isValid() ? localConfig->configClassSet() : Optional<ConfigClassSet>(),
-		    recoveredDiskFiles.isSet());
+		    recoveredDiskFiles.isSet(),
+		    configBroadcastInterface);
 
 		for (auto const& i : issues->get()) {
 			request.issues.push_back_deep(request.issues.arena(), i);
@@ -1647,7 +1649,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state std::string coordFolder = abspath(_coordFolder);
 
 	state WorkerInterface interf(locality);
-	interf.configBroadcastInterface = configBroadcastInterface;
 	state std::set<std::pair<UID, KeyValueStoreType>> runningStorages;
 	interf.initEndpoints();
 
@@ -1944,11 +1945,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       issues,
 		                                       configNode,
 		                                       localConfig,
+		                                       configBroadcastInterface,
 		                                       dbInfo,
 		                                       recoveredDiskFiles));
 
 		if (configNode.isValid()) {
-			errorForwarders.add(brokenPromiseToNever(localConfig->consume(interf.configBroadcastInterface)));
+			errorForwarders.add(brokenPromiseToNever(localConfig->consume(configBroadcastInterface)));
 		}
 
 		if (SERVER_KNOBS->ENABLE_WORKER_HEALTH_MONITOR) {
