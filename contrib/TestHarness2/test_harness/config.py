@@ -70,6 +70,7 @@ class ConfigValue:
 
 class Config:
     def __init__(self):
+        self.random = random.Random()
         self.kill_seconds: int = 30 * 60
         self.kill_seconds_args = {'help': 'Timeout for individual test'}
         self.buggify_on_ratio: float = 0.8
@@ -102,6 +103,7 @@ class Config:
         self.clean_up_args = {'long_name': 'no_clean_up', 'action': 'store_false'}
         self.run_dir: Path = Path('tmp')
         self.joshua_seed: int = int(os.getenv('JOSHUA_SEED', str(random.randint(0, 2 ** 32 - 1))))
+        self.random.seed(self.joshua_seed, version=2)
         self.joshua_seed_args = {'short_name': 's', 'help': 'A random seed'}
         self.print_coverage = False
         self.print_coverage_args = {'action': 'store_true'}
@@ -110,9 +112,16 @@ class Config:
         self.output_format: str = 'xml'
         self.output_format_args = {'short_name': 'O', 'choices': ['json', 'xml']}
         self.include_test_files: str = r'.*'
+        self.include_test_files_args = {'help': 'Only consider test files whose path match against the given regex'}
         self.exclude_test_files: str = r'.^'
+        self.exclude_test_files_args = {'help': 'Don\'t consider test files whose path match against the given regex'}
         self.include_test_names: str = r'.*'
+        self.include_test_names_args = {'help': 'Only consider tests whose names match against the given regex'}
         self.exclude_test_names: str = r'.^'
+        self.exclude_test_names_args = {'help': 'Don\'t consider tests whose names match against the given regex'}
+        self.max_stderr_bytes: int = 1000
+        self.write_stats: bool = True
+        self.read_stats: bool = True
         self.config_map = self._build_map()
 
     def _build_map(self):
@@ -151,6 +160,8 @@ class Config:
         for val in self.config_map.values():
             k, v = val.get_value(args)
             config.__setattr__(k, v)
+            if k == 'joshua_seed':
+                self.random.seed(self.joshua_seed, version=2)
 
 
 config = Config()

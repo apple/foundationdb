@@ -1,5 +1,4 @@
 import argparse
-import random
 import sys
 import traceback
 
@@ -10,7 +9,6 @@ from test_harness.summarize import SummaryTree
 
 if __name__ == '__main__':
     try:
-        # seed the random number generator
         parser = argparse.ArgumentParser('TestHarness', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
         config.build_arguments(parser)
         # initialize arguments
@@ -21,7 +19,6 @@ if __name__ == '__main__':
                             required=False)
         args = parser.parse_args()
         config.extract_args(args)
-        random.seed(config.joshua_seed)
         test_runner = TestRunner()
         if not test_runner.run(args.stats):
             exit(1)

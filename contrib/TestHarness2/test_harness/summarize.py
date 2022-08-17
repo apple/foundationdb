@@ -13,7 +13,6 @@ import xml.sax.saxutils
 
 from pathlib import Path
 from typing import List, Dict, TextIO, Callable, Optional, OrderedDict, Any, Tuple
-from xml.dom import minidom
 
 from test_harness.config import config
 
@@ -46,7 +45,7 @@ class SummaryTree:
         # However, our xml is very simple and therefore serializing manually is easy enough
         attrs = []
         for k, v in self.attributes.items():
-            attrs.append('{}="{}"'.format(k, xml.sax.saxutils.escape(v)))
+            attrs.append('{}={}'.format(k, xml.sax.saxutils.quoteattr(v)))
         elem = '{}<{}{}'.format(prefix, self.name, ('' if len(attrs) == 0 else ' '))
         out.write(elem)
         if config.pretty_print:
@@ -92,7 +91,7 @@ class ParseHandler:
         self.out = out
         self.events: OrderedDict[Optional[Tuple[str, Optional[str]]], List[ParserCallback]] = collections.OrderedDict()
 
-    def add_handler(self, attr: Tuple[str, str], callback: ParserCallback) -> None:
+    def add_handler(self, attr: Tuple[str, Optional[str]], callback: ParserCallback) -> None:
         if attr in self.events:
             self.events[attr].append(callback)
         else:
@@ -319,7 +318,7 @@ class TraceFiles:
                 else:
                     self.timestamps.append(ts)
                     self.runs[ts] = [file]
-        self.timestamps.sort()
+        self.timestamps.sort(reverse=True)
 
     def __getitem__(self, idx: int) -> List[Path]:
         res = self.runs[self.timestamps[idx]]
@@ -333,7 +332,8 @@ class TraceFiles:
 class Summary:
     def __init__(self, binary: Path, runtime: float = 0, max_rss: int | None = None,
                  was_killed: bool = False, uid: uuid.UUID | None = None, expected_unseed: int | None = None,
-                 exit_code: int = 0, valgrind_out_file: Path | None = None, stats: str | None = None):
+                 exit_code: int = 0, valgrind_out_file: Path | None = None, stats: str | None = None,
+                 error_out: str = None, will_restart: bool = False):
         self.binary = binary
         self.runtime: float = runtime
         self.max_rss: int | None = max_rss
@@ -353,17 +353,21 @@ class Summary:
         self.coverage: OrderedDict[Coverage, bool] = collections.OrderedDict()
         self.test_count: int = 0
         self.tests_passed: int = 0
+        self.error_out = error_out
+        self.stderr_severity: str = '40'
+        self.will_restart: bool = will_restart
 
         if uid is not None:
             self.out.attributes['TestUID'] = str(uid)
         if stats is not None:
             self.out.attributes['Statistics'] = stats
         self.out.attributes['JoshuaSeed'] = str(config.joshua_seed)
+        self.out.attributes['WillRestart'] = '1' if self.will_restart else '0'
 
         self.handler = ParseHandler(self.out)
         self.register_handlers()
 
-    def summarize(self, trace_dir: Path):
+    def summarize(self, trace_dir: Path, command: str):
         trace_files = TraceFiles(trace_dir)
         if len(trace_files) == 0:
             self.error = True
@@ -371,14 +375,15 @@ class Summary:
             child = SummaryTree('NoTracesFound')
             child.attributes['Severity'] = '40'
             child.attributes['Path'] = str(trace_dir.absolute())
+            child.attributes['Command'] = command
             self.out.append(child)
+            return
         for f in trace_files[0]:
             self.parse_file(f)
         self.done()
 
     def ok(self):
-        return not self.error and self.tests_passed == self.test_count and self.tests_passed >= 0\
-               and self.test_end_found
+        return not self.error
 
     def done(self):
         if config.print_coverage:
@@ -429,7 +434,38 @@ class Summary:
             child = SummaryTree('TestUnexpectedlyNotFinished')
             child.attributes['Severity'] = '40'
             self.out.append(child)
+        if self.error_out is not None and len(self.error_out) > 0:
+            if self.stderr_severity == '40':
+                self.error = True
+            lines = self.error_out.split('\n')
+            stderr_bytes = 0
+            for line in lines:
+                remaining_bytes = config.max_stderr_bytes - stderr_bytes
+                if remaining_bytes > 0:
+                    out_err = line[0:remaining_bytes] + ('...' if len(line) > remaining_bytes else '')
+                    child = SummaryTree('StdErrOutput')
+                    child.attributes['Severity'] = self.stderr_severity
+                    child.attributes['Output'] = out_err
+                    self.out.append(child)
+                stderr_bytes += len(line)
+            if stderr_bytes > config.max_stderr_bytes:
+                child = SummaryTree('StdErrOutputTruncated')
+                child.attributes['Severity'] = self.stderr_severity
+                child.attributes['BytesRemaining'] = stderr_bytes - config.max_stderr_bytes
+                self.out.append(child)
+
         self.out.attributes['Ok'] = '1' if self.ok() else '0'
+        if not self.ok():
+            reason = 'Unknown'
+            if self.error:
+                reason = 'ProducedErrors'
+            elif not self.test_end_found:
+                reason = 'TestDidNotFinish'
+            elif self.tests_passed == 0:
+                reason = 'NoTestsPassed'
+            elif self.test_count != self.tests_passed:
+                reason = 'Expected {} tests to pass, but only {} did'.format(self.test_count, self.tests_passed)
+            self.out.attributes['FailReason'] = reason
 
     def parse_file(self, file: Path):
         parser: Parser
@@ -581,3 +617,8 @@ class Summary:
                 self.out.append(child)
         self.handler.add_handler(('Type', 'BuggifySection'), buggify_section)
         self.handler.add_handler(('Type', 'FaultInjected'), buggify_section)
+
+        def stderr_severity(attrs: Dict[str, str]):
+            if 'NewSeverity' in attrs:
+                self.stderr_severity = attrs['NewSeverity']
+        self.handler.add_handler(('Type', 'StderrSeverity'), stderr_severity)
