@@ -177,6 +177,10 @@ bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, Network
 		CODE_PROBE(true, "Token referencing non-existing key");
 		TRACE_INVALID_PARSED_TOKEN("UnknownKey", t);
 		return false;
+	} else if (!t.issuedAtUnixTime.present()) {
+		CODE_PROBE(true, "Token has no issued-at field");
+		TRACE_INVALID_PARSED_TOKEN("NoIssuedAt", t);
+		return false;
 	} else if (!t.expiresAtUnixTime.present()) {
 		CODE_PROBE(true, "Token has no expiration time");
 		TRACE_INVALID_PARSED_TOKEN("NoExpirationTime", t);
@@ -279,6 +283,11 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 		    },
 		    "TokenNotYetValid",
 		},
+		{
+		    [](Arena&, IRandom&, authz::jwt::TokenRef& token) { token.issuedAtUnixTime.reset(); },
+		    "NoIssuedAt",
+		},
+
 		{
 		    [](Arena& arena, IRandom&, authz::jwt::TokenRef& token) { token.tenants.reset(); },
 		    "NoTenants",
