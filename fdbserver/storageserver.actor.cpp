@@ -2489,6 +2489,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	state int remainingLimitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	state int remainingDurableBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	state Version startVersion = data->version.get();
+	// TODO: Change feed reads should probably at least set cacheResult to false, possibly set a different ReadType as well, perhaps high priority?
 	state ReadOptions options;
 
 	if (DEBUG_CF_TRACE) {
