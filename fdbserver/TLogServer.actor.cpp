@@ -372,6 +372,16 @@ struct TLogData : NonCopyable {
 
 	Reference<Histogram> commitLatencyDist;
 
+	struct SafeAccessor {
+		TLogData* self;
+		Promise<Void> destroyed;
+		SafeAccessor(TLogData* self): self(self), destroyed(self->destroyed){}
+		TLogData* operator->() const {
+			ASSERT(!destroyed.isSet());
+			return self;
+		}
+	};
+
 	TLogData(UID dbgid,
 	         UID workerID,
 	         IKeyValueStore* persistentData,
@@ -1618,9 +1628,9 @@ ACTOR Future<std::vector<StringRef>> parseMessagesForTag(StringRef commitBlob, T
 }
 
 // Common logics to peek TLog and create TLogPeekReply that serves both streaming peek or normal peek request
-ACTOR template <typename PromiseType>
+ACTOR template <typename PromiseType, typename TLogDataAccessorType = TLogData*>
 Future<Void> tLogPeekMessages(PromiseType replyPromise,
-                              TLogData* self,
+                              TLogDataAccessorType self,
                               Reference<LogData> logData,
                               Version reqBegin,
                               Tag reqTag,
@@ -2018,8 +2028,7 @@ struct ErrorCounter {
 static ErrorCounter g_errorCounter("TlogDebugErrorCounter");
 
 // This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
-ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Reference<LogData> logData) {
-	state Promise<Void> destroyed = self->destroyed;
+ACTOR Future<Void> tLogPeekStream(TLogData::SafeAccessor self, TLogPeekStreamRequest req, Reference<LogData> logData) {
 	self->activePeekStreams++;
 
 	state Version begin = req.begin;
@@ -2031,7 +2040,7 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 		state Future<TLogPeekReply> future(promise.getFuture());
 		try {
 			wait(req.reply.onReady() && store(reply.rep, future) &&
-			     tLogPeekMessages(promise, self, logData, begin, req.tag, req.returnIfBlocked, onlySpilled));
+			     tLogPeekMessages<Promise<TLogPeekReply>, TLogData::SafeAccessor>(promise, self, logData, begin, req.tag, req.returnIfBlocked, onlySpilled));
 
 			reply.rep.begin = begin;
 			req.reply.send(reply);
@@ -2043,7 +2052,6 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 				wait(delay(0, g_network->getCurrentTask()));
 			}
 		} catch (Error& e) {
-			ASSERT(!destroyed.isSet());
 			self->activePeekStreams--;
 			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId)
 			    .errorUnsuppressed(e)
@@ -2621,7 +2629,7 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
 			TraceEvent(SevDebug, "TLogPeekStream", logData->logId)
 			    .detail("Token", tli.peekStreamMessages.getEndpoint().token);
-			logData->addActor.send(tLogPeekStream(self, req, logData));
+			logData->addActor.send(tLogPeekStream(TLogData::SafeAccessor(self), req, logData));
 		}
 		when(TLogPeekRequest req = waitNext(tli.peekMessages.getFuture())) {
 			logData->addActor.send(tLogPeekMessages(
