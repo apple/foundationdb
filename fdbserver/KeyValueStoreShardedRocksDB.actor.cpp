@@ -652,7 +652,7 @@ public:
 					    .detail("Range", range)
 					    .detail("Name", name);
 
-					// Shard with an empty name is an empty shard.
+					// Empty name indicates the shard doesn't belong to the SS/KVS.
 					if (name.empty()) {
 						continue;
 					}
@@ -675,6 +675,7 @@ public:
 					break;
 				}
 
+				// Read from the current last key since the shard begining with it hasn't been processed.
 				if (metadata.size() == 1 && metadata.back().value.toString().empty()) {
 					// Should not happen, just being paranoid.
 					keyRange = KeyRangeRef(keyAfter(metadata.back().key), keyRange.end);
