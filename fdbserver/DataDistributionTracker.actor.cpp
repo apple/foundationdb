@@ -505,7 +505,7 @@ void executeShardSplit(DataDistributionTracker* self,
 	int skipRange = deterministicRandom()->randomInt(0, numShards);
 
 	auto s = describeSplit(keys, splitKeys);
-	TraceEvent(SevInfo, "ExecutingShardSplit").detail("Splitting", s).detail("NumShards", numShards);
+	TraceEvent(SevInfo, "ExecutingShardSplit").suppressFor(0.5).detail("Splitting", s).detail("NumShards", numShards);
 
 	// The queue can't deal with RelocateShard requests which split an existing shard into three pieces, so
 	// we have to send the unskipped ranges in this order (nibbling in from the edges of the old range)
@@ -670,30 +670,33 @@ ACTOR Future<Void> brokenPromiseToReady(Future<Void> f) {
 	return Void();
 }
 
-static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef nextRange) {
-
-	if (keys.end == allKeys.end) {
-		return false;
-	}
-
+static bool shardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef adjRange) {
 	bool honorTenantKeyspaceBoundaries = self->ddTenantCache.present();
 
 	if (!honorTenantKeyspaceBoundaries) {
 		return true;
 	}
 
-	Optional<Reference<TCTenantInfo>> tenantOwningBegin = {};
-	Optional<Reference<TCTenantInfo>> tenantOwningNext = {};
+	Optional<Reference<TCTenantInfo>> tenantOwningRange = {};
+	Optional<Reference<TCTenantInfo>> tenantOwningAdjRange = {};
 
-	tenantOwningBegin = self->ddTenantCache.get()->tenantOwning(keys.begin);
-	tenantOwningNext = self->ddTenantCache.get()->tenantOwning(nextRange.begin);
+	tenantOwningRange = self->ddTenantCache.get()->tenantOwning(keys.begin);
+	tenantOwningAdjRange = self->ddTenantCache.get()->tenantOwning(adjRange.begin);
 
-	if ((tenantOwningBegin.present() != tenantOwningNext.present()) ||
-	    (tenantOwningBegin.present() && (tenantOwningBegin != tenantOwningNext))) {
+	if ((tenantOwningRange.present() != tenantOwningAdjRange.present()) ||
+	    (tenantOwningRange.present() && (tenantOwningRange != tenantOwningAdjRange))) {
 		return false;
 	}
 
 	return true;
+}
+
+static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef nextRange) {
+	if (keys.end == allKeys.end) {
+		return false;
+	}
+
+	return shardMergeFeasible(self, keys, nextRange);
 }
 
 static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef prevRange) {
@@ -701,24 +704,7 @@ static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange c
 		return false;
 	}
 
-	bool honorTenantKeyspaceBoundaries = self->ddTenantCache.present();
-
-	if (!honorTenantKeyspaceBoundaries) {
-		return true;
-	}
-
-	Optional<Reference<TCTenantInfo>> tenantOwningBegin = {};
-	Optional<Reference<TCTenantInfo>> tenantOwningPrev = {};
-
-	tenantOwningBegin = self->ddTenantCache.get()->tenantOwning(keys.begin);
-	tenantOwningPrev = self->ddTenantCache.get()->tenantOwning(prevRange.begin);
-
-	if ((tenantOwningBegin.present() != tenantOwningPrev.present()) ||
-	    (tenantOwningBegin.present() && (tenantOwningBegin != tenantOwningPrev))) {
-		return false;
-	}
-
-	return true;
+	return shardMergeFeasible(self, keys, prevRange);
 }
 
 Future<Void> shardMerger(DataDistributionTracker* self,
