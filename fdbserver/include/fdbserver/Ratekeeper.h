@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#ifndef FDBSERVER_RATEKEEPER_H
+#define FDBSERVER_RATEKEEPER_H
+
 #pragma once
 
 #include "fdbclient/DatabaseConfiguration.h"
@@ -43,19 +46,21 @@ enum limitReason_t {
 	log_server_min_free_space_ratio,
 	storage_server_durability_lag, // 10
 	storage_server_list_fetch_failed,
+	blob_worker_lag,
+	blob_worker_missing,
 	limitReason_t_end
 };
 
 class StorageQueueInfo {
 	uint64_t totalWriteCosts{ 0 };
 	int totalWriteOps{ 0 };
-	Reference<EventCacheHolder> busiestWriteTagEventHolder;
 
 	// refresh periodically
 	TransactionTagMap<TransactionCommitCostEstimation> tagCostEst;
 
 public:
 	bool valid;
+	UID ratekeeperID;
 	UID id;
 	LocalityData locality;
 	StorageQueuingMetricsReply lastReply;
@@ -67,12 +72,17 @@ public:
 	limitReason_t limitReason;
 	std::vector<StorageQueuingMetricsReply::TagInfo> busiestReadTags, busiestWriteTags;
 
-	StorageQueueInfo(UID id, LocalityData locality);
-	void refreshCommitCost(double elapsed);
+	StorageQueueInfo(const UID& id, const LocalityData& locality);
+	StorageQueueInfo(const UID& rateKeeperID, const UID& id, const LocalityData& locality);
+	// Summarizes up the commit cost per storage server. Returns the UpdateCommitCostRequest for corresponding SS.
+	UpdateCommitCostRequest refreshCommitCost(double elapsed);
 	int64_t getStorageQueueBytes() const { return lastReply.bytesInput - smoothDurableBytes.smoothTotal(); }
 	int64_t getDurabilityLag() const { return smoothLatestVersion.smoothTotal() - smoothDurableVersion.smoothTotal(); }
 	void update(StorageQueuingMetricsReply const&, Smoother& smoothTotalDurableBytes);
 	void addCommitCost(TransactionTagRef tagName, TransactionCommitCostEstimation const& cost);
+
+	// Determine the ratio (limit / current throughput) for throttling based on write queue size
+	Optional<double> getThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const;
 };
 
 struct TLogQueueInfo {
@@ -103,6 +113,8 @@ struct RatekeeperLimits {
 	int64_t lastDurabilityLag;
 	double durabilityLagLimit;
 
+	double bwLagTarget;
+
 	TransactionPriority priority;
 	std::string context;
 
@@ -115,7 +127,8 @@ struct RatekeeperLimits {
 	                 int64_t logTargetBytes,
 	                 int64_t logSpringBytes,
 	                 double maxVersionDifference,
-	                 int64_t durabilityLagTargetVersions);
+	                 int64_t durabilityLagTargetVersions,
+	                 double bwLagTarget);
 };
 
 class Ratekeeper {
@@ -129,6 +142,18 @@ class Ratekeeper {
 
 		double lastUpdateTime{ 0.0 };
 		double lastTagPushTime{ 0.0 };
+		Version version{ 0 };
+	};
+
+	struct VersionInfo {
+		int64_t totalTransactions;
+		int64_t batchTransactions;
+		double created;
+
+		VersionInfo(int64_t totalTransactions, int64_t batchTransactions, double created)
+		  : totalTransactions(totalTransactions), batchTransactions(batchTransactions), created(created) {}
+
+		VersionInfo() : totalTransactions(0), batchTransactions(0), created(0.0) {}
 	};
 
 	UID id;
@@ -150,10 +175,17 @@ class Ratekeeper {
 
 	std::unique_ptr<class ITagThrottler> tagThrottler;
 
+	// Maps storage server ID to storage server interface
+	std::unordered_map<UID, StorageServerInterface> storageServerInterfaces;
+
 	RatekeeperLimits normalLimits;
 	RatekeeperLimits batchLimits;
 
 	Deque<double> actualTpsHistory;
+	Version maxVersion;
+	double blobWorkerTime;
+	std::map<Version, Ratekeeper::VersionInfo> version_transactions;
+	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
 	Optional<Key> remoteDC;
 
 	Ratekeeper(UID id, Database db);
@@ -163,7 +195,6 @@ class Ratekeeper {
 	void updateRate(RatekeeperLimits* limits);
 	Future<Void> refreshStorageServerCommitCosts();
 	Future<Void> monitorServerListChange(PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges);
-	Future<Void> trackEachStorageServer(FutureStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges);
 
 	// SOMEDAY: template trackStorageServerQueueInfo and trackTLogQueueInfo into one function
 	Future<Void> trackStorageServerQueueInfo(StorageServerInterface);
@@ -172,7 +203,10 @@ class Ratekeeper {
 	void tryAutoThrottleTag(TransactionTag, double rate, double busyness, TagThrottledReason);
 	void tryAutoThrottleTag(StorageQueueInfo&, int64_t storageQueue, int64_t storageDurabilityLag);
 	Future<Void> monitorThrottlingChanges();
+	Future<Void> monitorBlobWorkers();
 
 public:
 	static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 };
+
+#endif // FDBSERVER_RATEKEEPER_H

@@ -98,32 +98,44 @@ struct ClusterControllerClientInterface {
 	}
 };
 
-template <class T>
-struct ItemWithExamples {
-	T item;
-	int count;
-	std::vector<std::pair<NetworkAddress, Key>> examples;
-
-	ItemWithExamples() : item{}, count(0) {}
-	ItemWithExamples(T const& item, int count, std::vector<std::pair<NetworkAddress, Key>> const& examples)
-	  : item(item), count(count), examples(examples) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, item, count, examples);
-	}
-};
-
 struct OpenDatabaseRequest {
 	constexpr static FileIdentifier file_identifier = 2799502;
 	// Sent by the native API to the cluster controller to open a database and track client
 	//   info changes.  Returns immediately if the current client info id is different from
 	//   knownClientInfoID; otherwise returns when it next changes (or perhaps after a long interval)
 
+	struct Samples {
+		int count;
+
+		// network address / trace log group
+		std::set<std::pair<NetworkAddress, Key>> samples;
+
+		Samples() : count(0), samples{} {}
+
+		template <typename Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, samples);
+		}
+
+		// Merges a set of Samples into *this
+		Samples& operator+=(const Samples& other) {
+			count += other.count;
+			samples.insert(std::begin(other.samples), std::end(other.samples));
+
+			return *this;
+		}
+	};
+
 	int clientCount;
-	std::vector<ItemWithExamples<Key>> issues;
-	std::vector<ItemWithExamples<Standalone<ClientVersionRef>>> supportedVersions;
-	std::vector<ItemWithExamples<Key>> maxProtocolSupported;
+
+	// Maps issue to Samples
+	std::map<Key, Samples> issues;
+
+	// Maps ClientVersionRef to Samples
+	std::map<Standalone<ClientVersionRef>, Samples> supportedVersions;
+
+	// Maps max protocol to Samples
+	std::map<Key, Samples> maxProtocolSupported;
 
 	UID knownClientInfoID;
 	ReplyPromise<struct ClientDBInfo> reply;

@@ -139,6 +139,8 @@ public:
 		Future<Void> clientCounter;
 		int clientCount;
 		AsyncVar<bool> blobGranulesEnabled;
+		ClusterType clusterType = ClusterType::STANDALONE;
+		Optional<ClusterName> metaclusterName;
 
 		DBInfo()
 		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
@@ -3312,6 +3314,7 @@ public:
 		serverInfo.masterLifetime.ccID = id;
 		serverInfo.clusterInterface = ccInterface;
 		serverInfo.myLocality = locality;
+		serverInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 		db.serverInfo->set(serverInfo);
 		cx = openDBOnServer(db.serverInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 

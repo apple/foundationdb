@@ -24,6 +24,7 @@
 #include <sstream>
 
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
@@ -62,7 +63,7 @@ struct ExceptionContract {
 		    e.code() == error_code_future_version || e.code() == error_code_transaction_cancelled ||
 		    e.code() == error_code_key_too_large || e.code() == error_code_value_too_large ||
 		    e.code() == error_code_process_behind || e.code() == error_code_batch_transaction_throttled ||
-		    e.code() == error_code_tag_throttled) {
+		    e.code() == error_code_tag_throttled || e.code() == error_code_grv_proxy_memory_limit_exceeded) {
 			return;
 		}
 
@@ -240,6 +241,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			if (i < self->numTenants) {
 				TenantMapEntry entry;
 				entry.tenantGroup = self->getTenantGroup(i);
+				entry.encrypted = SERVER_KNOBS->ENABLE_ENCRYPTION;
 				tenantFutures.push_back(::success(TenantAPI::createTenant(cx.getReference(), tenantName, entry)));
 				self->createdTenants.insert(tenantName);
 			}

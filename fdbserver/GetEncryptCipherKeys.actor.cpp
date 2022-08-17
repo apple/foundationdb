@@ -18,7 +18,9 @@
  * limitations under the License.
  */
 
+#include "fdbserver/EncryptKeyProxyInterface.h"
 #include "fdbserver/GetEncryptCipherKeys.h"
+#include "flow/IRandom.h"
 
 #include <boost/functional/hash.hpp>
 
@@ -105,8 +107,12 @@ ACTOR Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>
 			for (const EKPBaseCipherDetails& details : reply.baseCipherDetails) {
 				EncryptCipherDomainId domainId = details.encryptDomainId;
 				if (domains.count(domainId) > 0 && cipherKeys.count(domainId) == 0) {
-					Reference<BlobCipherKey> cipherKey = cipherKeyCache->insertCipherKey(
-					    domainId, details.baseCipherId, details.baseCipherKey.begin(), details.baseCipherKey.size());
+					Reference<BlobCipherKey> cipherKey = cipherKeyCache->insertCipherKey(domainId,
+					                                                                     details.baseCipherId,
+					                                                                     details.baseCipherKey.begin(),
+					                                                                     details.baseCipherKey.size(),
+					                                                                     details.refreshAt,
+					                                                                     details.expireAt);
 					ASSERT(cipherKey.isValid());
 					cipherKeys[domainId] = cipherKey;
 				}
@@ -191,10 +197,10 @@ ACTOR Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> ge
 	// Fetch any uncached cipher keys.
 	loop choose {
 		when(EKPGetBaseCipherKeysByIdsReply reply = wait(getUncachedEncryptCipherKeys(db, request))) {
-			std::unordered_map<BaseCipherIndex, StringRef, boost::hash<BaseCipherIndex>> baseCipherKeys;
+			std::unordered_map<BaseCipherIndex, EKPBaseCipherDetails, boost::hash<BaseCipherIndex>> baseCipherKeys;
 			for (const EKPBaseCipherDetails& baseDetails : reply.baseCipherDetails) {
 				BaseCipherIndex baseIdx = std::make_pair(baseDetails.encryptDomainId, baseDetails.baseCipherId);
-				baseCipherKeys[baseIdx] = baseDetails.baseCipherKey;
+				baseCipherKeys[baseIdx] = baseDetails;
 			}
 			// Insert base cipher keys into cache and construct result.
 			for (const BlobCipherDetails& details : cipherDetails) {
@@ -211,9 +217,11 @@ ACTOR Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> ge
 				}
 				Reference<BlobCipherKey> cipherKey = cipherKeyCache->insertCipherKey(details.encryptDomainId,
 				                                                                     details.baseCipherId,
-				                                                                     itr->second.begin(),
-				                                                                     itr->second.size(),
-				                                                                     details.salt);
+				                                                                     itr->second.baseCipherKey.begin(),
+				                                                                     itr->second.baseCipherKey.size(),
+				                                                                     details.salt,
+				                                                                     itr->second.refreshAt,
+				                                                                     itr->second.expireAt);
 				ASSERT(cipherKey.isValid());
 				cipherKeys[details] = cipherKey;
 			}

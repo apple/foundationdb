@@ -13,6 +13,8 @@
 #include <list>
 #include <deque>
 
+#include "flow/actorcompiler.h" // has to be last include
+
 template <class Key, class Value>
 class LRUCache {
 public:
@@ -156,6 +158,7 @@ bool TokenCache::validate(TenantNameRef name, StringRef token) {
 	TraceEvent(SevWarn, "InvalidToken")                                                                                \
 	    .detail("From", peer)                                                                                          \
 	    .detail("Reason", reason)                                                                                      \
+	    .detail("CurrentTime", currentTime)                                                                            \
 	    .detail("Token", token.toStringRef(arena).toStringView())
 
 bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, NetworkAddress const& peer) {
@@ -262,7 +265,7 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 		},
 		{
 		    [](Arena&, IRandom& rng, authz::jwt::TokenRef& token) {
-		        token.expiresAtUnixTime = uint64_t(g_network->timer() - 10 - rng.random01() * 50);
+		        token.expiresAtUnixTime = uint64_t(std::max<double>(g_network->timer() - 10 - rng.random01() * 50, 0));
 		    },
 		    "ExpiredToken",
 		},
@@ -324,23 +327,25 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 
 TEST_CASE("/fdbrpc/authz/TokenCache/GoodTokens") {
 	// Don't repeat because token expiry is at seconds granularity and sleeps are costly in unit tests
-	auto arena = Arena();
-	auto privateKey = mkcert::makeEcP256();
-	auto const pubKeyName = "somePublicKey"_sr;
+	state Arena arena;
+	state PrivateKey privateKey = mkcert::makeEcP256();
+	state StringRef pubKeyName = "somePublicKey"_sr;
+	state ScopeExit<std::function<void()>> publicKeyClearGuard(
+	    [pubKeyName = pubKeyName]() { FlowTransport::transport().removePublicKey(pubKeyName); });
+	state authz::jwt::TokenRef tokenSpec =
+	    authz::jwt::makeRandomTokenSpec(arena, *deterministicRandom(), authz::Algorithm::ES256);
+	state StringRef signedToken;
 	FlowTransport::transport().addPublicKey(pubKeyName, privateKey.toPublic());
-	auto publicKeyClearGuard = ScopeExit([pubKeyName]() { FlowTransport::transport().removePublicKey(pubKeyName); });
-	auto& rng = *deterministicRandom();
-	auto tokenSpec = authz::jwt::makeRandomTokenSpec(arena, rng, authz::Algorithm::ES256);
 	tokenSpec.expiresAtUnixTime = static_cast<uint64_t>(g_network->timer() + 2.0);
 	tokenSpec.keyId = pubKeyName;
-	auto signedToken = authz::jwt::signToken(arena, tokenSpec, privateKey);
+	signedToken = authz::jwt::signToken(arena, tokenSpec, privateKey);
 	if (!TokenCache::instance().validate(tokenSpec.tenants.get()[0], signedToken)) {
 		fmt::print("Unexpected failed token validation, token spec: {}, now: {}\n",
 		           tokenSpec.toStringRef(arena).toStringView(),
 		           g_network->timer());
 		ASSERT(false);
 	}
-	threadSleep(3.5);
+	wait(delay(3.5));
 	if (TokenCache::instance().validate(tokenSpec.tenants.get()[0], signedToken)) {
 		fmt::print(
 		    "Unexpected successful token validation after supposedly expiring in cache, token spec: {}, now: {}\n",

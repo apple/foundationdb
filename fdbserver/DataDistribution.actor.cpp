@@ -103,13 +103,16 @@ void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int pr
 	}
 }
 
+Future<Void> StorageWiggler::onCheck() const {
+	return delay(MIN_ON_CHECK_DELAY_SEC);
+}
+
 // add server to wiggling queue
 void StorageWiggler::addServer(const UID& serverId, const StorageMetadataType& metadata) {
 	// std::cout << "size: " << pq_handles.size() << " add " << serverId.toString() << " DC: "
 	//           << teamCollection->isPrimary() << std::endl;
 	ASSERT(!pq_handles.count(serverId));
 	pq_handles[serverId] = wiggle_pq.emplace(metadata, serverId);
-	nonEmpty.set(true);
 }
 
 void StorageWiggler::removeServer(const UID& serverId) {
@@ -120,7 +123,6 @@ void StorageWiggler::removeServer(const UID& serverId) {
 		pq_handles.erase(serverId);
 		wiggle_pq.erase(handle);
 	}
-	nonEmpty.set(!wiggle_pq.empty());
 }
 
 void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataType& metadata) {
@@ -133,9 +135,16 @@ void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataTy
 	wiggle_pq.update(handle, std::make_pair(metadata, serverId));
 }
 
-Optional<UID> StorageWiggler::getNextServerId() {
+bool StorageWiggler::necessary(const UID& serverId, const StorageMetadataType& metadata) const {
+	return metadata.wrongConfigured || (now() - metadata.createdTime > SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC);
+}
+
+Optional<UID> StorageWiggler::getNextServerId(bool necessaryOnly) {
 	if (!wiggle_pq.empty()) {
 		auto [metadata, id] = wiggle_pq.top();
+		if (necessaryOnly && !necessary(id, metadata)) {
+			return {};
+		}
 		wiggle_pq.pop();
 		pq_handles.erase(id);
 		return Optional<UID>(id);
@@ -273,21 +282,6 @@ static std::set<int> const& normalDDQueueErrors() {
 		s.insert(error_code_data_move_dest_team_not_found);
 	}
 	return s;
-}
-
-ACTOR Future<Void> pollMoveKeysLock(Database cx, MoveKeysLock lock, const DDEnabledState* ddEnabledState) {
-	loop {
-		wait(delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY));
-		state Transaction tr(cx);
-		loop {
-			try {
-				wait(checkMoveKeysLockReadOnly(&tr, lock, ddEnabledState));
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
 }
 
 struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
@@ -491,7 +485,7 @@ public:
 
 		for (; it != self->initData->dataMoveMap.ranges().end(); ++it) {
 			const DataMoveMetaData& meta = it.value()->meta;
-			if (it.value()->isCancelled() || (it.value()->valid && !CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
+			if (it.value()->isCancelled() || (it.value()->valid && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA)) {
 				RelocateShard rs(meta.range, DataMovementReason::RECOVER_MOVE, RelocateReason::OTHER);
 				rs.dataMoveId = meta.id;
 				rs.cancelled = true;
@@ -533,6 +527,10 @@ public:
 		ASSERT(shardsAffectedByTeamFailure); // has to be allocated
 		Future<Void> shardsReady = resumeFromShards(Reference<DataDistributor>::addRef(this), g_network->isSimulated());
 		return resumeFromDataMoves(Reference<DataDistributor>::addRef(this), shardsReady);
+	}
+
+	Future<Void> pollMoveKeysLock(const DDEnabledState* ddEnabledState) {
+		return txnProcessor->pollMoveKeysLock(lock, ddEnabledState);
 	}
 };
 
@@ -609,7 +607,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				    ddTenantCache->monitorTenantMap(), "DDTenantCacheMonitor", self->ddId, &normalDDQueueErrors()));
 			}
 
-			actors.push_back(pollMoveKeysLock(cx, self->lock, ddEnabledState));
+			actors.push_back(self->pollMoveKeysLock(ddEnabledState));
 			actors.push_back(reportErrorsExcept(dataDistributionTracker(self->initData,
 			                                                            cx,
 			                                                            self->relocationProducer,
@@ -796,7 +794,8 @@ ACTOR Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stre
 		if (reply.isError()) {
 			TraceEvent("SnapDataDistributor_ReqError")
 			    .errorUnsuppressed(reply.getError())
-			    .detail("Peer", stream.getEndpoint().getPrimaryAddress());
+			    .detail("Peer", stream.getEndpoint().getPrimaryAddress())
+			    .detail("Retry", snapReqRetry);
 			if (reply.getError().code() != error_code_request_maybe_delivered ||
 			    ++snapReqRetry > SERVER_KNOBS->SNAP_NETWORK_FAILURE_RETRY_LIMIT)
 				return ErrorOr<Void>(reply.getError());
@@ -810,24 +809,6 @@ ACTOR Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stre
 			break;
 	}
 	return ErrorOr<Void>(Void());
-}
-
-ACTOR static Future<Void> waitForMost(std::vector<Future<ErrorOr<Void>>> futures,
-                                      int faultTolerance,
-                                      Error e,
-                                      double waitMultiplierForSlowFutures = 1.0) {
-	state std::vector<Future<bool>> successFutures;
-	state double startTime = now();
-	successFutures.reserve(futures.size());
-	for (const auto& future : futures) {
-		successFutures.push_back(fmap([](auto const& result) { return result.present(); }, future));
-	}
-	bool success = wait(quorumEqualsTrue(successFutures, successFutures.size() - faultTolerance));
-	if (!success) {
-		throw e;
-	}
-	wait(delay((now() - startTime) * waitMultiplierForSlowFutures) || waitForAll(successFutures));
-	return Void();
 }
 
 ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getStatefulWorkers(
@@ -920,6 +901,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 			// get coordinators
 			Optional<Value> coordinators = wait(tr.get(coordinatorsKey));
 			if (!coordinators.present()) {
+				CODE_PROBE(true, "Failed to read the coordinatorsKey");
 				throw operation_failed();
 			}
 			ClusterConnectionString ccs(coordinators.get().toString());
@@ -1010,7 +992,8 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 
 		TraceEvent("SnapDataDistributor_GotStatefulWorkers")
 		    .detail("SnapPayload", snapReq.snapPayload)
-		    .detail("SnapUID", snapReq.snapUID);
+		    .detail("SnapUID", snapReq.snapUID)
+		    .detail("StorageFaultTolerance", storageFaultTolerance);
 
 		// we need to snapshot storage nodes before snapshot any tlogs
 		std::vector<Future<ErrorOr<Void>>> storageSnapReqs;
@@ -1022,7 +1005,6 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		}
 		wait(waitForMost(storageSnapReqs, storageFaultTolerance, snap_storage_failed()));
 		TraceEvent("SnapDataDistributor_AfterSnapStorage")
-		    .detail("FaultTolerance", storageFaultTolerance)
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
 
@@ -1345,14 +1327,14 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
 				auto& snapUID = snapReq.snapUID;
 				if (ddSnapReqResultMap.count(snapUID)) {
-					CODE_PROBE(true, "Data distributor received a duplicate finished snap request");
+					CODE_PROBE(true, "Data distributor received a duplicate finished snapshot request");
 					auto result = ddSnapReqResultMap[snapUID];
 					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
 					TraceEvent("RetryFinishedDistributorSnapRequest")
 					    .detail("SnapUID", snapUID)
 					    .detail("Result", result.isError() ? result.getError().code() : 0);
 				} else if (ddSnapReqMap.count(snapReq.snapUID)) {
-					CODE_PROBE(true, "Data distributor received a duplicate ongoing snap request");
+					CODE_PROBE(true, "Data distributor received a duplicate ongoing snapshot request");
 					TraceEvent("RetryOngoingDistributorSnapRequest").detail("SnapUID", snapUID);
 					ASSERT(snapReq.snapPayload == ddSnapReqMap[snapUID].snapPayload);
 					ddSnapReqMap[snapUID] = snapReq;
@@ -1389,14 +1371,6 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 
 namespace data_distribution_test {
 
-static Future<ErrorOr<Void>> goodTestFuture(double duration) {
-	return tag(delay(duration), ErrorOr<Void>(Void()));
-}
-
-static Future<ErrorOr<Void>> badTestFuture(double duration, Error e) {
-	return tag(delay(duration), ErrorOr<Void>(e));
-}
-
 inline DDShardInfo doubleToNoLocationShardInfo(double d, bool hasDest) {
 	DDShardInfo res(doubleToTestKey(d), anonymousShardId, anonymousShardId);
 	res.primarySrc.emplace_back((uint64_t)d, 0);
@@ -1407,57 +1381,23 @@ inline DDShardInfo doubleToNoLocationShardInfo(double d, bool hasDest) {
 	return res;
 }
 
-} // namespace data_distribution_test
-
-TEST_CASE("/DataDistribution/WaitForMost") {
-	state std::vector<Future<ErrorOr<Void>>> futures;
-	{
-		futures = { data_distribution_test::goodTestFuture(1),
-			        data_distribution_test::goodTestFuture(2),
-			        data_distribution_test::goodTestFuture(3) };
-		wait(waitForMost(futures, 1, operation_failed(), 0.0)); // Don't wait for slowest future
-		ASSERT(!futures[2].isReady());
-	}
-	{
-		futures = { data_distribution_test::goodTestFuture(1),
-			        data_distribution_test::goodTestFuture(2),
-			        data_distribution_test::goodTestFuture(3) };
-		wait(waitForMost(futures, 0, operation_failed(), 0.0)); // Wait for all futures
-		ASSERT(futures[2].isReady());
-	}
-	{
-		futures = { data_distribution_test::goodTestFuture(1),
-			        data_distribution_test::goodTestFuture(2),
-			        data_distribution_test::goodTestFuture(3) };
-		wait(waitForMost(futures, 1, operation_failed(), 1.0)); // Wait for slowest future
-		ASSERT(futures[2].isReady());
-	}
-	{
-		futures = { data_distribution_test::goodTestFuture(1),
-			        data_distribution_test::goodTestFuture(2),
-			        data_distribution_test::badTestFuture(1, success()) };
-		wait(waitForMost(futures, 1, operation_failed(), 1.0)); // Error ignored
-	}
-	{
-		futures = { data_distribution_test::goodTestFuture(1),
-			        data_distribution_test::goodTestFuture(2),
-			        data_distribution_test::badTestFuture(1, success()) };
-		try {
-			wait(waitForMost(futures, 0, operation_failed(), 1.0));
-			ASSERT(false);
-		} catch (Error& e) {
-			ASSERT_EQ(e.code(), error_code_operation_failed);
-		}
-	}
-	return Void();
+inline int getRandomShardCount() {
+#if defined(USE_SANITIZER)
+	return deterministicRandom()->randomInt(1000, 24000); // 24000 * MAX_SHARD_SIZE = 12TB
+#else
+	return deterministicRandom()->randomInt(1000, CLIENT_KNOBS->TOO_MANY); // 2000000000; OOM
+#endif
 }
 
-TEST_CASE("/DataDistributor/StorageWiggler/Order") {
+} // namespace data_distribution_test
+
+TEST_CASE("/DataDistribution/StorageWiggler/Order") {
 	StorageWiggler wiggler(nullptr);
-	wiggler.addServer(UID(1, 0), StorageMetadataType(1, KeyValueStoreType::SSD_BTREE_V2));
-	wiggler.addServer(UID(2, 0), StorageMetadataType(2, KeyValueStoreType::MEMORY, true));
-	wiggler.addServer(UID(3, 0), StorageMetadataType(3, KeyValueStoreType::SSD_ROCKSDB_V1, true));
-	wiggler.addServer(UID(4, 0), StorageMetadataType(4, KeyValueStoreType::SSD_BTREE_V2));
+	double startTime = now() - SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC - 0.4;
+	wiggler.addServer(UID(1, 0), StorageMetadataType(startTime, KeyValueStoreType::SSD_BTREE_V2));
+	wiggler.addServer(UID(2, 0), StorageMetadataType(startTime + 0.1, KeyValueStoreType::MEMORY, true));
+	wiggler.addServer(UID(3, 0), StorageMetadataType(startTime + 0.2, KeyValueStoreType::SSD_ROCKSDB_V1, true));
+	wiggler.addServer(UID(4, 0), StorageMetadataType(startTime + 0.3, KeyValueStoreType::SSD_BTREE_V2));
 
 	std::vector<UID> correctOrder{ UID(2, 0), UID(3, 0), UID(1, 0), UID(4, 0) };
 	for (int i = 0; i < correctOrder.size(); ++i) {
@@ -1469,7 +1409,7 @@ TEST_CASE("/DataDistributor/StorageWiggler/Order") {
 	return Void();
 }
 
-TEST_CASE("/DataDistributor/Initialization/ResumeFromShard") {
+TEST_CASE("/DataDistribution/Initialization/ResumeFromShard") {
 	state Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 	state Reference<DataDistributor> self(new DataDistributor(dbInfo, UID()));
 
@@ -1481,7 +1421,7 @@ TEST_CASE("/DataDistributor/Initialization/ResumeFromShard") {
 	// add DDShardInfo
 	self->shardsAffectedByTeamFailure->setCheckMode(
 	    ShardsAffectedByTeamFailure::CheckMode::ForceNoCheck); // skip check when build
-	int shardNum = deterministicRandom()->randomInt(1000, CLIENT_KNOBS->TOO_MANY * 5); // 2000000000; OOM
+	int shardNum = data_distribution_test::getRandomShardCount();
 	std::cout << "generating " << shardNum << " shards...\n";
 	for (int i = 1; i <= SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM; ++i) {
 		self->initData->shards.emplace_back(data_distribution_test::doubleToNoLocationShardInfo(i, true));

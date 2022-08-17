@@ -10,6 +10,7 @@ set(TEST_AGGREGATE_TRACES "NONE" CACHE STRING "Create aggregated trace files (NO
 set(TEST_LOG_FORMAT "xml" CACHE STRING "Format for test trace files (xml, json)")
 set(TEST_INCLUDE ".*" CACHE STRING "Include only tests that match the given regex")
 set(TEST_EXCLUDE ".^" CACHE STRING "Exclude all tests matching the given regex")
+set(SANITIZER_OPTIONS "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1;TSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/tsan.suppressions" CACHE STRING "Environment variables setting sanitizer options")
 
 # for the restart test we optimally want to use the last stable fdbserver
 # to test upgrades
@@ -128,9 +129,12 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BackupCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectnessClean.toml)
+  add_fdb_test(TEST_FILES fast/BlobGranuleVerifyAtomicOps.toml)
+  add_fdb_test(TEST_FILES fast/BlobGranuleVerifyCycle.toml)
   add_fdb_test(TEST_FILES fast/BlobGranuleVerifySmall.toml)
   add_fdb_test(TEST_FILES fast/BlobGranuleVerifySmallClean.toml)
-  add_fdb_test(TEST_FILES fast/BlobGranuleMoveVerifyCycle.toml)
+  # TODO: test occasionally times out due to too many change feed shard parts
+  add_fdb_test(TEST_FILES fast/BlobGranuleMoveVerifyCycle.toml IGNORE)
   add_fdb_test(TEST_FILES fast/CacheTest.toml)
   add_fdb_test(TEST_FILES fast/CloggedSideband.toml)
   add_fdb_test(TEST_FILES fast/CompressionUtilsUnit.toml)
@@ -140,6 +144,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/CycleTest.toml)
   add_fdb_test(TEST_FILES fast/ChangeFeeds.toml)
   add_fdb_test(TEST_FILES fast/ChangeFeedOperations.toml)
+  add_fdb_test(TEST_FILES fast/ChangeFeedOperationsMove.toml)
   add_fdb_test(TEST_FILES fast/DataLossRecovery.toml)
   add_fdb_test(TEST_FILES fast/EncryptionOps.toml)
   # TODO: fix failures and renable the test
@@ -188,9 +193,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/WriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/WriteDuringReadClean.toml)
   add_fdb_test(TEST_FILES noSim/RandomUnitTests.toml UNIT)
-  add_fdb_test(TEST_FILES noSim/SystemDataTest.toml UNIT)
   if (WITH_ROCKSDB_EXPERIMENTAL)
-    add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml)
+    add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml)
     add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml)
@@ -200,8 +204,6 @@ if(WITH_PYTHON)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml IGNORE)
     add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml  IGNORE)
   endif()
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifyAtomicOps.toml)
-  add_fdb_test(TEST_FILES rare/BlobGranuleVerifyCycle.toml)
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
   add_fdb_test(TEST_FILES rare/ClogUnclog.toml)
   add_fdb_test(TEST_FILES rare/CloggedCycleWithKills.toml)
@@ -258,11 +260,11 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_6.3.13/CycleTestRestart-1.txt
                restarting/from_6.3.13/CycleTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_6.3.13/DrUpgradeRestart-1.txt
-               restarting/from_6.3.13/DrUpgradeRestart-2.txt)
-  add_fdb_test(
     TEST_FILES restarting/from_6.3.13/StorefrontTestRestart-1.txt
                restarting/from_6.3.13/StorefrontTestRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_6.3.13_until_7.2.0/DrUpgradeRestart-1.txt
+               restarting/from_6.3.13_until_7.2.0/DrUpgradeRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
                restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
@@ -293,6 +295,9 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0/VersionVectorEnableRestart-1.toml
                restarting/from_7.1.0/VersionVectorEnableRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.2.0/DrUpgradeRestart-1.txt
+               restarting/from_7.2.0/DrUpgradeRestart-2.txt)
 
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
@@ -317,6 +322,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/DiskFailureCycle.toml)
   add_fdb_test(TEST_FILES slow/FastTriggeredWatches.toml)
   add_fdb_test(TEST_FILES slow/LowLatencyWithFailures.toml)
+  add_fdb_test(TEST_FILES slow/MetaclusterManagement.toml)
   add_fdb_test(TEST_FILES slow/MoveKeysClean.toml)
   add_fdb_test(TEST_FILES slow/MoveKeysSideband.toml)
   add_fdb_test(TEST_FILES slow/RyowCorrectness.toml)
@@ -330,7 +336,9 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/SwizzledRollbackTimeLapse.toml)
   add_fdb_test(TEST_FILES slow/SwizzledRollbackTimeLapseIncrement.toml)
   add_fdb_test(TEST_FILES slow/SwizzledTenantManagement.toml)
+  add_fdb_test(TEST_FILES slow/SwizzledTenantManagementMetacluster.toml)
   add_fdb_test(TEST_FILES slow/TenantManagement.toml)
+  add_fdb_test(TEST_FILES slow/TenantManagementConcurrency.toml)
   add_fdb_test(TEST_FILES slow/VersionStampBackupToDB.toml)
   add_fdb_test(TEST_FILES slow/VersionStampSwitchover.toml)
   add_fdb_test(TEST_FILES slow/WriteDuringReadAtomicRestore.toml)
@@ -364,18 +372,18 @@ if(WITH_PYTHON)
       NAME multiversion_client/unit_tests
       COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /fdbclient/multiversionclient/
     )
-    set_tests_properties("multiversion_client/unit_tests" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
+    set_tests_properties("multiversion_client/unit_tests" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
     add_test(
       NAME threadsafe_threadfuture_to_future/unit_tests
       COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /flow/safeThreadFutureToFuture/
     )
-    set_tests_properties("threadsafe_threadfuture_to_future/unit_tests" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
+    set_tests_properties("threadsafe_threadfuture_to_future/unit_tests" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
   endif()
 
   if(NOT OPEN_FOR_IDE)
     add_test(
       NAME command_line_argument_test
-      COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/argument_parsing/test_argument_parsing.py ${CMAKE_BINARY_DIR}
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/argument_parsing/test_argument_parsing.py ${CMAKE_BINARY_DIR}
     )
   endif()
 

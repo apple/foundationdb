@@ -113,7 +113,7 @@ enum {
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
 	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS, OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT,
-	OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE
+	OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -212,7 +212,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_KMS_CONN_DISCOVERY_URL_FILE,           "--discover-kms-conn-url-file",            SO_REQ_SEP},
 	{ OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,     "--kms-conn-validation-token-details",     SO_REQ_SEP},
 	{ OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-encryption-keys-endpoint", SO_REQ_SEP},
-	
+	{ OPT_USE_FUTURE_PROTOCOL_VERSION, 			 "--use-future-protocol-version",			SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -540,7 +540,7 @@ static void printBuildInformation() {
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getSourceVersion());
-	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion().version());
 }
 
 static void printHelpTeaser(const char* name) {
@@ -733,6 +733,9 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("--io-trust-warn-only",
 		                 " Instead of failing when an I/O operation exceeds io_trust_seconds, just"
 		                 " log a warning to the trace log. Has no effect if io_trust_seconds is unspecified.");
+		printOptionUsage("--use-future-protocol-version [true,false]",
+		                 " Run the process with a simulated future protocol version."
+		                 " This option can be used testing purposes only!");
 		printf("\n"
 		       "The 'kvfiledump' role dump all key-values from kvfile to stdout in binary format:\n"
 		       "{key length}{key binary}{value length}{value binary}, length is 4 bytes int\n"
@@ -751,6 +754,7 @@ static void printUsage(const char* name, bool devhelp) {
 		    "The given cluster file passed in by '-C, --cluster-file' is considered to contain the old cluster key.\n"
 		    "It is used before restoring a snapshotted cluster to let the cluster have a different cluster key.\n"
 		    "Please make sure run it on every host in the cluster with the same '--new-cluster-key'.\n");
+
 	} else {
 		printOptionUsage("--dev-help", "Display developer-specific help and exit.");
 	}
@@ -1689,6 +1693,12 @@ private:
 				authzPublicKeyFile = args.OptionArg();
 				break;
 			}
+			case OPT_USE_FUTURE_PROTOCOL_VERSION: {
+				if (!strcmp(args.OptionArg(), "true")) {
+					::useFutureProtocolVersion();
+				}
+				break;
+			}
 			}
 		}
 
@@ -2049,6 +2059,7 @@ int main(int argc, char* argv[]) {
 		    .detail("FaultInjectionEnabled", opts.faultInjectionEnabled)
 		    .detail("MemoryLimit", opts.memLimit)
 		    .detail("VirtualMemoryLimit", opts.virtualMemLimit)
+		    .detail("ProtocolVersion", currentProtocolVersion())
 		    .trackLatest("ProgramStart");
 
 		Error::init();

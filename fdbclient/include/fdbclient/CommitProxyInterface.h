@@ -117,8 +117,11 @@ struct ClientDBInfo {
 	Optional<Value> forward;
 	std::vector<VersionHistory> history;
 	UID clusterId;
+	bool isEncryptionEnabled = false;
 
 	TenantMode tenantMode;
+	ClusterType clusterType = ClusterType::STANDALONE;
+	Optional<ClusterName> metaclusterName;
 
 	ClientDBInfo() {}
 
@@ -130,7 +133,17 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, grvProxies, commitProxies, id, forward, history, tenantMode, clusterId);
+		serializer(ar,
+		           grvProxies,
+		           commitProxies,
+		           id,
+		           forward,
+		           history,
+		           tenantMode,
+		           isEncryptionEnabled,
+		           clusterId,
+		           clusterType,
+		           metaclusterName);
 	}
 };
 

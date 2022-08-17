@@ -165,8 +165,11 @@ void WorkloadManager::add(std::shared_ptr<IWorkload> workload, TTaskFct cont) {
 
 void WorkloadManager::run() {
 	std::vector<std::shared_ptr<IWorkload>> initialWorkloads;
-	for (auto iter : workloads) {
-		initialWorkloads.push_back(iter.second.ref);
+	{
+		std::unique_lock<std::mutex> lock(mutex);
+		for (auto iter : workloads) {
+			initialWorkloads.push_back(iter.second.ref);
+		}
 	}
 	for (auto iter : initialWorkloads) {
 		iter->init(this);

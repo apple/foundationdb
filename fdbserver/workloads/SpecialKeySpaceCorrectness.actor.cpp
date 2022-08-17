@@ -39,8 +39,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	double testDuration, absoluteRandomProb, transactionsPerSecond;
 	PerfIntCounter wrongResults, keysCount;
 	Reference<ReadYourWritesTransaction> ryw; // used to store all populated data
-	std::vector<std::shared_ptr<SKSCTestImpl>> impls;
+	std::vector<std::shared_ptr<SKSCTestRWImpl>> rwImpls;
+	std::vector<std::shared_ptr<SKSCTestAsyncReadImpl>> asyncReadImpls;
 	Standalone<VectorRef<KeyRangeRef>> keys;
+	Standalone<VectorRef<KeyRangeRef>> rwKeys;
 
 	SpecialKeySpaceCorrectnessWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), wrongResults("Wrong Results"), keysCount("Number of generated keys") {
@@ -81,12 +83,20 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			Key startKey(baseKey + "/");
 			Key endKey(baseKey + "/\xff");
 			self->keys.push_back_deep(self->keys.arena(), KeyRangeRef(startKey, endKey));
-			self->impls.push_back(std::make_shared<SKSCTestImpl>(KeyRangeRef(startKey, endKey)));
-			// Although there are already ranges registered, the testing range will replace them
-			cx->specialKeySpace->registerKeyRange(SpecialKeySpace::MODULE::TESTONLY,
-			                                      SpecialKeySpace::IMPLTYPE::READWRITE,
-			                                      self->keys.back(),
-			                                      self->impls.back().get());
+			if (deterministicRandom()->random01() < 0.2) {
+				self->asyncReadImpls.push_back(std::make_shared<SKSCTestAsyncReadImpl>(KeyRangeRef(startKey, endKey)));
+				cx->specialKeySpace->registerKeyRange(SpecialKeySpace::MODULE::TESTONLY,
+				                                      SpecialKeySpace::IMPLTYPE::READONLY,
+				                                      self->keys.back(),
+				                                      self->asyncReadImpls.back().get());
+			} else {
+				self->rwImpls.push_back(std::make_shared<SKSCTestRWImpl>(KeyRangeRef(startKey, endKey)));
+				// Although there are already ranges registered, the testing range will replace them
+				cx->specialKeySpace->registerKeyRange(SpecialKeySpace::MODULE::TESTONLY,
+				                                      SpecialKeySpace::IMPLTYPE::READWRITE,
+				                                      self->keys.back(),
+				                                      self->rwImpls.back().get());
+			}
 			// generate keys in each key range
 			int keysInRange = deterministicRandom()->randomInt(self->minKeysPerRange, self->maxKeysPerRange + 1);
 			self->keysCount += keysInRange;
@@ -154,7 +164,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			}
 
 			// check ryw result consistency
-			KeyRange rkr = self->randomKeyRange();
+			KeyRange rkr = self->randomRWKeyRange();
 			KeyRef rkey1 = rkr.begin;
 			KeyRef rkey2 = rkr.end;
 			// randomly set/clear two keys or clear a key range
@@ -238,8 +248,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		return true;
 	}
 
-	KeyRange randomKeyRange() {
-		Key prefix = keys[deterministicRandom()->randomInt(0, rangeCount)].begin;
+	KeyRange randomRWKeyRange() {
+		Key prefix = rwImpls[deterministicRandom()->randomInt(0, rwImpls.size())]->getKeyRange().begin;
 		Key rkey1 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, keyBytes)))
 		                .withPrefix(prefix);
 		Key rkey2 = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, keyBytes)))
@@ -863,31 +873,34 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		}
 		TraceEvent(SevDebug, "DatabaseLocked").log();
 		// if database locked, fdb read should get database_locked error
-		try {
-			tx->reset();
-			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			RangeResult res = wait(tx->getRange(normalKeys, 1));
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled)
-				throw;
-			ASSERT(e.code() == error_code_database_locked);
+		tx->reset();
+		loop {
+			try {
+				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
+				RangeResult res = wait(tx->getRange(normalKeys, 1));
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled)
+					throw;
+				if (e.code() == error_code_grv_proxy_memory_limit_exceeded ||
+				    e.code() == error_code_batch_transaction_throttled) {
+					wait(tx->onError(e));
+				} else {
+					ASSERT(e.code() == error_code_database_locked);
+					break;
+				}
+			}
 		}
 		// make sure we unlock the database
 		// unlock is idempotent, thus we can commit many times until successful
+		tx->reset();
 		loop {
 			try {
-				tx->reset();
 				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				// unlock the database
 				tx->clear(SpecialKeySpace::getManagementApiCommandPrefix("lock"));
 				wait(tx->commit());
 				TraceEvent(SevDebug, "DatabaseUnlocked").log();
-				tx->reset();
-				// read should be successful
-				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-				RangeResult res = wait(tx->getRange(normalKeys, 1));
-				tx->reset();
 				break;
 			} catch (Error& e) {
 				TraceEvent(SevDebug, "DatabaseUnlockFailure").error(e);
@@ -895,9 +908,23 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				wait(tx->onError(e));
 			}
 		}
+
+		tx->reset();
+		loop {
+			try {
+				// read should be successful
+				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
+				RangeResult res = wait(tx->getRange(normalKeys, 1));
+				break;
+			} catch (Error& e) {
+				wait(tx->onError(e));
+			}
+		}
+
 		// test consistencycheck which only used by ConsistencyCheck Workload
 		// Note: we have exclusive ownership of fdbShouldConsistencyCheckBeSuspended,
 		// no existing workloads can modify the key
+		tx->reset();
 		{
 			try {
 				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
