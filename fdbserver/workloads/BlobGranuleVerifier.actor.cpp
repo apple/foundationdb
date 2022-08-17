@@ -879,22 +879,18 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	ACTOR Future<bool> _check(Database cx, BlobGranuleVerifierWorkload* self) {
 		state Transaction tr(cx);
 		if (self->doForcePurge) {
-			// initial reads > 0 means there are granules to purge
-			if (!self->startedForcePurge && self->initialReads > 0) {
-				// if we didn't start a force purge during the test, do it now
-				Version rv = wait(self->doGrv(&tr));
-				self->forcePurgeVersion = rv;
-				self->purgedDataToCheck.clear(); //  in case we started but didn't finish loading it, reset it
-				wait(self->loadGranuleMetadataBeforeForcePurge(cx, self));
-				Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, self->forcePurgeVersion, {}, true));
-				self->forcePurgeKey = purgeKey;
+			if (self->startedForcePurge) {
+				if (self->forcePurgeKey.present()) {
+					wait(self->validateForcePurge(cx, self, normalKeys));
+				} // else if we had already started purge during the test but aren't sure whether it was registered or
+				  // not,
+				// don't validate that data was purged since it may never be
+				return true;
 			}
-			if (self->forcePurgeKey.present()) {
-				wait(self->validateForcePurge(cx, self, normalKeys));
-			} // else if we had already started purge during the test but aren't sure whether it was registered or not,
-			  // don't validate that data was purged since it may never be
-			return true;
+		} else if (self->enablePurging) {
+			// FIXME: if doPurging was set, possibly do one last purge here, and verify it succeeds with no errors
 		}
+
 		// check error counts, and do an availability check at the end
 
 		if (self->doSetup && self->initAtEnd) {
@@ -1017,11 +1013,29 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		// For some reason simulation is still passing when this fails?.. so assert for now
 		ASSERT(result);
 
-		// FIXME: if doPurging was set, possibly do one last purge here, and verify it succeeds with no errors
+		if (self->doForcePurge) {
+			// if granules are available, and we didn't do a force purge during the test, do it now
+			ASSERT(!self->startedForcePurge);
+			Version rv = wait(self->doGrv(&tr));
+			self->forcePurgeVersion = rv;
+			self->purgedDataToCheck.clear(); //  in case we started but didn't finish loading it, reset it
+			wait(self->loadGranuleMetadataBeforeForcePurge(cx, self));
+			Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, self->forcePurgeVersion, {}, true));
+			self->forcePurgeKey = purgeKey;
+			wait(self->validateForcePurge(cx, self, normalKeys));
+
+			return true;
+		} else if (self->enablePurging) {
+			// FIXME: if doPurging was set, possibly do one last purge here, and verify it succeeds with no errors
+		}
 
 		if (self->clientId == 0 && SERVER_KNOBS->BG_ENABLE_MERGING && self->clearAndMergeCheck) {
 			CODE_PROBE(true, "BGV clearing database and awaiting merge");
 			wait(clearAndAwaitMerge(cx, normalKeys));
+
+			// TODO: should do a read to check that not only did it reduce to one granule, but that granule is readable?
+
+			// FIXME: if doPurging was set, possibly do one last purge here, and verify it succeeds with no errors
 		}
 
 		return result;
