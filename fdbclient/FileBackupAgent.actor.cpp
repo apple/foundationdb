@@ -47,6 +47,7 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
+#include <unordered_map>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -484,45 +485,76 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		constexpr static FileIdentifier file_identifier = 3152016;
 
 		bool encryptionEnabled;
-		bool compressionEnabled;
 
-		Options(bool encryptionEnabled, bool compressionEnabled)
-		  : encryptionEnabled(encryptionEnabled), compressionEnabled(compressionEnabled) {}
+		Options(bool encryptionEnabled) : encryptionEnabled(encryptionEnabled) {}
 
 		Options() = default;
 
 		template <class Ar>
 		void serialize(Ar& ar) {
-			serializer(ar, encryptionEnabled, compressionEnabled);
+			serializer(ar, encryptionEnabled);
 		}
 	};
 
-	EncryptedRangeFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(),
+	EncryptedRangeFileWriter(Reference<BlobCipherKey> headerCipherKey,
+	                         Reference<BlobCipherKey> textCipherKey,
+	                         Reference<IBackupFile> file = Reference<IBackupFile>(),
 	                         int blockSize = 0,
-	                         Options options = Options(false, false))
-	  : file(file), blockSize(blockSize), blockEnd(0), fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION),
-	    options(options) {
+	                         Options options = Options(true))
+	  : headerCipherKey(headerCipherKey), textCipherKey(textCipherKey), file(file), blockSize(blockSize), blockEnd(0),
+	    fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION), options(options) {
+		ASSERT(headerCipherKey.isValid() && textCipherKey.isValid());
 		buffer = makeString(blockSize);
 		wPtr = mutateString(buffer);
 	}
 
-	static void encrypt(EncryptedRangeFileWriter* self) {
+	static void validateEncryptionHeader(Reference<BlobCipherKey> textCipherKey,
+	                                     Reference<BlobCipherKey> headerCipherKey,
+	                                     BlobCipherEncryptHeader& header) {
+		if (!(header.cipherHeaderDetails.baseCipherId == headerCipherKey->getBaseCipherId() &&
+		      header.cipherHeaderDetails.encryptDomainId == headerCipherKey->getDomainId() &&
+		      header.cipherHeaderDetails.salt == headerCipherKey->getSalt())) {
+			TraceEvent("EncryptionHeader_CipherHeaderMismatch")
+			    .detail("HeaderDomainId", headerCipherKey->getDomainId())
+			    .detail("ExpectedHeaderDomainId", header.cipherHeaderDetails.encryptDomainId)
+			    .detail("HeaderBaseCipherId", headerCipherKey->getBaseCipherId())
+			    .detail("ExpectedHeaderBaseCipherId", header.cipherHeaderDetails.baseCipherId)
+			    .detail("HeaderSalt", headerCipherKey->getSalt())
+			    .detail("ExpectedHeaderSalt", header.cipherHeaderDetails.salt);
+			throw encrypt_header_metadata_mismatch();
+		}
+	}
+
+	static StringRef decrypt(StringRef headerS,
+	                         uint8_t* dataP,
+	                         int64_t dataLen,
+	                         Arena& arena,
+	                         Reference<BlobCipherKey> textCipherKey,
+	                         Reference<BlobCipherKey> headerCipherKey) {
+		ASSERT(headerCipherKey.isValid() && textCipherKey.isValid());
+		BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(headerS);
+		validateEncryptionHeader(textCipherKey, headerCipherKey, header);
+		DecryptBlobCipherAes256Ctr decryptor(textCipherKey, headerCipherKey, header.iv);
+		return decryptor.decrypt(dataP, dataLen, header, arena)->toStringRef();
+	}
+
+	void encrypt() {
 		uint8_t iv[AES_256_IV_LENGTH];
 		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
 		EncryptBlobCipherAes265Ctr encryptor(
-		    self->textCipherKey, self->headerCipherKey, iv, AES_256_IV_LENGTH, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+		    textCipherKey, headerCipherKey, iv, AES_256_IV_LENGTH, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
 		BlobCipherEncryptHeader header;
 		Arena arena;
-		int64_t dataSize = self->wPtr - (self->encryptHeaderP + BlobCipherEncryptHeader::headerSize);
+		int64_t dataSize = wPtr - (encryptHeaderP + BlobCipherEncryptHeader::headerSize);
 		auto encryptedData =
-		    encryptor.encrypt(self->encryptHeaderP + BlobCipherEncryptHeader::headerSize, dataSize, &header, arena);
+		    encryptor.encrypt(encryptHeaderP + BlobCipherEncryptHeader::headerSize, dataSize, &header, arena);
 
 		// write header to buffer
 		StringRef headerStr = BlobCipherEncryptHeader::toStringRef(header, arena);
-		std::memcpy(self->encryptHeaderP, headerStr.begin(), BlobCipherEncryptHeader::headerSize);
+		std::memcpy(encryptHeaderP, headerStr.begin(), BlobCipherEncryptHeader::headerSize);
 
 		// write data to buffer
-		std::memcpy(self->encryptHeaderP + BlobCipherEncryptHeader::headerSize, encryptedData->begin(), dataSize);
+		std::memcpy(encryptHeaderP + BlobCipherEncryptHeader::headerSize, encryptedData->begin(), dataSize);
 	}
 
 	static int64_t currentBufferSize(EncryptedRangeFileWriter* self) { return self->wPtr - self->buffer.begin(); }
@@ -557,7 +589,9 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		// write buffer to file since block is finished
 		if (expectedFileSize(self) > 0) {
 			ASSERT(currentBufferSize(self) == self->blockSize);
-			encrypt(self);
+			if (self->options.encryptionEnabled) {
+				self->encrypt();
+			}
 			wait(self->file->append(self->buffer.begin(), self->blockSize));
 
 			// reset write pointer to beginning of StringRef
@@ -640,12 +674,16 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	Future<Void> finish() {
 		// Write any outstanding bytes to the file
 		if (currentBufferSize(this) > 0) {
-			encrypt(this);
+			if (options.encryptionEnabled) {
+				encrypt();
+			}
 			return file->append(buffer.begin(), currentBufferSize(this));
 		}
 		return Void();
 	}
 
+	Reference<BlobCipherKey> headerCipherKey;
+	Reference<BlobCipherKey> textCipherKey;
 	Reference<IBackupFile> file;
 	int blockSize;
 
@@ -653,8 +691,6 @@ private:
 	Standalone<StringRef> buffer;
 	uint8_t* wPtr;
 	uint8_t* encryptHeaderP;
-	Reference<BlobCipherKey> textCipherKey;
-	Reference<BlobCipherKey> headerCipherKey;
 	int64_t blockEnd;
 	uint32_t fileVersion;
 	Options options;
@@ -818,6 +854,21 @@ void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* 
 			throw restore_corrupted_data_padding();
 }
 
+Reference<BlobCipherKey> createCipherKey(std::unordered_map<int, Reference<BlobCipherKey>>& cipherKeys, int insertKey) {
+	// TODO (Nim): Remove this logic before merging
+	uint8_t buf[AES_256_KEY_LENGTH];
+	for (int i = 0; i < AES_256_KEY_LENGTH; i++) {
+		buf[i] = 1;
+	}
+	int64_t domainId = 2;
+	int64_t baseCipherId = 3;
+	int64_t salt = 4;
+	Reference<BlobCipherKey> cipherKey =
+	    makeReference<BlobCipherKey>(domainId, baseCipherId, buf, AES_256_KEY_LENGTH, salt);
+	cipherKeys[insertKey] = cipherKey;
+	return cipherKey;
+}
+
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
                                                                       int len) {
@@ -838,6 +889,9 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
 			decodeKVPairs(&reader, &results);
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
+			// TODO (Nim): Remove this logic before merging
+			std::unordered_map<int, Reference<BlobCipherKey>> cipherKeys;
+			Reference<BlobCipherKey> testCipherKey = createCipherKey(cipherKeys, 1);
 			// decode options struct
 			uint32_t optionsLen = reader.consumeNetworkUInt32();
 			const uint8_t* o = reader.consume(optionsLen);
@@ -846,7 +900,17 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			    ObjectReader::fromStringRef<EncryptedRangeFileWriter::Options>(optionsStringRef, IncludeVersion());
 
 			// read encryption header
-			reader.consume(BlobCipherEncryptHeader::headerSize);
+			if (options.encryptionEnabled) {
+				const uint8_t* headerP = reader.consume(BlobCipherEncryptHeader::headerSize);
+				StringRef header = StringRef(headerP, BlobCipherEncryptHeader::headerSize);
+				const uint8_t* dataP = headerP + BlobCipherEncryptHeader::headerSize;
+				int64_t bytesRead =
+				    sizeof(int32_t) + sizeof(uint32_t) + optionsLen + BlobCipherEncryptHeader::headerSize;
+				int64_t dataLen = len - bytesRead;
+				StringRef decryptedData = EncryptedRangeFileWriter::decrypt(
+				    header, const_cast<uint8_t*>(dataP), dataLen, results.arena(), testCipherKey, testCipherKey);
+				reader = StringRefReader(decryptedData, restore_corrupted_data());
+			}
 			decodeKVPairs(&reader, &results);
 		} else {
 			throw restore_unsupported_file_version();
@@ -1435,6 +1499,10 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		state std::unique_ptr<IRangeFileWriter> rangeFile;
 		state BackupConfig backup(task);
 
+		// TODO (Nim): Remove this logic before merging
+		state std::unordered_map<int, Reference<BlobCipherKey>> cipherKeys;
+		state Reference<BlobCipherKey> testCipherKey = createCipherKey(cipherKeys, 1);
+
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but if
 		// bc is false then clearly the backup is no longer in progress
 		state Reference<IBackupContainer> bc = wait(backup.backupContainer().getD(cx.getReference()));
@@ -1521,7 +1589,8 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				outFile = f;
 
 				// Initialize range file writer and write begin key
-				rangeFile = std::make_unique<EncryptedRangeFileWriter>(outFile, blockSize);
+				rangeFile =
+				    std::make_unique<EncryptedRangeFileWriter>(testCipherKey, testCipherKey, outFile, blockSize);
 				wait(rangeFile->writeKey(beginKey));
 			}
 
