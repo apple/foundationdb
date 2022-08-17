@@ -173,6 +173,13 @@ FDB_DECLARE_BOOLEAN_PARAM(IsRedundantTeam);
 FDB_DECLARE_BOOLEAN_PARAM(IsBadTeam);
 FDB_DECLARE_BOOLEAN_PARAM(WaitWiggle);
 
+// send request/signal to DDTeamCollection through interface
+// call synchronous method from components outside DDTeamCollection
+struct IDDTeamCollection {
+	PromiseStream<GetTeamRequest> getTeam;
+	virtual ~IDDTeamCollection() {}
+};
+
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	friend class DDTeamCollectionImpl;
 	friend class DDTeamCollectionUnitTest;
@@ -402,7 +409,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	// in the next iteration of the loop. Otherwise, you may miss checking some elements in machineTeams
 	bool removeMachineTeam(Reference<TCMachineTeamInfo> targetMT);
 
-	// Adds storage servers held on process of which the Process Id is “id” into excludeServers which prevent
+	// Adds storage servers held on process of which the Process id is “id” into excludeServers which prevent
 	// recruiting the wiggling storage servers and let teamTracker start to move data off the affected teams;
 	// Return a vector of futures wait for all data is moved to other teams.
 	Future<Void> excludeStorageServersForWiggle(const UID& id);
