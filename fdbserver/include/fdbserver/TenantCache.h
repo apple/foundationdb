@@ -53,6 +53,12 @@ private:
 	// return count of tenants that were found to be stale and removed from the cache
 	int cleanup();
 
+	// return a list of all tenant prefixes stored in the tenant cache
+	std::vector<KeyRef> getTenantPrefixList() const;
+
+	// update the size for a tenant; do nothing if the tenant doesn't exist in the map
+	void updateStorageUsage(KeyRef prefix, int64_t size);
+
 	UID id() const { return distributorID; }
 
 	Database dbcx() const { return cx; }
@@ -65,6 +71,8 @@ public:
 	Future<Void> build(Database cx);
 
 	Future<Void> monitorTenantMap();
+
+	Future<Void> monitorStorageUsage();
 
 	std::string desc() const;
 
