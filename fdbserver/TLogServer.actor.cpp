@@ -375,7 +375,7 @@ struct TLogData : NonCopyable {
 	struct SafeAccessor {
 		TLogData* self;
 		Promise<Void> destroyed;
-		SafeAccessor(TLogData* self): self(self), destroyed(self->destroyed){}
+		SafeAccessor(TLogData* self) : self(self), destroyed(self->destroyed) {}
 		TLogData* operator->() const {
 			ASSERT(!destroyed.isSet());
 			return self;
@@ -1421,9 +1421,7 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 ACTOR Future<Void> updateStorageLoop(TLogData* self) {
 	wait(delay(0, TaskPriority::UpdateStorage));
 
-	loop {
-		wait(updateStorage(self));
-	}
+	loop { wait(updateStorage(self)); }
 }
 
 void commitMessages(TLogData* self,
@@ -2023,9 +2021,33 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 struct ErrorCounter {
 	std::map<int, Counter> errorCounters;
 	CounterCollection collection;
+	UID id;
 	explicit ErrorCounter(const std::string& name) : collection(name) {}
+	static std::string errorNameToEventField(const std::string& name) {
+		std::string res;
+		bool upper = true;
+		for (int i = 0; i < name.size(); ++i) {
+			if (upper) {
+				upper = false;
+				res.push_back(toupper(name[i]));
+			} else if (name[i] == '_') {
+				upper = true;
+				continue;
+			} else {
+				res.push_back(name[i]);
+			}
+		}
+		return res;
+	}
+	void traceAll() {
+		TraceEvent te(SevInfo, "TraceErrorCounter", id);
+		for (auto& [code, c] : errorCounters) {
+			te.detail(c.getName().c_str(), c);
+			c.resetInterval();
+		}
+	}
 };
-static ErrorCounter g_errorCounter("TlogDebugErrorCounter");
+ErrorCounter g_errorCounter("TlogDebugErrorCounter");
 
 // This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
 ACTOR Future<Void> tLogPeekStream(TLogData::SafeAccessor self, TLogPeekStreamRequest req, Reference<LogData> logData) {
@@ -2040,7 +2062,8 @@ ACTOR Future<Void> tLogPeekStream(TLogData::SafeAccessor self, TLogPeekStreamReq
 		state Future<TLogPeekReply> future(promise.getFuture());
 		try {
 			wait(req.reply.onReady() && store(reply.rep, future) &&
-			     tLogPeekMessages<Promise<TLogPeekReply>, TLogData::SafeAccessor>(promise, self, logData, begin, req.tag, req.returnIfBlocked, onlySpilled));
+			     tLogPeekMessages<Promise<TLogPeekReply>, TLogData::SafeAccessor>(
+			         promise, self, logData, begin, req.tag, req.returnIfBlocked, onlySpilled));
 
 			reply.rep.begin = begin;
 			req.reply.send(reply);
@@ -2058,7 +2081,8 @@ ACTOR Future<Void> tLogPeekStream(TLogData::SafeAccessor self, TLogPeekStreamReq
 			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 
 			if (g_errorCounter.errorCounters.find(e.code()) == g_errorCounter.errorCounters.end()) {
-				g_errorCounter.errorCounters.emplace(e.code(), Counter(e.name(), g_errorCounter.collection));
+				g_errorCounter.errorCounters.emplace(
+				    e.code(), Counter(ErrorCounter::errorNameToEventField(e.name()), g_errorCounter.collection));
 			}
 			++g_errorCounter.errorCounters.at(e.code());
 
@@ -2741,9 +2765,7 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 	while (!endVersion.present() || logData->version.get() < endVersion.get()) {
 		loop {
 			choose {
-				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
-					break;
-				}
+				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) { break; }
 				when(wait(dbInfoChange)) {
 					if (logData->logSystem->get()) {
 						r = logData->logSystem->get()->peek(logData->logId, tagAt, endVersion, tags, true);
@@ -3220,9 +3242,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 
 								choose {
 									when(wait(updateStorage(self))) {}
-									when(wait(allRemoved)) {
-										throw worker_removed();
-									}
+									when(wait(allRemoved)) { throw worker_removed(); }
 								}
 							}
 						} else {
@@ -3233,9 +3253,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 						}
 					}
 				}
-				when(wait(allRemoved)) {
-					throw worker_removed();
-				}
+				when(wait(allRemoved)) { throw worker_removed(); }
 			}
 		}
 	} catch (Error& e) {
@@ -3553,7 +3571,9 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 			self.sharedActors.send(commitQueue(&self));
 			self.sharedActors.send(updateStorageLoop(&self));
 			self.sharedActors.send(traceRole(Role::SHARED_TRANSACTION_LOG, tlogId));
-			self.sharedActors.send(traceCounters("TLogStreamErrorCount", tlogId, 60.0, &g_errorCounter.collection));
+
+			g_errorCounter.id = tlogId;
+			state Future<Void> logger = recurring([]() { g_errorCounter.traceAll(); }, 60.0);
 			state Future<Void> activeSharedChange = Void();
 
 			loop {
@@ -3582,9 +3602,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 							forwardPromise(req.reply, self.tlogCache.get(req.recruitmentID));
 						}
 					}
-					when(wait(error)) {
-						throw internal_error();
-					}
+					when(wait(error)) { throw internal_error(); }
 					when(wait(activeSharedChange)) {
 						if (activeSharedTLog->get() == tlogId) {
 							TraceEvent("SharedTLogNowActive", self.dbgid).detail("NowActive", activeSharedTLog->get());
