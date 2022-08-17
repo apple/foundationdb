@@ -298,7 +298,6 @@ class ConfigBroadcasterImpl {
 				}
 			}
 		}
-
 		int responsesRemaining = self->coordinators - (int)self->registrationResponses.size();
 		int nodesTillQuorum = self->coordinators / 2 + 1 - (int)self->activeConfigNodes.size();
 
@@ -381,6 +380,7 @@ class ConfigBroadcasterImpl {
 			wait(self->newConfigNodesAllowed.getFuture());
 		}
 
+		sendSnapshot = sendSnapshot || (!registered && self->snapshot.size() > 0);
 		TraceEvent("ConfigBroadcasterRegisterNodeSendingReadyRequest", self->id)
 		    .detail("ConfigNodeAddress", address)
 		    .detail("SendSnapshot", sendSnapshot)

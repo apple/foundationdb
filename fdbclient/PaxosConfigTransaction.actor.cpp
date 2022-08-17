@@ -411,14 +411,13 @@ class PaxosConfigTransactionImpl {
 
 	// Returns when the cluster interface updates with a new connection string.
 	ACTOR static Future<Void> watchClusterFile(Database cx) {
-		state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(
-		    new AsyncVar<Optional<ClusterInterface>>);
-		state Future<Void> leaderMonitor = monitorLeader<ClusterInterface>(cx->getConnectionRecord(), clusterInterface);
+		state Future<Void> leaderMonitor =
+		    monitorLeader<ClusterInterface>(cx->getConnectionRecord(), cx->statusClusterInterface);
 		state std::string connectionString = cx->getConnectionRecord()->getConnectionString().toString();
 
 		loop {
 			choose {
-				when(wait(clusterInterface->onChange())) {
+				when(wait(cx->statusClusterInterface->onChange())) {
 					if (cx->getConnectionRecord()->getConnectionString().toString() != connectionString) {
 						return Void();
 					}
@@ -484,8 +483,12 @@ public:
 			ctis.emplace_back(c);
 		}
 		coordinatorsHash = std::hash<std::string>()(cx->getConnectionRecord()->getConnectionString().toString());
+		if (!cx->statusLeaderMon.isValid() || cx->statusLeaderMon.isReady()) {
+			cx->statusClusterInterface = makeReference<AsyncVar<Optional<ClusterInterface>>>();
+			cx->statusLeaderMon = watchClusterFile(cx);
+		}
 		getGenerationQuorum = GetGenerationQuorum{
-			coordinatorsHash, ctis, watchClusterFile(cx), getGenerationQuorum.getLastSeenLiveVersion()
+			coordinatorsHash, ctis, cx->statusLeaderMon, getGenerationQuorum.getLastSeenLiveVersion()
 		};
 		commitQuorum = CommitQuorum{ ctis };
 	}

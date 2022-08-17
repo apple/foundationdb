@@ -74,7 +74,6 @@ struct WorkerInterface {
 	RequestStream<struct WorkerSnapRequest> workerSnapReq;
 	RequestStream<struct UpdateServerDBInfoRequest> updateServerDBInfo;
 
-	ConfigBroadcastInterface configBroadcastInterface;
 	TesterInterface testerInterface;
 
 	UID id() const { return tLog.getEndpoint().token; }
@@ -128,8 +127,7 @@ struct WorkerInterface {
 		           workerSnapReq,
 		           backup,
 		           encryptKeyProxy,
-		           updateServerDBInfo,
-		           configBroadcastInterface);
+		           updateServerDBInfo);
 	}
 };
 
@@ -438,6 +436,7 @@ struct RegisterWorkerRequest {
 	Optional<ConfigClassSet> knobConfigClassSet;
 	bool requestDbInfo;
 	bool recoveredDiskFiles;
+	ConfigBroadcastInterface configBroadcastInterface;
 
 	RegisterWorkerRequest()
 	  : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
@@ -453,11 +452,13 @@ struct RegisterWorkerRequest {
 	                      bool degraded,
 	                      Optional<Version> lastSeenKnobVersion,
 	                      Optional<ConfigClassSet> knobConfigClassSet,
-	                      bool recoveredDiskFiles)
+	                      bool recoveredDiskFiles,
+	                      ConfigBroadcastInterface configBroadcastInterface)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), blobManagerInterf(bmInterf),
 	    encryptKeyProxyInterf(ekpInterf), degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion),
-	    knobConfigClassSet(knobConfigClassSet), requestDbInfo(false), recoveredDiskFiles(recoveredDiskFiles) {}
+	    knobConfigClassSet(knobConfigClassSet), requestDbInfo(false), recoveredDiskFiles(recoveredDiskFiles),
+	    configBroadcastInterface(configBroadcastInterface) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -478,7 +479,8 @@ struct RegisterWorkerRequest {
 		           lastSeenKnobVersion,
 		           knobConfigClassSet,
 		           requestDbInfo,
-		           recoveredDiskFiles);
+		           recoveredDiskFiles,
+		           configBroadcastInterface);
 	}
 };
 
