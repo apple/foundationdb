@@ -648,7 +648,9 @@ public:
 					const std::string name = metadata[i].value.toString();
 					KeyRangeRef range(metadata[i].key.removePrefix(shardMappingPrefix),
 					                  metadata[i + 1].key.removePrefix(shardMappingPrefix));
-					TraceEvent(SevVerbose, "DecodeShardMapping").detail("Range", range).detail("Name", name);
+					TraceEvent(SevVerbose, "DecodeShardMapping", this->logId)
+					    .detail("Range", range)
+					    .detail("Name", name);
 
 					// Shard with an empty name is an empty shard.
 					if (name.empty()) {
@@ -658,7 +660,7 @@ public:
 					auto it = physicalShards.find(name);
 					// Raise error if physical shard is missing.
 					if (it == physicalShards.end()) {
-						TraceEvent(SevError, "ShardedRocksDB").detail("MissingShard", name);
+						TraceEvent(SevError, "ShardedRocksDB", this->logId).detail("MissingShard", name);
 						return rocksdb::Status::NotFound();
 					}
 
@@ -669,6 +671,7 @@ public:
 				}
 
 				if (metadata.back().key.removePrefix(shardMappingPrefix) == specialKeys.end) {
+					TraceEvent(SevVerbose, "ShardedRocksLoadShardMappingEnd", this->logId);
 					break;
 				}
 
