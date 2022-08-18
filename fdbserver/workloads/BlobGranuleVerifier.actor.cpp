@@ -89,8 +89,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		timeTravelBufferSize = getOption(options, LiteralStringRef("timeTravelBufferSize"), 100000000);
 		threads = getOption(options, LiteralStringRef("threads"), 1);
 
-		// TODO CHANGE BACK!
-		enablePurging = getOption(options, LiteralStringRef("enablePurging"), true /*sharedRandomNumber % 3 == 0*/);
+		enablePurging = getOption(options, LiteralStringRef("enablePurging"), sharedRandomNumber % 3 == 0);
 		sharedRandomNumber /= 3;
 		// FIXME: re-enable this! There exist several bugs with purging active granules where a small amount of state
 		// won't be cleaned up.
@@ -98,12 +97,10 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		    getOption(options, LiteralStringRef("strictPurgeChecking"), false /*sharedRandomNumber % 2 == 0*/);
 		sharedRandomNumber /= 2;
 
-		// TODO CHANGE BACK!
-		doForcePurge = getOption(options, LiteralStringRef("doForcePurge"), false /*sharedRandomNumber % 3 == 0*/);
+		doForcePurge = getOption(options, LiteralStringRef("doForcePurge"), sharedRandomNumber % 3 == 0);
 		sharedRandomNumber /= 3;
 
-		// TODO CHANGE BACK!
-		purgeAtLatest = getOption(options, LiteralStringRef("purgeAtLatest"), true /*sharedRandomNumber % 3 == 0*/);
+		purgeAtLatest = getOption(options, LiteralStringRef("purgeAtLatest"), sharedRandomNumber % 3 == 0);
 		sharedRandomNumber /= 3;
 
 		// randomly some tests write data first and then turn on blob granules later, to test conversion of existing DB
