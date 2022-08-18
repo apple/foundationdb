@@ -22,6 +22,7 @@
 #include "flow/network.h"
 #include "flow/serialize.h"
 #include "flow/Arena.h"
+#include "flow/AutoCPointer.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/MkCert.h"
@@ -85,6 +86,51 @@ bool checkSignAlgorithm(PKeyAlgorithm algo, PrivateKey key) {
 	} else {
 		return true;
 	}
+}
+
+Optional<StringRef> convertEs256P1363ToDer(Arena& arena, StringRef p1363) {
+	const int SIGLEN = p1363.size();
+	const int HALF_SIGLEN = SIGLEN / 2;
+	auto r = AutoCPointer(BN_bin2bn(p1363.begin(), HALF_SIGLEN, nullptr), &::BN_free);
+	auto s = AutoCPointer(BN_bin2bn(p1363.begin() + HALF_SIGLEN, HALF_SIGLEN, nullptr), &::BN_free);
+	if (!r || !s)
+		return {};
+	auto sig = AutoCPointer(::ECDSA_SIG_new(), &ECDSA_SIG_free);
+	if (!sig)
+		return {};
+	::ECDSA_SIG_set0(sig, r.release(), s.release());
+	auto const derLen = ::i2d_ECDSA_SIG(sig, nullptr);
+	if (derLen < 0)
+		return {};
+	auto buf = new (arena) uint8_t[derLen];
+	auto bufPtr = buf;
+	::i2d_ECDSA_SIG(sig, &bufPtr);
+	return StringRef(buf, derLen);
+}
+
+Optional<StringRef> convertEs256DerToP1363(Arena& arena, StringRef der) {
+	uint8_t const* derPtr = der.begin();
+	auto sig = AutoCPointer(::d2i_ECDSA_SIG(nullptr, &derPtr, der.size()), &::ECDSA_SIG_free);
+	if (!sig) {
+		return {};
+	}
+	// ES256-specific constant. Adapt as needed
+	constexpr const int SIGLEN = 64;
+	constexpr const int HALF_SIGLEN = SIGLEN / 2;
+	auto buf = new (arena) uint8_t[SIGLEN];
+	::memset(buf, 0, SIGLEN);
+	auto bufr = buf;
+	auto bufs = bufr + HALF_SIGLEN;
+	auto r = std::add_pointer_t<BIGNUM const>();
+	auto s = std::add_pointer_t<BIGNUM const>();
+	ECDSA_SIG_get0(sig, &r, &s);
+	auto const lenr = BN_num_bytes(r);
+	auto const lens = BN_num_bytes(s);
+	if (lenr > HALF_SIGLEN || lens > HALF_SIGLEN)
+		return {};
+	BN_bn2bin(r, bufr + (HALF_SIGLEN - lenr));
+	BN_bn2bin(s, bufs + (HALF_SIGLEN - lens));
+	return StringRef(buf, SIGLEN);
 }
 
 } // namespace
@@ -268,6 +314,13 @@ StringRef signToken(Arena& arena, TokenRef tokenSpec, PrivateKey privateKey) {
 		throw digital_signature_ops_error();
 	}
 	auto plainSig = privateKey.sign(tmpArena, tokenPart, *digest);
+	if (tokenSpec.algorithm == Algorithm::ES256) {
+		// Need to convert ASN.1/DER signature to IEEE-P1363
+		auto convertedSig = convertEs256DerToP1363(tmpArena, plainSig);
+		if (!convertedSig.present())
+			throw digital_signature_ops_error();
+		plainSig = convertedSig.get();
+	}
 	auto const sigPartLen = base64url::encodedLength(plainSig.size());
 	auto const totalLen = tokenPart.size() + 1 + sigPartLen;
 	auto out = new (arena) uint8_t[totalLen];
@@ -442,6 +495,13 @@ bool verifyToken(StringRef signedToken, PublicKey publicKey) {
 	auto [verifyAlgo, digest] = getMethod(parsedToken.algorithm);
 	if (!checkVerifyAlgorithm(verifyAlgo, publicKey))
 		return false;
+	if (parsedToken.algorithm == Algorithm::ES256) {
+		// Need to convert IEEE-P1363 signature to ASN.1/DER
+		auto convertedSig = convertEs256P1363ToDer(arena, sig);
+		if (!convertedSig.present())
+			return false;
+		sig = convertedSig.get();
+	}
 	return publicKey.verify(b64urlTokenPart, sig, *digest);
 }
 
