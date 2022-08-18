@@ -461,7 +461,7 @@ Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> DDTxnProces
 	return NativeAPI::getServerListAndProcessClasses(&tr);
 }
 
-Future<MoveKeysLock> DDTxnProcessor::takeMoveKeysLock(UID ddId) const {
+Future<MoveKeysLock> DDTxnProcessor::takeMoveKeysLock(const UID& ddId) const {
 	return ::takeMoveKeysLock(cx, ddId);
 }
 
@@ -491,6 +491,6 @@ Future<bool> DDTxnProcessor::isDataDistributionEnabled(const DDEnabledState* ddE
 	return DDTxnProcessorImpl::isDataDistributionEnabled(cx, ddEnabledState);
 }
 
-Future<Void> DDTxnProcessor::pollMoveKeysLock(MoveKeysLock lock, const DDEnabledState* ddEnabledState) const {
+Future<Void> DDTxnProcessor::pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const {
 	return DDTxnProcessorImpl::pollMoveKeysLock(cx, lock, ddEnabledState);
 }

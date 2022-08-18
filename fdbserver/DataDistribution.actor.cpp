@@ -496,6 +496,15 @@ public:
 	Future<bool> isDataDistributionEnabled() const {
 		return txnProcessor->isDataDistributionEnabled(context->ddEnabledState.get());
 	}
+
+	Future<Void> removeKeysFromFailedServer(const UID& serverID, const std::vector<UID>& teamForDroppedRange) const {
+		return txnProcessor->removeKeysFromFailedServer(
+		    serverID, teamForDroppedRange, lock, context->ddEnabledState.get());
+	}
+
+	Future<Void> removeStorageServer(const UID& serverID, const Optional<UID>& tssPairID = Optional<UID>()) const {
+		return txnProcessor->removeStorageServer(serverID, tssPairID, lock, context->ddEnabledState.get());
+	}
 };
 
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
@@ -707,17 +716,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			TraceEvent("DataDistributorTeamCollectionsDestroyed").error(err);
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				TraceEvent("RemoveFailedServer", removeFailedServer.getFuture().get()).error(err);
-				wait(removeKeysFromFailedServer(cx,
-				                                removeFailedServer.getFuture().get(),
-				                                teamForDroppedRange,
-				                                self->lock,
-				                                self->context->ddEnabledState.get()));
-				Optional<UID> tssPairID;
-				wait(removeStorageServer(cx,
-				                         removeFailedServer.getFuture().get(),
-				                         tssPairID,
-				                         self->lock,
-				                         self->context->ddEnabledState.get()));
+				wait(self->removeKeysFromFailedServer(removeFailedServer.getFuture().get(), teamForDroppedRange));
+				wait(self->removeStorageServer(removeFailedServer.getFuture().get()));
 			} else {
 				if (err.code() != error_code_movekeys_conflict) {
 					throw err;
