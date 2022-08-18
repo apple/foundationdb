@@ -915,6 +915,61 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		return Void();
 	}
 
+	// Check database against blob granules. This is especially important because during chaos phase this can error, and
+	// initAtEnd doesn't get data checked otherwise
+	ACTOR Future<bool> checkAllData(Database cx, BlobGranuleVerifierWorkload* self) {
+		state Transaction tr(cx);
+		state KeyRange keyRange = normalKeys;
+		state bool gotEOS = false;
+		state int64_t totalRows = 0;
+		loop {
+			state RangeResult output;
+			state Version readVersion;
+			try {
+				Version ver = wait(tr.getReadVersion());
+				readVersion = ver;
+
+				state PromiseStream<Standalone<RangeResultRef>> results;
+				state Future<Void> stream = tr.getRangeStream(results, keyRange, GetRangeLimits());
+
+				loop {
+					Standalone<RangeResultRef> res = waitNext(results.getFuture());
+					output.arena().dependsOn(res.arena());
+					output.append(output.arena(), res.begin(), res.size());
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_operation_cancelled) {
+					throw e;
+				}
+				if (e.code() == error_code_end_of_stream) {
+					gotEOS = true;
+				} else {
+					wait(tr.onError(e));
+				}
+			}
+
+			if (!output.empty()) {
+				state KeyRange rangeToCheck = KeyRangeRef(keyRange.begin, keyAfter(output.back().key));
+				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
+				    wait(readFromBlob(cx, self->bstore, rangeToCheck, 0, readVersion));
+				if (!compareFDBAndBlob(output, blob, rangeToCheck, readVersion, BGV_DEBUG)) {
+					return false;
+				}
+				totalRows += output.size();
+				keyRange = KeyRangeRef(rangeToCheck.end, keyRange.end);
+			}
+			if (gotEOS) {
+				break;
+			}
+		}
+
+		if (BGV_DEBUG) {
+			fmt::print("BGV Final data check complete, checked {0} rows\n", totalRows);
+		}
+
+		return true;
+	}
+
 	ACTOR Future<bool> _check(Database cx, BlobGranuleVerifierWorkload* self) {
 		state Transaction tr(cx);
 		if (self->doForcePurge) {
@@ -1041,8 +1096,11 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		if (BGV_DEBUG && startReadVersion != readVersion) {
 			fmt::print("Availability check updated read version from {0} to {1}\n", startReadVersion, readVersion);
 		}
+
+		state bool dataPassed = wait(self->checkAllData(cx, self));
+
 		state bool result =
-		    availabilityPassed && self->mismatches == 0 && (checks > 0) && (self->timeTravelTooOld == 0);
+		    availabilityPassed && dataPassed && self->mismatches == 0 && (checks > 0) && (self->timeTravelTooOld == 0);
 		fmt::print("Blob Granule Verifier {0} {1}:\n", self->clientId, result ? "passed" : "failed");
 		fmt::print("  {} successful final granule checks\n", checks);
 		fmt::print("  {} failed final granule checks\n", availabilityPassed ? 0 : 1);
@@ -1054,6 +1112,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		fmt::print("  {} rows\n", self->rowsRead);
 		fmt::print("  {} bytes\n", self->bytesRead);
 		fmt::print("  {} purges\n", self->purges);
+		fmt::print("  {} final data check\n", dataPassed ? "passed" : "failed");
 		// FIXME: add above as details to trace event
 
 		TraceEvent("BlobGranuleVerifierChecked").detail("Result", result);
@@ -1101,7 +1160,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				}
 			}
 
-			// TODO: should do a read to check that not only did it reduce to one granule, but that granule is readable?
+			// read after merge to make sure it completed, granules are available, and data is empty
+			bool dataCheckAfterMerge = wait(self->checkAllData(cx, self));
+			ASSERT(dataCheckAfterMerge);
 		}
 
 		return result;
