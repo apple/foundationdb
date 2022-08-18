@@ -24,6 +24,7 @@
 #include <sstream>
 #include <string_view>
 #include <toml.hpp>
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/IPAllowList.h"
@@ -1904,6 +1905,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	}
 
 	simconfig.db.tenantMode = tenantMode;
+	simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
 
 	StatusObject startingConfigJSON = simconfig.db.toJSON(true);
 	std::string startingConfigString = "new";
@@ -1936,7 +1938,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		if (kv.second.type() == json_spirit::int_type) {
 			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int());
 		} else if (kv.second.type() == json_spirit::str_type) {
-			if ("storage_migration_type" == kv.first || "tenant_mode" == kv.first) {
+			if ("storage_migration_type" == kv.first || "tenant_mode" == kv.first ||
+			    "encryption_at_rest_mode" == kv.first) {
 				startingConfigString += kv.first + "=" + kv.second.get_str();
 			} else {
 				startingConfigString += kv.second.get_str();

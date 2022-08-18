@@ -70,7 +70,8 @@ enum class ConfigurationResult {
 	SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
 	DATABASE_CREATED_WARN_ROCKSDB_EXPERIMENTAL,
 	DATABASE_CREATED_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
-	DATABASE_IS_REGISTERED
+	DATABASE_IS_REGISTERED,
+	ENCRYPTION_AT_REST_MODE_ALREADY_SET
 };
 
 enum class CoordinatorsResult {
@@ -484,6 +485,11 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 						if (metaclusterRegistration.present()) {
 							return ConfigurationResult::DATABASE_IS_REGISTERED;
 						}
+					}
+
+					if (newConfig.encryptionAtRestMode != oldConfig.encryptionAtRestMode) {
+						// Encryption data at-rest mode can be set only at the time of database creation
+						return ConfigurationResult::ENCRYPTION_AT_REST_MODE_ALREADY_SET;
 					}
 				}
 			}
