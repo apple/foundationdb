@@ -89,6 +89,7 @@ public:
 	}
 
 private:
+	// FIXME: use other new blob granule apis!
 	enum OpType { OP_INSERT, OP_CLEAR, OP_CLEAR_RANGE, OP_READ, OP_GET_RANGES, OP_LAST = OP_GET_RANGES };
 	std::vector<OpType> excludedOpTypes;
 
@@ -113,7 +114,7 @@ private:
 			    fdb::native::FDBReadBlobGranuleContext granuleContext;
 			    granuleContext.userContext = &testerContext;
 			    granuleContext.debugNoMaterialize = false;
-			    granuleContext.granuleParallelism = 1;
+			    granuleContext.granuleParallelism = 1 + Random::get().randomInt(0, 3);
 			    granuleContext.start_load_f = &granule_start_load;
 			    granuleContext.get_load_f = &granule_get_load;
 			    granuleContext.free_load_f = &granule_free_load;
