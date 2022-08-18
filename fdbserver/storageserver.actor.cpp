@@ -1182,8 +1182,11 @@ public:
 			specialCounter(cc, "ServeFetchCheckpointActive", [self]() {
 				return self->serveFetchCheckpointParallelismLock.activePermits();
 			});
-			specialCounter(cc, "ServeFetchCheckpointActive", [self]() {
-				return self->serveFetchCheckpointParallelismLock.activePermits();
+			specialCounter(cc, "ServeFetchCheckpointWaiting", [self]() {
+				return self->serveFetchCheckpointParallelismLock.waiters();
+			});
+			specialCounter(cc, "ServeValidateStorageActive", [self]() {
+				return self->serveValidateStorageParallelismLock.activePermits();
 			});
 			specialCounter(cc, "ServeValidateStorageWaiting", [self]() {
 				return self->serveValidateStorageParallelismLock.waiters();
@@ -3496,11 +3499,12 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
                                               KeyRange range,
                                               Version version,
                                               StorageServerInterface remoteServer) {
-	TraceEvent("ServeValidateRangeAgainstServerBegin", data->thisServerID)
+	TraceEvent(SevDebug, "ServeValidateRangeAgainstServerBegin", data->thisServerID)
 	    .detail("Range", range)
 	    .detail("Version", version)
 	    .detail("Servers", remoteServer.toString());
 
+	state int validatedKeys = 0;
 	loop {
 		try {
 			state GetKeyValuesRequest req;
@@ -3548,15 +3552,16 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 					               Traceable<StringRef>::toString(localKV.key),
 					               remoteServer.uniqueID.first(),
 					               Traceable<StringRef>::toString(remoteKV.key));
-				}
-
-				if (remoteKV.value != localKV.value) {
+				} else if (remoteKV.value != localKV.value) {
 					error = format("Value Mismatch for Key %s: local server (%lld): %s, remote server(%lld) %s",
 					               Traceable<StringRef>::toString(localKV.key),
 					               data->thisServerID.first(),
 					               Traceable<StringRef>::toString(localKV.value),
 					               remoteServer.uniqueID.first(),
 					               Traceable<StringRef>::toString(remoteKV.value));
+				} else {
+					TraceEvent(SevDebug, "ValidatedKey", data->thisServerID).detail("Key", localKV.key);
+					++validatedKeys;
 				}
 
 				lastKey = localKV.key;
@@ -3601,6 +3606,12 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 		    .detail("RemoteServer", remoteServer.toString());
 		throw validate_storage_error();
 	}
+
+	TraceEvent(SevDebug, "ServeValidateRangeAgainstServerEnd", data->thisServerID)
+	    .detail("Range", range)
+	    .detail("Version", version)
+		.detail("ValidatedKeys", validatedKeys)
+	    .detail("Servers", remoteServer.toString());
 
 	return Void();
 }

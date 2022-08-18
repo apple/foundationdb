@@ -1,5 +1,5 @@
 /*
- * ValidateStorage.cpp
+ * ValidateStorage.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,10 +21,6 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/ServerCheckpoint.actor.h"
-#include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/QuietDatabase.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
@@ -34,12 +30,28 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+namespace {
+std::string printValue(const ErrorOr<Optional<Value>>& value) {
+	if (value.isError()) {
+		return value.getError().name();
+	}
+	return value.get().present() ? value.get().get().toString() : "Value Not Found.";
+}
+} // namespace
+
 struct ValidateStorage : TestWorkload {
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
 	FlowLock cleanUpDataMoveParallelismLock;
 	const bool enabled;
 	bool pass;
+
+	void validationFailed(ErrorOr<Optional<Value>> expectedValue, ErrorOr<Optional<Value>> actualValue) {
+		TraceEvent(SevError, "TestFailed")
+		    .detail("ExpectedValue", printValue(expectedValue))
+		    .detail("ActualValue", printValue(actualValue));
+		pass = false;
+	}
 
 	ValidateStorage(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(!clientId), pass(true) {}
 
@@ -65,10 +77,12 @@ struct ValidateStorage : TestWorkload {
 
 		Version _ = wait(self->populateData(self, cx, &kvs));
 
-		TraceEvent("TestValueWritten").log();
+        std::cout << "TestValueWritten" << std::endl;
 
-		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr), &kvs));
-		TraceEvent("TestValueVerified").log();
+		TraceEvent("TestValueWritten");
+
+		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
+		TraceEvent("TestValueVerified");
 
 		int ignore = wait(setDDMode(cx, 1));
 		return Void();
@@ -100,29 +114,49 @@ struct ValidateStorage : TestWorkload {
 		return version;
 	}
 
-	ACTOR Future<Void> validateData(ValidateStorage* self,
-	                                Database cx,
-	                                KeyRange range,
-	                                std::map<Key, Value>* kvs) {
+	ACTOR Future<Void> validateData(ValidateStorage* self, Database cx, KeyRange range) {
+        std::cout << "0" << std::endl;
 		state Transaction tr(cx);
-		loop {
-			state UID debugID = deterministicRandom()->randomUniqueID();
-			try {
-				tr.debugTransaction(debugID);
-				RangeResult res = wait(tr.getRange(range, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!res.more && res.size() < CLIENT_KNOBS->TOO_MANY);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-				for (const auto& kv : res) {
-					ASSERT((*kvs)[kv.key] == kv.value);
+		loop {
+			try {
+        std::cout << "1" << std::endl;
+				state RangeResult shards =
+				    wait(krmGetRanges(&tr, keyServersPrefix, range, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!shards.empty() && !shards.more);
+
+				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+
+				state int i = 0;
+				for (i = 0; i < shards.size() - 1; ++i) {
+
+                    std::cout << "2" << std::endl;
+					std::vector<UID> src;
+					std::vector<UID> dest;
+					UID srcId, destId;
+					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
+
+					const int idx = deterministicRandom()->randomInt(0, src.size());
+					Optional<Value> serverListValue = wait(tr.get(serverListKeyFor(src[idx])));
+					ASSERT(serverListValue.present());
+					const StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
+					ValidateStorageRequest req(deterministicRandom()->randomUniqueID(),
+					                           KeyRangeRef(shards[i].key, shards[i + 1].key));
+					ValidateStorageResult vResult = wait(ssi.validateStorage.getReply(req));
+
+                    std::cout << "3" << std::endl;
 				}
 				break;
 			} catch (Error& e) {
-				TraceEvent("TestCommitError").errorUnsuppressed(e);
+				TraceEvent(SevWarnAlways, "TestValidateStorageError").errorUnsuppressed(e).detail("Range", range);
 				wait(tr.onError(e));
 			}
 		}
 
-		TraceEvent("ValidateTestDataDone").detail("DebugID", debugID);
+		TraceEvent("TestValidateStorageDone").detail("Range", range);
 
 		return Void();
 	}
@@ -189,9 +223,9 @@ struct ValidateStorage : TestWorkload {
 		return version;
 	}
 
-	Future<bool> check(Database const& cx) override { return pass; }
+	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<ValidateStorage> ValidateStorageFactory("PhysicalShardMove");
+WorkloadFactory<ValidateStorage> ValidateStorageFactory("ValidateStorageWorkload");
