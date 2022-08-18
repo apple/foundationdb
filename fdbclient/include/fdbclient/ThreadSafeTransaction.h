@@ -62,6 +62,13 @@ public:
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
+	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
+
+	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
 
@@ -149,7 +156,8 @@ public:
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                int64_t chunkSize) override;
 
-	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
 
 	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
 	                                           Version beginVersion,

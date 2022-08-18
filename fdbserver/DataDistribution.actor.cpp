@@ -49,7 +49,7 @@
 #include "flow/serialize.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
-
+#include "fdbserver/DDSharedContext.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int priority) {
@@ -284,21 +284,6 @@ static std::set<int> const& normalDDQueueErrors() {
 	return s;
 }
 
-ACTOR Future<Void> pollMoveKeysLock(Database cx, MoveKeysLock lock, const DDEnabledState* ddEnabledState) {
-	loop {
-		wait(delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY));
-		state Transaction tr(cx);
-		loop {
-			try {
-				wait(checkMoveKeysLockReadOnly(&tr, lock, ddEnabledState));
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-}
-
 struct DataDistributor : NonCopyable, ReferenceCounted<DataDistributor> {
 public:
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
@@ -325,6 +310,8 @@ public:
 	// consumer is a yield stream from producer. The RelocateShard is pushed into relocationProducer and popped from
 	// relocationConsumer (by DDQueue)
 	PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
+
+	StorageQuotaInfo storageQuotaInfo;
 
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id)
 	  : dbInfo(db), ddId(id), txnProcessor(nullptr), initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
@@ -543,7 +530,32 @@ public:
 		Future<Void> shardsReady = resumeFromShards(Reference<DataDistributor>::addRef(this), g_network->isSimulated());
 		return resumeFromDataMoves(Reference<DataDistributor>::addRef(this), shardsReady);
 	}
+
+	Future<Void> pollMoveKeysLock(const DDEnabledState* ddEnabledState) {
+		return txnProcessor->pollMoveKeysLock(lock, ddEnabledState);
+	}
 };
+
+ACTOR Future<Void> storageQuotaTracker(Database cx, StorageQuotaInfo* storageQuotaInfo) {
+	loop {
+		state Transaction tr(cx);
+		loop {
+			try {
+				state RangeResult currentQuotas = wait(tr.getRange(storageQuotaKeys, CLIENT_KNOBS->TOO_MANY));
+				TraceEvent("StorageQuota_ReadCurrentQuotas").detail("Size", currentQuotas.size());
+				for (auto const kv : currentQuotas) {
+					Key const key = kv.key.removePrefix(storageQuotaPrefix);
+					uint64_t const quota = BinaryReader::fromStringRef<uint64_t>(kv.value, Unversioned());
+					storageQuotaInfo->quotaMap[key] = quota;
+				}
+				wait(delay(5.0));
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+}
 
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
@@ -618,7 +630,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				    ddTenantCache->monitorTenantMap(), "DDTenantCacheMonitor", self->ddId, &normalDDQueueErrors()));
 			}
 
-			actors.push_back(pollMoveKeysLock(cx, self->lock, ddEnabledState));
+			actors.push_back(self->pollMoveKeysLock(ddEnabledState));
 			actors.push_back(reportErrorsExcept(dataDistributionTracker(self->initData,
 			                                                            cx,
 			                                                            self->relocationProducer,
@@ -652,6 +664,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                                          self->configuration.storageTeamSize,
 			                                                          ddEnabledState),
 			                                    "DDQueue",
+			                                    self->ddId,
+			                                    &normalDDQueueErrors()));
+
+			actors.push_back(reportErrorsExcept(storageQuotaTracker(cx, &self->storageQuotaInfo),
+			                                    "StorageQuotaTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
 
