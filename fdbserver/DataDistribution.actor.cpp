@@ -202,46 +202,6 @@ ACTOR Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
 	return Void();
 }
 
-ACTOR Future<bool> isDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
-	state Transaction tr(cx);
-	loop {
-		try {
-			Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
-			if (!mode.present() && ddEnabledState->isDDEnabled())
-				return true;
-			if (mode.present()) {
-				BinaryReader rd(mode.get(), Unversioned());
-				int m;
-				rd >> m;
-				if (m && ddEnabledState->isDDEnabled()) {
-					TraceEvent(SevDebug, "IsDDEnabledSucceeded")
-					    .detail("Mode", m)
-					    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
-					return true;
-				}
-			}
-			// SOMEDAY: Write a wrapper in MoveKeys.actor.h
-			Optional<Value> readVal = wait(tr.get(moveKeysLockOwnerKey));
-			UID currentOwner =
-			    readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
-			if (ddEnabledState->isDDEnabled() && (currentOwner != dataDistributionModeLock)) {
-				TraceEvent(SevDebug, "IsDDEnabledSucceeded")
-				    .detail("CurrentOwner", currentOwner)
-				    .detail("DDModeLock", dataDistributionModeLock)
-				    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
-				return true;
-			}
-			TraceEvent(SevDebug, "IsDDEnabledFailed")
-			    .detail("CurrentOwner", currentOwner)
-			    .detail("DDModeLock", dataDistributionModeLock)
-			    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
-			return false;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
 // Ensures that the serverKeys key space is properly coalesced
 // This method is only used for testing and is not implemented in a manner that is safe for large databases
 ACTOR Future<Void> debugCheckCoalescing(Database cx) {
@@ -532,6 +492,10 @@ public:
 	}
 
 	Future<Void> pollMoveKeysLock() { return txnProcessor->pollMoveKeysLock(lock, context->ddEnabledState.get()); }
+
+	Future<bool> isDataDistributionEnabled() const {
+		return txnProcessor->isDataDistributionEnabled(context->ddEnabledState.get());
+	}
 };
 
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
@@ -759,7 +723,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 					throw err;
 				}
 
-				bool ddEnabled = wait(isDataDistributionEnabled(cx, self->context->ddEnabledState.get()));
+				bool ddEnabled = wait(self->isDataDistributionEnabled());
 				TraceEvent("DataDistributionMoveKeysConflict").error(err).detail("DataDistributionEnabled", ddEnabled);
 				if (ddEnabled) {
 					throw err;

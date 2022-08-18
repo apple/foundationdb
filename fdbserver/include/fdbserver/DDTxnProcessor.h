@@ -62,6 +62,8 @@ public:
 
 	virtual Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const = 0;
 
+	virtual Future<bool> isDataDistributionEnabled(const DDEnabledState* ddEnabledState) const = 0;
+
 	virtual Future<Void> pollMoveKeysLock(MoveKeysLock lock, const DDEnabledState* ddEnabledState) const = 0;
 };
 
@@ -96,6 +98,8 @@ public:
 	                               const DatabaseConfiguration& configuration) const override;
 
 	Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const override;
+
+	Future<bool> isDataDistributionEnabled(const DDEnabledState* ddEnabledState) const override;
 
 	Future<Void> pollMoveKeysLock(MoveKeysLock lock, const DDEnabledState* ddEnabledState) const override;
 };
