@@ -58,7 +58,6 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
-#include "fdbserver/EncryptedMutationMessage.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/GetEncryptCipherKeys.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -2297,6 +2296,11 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 				}
 
 				rangeIds[it->id] = std::tuple(it->range, it->emptyVersion, stopVersion, it->metadataVersion);
+			} else if (it->destroyed && it->metadataVersion > metadataWaitVersion) {
+				// if we communicate the lack of a change feed because it's destroying, ensure the feed destroy isn't
+				// rolled back first
+				CODE_PROBE(true, "Overlapping Change Feeds ensuring destroy isn't rolled back");
+				metadataWaitVersion = it->metadataVersion;
 			}
 		}
 	}
@@ -2884,8 +2888,6 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
 
 // Change feed stream must be sent an error as soon as it is moved away, or change feed can get incorrect results
 ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamRequest req, UID streamUID) {
-	wait(delay(0, TaskPriority::DefaultEndpoint));
-
 	auto feed = data->uidChangeFeed.find(req.rangeID);
 	if (feed == data->uidChangeFeed.end() || feed->second->removing) {
 		req.reply.sendError(unknown_change_feed());
@@ -6334,7 +6336,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					Version grvVersion = wait(tr.getRawReadVersion());
 					if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01)) {
 						// Test failed GRV request.
-						throw proxy_memory_limit_exceeded();
+						throw grv_proxy_memory_limit_exceeded();
 					}
 					fetchVersion = std::max(grvVersion, fetchVersion);
 				} catch (Error& e) {
@@ -6492,8 +6494,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		}
 
 		// FIXME: remove when we no longer support upgrades from 5.X
-		data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::True;
-		TraceEvent(SevWarnAlways, "FKReenableLB").detail("FKID", fetchKeysID);
+		if (!data->cx->enableLocalityLoadBalance) {
+			data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::True;
+			TraceEvent(SevWarnAlways, "FKReenableLB").detail("FKID", fetchKeysID);
+		}
 
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
 		//  As we have finished this work, we will allow more work to start...
@@ -7701,13 +7705,13 @@ private:
 				}
 			}
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) &&
-		           m.param1.startsWith(TenantMetadata::tenantMapPrivatePrefix)) {
+		           m.param1.startsWith(TenantMetadata::tenantMapPrivatePrefix())) {
 			if (m.type == MutationRef::SetValue) {
 				data->insertTenant(
-				    m.param1.removePrefix(TenantMetadata::tenantMapPrivatePrefix), m.param2, currentVersion);
+				    m.param1.removePrefix(TenantMetadata::tenantMapPrivatePrefix()), m.param2, currentVersion);
 			} else if (m.type == MutationRef::ClearRange) {
-				data->clearTenants(m.param1.removePrefix(TenantMetadata::tenantMapPrivatePrefix),
-				                   m.param2.removePrefix(TenantMetadata::tenantMapPrivatePrefix),
+				data->clearTenants(m.param1.removePrefix(TenantMetadata::tenantMapPrivatePrefix()),
+				                   m.param2.removePrefix(TenantMetadata::tenantMapPrivatePrefix()),
 				                   currentVersion);
 			}
 		} else if (m.param1.substr(1).startsWith(tssMappingKeys.begin) &&
@@ -7959,7 +7963,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		start = now();
 		state UpdateEagerReadInfo eager;
 		state FetchInjectionInfo fii;
-		state Reference<ILogSystem::IPeekCursor> cloneCursor2;
+		state Reference<ILogSystem::IPeekCursor> cloneCursor2 = cursor->cloneNoMore();
 		state Optional<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> cipherKeys;
 		state bool collectingCipherKeys = false;
 
@@ -7974,8 +7978,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			std::unordered_set<BlobCipherDetails> cipherDetails;
 
-			Reference<ILogSystem::IPeekCursor> cloneCursor1 = cursor->cloneNoMore();
-			cloneCursor2 = cursor->cloneNoMore();
+			Reference<ILogSystem::IPeekCursor> cloneCursor1 = cloneCursor2->cloneNoMore();
 
 			cloneCursor1->setProtocolVersion(data->logProtocol);
 
@@ -7996,23 +7999,18 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				           OTELSpanContextMessage::isNextIn(cloneReader)) {
 					OTELSpanContextMessage scm;
 					cloneReader >> scm;
-				} else if (cloneReader.protocolVersion().hasEncryptionAtRest() &&
-				           EncryptedMutationMessage::isNextIn(cloneReader) && !cipherKeys.present()) {
-					// Encrypted mutation found, but cipher keys haven't been fetch.
-					// Collect cipher details to fetch cipher keys in one batch.
-					EncryptedMutationMessage emm;
-					cloneReader >> emm;
-					cipherDetails.insert(emm.header.cipherTextDetails);
-					cipherDetails.insert(emm.header.cipherHeaderDetails);
-					collectingCipherKeys = true;
 				} else {
 					MutationRef msg;
-					if (cloneReader.protocolVersion().hasEncryptionAtRest() &&
-					    EncryptedMutationMessage::isNextIn(cloneReader)) {
-						assert(cipherKeys.present());
-						msg = EncryptedMutationMessage::decrypt(cloneReader, eager.arena, cipherKeys.get());
-					} else {
-						cloneReader >> msg;
+					cloneReader >> msg;
+					if (msg.isEncrypted()) {
+						if (!cipherKeys.present()) {
+							const BlobCipherEncryptHeader* header = msg.encryptionHeader();
+							cipherDetails.insert(header->cipherTextDetails);
+							cipherDetails.insert(header->cipherHeaderDetails);
+							collectingCipherKeys = true;
+						} else {
+							msg = msg.decrypt(cipherKeys.get(), eager.arena);
+						}
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
 
@@ -8062,6 +8060,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the reads
 				// only selectively
 				eager = UpdateEagerReadInfo();
+				cloneCursor2 = cursor->cloneNoMore();
 			}
 		}
 		data->eagerReadsLatencyHistogram->sampleSeconds(now() - start);
@@ -8155,11 +8154,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				spanContext = scm.spanContext;
 			} else {
 				MutationRef msg;
-				if (rd.protocolVersion().hasEncryptionAtRest() && EncryptedMutationMessage::isNextIn(rd)) {
+				rd >> msg;
+				if (msg.isEncrypted()) {
 					ASSERT(cipherKeys.present());
-					msg = EncryptedMutationMessage::decrypt(rd, rd.arena(), cipherKeys.get());
-				} else {
-					rd >> msg;
+					msg = msg.decrypt(cipherKeys.get(), rd.arena());
 				}
 
 				Span span("SS:update"_loc, spanContext);
@@ -10223,7 +10221,7 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 			// This limits the number of tenants, but eventually we shouldn't need to do this at all
 			// when SSs store only the local tenants
 			KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> entries =
-			    wait(TenantMetadata::tenantMap.getRange(
+			    wait(TenantMetadata::tenantMap().getRange(
 			        tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 			ASSERT(entries.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !entries.more);
 

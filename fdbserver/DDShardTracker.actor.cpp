@@ -21,6 +21,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/DDSharedContext.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/DatabaseContext.h"
 #include "flow/ActorCollection.h"
@@ -68,10 +69,10 @@ ACTOR Future<Void> updateMaxShardSize(Reference<AsyncVar<int64_t>> dbSizeEstimat
 	}
 }
 
-struct DataDistributionTracker {
+struct DataDistributionTracker : public IDDShardTracker {
 	Database cx;
 	UID distributorId;
-	KeyRangeMap<ShardTrackedData>& shards;
+	KeyRangeMap<ShardTrackedData>* shards;
 	ActorCollection sizeChanges;
 
 	int64_t systemSizeEstimate;
@@ -92,7 +93,7 @@ struct DataDistributionTracker {
 	// The reference to trackerCancelled must be extracted by actors,
 	// because by the time (trackerCancelled == true) this memory cannot
 	// be accessed
-	bool& trackerCancelled;
+	bool* trackerCancelled;
 
 	// This class extracts the trackerCancelled reference from a DataDistributionTracker object
 	// Because some actors spawned by the dataDistributionTracker outlive the DataDistributionTracker
@@ -104,7 +105,7 @@ struct DataDistributionTracker {
 
 	public:
 		SafeAccessor(DataDistributionTracker* tracker)
-		  : trackerCancelled(tracker->trackerCancelled), tracker(*tracker) {
+		  : trackerCancelled(*tracker->trackerCancelled), tracker(*tracker) {
 			ASSERT(!trackerCancelled);
 		}
 
@@ -123,18 +124,20 @@ struct DataDistributionTracker {
 	                        PromiseStream<RelocateShard> const& output,
 	                        Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
 	                        Reference<AsyncVar<bool>> anyZeroHealthyTeams,
-	                        KeyRangeMap<ShardTrackedData>& shards,
-	                        bool& trackerCancelled)
-	  : cx(cx), distributorId(distributorId), shards(shards), sizeChanges(false), systemSizeEstimate(0),
-	    dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()), output(output),
-	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), readyToStart(readyToStart),
+	                        KeyRangeMap<ShardTrackedData>* shards,
+	                        bool* trackerCancelled)
+	  : IDDShardTracker(), cx(cx), distributorId(distributorId), shards(shards), sizeChanges(false),
+	    systemSizeEstimate(0), dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()),
+	    output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), readyToStart(readyToStart),
 	    anyZeroHealthyTeams(anyZeroHealthyTeams), trackerCancelled(trackerCancelled) {}
 
-	~DataDistributionTracker() {
-		trackerCancelled = true;
+	~DataDistributionTracker() override {
+		*trackerCancelled = true;
 		// Cancel all actors so they aren't waiting on sizeChanged broken promise
 		sizeChanges.clear(false);
 	}
+
+	double getAverageShardBytes() override { return maxShardSize->get().get() / 2.0; }
 };
 
 void restartShardTrackers(DataDistributionTracker* self,
@@ -399,7 +402,7 @@ ACTOR Future<int64_t> getFirstSize(Reference<AsyncVar<Optional<ShardMetrics>>> s
 ACTOR Future<Void> changeSizes(DataDistributionTracker* self, KeyRange keys, int64_t oldShardsEndingSize) {
 	state std::vector<Future<int64_t>> sizes;
 	state std::vector<Future<int64_t>> systemSizes;
-	for (auto it : self->shards.intersectingRanges(keys)) {
+	for (auto it : self->shards->intersectingRanges(keys)) {
 		Future<int64_t> thisSize = getFirstSize(it->value().stats);
 		sizes.push_back(thisSize);
 		if (it->range().begin >= systemKeys.begin) {
@@ -477,7 +480,8 @@ private:
 ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
                                  KeyRange keys,
                                  Reference<AsyncVar<Optional<ShardMetrics>>> shardSize,
-                                 ShardSizeBounds shardBounds) {
+                                 ShardSizeBounds shardBounds,
+                                 RelocateReason reason) {
 	state StorageMetrics metrics = shardSize->get().get().metrics;
 	state BandwidthStatus bandwidthStatus = getBandwidthStatus(metrics);
 
@@ -524,12 +528,12 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 		for (int i = 0; i < skipRange; i++) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, RelocateReason::OTHER));
+			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, reason));
 		}
 		for (int i = numShards - 1; i > skipRange; i--) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, RelocateReason::OTHER));
+			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, reason));
 		}
 
 		self->sizeChanges.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes));
@@ -556,8 +560,8 @@ Future<Void> shardMerger(DataDistributionTracker* self,
                          Reference<AsyncVar<Optional<ShardMetrics>>> shardSize) {
 	int64_t maxShardSize = self->maxShardSize->get().get();
 
-	auto prevIter = self->shards.rangeContaining(keys.begin);
-	auto nextIter = self->shards.rangeContaining(keys.begin);
+	auto prevIter = self->shards->rangeContaining(keys.begin);
+	auto nextIter = self->shards->rangeContaining(keys.begin);
 
 	CODE_PROBE(true, "shard to be merged");
 	ASSERT(keys.begin > allKeys.begin);
@@ -675,7 +679,7 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	}
 	restartShardTrackers(self, mergeRange, ShardMetrics(endingStats, lastLowBandwidthStartTime, shardCount));
 	self->shardsAffectedByTeamFailure->defineShard(mergeRange);
-	self->output.send(RelocateShard(mergeRange, DataMovementReason::MERGE_SHARD, RelocateReason::OTHER));
+	self->output.send(RelocateShard(mergeRange, DataMovementReason::MERGE_SHARD, RelocateReason::MERGE_SHARD));
 
 	// We are about to be cancelled by the call to restartShardTrackers
 	return Void();
@@ -693,9 +697,9 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	ShardSizeBounds shardBounds = getShardSizeBounds(keys, self->maxShardSize->get().get());
 	StorageMetrics const& stats = shardSize->get().get().metrics;
 	auto bandwidthStatus = getBandwidthStatus(stats);
-
-	bool shouldSplit = stats.bytes > shardBounds.max.bytes ||
-	                   (bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin);
+	bool sizeSplit = stats.bytes > shardBounds.max.bytes,
+	     writeSplit = bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin;
+	bool shouldSplit = sizeSplit || writeSplit;
 	bool shouldMerge = stats.bytes < shardBounds.min.bytes && bandwidthStatus == BandwidthStatusLow;
 
 	// Every invocation must set this or clear it
@@ -721,14 +725,14 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	//     .detail("ShardBoundsMaxBytes", shardBounds.max.bytes)
 	//     .detail("ShardBoundsMinBytes", shardBounds.min.bytes)
 	//     .detail("WriteBandwitdhStatus", bandwidthStatus)
-	//     .detail("SplitBecauseHighWriteBandWidth",
-	//             (bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin) ? "Yes" : "No");
+	//     .detail("SplitBecauseHighWriteBandWidth", writeSplit ? "Yes" : "No");
 
 	if (!self->anyZeroHealthyTeams->get() && wantsToMerge->hasBeenTrueForLongEnough()) {
 		onChange = onChange || shardMerger(self, keys, shardSize);
 	}
 	if (shouldSplit) {
-		onChange = onChange || shardSplitter(self, keys, shardSize, shardBounds);
+		RelocateReason reason = writeSplit ? RelocateReason::WRITE_SPLIT : RelocateReason::SIZE_SPLIT;
+		onChange = onChange || shardSplitter(self, keys, shardSize, shardBounds, reason);
 	}
 
 	wait(onChange);
@@ -778,7 +782,7 @@ ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self,
 }
 
 void restartShardTrackers(DataDistributionTracker* self, KeyRangeRef keys, Optional<ShardMetrics> startingMetrics) {
-	auto ranges = self->shards.getAffectedRangesAfterInsertion(keys, ShardTrackedData());
+	auto ranges = self->shards->getAffectedRangesAfterInsertion(keys, ShardTrackedData());
 	for (int i = 0; i < ranges.size(); i++) {
 		if (!ranges[i].value.trackShard.isValid() && ranges[i].begin != keys.begin) {
 			// When starting, key space will be full of "dummy" default contructed entries.
@@ -805,7 +809,7 @@ void restartShardTrackers(DataDistributionTracker* self, KeyRangeRef keys, Optio
 		data.stats = shardMetrics;
 		data.trackShard = shardTracker(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics);
 		data.trackBytes = trackShardMetrics(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics);
-		self->shards.insert(ranges[i], data);
+		self->shards->insert(ranges[i], data);
 	}
 }
 
@@ -847,7 +851,7 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 			for (i = 0; i < SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT && i < req.keys.size(); ++i) {
 				auto range = req.keys[i];
 				StorageMetrics metrics;
-				for (auto t : self->shards.intersectingRanges(range)) {
+				for (auto t : self->shards->intersectingRanges(range)) {
 					auto& stats = t.value().stats;
 					if (!stats->get().present()) {
 						onChange = stats->onChange();
@@ -913,7 +917,7 @@ ACTOR Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetr
 		loop {
 			Future<Void> onChange;
 			StorageMetrics returnMetrics;
-			for (auto t : self->shards.intersectingRanges(req.keys)) {
+			for (auto t : self->shards->intersectingRanges(req.keys)) {
 				auto& stats = t.value().stats;
 				if (!stats->get().present()) {
 					onChange = stats->onChange();
@@ -957,8 +961,8 @@ ACTOR Future<Void> fetchShardMetricsList_impl(DataDistributionTracker* self, Get
 			// list of metrics, regenerate on loop when full range unsuccessful
 			Standalone<VectorRef<DDMetricsRef>> result;
 			Future<Void> onChange;
-			auto beginIter = self->shards.containedRanges(req.keys).begin();
-			auto endIter = self->shards.intersectingRanges(req.keys).end();
+			auto beginIter = self->shards->containedRanges(req.keys).begin();
+			auto endIter = self->shards->intersectingRanges(req.keys).end();
 			for (auto t = beginIter; t != endIter; ++t) {
 				auto& stats = t.value().stats;
 				if (!stats->get().present()) {
@@ -1014,8 +1018,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	                                   output,
 	                                   shardsAffectedByTeamFailure,
 	                                   anyZeroHealthyTeams,
-	                                   *shards,
-	                                   *trackerCancelled);
+	                                   shards,
+	                                   trackerCancelled);
 	state Future<Void> loggingTrigger = Void();
 	state Future<Void> readHotDetect = readHotDetector(&self);
 	state Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
@@ -1024,12 +1028,10 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 		initData = Reference<InitialDataDistribution>();
 
 		loop choose {
-			when(Promise<int64_t> req = waitNext(getAverageShardBytes)) {
-				req.send(self.maxShardSize->get().get() / 2);
-			}
+			when(Promise<int64_t> req = waitNext(getAverageShardBytes)) { req.send(self.getAverageShardBytes()); }
 			when(wait(loggingTrigger)) {
 				TraceEvent("DDTrackerStats", self.distributorId)
-				    .detail("Shards", self.shards.size())
+				    .detail("Shards", self.shards->size())
 				    .detail("TotalSizeBytes", self.dbSizeEstimate->get())
 				    .detail("SystemSizeBytes", self.systemSizeEstimate)
 				    .trackLatest(ddTrackerStatsEventHolder->trackingKey);
@@ -1055,3 +1057,9 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 		throw e;
 	}
 }
+
+// Not used yet
+ACTOR Future<Void> dataDistributionTracker(Reference<DDSharedContext> context,
+                                           Reference<InitialDataDistribution> initData,
+                                           Database cx,
+                                           KeyRangeMap<ShardTrackedData>* shards);

@@ -395,6 +395,21 @@ class DDTxnProcessorImpl {
 			}
 		}
 	}
+
+	ACTOR static Future<Void> pollMoveKeysLock(Database cx, MoveKeysLock lock, const DDEnabledState* ddEnabledState) {
+		loop {
+			wait(delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY));
+			state Transaction tr(cx);
+			loop {
+				try {
+					wait(checkMoveKeysLockReadOnly(&tr, lock, ddEnabledState));
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+		}
+	}
 };
 
 Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(const KeyRangeRef range) {
@@ -430,4 +445,8 @@ Future<Reference<InitialDataDistribution>> DDTxnProcessor::getInitialDataDistrib
 
 Future<Void> DDTxnProcessor::waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const {
 	return DDTxnProcessorImpl::waitForDataDistributionEnabled(cx, ddEnabledState);
+}
+
+Future<Void> DDTxnProcessor::pollMoveKeysLock(MoveKeysLock lock, const DDEnabledState* ddEnabledState) const {
+	return DDTxnProcessorImpl::pollMoveKeysLock(cx, lock, ddEnabledState);
 }

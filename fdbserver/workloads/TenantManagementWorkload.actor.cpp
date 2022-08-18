@@ -155,6 +155,11 @@ struct TenantManagementWorkload : TestWorkload {
 	};
 
 	Future<Void> setup(Database const& cx) override {
+		if (clientId == 0 && g_network->isSimulated() && BUGGIFY) {
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob(
+			    "max_tenants_per_cluster", KnobValueRef::create(int{ deterministicRandom()->randomInt(20, 100) }));
+		}
+
 		if (clientId == 0 || !singleClient) {
 			return _setup(cx, this);
 		} else {
@@ -299,7 +304,7 @@ struct TenantManagementWorkload : TestWorkload {
 				entry.setId(nextId++);
 				createFutures.push_back(success(TenantAPI::createTenantTransaction(tr, tenant, entry)));
 			}
-			TenantMetadata::lastTenantId.set(tr, nextId - 1);
+			TenantMetadata::lastTenantId().set(tr, nextId - 1);
 			wait(waitForAll(createFutures));
 			wait(tr->commit());
 		} else {
@@ -373,7 +378,7 @@ struct TenantManagementWorkload : TestWorkload {
 					if (operationType == OperationType::MANAGEMENT_TRANSACTION ||
 					    operationType == OperationType::SPECIAL_KEYS) {
 						tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-						wait(store(finalTenantCount, TenantMetadata::tenantCount.getD(tr, Snapshot::False, 0)));
+						wait(store(finalTenantCount, TenantMetadata::tenantCount().getD(tr, Snapshot::False, 0)));
 						minTenantCount = std::min(finalTenantCount, minTenantCount);
 					}
 
@@ -601,6 +606,23 @@ struct TenantManagementWorkload : TestWorkload {
 		return Void();
 	}
 
+	// Returns GRV and eats GRV errors
+	ACTOR static Future<Version> getReadVersion(Reference<ReadYourWritesTransaction> tr) {
+		loop {
+			try {
+				Version version = wait(tr->getReadVersion());
+				return version;
+			} catch (Error& e) {
+				if (e.code() == error_code_grv_proxy_memory_limit_exceeded ||
+				    e.code() == error_code_batch_transaction_throttled) {
+					wait(tr->onError(e));
+				} else {
+					throw;
+				}
+			}
+		}
+	}
+
 	ACTOR static Future<Void> deleteTenant(TenantManagementWorkload* self) {
 		state TenantName beginTenant = self->chooseTenantName(true);
 		state OperationType operationType = self->randomOperationType();
@@ -690,7 +712,7 @@ struct TenantManagementWorkload : TestWorkload {
 				state bool retried = false;
 				loop {
 					try {
-						state Version beforeVersion = wait(tr->getReadVersion());
+						state Version beforeVersion = wait(self->getReadVersion(tr));
 						Optional<Void> result =
 						    wait(timeout(deleteImpl(tr, beginTenant, endTenant, tenants, operationType, self),
 						                 deterministicRandom()->randomInt(1, 30)));
@@ -699,7 +721,7 @@ struct TenantManagementWorkload : TestWorkload {
 							if (anyExists) {
 								if (self->oldestDeletionVersion == 0 && !tenants.empty()) {
 									tr->reset();
-									Version afterVersion = wait(tr->getReadVersion());
+									Version afterVersion = wait(self->getReadVersion(tr));
 									self->oldestDeletionVersion = afterVersion;
 								}
 								self->newestDeletionVersion = beforeVersion;
@@ -722,6 +744,11 @@ struct TenantManagementWorkload : TestWorkload {
 							       operationType == OperationType::MANAGEMENT_DATABASE);
 							ASSERT(retried);
 							break;
+						} else if (e.code() == error_code_grv_proxy_memory_limit_exceeded ||
+						           e.code() == error_code_batch_transaction_throttled) {
+							// GRV proxy returns an error
+							wait(tr->onError(e));
+							continue;
 						} else {
 							throw;
 						}
@@ -1470,10 +1497,10 @@ struct TenantManagementWorkload : TestWorkload {
 		KeyBackedSet<Tuple>::RangeResultType tenants =
 		    wait(runTransaction(db, [tenantGroupRef, expectedCountRef](Reference<typename DB::TransactionT> tr) {
 			    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			    return TenantMetadata::tenantGroupTenantIndex.getRange(tr,
-			                                                           Tuple::makeTuple(tenantGroupRef),
-			                                                           Tuple::makeTuple(keyAfter(tenantGroupRef)),
-			                                                           expectedCountRef + 1);
+			    return TenantMetadata::tenantGroupTenantIndex().getRange(tr,
+			                                                             Tuple::makeTuple(tenantGroupRef),
+			                                                             Tuple::makeTuple(keyAfter(tenantGroupRef)),
+			                                                             expectedCountRef + 1);
 		    }));
 
 		ASSERT(tenants.results.size() == expectedCount && !tenants.more);
@@ -1497,7 +1524,7 @@ struct TenantManagementWorkload : TestWorkload {
 			          runTransaction(self->dataDb.getReference(),
 			                         [beginTenantGroupRef, endTenantGroupRef](Reference<ReadYourWritesTransaction> tr) {
 				                         tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				                         return TenantMetadata::tenantGroupMap.getRange(
+				                         return TenantMetadata::tenantGroupMap().getRange(
 				                             tr, beginTenantGroupRef, endTenantGroupRef, 1000);
 			                         })));
 
@@ -1536,7 +1563,7 @@ struct TenantManagementWorkload : TestWorkload {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 				Optional<TenantTombstoneCleanupData> tombstoneCleanupData =
-				    wait(TenantMetadata::tombstoneCleanupData.get(tr));
+				    wait(TenantMetadata::tombstoneCleanupData().get(tr));
 
 				if (self->oldestDeletionVersion != 0) {
 					ASSERT(tombstoneCleanupData.present());

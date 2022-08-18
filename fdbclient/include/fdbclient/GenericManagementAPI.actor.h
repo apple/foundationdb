@@ -480,7 +480,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 
 					if (newConfig.tenantMode != oldConfig.tenantMode) {
 						Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
-						    wait(MetaclusterMetadata::metaclusterRegistration.get(tr));
+						    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
 						if (metaclusterRegistration.present()) {
 							return ConfigurationResult::DATABASE_IS_REGISTERED;
 						}

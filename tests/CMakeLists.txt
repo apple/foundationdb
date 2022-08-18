@@ -10,6 +10,7 @@ set(TEST_AGGREGATE_TRACES "NONE" CACHE STRING "Create aggregated trace files (NO
 set(TEST_LOG_FORMAT "xml" CACHE STRING "Format for test trace files (xml, json)")
 set(TEST_INCLUDE ".*" CACHE STRING "Include only tests that match the given regex")
 set(TEST_EXCLUDE ".^" CACHE STRING "Exclude all tests matching the given regex")
+set(SANITIZER_OPTIONS "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1;TSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/tsan.suppressions" CACHE STRING "Environment variables setting sanitizer options")
 
 # for the restart test we optimally want to use the last stable fdbserver
 # to test upgrades
@@ -192,9 +193,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/WriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/WriteDuringReadClean.toml)
   add_fdb_test(TEST_FILES noSim/RandomUnitTests.toml UNIT)
-  add_fdb_test(TEST_FILES noSim/SystemDataTest.toml UNIT)
   if (WITH_ROCKSDB_EXPERIMENTAL)
-    add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml)
+    add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml)
     add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml)
@@ -372,12 +372,12 @@ if(WITH_PYTHON)
       NAME multiversion_client/unit_tests
       COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /fdbclient/multiversionclient/
     )
-    set_tests_properties("multiversion_client/unit_tests" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
+    set_tests_properties("multiversion_client/unit_tests" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
     add_test(
       NAME threadsafe_threadfuture_to_future/unit_tests
       COMMAND $<TARGET_FILE:fdbserver> -r unittests -f /flow/safeThreadFutureToFuture/
     )
-    set_tests_properties("threadsafe_threadfuture_to_future/unit_tests" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
+    set_tests_properties("threadsafe_threadfuture_to_future/unit_tests" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
   endif()
 
   if(NOT OPEN_FOR_IDE)

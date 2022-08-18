@@ -23,6 +23,7 @@
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupProgress.actor.h"
 #include "fdbserver/ClusterRecovery.actor.h"
+#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
 
@@ -1058,14 +1059,15 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	if (self->txnStateStore)
 		self->txnStateStore->close();
 	self->txnStateLogAdapter = openDiskQueueAdapter(oldLogSystem, myLocality, txsPoppedVersion);
-	self->txnStateStore = keyValueStoreLogSystem(self->txnStateLogAdapter,
-	                                             self->dbInfo,
-	                                             self->dbgid,
-	                                             self->memoryLimit,
-	                                             false,
-	                                             false,
-	                                             true,
-	                                             SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION);
+	self->txnStateStore = keyValueStoreLogSystem(
+	    self->txnStateLogAdapter,
+	    self->dbInfo,
+	    self->dbgid,
+	    self->memoryLimit,
+	    false,
+	    false,
+	    true,
+	    isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, self->dbInfo->get().client));
 
 	// Version 0 occurs at the version epoch. The version epoch is the number
 	// of microseconds since the Unix epoch. It can be set through fdbcli.
@@ -1159,7 +1161,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	}
 
 	Optional<Value> metaclusterRegistrationVal =
-	    wait(self->txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration.key));
+	    wait(self->txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration().key));
 	Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
 	    MetaclusterRegistrationEntry::decode(metaclusterRegistrationVal);
 	if (metaclusterRegistration.present()) {
@@ -1436,7 +1438,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	wait(self->cstate.read());
 
-	if (self->cstate.prevDBState.lowestCompatibleProtocolVersion > currentProtocolVersion) {
+	if (self->cstate.prevDBState.lowestCompatibleProtocolVersion > currentProtocolVersion()) {
 		TraceEvent(SevWarnAlways, "IncompatibleProtocolVersion", self->dbgid).log();
 		throw internal_error();
 	}
@@ -1497,10 +1499,10 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	DBCoreState newState = self->cstate.myDBState;
 	newState.recoveryCount++;
 	if (self->cstate.prevDBState.newestProtocolVersion.isInvalid() ||
-	    self->cstate.prevDBState.newestProtocolVersion < currentProtocolVersion) {
+	    self->cstate.prevDBState.newestProtocolVersion < currentProtocolVersion()) {
 		ASSERT(self->cstate.myDBState.lowestCompatibleProtocolVersion.isInvalid() ||
 		       !self->cstate.myDBState.newestProtocolVersion.isInvalid());
-		newState.newestProtocolVersion = currentProtocolVersion;
+		newState.newestProtocolVersion = currentProtocolVersion();
 		newState.lowestCompatibleProtocolVersion = minCompatibleProtocolVersion;
 	}
 	wait(self->cstate.write(newState) || recoverAndEndEpoch);
@@ -1661,7 +1663,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	                       self->dbgid,
 	                       recoveryCommitRequest.arena,
 	                       tr.mutations.slice(mmApplied, tr.mutations.size()),
-	                       self->txnStateStore);
+	                       self->txnStateStore,
+	                       self->dbInfo);
 	mmApplied = tr.mutations.size();
 
 	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the initial

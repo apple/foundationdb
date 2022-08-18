@@ -90,8 +90,8 @@ add_flow_target(LINK_TEST NAME fdbclientlinktest SRCS LinkTest.cpp)
 target_link_libraries(fdbclientlinktest PRIVATE fdbclient rapidxml) # re-link rapidxml due to private link interface
 
 if(BUILD_AZURE_BACKUP)
-  target_link_libraries(fdbclient PRIVATE curl uuid azure-storage-lite)
-  target_link_libraries(fdbclient_sampling PRIVATE curl uuid azure-storage-lite)
+  target_link_libraries(fdbclient PRIVATE curl azure-storage-lite)
+  target_link_libraries(fdbclient_sampling PRIVATE curl azure-storage-lite)
 endif()
 
 if(BUILD_AWS_BACKUP)

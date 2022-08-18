@@ -40,6 +40,7 @@
 
 #include <cstring>
 #include <fstream> // for perf microbenchmark
+#include <limits>
 #include <vector>
 
 #define BG_READ_DEBUG false
@@ -209,16 +210,21 @@ namespace {
 BlobGranuleFileEncryptionKeys getEncryptBlobCipherKey(const BlobGranuleCipherKeysCtx cipherKeysCtx) {
 	BlobGranuleFileEncryptionKeys eKeys;
 
+	// Cipher key reconstructed is 'never' inserted into BlobCipherKey cache, choose 'neverExpire'
 	eKeys.textCipherKey = makeReference<BlobCipherKey>(cipherKeysCtx.textCipherKey.encryptDomainId,
 	                                                   cipherKeysCtx.textCipherKey.baseCipherId,
 	                                                   cipherKeysCtx.textCipherKey.baseCipher.begin(),
 	                                                   cipherKeysCtx.textCipherKey.baseCipher.size(),
-	                                                   cipherKeysCtx.textCipherKey.salt);
+	                                                   cipherKeysCtx.textCipherKey.salt,
+	                                                   std::numeric_limits<int64_t>::max(),
+	                                                   std::numeric_limits<int64_t>::max());
 	eKeys.headerCipherKey = makeReference<BlobCipherKey>(cipherKeysCtx.headerCipherKey.encryptDomainId,
 	                                                     cipherKeysCtx.headerCipherKey.baseCipherId,
 	                                                     cipherKeysCtx.headerCipherKey.baseCipher.begin(),
 	                                                     cipherKeysCtx.headerCipherKey.baseCipher.size(),
-	                                                     cipherKeysCtx.headerCipherKey.salt);
+	                                                     cipherKeysCtx.headerCipherKey.salt,
+	                                                     std::numeric_limits<int64_t>::max(),
+	                                                     std::numeric_limits<int64_t>::max());
 
 	return eKeys;
 }
@@ -346,7 +352,9 @@ struct IndexBlockRef {
 
 			decrypt(cipherKeysCtx.get(), *this, arena);
 		} else {
-			TraceEvent("IndexBlockSize").detail("Sz", buffer.size());
+			if (BG_ENCRYPT_COMPRESS_DEBUG) {
+				TraceEvent("IndexBlockSize").detail("Sz", buffer.size());
+			}
 
 			ObjectReader dataReader(buffer.begin(), IncludeVersion());
 			dataReader.deserialize(FileIdentifierFor<IndexBlock>::value, block, arena);
@@ -368,7 +376,11 @@ struct IndexBlockRef {
 			    arena, ObjectWriter::toValue(block, IncludeVersion(ProtocolVersion::withBlobGranuleFile())).contents());
 		}
 
-		TraceEvent(SevDebug, "IndexBlockSize").detail("Sz", buffer.size()).detail("Encrypted", cipherKeysCtx.present());
+		if (BG_ENCRYPT_COMPRESS_DEBUG) {
+			TraceEvent(SevDebug, "IndexBlockSize")
+			    .detail("Sz", buffer.size())
+			    .detail("Encrypted", cipherKeysCtx.present());
+		}
 	}
 
 	template <class Ar>

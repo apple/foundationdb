@@ -18,6 +18,8 @@ testTitle = 'BlobGranuleVerifyCycle'
     [[test.workload]]
     testName = 'BlobGranuleVerifier'
     testDuration = 60.0
+    # cycle does its own workload checking, don't want clear racing with its checking
+    clearAndMergeCheck = false
 
     [[test.workload]]
     testName = 'RandomClogging'
