@@ -42,6 +42,8 @@
 #include "flow/IAsyncFile.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
+#include "flow/xxhash.h"
+
 #include <memory>
 #include <numeric>
 #include <boost/algorithm/string/split.hpp>
@@ -468,7 +470,7 @@ Value makePadding(int size) {
 
 struct IRangeFileWriter {
 public:
-	virtual Future<Void> padEnd() = 0;
+	virtual Future<Void> padEnd(bool final) = 0;
 
 	virtual Future<Void> writeKV(Key k, Value v) = 0;
 
@@ -479,7 +481,53 @@ public:
 	virtual ~IRangeFileWriter() {}
 };
 
-// TODO (Nim): Add actual encryption to this class
+struct SnapshotFileBackupCipherKey {
+	EncryptCipherDomainId encryptDomainId;
+	EncryptCipherBaseKeyId baseCipherId;
+	EncryptCipherRandomSalt salt;
+	StringRef baseCipher;
+
+	static SnapshotFileBackupCipherKey fromBlobCipherKey(Reference<BlobCipherKey> keyRef, Arena& arena) {
+		SnapshotFileBackupCipherKey cipherKey;
+		cipherKey.encryptDomainId = keyRef->getDomainId();
+		cipherKey.baseCipherId = keyRef->getBaseCipherId();
+		cipherKey.salt = keyRef->getSalt();
+		cipherKey.baseCipher = makeString(keyRef->getBaseCipherLen(), arena);
+		memcpy(mutateString(cipherKey.baseCipher), keyRef->rawBaseCipher(), keyRef->getBaseCipherLen());
+
+		return cipherKey;
+	}
+};
+
+struct SnapshotFileBackupCipherKeysCtx {
+	SnapshotFileBackupCipherKey textCipherKey;
+	SnapshotFileBackupCipherKey headerCipherKey;
+	StringRef ivRef;
+};
+
+struct SnapshotFileBackupEncryptionKeys {
+	Reference<BlobCipherKey> textCipherKey;
+	Reference<BlobCipherKey> headerCipherKey;
+};
+
+SnapshotFileBackupEncryptionKeys getEncryptSnapshotBackupCipherKey(
+    const SnapshotFileBackupCipherKeysCtx cipherKeysCtx) {
+	SnapshotFileBackupEncryptionKeys eKeys;
+
+	eKeys.textCipherKey = makeReference<BlobCipherKey>(cipherKeysCtx.textCipherKey.encryptDomainId,
+	                                                   cipherKeysCtx.textCipherKey.baseCipherId,
+	                                                   cipherKeysCtx.textCipherKey.baseCipher.begin(),
+	                                                   cipherKeysCtx.textCipherKey.baseCipher.size(),
+	                                                   cipherKeysCtx.textCipherKey.salt);
+	eKeys.headerCipherKey = makeReference<BlobCipherKey>(cipherKeysCtx.headerCipherKey.encryptDomainId,
+	                                                     cipherKeysCtx.headerCipherKey.baseCipherId,
+	                                                     cipherKeysCtx.headerCipherKey.baseCipher.begin(),
+	                                                     cipherKeysCtx.headerCipherKey.baseCipher.size(),
+	                                                     cipherKeysCtx.headerCipherKey.salt);
+
+	return eKeys;
+}
+
 struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	struct Options {
 		constexpr static FileIdentifier file_identifier = 3152016;
@@ -496,71 +544,97 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		}
 	};
 
-	EncryptedRangeFileWriter(Reference<BlobCipherKey> headerCipherKey,
-	                         Reference<BlobCipherKey> textCipherKey,
+	EncryptedRangeFileWriter(SnapshotFileBackupCipherKeysCtx cipherKeysCtx,
 	                         Reference<IBackupFile> file = Reference<IBackupFile>(),
 	                         int blockSize = 0,
 	                         Options options = Options(true))
-	  : headerCipherKey(headerCipherKey), textCipherKey(textCipherKey), file(file), blockSize(blockSize), blockEnd(0),
+	  : cipherKeysCtx(cipherKeysCtx), file(file), blockSize(blockSize), blockEnd(0),
 	    fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION), options(options) {
-		ASSERT(headerCipherKey.isValid() && textCipherKey.isValid());
 		buffer = makeString(blockSize);
 		wPtr = mutateString(buffer);
 	}
 
-	static void validateEncryptionHeader(Reference<BlobCipherKey> textCipherKey,
-	                                     Reference<BlobCipherKey> headerCipherKey,
-	                                     BlobCipherEncryptHeader& header) {
-		if (!(header.cipherHeaderDetails.baseCipherId == headerCipherKey->getBaseCipherId() &&
-		      header.cipherHeaderDetails.encryptDomainId == headerCipherKey->getDomainId() &&
-		      header.cipherHeaderDetails.salt == headerCipherKey->getSalt())) {
+	static void validateEncryptionHeader(SnapshotFileBackupEncryptionKeys& eKeys,
+	                                     BlobCipherEncryptHeader& header,
+	                                     const StringRef& ivRef) {
+		// Validate encryption header 'cipherHeader' details
+		if (!(header.cipherHeaderDetails.baseCipherId == eKeys.headerCipherKey->getBaseCipherId() &&
+		      header.cipherHeaderDetails.encryptDomainId == eKeys.headerCipherKey->getDomainId() &&
+		      header.cipherHeaderDetails.salt == eKeys.headerCipherKey->getSalt())) {
 			TraceEvent("EncryptionHeader_CipherHeaderMismatch")
-			    .detail("HeaderDomainId", headerCipherKey->getDomainId())
+			    .detail("HeaderDomainId", eKeys.headerCipherKey->getDomainId())
 			    .detail("ExpectedHeaderDomainId", header.cipherHeaderDetails.encryptDomainId)
-			    .detail("HeaderBaseCipherId", headerCipherKey->getBaseCipherId())
+			    .detail("HeaderBaseCipherId", eKeys.headerCipherKey->getBaseCipherId())
 			    .detail("ExpectedHeaderBaseCipherId", header.cipherHeaderDetails.baseCipherId)
-			    .detail("HeaderSalt", headerCipherKey->getSalt())
+			    .detail("HeaderSalt", eKeys.headerCipherKey->getSalt())
 			    .detail("ExpectedHeaderSalt", header.cipherHeaderDetails.salt);
+			throw encrypt_header_metadata_mismatch();
+		}
+
+		// Validate encryption text 'cipherText' details sanity
+		if (!(header.cipherTextDetails.baseCipherId == eKeys.textCipherKey->getBaseCipherId() &&
+		      header.cipherTextDetails.encryptDomainId == eKeys.textCipherKey->getDomainId() &&
+		      header.cipherTextDetails.salt == eKeys.textCipherKey->getSalt())) {
+			TraceEvent("EncryptionHeader_CipherHeaderMismatch")
+			    .detail("HeaderDomainId", eKeys.textCipherKey->getDomainId())
+			    .detail("ExpectedHeaderDomainId", header.cipherTextDetails.encryptDomainId)
+			    .detail("HeaderBaseCipherId", eKeys.textCipherKey->getBaseCipherId())
+			    .detail("ExpectedHeaderBaseCipherId", header.cipherTextDetails.baseCipherId)
+			    .detail("HeaderSalt", eKeys.textCipherKey->getSalt())
+			    .detail("ExpectedHeaderSalt", header.cipherTextDetails.salt);
+			throw encrypt_header_metadata_mismatch();
+		}
+
+		// Validate 'Initialization Vector'
+		if (memcmp(ivRef.begin(), &header.iv[0], AES_256_IV_LENGTH) != 0) {
+			TraceEvent(SevError, "EncryptionHeader_IVMismatch")
+			    .detail("IVChecksum", XXH3_64bits(ivRef.begin(), ivRef.size()))
+			    .detail("ExpectedIVChecksum", XXH3_64bits(&header.iv[0], AES_256_IV_LENGTH));
 			throw encrypt_header_metadata_mismatch();
 		}
 	}
 
 	static StringRef decrypt(StringRef headerS,
-	                         uint8_t* dataP,
+	                         const uint8_t* dataP,
 	                         int64_t dataLen,
 	                         Arena& arena,
-	                         Reference<BlobCipherKey> textCipherKey,
-	                         Reference<BlobCipherKey> headerCipherKey) {
-		ASSERT(headerCipherKey.isValid() && textCipherKey.isValid());
+	                         SnapshotFileBackupCipherKeysCtx& cipherKeysCtx) {
+		SnapshotFileBackupEncryptionKeys eKeys = getEncryptSnapshotBackupCipherKey(cipherKeysCtx);
+		ASSERT(eKeys.headerCipherKey.isValid() && eKeys.textCipherKey.isValid());
 		BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(headerS);
-		validateEncryptionHeader(textCipherKey, headerCipherKey, header);
-		DecryptBlobCipherAes256Ctr decryptor(textCipherKey, headerCipherKey, header.iv);
+		validateEncryptionHeader(eKeys, header, cipherKeysCtx.ivRef);
+		DecryptBlobCipherAes256Ctr decryptor(eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin());
 		return decryptor.decrypt(dataP, dataLen, header, arena)->toStringRef();
 	}
 
 	void encrypt() {
-		uint8_t iv[AES_256_IV_LENGTH];
-		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
-		EncryptBlobCipherAes265Ctr encryptor(
-		    textCipherKey, headerCipherKey, iv, AES_256_IV_LENGTH, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+		SnapshotFileBackupEncryptionKeys eKeys = getEncryptSnapshotBackupCipherKey(cipherKeysCtx);
+		ASSERT(eKeys.headerCipherKey.isValid() && eKeys.textCipherKey.isValid());
+		EncryptBlobCipherAes265Ctr encryptor(eKeys.textCipherKey,
+		                                     eKeys.headerCipherKey,
+		                                     cipherKeysCtx.ivRef.begin(),
+		                                     AES_256_IV_LENGTH,
+		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
 		BlobCipherEncryptHeader header;
 		Arena arena;
-		int64_t dataSize = wPtr - (encryptHeaderP + BlobCipherEncryptHeader::headerSize);
+		int64_t payloadSize = wPtr - (encryptHeaderP + BlobCipherEncryptHeader::headerSize);
 		auto encryptedData =
-		    encryptor.encrypt(encryptHeaderP + BlobCipherEncryptHeader::headerSize, dataSize, &header, arena);
+		    encryptor.encrypt(encryptHeaderP + BlobCipherEncryptHeader::headerSize, payloadSize, &header, arena);
 
 		// write header to buffer
 		StringRef headerStr = BlobCipherEncryptHeader::toStringRef(header, arena);
 		std::memcpy(encryptHeaderP, headerStr.begin(), BlobCipherEncryptHeader::headerSize);
 
 		// write data to buffer
-		std::memcpy(encryptHeaderP + BlobCipherEncryptHeader::headerSize, encryptedData->begin(), dataSize);
+		std::memcpy(encryptHeaderP + BlobCipherEncryptHeader::headerSize, encryptedData->begin(), payloadSize);
 	}
 
+	// Returns the number of bytes that have been written to the buffer
 	static int64_t currentBufferSize(EncryptedRangeFileWriter* self) { return self->wPtr - self->buffer.begin(); }
 
 	static int64_t expectedFileSize(EncryptedRangeFileWriter* self) {
 		// Return what has already been written to file plus the size of the current buffer
+		// which indicates how many bytes the file will contain once the buffer is written
 		return self->file->size() + currentBufferSize(self);
 	}
 
@@ -571,6 +645,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	}
 
 	static void appendStringRefWithLenToBuffer(EncryptedRangeFileWriter* self, StringRef* s) {
+		// Append the string length followed by the string to the buffer
 		uint32_t lenBuf = bigEndian32((uint32_t)s->size());
 		copyToBuffer(self, &lenBuf, sizeof(lenBuf));
 		copyToBuffer(self, s->begin(), s->size());
@@ -586,8 +661,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 			copyToBuffer(self, paddingFFs.begin(), bytesLeft);
 		}
 
-		// write buffer to file since block is finished
 		if (expectedFileSize(self) > 0) {
+			// write buffer to file since block is finished
 			ASSERT(currentBufferSize(self) == self->blockSize);
 			if (self->options.encryptionEnabled) {
 				self->encrypt();
@@ -626,17 +701,16 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		}
 
 		// There must now be room in the current block for bytesNeeded or the block size is too small
-		if (self->expectedFileSize(self) + bytesNeeded > self->blockEnd)
+		if (expectedFileSize(self) + bytesNeeded > self->blockEnd) {
 			throw backup_bad_block_size();
+		}
 
 		return Void();
 	}
 
-	// Used in simulation only to create backup file sizes which are an integer multiple of the block size
-	Future<Void> padEnd() {
-		ASSERT(g_network->isSimulated());
+	Future<Void> padEnd(bool final) {
 		if (expectedFileSize(this) > 0) {
-			return newBlock(this, 0, true);
+			return newBlock(this, 0, final);
 		}
 		return Void();
 	}
@@ -682,8 +756,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		return Void();
 	}
 
-	Reference<BlobCipherKey> headerCipherKey;
-	Reference<BlobCipherKey> textCipherKey;
+	SnapshotFileBackupCipherKeysCtx cipherKeysCtx;
 	Reference<IBackupFile> file;
 	int blockSize;
 
@@ -770,10 +843,10 @@ struct RangeFileWriter : public IRangeFileWriter {
 	}
 
 	// Used in simulation only to create backup file sizes which are an integer multiple of the block size
-	Future<Void> padEnd() {
+	Future<Void> padEnd(bool final) {
 		ASSERT(g_network->isSimulated());
 		if (file->size() > 0) {
-			return newBlock(this, 0, true);
+			return newBlock(this, 0, final);
 		}
 		return Void();
 	}
@@ -820,6 +893,32 @@ private:
 	Key lastValue;
 };
 
+SnapshotFileBackupCipherKeysCtx getCipherKeyCtx(Arena& arena) {
+	// TODO (Nim): Get the actual keys from EKP here (currently a dummy method)
+	uint8_t buf[AES_256_KEY_LENGTH];
+	for (int i = 0; i < AES_256_KEY_LENGTH; i++) {
+		buf[i] = 1;
+	}
+	int64_t domainId = 2;
+	int64_t baseCipherId = 3;
+	int64_t salt = 4;
+
+	uint8_t iv[AES_256_IV_LENGTH];
+	for (int i = 0; i < AES_256_IV_LENGTH; i++) {
+		iv[i] = 2;
+	}
+
+	Reference<BlobCipherKey> cipherKey =
+	    makeReference<BlobCipherKey>(domainId, baseCipherId, buf, AES_256_KEY_LENGTH, salt);
+
+	SnapshotFileBackupCipherKeysCtx cipherKeysCtx;
+	cipherKeysCtx.headerCipherKey = SnapshotFileBackupCipherKey::fromBlobCipherKey(cipherKey, arena);
+	cipherKeysCtx.textCipherKey = SnapshotFileBackupCipherKey::fromBlobCipherKey(cipherKey, arena);
+	cipherKeysCtx.ivRef = makeString(AES_256_IV_LENGTH, arena);
+	memcpy(mutateString(cipherKeysCtx.ivRef), iv, AES_256_IV_LENGTH);
+	return cipherKeysCtx;
+}
+
 void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* results) {
 	// Read begin key, if this fails then block was invalid.
 	uint32_t kLen = reader->consumeNetworkUInt32();
@@ -854,21 +953,6 @@ void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* 
 			throw restore_corrupted_data_padding();
 }
 
-Reference<BlobCipherKey> createCipherKey(std::unordered_map<int, Reference<BlobCipherKey>>& cipherKeys, int insertKey) {
-	// TODO (Nim): Remove this logic before merging
-	uint8_t buf[AES_256_KEY_LENGTH];
-	for (int i = 0; i < AES_256_KEY_LENGTH; i++) {
-		buf[i] = 1;
-	}
-	int64_t domainId = 2;
-	int64_t baseCipherId = 3;
-	int64_t salt = 4;
-	Reference<BlobCipherKey> cipherKey =
-	    makeReference<BlobCipherKey>(domainId, baseCipherId, buf, AES_256_KEY_LENGTH, salt);
-	cipherKeys[insertKey] = cipherKey;
-	return cipherKey;
-}
-
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
                                                                       int len) {
@@ -881,6 +965,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 
 	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
 	state StringRefReader reader(buf, restore_corrupted_data());
+	state Arena arena;
 
 	try {
 		// Read header, currently only decoding BACKUP_AGENT_SNAPSHOT_FILE_VERSION or
@@ -889,9 +974,8 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
 			decodeKVPairs(&reader, &results);
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
-			// TODO (Nim): Remove this logic before merging
-			std::unordered_map<int, Reference<BlobCipherKey>> cipherKeys;
-			Reference<BlobCipherKey> testCipherKey = createCipherKey(cipherKeys, 1);
+			// Get cipher keys
+			SnapshotFileBackupCipherKeysCtx cipherKeyCtx = getCipherKeyCtx(arena);
 			// decode options struct
 			uint32_t optionsLen = reader.consumeNetworkUInt32();
 			const uint8_t* o = reader.consume(optionsLen);
@@ -899,16 +983,18 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			EncryptedRangeFileWriter::Options options =
 			    ObjectReader::fromStringRef<EncryptedRangeFileWriter::Options>(optionsStringRef, IncludeVersion());
 
-			// read encryption header
 			if (options.encryptionEnabled) {
+				// read encryption header
 				const uint8_t* headerP = reader.consume(BlobCipherEncryptHeader::headerSize);
 				StringRef header = StringRef(headerP, BlobCipherEncryptHeader::headerSize);
 				const uint8_t* dataP = headerP + BlobCipherEncryptHeader::headerSize;
+				// calculate the total bytes read up to (and including) the header
 				int64_t bytesRead =
 				    sizeof(int32_t) + sizeof(uint32_t) + optionsLen + BlobCipherEncryptHeader::headerSize;
+				// get the size of the encrypted payload and decrypt it
 				int64_t dataLen = len - bytesRead;
-				StringRef decryptedData = EncryptedRangeFileWriter::decrypt(
-				    header, const_cast<uint8_t*>(dataP), dataLen, results.arena(), testCipherKey, testCipherKey);
+				StringRef decryptedData =
+				    EncryptedRangeFileWriter::decrypt(header, dataP, dataLen, results.arena(), cipherKeyCtx);
 				reader = StringRefReader(decryptedData, restore_corrupted_data());
 			}
 			decodeKVPairs(&reader, &results);
@@ -1333,6 +1419,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		static TaskParam<Key> beginKey() { return LiteralStringRef(__FUNCTION__); }
 		static TaskParam<Key> endKey() { return LiteralStringRef(__FUNCTION__); }
 		static TaskParam<bool> addBackupRangeTasks() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<bool> encryptionEnabled() { return LiteralStringRef(__FUNCTION__); }
 	} Params;
 
 	std::string toString(Reference<Task> task) const override {
@@ -1441,6 +1528,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 			    Params.beginKey().set(task, begin);
 			    Params.endKey().set(task, end);
 			    Params.addBackupRangeTasks().set(task, false);
+			    Params.encryptionEnabled().set(task, Params.encryptionEnabled().get(parentTask));
 			    if (scheduledVersion != invalidVersion)
 				    ReservedTaskParams::scheduledVersion().set(task, scheduledVersion);
 		    },
@@ -1498,10 +1586,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		                                      LockAware::True);
 		state std::unique_ptr<IRangeFileWriter> rangeFile;
 		state BackupConfig backup(task);
-
-		// TODO (Nim): Remove this logic before merging
-		state std::unordered_map<int, Reference<BlobCipherKey>> cipherKeys;
-		state Reference<BlobCipherKey> testCipherKey = createCipherKey(cipherKeys, 1);
+		state Arena arena;
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but if
 		// bc is false then clearly the backup is no longer in progress
@@ -1512,6 +1597,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 		state bool done = false;
 		state int64_t nrKeys = 0;
+		state std::optional<int64_t> previousTenantId;
 
 		loop {
 			state RangeResultWithVersion values;
@@ -1534,7 +1620,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 					wait(rangeFile->writeKey(nextKey));
 
 					if (BUGGIFY) {
-						wait(rangeFile->padEnd());
+						wait(rangeFile->padEnd(true));
 					}
 
 					wait(rangeFile->finish());
@@ -1589,8 +1675,13 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				outFile = f;
 
 				// Initialize range file writer and write begin key
-				rangeFile =
-				    std::make_unique<EncryptedRangeFileWriter>(testCipherKey, testCipherKey, outFile, blockSize);
+				if (Params.encryptionEnabled().get(task)) {
+					previousTenantId.reset();
+					SnapshotFileBackupCipherKeysCtx cipherKeysCtx = getCipherKeyCtx(arena);
+					rangeFile = std::make_unique<EncryptedRangeFileWriter>(cipherKeysCtx, outFile, blockSize);
+				} else {
+					rangeFile = std::make_unique<RangeFileWriter>();
+				}
 				wait(rangeFile->writeKey(beginKey));
 			}
 
@@ -1598,6 +1689,19 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 			if (values.first.size() != 0) {
 				state size_t i = 0;
 				for (; i < values.first.size(); ++i) {
+					// TODO (Nim): Remove this false check when the param is actually reliable
+					// TODO (Nim): Support backing up system keys
+					if (Params.encryptionEnabled().get(task) && false) {
+						// get the current tenant prefix (first 8 bytes of key)
+						KeyRef tenantPrefix = KeyRef(values.first[i].key.begin(), 8);
+						state int64_t curTenantId = TenantMapEntry::prefixToId(tenantPrefix);
+						// if we have crossed tenant boundaries then finish the current
+						// block and start a new one
+						if (previousTenantId.has_value() && curTenantId != previousTenantId.value()) {
+							wait(rangeFile->padEnd(false));
+						}
+						previousTenantId = curTenantId;
+					}
 					wait(rangeFile->writeKV(values.first[i].key, values.first[i].value));
 				}
 				lastKey = values.first.back().key;
@@ -1663,7 +1767,6 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 	                                  Reference<FutureBucket> futureBucket,
 	                                  Reference<Task> task) {
 		state Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
-
 		if (Params.addBackupRangeTasks().get(task)) {
 			wait(startBackupRangeInternal(tr, taskBucket, futureBucket, task, taskFuture));
 		} else {
@@ -1696,6 +1799,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		static TaskParam<bool> snapshotFinished() { return LiteralStringRef(__FUNCTION__); }
 		// Set by Execute, used by Finish
 		static TaskParam<Version> nextDispatchVersion() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<bool> encryptionEnabled() { return LiteralStringRef(__FUNCTION__); }
 	} Params;
 
 	StringRef getName() const override { return name; };
@@ -1704,6 +1808,8 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 	                     Reference<TaskBucket> tb,
 	                     Reference<FutureBucket> fb,
 	                     Reference<Task> task) override {
+		// TODO (Nim): Set proper value for this
+		Params.encryptionEnabled().set(task, true);
 		return _execute(cx, tb, fb, task);
 	};
 	Future<Void> finish(Reference<ReadYourWritesTransaction> tr,
