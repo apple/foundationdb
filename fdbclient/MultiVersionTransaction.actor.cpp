@@ -2374,9 +2374,13 @@ void MultiVersionApi::setupNetwork() {
 			// Copy external lib for each thread
 			if (externalClients.count(filename) == 0) {
 				externalClients[filename] = {};
-				for (const auto& tmp : copyExternalLibraryPerThread(path)) {
+				auto libCopies = copyExternalLibraryPerThread(path);
+				for (int idx = 0; idx < libCopies.size(); ++idx) {
 					externalClients[filename].push_back(Reference<ClientInfo>(
-					    new ClientInfo(new DLApi(tmp.first, tmp.second /*unlink on load*/), path, useFutureVersion)));
+					    new ClientInfo(new DLApi(libCopies[idx].first, libCopies[idx].second /*unlink on load*/),
+					                   path,
+					                   useFutureVersion,
+					                   idx)));
 				}
 			}
 		}
@@ -2467,21 +2471,17 @@ void MultiVersionApi::runNetwork() {
 
 	std::vector<THREAD_HANDLE> handles;
 	if (!bypassMultiClientApi) {
-		for (int threadNum = 0; threadNum < threadCount; threadNum++) {
-			runOnExternalClients(threadNum, [&handles, threadNum](Reference<ClientInfo> client) {
-				if (client->external) {
-					std::string threadName = format("fdb-%s-%d", client->releaseVersion.c_str(), threadNum);
-					if (threadName.size() > 15) {
-						threadName = format("fdb-%s", client->releaseVersion.c_str());
-						if (threadName.size() > 15) {
-							threadName = "fdb-external";
-						}
-					}
-					handles.push_back(
-					    g_network->startThread(&runNetworkThread, client.getPtr(), 0, threadName.c_str()));
+		runOnExternalClientsAllThreads([&handles](Reference<ClientInfo> client) {
+			ASSERT(client->external);
+			std::string threadName = format("fdb-%s-%d", client->releaseVersion.c_str(), client->threadIndex);
+			if (threadName.size() > 15) {
+				threadName = format("fdb-%s", client->releaseVersion.c_str());
+				if (threadName.size() > 15) {
+					threadName = "fdb-external";
 				}
-			});
-		}
+			}
+			handles.push_back(g_network->startThread(&runNetworkThread, client.getPtr(), 0, threadName.c_str()));
+		});
 	}
 
 	localClient->api->runNetwork();
