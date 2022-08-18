@@ -23,17 +23,6 @@ def pytest_addoption(parser):
 def random_alphanum_str(k: int):
     return ''.join(random.choices(string.ascii_letters + string.digits, k=k))
 
-def cleanup_tenant(db, tenant_name):
-    try:
-        tenant = db.open_tenant(tenant_name)
-        del tenant[:]
-        fdb.tenant_management.delete_tenant(db, tenant_name)
-    except fdb.FDBError as e:
-        if e.code == 2131: # tenant not found
-            pass
-        else:
-            raise
-
 @pytest.fixture
 def build_dir(request):
     return request.config.option.build_dir
@@ -85,7 +74,7 @@ def cluster(build_dir, public_key_jwks_str, trusted_client):
             build_dir=build_dir,
             tls_config=TLSConfig(server_chain_len=3, client_chain_len=2),
             public_key_json_str=public_key_jwks_str,
-            remove_at_exit=False,
+            remove_at_exit=True,
             custom_config={"code-probes": "all"}) as cluster:
         fdb.options.set_tls_key_path(str(cluster.client_key_file) if trusted_client else "")
         fdb.options.set_tls_cert_path(str(cluster.client_cert_file) if trusted_client else "")
@@ -98,17 +87,13 @@ def db(cluster):
     db = fdb.open(str(cluster.cluster_file))
     db.options.set_transaction_timeout(2000) # 2 seconds
     db.options.set_transaction_retry_limit(3)
-    yield db
-    tenants = fdb.tenant_management.list_tenants(db, b'', b'\xff', 100)
-    print("Cleaning up tenants: {}".format(tenants))
-    for tenant in tenants:
-        cleanup_tenant(db, tenant)
+    return db
 
 @pytest.fixture
-def default_tenant(db):
+def default_tenant(cluster):
     tenant = random_alphanum_str(8).encode("ascii")
-    yield tenant
-    cleanup_tenant(db, tenant)
+    cluster.fdbcli_exec("createtenant {}".format(tenant.decode("ascii")))
+    return tenant
 
 @pytest.fixture
 def default_tenant_tr_gen(db, default_tenant):

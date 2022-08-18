@@ -21,11 +21,9 @@ def token_claim_1h(tenant_name: str):
     }
 
 def test_simple_tenant_access(db, token_gen, default_tenant, default_tenant_tr_gen):
-    token = token_gen(token_claim_1h(str(default_tenant)))
+    token = token_gen(token_claim_1h(default_tenant.decode("ascii")))
     tr = default_tenant_tr_gen()
     tr.options.set_authorization_token(token)
-    tr.options.set_debug_transaction_identifier("XYZ")
-    tr.options.set_log_transaction()
     tr[b'abc'] = b'def'
     tr.commit().wait()
     tr = default_tenant_tr_gen()

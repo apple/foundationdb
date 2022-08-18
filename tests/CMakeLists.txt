@@ -403,25 +403,29 @@ if(WITH_PYTHON)
     set(authz_venv_activate ". ${authz_venv_dir}/bin/activate")
   endif()
 
+  set(authz_venv_stamp_file ${authz_venv_dir}/venv.ready)
   if (NOT WIN32)
     add_test(
       NAME authorization_venv_setup
-      COMMAND bash -c "${Python3_EXECUTABLE} -m venv ${authz_venv_dir} && \
+      COMMAND bash -c "
               ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/tests/authorization/* ${authz_venv_dir}/ && \
               ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/tests/TestRunner/*_cluster.py ${authz_venv_dir}/ && \
-              ${authz_venv_activate} && \
-              pip install --upgrade pip && \
-              pip install --upgrade -r ${authz_venv_dir}/requirements.txt && \
-              (cd ${CMAKE_BINARY_DIR}/bindings/python && python3 setup.py install) && \
-              deactivate"
+              ( \
+			      [[ ! -f ${authz_venv_stamp_file} ]] && \
+                  ${Python3_EXECUTABLE} -m venv ${authz_venv_dir} && \
+                  ${authz_venv_activate} && \
+                  pip install --upgrade pip && \
+                  pip install --upgrade -r ${authz_venv_dir}/requirements.txt && \
+                  (cd ${CMAKE_BINARY_DIR}/bindings/python && python3 setup.py install) && \
+                  touch ${authz_venv_stamp_file} \
+		      || echo \"venv already set up\")"
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
     add_test(
       NAME token_based_tenant_authorization
       WORKING_DIRECTORY ${authz_venv_dir}
       COMMAND bash -c "${authz_venv_activate} && \
-              LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib pytest authz_test.py --build-dir ${CMAKE_BINARY_DIR} && \
-              deactivate"
+              LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib pytest authz_test.py --build-dir ${CMAKE_BINARY_DIR}"
           )
     set_tests_properties(token_based_tenant_authorization PROPERTIES FIXTURES_REQUIRED authz_virtual_env)
     set_tests_properties(authorization_venv_setup PROPERTIES FIXTURES_SETUP authz_virtual_env)
