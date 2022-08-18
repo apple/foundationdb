@@ -88,7 +88,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		timeTravelLimit = getOption(options, LiteralStringRef("timeTravelLimit"), testDuration);
 		timeTravelBufferSize = getOption(options, LiteralStringRef("timeTravelBufferSize"), 100000000);
 		threads = getOption(options, LiteralStringRef("threads"), 1);
-		enablePurging = getOption(options, LiteralStringRef("enablePurging"), sharedRandomNumber % 3 == 0);
+
+		// TODO CHANGE BACK!
+		enablePurging = getOption(options, LiteralStringRef("enablePurging"), true /*sharedRandomNumber % 3 == 0*/);
 		sharedRandomNumber /= 3;
 		// FIXME: re-enable this! There exist several bugs with purging active granules where a small amount of state
 		// won't be cleaned up.
@@ -96,10 +98,12 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		    getOption(options, LiteralStringRef("strictPurgeChecking"), false /*sharedRandomNumber % 2 == 0*/);
 		sharedRandomNumber /= 2;
 
-		doForcePurge = getOption(options, LiteralStringRef("doForcePurge"), sharedRandomNumber % 3 == 0);
+		// TODO CHANGE BACK!
+		doForcePurge = getOption(options, LiteralStringRef("doForcePurge"), false /*sharedRandomNumber % 3 == 0*/);
 		sharedRandomNumber /= 3;
 
-		purgeAtLatest = getOption(options, LiteralStringRef("purgeAtLatest"), sharedRandomNumber % 3 == 0);
+		// TODO CHANGE BACK!
+		purgeAtLatest = getOption(options, LiteralStringRef("purgeAtLatest"), true /*sharedRandomNumber % 3 == 0*/);
 		sharedRandomNumber /= 3;
 
 		// randomly some tests write data first and then turn on blob granules later, to test conversion of existing DB
@@ -330,7 +334,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 					// before doing read, purge just before read version
 					state Version newPurgeVersion = 0;
-					state bool doPurging = allowPurging && !self->purgeAtLatest && deterministicRandom()->random01() < 0.5;
+					state bool doPurging =
+					    allowPurging && !self->purgeAtLatest && deterministicRandom()->random01() < 0.5;
 					state bool forcePurge = doPurging && self->doForcePurge && deterministicRandom()->random01() < 0.25;
 					if (doPurging) {
 						CODE_PROBE(true, "BGV considering purge");
@@ -462,11 +467,23 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				    wait(readFromBlob(cx, self->bstore, range, 0, fdb.second));
 				if (self->purgeAtLatest && timeTravelChecks.empty() && deterministicRandom()->random01() < 0.25) {
 					// purge at this version, and make sure it's still readable after on our immediate re-read
-					Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, fdb.second, {}, false));
-					if (BGV_DEBUG) {
-						fmt::print("BGV Purged Latest @ {0}, waiting\n", fdb.second);
+					try {
+						Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, fdb.second, {}, false));
+						if (BGV_DEBUG) {
+							fmt::print("BGV Purged Latest @ {0}, waiting\n", fdb.second);
+						}
+						wait(cx->waitPurgeGranulesComplete(purgeKey));
+					} catch (Error& e) {
+						if (e.code() == error_code_operation_cancelled) {
+							throw e;
+						}
+						// purging shouldn't error, it should retry.
+						if (BGV_DEBUG) {
+							fmt::print("Unexpected error {0} purging latest @ {1}!\n", e.name(), newPurgeVersion);
+						}
+						ASSERT(false);
 					}
-					wait(cx->waitPurgeGranulesComplete(purgeKey));
+					self->purges++;
 				}
 				if (compareFDBAndBlob(fdb.first, blob, range, fdb.second, BGV_DEBUG)) {
 					bool rereadImmediately = self->purgeAtLatest || deterministicRandom()->random01() < 0.25;
@@ -922,6 +939,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			if (BGV_DEBUG) {
 				fmt::print("BGV Purged Latest before final availability check complete\n");
 			}
+			self->purges++;
 		}
 
 		// check error counts, and do an availability check at the end
