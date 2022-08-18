@@ -547,6 +547,12 @@ ACTOR Future<BlobGranuleSplitPoints> alignKeys(Reference<BlobManagerData> bmData
 
 	state Transaction tr = Transaction(bmData->db);
 	state int idx = 1;
+	state Reference<GranuleTenantData> tenantData = bmData->tenantData.getDataForGranule(granuleRange);
+	while (SERVER_KNOBS->BG_METADATA_SOURCE == "tenant" && !tenantData.isValid()) {
+		// this is a bit of a hack, but if we know this range is supposed to have a tenant, and it doesn't, just wait
+		wait(delay(1.0));
+		tenantData = bmData->tenantData.getDataForGranule(granuleRange);
+	}
 	for (; idx < splits.size() - 1; idx++) {
 		loop {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -559,7 +565,6 @@ ACTOR Future<BlobGranuleSplitPoints> alignKeys(Reference<BlobManagerData> bmData
 					break;
 				}
 
-				Reference<GranuleTenantData> tenantData = bmData->tenantData.getDataForGranule(granuleRange);
 				alignKeyBoundary(bmData, tenantData, nextKeyRes[0].key, offset, splitPoints);
 				break;
 			} catch (Error& e) {
@@ -1453,7 +1458,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 	}
 
 	if (BM_DEBUG) {
-		fmt::print("Re-evaluated split ({0}:\n", newRanges.size());
+		fmt::print("Re-evaluated split ({0}):\n", newRanges.size());
 		for (auto& it : newRanges) {
 			fmt::print("    {0}\n", it.printable());
 		}
@@ -1466,7 +1471,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 	ASSERT(finalSplit.keys.size() > 2);
 
 	if (BM_DEBUG) {
-		fmt::print("Aligned split ({0}:\n", finalSplit.keys.size());
+		fmt::print("Aligned split ({0}):\n", finalSplit.keys.size());
 		for (auto& it : finalSplit.keys) {
 			fmt::print("    {0}{1}\n", it.printable(), finalSplit.boundaries.count(it) ? " *" : "");
 		}
@@ -3324,7 +3329,8 @@ ACTOR Future<Void> loadBlobGranuleMergeBoundaries(Reference<BlobManagerData> bmD
 
 			// Add the mappings to our in memory key range map
 			for (int i = 0; i < results.size(); i++) {
-				bmData->mergeBoundaries[results[i].key] = decodeBlobGranuleMergeBoundaryValue(results[i].value);
+				bmData->mergeBoundaries[results[i].key.removePrefix(blobGranuleMergeBoundaryKeys.begin)] =
+				    decodeBlobGranuleMergeBoundaryValue(results[i].value);
 			}
 
 			if (!results.more) {
