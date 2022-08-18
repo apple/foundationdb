@@ -720,6 +720,7 @@ struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 
 	void loadVersion();
 	bool canReplace(Reference<ClientInfo> other) const;
+	std::string getTraceFileIdentifier(const std::string& baseIdentifier);
 };
 
 class MultiVersionApi;
@@ -1039,6 +1040,8 @@ private:
 	int nextThread = 0;
 	int threadCount;
 	std::string tmpDir;
+	bool traceIncludeThreadIds;
+	std::string traceFileIdentifier;
 
 	Mutex lock;
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;

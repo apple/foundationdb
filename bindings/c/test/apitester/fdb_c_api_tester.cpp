@@ -25,6 +25,7 @@
 #include "TesterTestSpec.h"
 #include "TesterUtil.h"
 #include "SimpleOpt/SimpleOpt.h"
+#include "fdb_c_options.g.h"
 #include "test/fdb_api.hpp"
 
 #include <memory>
@@ -324,6 +325,9 @@ void applyNetworkOptions(TesterOptions& options) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, options.traceDir);
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_FORMAT, options.traceFormat);
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_LOG_GROUP, options.logGroup);
+		if (options.apiVersion >= 720) {
+			fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_INCLUDE_THREAD_IDS);
+		}
 	}
 
 	for (auto knob : options.knobs) {
