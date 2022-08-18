@@ -25,7 +25,6 @@
 #include "TesterTestSpec.h"
 #include "TesterUtil.h"
 #include "SimpleOpt/SimpleOpt.h"
-#include "fdb_c_options.g.h"
 #include "test/fdb_api.hpp"
 
 #include <memory>
