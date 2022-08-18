@@ -8037,10 +8037,13 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRan
 		if (curRegion.begin >= range.end) {
 			return readVersionOut;
 		}
-		try {
-			wait(store(allRanges, tr.getBlobGranuleRanges(KeyRangeRef(curRegion.begin, range.end), loadSize)));
-		} catch (Error& e) {
-			wait(tr.onError(e));
+		loop {
+			try {
+				wait(store(allRanges, tr.getBlobGranuleRanges(KeyRangeRef(curRegion.begin, range.end), loadSize)));
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
 		}
 
 		if (allRanges.empty()) {
