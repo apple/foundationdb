@@ -2438,7 +2438,10 @@ void MultiVersionApi::setupNetwork() {
 			client->loadVersion();
 		});
 
-		std::string baseTraceFileId = traceFileIdentifier.empty() ? format("%d", getpid()) : traceFileIdentifier;
+		std::string baseTraceFileId;
+		if (!traceFileIdentifier.empty() || traceIncludeThreadIds) {
+			baseTraceFileId = traceFileIdentifier.empty() ? format("%d", getpid()) : traceFileIdentifier;
+		}
 
 		MutexHolder holder(lock);
 		runOnExternalClientsAllThreads([this, transportId, baseTraceFileId](Reference<ClientInfo> client) {
@@ -2446,10 +2449,11 @@ void MultiVersionApi::setupNetwork() {
 				client->api->setNetworkOption(option.first, option.second.castTo<StringRef>());
 			}
 			client->api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT_TRANSPORT_ID, std::to_string(transportId));
-			client->api->setNetworkOption(FDBNetworkOptions::TRACE_FILE_IDENTIFIER,
-			                              traceIncludeThreadIds ? client->getTraceFileIdentifier(baseTraceFileId)
-			                                                    : baseTraceFileId);
-
+			if (!baseTraceFileId.empty()) {
+				client->api->setNetworkOption(FDBNetworkOptions::TRACE_FILE_IDENTIFIER,
+				                              traceIncludeThreadIds ? client->getTraceFileIdentifier(baseTraceFileId)
+				                                                    : baseTraceFileId);
+			}
 			client->api->setupNetwork();
 		});
 
