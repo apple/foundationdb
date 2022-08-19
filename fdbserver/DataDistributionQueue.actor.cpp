@@ -2372,7 +2372,7 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 				}
 			}
 
-			// TODO@ZZX:
+			// TODO@ZZX: delete
 			skipCurrentLoop = true;
 			traceEvent.detail("Enabled", !skipCurrentLoop);
 
@@ -2476,7 +2476,7 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 			traceEvent.detail("Enabled", !skipCurrentLoop);
 
 			wait(delayF);
-			// TODO@ZZX:
+			// TODO@ZZX: delete
 			skipCurrentLoop = true;
 			if (skipCurrentLoop) {
 				// set loop interval to avoid busy wait here.
