@@ -2886,11 +2886,6 @@ ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamReq
 		req.reply.sendError(unknown_change_feed());
 		return Void();
 	}
-	if (feed->second->emptyVersion > req.begin && !req.canReadPopped) {
-		CODE_PROBE(true, "Feed request start already asking for popped data!");
-		req.reply.sendError(change_feed_popped());
-		return Void();
-	}
 	state Promise<Void> moved;
 	feed->second->triggerOnMove(req.range, streamUID, moved);
 	try {
