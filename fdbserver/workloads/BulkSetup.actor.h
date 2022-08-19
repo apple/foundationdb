@@ -159,6 +159,37 @@ ACTOR Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Datab
                                                                            double checkInterval);
 
 ACTOR template <class T>
+Future<Void> waitForLowInFlight(Database cx, T* workload) {
+	state Future<Void> timeout = delay(600.0);
+	loop {
+		try {
+			if (timeout.isReady()) {
+				throw timed_out();
+			}
+
+			int64_t inFlight = wait(getDataInFlight(cx, workload->dbInfo));
+			TraceEvent("DynamicWarming").detail("InFlight", inFlight);
+			if (inFlight > 1e6) { // Wait for just 1 MB to be in flight
+				wait(delay(1.0));
+			} else {
+				wait(delay(1.0));
+				TraceEvent("DynamicWarmingDone").log();
+				break;
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_attribute_not_found) {
+				// DD may not be initialized yet and attribute "DataInFlight" can be missing
+				wait(delay(1.0));
+			} else {
+				TraceEvent(SevWarn, "WaitForLowInFlightError").error(e);
+				throw;
+			}
+		}
+	}
+	return Void();
+}
+
+ACTOR template <class T>
 Future<Void> bulkSetup(Database cx,
                        T* workload,
                        uint64_t nodeCount,
@@ -279,17 +310,7 @@ Future<Void> bulkSetup(Database cx,
 	if (postSetupWarming != 0) {
 		try {
 			wait(delay(5.0)); // Wait for the data distribution in a small test to start
-			loop {
-				int64_t inFlight = wait(getDataInFlight(cx, workload->dbInfo));
-				TraceEvent("DynamicWarming").detail("InFlight", inFlight);
-				if (inFlight > 1e6) { // Wait for just 1 MB to be in flight
-					wait(delay(1.0));
-				} else {
-					wait(delay(1.0));
-					TraceEvent("DynamicWarmingDone").log();
-					break;
-				}
-			}
+			wait(waitForLowInFlight(cx, workload)); // Wait for the data distribution in a small test to start
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;
