@@ -503,7 +503,73 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> checkPurgedHistoryEntries(Database cx, BlobGranuleVerifierWorkload* self, KeyRange purgeRange) {
+	ACTOR Future<bool> checkGranuleMetadataPurged(Transaction* tr,
+	                                              KeyRange granuleRange,
+	                                              Version historyVersion,
+	                                              UID granuleId,
+	                                              bool strictMetadataCheck,
+	                                              bool possiblyInFlight) {
+		// change feed
+		Optional<Value> changeFeed = wait(tr->get(granuleIDToCFKey(granuleId).withPrefix(changeFeedPrefix)));
+		if (possiblyInFlight && changeFeed.present()) {
+			fmt::print("WARN: Change Feed for [{0} - {1}): {2} not purged, retrying\n",
+			           granuleRange.begin.printable(),
+			           granuleRange.end.printable(),
+			           granuleId.toString().substr(0, 6));
+			return false;
+		}
+		ASSERT(!changeFeed.present());
+
+		// file metadata
+		RangeResult fileMetadata = wait(tr->getRange(blobGranuleFileKeyRangeFor(granuleId), 1));
+		if (possiblyInFlight && !fileMetadata.empty()) {
+			fmt::print("WARN: File metadata for [{0} - {1}): {2} not purged, retrying\n",
+			           granuleRange.begin.printable(),
+			           granuleRange.end.printable(),
+			           granuleId.toString().substr(0, 6));
+			return false;
+		}
+		ASSERT(fileMetadata.empty());
+
+		if (strictMetadataCheck) {
+			// lock
+			Optional<Value> lock = wait(tr->get(blobGranuleLockKeyFor(granuleRange)));
+			if (possiblyInFlight && lock.present()) {
+				return false;
+			}
+			ASSERT(!lock.present());
+
+			// history entry
+			Optional<Value> history = wait(tr->get(blobGranuleHistoryKeyFor(granuleRange, historyVersion)));
+			if (possiblyInFlight && history.present()) {
+				return false;
+			}
+			ASSERT(!history.present());
+
+			// split state
+			RangeResult splitData = wait(tr->getRange(blobGranuleSplitKeyRangeFor(granuleId), 1));
+			if (possiblyInFlight && !splitData.empty()) {
+				return false;
+			}
+			ASSERT(splitData.empty());
+
+			// merge state
+			Optional<Value> merge = wait(tr->get(blobGranuleMergeKeyFor(granuleId)));
+			if (possiblyInFlight && merge.present()) {
+				return false;
+			}
+			ASSERT(!merge.present());
+
+			// FIXME: add merge boundaries!
+		}
+
+		return true;
+	}
+
+	ACTOR Future<Void> checkPurgedHistoryEntries(Database cx,
+	                                             BlobGranuleVerifierWorkload* self,
+	                                             KeyRange purgeRange,
+	                                             bool strictMetadataCheck) {
 		// quick check to make sure we didn't miss any new granules generated between the purge metadata load time and
 		// the actual purge, by checking for any new history keys in the range
 		// FIXME: fix this check! The BW granule check is really the important one, this finds occasional leftover
@@ -512,6 +578,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		// force purging, we check that the history version > the force purge version
 		state Transaction tr(cx);
 		state KeyRange cur = blobGranuleHistoryKeys;
+		state std::vector<std::tuple<KeyRange, Version, UID>> granulesToCheck;
 		loop {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
@@ -521,7 +588,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					Version version;
 					std::tie(keyRange, version) = decodeBlobGranuleHistoryKey(it.key);
 					if (purgeRange.intersects(keyRange)) {
-						if (BGV_DEBUG && version <= self->forcePurgeVersion) {
+						if (BGV_DEBUG) {
 							fmt::print("Found range [{0} - {1}) @ {2} that avoided force purge [{3} - {4}) @ {5}!!\n",
 							           keyRange.begin.printable(),
 							           keyRange.end.printable(),
@@ -530,9 +597,13 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 							           purgeRange.end.printable(),
 							           self->forcePurgeVersion);
 						}
-						ASSERT(version > self->forcePurgeVersion);
+						if (strictMetadataCheck) {
+							ASSERT(!purgeRange.intersects(keyRange));
+						} else {
+							Standalone<BlobGranuleHistoryValue> historyValue = decodeBlobGranuleHistoryValue(it.value);
+							granulesToCheck.emplace_back(keyRange, version, historyValue.granuleID);
+						}
 					}
-					// ASSERT(!purgeRange.intersects(keyRange));
 				}
 				if (!history.empty() && history.more) {
 					cur = KeyRangeRef(keyAfter(history.back().key), cur.end);
@@ -544,10 +615,35 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			}
 		}
 
+		tr.reset();
+		state int i;
+		if (BGV_DEBUG && !granulesToCheck.empty()) {
+			fmt::print("Checking metadata for {0} non-purged ranges\n", granulesToCheck.size());
+		}
+		for (i = 0; i < granulesToCheck.size(); i++) {
+			loop {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				try {
+					bool success = wait(self->checkGranuleMetadataPurged(&tr,
+					                                                     std::get<0>(granulesToCheck[i]),
+					                                                     std::get<1>(granulesToCheck[i]),
+					                                                     std::get<2>(granulesToCheck[i]),
+					                                                     strictMetadataCheck,
+					                                                     true));
+					if (success) {
+						break;
+					}
+					wait(delay(5.0));
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+		}
+
 		return Void();
 	}
 
-	ACTOR Future<Void> checkPurgedChangeFeeds(Database cx, BlobGranuleVerifierWorkload* self, KeyRange purgeRange) {
+	ACTOR Future<bool> checkPurgedChangeFeeds(Database cx, BlobGranuleVerifierWorkload* self, KeyRange purgeRange) {
 		// quick check to make sure we didn't miss any change feeds
 		state Transaction tr(cx);
 		state KeyRange cur = changeFeedKeys;
@@ -572,8 +668,28 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 							    purgeRange.end.printable(),
 							    self->forcePurgeVersion);
 						}
+						// FIXME!!: there is a known race with the existing force purge algorithm that would require a
+						// bit of a redesign. This is mostly an edge case though that we don't anticipate seeing much in
+						// actual use, and the impact of these leaked change feeds is limited because the range is
+						// purged anyway.
+						bool foundAnyHistoryForRange = false;
+						for (auto& purgedData : self->purgedDataToCheck) {
+							KeyRange granuleRange = std::get<0>(purgedData);
+							if (granuleRange.intersects(keyRange)) {
+								foundAnyHistoryForRange = true;
+								break;
+							}
+						}
+
+						if (!foundAnyHistoryForRange) {
+							// if range never existed in blob, and was doing the initial snapshot,  it could have a
+							// change feed but not a history entry/snapshot
+							CODE_PROBE(true, "not failing test for leaked feed with no history");
+							fmt::print("Not failing test b/c feed never had history!\n");
+						}
+						return !foundAnyHistoryForRange;
 					}
-					ASSERT(!purgeRange.intersects(keyRange));
+					// ASSERT(!purgeRange.intersects(keyRange));
 				}
 				if (!feeds.empty() && feeds.more) {
 					cur = KeyRangeRef(keyAfter(feeds.back().key), cur.end);
@@ -585,7 +701,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			}
 		}
 
-		return Void();
+		return true;
 	}
 
 	ACTOR Future<Void> validateForcePurge(Database cx, BlobGranuleVerifierWorkload* self, KeyRange purgeRange) {
@@ -656,34 +772,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			loop {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				try {
-					// change feed
-					Optional<Value> changeFeed = wait(tr.get(granuleIDToCFKey(granuleId).withPrefix(changeFeedPrefix)));
-					ASSERT(!changeFeed.present());
-
-					// file metadata
-					RangeResult fileMetadata = wait(tr.getRange(blobGranuleFileKeyRangeFor(granuleId), 1));
-					ASSERT(fileMetadata.empty());
-
-					if (strictMetadataCheck) {
-						// lock
-						Optional<Value> lock = wait(tr.get(blobGranuleLockKeyFor(granuleRange)));
-						ASSERT(!lock.present());
-
-						// history entry
-						Optional<Value> history = wait(tr.get(blobGranuleHistoryKeyFor(granuleRange, historyVersion)));
-						ASSERT(!history.present());
-
-						// split state
-						RangeResult splitData = wait(tr.getRange(blobGranuleSplitKeyRangeFor(granuleId), 1));
-						ASSERT(splitData.empty());
-
-						// merge state
-						Optional<Value> merge = wait(tr.get(blobGranuleMergeKeyFor(granuleId)));
-						ASSERT(!merge.present());
-
-						// FIXME: add merge boundaries!
-					}
-
+					bool success = wait(self->checkGranuleMetadataPurged(
+					    &tr, granuleRange, historyVersion, granuleId, strictMetadataCheck, false));
+					ASSERT(success);
 					break;
 				} catch (Error& e) {
 					wait(tr.onError(e));
@@ -716,13 +807,18 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			           filesChecked);
 		}
 
-		wait(self->checkPurgedHistoryEntries(cx, self, purgeRange));
+		wait(self->checkPurgedHistoryEntries(cx, self, purgeRange, strictMetadataCheck));
 
 		if (BGV_DEBUG) {
 			fmt::print("BGV force purge checked for new granule history entries\n");
 		}
 
-		wait(self->checkPurgedChangeFeeds(cx, self, purgeRange));
+		loop {
+			bool success = wait(self->checkPurgedChangeFeeds(cx, self, purgeRange));
+			if (success) {
+				break;
+			}
+		}
 
 		if (BGV_DEBUG) {
 			fmt::print("BGV force purge checked for leaked change feeds\n");
@@ -781,15 +877,20 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> _check(Database cx, BlobGranuleVerifierWorkload* self) {
-		if (self->startedForcePurge) {
-			// data may or may not be gone, depending on whether force purge was registered or not. Only do force purge
-			// check if we're sure it was registerd, otherwise, only do actual checks if we're sure no force purge was
-			// started.
-			if (self->forcePurgeKey.present()) {
-				wait(self->validateForcePurge(cx, self, normalKeys));
+		state Transaction tr(cx);
+		if (self->doForcePurge) {
+			if (self->startedForcePurge) {
+				if (self->forcePurgeKey.present()) {
+					wait(self->validateForcePurge(cx, self, normalKeys));
+				} // else if we had already started purge during the test but aren't sure whether it was registered or
+				  // not,
+				// don't validate that data was purged since it may never be
+				return true;
 			}
-			return true;
+		} else if (self->enablePurging) {
+			// FIXME: if doPurging was set, possibly do one last purge here, and verify it succeeds with no errors
 		}
+
 		// check error counts, and do an availability check at the end
 
 		if (self->doSetup && self->initAtEnd) {
@@ -797,7 +898,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			wait(self->setUpBlobRange(cx));
 		}
 
-		state Transaction tr(cx);
 		state Version readVersion = wait(self->doGrv(&tr));
 		state Version startReadVersion = readVersion;
 		state int checks = 0;
@@ -913,11 +1013,29 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		// For some reason simulation is still passing when this fails?.. so assert for now
 		ASSERT(result);
 
-		// FIXME: if doPurging was set, possibly do one last purge here, and verify it succeeds with no errors
+		if (self->doForcePurge) {
+			// if granules are available, and we didn't do a force purge during the test, do it now
+			ASSERT(!self->startedForcePurge);
+			Version rv = wait(self->doGrv(&tr));
+			self->forcePurgeVersion = rv;
+			self->purgedDataToCheck.clear(); //  in case we started but didn't finish loading it, reset it
+			wait(self->loadGranuleMetadataBeforeForcePurge(cx, self));
+			Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, self->forcePurgeVersion, {}, true));
+			self->forcePurgeKey = purgeKey;
+			wait(self->validateForcePurge(cx, self, normalKeys));
+
+			return true;
+		} else if (self->enablePurging) {
+			// FIXME: if doPurging was set, possibly do one last purge here, and verify it succeeds with no errors
+		}
 
 		if (self->clientId == 0 && SERVER_KNOBS->BG_ENABLE_MERGING && self->clearAndMergeCheck) {
 			CODE_PROBE(true, "BGV clearing database and awaiting merge");
 			wait(clearAndAwaitMerge(cx, normalKeys));
+
+			// TODO: should do a read to check that not only did it reduce to one granule, but that granule is readable?
+
+			// FIXME: if doPurging was set, possibly do one last purge here, and verify it succeeds with no errors
 		}
 
 		return result;
