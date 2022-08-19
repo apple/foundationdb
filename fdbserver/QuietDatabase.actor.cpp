@@ -700,24 +700,31 @@ ACTOR Future<Void> reconfigureAfter(Database cx,
 }
 
 struct QuietDatabaseChecker {
-	double start = now();
-	double maxDDRunTime;
+	double start;
+	double lastProgressedAt;
+	constexpr static double maxDDRunTime = 1000.0;
 
-	QuietDatabaseChecker(double maxDDRunTime) : maxDDRunTime(maxDDRunTime) {}
+	QuietDatabaseChecker() {
+		start = now();
+		lastProgressedAt = start;
+	}
 
 	struct Impl {
 		double start;
 		std::string const& phase;
 		double maxDDRunTime;
+		double lastProgressedAt;
+
 		std::vector<std::string> failReasons;
 
-		Impl(double start, const std::string& phase, const double maxDDRunTime)
-		  : start(start), phase(phase), maxDDRunTime(maxDDRunTime) {}
+		Impl(double start, const std::string& phase, const double maxDDRunTime, double lastProgressedAt)
+		  : start(start), phase(phase), maxDDRunTime(maxDDRunTime), lastProgressedAt(lastProgressedAt) {}
 
 		template <class T, class Comparison = std::less_equal<>>
 		Impl& add(BaseTraceEvent& evt,
 		          const char* name,
 		          T value,
+		          Optional<T> prevValue,
 		          T expected,
 		          Comparison const& cmp = std::less_equal<>()) {
 			std::string k = fmt::format("{}Gate", name);
@@ -725,17 +732,24 @@ struct QuietDatabaseChecker {
 			if (!cmp(value, expected)) {
 				failReasons.push_back(name);
 			}
+
+			if (prevValue.present() && cmp(value, prevValue.get())) {
+				lastProgressedAt = now();
+			}
 			return *this;
 		}
 
+		double progressUpdate() { return lastProgressedAt; }
+
 		bool success() {
-			bool timedOut = now() - start > maxDDRunTime;
+			bool timedOut = (now() - lastProgressedAt > maxDDRunTime) || (now() - start > (5 * maxDDRunTime));
 			if (!failReasons.empty()) {
 				std::string traceMessage = fmt::format("QuietDatabase{}Fail", phase);
 				std::string reasons = fmt::format("{}", fmt::join(failReasons, ", "));
 				TraceEvent(timedOut ? SevError : SevWarnAlways, traceMessage.c_str())
 				    .detail("Reasons", reasons)
 				    .detail("FailedAfter", now() - start)
+				    .detail("NoProgressFor", now() - lastProgressedAt)
 				    .detail("Timeout", maxDDRunTime);
 				if (timedOut) {
 					// this bool is just created to make the assertion more readable
@@ -752,7 +766,7 @@ struct QuietDatabaseChecker {
 	};
 
 	Impl startIteration(std::string const& phase) const {
-		Impl res(start, phase, maxDDRunTime);
+		Impl res(start, phase, maxDDRunTime, lastProgressedAt);
 		return res;
 	}
 };
@@ -768,12 +782,13 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
                                         int64_t maxDataDistributionQueueSize = 0,
                                         int64_t maxPoppedVersionLag = 30e6,
                                         int64_t maxVersionOffset = 1e6) {
-	state QuietDatabaseChecker checker(isBuggifyEnabled(BuggifyType::General) ? 3600.0 : 1000.0);
+	state QuietDatabaseChecker checker;
 	state Future<Void> reconfig =
 	    reconfigureAfter(cx, 100 + (deterministicRandom()->random01() * 100), dbInfo, "QuietDatabase");
 	state Future<int64_t> dataInFlight;
 	state Future<std::pair<int64_t, int64_t>> tLogQueueInfo;
 	state Future<int64_t> dataDistributionQueueSize;
+	state Optional<int64_t> prevDataDistributionQueueSize;
 	state Future<bool> teamCollectionValid;
 	state Future<int64_t> storageQueueSize;
 	state Future<bool> dataDistributionActive;
@@ -827,18 +842,26 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 
 			std::string evtType = "QuietDatabase" + phase;
 			TraceEvent evt(evtType.c_str());
-			check.add(evt, "DataInFlight", dataInFlight.get(), dataInFlightGate)
-			    .add(evt, "MaxTLogQueueSize", tLogQueueInfo.get().first, maxTLogQueueGate)
-			    .add(evt, "MaxTLogPoppedVersionLag", tLogQueueInfo.get().second, maxPoppedVersionLag)
-			    .add(evt, "DataDistributionQueueSize", dataDistributionQueueSize.get(), maxDataDistributionQueueSize)
-			    .add(evt, "TeamCollectionValid", teamCollectionValid.get(), true, std::equal_to<>())
-			    .add(evt, "MaxStorageQueueSize", storageQueueSize.get(), maxStorageServerQueueGate)
-			    .add(evt, "DataDistributionActive", dataDistributionActive.get(), true, std::equal_to<>())
-			    .add(evt, "StorageServersRecruiting", storageServersRecruiting.get(), false, std::equal_to<>())
-			    .add(evt, "VersionOffset", versionOffset.get(), maxVersionOffset);
+			check.add(evt, "DataInFlight", dataInFlight.get(), {}, dataInFlightGate)
+			    .add(evt, "MaxTLogQueueSize", tLogQueueInfo.get().first, {}, maxTLogQueueGate)
+			    .add(evt, "MaxTLogPoppedVersionLag", tLogQueueInfo.get().second, {}, maxPoppedVersionLag)
+			    .add(evt,
+			         "DataDistributionQueueSize",
+			         dataDistributionQueueSize.get(),
+			         prevDataDistributionQueueSize,
+			         maxDataDistributionQueueSize)
+			    .add(evt, "TeamCollectionValid", teamCollectionValid.get(), {}, true, std::equal_to<>())
+			    .add(evt, "MaxStorageQueueSize", storageQueueSize.get(), {}, maxStorageServerQueueGate)
+			    .add(evt, "DataDistributionActive", dataDistributionActive.get(), {}, true, std::equal_to<>())
+			    .add(evt, "StorageServersRecruiting", storageServersRecruiting.get(), {}, false, std::equal_to<>())
+			    .add(evt, "VersionOffset", versionOffset.get(), {}, maxVersionOffset);
+
+			checker.lastProgressedAt = check.progressUpdate();
 
 			evt.detail("RecoveryCount", dbInfo->get().recoveryCount).detail("NumSuccesses", numSuccesses);
 			evt.log();
+
+			prevDataDistributionQueueSize = dataDistributionQueueSize.get();
 
 			if (check.success()) {
 				if (++numSuccesses == 3) {
