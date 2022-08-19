@@ -747,16 +747,28 @@ namespace SummarizeTest
             AppendToSummary(summaryFileName, xout);
         }
 
-        // Parses the valgrind XML file and returns a list of "what" tags for each error.
+        static string ParseValgrindStack(XElement stackElement) {
+            string backtrace = "";
+            foreach (XElement frame in stackElement.Elements()) {
+                backtrace += " " + frame.Element("ip").Value.ToLower();
+            }
+            if (backtrace.Length > 0) {
+                backtrace = "addr2line -e fdbserver.debug -p -C -f -i" + backtrace;
+            }
+
+            return backtrace;
+        }
+
+        // Parses the valgrind XML file and returns a list of error elements.
         //  All errors for which the "kind" tag starts with "Leak" are ignored
-        static Tuple<string, string>[] ParseValgrindOutput(string valgrindOutputFileName, bool traceToStdout)
+        static XElement[] ParseValgrindOutput(string valgrindOutputFileName, bool traceToStdout)
         {
             if (!traceToStdout)
             {
                 Console.WriteLine("Reading vXML file: " + valgrindOutputFileName);
             }
 
-            ISet<Tuple<string, string>> whats = new HashSet<Tuple<string, string>>();
+            IList<XElement> errors = new List<XElement>();
             XElement xdoc = XDocument.Load(valgrindOutputFileName).Element("valgrindoutput");
             foreach(var elem in xdoc.Elements()) {
                 if (elem.Name != "error")
@@ -764,19 +776,29 @@ namespace SummarizeTest
                 string kind = elem.Element("kind").Value;
                 if(kind.StartsWith("Leak"))
                     continue;
-                string backtrace = "";
-                XElement stack = elem.Element("stack");
-                foreach (XElement frame in stack.Elements()) {
-                    backtrace += " " + frame.Element("ip").Value.ToLower();
+
+                XElement errorElement = new XElement("ValgrindError",
+                                new XAttribute("Severity", (int)Magnesium.Severity.SevError));
+
+                int num = 1;
+                string suffix = "";
+                foreach (XElement sub in elem.Elements()) {
+                    if (sub.Name == "what") {
+                        errorElement.SetAttributeValue("What", sub.Value);
+                    } else if (sub.Name == "auxwhat") {
+                        suffix = "Aux" + num++;
+                        errorElement.SetAttributeValue("What" + suffix, sub.Value);
+                    } else if (sub.Name == "stack") {
+                        errorElement.SetAttributeValue("Backtrace" + suffix, ParseValgrindStack(sub));
+                    } else if (sub.Name == "origin") {
+                        errorElement.SetAttributeValue("WhatOrigin", sub.Element("what").Value);
+                        errorElement.SetAttributeValue("BacktraceOrigin", ParseValgrindStack(sub.Element("stack")));
+                    }
                 }
 
-                if (backtrace.Length > 0) {
-                    backtrace = "addr2line -e fdbserver.debug -p -C -f -i" + backtrace;
-                }
-
-                whats.Add(new Tuple<string, string>(elem.Element("what").Value, backtrace));
+                errors.Add(errorElement);
             }
-            return whats.ToArray();
+            return errors.ToArray();
         }
 
         delegate IEnumerable<Magnesium.Event> parseDelegate(System.IO.Stream stream, string file,
@@ -1085,10 +1107,7 @@ namespace SummarizeTest
                     var valgrindErrors = ParseValgrindOutput(valgrindOutputFileName, traceToStdout);
                     foreach (var vError in valgrindErrors)
                     {
-                        xout.Add(new XElement("ValgrindError",
-                                new XAttribute("Severity", (int)Magnesium.Severity.SevError),
-                                new XAttribute("What", vError.Item1),
-                                new XAttribute("Backtrace", vError.Item2)));
+                        xout.Add(vError);
                         ok = false;
                         error = true;
                     }
