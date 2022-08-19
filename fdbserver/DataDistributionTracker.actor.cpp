@@ -74,7 +74,7 @@ struct DataDistributionTracker {
 	UID distributorId;
 
 	// At now, the lifetime of shards is guaranteed longer than DataDistributionTracker.
-	KeyRangeMap<ShardTrackedData>* shards;
+	KeyRangeMap<ShardTrackedData>* shards = nullptr;
 	ActorCollection sizeChanges;
 
 	int64_t systemSizeEstimate = 0;
@@ -95,7 +95,7 @@ struct DataDistributionTracker {
 	// The reference to trackerCancelled must be extracted by actors,
 	// because by the time (trackerCancelled == true) this memory cannot
 	// be accessed
-	bool* trackerCancelled;
+	bool* trackerCancelled = nullptr;
 
 	// This class extracts the trackerCancelled reference from a DataDistributionTracker object
 	// Because some actors spawned by the dataDistributionTracker outlive the DataDistributionTracker
