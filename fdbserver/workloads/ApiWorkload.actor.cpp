@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
  */
 
 #include <cinttypes>
+#include "fmt/format.h"
 #include "fdbserver/workloads/ApiWorkload.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -123,7 +124,7 @@ bool ApiWorkload::compareResults(VectorRef<KeyValueRef> dbResults,
 		for (int j = 0; j < storeResults.size(); j++)
 			printf("%d: %s %d\n", j, storeResults[j].key.toString().c_str(), storeResults[j].value.size());
 
-		printf("Read Version: %" PRId64 "\n", readVersion);
+		fmt::print("Read Version: {}\n", readVersion);
 
 		TraceEvent(SevError, format("%s_CompareSizeMismatch", description().c_str()).c_str())
 		    .detail("ReadVer", readVersion)
@@ -144,7 +145,7 @@ bool ApiWorkload::compareResults(VectorRef<KeyValueRef> dbResults,
 			for (int j = 0; j < storeResults.size(); j++)
 				printf("%d: %s %d\n", j, storeResults[j].key.toString().c_str(), storeResults[j].value.size());
 
-			printf("Read Version: %" PRId64 "\n", readVersion);
+			fmt::print("Read Version: {}\n", readVersion);
 
 			TraceEvent(SevError, format("%s_CompareValueMismatch", description().c_str()).c_str())
 			    .detail("ReadVer", readVersion)
@@ -286,6 +287,7 @@ Value ApiWorkload::generateValue() {
 // Creates a random transaction factory to produce transaction of one of the TransactionType choices
 ACTOR Future<Void> chooseTransactionFactory(Database cx, std::vector<TransactionType> choices, ApiWorkload* self) {
 	TransactionType transactionType = deterministicRandom()->randomChoice(choices);
+	self->transactionType = transactionType;
 
 	if (transactionType == NATIVE) {
 		printf("client %d: Running NativeAPI Transactions\n", self->clientPrefixInt);

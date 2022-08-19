@@ -23,6 +23,7 @@ package com.apple.foundationdb;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
+import com.apple.foundationdb.tuple.Tuple;
 
 /**
  * A mutable, lexicographically ordered mapping from binary keys to binary values.
@@ -41,11 +42,82 @@ import java.util.function.Function;
  */
 public interface Database extends AutoCloseable, TransactionContext {
 	/**
-	 * Creates a {@link Transaction} that operates on this {@code Database}.<br>
+	 * Opens an existing tenant to be used for running transactions.<br>
+	 * <br>
+	 * <b>Note:</b> opening a tenant does not check its existence in the cluster. If the tenant does not exist,
+	 * attempts to read or write data with it will fail.
+	 *
+	 * @param tenantName The name of the tenant to open.
+	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
+	 */
+	default Tenant openTenant(byte[] tenantName) {
+		return openTenant(tenantName, getExecutor());
+	}
+
+	/**
+	 * Opens an existing tenant to be used for running transactions. This is a convenience method that generates the
+	 * tenant name by packing a {@code Tuple}.<br>
+	 * <br>
+	 * <b>Note:</b> opening a tenant does not check its existence in the cluster. If the tenant does not exist,
+	 * attempts to read or write data with it will fail.
+	 *
+	 * @param tenantName The name of the tenant to open, as a Tuple.
+	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
+	 */
+	Tenant openTenant(Tuple tenantName);
+
+	/**
+	 * Opens an existing tenant to be used for running transactions.
+	 *
+	 * @param tenantName The name of the tenant to open.
+	 * @param e the {@link Executor} to use when executing asynchronous callbacks.
+	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
+	 */
+	Tenant openTenant(byte[] tenantName, Executor e);
+
+	/**
+	 * Opens an existing tenant to be used for running transactions. This is a convenience method that generates the
+	 * tenant name by packing a {@code Tuple}.
+	 *
+	 * @param tenantName The name of the tenant to open, as a Tuple.
+	 * @param e the {@link Executor} to use when executing asynchronous callbacks.
+	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
+	 */
+	Tenant openTenant(Tuple tenantName, Executor e);
+
+	/**
+	 * Opens an existing tenant to be used for running transactions.
+	 *
+	 * @param tenantName The name of the tenant to open.
+	 * @param e the {@link Executor} to use when executing asynchronous callbacks.
+	 * @param eventKeeper the {@link EventKeeper} to use when tracking instrumented calls for the tenant's transactions.
+	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
+	 */
+	Tenant openTenant(byte[] tenantName, Executor e, EventKeeper eventKeeper);
+
+	/**
+	 * Opens an existing tenant to be used for running transactions. This is a convenience method that generates the
+	 * tenant name by packing a {@code Tuple}.
+	 *
+	 * @param tenantName The name of the tenant to open, as a Tuple.
+	 * @param e the {@link Executor} to use when executing asynchronous callbacks.
+	 * @param eventKeeper the {@link EventKeeper} to use when tracking instrumented calls for the tenant's transactions.
+	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
+	 */
+	Tenant openTenant(Tuple tenantName, Executor e, EventKeeper eventKeeper);
+
+	/**
+	 * Creates a {@link Transaction} that operates on this {@code Database}. Creating a transaction
+	 *  in this way does not associate it with a {@code Tenant}, and as a result the transaction will
+	 *  operate on the entire key-space for the database.<br>
 	 * <br>
 	 * <b>Note:</b> Java transactions automatically set the {@link TransactionOptions#setUsedDuringCommitProtectionDisable}
 	 *  option. This is because the Java bindings disallow use of {@code Transaction} objects after
-	 *  {@link Transaction#onError} is called.
+	 *  {@link Transaction#onError} is called.<br>
+	 * <br>
+	 * <b>Note:</b> Transactions created directly on a {@code Database} object cannot be used in a cluster
+	 *  that requires tenant-based access. To run transactions in those clusters, you must first open a tenant
+	 *  with {@link #openTenant(byte[])}.
 	 *
 	 * @return a newly created {@code Transaction} that reads from and writes to this {@code Database}.
 	 */
@@ -88,6 +160,147 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 * @return a value where 0 indicates that the client is idle and 1 (or larger) indicates that the client is saturated.
 	 */
 	double getMainThreadBusyness();
+
+	/**
+	 * Runs {@link #purgeBlobGranules(Function)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param purgeVersion version to purge at
+	 * @param force if true delete all data, if not keep data >= purgeVersion
+	 *
+	 * @return the key to watch for purge complete
+	 */
+	default CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion, boolean force) {
+		return purgeBlobGranules(beginKey, endKey, purgeVersion, force, getExecutor());
+	}
+
+	/**
+	 * Queues a purge of blob granules for the specified key range, at the specified version.
+     *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param purgeVersion version to purge at
+	 * @param force if true delete all data, if not keep data >= purgeVersion
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return the key to watch for purge complete
+	 */
+	CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion, boolean force, Executor e);
+
+
+	/**
+	 * Runs {@link #waitPurgeGranulesComplete(Function)} on the default executor.
+	 *
+	 * @param purgeKey key to watch
+	 */
+	default CompletableFuture<Void> waitPurgeGranulesComplete(byte[] purgeKey) {
+		return waitPurgeGranulesComplete(purgeKey, getExecutor());
+	}
+
+	/**
+	 * Wait for a previous call to purgeBlobGranules to complete.
+	 *
+	 * @param purgeKey key to watch
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+	 */
+	CompletableFuture<Void> waitPurgeGranulesComplete(byte[] purgeKey, Executor e);
+
+	/**
+	 * Runs {@link #blobbifyRange(Function)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+
+	 * @return if the recording of the range was successful
+	 */
+	default CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey) {
+		return blobbifyRange(beginKey, endKey, getExecutor());
+	}
+
+	/**
+	 * Sets a range to be blobbified in the database. Must be a completely unblobbified range.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return if the recording of the range was successful
+	 */
+	CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey, Executor e);
+
+	/**
+	 * Runs {@link #unblobbifyRange(Function)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+
+	 * @return if the recording of the range was successful
+	 */
+	default CompletableFuture<Boolean> unblobbifyRange(byte[] beginKey, byte[] endKey) {
+		return unblobbifyRange(beginKey, endKey, getExecutor());
+	}
+
+	/**
+	 * Sets a range to be unblobbified in the database.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return if the recording of the range was successful
+	 */
+	CompletableFuture<Boolean> unblobbifyRange(byte[] beginKey, byte[] endKey, Executor e);
+
+	/**
+	 * Runs {@link #listBlobbifiedRanges(Function)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param rangeLimit batch size
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return a future with the list of blobbified ranges.
+	 */
+	 default CompletableFuture<KeyRangeArrayResult> listBlobbifiedRanges(byte[] beginKey, byte[] endKey, int rangeLimit) {
+		return listBlobbifiedRanges(beginKey, endKey, rangeLimit, getExecutor());
+	 }
+
+	/**
+	 * Lists blobbified ranges in the database. There may be more if result.size() == rangeLimit.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param rangeLimit batch size
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return a future with the list of blobbified ranges.
+	 */
+	 CompletableFuture<KeyRangeArrayResult> listBlobbifiedRanges(byte[] beginKey, byte[] endKey, int rangeLimit, Executor e);
+
+	/**
+	 * Runs {@link #verifyBlobRange(Function)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param version version to read at
+	 *
+	 * @return a future with the version of the last blob granule.
+	 */
+	default CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey, long version) {
+		return verifyBlobRange(beginKey, endKey, version, getExecutor());
+	}
+
+	/**
+	 * Checks if a blob range is blobbified.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param version version to read at
+	 *
+	 * @return a future with the version of the last blob granule.
+	 */
+	CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey, long version, Executor e);
 
 	/**
 	 * Runs a read-only transactional function against this {@code Database} with retry logic.

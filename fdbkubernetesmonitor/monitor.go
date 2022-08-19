@@ -24,6 +24,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -32,6 +34,10 @@ import (
 	"syscall"
 	"time"
 
+	"k8s.io/utils/pointer"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/apple/foundationdb/fdbkubernetesmonitor/api"
 	"github.com/fsnotify/fsnotify"
 	"github.com/go-logr/logr"
 )
@@ -52,7 +58,7 @@ type Monitor struct {
 	CustomEnvironment map[string]string
 
 	// ActiveConfiguration defines the active process configuration.
-	ActiveConfiguration *ProcessConfiguration
+	ActiveConfiguration *api.ProcessConfiguration
 
 	// ActiveConfigurationBytes defines the source data for the active process
 	// configuration.
@@ -61,6 +67,9 @@ type Monitor struct {
 	// LastConfigurationTime is the last time we successfully reloaded the
 	// configuration file.
 	LastConfigurationTime time.Time
+
+	// ProcessCount defines how many processes the
+	ProcessCount int
 
 	// ProcessIDs stores the PIDs of the processes that are running. A PID of
 	// zero will indicate that a process does not have a run loop. A PID of -1
@@ -82,8 +91,8 @@ type Monitor struct {
 }
 
 // StartMonitor starts the monitor loop.
-func StartMonitor(logger logr.Logger, configFile string, customEnvironment map[string]string) {
-	podClient, err := CreatePodClient()
+func StartMonitor(logger logr.Logger, configFile string, customEnvironment map[string]string, processCount int, listenAddr string, enableDebug bool) {
+	podClient, err := CreatePodClient(logger)
 	if err != nil {
 		panic(err)
 	}
@@ -93,9 +102,37 @@ func StartMonitor(logger logr.Logger, configFile string, customEnvironment map[s
 		PodClient:         podClient,
 		Logger:            logger,
 		CustomEnvironment: customEnvironment,
+		ProcessCount:      processCount,
 	}
 
 	go func() { monitor.WatchPodTimestamps() }()
+
+	mux := http.NewServeMux()
+	// Enable pprof endpoints for debugging purposes.
+	if enableDebug {
+		mux.Handle("/debug/pprof/heap", pprof.Handler("heap"))
+		mux.Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+		mux.Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+		mux.Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
+		mux.Handle("/debug/pprof/block", pprof.Handler("block"))
+		mux.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	}
+
+	// Add Prometheus support
+	mux.Handle("/metrics", promhttp.Handler())
+	go func() {
+		err := http.ListenAndServe(listenAddr, mux)
+		if err != nil {
+			logger.Error(err, "could not start HTTP server")
+			os.Exit(1)
+		}
+	}()
+
 	monitor.Run()
 }
 
@@ -107,7 +144,7 @@ func (monitor *Monitor) LoadConfiguration() {
 		return
 	}
 	defer file.Close()
-	configuration := &ProcessConfiguration{}
+	configuration := &api.ProcessConfiguration{}
 	configurationBytes, err := io.ReadAll(file)
 	if err != nil {
 		monitor.Logger.Error(err, "Error reading monitor configuration", "monitorConfigPath", monitor.ConfigFile)
@@ -154,15 +191,15 @@ func checkOwnerExecutable(path string) error {
 
 // acceptConfiguration is called when the monitor process parses and accepts
 // a configuration from the local config file.
-func (monitor *Monitor) acceptConfiguration(configuration *ProcessConfiguration, configurationBytes []byte) {
+func (monitor *Monitor) acceptConfiguration(configuration *api.ProcessConfiguration, configurationBytes []byte) {
 	monitor.Mutex.Lock()
 	defer monitor.Mutex.Unlock()
 	monitor.Logger.Info("Received new configuration file", "configuration", configuration)
 
 	if monitor.ProcessIDs == nil {
-		monitor.ProcessIDs = make([]int, configuration.ServerCount+1)
+		monitor.ProcessIDs = make([]int, monitor.ProcessCount+1)
 	} else {
-		for len(monitor.ProcessIDs) <= configuration.ServerCount {
+		for len(monitor.ProcessIDs) <= monitor.ProcessCount {
 			monitor.ProcessIDs = append(monitor.ProcessIDs, 0)
 		}
 	}
@@ -171,7 +208,7 @@ func (monitor *Monitor) acceptConfiguration(configuration *ProcessConfiguration,
 	monitor.ActiveConfigurationBytes = configurationBytes
 	monitor.LastConfigurationTime = time.Now()
 
-	for processNumber := 1; processNumber <= configuration.ServerCount; processNumber++ {
+	for processNumber := 1; processNumber <= monitor.ProcessCount; processNumber++ {
 		if monitor.ProcessIDs[processNumber] == 0 {
 			monitor.ProcessIDs[processNumber] = -1
 			tempNumber := processNumber
@@ -284,11 +321,13 @@ func (monitor *Monitor) checkProcessRequired(processNumber int) bool {
 	monitor.Mutex.Lock()
 	defer monitor.Mutex.Unlock()
 	logger := monitor.Logger.WithValues("processNumber", processNumber, "area", "checkProcessRequired")
-	if monitor.ActiveConfiguration.ServerCount < processNumber {
+	runProcesses := pointer.BoolDeref(monitor.ActiveConfiguration.RunServers, true)
+	if monitor.ProcessCount < processNumber || !runProcesses {
 		logger.Info("Terminating run loop")
 		monitor.ProcessIDs[processNumber] = 0
 		return false
 	}
+
 	return true
 }
 
@@ -364,12 +403,18 @@ func (monitor *Monitor) Run() {
 		panic(err)
 	}
 
-	defer watcher.Close()
+	defer func(watcher *fsnotify.Watcher) {
+		err := watcher.Close()
+		if err != nil {
+			monitor.Logger.Error(err, "could not close watcher")
+		}
+	}(watcher)
 	go func() { monitor.WatchConfiguration(watcher) }()
 
 	<-done
 }
 
+// WatchPodTimestamps watches the timestamp feed to reload the configuration.
 func (monitor *Monitor) WatchPodTimestamps() {
 	for timestamp := range monitor.PodClient.TimestampFeed {
 		if timestamp > monitor.LastConfigurationTime.Unix() {

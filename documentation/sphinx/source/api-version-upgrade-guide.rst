@@ -9,6 +9,16 @@ This document provides an overview of changes that an application developer may 
 
 For more details about API versions, see :ref:`api-versions`.
 
+.. _api-version-upgrade-guide-720:
+
+API version 720
+===============
+
+General
+-------
+
+* Special keys ``\xff\xff/management/profiling/<client_txn_sample_rate|client_txn_size_limit>`` are removed in 7.2 and the functionalities they provide are now covered by the global configuration module.
+
 .. _api-version-upgrade-guide-710:
 
 API version 710
@@ -16,6 +26,8 @@ API version 710
 
 General
 -------
+
+* ``fdb_transaction_get_range_and_flat_map`` API is replaced by ``fdb_transaction_get_mapped_range`` in version 710. The function ``fdb_transaction_get_range_and_flat_map`` is not supported in any API version.
 
 .. _api-version-upgrade-guide-700:
 

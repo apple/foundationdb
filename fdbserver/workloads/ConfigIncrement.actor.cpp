@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,12 +36,7 @@ class ConfigIncrementWorkload : public TestWorkload {
 
 	PerfIntCounter transactions, retries, commitUnknownResult;
 
-	static Key getConfigKey() {
-		Tuple tuple;
-		tuple.appendNull(); // config class
-		tuple << testKnobName;
-		return tuple.pack();
-	}
+	static Key getConfigKey() { return Tuple::makeTuple(/* config class */ nullptr, testKnobName).pack(); }
 
 	ACTOR static Future<int> get(Reference<ISingleThreadTransaction> tr) {
 		TraceEvent(SevDebug, "ConfigIncrementGet");
@@ -83,8 +78,8 @@ class ConfigIncrementWorkload : public TestWorkload {
 						break;
 					} catch (Error& e) {
 						TraceEvent(SevDebug, "ConfigIncrementError")
-						    .detail("LastKnownValue", self->lastKnownValue)
-						    .error(e, true /* include cancelled  */);
+						    .errorUnsuppressed(e)
+						    .detail("LastKnownValue", self->lastKnownValue);
 						wait(tr->onError(e));
 						++self->retries;
 					}
@@ -145,10 +140,7 @@ public:
 		auto localIncrementActors =
 		    (clientId < incrementActors) ? ((incrementActors - clientId - 1) / clientCount + 1) : 0;
 		for (int i = 0; i < localIncrementActors; ++i) {
-			// TODO: The timeout is a hack to get the test to pass before rollforward and
-			// rollback are supported. Eventually, this timeout should be removed so
-			// we test that all clients make progress.
-			actors.push_back(timeout(incrementActor(this, cx), 60.0, Void()));
+			actors.push_back(incrementActor(this, cx));
 		}
 		return waitForAll(actors);
 	}

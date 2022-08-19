@@ -1,10 +1,30 @@
+/*
+ * SnapTest.actor.cpp
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include <boost/lexical_cast.hpp>
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/ContinuousSample.h"
-#include "fdbmonitor/SimpleIni.h"
+#include "fdbclient/SimpleIni.h"
 #include "fdbserver/Status.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -21,10 +41,10 @@ void getVersionAndnumTags(TraceEventFields md, Version& version, int& numTags) {
 }
 
 void getTagAndDurableVersion(TraceEventFields md, Version version, Tag& tag, Version& durableVersion) {
-	Version verifyVersion;
 	durableVersion = -1;
 
-	verifyVersion = boost::lexical_cast<int64_t>(md.getValue("Version"));
+	// verify version:
+	boost::lexical_cast<int64_t>(md.getValue("Version"));
 	std::string tagString = md.getValue("Tag");
 	int colon = tagString.find_first_of(':');
 	std::string localityString = tagString.substr(0, colon);
@@ -40,11 +60,11 @@ void getMinAndMaxTLogVersions(TraceEventFields md,
                               Tag tag,
                               Version& minTLogVersion,
                               Version& maxTLogVersion) {
-	Version verifyVersion;
 	Tag verifyTag;
 	minTLogVersion = maxTLogVersion = -1;
 
-	verifyVersion = boost::lexical_cast<int64_t>(md.getValue("Version"));
+	// verify version:
+	boost::lexical_cast<int64_t>(md.getValue("Version"));
 	std::string tagString = md.getValue("Tag");
 	int colon = tagString.find_first_of(':');
 	std::string localityString = tagString.substr(0, colon);

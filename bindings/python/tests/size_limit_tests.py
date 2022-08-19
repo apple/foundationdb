@@ -22,7 +22,7 @@ import fdb
 import sys
 
 if __name__ == '__main__':
-    fdb.api_version(710)
+    fdb.api_version(720)
 
 @fdb.transactional
 def setValue(tr, key, value):
@@ -65,6 +65,9 @@ def test_size_limit_option(db):
         assert(False)  # not reached
     except fdb.FDBError as e:
         assert(e.code == 2101)  # Transaction exceeds byte limit (2101)
+
+    # Reset the size limit for future tests
+    db.options.set_transaction_size_limit(10000000)
 
 @fdb.transactional
 def test_get_approximate_size(tr):

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -266,6 +266,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		try {
 			wait(backupAgent->submitBackup(cx,
 			                               StringRef(backupContainer),
+			                               {},
 			                               deterministicRandom()->randomInt(0, 60),
 			                               deterministicRandom()->randomInt(0, 100),
 			                               tag.toString(),
@@ -284,7 +285,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 		// Stop the differential backup, if enabled
 		if (stopDifferentialDelay) {
-			TEST(!stopDifferentialFuture.isReady()); // Restore starts at specified time - stopDifferential not ready
+			CODE_PROBE(!stopDifferentialFuture.isReady(),
+			           "Restore starts at specified time - stopDifferential not ready");
 			wait(stopDifferentialFuture);
 			TraceEvent("BARW_DoBackupWaitToDiscontinue", randomID)
 			    .detail("Tag", printable(tag))
@@ -423,6 +425,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				                                  cx,
 				                                  self->backupTag,
 				                                  KeyRef(lastBackupContainer),
+				                                  {},
 				                                  WaitForComplete::True,
 				                                  ::invalidVersion,
 				                                  Verbose::True,
@@ -511,11 +514,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			    .detail("AbortAndRestartAfter", self->abortAndRestartAfter);
 
 			state KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
-			UidAndAbortedFlagT uidFlag = wait(keyBackedTag.getOrThrow(cx));
+			UidAndAbortedFlagT uidFlag = wait(keyBackedTag.getOrThrow(cx.getReference()));
 			state UID logUid = uidFlag.first;
-			state Key destUidValue = wait(BackupConfig(logUid).destUidValue().getD(cx));
+			state Key destUidValue = wait(BackupConfig(logUid).destUidValue().getD(cx.getReference()));
 			state Reference<IBackupContainer> lastBackupContainer =
-			    wait(BackupConfig(logUid).backupContainer().getD(cx));
+			    wait(BackupConfig(logUid).backupContainer().getD(cx.getReference()));
 
 			// Occasionally start yet another backup that might still be running when we restore
 			if (!self->locked && BUGGIFY) {
@@ -523,6 +526,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				try {
 					extraBackup = backupAgent.submitBackup(cx,
 					                                       "file://simfdb/backups/"_sr,
+					                                       {},
 					                                       deterministicRandom()->randomInt(0, 60),
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
@@ -537,7 +541,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				}
 			}
 
-			TEST(!startRestore.isReady()); // Restore starts at specified time
+			CODE_PROBE(!startRestore.isReady(), "Restore starts at specified time");
 			wait(startRestore);
 
 			if (lastBackupContainer && self->performRestore) {
@@ -557,7 +561,9 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				    .detail("RestoreAfter", self->restoreAfter)
 				    .detail("BackupTag", printable(self->backupTag));
 
-				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL());
+				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL(),
+				                                                 lastBackupContainer->getProxy(),
+				                                                 lastBackupContainer->getEncryptionKeyFileName());
 				BackupDescription desc = wait(container->describeBackup());
 
 				Version targetVersion = -1;
@@ -593,6 +599,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						                                       cx,
 						                                       restoreTag,
 						                                       KeyRef(lastBackupContainer->getURL()),
+						                                       lastBackupContainer->getProxy(),
 						                                       WaitForComplete::True,
 						                                       targetVersion,
 						                                       Verbose::True,
@@ -616,6 +623,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					                                       cx,
 					                                       restoreTag,
 					                                       KeyRef(lastBackupContainer->getURL()),
+					                                       lastBackupContainer->getProxy(),
 					                                       self->restoreRanges,
 					                                       WaitForComplete::True,
 					                                       targetVersion,
@@ -646,6 +654,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 							                                             cx,
 							                                             restoreTags[restoreIndex],
 							                                             KeyRef(lastBackupContainer->getURL()),
+							                                             lastBackupContainer->getProxy(),
 							                                             self->restoreRanges,
 							                                             WaitForComplete::True,
 							                                             ::invalidVersion,
@@ -675,6 +684,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 								                                             cx,
 								                                             restoreTags[restoreIndex],
 								                                             KeyRef(lastBackupContainer->getURL()),
+								                                             lastBackupContainer->getProxy(),
 								                                             WaitForComplete::True,
 								                                             ::invalidVersion,
 								                                             Verbose::True,

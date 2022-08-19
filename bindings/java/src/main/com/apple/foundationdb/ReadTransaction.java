@@ -424,6 +424,43 @@ public interface ReadTransaction extends ReadTransactionContext {
 	AsyncIterable<KeyValue> getRange(Range range,
 			int limit, boolean reverse, StreamingMode mode);
 
+	/**
+	 * WARNING: This feature is considered experimental at this time. It is only allowed when using snapshot isolation
+	 * AND disabling read-your-writes.
+	 *
+	 * @see KeySelector
+	 * @see AsyncIterator
+	 *
+	 * @param begin the beginning of the range (inclusive)
+	 * @param end the end of the range (exclusive)
+	 * @param mapper defines how to map a key-value pair (one of the key-value pairs got
+	 *  from the first range query) to a GetRange (or GetValue) request.
+	 *  more details: https://github.com/apple/foundationdb/wiki/Everything-about-GetMappedRange
+	 * @param limit the maximum number of results to return. Limits results to the
+	 *  <i>first</i> keys in the range. Pass {@link #ROW_LIMIT_UNLIMITED} if this query
+	 *  should not limit the number of results. If {@code reverse} is {@code true} rows
+	 *  will be limited starting at the end of the range.
+	 * @param reverse return results starting at the end of the range in reverse order.
+	 *  Reading ranges in reverse is supported natively by the database and should
+	 *  have minimal extra cost.
+	 * @param mode provide a hint about how the results are to be used. This
+	 *  can provide speed improvements or efficiency gains based on the caller's
+	 *  knowledge of the upcoming access pattern.
+	 *
+	 * <p>
+	 *     When converting the result of this query to a list using {@link AsyncIterable#asList()} with the {@code
+	 * ITERATOR} streaming mode, the query is automatically modified to fetch results in larger batches. This is done
+	 * because it is known in advance that the {@link AsyncIterable#asList()} function will fetch all results in the
+	 * range. If a limit is specified, the {@code EXACT} streaming mode will be used, and otherwise it will use {@code
+	 * WANT_ALL}.
+	 *
+	 *     To achieve comparable performance when iterating over an entire range without using {@link
+	 * AsyncIterable#asList()}, the same streaming mode would need to be used.
+	 * </p>
+	 * @return a handle to access the results of the asynchronous call
+	 */
+	AsyncIterable<MappedKeyValue> getMappedRange(KeySelector begin, KeySelector end, byte[] mapper, int limit,
+	                                             int matchIndex, boolean reverse, StreamingMode mode);
 
 	/**
 	 * Gets an estimate for the number of bytes stored in the given range.
@@ -475,6 +512,17 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 * @return a handle to access the results of the asynchronous call
 	 */
 	CompletableFuture<KeyArrayResult> getRangeSplitPoints(Range range, long chunkSize);
+
+	/**
+	 * Gets the blob granule ranges for a given region.
+	 * Returned in batches, requires calling again moving the begin key up.
+	 *
+	 * @param begin beginning of the range (inclusive)
+	 * @param end end of the range (exclusive)
+
+	 * @return list of blob granules in the given range. May not be all.
+	 */
+	 CompletableFuture<KeyRangeArrayResult> getBlobGranuleRanges(byte[] begin, byte[] end, int rowLimit);
 
 	
 	/**

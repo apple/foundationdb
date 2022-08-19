@@ -5,15 +5,15 @@ vexillographer_compile(TARGET ruby_options LANG ruby
 configure_file(fdb.gemspec.cmake fdb.gemspec)
 
 if(NOT FDB_RELEASE)
-  set(prerelease_string "PRERELEASE")
+  set(not_fdb_release_string "SNAPSHOT")
 else()
-  set(prerelease_string "")
+  set(not_fdb_release_string "")
 endif()
 
 set(setup_file fdb-${FDB_VERSION}.gem)
-set(gem_target ${CMAKE_BINARY_DIR}/packages/fdb-${FDB_VERSION}${prerelease_string}.gem)
+set(gem_target ${CMAKE_BINARY_DIR}/packages/fdb-${FDB_VERSION}${not_fdb_release_string}.gem)
 add_custom_command(OUTPUT ${gem_target}
-  COMMAND ${GEM_COMMAND} build fdb.gemspec &&
+  COMMAND ${GEM_COMMAND} build fdb.gemspec --output ${setup_file} &&
           ${CMAKE_COMMAND} -E copy ${setup_file} ${gem_target}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   COMMENT "Building ruby gem")

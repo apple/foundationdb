@@ -668,7 +668,7 @@ Datacenters
 
 FoundationDB is datacenter aware and supports operation across datacenters. In a multiple-datacenter configuration, it is recommended that you set the :ref:`redundancy mode <configuration-choosing-redundancy-mode>` to ``three_datacenter`` and that you set the ``locality_dcid`` parameter for all FoundationDB processes in :ref:`foundationdb.conf <foundationdb-conf>`.
 
-If you specify the ``--datacenter_id`` option to any FoundationDB process in your cluster, you should specify it to all such processes. Processes which do not have a specified datacenter ID on the command line are considered part of a default "unset" datacenter. FoundationDB will incorrectly believe that these processes are failure-isolated from other datacenters, which can reduce performance and fault tolerance.
+If you specify the ``--datacenter-id`` option to any FoundationDB process in your cluster, you should specify it to all such processes. Processes which do not have a specified datacenter ID on the command line are considered part of a default "unset" datacenter. FoundationDB will incorrectly believe that these processes are failure-isolated from other datacenters, which can reduce performance and fault tolerance.
 
 (Re)creating a database
 -----------------------
@@ -761,6 +761,11 @@ You can now remove old client library versions from your clients. This is only t
 
 Version-specific notes on upgrading
 ===================================
+
+Upgrading to 7.1.x
+--------------------
+
+Upgrades to 7.1.0 or later will break any client using ``fdb_transaction_get_range_and_flat_map``, as it is removed in version 7.1.0.
 
 Upgrading from 6.2.x
 --------------------

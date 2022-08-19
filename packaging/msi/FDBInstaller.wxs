@@ -104,6 +104,8 @@
               <Component Id='FDBCLibraryHeader' Guid='{32D846FA-3BA8-4CF6-8777-51DFA1011198}' Win64='yes'>
                 <File Id='FDBCH' Name='fdb_c.h' DiskId='1' Source='$(var.SolutionRoot)bindings\c\foundationdb\fdb_c.h' KeyPath='yes'/>
                 <File Id='FDBCOPTIONSH' Name='fdb_c_options.g.h' DiskId='1' Source='$(var.SolutionRoot)bindings\c\foundationdb\fdb_c_options.g.h'/>
+                <File Id='FDBCTYPES' Name='fdb_c_types.h' DiskId='1' Source='$(var.SolutionRoot)bindings\c\foundationdb\fdb_c_types.h' KeyPath='yes'/>
+                <File Id='FDBCINTERNAL' Name='fdb_c_internal.h' DiskId='1' Source='$(var.SolutionRoot)bindings\c\foundationdb\fdb_c_internal.h'/>
                 <File Id='FDBOPTIONSFILE' Name='fdb.options' DiskId='1' Source='$(var.SolutionRoot)fdbclient\vexillographer\fdb.options'/>
               </Component>
             </Directory>

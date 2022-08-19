@@ -30,6 +30,7 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.function.Function;
@@ -44,11 +45,13 @@ import com.apple.foundationdb.LocalityUtil;
 import com.apple.foundationdb.MutationType;
 import com.apple.foundationdb.Range;
 import com.apple.foundationdb.StreamingMode;
+import com.apple.foundationdb.TenantManagement;
 import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.async.CloseableAsyncIterator;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.Tenant;
 import com.apple.foundationdb.tuple.Tuple;
 
 /**
@@ -197,7 +200,7 @@ public class StackTester {
 				inst.tr.options().setNextWriteNoWriteConflictRange();
 			}
 			else if(op == StackOperation.RESET) {
-				inst.context.newTransaction();
+				inst.context.resetTransaction();
 			}
 			else if(op == StackOperation.CANCEL) {
 				inst.tr.cancel();
@@ -300,12 +303,12 @@ public class StackTester {
 
 				try {
 					Transaction tr = inst.tr.onError(err).join();
-					if(!inst.setTransaction(tr)) {
+					if(!inst.replaceTransaction(tr)) {
 						tr.close();
 					}
 				}
 				catch(Throwable t) {
-					inst.context.newTransaction(); // Other bindings allow reuse of non-retryable transactions, so we need to emulate that behavior.
+					inst.context.resetTransaction(); // Other bindings allow reuse of non-retryable transactions, so we need to emulate that behavior.
 					throw t;
 				}
 
@@ -418,7 +421,41 @@ public class StackTester {
 				double value = ((Number)param).doubleValue();
 				inst.push(ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putDouble(value).array());
 			}
-			else if(op == StackOperation.UNIT_TESTS) {
+			else if (op == StackOperation.TENANT_CREATE) {
+				byte[] tenantName = (byte[])inst.popParam().join();
+				inst.push(TenantManagement.createTenant(inst.context.db, tenantName));
+			}
+			else if (op == StackOperation.TENANT_DELETE) {
+				byte[] tenantName = (byte[])inst.popParam().join();
+				inst.push(TenantManagement.deleteTenant(inst.context.db, tenantName));
+			}
+			else if (op == StackOperation.TENANT_LIST) {
+				List<Object> params = inst.popParams(3).join();
+				byte[] begin = (byte[])params.get(0);
+				byte[] end = (byte[])params.get(1);
+				int limit = StackUtils.getInt(params.get(2));
+				CloseableAsyncIterator<KeyValue> tenantIter = TenantManagement.listTenants(inst.context.db, begin, end, limit);
+				List<byte[]> result = new ArrayList();
+				try {
+					while (tenantIter.hasNext()) {
+						KeyValue next = tenantIter.next();
+						String metadata = new String(next.getValue());
+						assert StackUtils.validTenantMetadata(metadata) : "Invalid Tenant Metadata";
+						result.add(next.getKey());
+					}
+				} finally {
+					tenantIter.close();
+				}
+				inst.push(Tuple.fromItems(result).pack());
+			}
+			else if (op == StackOperation.TENANT_SET_ACTIVE) {
+				byte[] tenantName = (byte[])inst.popParam().join();
+				inst.context.setTenant(Optional.of(tenantName));
+			}
+			else if (op == StackOperation.TENANT_CLEAR_ACTIVE) {
+				inst.context.setTenant(Optional.empty());
+			}
+			else if (op == StackOperation.UNIT_TESTS) {
 				try {
 					inst.context.db.options().setLocationCacheSize(100001);
 					inst.context.db.run(tr -> {
@@ -490,12 +527,13 @@ public class StackTester {
 
 					testWatches(inst.context.db);
 					testLocality(inst.context.db);
+					testTenantTupleNames(inst.context.db);
 				}
 				catch(Exception e) {
 					throw new RuntimeException("Unit tests failed: " + e.getMessage());
 				}
 			}
-			else if(op == StackOperation.LOG_STACK) {
+			else if (op == StackOperation.LOG_STACK) {
 				List<Object> params = inst.popParams(1).join();
 				byte[] prefix = (byte[]) params.get(0);
 
@@ -579,7 +617,7 @@ public class StackTester {
 	private static void executeMutation(Instruction inst, Function<Transaction, Void> r) {
 		// run this with a retry loop (and commit)
 		inst.tcx.run(r);
-		if(inst.isDatabase)
+		if(inst.isDatabase || inst.isTenant)
 			inst.push("RESULT_NOT_PRESENT".getBytes());
 	}
 
@@ -739,6 +777,35 @@ public class StackTester {
 				boundaryKeys.close();
 			}
 		});
+	}
+
+	private static void testTenantTupleNames(Database db) {
+		try {
+			TenantManagement.createTenant(db, Tuple.from("tenant")).join();
+			Tenant tenant = db.openTenant(Tuple.from("tenant"));
+
+			tenant.run(tr -> {
+					tr.set(Tuple.from("hello").pack(), Tuple.from("world").pack());
+					return null;
+			});
+
+			String output = tenant.read(tr -> {
+					byte[] result = tr.get(Tuple.from("hello").pack()).join();
+					return Tuple.fromBytes(result).getString(0);
+			});
+
+			assert output.equals("world");
+
+			tenant.run(tr -> {
+					tr.clear(Tuple.from("hello").pack());
+					return null;
+			});
+
+			TenantManagement.deleteTenant(db, Tuple.from("tenant")).join();
+        }
+		catch(Exception e) {
+			e.printStackTrace();
+		}
 	}
 
 	/**

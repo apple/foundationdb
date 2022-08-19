@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ static inline void initGlobalData() {
 	if (!globalData) {
 		globalData = static_cast<uint8_t*>(allocateFast(globalDataSize));
 	}
-	generateRandomData(globalData, globalDataSize);
+	deterministicRandom()->randomBytes(globalData, globalDataSize);
 }
 
 KeyValueRef getKV(size_t keySize, size_t valueSize) {

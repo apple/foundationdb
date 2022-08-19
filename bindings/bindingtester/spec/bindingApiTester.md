@@ -117,8 +117,8 @@ should simulate it using an anonymous transaction. Remember that set and clear
 operations must immediately commit (with appropriate retry behavior!).
 
 Any error that bubbles out of these operations must be caught. In the event of
-an error, you must push the packed tuple of the string `"ERROR"` and the error
-code (as a string, not an integer).
+an error, you must push the packed tuple of the byte string `"ERROR"` and the
+error code (as a byte string, not an integer).
 
 Some operations may allow you to push future values onto the stack. When popping
 objects from the stack, the future MUST BE waited on and errors caught before
@@ -170,6 +170,13 @@ futures must apply the following rules to the result:
     construct a key range. Then call the `getEstimatedRangeSize` API of 
     the language binding. Make sure the API returns without error. Finally 
     push the string "GOT_ESTIMATED_RANGE_SIZE" onto the stack.
+
+#### GET_RANGE_SPLIT_POINTS
+
+    Pops the top three items off of the stack as BEGIN_KEY, END_KEY and
+    CHUNK_SIZE. Then call the `getRangeSplitPoints` API of the language
+    binding. Make sure the API returns without error. Finally push the string
+    "GOT_RANGE_SPLIT_POINTS" onto the stack.
 
 #### GET_KEY (_SNAPSHOT, _DATABASE)
 

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,6 +40,11 @@ FlowKnobs const* FLOW_KNOBS = &bootstrapGlobalFlowKnobs;
 void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( AUTOMATIC_TRACE_DUMP,                                  1 );
 	init( PREVENT_FAST_SPIN_DELAY,                             .01 );
+	init( HOSTNAME_RESOLVE_INIT_INTERVAL,                      .05 );
+	init( HOSTNAME_RESOLVE_MAX_INTERVAL,                       1.0 );
+	init( HOSTNAME_RECONNECT_INIT_INTERVAL,                    .05 );
+	init( HOSTNAME_RECONNECT_MAX_INTERVAL,                     1.0 );
+	init( ENABLE_COORDINATOR_DNS_CACHE,                      false ); if( randomize && BUGGIFY ) ENABLE_COORDINATOR_DNS_CACHE = true;
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );
 
 	init( DELAY_JITTER_OFFSET,                                 0.9 );
@@ -67,8 +72,17 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( HUGE_ARENA_LOGGING_BYTES,                          100e6 );
 	init( HUGE_ARENA_LOGGING_INTERVAL,                         5.0 );
 
+	init( MEMORY_USAGE_CHECK_INTERVAL,                         1.0 );
+
+	// Chaos testing - enabled for simulation by default
+	init( ENABLE_CHAOS_FEATURES,                       isSimulated );
+	init( CHAOS_LOGGING_INTERVAL,                              5.0 );
+
+
 	init( WRITE_TRACING_ENABLED,                              true ); if( randomize && BUGGIFY ) WRITE_TRACING_ENABLED = false;
-	init( TRACING_SAMPLE_RATE,                                 1.0 ); // Fraction of traces (not spans) to sample (0 means ignore all traces)
+	init( TRACING_SPAN_ATTRIBUTES_ENABLED,                   false ); // Additional K/V and tenant data added to Span Attributes
+	init( TRACING_SAMPLE_RATE,                                 0.0 ); // Fraction of distributed traces (not spans) to sample (0 means ignore all traces)
+	init( TRACING_UDP_LISTENER_ADDR,                   "127.0.0.1" ); // Only applicable if TracerType is set to a network option
 	init( TRACING_UDP_LISTENER_PORT,                          8889 ); // Only applicable if TracerType is set to a network option
 
 	//connectionMonitor
@@ -112,6 +126,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( NETWORK_TEST_REQUEST_COUNT,                            0 ); // 0 -> run forever
 	init( NETWORK_TEST_REQUEST_SIZE,                             1 );
 	init( NETWORK_TEST_SCRIPT_MODE,                          false );
+	init( MAX_CACHED_EXPIRED_TOKENS,                          1024 );
 
 	//AsyncFileCached
 	init( PAGE_CACHE_4K,                                   2LL<<30 );
@@ -140,6 +155,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	//AsyncFileKAIO
 	init( MAX_OUTSTANDING,                                      64 );
 	init( MIN_SUBMIT,                                           10 );
+	init( DISK_METRIC_LOGGING_INTERVAL,                        5.0 );
 
 	init( PAGE_WRITE_CHECKSUM_HISTORY,                           0 ); if( randomize && BUGGIFY ) PAGE_WRITE_CHECKSUM_HISTORY = 10000000;
 	init( DISABLE_POSIX_KERNEL_AIO,                              0 );
@@ -152,6 +168,13 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( BUGGIFY_FLOW_LOCK_RELEASE_DELAY,                     1.0 );
 	init( LOW_PRIORITY_DELAY_COUNT,                              5 );
 	init( LOW_PRIORITY_MAX_DELAY,                              5.0 );
+
+	// HTTP
+	init( HTTP_READ_SIZE,                                 128*1024 );
+	init( HTTP_SEND_SIZE,                                  32*1024 );
+	init( HTTP_VERBOSE_LEVEL,                                    0 );
+	init( HTTP_REQUEST_ID_HEADER,                               "" );
+	init( HTTP_RESPONSE_SKIP_VERIFY_CHECKSUM_FOR_PARTIAL_CONTENT, false );
 
 	//IAsyncFile
 	init( INCREMENTAL_DELETE_TRUNCATE_AMOUNT,                  5e8 ); //500MB
@@ -166,6 +189,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MIN_LOGGED_PRIORITY_BUSY_FRACTION,                  0.05 );
 	init( CERT_FILE_MAX_SIZE,                      5 * 1024 * 1024 );
 	init( READY_QUEUE_RESERVED_SIZE,                          8192 );
+	init( TASKS_PER_REACTOR_CHECK,                             100 );
 
 	//Network
 	init( PACKET_LIMIT,                                  100LL<<20 );
@@ -193,7 +217,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( ZERO_LENGTH_FILE_PAD,                                  1 );
 	init( TRACE_FLUSH_INTERVAL,                               0.25 );
 	init( TRACE_RETRY_OPEN_INTERVAL,						  1.00 );
-	init( MIN_TRACE_SEVERITY,                 isSimulated ? 1 : 10 ); // Related to the trace severity in Trace.h
+	init( MIN_TRACE_SEVERITY,                isSimulated ?  1 : 10 ); // Related to the trace severity in Trace.h
 	init( MAX_TRACE_SUPPRESSIONS,                              1e4 );
 	init( TRACE_DATETIME_ENABLED,                             true ); // trace time in human readable format (always real time)
 	init( TRACE_SYNC_ENABLED,                                    0 );
@@ -203,6 +227,9 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MAX_TRACE_FIELD_LENGTH,                              495 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
 	init( MAX_TRACE_EVENT_LENGTH,                             4000 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
 	init( ALLOCATION_TRACING_ENABLED,                         true );
+	init( SIM_SPEEDUP_AFTER_SECONDS,                           450 );
+	init( MAX_TRACE_LINES,                               1'000'000 );
+	init( CODE_COV_TRACE_EVENT_SEVERITY,                        10 ); // Code coverage TraceEvent severity level
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
@@ -254,6 +281,21 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS,    true );
 	init( HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS,          30 );
 	init( HEALTH_MONITOR_CONNECTION_MAX_CLOSED,                  5 );
+
+	// Encryption
+	init( ENCRYPT_CIPHER_KEY_CACHE_TTL, isSimulated ? 5 * 60 : 10 * 60 );
+	if ( randomize && BUGGIFY) { ENCRYPT_CIPHER_KEY_CACHE_TTL = deterministicRandom()->randomInt(2, 10) * 60; }
+	init( ENCRYPT_KEY_REFRESH_INTERVAL,   isSimulated ? 60 : 8 * 60 );
+	if ( randomize && BUGGIFY) { ENCRYPT_KEY_REFRESH_INTERVAL = deterministicRandom()->randomInt(2, 10); }
+	init( TOKEN_CACHE_SIZE,                                    100 );
+
+	// REST Client
+	init( RESTCLIENT_MAX_CONNECTIONPOOL_SIZE,                   10 );
+	init( RESTCLIENT_CONNECT_TRIES,                             10 );
+	init( RESTCLIENT_CONNECT_TIMEOUT,                           10 );
+	init( RESTCLIENT_MAX_CONNECTION_LIFE,                      120 );
+	init( RESTCLIENT_REQUEST_TRIES,                             10 );
+	init( RESTCLIENT_REQUEST_TIMEOUT_SEC,                      120 );
 }
 // clang-format on
 
@@ -335,6 +377,26 @@ bool Knobs::setKnob(std::string const& knob, std::string const& value) {
 	*string_knobs[knob].value = value;
 	explicitlySetKnobs.insert(toLower(knob));
 	return true;
+}
+
+ParsedKnobValue Knobs::getKnob(const std::string& name) const {
+	if (double_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *double_knobs.at(name).value };
+	}
+	if (int64_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *int64_knobs.at(name).value };
+	}
+	if (int_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *int_knobs.at(name).value };
+	}
+	if (string_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *string_knobs.at(name).value };
+	}
+	if (bool_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *bool_knobs.at(name).value };
+	}
+
+	return ParsedKnobValue{ NoKnobFound() };
 }
 
 bool Knobs::isAtomic(std::string const& knob) const {

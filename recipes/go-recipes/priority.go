@@ -22,12 +22,13 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"math/rand"
+
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
-	"log"
-	"math/rand"
 )
 
 func clear_subspace(trtr fdb.Transactor, sub subspace.Subspace) error {
@@ -117,7 +118,7 @@ func (prty Priority) Peek(trtr fdb.Transactor, max bool) interface{} {
 }
 
 func main() {
-	fdb.MustAPIVersion(710)
+	fdb.MustAPIVersion(720)
 
 	db := fdb.MustOpenDefault()
 

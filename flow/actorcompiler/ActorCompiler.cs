@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -431,10 +431,15 @@ namespace actorcompiler
             writer.WriteLine("public:");
             writer.WriteLine("\tusing FastAllocated<{0}>::operator new;", fullClassName);
             writer.WriteLine("\tusing FastAllocated<{0}>::operator delete;", fullClassName);
+
+            writer.WriteLine("#pragma clang diagnostic push");
+            writer.WriteLine("#pragma clang diagnostic ignored \"-Wdelete-non-virtual-dtor\"");
             if (actor.returnType != null)
                 writer.WriteLine("\tvoid destroy() override {{ ((Actor<{0}>*)this)->~Actor(); operator delete(this); }}", actor.returnType);
             else
                 writer.WriteLine("\tvoid destroy() {{ ((Actor<void>*)this)->~Actor(); operator delete(this); }}");
+            writer.WriteLine("#pragma clang diagnostic pop");
+
             foreach (var cb in callbacks)
                 writer.WriteLine("friend struct {0};", cb.type);
 

@@ -20,39 +20,44 @@ endif()
 
 include(CheckSymbolExists)
 
-set(DISABLE_TLS OFF CACHE BOOL "Don't try to find OpenSSL and always build without TLS support")
-if(DISABLE_TLS)
-  set(WITH_TLS OFF)
-else()
+set(USE_WOLFSSL OFF CACHE BOOL "Build against WolfSSL instead of OpenSSL")
+set(USE_OPENSSL ON CACHE BOOL "Build against OpenSSL")
+if(USE_WOLFSSL)
+  set(WOLFSSL_USE_STATIC_LIBS TRUE)
+  find_package(WolfSSL)
+  if(WOLFSSL_FOUND)
+    set(CMAKE_REQUIRED_INCLUDES ${WOLFSSL_INCLUDE_DIR})
+    add_compile_options(-DHAVE_OPENSSL)
+    add_compile_options(-DHAVE_WOLFSSL)
+  else()
+    message(STATUS "WolfSSL was not found - Will compile without TLS Support")
+    message(STATUS "You can set WOLFSSL_ROOT_DIR to help cmake find it")
+    message(FATAL_ERROR "Unable to find WolfSSL")
+  endif()
+elseif(USE_OPENSSL)
   set(OPENSSL_USE_STATIC_LIBS TRUE)
+  if(WIN32)
+    set(OPENSSL_MSVC_STATIC_RT ON)
+  endif()
   find_package(OpenSSL)
   if(OPENSSL_FOUND)
     set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
-    set(WITH_TLS ON)
     add_compile_options(-DHAVE_OPENSSL)
-    check_symbol_exists("OPENSSL_INIT_NO_ATEXIT" "openssl/crypto.h" OPENSSL_HAS_NO_ATEXIT)
-    if(OPENSSL_HAS_NO_ATEXIT)
-      add_compile_options(-DHAVE_OPENSSL_INIT_NO_AT_EXIT)
-    else()
-      message(STATUS "Found OpenSSL without OPENSSL_INIT_NO_ATEXIT: assuming BoringSSL")
-    endif()
   else()
     message(STATUS "OpenSSL was not found - Will compile without TLS Support")
     message(STATUS "You can set OPENSSL_ROOT_DIR to help cmake find it")
-    set(WITH_TLS OFF)
+    message(FATAL_ERROR "Unable to find OpenSSL")
   endif()
-  if(WIN32)
-    message(STATUS "TLS is temporarilty disabled on Windows while libressl -> openssl transition happens")
-    set(WITH_TLS OFF)
-  endif()
+else()
+  message(FATAL_ERROR "Must set USE_WOLFSSL or USE_OPENSSL")
 endif()
 
 ################################################################################
 # Python Bindings
 ################################################################################
 
-find_package(Python COMPONENTS Interpreter)
-if(Python_Interpreter_FOUND)
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
   set(WITH_PYTHON ON)
 else()
   message(WARNING "Could not found a suitable python interpreter")
@@ -169,6 +174,8 @@ endif()
 ################################################################################
 
 set(SSD_ROCKSDB_EXPERIMENTAL ON CACHE BOOL "Build with experimental RocksDB support")
+set(PORTABLE_ROCKSDB ON CACHE BOOL "Compile RocksDB in portable mode") # Set this to OFF to compile RocksDB with `-march=native`
+set(WITH_LIBURING OFF CACHE BOOL "Build with liburing enabled") # Set this to ON to include liburing
 # RocksDB is currently enabled by default for GCC but does not build with the latest
 # Clang.
 if (SSD_ROCKSDB_EXPERIMENTAL AND GCC)
@@ -186,10 +193,9 @@ endif()
 find_package(toml11 QUIET)
 if(toml11_FOUND)
   add_library(toml11_target INTERFACE)
-  add_dependencies(toml11_target INTERFACE toml11::toml11)
+  target_link_libraries(toml11_target INTERFACE toml11::toml11)
 else()
-  include(ExternalProject)
-
+  include(ExternalProject)  
   ExternalProject_add(toml11Project
     URL "https://github.com/ToruNiina/toml11/archive/v3.4.0.tar.gz"
     URL_HASH SHA256=bc6d733efd9216af8c119d8ac64a805578c79cc82b813e4d1d880ca128bd154d
@@ -200,6 +206,32 @@ else()
   add_library(toml11_target INTERFACE)
   add_dependencies(toml11_target toml11Project)
   target_include_directories(toml11_target SYSTEM INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/toml11/include)
+endif()
+
+################################################################################
+# Coroutine implementation
+################################################################################
+
+set(DEFAULT_COROUTINE_IMPL boost)
+if(WIN32)
+  # boost coroutine not available in windows build environment for now.
+  set(DEFAULT_COROUTINE_IMPL libcoro)
+elseif(NOT APPLE AND NOT USE_ASAN AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86")
+  # revert to libcoro for x86 linux while we investigate a performance regression
+  set(DEFAULT_COROUTINE_IMPL libcoro)
+endif()
+
+set(COROUTINE_IMPL ${DEFAULT_COROUTINE_IMPL} CACHE STRING "Which coroutine implementation to use. Options are boost and libcoro")
+
+################################################################################
+# AWS SDK
+################################################################################
+
+set(BUILD_AWS_BACKUP OFF CACHE BOOL "Build AWS S3 SDK backup client")
+if (BUILD_AWS_BACKUP)
+  set(WITH_AWS_BACKUP ON)
+else()
+  set(WITH_AWS_BACKUP OFF)
 endif()
 
 ################################################################################
@@ -217,16 +249,16 @@ function(print_components)
   message(STATUS "Build Java Bindings:                  ${WITH_JAVA_BINDING}")
   message(STATUS "Build Go bindings:                    ${WITH_GO_BINDING}")
   message(STATUS "Build Ruby bindings:                  ${WITH_RUBY_BINDING}")
-  message(STATUS "Build with TLS support:               ${WITH_TLS}")
   message(STATUS "Build Documentation (make html):      ${WITH_DOCUMENTATION}")
   message(STATUS "Build Python sdist (make package):    ${WITH_PYTHON_BINDING}")
   message(STATUS "Configure CTest (depends on Python):  ${WITH_PYTHON}")
   message(STATUS "Build with RocksDB:                   ${WITH_ROCKSDB_EXPERIMENTAL}")
+  message(STATUS "Build with AWS SDK:                   ${WITH_AWS_BACKUP}")
   message(STATUS "=========================================")
 endfunction()
 
 if(FORCE_ALL_COMPONENTS)
-  if(NOT WITH_C_BINDING OR NOT WITH_JAVA_BINDING OR NOT WITH_TLS OR NOT WITH_GO_BINDING OR NOT WITH_RUBY_BINDING OR NOT WITH_PYTHON_BINDING OR NOT WITH_DOCUMENTATION)
+  if(NOT WITH_C_BINDING OR NOT WITH_JAVA_BINDING OR NOT WITH_GO_BINDING OR NOT WITH_RUBY_BINDING OR NOT WITH_PYTHON_BINDING OR NOT WITH_DOCUMENTATION)
     print_components()
     message(FATAL_ERROR "FORCE_ALL_COMPONENTS is set but not all dependencies could be found")
   endif()

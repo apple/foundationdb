@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -140,6 +140,16 @@ std::vector<TLogInterface> LogSystemConfig::allLocalLogs(bool includeSatellite) 
 		}
 	}
 	return results;
+}
+
+int LogSystemConfig::numLogs() const {
+	int numLogs = 0;
+	for (auto& tLogSet : tLogs) {
+		if (tLogSet.isLocal == true) {
+			numLogs += tLogSet.tLogs.size();
+		}
+	}
+	return numLogs;
 }
 
 std::vector<TLogInterface> LogSystemConfig::allPresentLogs() const {

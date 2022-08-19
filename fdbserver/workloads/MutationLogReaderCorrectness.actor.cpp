@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <limits>
+#include "fmt/format.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
@@ -78,9 +79,9 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 		state Transaction tr(cx);
 		state int iStart = 0;
 		state int batchSize = 1000;
-		printf("Records: %d\n", self->records);
-		printf("BeginVersion: %" PRId64 "\n", self->beginVersion);
-		printf("EndVersion: %" PRId64 "\n", self->endVersion);
+		fmt::print("Records: {}\n", self->records);
+		fmt::print("BeginVersion: {}\n", self->beginVersion);
+		fmt::print("EndVersion: {}\n", self->endVersion);
 
 		while (iStart < self->records) {
 			loop {

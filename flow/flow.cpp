@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,11 +20,16 @@
 
 #include "flow/flow.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/Error.h"
 #include "flow/UnitTest.h"
 #include "flow/rte_memcpy.h"
-#include "flow/folly_memcpy.h"
+#ifdef WITH_FOLLY_MEMCPY
+#include "folly_memcpy.h"
+#endif
 #include <stdarg.h>
 #include <cinttypes>
+#include <openssl/err.h>
+#include <openssl/rand.h>
 
 std::atomic<bool> startSampling = false;
 LineageReference rootLineage;
@@ -69,7 +74,7 @@ using namespace std::literals;
 
 const std::string_view StackLineage::name = "StackLineage"sv;
 
-#if (defined(__linux__) || defined(__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER)
+#if (defined(__linux__) || defined(__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER) && !DEBUG_DETERMINISM
 // For benchmarking; need a version of rte_memcpy that doesn't live in the same compilation unit as the test.
 void* rte_memcpy_noinline(void* __restrict __dest, const void* __restrict __src, size_t __n) {
 	return rte_memcpy(__dest, __src, __n);
@@ -86,9 +91,9 @@ void* rte_memcpy_noinline(void* __restrict __dest, const void* __restrict __src,
 }
 #endif // (defined (__linux__) || defined (__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER)
 
-INetwork* g_network = 0;
+INetwork* g_network = nullptr;
 
-FILE* randLog = 0;
+FILE* randLog = nullptr;
 thread_local Reference<IRandom> seededRandom;
 Reference<IRandom> seededDebugRandom;
 uint64_t debug_lastLoadBalanceResultEndpointToken = 0;
@@ -127,6 +132,19 @@ UID UID::fromString(std::string const& s) {
 	uint64_t a = 0, b = 0;
 	int r = sscanf(s.c_str(), "%16" SCNx64 "%16" SCNx64, &a, &b);
 	ASSERT(r == 2);
+	return UID(a, b);
+}
+
+UID UID::fromStringThrowsOnFailure(std::string const& s) {
+	if (s.size() != 32) {
+		// invalid string size
+		throw operation_failed();
+	}
+	uint64_t a = 0, b = 0;
+	int r = sscanf(s.c_str(), "%16" SCNx64 "%16" SCNx64, &a, &b);
+	if (r != 2) {
+		throw operation_failed();
+	}
 	return UID(a, b);
 }
 
@@ -246,7 +264,7 @@ int vsformat(std::string& outputString, const char* form, va_list args) {
 		return -1;
 	}
 
-	TEST(true); // large format result
+	CODE_PROBE(true, "large format result");
 
 	outputString.resize(size + 1);
 	size = vsnprintf(&outputString[0], outputString.size(), form, args);
@@ -359,6 +377,77 @@ void enableBuggify(bool enabled, BuggifyType type) {
 	buggifyActivated[int(type)] = enabled;
 }
 
+// Make OpenSSL use DeterministicRandom as RNG source such that simulation runs stay deterministic w/ e.g. signature ops
+void bindDeterministicRandomToOpenssl() {
+	// TODO: implement ifdef branch for 3.x using provider API
+#ifndef OPENSSL_IS_BORINGSSL
+	static const RAND_METHOD method = {
+		// replacement for RAND_seed(), which reseeds OpenSSL RNG
+		[](const void*, int) -> int { return 1; },
+		// replacement for RAND_bytes(), which fills given buffer with random byte sequence
+		[](unsigned char* buf, int length) -> int {
+		    if (g_network)
+			    ASSERT_ABORT(g_network->isSimulated());
+		    deterministicRandom()->randomBytes(buf, length);
+		    return 1;
+		},
+		// replacement for RAND_cleanup(), a no-op for simulation
+		[]() -> void {},
+		// replacement for RAND_add(), which reseeds OpenSSL RNG with randomness hint
+		[](const void*, int, double) -> int { return 1; },
+		// replacement for default pseudobytes getter (same as RAND_bytes by default)
+		[](unsigned char* buf, int length) -> int {
+		    if (g_network)
+			    ASSERT_ABORT(g_network->isSimulated());
+		    deterministicRandom()->randomBytes(buf, length);
+		    return 1;
+		},
+		// status function for PRNG readiness check
+		[]() -> int { return 1; },
+	};
+
+	if (1 != ::RAND_set_rand_method(&method)) {
+		auto ec = ::ERR_get_error();
+		char msg[256]{
+			0,
+		};
+		if (ec) {
+			::ERR_error_string_n(ec, msg, sizeof(msg));
+		}
+		fprintf(stderr,
+		        "ERROR: Failed to bind DeterministicRandom to OpenSSL RNG\n"
+		        "       OpenSSL error message: '%s'\n",
+		        msg);
+		throw internal_error();
+	} else {
+		printf("DeterministicRandom successfully bound to OpenSSL RNG\n");
+	}
+#else // OPENSSL_IS_BORINGSSL
+	static const RAND_METHOD method = {
+		[](const void*, int) -> void {},
+		[](unsigned char* buf, unsigned long length) -> int {
+		    if (g_network)
+			    ASSERT_ABORT(g_network->isSimulated());
+		    ASSERT(length <= std::numeric_limits<int>::max());
+		    deterministicRandom()->randomBytes(buf, length);
+		    return 1;
+		},
+		[]() -> void {},
+		[](const void*, int, double) -> void {},
+		[](unsigned char* buf, unsigned long length) -> int {
+		    if (g_network)
+			    ASSERT_ABORT(g_network->isSimulated());
+		    ASSERT(length <= std::numeric_limits<int>::max());
+		    deterministicRandom()->randomBytes(buf, length);
+		    return 1;
+		},
+		[]() -> int { return 1; },
+	};
+	::RAND_set_rand_method(&method);
+	printf("DeterministicRandom successfully bound to OpenSSL RNG\n");
+#endif // OPENSSL_IS_BORINGSSL
+}
+
 namespace {
 // Simple message for flatbuffers unittests
 struct Int {
@@ -445,5 +534,11 @@ TEST_CASE("/flow/FlatBuffers/Standalone") {
 		reader.deserialize(out);
 		ASSERT(in == out);
 	}
+	return Void();
+}
+
+// we need to make sure at least one test of each prefix exists, otherwise
+// the noSim test fails if we compile without RocksDB
+TEST_CASE("noSim/noopTest") {
 	return Void();
 }

@@ -10,6 +10,7 @@ env_set(USE_GCOV OFF BOOL "Compile with gcov instrumentation")
 env_set(USE_MSAN OFF BOOL "Compile with memory sanitizer. To avoid false positives you need to dynamically link to a msan-instrumented libc++ and libc++abi, which you must compile separately. See https://github.com/google/sanitizers/wiki/MemorySanitizerLibcxxHowTo#instrumented-libc.")
 env_set(USE_TSAN OFF BOOL "Compile with thread sanitizer. It is recommended to dynamically link to a tsan-instrumented libc++ and libc++abi, which you can compile separately.")
 env_set(USE_UBSAN OFF BOOL "Compile with undefined behavior sanitizer")
+env_set(FDB_RELEASE_CANDIDATE OFF BOOL "This is a building of a release candidate")
 env_set(FDB_RELEASE OFF BOOL "This is a building of a final release")
 env_set(USE_CCACHE OFF BOOL "Use ccache for compilation if available")
 env_set(RELATIVE_DEBUG_PATHS OFF BOOL "Use relative file paths in debug info")
@@ -21,11 +22,22 @@ use_libcxx(_use_libcxx)
 env_set(USE_LIBCXX "${_use_libcxx}" BOOL "Use libc++")
 static_link_libcxx(_static_link_libcxx)
 env_set(STATIC_LINK_LIBCXX "${_static_link_libcxx}" BOOL "Statically link libstdcpp/libc++")
+env_set(TRACE_PC_GUARD_INSTRUMENTATION_LIB "" STRING "Path to a library containing an implementation for __sanitizer_cov_trace_pc_guard. See https://clang.llvm.org/docs/SanitizerCoverage.html for more info.")
+env_set(PROFILE_INSTR_GENERATE OFF BOOL "If set, build FDB as an instrumentation build to generate profiles")
+env_set(PROFILE_INSTR_USE "" STRING "If set, build FDB with profile")
 
 set(USE_SANITIZER OFF)
 if(USE_ASAN OR USE_VALGRIND OR USE_MSAN OR USE_TSAN OR USE_UBSAN)
   set(USE_SANITIZER ON)
 endif()
+
+set(jemalloc_default ON)
+# We don't want to use jemalloc on Windows
+# Nor on FreeBSD, where jemalloc is the default system allocator
+if(USE_SANITIZER OR WIN32 OR (CMAKE_SYSTEM_NAME STREQUAL "FreeBSD") OR APPLE)
+  set(jemalloc_default OFF)
+endif()
+env_set(USE_JEMALLOC ${jemalloc_default} BOOL "Link with jemalloc")
 
 if(USE_LIBCXX AND STATIC_LINK_LIBCXX AND NOT USE_LD STREQUAL "LLD")
   message(FATAL_ERROR "Unsupported configuration: STATIC_LINK_LIBCXX with libc++ only works if USE_LD=LLD")
@@ -52,12 +64,12 @@ add_compile_definitions(BOOST_ERROR_CODE_HEADER_ONLY BOOST_SYSTEM_NO_DEPRECATED)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-include_directories(${CMAKE_SOURCE_DIR})
-include_directories(${CMAKE_BINARY_DIR})
-
 if(WIN32)
   add_definitions(-DBOOST_USE_WINDOWS_H)
   add_definitions(-DWIN32_LEAN_AND_MEAN)
+  add_definitions(-D_ITERATOR_DEBUG_LEVEL=0)
+  add_definitions(-DNOGDI) # WinGDI.h defines macro ERROR
+  add_definitions(-D_USE_MATH_DEFINES) # Math constants
 endif()
 
 if (USE_CCACHE)
@@ -104,11 +116,12 @@ if(WIN32)
 else()
   set(GCC NO)
   set(CLANG NO)
-  set(ICC NO)
-  if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
+  set(ICX NO)
+  # CMAKE_CXX_COMPILER_ID is set to Clang even if CMAKE_CXX_COMPILER points to ICPX, so we have to check the compiler too.
+  if (${CMAKE_CXX_COMPILER} MATCHES ".*icpx")
+    set(ICX YES)
+  elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
     set(CLANG YES)
-  elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
-    set(ICC YES)
   else()
     # This is not a very good test. However, as we do not really support many architectures
     # this is good enough for now
@@ -154,6 +167,10 @@ else()
   # we always compile with debug symbols. CPack will strip them out
   # and create a debuginfo rpm
   add_compile_options(-ggdb -fno-omit-frame-pointer)
+  if(TRACE_PC_GUARD_INSTRUMENTATION_LIB)
+      add_compile_options(-fsanitize-coverage=trace-pc-guard)
+      link_libraries(${TRACE_PC_GUARD_INSTRUMENTATION_LIB})
+  endif()
   if(USE_ASAN)
     list(APPEND SANITIZER_COMPILE_OPTIONS
       -fsanitize=address
@@ -175,6 +192,7 @@ else()
   endif()
 
   if(USE_GCOV)
+    add_compile_options(--coverage)
     add_link_options(--coverage)
   endif()
 
@@ -211,7 +229,7 @@ else()
   endif()
   if(STATIC_LINK_LIBCXX)
     if (NOT USE_LIBCXX AND NOT APPLE)
-      add_link_options(-static-libstdc++ -static-libgcc)
+	add_link_options(-static-libstdc++ -static-libgcc)
     endif()
   endif()
   # # Instruction sets we require to be supported by the CPU
@@ -259,7 +277,7 @@ else()
   # for more information.
   #add_compile_options(-fno-builtin-memcpy)
 
-  if (CLANG)
+  if (CLANG OR ICX)
     add_compile_options()
     if (APPLE OR USE_LIBCXX)
       add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
@@ -282,17 +300,28 @@ else()
       -Woverloaded-virtual
       -Wshift-sign-overflow
       # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 11
-      -Wno-delete-non-virtual-dtor
-      -Wno-format
       -Wno-sign-compare
       -Wno-undefined-var-template
       -Wno-unknown-warning-option
       -Wno-unused-parameter
+      -Wno-constant-logical-operand
       )
     if (USE_CCACHE)
       add_compile_options(
         -Wno-register
         -Wno-unused-command-line-argument)
+    endif()
+    if (PROFILE_INSTR_GENERATE)
+      add_compile_options(-fprofile-instr-generate)
+      add_link_options(-fprofile-instr-generate)
+    endif()
+    if (NOT (PROFILE_INSTR_USE STREQUAL ""))
+      if (PROFILE_INSTR_GENERATE)
+          message(FATAL_ERROR "Can't set both PROFILE_INSTR_GENERATE and PROFILE_INSTR_USE")
+      endif()
+      add_compile_options(-Wno-error=profile-instr-out-of-date -Wno-error=profile-instr-unprofiled)
+      add_compile_options(-fprofile-instr-use=${PROFILE_INSTR_USE})
+      add_link_options(-fprofile-instr-use=${PROFILE_INSTR_USE})
     endif()
   endif()
   if (USE_WERROR)
@@ -303,9 +332,6 @@ else()
     # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
     # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
     add_compile_options(-Wno-attributes)
-  elseif(ICC)
-    add_compile_options(-wd1879 -wd1011)
-    add_link_options(-static-intel)
   endif()
   add_compile_options(-Wno-error=format
     -Wunused-variable
@@ -313,7 +339,7 @@ else()
     -fvisibility=hidden
     -Wreturn-type
     -fPIC)
-  if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86" AND NOT CLANG)
+  if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86" AND NOT CLANG AND NOT ICX)
     add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wclass-memaccess>)
   endif()
   if (GPERFTOOLS_FOUND AND GCC)
@@ -323,6 +349,15 @@ else()
       -fno-builtin-realloc
       -fno-builtin-free)
   endif()
+  
+  if (ICX)
+    find_library(CXX_LIB NAMES c++ PATHS "/usr/local/lib" REQUIRED)
+    find_library(CXX_ABI_LIB NAMES c++abi PATHS "/usr/local/lib" REQUIRED)
+    add_compile_options($<$<COMPILE_LANGUAGE:C>:-ffp-contract=on>)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=on>)
+    # No libc++ and libc++abi in Intel LIBRARY_PATH
+    link_libraries(${CXX_LIB} ${CXX_ABI_LIB})
+  endif()
 
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
     # Graviton2 or later
@@ -330,6 +365,9 @@ else()
     add_compile_options(-march=armv8.2-a+crc+simd)
   endif()
 
+  if (CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
+    add_compile_options(-m64 -mcpu=power9 -mtune=power9 -DNO_WARN_X86_INTRINSICS)
+  endif()
   # Check whether we can use dtrace probes
   include(CheckSymbolExists)
   check_symbol_exists(DTRACE_PROBE sys/sdt.h SUPPORT_DTRACE)
@@ -339,9 +377,19 @@ else()
     set(DTRACE_PROBES 1)
   endif()
 
-  if(CMAKE_COMPILER_IS_GNUCXX)
-    set(USE_LTO OFF CACHE BOOL "Do link time optimization")
-    if (USE_LTO)
+  set(USE_LTO OFF CACHE BOOL "Do link time optimization")
+  if (USE_LTO)
+    if (CLANG)
+      set(CLANG_LTO_STRATEGY "Thin" CACHE STRING "LLVM LTO strategy (Thin, or Full)")
+      if (CLANG_LTO_STRATEGY STREQUAL "Full")
+        add_compile_options($<$<CONFIG:Release>:-flto=full>)
+      else()
+        add_compile_options($<$<CONFIG:Release>:-flto=thin>)
+      endif()
+      set(CMAKE_RANLIB "llvm-ranlib")
+      set(CMAKE_AR "llvm-ar")
+    endif()
+    if(CMAKE_COMPILER_IS_GNUCXX)
       add_compile_options($<$<CONFIG:Release>:-flto>)
       set(CMAKE_AR  "gcc-ar")
       set(CMAKE_C_ARCHIVE_CREATE "<CMAKE_AR> qcs <TARGET> <LINK_FLAGS> <OBJECTS>")

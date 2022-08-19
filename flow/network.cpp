@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "Arena.h"
+#include "flow/Arena.h"
 #include "boost/asio.hpp"
 
 #include "flow/network.h"
@@ -63,18 +63,24 @@ bool IPAddress::isValid() const {
 	return std::get<uint32_t>(addr) != 0;
 }
 
+FDB_DEFINE_BOOLEAN_PARAM(NetworkAddressFromHostname);
+
 NetworkAddress NetworkAddress::parse(std::string const& s) {
 	if (s.empty()) {
 		throw connection_string_invalid();
 	}
 
 	bool isTLS = false;
-	std::string f;
-	if (s.size() > 4 && strcmp(s.c_str() + s.size() - 4, ":tls") == 0) {
+	NetworkAddressFromHostname fromHostname = NetworkAddressFromHostname::False;
+	std::string f = s;
+	const auto& pos = f.find("(fromHostname)");
+	if (pos != std::string::npos) {
+		fromHostname = NetworkAddressFromHostname::True;
+		f = f.substr(0, pos);
+	}
+	if (f.size() > 4 && strcmp(f.c_str() + f.size() - 4, ":tls") == 0) {
 		isTLS = true;
-		f = s.substr(0, s.size() - 4);
-	} else {
-		f = s;
+		f = f.substr(0, f.size() - 4);
 	}
 
 	if (f[0] == '[') {
@@ -89,13 +95,13 @@ NetworkAddress NetworkAddress::parse(std::string const& s) {
 		if (!addr.present()) {
 			throw connection_string_invalid();
 		}
-		return NetworkAddress(addr.get(), port, true, isTLS);
+		return NetworkAddress(addr.get(), port, true, isTLS, fromHostname);
 	} else {
 		// TODO: Use IPAddress::parse
 		int a, b, c, d, port, count = -1;
 		if (sscanf(f.c_str(), "%d.%d.%d.%d:%d%n", &a, &b, &c, &d, &port, &count) < 5 || count != f.size())
 			throw connection_string_invalid();
-		return NetworkAddress((a << 24) + (b << 16) + (c << 8) + d, port, true, isTLS);
+		return NetworkAddress((a << 24) + (b << 16) + (c << 8) + d, port, true, isTLS, fromHostname);
 	}
 }
 
@@ -111,19 +117,23 @@ Optional<NetworkAddress> NetworkAddress::parseOptional(std::string const& s) {
 std::vector<NetworkAddress> NetworkAddress::parseList(std::string const& addrs) {
 	// Split addrs on ',' and parse them individually
 	std::vector<NetworkAddress> coord;
-	for (int p = 0; p <= addrs.size();) {
+	for (int p = 0; p < addrs.length();) {
 		int pComma = addrs.find_first_of(',', p);
-		if (pComma == addrs.npos)
-			pComma = addrs.size();
-		NetworkAddress parsedAddress = NetworkAddress::parse(addrs.substr(p, pComma - p));
-		coord.push_back(parsedAddress);
+		if (pComma == addrs.npos) {
+			pComma = addrs.length();
+		}
+		coord.push_back(NetworkAddress::parse(addrs.substr(p, pComma - p)));
 		p = pComma + 1;
 	}
 	return coord;
 }
 
 std::string NetworkAddress::toString() const {
-	return formatIpPort(ip, port) + (isTLS() ? ":tls" : "");
+	std::string ipString = formatIpPort(ip, port) + (isTLS() ? ":tls" : "");
+	if (fromHostname) {
+		return ipString + "(fromHostname)";
+	}
+	return ipString;
 }
 
 std::string toIPVectorString(const std::vector<uint32_t>& ips) {
@@ -151,15 +161,129 @@ std::string formatIpPort(const IPAddress& ip, uint16_t port) {
 	return format(patt, ip.toString().c_str(), port);
 }
 
+Optional<std::vector<NetworkAddress>> DNSCache::find(const std::string& host, const std::string& service) {
+	auto it = hostnameToAddresses.find(host + ":" + service);
+	if (it != hostnameToAddresses.end()) {
+		return it->second;
+	}
+	return {};
+}
+
+void DNSCache::add(const std::string& host, const std::string& service, const std::vector<NetworkAddress>& addresses) {
+	hostnameToAddresses[host + ":" + service] = addresses;
+}
+
+void DNSCache::remove(const std::string& host, const std::string& service) {
+	auto it = hostnameToAddresses.find(host + ":" + service);
+	if (it != hostnameToAddresses.end()) {
+		hostnameToAddresses.erase(it);
+	}
+}
+
+void DNSCache::clear() {
+	hostnameToAddresses.clear();
+}
+
+std::string DNSCache::toString() {
+	std::string ret;
+	for (auto it = hostnameToAddresses.begin(); it != hostnameToAddresses.end(); ++it) {
+		if (it != hostnameToAddresses.begin()) {
+			ret += ';';
+		}
+		ret += it->first + ',';
+		const std::vector<NetworkAddress>& addresses = it->second;
+		for (int i = 0; i < addresses.size(); ++i) {
+			ret += addresses[i].toString();
+			if (i != addresses.size() - 1) {
+				ret += ',';
+			}
+		}
+	}
+	return ret;
+}
+
+DNSCache DNSCache::parseFromString(const std::string& s) {
+	std::map<std::string, std::vector<NetworkAddress>> dnsCache;
+
+	for (int p = 0; p < s.length();) {
+		int pSemiColumn = s.find_first_of(';', p);
+		if (pSemiColumn == s.npos) {
+			pSemiColumn = s.length();
+		}
+		std::string oneMapping = s.substr(p, pSemiColumn - p);
+
+		std::string hostname;
+		std::vector<NetworkAddress> addresses;
+		for (int i = 0; i < oneMapping.length();) {
+			int pComma = oneMapping.find_first_of(',', i);
+			if (pComma == oneMapping.npos) {
+				pComma = oneMapping.length();
+			}
+			if (!i) {
+				// The first part is hostname
+				hostname = oneMapping.substr(i, pComma - i);
+			} else {
+				addresses.push_back(NetworkAddress::parse(oneMapping.substr(i, pComma - i)));
+			}
+			i = pComma + 1;
+		}
+		dnsCache[hostname] = addresses;
+		p = pSemiColumn + 1;
+	}
+
+	return DNSCache(dnsCache);
+}
+
+TEST_CASE("/flow/DNSCache") {
+	DNSCache dnsCache;
+	std::vector<NetworkAddress> networkAddresses;
+	NetworkAddress address1(IPAddress(0x13131313), 1), address2(IPAddress(0x14141414), 2);
+	networkAddresses.push_back(address1);
+	networkAddresses.push_back(address2);
+	dnsCache.add("testhost1", "port1", networkAddresses);
+	ASSERT(dnsCache.find("testhost1", "port1").present());
+	ASSERT(!dnsCache.find("testhost1", "port2").present());
+	std::vector<NetworkAddress> resolvedNetworkAddresses = dnsCache.find("testhost1", "port1").get();
+	ASSERT(resolvedNetworkAddresses.size() == 2);
+	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address1) !=
+	       resolvedNetworkAddresses.end());
+	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address2) !=
+	       resolvedNetworkAddresses.end());
+	dnsCache.remove("testhost1", "port1");
+	ASSERT(!dnsCache.find("testhost1", "port1").present());
+	dnsCache.add("testhost1", "port2", networkAddresses);
+	ASSERT(dnsCache.find("testhost1", "port2").present());
+	dnsCache.clear();
+	ASSERT(!dnsCache.find("testhost1", "port2").present());
+
+	return Void();
+}
+
+TEST_CASE("/flow/DNSCacheParsing") {
+	std::string dnsCacheString;
+	ASSERT(DNSCache::parseFromString(dnsCacheString).toString() == dnsCacheString);
+
+	dnsCacheString = "testhost1:port1,[::1]:4800:tls(fromHostname)";
+	ASSERT(DNSCache::parseFromString(dnsCacheString).toString() == dnsCacheString);
+
+	dnsCacheString = "testhost1:port1,[::1]:4800,[2001:db8:85a3::8a2e:370:7334]:4800;testhost2:port2,[2001:db8:85a3::"
+	                 "8a2e:370:7334]:4800:tls(fromHostname),8.8.8.8:12";
+	ASSERT(DNSCache::parseFromString(dnsCacheString).toString() == dnsCacheString);
+
+	return Void();
+}
+
 Future<Reference<IConnection>> INetworkConnections::connect(const std::string& host,
                                                             const std::string& service,
-                                                            bool useTLS) {
+                                                            bool isTLS) {
 	// Use map to create an actor that returns an endpoint or throws
 	Future<NetworkAddress> pickEndpoint =
 	    map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
-		    NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
-		    if (useTLS)
+		    NetworkAddress addr = INetworkConnections::pickOneAddress(addresses);
+		    addr.fromHostname = true;
+		    if (isTLS) {
 			    addr.flags = NetworkAddress::FLAG_TLS;
+		    }
 		    return addr;
 	    });
 
@@ -169,7 +293,7 @@ Future<Reference<IConnection>> INetworkConnections::connect(const std::string& h
 	                std::function<Future<Reference<IConnection>>(NetworkAddress const&)>,
 	                Reference<IConnection>>(
 	    pickEndpoint,
-	    [=](NetworkAddress const& addr) -> Future<Reference<IConnection>> { return connectExternal(addr, host); });
+	    [=](NetworkAddress const& addr) -> Future<Reference<IConnection>> { return connectExternal(addr); });
 }
 
 IUDPSocket::~IUDPSocket() {}
@@ -185,15 +309,18 @@ TEST_CASE("/flow/network/ipaddress") {
 		auto addrCompressed = "[2001:db8:85a3::8a2e:370:7334]:4800";
 		ASSERT(addrParsed.isV6());
 		ASSERT(!addrParsed.isTLS());
+		ASSERT(addrParsed.fromHostname == false);
+		ASSERT(addrParsed.toString() == addrCompressed);
 		ASSERT(addrParsed.toString() == addrCompressed);
 	}
 
 	{
-		auto addr = "[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:4800:tls";
+		auto addr = "[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:4800:tls(fromHostname)";
 		auto addrParsed = NetworkAddress::parse(addr);
-		auto addrCompressed = "[2001:db8:85a3::8a2e:370:7334]:4800:tls";
+		auto addrCompressed = "[2001:db8:85a3::8a2e:370:7334]:4800:tls(fromHostname)";
 		ASSERT(addrParsed.isV6());
 		ASSERT(addrParsed.isTLS());
+		ASSERT(addrParsed.fromHostname == true);
 		ASSERT(addrParsed.toString() == addrCompressed);
 	}
 
@@ -216,6 +343,24 @@ TEST_CASE("/flow/network/ipaddress") {
 		auto addrParsed = IPAddress::parse(addr);
 		ASSERT(!addrParsed.present());
 	}
+
+	return Void();
+}
+
+TEST_CASE("/flow/network/ipV6Preferred") {
+	std::vector<NetworkAddress> addresses;
+	for (int i = 0; i < 50; ++i) {
+		std::string s = fmt::format("{}.{}.{}.{}:{}", i, i, i, i, i);
+		addresses.push_back(NetworkAddress::parse(s));
+	}
+	std::string ipv6 = "[2001:db8:85a3::8a2e:370:7334]:4800";
+	addresses.push_back(NetworkAddress::parse(ipv6));
+	for (int i = 50; i < 100; ++i) {
+		std::string s = fmt::format("{}.{}.{}.{}:{}", i, i, i, i, i);
+		addresses.push_back(NetworkAddress::parse(s));
+	}
+	// Confirm IPv6 is always preferred.
+	ASSERT(INetworkConnections::pickOneAddress(addresses).toString() == ipv6);
 
 	return Void();
 }

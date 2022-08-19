@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 #include <cinttypes>
 
 #include "boost/lexical_cast.hpp"
+#include "fmt/format.h"
 
 #include "fdbcli/fdbcli.actor.h"
 
@@ -55,7 +56,7 @@ ACTOR Future<Void> printHealthyZone(Reference<IDatabase> db) {
 			} else {
 				std::string zoneId = res[0].key.removePrefix(fdb_cli::maintenanceSpecialKeyRange.begin).toString();
 				int64_t seconds = static_cast<int64_t>(boost::lexical_cast<double>(res[0].value.toString()));
-				printf("Maintenance for zone %s will continue for %" PRId64 " seconds.\n", zoneId.c_str(), seconds);
+				fmt::print("Maintenance for zone {0} will continue for {1} seconds.\n", zoneId, seconds);
 			}
 			return Void();
 		} catch (Error& e) {

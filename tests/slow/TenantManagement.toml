@@ -1,0 +1,16 @@
+[configuration]
+allowDefaultTenant = false
+allowDisablingTenants = false
+allowCreatingTenants = false
+extraDatabaseMode = 'Single'
+
+[[test]]
+testTitle = 'TenantManagementTest'
+clearAfterTest = true
+timeout = 2100
+runSetup = true
+
+    [[test.workload]]
+    testName = 'TenantManagement'
+    maxTenants = 1000
+    testDuration = 120

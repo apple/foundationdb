@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -192,8 +192,15 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 					                LiteralStringRef("\xff\xff").withPrefix(conflictingKeysRange.begin));
 					// The getRange here using the special key prefix "\xff\xff/transaction/conflicting_keys/" happens
 					// locally Thus, the error handling is not needed here
-					Future<RangeResult> conflictingKeyRangesFuture = tr2->getRange(ckr, CLIENT_KNOBS->TOO_MANY);
+					state Future<RangeResult> conflictingKeyRangesFuture = tr2->getRange(ckr, CLIENT_KNOBS->TOO_MANY);
 					ASSERT(conflictingKeyRangesFuture.isReady());
+
+					wait(validateSpecialSubrangeRead(tr2.getPtr(),
+					                                 firstGreaterOrEqual(ckr.begin),
+					                                 firstGreaterOrEqual(ckr.end),
+					                                 GetRangeLimits(),
+					                                 Reverse::False,
+					                                 conflictingKeyRangesFuture.get()));
 
 					tr2 = makeReference<ReadYourWritesTransaction>(cx);
 

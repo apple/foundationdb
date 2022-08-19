@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
@@ -72,6 +73,17 @@ public:
 		KeySelector begin, end;
 		GetRangeLimits limits;
 		using Result = RangeResult;
+	};
+
+	template <bool reverse>
+	struct GetMappedRangeReq {
+		GetMappedRangeReq(KeySelector begin, KeySelector end, Key mapper, int matchIndex, GetRangeLimits limits)
+		  : begin(begin), end(end), mapper(mapper), limits(limits), matchIndex(matchIndex) {}
+		KeySelector begin, end;
+		Key mapper;
+		GetRangeLimits limits;
+		int matchIndex;
+		using Result = MappedRangeResult;
 	};
 
 	// read() Performs a read (get, getKey, getRange, etc), in the context of the given transaction.  Snapshot or RYW
@@ -206,13 +218,14 @@ public:
 	// addConflictRange(ryw,read,result) is called after a serializable read and is responsible for adding the relevant
 	// conflict range
 
+	template <bool mustUnmodified = false>
 	static void addConflictRange(ReadYourWritesTransaction* ryw,
 	                             GetValueReq read,
 	                             WriteMap::iterator& it,
 	                             Optional<Value> result) {
 		// it will already point to the right segment (see the calling code in read()), so we don't need to skip
 		// read.key will be copied into ryw->arena inside of updateConflictMap if it is being added
-		ryw->updateConflictMap(read.key, it);
+		updateConflictMap<mustUnmodified>(ryw, read.key, it);
 	}
 
 	static void addConflictRange(ReadYourWritesTransaction* ryw, GetKeyReq read, WriteMap::iterator& it, Key result) {
@@ -230,15 +243,18 @@ public:
 		ryw->updateConflictMap(readRange, it);
 	}
 
+	template <bool mustUnmodified = false, class RangeResultFamily = RangeResult>
 	static void addConflictRange(ReadYourWritesTransaction* ryw,
 	                             GetRangeReq<false> read,
 	                             WriteMap::iterator& it,
-	                             RangeResult const& result) {
+	                             RangeResultFamily& result) {
 		KeyRef rangeBegin, rangeEnd;
 		bool endInArena = false;
 
 		if (read.begin.getKey() < read.end.getKey()) {
 			rangeBegin = read.begin.getKey();
+			// If the end offset is 1 (first greater than / first greater or equal) or more, then no changes to the
+			// range after the returned results can change the outcome.
 			rangeEnd = read.end.offset > 0 && result.more ? read.begin.getKey() : read.end.getKey();
 		} else {
 			rangeBegin = read.end.getKey();
@@ -262,18 +278,22 @@ public:
 		KeyRangeRef readRange =
 		    KeyRangeRef(KeyRef(ryw->arena, rangeBegin), endInArena ? rangeEnd : KeyRef(ryw->arena, rangeEnd));
 		it.skip(readRange.begin);
-		ryw->updateConflictMap(readRange, it);
+		updateConflictMap<mustUnmodified>(ryw, readRange, it);
 	}
 
+	// In the case where RangeResultFamily is MappedRangeResult, it only adds the primary range to conflict.
+	template <bool mustUnmodified = false, class RangeResultFamily = RangeResult>
 	static void addConflictRange(ReadYourWritesTransaction* ryw,
 	                             GetRangeReq<true> read,
 	                             WriteMap::iterator& it,
-	                             RangeResult const& result) {
+	                             RangeResultFamily& result) {
 		KeyRef rangeBegin, rangeEnd;
 		bool endInArena = false;
 
 		if (read.begin.getKey() < read.end.getKey()) {
-			rangeBegin = read.begin.offset <= 0 && result.more ? read.end.getKey() : read.begin.getKey();
+			// If the begin offset is 1 (first greater than / first greater or equal) or less, then no changes to the
+			// range prior to the returned results can change the outcome.
+			rangeBegin = read.begin.offset <= 1 && result.more ? read.end.getKey() : read.begin.getKey();
 			rangeEnd = read.end.getKey();
 		} else {
 			rangeBegin = read.end.getKey();
@@ -296,7 +316,39 @@ public:
 		KeyRangeRef readRange =
 		    KeyRangeRef(KeyRef(ryw->arena, rangeBegin), endInArena ? rangeEnd : KeyRef(ryw->arena, rangeEnd));
 		it.skip(readRange.begin);
-		ryw->updateConflictMap(readRange, it);
+		updateConflictMap<mustUnmodified>(ryw, readRange, it);
+	}
+
+	template <bool mustUnmodified = false>
+	static void updateConflictMap(ReadYourWritesTransaction* ryw, KeyRef const& key, WriteMap::iterator& it) {
+		// it.skip( key );
+		// ASSERT( it.beginKey() <= key && key < it.endKey() );
+		if (mustUnmodified && !it.is_unmodified_range()) {
+			throw get_mapped_range_reads_your_writes();
+		}
+		if (it.is_unmodified_range() || (it.is_operation() && !it.is_independent())) {
+			ryw->approximateSize += 2 * key.expectedSize() + 1 + sizeof(KeyRangeRef);
+			ryw->readConflicts.insert(singleKeyRange(key, ryw->arena), true);
+		}
+	}
+
+	template <bool mustUnmodified = false>
+	static void updateConflictMap(ReadYourWritesTransaction* ryw, KeyRangeRef const& keys, WriteMap::iterator& it) {
+		// it.skip( keys.begin );
+		// ASSERT( it.beginKey() <= keys.begin && keys.begin < it.endKey() );
+		for (; it.beginKey() < keys.end; ++it) {
+			if (mustUnmodified && !it.is_unmodified_range()) {
+				throw get_mapped_range_reads_your_writes();
+			}
+			if (it.is_unmodified_range() || (it.is_operation() && !it.is_independent())) {
+				KeyRangeRef insert_range = KeyRangeRef(std::max(keys.begin, it.beginKey().toArenaOrRef(ryw->arena)),
+				                                       std::min(keys.end, it.endKey().toArenaOrRef(ryw->arena)));
+				if (!insert_range.empty()) {
+					ryw->approximateSize += keys.expectedSize() + sizeof(KeyRangeRef);
+					ryw->readConflicts.insert(insert_range, true);
+				}
+			}
+		}
 	}
 
 	ACTOR template <class Req>
@@ -1064,6 +1116,123 @@ public:
 		return result;
 	}
 
+#ifndef __INTEL_COMPILER
+#pragma region GetMappedRange
+#endif
+
+	template <class Iter>
+	static Future<MappedRangeResult> read(ReadYourWritesTransaction* ryw, GetMappedRangeReq<false> read, Iter* it) {
+		return getMappedRangeValue(ryw, read.begin, read.end, read.mapper, read.limits, it);
+	};
+
+	template <class Iter>
+	static Future<MappedRangeResult> read(ReadYourWritesTransaction* ryw, GetMappedRangeReq<true> read, Iter* it) {
+		throw unsupported_operation();
+		// TODO: Support reverse. return getMappedRangeValueBack(ryw, read.begin, read.end, read.mapper,
+		// read.limits, it);
+	};
+
+	ACTOR template <bool backwards>
+	static Future<MappedRangeResult> readThrough(ReadYourWritesTransaction* ryw,
+	                                             GetMappedRangeReq<backwards> read,
+	                                             Snapshot snapshot) {
+		if (backwards && read.end.offset > 1) {
+			// FIXME: Optimistically assume that this will not run into the system keys, and only reissue if the result
+			// actually does.
+			Key key = wait(ryw->tr.getKey(read.end, snapshot));
+			if (key > ryw->getMaxReadKey())
+				read.end = firstGreaterOrEqual(ryw->getMaxReadKey());
+			else
+				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
+		}
+		MappedRangeResult v = wait(ryw->tr.getMappedRange(read.begin,
+		                                                  read.end,
+		                                                  read.mapper,
+		                                                  read.limits,
+		                                                  read.matchIndex,
+		                                                  snapshot,
+		                                                  backwards ? Reverse::True : Reverse::False));
+		return v;
+	}
+
+	template <bool backwards>
+	static void addConflictRangeAndMustUnmodified(ReadYourWritesTransaction* ryw,
+	                                              GetMappedRangeReq<backwards> read,
+	                                              WriteMap::iterator& it,
+	                                              MappedRangeResult result) {
+		// Primary getRange.
+		addConflictRange<true, MappedRangeResult>(
+		    ryw, GetRangeReq<backwards>(read.begin, read.end, read.limits), it, result);
+
+		// Secondary getValue/getRanges.
+		for (const auto& mappedKeyValue : result) {
+			const auto& reqAndResult = mappedKeyValue.reqAndResult;
+			if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResult)) {
+				auto getValue = std::get<GetValueReqAndResultRef>(reqAndResult);
+				// GetValueReq variation of addConflictRange require it to point at the right segment.
+				it.skip(getValue.key);
+				// The result is not used in GetValueReq variation of addConflictRange. Let's just pass in a
+				// placeholder.
+				addConflictRange<true>(ryw, GetValueReq(getValue.key), it, Optional<Value>());
+			} else if (std::holds_alternative<GetRangeReqAndResultRef>(reqAndResult)) {
+				auto getRange = std::get<GetRangeReqAndResultRef>(reqAndResult);
+				// We only support forward scan for secondary getRange requests.
+				// The limits are not used in addConflictRange. Let's just pass in a placeholder.
+				addConflictRange<true>(
+				    ryw, GetRangeReq<false>(getRange.begin, getRange.end, GetRangeLimits()), it, getRange.result);
+			} else {
+				throw internal_error();
+			}
+		}
+	}
+
+	// For Snapshot::True and NOT readYourWritesDisabled.
+	ACTOR template <bool backwards>
+	static Future<MappedRangeResult> readWithConflictRangeRYW(ReadYourWritesTransaction* ryw,
+	                                                          GetMappedRangeReq<backwards> req,
+	                                                          Snapshot snapshot) {
+		choose {
+			when(MappedRangeResult result = wait(readThrough(ryw, req, Snapshot::True))) {
+				// Insert read conflicts (so that it supported Snapshot::True) and check it is not modified (so it masks
+				// sure not break RYW semantic while not implementing RYW) for both the primary getRange and all
+				// underlying getValue/getRanges.
+				WriteMap::iterator writes(&ryw->writes);
+				addConflictRangeAndMustUnmodified<backwards>(ryw, req, writes, result);
+				return result;
+			}
+			when(wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
+		}
+	}
+
+	template <bool backwards>
+	static inline Future<MappedRangeResult> readWithConflictRangeForGetMappedRange(
+	    ReadYourWritesTransaction* ryw,
+	    GetMappedRangeReq<backwards> const& req,
+	    Snapshot snapshot) {
+		// For now, getMappedRange requires serializable isolation. (Technically it is trivial to add snapshot
+		// isolation support. But it is not default and is rarely used. So we disallow it until we have thorough test
+		// coverage for it.)
+		if (snapshot) {
+			CODE_PROBE(true, "getMappedRange not supported for snapshot.");
+			throw unsupported_operation();
+		}
+		// For now, getMappedRange requires read-your-writes being NOT disabled. But the support of RYW is limited
+		// to throwing get_mapped_range_reads_your_writes error when getMappedRange actually reads your own writes.
+		// Applications should fall back in their own ways. This is different from what is usually expected from RYW,
+		// which returns the written value transparently. In another word, it makes sure not break RYW semantics without
+		// actually implementing reading from the writes.
+		if (ryw->options.readYourWritesDisabled) {
+			CODE_PROBE(true, "getMappedRange not supported for read-your-writes disabled.");
+			throw unsupported_operation();
+		}
+
+		return readWithConflictRangeRYW(ryw, req, snapshot);
+	}
+
+#ifndef __INTEL_COMPILER
+#pragma endregion
+#endif
+
 	static void triggerWatches(ReadYourWritesTransaction* ryw,
 	                           KeyRangeRef range,
 	                           Optional<ValueRef> val,
@@ -1073,7 +1242,7 @@ public:
 			++it;
 
 			ASSERT(itCopy->value.size());
-			TEST(itCopy->value.size() > 1); // Multiple watches on the same key triggered by RYOW
+			CODE_PROBE(itCopy->value.size() > 1, "Multiple watches on the same key triggered by RYOW");
 
 			for (int i = 0; i < itCopy->value.size(); i++) {
 				if (itCopy->value[i]->onChangeTrigger.isSet()) {
@@ -1284,17 +1453,21 @@ public:
 	}
 };
 
-ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx)
-  : ISingleThreadTransaction(cx->deferredError), tr(cx), cache(&arena), writes(&arena), retries(0), approximateSize(0),
-    creationTime(now()), commitStarted(false), versionStampFuture(tr.getVersionstamp()),
+ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx, Optional<TenantName> tenantName)
+  : ISingleThreadTransaction(cx->deferredError), tr(cx, tenantName), cache(&arena), writes(&arena), retries(0),
+    approximateSize(0), creationTime(now()), commitStarted(false), versionStampFuture(tr.getVersionstamp()),
     specialKeySpaceWriteMap(std::make_pair(false, Optional<Value>()), specialKeys.end), options(tr) {
 	std::copy(
 	    cx.getTransactionDefaults().begin(), cx.getTransactionDefaults().end(), std::back_inserter(persistentOptions));
 	applyPersistentOptions();
 }
 
-void ReadYourWritesTransaction::setDatabase(Database const& cx) {
-	*this = ReadYourWritesTransaction(cx);
+void ReadYourWritesTransaction::construct(Database const& cx) {
+	*this = ReadYourWritesTransaction(cx, Optional<TenantName>());
+}
+
+void ReadYourWritesTransaction::construct(Database const& cx, TenantName const& tenantName) {
+	*this = ReadYourWritesTransaction(cx, tenantName);
 }
 
 ACTOR Future<Void> timebomb(double endTime, Promise<Void> resetPromise) {
@@ -1362,11 +1535,11 @@ ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord
 }
 
 Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot snapshot) {
-	TEST(true); // ReadYourWritesTransaction::get
+	CODE_PROBE(true, "ReadYourWritesTransaction::get");
 
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(key)) {
-			TEST(true); // Special keys get
+			CODE_PROBE(true, "Special keys get");
 			return getDatabase()->specialKeySpace->get(this, key);
 		}
 	} else {
@@ -1415,10 +1588,10 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 	if (key >= getMaxReadKey() && key != metadataVersionKey)
 		return key_outside_legal_range();
 
-	// There are no keys in the database with size greater than KEY_SIZE_LIMIT
-	if (key.size() >
-	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+	// There are no keys in the database with size greater than the max key size
+	if (key.size() > getMaxReadKeySize(key)) {
 		return Optional<Value>();
+	}
 
 	Future<Optional<Value>> result = RYWImpl::readWithConflictRange(this, RYWImpl::GetValueReq(key), snapshot);
 	reading.add(success(result));
@@ -1449,7 +1622,7 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
 		    end.getKey() <= specialKeys.end) {
-			TEST(true); // Special key space get range
+			CODE_PROBE(true, "Special key space get range");
 			return getDatabase()->specialKeySpace->getRange(this, begin, end, limits, reverse);
 		}
 	} else {
@@ -1475,7 +1648,7 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 
 	// This optimization prevents nullptr operations from being added to the conflict range
 	if (limits.isReached()) {
-		TEST(true); // RYW range read limit 0
+		CODE_PROBE(true, "RYW range read limit 0");
 		return RangeResult();
 	}
 
@@ -1489,7 +1662,7 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 		end.removeOrEqual(end.arena());
 
 	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
-		TEST(true); // RYW range inverted
+		CODE_PROBE(true, "RYW range inverted");
 		return RangeResult();
 	}
 
@@ -1507,6 +1680,65 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(const KeySelector& begin
                                                         Snapshot snapshot,
                                                         Reverse reverse) {
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
+}
+
+Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector begin,
+                                                                    KeySelector end,
+                                                                    Key mapper,
+                                                                    GetRangeLimits limits,
+                                                                    int matchIndex,
+                                                                    Snapshot snapshot,
+                                                                    Reverse reverse) {
+	if (getDatabase()->apiVersionAtLeast(630)) {
+		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
+		    end.getKey() <= specialKeys.end) {
+			CODE_PROBE(true, "Special key space get range (getMappedRange)");
+			throw client_invalid_operation(); // Not support special keys.
+		}
+	} else {
+		if (begin.getKey() == LiteralStringRef("\xff\xff/worker_interfaces")) {
+			throw client_invalid_operation(); // Not support special keys.
+		}
+	}
+
+	if (checkUsedDuringCommit()) {
+		return used_during_commit();
+	}
+
+	if (resetPromise.isSet())
+		return resetPromise.getFuture().getError();
+
+	KeyRef maxKey = getMaxReadKey();
+	if (begin.getKey() > maxKey || end.getKey() > maxKey)
+		return key_outside_legal_range();
+
+	// This optimization prevents nullptr operations from being added to the conflict range
+	if (limits.isReached()) {
+		CODE_PROBE(true, "RYW range read limit 0 (getMappedRange)");
+		return MappedRangeResult();
+	}
+
+	if (!limits.isValid())
+		return range_limits_invalid();
+
+	if (begin.orEqual)
+		begin.removeOrEqual(begin.arena());
+
+	if (end.orEqual)
+		end.removeOrEqual(end.arena());
+
+	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
+		CODE_PROBE(true, "RYW range inverted (getMappedRange)");
+		return MappedRangeResult();
+	}
+
+	Future<MappedRangeResult> result =
+	    reverse ? RYWImpl::readWithConflictRangeForGetMappedRange(
+	                  this, RYWImpl::GetMappedRangeReq<true>(begin, end, mapper, matchIndex, limits), snapshot)
+	            : RYWImpl::readWithConflictRangeForGetMappedRange(
+	                  this, RYWImpl::GetMappedRangeReq<false>(begin, end, mapper, matchIndex, limits), snapshot);
+
+	return result;
 }
 
 Future<Standalone<VectorRef<const char*>>> ReadYourWritesTransaction::getAddressesForKey(const Key& key) {
@@ -1532,7 +1764,7 @@ Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyR
 	if (resetPromise.isSet())
 		return resetPromise.getFuture().getError();
 
-	return map(waitOrError(tr.getStorageMetrics(keys, -1), resetPromise.getFuture()),
+	return map(waitOrError(tr.getDatabase()->getStorageMetrics(keys, -1), resetPromise.getFuture()),
 	           [](const StorageMetrics& m) { return m.bytes; });
 }
 
@@ -1551,6 +1783,45 @@ Future<Standalone<VectorRef<KeyRef>>> ReadYourWritesTransaction::getRangeSplitPo
 	return waitOrError(tr.getRangeSplitPoints(range, chunkSize), resetPromise.getFuture());
 }
 
+Future<Standalone<VectorRef<KeyRangeRef>>> ReadYourWritesTransaction::getBlobGranuleRanges(const KeyRange& range,
+                                                                                           int rangeLimit) {
+	if (checkUsedDuringCommit()) {
+		return used_during_commit();
+	}
+	if (resetPromise.isSet())
+		return resetPromise.getFuture().getError();
+
+	KeyRef maxKey = getMaxReadKey();
+	if (range.begin > maxKey || range.end > maxKey)
+		return key_outside_legal_range();
+
+	return waitOrError(tr.getBlobGranuleRanges(range, rangeLimit), resetPromise.getFuture());
+}
+
+Future<Standalone<VectorRef<BlobGranuleChunkRef>>> ReadYourWritesTransaction::readBlobGranules(
+    const KeyRange& range,
+    Version begin,
+    Optional<Version> readVersion,
+    Version* readVersionOut) {
+
+	if (!options.readYourWritesDisabled) {
+		return blob_granule_no_ryw();
+	}
+
+	if (checkUsedDuringCommit()) {
+		return used_during_commit();
+	}
+
+	if (resetPromise.isSet())
+		return resetPromise.getFuture().getError();
+
+	KeyRef maxKey = getMaxReadKey();
+	if (range.begin > maxKey || range.end > maxKey)
+		return key_outside_legal_range();
+
+	return waitOrError(tr.readBlobGranules(range, begin, readVersion, readVersionOut), resetPromise.getFuture());
+}
+
 void ReadYourWritesTransaction::addReadConflictRange(KeyRangeRef const& keys) {
 	if (checkUsedDuringCommit()) {
 		throw used_during_commit();
@@ -1563,23 +1834,19 @@ void ReadYourWritesTransaction::addReadConflictRange(KeyRangeRef const& keys) {
 		}
 	}
 
-	// There aren't any keys in the database with size larger than KEY_SIZE_LIMIT, so if range contains large keys
+	// There aren't any keys in the database with size larger than max key size, so if range contains large keys
 	// we can translate it to an equivalent one with smaller keys
 	KeyRef begin = keys.begin;
 	KeyRef end = keys.end;
 
-	if (begin.size() >
-	    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		begin = begin.substr(
-		    0,
-		    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
-	if (end.size() >
-	    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		end = end.substr(
-		    0,
-		    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
+	int64_t beginMaxSize = getMaxReadKeySize(begin);
+	int64_t endMaxSize = getMaxReadKeySize(end);
+	if (begin.size() > beginMaxSize) {
+		begin = begin.substr(0, beginMaxSize + 1);
+	}
+	if (end.size() > endMaxSize) {
+		end = end.substr(0, endMaxSize + 1);
+	}
 
 	KeyRangeRef r = KeyRangeRef(begin, end);
 
@@ -1600,27 +1867,11 @@ void ReadYourWritesTransaction::addReadConflictRange(KeyRangeRef const& keys) {
 }
 
 void ReadYourWritesTransaction::updateConflictMap(KeyRef const& key, WriteMap::iterator& it) {
-	// it.skip( key );
-	// ASSERT( it.beginKey() <= key && key < it.endKey() );
-	if (it.is_unmodified_range() || (it.is_operation() && !it.is_independent())) {
-		approximateSize += 2 * key.expectedSize() + 1 + sizeof(KeyRangeRef);
-		readConflicts.insert(singleKeyRange(key, arena), true);
-	}
+	RYWImpl::updateConflictMap(this, key, it);
 }
 
 void ReadYourWritesTransaction::updateConflictMap(KeyRangeRef const& keys, WriteMap::iterator& it) {
-	// it.skip( keys.begin );
-	// ASSERT( it.beginKey() <= keys.begin && keys.begin < it.endKey() );
-	for (; it.beginKey() < keys.end; ++it) {
-		if (it.is_unmodified_range() || (it.is_operation() && !it.is_independent())) {
-			KeyRangeRef insert_range = KeyRangeRef(std::max(keys.begin, it.beginKey().toArenaOrRef(arena)),
-			                                       std::min(keys.end, it.endKey().toArenaOrRef(arena)));
-			if (!insert_range.empty()) {
-				approximateSize += keys.expectedSize() + sizeof(KeyRangeRef);
-				readConflicts.insert(insert_range, true);
-			}
-		}
-	}
+	RYWImpl::updateConflictMap(this, keys, it);
 }
 
 void ReadYourWritesTransaction::writeRangeToNativeTransaction(KeyRangeRef const& keys) {
@@ -1739,7 +1990,7 @@ void ReadYourWritesTransaction::getWriteConflicts(KeyRangeMap<bool>* result) {
 	}
 }
 
-void ReadYourWritesTransaction::setTransactionID(uint64_t id) {
+void ReadYourWritesTransaction::setTransactionID(UID id) {
 	tr.setTransactionID(id);
 }
 
@@ -1748,9 +1999,9 @@ void ReadYourWritesTransaction::setToken(uint64_t token) {
 }
 
 RangeResult ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRangeRef kr) {
-	TEST(true); // Special keys read conflict range
+	CODE_PROBE(true, "Special keys read conflict range");
 	ASSERT(readConflictRangeKeysRange.contains(kr));
-	ASSERT(!tr.options.checkWritesEnabled);
+	ASSERT(!tr.trState->options.checkWritesEnabled);
 	RangeResult result;
 	if (!options.readYourWritesDisabled) {
 		kr = kr.removePrefix(readConflictRangeKeysRange.begin);
@@ -1790,7 +2041,7 @@ RangeResult ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRange
 }
 
 RangeResult ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRangeRef kr) {
-	TEST(true); // Special keys write conflict range
+	CODE_PROBE(true, "Special keys write conflict range");
 	ASSERT(writeConflictRangeKeysRange.contains(kr));
 	RangeResult result;
 
@@ -1868,9 +2119,9 @@ void ReadYourWritesTransaction::atomicOp(const KeyRef& key, const ValueRef& oper
 	if (!isValidMutationType(operationType) || !isAtomicOp((MutationRef::Type)operationType))
 		throw invalid_mutation_type();
 
-	if (key.size() >
-	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+	if (key.size() > getMaxWriteKeySize(key, getTransactionState()->options.rawAccess)) {
 		throw key_too_large();
+	}
 	if (operand.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT)
 		throw value_too_large();
 
@@ -1895,7 +2146,7 @@ void ReadYourWritesTransaction::atomicOp(const KeyRef& key, const ValueRef& oper
 	}
 
 	if (operationType == MutationRef::SetVersionstampedKey) {
-		TEST(options.readYourWritesDisabled); // SetVersionstampedKey without ryw enabled
+		CODE_PROBE(options.readYourWritesDisabled, "SetVersionstampedKey without ryw enabled");
 		// this does validation of the key and needs to be performed before the readYourWritesDisabled path
 		KeyRangeRef range = getVersionstampKeyRange(arena, k, tr.getCachedReadVersion().orDefault(0), getMaxReadKey());
 		versionStampKeys.push_back(arena, k);
@@ -1975,9 +2226,9 @@ void ReadYourWritesTransaction::set(const KeyRef& key, const ValueRef& value) {
 	}
 
 	// TODO: check transaction size here
-	if (key.size() >
-	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+	if (key.size() > getMaxWriteKeySize(key, getTransactionState()->options.rawAccess)) {
 		throw key_too_large();
+	}
 	if (value.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT)
 		throw value_too_large();
 
@@ -2011,23 +2262,19 @@ void ReadYourWritesTransaction::clear(const KeyRangeRef& range) {
 		return tr.clear(range, addWriteConflict);
 	}
 
-	// There aren't any keys in the database with size larger than KEY_SIZE_LIMIT, so if range contains large keys
+	// There aren't any keys in the database with size larger than the max key size, so if range contains large keys
 	// we can translate it to an equivalent one with smaller keys
 	KeyRef begin = range.begin;
 	KeyRef end = range.end;
 
-	if (begin.size() >
-	    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		begin = begin.substr(
-		    0,
-		    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
-	if (end.size() >
-	    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		end = end.substr(
-		    0,
-		    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
+	int64_t beginMaxSize = getMaxClearKeySize(begin);
+	int64_t endMaxSize = getMaxClearKeySize(end);
+	if (begin.size() > beginMaxSize) {
+		begin = begin.substr(0, beginMaxSize + 1);
+	}
+	if (end.size() > endMaxSize) {
+		end = end.substr(0, endMaxSize + 1);
+	}
 
 	KeyRangeRef r = KeyRangeRef(begin, end);
 
@@ -2057,9 +2304,9 @@ void ReadYourWritesTransaction::clear(const KeyRef& key) {
 	if (key >= getMaxWriteKey())
 		throw key_outside_legal_range();
 
-	if (key.size() >
-	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+	if (key.size() > getMaxClearKeySize(key)) {
 		return;
+	}
 
 	if (options.readYourWritesDisabled) {
 		return tr.clear(key, addWriteConflict);
@@ -2089,9 +2336,9 @@ Future<Void> ReadYourWritesTransaction::watch(const Key& key) {
 	if (key >= allKeys.end || (key >= getMaxReadKey() && key != metadataVersionKey && tr.apiVersionAtLeast(300)))
 		return key_outside_legal_range();
 
-	if (key.size() >
-	    (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
+	if (key.size() > getMaxWriteKeySize(key, getTransactionState()->options.rawAccess)) {
 		return key_too_large();
+	}
 
 	return RYWImpl::watch(this, key);
 }
@@ -2107,23 +2354,19 @@ void ReadYourWritesTransaction::addWriteConflictRange(KeyRangeRef const& keys) {
 		}
 	}
 
-	// There aren't any keys in the database with size larger than KEY_SIZE_LIMIT, so if range contains large keys
+	// There aren't any keys in the database with size larger than the max key size, so if range contains large keys
 	// we can translate it to an equivalent one with smaller keys
 	KeyRef begin = keys.begin;
 	KeyRef end = keys.end;
 
-	if (begin.size() >
-	    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		begin = begin.substr(
-		    0,
-		    (begin.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
-	if (end.size() >
-	    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
-		end = end.substr(
-		    0,
-		    (end.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) +
-		        1);
+	int64_t beginMaxSize = getMaxKeySize(begin);
+	int64_t endMaxSize = getMaxKeySize(end);
+	if (begin.size() > beginMaxSize) {
+		begin = begin.substr(0, beginMaxSize + 1);
+	}
+	if (end.size() > endMaxSize) {
+		end = end.substr(0, endMaxSize + 1);
+	}
 
 	KeyRangeRef r = KeyRangeRef(begin, end);
 
@@ -2424,7 +2667,7 @@ void ReadYourWritesTransaction::debugLogRetries(Optional<Error> error) {
 			{
 				TraceEvent trace = TraceEvent("LongTransaction");
 				if (error.present())
-					trace.error(error.get(), true);
+					trace.errorUnsuppressed(error.get());
 				if (!transactionDebugInfo->transactionName.empty())
 					trace.detail("TransactionName", transactionDebugInfo->transactionName);
 				trace.detail("Elapsed", elapsed).detail("Retries", retries).detail("Committed", committed);

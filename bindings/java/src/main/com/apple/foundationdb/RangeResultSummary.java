@@ -20,6 +20,8 @@
 
 package com.apple.foundationdb;
 
+import com.apple.foundationdb.tuple.ByteArrayUtil;
+
 class RangeResultSummary {
 	final byte[] lastKey;
 	final int keyCount;
@@ -29,5 +31,15 @@ class RangeResultSummary {
 		this.lastKey = lastKey;
 		this.keyCount = keyCount;
 		this.more = more;
+	}
+
+	@Override
+	public String toString() {
+		final StringBuilder sb = new StringBuilder("RangeResultSummary{");
+		sb.append("lastKey=").append(ByteArrayUtil.printable(lastKey));
+		sb.append(", keyCount=").append(keyCount);
+		sb.append(", more=").append(more);
+		sb.append('}');
+		return sb.toString();
 	}
 }

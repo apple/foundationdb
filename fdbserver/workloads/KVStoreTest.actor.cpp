@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 
 #include <ctime>
 #include <cinttypes>
+#include "fmt/format.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
@@ -278,7 +279,7 @@ ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest)
 		}
 		double elapsed = timer() - cst;
 		TraceEvent("KVStoreCount").detail("Count", count).detail("Took", elapsed);
-		printf("Counted: %" PRId64 " in %0.1fs\n", count, elapsed);
+		fmt::print("Counted: {0} in {1:01.f}s\n");
 	}
 
 	if (workload->doSetup) {
@@ -383,10 +384,13 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 		test.store = keyValueStoreSQLite(fn, id, KeyValueStoreType::SSD_BTREE_V1);
 	else if (workload->storeType == "ssd-2")
 		test.store = keyValueStoreSQLite(fn, id, KeyValueStoreType::SSD_REDWOOD_V1);
-	else if (workload->storeType == "ssd-redwood-experimental")
+	else if (workload->storeType == "ssd-redwood-1-experimental")
 		test.store = keyValueStoreRedwoodV1(fn, id);
-	else if (workload->storeType == "ssd-rocksdb-experimental")
+	else if (workload->storeType == "ssd-rocksdb-v1")
 		test.store = keyValueStoreRocksDB(fn, id, KeyValueStoreType::SSD_ROCKSDB_V1);
+	else if (workload->storeType == "ssd-sharded-rocksdb")
+		test.store = keyValueStoreRocksDB(
+		    fn, id, KeyValueStoreType::SSD_SHARDED_ROCKSDB); // TODO: to replace the KVS in the future
 	else if (workload->storeType == "memory")
 		test.store = keyValueStoreMemory(fn, id, 500e6);
 	else if (workload->storeType == "memory-radixtree-beta")

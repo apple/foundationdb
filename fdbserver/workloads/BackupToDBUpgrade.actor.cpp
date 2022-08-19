@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -76,7 +76,9 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 		}
 
-		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
+		ASSERT(g_simulator.extraDatabases.size() == 1);
+		auto extraFile =
+		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
 		extraDB = Database::createDatabase(extraFile, -1);
 
 		TraceEvent("DRU_Start").log();
@@ -485,7 +487,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					wait(tr2->commit());
 					break;
 				} catch (Error& e) {
-					TraceEvent("DRU_RestoreSetupError").error(e, true);
+					TraceEvent("DRU_RestoreSetupError").errorUnsuppressed(e);
 					wait(tr2->onError(e));
 				}
 			}

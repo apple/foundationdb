@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,12 @@
  * limitations under the License.
  */
 
+#include "fdbserver/OTELSpanContextMessage.h"
 #include "flow/Arena.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/GetEncryptCipherKeys.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -279,7 +281,7 @@ public:
 	void checkChangeCounter(uint64_t oldCacheRangeChangeCounter, KeyRef const& key) {
 		if (oldCacheRangeChangeCounter != cacheRangeChangeCounter &&
 		    cachedRangeMap[key]->changeCounter > oldCacheRangeChangeCounter) {
-			TEST(true); // CacheRange change during getValueQ
+			CODE_PROBE(true, "CacheRange change during getValueQ");
 			// TODO: should we throw the cold_cache_server() error here instead?
 			throw wrong_shard_server();
 		}
@@ -290,7 +292,7 @@ public:
 			auto sh = cachedRangeMap.intersectingRanges(keys);
 			for (auto i = sh.begin(); i != sh.end(); ++i)
 				if (i->value()->changeCounter > oldCacheRangeChangeCounter) {
-					TEST(true); // CacheRange change during range operation
+					CODE_PROBE(true, "CacheRange change during range operation");
 					// TODO: should we throw the cold_cache_server() error here instead?
 					throw wrong_shard_server();
 				}
@@ -469,7 +471,6 @@ ACTOR Future<Void> getValueQ(StorageCacheData* data, GetValueRequest req) {
 	try {
 		++data->counters.getValueQueries;
 		++data->counters.allQueries;
-		//++data->readQueueSizeMetric;
 		// TODO later
 		// data->maxQueryQueue = std::max<int>( data->maxQueryQueue, data->counters.allQueries.getValue() -
 		// data->counters.finishedQueries.getValue());
@@ -541,7 +542,6 @@ ACTOR Future<Void> getValueQ(StorageCacheData* data, GetValueRequest req) {
 	}
 
 	++data->counters.finishedQueries;
-	//--data->readQueueSizeMetric;
 	// if(data->latencyBandConfig.present()) {
 	//	int maxReadBytes =
 	// data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
@@ -662,7 +662,7 @@ Key findKey(StorageCacheData* data, KeySelectorRef sel, Version version, KeyRang
 	// If we get only one result in the reverse direction as a result of the data being too large, we could get stuck in
 	// a loop
 	if (more && !forward && rep.data.size() == 1) {
-		TEST(true); // Reverse key selector returned only one result in range read
+		CODE_PROBE(true, "Reverse key selector returned only one result in range read");
 		maxBytes = std::numeric_limits<int>::max();
 		GetKeyValuesReply rep2 =
 		    readRange(data, version, KeyRangeRef(range.begin, keyAfter(sel.getKey())), -2, &maxBytes);
@@ -685,7 +685,7 @@ Key findKey(StorageCacheData* data, KeySelectorRef sel, Version version, KeyRang
 			*pOffset = -*pOffset;
 
 		if (more) {
-			TEST(true); // Key selector read range had more results
+			CODE_PROBE(true, "Key selector read range had more results");
 
 			ASSERT(rep.data.size());
 			Key returnKey = forward ? keyAfter(rep.data.back().key) : rep.data.back().key;
@@ -725,7 +725,6 @@ ACTOR Future<Void> getKeyValues(StorageCacheData* data, GetKeyValuesRequest req)
 	++data->counters.getRangeQueries;
 	++data->counters.allQueries;
 	// printf("\nSCGetKeyValues\n");
-	//++data->readQueueSizeMetric;
 	// data->maxQueryQueue = std::max<int>( data->maxQueryQueue, data->counters.allQueries.getValue() -
 	// data->counters.finishedQueries.getValue());
 
@@ -778,7 +777,7 @@ ACTOR Future<Void> getKeyValues(StorageCacheData* data, GetKeyValuesRequest req)
 		// cachedKeyRange is the end the last actual key returned must be from this cachedKeyRange. A begin offset of 1
 		// is also OK because then either begin is past end or equal to end (so the result is definitely empty)
 		if ((offset1 && offset1 != 1) || (offset2 && offset2 != 1)) {
-			TEST(true); // wrong_cache_server due to offset
+			CODE_PROBE(true, "wrong_cache_server due to offset");
 			// We could detect when offset1 takes us off the beginning of the database or offset2 takes us off the end,
 			// and return a clipped range rather than an error (since that is what the NativeAPI.getRange will do anyway
 			// via its "slow path"), but we would have to add some flags to the response to encode whether we went off
@@ -940,7 +939,7 @@ bool expandMutation(MutationRef& m, StorageCacheData::VersionedData const& data,
 		if (it != data.atLatest().end() && it->isValue() && it.key() == m.param1)
 			oldVal = it->getValue();
 		else if (it != data.atLatest().end() && it->isClearTo() && it->getEndKey() > m.param1) {
-			TEST(true); // Atomic op right after a clear.
+			CODE_PROBE(true, "Atomic op right after a clear.");
 		}
 
 		switch (m.type) {
@@ -1070,7 +1069,7 @@ void splitMutation(StorageCacheData* data, KeyRangeMap<T>& map, MutationRef cons
 }
 
 void rollback(StorageCacheData* data, Version rollbackVersion, Version nextVersion) {
-	TEST(true); // call to cacheRange rollback
+	CODE_PROBE(true, "call to cacheRange rollback");
 	// FIXME: enable when debugKeyRange is active
 	// debugKeyRange("Rollback", rollbackVersion, allKeys);
 
@@ -1189,7 +1188,7 @@ ACTOR Future<RangeResult> tryFetchRange(Database cx,
 
 	ASSERT(!cx->switchable);
 	tr.setVersion(version);
-	tr.info.taskID = TaskPriority::FetchKeys;
+	tr.trState->taskID = TaskPriority::FetchKeys;
 	limits.minRows = 0;
 
 	try {
@@ -1276,7 +1275,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 			lastAvailable = std::max(lastAvailable, r->value());
 
 		if (lastAvailable != invalidVersion && lastAvailable >= data->oldestVersion.get()) {
-			TEST(true); // wait for oldest version
+			CODE_PROBE(true, "wait for oldest version");
 			wait(data->oldestVersion.whenAtLeast(lastAvailable + 1));
 		}
 
@@ -1315,7 +1314,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 
 		loop {
 			try {
-				TEST(true); // Fetching keys for transferred cacheRange
+				CODE_PROBE(true, "Fetching keys for transferred cacheRange");
 
 				state RangeResult this_block =
 				    wait(tryFetchRange(data->cx,
@@ -1375,11 +1374,11 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 				break;
 			} catch (Error& e) {
 				TraceEvent("SCFKBlockFail", data->thisServerID)
-				    .error(e, true)
+				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
 				    .detail("FKID", interval.pairID);
 				if (e.code() == error_code_transaction_too_old) {
-					TEST(true); // A storage server has forgotten the history data we are fetching
+					CODE_PROBE(true, "A storage server has forgotten the history data we are fetching");
 					Version lastFV = fetchVersion;
 					fetchVersion = data->version.get();
 					isTooOld = false;
@@ -1406,8 +1405,9 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 						    .detail("E", data->version.get());
 					}
 				} else if (e.code() == error_code_future_version || e.code() == error_code_process_behind) {
-					TEST(true); // fetchKeys got future_version or process_behind, so there must be a huge storage lag
-					            // somewhere.  Keep trying.
+					CODE_PROBE(true,
+					           "fetchKeys got future_version or process_behind, so there must be a huge storage lag "
+					           "somewhere.  Keep trying.");
 				} else {
 					throw;
 				}
@@ -1467,7 +1467,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 		}
 
 		int startSize = batch->changes.size();
-		TEST(startSize); // Adding fetch data to a batch which already has changes
+		CODE_PROBE(startSize, "Adding fetch data to a batch which already has changes");
 		batch->changes.resize(batch->changes.size() + cacheRange->updates.size());
 
 		// FIXME: pass the deque back rather than copy the data
@@ -1507,7 +1507,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 
 		// TraceEvent(SevDebug, interval.end(), data->thisServerID);
 	} catch (Error& e) {
-		// TraceEvent(SevDebug, interval.end(), data->thisServerID).error(e, true).detail("Version", data->version.get());
+		// TraceEvent(SevDebug, interval.end(), data->thisServerID).errorUnsuppressed(e).detail("Version", data->version.get());
 
 		// TODO define the shuttingDown state of cache server
 		if (e.code() == error_code_actor_cancelled &&
@@ -1630,7 +1630,7 @@ void cacheWarmup(StorageCacheData* data, const KeyRangeRef& keys, bool nowAssign
 		else {
 			ASSERT(ranges[i].value->adding);
 			data->addCacheRange(CacheRangeInfo::newAdding(data, ranges[i]));
-			TEST(true); // cacheWarmup reFetchKeys
+			CODE_PROBE(true, "cacheWarmup reFetchKeys");
 		}
 	}
 
@@ -1769,7 +1769,7 @@ private:
 			br >> rollbackVersion;
 
 			if (rollbackVersion < fromVersion && rollbackVersion > data->oldestVersion.get()) {
-				TEST(true); // CacheRangeApplyPrivateData cacheRange rollback
+				CODE_PROBE(true, "CacheRangeApplyPrivateData cacheRange rollback");
 				TraceEvent(SevWarn, "Rollback", data->thisServerID)
 				    .detail("FromVersion", fromVersion)
 				    .detail("ToVersion", rollbackVersion)
@@ -1839,16 +1839,18 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 	++data->counters.updateBatches;
 
 	loop {
-		loop {
-			choose {
-				when(wait(cursor ? cursor->getMore(TaskPriority::TLogCommit) : Never())) { break; }
-				when(wait(dbInfoChange)) {
+		loop choose {
+			when(wait(cursor ? cursor->getMore(TaskPriority::TLogCommit) : Never())) { break; }
+			when(wait(dbInfoChange)) {
+				dbInfoChange = data->db->onChange();
+				if (data->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
+					data->logSystem = ILogSystem::fromServerDBInfo(data->thisServerID, data->db->get());
 					if (data->logSystem) {
 						cursor = data->logSystem->peekSingle(
 						    data->thisServerID, data->peekVersion, cacheTag, std::vector<std::pair<Version, Tag>>());
-					} else
+					} else {
 						cursor = Reference<ILogSystem::IPeekCursor>();
-					dbInfoChange = data->db->onChange();
+					}
 				}
 			}
 		}
@@ -1871,12 +1873,17 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 
 			state FetchInjectionInfo fii;
 			state Reference<ILogSystem::IPeekCursor> cloneCursor2;
+			state Optional<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> cipherKeys;
+			state bool collectingCipherKeys = false;
+			// If encrypted mutation is encountered, we collect cipher details and fetch cipher keys, then start over.
 			loop {
 				state uint64_t changeCounter = data->cacheRangeChangeCounter;
 				bool epochEnd = false;
 				bool hasPrivateData = false;
 				bool firstMutation = true;
 				bool dbgLastMessageWasProtocol = false;
+
+				std::unordered_set<BlobCipherDetails> cipherDetails;
 
 				Reference<ILogSystem::IPeekCursor> cloneCursor1 = cursor->cloneNoMore();
 				cloneCursor2 = cursor->cloneNoMore();
@@ -1897,36 +1904,60 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 					           SpanContextMessage::isNextIn(cloneReader)) {
 						SpanContextMessage scm;
 						cloneReader >> scm;
+					} else if (cloneReader.protocolVersion().hasOTELSpanContext() &&
+					           OTELSpanContextMessage::isNextIn(cloneReader)) {
+						OTELSpanContextMessage scm;
+						cloneReader >> scm;
 					} else {
 						MutationRef msg;
 						cloneReader >> msg;
-
-						if (firstMutation && msg.param1.startsWith(systemKeys.end))
-							hasPrivateData = true;
-						firstMutation = false;
-
-						if (msg.param1 == lastEpochEndPrivateKey) {
-							epochEnd = true;
-							// ASSERT(firstMutation);
-							ASSERT(dbgLastMessageWasProtocol);
+						if (msg.isEncrypted()) {
+							if (!cipherKeys.present()) {
+								const BlobCipherEncryptHeader* header = msg.encryptionHeader();
+								cipherDetails.insert(header->cipherTextDetails);
+								cipherDetails.insert(header->cipherHeaderDetails);
+								collectingCipherKeys = true;
+							} else {
+								msg = msg.decrypt(cipherKeys.get(), cloneReader.arena());
+							}
 						}
+						if (!collectingCipherKeys) {
+							if (firstMutation && msg.param1.startsWith(systemKeys.end))
+								hasPrivateData = true;
+							firstMutation = false;
 
-						dbgLastMessageWasProtocol = false;
+							if (msg.param1 == lastEpochEndPrivateKey) {
+								epochEnd = true;
+								// ASSERT(firstMutation);
+								ASSERT(dbgLastMessageWasProtocol);
+							}
+
+							dbgLastMessageWasProtocol = false;
+						}
 					}
 				}
 
-				// Any fetchKeys which are ready to transition their cacheRanges to the adding,transferred state do so
-				// now. If there is an epoch end we skip this step, to increase testability and to prevent inserting a
-				// version in the middle of a rolled back version range.
-				while (!hasPrivateData && !epochEnd && !data->readyFetchKeys.empty()) {
-					auto fk = data->readyFetchKeys.back();
-					data->readyFetchKeys.pop_back();
-					fk.send(&fii);
+				if (collectingCipherKeys) {
+					std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> result =
+					    wait(getEncryptCipherKeys(data->db, cipherDetails));
+					cipherKeys = result;
+					collectingCipherKeys = false;
+				} else {
+					// Any fetchKeys which are ready to transition their cacheRanges to the adding,transferred state do
+					// so now. If there is an epoch end we skip this step, to increase testability and to prevent
+					// inserting a version in the middle of a rolled back version range.
+					while (!hasPrivateData && !epochEnd && !data->readyFetchKeys.empty()) {
+						auto fk = data->readyFetchKeys.back();
+						data->readyFetchKeys.pop_back();
+						fk.send(&fii);
+					}
+					if (data->cacheRangeChangeCounter == changeCounter)
+						break;
+					// CODE_PROBE(
+					//     true,
+					//     "A fetchKeys completed while we were doing this, so eager might be outdated. Read it
+					//     again.");
 				}
-				if (data->cacheRangeChangeCounter == changeCounter)
-					break;
-				// TEST(true); // A fetchKeys completed while we were doing this, so eager might be outdated.  Read it
-				// again.
 			}
 
 			data->debug_inApplyUpdate = true;
@@ -1975,9 +2006,16 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 				} else if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader)) {
 					SpanContextMessage scm;
 					reader >> scm;
+				} else if (reader.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(reader)) {
+					CODE_PROBE(true, "StorageCache reading OTELSpanContextMessage");
+					OTELSpanContextMessage oscm;
+					reader >> oscm;
 				} else {
 					MutationRef msg;
 					reader >> msg;
+					if (msg.isEncrypted()) {
+						msg = msg.decrypt(cipherKeys.get(), reader.arena());
+					}
 
 					if (ver != invalidVersion) // This change belongs to a version < minVersion
 					{
@@ -2169,7 +2207,6 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
                                       Reference<AsyncVar<ServerDBInfo> const> db) {
 	state StorageCacheData self(ssi.id(), id, db);
 	state ActorCollection actors(false);
-	state Future<Void> dbInfoChange = Void();
 	state StorageCacheUpdater updater(self.lastVersionWithData);
 	self.updater = &updater;
 
@@ -2201,10 +2238,6 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
 	loop {
 		++self.counters.loops;
 		choose {
-			when(wait(dbInfoChange)) {
-				dbInfoChange = db->onChange();
-				self.logSystem = ILogSystem::fromServerDBInfo(self.thisServerID, self.db->get());
-			}
 			when(GetValueRequest req = waitNext(ssi.getValue.getFuture())) {
 				// TODO do we need to add throttling for cache servers? Probably not
 				// actors.add(self->readGuard(req , getValueQ));
@@ -2221,6 +2254,25 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
 			//	ASSERT(false);
 			//}
 			when(ReplyPromise<KeyValueStoreType> reply = waitNext(ssi.getKeyValueStoreType.getFuture())) {
+				ASSERT(false);
+			}
+
+			when(GetMappedKeyValuesRequest req = waitNext(ssi.getMappedKeyValues.getFuture())) { ASSERT(false); }
+			when(WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) { ASSERT(false); }
+			when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) { ASSERT(false); }
+			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) { ASSERT(false); }
+			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) { ASSERT(false); }
+			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) { ASSERT(false); }
+			when(GetKeyValuesStreamRequest req = waitNext(ssi.getKeyValuesStream.getFuture())) { ASSERT(false); }
+			when(ChangeFeedStreamRequest req = waitNext(ssi.changeFeedStream.getFuture())) { ASSERT(false); }
+			when(OverlappingChangeFeedsRequest req = waitNext(ssi.overlappingChangeFeeds.getFuture())) {
+				// Simulate endpoint not found so that the requester will try another endpoint
+				// This is a workaround to the fact that storage servers do not have an easy way to enforce this
+				// request goes only to other storage servers, and in simulation we manage to trigger this behavior
+				req.reply.sendError(broken_promise());
+			}
+			when(ChangeFeedPopRequest req = waitNext(ssi.changeFeedPop.getFuture())) { ASSERT(false); }
+			when(ChangeFeedVersionUpdateRequest req = waitNext(ssi.changeFeedVersionUpdate.getFuture())) {
 				ASSERT(false);
 			}
 			when(wait(actors.getResult())) {}

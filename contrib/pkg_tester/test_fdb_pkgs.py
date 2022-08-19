@@ -22,6 +22,7 @@ import pathlib
 import pytest
 import shlex
 import subprocess
+import sys
 import uuid
 
 from typing import Iterator, List, Optional, Union
@@ -29,9 +30,14 @@ from typing import Iterator, List, Optional, Union
 
 def run(args: List[str]) -> str:
     print("$ {}".format(" ".join(map(shlex.quote, args))))
-    result = subprocess.check_output(args).decode("utf-8")
-    print(result, end="")
-    return result
+    result = []
+    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    while proc.poll() is None:
+        text = proc.stdout.readline().decode("utf-8")
+        result.append(text)
+        sys.stdout.write(text)
+    assert proc.returncode == 0
+    return "".join(result)
 
 
 class Image:
@@ -54,7 +60,9 @@ class Container:
         # https://developers.redhat.com/blog/2016/09/13/running-systemd-in-a-non-privileged-container#the_quest
         extra_initd_args = []
         if initd:
-            extra_initd_args = "--tmpfs /tmp --tmpfs /run -v /sys/fs/cgroup:/sys/fs/cgroup:ro".split()
+            extra_initd_args = (
+                "--tmpfs /tmp --tmpfs /run -v /sys/fs/cgroup:/sys/fs/cgroup:ro".split()
+            )
 
         self.uid = str(uuid.uuid4())
 
@@ -103,6 +111,17 @@ def ubuntu_image_with_fdb_helper(versioned: bool) -> Iterator[Optional[Image]]:
         container = Container("ubuntu")
         for deb in debs:
             container.copy_to(deb, "/opt")
+        container.run(["bash", "-c", "apt-get update"])
+        container.run(
+            ["bash", "-c", "apt-get install --yes execstack"]
+        )  # this is for testing libfdb_c execstack permissions
+        container.run(
+            [
+                "bash",
+                "-c",
+                "DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true apt-get install --yes gcc pkg-config cmake",
+            ]
+        )  # this is for testing building client apps
         container.run(["bash", "-c", "dpkg -i /opt/*.deb"])
         container.run(["bash", "-c", "rm /opt/*.deb"])
         image = container.commit()
@@ -143,9 +162,15 @@ def centos_image_with_fdb_helper(versioned: bool) -> Iterator[Optional[Image]]:
     container = None
     image = None
     try:
-        container = Container("centos", initd=True)
+        container = Container("centos:7", initd=True)
         for rpm in rpms:
             container.copy_to(rpm, "/opt")
+        container.run(
+            ["bash", "-c", "yum install -y prelink"]
+        )  # this is for testing libfdb_c execstack permissions
+        container.run(
+            ["bash", "-c", "yum install -y gcc pkg-config cmake make"]
+        )  # this is for testing building client apps
         container.run(["bash", "-c", "yum install -y /opt/*.rpm"])
         container.run(["bash", "-c", "rm /opt/*.rpm"])
         image = container.commit()
@@ -226,13 +251,84 @@ def test_db_available(linux_container: Container):
     linux_container.run(["fdbcli", "--exec", "get x"])
 
 
+def test_client_app(linux_container: Container):
+    test_client_app_script = r"""#!/bin/bash
+
+set -euxo pipefail
+
+cat > app.c << EOF
+// FDB_API_VERSION doesn't necessarily need to be kept up to date here
+#define FDB_API_VERSION 700
+#include <foundationdb/fdb_c.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+static void check(fdb_error_t e) {
+    if (e) {
+        fprintf(stderr, "%s\n", fdb_get_error(e));
+        fflush(NULL);
+        abort();
+    }
+}
+
+int result = 0;
+
+static void callback(FDBFuture* f, void* _ignored) {
+    check(fdb_stop_network());
+}
+
+int main() {
+    check(fdb_select_api_version(700));
+    check(fdb_setup_network());
+    FDBDatabase* db;
+    check(fdb_create_database(NULL, &db));
+    FDBTransaction* tr;
+    check(fdb_database_create_transaction(db, &tr));
+    FDBFuture* f = fdb_transaction_get_read_version(tr);
+    check(fdb_future_set_callback(f, callback, NULL));
+    check(fdb_run_network());
+    fdb_future_destroy(f);
+    fdb_transaction_destroy(tr);
+    fdb_database_destroy(db);
+    return 0;
+}
+EOF
+
+cc app.c `pkg-config foundationdb-client --cflags --libs`
+./a.out
+
+cat > CMakeLists.txt << EOF
+project(app C)
+find_package(FoundationDB-Client REQUIRED)
+add_executable(app app.c)
+target_link_libraries(app PRIVATE fdb_c)
+EOF
+
+mkdir build
+cd build
+cmake ..
+make
+./app
+
+"""
+    linux_container.run(["bash", "-c", test_client_app_script])
+
+
 def test_write(linux_container: Container, snapshot):
     linux_container.run(["fdbcli", "--exec", "writemode on; set x y"])
     assert snapshot == linux_container.run(["fdbcli", "--exec", "get x"])
 
 
-def test_fdbcli_help_text(linux_container: Container, snapshot):
-    assert snapshot == linux_container.run(["fdbcli", "--help"])
+def test_execstack_permissions_libfdb_c(linux_container: Container, snapshot):
+    linux_container.run(["ldconfig"])
+    assert snapshot == linux_container.run(
+        [
+            "bash",
+            "-c",
+            "execstack -q $(ldconfig -p | grep libfdb_c.so | awk '{print $(NF)}')",
+        ]
+    )
 
 
 def test_backup_restore(linux_container: Container, snapshot, tmp_path: pathlib.Path):
@@ -245,7 +341,7 @@ def test_backup_restore(linux_container: Container, snapshot, tmp_path: pathlib.
         [
             "bash",
             "-c",
-            "fdbrestore start -r file://$(echo /tmp/fdb_backup/*) -w --dest_cluster_file /etc/foundationdb/fdb.cluster",
+            "fdbrestore start -r file://$(echo /tmp/fdb_backup/*) -w --dest-cluster-file /etc/foundationdb/fdb.cluster",
         ]
     )
     assert snapshot == linux_container.run(["fdbcli", "--exec", "get x"])

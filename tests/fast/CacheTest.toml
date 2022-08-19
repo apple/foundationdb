@@ -12,5 +12,5 @@ testTitle = 'Cycle'
     testName = 'Cycle'
     transactionsPerSecond = 2500.0
     testDuration = 10.0
-    expectedRate = 0.80
+    expectedRate = 0.01
     keyPrefix = 'foo/'

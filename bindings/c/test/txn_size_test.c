@@ -67,25 +67,25 @@ void runTests(struct ResultSet* rs) {
 	fdb_transaction_set(tr, keys[i], KEY_SIZE, valueStr, VALUE_SIZE);
 	e = getSize(rs, tr, sizes + i);
 	checkError(e, "transaction get size", rs);
-	printf("size %d: %u\n", i, sizes[i]);
+	printf("size %d: %" PRId64 "\n", i, sizes[i]);
 	i++;
 
 	fdb_transaction_set(tr, keys[i], KEY_SIZE, valueStr, VALUE_SIZE);
 	e = getSize(rs, tr, sizes + i);
 	checkError(e, "transaction get size", rs);
-	printf("size %d: %u\n", i, sizes[i]);
+	printf("size %d: %" PRId64 "\n", i, sizes[i]);
 	i++;
 
 	fdb_transaction_clear(tr, keys[i], KEY_SIZE);
 	e = getSize(rs, tr, sizes + i);
 	checkError(e, "transaction get size", rs);
-	printf("size %d: %u\n", i, sizes[i]);
+	printf("size %d: %" PRId64 "\n", i, sizes[i]);
 	i++;
 
 	fdb_transaction_clear_range(tr, keys[i], KEY_SIZE, keys[i + 1], KEY_SIZE);
 	e = getSize(rs, tr, sizes + i);
 	checkError(e, "transaction get size", rs);
-	printf("size %d: %u\n", i, sizes[i]);
+	printf("size %d: %" PRId64 "\n", i, sizes[i]);
 	i++;
 
 	for (j = 0; j + 1 < i; j++) {
@@ -97,7 +97,7 @@ void runTests(struct ResultSet* rs) {
 int main(int argc, char** argv) {
 	srand(time(NULL));
 	struct ResultSet* rs = newResultSet();
-	checkError(fdb_select_api_version(710), "select API version", rs);
+	checkError(fdb_select_api_version(720), "select API version", rs);
 	printf("Running performance test at client version: %s\n", fdb_get_client_version());
 
 	keys = generateKeys(numKeys, KEY_SIZE);

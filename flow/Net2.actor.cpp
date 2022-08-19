@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 #include "boost/asio/buffer.hpp"
 #include "boost/asio/ip/address.hpp"
 #include "boost/system/system_error.hpp"
+#include "flow/Arena.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include <algorithm>
@@ -29,13 +30,17 @@
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #include <boost/asio.hpp>
-#include <boost/bind.hpp>
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
+#include "boost/asio/ssl.hpp"
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/range.hpp>
 #include <boost/algorithm/string/join.hpp>
 #include "flow/network.h"
 #include "flow/IThreadPool.h"
 
+#include "flow/IAsyncFile.h"
 #include "flow/ActorCollection.h"
 #include "flow/ThreadSafeQueue.h"
 #include "flow/ThreadHelper.actor.h"
@@ -47,13 +52,12 @@
 #include "flow/TLSConfig.actor.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Util.h"
+#include "flow/UnitTest.h"
+#include "flow/ScopeExit.h"
 
 #ifdef ADDRESS_SANITIZER
 #include <sanitizer/lsan_interface.h>
 #endif
-
-// See the comment in TLSConfig.actor.h for the explanation of why this module breaking include was done.
-#include "fdbrpc/IAsyncFile.h"
 
 #ifdef WIN32
 #include <mmsystem.h>
@@ -84,10 +88,6 @@ sigset_t sigprof_set;
 void initProfiling() {
 	net2backtraces = new volatile void*[net2backtraces_max];
 	other_backtraces = new volatile void*[net2backtraces_max];
-
-	// According to folk wisdom, calling this once before setting up the signal handler makes
-	// it async signal safe in practice :-/
-	backtrace(const_cast<void**>(other_backtraces), net2backtraces_max);
 
 	sigemptyset(&sigprof_set);
 	sigaddset(&sigprof_set, SIGPROF);
@@ -148,12 +148,31 @@ public:
 	void initMetrics() override;
 
 	// INetworkConnections interface
-	Future<Reference<IConnection>> connect(NetworkAddress toAddr, const std::string& host) override;
-	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, const std::string& host) override;
+	Future<Reference<IConnection>> connect(NetworkAddress toAddr, tcp::socket* existingSocket = nullptr) override;
+	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6) override;
+	// The mock DNS methods should only be used in simulation.
+	void addMockTCPEndpoint(const std::string& host,
+	                        const std::string& service,
+	                        const std::vector<NetworkAddress>& addresses) override {
+		throw operation_failed();
+	}
+	// The mock DNS methods should only be used in simulation.
+	void removeMockTCPEndpoint(const std::string& host, const std::string& service) override {
+		throw operation_failed();
+	}
+	void parseMockDNSFromString(const std::string& s) override { throw operation_failed(); }
+	std::string convertMockDNSToString() override { throw operation_failed(); }
+
 	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                       const std::string& service) override;
+	Future<std::vector<NetworkAddress>> resolveTCPEndpointWithDNSCache(const std::string& host,
+	                                                                   const std::string& service) override;
+	std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
+	                                                       const std::string& service) override;
+	std::vector<NetworkAddress> resolveTCPEndpointBlockingWithDNSCache(const std::string& host,
+	                                                                   const std::string& service) override;
 	Reference<IListener> listen(NetworkAddress localAddr) override;
 
 	// INetwork interface
@@ -175,13 +194,13 @@ public:
 		if (thread_network == this)
 			stopImmediately();
 		else
-			onMainThreadVoid([this] { this->stopImmediately(); }, nullptr);
+			onMainThreadVoid([this] { this->stopImmediately(); });
 	}
 	void addStopCallback(std::function<void()> fn) override {
 		if (thread_network == this)
 			stopCallbacks.emplace_back(std::move(fn));
 		else
-			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); }, nullptr);
+			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); });
 	}
 
 	bool isSimulated() const override { return false; }
@@ -193,11 +212,11 @@ public:
 
 	flowGlobalType global(int id) const override { return (globals.size() > id) ? globals[id] : nullptr; }
 	void setGlobal(size_t id, flowGlobalType v) override {
-		globals.resize(std::max(globals.size(), id + 1));
+		ASSERT(id < globals.size());
 		globals[id] = v;
 	}
 
-	ProtocolVersion protocolVersion() const override { return currentProtocolVersion; }
+	ProtocolVersion protocolVersion() const override { return currentProtocolVersion(); }
 
 	std::vector<flowGlobalType> globals;
 
@@ -214,12 +233,10 @@ public:
 	// private:
 
 	ASIOReactor reactor;
-#ifndef TLS_DISABLED
 	AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>> sslContextVar;
 	Reference<IThreadPool> sslHandshakerPool;
 	int sslHandshakerThreadsStarted;
 	int sslPoolHandshakesInProgress;
-#endif
 	TLSConfig tlsConfig;
 	Future<Void> backgroundCertRefresh;
 	ETLSInitState tlsInitializedState;
@@ -231,6 +248,7 @@ public:
 	TaskPriority currentTaskID;
 	uint64_t tasksIssued;
 	TDMetricCollection tdmetrics;
+	ChaosMetrics chaosMetrics;
 	// we read now() from a different thread. On Intel, reading a double is atomic anyways, but on other platforms it's
 	// not. For portability this should be atomic
 	std::atomic<double> currentTime;
@@ -353,14 +371,12 @@ public:
 				{
 					TraceEvent evt(SevWarn, errContext, errID);
 					evt.suppressFor(1.0).detail("ErrorCode", error.value()).detail("Message", error.message());
-#ifndef TLS_DISABLED
 					// There is no function in OpenSSL to use to check if an error code is from OpenSSL,
 					// but all OpenSSL errors have a non-zero "library" code set in bits 24-32, and linux
 					// error codes should never go that high.
 					if (error.value() >= (1 << 24L)) {
 						evt.detail("WhichMeans", TLSPolicy::ErrorString(error));
 					}
-#endif
 				}
 
 				p.sendError(connection_failed());
@@ -493,7 +509,7 @@ public:
 
 	UID getDebugID() const override { return id; }
 
-	tcp::socket& getSocket() { return socket; }
+	tcp::socket& getSocket() override { return socket; }
 
 private:
 	UID id;
@@ -728,6 +744,13 @@ class Listener final : public IListener, ReferenceCounted<Listener> {
 public:
 	Listener(boost::asio::io_context& io_service, NetworkAddress listenAddress)
 	  : io_service(io_service), listenAddress(listenAddress), acceptor(io_service, tcpEndpoint(listenAddress)) {
+		// when port 0 is passed in, a random port will be opened
+		// set listenAddress as the address with the actual port opened instead of port 0
+		if (listenAddress.port == 0) {
+			this->listenAddress =
+			    NetworkAddress::parse(acceptor.local_endpoint().address().to_string().append(":").append(
+			        std::to_string(acceptor.local_endpoint().port())));
+		}
 		platform::setCloseOnExec(acceptor.native_handle());
 	}
 
@@ -760,7 +783,6 @@ private:
 	}
 };
 
-#ifndef TLS_DISABLED
 typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket&> ssl_socket;
 
 struct SSLHandshakerThread final : IThreadPoolReceiver {
@@ -819,10 +841,15 @@ public:
 	  : id(nondeterministicRandom()->randomUniqueID()), socket(io_service), ssl_sock(socket, context->mutate()),
 	    sslContext(context) {}
 
+	explicit SSLConnection(Reference<ReferencedObject<boost::asio::ssl::context>> context, tcp::socket* existingSocket)
+	  : id(nondeterministicRandom()->randomUniqueID()), socket(std::move(*existingSocket)),
+	    ssl_sock(socket, context->mutate()), sslContext(context) {}
+
 	// This is not part of the IConnection interface, because it is wrapped by INetwork::connect()
 	ACTOR static Future<Reference<IConnection>> connect(boost::asio::io_service* ios,
 	                                                    Reference<ReferencedObject<boost::asio::ssl::context>> context,
-	                                                    NetworkAddress addr) {
+	                                                    NetworkAddress addr,
+	                                                    tcp::socket* existingSocket = nullptr) {
 		std::pair<IPAddress, uint16_t> peerIP = std::make_pair(addr.ip, addr.port);
 		auto iter(g_network->networkInfo.serverTLSConnectionThrottler.find(peerIP));
 		if (iter != g_network->networkInfo.serverTLSConnectionThrottler.end()) {
@@ -837,9 +864,15 @@ public:
 			}
 		}
 
+		if (existingSocket != nullptr) {
+			Reference<SSLConnection> self(new SSLConnection(context, existingSocket));
+			self->peer_address = addr;
+			self->init();
+			return self;
+		}
+
 		state Reference<SSLConnection> self(new SSLConnection(*ios, context));
 		self->peer_address = addr;
-
 		try {
 			auto to = tcpEndpoint(self->peer_address);
 			BindPromise p("N2_ConnectError", self->id);
@@ -849,7 +882,7 @@ public:
 			wait(onConnected);
 			self->init();
 			return self;
-		} catch (Error& e) {
+		} catch (Error&) {
 			// Either the connection failed, or was cancelled by the caller
 			self->closeSocket();
 			throw;
@@ -1077,7 +1110,7 @@ public:
 
 	UID getDebugID() const override { return id; }
 
-	tcp::socket& getSocket() { return socket; }
+	tcp::socket& getSocket() override { return socket; }
 
 	ssl_socket& getSSLSocket() { return ssl_sock; }
 
@@ -1164,7 +1197,6 @@ private:
 		}
 	}
 };
-#endif
 
 struct PromiseTask final : public Task, public FastAllocated<PromiseTask> {
 	Promise<Void> promise;
@@ -1180,13 +1212,11 @@ struct PromiseTask final : public Task, public FastAllocated<PromiseTask> {
 // 5MB for loading files into memory
 
 Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
-  : useThreadPool(useThreadPool), reactor(this),
-#ifndef TLS_DISABLED
+  : globals(enumGlobal::COUNT), useThreadPool(useThreadPool), reactor(this),
     sslContextVar({ ReferencedObject<boost::asio::ssl::context>::from(
         boost::asio::ssl::context(boost::asio::ssl::context::tls)) }),
-    sslHandshakerThreadsStarted(0), sslPoolHandshakesInProgress(0),
-#endif
-    tlsConfig(tlsConfig), tlsInitializedState(ETLSInitState::NONE), network(this), tscBegin(0), tscEnd(0), taskBegin(0),
+    sslHandshakerThreadsStarted(0), sslPoolHandshakesInProgress(0), tlsConfig(tlsConfig),
+    tlsInitializedState(ETLSInitState::NONE), network(this), tscBegin(0), tscEnd(0), taskBegin(0),
     currentTaskID(TaskPriority::DefaultYield), tasksIssued(0), stopped(false), started(false), numYields(0),
     lastPriorityStats(nullptr), ready(FLOW_KNOBS->READY_QUEUE_RESERVED_SIZE) {
 	// Until run() is called, yield() will always yield
@@ -1195,6 +1225,9 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	// Set the global members
 	if (useMetrics) {
 		setGlobal(INetwork::enTDMetrics, (flowGlobalType)&tdmetrics);
+	}
+	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
+		setGlobal(INetwork::enChaosMetrics, (flowGlobalType)&chaosMetrics);
 	}
 	setGlobal(INetwork::enNetworkConnections, (flowGlobalType)network);
 	setGlobal(INetwork::enASIOService, (flowGlobalType)&reactor.ios);
@@ -1207,7 +1240,6 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	updateNow();
 }
 
-#ifndef TLS_DISABLED
 ACTOR static Future<Void> watchFileForChanges(std::string filename, AsyncTrigger* fileChanged) {
 	if (filename == "") {
 		return Never();
@@ -1284,13 +1316,11 @@ ACTOR static Future<Void> reloadCertificatesOnChange(
 		}
 	}
 }
-#endif
 
 void Net2::initTLS(ETLSInitState targetState) {
 	if (tlsInitializedState >= targetState) {
 		return;
 	}
-#ifndef TLS_DISABLED
 	// Any target state must be higher than NONE so if the current state is NONE
 	// then initialize the TLS config
 	if (tlsInitializedState == ETLSInitState::NONE) {
@@ -1340,11 +1370,10 @@ void Net2::initTLS(ETLSInitState targetState) {
 
 			for (int i = 0; i < threadsToStart; ++i) {
 				++sslHandshakerThreadsStarted;
-				sslHandshakerPool->addThread(new SSLHandshakerThread());
+				sslHandshakerPool->addThread(new SSLHandshakerThread(), "fdb-ssl-connect");
 			}
 		}
 	}
-#endif
 
 	tlsInitializedState = targetState;
 }
@@ -1402,6 +1431,8 @@ void Net2::run() {
 	TraceEvent("Net2Running").log();
 
 	thread_network = this;
+
+	unsigned int tasksSinceReact = 0;
 
 #ifdef WIN32
 	if (timeBeginPeriod(1) != TIMERR_NOERROR)
@@ -1471,6 +1502,7 @@ void Net2::run() {
 		taskBegin = timer_monotonic();
 		trackAtPriority(TaskPriority::ASIOReactor, taskBegin);
 		reactor.react();
+		tasksSinceReact = 0;
 
 		updateNow();
 		double now = this->currentTime;
@@ -1490,6 +1522,7 @@ void Net2::run() {
 			ready.push(timers.top());
 			timers.pop();
 		}
+		// FIXME: Is this double counting?
 		countTimers += numTimers;
 		FDB_TRACE_PROBE(run_loop_ready_timers, numTimers);
 
@@ -1500,7 +1533,7 @@ void Net2::run() {
 		taskBegin = timer_monotonic();
 		numYields = 0;
 		TaskPriority minTaskID = TaskPriority::Max;
-		int queueSize = ready.size();
+		[[maybe_unused]] int queueSize = ready.size();
 
 		FDB_TRACE_PROBE(run_loop_tasks_start, queueSize);
 		while (!ready.empty()) {
@@ -1511,6 +1544,7 @@ void Net2::run() {
 			ready.pop();
 
 			try {
+				++tasksSinceReact;
 				(*task)();
 			} catch (Error& e) {
 				TraceEvent(SevError, "TaskError").error(e);
@@ -1521,6 +1555,15 @@ void Net2::run() {
 			if (currentTaskID < minTaskID) {
 				trackAtPriority(currentTaskID, taskBegin);
 				minTaskID = currentTaskID;
+			}
+
+			// attempt to empty out the IO backlog
+			if (tasksSinceReact >= FLOW_KNOBS->TASKS_PER_REACTOR_CHECK) {
+				if (runFunc) {
+					runFunc();
+				}
+				reactor.react();
+				tasksSinceReact = 0;
 			}
 
 			double tscNow = timestampCounter();
@@ -1601,7 +1644,7 @@ void Net2::run() {
 #ifdef WIN32
 	timeEndPeriod(1);
 #endif
-}
+} // Net2::run
 
 // Updates the PriorityStats found in NetworkMetrics
 void Net2::updateStarvationTracker(struct NetworkMetrics::PriorityStats& binStats,
@@ -1788,19 +1831,25 @@ THREAD_HANDLE Net2::startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, in
 	return ::startThread(func, arg, stackSize, name);
 }
 
-Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, const std::string& host) {
-#ifndef TLS_DISABLED
+Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, tcp::socket* existingSocket) {
 	if (toAddr.isTLS()) {
 		initTLS(ETLSInitState::CONNECT);
-		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr);
+		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr, existingSocket);
 	}
-#endif
 
 	return Connection::connect(&this->reactor.ios, toAddr);
 }
 
-Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr, const std::string& host) {
-	return connect(toAddr, host);
+Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr) {
+	return connect(toAddr);
+}
+
+Future<Reference<IUDPSocket>> Net2::createUDPSocket(NetworkAddress toAddr) {
+	return UDPSocket::connect(&reactor.ios, toAddr, toAddr.ip.isV6());
+}
+
+Future<Reference<IUDPSocket>> Net2::createUDPSocket(bool isV6) {
+	return UDPSocket::connect(&reactor.ios, Optional<NetworkAddress>(), isV6);
 }
 
 ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* self,
@@ -1811,7 +1860,7 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 	state Future<std::vector<NetworkAddress>> result = promise.getFuture();
 
 	tcpResolver.async_resolve(
-	    tcp::resolver::query(host, service), [=](const boost::system::error_code& ec, tcp::resolver::iterator iter) {
+	    host, service, [promise](const boost::system::error_code& ec, tcp::resolver::iterator iter) {
 		    if (ec) {
 			    promise.sendError(lookup_failed());
 			    return;
@@ -1824,9 +1873,9 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 			    auto endpoint = iter->endpoint();
 			    auto addr = endpoint.address();
 			    if (addr.is_v6()) {
-				    addrs.push_back(NetworkAddress(IPAddress(addr.to_v6().to_bytes()), endpoint.port()));
+				    addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
 			    } else {
-				    addrs.push_back(NetworkAddress(addr.to_v4().to_ulong(), endpoint.port()));
+				    addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
 			    }
 			    ++iter;
 		    }
@@ -1838,22 +1887,71 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 		    }
 	    });
 
-	wait(ready(result));
+	try {
+		wait(ready(result));
+	} catch (Error& e) {
+		if (e.code() == error_code_lookup_failed) {
+			self->dnsCache.remove(host, service);
+		}
+		throw e;
+	}
 	tcpResolver.cancel();
+	std::vector<NetworkAddress> ret = result.get();
+	self->dnsCache.add(host, service, ret);
 
-	return result.get();
-}
-
-Future<Reference<IUDPSocket>> Net2::createUDPSocket(NetworkAddress toAddr) {
-	return UDPSocket::connect(&reactor.ios, toAddr, toAddr.ip.isV6());
-}
-
-Future<Reference<IUDPSocket>> Net2::createUDPSocket(bool isV6) {
-	return UDPSocket::connect(&reactor.ios, Optional<NetworkAddress>(), isV6);
+	return ret;
 }
 
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint(const std::string& host, const std::string& service) {
 	return resolveTCPEndpoint_impl(this, host, service);
+}
+
+Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpointWithDNSCache(const std::string& host,
+                                                                         const std::string& service) {
+	if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
+		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+		if (cache.present()) {
+			return cache.get();
+		}
+	}
+	return resolveTCPEndpoint_impl(this, host, service);
+}
+
+std::vector<NetworkAddress> Net2::resolveTCPEndpointBlocking(const std::string& host, const std::string& service) {
+	tcp::resolver tcpResolver(reactor.ios);
+	try {
+		auto iter = tcpResolver.resolve(host, service);
+		decltype(iter) end;
+		std::vector<NetworkAddress> addrs;
+		while (iter != end) {
+			auto endpoint = iter->endpoint();
+			auto addr = endpoint.address();
+			if (addr.is_v6()) {
+				addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+			} else {
+				addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+			}
+			++iter;
+		}
+		if (addrs.empty()) {
+			throw lookup_failed();
+		}
+		return addrs;
+	} catch (...) {
+		dnsCache.remove(host, service);
+		throw lookup_failed();
+	}
+}
+
+std::vector<NetworkAddress> Net2::resolveTCPEndpointBlockingWithDNSCache(const std::string& host,
+                                                                         const std::string& service) {
+	if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
+		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+		if (cache.present()) {
+			return cache.get();
+		}
+	}
+	return resolveTCPEndpointBlocking(host, service);
 }
 
 bool Net2::isAddressOnThisHost(NetworkAddress const& addr) const {
@@ -1886,12 +1984,10 @@ bool Net2::isAddressOnThisHost(NetworkAddress const& addr) const {
 
 Reference<IListener> Net2::listen(NetworkAddress localAddr) {
 	try {
-#ifndef TLS_DISABLED
 		if (localAddr.isTLS()) {
 			initTLS(ETLSInitState::LISTEN);
 			return Reference<IListener>(new SSLListener(reactor.ios, &this->sslContextVar, localAddr));
 		}
-#endif
 		return Reference<IListener>(new Listener(reactor.ios, localAddr));
 	} catch (boost::system::system_error const& e) {
 		Error x;
@@ -2032,7 +2128,7 @@ struct TestGVR {
 };
 
 template <class F>
-void startThreadF(F&& func) {
+THREAD_HANDLE startThreadF(F&& func) {
 	struct Thing {
 		F f;
 		Thing(F&& f) : f(std::move(f)) {}
@@ -2044,71 +2140,153 @@ void startThreadF(F&& func) {
 		}
 	};
 	Thing* t = new Thing(std::move(func));
-	startThread(Thing::start, t);
+	return g_network->startThread(Thing::start, t);
+}
+
+TEST_CASE("/flow/Net2/ThreadSafeQueue/Interface") {
+	ThreadSafeQueue<int> tq;
+	ASSERT(!tq.pop().present());
+	ASSERT(tq.canSleep());
+
+	ASSERT(tq.push(1) == true);
+	ASSERT(!tq.canSleep());
+	ASSERT(!tq.canSleep());
+	ASSERT(tq.push(2) == false);
+	ASSERT(tq.push(3) == false);
+
+	ASSERT(tq.pop().get() == 1);
+	ASSERT(tq.pop().get() == 2);
+	ASSERT(tq.push(4) == false);
+	ASSERT(tq.pop().get() == 3);
+	ASSERT(tq.pop().get() == 4);
+	ASSERT(!tq.pop().present());
+	ASSERT(tq.canSleep());
+	return Void();
+}
+
+// A helper struct used by queueing tests which use multiple threads.
+struct QueueTestThreadState {
+	QueueTestThreadState(int threadId, int toProduce) : threadId(threadId), toProduce(toProduce) {}
+	int threadId;
+	THREAD_HANDLE handle;
+	int toProduce;
+	int produced = 0;
+	Promise<Void> doneProducing;
+	int consumed = 0;
+
+	static int valueToThreadId(int value) { return value >> 20; }
+	int elementValue(int index) { return index + (threadId << 20); }
+	int nextProduced() { return elementValue(produced++); }
+	int nextConsumed() { return elementValue(consumed++); }
+	void checkDone() {
+		ASSERT_EQ(produced, toProduce);
+		ASSERT_EQ(consumed, produced);
+	}
+};
+
+TEST_CASE("/flow/Net2/ThreadSafeQueue/Threaded") {
+	// Uses ThreadSafeQueue from multiple threads. Verifies that all pushed elements are popped, maintaining the
+	// ordering within a thread.
+	noUnseed = true; // multi-threading inherently non-deterministic
+
+	ThreadSafeQueue<int> queue;
+	state std::vector<QueueTestThreadState> perThread = { QueueTestThreadState(0, 1000000),
+		                                                  QueueTestThreadState(1, 100000),
+		                                                  QueueTestThreadState(2, 1000000) };
+	state std::vector<Future<Void>> doneProducing;
+
+	int total = 0;
+	for (int t = 0; t < perThread.size(); ++t) {
+		auto& s = perThread[t];
+		doneProducing.push_back(s.doneProducing.getFuture());
+		total += s.toProduce;
+		s.handle = startThreadF([&queue, &s]() {
+			printf("Thread%d\n", s.threadId);
+			int nextYield = 0;
+			while (s.produced < s.toProduce) {
+				queue.push(s.nextProduced());
+				if (nextYield-- == 0) {
+					std::this_thread::yield();
+					nextYield = nondeterministicRandom()->randomInt(0, 100);
+				}
+			}
+			printf("T%dDone\n", s.threadId);
+			s.doneProducing.send(Void());
+		});
+	}
+	int consumed = 0;
+	while (consumed < total) {
+		Optional<int> element = queue.pop();
+		if (element.present()) {
+			int v = element.get();
+			auto& s = perThread[QueueTestThreadState::valueToThreadId(v)];
+			++consumed;
+			ASSERT(v == s.nextConsumed());
+		} else {
+			std::this_thread::yield();
+		}
+		if ((consumed & 3) == 0)
+			queue.canSleep();
+	}
+
+	wait(waitForAll(doneProducing));
+
+	// Make sure we continue on the main thread.
+	Promise<Void> signal;
+	state Future<Void> doneConsuming = signal.getFuture();
+	g_network->onMainThread(std::move(signal), TaskPriority::DefaultOnMainThread);
+	wait(doneConsuming);
+
+	for (int t = 0; t < perThread.size(); ++t) {
+		waitThread(perThread[t].handle);
+		perThread[t].checkDone();
+	}
+	return Void();
+}
+
+// NB: This could be a test for any INetwork implementation, but Sim2 doesn't
+// satisfy this requirement yet.
+TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
+	// Verifies that signals processed by onMainThread() are executed in order.
+	noUnseed = true; // multi-threading inherently non-deterministic
+
+	state std::vector<QueueTestThreadState> perThread = { QueueTestThreadState(0, 1000000),
+		                                                  QueueTestThreadState(1, 100000),
+		                                                  QueueTestThreadState(2, 1000000) };
+	state std::vector<Future<Void>> doneProducing;
+	for (int t = 0; t < perThread.size(); ++t) {
+		auto& s = perThread[t];
+		doneProducing.push_back(s.doneProducing.getFuture());
+		s.handle = startThreadF([&s]() {
+			int nextYield = 0;
+			while (s.produced < s.toProduce) {
+				if (nextYield-- == 0) {
+					std::this_thread::yield();
+					nextYield = nondeterministicRandom()->randomInt(0, 100);
+				}
+				int v = s.nextProduced();
+				onMainThreadVoid([&s, v]() { ASSERT_EQ(v, s.nextConsumed()); });
+			}
+			s.doneProducing.send(Void());
+		});
+	}
+	wait(waitForAll(doneProducing));
+
+	// Wait for one more onMainThread to wait for all scheduled signals to be executed.
+	Promise<Void> signal;
+	state Future<Void> doneConsuming = signal.getFuture();
+	g_network->onMainThread(std::move(signal), TaskPriority::DefaultOnMainThread);
+	wait(doneConsuming);
+
+	for (int t = 0; t < perThread.size(); ++t) {
+		waitThread(perThread[t].handle);
+		perThread[t].checkDone();
+	}
+	return Void();
 }
 
 void net2_test(){
-	/*printf("ThreadSafeQueue test\n");
-	printf("  Interface: ");
-	ThreadSafeQueue<int> tq;
-	ASSERT( tq.canSleep() == true );
-
-	ASSERT( tq.push( 1 ) == true ) ;
-	ASSERT( tq.push( 2 ) == false );
-	ASSERT( tq.push( 3 ) == false );
-
-	ASSERT( tq.pop().get() == 1 );
-	ASSERT( tq.pop().get() == 2 );
-	ASSERT( tq.push( 4 ) == false );
-	ASSERT( tq.pop().get() == 3 );
-	ASSERT( tq.pop().get() == 4 );
-	ASSERT( !tq.pop().present() );
-	printf("OK\n");
-
-	printf("Threaded: ");
-	Event finished, finished2;
-	int thread1Iterations = 1000000, thread2Iterations = 100000;
-
-	if (thread1Iterations)
-	    startThreadF([&](){
-	        printf("Thread1\n");
-	        for(int i=0; i<thread1Iterations; i++)
-	            tq.push(i);
-	        printf("T1Done\n");
-	        finished.set();
-	    });
-	if (thread2Iterations)
-	    startThreadF([&](){
-	        printf("Thread2\n");
-	        for(int i=0; i<thread2Iterations; i++)
-	            tq.push(i + (1<<20));
-	        printf("T2Done\n");
-	        finished2.set();
-	    });
-	int c = 0, mx[2]={0, 1<<20}, p = 0;
-	while (c < thread1Iterations + thread2Iterations)
-	{
-	    Optional<int> i = tq.pop();
-	    if (i.present()) {
-	        int v = i.get();
-	        ++c;
-	        if (mx[v>>20] != v)
-	            printf("Wrong value dequeued!\n");
-	        ASSERT( mx[v>>20] == v );
-	        mx[v>>20] = v + 1;
-	    } else {
-	        ++p;
-	        _mm_pause();
-	    }
-	    if ((c&3)==0) tq.canSleep();
-	}
-	printf("%d %d %x %x %s\n", c, p, mx[0], mx[1], mx[0]==thread1Iterations && mx[1]==(1<<20)+thread2Iterations ? "OK" :
-	"FAIL");
-
-	finished.block();
-	finished2.block();
-
-
+	/*
 	g_network = newNet2();  // for promise serialization below
 
 	Endpoint destination;

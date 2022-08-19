@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,8 +19,9 @@
  */
 
 #include <cinttypes>
+#include "fmt/format.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbclient/FDBTypes.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -113,7 +114,7 @@ struct DiskDurabilityTest : TestWorkload {
 		if (failed)
 			throw operation_failed();
 
-		printf("Verified %d/%" PRId64 " pages\n", verifyPages, size / 4096);
+		fmt::print("Verified {0}/{1} pages\n", verifyPages, size / 4096);
 		TraceEvent(SevInfo, "Verified").detail("Pages", verifyPages).detail("Of", size / 4096);
 
 		// Run

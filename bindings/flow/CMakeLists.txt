@@ -18,7 +18,9 @@ set(SRCS
 
 add_flow_target(STATIC_LIBRARY NAME fdb_flow SRCS ${SRCS})
 target_link_libraries(fdb_flow PUBLIC fdb_c)
+target_link_libraries(fdb_flow PUBLIC fdbclient)
 target_include_directories(fdb_flow PUBLIC
+  "${CMAKE_SOURCE_DIR}"
   "${CMAKE_CURRENT_BINARY_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}/tester"
@@ -36,15 +38,15 @@ if(NOT OPEN_FOR_IDE)
   endforeach()
 
   if(NOT FDB_RELEASE)
-    set(prerelease_string "-PRERELEASE")
+    set(not_fdb_release_string "-SNAPSHOT")
   else()
-    set(prerelease_string "")
+    set(not_fdb_release_string "")
   endif()
 
   file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/packages)
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packages)
-  set(package_dir ${CMAKE_CURRENT_BINARY_DIR}/packages/fdb-flow-${CMAKE_PROJECT_VERSION})
-  set(tar_file ${CMAKE_BINARY_DIR}/packages/fdb-flow-${CMAKE_PROJECT_VERSION}${prerelease_string}-x86_64.tar.gz)
+  set(package_dir ${CMAKE_CURRENT_BINARY_DIR}/packages/fdb-flow-${FDB_VERSION})
+  set(tar_file ${CMAKE_BINARY_DIR}/packages/fdb-flow-${FDB_VERSION}${not_fdb_release_string}-x86_64.tar.gz)
   add_custom_command(OUTPUT ${tar_file}
     COMMAND
     ${CMAKE_COMMAND} -E make_directory ${package_dir} &&

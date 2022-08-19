@@ -1,0 +1,23 @@
+[[test]]
+testTitle='CloggedConfigureDatabaseTest'
+clearAfterTest=false
+
+    [[test.workload]]
+    testName='ConfigureDatabase'
+    testDuration=30.0
+    allowDescriptorChange=false
+
+    [[test.workload]]
+    testName='RandomClogging'
+    testDuration=30.0
+
+    [[test.workload]]
+    testName='RandomClogging'
+    testDuration=30.0
+    scale=0.1
+    clogginess=2.0
+
+    [[test.workload]]
+    testName='SaveAndKill'
+    restartInfoLocation='simfdb/restartInfo.ini'
+    testDuration=30.0

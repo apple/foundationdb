@@ -22,10 +22,6 @@
 
 package fdb
 
-// #define FDB_API_VERSION 710
-// #include <foundationdb/fdb_c.h>
-import "C"
-
 // Deprecated: Use OpenDatabase or OpenDefault to obtain a database handle directly.
 // Cluster is a handle to a FoundationDB cluster. Cluster is a lightweight
 // object that may be efficiently copied, and is safe for concurrent use by

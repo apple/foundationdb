@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,11 +26,11 @@
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #include <boost/asio.hpp>
-#include <boost/bind.hpp>
 
 #define FILESYSTEM_IMPL 1
 
 #include "fdbrpc/AsyncFileCached.actor.h"
+#include "fdbrpc/AsyncFileChaos.h"
 #include "fdbrpc/AsyncFileEIO.actor.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileWinASIO.actor.h"
@@ -77,14 +77,14 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 		    static_cast<boost::asio::io_service*>((void*)g_network->global(INetwork::enASIOService)));
 	if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
 		f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
-#if ENCRYPTION_ENABLED
+	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
+		f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileChaos(r)); });
 	if (flags & IAsyncFile::OPEN_ENCRYPTED)
 		f = map(f, [flags](Reference<IAsyncFile> r) {
 			auto mode = flags & IAsyncFile::OPEN_READWRITE ? AsyncFileEncrypted::Mode::APPEND_ONLY
 			                                               : AsyncFileEncrypted::Mode::READ_ONLY;
 			return Reference<IAsyncFile>(new AsyncFileEncrypted(r, mode));
 		});
-#endif // ENCRYPTION_ENABLED
 	return f;
 }
 

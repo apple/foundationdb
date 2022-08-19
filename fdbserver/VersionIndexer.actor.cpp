@@ -25,7 +25,7 @@
 #include "flow/ActorCollection.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.actor.h"
-#include "fdbserver/VersionIndexerInterface.actor.h"
+#include "fdbserver/VersionIndexerInterface.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 template <>
@@ -116,14 +116,14 @@ ACTOR Future<Void> versionPeek(VersionIndexerState* self, VersionIndexerPeekRequ
 		ASSERT(iter->version > req.lastKnownVersion);
 		reply.versions.emplace_back(iter->version, hasMutations);
 	}
-	//TraceEvent evt(SevDebug, "VersionIndexerPeek", self->id);
-	// evt.detail("Tag", req.tag).detail("PrevVersion", reply.previousVersion);
-	// for (int i = 0; i < reply.versions.size(); ++i) {
-	//	auto kVer = format("Version%d", i);
-	//	auto kVal = format("HasData%d", i);
-	//	evt.detail(kVer.c_str(), reply.versions[i].first);
-	//	evt.detail(kVal.c_str(), reply.versions[i].second);
-	// }
+	TraceEvent event(SevDebug, "VersionIndexerPeek", self->id);
+	event.detail("Tag", req.tag).detail("PrevVersion", reply.previousVersion);
+	for (int i = 0; i < reply.versions.size(); ++i) {
+		auto kVer = format("Version%d", i);
+		auto kVal = format("HasData%d", i);
+		event.detail(kVer.c_str(), reply.versions[i].first);
+		event.detail(kVal.c_str(), reply.versions[i].second);
+	}
 	req.reply.send(std::move(reply));
 	return Void();
 }
@@ -156,17 +156,17 @@ ACTOR Future<Void> addVersion(VersionIndexerState* self, VersionIndexerCommitReq
 		entry.version = req.version;
 		entry.tags = std::move(req.tags);
 		std::sort(entry.tags.begin(), entry.tags.end());
-		// TraceEvent evt(SevDebug, "VersionIndexerAddVersion", self->id);
-		// evt.detail("Version", req.version)
-		//     .detail("PrevVersion", req.previousVersion)
-		//     .detail("IndexerVersion", self->version.get())
-		//     .detail("NumTags", entry.tags.size())
-		//     .detail("FirstCommit", firstCommit);
-		// for (int i = 0; i < entry.tags.size(); ++i) {
-		// 	auto k = format("Tag%d", i);
-		// 	evt.detail(k.c_str(), entry.tags[i]);
-		// }
-		// evt.log();
+		TraceEvent event(SevDebug, "VersionIndexerAddVersion", self->id);
+		event.detail("Version", req.version)
+			.detail("PrevVersion", req.previousVersion)
+			.detail("IndexerVersion", self->version.get())
+			.detail("NumTags", entry.tags.size())
+			.detail("FirstCommit", firstCommit);
+		for (int i = 0; i < entry.tags.size(); ++i) {
+			auto k = format("Tag%d", i);
+			event.detail(k.c_str(), entry.tags[i]);
+		}
+		//event.log();
 		self->versionWindow.emplace_back(std::move(entry));
 		self->version.set(req.version);
 		self->stats.windowEnd = req.version;
@@ -220,7 +220,7 @@ ACTOR Future<Void> versionIndexer(VersionIndexerInterface interface,
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed) {
-			TraceEvent("VersionIndexerTerminated", interface.id()).error(e, true);
+			TraceEvent("VersionIndexerTerminated", interface.id()).errorUnsuppressed(e);
 			return Void();
 		}
 		throw;

@@ -88,8 +88,9 @@ public class FakeFDBTransaction extends FDBTransaction {
 	public int getNumRangeCalls() { return numRangeCalls; }
 
 	@Override
-	protected FutureResults getRange_internal(KeySelector begin, KeySelector end, int rowLimit, int targetBytes,
-	                                          int streamingMode, int iteration, boolean isSnapshot, boolean reverse) {
+	protected FutureResults getRange_internal(KeySelector begin, KeySelector end,
+	                                          int rowLimit, int targetBytes, int streamingMode, int iteration,
+	                                          boolean isSnapshot, boolean reverse) {
 		numRangeCalls++;
 		// TODO this is probably not correct for all KeySelector instances--we'll want to match with real behavior
 		NavigableMap<byte[], byte[]> range =

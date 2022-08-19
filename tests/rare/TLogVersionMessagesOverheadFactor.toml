@@ -1,0 +1,8 @@
+[[test]]
+testTitle = 'TLogVersionMessagesOverheadFactor'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    testsMatching = 'Lfdbserver/tlogserver/VersionMessagesOverheadFactor'

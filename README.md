@@ -1,6 +1,6 @@
 <img alt="FoundationDB logo" src="documentation/FDB_logo.png?raw=true" width="400">
 
-![Build Status](https://codebuild.us-west-2.amazonaws.com/badges?uuid=eyJlbmNyeXB0ZWREYXRhIjoiZ1FhRlNwU0JXeHVpZkt0a0k0QlNJK3BEUkplTGVRYnk3azBoT1FOazBQbGlIeDgrYmRJZVhuSUI4RTd3RWJWcjVMT3ZPTzV0NXlCTWpPTGlPVlMzckJJPSIsIml2UGFyYW1ldGVyU3BlYyI6IlB0TWVCM0VYdU5PQWtMUFYiLCJtYXRlcmlhbFNldFNlcmlhbCI6MX0%3D&branch=master)
+![Build Status](https://codebuild.us-west-2.amazonaws.com/badges?uuid=eyJlbmNyeXB0ZWREYXRhIjoiVjVzb1RQNUZTaGxGNm9iUnk4OUZ1d09GdTMzZnVOT1YzaUU1RU1xR2o2TENRWFZjb3ZrTHJEcngrZVdnNE40bXJJVDErOGVwendIL3lFWFY3Y3oxQmdjPSIsIml2UGFyYW1ldGVyU3BlYyI6IlJUbWhnaUlJVXRORUNJTjQiLCJtYXRlcmlhbFNldFNlcmlhbCI6MX0%3D&branch=main)
 
 FoundationDB is a distributed database designed to handle large volumes of structured data across clusters of commodity servers. It organizes data as an ordered key-value store and employs ACID transactions for all operations. It is especially well-suited for read/write workloads but also has excellent performance for write-intensive workloads. Users interact with the database using API language binding.
 
@@ -22,7 +22,7 @@ Contributing to FoundationDB can be in contributions to the code base, sharing y
 
 ### Binary downloads
 
-Developers interested in using FoundationDB can get started by downloading and installing a binary package. Please see the [downloads page](https://www.foundationdb.org/download/) for a list of available packages.
+Developers interested in using FoundationDB can get started by downloading and installing a binary package. Please see the [downloads page](https://github.com/apple/foundationdb/releases) for a list of available packages.
 
 
 ### Compiling from source
@@ -35,7 +35,7 @@ The official docker image for building is [`foundationdb/build`](https://hub.doc
 To build outside the official docker image you'll need at least these dependencies:
 
 1. Install cmake Version 3.13 or higher [CMake](https://cmake.org/)
-1. Install [Mono](http://www.mono-project.com/download/stable/)
+1. Install [Mono](https://www.mono-project.com/download/stable/)
 1. Install [Ninja](https://ninja-build.org/) (optional, but recommended)
 
 If compiling for local development, please set `-DUSE_WERROR=ON` in
@@ -126,7 +126,6 @@ You should create a second build-directory which you will use for building and d
     mkdir .build && cd .build
     cmake -G Ninja \
         -DUSE_CCACHE=on \
-        -DDISABLE_TLS=off \
         -DUSE_DTRACE=off \
         ..
     ninja -j 10
@@ -168,32 +167,17 @@ $SRCDIR/packaging/osx/buildpkg.sh . $SRCDIR
 
 ### Windows
 
-Under Windows, the build instructions are very similar, with the main difference
-that Visual Studio is used to compile.
+Under Windows, only Visual Studio with ClangCl is supported
 
-1. Install Visual Studio 2017 (Community Edition is tested)
-1. Install cmake Version 3.12 or higher [CMake](https://cmake.org/)
-1. Download version 1.72 of [Boost](https://boostorg.jfrog.io/artifactory/main/release/1.72.0/source/boost_1_72_0.tar.bz2)
-1. Unpack boost (you don't need to compile it)
-1. Install [Mono](http://www.mono-project.com/download/stable/)
-1. (Optional) Install a [JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html). FoundationDB currently builds with Java 8
-1. Set `JAVA_HOME` to the unpacked location and JAVA_COMPILE to
-   `$JAVA_HOME/bin/javac`.
-1. Install [Python](https://www.python.org/downloads/) if it is not already installed by Visual Studio
-1. (Optional) Install [WIX](http://wixtoolset.org/). Without it Visual Studio
-   won't build the Windows installer
-1. Create a build directory (you can have the build directory anywhere you
-   like): `mkdir build`
-1. `cd build`
-1. `cmake -G "Visual Studio 15 2017 Win64" -DBOOST_ROOT=<PATH_TO_BOOST> <PATH_TO_FOUNDATIONDB_DIRECTORY>`
-1. This should succeed. In which case you can build using msbuild:
-   `msbuild /p:Configuration=Release foundationdb.sln`. You can also open the resulting
-   solution in Visual Studio and compile from there. However, be aware that
-   using Visual Studio for development is currently not supported as Visual
-   Studio will only know about the generated files. `msbuild` is located at
-   `c:\Program Files (x86)\MSBuild\14.0\Bin\MSBuild.exe` for Visual Studio 15.
-
-If you installed WIX before running `cmake` you should find the
-`FDBInstaller.msi` in your build directory under `packaging/msi`. 
-
-TODO: Re-add instructions for TLS support [#3022](https://github.com/apple/foundationdb/issues/3022)
+1. Install Visual Studio 2019 (IDE or Build Tools), and enable llvm support
+1. Install  [CMake 3.15](https://cmake.org/) or higher
+1. Download [Boost 1.77.0](https://boostorg.jfrog.io/artifactory/main/release/1.77.0/source/boost_1_77_0.7z)
+1. Unpack boost to C:\boost, or use `-DBOOST_ROOT=<PATH_TO_BOOST>` with `cmake` if unpacked elsewhere
+1. Install [Python](https://www.python.org/downloads/) if is not already installed by Visual Studio
+1. (Optional) Install [OpenJDK 11](https://developers.redhat.com/products/openjdk/download) to build Java bindings
+1. (Optional) Install [OpenSSL 3.x](https://slproweb.com/products/Win32OpenSSL.html) to build with TLS support
+1. (Optional) Install [WIX Toolset](https://wixtoolset.org/) to build Windows installer
+1. `mkdir build && cd build`
+1. `cmake -G "Visual Studio 16 2019" -A x64 -T ClangCl <PATH_TO_FOUNDATIONDB_SOURCE>`
+1. `msbuild /p:Configuration=Release foundationdb.sln`
+1. To increase build performance, use `/p:UseMultiToolTask=true` and `/p:CL_MPCount=<NUMBER_OF_PARALLEL_JOBS>` 

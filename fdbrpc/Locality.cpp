@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -291,6 +291,24 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		default:
 			return ProcessClass::NeverAssign;
 		}
+	case ProcessClass::EncryptKeyProxy:
+		switch (_class) {
+		case ProcessClass::EncryptKeyProxyClass:
+			return ProcessClass::BestFit;
+		case ProcessClass::StatelessClass:
+			return ProcessClass::GoodFit;
+		case ProcessClass::UnsetClass:
+			return ProcessClass::UnsetFit;
+		case ProcessClass::MasterClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::CoordinatorClass:
+		case ProcessClass::TesterClass:
+		case ProcessClass::StorageCacheClass:
+		case ProcessClass::BlobWorkerClass:
+			return ProcessClass::NeverAssign;
+		default:
+			return ProcessClass::WorstFit;
+		}
 	default:
 		return ProcessClass::NeverAssign;
 	}
@@ -311,41 +329,27 @@ LBDistance::Type loadBalanceDistance(LocalityData const& loc1, LocalityData cons
 }
 
 StringRef to_string(ProcessClass::ClusterRole role) {
+	// clang-format off
 	switch (role) {
-	case ProcessClass::Storage:
-		return "Storage"_sr;
-	case ProcessClass::TLog:
-		return "TLog"_sr;
-	case ProcessClass::CommitProxy:
-		return "CommitProxy"_sr;
-	case ProcessClass::GrvProxy:
-		return "GrvProxy"_sr;
-	case ProcessClass::Master:
-		return "Master"_sr;
-	case ProcessClass::Resolver:
-		return "Resolver"_sr;
-	case ProcessClass::LogRouter:
-		return "LogRouter"_sr;
-	case ProcessClass::ClusterController:
-		return "ClusterController"_sr;
-	case ProcessClass::DataDistributor:
-		return "DataDistributor"_sr;
-	case ProcessClass::Ratekeeper:
-		return "Ratekeeper"_sr;
-	case ProcessClass::StorageCache:
-		return "StorageCache"_sr;
-	case ProcessClass::Backup:
-		return "Backup"_sr;
-	case ProcessClass::VersionIndexer:
-		return "VersionIndexer"_sr;
-	case ProcessClass::Worker:
-		return "Worker"_sr;
-	case ProcessClass::BlobManager:
-		return "BlobManager"_sr;
-	case ProcessClass::BlobWorker:
-		return "BlobWorker"_sr;
-	case ProcessClass::NoRole:
-		return "NoRole"_sr;
+	case ProcessClass::Storage:           return LiteralStringRef("Storage");
+	case ProcessClass::TLog:              return LiteralStringRef("TLog");
+	case ProcessClass::CommitProxy:       return LiteralStringRef("CommitProxy");
+	case ProcessClass::GrvProxy:          return LiteralStringRef("GrvProxy");
+	case ProcessClass::Master:            return LiteralStringRef("Master");
+	case ProcessClass::Resolver:          return LiteralStringRef("Resolver");
+	case ProcessClass::LogRouter:         return LiteralStringRef("LogRouter");
+	case ProcessClass::ClusterController: return LiteralStringRef("ClusterController");
+	case ProcessClass::DataDistributor:   return LiteralStringRef("DataDistributor");
+	case ProcessClass::Ratekeeper:        return LiteralStringRef("Ratekeeper");
+	case ProcessClass::BlobManager:       return LiteralStringRef("BlobManager");
+	case ProcessClass::BlobWorker:        return LiteralStringRef("BlobWorker");
+	case ProcessClass::StorageCache:      return LiteralStringRef("StorageCache");
+	case ProcessClass::Backup:            return LiteralStringRef("Backup");
+	case ProcessClass::EncryptKeyProxy:   return LiteralStringRef("EncryptKeyProxy");
+	case ProcessClass::VersionIndexer:    return LiteralStringRef("VersionIndexer");
+	case ProcessClass::Worker:            return LiteralStringRef("Worker");
+	case ProcessClass::NoRole:            return LiteralStringRef("NoRole");
 	}
+	// clang-format on
 	UNSTOPPABLE_ASSERT(false);
 }

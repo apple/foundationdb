@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,15 @@
  * limitations under the License.
  */
 
-#include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/Tuple.h"
 
 #include "flow/actorcompiler.h" // has to be last include
+
+double const ClientTagThrottleLimits::NO_EXPIRATION = std::numeric_limits<double>::max();
 
 void TagSet::addTag(TransactionTagRef tag) {
 	ASSERT(CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH < 256); // Tag length is encoded with a single byte
@@ -45,6 +49,19 @@ void TagSet::addTag(TransactionTagRef tag) {
 
 size_t TagSet::size() const {
 	return tags.size();
+}
+
+std::string TagSet::toString(Capitalize capitalize) const {
+	ASSERT(!tags.empty());
+	if (tags.size() == 1) {
+		std::string start = capitalize ? "Tag" : "tag";
+		return format("%s `%s'", start.c_str(), tags[0].toString().c_str());
+	}
+	std::string result = capitalize ? "Tags (" : "tags (";
+	for (int index = 0; index < tags.size() - 1; ++index) {
+		result += format("`%s', ", tags[index].toString().c_str());
+	}
+	return result + format("`%s')", tags.back().toString().c_str());
 }
 
 // Format for throttle key:
@@ -109,4 +126,69 @@ TagThrottleValue TagThrottleValue::fromValue(const ValueRef& value) {
 	BinaryReader reader(value, IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
 	reader >> throttleValue;
 	return throttleValue;
+}
+
+KeyRangeRef const tagQuotaKeys = KeyRangeRef("\xff/tagQuota/"_sr, "\xff/tagQuota0"_sr);
+KeyRef const tagQuotaPrefix = tagQuotaKeys.begin;
+
+Key ThrottleApi::getTagQuotaKey(TransactionTagRef tag) {
+	return tag.withPrefix(tagQuotaPrefix);
+}
+
+bool ThrottleApi::TagQuotaValue::isValid() const {
+	return reservedReadQuota <= totalReadQuota && reservedWriteQuota <= totalWriteQuota && reservedReadQuota >= 0 &&
+	       reservedWriteQuota >= 0;
+}
+
+Value ThrottleApi::TagQuotaValue::toValue() const {
+	return Tuple::makeTuple(reservedReadQuota, totalReadQuota, reservedWriteQuota, totalWriteQuota).pack();
+}
+
+ThrottleApi::TagQuotaValue ThrottleApi::TagQuotaValue::fromValue(ValueRef value) {
+	auto tuple = Tuple::unpack(value);
+	if (tuple.size() != 4) {
+		throw invalid_throttle_quota_value();
+	}
+	TagQuotaValue result;
+	try {
+		result.reservedReadQuota = tuple.getDouble(0);
+		result.totalReadQuota = tuple.getDouble(1);
+		result.reservedWriteQuota = tuple.getDouble(2);
+		result.totalWriteQuota = tuple.getDouble(3);
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "TagQuotaValueFailedToDeserialize").error(e);
+		throw invalid_throttle_quota_value();
+	}
+	if (!result.isValid()) {
+		TraceEvent(SevWarnAlways, "TagQuotaValueInvalidQuotas")
+		    .detail("ReservedReadQuota", result.reservedReadQuota)
+		    .detail("TotalReadQuota", result.totalReadQuota)
+		    .detail("ReservedWriteQuota", result.reservedWriteQuota)
+		    .detail("TotalWriteQuota", result.totalWriteQuota);
+		throw invalid_throttle_quota_value();
+	}
+	return result;
+}
+
+FDB_DEFINE_BOOLEAN_PARAM(ContainsRecommended);
+FDB_DEFINE_BOOLEAN_PARAM(Capitalize);
+
+TEST_CASE("TagSet/toString") {
+	{
+		TagSet tagSet;
+		tagSet.addTag("a"_sr);
+		ASSERT(tagSet.toString() == "tag `a'");
+		ASSERT(tagSet.toString(Capitalize::True) == "Tag `a'");
+	}
+	{
+		// Order is not guaranteed when multiple tags are present
+		TagSet tagSet;
+		tagSet.addTag("a"_sr);
+		tagSet.addTag("b"_sr);
+		auto tagString = tagSet.toString();
+		ASSERT(tagString == "tags (`a', `b')" || tagString == "tags (`b', `a')");
+		auto capitalizedTagString = tagSet.toString(Capitalize::True);
+		ASSERT(capitalizedTagString == "Tags (`a', `b')" || capitalizedTagString == "Tags (`b', `a')");
+	}
+	return Void();
 }

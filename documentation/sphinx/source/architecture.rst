@@ -137,7 +137,7 @@ storage server is responsible for which data range, and ensures data is
 evenly distributed across all storage servers (SS). Data distributor as
 a singleton in the cluster is recruited and monitored by Cluster
 Controller. See `internal
-documentation <https://github.com/apple/foundationdb/blob/master/design/data-distributor-internals.md>`__.
+documentation <https://github.com/apple/foundationdb/blob/main/design/data-distributor-internals.md>`__.
 
 Ratekeeper
 ~~~~~~~~~~
@@ -313,7 +313,7 @@ Transaction Logs. After previous Log Servers are stopped and new transaction
 system is recruited, the Master writes the coordinated states with current
 transaction system information. Finally, the Master accepts new
 transaction commits. See details in this
-`documentation <https://github.com/apple/foundationdb/blob/master/design/recovery-internals.md>`__.
+`documentation <https://github.com/apple/foundationdb/blob/main/design/recovery-internals.md>`__.
 
 Because GRV Proxies, Commit Proxies and Resolvers are stateless, their 
 recoveries have no extra work. In contrast, Transaction Logs save the 
@@ -345,16 +345,16 @@ Resources
 Post <https://forums.foundationdb.org/t/technical-overview-of-the-database/135/26>`__
 
 `Existing Architecture
-Documentation <https://github.com/apple/foundationdb/blob/master/documentation/sphinx/source/kv-architecture.rst>`__
+Documentation <https://github.com/apple/foundationdb/blob/main/documentation/sphinx/source/kv-architecture.rst>`__
 
 `Summit
 Presentation <https://www.youtube.com/watch?list=PLbzoR-pLrL6q7uYN-94-p_-Q3hyAmpI7o&v=EMwhsGsxfPU&feature=emb_logo>`__
 
 `Data Distribution
-Documentation <https://github.com/apple/foundationdb/blob/master/design/data-distributor-internals.md>`__
+Documentation <https://github.com/apple/foundationdb/blob/main/design/data-distributor-internals.md>`__
 
 `Recovery
-Documentation <https://github.com/apple/foundationdb/blob/master/design/recovery-internals.md>`__
+Documentation <https://github.com/apple/foundationdb/blob/main/design/recovery-internals.md>`__
 
 .. |image0| image:: images/Architecture.png
 .. |image1| image:: images/architecture-1.jpeg

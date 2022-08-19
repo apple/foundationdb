@@ -27,6 +27,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.tuple.Tuple;
 
 class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsumer {
 	private DatabaseOptions options;
@@ -117,6 +119,44 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	}
 
 	@Override
+	public Tenant openTenant(byte[] tenantName, Executor e) {
+		return openTenant(tenantName, e, eventKeeper);
+	}
+
+	@Override
+	public Tenant openTenant(Tuple tenantName) {
+		return openTenant(tenantName.pack());
+	}
+
+	@Override
+	public Tenant openTenant(Tuple tenantName, Executor e) {
+		return openTenant(tenantName.pack(), e);
+	}
+
+	@Override
+	public Tenant openTenant(byte[] tenantName, Executor e, EventKeeper eventKeeper) {
+		pointerReadLock.lock();
+		Tenant tenant = null;
+		try {
+			tenant = new FDBTenant(Database_openTenant(getPtr(), tenantName), this, tenantName, e, eventKeeper);
+			return tenant;
+		} catch (RuntimeException err) {
+			if (tenant != null) {
+				tenant.close();
+			}
+
+			throw err;
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
+	public Tenant openTenant(Tuple tenantName, Executor e, EventKeeper eventKeeper) {
+		return openTenant(tenantName.pack(), e, eventKeeper);
+	}
+
+	@Override
 	public Transaction createTransaction(Executor e) {
 		return createTransaction(e, eventKeeper);
 	}
@@ -161,6 +201,66 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	}
 
 	@Override
+	public CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion, boolean force, Executor e) {
+		pointerReadLock.lock();
+		try {
+			return new FutureKey(Database_purgeBlobGranules(getPtr(), beginKey, endKey, purgeVersion, force), e, eventKeeper);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
+	public CompletableFuture<Void> waitPurgeGranulesComplete(byte[] purgeKey, Executor e) {
+		pointerReadLock.lock();
+		try {
+			return new FutureVoid(Database_waitPurgeGranulesComplete(getPtr(), purgeKey), e);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
+	public CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey, Executor e) {
+		pointerReadLock.lock();
+		try {
+			return new FutureBool(Database_blobbifyRange(getPtr(), beginKey, endKey), e);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
+	public CompletableFuture<Boolean> unblobbifyRange(byte[] beginKey, byte[] endKey, Executor e) {
+		pointerReadLock.lock();
+		try {
+			return new FutureBool(Database_unblobbifyRange(getPtr(), beginKey, endKey), e);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
+	public CompletableFuture<KeyRangeArrayResult> listBlobbifiedRanges(byte[] beginKey, byte[] endKey, int rangeLimit, Executor e) {
+		pointerReadLock.lock();
+		try {
+			return new FutureKeyRangeArray(Database_listBlobbifiedRanges(getPtr(), beginKey, endKey, rangeLimit), e);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
+	public CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey, long version, Executor e) {
+		pointerReadLock.lock();
+		try {
+			return new FutureInt64(Database_verifyBlobRange(getPtr(), beginKey, endKey, version), e);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
 	public Executor getExecutor() {
 		return executor;
 	}
@@ -170,8 +270,15 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 		Database_dispose(cPtr);
 	}
 
+	private native long Database_openTenant(long cPtr, byte[] tenantName);
 	private native long Database_createTransaction(long cPtr);
 	private native void Database_dispose(long cPtr);
 	private native void Database_setOption(long cPtr, int code, byte[] value) throws FDBException;
 	private native double Database_getMainThreadBusyness(long cPtr);
+	private native long Database_purgeBlobGranules(long cPtr, byte[] beginKey, byte[] endKey, long purgeVersion, boolean force);
+	private native long Database_waitPurgeGranulesComplete(long cPtr, byte[] purgeKey);
+	private native long Database_blobbifyRange(long cPtr, byte[] beginKey, byte[] endKey);
+	private native long Database_unblobbifyRange(long cPtr, byte[] beginKey, byte[] endKey);
+	private native long Database_listBlobbifiedRanges(long cPtr, byte[] beginKey, byte[] endKey, int rangeLimit);
+	private native long Database_verifyBlobRange(long cPtr, byte[] beginKey, byte[] endKey, long version);
 }

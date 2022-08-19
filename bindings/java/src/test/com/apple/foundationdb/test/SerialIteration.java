@@ -39,7 +39,7 @@ public class SerialIteration {
 	private static final int THREAD_COUNT = 1;
 
 	public static void main(String[] args) throws InterruptedException {
-		FDB api = FDB.selectAPIVersion(710);
+		FDB api = FDB.selectAPIVersion(720);
 		try(Database database = api.open(args[0])) {
 			for(int i = 1; i <= THREAD_COUNT; i++) {
 				runThreadedTest(database, i);

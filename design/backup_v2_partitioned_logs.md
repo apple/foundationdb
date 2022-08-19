@@ -18,7 +18,7 @@ As an essential component of a database system, backup and restore is commonly u
 
 FDB backup system continuously scan the database’s key-value space, save key-value pairs and mutations at versions into range files and log files in blob storage. Specifically, mutation logs are generated at CommitProxy, and are written to transaction logs along with regular mutations. In production clusters like CK clusters, backup system is always on, which means each mutation is written twice to transaction logs, consuming about half of write bandwidth and about 40% of CommitProxy CPU time.
 
-The design of old backup system is [here](https://github.com/apple/foundationdb/blob/master/design/backup.md), and the data format of range files and mutations files is [here](https://github.com/apple/foundationdb/blob/master/design/backup-dataFormat.md). The technical overview of FDB is [here](https://github.com/apple/foundationdb/wiki/Technical-Overview-of-the-Database). The FDB recovery is described in this [doc](https://github.com/apple/foundationdb/blob/master/design/recovery-internals.md).
+The design of old backup system is [here](https://github.com/apple/foundationdb/blob/main/design/backup.md), and the data format of range files and mutations files is [here](https://github.com/apple/foundationdb/blob/main/design/backup-dataFormat.md). The technical overview of FDB is [here](https://github.com/apple/foundationdb/wiki/Technical-Overview-of-the-Database). The FDB recovery is described in this [doc](https://github.com/apple/foundationdb/blob/main/design/recovery-internals.md).
 
 
 ## Terminology
@@ -117,12 +117,12 @@ This project saves the mutation log to blob storage directly from the FDB cluste
 **Design question 1**: Should backup workers be recruited as part of log system or not?
 There are two design alternatives:
 
-1. Backup worker is external to the log system. In other words, backup workers survive master recovery. Thus, backup workers are recruited and monitored by the cluster controller.
-    1. The advantage is that the failure of backup workers does not cause master recovery.
-    2. The disadvantage is that backup workers need to monitor master recovery, especially configuration changes. Because the number of log routers can change after a recovery, we might need to recruit more backup workers for an increase and need to pause/shutdown backup workers for a decrease, which complicates the recruitment logic; or we might need to changing the mapping of tags to backup workers, which is also complex. A further complication is that backup workers need to constantly monitor master recovery and be very careful about the version boundary between two consecutive epochs, because the number of tags may change.
-2. Backup worker is recruited during master recovery as part of log system. The Master recruits a fixed number of backup workers, i.e., the same number as LogRouters.
+1. Backup worker is external to the log system. In other words, backup workers survive cluster recovery. Thus, backup workers are recruited and monitored by the cluster controller.
+    1. The advantage is that the failure of backup workers does not cause cluster recovery.
+    2. The disadvantage is that backup workers need to monitor cluster recovery, especially configuration changes. Because the number of log routers can change after a recovery, we might need to recruit more backup workers for an increase and need to pause/shutdown backup workers for a decrease, which complicates the recruitment logic; or we might need to changing the mapping of tags to backup workers, which is also complex. A further complication is that backup workers need to constantly monitor cluster recovery and be very careful about the version boundary between two consecutive epochs, because the number of tags may change.
+2. Backup worker is recruited during cluster recovery as part of log system. The Cluster Controller recruits a fixed number of backup workers, i.e., the same number as LogRouters.
     1. The advantage is that recruiting and mapping from backup worker to LogRouter tags are simple, i.e., one tag per worker.
-    2. The disadvantages is that backup workers are tied with master recovery -- a failure of a backup worker results in a master recovery, and a master recovery stops old backup workers and starts new ones.
+    2. The disadvantages is that backup workers are tied with cluster recovery -- a failure of a backup worker results in a cluster recovery, and a cluster recovery stops old backup workers and starts new ones.
 
 **Decision**: We choose the second approach for the simplicity of the recruiting process and handling of mapping of LogRouter tags to backup workers.
 
@@ -151,7 +151,7 @@ The requirement of the new backup system raises several design challenges:
 
 **Backup Worker**: This is a new role introduced in the new backup system. A backup worker is a `fdbserver` process running inside a FDB cluster, responsible for pulling mutations from transaction logs and saving the mutations to blob storage.
 
-**Master**: The master is responsible for coordinating the transition of the FDB transaction sub-system from one generation to the next. In particular, the master recruits backup workers during the recovery.
+**Cluster Controller (CC)**: The CC is responsible for coordinating the transition of the FDB transaction sub-system from one generation to the next. In particular, the CC recruits backup workers during the recovery.
 
 **Transaction Logs (TLogs)**: The transaction logs make mutations durable to disk for fast commit latencies. The logs receive commits from the commit proxy in version order, and only respond to the commit proxy once the data has been written and fsync'ed to an append only mutation log on disk. Storage servers retrieve mutations from TLogs. Once the storage servers have persisted mutations, storage servers then pop the mutations from the TLogs.
 
@@ -176,15 +176,15 @@ Backup worker is a new role introduced in the new backup system. A backup worker
 
 Backup worker has two modes of operation: *no-op* mode, and *working* mode. When there is no active backup in the cluster, backup worker operates in the no-op mode, which simply obtains the recently committed version from Proxies and then pops mutations from transaction logs. After operators submit a new backup request to the cluster, backup workers transition into the working mode that starts pulling mutations from transaction logs and saving the mutation data to blob storage.
 
-In the working mode, the popping of backup workers need to follow a strictly increasing version order. For the same tag, there could be multiple backup workers, each is responsible for a different epoch. These backup workers must coordinating their popping order, otherwise the backup can miss some mutation data. This coordination among backup workers is achieved by deferring popping of a later epoch and only allowing the oldest epoch to pop first. After the oldest epoch has finished, these corresponding backup workers notifies the master, which will then advances the oldest backup epoch so that the next epoch can proceed the popping.
+In the working mode, the popping of backup workers need to follow a strictly increasing version order. For the same tag, there could be multiple backup workers, each is responsible for a different epoch. These backup workers must coordinating their popping order, otherwise the backup can miss some mutation data. This coordination among backup workers is achieved by deferring popping of a later epoch and only allowing the oldest epoch to pop first. After the oldest epoch has finished, these corresponding backup workers notifies the CC, which will then advances the oldest backup epoch so that the next epoch can proceed the popping.
 
-A subtle issue for a displaced backup worker (i.e., being displaced because a new epoch begins), is that the last pop of the backup worker can cause missing version ranges in mutation logs. This is because the transaction for saving the progress may be delayed during recovery. As a result, the master could already recruited a new backup worker for the old epoch starting at the previously saved progress version. Then the saving transaction succeeds, and the worker pops mutations that the new backup worker is supposed to save, resulting in missing data for new backup worker’s log. The solution to this problem can be: 1) the old backup worker aborts immediately after knowing itself is displaced, thus not trying to save its progress; or 2) the old backup worker skip its last pop, since the next epoch will pop versions larger than its progress. Because the second approach avoids doing duplicated work in the new epoch, we choose to the second approach.
+A subtle issue for a displaced backup worker (i.e., being displaced because a new epoch begins), is that the last pop of the backup worker can cause missing version ranges in mutation logs. This is because the transaction for saving the progress may be delayed during recovery. As a result, the CC could already recruited a new backup worker for the old epoch starting at the previously saved progress version. Then the saving transaction succeeds, and the worker pops mutations that the new backup worker is supposed to save, resulting in missing data for new backup worker’s log. The solution to this problem can be: 1) the old backup worker aborts immediately after knowing itself is displaced, thus not trying to save its progress; or 2) the old backup worker skip its last pop, since the next epoch will pop versions larger than its progress. Because the second approach avoids doing duplicated work in the new epoch, we choose to the second approach.
 
 Finally, multiple concurrent backups are supported. Each backup worker keeps track of current backup jobs and saves mutations to corresponding backup containers for the same batch of mutations.
 
 ### Recruitment of Backup workers
 
-Backup workers are recruited during master recovery as part of log system. The Master recruits a fixed number of backup workers, one for each log router tag. During the recruiting process, the master sends backup worker initialization request as:
+Backup workers are recruited during cluster recovery as part of log system. The CC recruits a fixed number of backup workers, one for each log router tag. During the recruiting process, the CC sends backup worker initialization request as:
 
 ```
 struct InitializeBackupRequest {
@@ -200,11 +200,11 @@ struct InitializeBackupRequest {
 
 ```
 
-Note we need two epochs here: one for the recruited epoch and one for backing up epoch. The recruited epoch is the epoch of the log system, which is used by a backup worker to find out if it works for the current epoch. If so, the worker should save its progress and immediately exit. The `backupEpoch` is used for saving progress. The `backupEpoch` is usually the same as the epoch that the worker is recruited. However, it can be some earlier epoch than the recruiting epoch, signifying that the worker is responsible for data in that earlier epoch. In this case, when the worker is done and exits, the master should not flag its departure as a trigger of recovery. This is solved by the following protocol:
+Note we need two epochs here: one for the recruited epoch and one for backing up epoch. The recruited epoch is the epoch of the log system, which is used by a backup worker to find out if it works for the current epoch. If so, the worker should save its progress and immediately exit. The `backupEpoch` is used for saving progress. The `backupEpoch` is usually the same as the epoch that the worker is recruited. However, it can be some earlier epoch than the recruiting epoch, signifying that the worker is responsible for data in that earlier epoch. In this case, when the worker is done and exits, the CC should not flag its departure as a trigger of recovery. This is solved by the following protocol:
 
-1. The backup worker finishes its work, including saving progress to the key value store and uploading to cloud storage, and then sends a `BackupWorkerDoneRequest` to the master;
-2. The master receives the request, removes the worker from its log system, and updates the oldest backing up epoch `oldestBackupEpoch`;
-3. The master sends backup a reply message to the backup worker and registers the new log system with cluster controller;
+1. The backup worker finishes its work, including saving progress to the key value store and uploading to cloud storage, and then sends a `BackupWorkerDoneRequest` to the CC;
+2. The CC receives the request, removes the worker from its log system, and updates the oldest backing up epoch `oldestBackupEpoch`;
+3. The CC sends backup a reply message to the backup worker and registers the new log system with cluster controller;
 4. The backup worker exits after receiving the reply. Other backup workers in the system get the new log system from the cluster controller. If a backup worker’s `backupEpoch` is equal to `oldestBackupEpoch`, then the worker may start popping from TLogs.
 
 Note `oldestBackupEpoch` is introduced to prevent a backup worker for a newer epoch from popping when there are backup workers for older epochs. Otherwise, these older backup workers may lose data.
@@ -223,7 +223,7 @@ We strive to keep the operational interface the same as the old backup system. T
 
 By default, backup workers are not enabled in the system. When operators submit a new backup request for the first time, the database performs a configuration change (`backup_worker_enabled:=1`) that enables backup workers.
 
-The operator’s backup request can indicate if an old backup or a new backup is used. This is a command line option (i.e., `-p` or `--partitioned_log`) in the `fdbbackup` command. A backup request of the new type is started in the following steps:
+The operator’s backup request can indicate if an old backup or a new backup is used. This is a command line option (i.e., `-p` or `--partitioned-log`) in the `fdbbackup` command. A backup request of the new type is started in the following steps:
 
 1. Operators use `fdbbackup` tool to write the backup range to a system key, i.e., `\xff\x02/backupStarted`.
 2. All backup workers monitor the key `\xff\x02/backupStarted`, see the change, and start logging mutations.
@@ -271,7 +271,7 @@ The backup system must generate log files that the restore system can apply all 
 
 **Ordering guarantee**. To maintain the ordering of mutations, each mutation is stored with its commit version and a subsequence number, both are assigned by Proxies during commit. The restore system can load all mutations and derive a total order among all the mutations.
 
-**Completeness guarantee**. All mutations should be saved in log files. We cannot allow any mutations missing from the backup. This is guaranteed by the fault tolerance discussed below. Essentially all backup workers checkpoint their progress in the database. After the recovery, the new master reads previous checkpoints and recruit new backup workers for any missing version ranges.
+**Completeness guarantee**. All mutations should be saved in log files. We cannot allow any mutations missing from the backup. This is guaranteed by the fault tolerance discussed below. Essentially all backup workers checkpoint their progress in the database. After the recovery, the new CC reads previous checkpoints and recruit new backup workers for any missing version ranges.
 
 ## Backup File Format
 
@@ -306,9 +306,9 @@ The information can be used to optimize the restore process. For instance, the n
 
 ## Fault Tolerance
 
-Failures of a backup worker will trigger a master recovery. After the recovery, the new master recruits a new set of backup workers. Among them, a new backup worker shall continue the work of the failed backup worker from the previous epoch.
+Failures of a backup worker will trigger a cluster recovery. After the recovery, the new CC recruits a new set of backup workers. Among them, a new backup worker shall continue the work of the failed backup worker from the previous epoch.
 
-The interesting part is the handling of old epochs, since the backup workers for the old epoch are in the “displaced” state and should exit. So the basic idea is that we need a set of backup workers for the data left in the old epochs. To figure out the set of data not backed up yet, the master first loads saved backup progress data `<Worker_UID, LogEpoch, SavedVersion, Tag, TotalTags> `from the database, and then computes for each epoch, what version ranges have not been backed up. For each of the version range and tag, master recruit a worker to resume the backup for that version range and tag. Note that this worker has a different worker UID from the worker in the original epoch. As a result, for a given epoch and a tag, there might be multiple progress status, as these workers are recruited at different epochs.
+The interesting part is the handling of old epochs, since the backup workers for the old epoch are in the “displaced” state and should exit. So the basic idea is that we need a set of backup workers for the data left in the old epochs. To figure out the set of data not backed up yet, the CC first loads saved backup progress data `<Worker_UID, LogEpoch, SavedVersion, Tag, TotalTags> `from the database, and then computes for each epoch, what version ranges have not been backed up. For each of the version range and tag, the CC recruits a worker to resume the backup for that version range and tag. Note that this worker has a different worker UID from the worker in the original epoch. As a result, for a given epoch and a tag, there might be multiple progress status, as these workers are recruited at different epochs.
 
 ## KPI's and Metrics
 

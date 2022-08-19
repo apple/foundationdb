@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -541,7 +541,12 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		state AddressExclusion coordExcl;
 		// Exclude a coordinator under buggify, but only if fault tolerance is > 0 and kill set is non-empty already
 		if (BUGGIFY && toKill.size()) {
-			std::vector<NetworkAddress> coordinators = wait(getCoordinators(cx));
+			Optional<ClusterConnectionString> csOptional = wait(getConnectionString(cx));
+			state std::vector<NetworkAddress> coordinators;
+			if (csOptional.present()) {
+				ClusterConnectionString cs = csOptional.get();
+				wait(store(coordinators, cs.tryResolveHostnames()));
+			}
 			if (coordinators.size() > 2) {
 				auto randomCoordinator = deterministicRandom()->randomChoice(coordinators);
 				coordExcl = AddressExclusion(randomCoordinator.ip, randomCoordinator.port);

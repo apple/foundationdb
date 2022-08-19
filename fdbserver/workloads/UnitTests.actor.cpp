@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,13 +28,20 @@ void forceLinkFlowTests();
 void forceLinkVersionedMapTests();
 void forceLinkMemcpyTests();
 void forceLinkMemcpyPerfTests();
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 void forceLinkStreamCipherTests();
-#endif
+void forceLinkBlobCipherTests();
 void forceLinkParallelStreamTests();
 void forceLinkSimExternalConnectionTests();
 void forceLinkMutationLogReaderTests();
+void forceLinkSimKmsConnectorTests();
 void forceLinkIThreadPoolTests();
+void forceLinkTokenSignTests();
+void forceLinkJsonWebKeySetTests();
+void forceLinkVersionVectorTests();
+void forceLinkRESTClientTests();
+void forceLinkRESTUtilsTests();
+void forceLinkRESTKmsConnectorTest();
+void forceLinkCompressionUtilsTest();
 
 struct UnitTestWorkload : TestWorkload {
 	bool enabled;
@@ -73,13 +80,20 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkVersionedMapTests();
 		forceLinkMemcpyTests();
 		forceLinkMemcpyPerfTests();
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 		forceLinkStreamCipherTests();
-#endif
+		void forceLinkBlobCipherTests();
 		forceLinkParallelStreamTests();
 		forceLinkSimExternalConnectionTests();
 		forceLinkMutationLogReaderTests();
+		forceLinkSimKmsConnectorTests();
 		forceLinkIThreadPoolTests();
+		forceLinkTokenSignTests();
+		forceLinkJsonWebKeySetTests();
+		forceLinkVersionVectorTests();
+		forceLinkRESTClientTests();
+		forceLinkRESTUtilsTests();
+		forceLinkRESTKmsConnectorTest();
+		forceLinkCompressionUtilsTest();
 	}
 
 	std::string description() const override { return "UnitTests"; }
@@ -111,6 +125,10 @@ struct UnitTestWorkload : TestWorkload {
 			}
 		}
 
+		std::sort(tests.begin(), tests.end(), [](auto lhs, auto rhs) {
+			return std::string_view(lhs->name) < std::string_view(rhs->name);
+		});
+
 		fprintf(stdout, "Found %zu tests\n", tests.size());
 
 		if (tests.size() == 0) {
@@ -127,6 +145,11 @@ struct UnitTestWorkload : TestWorkload {
 		for (t = tests.begin(); t != tests.end(); ++t) {
 			state UnitTest* test = *t;
 			printf("Testing %s\n", test->name);
+
+			TraceEvent(SevInfo, "RunningUnitTest")
+			    .detail("Name", test->name)
+			    .detail("File", test->file)
+			    .detail("Line", test->line);
 
 			state Error result = success();
 			state double start_now = now();
@@ -149,7 +172,7 @@ struct UnitTestWorkload : TestWorkload {
 			self->totalWallTime += wallTime;
 			self->totalSimTime += simTime;
 			TraceEvent(result.code() != error_code_success ? SevError : SevInfo, "UnitTest")
-			    .error(result, true)
+			    .errorUnsuppressed(result)
 			    .detail("Name", test->name)
 			    .detail("File", test->file)
 			    .detail("Line", test->line)

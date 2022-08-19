@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #include "boost/asio.hpp"
-#include "boost/bind.hpp"
 
 class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool> {
 	struct Thread {
@@ -37,8 +36,7 @@ class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool>
 		~Thread() { ASSERT_ABORT(!userObject); }
 
 		void run() {
-			deprioritizeThread();
-
+			setThreadPriority(pool->priority());
 			threadUserObject = userObject;
 			try {
 				userObject->init();
@@ -63,6 +61,7 @@ class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool>
 	enum Mode { Run = 0, Shutdown = 2 };
 	volatile int mode;
 	int stackSize;
+	int pri;
 
 	struct ActionWrapper {
 		PThreadAction action;
@@ -83,7 +82,7 @@ class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool>
 	};
 
 public:
-	ThreadPool(int stackSize) : dontstop(ios), mode(Run), stackSize(stackSize) {}
+	ThreadPool(int stackSize, int pri) : dontstop(ios), mode(Run), stackSize(stackSize), pri(pri) {}
 	~ThreadPool() override {}
 	Future<Void> stop(Error const& e = success()) override {
 		if (mode == Shutdown)
@@ -112,10 +111,11 @@ public:
 		threads.back()->handle = g_network->startThread(start, threads.back(), stackSize, name);
 	}
 	void post(PThreadAction action) override { ios.post(ActionWrapper(action)); }
+	int priority() const { return pri; }
 };
 
-Reference<IThreadPool> createGenericThreadPool(int stackSize) {
-	return Reference<IThreadPool>(new ThreadPool(stackSize));
+Reference<IThreadPool> createGenericThreadPool(int stackSize, int pri) {
+	return Reference<IThreadPool>(new ThreadPool(stackSize, pri));
 }
 
 thread_local IThreadPoolReceiver* ThreadPool::Thread::threadUserObject;

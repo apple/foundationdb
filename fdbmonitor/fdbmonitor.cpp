@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -75,10 +75,13 @@
 #include <pwd.h>
 #include <grp.h>
 
-#include "flow/SimpleOpt.h"
-#include "SimpleIni.h"
+#include "SimpleOpt/SimpleOpt.h"
 
+#include "fdbclient/SimpleIni.h"
 #include "fdbclient/versions.h"
+
+constexpr uint64_t DEFAULT_MEMORY_LIMIT = 8LL << 30;
+constexpr double MEMORY_CHECK_INTERVAL = 2.0; // seconds
 
 #ifdef __linux__
 typedef fd_set* fdb_fd_set;
@@ -197,15 +200,44 @@ const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
 	const char* ret = nullptr;
 	const char* section = nullptr;
 
+	std::string keyWithUnderscores(key);
+	for (int i = keyWithUnderscores.size() - 1; i >= 0; --i) {
+		if (keyWithUnderscores[i] == '-') {
+			keyWithUnderscores.at(i) = '_';
+		}
+	}
+
 	va_list ap;
 	va_start(ap, key);
-
-	while (!ret && (section = va_arg(ap, const char*)))
+	while (!ret && (section = va_arg(ap, const char*))) {
 		ret = ini.GetValue(section, key, nullptr);
-
+		if (!ret) {
+			ret = ini.GetValue(section, keyWithUnderscores.c_str(), nullptr);
+		}
+	}
 	va_end(ap);
-
 	return ret;
+}
+
+bool isParameterNameEqual(const char* str, const char* target) {
+	if (!str || !target) {
+		return false;
+	}
+	while (*str && *target) {
+		char curStr = *str, curTarget = *target;
+		if (curStr == '-') {
+			curStr = '_';
+		}
+		if (curTarget == '-') {
+			curTarget = '_';
+		}
+		if (curStr != curTarget) {
+			return false;
+		}
+		str++;
+		target++;
+	}
+	return !(*str || *target);
 }
 
 double timer() {
@@ -368,6 +400,47 @@ int mkdir(std::string const& directory) {
 	return 0;
 }
 
+// Parse size value with same format as parse_with_suffix in flow.h
+uint64_t parseWithSuffix(const char* to_parse, const char* default_unit = nullptr) {
+	char* end_ptr = nullptr;
+	uint64_t ret = strtoull(to_parse, &end_ptr, 10);
+	if (end_ptr == to_parse) {
+		// failed to parse
+		return 0;
+	}
+	const char* unit = default_unit;
+	if (*end_ptr != 0) {
+		unit = end_ptr;
+	}
+	if (unit == nullptr) {
+		// no unit found
+		return 0;
+	}
+	if (strcmp(end_ptr, "B") == 0) {
+		// do nothing
+	} else if (strcmp(unit, "KB") == 0) {
+		ret *= static_cast<uint64_t>(1e3);
+	} else if (strcmp(unit, "KiB") == 0) {
+		ret *= 1ull << 10;
+	} else if (strcmp(unit, "MB") == 0) {
+		ret *= static_cast<uint64_t>(1e6);
+	} else if (strcmp(unit, "MiB") == 0) {
+		ret *= 1ull << 20;
+	} else if (strcmp(unit, "GB") == 0) {
+		ret *= static_cast<uint64_t>(1e9);
+	} else if (strcmp(unit, "GiB") == 0) {
+		ret *= 1ull << 30;
+	} else if (strcmp(unit, "TB") == 0) {
+		ret *= static_cast<uint64_t>(1e12);
+	} else if (strcmp(unit, "TiB") == 0) {
+		ret *= 1ull << 40;
+	} else {
+		// unrecognized unit
+		ret = 0;
+	}
+	return ret;
+}
+
 struct Command {
 private:
 	std::vector<std::string> commands;
@@ -387,6 +460,7 @@ public:
 	const char* delete_envvars;
 	bool deconfigured;
 	bool kill_on_configuration_change;
+	uint64_t memory_rss;
 
 	// one pair for each of stdout and stderr
 	int pipes[2][2];
@@ -394,7 +468,7 @@ public:
 	Command() : argv(nullptr) {}
 	Command(const CSimpleIni& ini, std::string _section, ProcessID id, fdb_fd_set fds, int* maxfd)
 	  : fds(fds), argv(nullptr), section(_section), fork_retry_time(-1), quiet(false), delete_envvars(nullptr),
-	    deconfigured(false), kill_on_configuration_change(true) {
+	    deconfigured(false), kill_on_configuration_change(true), memory_rss(0) {
 		char _ssection[strlen(section.c_str()) + 22];
 		snprintf(_ssection, strlen(section.c_str()) + 22, "%s", id.c_str());
 		ssection = _ssection;
@@ -426,7 +500,7 @@ public:
 
 		char* endptr;
 		const char* rd =
-		    get_value_multi(ini, "restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
+		    get_value_multi(ini, "restart-delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if (!rd) {
 			log_msg(SevError, "Unable to resolve restart delay for %s\n", ssection.c_str());
 			return;
@@ -439,7 +513,7 @@ public:
 		}
 
 		const char* mrd = get_value_multi(
-		    ini, "initial_restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
+		    ini, "initial-restart-delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if (!mrd) {
 			initial_restart_delay = 0;
 		} else {
@@ -453,7 +527,7 @@ public:
 		current_restart_delay = initial_restart_delay;
 
 		const char* rbo = get_value_multi(
-		    ini, "restart_backoff", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
+		    ini, "restart-backoff", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if (!rbo) {
 			restart_backoff = max_restart_delay;
 		} else {
@@ -469,7 +543,7 @@ public:
 		}
 
 		const char* rdri = get_value_multi(
-		    ini, "restart_delay_reset_interval", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
+		    ini, "restart-delay-reset-interval", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if (!rdri) {
 			restart_delay_reset_interval = max_restart_delay;
 		} else {
@@ -481,16 +555,16 @@ public:
 		}
 
 		const char* q =
-		    get_value_multi(ini, "disable_lifecycle_logging", ssection.c_str(), section.c_str(), "general", nullptr);
+		    get_value_multi(ini, "disable-lifecycle-logging", ssection.c_str(), section.c_str(), "general", nullptr);
 		if (q && !strcmp(q, "true"))
 			quiet = true;
 
 		const char* del_env =
-		    get_value_multi(ini, "delete_envvars", ssection.c_str(), section.c_str(), "general", nullptr);
+		    get_value_multi(ini, "delete-envvars", ssection.c_str(), section.c_str(), "general", nullptr);
 		delete_envvars = del_env;
 
 		const char* kocc =
-		    get_value_multi(ini, "kill_on_configuration_change", ssection.c_str(), section.c_str(), "general", nullptr);
+		    get_value_multi(ini, "kill-on-configuration-change", ssection.c_str(), section.c_str(), "general", nullptr);
 		if (kocc && strcmp(kocc, "true")) {
 			kill_on_configuration_change = false;
 		}
@@ -500,6 +574,22 @@ public:
 			log_msg(SevError, "Unable to resolve command for %s\n", ssection.c_str());
 			return;
 		}
+
+		const char* mem_rss = get_value_multi(ini, "memory", ssection.c_str(), section.c_str(), "general", nullptr);
+#ifdef __linux__
+		if (mem_rss) {
+			memory_rss = parseWithSuffix(mem_rss, "MiB");
+		} else {
+			memory_rss = DEFAULT_MEMORY_LIMIT;
+		}
+#else
+		if (mem_rss) {
+			// While the memory check is not currently implemented on non-Linux by fdbmonitor, the "memory" option is
+			// still pass to fdbserver, which will crash itself if the limit is exceeded.
+			log_msg(SevWarn, "Memory monitoring by fdbmonitor is not supported by current system\n");
+		}
+#endif
+
 		std::stringstream ss(binary);
 		std::copy(std::istream_iterator<std::string>(ss),
 		          std::istream_iterator<std::string>(),
@@ -508,10 +598,14 @@ public:
 		const char* id_s = ssection.c_str() + strlen(section.c_str()) + 1;
 
 		for (auto i : keys) {
-			if (!strcmp(i.pItem, "command") || !strcmp(i.pItem, "restart_delay") ||
-			    !strcmp(i.pItem, "initial_restart_delay") || !strcmp(i.pItem, "restart_backoff") ||
-			    !strcmp(i.pItem, "restart_delay_reset_interval") || !strcmp(i.pItem, "disable_lifecycle_logging") ||
-			    !strcmp(i.pItem, "delete_envvars") || !strcmp(i.pItem, "kill_on_configuration_change")) {
+			// For "memory" option, despite they are handled by fdbmonitor, we still pass it to fdbserver.
+			if (isParameterNameEqual(i.pItem, "command") || isParameterNameEqual(i.pItem, "restart-delay") ||
+			    isParameterNameEqual(i.pItem, "initial-restart-delay") ||
+			    isParameterNameEqual(i.pItem, "restart-backoff") ||
+			    isParameterNameEqual(i.pItem, "restart-delay-reset-interval") ||
+			    isParameterNameEqual(i.pItem, "disable-lifecycle-logging") ||
+			    isParameterNameEqual(i.pItem, "delete-envvars") ||
+			    isParameterNameEqual(i.pItem, "kill-on-configuration-change")) {
 				continue;
 			}
 
@@ -523,7 +617,7 @@ public:
 				opt.replace(pos, 3, id_s, strlen(id_s));
 
 			const char* flagName = i.pItem + 5;
-			if (strncmp("flag_", i.pItem, 5) == 0 && strlen(flagName) > 0) {
+			if ((strncmp("flag_", i.pItem, 5) == 0 || strncmp("flag-", i.pItem, 5) == 0) && strlen(flagName) > 0) {
 				if (opt == "true")
 					commands.push_back(std::string("--") + flagName);
 				else if (opt != "false") {
@@ -609,6 +703,31 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONFFILE, "--conffile", SO_REQ_SEP }
 	                                  { OPT_HELP, "-h", SO_NONE },
 	                                  { OPT_HELP, "--help", SO_NONE },
 	                                  SO_END_OF_OPTIONS };
+
+// Return resident memory in bytes for the given process, or 0 if error.
+uint64_t getRss(ProcessID id) {
+#ifndef __linux__
+	// TODO: implement for non-linux
+	return 0;
+#else
+	pid_t pid = id_pid[id];
+	char stat_path[100];
+	snprintf(stat_path, sizeof(stat_path), "/proc/%d/statm", pid);
+	FILE* stat_file = fopen(stat_path, "r");
+	if (stat_file == nullptr) {
+		log_msg(SevWarn, "Unable to open stat file for %s\n", id.c_str());
+		return 0;
+	}
+	long rss = 0;
+	int ret = fscanf(stat_file, "%*s%ld", &rss);
+	if (ret == 0) {
+		log_msg(SevWarn, "Unable to parse rss size for %s\n", id.c_str());
+		return 0;
+	}
+	fclose(stat_file);
+	return static_cast<uint64_t>(rss) * sysconf(_SC_PAGESIZE);
+#endif
+}
 
 void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, sigset_t* mask) {
 	if (!cmd->argv)
@@ -765,7 +884,7 @@ bool argv_equal(const char** a1, const char** a2) {
 	return true;
 }
 
-void kill_process(ProcessID id, bool wait = true) {
+void kill_process(ProcessID id, bool wait = true, bool cleanup = true) {
 	pid_t pid = id_pid[id];
 
 	log_msg(SevInfo, "Killing process %d\n", pid);
@@ -775,8 +894,10 @@ void kill_process(ProcessID id, bool wait = true) {
 		waitpid(pid, nullptr, 0);
 	}
 
-	pid_id.erase(pid);
-	id_pid.erase(id);
+	if (cleanup) {
+		pid_id.erase(pid);
+		id_pid.erase(id);
+	}
 }
 
 void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb_fd_set rfds, int* maxfd) {
@@ -1151,7 +1272,7 @@ void testPathOps() {
 	std::string cwd = abspath(".", true);
 
 	// Create some symlinks and test resolution (or non-resolution) of them
-	int rc;
+	[[maybe_unused]] int rc;
 	// Ignoring return codes, if symlinks fail tests below will fail
 	rc = unlink("simfdb/backups/four");
 	rc = unlink("simfdb/backups/five");
@@ -1227,7 +1348,7 @@ int main(int argc, char** argv) {
 
 	std::vector<const char*> additional_watch_paths;
 
-	CSimpleOpt args(argc, argv, g_rgOptions, SO_O_NOERR);
+	CSimpleOpt args(argc, argv, g_rgOptions, SO_O_NOERR | SO_O_HYPHEN_TO_UNDERSCORE);
 
 	while (args.Next()) {
 		if (args.LastError() == SO_SUCCESS) {
@@ -1445,6 +1566,7 @@ int main(int argc, char** argv) {
 #endif
 
 	bool reload = true;
+	double last_rss_check = timer();
 	while (1) {
 		if (reload) {
 			reload = false;
@@ -1502,20 +1624,36 @@ int main(int argc, char** argv) {
 		}
 
 		double end_time = std::numeric_limits<double>::max();
+		double now = timer();
+
+		// True if any process has a resident memory limit
+		bool need_rss_check = false;
+
 		for (auto& i : id_command) {
 			if (i.second->fork_retry_time >= 0) {
 				end_time = std::min(i.second->fork_retry_time, end_time);
 			}
+			// If process has a resident memory limit and is currently running
+			if (i.second->memory_rss > 0 && id_pid.count(i.first) > 0) {
+				need_rss_check = true;
+			}
+		}
+		bool timeout_for_rss_check = false;
+		if (need_rss_check && end_time > last_rss_check + MEMORY_CHECK_INTERVAL) {
+			end_time = last_rss_check + MEMORY_CHECK_INTERVAL;
+			timeout_for_rss_check = true;
 		}
 		struct timespec tv;
 		double timeout = -1;
 		if (end_time < std::numeric_limits<double>::max()) {
-			timeout = std::max(0.0, end_time - timer());
+			timeout = std::max(0.0, end_time - now);
 			if (timeout > 0) {
 				tv.tv_sec = timeout;
 				tv.tv_nsec = 1e9 * (timeout - tv.tv_sec);
 			}
 		}
+
+		bool is_timeout = false;
 
 #ifdef __linux__
 		/* Block until something interesting happens (while atomically
@@ -1529,7 +1667,10 @@ int main(int argc, char** argv) {
 		}
 
 		if (nfds == 0) {
-			reload = true;
+			is_timeout = true;
+			if (!timeout_for_rss_check) {
+				reload = true;
+			}
 		}
 #elif defined(__APPLE__) || defined(__FreeBSD__)
 		int nev = 0;
@@ -1540,7 +1681,10 @@ int main(int argc, char** argv) {
 		}
 
 		if (nev == 0) {
-			reload = true;
+			is_timeout = true;
+			if (!timeout_for_rss_check) {
+				reload = true;
+			}
 		}
 
 		if (nev > 0) {
@@ -1588,6 +1732,39 @@ int main(int argc, char** argv) {
 			reload = true;
 		}
 #endif
+
+		if (is_timeout && timeout_for_rss_check) {
+			last_rss_check = timer();
+			std::vector<ProcessID> oom_ids;
+			for (auto& i : id_command) {
+				if (id_pid.count(i.first) == 0) {
+					// process is not running
+					continue;
+				}
+				uint64_t rss_limit = i.second->memory_rss;
+				if (rss_limit == 0) {
+					continue;
+				}
+				uint64_t current_rss = getRss(i.first);
+				if (current_rss > rss_limit) {
+					log_process_msg(SevWarn,
+					                i.second->ssection.c_str(),
+					                "Process %d being killed for exceeding resident memory limit, current %" PRIu64
+					                " , limit %" PRIu64 "\n",
+					                id_pid[i.first],
+					                current_rss,
+					                i.second->memory_rss);
+					oom_ids.push_back(i.first);
+				}
+			}
+			// kill process without waiting, and rely on the SIGCHLD handling logic below to restart the process.
+			for (auto& id : oom_ids) {
+				kill_process(id, false /*wait*/, false /*cleanup*/);
+			}
+			if (oom_ids.size() > 0) {
+				child_exited = true;
+			}
+		}
 
 		/* select() could have returned because received an exit signal */
 		if (exit_signal > 0) {

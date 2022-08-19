@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "fmt/format.h"
+#include "flow/Arena.h"
 #include "flow/DeterministicRandom.h"
 
 #include <cstring>
@@ -78,7 +80,7 @@ int64_t DeterministicRandom::randomInt64(int64_t min, int64_t maxPlusOne) {
 	else
 		i = v + min;
 	if (randLog && useRandLog)
-		fprintf(randLog, "Rint64 %" PRId64 "\n", i);
+		fmt::print(randLog, "Rint64 {}\n", i);
 	return i;
 }
 
@@ -91,11 +93,12 @@ uint64_t DeterministicRandom::randomUInt64() {
 }
 
 uint32_t DeterministicRandom::randomSkewedUInt32(uint32_t min, uint32_t maxPlusOne) {
-	std::uniform_real_distribution<double> distribution(std::log(min), std::log(maxPlusOne - 1));
-	double logpower = distribution(random);
-	uint32_t loguniform = static_cast<uint32_t>(std::pow(10, logpower));
-	// doubles can be imprecise, so let's make sure we don't violate an edge case.
-	return std::max(std::min(loguniform, maxPlusOne - 1), min);
+	ASSERT(min < maxPlusOne);
+	std::uniform_real_distribution<double> distribution(std::log(std::max<double>(min, 1.0 / M_E)),
+	                                                    std::log(maxPlusOne));
+	double exponent = distribution(random);
+	uint32_t value = static_cast<uint32_t>(std::pow(M_E, exponent));
+	return std::max(std::min(value, maxPlusOne - 1), min);
 }
 
 UID DeterministicRandom::randomUniqueID() {
@@ -103,7 +106,7 @@ UID DeterministicRandom::randomUniqueID() {
 	x = gen64();
 	y = gen64();
 	if (randLog && useRandLog)
-		fprintf(randLog, "Ruid %" PRIx64 " %" PRIx64 "\n", x, y);
+		fmt::print(randLog, "Ruid {0} {1}\n", x, y);
 	return UID(x, y);
 }
 
@@ -123,6 +126,23 @@ std::string DeterministicRandom::randomAlphaNumeric(int length) {
 	return s;
 }
 
+void DeterministicRandom::randomBytes(uint8_t* buf, int length) {
+	constexpr const int unitLen = sizeof(decltype(gen64()));
+	for (int i = 0; i < length; i += unitLen) {
+		auto val = gen64();
+		memcpy(buf + i, &val, std::min(unitLen, length - i));
+	}
+	if (randLog && useRandLog) {
+		constexpr const int cutOff = 32;
+		bool tooLong = length > cutOff;
+		fmt::print(randLog,
+		           "Rbytes[{}] {}{}\n",
+		           length,
+		           StringRef(buf, std::min(cutOff, length)).printable(),
+		           tooLong ? "..." : "");
+	}
+}
+
 uint64_t DeterministicRandom::peek() const {
 	return next;
 }
@@ -132,11 +152,4 @@ void DeterministicRandom::addref() {
 }
 void DeterministicRandom::delref() {
 	ReferenceCounted<DeterministicRandom>::delref();
-}
-
-void generateRandomData(uint8_t* buffer, int length) {
-	for (int i = 0; i < length; i += sizeof(uint32_t)) {
-		uint32_t val = deterministicRandom()->randomUInt32();
-		memcpy(&buffer[i], &val, std::min(length - i, (int)sizeof(uint32_t)));
-	}
 }

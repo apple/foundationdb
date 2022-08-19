@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@
 
 #include "flow/Platform.h"
 
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 #include "foundationdb/fdb_c.h"
 
 #undef NDEBUG
@@ -53,7 +53,7 @@ bool file_exists(const char* path) {
 }
 
 int main(int argc, char** argv) {
-	fdb_check(fdb_select_api_version(710));
+	fdb_check(fdb_select_api_version(720));
 
 	std::string file_identifier = "trace_partial_file_suffix_test" + std::to_string(std::random_device{}());
 	std::string trace_partial_file_suffix = ".tmp";
@@ -72,7 +72,7 @@ int main(int argc, char** argv) {
 
 	// Apparently you need to open a database to initialize logging
 	FDBDatabase* out;
-	fdb_check(fdb_create_database(nullptr, &out));
+	fdb_check(fdb_create_database(argv[1], &out));
 	fdb_database_destroy(out);
 
 	// Eventually there's a new trace file for this test ending in .tmp

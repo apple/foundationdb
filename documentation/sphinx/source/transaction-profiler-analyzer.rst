@@ -18,7 +18,7 @@ The second part of transaction profiling involves deleting old sampled data to r
  
 There are many ways that this data can be exposed for analysis. One can imagine building a client that reads the data from the database and streams it to external tools such as Wavefront.
  
-One such tool that’s available as part of open source FDB is a python script called ``transaction_profiling_analyzer.py`` that's available here on `GitHUb <https://github.com/apple/foundationdb/blob/master/contrib/transaction_profiling_analyzer/transaction_profiling_analyzer.py>`_. It reads the sampled data from the database and outputs it in a user friendly format. Currently it’s most useful in identifying hot key-ranges (for both reading and writing).
+One such tool that’s available as part of open source FDB is a python script called ``transaction_profiling_analyzer.py`` that's available here on `GitHUb <https://github.com/apple/foundationdb/blob/main/contrib/transaction_profiling_analyzer/transaction_profiling_analyzer.py>`_. It reads the sampled data from the database and outputs it in a user friendly format. Currently it’s most useful in identifying hot key-ranges (for both reading and writing).
  
 Prerequisites
 =============

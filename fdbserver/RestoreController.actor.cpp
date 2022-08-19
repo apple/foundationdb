@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,7 +47,8 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc,
                                                 RestoreRequest request);
 ACTOR static Future<Void> buildRangeVersions(KeyRangeMap<Version>* pRangeVersions,
                                              std::vector<RestoreFileFR>* pRangeFiles,
-                                             Key url);
+                                             Key url,
+                                             Optional<std::string> proxy);
 
 ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerData> self,
                                                    Database cx,
@@ -136,7 +137,7 @@ ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controlle
 		wait(startProcessRestoreRequests(self, cx) || error);
 	} catch (Error& e) {
 		if (e.code() != error_code_operation_cancelled) {
-			TraceEvent(SevError, "FastRestoreControllerStart").detail("Reason", "Unexpected unhandled error").error(e);
+			TraceEvent(SevError, "FastRestoreControllerStart").error(e).detail("Reason", "Unexpected unhandled error");
 		}
 	}
 
@@ -317,7 +318,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerDa
 	state std::vector<RestoreFileFR> allFiles;
 	state Version minRangeVersion = MAX_VERSION;
 
-	self->initBackupContainer(request.url);
+	self->initBackupContainer(request.url, request.proxy);
 
 	// Get all backup files' description and save them to files
 	state Version targetVersion =
@@ -334,7 +335,7 @@ ACTOR static Future<Version> processRestoreRequest(Reference<RestoreControllerDa
 	// Build range versions: version of key ranges in range file
 	state KeyRangeMap<Version> rangeVersions(minRangeVersion, allKeys.end);
 	if (SERVER_KNOBS->FASTRESTORE_GET_RANGE_VERSIONS_EXPENSIVE) {
-		wait(buildRangeVersions(&rangeVersions, &rangeFiles, request.url));
+		wait(buildRangeVersions(&rangeVersions, &rangeFiles, request.url, request.proxy));
 	} else {
 		// Debug purpose, dump range versions
 		auto ranges = rangeVersions.ranges();
@@ -881,13 +882,14 @@ ACTOR static Future<Void> insertRangeVersion(KeyRangeMap<Version>* pRangeVersion
 // Expensive and slow operation that should not run in real prod.
 ACTOR static Future<Void> buildRangeVersions(KeyRangeMap<Version>* pRangeVersions,
                                              std::vector<RestoreFileFR>* pRangeFiles,
-                                             Key url) {
+                                             Key url,
+                                             Optional<std::string> proxy) {
 	if (!g_network->isSimulated()) {
 		TraceEvent(SevError, "ExpensiveBuildRangeVersions")
 		    .detail("Reason", "Parsing all range files is slow and memory intensive");
 		return Void();
 	}
-	Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
+	Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString(), proxy, {});
 
 	// Key ranges not in range files are empty;
 	// Assign highest version to avoid applying any mutation in these ranges
@@ -1140,7 +1142,7 @@ ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreControllerData
 }
 
 /*
-// Update the most recent time when controller receives hearbeat from each loader and applier
+// Update the most recent time when controller receives heartbeat from each loader and applier
 // TODO: Replace the heartbeat mechanism with FDB failure monitoring mechanism
 ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreControllerData> self) {
     wait(self->recruitedRoles.getFuture());

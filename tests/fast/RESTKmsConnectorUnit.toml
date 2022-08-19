@@ -1,0 +1,8 @@
+[[test]]
+testTitle = 'RESTKmsConnectorTest'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    testsMatching = '/KmsConnector/REST/'

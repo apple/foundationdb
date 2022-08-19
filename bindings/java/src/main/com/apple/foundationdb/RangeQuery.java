@@ -56,7 +56,7 @@ class RangeQuery implements AsyncIterable<KeyValue> {
 	private final EventKeeper eventKeeper;
 
 	RangeQuery(FDBTransaction transaction, boolean isSnapshot, KeySelector begin, KeySelector end, int rowLimit,
-			boolean reverse, StreamingMode streamingMode, EventKeeper eventKeeper) {
+	           boolean reverse, StreamingMode streamingMode, EventKeeper eventKeeper) {
 		this.tr = transaction;
 		this.begin = begin;
 		this.end = end;
@@ -83,9 +83,9 @@ class RangeQuery implements AsyncIterable<KeyValue> {
 
 		// if the streaming mode is EXACT, try and grab things as one chunk
 		if(mode == StreamingMode.EXACT) {
-			FutureResults range = tr.getRange_internal(
-					this.begin, this.end, this.rowLimit, 0, StreamingMode.EXACT.code(),
-					1, this.snapshot, this.reverse);
+
+			FutureResults range = tr.getRange_internal(this.begin, this.end, this.rowLimit, 0,
+			                                           StreamingMode.EXACT.code(), 1, this.snapshot, this.reverse);
 			return range.thenApply(result -> result.get().values)
 					.whenComplete((result, e) -> range.close());
 		}
@@ -222,7 +222,7 @@ class RangeQuery implements AsyncIterable<KeyValue> {
 			nextFuture = new CompletableFuture<>();
 			final long sTime = System.nanoTime();
 			fetchingChunk = tr.getRange_internal(begin, end, rowsLimited ? rowsRemaining : 0, 0, streamingMode.code(),
-					++iteration, snapshot, reverse);
+			                                     ++iteration, snapshot, reverse);
 
 			BiConsumer<RangeResultInfo,Throwable> cons = new FetchComplete(fetchingChunk,nextFuture);
 			if(eventKeeper!=null){

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@
 
 #include <cinttypes>
 
+#include "fmt/format.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/SignalSafeUnwind.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Stress test the slow task profiler or flow profiler
@@ -42,27 +42,25 @@ struct SlowTaskWorkload : TestWorkload {
 
 	ACTOR static Future<Void> go() {
 		wait(delay(1));
-		int64_t phc = dl_iterate_phdr_calls;
 		int64_t startProfilesDeferred = getNumProfilesDeferred();
 		int64_t startProfilesOverflowed = getNumProfilesOverflowed();
 		int64_t startProfilesCaptured = getNumProfilesCaptured();
 		int64_t exc = 0;
-		fprintf(stderr, "Slow task starting\n");
+		fprintf(stdout, "Slow task starting\n");
 		for (int i = 0; i < 10; i++) {
-			fprintf(stderr, "  %d\n", i);
+			fprintf(stdout, "  %d\n", i);
 			double end = timer() + 1;
 			while (timer() < end) {
 				do_slow_exception_thing(&exc);
 			}
 		}
-		fprintf(stderr,
-		        "Slow task complete: %" PRId64 " exceptions; %" PRId64 " calls to dl_iterate_phdr, %" PRId64
-		        " profiles deferred, %" PRId64 " profiles overflowed, %" PRId64 " profiles captured\n",
-		        exc,
-		        dl_iterate_phdr_calls - phc,
-		        getNumProfilesDeferred() - startProfilesDeferred,
-		        getNumProfilesOverflowed() - startProfilesOverflowed,
-		        getNumProfilesCaptured() - startProfilesCaptured);
+		fmt::print(stdout,
+		           "Slow task complete: {0} exceptions; {1} profiles deferred, {2} profiles overflowed, {3} profiles "
+		           "captured\n",
+		           exc,
+		           getNumProfilesDeferred() - startProfilesDeferred,
+		           getNumProfilesOverflowed() - startProfilesOverflowed,
+		           getNumProfilesCaptured() - startProfilesCaptured);
 
 		return Void();
 	}

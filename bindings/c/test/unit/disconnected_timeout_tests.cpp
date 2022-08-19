@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
 
 // Unit tests that test the timeouts for a disconnected cluster
 
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 #include <foundationdb/fdb_c.h>
 
 #include <chrono>
@@ -58,7 +58,7 @@ fdb_error_t wait_future(fdb::Future& f) {
 void validateTimeoutDuration(double expectedSeconds, std::chrono::time_point<std::chrono::steady_clock> start) {
 	std::chrono::duration<double> duration = std::chrono::steady_clock::now() - start;
 	double actualSeconds = duration.count();
-	CHECK(actualSeconds >= expectedSeconds - 1e-6);
+	CHECK(actualSeconds >= expectedSeconds - 1e-3);
 	CHECK(actualSeconds < expectedSeconds * 2);
 }
 
@@ -255,7 +255,7 @@ int main(int argc, char** argv) {
 		          << std::endl;
 		return 1;
 	}
-	fdb_check(fdb_select_api_version(710));
+	fdb_check(fdb_select_api_version(720));
 	if (argc >= 3) {
 		std::string externalClientLibrary = argv[2];
 		if (externalClientLibrary.substr(0, 2) != "--") {

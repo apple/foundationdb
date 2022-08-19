@@ -242,7 +242,7 @@ function startFdbServer
     let status="${status} + 1"
 
   else
-    "${BINDIR}/fdbserver" --knob_disable_posix_kernel_aio=1 -C "${FDBCONF}" -p "${FDBCLUSTERTEXT}" -L "${LOGDIR}" -d "${WORKDIR}/fdb/${$}" &> "${LOGDIR}/fdbserver.log" &
+    "${BINDIR}/fdbserver" --knob-disable-posix-kernel-aio=1 -C "${FDBCONF}" -p "${FDBCLUSTERTEXT}" -L "${LOGDIR}" -d "${WORKDIR}/fdb/${$}" &> "${LOGDIR}/fdbserver.log" &
     if [ "${?}" -ne 0 ]
     then
         log "Failed to start FDB Server"
@@ -346,7 +346,7 @@ function createDatabase
 
   # Configure the database.
   else
-    "${BINDIR}/fdbcli" -C "${FDBCONF}" --exec 'configure new single memory; status' --timeout "${CONFIGUREWAIT}" --log --log-dir "${LOGDIR}" &>> "${LOGDIR}/fdbclient.log"
+    "${BINDIR}/fdbcli" -C "${FDBCONF}" --exec 'configure new single memory tenant_mode=optional_experimental; status' --timeout "${CONFIGUREWAIT}" --log --log-dir "${LOGDIR}" &>> "${LOGDIR}/fdbclient.log"
 
     if ! displayMessage "Checking if config succeeded"
     then

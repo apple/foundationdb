@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,8 +28,8 @@
 #include <stdint.h>
 #include <time.h>
 
-#include "flow/SimpleOpt.h"
-#include "fdbmonitor/SimpleIni.h"
+#include "SimpleOpt/SimpleOpt.h"
+#include "fdbclient/SimpleIni.h"
 #include "fdbclient/versions.h"
 
 // For PathFileExists
@@ -325,7 +325,7 @@ protected:
 		LogEvent(EVENTLOG_INFORMATION_TYPE, format("Default config file at %s", _confpath.c_str()));
 
 		// Parse "command line" options
-		CSimpleOpt args(argc, argv, g_rgOptions, SO_O_NOERR);
+		CSimpleOpt args(argc, argv, g_rgOptions, SO_O_NOERR | SO_O_HYPHEN_TO_UNDERSCORE);
 
 		while (args.Next()) {
 			if (args.LastError() == SO_SUCCESS) {
@@ -646,13 +646,45 @@ private:
 	const char* getValueMulti(const CSimpleIni& ini, const char* name, ...) {
 		const char* ret = nullptr;
 		const char* section = nullptr;
+
+		std::string nameWithUnderscores(name);
+		for (int i = nameWithUnderscores.size() - 1; i >= 0; --i) {
+			if (nameWithUnderscores[i] == '-') {
+				nameWithUnderscores.at(i) = '_';
+			}
+		}
+
 		va_list ap;
 		va_start(ap, name);
 		while (!ret && (section = va_arg(ap, const char*))) {
 			ret = ini.GetValue(section, name, nullptr);
+			if (!ret) {
+				ret = ini.GetValue(section, nameWithUnderscores.c_str(), nullptr);
+			}
 		}
 		va_end(ap);
 		return ret;
+	}
+
+	bool isParameterNameEqual(const char* str, const char* target) {
+		if (!str || !target) {
+			return false;
+		}
+		while (*str && *target) {
+			char curStr = *str, curTarget = *target;
+			if (curStr == '-') {
+				curStr = '_';
+			}
+			if (curTarget == '-') {
+				curTarget = '_';
+			}
+			if (curStr != curTarget) {
+				return false;
+			}
+			str++;
+			target++;
+		}
+		return !(*str || *target);
 	}
 
 	Command makeCommand(const CSimpleIni& ini, std::string section, uint16_t id) {
@@ -673,7 +705,7 @@ private:
 		});
 
 		const char* rd =
-		    getValueMulti(ini, "restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
+		    getValueMulti(ini, "restart-delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", nullptr);
 		if (!rd) {
 			LogEvent(EVENTLOG_ERROR_TYPE, format("Unable to resolve restart delay for %s\n", ssection.c_str()));
 			return result;
@@ -687,7 +719,7 @@ private:
 		}
 
 		const char* q =
-		    getValueMulti(ini, "disable_lifecycle_logging", ssection.c_str(), section.c_str(), "general", nullptr);
+		    getValueMulti(ini, "disable-lifecycle-logging", ssection.c_str(), section.c_str(), "general", nullptr);
 		if (q && !strcmp(q, "true"))
 			result.quiet = true;
 
@@ -702,8 +734,8 @@ private:
 		const char* id_s = ssection.c_str() + strlen(section.c_str()) + 1;
 
 		for (auto i : keys) {
-			if (!strcmp(i.pItem, "command") || !strcmp(i.pItem, "restart_delay") ||
-			    !strcmp(i.pItem, "disable_lifecycle_logging")) {
+			if (isParameterNameEqual(i.pItem, "command") || isParameterNameEqual(i.pItem, "restart-delay") ||
+			    isParameterNameEqual(i.pItem, "disable-lifecycle-logging")) {
 				continue;
 			}
 

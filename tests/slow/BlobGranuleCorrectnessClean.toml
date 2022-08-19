@@ -1,0 +1,17 @@
+[configuration]
+blobGranulesEnabled = true 
+allowDefaultTenant = false
+allowDisablingTenants = false
+# FIXME: re-enable rocks at some point
+storageEngineExcludeTypes = [4, 5]
+
+[[knobs]]
+bg_metadata_source = "tenant"
+enable_encryption = true
+
+[[test]]
+testTitle = 'BlobGranuleCorrectness'
+
+    [[test.workload]]
+    testName = 'BlobGranuleCorrectnessWorkload'
+    testDuration = 120.0

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,8 +20,22 @@
 
 #include <jni.h>
 #include <string.h>
+#include <functional>
 
-#define FDB_API_VERSION 710
+#include "com_apple_foundationdb_FDB.h"
+#include "com_apple_foundationdb_FDBDatabase.h"
+#include "com_apple_foundationdb_FDBTransaction.h"
+#include "com_apple_foundationdb_FutureBool.h"
+#include "com_apple_foundationdb_FutureInt64.h"
+#include "com_apple_foundationdb_FutureKey.h"
+#include "com_apple_foundationdb_FutureKeyArray.h"
+#include "com_apple_foundationdb_FutureKeyRangeArray.h"
+#include "com_apple_foundationdb_FutureResult.h"
+#include "com_apple_foundationdb_FutureResults.h"
+#include "com_apple_foundationdb_FutureStrings.h"
+#include "com_apple_foundationdb_NativeFuture.h"
+
+#define FDB_API_VERSION 720
 
 #include <foundationdb/fdb_c.h>
 
@@ -39,10 +53,18 @@ static thread_local jmethodID g_IFutureCallback_call_methodID = JNI_NULL;
 static thread_local bool is_external = false;
 static jclass range_result_summary_class;
 static jclass range_result_class;
+static jclass mapped_range_result_class;
+static jclass mapped_key_value_class;
 static jclass string_class;
 static jclass key_array_result_class;
+static jclass keyrange_class;
+static jclass keyrange_array_result_class;
 static jmethodID key_array_result_init;
+static jmethodID keyrange_init;
+static jmethodID keyrange_array_result_init;
 static jmethodID range_result_init;
+static jmethodID mapped_range_result_init;
+static jmethodID mapped_key_value_from_bytes;
 static jmethodID range_result_summary_init;
 
 void detachIfExternalThread(void* ignore) {
@@ -262,6 +284,23 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_NativeFuture_Future_1releaseM
 	fdb_future_release_memory(var);
 }
 
+JNIEXPORT jboolean JNICALL Java_com_apple_foundationdb_FutureBool_FutureBool_1get(JNIEnv* jenv, jobject, jlong future) {
+	if (!future) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBFuture* f = (FDBFuture*)future;
+
+	fdb_bool_t value = false;
+	fdb_error_t err = fdb_future_get_bool(f, &value);
+	if (err) {
+		safeThrow(jenv, getThrowable(jenv, err));
+		return 0;
+	}
+
+	return (jboolean)value;
+}
+
 JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureInt64_FutureInt64_1get(JNIEnv* jenv, jobject, jlong future) {
 	if (!future) {
 		throwParamNotNull(jenv);
@@ -279,9 +318,9 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureInt64_FutureInt64_1get
 	return (jlong)value;
 }
 
-JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureStrings_FutureStrings_1get(JNIEnv* jenv,
-                                                                                       jobject,
-                                                                                       jlong future) {
+JNIEXPORT jobjectArray JNICALL Java_com_apple_foundationdb_FutureStrings_FutureStrings_1get(JNIEnv* jenv,
+                                                                                            jobject,
+                                                                                            jlong future) {
 	if (!future) {
 		throwParamNotNull(jenv);
 		return JNI_NULL;
@@ -391,6 +430,61 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureKeyArray_FutureKeyAr
 	return result;
 }
 
+JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureKeyRangeArray_FutureKeyRangeArray_1get(JNIEnv* jenv,
+                                                                                                   jobject,
+                                                                                                   jlong future) {
+	if (!future) {
+		throwParamNotNull(jenv);
+		return JNI_NULL;
+	}
+
+	FDBFuture* f = (FDBFuture*)future;
+
+	const FDBKeyRange* fdbKr;
+	int count;
+	fdb_error_t err = fdb_future_get_keyrange_array(f, &fdbKr, &count);
+	if (err) {
+		safeThrow(jenv, getThrowable(jenv, err));
+		return JNI_NULL;
+	}
+
+	jobjectArray kr_values = jenv->NewObjectArray(count, keyrange_class, NULL);
+	if (!kr_values) {
+		if (!jenv->ExceptionOccurred())
+			throwOutOfMem(jenv);
+		return JNI_NULL;
+	}
+
+	for (int i = 0; i < count; i++) {
+		jbyteArray beginArr = jenv->NewByteArray(fdbKr[i].begin_key_length);
+		if (!beginArr) {
+			if (!jenv->ExceptionOccurred())
+				throwOutOfMem(jenv);
+			return JNI_NULL;
+		}
+		jbyteArray endArr = jenv->NewByteArray(fdbKr[i].end_key_length);
+		if (!endArr) {
+			if (!jenv->ExceptionOccurred())
+				throwOutOfMem(jenv);
+			return JNI_NULL;
+		}
+		jenv->SetByteArrayRegion(beginArr, 0, fdbKr[i].begin_key_length, (const jbyte*)fdbKr[i].begin_key);
+		jenv->SetByteArrayRegion(endArr, 0, fdbKr[i].end_key_length, (const jbyte*)fdbKr[i].end_key);
+
+		jobject kr = jenv->NewObject(keyrange_class, keyrange_init, beginArr, endArr);
+		if (jenv->ExceptionOccurred())
+			return JNI_NULL;
+		jenv->SetObjectArrayElement(kr_values, i, kr);
+		if (jenv->ExceptionOccurred())
+			return JNI_NULL;
+	}
+	jobject krarr = jenv->NewObject(keyrange_array_result_class, keyrange_array_result_init, kr_values);
+	if (jenv->ExceptionOccurred())
+		return JNI_NULL;
+
+	return krarr;
+}
+
 // SOMEDAY: explore doing this more efficiently with Direct ByteBuffers
 JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResults_FutureResults_1get(JNIEnv* jenv,
                                                                                        jobject,
@@ -467,6 +561,133 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResults_FutureResult
 	return result;
 }
 
+class ExecuteOnLeave {
+	std::function<void()> func;
+
+public:
+	explicit ExecuteOnLeave(std::function<void()> func) : func(func) {}
+	~ExecuteOnLeave() { func(); }
+};
+
+void cpBytesAndLengthInner(uint8_t*& pByte, jint*& pLength, const uint8_t* data, const int& length) {
+	*pLength = length;
+	pLength++;
+
+	memcpy(pByte, data, length);
+	pByte += length;
+}
+
+void cpBytesAndLength(uint8_t*& pByte, jint*& pLength, const FDBKey& key) {
+	cpBytesAndLengthInner(pByte, pLength, key.key, key.key_length);
+}
+
+JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureMappedResults_FutureMappedResults_1get(JNIEnv* jenv,
+                                                                                                   jobject,
+                                                                                                   jlong future) {
+	if (!future) {
+		throwParamNotNull(jenv);
+		return JNI_NULL;
+	}
+
+	FDBFuture* f = (FDBFuture*)future;
+
+	const FDBMappedKeyValue* kvms;
+	int count;
+	fdb_bool_t more;
+	fdb_error_t err = fdb_future_get_mappedkeyvalue_array(f, &kvms, &count, &more);
+	if (err) {
+		safeThrow(jenv, getThrowable(jenv, err));
+		return JNI_NULL;
+	}
+
+	jobjectArray mrr_values = jenv->NewObjectArray(count, mapped_key_value_class, NULL);
+	if (!mrr_values) {
+		if (!jenv->ExceptionOccurred())
+			throwOutOfMem(jenv);
+		return JNI_NULL;
+	}
+
+	for (int i = 0; i < count; i++) {
+		FDBMappedKeyValue kvm = kvms[i];
+		int kvm_count = kvm.getRange.m_size;
+
+		// now it has 5 field, key, value, getRange.begin, getRange.end, boundaryAndExist
+		// this needs to change if FDBMappedKeyValue definition is changed.
+		const int totalFieldFDBMappedKeyValue = 5;
+
+		const int totalLengths = totalFieldFDBMappedKeyValue + kvm_count * 2;
+
+		int totalBytes = kvm.key.key_length + kvm.value.key_length + kvm.getRange.begin.key.key_length +
+		                 kvm.getRange.end.key.key_length + sizeof(kvm.boundaryAndExist);
+		for (int i = 0; i < kvm_count; i++) {
+			auto kv = kvm.getRange.data[i];
+			totalBytes += kv.key_length + kv.value_length;
+		}
+
+		jbyteArray bytesArray = jenv->NewByteArray(totalBytes);
+		if (!bytesArray) {
+			if (!jenv->ExceptionOccurred())
+				throwOutOfMem(jenv);
+			return JNI_NULL;
+		}
+
+		jintArray lengthArray = jenv->NewIntArray(totalLengths);
+		if (!lengthArray) {
+			if (!jenv->ExceptionOccurred())
+				throwOutOfMem(jenv);
+			return JNI_NULL;
+		}
+
+		uint8_t* bytes_barr = (uint8_t*)jenv->GetByteArrayElements(bytesArray, JNI_NULL);
+		if (!bytes_barr) {
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+			return JNI_NULL;
+		}
+		{
+			ExecuteOnLeave e([&]() { jenv->ReleaseByteArrayElements(bytesArray, (jbyte*)bytes_barr, 0); });
+
+			jint* length_barr = jenv->GetIntArrayElements(lengthArray, JNI_NULL);
+			if (!length_barr) {
+				if (!jenv->ExceptionOccurred())
+					throwOutOfMem(jenv);
+				return JNI_NULL;
+			}
+			{
+				ExecuteOnLeave e([&]() { jenv->ReleaseIntArrayElements(lengthArray, length_barr, 0); });
+
+				uint8_t* pByte = bytes_barr;
+				jint* pLength = length_barr;
+
+				cpBytesAndLength(pByte, pLength, kvm.key);
+				cpBytesAndLength(pByte, pLength, kvm.value);
+				cpBytesAndLength(pByte, pLength, kvm.getRange.begin.key);
+				cpBytesAndLength(pByte, pLength, kvm.getRange.end.key);
+				cpBytesAndLengthInner(pByte, pLength, (uint8_t*)&(kvm.boundaryAndExist), sizeof(kvm.boundaryAndExist));
+				for (int kvm_i = 0; kvm_i < kvm_count; kvm_i++) {
+					auto kv = kvm.getRange.data[kvm_i];
+					cpBytesAndLengthInner(pByte, pLength, kv.key, kv.key_length);
+					cpBytesAndLengthInner(pByte, pLength, kv.value, kv.value_length);
+				}
+			}
+		}
+		// After native arrays are released
+		// call public static method MappedKeyValue::fromBytes()
+		jobject mkv = jenv->CallStaticObjectMethod(
+		    mapped_key_value_class, mapped_key_value_from_bytes, (jbyteArray)bytesArray, (jintArray)lengthArray);
+		if (jenv->ExceptionOccurred())
+			return JNI_NULL;
+		jenv->SetObjectArrayElement(mrr_values, i, mkv);
+		if (jenv->ExceptionOccurred())
+			return JNI_NULL;
+	}
+
+	jobject mrr = jenv->NewObject(mapped_range_result_class, mapped_range_result_init, mrr_values, (jboolean)more);
+	if (jenv->ExceptionOccurred())
+		return JNI_NULL;
+
+	return mrr;
+}
+
 // SOMEDAY: explore doing this more efficiently with Direct ByteBuffers
 JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureResult_FutureResult_1get(JNIEnv* jenv,
                                                                                         jobject,
@@ -500,7 +721,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureResult_FutureResu
 	return result;
 }
 
-JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1get(JNIEnv* jenv, jclass, jlong future) {
+JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1get(JNIEnv* jenv, jobject, jlong future) {
 	if (!future) {
 		throwParamNotNull(jenv);
 		return JNI_NULL;
@@ -524,6 +745,34 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1ge
 
 	jenv->SetByteArrayRegion(result, 0, length, (const jbyte*)value);
 	return result;
+}
+
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1openTenant(JNIEnv* jenv,
+                                                                                     jobject,
+                                                                                     jlong dbPtr,
+                                                                                     jbyteArray tenantNameBytes) {
+	if (!dbPtr || !tenantNameBytes) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBDatabase* database = (FDBDatabase*)dbPtr;
+	FDBTenant* tenant;
+
+	uint8_t* barr = (uint8_t*)jenv->GetByteArrayElements(tenantNameBytes, JNI_NULL);
+	if (!barr) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	fdb_error_t err = fdb_database_open_tenant(database, barr, jenv->GetArrayLength(tenantNameBytes), &tenant);
+	if (err) {
+		safeThrow(jenv, getThrowable(jenv, err));
+		return 0;
+	}
+
+	jenv->ReleaseByteArrayElements(tenantNameBytes, (jbyte*)barr, JNI_ABORT);
+	return (jlong)tenant;
 }
 
 JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1createTransaction(JNIEnv* jenv,
@@ -594,6 +843,207 @@ JNIEXPORT jdouble JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1getM
 	return (jdouble)fdb_database_get_main_thread_busyness(database);
 }
 
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1purgeBlobGranules(JNIEnv* jenv,
+                                                                                            jobject,
+                                                                                            jlong dbPtr,
+                                                                                            jbyteArray beginKeyBytes,
+                                                                                            jbyteArray endKeyBytes,
+                                                                                            jlong purgeVersion,
+                                                                                            jboolean force) {
+	if (!dbPtr || !beginKeyBytes || !endKeyBytes) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+
+	FDBDatabase* database = (FDBDatabase*)dbPtr;
+
+	uint8_t* beginKeyArr = (uint8_t*)jenv->GetByteArrayElements(beginKeyBytes, JNI_NULL);
+	if (!beginKeyArr) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	uint8_t* endKeyArr = (uint8_t*)jenv->GetByteArrayElements(endKeyBytes, JNI_NULL);
+	if (!endKeyArr) {
+		jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)beginKeyArr, JNI_ABORT);
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	FDBFuture* f = fdb_database_purge_blob_granules(database,
+	                                                beginKeyArr,
+	                                                jenv->GetArrayLength(beginKeyBytes),
+	                                                endKeyArr,
+	                                                jenv->GetArrayLength(endKeyBytes),
+	                                                purgeVersion,
+	                                                (fdb_bool_t)force);
+	jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)beginKeyArr, JNI_ABORT);
+	jenv->ReleaseByteArrayElements(endKeyBytes, (jbyte*)endKeyArr, JNI_ABORT);
+	return (jlong)f;
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_apple_foundationdb_FDBDatabase_Database_1waitPurgeGranulesComplete(JNIEnv* jenv,
+                                                                            jobject,
+                                                                            jlong dbPtr,
+                                                                            jbyteArray purgeKeyBytes) {
+	if (!dbPtr || !purgeKeyBytes) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBDatabase* database = (FDBDatabase*)dbPtr;
+	uint8_t* purgeKeyArr = (uint8_t*)jenv->GetByteArrayElements(purgeKeyBytes, JNI_NULL);
+
+	if (!purgeKeyArr) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+	FDBFuture* f =
+	    fdb_database_wait_purge_granules_complete(database, purgeKeyArr, jenv->GetArrayLength(purgeKeyBytes));
+	jenv->ReleaseByteArrayElements(purgeKeyBytes, (jbyte*)purgeKeyArr, JNI_ABORT);
+
+	return (jlong)f;
+}
+
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1blobbifyRange(JNIEnv* jenv,
+                                                                                        jobject,
+                                                                                        jlong dbPtr,
+                                                                                        jbyteArray beginKeyBytes,
+                                                                                        jbyteArray endKeyBytes) {
+	if (!dbPtr || !beginKeyBytes || !endKeyBytes) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+
+	FDBDatabase* database = (FDBDatabase*)dbPtr;
+
+	uint8_t* beginKeyArr = (uint8_t*)jenv->GetByteArrayElements(beginKeyBytes, JNI_NULL);
+	if (!beginKeyArr) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	uint8_t* endKeyArr = (uint8_t*)jenv->GetByteArrayElements(endKeyBytes, JNI_NULL);
+	if (!endKeyArr) {
+		jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)beginKeyArr, JNI_ABORT);
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	FDBFuture* f = fdb_database_blobbify_range(
+	    database, beginKeyArr, jenv->GetArrayLength(beginKeyBytes), endKeyArr, jenv->GetArrayLength(endKeyBytes));
+	jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)beginKeyArr, JNI_ABORT);
+	jenv->ReleaseByteArrayElements(endKeyBytes, (jbyte*)endKeyArr, JNI_ABORT);
+	return (jlong)f;
+}
+
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1unblobbifyRange(JNIEnv* jenv,
+                                                                                          jobject,
+                                                                                          jlong dbPtr,
+                                                                                          jbyteArray beginKeyBytes,
+                                                                                          jbyteArray endKeyBytes) {
+	if (!dbPtr || !beginKeyBytes || !endKeyBytes) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+
+	FDBDatabase* database = (FDBDatabase*)dbPtr;
+
+	uint8_t* beginKeyArr = (uint8_t*)jenv->GetByteArrayElements(beginKeyBytes, JNI_NULL);
+	if (!beginKeyArr) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	uint8_t* endKeyArr = (uint8_t*)jenv->GetByteArrayElements(endKeyBytes, JNI_NULL);
+	if (!endKeyArr) {
+		jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)beginKeyArr, JNI_ABORT);
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	FDBFuture* f = fdb_database_unblobbify_range(
+	    database, beginKeyArr, jenv->GetArrayLength(beginKeyBytes), endKeyArr, jenv->GetArrayLength(endKeyBytes));
+	jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)beginKeyArr, JNI_ABORT);
+	jenv->ReleaseByteArrayElements(endKeyBytes, (jbyte*)endKeyArr, JNI_ABORT);
+	return (jlong)f;
+}
+
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1listBlobbifiedRanges(JNIEnv* jenv,
+                                                                                               jobject,
+                                                                                               jlong dbPtr,
+                                                                                               jbyteArray beginKeyBytes,
+                                                                                               jbyteArray endKeyBytes,
+                                                                                               jint rangeLimit) {
+	if (!dbPtr || !beginKeyBytes || !endKeyBytes) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBDatabase* tr = (FDBDatabase*)dbPtr;
+
+	uint8_t* startKey = (uint8_t*)jenv->GetByteArrayElements(beginKeyBytes, JNI_NULL);
+	if (!startKey) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	uint8_t* endKey = (uint8_t*)jenv->GetByteArrayElements(endKeyBytes, JNI_NULL);
+	if (!endKey) {
+		jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)startKey, JNI_ABORT);
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	FDBFuture* f = fdb_database_list_blobbified_ranges(
+	    tr, startKey, jenv->GetArrayLength(beginKeyBytes), endKey, jenv->GetArrayLength(endKeyBytes), rangeLimit);
+	jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)startKey, JNI_ABORT);
+	jenv->ReleaseByteArrayElements(endKeyBytes, (jbyte*)endKey, JNI_ABORT);
+	return (jlong)f;
+}
+
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1verifyBlobRange(JNIEnv* jenv,
+                                                                                          jobject,
+                                                                                          jlong dbPtr,
+                                                                                          jbyteArray beginKeyBytes,
+                                                                                          jbyteArray endKeyBytes,
+                                                                                          jlong version) {
+	if (!dbPtr || !beginKeyBytes || !endKeyBytes) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBDatabase* tr = (FDBDatabase*)dbPtr;
+
+	uint8_t* startKey = (uint8_t*)jenv->GetByteArrayElements(beginKeyBytes, JNI_NULL);
+	if (!startKey) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	uint8_t* endKey = (uint8_t*)jenv->GetByteArrayElements(endKeyBytes, JNI_NULL);
+	if (!endKey) {
+		jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)startKey, JNI_ABORT);
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	FDBFuture* f = fdb_database_list_blobbified_ranges(
+	    tr, startKey, jenv->GetArrayLength(beginKeyBytes), endKey, jenv->GetArrayLength(endKeyBytes), version);
+	jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)startKey, JNI_ABORT);
+	jenv->ReleaseByteArrayElements(endKeyBytes, (jbyte*)endKey, JNI_ABORT);
+	return (jlong)f;
+}
+
 JNIEXPORT jboolean JNICALL Java_com_apple_foundationdb_FDB_Error_1predicate(JNIEnv* jenv,
                                                                             jobject,
                                                                             jint predicate,
@@ -625,6 +1075,31 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDB_Database_1create(JNIEnv*
 	}
 
 	return (jlong)db;
+}
+
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTenant_Tenant_1createTransaction(JNIEnv* jenv,
+                                                                                        jobject,
+                                                                                        jlong tPtr) {
+	if (!tPtr) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBTenant* tenant = (FDBTenant*)tPtr;
+	FDBTransaction* tr;
+	fdb_error_t err = fdb_tenant_create_transaction(tenant, &tr);
+	if (err) {
+		safeThrow(jenv, getThrowable(jenv, err));
+		return 0;
+	}
+	return (jlong)tr;
+}
+
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTenant_Tenant_1dispose(JNIEnv* jenv, jobject, jlong tPtr) {
+	if (!tPtr) {
+		throwParamNotNull(jenv);
+		return;
+	}
+	fdb_tenant_destroy((FDBTenant*)tPtr);
 }
 
 JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1setVersion(JNIEnv* jenv,
@@ -756,12 +1231,82 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1
 	return (jlong)f;
 }
 
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getMappedRange(JNIEnv* jenv,
+                                                                                               jobject,
+                                                                                               jlong tPtr,
+                                                                                               jbyteArray keyBeginBytes,
+                                                                                               jboolean orEqualBegin,
+                                                                                               jint offsetBegin,
+                                                                                               jbyteArray keyEndBytes,
+                                                                                               jboolean orEqualEnd,
+                                                                                               jint offsetEnd,
+                                                                                               jbyteArray mapperBytes,
+                                                                                               jint rowLimit,
+                                                                                               jint targetBytes,
+                                                                                               jint streamingMode,
+                                                                                               jint iteration,
+                                                                                               jint matchIndex,
+                                                                                               jboolean snapshot,
+                                                                                               jboolean reverse) {
+	if (!tPtr || !keyBeginBytes || !keyEndBytes || !mapperBytes) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBTransaction* tr = (FDBTransaction*)tPtr;
+
+	uint8_t* barrBegin = (uint8_t*)jenv->GetByteArrayElements(keyBeginBytes, JNI_NULL);
+	if (!barrBegin) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	uint8_t* barrEnd = (uint8_t*)jenv->GetByteArrayElements(keyEndBytes, JNI_NULL);
+	if (!barrEnd) {
+		jenv->ReleaseByteArrayElements(keyBeginBytes, (jbyte*)barrBegin, JNI_ABORT);
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	uint8_t* barrMapper = (uint8_t*)jenv->GetByteArrayElements(mapperBytes, JNI_NULL);
+	if (!barrMapper) {
+		jenv->ReleaseByteArrayElements(keyBeginBytes, (jbyte*)barrBegin, JNI_ABORT);
+		jenv->ReleaseByteArrayElements(keyEndBytes, (jbyte*)barrEnd, JNI_ABORT);
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	FDBFuture* f = fdb_transaction_get_mapped_range(tr,
+	                                                barrBegin,
+	                                                jenv->GetArrayLength(keyBeginBytes),
+	                                                orEqualBegin,
+	                                                offsetBegin,
+	                                                barrEnd,
+	                                                jenv->GetArrayLength(keyEndBytes),
+	                                                orEqualEnd,
+	                                                offsetEnd,
+	                                                barrMapper,
+	                                                jenv->GetArrayLength(mapperBytes),
+	                                                rowLimit,
+	                                                targetBytes,
+	                                                (FDBStreamingMode)streamingMode,
+	                                                iteration,
+	                                                matchIndex,
+	                                                snapshot,
+	                                                reverse);
+	jenv->ReleaseByteArrayElements(keyBeginBytes, (jbyte*)barrBegin, JNI_ABORT);
+	jenv->ReleaseByteArrayElements(keyEndBytes, (jbyte*)barrEnd, JNI_ABORT);
+	jenv->ReleaseByteArrayElements(mapperBytes, (jbyte*)barrMapper, JNI_ABORT);
+	return (jlong)f;
+}
+
 JNIEXPORT void JNICALL Java_com_apple_foundationdb_FutureResults_FutureResults_1getDirect(JNIEnv* jenv,
                                                                                           jobject,
                                                                                           jlong future,
                                                                                           jobject jbuffer,
                                                                                           jint bufferCapacity) {
-
 	if (!future) {
 		throwParamNotNull(jenv);
 		return;
@@ -818,6 +1363,92 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FutureResults_FutureResults_1
 
 		memcpy(buffer + offset, kvs[i].value, kvs[i].value_length);
 		offset += kvs[i].value_length;
+	}
+}
+
+void memcpyStringInner(uint8_t* buffer, int& offset, const uint8_t* data, const int& length) {
+	memcpy(buffer + offset, &length, sizeof(jint));
+	offset += sizeof(jint);
+	memcpy(buffer + offset, data, length);
+	offset += length;
+}
+
+void memcpyString(uint8_t* buffer, int& offset, const FDBKey& key) {
+	memcpyStringInner(buffer, offset, key.key, key.key_length);
+}
+
+JNIEXPORT void JNICALL
+Java_com_apple_foundationdb_FutureMappedResults_FutureMappedResults_1getDirect(JNIEnv* jenv,
+                                                                               jobject,
+                                                                               jlong future,
+                                                                               jobject jbuffer,
+                                                                               jint bufferCapacity) {
+
+	if (!future) {
+		throwParamNotNull(jenv);
+		return;
+	}
+
+	uint8_t* buffer = (uint8_t*)jenv->GetDirectBufferAddress(jbuffer);
+	if (!buffer) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return;
+	}
+
+	FDBFuture* f = (FDBFuture*)future;
+	const FDBMappedKeyValue* kvms;
+	int count;
+	fdb_bool_t more;
+	fdb_error_t err = fdb_future_get_mappedkeyvalue_array(f, &kvms, &count, &more);
+	if (err) {
+		safeThrow(jenv, getThrowable(jenv, err));
+		return;
+	}
+
+	int totalCapacityNeeded = 2 * sizeof(jint);
+	for (int i = 0; i < count; i++) {
+		const FDBMappedKeyValue& kvm = kvms[i];
+		totalCapacityNeeded += kvm.key.key_length + kvm.value.key_length + kvm.getRange.begin.key.key_length +
+		                       kvm.getRange.end.key.key_length +
+		                       5 * sizeof(jint); // Besides the 4 lengths above, also one for kvm_count.
+		int kvm_count = kvm.getRange.m_size;
+		for (int i = 0; i < kvm_count; i++) {
+			auto kv = kvm.getRange.data[i];
+			totalCapacityNeeded += kv.key_length + kv.value_length + 2 * sizeof(jint);
+		}
+		if (bufferCapacity < totalCapacityNeeded) {
+			count = i; /* Only fit first `i` K/V pairs */
+			more = true;
+			break;
+		}
+	}
+
+	int offset = 0;
+
+	// First copy RangeResultSummary, i.e. [keyCount, more]
+	memcpy(buffer + offset, &count, sizeof(jint));
+	offset += sizeof(jint);
+
+	memcpy(buffer + offset, &more, sizeof(jint));
+	offset += sizeof(jint);
+
+	for (int i = 0; i < count; i++) {
+		const FDBMappedKeyValue& kvm = kvms[i];
+		memcpyString(buffer, offset, kvm.key);
+		memcpyString(buffer, offset, kvm.value);
+		memcpyString(buffer, offset, kvm.getRange.begin.key);
+		memcpyString(buffer, offset, kvm.getRange.end.key);
+
+		int kvm_count = kvm.getRange.m_size;
+		memcpy(buffer + offset, &kvm_count, sizeof(jint));
+		offset += sizeof(jint);
+
+		for (int i = 0; i < kvm_count; i++) {
+			auto kv = kvm.getRange.data[i];
+			memcpyStringInner(buffer, offset, kv.key, kv.key_length);
+			memcpyStringInner(buffer, offset, kv.value, kv.value_length);
+		}
 	}
 }
 
@@ -885,6 +1516,41 @@ Java_com_apple_foundationdb_FDBTransaction_Transaction_1getRangeSplitPoints(JNIE
 
 	FDBFuture* f = fdb_transaction_get_range_split_points(
 	    tr, startKey, jenv->GetArrayLength(beginKeyBytes), endKey, jenv->GetArrayLength(endKeyBytes), chunkSize);
+	jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)startKey, JNI_ABORT);
+	jenv->ReleaseByteArrayElements(endKeyBytes, (jbyte*)endKey, JNI_ABORT);
+	return (jlong)f;
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_apple_foundationdb_FDBTransaction_Transaction_1getBlobGranuleRanges(JNIEnv* jenv,
+                                                                             jobject,
+                                                                             jlong tPtr,
+                                                                             jbyteArray beginKeyBytes,
+                                                                             jbyteArray endKeyBytes,
+                                                                             jint rowLimit) {
+	if (!tPtr || !beginKeyBytes || !endKeyBytes || !rowLimit) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBTransaction* tr = (FDBTransaction*)tPtr;
+
+	uint8_t* startKey = (uint8_t*)jenv->GetByteArrayElements(beginKeyBytes, JNI_NULL);
+	if (!startKey) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	uint8_t* endKey = (uint8_t*)jenv->GetByteArrayElements(endKeyBytes, JNI_NULL);
+	if (!endKey) {
+		jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)startKey, JNI_ABORT);
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	FDBFuture* f = fdb_transaction_get_blob_granule_ranges(
+	    tr, startKey, jenv->GetArrayLength(beginKeyBytes), endKey, jenv->GetArrayLength(endKeyBytes), rowLimit);
 	jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)startKey, JNI_ABORT);
 	jenv->ReleaseByteArrayElements(endKeyBytes, (jbyte*)endKey, JNI_ABORT);
 	return (jlong)f;
@@ -1315,9 +1981,28 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved) {
 		range_result_init = env->GetMethodID(local_range_result_class, "<init>", "([B[IZ)V");
 		range_result_class = (jclass)(env)->NewGlobalRef(local_range_result_class);
 
+		jclass local_mapped_range_result_class = env->FindClass("com/apple/foundationdb/MappedRangeResult");
+		mapped_range_result_init =
+		    env->GetMethodID(local_mapped_range_result_class, "<init>", "([Lcom/apple/foundationdb/MappedKeyValue;Z)V");
+		mapped_range_result_class = (jclass)(env)->NewGlobalRef(local_mapped_range_result_class);
+
+		jclass local_mapped_key_value_class = env->FindClass("com/apple/foundationdb/MappedKeyValue");
+		mapped_key_value_from_bytes = env->GetStaticMethodID(
+		    local_mapped_key_value_class, "fromBytes", "([B[I)Lcom/apple/foundationdb/MappedKeyValue;");
+		mapped_key_value_class = (jclass)(env)->NewGlobalRef(local_mapped_key_value_class);
+
 		jclass local_key_array_result_class = env->FindClass("com/apple/foundationdb/KeyArrayResult");
 		key_array_result_init = env->GetMethodID(local_key_array_result_class, "<init>", "([B[I)V");
 		key_array_result_class = (jclass)(env)->NewGlobalRef(local_key_array_result_class);
+
+		jclass local_keyrange_class = env->FindClass("com/apple/foundationdb/Range");
+		keyrange_init = env->GetMethodID(local_keyrange_class, "<init>", "([B[B)V");
+		keyrange_class = (jclass)(env)->NewGlobalRef(local_keyrange_class);
+
+		jclass local_keyrange_array_result_class = env->FindClass("com/apple/foundationdb/KeyRangeArrayResult");
+		keyrange_array_result_init =
+		    env->GetMethodID(local_keyrange_array_result_class, "<init>", "([Lcom/apple/foundationdb/Range;)V");
+		keyrange_array_result_class = (jclass)(env)->NewGlobalRef(local_keyrange_array_result_class);
 
 		jclass local_range_result_summary_class = env->FindClass("com/apple/foundationdb/RangeResultSummary");
 		range_result_summary_init = env->GetMethodID(local_range_result_summary_class, "<init>", "([BIZ)V");
@@ -1342,6 +2027,18 @@ void JNI_OnUnload(JavaVM* vm, void* reserved) {
 		}
 		if (range_result_class != JNI_NULL) {
 			env->DeleteGlobalRef(range_result_class);
+		}
+		if (keyrange_array_result_class != JNI_NULL) {
+			env->DeleteGlobalRef(keyrange_array_result_class);
+		}
+		if (keyrange_class != JNI_NULL) {
+			env->DeleteGlobalRef(keyrange_class);
+		}
+		if (mapped_range_result_class != JNI_NULL) {
+			env->DeleteGlobalRef(mapped_range_result_class);
+		}
+		if (mapped_key_value_class != JNI_NULL) {
+			env->DeleteGlobalRef(mapped_key_value_class);
 		}
 		if (string_class != JNI_NULL) {
 			env->DeleteGlobalRef(string_class);

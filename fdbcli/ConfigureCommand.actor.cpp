@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -176,7 +176,7 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 	case ConfigurationResult::STORAGE_MIGRATION_DISABLED:
 		fprintf(stderr,
 		        "ERROR: Storage engine type cannot be changed because "
-		        "storage_migration_mode=disabled.\n");
+		        "storage_migration_type=disabled.\n");
 		fprintf(stderr,
 		        "Type `configure perpetual_storage_wiggle=1 storage_migration_type=gradual' to enable gradual "
 		        "migration with the perpetual wiggle, or `configure "
@@ -189,6 +189,17 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		break;
 	case ConfigurationResult::DATABASE_CREATED:
 		printf("Database created\n");
+		break;
+	case ConfigurationResult::DATABASE_CREATED_WARN_ROCKSDB_EXPERIMENTAL:
+		printf("Database created\n");
+		fprintf(stderr,
+		        "WARN: RocksDB storage engine type is still in experimental stage, not yet production tested.\n");
+		break;
+	case ConfigurationResult::DATABASE_CREATED_WARN_SHARDED_ROCKSDB_EXPERIMENTAL:
+		printf("Database created\n");
+		fprintf(
+		    stderr,
+		    "WARN: Sharded RocksDB storage engine type is still in experimental stage, not yet production tested.\n");
 		break;
 	case ConfigurationResult::DATABASE_UNAVAILABLE:
 		fprintf(stderr, "ERROR: The database is unavailable\n");
@@ -250,11 +261,56 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		        "storage_migration_type=gradual' to set the gradual migration type.\n");
 		ret = false;
 		break;
+	case ConfigurationResult::SUCCESS_WARN_ROCKSDB_EXPERIMENTAL:
+		printf("Configuration changed\n");
+		fprintf(stderr,
+		        "WARN: RocksDB storage engine type is still in experimental stage, not yet production tested.\n");
+		break;
+	case ConfigurationResult::SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL:
+		printf("Configuration changed\n");
+		fprintf(
+		    stderr,
+		    "WARN: Sharded RocksDB storage engine type is still in experimental stage, not yet production tested.\n");
+		break;
+	case ConfigurationResult::DATABASE_IS_REGISTERED:
+		fprintf(stderr, "ERROR: A cluster cannot change its tenant mode while part of a metacluster.\n");
+		ret = false;
+		break;
 	default:
 		ASSERT(false);
 		ret = false;
 	};
 	return ret;
+}
+
+void configureGenerator(const char* text,
+                        const char* line,
+                        std::vector<std::string>& lc,
+                        std::vector<StringRef> const& tokens) {
+	const char* opts[] = { "new",
+		                   "single",
+		                   "double",
+		                   "triple",
+		                   "three_data_hall",
+		                   "three_datacenter",
+		                   "ssd",
+		                   "ssd-1",
+		                   "ssd-2",
+		                   "memory",
+		                   "memory-1",
+		                   "memory-2",
+		                   "memory-radixtree-beta",
+		                   "commit_proxies=",
+		                   "grv_proxies=",
+		                   "logs=",
+		                   "resolvers=",
+		                   "perpetual_storage_wiggle=",
+		                   "perpetual_storage_wiggle_locality=",
+		                   "storage_migration_type=",
+		                   "tenant_mode=",
+		                   "blob_granules_enabled=",
+		                   nullptr };
+	arrayGenerator(text, line, opts, lc);
 }
 
 CommandFactory configureFactory(
@@ -264,7 +320,8 @@ CommandFactory configureFactory(
         "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|"
         "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
         "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|perpetual_storage_wiggle_locality="
-        "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|storage_migration_type={disabled|gradual|aggressive}",
+        "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|storage_migration_type={disabled|gradual|aggressive}"
+        "|tenant_mode={disabled|optional_experimental|required_experimental}|blob_granules_enabled={0|1}",
         "change the database configuration",
         "The `new' option, if present, initializes a new database with the given configuration rather than changing "
         "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
@@ -295,6 +352,11 @@ CommandFactory configureFactory(
         "perpetual_storage_wiggle_locality=<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>: Set the process filter for wiggling. "
         "The processes that match the given locality key and locality value are only wiggled. The value 0 will disable "
         "the locality filter and matches all the processes for wiggling.\n\n"
-        "See the FoundationDB Administration Guide for more information."));
+        "tenant_mode=<disabled|optional_experimental|required_experimental>: Sets the tenant mode for the cluster. If "
+        "optional, then transactions can be run with or without specifying tenants. If required, all data must be "
+        "accessed using tenants.\n\n"
+
+        "See the FoundationDB Administration Guide for more information."),
+    &configureGenerator);
 
 } // namespace fdb_cli

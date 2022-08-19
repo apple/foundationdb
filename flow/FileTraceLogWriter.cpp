@@ -122,6 +122,9 @@ void FileTraceLogWriter::write(const StringRef& str) {
 }
 
 void FileTraceLogWriter::write(const char* str, size_t len) {
+	if (traceFileFD < 0) {
+		return;
+	}
 	auto ptr = str;
 	int remaining = len;
 	bool needsResolve = false;
@@ -186,19 +189,17 @@ void FileTraceLogWriter::open() {
 			needsResolve = true;
 
 			int errorNum = errno;
-			onMainThreadVoid(
-			    [finalname = finalname, errorNum] {
-				    TraceEvent(SevWarnAlways, "TraceFileOpenError")
-				        .detail("Filename", finalname)
-				        .detail("ErrorCode", errorNum)
-				        .detail("Error", strerror(errorNum))
-				        .trackLatest("TraceFileOpenError");
-			    },
-			    nullptr);
+			onMainThreadVoid([finalname = finalname, errorNum] {
+				TraceEvent(SevWarnAlways, "TraceFileOpenError")
+				    .detail("Filename", finalname)
+				    .detail("ErrorCode", errorNum)
+				    .detail("Error", strerror(errorNum))
+				    .trackLatest("TraceFileOpenError");
+			});
 			threadSleep(FLOW_KNOBS->TRACE_RETRY_OPEN_INTERVAL);
 		}
 	}
-	onMainThreadVoid([] { latestEventCache.clear("TraceFileOpenError"); }, nullptr);
+	onMainThreadVoid([] { latestEventCache.clear("TraceFileOpenError"); });
 	if (needsResolve) {
 		issues->resolveIssue("trace_log_could_not_create_file");
 	}

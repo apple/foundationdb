@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,15 +19,19 @@
  */
 
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
-#include "flow/crc32c.h"
+#include "fmt/format.h"
+#include "crc32/crc32c.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Hash3.h"
 #include "flow/xxhash.h"
 
+// for unprintable
+#include "fdbclient/NativeAPI.actor.h"
+
 extern "C" {
-#include "fdbserver/sqlite/sqliteInt.h"
+#include "sqliteInt.h"
 u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 }
 #include "flow/ThreadPrimitives.h"
@@ -113,7 +117,7 @@ struct PageChecksumCodec {
 			crc32Sum.part1 = 0;
 			crc32Sum.part2 = crc32c_append(0xfdbeefdb, static_cast<uint8_t*>(data), dataLen);
 			if (crc32Sum == *pSumInPage) {
-				TEST(true); // Read CRC32 checksum
+				CODE_PROBE(true, "Read CRC32 checksum");
 				return true;
 			}
 		}
@@ -129,7 +133,7 @@ struct PageChecksumCodec {
 			xxHash3Sum.part1 = static_cast<uint32_t>((xxHash3 >> 32) & 0x00ffffff);
 			xxHash3Sum.part2 = static_cast<uint32_t>(xxHash3 & 0xffffffff);
 			if (xxHash3Sum == *pSumInPage) {
-				TEST(true); // Read xxHash3 checksum
+				CODE_PROBE(true, "Read xxHash3 checksum");
 				return true;
 			}
 		}
@@ -140,7 +144,7 @@ struct PageChecksumCodec {
 		hashLittle2Sum.part2 = 0x5ca1ab1e;
 		hashlittle2(pData, dataLen, &hashLittle2Sum.part1, &hashLittle2Sum.part2);
 		if (hashLittle2Sum == *pSumInPage) {
-			TEST(true); // Read HashLittle2 checksum
+			CODE_PROBE(true, "Read HashLittle2 checksum");
 			return true;
 		}
 
@@ -353,7 +357,7 @@ struct SQLiteDB : NonCopyable {
 					lineStart = lineEnd;
 				}
 			}
-			TEST(true); // BTree integrity checked
+			CODE_PROBE(true, "BTree integrity checked");
 		}
 		if (e)
 			sqlite3_free(e);
@@ -702,6 +706,7 @@ struct RawCursor {
 	BtCursor* cursor;
 	KeyInfo keyInfo;
 	bool valid;
+	int64_t kvBytesRead = 0;
 
 	operator bool() const { return valid; }
 
@@ -1101,6 +1106,7 @@ struct RawCursor {
 			if (r == 0) {
 				Value result;
 				((ValueRef&)result) = decodeKVFragment(getEncodedRow(result.arena())).get().value;
+				kvBytesRead += key.size() + result.size();
 				return result;
 			}
 
@@ -1111,12 +1117,14 @@ struct RawCursor {
 			DefragmentingReader i(*this, m, true);
 			if (i.peek() == key) {
 				Optional<KeyValueRef> kv = i.getNext();
+				kvBytesRead += key.size() + kv.get().value.size();
 				return Value(kv.get().value, m);
 			}
 		} else if (r == 0) {
 			Value result;
 			KeyValueRef kv = decodeKV(getEncodedRow(result.arena()));
 			((ValueRef&)result) = kv.value;
+			kvBytesRead += key.size() + result.size();
 			return result;
 		}
 
@@ -1131,6 +1139,7 @@ struct RawCursor {
 			DefragmentingReader i(*this, m, getEncodedKVFragmentSize(key.size(), maxLength));
 			if (i.peek() == key) {
 				Optional<KeyValueRef> kv = i.getNext();
+				kvBytesRead += key.size() + kv.get().value.size();
 				return Value(kv.get().value, m);
 			}
 		} else if (!moveTo(key)) {
@@ -1141,6 +1150,7 @@ struct RawCursor {
 			int maxEncodedSize = getEncodedSize(key.size(), maxLength);
 			KeyValueRef kv = decodeKVPrefix(getEncodedRowPrefix(result.arena(), maxEncodedSize), maxLength);
 			((ValueRef&)result) = kv.value;
+			kvBytesRead += key.size() + result.size();
 			return result;
 		}
 		return Optional<Value>();
@@ -1217,6 +1227,8 @@ struct RawCursor {
 			ASSERT(result.size() > 0);
 			result.readThrough = result[result.size() - 1].key;
 		}
+		// AccumulatedBytes includes KeyValueRef overhead so subtract it
+		kvBytesRead += (accumulatedBytes - result.size() * sizeof(KeyValueRef));
 		return result;
 	}
 
@@ -1411,7 +1423,7 @@ void SQLiteDB::open(bool writable) {
 			renameFile(walpath, walpath + "-old-" + deterministicRandom()->randomUniqueID().toString());
 			ASSERT_WE_THINK(false); //< This code should not be hit in FoundationDB at the moment, because worker looks
 			                        // for databases to open by listing .fdb files, not .fdb-wal files
-			// TEST(true);  // Replace a partially constructed or destructed DB
+			// CODE_PROBE(true, "Replace a partially constructed or destructed DB");
 		}
 
 		if (dbFile.isError() && walFile.isError() && writable &&
@@ -1635,7 +1647,7 @@ private:
 
 		Reference<ReadCursor> getCursor() {
 			Reference<ReadCursor> cursor = *ppReadCursor;
-			if (!cursor) {
+			if (!cursor || cursor->get().kvBytesRead > SERVER_KNOBS->SQLITE_CURSOR_MAX_LIFETIME_BYTES) {
 				*ppReadCursor = cursor = makeReference<ReadCursor>();
 				cursor->init(conn);
 			}
@@ -1930,8 +1942,8 @@ private:
 				}
 
 				if (canDelete && (!canVacuum || deterministicRandom()->random01() < lazyDeleteBatchProbability)) {
-					TEST(canVacuum); // SQLite lazy deletion when vacuuming is active
-					TEST(!canVacuum); // SQLite lazy deletion when vacuuming is inactive
+					CODE_PROBE(canVacuum, "SQLite lazy deletion when vacuuming is active");
+					CODE_PROBE(!canVacuum, "SQLite lazy deletion when vacuuming is inactive");
 
 					int pagesToDelete = std::max(
 					    1,
@@ -1943,10 +1955,10 @@ private:
 					lazyDeleteTime += now() - begin;
 				} else {
 					ASSERT(canVacuum);
-					TEST(canDelete); // SQLite vacuuming when lazy delete is active
-					TEST(!canDelete); // SQLite vacuuming when lazy delete is inactive
-					TEST(SERVER_KNOBS->SPRING_CLEANING_VACUUMS_PER_LAZY_DELETE_PAGE !=
-					     0); // SQLite vacuuming with nonzero vacuums_per_lazy_delete_page
+					CODE_PROBE(canDelete, "SQLite vacuuming when lazy delete is active");
+					CODE_PROBE(!canDelete, "SQLite vacuuming when lazy delete is inactive");
+					CODE_PROBE(SERVER_KNOBS->SPRING_CLEANING_VACUUMS_PER_LAZY_DELETE_PAGE != 0,
+					           "SQLite vacuuming with nonzero vacuums_per_lazy_delete_page");
 
 					vacuumFinished = conn.vacuum();
 					if (!vacuumFinished) {
@@ -1961,10 +1973,10 @@ private:
 
 			freeListPages = conn.freePages();
 
-			TEST(workPerformed.lazyDeletePages > 0); // Pages lazily deleted
-			TEST(workPerformed.vacuumedPages > 0); // Pages vacuumed
-			TEST(vacuumTime > 0); // Time spent vacuuming
-			TEST(lazyDeleteTime > 0); // Time spent lazy deleting
+			CODE_PROBE(workPerformed.lazyDeletePages > 0, "Pages lazily deleted");
+			CODE_PROBE(workPerformed.vacuumedPages > 0, "Pages vacuumed");
+			CODE_PROBE(vacuumTime > 0, "Time spent vacuuming");
+			CODE_PROBE(lazyDeleteTime > 0, "Time spent lazy deleting");
 
 			++springCleaningStats.springCleaningCount;
 			springCleaningStats.lazyDeletePages += workPerformed.lazyDeletePages;
@@ -1984,7 +1996,7 @@ private:
 		state int64_t lastReadsComplete = 0;
 		state int64_t lastWritesComplete = 0;
 		loop {
-			wait(delay(SERVER_KNOBS->DISK_METRIC_LOGGING_INTERVAL));
+			wait(delay(FLOW_KNOBS->DISK_METRIC_LOGGING_INTERVAL));
 
 			int64_t rc = self->readsComplete, wc = self->writesComplete;
 			TraceEvent("DiskMetrics", self->logID)
@@ -2058,8 +2070,8 @@ private:
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "KVDoCloseError", self->logID)
+			    .errorUnsuppressed(e)
 			    .detail("Filename", self->filename)
-			    .error(e, true)
 			    .detail("Reason", e.code() == error_code_platform_error ? "could not delete database" : "unknown");
 			error = e;
 		}
@@ -2138,6 +2150,7 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename,
 	                                                          // the cache sizes for individual threads?
 	TaskPriority taskId = g_network->getCurrentTask();
 	g_network->setCurrentTask(TaskPriority::DiskWrite);
+	// Note: the below is actually a coroutine and not a thread.
 	writeThread->addThread(new Writer(this,
 	                                  type == KeyValueStoreType::SSD_BTREE_V2,
 	                                  checkChecksums,
@@ -2147,7 +2160,8 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename,
 	                                  diskBytesUsed,
 	                                  freeListPages,
 	                                  id,
-	                                  &readCursors));
+	                                  &readCursors),
+	                       "fdb-sqlite-wr");
 	g_network->setCurrentTask(taskId);
 	auto p = new Writer::InitAction();
 	auto f = p->result.getFuture();
@@ -2174,9 +2188,16 @@ void KeyValueStoreSQLite::startReadThreads() {
 	int nReadThreads = readCursors.size();
 	TaskPriority taskId = g_network->getCurrentTask();
 	g_network->setCurrentTask(TaskPriority::DiskRead);
-	for (int i = 0; i < nReadThreads; i++)
+	for (int i = 0; i < nReadThreads; i++) {
+		std::string threadName = format("fdb-sqlite-r-%d", i);
+		if (threadName.size() > 15) {
+			threadName = "fdb-sqlite-r";
+		}
+		//  Note: the below is actually a coroutine and not a thread.
 		readThreads->addThread(
-		    new Reader(filename, type == KeyValueStoreType::SSD_BTREE_V2, readsComplete, logID, &readCursors[i]));
+		    new Reader(filename, type == KeyValueStoreType::SSD_BTREE_V2, readsComplete, logID, &readCursors[i]),
+		    threadName.c_str());
+	}
 	g_network->setCurrentTask(taskId);
 }
 
@@ -2272,6 +2293,82 @@ ACTOR Future<Void> KVFileCheck(std::string filename, bool integrity) {
 
 	// Wait for integry check to finish
 	wait(success(store->readValue(StringRef())));
+
+	if (store->getError().isError())
+		wait(store->getError());
+	Future<Void> c = store->onClosed();
+	store->close();
+	wait(c);
+
+	return Void();
+}
+
+ACTOR Future<Void> KVFileDump(std::string filename) {
+	if (!fileExists(filename))
+		throw file_not_found();
+
+	StringRef kvFile(filename);
+	KeyValueStoreType type = KeyValueStoreType::END;
+	if (kvFile.endsWith(".fdb"_sr))
+		type = KeyValueStoreType::SSD_BTREE_V1;
+	else if (kvFile.endsWith(".sqlite"_sr))
+		type = KeyValueStoreType::SSD_BTREE_V2;
+	ASSERT(type != KeyValueStoreType::END);
+
+	state IKeyValueStore* store = keyValueStoreSQLite(filename, UID(0, 0), type);
+	ASSERT(store != nullptr);
+
+	// dump
+	state int64_t count = 0;
+	state Key k;
+	state Key endk = allKeys.end;
+	state bool debug = false;
+
+	const char* startKey = getenv("FDB_DUMP_STARTKEY");
+	const char* endKey = getenv("FDB_DUMP_ENDKEY");
+	const char* debugS = getenv("FDB_DUMP_DEBUG");
+	if (startKey != NULL)
+		k = StringRef(unprintable(std::string(startKey)));
+	if (endKey != NULL)
+		endk = StringRef(unprintable(std::string(endKey)));
+	if (debugS != NULL)
+		debug = true;
+
+	fprintf(stderr,
+	        "Dump start: %s, end: %s, debug: %s\n",
+	        printable(k).c_str(),
+	        printable(endk).c_str(),
+	        debug ? "true" : "false");
+
+	while (true) {
+		RangeResult kv = wait(store->readRange(KeyRangeRef(k, endk), 1000));
+		for (auto& one : kv) {
+			int size = 0;
+			const uint8_t* data = NULL;
+
+			size = one.key.size();
+			data = one.key.begin();
+			fwrite(&size, sizeof(int), 1, stdout);
+			fwrite(data, sizeof(uint8_t), size, stdout);
+
+			size = one.value.size();
+			data = one.value.begin();
+			fwrite(&size, sizeof(int), 1, stdout);
+			fwrite(data, sizeof(uint8_t), size, stdout);
+
+			if (debug) {
+				fprintf(stderr, "key: %s\n", printable(one.key).c_str());
+				fprintf(stderr, "val: %s\n", printable(one.value).c_str());
+			}
+		}
+
+		count += kv.size();
+		if (kv.size() <= 0)
+			break;
+		k = keyAfter(kv[kv.size() - 1].key);
+	}
+	fflush(stdout);
+	fmt::print(stderr, "Counted: {}\n", count);
 
 	if (store->getError().isError())
 		wait(store->getError());

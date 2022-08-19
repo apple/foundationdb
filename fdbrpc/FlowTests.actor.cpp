@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,13 +20,14 @@
 
 // Unit tests for the flow language and libraries
 
+#include "flow/Arena.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IThreadPool.h"
 #include "flow/WriteOnlySet.h"
 #include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "flow/TLSConfig.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -68,7 +69,7 @@ TEST_CASE("/flow/buggifiedDelay") {
 		});
 		wait(f1 && f2);
 		if (last == 1) {
-			TEST(true); // Delays can become ready out of order
+			CODE_PROBE(true, "Delays can become ready out of order");
 			return Void();
 		}
 	}
@@ -809,7 +810,7 @@ TEST_CASE("/flow/flow/chooseTwoActor") {
 	return Void();
 }
 
-TEST_CASE("/flow/flow/perf/actor patterns") {
+TEST_CASE("#flow/flow/perf/actor patterns") {
 	double start;
 	int N = 1000000;
 

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,8 @@
 
 // Unit tests for the FoundationDB C API.
 
-#define FDB_API_VERSION 710
+#include "fdb_c_options.g.h"
+#define FDB_API_VERSION 720
 #include <foundationdb/fdb_c.h>
 #include <assert.h>
 #include <string.h>
@@ -38,10 +39,13 @@
 #include <chrono>
 
 #define DOCTEST_CONFIG_IMPLEMENT
+#include <rapidjson/document.h>
 #include "doctest.h"
-#include "fdbclient/rapidjson/document.h"
+#include "fdbclient/Tuple.h"
 
 #include "flow/config.h"
+#include "flow/DeterministicRandom.h"
+#include "flow/IRandom.h"
 
 #include "fdb_api.hpp"
 
@@ -76,7 +80,7 @@ fdb_error_t wait_future(fdb::Future& f) {
 // Given a string s, returns the "lowest" string greater than any string that
 // starts with s. Taken from
 // https://github.com/apple/foundationdb/blob/e7d72f458c6a985fdfa677ae021f357d6f49945b/flow/flow.cpp#L223.
-std::string strinc(const std::string& s) {
+std::string strinc_str(const std::string& s) {
 	int index = -1;
 	for (index = s.size() - 1; index >= 0; --index) {
 		if ((uint8_t)s[index] != 255) {
@@ -92,16 +96,16 @@ std::string strinc(const std::string& s) {
 	return r;
 }
 
-TEST_CASE("strinc") {
-	CHECK(strinc("a").compare("b") == 0);
-	CHECK(strinc("y").compare("z") == 0);
-	CHECK(strinc("!").compare("\"") == 0);
-	CHECK(strinc("*").compare("+") == 0);
-	CHECK(strinc("fdb").compare("fdc") == 0);
-	CHECK(strinc("foundation database 6").compare("foundation database 7") == 0);
+TEST_CASE("strinc_str") {
+	CHECK(strinc_str("a").compare("b") == 0);
+	CHECK(strinc_str("y").compare("z") == 0);
+	CHECK(strinc_str("!").compare("\"") == 0);
+	CHECK(strinc_str("*").compare("+") == 0);
+	CHECK(strinc_str("fdb").compare("fdc") == 0);
+	CHECK(strinc_str("foundation database 6").compare("foundation database 7") == 0);
 
 	char terminated[] = { 'a', 'b', '\xff' };
-	CHECK(strinc(std::string(terminated, 3)).compare("ac") == 0);
+	CHECK(strinc_str(std::string(terminated, 3)).compare("ac") == 0);
 }
 
 // Helper function to add `prefix` to all keys in the given map. Returns a new
@@ -117,7 +121,7 @@ std::map<std::string, std::string> create_data(std::map<std::string, std::string
 // Clears all data in the database, then inserts the given key value pairs.
 void insert_data(FDBDatabase* db, const std::map<std::string, std::string>& data) {
 	fdb::Transaction tr(db);
-	auto end_key = strinc(prefix);
+	auto end_key = strinc_str(prefix);
 	while (1) {
 		tr.clear_range(prefix, end_key);
 		for (const auto& [key, val] : data) {
@@ -166,6 +170,31 @@ std::optional<std::string> get_value(std::string_view key,
 struct GetRangeResult {
 	// List of key-value pairs in the range read.
 	std::vector<std::pair<std::string, std::string>> kvs;
+	// True if values remain in the key range requested.
+	bool more;
+	// Set to a non-zero value if an error occurred during the transaction.
+	fdb_error_t err;
+};
+
+struct GetMappedRangeResult {
+	struct MappedKV {
+		MappedKV(const std::string& key,
+		         const std::string& value,
+		         const std::string& begin,
+		         const std::string& end,
+		         const std::vector<std::pair<std::string, std::string>>& range_results,
+		         fdb_bool_t boundaryAndExist)
+		  : key(key), value(value), begin(begin), end(end), range_results(range_results),
+		    boundaryAndExist(boundaryAndExist) {}
+
+		std::string key;
+		std::string value;
+		std::string begin;
+		std::string end;
+		std::vector<std::pair<std::string, std::string>> range_results;
+		fdb_bool_t boundaryAndExist;
+	};
+	std::vector<MappedKV> mkvs;
 	// True if values remain in the key range requested.
 	bool more;
 	// Set to a non-zero value if an error occurred during the transaction.
@@ -222,6 +251,86 @@ GetRangeResult get_range(fdb::Transaction& tr,
 		results.emplace_back(key, value);
 	}
 	return GetRangeResult{ results, out_more != 0, 0 };
+}
+
+static inline std::string extractString(FDBKey key) {
+	return std::string((const char*)key.key, key.key_length);
+}
+
+GetMappedRangeResult get_mapped_range(fdb::Transaction& tr,
+                                      const uint8_t* begin_key_name,
+                                      int begin_key_name_length,
+                                      fdb_bool_t begin_or_equal,
+                                      int begin_offset,
+                                      const uint8_t* end_key_name,
+                                      int end_key_name_length,
+                                      fdb_bool_t end_or_equal,
+                                      int end_offset,
+                                      const uint8_t* mapper_name,
+                                      int mapper_name_length,
+                                      int limit,
+                                      int target_bytes,
+                                      FDBStreamingMode mode,
+                                      int iteration,
+                                      int matchIndex,
+                                      fdb_bool_t snapshot,
+                                      fdb_bool_t reverse) {
+	fdb::MappedKeyValueArrayFuture f1 = tr.get_mapped_range(begin_key_name,
+	                                                        begin_key_name_length,
+	                                                        begin_or_equal,
+	                                                        begin_offset,
+	                                                        end_key_name,
+	                                                        end_key_name_length,
+	                                                        end_or_equal,
+	                                                        end_offset,
+	                                                        mapper_name,
+	                                                        mapper_name_length,
+	                                                        limit,
+	                                                        target_bytes,
+	                                                        mode,
+	                                                        iteration,
+	                                                        matchIndex,
+	                                                        snapshot,
+	                                                        reverse);
+
+	fdb_error_t err = wait_future(f1);
+	if (err) {
+		return GetMappedRangeResult{ {}, false, err };
+	}
+
+	const FDBMappedKeyValue* out_mkv;
+	int out_count;
+	fdb_bool_t out_more;
+
+	fdb_check(f1.get(&out_mkv, &out_count, &out_more));
+
+	GetMappedRangeResult result;
+	result.more = (out_more != 0);
+	result.err = 0;
+
+	//	std::cout << "out_count:" << out_count << " out_more:" << out_more << " out_mkv:" << (void*)out_mkv <<
+	// std::endl;
+
+	for (int i = 0; i < out_count; ++i) {
+		FDBMappedKeyValue mkv = out_mkv[i];
+		auto key = extractString(mkv.key);
+		auto value = extractString(mkv.value);
+		auto begin = extractString(mkv.getRange.begin.key);
+		auto end = extractString(mkv.getRange.end.key);
+		bool boundaryAndExist = mkv.boundaryAndExist;
+		//		std::cout << "key:" << key << " value:" << value << " begin:" << begin << " end:" << end << std::endl;
+
+		std::vector<std::pair<std::string, std::string>> range_results;
+		for (int i = 0; i < mkv.getRange.m_size; ++i) {
+			const auto& kv = mkv.getRange.data[i];
+			std::string k((const char*)kv.key, kv.key_length);
+			std::string v((const char*)kv.value, kv.value_length);
+			range_results.emplace_back(k, v);
+			// std::cout << "[" << i << "]" << k << " -> " << v << std::endl;
+		}
+		result.mkvs.emplace_back(key, value, begin, end, range_results, boundaryAndExist);
+	}
+	return result;
 }
 
 // Clears all data in the database.
@@ -819,6 +928,319 @@ TEST_CASE("fdb_transaction_set_read_version future_version") {
 	CHECK(err == 1009); // future_version
 }
 
+const std::string EMPTY = Tuple().pack().toString();
+const KeyRef RECORD = "RECORD"_sr;
+const KeyRef INDEX = "INDEX"_sr;
+static Key primaryKey(const int i) {
+	return Key(format("primary-key-of-record-%08d", i));
+}
+static Key indexKey(const int i) {
+	return Key(format("index-key-of-record-%08d", i));
+}
+static Value dataOfRecord(const int i) {
+	return Value(format("data-of-record-%08d", i));
+}
+static std::string indexEntryKey(const int i) {
+	return Tuple::makeTuple(prefix, INDEX, indexKey(i), primaryKey(i)).pack().toString();
+}
+static std::string recordKey(const int i, const int split) {
+	return Tuple::makeTuple(prefix, RECORD, primaryKey(i), split).pack().toString();
+}
+static std::string recordValue(const int i, const int split) {
+	return Tuple::makeTuple(dataOfRecord(i), split).pack().toString();
+}
+
+const static int SPLIT_SIZE = 3;
+std::map<std::string, std::string> fillInRecords(int n) {
+	// Note: The user requested `prefix` should be added as the first element of the tuple that forms the key, rather
+	// than the prefix of the key. So we don't use key() or create_data() in this test.
+	std::map<std::string, std::string> data;
+	for (int i = 0; i < n; i++) {
+		data[indexEntryKey(i)] = EMPTY;
+		for (int split = 0; split < SPLIT_SIZE; split++) {
+			data[recordKey(i, split)] = recordValue(i, split);
+		}
+	}
+	insert_data(db, data);
+	return data;
+}
+
+GetMappedRangeResult getMappedIndexEntries(int beginId,
+                                           int endId,
+                                           fdb::Transaction& tr,
+                                           std::string mapper,
+                                           int matchIndex) {
+	std::string indexEntryKeyBegin = indexEntryKey(beginId);
+	std::string indexEntryKeyEnd = indexEntryKey(endId);
+
+	return get_mapped_range(
+	    tr,
+	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKeyBegin.c_str(), indexEntryKeyBegin.size()),
+	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKeyEnd.c_str(), indexEntryKeyEnd.size()),
+	    (const uint8_t*)mapper.c_str(),
+	    mapper.size(),
+	    /* limit */ 0,
+	    /* target_bytes */ 0,
+	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+	    /* iteration */ 0,
+	    /* matchIndex */ matchIndex,
+	    /* snapshot */ false,
+	    /* reverse */ 0);
+}
+
+GetMappedRangeResult getMappedIndexEntries(int beginId,
+                                           int endId,
+                                           fdb::Transaction& tr,
+                                           int matchIndex,
+                                           bool allMissing) {
+	std::string mapper =
+	    Tuple::makeTuple(prefix, RECORD, (allMissing ? "{K[2]}"_sr : "{K[3]}"_sr), "{...}"_sr).pack().toString();
+	return getMappedIndexEntries(beginId, endId, tr, mapper, matchIndex);
+}
+
+TEST_CASE("versionstamp_unit_test") {
+	// a random 12 bytes long StringRef as a versionstamp
+	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12"_sr;
+	Versionstamp vs(str), vs2(str);
+	ASSERT(vs == vs2);
+	ASSERT(vs.begin() != vs2.begin());
+
+	int64_t version = vs.getVersion();
+	int64_t version2 = vs2.getVersion();
+	int64_t versionExpected = ((int64_t)0x01 << 56) + ((int64_t)0x02 << 48) + ((int64_t)0x03 << 40) +
+	                          ((int64_t)0x04 << 32) + (0x05 << 24) + (0x06 << 16) + (0x07 << 8) + 0x08;
+	ASSERT(version == versionExpected);
+	ASSERT(version2 == versionExpected);
+
+	int16_t batch = vs.getBatchNumber();
+	int16_t batch2 = vs2.getBatchNumber();
+	int16_t batchExpected = (0x09 << 8) + 0x10;
+	ASSERT(batch == batchExpected);
+	ASSERT(batch2 == batchExpected);
+
+	int16_t user = vs.getUserVersion();
+	int16_t user2 = vs2.getUserVersion();
+	int16_t userExpected = (0x11 << 8) + 0x12;
+	ASSERT(user == userExpected);
+	ASSERT(user2 == userExpected);
+
+	ASSERT(vs.size() == VERSIONSTAMP_TUPLE_SIZE);
+	ASSERT(vs2.size() == VERSIONSTAMP_TUPLE_SIZE);
+}
+
+TEST_CASE("tuple_support_versionstamp") {
+	// a random 12 bytes long StringRef as a versionstamp
+	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12"_sr;
+	Versionstamp vs(str);
+	const Tuple t = Tuple::makeTuple(prefix, RECORD, vs, "{K[3]}"_sr, "{...}"_sr);
+	ASSERT(t.getVersionstamp(2) == vs);
+
+	// verify the round-way pack-unpack path for a Tuple containing a versionstamp
+	StringRef result1 = t.pack();
+	Tuple t2 = Tuple::unpack(result1);
+	StringRef result2 = t2.pack();
+	ASSERT(t2.getVersionstamp(2) == vs);
+	ASSERT(result1.toString() == result2.toString());
+}
+
+TEST_CASE("tuple_fail_to_append_truncated_versionstamp") {
+	// a truncated 11 bytes long StringRef as a versionstamp
+	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11"_sr;
+	try {
+		Versionstamp truncatedVersionstamp(str);
+	} catch (Error& e) {
+		return;
+	}
+	UNREACHABLE();
+}
+
+TEST_CASE("tuple_fail_to_append_longer_versionstamp") {
+	// a longer than expected 13 bytes long StringRef as a versionstamp
+	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11"_sr;
+	try {
+		Versionstamp longerVersionstamp(str);
+	} catch (Error& e) {
+		return;
+	}
+	UNREACHABLE();
+}
+
+TEST_CASE("fdb_transaction_get_mapped_range") {
+	const int TOTAL_RECORDS = 20;
+	fillInRecords(TOTAL_RECORDS);
+
+	fdb::Transaction tr(db);
+	// RYW should be enabled.
+	while (1) {
+		int beginId = 1;
+		int endId = 19;
+		const double r = deterministicRandom()->random01();
+		int matchIndex = MATCH_INDEX_ALL;
+		if (r < 0.25) {
+			matchIndex = MATCH_INDEX_NONE;
+		} else if (r < 0.5) {
+			matchIndex = MATCH_INDEX_MATCHED_ONLY;
+		} else if (r < 0.75) {
+			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
+		}
+		auto result = getMappedIndexEntries(beginId, endId, tr, matchIndex, false);
+
+		if (result.err) {
+			fdb::EmptyFuture f1 = tr.on_error(result.err);
+			fdb_check(wait_future(f1));
+			continue;
+		}
+
+		int expectSize = endId - beginId;
+		CHECK(result.mkvs.size() == expectSize);
+		CHECK(!result.more);
+
+		int id = beginId;
+		bool boundary;
+		for (int i = 0; i < expectSize; i++, id++) {
+			boundary = i == 0 || i == expectSize - 1;
+			const auto& mkv = result.mkvs[i];
+			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
+				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
+			} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
+				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
+			} else if (matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
+				CHECK(EMPTY.compare(mkv.key) == 0);
+			} else {
+				CHECK(EMPTY.compare(mkv.key) == 0);
+			}
+			bool empty = mkv.range_results.empty();
+			CHECK(mkv.boundaryAndExist == (boundary && !empty));
+			CHECK(EMPTY.compare(mkv.value) == 0);
+			CHECK(mkv.range_results.size() == SPLIT_SIZE);
+			for (int split = 0; split < SPLIT_SIZE; split++) {
+				auto& kv = mkv.range_results[split];
+				CHECK(recordKey(id, split).compare(kv.first) == 0);
+				CHECK(recordValue(id, split).compare(kv.second) == 0);
+			}
+		}
+		break;
+	}
+}
+
+TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
+	const int TOTAL_RECORDS = 20;
+	fillInRecords(TOTAL_RECORDS);
+
+	fdb::Transaction tr(db);
+	// RYW should be enabled.
+	while (1) {
+		int beginId = 1;
+		int endId = 19;
+		const double r = deterministicRandom()->random01();
+		int matchIndex = MATCH_INDEX_ALL;
+		if (r < 0.25) {
+			matchIndex = MATCH_INDEX_NONE;
+		} else if (r < 0.5) {
+			matchIndex = MATCH_INDEX_MATCHED_ONLY;
+		} else if (r < 0.75) {
+			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
+		}
+		auto result = getMappedIndexEntries(beginId, endId, tr, matchIndex, true);
+
+		if (result.err) {
+			fdb::EmptyFuture f1 = tr.on_error(result.err);
+			fdb_check(wait_future(f1));
+			continue;
+		}
+
+		int expectSize = endId - beginId;
+		CHECK(result.mkvs.size() == expectSize);
+		CHECK(!result.more);
+
+		int id = beginId;
+		bool boundary;
+		for (int i = 0; i < expectSize; i++, id++) {
+			boundary = i == 0 || i == expectSize - 1;
+			const auto& mkv = result.mkvs[i];
+			if (matchIndex == MATCH_INDEX_ALL || i == 0 || i == expectSize - 1) {
+				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
+			} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
+				CHECK(EMPTY.compare(mkv.key) == 0);
+			} else if (matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
+				CHECK(indexEntryKey(id).compare(mkv.key) == 0);
+			} else {
+				CHECK(EMPTY.compare(mkv.key) == 0);
+			}
+			bool empty = mkv.range_results.empty();
+			CHECK(mkv.boundaryAndExist == (boundary && !empty));
+			CHECK(EMPTY.compare(mkv.value) == 0);
+		}
+		break;
+	}
+}
+
+TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_serializable") {
+	std::string mapper = Tuple::makeTuple(prefix, RECORD, "{K[3]}"_sr).pack().toString();
+	fdb::Transaction tr(db);
+	auto result = get_mapped_range(
+	    tr,
+	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKey(0).c_str(), indexEntryKey(0).size()),
+	    FDB_KEYSEL_FIRST_GREATER_THAN((const uint8_t*)indexEntryKey(1).c_str(), indexEntryKey(1).size()),
+	    (const uint8_t*)mapper.c_str(),
+	    mapper.size(),
+	    /* limit */ 0,
+	    /* target_bytes */ 0,
+	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+	    /* iteration */ 0,
+	    /* matchIndex */ MATCH_INDEX_ALL,
+	    /* snapshot */ true, // Set snapshot to true
+	    /* reverse */ 0);
+	ASSERT(result.err == error_code_unsupported_operation);
+}
+
+TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_ryw_enable") {
+	std::string mapper = Tuple::makeTuple(prefix, RECORD, "{K[3]}"_sr).pack().toString();
+	fdb::Transaction tr(db);
+	fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0)); // Not disable RYW
+	auto result = get_mapped_range(
+	    tr,
+	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKey(0).c_str(), indexEntryKey(0).size()),
+	    FDB_KEYSEL_FIRST_GREATER_THAN((const uint8_t*)indexEntryKey(1).c_str(), indexEntryKey(1).size()),
+	    (const uint8_t*)mapper.c_str(),
+	    mapper.size(),
+	    /* limit */ 0,
+	    /* target_bytes */ 0,
+	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+	    /* iteration */ 0,
+	    /* matchIndex */ MATCH_INDEX_ALL,
+	    /* snapshot */ false,
+	    /* reverse */ 0);
+	ASSERT(result.err == error_code_unsupported_operation);
+}
+
+void assertNotTuple(std::string str) {
+	try {
+		Tuple::unpack(str);
+	} catch (Error& e) {
+		return;
+	}
+	UNREACHABLE();
+}
+
+TEST_CASE("fdb_transaction_get_mapped_range_fail_on_mapper_not_tuple") {
+	// A string that cannot be parsed as tuple.
+	// "\x15:\x152\x15E\x15\x09\x15\x02\x02MySimpleRecord$repeater-version\x00\x15\x013\x00\x00\x00\x00\x1aU\x90\xba\x00\x00\x00\x02\x15\x04"
+	// should fail at \x35
+
+	std::string mapper = {
+		'\x15', ':',    '\x15', '2', '\x15', 'E',    '\x15', '\t',   '\x15', '\x02', '\x02', 'M',
+		'y',    'S',    'i',    'm', 'p',    'l',    'e',    'R',    'e',    'c',    'o',    'r',
+		'd',    '$',    'r',    'e', 'p',    'e',    'a',    't',    'e',    'r',    '-',    'v',
+		'e',    'r',    's',    'i', 'o',    'n',    '\x00', '\x15', '\x01', '\x35', '\x00', '\x00',
+		'\x00', '\x00', '\x1a', 'U', '\x90', '\xba', '\x00', '\x00', '\x00', '\x02', '\x15', '\x04'
+	};
+	assertNotTuple(mapper);
+	fdb::Transaction tr(db);
+	auto result = getMappedIndexEntries(1, 3, tr, mapper, MATCH_INDEX_ALL);
+	ASSERT(result.err == error_code_mapper_not_tuple);
+}
+
 TEST_CASE("fdb_transaction_get_range reverse") {
 	std::map<std::string, std::string> data = create_data({ { "a", "1" }, { "b", "2" }, { "c", "3" }, { "d", "4" } });
 	insert_data(db, data);
@@ -853,10 +1275,8 @@ TEST_CASE("fdb_transaction_get_range reverse") {
 			std::string data_key = it->first;
 			std::string data_value = it->second;
 
-			auto [key, value] = *results_it;
-
-			CHECK(data_key.compare(key) == 0);
-			CHECK(data[data_key].compare(value) == 0);
+			CHECK(data_key.compare(results_it->first /*key*/) == 0);
+			CHECK(data[data_key].compare(results_it->second /*value*/) == 0);
 		}
 		break;
 	}
@@ -890,8 +1310,8 @@ TEST_CASE("fdb_transaction_get_range limit") {
 			CHECK(result.more);
 		}
 
-		for (const auto& [key, value] : result.kvs) {
-			CHECK(data[key].compare(value) == 0);
+		for (const auto& kv : result.kvs) {
+			CHECK(data[kv.first].compare(kv.second) == 0);
 		}
 		break;
 	}
@@ -922,8 +1342,8 @@ TEST_CASE("fdb_transaction_get_range FDB_STREAMING_MODE_EXACT") {
 		CHECK(result.kvs.size() == 3);
 		CHECK(result.more);
 
-		for (const auto& [key, value] : result.kvs) {
-			CHECK(data[key].compare(value) == 0);
+		for (const auto& kv : result.kvs) {
+			CHECK(data[kv.first].compare(kv.second) == 0);
 		}
 		break;
 	}
@@ -1726,7 +2146,7 @@ TEST_CASE("fdb_transaction_add_conflict_range") {
 
 		fdb::Transaction tr2(db);
 		while (1) {
-			fdb_check(tr2.add_conflict_range(key("a"), strinc(key("a")), FDB_CONFLICT_RANGE_TYPE_WRITE));
+			fdb_check(tr2.add_conflict_range(key("a"), strinc_str(key("a")), FDB_CONFLICT_RANGE_TYPE_WRITE));
 			fdb::EmptyFuture f1 = tr2.commit();
 
 			fdb_error_t err = wait_future(f1);
@@ -1739,8 +2159,8 @@ TEST_CASE("fdb_transaction_add_conflict_range") {
 		}
 
 		while (1) {
-			fdb_check(tr.add_conflict_range(key("a"), strinc(key("a")), FDB_CONFLICT_RANGE_TYPE_READ));
-			fdb_check(tr.add_conflict_range(key("a"), strinc(key("a")), FDB_CONFLICT_RANGE_TYPE_WRITE));
+			fdb_check(tr.add_conflict_range(key("a"), strinc_str(key("a")), FDB_CONFLICT_RANGE_TYPE_READ));
+			fdb_check(tr.add_conflict_range(key("a"), strinc_str(key("a")), FDB_CONFLICT_RANGE_TYPE_WRITE));
 			fdb::EmptyFuture f1 = tr.commit();
 
 			fdb_error_t err = wait_future(f1);
@@ -1769,15 +2189,17 @@ TEST_CASE("fdb_transaction_add_conflict_range") {
 TEST_CASE("special-key-space valid transaction ID") {
 	auto value = get_value("\xff\xff/tracing/transaction_id", /* snapshot */ false, {});
 	REQUIRE(value.has_value());
-	uint64_t transaction_id = std::stoul(value.value());
-	CHECK(transaction_id > 0);
+	UID transaction_id = UID::fromString(value.value());
+	CHECK(transaction_id.first() > 0);
+	CHECK(transaction_id.second() > 0);
 }
 
 TEST_CASE("special-key-space custom transaction ID") {
 	fdb::Transaction tr(db);
 	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
 	while (1) {
-		tr.set("\xff\xff/tracing/transaction_id", std::to_string(ULONG_MAX));
+		UID randomTransactionID = UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64());
+		tr.set("\xff\xff/tracing/transaction_id", randomTransactionID.toString());
 		fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/transaction_id",
 		                             /* snapshot */ false);
 
@@ -1794,8 +2216,8 @@ TEST_CASE("special-key-space custom transaction ID") {
 		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
 
 		REQUIRE(out_present);
-		uint64_t transaction_id = std::stoul(std::string(val, vallen));
-		CHECK(transaction_id == ULONG_MAX);
+		UID transaction_id = UID::fromString(std::string(val, vallen));
+		CHECK(transaction_id == randomTransactionID);
 		break;
 	}
 }
@@ -1822,45 +2244,11 @@ TEST_CASE("special-key-space set transaction ID after write") {
 		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
 
 		REQUIRE(out_present);
-		uint64_t transaction_id = std::stoul(std::string(val, vallen));
-		CHECK(transaction_id != 0);
+		UID transaction_id = UID::fromString(std::string(val, vallen));
+		CHECK(transaction_id.first() > 0);
+		CHECK(transaction_id.second() > 0);
 		break;
 	}
-}
-
-TEST_CASE("special-key-space set token after write") {
-	fdb::Transaction tr(db);
-	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-	while (1) {
-		tr.set(key("foo"), "bar");
-		tr.set("\xff\xff/tracing/token", "false");
-		fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/token",
-		                             /* snapshot */ false);
-
-		fdb_error_t err = wait_future(f1);
-		if (err) {
-			fdb::EmptyFuture f2 = tr.on_error(err);
-			fdb_check(wait_future(f2));
-			continue;
-		}
-
-		int out_present;
-		char* val;
-		int vallen;
-		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-
-		REQUIRE(out_present);
-		uint64_t token = std::stoul(std::string(val, vallen));
-		CHECK(token != 0);
-		break;
-	}
-}
-
-TEST_CASE("special-key-space valid token") {
-	auto value = get_value("\xff\xff/tracing/token", /* snapshot */ false, {});
-	REQUIRE(value.has_value());
-	uint64_t token = std::stoul(value.value());
-	CHECK(token > 0);
 }
 
 TEST_CASE("special-key-space disable tracing") {
@@ -1888,48 +2276,6 @@ TEST_CASE("special-key-space disable tracing") {
 		CHECK(token == 0);
 		break;
 	}
-}
-
-TEST_CASE("FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE") {
-	fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE, nullptr, 0));
-
-	auto value = get_value("\xff\xff/tracing/token", /* snapshot */ false, {});
-	REQUIRE(value.has_value());
-	uint64_t token = std::stoul(value.value());
-	CHECK(token == 0);
-
-	fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_ENABLE, nullptr, 0));
-}
-
-TEST_CASE("FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE enable tracing for transaction") {
-	fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_DISABLE, nullptr, 0));
-
-	fdb::Transaction tr(db);
-	fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-	while (1) {
-		tr.set("\xff\xff/tracing/token", "true");
-		fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/token",
-		                             /* snapshot */ false);
-
-		fdb_error_t err = wait_future(f1);
-		if (err) {
-			fdb::EmptyFuture f2 = tr.on_error(err);
-			fdb_check(wait_future(f2));
-			continue;
-		}
-
-		int out_present;
-		char* val;
-		int vallen;
-		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-
-		REQUIRE(out_present);
-		uint64_t token = std::stoul(std::string(val, vallen));
-		CHECK(token > 0);
-		break;
-	}
-
-	fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_DISTRIBUTED_TRANSACTION_TRACE_ENABLE, nullptr, 0));
 }
 
 TEST_CASE("special-key-space tracing get range") {
@@ -1964,10 +2310,10 @@ TEST_CASE("special-key-space tracing get range") {
 		CHECK(!out_more);
 		CHECK(out_count == 2);
 
-		CHECK(std::string((char*)out_kv[0].key, out_kv[0].key_length) == tracingBegin + "token");
-		CHECK(std::stoul(std::string((char*)out_kv[0].value, out_kv[0].value_length)) > 0);
 		CHECK(std::string((char*)out_kv[1].key, out_kv[1].key_length) == tracingBegin + "transaction_id");
-		CHECK(std::stoul(std::string((char*)out_kv[1].value, out_kv[1].value_length)) > 0);
+		UID transaction_id = UID::fromString(std::string((char*)out_kv[1].value, out_kv[1].value_length));
+		CHECK(transaction_id.first() > 0);
+		CHECK(transaction_id.second() > 0);
 		break;
 	}
 }
@@ -2217,7 +2563,7 @@ TEST_CASE("commit_does_not_reset") {
 			continue;
 		}
 
-		fdb_check(tr2.add_conflict_range(key("foo"), strinc(key("foo")), FDB_CONFLICT_RANGE_TYPE_READ));
+		fdb_check(tr2.add_conflict_range(key("foo"), strinc_str(key("foo")), FDB_CONFLICT_RANGE_TYPE_READ));
 		tr2.set(key("foo"), "bar");
 		fdb::EmptyFuture tr2CommitFuture = tr2.commit();
 		err = wait_future(tr2CommitFuture);
@@ -2252,6 +2598,327 @@ TEST_CASE("commit_does_not_reset") {
 	}
 }
 
+TEST_CASE("Fast alloc thread cleanup") {
+	// Try to cause an OOM if thread cleanup doesn't work
+	for (int i = 0; i < 50000; ++i) {
+		auto thread = std::thread([]() {
+			fdb::Transaction tr(db);
+			for (int s = 0; s < 11; ++s) {
+				tr.set(key("foo"), std::string(8 << s, '\x00'));
+			}
+		});
+		thread.join();
+	}
+}
+
+TEST_CASE("Tenant create, access, and delete") {
+	std::string tenantName = "tenant";
+	std::string testKey = "foo";
+	std::string testValue = "bar";
+
+	fdb::Transaction tr(db);
+	while (1) {
+		fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
+		tr.set("\xff\xff/management/tenant/map/" + tenantName, "");
+		fdb::EmptyFuture commitFuture = tr.commit();
+		fdb_error_t err = wait_future(commitFuture);
+		if (err) {
+			fdb::EmptyFuture f = tr.on_error(err);
+			fdb_check(wait_future(f));
+			continue;
+		}
+		tr.reset();
+		break;
+	}
+
+	while (1) {
+		StringRef begin = "\xff\xff/management/tenant/map/"_sr;
+		StringRef end = "\xff\xff/management/tenant/map0"_sr;
+
+		fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
+		fdb::KeyValueArrayFuture f = tr.get_range(FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(begin.begin(), begin.size()),
+		                                          FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(end.begin(), end.size()),
+		                                          /* limit */ 0,
+		                                          /* target_bytes */ 0,
+		                                          /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+		                                          /* iteration */ 0,
+		                                          /* snapshot */ false,
+		                                          /* reverse */ 0);
+
+		fdb_error_t err = wait_future(f);
+		if (err) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		FDBKeyValue const* outKv;
+		int outCount;
+		int outMore;
+		fdb_check(f.get(&outKv, &outCount, &outMore));
+		CHECK(outCount == 1);
+		CHECK(StringRef(outKv->key, outKv->key_length) == StringRef(tenantName).withPrefix(begin));
+
+		tr.reset();
+		break;
+	}
+
+	fdb::Tenant tenant(db, reinterpret_cast<const uint8_t*>(tenantName.c_str()), tenantName.size());
+	fdb::Transaction tr2(tenant);
+
+	while (1) {
+		tr2.set(testKey, testValue);
+		fdb::EmptyFuture commitFuture = tr2.commit();
+		fdb_error_t err = wait_future(commitFuture);
+		if (err) {
+			fdb::EmptyFuture f = tr2.on_error(err);
+			fdb_check(wait_future(f));
+			continue;
+		}
+		tr2.reset();
+		break;
+	}
+
+	while (1) {
+		fdb::ValueFuture f1 = tr2.get(testKey, false);
+		fdb_error_t err = wait_future(f1);
+		if (err) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		int out_present;
+		char* val;
+		int vallen;
+		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
+		CHECK(out_present == 1);
+		CHECK(vallen == testValue.size());
+		CHECK(testValue == val);
+
+		tr2.clear(testKey);
+		fdb::EmptyFuture commitFuture = tr2.commit();
+		err = wait_future(commitFuture);
+		if (err) {
+			fdb::EmptyFuture f = tr2.on_error(err);
+			fdb_check(wait_future(f));
+			continue;
+		}
+
+		tr2.reset();
+		break;
+	}
+
+	while (1) {
+		fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
+		tr.clear("\xff\xff/management/tenant/map/" + tenantName);
+		fdb::EmptyFuture commitFuture = tr.commit();
+		fdb_error_t err = wait_future(commitFuture);
+		if (err) {
+			fdb::EmptyFuture f = tr.on_error(err);
+			fdb_check(wait_future(f));
+			continue;
+		}
+		tr.reset();
+		break;
+	}
+
+	while (1) {
+		fdb::ValueFuture f1 = tr2.get(testKey, false);
+		fdb_error_t err = wait_future(f1);
+		if (err == error_code_tenant_not_found) {
+			tr2.reset();
+			break;
+		}
+		if (err) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+	}
+}
+
+int64_t granule_start_load_fail(const char* filename,
+                                int filenameLength,
+                                int64_t offset,
+                                int64_t length,
+                                int64_t fullFileLength,
+                                void* userContext) {
+	CHECK(false);
+	return -1;
+}
+
+uint8_t* granule_get_load_fail(int64_t loadId, void* userContext) {
+	CHECK(false);
+	return nullptr;
+}
+
+void granule_free_load_fail(int64_t loadId, void* userContext) {
+	CHECK(false);
+}
+
+TEST_CASE("Blob Granule Functions") {
+	auto confValue =
+	    get_value("\xff/conf/blob_granules_enabled", /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
+	if (!confValue.has_value() || confValue.value() != "1") {
+		return;
+	}
+
+	// write some data
+	insert_data(db, create_data({ { "bg1", "a" }, { "bg2", "b" }, { "bg3", "c" } }));
+
+	// because wiring up files is non-trivial, just test the calls complete with the expected no_materialize error
+	FDBReadBlobGranuleContext granuleContext;
+	granuleContext.userContext = nullptr;
+	granuleContext.start_load_f = &granule_start_load_fail;
+	granuleContext.get_load_f = &granule_get_load_fail;
+	granuleContext.free_load_f = &granule_free_load_fail;
+	granuleContext.debugNoMaterialize = true;
+	granuleContext.granuleParallelism = 1;
+
+	// dummy values
+	FDBKeyValue const* out_kv;
+	int out_count;
+	int out_more;
+
+	fdb::Transaction tr(db);
+	int64_t originalReadVersion = -1;
+
+	// test no materialize gets error but completes, save read version
+	while (1) {
+		fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+		// -2 is latest version
+		fdb::KeyValueArrayResult r = tr.read_blob_granules(key("bg"), key("bh"), 0, -2, granuleContext);
+		fdb_error_t err = r.get(&out_kv, &out_count, &out_more);
+		if (err && err != 2037 /* blob_granule_not_materialized */) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		CHECK(err == 2037 /* blob_granule_not_materialized */);
+
+		// If read done, save read version. Should have already used read version so this shouldn't error
+		fdb::Int64Future grvFuture = tr.get_read_version();
+		fdb_error_t grvErr = wait_future(grvFuture);
+		CHECK(!grvErr);
+		CHECK(!grvFuture.get(&originalReadVersion));
+
+		CHECK(originalReadVersion > 0);
+
+		tr.reset();
+		break;
+	}
+
+	// test with begin version > 0
+	while (1) {
+		fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+		// -2 is latest version, read version should be >= originalReadVersion
+		fdb::KeyValueArrayResult r =
+		    tr.read_blob_granules(key("bg"), key("bh"), originalReadVersion, -2, granuleContext);
+		fdb_error_t err = r.get(&out_kv, &out_count, &out_more);
+		;
+		if (err && err != 2037 /* blob_granule_not_materialized */) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		CHECK(err == 2037 /* blob_granule_not_materialized */);
+
+		tr.reset();
+		break;
+	}
+
+	// test with prior read version completes after delay larger than normal MVC window
+	// TODO: should we not do this?
+	std::this_thread::sleep_for(std::chrono::milliseconds(6000));
+	while (1) {
+		fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+		fdb::KeyValueArrayResult r =
+		    tr.read_blob_granules(key("bg"), key("bh"), 0, originalReadVersion, granuleContext);
+		fdb_error_t err = r.get(&out_kv, &out_count, &out_more);
+		if (err && err != 2037 /* blob_granule_not_materialized */) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		CHECK(err == 2037 /* blob_granule_not_materialized */);
+
+		tr.reset();
+		break;
+	}
+
+	// test ranges
+
+	while (1) {
+		fdb::KeyRangeArrayFuture f = tr.get_blob_granule_ranges(key("bg"), key("bh"), 1000);
+		fdb_error_t err = wait_future(f);
+		if (err) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		const FDBKeyRange* out_kr;
+		int out_count;
+		fdb_check(f.get(&out_kr, &out_count));
+
+		CHECK(out_count >= 1);
+		// check key ranges are in order
+		for (int i = 0; i < out_count; i++) {
+			// key range start < end
+			CHECK(std::string((const char*)out_kr[i].begin_key, out_kr[i].begin_key_length) <
+			      std::string((const char*)out_kr[i].end_key, out_kr[i].end_key_length));
+		}
+		// Ranges themselves are sorted
+		for (int i = 0; i < out_count - 1; i++) {
+			CHECK(std::string((const char*)out_kr[i].end_key, out_kr[i].end_key_length) <=
+			      std::string((const char*)out_kr[i + 1].begin_key, out_kr[i + 1].begin_key_length));
+		}
+
+		tr.reset();
+		break;
+	}
+
+	// do a purge + wait at that version to purge everything before originalReadVersion
+
+	fdb::KeyFuture purgeKeyFuture =
+	    fdb::Database::purge_blob_granules(db, key("bg"), key("bh"), originalReadVersion, false);
+
+	fdb_check(wait_future(purgeKeyFuture));
+
+	const uint8_t* purgeKeyData;
+	int purgeKeyLen;
+
+	fdb_check(purgeKeyFuture.get(&purgeKeyData, &purgeKeyLen));
+
+	std::string purgeKey((const char*)purgeKeyData, purgeKeyLen);
+
+	fdb::EmptyFuture waitPurgeFuture = fdb::Database::wait_purge_granules_complete(db, purgeKey);
+	fdb_check(wait_future(waitPurgeFuture));
+
+	// re-read again at the purge version to make sure it is still valid
+
+	while (1) {
+		fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+		fdb::KeyValueArrayResult r =
+		    tr.read_blob_granules(key("bg"), key("bh"), 0, originalReadVersion, granuleContext);
+		fdb_error_t err = r.get(&out_kv, &out_count, &out_more);
+		if (err && err != 2037 /* blob_granule_not_materialized */) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		CHECK(err == 2037 /* blob_granule_not_materialized */);
+
+		tr.reset();
+		break;
+	}
+}
+
 int main(int argc, char** argv) {
 	if (argc < 3) {
 		std::cout << "Unit tests for the FoundationDB C API.\n"
@@ -2259,7 +2926,7 @@ int main(int argc, char** argv) {
 		          << std::endl;
 		return 1;
 	}
-	fdb_check(fdb_select_api_version(710));
+	fdb_check(fdb_select_api_version(720));
 	if (argc >= 4) {
 		std::string externalClientLibrary = argv[3];
 		if (externalClientLibrary.substr(0, 2) != "--") {

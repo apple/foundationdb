@@ -23,7 +23,7 @@
 import re
 import sys
 
-(platform, source, asm, h) = sys.argv[1:]
+(os, cpu, source, asm, h) = sys.argv[1:]
 
 functions = {}
 
@@ -59,20 +59,29 @@ def write_windows_asm(asmfile, functions):
 
 
 def write_unix_asm(asmfile, functions, prefix):
-    if platform != "linux-aarch64":
+    if cpu != "aarch64" and cpu!= "ppc64le":
         asmfile.write(".intel_syntax noprefix\n")
 
-    if platform.startswith('linux') or platform == "freebsd":
+    i = 0
+    if os == 'linux' or os == 'freebsd':
         asmfile.write("\n.data\n")
         for f in functions:
             asmfile.write("\t.extern fdb_api_ptr_%s\n" % f)
 
-        asmfile.write("\n.text\n")
-        for f in functions:
-            asmfile.write("\t.global %s\n\t.type %s, @function\n" % (f, f))
-
+        if os == 'linux' or os == 'freebsd':
+            asmfile.write("\n.text\n")
+            for f in functions:
+                if cpu == "ppc64le":
+                    asmfile.write("\n.LC%d:\n" % (i))
+                    asmfile.write("\t.quad \tfdb_api_ptr_%s\n" % (f))
+                    asmfile.write("\t.align 2\n")
+                    i = i + 1
+                asmfile.write("\t.global %s\n\t.type %s, @function\n" % (f, f))
+    i = 0
     for f in functions:
         asmfile.write("\n.globl %s%s\n" % (prefix, f))
+        if cpu == 'aarch64' and os == 'osx':
+            asmfile.write(".p2align\t2\n")
         asmfile.write("%s%s:\n" % (prefix, f))
 
         # These assembly implementations of versioned fdb c api functions must have the following properties.
@@ -104,11 +113,57 @@ def write_unix_asm(asmfile, functions, prefix):
         # 	.size	g, .-g
         # 	.ident	"GCC: (GNU) 8.3.1 20190311 (Red Hat 8.3.1-3)"
 
-        if platform == "linux-aarch64":
-            asmfile.write("\tadrp x8, :got:fdb_api_ptr_%s\n" % (f))
-            asmfile.write("\tldr x8, [x8, #:got_lo12:fdb_api_ptr_%s]\n" % (f))
+        if cpu == "aarch64":
+            if os == 'osx':
+                asmfile.write("\tadrp x8, _fdb_api_ptr_%s@GOTPAGE\n" % (f))
+                asmfile.write("\tldr x8, [x8, _fdb_api_ptr_%s@GOTPAGEOFF]\n" % (f))
+            elif os == 'linux':
+                asmfile.write("\tadrp x8, :got:fdb_api_ptr_%s\n" % (f))
+                asmfile.write("\tldr x8, [x8, #:got_lo12:fdb_api_ptr_%s]\n" % (f))
+            else:
+                assert False, '{} not supported for Arm yet'.format(os)
             asmfile.write("\tldr x8, [x8]\n")
             asmfile.write("\tbr x8\n")
+        elif cpu == "ppc64le":
+            asmfile.write("\n.LCF%d:\n" % (i))
+            asmfile.write("\taddis 2,12,.TOC.-.LCF%d@ha\n" % (i))
+            asmfile.write("\taddi 2,2,.TOC.-.LCF%d@l\n" % (i))
+            asmfile.write("\tmflr 0\n")
+            asmfile.write("\tstd 31, -8(1)\n")
+            asmfile.write("\tstd     0,16(1)\n")
+            asmfile.write("\tstdu    1,-192(1)\n")
+            #asmfile.write("\tstd 2,24(1)\n")
+            asmfile.write("\taddis 11,2,.LC%d@toc@ha\n" % (i))
+            asmfile.write("\tld 11,.LC%d@toc@l(11)\n" % (i))
+            asmfile.write("\tld 12,0(11)\n")
+            asmfile.write("\tstd 2,24(1)\n")
+            asmfile.write("\tlwa 11,344(1)\n")
+            asmfile.write("\tmtctr 12\n")
+            asmfile.write("\tstd 11,152(1)\n")
+            asmfile.write("\tlwa 11,352(1)\n")
+            asmfile.write("\tstd 11,160(1)\n")
+            asmfile.write("\tlwa 11,336(1)\n")
+            asmfile.write("\tstd 11,144(1)\n")
+            asmfile.write("\tlwa 11,328(1)\n")
+            asmfile.write("\tstd 11,136(1)\n")
+            asmfile.write("\tlwa 11,320(1)\n")
+            asmfile.write("\tstd 11,128(1)\n")
+            asmfile.write("\tlwa 11,312(1)\n")
+            asmfile.write("\tstd 11,120(1)\n")
+            asmfile.write("\tlwa 11,304(1)\n")
+            asmfile.write("\tstd 11,112(1)\n")
+            asmfile.write("\tld 11,296(1)\n")
+            asmfile.write("\tstd 11,104(1)\n")
+            asmfile.write("\tlwa 11,288(1)\n")
+            asmfile.write("\tstd 11,96(1)\n")
+            asmfile.write("\tbctrl\n")
+            asmfile.write("\tld 2,24(1)\n")
+            asmfile.write("\taddi 1,1,192\n")
+            asmfile.write("\tld 0,16(1)\n")
+            asmfile.write("\tld 31, -8(1)\n")
+            asmfile.write("\tmtlr 0\n")
+            asmfile.write("\tblr\n")
+            i = i + 1
         else:
             asmfile.write(
                 "\tmov r11, qword ptr [%sfdb_api_ptr_%s@GOTPCREL+rip]\n" % (prefix, f))
@@ -123,15 +178,15 @@ with open(asm, 'w') as asmfile:
         hfile.write(
             "void fdb_api_ptr_removed() { fprintf(stderr, \"REMOVED FDB API FUNCTION\\n\"); abort(); }\n\n")
 
-        if platform.startswith('linux'):
+        if os == 'linux':
             write_unix_asm(asmfile, functions, '')
-        elif platform == "osx":
+        elif os == "osx":
             write_unix_asm(asmfile, functions, '_')
-        elif platform == "windows":
+        elif os == "windows":
             write_windows_asm(asmfile, functions)
 
         for f in functions:
-            if platform == "windows":
+            if os == "windows":
                 hfile.write("extern \"C\" ")
             hfile.write("void* fdb_api_ptr_%s = (void*)&fdb_api_ptr_unimpl;\n" % f)
             for v in functions[f]:

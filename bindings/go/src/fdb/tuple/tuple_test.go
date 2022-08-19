@@ -121,7 +121,7 @@ func BenchmarkTuplePacking(b *testing.B) {
 }
 
 func TestTupleString(t *testing.T) {
-	testCases :=[ ]struct {
+	testCases := []struct {
 		input    Tuple
 		expected string
 	}{

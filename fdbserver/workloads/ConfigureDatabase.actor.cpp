@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,9 +36,17 @@ static const char* storageMigrationTypes[] = { "perpetual_storage_wiggle=0 stora
 	                                           "perpetual_storage_wiggle=1",
 	                                           "perpetual_storage_wiggle=1 storage_migration_type=gradual",
 	                                           "storage_migration_type=aggressive" };
-static const char* logTypes[] = { "log_engine:=1",  "log_engine:=2",  "log_spill:=1",
-	                              "log_spill:=2",   "log_version:=2", "log_version:=3",
-	                              "log_version:=4", "log_version:=5", "log_version:=6" };
+static const char* logTypes[] = { "log_engine:=1",
+	                              "log_engine:=2",
+	                              "log_spill:=1",
+	                              "log_spill:=2",
+	                              "log_version:=2",
+	                              "log_version:=3",
+	                              "log_version:=4",
+	                              "log_version:=5",
+	                              "log_version:=6",
+	                              // downgrade incompatible log version
+	                              "log_version:=7" };
 static const char* redundancies[] = { "single", "double", "triple" };
 static const char* backupTypes[] = { "backup_worker_enabled:=0", "backup_worker_enabled:=1" };
 
@@ -116,17 +124,17 @@ std::string generateRegions() {
 			int satellite_replication_type = deterministicRandom()->randomInt(0, 3);
 			switch (satellite_replication_type) {
 			case 0: {
-				TEST(true); // Simulated cluster using no satellite redundancy mode
+				CODE_PROBE(true, "Simulated cluster using no satellite redundancy mode");
 				break;
 			}
 			case 1: {
-				TEST(true); // Simulated cluster using two satellite fast redundancy mode
+				CODE_PROBE(true, "Simulated cluster using two satellite fast redundancy mode");
 				primaryObj["satellite_redundancy_mode"] = "two_satellite_fast";
 				remoteObj["satellite_redundancy_mode"] = "two_satellite_fast";
 				break;
 			}
 			case 2: {
-				TEST(true); // Simulated cluster using two satellite safe redundancy mode
+				CODE_PROBE(true, "Simulated cluster using two satellite safe redundancy mode");
 				primaryObj["satellite_redundancy_mode"] = "two_satellite_safe";
 				remoteObj["satellite_redundancy_mode"] = "two_satellite_safe";
 				break;
@@ -139,21 +147,21 @@ std::string generateRegions() {
 			switch (satellite_replication_type) {
 			case 0: {
 				// FIXME: implement
-				TEST(true); // Simulated cluster using custom satellite redundancy mode
+				CODE_PROBE(true, "Simulated cluster using custom satellite redundancy mode");
 				break;
 			}
 			case 1: {
-				TEST(true); // Simulated cluster using no satellite redundancy mode (<5 datacenters)
+				CODE_PROBE(true, "Simulated cluster using no satellite redundancy mode (<5 datacenters)");
 				break;
 			}
 			case 2: {
-				TEST(true); // Simulated cluster using single satellite redundancy mode
+				CODE_PROBE(true, "Simulated cluster using single satellite redundancy mode");
 				primaryObj["satellite_redundancy_mode"] = "one_satellite_single";
 				remoteObj["satellite_redundancy_mode"] = "one_satellite_single";
 				break;
 			}
 			case 3: {
-				TEST(true); // Simulated cluster using double satellite redundancy mode
+				CODE_PROBE(true, "Simulated cluster using double satellite redundancy mode");
 				primaryObj["satellite_redundancy_mode"] = "one_satellite_double";
 				remoteObj["satellite_redundancy_mode"] = "one_satellite_double";
 				break;
@@ -172,20 +180,20 @@ std::string generateRegions() {
 		switch (remote_replication_type) {
 		case 0: {
 			// FIXME: implement
-			TEST(true); // Simulated cluster using custom remote redundancy mode
+			CODE_PROBE(true, "Simulated cluster using custom remote redundancy mode");
 			break;
 		}
 		case 1: {
-			TEST(true); // Simulated cluster using default remote redundancy mode
+			CODE_PROBE(true, "Simulated cluster using default remote redundancy mode");
 			break;
 		}
 		case 2: {
-			TEST(true); // Simulated cluster using single remote redundancy mode
+			CODE_PROBE(true, "Simulated cluster using single remote redundancy mode");
 			result += " remote_single";
 			break;
 		}
 		case 3: {
-			TEST(true); // Simulated cluster using double remote redundancy mode
+			CODE_PROBE(true, "Simulated cluster using double remote redundancy mode");
 			result += " remote_double";
 			break;
 		}
@@ -219,7 +227,10 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	double testDuration;
 	int additionalDBs;
 	bool allowDescriptorChange;
-	bool allowTestStorageMigration;
+	bool allowTestStorageMigration; // allow change storage migration and perpetual wiggle conf
+	bool storageMigrationCompatibleConf; // only allow generating configuration suitable for storage migration test
+	bool waitStoreTypeCheck;
+	bool downgradeTest1; // if this is true, don't pick up downgrade incompatible config
 	std::vector<Future<Void>> clients;
 	PerfIntCounter retries;
 
@@ -229,6 +240,9 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		    getOption(options, LiteralStringRef("allowDescriptorChange"), SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
 		allowTestStorageMigration =
 		    getOption(options, "allowTestStorageMigration"_sr, false) && g_simulator.allowStorageMigrationTypeChange;
+		storageMigrationCompatibleConf = getOption(options, "storageMigrationCompatibleConf"_sr, false);
+		waitStoreTypeCheck = getOption(options, "waitStoreTypeCheck"_sr, false);
+		downgradeTest1 = getOption(options, "downgradeTest1"_sr, false);
 		g_simulator.usableRegions = 1;
 	}
 
@@ -273,7 +287,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		// only storage_migration_type=gradual && perpetual_storage_wiggle=1 need this check because in QuietDatabase
 		// perpetual wiggle will be forced to close For other cases, later ConsistencyCheck will check KV store type
 		// there
-		if (self->allowTestStorageMigration) {
+		if (self->allowTestStorageMigration || self->waitStoreTypeCheck) {
 			loop {
 				// There exists a race where the check can start before the last transaction that singleDB issued
 				// finishes, if singleDB gets actor cancelled from a timeout at the end of a test. This means the
@@ -337,7 +351,11 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			}
 			state int randomChoice;
 			if (self->allowTestStorageMigration) {
-				randomChoice = deterministicRandom()->randomInt(4, 9);
+				randomChoice = (deterministicRandom()->random01() < 0.375) ? deterministicRandom()->randomInt(0, 3)
+				                                                           : deterministicRandom()->randomInt(4, 9);
+			} else if (self->storageMigrationCompatibleConf) {
+				randomChoice = (deterministicRandom()->random01() < 3.0 / 7) ? deterministicRandom()->randomInt(0, 3)
+				                                                             : deterministicRandom()->randomInt(4, 8);
 			} else {
 				randomChoice = deterministicRandom()->randomInt(0, 8);
 			}
@@ -404,8 +422,14 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				    true)));
 			} else if (randomChoice == 6) {
 				// Some configurations will be invalid, and that's fine.
-				wait(success(IssueConfigurationChange(
-				    cx, logTypes[deterministicRandom()->randomInt(0, sizeof(logTypes) / sizeof(logTypes[0]))], false)));
+				int length = sizeof(logTypes) / sizeof(logTypes[0]);
+
+				if (self->downgradeTest1) {
+					length -= 1;
+				}
+
+				wait(success(
+				    IssueConfigurationChange(cx, logTypes[deterministicRandom()->randomInt(0, length)], false)));
 			} else if (randomChoice == 7) {
 				wait(success(IssueConfigurationChange(
 				    cx,
@@ -413,7 +437,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				    false)));
 			} else if (randomChoice == 8) {
 				if (self->allowTestStorageMigration) {
-					TEST(true); // storage migration type change
+					CODE_PROBE(true, "storage migration type change");
 
 					// randomly configuring perpetual_storage_wiggle_locality
 					state std::string randomPerpetualWiggleLocality;

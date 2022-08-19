@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <cinttypes>
 
+#include "fmt/format.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
@@ -37,14 +38,14 @@ THREAD_FUNC networkThread(void* fdb) {
 }
 
 ACTOR Future<Void> _test() {
-	API* fdb = FDB::API::selectAPIVersion(710);
+	API* fdb = FDB::API::selectAPIVersion(720);
 	auto db = fdb->createDatabase();
 	state Reference<Transaction> tr = db->createTransaction();
 
 	// tr->setVersion(1);
 
 	Version ver = wait(tr->getReadVersion());
-	printf("%" PRId64 "\n", ver);
+	fmt::print("{}\n", ver);
 
 	state std::vector<Future<Version>> versions;
 
@@ -81,7 +82,7 @@ ACTOR Future<Void> _test() {
 }
 
 void fdb_flow_test() {
-	API* fdb = FDB::API::selectAPIVersion(710);
+	API* fdb = FDB::API::selectAPIVersion(720);
 	fdb->setupNetwork();
 	startThread(networkThread, fdb);
 

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,45 @@
 const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
+      "storage_wiggler": {
+         "error": "some error description",
+         "wiggle_server_ids":["0ccb4e0feddb55"],
+         "wiggle_server_addresses": ["127.0.0.1"],
+         "primary": {
+            "state": {"$enum":["running", "paused", "unknown"]},
+            "last_state_change_datetime": "2022-04-02 00:05:05.123 +0000",
+            "last_state_change_timestamp": 1648857905.123,
+            "last_round_start_datetime": "2022-04-02 00:05:05.123 +0000",
+            "last_round_start_timestamp": 1648857905.123,
+            "last_round_finish_datetime": "1970-01-01 00:00:00.000 +0000",
+            "last_round_finish_timestamp": 0,
+            "smoothed_round_seconds": 1,
+            "finished_round": 1,
+            "last_wiggle_start_datetime": "2022-04-02 00:05:05.123 +0000",
+            "last_wiggle_start_timestamp": 1648857905.123,
+            "last_wiggle_finish_datetime": "1970-01-01 00:00:00.000 +0000",
+            "last_wiggle_finish_timestamp": 0,
+            "smoothed_wiggle_seconds": 1,
+            "finished_wiggle": 1
+         },
+         "remote": {
+            "state": {"$enum":["running", "paused", "unknown"]},
+            "last_state_change_datetime": "2022-04-02 00:05:05.123 +0000",
+            "last_state_change_timestamp": 1648857905.123,
+            "last_round_start_datetime": "2022-04-02 00:05:05.123 +0000",
+            "last_round_start_timestamp": 1648857905.123,
+            "last_round_finish_datetime": "1970-01-01 00:00:00.000 +0000",
+            "last_round_finish_timestamp": 0,
+            "smoothed_round_seconds": 1,
+            "finished_round": 1,
+            "last_wiggle_start_datetime": "2022-04-02 00:05:05.123 +0000",
+            "last_wiggle_start_timestamp": 1648857905.123,
+            "last_wiggle_finish_datetime": "1970-01-01 00:00:00.000 +0000",
+            "last_wiggle_finish_timestamp": 0,
+            "smoothed_wiggle_seconds": 1,
+            "finished_wiggle": 1
+         }
+      },
       "layers":{
          "_valid":true,
          "_error":"some error description"
@@ -97,10 +136,29 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "ratekeeper",
                         "blob_manager",
                         "blob_worker",
+                        "encrypt_key_proxy",
                         "storage_cache",
                         "router",
                         "coordinator"
                      ]
+                  },
+                  "storage_metadata":{
+                     "created_time_datetime":"1970-01-01 00:00:00.000 +0000",
+                     "created_time_timestamp": 0,
+                     "storage_engine":{
+                     "$enum":[
+                     "ssd",
+                     "ssd-1",
+                     "ssd-2",
+                     "ssd-redwood-1-experimental",
+                     "ssd-rocksdb-v1",
+                     "ssd-sharded-rocksdb",
+                     "memory",
+                     "memory-1",
+                     "memory-2",
+                     "memory-radixtree-beta",
+                     "unknown"
+                     ]}
                   },
                   "data_version":12341234,
                   "durable_version":12341234,
@@ -250,7 +308,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "available_bytes":0,
                "limit_bytes":0,
                "unused_allocated_memory":0,
-               "used_bytes":0
+               "used_bytes":0,
+               "rss_bytes":0
             },
             "messages":[
                {
@@ -368,7 +427,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "log_server_min_free_space",
                   "log_server_min_free_space_ratio",
                   "storage_server_durability_lag",
-                  "storage_server_list_fetch_failed"
+                  "storage_server_list_fetch_failed",
+                  "blob_worker_lag",
+                  "blob_worker_missing"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -389,7 +450,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "log_server_min_free_space",
                   "log_server_min_free_space_ratio",
                   "storage_server_durability_lag",
-                  "storage_server_list_fetch_failed"
+                  "storage_server_list_fetch_failed",
+                  "blob_worker_lag",
+                  "blob_worker_missing"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -493,9 +556,11 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "name":{
                "$enum":[
                   "unreachable_master_worker",
+                  "unreachable_cluster_controller_worker",
                   "unreachable_dataDistributor_worker",
                   "unreachable_ratekeeper_worker",
                   "unreachable_blobManager_worker",
+                  "unreachable_encryptKeyProxy_worker",
                   "unreadable_configuration",
                   "full_replication_timeout",
                   "client_issues",
@@ -514,7 +579,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "duplicate_mutation_streams",
                   "duplicate_mutation_fetch_timeout",
                   "primary_dc_missing",
-                  "fetch_primary_dc_timeout"
+                  "fetch_primary_dc_timeout",
+                  "fetch_storage_wiggler_stats_timeout"
                ]
             },
             "issues":[
@@ -656,12 +722,15 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       },
       "cluster_controller_timestamp":1415650089,
       "protocol_version":"fdb00a400050001",
+      "newest_protocol_version":"fdb00a500040001",
+      "lowest_compatible_protocol_version":"fdb00a500040001",
       "connection_string":"a:a@127.0.0.1:4000",
       "full_replication":true,
       "maintenance_zone":"0ccb4e0fdbdb5583010f6b77d9d10ece",
       "maintenance_seconds_remaining":1.0,
       "data_distribution_disabled_for_ss_failures":true,
       "data_distribution_disabled_for_rebalance":true,
+      "data_distribution_disabled_hex": "1",
       "data_distribution_disabled":true,
       "active_primary_dc":"pv",
       "bounce_impact":{
@@ -729,8 +798,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-experimental",
-             "ssd-rocksdb-experimental",
+             "ssd-redwood-1-experimental",
+             "ssd-rocksdb-v1",
+             "ssd-sharded-rocksdb",
              "memory",
              "memory-1",
              "memory-2",
@@ -742,8 +812,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-experimental",
-             "ssd-rocksdb-experimental",
+             "ssd-redwood-1-experimental",
+             "ssd-rocksdb-v1",
+             "ssd-sharded-rocksdb",
              "memory",
              "memory-1",
              "memory-2",
@@ -771,6 +842,13 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "disabled",
              "aggressive",
              "gradual"
+         ]},
+         "blob_granules_enabled":0,
+         "tenant_mode": {
+             "$enum":[
+             "disabled",
+             "optional_experimental",
+             "required_experimental"
          ]}
       },
       "data":{
@@ -864,6 +942,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "logical_core_utilization":0.4
             }
          }
+      },
+      "tenants":{
+         "num_tenants":0
       }
    },
    "client":{
@@ -1041,19 +1122,3 @@ const KeyRef JSONSchemas::managementApiErrorSchema = LiteralStringRef(R"""(
    "message": "The reason of the error"
 }
 )""");
-
-const KeyRef JSONSchemas::clientLibMetadataSchema = LiteralStringRef(R"""(
-{
-    "platform": "x86_64-linux",
-    "version": "7.1.0",
-    "githash": "e28fef6264d05ab0c9488238022d1ee885a30bea",
-    "type": "debug",
-    "checksum": "fcef53fb4ae86d2c4fff4dc17c7e5d08",
-    "checksumalg": "md5",
-    "apiversion": 710,
-    "protocol": "fdb00b07001001",
-    "filename": "libfdb_c.7.1.0.so",
-    "size" : 19467552,
-    "chunkcount" : 2377,
-    "status": "available"
-})""");

@@ -53,6 +53,13 @@ Arguments
 
 - | ``-t | --threads <threads>``
   | Number of threads per worker process (Default: 1)
+  | With ``--async_xacts <xacts>`` == 0 (Default), each of the ``<threads>`` operates on a transaction object with blocking API calls
+  | Otherwise, all of the ``<threads>`` run an asynchronous job scheduler, serving ``<xacts>`` transactions
+
+- | ``--async_xacts <xacts>``
+  | Number of transactions per worker process to run asynchronously (Default: 0)
+  | ``<xacts>`` > 0 switches the execution mode to non-blocking (See ``-t | --threads``), with the exception of blob granules API
+  | Note: throttling options, e.g. ``--tpsmax``, ``--tpsmin``, ``--tpschange``, ``--tpsinterval``, are ignored in asynchronous mode
 
 - | ``-r | --rows <rows>``
   | Number of rows initially populated (Default: 100000)
@@ -138,6 +145,7 @@ Operation Types
 - ``u`` – Update (= GET followed by SET)
 - ``i`` – Insert (= SET with a new key)
 - ``ir`` – Insert Range (Sequential)
+- ``o`` – Overwrite (Blind write to existing keys)
 - ``c`` – CLEAR
 - ``sc`` – SET & CLEAR
 - ``cr`` – CLEAR RANGE
@@ -148,7 +156,7 @@ Format
 ------
 | One operation type is defined as ``<Type><Count>`` or ``<Type><Count>:<Range>``.
 | When Count is omitted, it's equivalent to setting it to 1.  (e.g. ``g`` is equivalent to ``g1``)
-| Multiple operation types within the same trancaction can be concatenated.  (e.g. ``g9u1`` = 9 GETs and 1 update)
+| Multiple operation types within the same transaction can be concatenated.  (e.g. ``g9u1`` = 9 GETs and 1 update)
 
 Transaction Specification Examples
 ----------------------------------

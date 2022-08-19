@@ -58,7 +58,7 @@ class RangeResult {
 		this.more = more;
 	}
 
-	RangeResult(DirectBufferIterator iterator) {
+	RangeResult(RangeResultDirectBufferIterator iterator) {
 		iterator.readResultsSummary();
 		more = iterator.hasMore();
 

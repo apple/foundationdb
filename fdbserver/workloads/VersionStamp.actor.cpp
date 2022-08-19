@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@ struct VersionStampWorkload : TestWorkload {
 	std::map<Key, std::vector<std::pair<Version, Standalone<StringRef>>>> versionStampKey_commit;
 	int apiVersion;
 	bool soleOwnerOfMetadataVersionKey;
+	bool allowMetadataVersionKey;
 
 	VersionStampWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 60.0);
@@ -74,6 +75,9 @@ struct VersionStampWorkload : TestWorkload {
 			apiVersion = Database::API_VERSION_LATEST;
 		}
 		TraceEvent("VersionStampApiVersion").detail("ApiVersion", apiVersion);
+
+		allowMetadataVersionKey = apiVersion >= 610 || apiVersion == Database::API_VERSION_LATEST;
+
 		cx->apiVersion = apiVersion;
 		if (clientId == 0)
 			return _start(cx, this, 1 / transactionsPerSecond);
@@ -81,7 +85,7 @@ struct VersionStampWorkload : TestWorkload {
 	}
 
 	Key keyForIndex(uint64_t index) {
-		if ((apiVersion >= 610 || apiVersion == Database::API_VERSION_LATEST) && index == 0) {
+		if (allowMetadataVersionKey && index == 0) {
 			return metadataVersionKey;
 		}
 
@@ -151,7 +155,9 @@ struct VersionStampWorkload : TestWorkload {
 
 	ACTOR Future<bool> _check(Database cx, VersionStampWorkload* self) {
 		if (self->validateExtraDB) {
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
+			ASSERT(g_simulator.extraDatabases.size() == 1);
+			auto extraFile =
+			    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
 			cx = Database::createDatabase(extraFile, -1);
 		}
 		state ReadYourWritesTransaction tr(cx);
@@ -191,8 +197,7 @@ struct VersionStampWorkload : TestWorkload {
 				RangeResult result_ = wait(tr.getRange(
 				    KeyRangeRef(self->vsValuePrefix, endOfRange(self->vsValuePrefix)), self->nodeCount + 1));
 				result = result_;
-				if ((self->apiVersion >= 610 || self->apiVersion == Database::API_VERSION_LATEST) &&
-				    self->key_commit.count(metadataVersionKey)) {
+				if (self->allowMetadataVersionKey && self->key_commit.count(metadataVersionKey)) {
 					Optional<Value> mVal = wait(tr.get(metadataVersionKey));
 					if (mVal.present()) {
 						result.push_back_deep(result.arena(), KeyValueRef(metadataVersionKey, mVal.get()));
@@ -202,7 +207,7 @@ struct VersionStampWorkload : TestWorkload {
 				if (self->failIfDataLost) {
 					ASSERT(result.size() == self->key_commit.size());
 				} else {
-					TEST(result.size() > 0); // Not all data should always be lost.
+					CODE_PROBE(result.size() > 0, "Not all data should always be lost.");
 				}
 
 				//TraceEvent("VST_Check0").detail("Size", result.size()).detail("NodeCount", self->nodeCount).detail("KeyCommit", self->key_commit.size()).detail("ReadVersion", readVersion);
@@ -257,7 +262,7 @@ struct VersionStampWorkload : TestWorkload {
 				if (self->failIfDataLost) {
 					ASSERT(result.size() == self->versionStampKey_commit.size());
 				} else {
-					TEST(result.size() > 0); // Not all data should always be lost (2)
+					CODE_PROBE(result.size() > 0, "Not all data should always be lost (2)");
 				}
 
 				//TraceEvent("VST_Check1").detail("Size", result.size()).detail("VsKeyCommitSize", self->versionStampKey_commit.size());
@@ -309,11 +314,14 @@ struct VersionStampWorkload : TestWorkload {
 		state double lastTime = now();
 		state Database extraDB;
 
-		if (g_simulator.extraDB != nullptr) {
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
+		if (!g_simulator.extraDatabases.empty()) {
+			ASSERT(g_simulator.extraDatabases.size() == 1);
+			auto extraFile =
+			    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
 			extraDB = Database::createDatabase(extraFile, -1);
 		}
 
+		state Future<Void> metadataWatch = Void();
 		loop {
 			wait(poisson(&lastTime, delay));
 			bool oldVSFormat = !cx->apiVersionAtLeast(520);
@@ -350,6 +358,7 @@ struct VersionStampWorkload : TestWorkload {
 				state Error err;
 				//TraceEvent("VST_CommitBegin").detail("Key", printable(key)).detail("VsKey", printable(versionStampKey)).detail("Clear", printable(range));
 				state Key testKey;
+				state Future<Void> nextMetadataWatch;
 				try {
 					tr.atomicOp(key, versionStampValue, MutationRef::SetVersionstampedValue);
 					if (key == metadataVersionKey) {
@@ -358,15 +367,24 @@ struct VersionStampWorkload : TestWorkload {
 					}
 					tr.clear(range);
 					tr.atomicOp(versionStampKey, value, MutationRef::SetVersionstampedKey);
+					if (key == metadataVersionKey) {
+						nextMetadataWatch = tr.watch(versionStampKey);
+					}
 					state Future<Standalone<StringRef>> fTrVs = tr.getVersionstamp();
 					wait(tr.commit());
 
 					committedVersion = tr.getCommittedVersion();
 					Standalone<StringRef> committedVersionStamp_ = wait(fTrVs);
 					committedVersionStamp = committedVersionStamp_;
+
+					if (key == metadataVersionKey) {
+						wait(timeoutError(metadataWatch, 30));
+						nextMetadataWatch = metadataWatch;
+					}
+
 				} catch (Error& e) {
 					err = e;
-					if (err.code() == error_code_database_locked && g_simulator.extraDB != nullptr) {
+					if (err.code() == error_code_database_locked && !g_simulator.extraDatabases.empty()) {
 						//TraceEvent("VST_CommitDatabaseLocked");
 						cx_is_primary = !cx_is_primary;
 						tr = ReadYourWritesTransaction(cx_is_primary ? cx : extraDB);

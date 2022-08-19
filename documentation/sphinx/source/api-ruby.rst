@@ -5,6 +5,7 @@
 .. |database-type| replace:: ``Database``
 .. |database-class| replace:: :class:`Database`
 .. |database-auto| replace:: :meth:`Database.transact`
+.. |tenant-type| replace:: FIXME
 .. |transaction-class| replace:: :class:`Transaction`
 .. |get-key-func| replace:: :meth:`Transaction.get_key`
 .. |get-range-func| replace:: :meth:`Transaction.get_range`
@@ -93,7 +94,7 @@ Opening a database
 After requiring the ``FDB`` gem and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     require 'fdb'
-    FDB.api_version 710
+    FDB.api_version 720
     db = FDB.open
 
 .. function:: open( cluster_file=nil ) -> Database

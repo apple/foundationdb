@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@
 #include <boost/range.hpp>
 #include <thread>
 
-#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/SimExternalConnection.h"
 #include "flow/Net2Packet.h"
 #include "flow/Platform.h"
@@ -130,29 +129,46 @@ UID SimExternalConnection::getDebugID() const {
 	return dbgid;
 }
 
-ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpointImpl(std::string host, std::string service) {
-	wait(delayJittered(0.1));
+std::vector<NetworkAddress> SimExternalConnection::resolveTCPEndpointBlocking(const std::string& host,
+                                                                              const std::string& service,
+                                                                              DNSCache* dnsCache) {
 	ip::tcp::resolver resolver(ios);
-	ip::tcp::resolver::query query(host, service);
-	auto iter = resolver.resolve(query);
-	decltype(iter) end;
-	std::vector<NetworkAddress> addrs;
-	while (iter != end) {
-		auto endpoint = iter->endpoint();
-		auto addr = endpoint.address();
-		if (addr.is_v6()) {
-			addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
-		} else {
-			addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+	try {
+		auto iter = resolver.resolve(host, service);
+		decltype(iter) end;
+		std::vector<NetworkAddress> addrs;
+		while (iter != end) {
+			auto endpoint = iter->endpoint();
+			auto addr = endpoint.address();
+			if (addr.is_v6()) {
+				addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+			} else {
+				addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+			}
+			++iter;
 		}
-		++iter;
+		if (addrs.empty()) {
+			throw lookup_failed();
+		}
+		dnsCache->add(host, service, addrs);
+		return addrs;
+	} catch (...) {
+		dnsCache->remove(host, service);
+		throw lookup_failed();
 	}
-	return addrs;
+}
+
+ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpointImpl(std::string host,
+                                                                        std::string service,
+                                                                        DNSCache* dnsCache) {
+	wait(delayJittered(0.1));
+	return SimExternalConnection::resolveTCPEndpointBlocking(host, service, dnsCache);
 }
 
 Future<std::vector<NetworkAddress>> SimExternalConnection::resolveTCPEndpoint(const std::string& host,
-                                                                              const std::string& service) {
-	return resolveTCPEndpointImpl(host, service);
+                                                                              const std::string& service,
+                                                                              DNSCache* dnsCache) {
+	return resolveTCPEndpointImpl(host, service, dnsCache);
 }
 
 Future<Reference<IConnection>> SimExternalConnection::connect(NetworkAddress toAddr) {
@@ -197,7 +213,8 @@ TEST_CASE("fdbrpc/SimExternalClient") {
 		// Wait until server is ready
 		threadSleep(0.01);
 	}
-	state Key data = deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, maxDataLength + 1));
+	state Standalone<StringRef> data =
+	    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, maxDataLength + 1));
 	PacketWriter packetWriter(packetQueue.getWriteBuffer(data.size()), nullptr, Unversioned());
 	packetWriter.serializeBytes(data);
 	wait(externalConn->onWritable());
@@ -209,6 +226,28 @@ TEST_CASE("fdbrpc/SimExternalClient") {
 	StringRef echo(&vec[0], vec.size());
 	ASSERT(echo.toString() == data.toString());
 	serverThread.join();
+	return Void();
+}
+
+TEST_CASE("fdbrpc/MockDNS") {
+	state std::vector<NetworkAddress> networkAddresses;
+	state NetworkAddress address1(IPAddress(0x13131313), 1);
+	networkAddresses.push_back(address1);
+	INetworkConnections::net()->addMockTCPEndpoint("testhost1", "port1", networkAddresses);
+	state std::vector<NetworkAddress> resolvedNetworkAddresses =
+	    wait(INetworkConnections::net()->resolveTCPEndpoint("testhost1", "port1"));
+	ASSERT(resolvedNetworkAddresses.size() == 1);
+	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address1) !=
+	       resolvedNetworkAddresses.end());
+	INetworkConnections::net()->removeMockTCPEndpoint("testhost1", "port1");
+	state NetworkAddress address2(IPAddress(0x14141414), 2);
+	networkAddresses.push_back(address2);
+	INetworkConnections::net()->addMockTCPEndpoint("testhost1", "port1", networkAddresses);
+	wait(store(resolvedNetworkAddresses, INetworkConnections::net()->resolveTCPEndpoint("testhost1", "port1")));
+	ASSERT(resolvedNetworkAddresses.size() == 2);
+	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address2) !=
+	       resolvedNetworkAddresses.end());
+
 	return Void();
 }
 

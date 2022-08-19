@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,11 +22,12 @@
 #include "boost/lexical_cast.hpp"
 
 #include "flow/IRandom.h"
-#include "flow/Tracing.h"
+#include "fdbclient/Tracing.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbrpc/IRateControl.h"
+#include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/StorageMetrics.h"
@@ -36,8 +37,9 @@
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/network.h"
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 //#define SevCCheckInfo SevVerbose
 #define SevCCheckInfo SevInfo
@@ -209,8 +211,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> runCheck(Database cx, ConsistencyCheckWorkload* self) {
-		TEST(self->performQuiescentChecks); // Quiescent consistency check
-		TEST(!self->performQuiescentChecks); // Non-quiescent consistency check
+		CODE_PROBE(self->performQuiescentChecks, "Quiescent consistency check");
+		CODE_PROBE(!self->performQuiescentChecks, "Non-quiescent consistency check");
 
 		if (self->firstClient || self->distributed) {
 			try {
@@ -283,7 +285,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 					// Check that nothing is in the storage server queues
 					try {
-						int64_t maxStorageServerQueueSize = wait(getMaxStorageServerQueueSize(cx, self->dbInfo));
+						int64_t maxStorageServerQueueSize =
+						    wait(getMaxStorageServerQueueSize(cx, self->dbInfo, invalidVersion));
 						if (maxStorageServerQueueSize > 0) {
 							TraceEvent("ConsistencyCheck_ExceedStorageServerQueueLimit", self->id)
 							    .detail("MaxQueueSize", maxStorageServerQueueSize);
@@ -307,7 +310,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					wait(::success(self->checkForExtraDataStores(cx, self)));
 
 					// Check blob workers are operating as expected
-					if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+					if (configuration.blobGranulesEnabled) {
 						bool blobWorkersCorrect = wait(self->checkBlobWorkers(cx, configuration, self));
 						if (!blobWorkersCorrect)
 							self->testFailure("Blob workers incorrect");
@@ -442,7 +445,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				KeyRangeRef range(cacheKey[k].key, (k < cacheKey.size() - 1) ? cacheKey[k + 1].key : allKeys.end);
 				cachedKeysLocationMap.insert(range, cacheServerInterfaces);
 				TraceEvent(SevDebug, "CheckCacheConsistency", self->id)
-				    .detail("CachedRange", range.toString())
+				    .detail("CachedRange", range)
 				    .detail("Index", k);
 			}
 		}
@@ -556,8 +559,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 					wait(waitForAll(keyValueFutures));
 					TraceEvent(SevDebug, "CheckCacheConsistencyComparison", self->id)
-					    .detail("Begin", req.begin.toString())
-					    .detail("End", req.end.toString())
+					    .detail("Begin", req.begin)
+					    .detail("End", req.end)
 					    .detail("SSInterfaces", describe(iter_ss));
 
 					// Read the resulting entries
@@ -724,7 +727,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						ASSERT(begin.getKey() != allKeys.end);
 						lastStartSampleKey = lastSampleKey;
 						TraceEvent(SevDebug, "CacheConsistencyCheckNextBeginKey", self->id)
-						    .detail("Key", begin.toString());
+							.detail("Key", begin);
 					} else
 						break;
 				} catch (Error& e) {
@@ -886,16 +889,19 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state Key begin = kr.begin;
 		state Key end = kr.end;
 		state int limitKeyServers = BUGGIFY ? 1 : 100;
-		state Span span(deterministicRandom()->randomUniqueID(), "WL:ConsistencyCheck"_loc);
+		state Span span(SpanContext(deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64()),
+		                "WL:ConsistencyCheck"_loc);
 
 		while (begin < end) {
-			state Reference<CommitProxyInfo> commitProxyInfo = wait(cx->getCommitProxiesFuture(false));
+			state Reference<CommitProxyInfo> commitProxyInfo =
+			    wait(cx->getCommitProxiesFuture(UseProvisionalProxies::False));
 			keyServerLocationFutures.clear();
 			for (int i = 0; i < commitProxyInfo->size(); i++)
 				keyServerLocationFutures.push_back(
 				    commitProxyInfo->get(i, &CommitProxyInterface::getKeyServersLocations)
 				        .getReplyUnlessFailedFor(
-				            GetKeyServerLocationsRequest(span.context, begin, end, limitKeyServers, false, Arena()),
+				            GetKeyServerLocationsRequest(
+				                span.context, TenantInfo(), begin, end, limitKeyServers, false, latestVersion, Arena()),
 				            2,
 				            0));
 
@@ -1085,11 +1091,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				// If the storage server doesn't reply, then return -1
 				if (!reply.present()) {
 					TraceEvent("ConsistencyCheck_FailedToFetchMetrics", id)
+					    .error(reply.getError())
 					    .detail("Begin", printable(shard.begin))
 					    .detail("End", printable(shard.end))
 					    .detail("StorageServer", storageServers[i].id())
-					    .detail("IsTSS", storageServers[i].isTss() ? "True" : "False")
-					    .error(reply.getError());
+					    .detail("IsTSS", storageServers[i].isTss() ? "True" : "False");
 					estimatedBytes.push_back(-1);
 				}
 
@@ -1137,7 +1143,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		loop {
 			try {
 				StorageMetrics metrics =
-				    wait(tr.getStorageMetrics(KeyRangeRef(allKeys.begin, keyServersPrefix), 100000));
+				    wait(tr.getDatabase()->getStorageMetrics(KeyRangeRef(allKeys.begin, keyServersPrefix), 100000));
 				return metrics.bytes;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -1281,7 +1287,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				for (int i = 0; i < initialSize; i++) {
 					auto tssPair = tssMapping.find(storageServers[i]);
 					if (tssPair != tssMapping.end()) {
-						TEST(true); // TSS checked in consistency check
+						CODE_PROBE(true, "TSS checked in consistency check");
 						storageServers.push_back(tssPair->second.id());
 						storageServerInterfaces.push_back(tssPair->second);
 					}
@@ -1509,6 +1515,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    rangeResult.isError() ? rangeResult.getError() : rangeResult.get().error.get();
 
 								TraceEvent("ConsistencyCheck_StorageServerUnavailable", self->id)
+								    .errorUnsuppressed(e)
 								    .suppressFor(1.0)
 								    .detail("StorageServer", storageServers[j])
 								    .detail("ShardBegin", printable(range.begin))
@@ -1517,8 +1524,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    .detail("UID", storageServerInterfaces[j].id())
 								    .detail("GetKeyValuesToken",
 								            storageServerInterfaces[j].getKeyValues.getEndpoint().token)
-								    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False")
-								    .error(e);
+								    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False");
 
 								// All shards should be available in quiscence
 								if (self->performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
@@ -1613,7 +1619,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					for (int j = 0; j < storageServers.size(); j++)
 						storageServerSizes[storageServers[j]] += shardBytes;
 
-				bool hasValidEstimate = estimatedBytes.size() > 0;
+				// FIXME: Where is this intended to be used?
+				[[maybe_unused]] bool hasValidEstimate = estimatedBytes.size() > 0;
 
 				// If the storage servers' sampled estimate of shard size is different from ours
 				if (self->performQuiescentChecks) {
@@ -1633,8 +1640,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 							break;
 						} else if (estimatedBytes[j] < 0 &&
-						           (g_network->isSimulated() || !storageServerInterfaces[j].isTss())) {
-							self->testFailure("Could not get storage metrics from server");
+						           ((g_network->isSimulated() &&
+						             g_simulator.tssMode <= ISimulator::TSSMode::EnabledNormal) ||
+						            !storageServerInterfaces[j].isTss())) {
+							// Ignore a non-responding TSS outside of simulation, or if tss fault injection is enabled
 							hasValidEstimate = false;
 							break;
 						}
@@ -2011,25 +2020,24 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		int numBlobWorkerProcesses = 0;
 		for (const auto& worker : workers) {
 			NetworkAddress addr = worker.interf.stableAddress();
+			bool inCCDc = worker.interf.locality.dcId() == ccDcId;
 			if (!configuration.isExcludedServer(worker.interf.addresses())) {
 				if (worker.processClass == ProcessClass::BlobWorkerClass) {
 					numBlobWorkerProcesses++;
 
-					// this is a worker with processClass == BWClass, so should have exactly one blob worker
-					if (blobWorkersByAddr[addr] == 0) {
-						TraceEvent("ConsistencyCheck_NoBWsOnBWClass")
+					// this is a worker with processClass == BWClass, so should have exactly one blob worker if it's in
+					// the same DC
+					int desiredBlobWorkersOnAddr = inCCDc ? 1 : 0;
+
+					if (blobWorkersByAddr[addr] != desiredBlobWorkersOnAddr) {
+						TraceEvent("ConsistencyCheck_WrongBWCountOnBWClass")
 						    .detail("Address", addr)
-						    .detail("NumBlobWorkersOnAddr", blobWorkersByAddr[addr]);
+						    .detail("NumBlobWorkersOnAddr", blobWorkersByAddr[addr])
+						    .detail("DesiredBlobWorkersOnAddr", desiredBlobWorkersOnAddr)
+						    .detail("BwDcId", worker.interf.locality.dcId())
+						    .detail("CcDcId", ccDcId);
 						return false;
 					}
-					/* TODO: replace above code with this once blob manager recovery is handled
-					if (blobWorkersByAddr[addr] != 1) {
-					    TraceEvent("ConsistencyCheck_NoBWOrManyBWsOnBWClass")
-					        .detail("Address", addr)
-					        .detail("NumBlobWorkersOnAddr", blobWorkersByAddr[addr]);
-					    return false;
-					}
-					*/
 				} else {
 					// this is a worker with processClass != BWClass, so there should be no BWs on it
 					if (blobWorkersByAddr[addr] > 0) {
@@ -2043,8 +2051,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> checkWorkerList(Database cx, ConsistencyCheckWorkload* self) {
-		if (g_simulator.extraDB)
+		if (!g_simulator.extraDatabases.empty()) {
 			return true;
+		}
 
 		std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		std::set<NetworkAddress> workerAddresses;
@@ -2105,7 +2114,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					return false;
 				}
 
-				state ClusterConnectionString old(currentKey.get().toString());
+				ClusterConnectionString old(currentKey.get().toString());
+				state std::vector<NetworkAddress> oldCoordinators = wait(old.tryResolveHostnames());
 
 				std::vector<ProcessData> workers = wait(::getWorkers(&tr));
 
@@ -2115,7 +2125,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 
 				std::set<Optional<Standalone<StringRef>>> checkDuplicates;
-				for (const auto& addr : old.coordinators()) {
+				for (const auto& addr : oldCoordinators) {
 					auto findResult = addr_locality.find(addr);
 					if (findResult != addr_locality.end()) {
 						if (checkDuplicates.count(findResult->second.zoneId())) {
@@ -2367,7 +2377,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check BlobManager
-		if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES && db.blobManager.present() &&
+		if (config.blobGranulesEnabled && db.blobManager.present() &&
 		    (!nonExcludedWorkerProcessMap.count(db.blobManager.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.blobManager.get().address()].processClass.machineClassFitness(
 		         ProcessClass::BlobManager) > fitnessLowerBound)) {
@@ -2379,6 +2389,21 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			            ? nonExcludedWorkerProcessMap[db.blobManager.get().address()].processClass.machineClassFitness(
 			                  ProcessClass::BlobManager)
 			            : -1);
+			return false;
+		}
+
+		// Check EncryptKeyProxy
+		if (SERVER_KNOBS->ENABLE_ENCRYPTION && db.encryptKeyProxy.present() &&
+		    (!nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address()) ||
+		     nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()].processClass.machineClassFitness(
+		         ProcessClass::EncryptKeyProxy) > fitnessLowerBound)) {
+			TraceEvent("ConsistencyCheck_EncryptKeyProxyNotBest")
+			    .detail("BestEncryptKeyProxyFitness", fitnessLowerBound)
+			    .detail("ExistingEncryptKeyProxyFitness",
+			            nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address())
+			                ? nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()]
+			                      .processClass.machineClassFitness(ProcessClass::EncryptKeyProxy)
+			                : -1);
 			return false;
 		}
 

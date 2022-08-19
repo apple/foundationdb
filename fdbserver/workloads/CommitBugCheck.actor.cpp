@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,7 +49,7 @@ struct CommitBugWorkload : TestWorkload {
 					break;
 				} catch (Error& e) {
 					TraceEvent("CommitBugSetVal1Error").error(e);
-					TEST(e.code() == error_code_commit_unknown_result); // Commit unknown result
+					CODE_PROBE(e.code() == error_code_commit_unknown_result, "Commit unknown result");
 					wait(tr.onError(e));
 				}
 			}
@@ -140,7 +140,7 @@ struct CommitBugWorkload : TestWorkload {
 
 						break;
 					} else {
-						TEST(true); // Commit conflict
+						CODE_PROBE(true, "Commit conflict");
 
 						TraceEvent("CommitBug2Error").error(e).detail("AttemptedNum", i + 1);
 						wait(tr.onError(e));
