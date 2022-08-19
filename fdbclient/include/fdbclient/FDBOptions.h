@@ -113,4 +113,11 @@ public:
 	type::optionInfo.insert(                                                                                           \
 	    var, FDBOptionInfo(name, comment, parameterComment, hasParameter, hidden, persistent, defaultFor, paramType));
 
+void validateOptionValuePresent(Optional<StringRef> value);
+void validateOptionValueNotPresent(Optional<StringRef> value);
+
+int64_t extractIntOption(Optional<StringRef> value,
+                         int64_t minValue = std::numeric_limits<int64_t>::min(),
+                         int64_t maxValue = std::numeric_limits<int64_t>::max());
+
 #endif

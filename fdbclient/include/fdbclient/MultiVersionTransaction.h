@@ -312,7 +312,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                          int end_key_name_length,
 	                                          int64_t beginVersion,
 	                                          int64_t readVersion,
-	                                          FDBReadBlobGranuleContext granule_context);
+	                                          FDBReadBlobGranuleContext granuleContext);
 
 	FDBFuture* (*transactionCommit)(FDBTransaction* tr);
 	fdb_error_t (*transactionGetCommittedVersion)(FDBTransaction* tr, int64_t* outVersion);
@@ -409,7 +409,7 @@ public:
 	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
 	                                           Version beginVersion,
 	                                           Optional<Version> readVersion,
-	                                           ReadBlobGranuleContext granule_context) override;
+	                                           ReadBlobGranuleContext granuleContext) override;
 
 	void addReadConflictRange(const KeyRangeRef& keys) override;
 
@@ -614,7 +614,7 @@ public:
 	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
 	                                           Version beginVersion,
 	                                           Optional<Version> readVersion,
-	                                           ReadBlobGranuleContext granule_context) override;
+	                                           ReadBlobGranuleContext granuleContext) override;
 
 	void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) override;
 	void set(const KeyRef& key, const ValueRef& value) override;
@@ -655,36 +655,17 @@ private:
 		ThreadFuture<Void> onChange;
 	};
 
-	// Timeout related variables for MultiVersionTransaction objects that do not have an underlying ITransaction
+	template <class T, class... Args>
+	typename std::enable_if<!is_thread_future_type<T>, T>::type runOperation(T (ITransaction::*func)(Args...),
+	                                                                         Args&&... args);
 
-	// The time when the MultiVersionTransaction was last created or reset
-	std::atomic<double> startTime;
-
-	// A lock that needs to be held if using timeoutTsav or currentTimeout
-	ThreadSpinLock timeoutLock;
-
-	// A single assignment var (i.e. promise) that gets set with an error when the timeout elapses or the transaction
-	// is reset or destroyed.
-	Reference<ThreadSingleAssignmentVar<Void>> timeoutTsav;
-
-	// A reference to the current actor waiting for the timeout. This actor will set the timeoutTsav promise.
-	ThreadFuture<Void> currentTimeout;
-
-	// Configure a timeout based on the options set for this transaction. This timeout only applies
-	// if we don't have an underlying database object to connect with.
-	void setTimeout(Optional<StringRef> value);
-
-	// Creates a ThreadFuture<T> that will signal an error if the transaction times out.
-	template <class T>
-	ThreadFuture<T> makeTimeout();
-
-	template <class T>
-	ThreadResult<T> abortableTimeoutResult(ThreadFuture<Void> abortSignal);
+	template <class T, class... Args>
+	ThreadFuture<T> runOperation(ThreadFuture<T> (ITransaction::*func)(Args...), Args&&... args);
 
 	TransactionInfo transaction;
 
 	TransactionInfo getTransaction();
-	void updateTransaction();
+	void updateTransaction(Optional<Reference<ITransaction>> replayTransaction = Optional<Reference<ITransaction>>());
 	void setDefaultOptions(UniqueOrderedOptionList<FDBTransactionOptions> options);
 
 	std::vector<std::pair<FDBTransactionOptions::Option, Optional<Standalone<StringRef>>>> persistentOptions;

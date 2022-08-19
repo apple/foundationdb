@@ -122,6 +122,9 @@ public:
 	virtual bool isValid() { return true; }
 
 	virtual Optional<TenantName> getTenant() = 0;
+
+	virtual bool isReplayable() { return false; }
+	virtual void replay(Reference<ITransaction> tr) { ASSERT(false); }
 };
 
 class ITenant {

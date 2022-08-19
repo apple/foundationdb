@@ -22,13 +22,15 @@
 #define FDBCLIENT_MULTIVERSIONASSIGNMENTVARS_H
 #pragma once
 
+#include "fdbclient/fdb_c_options.g.h"
+#include "fdbclient/MultiVersionTransaction.h"
 #include "flow/ThreadHelper.actor.h"
 
 template <class T>
 class AbortableSingleAssignmentVar final : public ThreadSingleAssignmentVar<T>, public ThreadCallback {
 public:
-	AbortableSingleAssignmentVar(ThreadFuture<T> future, ThreadFuture<Void> abortSignal)
-	  : future(future), abortSignal(abortSignal), hasBeenSet(false), callbacksCleared(false) {
+	AbortableSingleAssignmentVar(ThreadFuture<T> future, ThreadFuture<Void> abortSignal, int abortError)
+	  : future(future), abortSignal(abortSignal), abortError(abortError), hasBeenSet(false), callbacksCleared(false) {
 		int userParam;
 
 		ThreadSingleAssignmentVar<T>::addref();
@@ -61,7 +63,7 @@ public:
 			if (future.isReady() && !future.isError()) {
 				ThreadSingleAssignmentVar<T>::send(future.get());
 			} else if (abortSignal.isReady()) {
-				ThreadSingleAssignmentVar<T>::sendError(cluster_version_changed());
+				ThreadSingleAssignmentVar<T>::sendError(Error(abortError));
 			} else {
 				ASSERT(false);
 			}
@@ -92,6 +94,7 @@ public:
 private:
 	ThreadFuture<T> future;
 	ThreadFuture<Void> abortSignal;
+	int abortError;
 
 	ThreadSpinLock lock;
 	bool hasBeenSet;
@@ -118,8 +121,8 @@ private:
 };
 
 template <class T>
-ThreadFuture<T> abortableFuture(ThreadFuture<T> f, ThreadFuture<Void> abortSignal) {
-	return ThreadFuture<T>(new AbortableSingleAssignmentVar<T>(f, abortSignal));
+ThreadFuture<T> abortableFuture(ThreadFuture<T> f, ThreadFuture<Void> abortSignal, int abortError) {
+	return ThreadFuture<T>(new AbortableSingleAssignmentVar<T>(f, abortSignal, abortError));
 }
 
 template <class T>
