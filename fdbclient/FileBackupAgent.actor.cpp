@@ -481,52 +481,11 @@ public:
 	virtual ~IRangeFileWriter() {}
 };
 
-struct SnapshotFileBackupCipherKey {
-	EncryptCipherDomainId encryptDomainId;
-	EncryptCipherBaseKeyId baseCipherId;
-	EncryptCipherRandomSalt salt;
-	StringRef baseCipher;
-
-	static SnapshotFileBackupCipherKey fromBlobCipherKey(Reference<BlobCipherKey> keyRef, Arena& arena) {
-		SnapshotFileBackupCipherKey cipherKey;
-		cipherKey.encryptDomainId = keyRef->getDomainId();
-		cipherKey.baseCipherId = keyRef->getBaseCipherId();
-		cipherKey.salt = keyRef->getSalt();
-		cipherKey.baseCipher = makeString(keyRef->getBaseCipherLen(), arena);
-		memcpy(mutateString(cipherKey.baseCipher), keyRef->rawBaseCipher(), keyRef->getBaseCipherLen());
-
-		return cipherKey;
-	}
-};
-
-struct SnapshotFileBackupCipherKeysCtx {
-	SnapshotFileBackupCipherKey textCipherKey;
-	SnapshotFileBackupCipherKey headerCipherKey;
-	StringRef ivRef;
-};
-
 struct SnapshotFileBackupEncryptionKeys {
 	Reference<BlobCipherKey> textCipherKey;
 	Reference<BlobCipherKey> headerCipherKey;
+	StringRef ivRef;
 };
-
-SnapshotFileBackupEncryptionKeys getEncryptSnapshotBackupCipherKey(
-    const SnapshotFileBackupCipherKeysCtx cipherKeysCtx) {
-	SnapshotFileBackupEncryptionKeys eKeys;
-
-	eKeys.textCipherKey = makeReference<BlobCipherKey>(cipherKeysCtx.textCipherKey.encryptDomainId,
-	                                                   cipherKeysCtx.textCipherKey.baseCipherId,
-	                                                   cipherKeysCtx.textCipherKey.baseCipher.begin(),
-	                                                   cipherKeysCtx.textCipherKey.baseCipher.size(),
-	                                                   cipherKeysCtx.textCipherKey.salt);
-	eKeys.headerCipherKey = makeReference<BlobCipherKey>(cipherKeysCtx.headerCipherKey.encryptDomainId,
-	                                                     cipherKeysCtx.headerCipherKey.baseCipherId,
-	                                                     cipherKeysCtx.headerCipherKey.baseCipher.begin(),
-	                                                     cipherKeysCtx.headerCipherKey.baseCipher.size(),
-	                                                     cipherKeysCtx.headerCipherKey.salt);
-
-	return eKeys;
-}
 
 struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	struct Options {
@@ -544,11 +503,11 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		}
 	};
 
-	EncryptedRangeFileWriter(SnapshotFileBackupCipherKeysCtx cipherKeysCtx,
+	EncryptedRangeFileWriter(SnapshotFileBackupEncryptionKeys cipherKeys,
 	                         Reference<IBackupFile> file = Reference<IBackupFile>(),
 	                         int blockSize = 0,
 	                         Options options = Options(true))
-	  : cipherKeysCtx(cipherKeysCtx), file(file), blockSize(blockSize), blockEnd(0),
+	  : cipherKeys(cipherKeys), file(file), blockSize(blockSize), blockEnd(0),
 	    fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION), options(options) {
 		buffer = makeString(blockSize);
 		wPtr = mutateString(buffer);
@@ -598,21 +557,20 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                         const uint8_t* dataP,
 	                         int64_t dataLen,
 	                         Arena& arena,
-	                         SnapshotFileBackupCipherKeysCtx& cipherKeysCtx) {
-		SnapshotFileBackupEncryptionKeys eKeys = getEncryptSnapshotBackupCipherKey(cipherKeysCtx);
-		ASSERT(eKeys.headerCipherKey.isValid() && eKeys.textCipherKey.isValid());
+	                         SnapshotFileBackupEncryptionKeys& cipherKeys) {
+		ASSERT(cipherKeys.headerCipherKey.isValid() && cipherKeys.textCipherKey.isValid());
 		BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(headerS);
-		validateEncryptionHeader(eKeys, header, cipherKeysCtx.ivRef);
-		DecryptBlobCipherAes256Ctr decryptor(eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin());
+		validateEncryptionHeader(cipherKeys, header, cipherKeys.ivRef);
+		DecryptBlobCipherAes256Ctr decryptor(
+		    cipherKeys.textCipherKey, cipherKeys.headerCipherKey, cipherKeys.ivRef.begin());
 		return decryptor.decrypt(dataP, dataLen, header, arena)->toStringRef();
 	}
 
 	void encrypt() {
-		SnapshotFileBackupEncryptionKeys eKeys = getEncryptSnapshotBackupCipherKey(cipherKeysCtx);
-		ASSERT(eKeys.headerCipherKey.isValid() && eKeys.textCipherKey.isValid());
-		EncryptBlobCipherAes265Ctr encryptor(eKeys.textCipherKey,
-		                                     eKeys.headerCipherKey,
-		                                     cipherKeysCtx.ivRef.begin(),
+		ASSERT(cipherKeys.headerCipherKey.isValid() && cipherKeys.textCipherKey.isValid());
+		EncryptBlobCipherAes265Ctr encryptor(cipherKeys.textCipherKey,
+		                                     cipherKeys.headerCipherKey,
+		                                     cipherKeys.ivRef.begin(),
 		                                     AES_256_IV_LENGTH,
 		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
 		BlobCipherEncryptHeader header;
@@ -756,7 +714,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		return Void();
 	}
 
-	SnapshotFileBackupCipherKeysCtx cipherKeysCtx;
+	SnapshotFileBackupEncryptionKeys cipherKeys;
 	Reference<IBackupFile> file;
 	int blockSize;
 
@@ -893,7 +851,7 @@ private:
 	Key lastValue;
 };
 
-SnapshotFileBackupCipherKeysCtx getCipherKeyCtx(Arena& arena) {
+void getCipherKeys(SnapshotFileBackupEncryptionKeys& eKeys, Arena& arena) {
 	// TODO (Nim): Get the actual keys from EKP here (currently a dummy method)
 	uint8_t buf[AES_256_KEY_LENGTH];
 	for (int i = 0; i < AES_256_KEY_LENGTH; i++) {
@@ -911,12 +869,10 @@ SnapshotFileBackupCipherKeysCtx getCipherKeyCtx(Arena& arena) {
 	Reference<BlobCipherKey> cipherKey =
 	    makeReference<BlobCipherKey>(domainId, baseCipherId, buf, AES_256_KEY_LENGTH, salt);
 
-	SnapshotFileBackupCipherKeysCtx cipherKeysCtx;
-	cipherKeysCtx.headerCipherKey = SnapshotFileBackupCipherKey::fromBlobCipherKey(cipherKey, arena);
-	cipherKeysCtx.textCipherKey = SnapshotFileBackupCipherKey::fromBlobCipherKey(cipherKey, arena);
-	cipherKeysCtx.ivRef = makeString(AES_256_IV_LENGTH, arena);
-	memcpy(mutateString(cipherKeysCtx.ivRef), iv, AES_256_IV_LENGTH);
-	return cipherKeysCtx;
+	eKeys.headerCipherKey = cipherKey;
+	eKeys.textCipherKey = cipherKey;
+	eKeys.ivRef = makeString(AES_256_IV_LENGTH, arena);
+	memcpy(mutateString(eKeys.ivRef), iv, AES_256_IV_LENGTH);
 }
 
 void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* results) {
@@ -976,28 +932,26 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 			// TODO (Nim): Remove once all work is finished, currently codepath should not trigger
 			// Get cipher keys
-			SnapshotFileBackupCipherKeysCtx cipherKeyCtx = getCipherKeyCtx(arena);
+			SnapshotFileBackupEncryptionKeys eKeys;
+			getCipherKeys(eKeys, arena);
 			// decode options struct
 			uint32_t optionsLen = reader.consumeNetworkUInt32();
 			const uint8_t* o = reader.consume(optionsLen);
 			StringRef optionsStringRef = StringRef(o, optionsLen);
 			EncryptedRangeFileWriter::Options options =
 			    ObjectReader::fromStringRef<EncryptedRangeFileWriter::Options>(optionsStringRef, IncludeVersion());
+			ASSERT(options.encryptionEnabled);
 
-			if (options.encryptionEnabled) {
-				// read encryption header
-				const uint8_t* headerP = reader.consume(BlobCipherEncryptHeader::headerSize);
-				StringRef header = StringRef(headerP, BlobCipherEncryptHeader::headerSize);
-				const uint8_t* dataP = headerP + BlobCipherEncryptHeader::headerSize;
-				// calculate the total bytes read up to (and including) the header
-				int64_t bytesRead =
-				    sizeof(int32_t) + sizeof(uint32_t) + optionsLen + BlobCipherEncryptHeader::headerSize;
-				// get the size of the encrypted payload and decrypt it
-				int64_t dataLen = len - bytesRead;
-				StringRef decryptedData =
-				    EncryptedRangeFileWriter::decrypt(header, dataP, dataLen, results.arena(), cipherKeyCtx);
-				reader = StringRefReader(decryptedData, restore_corrupted_data());
-			}
+			// read encryption header
+			const uint8_t* headerP = reader.consume(BlobCipherEncryptHeader::headerSize);
+			StringRef header = StringRef(headerP, BlobCipherEncryptHeader::headerSize);
+			const uint8_t* dataP = headerP + BlobCipherEncryptHeader::headerSize;
+			// calculate the total bytes read up to (and including) the header
+			int64_t bytesRead = sizeof(int32_t) + sizeof(uint32_t) + optionsLen + BlobCipherEncryptHeader::headerSize;
+			// get the size of the encrypted payload and decrypt it
+			int64_t dataLen = len - bytesRead;
+			StringRef decryptedData = EncryptedRangeFileWriter::decrypt(header, dataP, dataLen, results.arena(), eKeys);
+			reader = StringRefReader(decryptedData, restore_corrupted_data());
 			decodeKVPairs(&reader, &results);
 		} else {
 			throw restore_unsupported_file_version();
@@ -1679,9 +1633,11 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				if (encryptionEnabled) {
 					// TODO (Nim): Remove once all work is finished, currently codepath should not trigger
 					previousTenantId.reset();
-					SnapshotFileBackupCipherKeysCtx cipherKeysCtx = getCipherKeyCtx(arena);
-					rangeFile = std::make_unique<EncryptedRangeFileWriter>(cipherKeysCtx, outFile, blockSize);
+					SnapshotFileBackupEncryptionKeys eKeys;
+					getCipherKeys(eKeys, arena);
+					rangeFile = std::make_unique<EncryptedRangeFileWriter>(eKeys, outFile, blockSize);
 				} else {
+					ASSERT(false);
 					rangeFile = std::make_unique<RangeFileWriter>(outFile, blockSize);
 				}
 				wait(rangeFile->writeKey(beginKey));
