@@ -1525,7 +1525,7 @@ enum class ReadType {
 // store options for storage engine read
 // ReadType describes the usage and priority of the read
 // cacheResult determines whether the storage engine cache for this read
-// consistencyCheckStartVersion is the consistency check which began at this version
+// consistencyCheckStartVersion indicates the consistency check which began at this version
 // debugID helps to trace the path of the read
 struct ReadOptions {
 	ReadType type;
