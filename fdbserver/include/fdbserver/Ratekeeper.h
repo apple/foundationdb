@@ -186,8 +186,23 @@ class Ratekeeper {
 	double blobWorkerTime;
 	double unblockedAssignmentTime;
 	std::map<Version, Ratekeeper::VersionInfo> version_transactions;
+	std::map<Version, std::pair<double, Optional<double>>> version_recovery;
 	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
 	Optional<Key> remoteDC;
+
+	double getRecoveryDuration(Version ver) {
+		auto it = version_recovery.lower_bound(ver);
+		double recoveryDuration = 0;
+		while (it != version_recovery.end()) {
+			if (it->second.second.present()) {
+				recoveryDuration += it->second.second.get() - it->second.first;
+			} else {
+				recoveryDuration += now() - it->second.first;
+			}
+			++it;
+		}
+		return recoveryDuration;
+	}
 
 	Ratekeeper(UID id, Database db);
 
