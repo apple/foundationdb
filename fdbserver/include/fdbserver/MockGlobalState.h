@@ -26,6 +26,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "SimulatedCluster.h"
+#include "ShardsAffectedByTeamFailure.h"
 
 class MockStorageServer {
 public:
@@ -49,29 +50,15 @@ public:
 
 class MockGlobalState {
 public:
-	// Index starting from 1. 0 indicates invalid index;
-	typedef uint32_t TeamIndex;
-	typedef uint64_t ServerIndex;
-	struct Team {
-		TeamIndex teamIdx;
-		std::vector<ServerIndex> serverIdx;
-
-		std::vector<UID> getServerIds() const;
-	};
-
-	struct ShardTeamValue {
-		TeamIndex srcIdx;
-		Optional<TeamIndex> destIdx;
-	};
-
-	std::map<Key, ShardTeamValue> keyServers; // a shard belongs to which teams, key is the beginning key of a shard
-	std::map<ServerIndex, MockStorageServer> servers; // all mock servers
-	std::map<TeamIndex, Team> teams;
+	Reference<ShardsAffectedByTeamFailure> shardMapping;
+	std::map<UID, MockStorageServer> allServers;
 	DatabaseConfiguration configuration;
 
 	// user defined parameters for mock workload purpose
 	double emptyProb; // probability of doing an empty read
 	uint32_t minByteSize, maxByteSize; // the size band of a point data operation
+
+	MockGlobalState() : shardMapping(new ShardsAffectedByTeamFailure) {}
 
 	static UID indexToUID(uint64_t a) { return UID(a, a); }
 	void initialAsEmptyDatabaseMGS(const DatabaseConfiguration& conf,

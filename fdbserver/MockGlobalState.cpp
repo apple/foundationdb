@@ -23,21 +23,14 @@
 void MockGlobalState::initialAsEmptyDatabaseMGS(const DatabaseConfiguration& conf, uint64_t defaultDiskSpace) {
 	ASSERT(conf.storageTeamSize > 0);
 	configuration = conf;
-	Team seedTeam;
-	seedTeam.teamIdx = 1;
-	for (int i = 1; i <= conf.storageTeamSize; ++i) {
-		seedTeam.serverIdx.emplace_back(i);
-		servers[i] = MockStorageServer(indexToUID(i), defaultDiskSpace);
+	std::vector<UID> serverIds;
+	for(int i = 1; i <= conf.storageTeamSize; ++ i) {
+		UID id = indexToUID(i);
+		serverIds.push_back(id);
+		allServers[id] = MockStorageServer(id, defaultDiskSpace);
 	}
-	teams[seedTeam.teamIdx] = seedTeam;
-	keyServers[allKeys.begin] = { seedTeam.teamIdx, Optional<TeamIndex>() };
-	keyServers[allKeys.end] = { 0, Optional<TeamIndex>() };
-}
 
-std::vector<UID> MockGlobalState::Team::getServerIds() const {
-	std::vector<UID> res(serverIdx.size());
-	for (int i = 0; i < serverIdx.size(); ++i) {
-		res[i] = indexToUID(serverIdx.at(i));
-	}
-	return res;
+	shardMapping->defineShard(allKeys);
+	shardMapping->moveShard(allKeys, {ShardsAffectedByTeamFailure::Team(serverIds, true)});
+	shardMapping->finishMove(allKeys);
 }
