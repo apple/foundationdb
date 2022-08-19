@@ -1183,11 +1183,6 @@ public:
 			});
 			specialCounter(
 			    cc, "FetchKeysFullFetchWaiting", [self]() { return self->fetchKeysParallelismFullLock.waiters(); });
-			specialCounter(cc, "FetchChangeFeedFetchActive", [self]() {
-				return self->fetchChangeFeedParallelismLock.activePermits();
-			});
-			specialCounter(
-			    cc, "FetchChangeFeedWaiting", [self]() { return self->fetchChangeFeedParallelismLock.waiters(); });
 			specialCounter(cc, "ServeFetchCheckpointActive", [self]() {
 				return self->serveFetchCheckpointParallelismLock.activePermits();
 			});
@@ -1247,7 +1242,6 @@ public:
 	    numWatches(0), noRecentUpdates(false), lastUpdate(now()), updateEagerReads(nullptr),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysParallelismFullLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_FULL),
-	    fetchChangeFeedParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
@@ -5806,10 +5800,6 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
                                       Version beginVersion,
                                       Version endVersion) {
 	wait(delay(0)); // allow this actor to be cancelled by removals
-
-	// bound active change feed fetches
-	wait(data->fetchChangeFeedParallelismLock.take(TaskPriority::DefaultYield));
-	state FlowLock::Releaser holdingFCFPL(data->fetchChangeFeedParallelismLock);
 
 	TraceEvent(SevDebug, "FetchChangeFeed", data->thisServerID)
 	    .detail("RangeID", changeFeedInfo->id)
