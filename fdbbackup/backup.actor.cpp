@@ -139,6 +139,7 @@ enum {
 	OPT_BACKUPKEYS_FILTER,
 	OPT_INCREMENTALONLY,
 	OPT_ENCRYPTION_KEY_FILE,
+	OPT_ENCRYPTION_ENABLED,
 
 	// Backup Modify
 	OPT_MOD_ACTIVE_INTERVAL,
@@ -268,6 +269,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
+	{ OPT_ENCRYPTION_ENABLED, "--enable-encryption", SO_NONE },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -1905,6 +1907,7 @@ ACTOR Future<Void> submitBackup(Database db,
                                 int initialSnapshotIntervalSeconds,
                                 int snapshotIntervalSeconds,
                                 Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                bool encryptionEnabled,
                                 std::string tagName,
                                 bool dryRun,
                                 WaitForComplete waitForCompletion,
@@ -1964,6 +1967,7 @@ ACTOR Future<Void> submitBackup(Database db,
 			                              snapshotIntervalSeconds,
 			                              tagName,
 			                              backupRanges,
+			                              encryptionEnabled,
 			                              stopWhenDone,
 			                              usePartitionedLog,
 			                              incrementalBackupOnly));
@@ -3377,6 +3381,7 @@ int main(int argc, char* argv[]) {
 		bool trace = false;
 		bool quietDisplay = false;
 		bool dryRun = false;
+		bool encryptionEnabled = false;
 		std::string traceDir = "";
 		std::string traceFormat = "";
 		std::string traceLogGroup;
@@ -3649,6 +3654,9 @@ int main(int argc, char* argv[]) {
 				break;
 			case OPT_ENCRYPTION_KEY_FILE:
 				encryptionKeyFile = args->OptionArg();
+				break;
+			case OPT_ENCRYPTION_ENABLED:
+				encryptionEnabled = true;
 				break;
 			case OPT_RESTORECONTAINER:
 				restoreContainer = args->OptionArg();
@@ -3963,6 +3971,7 @@ int main(int argc, char* argv[]) {
 				                           initialSnapshotIntervalSeconds,
 				                           snapshotIntervalSeconds,
 				                           backupKeys,
+				                           encryptionEnabled,
 				                           tagName,
 				                           dryRun,
 				                           waitForDone,

@@ -22,6 +22,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -271,6 +272,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			                               deterministicRandom()->randomInt(0, 100),
 			                               tag.toString(),
 			                               backupRanges,
+			                               SERVER_KNOBS->ENABLE_ENCRYPTION,
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               UsePartitionedLog::False,
 			                               IncrementalBackupOnly::False,
@@ -531,6 +533,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
 					                                       self->backupRanges,
+					                                       SERVER_KNOBS->ENABLE_ENCRYPTION,
 					                                       StopWhenDone::True);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)

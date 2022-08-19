@@ -272,6 +272,7 @@ public:
 	                          int snapshotIntervalSeconds,
 	                          std::string const& tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                          bool encryptionEnabled,
 	                          StopWhenDone = StopWhenDone::True,
 	                          UsePartitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly = IncrementalBackupOnly::False,
@@ -283,6 +284,7 @@ public:
 	                          int snapshotIntervalSeconds,
 	                          std::string const& tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                          bool encryptionEnabled,
 	                          StopWhenDone stopWhenDone = StopWhenDone::True,
 	                          UsePartitionedLog partitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::False,
@@ -295,6 +297,7 @@ public:
 			                    snapshotIntervalSeconds,
 			                    tagName,
 			                    backupRanges,
+			                    encryptionEnabled,
 			                    stopWhenDone,
 			                    partitionedLog,
 			                    incrementalBackupOnly,
@@ -896,6 +899,11 @@ public:
 
 	// Stop differntial logging if already started or don't start after completing KV ranges
 	KeyBackedProperty<bool> stopWhenDone() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+
+	// Enable snapshot backup file encryption
+	KeyBackedProperty<bool> enableSnapshotBackupEncryption() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
 
 	// Latest version for which all prior versions have had their log copy tasks completed
 	KeyBackedProperty<Version> latestLogEndVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }

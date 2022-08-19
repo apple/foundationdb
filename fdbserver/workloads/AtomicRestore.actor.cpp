@@ -20,6 +20,7 @@
 
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -98,6 +99,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 			                              deterministicRandom()->randomInt(0, 100),
 			                              BackupAgentBase::getDefaultTagName(),
 			                              self->backupRanges,
+			                              SERVER_KNOBS->ENABLE_ENCRYPTION,
 			                              StopWhenDone::False,
 			                              self->usePartitionedLogs));
 		} catch (Error& e) {

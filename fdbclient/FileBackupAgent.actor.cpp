@@ -975,7 +975,6 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			decodeKVPairs(&reader, &results);
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 			// TODO (Nim): Remove once all work is finished, currently codepath should not trigger
-			ASSERT(false);
 			// Get cipher keys
 			SnapshotFileBackupCipherKeysCtx cipherKeyCtx = getCipherKeyCtx(arena);
 			// decode options struct
@@ -1421,7 +1420,6 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		static TaskParam<Key> beginKey() { return LiteralStringRef(__FUNCTION__); }
 		static TaskParam<Key> endKey() { return LiteralStringRef(__FUNCTION__); }
 		static TaskParam<bool> addBackupRangeTasks() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<bool> encryptionEnabled() { return LiteralStringRef(__FUNCTION__); }
 	} Params;
 
 	std::string toString(Reference<Task> task) const override {
@@ -1530,7 +1528,6 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 			    Params.beginKey().set(task, begin);
 			    Params.endKey().set(task, end);
 			    Params.addBackupRangeTasks().set(task, false);
-			    Params.encryptionEnabled().set(task, Params.encryptionEnabled().get(parentTask));
 			    if (scheduledVersion != invalidVersion)
 				    ReservedTaskParams::scheduledVersion().set(task, scheduledVersion);
 		    },
@@ -1600,6 +1597,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		state bool done = false;
 		state int64_t nrKeys = 0;
 		state std::optional<int64_t> previousTenantId;
+		state bool encryptionEnabled = false;
 
 		loop {
 			state RangeResultWithVersion values;
@@ -1664,6 +1662,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 						wait(taskBucket->keepRunning(tr, task) &&
 						     storeOrThrow(snapshotBeginVersion, backup.snapshotBeginVersion().get(tr)) &&
+						     storeOrThrow(encryptionEnabled, backup.enableSnapshotBackupEncryption().get(tr)) &&
 						     store(snapshotRangeFileCount, backup.snapshotRangeFileCount().getD(tr)));
 
 						break;
@@ -1677,9 +1676,8 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				outFile = f;
 
 				// Initialize range file writer and write begin key
-				if (Params.encryptionEnabled().get(task)) {
+				if (encryptionEnabled) {
 					// TODO (Nim): Remove once all work is finished, currently codepath should not trigger
-					ASSERT(false);
 					previousTenantId.reset();
 					SnapshotFileBackupCipherKeysCtx cipherKeysCtx = getCipherKeyCtx(arena);
 					rangeFile = std::make_unique<EncryptedRangeFileWriter>(cipherKeysCtx, outFile, blockSize);
@@ -1694,7 +1692,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				state size_t i = 0;
 				for (; i < values.first.size(); ++i) {
 					// TODO (Nim): Support backing up system keys
-					if (Params.encryptionEnabled().get(task)) {
+					if (encryptionEnabled && false) {
 						// get the current tenant prefix (first 8 bytes of key)
 						KeyRef tenantPrefix = KeyRef(values.first[i].key.begin(), 8);
 						state int64_t curTenantId = TenantMapEntry::prefixToId(tenantPrefix);
@@ -1802,7 +1800,6 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		static TaskParam<bool> snapshotFinished() { return LiteralStringRef(__FUNCTION__); }
 		// Set by Execute, used by Finish
 		static TaskParam<Version> nextDispatchVersion() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<bool> encryptionEnabled() { return LiteralStringRef(__FUNCTION__); }
 	} Params;
 
 	StringRef getName() const override { return name; };
@@ -1811,8 +1808,6 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 	                     Reference<TaskBucket> tb,
 	                     Reference<FutureBucket> fb,
 	                     Reference<Task> task) override {
-		// TODO (Nim): Set proper value for this
-		Params.encryptionEnabled().set(task, false);
 		return _execute(cx, tb, fb, task);
 	};
 	Future<Void> finish(Reference<ReadYourWritesTransaction> tr,
@@ -4917,6 +4912,7 @@ public:
 	                                       int snapshotIntervalSeconds,
 	                                       std::string tagName,
 	                                       Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                                       bool encryptionEnabled,
 	                                       StopWhenDone stopWhenDone,
 	                                       UsePartitionedLog partitionedLog,
 	                                       IncrementalBackupOnly incrementalBackupOnly,
@@ -5035,6 +5031,7 @@ public:
 		config.snapshotIntervalSeconds().set(tr, snapshotIntervalSeconds);
 		config.partitionedLogEnabled().set(tr, partitionedLog);
 		config.incrementalBackupOnly().set(tr, incrementalBackupOnly);
+		config.enableSnapshotBackupEncryption().set(tr, encryptionEnabled);
 
 		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(
 		    tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
@@ -6056,6 +6053,7 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
                                            int snapshotIntervalSeconds,
                                            std::string const& tagName,
                                            Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                           bool encryptionEnabled,
                                            StopWhenDone stopWhenDone,
                                            UsePartitionedLog partitionedLog,
                                            IncrementalBackupOnly incrementalBackupOnly,
@@ -6068,6 +6066,7 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
 	                                         snapshotIntervalSeconds,
 	                                         tagName,
 	                                         backupRanges,
+	                                         encryptionEnabled,
 	                                         stopWhenDone,
 	                                         partitionedLog,
 	                                         incrementalBackupOnly,

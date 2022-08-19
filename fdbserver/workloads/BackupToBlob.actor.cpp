@@ -21,6 +21,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/BlobStoreWorkload.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -66,7 +67,8 @@ struct BackupToBlobWorkload : TestWorkload {
 		                              self->initSnapshotInterval,
 		                              self->snapshotInterval,
 		                              self->backupTag.toString(),
-		                              backupRanges));
+		                              backupRanges,
+		                              SERVER_KNOBS->ENABLE_ENCRYPTION));
 		EBackupState backupStatus = wait(backupAgent.waitBackup(cx, self->backupTag.toString(), StopWhenDone::True));
 		TraceEvent("BackupToBlob_BackupStatus").detail("Status", BackupAgentBase::getStateText(backupStatus));
 		return Void();
