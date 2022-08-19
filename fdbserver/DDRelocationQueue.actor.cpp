@@ -90,7 +90,9 @@ std::pair<const DmReasonPriorityMapping*, const PriorityDmReasonMapping*> buildP
 		{ DataMovementReason::TEAM_1_LEFT, SERVER_KNOBS->PRIORITY_TEAM_1_LEFT },
 		{ DataMovementReason::TEAM_FAILED, SERVER_KNOBS->PRIORITY_TEAM_FAILED },
 		{ DataMovementReason::TEAM_0_LEFT, SERVER_KNOBS->PRIORITY_TEAM_0_LEFT },
-		{ DataMovementReason::SPLIT_SHARD, SERVER_KNOBS->PRIORITY_SPLIT_SHARD }
+		{ DataMovementReason::SPLIT_SHARD, SERVER_KNOBS->PRIORITY_SPLIT_SHARD },
+		{ DataMovementReason::ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,
+		  SERVER_KNOBS->PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD }
 	};
 
 	static PriorityDmReasonMapping priorityReason;
@@ -630,6 +632,7 @@ struct DDQueue : public IDDRelocationQueue {
 
 	std::vector<TeamCollectionInterface> teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
+	Reference<PhysicalShardCollection> physicalShardCollection;
 	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 
 	FlowLock startMoveKeysParallelismLock;
@@ -728,6 +731,7 @@ struct DDQueue : public IDDRelocationQueue {
 	        Database cx,
 	        std::vector<TeamCollectionInterface> teamCollections,
 	        Reference<ShardsAffectedByTeamFailure> sABTF,
+	        Reference<PhysicalShardCollection> physicalShardCollection,
 	        PromiseStream<Promise<int64_t>> getAverageShardBytes,
 	        int teamSize,
 	        int singleRegionTeamSize,
@@ -737,7 +741,7 @@ struct DDQueue : public IDDRelocationQueue {
 	        PromiseStream<GetTopKMetricsRequest> getTopKMetrics)
 	  : IDDRelocationQueue(), distributorId(mid), lock(lock), cx(cx), txnProcessor(new DDTxnProcessor(cx)),
 	    teamCollections(teamCollections), shardsAffectedByTeamFailure(sABTF),
-	    getAverageShardBytes(getAverageShardBytes),
+	    physicalShardCollection(physicalShardCollection), getAverageShardBytes(getAverageShardBytes),
 	    startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    cleanUpDataMoveParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
@@ -1226,7 +1230,11 @@ struct DDQueue : public IDDRelocationQueue {
 					// TODO(psm): The shard id is determined by DD.
 					rrs.dataMove.reset();
 					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-						rrs.dataMoveId = deterministicRandom()->randomUniqueID();
+						if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+							rrs.dataMoveId = UID();
+						} else {
+							rrs.dataMoveId = deterministicRandom()->randomUniqueID();
+						}
 					} else {
 						rrs.dataMoveId = anonymousShardId;
 					}
@@ -1379,6 +1387,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 	state std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> bestTeams;
 	state double startTime = now();
 	state std::vector<UID> destIds;
+	state uint64_t debugID = deterministicRandom()->randomUInt64();
 
 	try {
 		if (now() - self->lastInterval < 1.0) {
@@ -1417,11 +1426,19 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					    .detail("Range", kr);
 				}
 			}
-			self->dataMoves.insert(rd.keys, DDQueue::DDDataMove(rd.dataMoveId));
+			if (rd.isRestore() || !SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+				if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+					ASSERT(rd.dataMoveId.isValid());
+				}
+				self->dataMoves.insert(rd.keys, DDQueue::DDDataMove(rd.dataMoveId));
+			}
 		}
 
 		state StorageMetrics metrics =
 		    wait(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(rd.keys))));
+
+		state uint64_t physicalShardIDCandidate = UID().first();
+		state bool forceToUseNewPhysicalShard = false;
 
 		ASSERT(rd.src.size());
 		loop {
@@ -1483,6 +1500,20 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						req.src = rd.src;
 						req.completeSources = rd.completeSources;
 
+						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD &&
+						    tciIndex == 1) {
+							ASSERT(physicalShardIDCandidate != UID().first() &&
+							       physicalShardIDCandidate != anonymousShardId.first());
+							Optional<ShardsAffectedByTeamFailure::Team> remoteTeamWithPhysicalShard =
+							    self->physicalShardCollection->tryGetAvailableRemoteTeamWith(
+							        physicalShardIDCandidate, metrics, debugID);
+							if (remoteTeamWithPhysicalShard.present()) {
+								// Exists a remoteTeam in the mapping that has the physicalShardIDCandidate
+								// use the remoteTeam with the physicalShard as the bestTeam
+								req = GetTeamRequest(remoteTeamWithPhysicalShard.get().servers);
+							}
+						}
+
 						// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
 						// server that hosts the relocateData. This is possible, for example, in a fearless
 						// configuration when the remote DC is just brought up.
@@ -1514,10 +1545,62 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							anyWithSource = true;
 						}
 
-						bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
+						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+							// critical to the correctness of team selection by PhysicalShardCollection
+							// tryGetAvailableRemoteTeamWith() enforce to select a remote team paired with a primary
+							// team Thus, tryGetAvailableRemoteTeamWith() may select an almost full remote team In this
+							// case, we must re-select a remote team We set foundTeams = false to avoid finishing team
+							// selection Then, forceToUseNewPhysicalShard is set, which enforce to use getTeam to select
+							// a remote team
+							if (tciIndex == 1 && !forceToUseNewPhysicalShard) {
+								bool minAvailableSpaceRatio = bestTeam.first.get()->getMinAvailableSpaceRatio(true);
+								if (minAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
+									foundTeams = false;
+									break;
+								}
+							}
+						}
+
+						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+							bestTeams.emplace_back(bestTeam.first.get(), true);
+							// Always set bestTeams[i].second = true to disable optimization in data move between DCs
+							// for the correctness of PhysicalShardCollection
+							// Currently, enabling the optimization will break the invariant of PhysicalShardCollection
+							// Invariant: once a physical shard is created with a specific set of SSes, this SS set will
+							// never get changed.
+						} else {
+							bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
+						}
+
+						// get physicalShardIDCandidate
+						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD &&
+						    tciIndex == 0) {
+							ASSERT(foundTeams);
+							ShardsAffectedByTeamFailure::Team primaryTeam =
+							    ShardsAffectedByTeamFailure::Team(bestTeams[0].first->getServerIDs(), true);
+							physicalShardIDCandidate =
+							    self->physicalShardCollection->determinePhysicalShardIDGivenPrimaryTeam(
+							        primaryTeam, metrics, forceToUseNewPhysicalShard, debugID);
+							ASSERT(physicalShardIDCandidate != UID().first() &&
+							       physicalShardIDCandidate != anonymousShardId.first());
+						}
 					}
 					tciIndex++;
 				}
+
+				// critical to the correctness of team selection by PhysicalShardCollection
+				// tryGetAvailableRemoteTeamWith() enforce to select a remote team paired with a primary team
+				// Thus, tryGetAvailableRemoteTeamWith() may select an unhealthy remote team
+				// In this case, we must re-select a remote team
+				// We set foundTeams = false to avoid finishing team selection
+				// Then, forceToUseNewPhysicalShard is set, which enforce to use getTeam to select a remote team
+				if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD &&
+				    bestTeams.size() > 1 && !forceToUseNewPhysicalShard) {
+					if (!bestTeams[1].first->isHealthy()) {
+						foundTeams = false;
+					}
+				}
+
 				// once we've found healthy candidate teams, make sure they're not overloaded with outstanding moves
 				// already
 				anyDestOverloaded = !canLaunchDest(bestTeams, rd.priority, self->destBusymap);
@@ -1538,6 +1621,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					    .detail("AnyDestOverloaded", anyDestOverloaded)
 					    .detail("NumOfTeamCollections", self->teamCollections.size())
 					    .detail("Servers", destServersString(bestTeams));
+					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+						if (rd.isRestore() && destOverloadedCount > 50) {
+							throw data_move_dest_team_not_found();
+						}
+					}
 					wait(delay(SERVER_KNOBS->DEST_OVERLOADED_DELAY, TaskPriority::DataDistributionLaunch));
 				} else {
 					CODE_PROBE(true, "did not find a healthy destination team on the first attempt");
@@ -1554,8 +1642,40 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 					wait(delay(SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskPriority::DataDistributionLaunch));
 				}
+				// When forceToUseNewPhysicalShard = false, we get paired primary team and remote team
+				// However, this may be failed
+				// Any retry triggers to use new physicalShard which enters the normal routine
+				if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+					forceToUseNewPhysicalShard = true;
+				}
 
 				// TODO different trace event + knob for overloaded? Could wait on an async var for done moves
+			}
+
+			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+				if (!rd.isRestore()) {
+					// when !rd.isRestore(), dataMoveId is just decided as physicalShardIDCandidate
+					// thus, update the physicalShardIDCandidate to related data structures
+					ASSERT(physicalShardIDCandidate != UID().first());
+					rd.dataMoveId = newShardId(physicalShardIDCandidate, AssignEmptyRange::False);
+					auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
+					inFlightRange.value().dataMoveId = rd.dataMoveId;
+					auto f = self->dataMoves.intersectingRanges(rd.keys);
+					for (auto it = f.begin(); it != f.end(); ++it) {
+						KeyRangeRef kr(it->range().begin, it->range().end);
+						const UID mId = it->value().id;
+						if (mId.isValid() && mId != rd.dataMoveId) {
+							TraceEvent("DDRelocatorConflictingDataMoveAfterGetTeam", distributorId)
+							    .detail("CurrentDataMoveID", rd.dataMoveId)
+							    .detail("DataMoveID", mId)
+							    .detail("Range", kr);
+						}
+					}
+					self->dataMoves.insert(rd.keys, DDQueue::DDDataMove(rd.dataMoveId));
+				}
+				ASSERT(rd.dataMoveId.first() != UID().first());
+				auto dataMoveRange = self->dataMoves.rangeContaining(rd.keys.begin);
+				ASSERT(dataMoveRange.value().id == rd.dataMoveId);
 			}
 
 			// set cancellable to false on inFlight's entry for this key range
@@ -1776,6 +1896,20 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					self->bytesWritten += metrics.bytes;
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
+
+					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+						// update physical shard collection
+						std::vector<ShardsAffectedByTeamFailure::Team> selectedTeams;
+						for (int i = 0; i < bestTeams.size(); i++) {
+							auto serverIds = bestTeams[i].first->getServerIDs();
+							selectedTeams.push_back(ShardsAffectedByTeamFailure::Team(serverIds, i == 0));
+						}
+						// The update of PhysicalShardToTeams, PhysicalShardInstances, keyRangePhysicalShardIDMap should
+						// be atomic
+						self->physicalShardCollection->updatePhysicalShardCollection(
+						    rd.keys, rd.isRestore(), selectedTeams, rd.dataMoveId.first(), metrics, debugID);
+					}
+
 					return Void();
 				} else {
 					throw error;
@@ -2337,6 +2471,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          Reference<AsyncVar<bool>> processingWiggle,
                                          std::vector<TeamCollectionInterface> teamCollections,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+                                         Reference<PhysicalShardCollection> physicalShardCollection,
                                          MoveKeysLock lock,
                                          PromiseStream<Promise<int64_t>> getAverageShardBytes,
                                          FutureStream<Promise<int>> getUnhealthyRelocationCount,
@@ -2349,6 +2484,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 	                   cx,
 	                   teamCollections,
 	                   shardsAffectedByTeamFailure,
+	                   physicalShardCollection,
 	                   getAverageShardBytes,
 	                   teamSize,
 	                   singleRegionTeamSize,
