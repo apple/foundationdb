@@ -73,6 +73,7 @@ namespace {
 struct PhysicalShard;
 struct DataShard;
 struct ReadIterator;
+struct ShardedRocksDBKeyValueStore;
 
 using rocksdb::BackgroundErrorReason;
 
@@ -492,6 +493,7 @@ struct PhysicalShard {
 	std::shared_ptr<ReadIteratorPool> readIterPool;
 	bool deletePending = false;
 	std::atomic<bool> isInitialized;
+	double deleteTimeSec;
 };
 
 int readRangeInDb(PhysicalShard* shard, const KeyRangeRef& range, int rowLimit, int byteLimit, RangeResult* result) {
@@ -816,6 +818,8 @@ public:
 				if (existingShard->dataShards.size() == 0) {
 					TraceEvent(SevDebug, "ShardedRocksDB").detail("EmptyShardId", existingShard->id);
 					shardIds.push_back(existingShard->id);
+					existingShard->deleteTimeSec = now();
+					pendingDeletionShards.push_back(existingShard->id);
 					activePhysicalShardIds.erase(existingShard->id);
 				}
 				continue;
@@ -856,13 +860,25 @@ public:
 		return shardIds;
 	}
 
-	std::vector<std::shared_ptr<PhysicalShard>> cleanUpShards(const std::vector<std::string>& shardIds) {
+	std::vector<std::shared_ptr<PhysicalShard>> getPendingDeletionShards() {
 		std::vector<std::shared_ptr<PhysicalShard>> emptyShards;
-		for (const auto& id : shardIds) {
+		double currentTime = now();
+		double cleanUpDelay = SERVER_KNOBS->ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY;
+		if (g_network->isSimulated()) {
+			cleanUpDelay = 120.0;
+		}
+		while (!pendingDeletionShards.empty()) {
+			const auto& id = pendingDeletionShards.front();
 			auto it = physicalShards.find(id);
-			if (it != physicalShards.end() && it->second->dataShards.size() == 0) {
+			if (it == physicalShards.end() || it->second->dataShards.size() != 0) {
+				pendingDeletionShards.pop_front();
+				continue;
+			}
+			if (currentTime - it->second->deleteTimeSec > cleanUpDelay) {
 				emptyShards.push_back(it->second);
-				physicalShards.erase(it);
+				physicalShards.erase(id);
+			} else {
+				break;
 			}
 		}
 		return emptyShards;
@@ -1057,6 +1073,7 @@ private:
 	std::unique_ptr<std::set<PhysicalShard*>> dirtyShards;
 	KeyRangeMap<DataShard*> dataShardMap;
 	std::shared_ptr<PhysicalShard> metadataShard = nullptr;
+	std::deque<std::string> pendingDeletionShards;
 };
 
 class RocksDBMetrics {
@@ -1885,9 +1902,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			if (g_network->isSimulated()) {
 				// In simulation, increasing the read operation timeouts to 5 minutes, as some of the tests have
 				// very high load and single read thread cannot process all the load within the timeouts.
-				readValueTimeout = 5 * 60;
-				readValuePrefixTimeout = 5 * 60;
-				readRangeTimeout = 5 * 60;
+				readValueTimeout = 60 * 5;
+				readValuePrefixTimeout = 60 * 5;
+				readRangeTimeout = 60 * 5;
 			} else {
 				readValueTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_TIMEOUT;
 				readValuePrefixTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
@@ -2202,6 +2219,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		// The metrics future retains a reference to the DB, so stop it before we delete it.
 		self->metrics.reset();
 		self->refreshHolder.cancel();
+		self->cleanUpJob.cancel();
 
 		wait(self->readThreads->stop());
 		auto a = new Writer::CloseAction(&self->shardManager, deleteOnClose);
@@ -2237,6 +2255,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			this->metrics = ShardManager::shardMetricsLogger(this->rState, openFuture, &shardManager) &&
 			                rocksDBAggregatedMetricsLogger(this->rState, openFuture, rocksDBMetrics, &shardManager);
 			this->refreshHolder = refreshReadIteratorPools(this->rState, openFuture, shardManager.getAllShards());
+			this->cleanUpJob = emptyShardCleaner(this->rState, openFuture, &shardManager, writeThread);
 			writeThread->post(a.release());
 			return openFuture;
 		}
@@ -2399,6 +2418,36 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
+	ACTOR static Future<Void> emptyShardCleaner(std::shared_ptr<ShardedRocksDBState> rState,
+	                                            Future<Void> openFuture,
+	                                            ShardManager* shardManager,
+	                                            Reference<IThreadPool> writeThread) {
+		state double cleanUpPeriod = SERVER_KNOBS->ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY * 2;
+		if (g_network->isSimulated()) {
+			// We have longer read timeout in simulation. Set clean up delay accordingly.
+			cleanUpPeriod = 240;
+		}
+		try {
+			wait(openFuture);
+			loop {
+				wait(delay(cleanUpPeriod));
+				if (rState->closing) {
+					break;
+				}
+				auto shards = shardManager->getPendingDeletionShards();
+				auto a = new Writer::RemoveShardAction(shards);
+				Future<Void> f = a->done.getFuture();
+				writeThread->post(a);
+				wait(f);
+			}
+		} catch (Error& e) {
+			if (e.code() != error_code_actor_cancelled) {
+				TraceEvent(SevError, "DeleteEmptyShardsError").errorUnsuppressed(e);
+			}
+		}
+		return Void();
+	}
+
 	StorageBytes getStorageBytes() const override {
 		uint64_t live = 0;
 		ASSERT(shardManager.getDb()->GetAggregatedIntProperty(rocksdb::DB::Properties::kLiveSstFilesSize, &live));
@@ -2416,11 +2465,11 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Future<Void> cleanUpShardsIfNeeded(const std::vector<std::string>& shardIds) override {
-		auto shards = shardManager.cleanUpShards(shardIds);
+		/*auto shards = shardManager.cleanUpShards(shardIds);
 		auto a = new Writer::RemoveShardAction(shards);
 		Future<Void> res = a->done.getFuture();
-		writeThread->post(a);
-		return res;
+		writeThread->post(a);*/
+		return Void();
 	}
 
 	// Used for debugging shard mapping issue.
@@ -2445,6 +2494,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	int numFetchWaiters;
 	Counters counters;
 	Future<Void> refreshHolder;
+	Future<Void> cleanUpJob;
 };
 
 } // namespace
