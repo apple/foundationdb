@@ -3457,6 +3457,16 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 						           req.readVersion);
 					}
 				}
+				// if feed was popped by another worker and BW only got empty versions, it wouldn't itself see that it
+				// got popped, but we can still reject the in theory this should never happen with other protections but
+				// it's a useful and inexpensive sanity check
+				Version emptyVersion = metadata->activeCFData.get()->popVersion - 1;
+				if (req.readVersion > metadata->durableDeltaVersion.get() &&
+				    emptyVersion > metadata->bufferedDeltaVersion) {
+					CODE_PROBE(true, "feed popped for read but granule updater didn't notice yet");
+					// FIXME: could try to cancel the actor here somehow, but it should find out eventually
+					throw wrong_shard_server();
+				}
 				rangeGranulePair.push_back(std::pair(metadata->keyRange, metadata->files));
 			}
 
