@@ -175,7 +175,8 @@ private:
 				    }
 			    }
 			    schedule(cont);
-		    });
+		    },
+		    false);
 	}
 
 	void randomGetRangesOp(TTaskFct cont) {
@@ -205,11 +206,25 @@ private:
 
 			    for (int i = 0; i < results->size(); i++) {
 				    // no empty or inverted ranges
+				    if ((*results)[i].beginKey >= (*results)[i].endKey) {
+					    error(fmt::format("Empty/inverted range [{0} - {1}) for getBlobGranuleRanges({2} - {3})",
+					                      fdb::toCharsRef((*results)[i].beginKey),
+					                      fdb::toCharsRef((*results)[i].endKey),
+					                      fdb::toCharsRef(begin),
+					                      fdb::toCharsRef(end)));
+				    }
 				    ASSERT((*results)[i].beginKey < (*results)[i].endKey);
 			    }
 
 			    for (int i = 1; i < results->size(); i++) {
 				    // ranges contain entire requested key range
+				    if ((*results)[i].beginKey != (*results)[i].endKey) {
+					    error(fmt::format("Non-contiguous range [{0} - {1}) for getBlobGranuleRanges({2} - {3})",
+					                      fdb::toCharsRef((*results)[i].beginKey),
+					                      fdb::toCharsRef((*results)[i].endKey),
+					                      fdb::toCharsRef(begin),
+					                      fdb::toCharsRef(end)));
+				    }
 				    ASSERT((*results)[i].beginKey == (*results)[i - 1].endKey);
 			    }
 

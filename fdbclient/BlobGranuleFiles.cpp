@@ -1620,12 +1620,11 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 
 	bool fileError = false;
 
-	// Kick off first file reads if parallelism > 1
-	for (int i = 0; i < parallelism - 1 && i < files.size(); i++) {
-		startLoad(granuleContext, files[i], loadIds[i]);
-	}
-
 	try {
+		// Kick off first file reads if parallelism > 1
+		for (int i = 0; i < parallelism - 1 && i < files.size(); i++) {
+			startLoad(granuleContext, files[i], loadIds[i]);
+		}
 		RangeResult results;
 		for (int chunkIdx = 0; chunkIdx < files.size(); chunkIdx++) {
 			// Kick off files for this granule if parallelism == 1, or future granule if parallelism > 1
@@ -1659,8 +1658,8 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 
 			// materialize rows from chunk
 			if (!fileError) {
-				chunkRows =
-					materializeBlobGranule(files[chunkIdx], keyRange, beginVersion, readVersion, snapshotData, deltaData);
+				chunkRows = materializeBlobGranule(
+				    files[chunkIdx], keyRange, beginVersion, readVersion, snapshotData, deltaData);
 
 				results.arena().dependsOn(chunkRows.arena());
 				results.append(results.arena(), chunkRows.begin(), chunkRows.size());

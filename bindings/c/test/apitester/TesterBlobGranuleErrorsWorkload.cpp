@@ -98,7 +98,11 @@ private:
 	               int64_t readVersion,
 	               fdb::native::fdb_error_t expectedError) {
 		fdb::Key begin = randomKeyName();
-		fdb::Key end = randomKeyName();
+		fdb::Key end = begin;
+		// [K - K) empty range will succeed read because there is trivially nothing to do, so don't do it
+		while (end == begin) {
+			end = randomKeyName();
+		}
 		if (begin > end) {
 			std::swap(begin, end);
 		}
@@ -123,15 +127,19 @@ private:
 			    auto out = fdb::Result::KeyValueRefArray{};
 			    fdb::Error err = res.getKeyValueArrayNothrow(out);
 
+			    if (err.code() == error_code_success) {
+				    error(fmt::format("Operation succeeded in error test!"));
+			    }
 			    ASSERT(err.code() != error_code_success);
 			    if (err.code() != expectedError) {
-				    error(fmt::format("incorrect error. Expected {}, Got {}", err.code(), expectedError));
+				    info(fmt::format("incorrect error. Expected {}, Got {}", err.code(), expectedError));
 				    ctx->onError(err);
 			    } else {
 				    ctx->done();
 			    }
 		    },
-		    [this, cont]() { schedule(cont); });
+		    [this, cont]() { schedule(cont); },
+		    false);
 	}
 
 	void randomOpReadNoMaterialize(TTaskFct cont) {

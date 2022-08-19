@@ -26,7 +26,8 @@
 
 extern thread_local mako::Logger logr;
 
-// FIXME: use the same implementation as the api tester! this implementation was from back when mako was written in C and is inferior.
+// FIXME: use the same implementation as the api tester! this implementation was from back when mako was written in C
+// and is inferior.
 
 namespace mako::blob_granules::local_file {
 
