@@ -1287,20 +1287,6 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 					}
 				}
 
-				for (KeyRangeRef range : rangesToRemove) {
-					TraceEvent("ClientBlobRangeRemoved", bmData->id).detail("Range", range);
-					if (BM_DEBUG) {
-						fmt::print(
-						    "BM Got range to revoke [{0} - {1})\n", range.begin.printable(), range.end.printable());
-					}
-
-					RangeAssignment ra;
-					ra.isAssign = false;
-					ra.keyRange = range;
-					ra.revoke = RangeRevokeData(true); // dispose=true
-					handleRangeAssign(bmData, ra);
-				}
-
 				state std::vector<Future<BlobGranuleSplitPoints>> splitFutures;
 				// Divide new ranges up into equal chunks by using SS byte sample
 				for (KeyRangeRef range : rangesToAdd) {
@@ -1320,6 +1306,20 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 
 					// start initial split for range
 					splitFutures.push_back(splitRange(bmData, range, false, true));
+				}
+
+				for (KeyRangeRef range : rangesToRemove) {
+					TraceEvent("ClientBlobRangeRemoved", bmData->id).detail("Range", range);
+					if (BM_DEBUG) {
+						fmt::print(
+						    "BM Got range to revoke [{0} - {1})\n", range.begin.printable(), range.end.printable());
+					}
+
+					RangeAssignment ra;
+					ra.isAssign = false;
+					ra.keyRange = range;
+					ra.revoke = RangeRevokeData(true); // dispose=true
+					handleRangeAssign(bmData, ra);
 				}
 
 				if (firstLoad) {
@@ -4425,6 +4425,8 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		activeRanges.push_back(it.range());
 	}
 
+	state std::set<Key> knownBoundariesPurged;
+
 	if (force) {
 		// revoke range from all active blob workers - AFTER we copy set of active ranges to purge
 		// if purge covers multiple blobbified ranges, revoke each separately
@@ -4435,6 +4437,12 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 				ra.isAssign = false;
 				ra.keyRange = range & it.range();
 				ra.revoke = RangeRevokeData(true); // dispose=true
+				if (ra.keyRange.begin > range.begin) {
+					knownBoundariesPurged.insert(ra.keyRange.begin);
+				}
+				if (ra.keyRange.end < range.end) {
+					knownBoundariesPurged.insert(ra.keyRange.end);
+				}
 				handleRangeAssign(self, ra);
 			}
 		}
@@ -4681,6 +4689,12 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 				// read them
 				wait(checkManagerLock(&tr, self));
 				wait(krmSetRange(&tr, blobGranuleMappingKeys.begin, range, blobGranuleMappingValueFor(UID())));
+				// FIXME: there is probably a cleaner fix than setting extra keys in the database if someone does a
+				// purge that's not aligned to boundaries
+				for (auto& it : knownBoundariesPurged) {
+					// keep original bounds in granule mapping as to not confuse future managers on recovery
+					tr.set(it.withPrefix(blobGranuleMappingKeys.begin), blobGranuleMappingValueFor(UID()));
+				}
 				wait(tr.commit());
 				break;
 			} catch (Error& e) {
