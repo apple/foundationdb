@@ -749,14 +749,14 @@ namespace SummarizeTest
 
         // Parses the valgrind XML file and returns a list of "what" tags for each error.
         //  All errors for which the "kind" tag starts with "Leak" are ignored
-        static string[] ParseValgrindOutput(string valgrindOutputFileName, bool traceToStdout)
+        static Tuple<string, string>[] ParseValgrindOutput(string valgrindOutputFileName, bool traceToStdout)
         {
             if (!traceToStdout)
             {
                 Console.WriteLine("Reading vXML file: " + valgrindOutputFileName);
             }
 
-            ISet<string> whats = new HashSet<string>();
+            ISet<Tuple<string, string>> whats = new HashSet<Tuple<string, string>>();
             XElement xdoc = XDocument.Load(valgrindOutputFileName).Element("valgrindoutput");
             foreach(var elem in xdoc.Elements()) {
                 if (elem.Name != "error")
@@ -764,7 +764,17 @@ namespace SummarizeTest
                 string kind = elem.Element("kind").Value;
                 if(kind.StartsWith("Leak"))
                     continue;
-                whats.Add(elem.Element("what").Value);
+                string backtrace = "";
+                XElement stack = elem.Element("stack");
+                foreach (XElement frame in stack.Elements()) {
+                    backtrace += " " + frame.Element("ip").Value.ToLower();
+                }
+
+                if (backtrace.Length > 0) {
+                    backtrace = "addr2line -e fdbserver.debug -p -C -f -i" + backtrace;
+                }
+
+                whats.Add(new Tuple<string, string>(elem.Element("what").Value, backtrace));
             }
             return whats.ToArray();
         }
@@ -1072,12 +1082,13 @@ namespace SummarizeTest
                 try
                 {
                     // If there are any errors reported "ok" will be set to false
-                    var whats = ParseValgrindOutput(valgrindOutputFileName, traceToStdout);
-                    foreach (var what in whats)
+                    var valgrindErrors = ParseValgrindOutput(valgrindOutputFileName, traceToStdout);
+                    foreach (var vError in valgrindErrors)
                     {
                         xout.Add(new XElement("ValgrindError",
                                 new XAttribute("Severity", (int)Magnesium.Severity.SevError),
-                                new XAttribute("What", what)));
+                                new XAttribute("What", vError.Item1),
+                                new XAttribute("Backtrace", vError.Item2)));
                         ok = false;
                         error = true;
                     }
