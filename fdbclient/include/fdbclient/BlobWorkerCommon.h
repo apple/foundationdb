@@ -82,8 +82,8 @@ struct BlobWorkerStats {
 	    readRequestsWithBegin("ReadRequestsWithBegin", cc), readRequestsCollapsed("ReadRequestsCollapsed", cc),
 	    flushGranuleReqs("FlushGranuleReqs", cc), compressionBytesRaw("CompressionBytesRaw", cc),
 	    compressionBytesFinal("CompressionBytesFinal", cc), fullRejections("FullRejections", cc), numRangesAssigned(0),
-	    mutationBytesBuffered(0), activeReadRequests(0), granulesPendingSplitCheck(0), minimumCFVersion(0), cfVersionLag(0),
-	    notAtLatestChangeFeeds(0), lastResidentMemory(0), estimatedMaxResidentMemory(0),
+	    mutationBytesBuffered(0), activeReadRequests(0), granulesPendingSplitCheck(0), minimumCFVersion(0),
+	    cfVersionLag(0), notAtLatestChangeFeeds(0), lastResidentMemory(0), estimatedMaxResidentMemory(0),
 	    initialSnapshotLock(initialSnapshotLock), resnapshotLock(resnapshotLock), deltaWritesLock(deltaWritesLock) {
 		specialCounter(cc, "NumRangesAssigned", [this]() { return this->numRangesAssigned; });
 		specialCounter(cc, "MutationBytesBuffered", [this]() { return this->mutationBytesBuffered; });
