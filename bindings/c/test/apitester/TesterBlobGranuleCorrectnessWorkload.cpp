@@ -180,7 +180,7 @@ private:
 		}
 		execTransaction(
 		    [begin, end, results](auto ctx) {
-			    fdb::Future f = ctx->tx().getBlobGranuleRanges(begin, end).eraseType();
+			    fdb::Future f = ctx->tx().getBlobGranuleRanges(begin, end, 1000).eraseType();
 			    ctx->continueAfter(
 			        f,
 			        [ctx, f, results]() {

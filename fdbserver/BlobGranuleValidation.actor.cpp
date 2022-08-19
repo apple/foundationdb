@@ -189,7 +189,7 @@ ACTOR Future<Void> clearAndAwaitMerge(Database cx, KeyRange range) {
 	state int reClearInterval = 1; // do quadratic backoff on clear rate, b/c large keys can keep it not write-cold
 	loop {
 		try {
-			Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(range));
+			Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(range, 2));
 			if (ranges.size() == 1) {
 				return Void();
 			}

@@ -181,15 +181,30 @@ ACTOR Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Datab
 
 ACTOR template <class T>
 Future<Void> waitForLowInFlight(Database cx, T* workload) {
+	state Future<Void> timeout = delay(600.0);
 	loop {
-		int64_t inFlight = wait(getDataInFlight(cx, workload->dbInfo));
-		TraceEvent("DynamicWarming").detail("InFlight", inFlight);
-		if (inFlight > 1e6) { // Wait for just 1 MB to be in flight
-			wait(delay(1.0));
-		} else {
-			wait(delay(1.0));
-			TraceEvent("DynamicWarmingDone").log();
-			break;
+		try {
+			if (timeout.isReady()) {
+				throw timed_out();
+			}
+
+			int64_t inFlight = wait(getDataInFlight(cx, workload->dbInfo));
+			TraceEvent("DynamicWarming").detail("InFlight", inFlight);
+			if (inFlight > 1e6) { // Wait for just 1 MB to be in flight
+				wait(delay(1.0));
+			} else {
+				wait(delay(1.0));
+				TraceEvent("DynamicWarmingDone").log();
+				break;
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_attribute_not_found) {
+				// DD may not be initialized yet and attribute "DataInFlight" can be missing
+				wait(delay(1.0));
+			} else {
+				TraceEvent(SevWarn, "WaitForLowInFlightError").error(e);
+				throw;
+			}
 		}
 	}
 	return Void();

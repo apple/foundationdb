@@ -171,6 +171,32 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                                uint8_t const* purge_key_name,
 	                                                int purge_key_name_length);
 
+	FDBFuture* (*databaseBlobbifyRange)(FDBDatabase* db,
+	                                    uint8_t const* begin_key_name,
+	                                    int begin_key_name_length,
+	                                    uint8_t const* end_key_name,
+	                                    int end_key_name_length);
+
+	FDBFuture* (*databaseUnblobbifyRange)(FDBDatabase* db,
+	                                      uint8_t const* begin_key_name,
+	                                      int begin_key_name_length,
+	                                      uint8_t const* end_key_name,
+	                                      int end_key_name_length);
+
+	FDBFuture* (*databaseListBlobbifiedRanges)(FDBDatabase* db,
+	                                           uint8_t const* begin_key_name,
+	                                           int begin_key_name_length,
+	                                           uint8_t const* end_key_name,
+	                                           int end_key_name_length,
+	                                           int rangeLimit);
+
+	FDBFuture* (*databaseVerifyBlobRange)(FDBDatabase* db,
+	                                      uint8_t const* begin_key_name,
+	                                      int begin_key_name_length,
+	                                      uint8_t const* end_key_name,
+	                                      int end_key_name_length,
+	                                      Optional<Version> version);
+
 	// Tenant
 	fdb_error_t (*tenantCreateTransaction)(FDBTenant* tenant, FDBTransaction** outTransaction);
 
@@ -276,7 +302,8 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                              uint8_t const* begin_key_name,
 	                                              int begin_key_name_length,
 	                                              uint8_t const* end_key_name,
-	                                              int end_key_name_length);
+	                                              int end_key_name_length,
+	                                              int rangeLimit);
 
 	FDBResult* (*transactionReadBlobGranules)(FDBTransaction* db,
 	                                          uint8_t const* begin_key_name,
@@ -376,7 +403,8 @@ public:
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                int64_t chunkSize) override;
-	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
 
 	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
 	                                           Version beginVersion,
@@ -476,6 +504,12 @@ public:
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
+	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
+	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
 
@@ -574,7 +608,8 @@ public:
 
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                int64_t chunkSize) override;
-	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
 
 	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
 	                                           Version beginVersion,
@@ -816,6 +851,12 @@ public:
 
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
+
+	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
+	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
