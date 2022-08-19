@@ -41,6 +41,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/flow.h"
 
+#define TRACE_AFTER_READY(future, phase, traceValue) traceAfter(future, "QuietDatabaseWait", "Actor", std::string(traceValue))
+
 ACTOR Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags = 0) {
 	loop {
 		choose {
@@ -640,8 +642,8 @@ ACTOR Future<int64_t> getVersionOffset(Database cx,
 			TraceEvent("GetVersionOffset").detail("Stage", "ReadingVersionEpoch");
 
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			state Version rv = wait(tr.getReadVersion());
-			Optional<Standalone<StringRef>> versionEpochValue = wait(tr.get(versionEpochKey));
+			state Version rv = wait(TRACE_AFTER_READY(tr.getReadVersion(), "", "GetReadVersion"));
+			Optional<Standalone<StringRef>> versionEpochValue = wait(TRACE_AFTER_READY(tr.get(versionEpochKey), "", "VersionEpochValue"));
 			if (!versionEpochValue.present()) {
 				return 0;
 			}
@@ -808,14 +810,14 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 			TraceEvent("QuietDatabaseGotDataDistributor", distributorUID)
 			    .detail("Locality", distributorWorker.locality.toString());
 
-			dataInFlight = getDataInFlight(cx, distributorWorker);
-			tLogQueueInfo = getTLogQueueInfo(cx, dbInfo);
-			dataDistributionQueueSize = getDataDistributionQueueSize(cx, distributorWorker, dataInFlightGate == 0);
-			teamCollectionValid = getTeamCollectionValid(cx, distributorWorker);
-			storageQueueSize = getMaxStorageServerQueueSize(cx, dbInfo, version);
-			dataDistributionActive = getDataDistributionActive(cx, distributorWorker);
-			storageServersRecruiting = getStorageServersRecruiting(cx, distributorWorker, distributorUID);
-			versionOffset = getVersionOffset(cx, distributorWorker, dbInfo);
+			dataInFlight = TRACE_AFTER_READY(getDataInFlight(cx, distributorWorker), phase, "DataInFlight");
+			tLogQueueInfo = TRACE_AFTER_READY(getTLogQueueInfo(cx, dbInfo), phase, "TlogQueueInfo");
+			dataDistributionQueueSize = TRACE_AFTER_READY(getDataDistributionQueueSize(cx, distributorWorker, dataInFlightGate == 0), phase, "DDQueueSize");
+			teamCollectionValid = TRACE_AFTER_READY(getTeamCollectionValid(cx, distributorWorker), phase, "TeamCollectionValid");
+			storageQueueSize = TRACE_AFTER_READY(getMaxStorageServerQueueSize(cx, dbInfo, version), phase, "SQSize");
+			dataDistributionActive = TRACE_AFTER_READY(getDataDistributionActive(cx, distributorWorker), phase, "DDActive");
+			storageServersRecruiting = TRACE_AFTER_READY(getStorageServersRecruiting(cx, distributorWorker, distributorUID), phase, "StorageRecruiting");
+			versionOffset = TRACE_AFTER_READY(getVersionOffset(cx, distributorWorker, dbInfo), phase, "VersionOffset");
 
 			wait(success(dataInFlight) && success(tLogQueueInfo) && success(dataDistributionQueueSize) &&
 			     success(teamCollectionValid) && success(storageQueueSize) && success(dataDistributionActive) &&
