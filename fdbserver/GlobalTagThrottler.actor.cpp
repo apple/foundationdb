@@ -445,7 +445,7 @@ public:
 		for (auto& [tag, stats] : tagStatistics) {
 			// Currently there is no differentiation between batch priority and default priority transactions
 			TraceEvent te("GlobalTagThrottler_GotRate", id);
-			bool isReadBusy, isWriteBusy;
+			bool isReadBusy = false, isWriteBusy = false;
 			auto const targetTps = getTargetTps(tag, isReadBusy, isWriteBusy, te);
 			if (isReadBusy) {
 				++lastBusyReadTagCount;
@@ -472,7 +472,7 @@ public:
 
 		for (auto& [tag, stats] : tagStatistics) {
 			// Currently there is no differentiation between batch priority and default priority transactions
-			bool isReadBusy, isWriteBusy;
+			bool isReadBusy = false, isWriteBusy = false;
 			TraceEvent te("GlobalTagThrottler_GotClientRate", id);
 			auto const targetTps = getTargetTps(tag, isReadBusy, isWriteBusy, te);
 
