@@ -284,6 +284,12 @@ class ErrorCommitInfo(BaseInfo):
         if protocol_version >= PROTOCOL_VERSION_6_3:
             self.report_conflicting_keys = bb.get_bool()
 
+        if protocol_version >= PROTOCOL_VERSION_7_1:
+            lock_aware = bb.get_bool()
+            if bb.get_bool():
+                spanId = bb.get_bytes(16)
+
+
 class UnsupportedProtocolVersionError(Exception):
     def __init__(self, protocol_version):
         super().__init__("Unsupported protocol version 0x%0.2X" % protocol_version)

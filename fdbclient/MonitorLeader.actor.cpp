@@ -663,69 +663,43 @@ ACTOR Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> s
 	}
 }
 
-struct ClientStatusStats {
-	int count;
-	std::vector<std::pair<NetworkAddress, Key>> examples;
+namespace {
 
-	ClientStatusStats() : count(0) { examples.reserve(CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT); }
-};
+void tryInsertIntoSamples(OpenDatabaseRequest::Samples& samples,
+                          const NetworkAddress& networkAddress,
+                          const Key& traceLogGroup) {
+	++samples.count;
+	if (samples.samples.size() < static_cast<size_t>(CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT)) {
+		samples.samples.insert({ networkAddress, traceLogGroup });
+	}
+}
+
+} // namespace
 
 OpenDatabaseRequest ClientData::getRequest() {
 	OpenDatabaseRequest req;
 
-	std::map<StringRef, ClientStatusStats> issueMap;
-	std::map<ClientVersionRef, ClientStatusStats> versionMap;
-	std::map<StringRef, ClientStatusStats> maxProtocolMap;
-	int clientCount = 0;
-
-	// SOMEDAY: add a yield in this loop
 	for (auto& ci : clientStatusInfoMap) {
-		for (auto& it : ci.second.issues) {
-			auto& entry = issueMap[it];
-			entry.count++;
-			if (entry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
-				entry.examples.emplace_back(ci.first, ci.second.traceLogGroup);
-			}
-		}
-		if (ci.second.versions.size()) {
-			clientCount++;
-			StringRef maxProtocol;
-			for (auto& it : ci.second.versions) {
-				maxProtocol = std::max(maxProtocol, it.protocolVersion);
-				auto& entry = versionMap[it];
-				entry.count++;
-				if (entry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
-					entry.examples.emplace_back(ci.first, ci.second.traceLogGroup);
-				}
-			}
-			auto& maxEntry = maxProtocolMap[maxProtocol];
-			maxEntry.count++;
-			if (maxEntry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
-				maxEntry.examples.emplace_back(ci.first, ci.second.traceLogGroup);
-			}
-		} else {
-			auto& entry = versionMap[ClientVersionRef()];
-			entry.count++;
-			if (entry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
-				entry.examples.emplace_back(ci.first, ci.second.traceLogGroup);
-			}
-		}
-	}
+		const auto& networkAddress = ci.first;
+		const auto& traceLogGroup = ci.second.traceLogGroup;
 
-	req.issues.reserve(issueMap.size());
-	for (auto& it : issueMap) {
-		req.issues.push_back(ItemWithExamples<Key>(it.first, it.second.count, it.second.examples));
+		for (auto& issue : ci.second.issues) {
+			tryInsertIntoSamples(req.issues[issue], networkAddress, traceLogGroup);
+		}
+
+		if (!ci.second.versions.size()) {
+			tryInsertIntoSamples(req.supportedVersions[ClientVersionRef()], networkAddress, traceLogGroup);
+			continue;
+		}
+
+		++req.clientCount;
+		StringRef maxProtocol;
+		for (auto& it : ci.second.versions) {
+			maxProtocol = std::max(maxProtocol, it.protocolVersion);
+			tryInsertIntoSamples(req.supportedVersions[it], networkAddress, traceLogGroup);
+		}
+		tryInsertIntoSamples(req.maxProtocolSupported[maxProtocol], networkAddress, traceLogGroup);
 	}
-	req.supportedVersions.reserve(versionMap.size());
-	for (auto& it : versionMap) {
-		req.supportedVersions.push_back(
-		    ItemWithExamples<Standalone<ClientVersionRef>>(it.first, it.second.count, it.second.examples));
-	}
-	req.maxProtocolSupported.reserve(maxProtocolMap.size());
-	for (auto& it : maxProtocolMap) {
-		req.maxProtocolSupported.push_back(ItemWithExamples<Key>(it.first, it.second.count, it.second.examples));
-	}
-	req.clientCount = clientCount;
 
 	return req;
 }

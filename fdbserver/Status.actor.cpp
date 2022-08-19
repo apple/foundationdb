@@ -1078,76 +1078,61 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	return processMap;
 }
 
-struct ClientStats {
-	int count;
-	std::set<std::pair<NetworkAddress, Key>> examples;
-
-	ClientStats() : count(0) {}
-};
-
 static JsonBuilderObject clientStatusFetcher(
     std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatusMap) {
 	JsonBuilderObject clientStatus;
 
 	int64_t clientCount = 0;
-	std::map<Key, ClientStats> issues;
-	std::map<Standalone<ClientVersionRef>, ClientStats> supportedVersions;
-	std::map<Key, ClientStats> maxSupportedProtocol;
+	// Here we handle versions and maxSupportedProtocols, the issues will be handled in getClientIssuesAsMessages
+	std::map<Standalone<ClientVersionRef>, OpenDatabaseRequest::Samples> supportedVersions;
+	std::map<Key, OpenDatabaseRequest::Samples> maxSupportedProtocol;
 
 	for (auto iter = clientStatusMap->begin(); iter != clientStatusMap->end();) {
-		if (now() - iter->second.first < 2 * SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL) {
-			clientCount += iter->second.second.clientCount;
-			for (auto& it : iter->second.second.issues) {
-				auto& issue = issues[it.item];
-				issue.count += it.count;
-				issue.examples.insert(it.examples.begin(), it.examples.end());
-			}
-			for (auto& it : iter->second.second.supportedVersions) {
-				auto& version = supportedVersions[it.item];
-				version.count += it.count;
-				version.examples.insert(it.examples.begin(), it.examples.end());
-			}
-			for (auto& it : iter->second.second.maxProtocolSupported) {
-				auto& protocolVersion = maxSupportedProtocol[it.item];
-				protocolVersion.count += it.count;
-				protocolVersion.examples.insert(it.examples.begin(), it.examples.end());
-			}
-			++iter;
-		} else {
+		if (now() - iter->second.first >= 2 * SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL) {
 			iter = clientStatusMap->erase(iter);
+			continue;
 		}
+
+		clientCount += iter->second.second.clientCount;
+		for (const auto& [version, samples] : iter->second.second.supportedVersions) {
+			supportedVersions[version] += samples;
+		}
+		for (const auto& [protocol, samples] : iter->second.second.maxProtocolSupported) {
+			maxSupportedProtocol[protocol] += samples;
+		}
+		++iter;
 	}
 
 	clientStatus["count"] = clientCount;
 
 	JsonBuilderArray versionsArray = JsonBuilderArray();
-	for (auto& cv : supportedVersions) {
+	for (const auto& [clientVersionRef, samples] : supportedVersions) {
 		JsonBuilderObject ver;
-		ver["count"] = (int64_t)cv.second.count;
-		ver["client_version"] = cv.first.clientVersion.toString();
-		ver["protocol_version"] = cv.first.protocolVersion.toString();
-		ver["source_version"] = cv.first.sourceVersion.toString();
+		ver["count"] = (int64_t)samples.count;
+		ver["client_version"] = clientVersionRef.clientVersion.toString();
+		ver["protocol_version"] = clientVersionRef.protocolVersion.toString();
+		ver["source_version"] = clientVersionRef.sourceVersion.toString();
 
 		JsonBuilderArray clients = JsonBuilderArray();
-		for (auto& client : cv.second.examples) {
+		for (const auto& [networkAddress, trackLogGroup] : samples.samples) {
 			JsonBuilderObject cli;
-			cli["address"] = client.first.toString();
-			cli["log_group"] = client.second.toString();
+			cli["address"] = networkAddress.toString();
+			cli["log_group"] = trackLogGroup.toString();
 			clients.push_back(cli);
 		}
 
-		auto iter = maxSupportedProtocol.find(cv.first.protocolVersion);
-		if (iter != maxSupportedProtocol.end()) {
+		auto iter = maxSupportedProtocol.find(clientVersionRef.protocolVersion);
+		if (iter != std::end(maxSupportedProtocol)) {
 			JsonBuilderArray maxClients = JsonBuilderArray();
-			for (auto& client : iter->second.examples) {
+			for (const auto& [networkAddress, trackLogGroup] : iter->second.samples) {
 				JsonBuilderObject cli;
-				cli["address"] = client.first.toString();
-				cli["log_group"] = client.second.toString();
+				cli["address"] = networkAddress.toString();
+				cli["log_group"] = trackLogGroup.toString();
 				maxClients.push_back(cli);
 			}
 			ver["max_protocol_count"] = iter->second.count;
 			ver["max_protocol_clients"] = maxClients;
-			maxSupportedProtocol.erase(cv.first.protocolVersion);
+			maxSupportedProtocol.erase(clientVersionRef.protocolVersion);
 		}
 
 		ver["connected_clients"] = clients;
@@ -2660,18 +2645,19 @@ static JsonBuilderArray getClientIssuesAsMessages(
 		std::map<std::string, std::pair<int, std::vector<std::string>>> deduplicatedIssues;
 
 		for (auto iter = clientStatusMap->begin(); iter != clientStatusMap->end();) {
-			if (now() - iter->second.first < 2 * SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL) {
-				for (auto& issue : iter->second.second.issues) {
-					auto& t = deduplicatedIssues[issue.item.toString()];
-					t.first += issue.count;
-					for (auto& example : issue.examples) {
-						t.second.push_back(formatIpPort(example.first.ip, example.first.port));
-					}
-				}
-				++iter;
-			} else {
+			if (now() - iter->second.first >= 2 * SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL) {
 				iter = clientStatusMap->erase(iter);
+				continue;
 			}
+
+			for (const auto& [issueKey, samples] : iter->second.second.issues) {
+				auto& t = deduplicatedIssues[issueKey.toString()];
+				t.first += samples.count;
+				for (const auto& sample : samples.samples) {
+					t.second.push_back(formatIpPort(sample.first.ip, sample.first.port));
+				}
+			}
+			++iter;
 		}
 
 		// FIXME: add the log_group in addition to the network address
