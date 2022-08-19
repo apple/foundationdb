@@ -1664,7 +1664,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
                     .detail("Server", destServersString(bestTeams))
                     .detail("DestIds", destIds);
             }
-            
+
 			if (!rd.isRestore()) {
 				self->shardsAffectedByTeamFailure->moveShard(rd.keys, destinationTeams);
 			}
@@ -2112,8 +2112,6 @@ ACTOR Future<bool> rebalanceByReduceShard(DDQueue* self,
         // randomly choose bottomK shards
         GetTopKMetricsRequest req(shards, bottomK, srcLoad / shards.size(), 0, false);
         state GetTopKMetricsReply bottomKReply = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
-        
-        TraceEvent("ZZXDEBUG4").detail("Back", 0);
 
         auto& metricsList = bottomKReply.shardMetrics;
         deterministicRandom()->randomShuffle(metricsList);
