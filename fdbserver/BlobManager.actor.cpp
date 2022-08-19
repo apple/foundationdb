@@ -25,6 +25,7 @@
 #include <vector>
 #include <unordered_map>
 
+#include "fdbclient/ServerKnobs.h"
 #include "fdbrpc/simulator.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupContainerFileSystem.h"
@@ -1944,6 +1945,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 			for (auto it = splitPoints.boundaries.begin(); it != splitPoints.boundaries.end(); it++) {
 				bmData->mergeBoundaries[it->first] = it->second;
 			}
+
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled) {
@@ -3454,6 +3456,10 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 	// Once we acknowledge the existing blob workers, we can go ahead and recruit new ones
 	bmData->startRecruiting.trigger();
+
+	bmData->initBStore();
+	if (isFullRestoreMode())
+		wait(loadManifest(bmData->db, bmData->bstore));
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 
@@ -5042,6 +5048,28 @@ ACTOR Future<int64_t> bgccCheckGranule(Reference<BlobManagerData> bmData, KeyRan
 	return bytesRead;
 }
 
+// Check if there is any pending split. It's a precheck for manifest backup
+ACTOR Future<bool> hasPendingSplit(Reference<BlobManagerData> self) {
+	state Transaction tr(self->db);
+	loop {
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			RangeResult result = wait(tr.getRange(blobGranuleSplitKeys, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+			for (auto& row : result) {
+				std::pair<BlobGranuleSplitState, Version> gss = decodeBlobGranuleSplitValue(row.value);
+				if (gss.first != BlobGranuleSplitState::Done) {
+					return true;
+				}
+			}
+			return false;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 // FIXME: could eventually make this more thorough by storing some state in the DB or something
 // FIXME: simpler solution could be to shuffle ranges
 ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
@@ -5053,6 +5081,8 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 	if (BM_DEBUG) {
 		fmt::print("BGCC starting\n");
 	}
+	if (isFullRestoreMode())
+		wait(printRestoreSummary(bmData->db, bmData->bstore));
 
 	loop {
 		if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
@@ -5060,6 +5090,14 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 				printf("BGCC stopping\n");
 			}
 			return Void();
+		}
+
+		// Only dump blob manifest when there is no pending split to ensure data consistency
+		if (SERVER_KNOBS->BLOB_MANIFEST_BACKUP && !isFullRestoreMode()) {
+			bool pendingSplit = wait(hasPendingSplit(bmData));
+			if (!pendingSplit) {
+				wait(dumpManifest(bmData->db, bmData->bstore));
+			}
 		}
 
 		if (bmData->workersById.size() >= 1) {

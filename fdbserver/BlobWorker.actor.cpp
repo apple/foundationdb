@@ -1973,6 +1973,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			metadata->historyVersion = startState.history.present() ? startState.history.get().version : startVersion;
 		}
 
+		// No need to start Change Feed in full restore mode
+		if (isFullRestoreMode())
+			return Void();
+
 		checkMergeCandidate = granuleCheckMergeCandidate(bwData,
 		                                                 metadata,
 		                                                 startState.granuleID,
@@ -3397,10 +3401,12 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			}
 			state Reference<GranuleMetadata> metadata = m;
 			state Version granuleBeginVersion = req.beginVersion;
-
-			choose {
-				when(wait(metadata->readable.getFuture())) {}
-				when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
+			// skip waiting for CF ready for recovery mode
+			if (!isFullRestoreMode()) {
+				choose {
+					when(wait(metadata->readable.getFuture())) {}
+					when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
+				}
 			}
 
 			// in case both readable and cancelled are ready, check cancelled
@@ -3453,6 +3459,10 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				CODE_PROBE(true, "Granule Active Read");
 				// this is an active granule query
 				loop {
+					// skip check since CF doesn't start for bare metal recovery mode
+					if (isFullRestoreMode()) {
+						break;
+					}
 					if (!metadata->activeCFData.get().isValid() || !metadata->cancelled.canBeSet()) {
 						throw wrong_shard_server();
 					}
@@ -3493,12 +3503,14 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				// if feed was popped by another worker and BW only got empty versions, it wouldn't itself see that it
 				// got popped, but we can still reject the in theory this should never happen with other protections but
 				// it's a useful and inexpensive sanity check
-				Version emptyVersion = metadata->activeCFData.get()->popVersion - 1;
-				if (req.readVersion > metadata->durableDeltaVersion.get() &&
-				    emptyVersion > metadata->bufferedDeltaVersion) {
-					CODE_PROBE(true, "feed popped for read but granule updater didn't notice yet");
-					// FIXME: could try to cancel the actor here somehow, but it should find out eventually
-					throw wrong_shard_server();
+				if (!isFullRestoreMode()) {
+					Version emptyVersion = metadata->activeCFData.get()->popVersion - 1;
+					if (req.readVersion > metadata->durableDeltaVersion.get() &&
+					    emptyVersion > metadata->bufferedDeltaVersion) {
+						CODE_PROBE(true, "feed popped for read but granule updater didn't notice yet");
+						// FIXME: could try to cancel the actor here somehow, but it should find out eventually
+						throw wrong_shard_server();
+					}
 				}
 				rangeGranulePair.push_back(std::pair(metadata->keyRange, metadata->files));
 			}
@@ -3795,7 +3807,6 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				std::tuple<int64_t, int64_t, UID> prevOwner = decodeBlobGranuleLockValue(prevLockValue.get());
 
 				info.granuleID = std::get<2>(prevOwner);
-
 				state bool doLockCheck = true;
 				// if it's the first snapshot of a new granule, history won't be present
 				if (info.history.present()) {
@@ -3859,9 +3870,28 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 					// if this granule is not derived from a split or merge, use new granule id
 					info.granuleID = newGranuleID;
 				}
-				createChangeFeed = true;
-				info.doSnapshot = true;
-				info.previousDurableVersion = invalidVersion;
+
+				// for recovery mode - don't create change feed, don't create snapshot
+				if (isFullRestoreMode()) {
+					createChangeFeed = false;
+					info.doSnapshot = false;
+					GranuleFiles granuleFiles = wait(loadPreviousFiles(&tr, info.granuleID));
+					info.existingFiles = granuleFiles;
+
+					if (info.existingFiles.get().snapshotFiles.empty()) {
+						ASSERT(info.existingFiles.get().deltaFiles.empty());
+						info.previousDurableVersion = invalidVersion;
+					} else if (info.existingFiles.get().deltaFiles.empty()) {
+						info.previousDurableVersion = info.existingFiles.get().snapshotFiles.back().version;
+					} else {
+						info.previousDurableVersion = info.existingFiles.get().deltaFiles.back().version;
+					}
+					info.changeFeedStartVersion = info.previousDurableVersion;
+				} else {
+					createChangeFeed = true;
+					info.doSnapshot = true;
+					info.previousDurableVersion = invalidVersion;
+				}
 			}
 
 			if (createChangeFeed) {
@@ -3876,7 +3906,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			// If anything in previousGranules, need to do the handoff logic and set
 			// ret.previousChangeFeedId, and the previous durable version will come from the previous
 			// granules
-			if (info.history.present() && info.history.get().value.parentVersions.size() > 0) {
+			if (info.history.present() && info.history.get().value.parentVersions.size() > 0 && !isFullRestoreMode()) {
 				CODE_PROBE(true, "Granule open found parent");
 				if (info.history.get().value.parentVersions.size() == 1) { // split
 					state KeyRangeRef parentRange(info.history.get().value.parentBoundaries[0],
