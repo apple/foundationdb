@@ -415,7 +415,7 @@ public:
 	// The returned list would still be in form of [keys.begin, splitPoint1, splitPoint2, ... , keys.end]
 	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize);
 
-	Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRange& range);
+	Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRange& range, int rangeLimit);
 	Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranules(const KeyRange& range,
 	                                                                    Version begin,
 	                                                                    Optional<Version> readVersion,

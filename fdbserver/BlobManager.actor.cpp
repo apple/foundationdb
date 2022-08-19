@@ -130,7 +130,7 @@ void updateClientBlobRanges(KeyRangeMap<bool>* knownBlobRanges,
 				}
 				break;
 			}
-			bool active = dbBlobRanges[i].value == LiteralStringRef("1");
+			bool active = dbBlobRanges[i].value == blobRangeActive;
 			if (active) {
 				if (BM_DEBUG) {
 					fmt::print("BM sees client range [{0} - {1})\n",
@@ -1287,7 +1287,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 					needToCoalesce = false;
 
 					for (int i = 0; i < results.size() - 1; i++) {
-						bool active = results[i].value == LiteralStringRef("1");
+						bool active = results[i].value == blobRangeActive;
 						bmData->knownBlobRanges.insert(KeyRangeRef(results[i].key, results[i + 1].key), active);
 					}
 				}
@@ -5079,9 +5079,6 @@ TEST_CASE("/blobmanager/updateranges") {
 	VectorRef<KeyRangeRef> added;
 	VectorRef<KeyRangeRef> removed;
 
-	StringRef active = LiteralStringRef("1");
-	StringRef inactive = StringRef();
-
 	RangeResult dbDataEmpty;
 	std::vector<std::pair<KeyRangeRef, bool>> kbrRanges;
 
@@ -5092,34 +5089,34 @@ TEST_CASE("/blobmanager/updateranges") {
 
 	// db data setup
 	RangeResult dbDataAB;
-	dbDataAB.emplace_back(ar, keyA, active);
-	dbDataAB.emplace_back(ar, keyB, inactive);
+	dbDataAB.emplace_back(ar, keyA, blobRangeActive);
+	dbDataAB.emplace_back(ar, keyB, blobRangeInactive);
 
 	RangeResult dbDataAC;
-	dbDataAC.emplace_back(ar, keyA, active);
-	dbDataAC.emplace_back(ar, keyC, inactive);
+	dbDataAC.emplace_back(ar, keyA, blobRangeActive);
+	dbDataAC.emplace_back(ar, keyC, blobRangeInactive);
 
 	RangeResult dbDataAD;
-	dbDataAD.emplace_back(ar, keyA, active);
-	dbDataAD.emplace_back(ar, keyD, inactive);
+	dbDataAD.emplace_back(ar, keyA, blobRangeActive);
+	dbDataAD.emplace_back(ar, keyD, blobRangeInactive);
 
 	RangeResult dbDataBC;
-	dbDataBC.emplace_back(ar, keyB, active);
-	dbDataBC.emplace_back(ar, keyC, inactive);
+	dbDataBC.emplace_back(ar, keyB, blobRangeActive);
+	dbDataBC.emplace_back(ar, keyC, blobRangeInactive);
 
 	RangeResult dbDataBD;
-	dbDataBD.emplace_back(ar, keyB, active);
-	dbDataBD.emplace_back(ar, keyD, inactive);
+	dbDataBD.emplace_back(ar, keyB, blobRangeActive);
+	dbDataBD.emplace_back(ar, keyD, blobRangeInactive);
 
 	RangeResult dbDataCD;
-	dbDataCD.emplace_back(ar, keyC, active);
-	dbDataCD.emplace_back(ar, keyD, inactive);
+	dbDataCD.emplace_back(ar, keyC, blobRangeActive);
+	dbDataCD.emplace_back(ar, keyD, blobRangeInactive);
 
 	RangeResult dbDataAB_CD;
-	dbDataAB_CD.emplace_back(ar, keyA, active);
-	dbDataAB_CD.emplace_back(ar, keyB, inactive);
-	dbDataAB_CD.emplace_back(ar, keyC, active);
-	dbDataAB_CD.emplace_back(ar, keyD, inactive);
+	dbDataAB_CD.emplace_back(ar, keyA, blobRangeActive);
+	dbDataAB_CD.emplace_back(ar, keyB, blobRangeInactive);
+	dbDataAB_CD.emplace_back(ar, keyC, blobRangeActive);
+	dbDataAB_CD.emplace_back(ar, keyD, blobRangeInactive);
 
 	// key ranges setup
 	KeyRangeRef rangeAB = KeyRangeRef(keyA, keyB);
