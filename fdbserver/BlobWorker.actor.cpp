@@ -4215,7 +4215,9 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 			wait(waitForAll(toWait));
 
 			if (shouldStart) {
-				bwData->stats.numRangesAssigned++;
+				if (!isSelfReassign) {
+					bwData->stats.numRangesAssigned++;
+				}
 				auto m = bwData->granuleMetadata.rangeContaining(req.keyRange.begin);
 				ASSERT(m.begin() == req.keyRange.begin && m.end() == req.keyRange.end);
 				if (m.value().activeMetadata.isValid()) {
@@ -4304,6 +4306,7 @@ void handleBlobVersionRequest(Reference<BlobWorkerData> bwData, MinBlobVersionRe
 	MinBlobVersionReply rep;
 	rep.version = bwData->db->getMinimumChangeFeedVersion();
 	bwData->stats.minimumCFVersion = rep.version;
+	bwData->stats.cfVersionLag = std::max((Version)0, req.grv - rep.version);
 	bwData->stats.notAtLatestChangeFeeds = bwData->db->notAtLatestChangeFeeds.size();
 	req.reply.send(rep);
 }
