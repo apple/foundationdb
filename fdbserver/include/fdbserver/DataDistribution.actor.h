@@ -614,8 +614,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            Promise<Void> readyToStart,
                                            Reference<AsyncVar<bool>> zeroHealthyTeams,
                                            UID distributorId,
-                                           std::shared_ptr<KeyRangeMap<ShardTrackedData>> shards,
-                                           std::shared_ptr<bool> trackerCancelled);
+                                           KeyRangeMap<ShardTrackedData>* shards,
+                                           bool* trackerCancelled);
 
 ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          PromiseStream<RelocateShard> output,

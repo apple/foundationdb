@@ -1046,8 +1046,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            Promise<Void> readyToStart,
                                            Reference<AsyncVar<bool>> anyZeroHealthyTeams,
                                            UID distributorId,
-                                           std::shared_ptr<KeyRangeMap<ShardTrackedData>> shards,
-                                           std::shared_ptr<bool> trackerCancelled) {
+                                           KeyRangeMap<ShardTrackedData>* shards,
+                                           bool* trackerCancelled) {
 	state DataDistributionTracker self(cx,
 	                                   distributorId,
 	                                   readyToStart,
@@ -1646,7 +1646,7 @@ TEST_CASE("/DataDistributor/Tracker/FetchTopK") {
 	req.minBytesReadPerKSecond = 1000;
 	req.minBytesReadPerKSecond = 10000;
 
-	self.shards = std::make_shared<KeyRangeMap<ShardTrackedData>>();
+	// self.shards = std::make_shared<KeyRangeMap<ShardTrackedData>>();
 	double targetDensities[10] = { 2, 1, 3, 5, 4, 10, 6, 8, 7, 0 };
 	for (int i = 0; i <= 5; ++i) {
 	}
