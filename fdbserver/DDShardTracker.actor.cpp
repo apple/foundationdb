@@ -84,6 +84,9 @@ struct DataDistributionTracker : public IDDShardTracker {
 	PromiseStream<RelocateShard> output;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 
+	// PhysicalShard Tracker
+	Reference<PhysicalShardCollection> physicalShardCollection;
+
 	Promise<Void> readyToStart;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
 
@@ -123,12 +126,14 @@ struct DataDistributionTracker : public IDDShardTracker {
 	                        Promise<Void> const& readyToStart,
 	                        PromiseStream<RelocateShard> const& output,
 	                        Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+	                        Reference<PhysicalShardCollection> physicalShardCollection,
 	                        Reference<AsyncVar<bool>> anyZeroHealthyTeams,
 	                        KeyRangeMap<ShardTrackedData>* shards,
 	                        bool* trackerCancelled)
 	  : IDDShardTracker(), cx(cx), distributorId(distributorId), shards(shards), sizeChanges(false),
 	    systemSizeEstimate(0), dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()),
-	    output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), readyToStart(readyToStart),
+	    output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
+	    physicalShardCollection(physicalShardCollection), readyToStart(readyToStart),
 	    anyZeroHealthyTeams(anyZeroHealthyTeams), trackerCancelled(trackerCancelled) {}
 
 	~DataDistributionTracker() override {
@@ -142,7 +147,8 @@ struct DataDistributionTracker : public IDDShardTracker {
 
 void restartShardTrackers(DataDistributionTracker* self,
                           KeyRangeRef keys,
-                          Optional<ShardMetrics> startingMetrics = Optional<ShardMetrics>());
+                          Optional<ShardMetrics> startingMetrics = Optional<ShardMetrics>(),
+                          bool whenDDInit = false);
 
 // Gets the permitted size and IO bounds for a shard. A shard that starts at allKeys.begin
 //  (i.e. '') will have a permitted size of 0, since the database can contain no data.
@@ -189,7 +195,8 @@ int64_t getMaxShardSize(double dbSizeEstimate) {
 
 ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
                                      KeyRange keys,
-                                     Reference<AsyncVar<Optional<ShardMetrics>>> shardMetrics) {
+                                     Reference<AsyncVar<Optional<ShardMetrics>>> shardMetrics,
+                                     bool whenDDInit) {
 	state BandwidthStatus bandwidthStatus =
 	    shardMetrics->get().present() ? getBandwidthStatus(shardMetrics->get().get().metrics) : BandwidthStatusNormal;
 	state double lastLowBandwidthStartTime =
@@ -198,7 +205,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 	state ReadBandwidthStatus readBandwidthStatus = shardMetrics->get().present()
 	                                                    ? getReadBandwidthStatus(shardMetrics->get().get().metrics)
 	                                                    : ReadBandwidthStatusNormal;
-
+	state bool initWithNewMetrics = whenDDInit;
 	wait(delay(0, TaskPriority::DataDistribution));
 
 	/*TraceEvent("TrackShardMetricsStarting")
@@ -306,6 +313,23 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 					if (shardMetrics->get().present()) {
 						self()->dbSizeEstimate->set(self()->dbSizeEstimate->get() + metrics.first.get().bytes -
 						                            shardMetrics->get().get().metrics.bytes);
+						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+							// update physicalShard metrics and return whether the keys needs to move out of
+							// physicalShard
+							const MoveKeyRangeOutPhysicalShard needToMove =
+							    self()->physicalShardCollection->trackPhysicalShard(
+							        keys, metrics.first.get(), shardMetrics->get().get().metrics, initWithNewMetrics);
+							if (needToMove) {
+								// Do we need to update shardsAffectedByTeamFailure here?
+								self()->output.send(
+								    RelocateShard(keys,
+								                  DataMovementReason::ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,
+								                  RelocateReason::OTHER));
+							}
+							if (initWithNewMetrics) {
+								initWithNewMetrics = false;
+							}
+						}
 						if (keys.begin >= systemKeys.begin) {
 							self()->systemSizeEstimate +=
 							    metrics.first.get().bytes - shardMetrics->get().get().metrics.bytes;
@@ -781,7 +805,10 @@ ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self,
 	}
 }
 
-void restartShardTrackers(DataDistributionTracker* self, KeyRangeRef keys, Optional<ShardMetrics> startingMetrics) {
+void restartShardTrackers(DataDistributionTracker* self,
+                          KeyRangeRef keys,
+                          Optional<ShardMetrics> startingMetrics,
+                          bool whenDDInit) {
 	auto ranges = self->shards->getAffectedRangesAfterInsertion(keys, ShardTrackedData());
 	for (int i = 0; i < ranges.size(); i++) {
 		if (!ranges[i].value.trackShard.isValid() && ranges[i].begin != keys.begin) {
@@ -808,7 +835,8 @@ void restartShardTrackers(DataDistributionTracker* self, KeyRangeRef keys, Optio
 		ShardTrackedData data;
 		data.stats = shardMetrics;
 		data.trackShard = shardTracker(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics);
-		data.trackBytes = trackShardMetrics(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics);
+		data.trackBytes =
+		    trackShardMetrics(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics, whenDDInit);
 		self->shards->insert(ranges[i], data);
 	}
 }
@@ -822,7 +850,8 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 
 	state int s;
 	for (s = 0; s < initData->shards.size() - 1; s++) {
-		restartShardTrackers(self, KeyRangeRef(initData->shards[s].key, initData->shards[s + 1].key));
+		restartShardTrackers(
+		    self, KeyRangeRef(initData->shards[s].key, initData->shards[s + 1].key), Optional<ShardMetrics>(), true);
 		wait(yield(TaskPriority::DataDistribution));
 	}
 
@@ -1003,6 +1032,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            Database cx,
                                            PromiseStream<RelocateShard> output,
                                            Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+                                           Reference<PhysicalShardCollection> physicalShardCollection,
                                            PromiseStream<GetMetricsRequest> getShardMetrics,
                                            FutureStream<GetTopKMetricsRequest> getTopKMetrics,
                                            PromiseStream<GetMetricsListRequest> getShardMetricsList,
@@ -1017,6 +1047,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	                                   readyToStart,
 	                                   output,
 	                                   shardsAffectedByTeamFailure,
+	                                   physicalShardCollection,
 	                                   anyZeroHealthyTeams,
 	                                   shards,
 	                                   trackerCancelled);
@@ -1063,3 +1094,536 @@ ACTOR Future<Void> dataDistributionTracker(Reference<DDSharedContext> context,
                                            Reference<InitialDataDistribution> initData,
                                            Database cx,
                                            KeyRangeMap<ShardTrackedData>* shards);
+
+// Methods for PhysicalShardCollection
+FDB_DEFINE_BOOLEAN_PARAM(InAnonymousPhysicalShard);
+FDB_DEFINE_BOOLEAN_PARAM(PhysicalShardHasMoreThanKeyRange);
+FDB_DEFINE_BOOLEAN_PARAM(InOverSizePhysicalShard);
+FDB_DEFINE_BOOLEAN_PARAM(PhysicalShardAvailable);
+FDB_DEFINE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
+
+// Decide whether a physical shard is available at the moment when the func is calling
+PhysicalShardAvailable PhysicalShardCollection::checkPhysicalShardAvailable(uint64_t physicalShardID,
+                                                                            StorageMetrics const& moveInMetrics) {
+	ASSERT(physicalShardID != UID().first() && physicalShardID != anonymousShardId.first());
+	ASSERT(physicalShardInstances.count(physicalShardID) > 0);
+	if (physicalShardInstances[physicalShardID].metrics.bytes + moveInMetrics.bytes >
+	    SERVER_KNOBS->MAX_PHYSICAL_SHARD_BYTES) {
+		return PhysicalShardAvailable::False;
+	}
+	return PhysicalShardAvailable::True;
+}
+
+std::string PhysicalShardCollection::convertIDsToString(std::set<uint64_t> ids) {
+	std::string r = "";
+	for (auto id : ids) {
+		r = r + std::to_string(id) + " ";
+	}
+	return r;
+}
+
+void PhysicalShardCollection::updateTeamPhysicalShardIDsMap(uint64_t inputPhysicalShardID,
+                                                            std::vector<ShardsAffectedByTeamFailure::Team> inputTeams,
+                                                            uint64_t debugID) {
+	ASSERT(inputTeams.size() <= 2);
+	ASSERT(inputPhysicalShardID != anonymousShardId.first() && inputPhysicalShardID != UID().first());
+	for (auto inputTeam : inputTeams) {
+		if (teamPhysicalShardIDs.count(inputTeam) == 0) {
+			std::set<uint64_t> physicalShardIDSet;
+			physicalShardIDSet.insert(inputPhysicalShardID);
+			teamPhysicalShardIDs.insert(std::make_pair(inputTeam, physicalShardIDSet));
+		} else {
+			teamPhysicalShardIDs[inputTeam].insert(inputPhysicalShardID);
+		}
+	}
+	return;
+}
+
+void PhysicalShardCollection::insertPhysicalShardToCollection(uint64_t physicalShardID,
+                                                              StorageMetrics const& metrics,
+                                                              std::vector<ShardsAffectedByTeamFailure::Team> teams,
+                                                              uint64_t debugID,
+                                                              PhysicalShardCreationTime whenCreated) {
+	ASSERT(physicalShardID != anonymousShardId.first() && physicalShardID != UID().first());
+	ASSERT(physicalShardInstances.count(physicalShardID) == 0);
+	physicalShardInstances.insert(
+	    std::make_pair(physicalShardID, PhysicalShard(physicalShardID, metrics, teams, whenCreated)));
+	return;
+}
+
+void PhysicalShardCollection::updatekeyRangePhysicalShardIDMap(KeyRange keyRange,
+                                                               uint64_t physicalShardID,
+                                                               uint64_t debugID) {
+	ASSERT(physicalShardID != UID().first());
+	keyRangePhysicalShardIDMap.insert(keyRange, physicalShardID);
+	return;
+}
+
+// At beginning of the transition from the initial state without physical shard notion
+// to the physical shard aware state, the physicalShard set only contains one element which is anonymousShardId[0]
+// After a period in the transition, the physicalShard set of the team contains some meaningful physicalShardIDs
+Optional<uint64_t> PhysicalShardCollection::trySelectAvailablePhysicalShardFor(ShardsAffectedByTeamFailure::Team team,
+                                                                               StorageMetrics const& moveInMetrics,
+                                                                               uint64_t debugID) {
+	ASSERT(team.servers.size() > 0);
+	// Case: The team is not tracked in the mapping (teamPhysicalShardIDs)
+	if (teamPhysicalShardIDs.count(team) == 0) {
+		return Optional<uint64_t>();
+	}
+	ASSERT(teamPhysicalShardIDs[team].size() >= 1);
+	// Case: The team is tracked in the mapping and the system already has physical shard notion
+	// 		and the number of physicalShard is large
+	std::vector<uint64_t> availablePhysicalShardIDs;
+	for (auto physicalShardID : teamPhysicalShardIDs[team]) {
+		if (physicalShardID == anonymousShardId.first() || physicalShardID == UID().first()) {
+			ASSERT(false);
+		}
+		ASSERT(physicalShardInstances.count(physicalShardID));
+		/*TraceEvent("TryGetPhysicalShardIDCandidates")
+		    .detail("PhysicalShardID", physicalShardID)
+		    .detail("Bytes", physicalShardInstances[physicalShardID].metrics.bytes)
+		    .detail("BelongTeam", team.toString())
+		    .detail("DebugID", debugID);*/
+		if (!checkPhysicalShardAvailable(physicalShardID, moveInMetrics)) {
+			continue;
+		}
+		availablePhysicalShardIDs.push_back(physicalShardID);
+	}
+	if (availablePhysicalShardIDs.size() == 0) {
+		/*TraceEvent("TryGetPhysicalShardIDResultFailed")
+		    .detail("Reason", "no valid physicalShard")
+		    .detail("MoveInBytes", moveInMetrics.bytes)
+		    .detail("MaxPhysicalShardBytes", SERVER_KNOBS->MAX_PHYSICAL_SHARD_BYTES)
+		    .detail("DebugID", debugID);*/
+		return Optional<uint64_t>();
+	}
+	return deterministicRandom()->randomChoice(availablePhysicalShardIDs);
+}
+
+uint64_t PhysicalShardCollection::generateNewPhysicalShardID(uint64_t debugID) {
+	uint64_t physicalShardID = UID().first();
+	int stuckCount = 0;
+	while (physicalShardID == UID().first() || physicalShardID == anonymousShardId.first()) {
+		physicalShardID = deterministicRandom()->randomUInt64();
+		stuckCount = stuckCount + 1;
+		if (stuckCount > 50) {
+			ASSERT(false);
+		}
+	}
+	ASSERT(physicalShardID != UID().first() && physicalShardID != anonymousShardId.first());
+	//TraceEvent("GenerateNewPhysicalShardID").detail("PhysicalShardID", physicalShardID).detail("DebugID", debugID);
+	return physicalShardID;
+}
+
+void PhysicalShardCollection::reduceMetricsForMoveOut(uint64_t physicalShardID, StorageMetrics const& moveOutMetrics) {
+	ASSERT(physicalShardInstances.count(physicalShardID) != 0);
+	ASSERT(physicalShardID != UID().first() && physicalShardID != anonymousShardId.first());
+	physicalShardInstances[physicalShardID].metrics = physicalShardInstances[physicalShardID].metrics - moveOutMetrics;
+	return;
+}
+
+void PhysicalShardCollection::increaseMetricsForMoveIn(uint64_t physicalShardID, StorageMetrics const& moveInMetrics) {
+	ASSERT(physicalShardInstances.count(physicalShardID) != 0);
+	ASSERT(physicalShardID != UID().first() && physicalShardID != anonymousShardId.first());
+	physicalShardInstances[physicalShardID].metrics = physicalShardInstances[physicalShardID].metrics + moveInMetrics;
+	return;
+}
+
+void PhysicalShardCollection::updatePhysicalShardMetricsByKeyRange(KeyRange keyRange,
+                                                                   StorageMetrics const& newMetrics,
+                                                                   StorageMetrics const& oldMetrics,
+                                                                   bool initWithNewMetrics) {
+	auto ranges = keyRangePhysicalShardIDMap.intersectingRanges(keyRange);
+	std::set<uint64_t> physicalShardIDSet;
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		physicalShardIDSet.insert(it->value());
+	}
+	StorageMetrics delta;
+	if (initWithNewMetrics) {
+		delta = newMetrics;
+	} else {
+		delta = newMetrics - oldMetrics;
+	}
+	for (auto physicalShardID : physicalShardIDSet) {
+		ASSERT(physicalShardID != UID().first());
+		if (physicalShardID == anonymousShardId.first()) {
+			continue; // we ignore anonymousShard when updating physicalShard metrics
+		}
+		increaseMetricsForMoveIn(physicalShardID, (delta * (1.0 / physicalShardIDSet.size())));
+	}
+	return;
+}
+
+InAnonymousPhysicalShard PhysicalShardCollection::isInAnonymousPhysicalShard(KeyRange keyRange) {
+	InAnonymousPhysicalShard res = InAnonymousPhysicalShard::True;
+	auto ranges = keyRangePhysicalShardIDMap.intersectingRanges(keyRange);
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		uint64_t physicalShardID = it->value();
+		if (physicalShardID != anonymousShardId.first()) {
+			// res = false if exists a part of keyRange belongs to a non-anonymous physicalShard
+			// exist a case where some keyRange of anonymousShard is decided to move
+			// to a non-anonymous physicalShard but not completes
+			res = InAnonymousPhysicalShard::False;
+		}
+	}
+	return res;
+}
+
+// TODO: require optimize
+// It is slow to go through the keyRangePhysicalShardIDRanges for each time
+// Do we need a D/S to store the keyRange for each physicalShard?
+PhysicalShardHasMoreThanKeyRange PhysicalShardCollection::whetherPhysicalShardHasMoreThanKeyRange(
+    uint64_t physicalShardID,
+    KeyRange keyRange) {
+	KeyRangeMap<uint64_t>::Ranges keyRangePhysicalShardIDRanges = keyRangePhysicalShardIDMap.ranges();
+	KeyRangeMap<uint64_t>::iterator it = keyRangePhysicalShardIDRanges.begin();
+	for (; it != keyRangePhysicalShardIDRanges.end(); ++it) {
+		if (it->value() != physicalShardID) {
+			continue;
+		}
+		auto keyRangePiece = KeyRangeRef(it->range().begin, it->range().end);
+		if (!keyRange.intersects(keyRangePiece)) {
+			return PhysicalShardHasMoreThanKeyRange::True;
+		}
+		// if keyRange and keyRangePiece have intersection
+		if (!keyRange.contains(keyRangePiece)) {
+			return PhysicalShardHasMoreThanKeyRange::True;
+		}
+	}
+	return PhysicalShardHasMoreThanKeyRange::False;
+}
+
+InOverSizePhysicalShard PhysicalShardCollection::isInOverSizePhysicalShard(KeyRange keyRange) {
+	auto ranges = keyRangePhysicalShardIDMap.intersectingRanges(keyRange);
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		uint64_t physicalShardID = it->value();
+		ASSERT(physicalShardID != UID().first());
+		if (physicalShardID == anonymousShardId.first()) {
+			continue;
+		}
+		if (checkPhysicalShardAvailable(physicalShardID, StorageMetrics())) {
+			continue;
+		}
+		if (!whetherPhysicalShardHasMoreThanKeyRange(physicalShardID, keyRange)) {
+			continue;
+		}
+		return InOverSizePhysicalShard::True;
+	}
+	return InOverSizePhysicalShard::False;
+}
+
+uint64_t PhysicalShardCollection::determinePhysicalShardIDGivenPrimaryTeam(
+    ShardsAffectedByTeamFailure::Team primaryTeam,
+    StorageMetrics const& metrics,
+    bool forceToUseNewPhysicalShard,
+    uint64_t debugID) {
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
+	ASSERT(primaryTeam.primary == true);
+	if (forceToUseNewPhysicalShard) {
+		return generateNewPhysicalShardID(debugID);
+	}
+	Optional<uint64_t> physicalShardIDFetch = trySelectAvailablePhysicalShardFor(primaryTeam, metrics, debugID);
+	if (!physicalShardIDFetch.present()) {
+		return generateNewPhysicalShardID(debugID);
+	}
+	return physicalShardIDFetch.get();
+}
+
+// May return a problematic remote team
+Optional<ShardsAffectedByTeamFailure::Team> PhysicalShardCollection::tryGetAvailableRemoteTeamWith(
+    uint64_t inputPhysicalShardID,
+    StorageMetrics const& moveInMetrics,
+    uint64_t debugID) {
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
+	ASSERT(inputPhysicalShardID != anonymousShardId.first() && inputPhysicalShardID != UID().first());
+	if (physicalShardInstances.count(inputPhysicalShardID) == 0) {
+		return Optional<ShardsAffectedByTeamFailure::Team>();
+	}
+	if (!checkPhysicalShardAvailable(inputPhysicalShardID, moveInMetrics)) {
+		return Optional<ShardsAffectedByTeamFailure::Team>();
+	}
+	for (auto team : physicalShardInstances[inputPhysicalShardID].teams) {
+		if (team.primary == false) {
+			/*TraceEvent("TryGetRemoteTeamWith")
+			    .detail("PhysicalShardID", inputPhysicalShardID)
+			    .detail("Team", team.toString())
+			    .detail("TeamSize", team.servers.size())
+			    .detail("PhysicalShardsOfTeam", convertIDsToString(teamPhysicalShardIDs[team]))
+			    .detail("DebugID", debugID);*/
+			return team;
+		}
+	}
+	UNREACHABLE();
+}
+
+// The update of PhysicalShardToTeams, Collection, keyRangePhysicalShardIDMap should be atomic
+void PhysicalShardCollection::initPhysicalShardCollection(KeyRange keys,
+                                                          std::vector<ShardsAffectedByTeamFailure::Team> selectedTeams,
+                                                          uint64_t physicalShardID,
+                                                          uint64_t debugID) {
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
+	ASSERT(physicalShardID != UID().first());
+	if (physicalShardID != anonymousShardId.first()) {
+		updateTeamPhysicalShardIDsMap(physicalShardID, selectedTeams, debugID);
+		if (physicalShardInstances.count(physicalShardID) == 0) {
+			insertPhysicalShardToCollection(
+			    physicalShardID, StorageMetrics(), selectedTeams, debugID, PhysicalShardCreationTime::DDInit);
+		} else {
+			// This assertion will be broken if we enable the optimization of data move traffic between DCs
+			ASSERT(physicalShardInstances[physicalShardID].teams == selectedTeams);
+		}
+	} else {
+		// If any physicalShard restored when DD init is the anonymousShard,
+		// Then DD enters Transition state where DD graduatelly moves Shard (or KeyRange)
+		// out of the anonymousShard
+		setTransitionCheck();
+	}
+	updatekeyRangePhysicalShardIDMap(keys, physicalShardID, debugID);
+	return;
+}
+
+// The update of PhysicalShardToTeams, Collection, keyRangePhysicalShardIDMap should be atomic
+void PhysicalShardCollection::updatePhysicalShardCollection(
+    KeyRange keys,
+    bool isRestore,
+    std::vector<ShardsAffectedByTeamFailure::Team> selectedTeams,
+    uint64_t physicalShardID,
+    const StorageMetrics& metrics,
+    uint64_t debugID) {
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
+	ASSERT(physicalShardID != UID().first());
+	/*TraceEvent e("UpdatePhysicalShard");
+	e.detail("DebugID", debugID);
+	e.detail("KeyRange", keys);
+	e.detail("IsRestore", isRestore);*/
+	// When updates metrics in physicalShard collection, we assume:
+	// It is impossible to move a keyRange from anonymousShard to a valid physicalShard
+	// Thus, we ignore anonymousShard when updating metrics
+	if (physicalShardID != anonymousShardId.first()) {
+		updateTeamPhysicalShardIDsMap(physicalShardID, selectedTeams, debugID);
+		// Update physicalShardInstances
+		// Add the metrics to in-physicalShard
+		// e.detail("PhysicalShardIDIn", physicalShardID);
+		if (physicalShardInstances.count(physicalShardID) == 0) {
+			// e.detail("Op", "Insert");
+			insertPhysicalShardToCollection(
+			    physicalShardID, metrics, selectedTeams, debugID, PhysicalShardCreationTime::DDRelocator);
+		} else {
+			// e.detail("Op", "Update");
+			//  This assertion is true since we disable the optimization of data move traffic between DCs
+			ASSERT(physicalShardInstances[physicalShardID].teams == selectedTeams);
+			increaseMetricsForMoveIn(physicalShardID, metrics);
+		}
+	}
+	// Minus the metrics from the existing (multiple) out-physicalShard(s)
+	auto ranges = keyRangePhysicalShardIDMap.intersectingRanges(keys);
+	std::set<uint64_t> physicalShardIDSet;
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		physicalShardIDSet.insert(it->value());
+	}
+	/*std::string physicalShardIDOut = "";
+	for (auto id : physicalShardIDSet) {
+	    physicalShardIDOut = physicalShardIDOut + std::to_string(id) + " ";
+	}*/
+	// e.detail("PhysicalShardIDOut", physicalShardIDOut);
+	for (auto physicalShardID : physicalShardIDSet) { // imprecise: evenly move out bytes
+		if (physicalShardID == anonymousShardId.first()) {
+			continue; // we ignore anonymousShard when updating physicalShard metrics
+		}
+		StorageMetrics toReduceMetrics = metrics * (1.0 / physicalShardIDSet.size());
+		reduceMetricsForMoveOut(physicalShardID, toReduceMetrics);
+	}
+	// keyRangePhysicalShardIDMap must be update after updating the metrics of physicalShardInstances
+	updatekeyRangePhysicalShardIDMap(keys, physicalShardID, debugID);
+	return;
+}
+
+// return false if no need to move keyRange out of current physical shard
+MoveKeyRangeOutPhysicalShard PhysicalShardCollection::trackPhysicalShard(KeyRange keyRange,
+                                                                         StorageMetrics const& newMetrics,
+                                                                         StorageMetrics const& oldMetrics,
+                                                                         bool initWithNewMetrics) {
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
+	updatePhysicalShardMetricsByKeyRange(keyRange, newMetrics, oldMetrics, initWithNewMetrics);
+	if (requireTransitionCheck() &&
+	    now() - lastTransitionStartTime > SERVER_KNOBS->ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME) {
+		if (isInAnonymousPhysicalShard(keyRange)) {
+			// Currently, whenever a shard updates metrics, it checks whether is in AnonymousPhysicalShard
+			// If yes, and if the shard has been created for long time, then triggers a data move on the shard.
+			resetLastTransitionStartTime();
+			TraceEvent("PhysicalShardTiggerTransitionMove")
+			    .detail("KeyRange", keyRange)
+			    .detail("TransitionCoolDownTime", SERVER_KNOBS->ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME);
+			return MoveKeyRangeOutPhysicalShard::True;
+		}
+	}
+	if (isInOverSizePhysicalShard(keyRange)) {
+		return MoveKeyRangeOutPhysicalShard::True;
+	}
+	return MoveKeyRangeOutPhysicalShard::False;
+}
+
+// The update of PhysicalShardToTeams, PhysicalShardInstances, KeyRangePhysicalShardIDMap should be atomic
+void PhysicalShardCollection::cleanUpPhysicalShardCollection() {
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
+	std::set<uint64_t> physicalShardsInUse;
+	std::map<uint64_t, StorageMetrics> metricsReplies;
+	KeyRangeMap<uint64_t>::Ranges keyRangePhysicalShardIDRanges = keyRangePhysicalShardIDMap.ranges();
+	KeyRangeMap<uint64_t>::iterator it = keyRangePhysicalShardIDRanges.begin();
+	// Assume that once a physical shard is disappear in keyRangePhysicalShardIDMap,
+	// the physical shard (with the deleted id) should be deprecated.
+	// This function aims at clean up those deprecated physical shards in PhysicalShardCollection
+	// This function collects the physicalShard usage info from KeyRangePhysicalShardIDMap,
+	// then based on the info to update PhysicalShardToTeams and PhysicalShardInstances
+
+	// keyRangePhysicalShardIDMap indicates which physicalShard actually has data
+	// Step 1: Clear unused physicalShard in physicalShardInstances based on keyRangePhysicalShardIDMap
+	for (; it != keyRangePhysicalShardIDRanges.end(); ++it) {
+		uint64_t physicalShardID = it->value();
+		if (physicalShardID == anonymousShardId.first()) {
+			continue;
+		}
+		physicalShardsInUse.insert(physicalShardID);
+	}
+	for (auto it = physicalShardInstances.begin(); it != physicalShardInstances.end();) {
+		uint64_t physicalShardID = it->first;
+		ASSERT(physicalShardInstances.count(physicalShardID) > 0);
+		if (physicalShardsInUse.count(physicalShardID) == 0) {
+			/*TraceEvent("PhysicalShardisEmpty")
+			    .detail("PhysicalShard", physicalShardID)
+			    .detail("RemainBytes", physicalShardInstances[physicalShardID].metrics.bytes);*/
+			// "RemainBytes" indicates the deviation of current physical shard metric update
+			it = physicalShardInstances.erase(it);
+		} else {
+			it++;
+		}
+	}
+	// Step 2: Clean up teamPhysicalShardIDs
+	std::set<ShardsAffectedByTeamFailure::Team> toRemoveTeams;
+	for (auto [team, _] : teamPhysicalShardIDs) {
+		for (auto it = teamPhysicalShardIDs[team].begin(); it != teamPhysicalShardIDs[team].end();) {
+			uint64_t physicalShardID = *it;
+			if (physicalShardInstances.count(physicalShardID) == 0) {
+				// physicalShardID has been removed from physicalShardInstances (see step 1)
+				// So, remove the physicalShard from teamPhysicalShardID[team]
+				it = teamPhysicalShardIDs[team].erase(it);
+			} else {
+				it++;
+			}
+		}
+		if (teamPhysicalShardIDs[team].size() == 0) {
+			// If a team has no physicalShard, remove the team from teamPhysicalShardID
+			toRemoveTeams.insert(team);
+		}
+	}
+	for (auto team : toRemoveTeams) {
+		teamPhysicalShardIDs.erase(team);
+	}
+}
+
+void PhysicalShardCollection::logPhysicalShardCollection() {
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
+	// Step 1: Logging non-empty physicalShard
+	for (auto [physicalShardID, physicalShard] : physicalShardInstances) {
+		ASSERT(physicalShardID == physicalShard.id);
+		TraceEvent e("PhysicalShardStatus");
+		e.detail("PhysicalShardID", physicalShardID);
+		e.detail("TotalBytes", physicalShard.metrics.bytes);
+	}
+	// Step 2: Logging TeamPhysicalShardStatus
+	for (auto [team, physicalShardIDs] : teamPhysicalShardIDs) {
+		TraceEvent e("TeamPhysicalShardStatus");
+		e.detail("Team", team.toString());
+		// std::string metricsStr = "";
+		int64_t counter = 0;
+		int64_t totalBytes = 0;
+		int64_t maxPhysicalShardBytes = -1;
+		int64_t minPhysicalShardBytes = StorageMetrics::infinity;
+		uint64_t maxPhysicalShardID = 0;
+		uint64_t minPhysicalShardID = 0;
+		for (auto physicalShardID : physicalShardIDs) {
+			ASSERT(physicalShardInstances.count(physicalShardID) > 0);
+			uint64_t id = physicalShardInstances[physicalShardID].id;
+			int64_t bytes = physicalShardInstances[physicalShardID].metrics.bytes;
+			if (bytes > maxPhysicalShardBytes) {
+				maxPhysicalShardBytes = bytes;
+				maxPhysicalShardID = id;
+			}
+			if (bytes < minPhysicalShardBytes) {
+				minPhysicalShardBytes = bytes;
+				minPhysicalShardID = id;
+			}
+			totalBytes = totalBytes + bytes;
+			/* metricsStr = metricsStr + std::to_string(id) + ":" + std::to_string(bytes);
+			if (counter < physicalShardIDs.size() - 1) {
+			    metricsStr = metricsStr + ",";
+			} */
+			counter = counter + 1;
+		}
+		// e.detail("Metrics", metricsStr);
+		e.detail("TotalBytes", totalBytes);
+		e.detail("NumPhysicalShards", counter);
+		e.detail("MaxPhysicalShard", std::to_string(maxPhysicalShardID) + ":" + std::to_string(maxPhysicalShardBytes));
+		e.detail("MinPhysicalShard", std::to_string(minPhysicalShardID) + ":" + std::to_string(minPhysicalShardBytes));
+	}
+	// Step 3: Logging StorageServerPhysicalShardStatus
+	std::map<UID, std::map<uint64_t, int64_t>> storageServerPhysicalShardStatus;
+	for (auto [team, _] : teamPhysicalShardIDs) {
+		for (auto ssid : team.servers) {
+			for (auto it = teamPhysicalShardIDs[team].begin(); it != teamPhysicalShardIDs[team].end();) {
+				uint64_t physicalShardID = *it;
+				if (storageServerPhysicalShardStatus.count(ssid) != 0) {
+					if (storageServerPhysicalShardStatus[ssid].count(physicalShardID) == 0) {
+						ASSERT(physicalShardInstances.count(physicalShardID) > 0);
+						storageServerPhysicalShardStatus[ssid].insert(
+						    std::make_pair(physicalShardID, physicalShardInstances[physicalShardID].metrics.bytes));
+					}
+				} else {
+					ASSERT(physicalShardInstances.count(physicalShardID) > 0);
+					std::map<uint64_t, int64_t> tmp;
+					tmp.insert(std::make_pair(physicalShardID, physicalShardInstances[physicalShardID].metrics.bytes));
+					storageServerPhysicalShardStatus.insert(std::make_pair(ssid, tmp));
+				}
+				it++;
+			}
+		}
+	}
+	for (auto [serverID, physicalShardMetrics] : storageServerPhysicalShardStatus) {
+		TraceEvent e("ServerPhysicalShardStatus");
+		e.detail("Server", serverID);
+		e.detail("NumPhysicalShards", physicalShardMetrics.size());
+		int64_t totalBytes = 0;
+		int64_t maxPhysicalShardBytes = -1;
+		int64_t minPhysicalShardBytes = StorageMetrics::infinity;
+		uint64_t maxPhysicalShardID = 0;
+		uint64_t minPhysicalShardID = 0;
+		// std::string metricsStr = "";
+		// int64_t counter = 0;
+		for (auto [physicalShardID, bytes] : physicalShardMetrics) {
+			totalBytes = totalBytes + bytes;
+			if (bytes > maxPhysicalShardBytes) {
+				maxPhysicalShardBytes = bytes;
+				maxPhysicalShardID = physicalShardID;
+			}
+			if (bytes < minPhysicalShardBytes) {
+				minPhysicalShardBytes = bytes;
+				minPhysicalShardID = physicalShardID;
+			}
+			/* metricsStr = metricsStr + std::to_string(physicalShardID) + ":" + std::to_string(bytes);
+			if (counter < physicalShardMetrics.size() - 1) {
+			        metricsStr = metricsStr + ",";
+			}
+			counter = counter + 1; */
+		}
+		e.detail("TotalBytes", totalBytes);
+		e.detail("MaxPhysicalShard", std::to_string(maxPhysicalShardID) + ":" + std::to_string(maxPhysicalShardBytes));
+		e.detail("MinPhysicalShard", std::to_string(minPhysicalShardID) + ":" + std::to_string(minPhysicalShardBytes));
+	}
+}
