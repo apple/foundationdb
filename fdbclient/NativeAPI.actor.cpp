@@ -8639,6 +8639,7 @@ ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, Chan
 	loop {
 		if (self->version.get() < self->desired.get()) {
 			wait(delay(CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME) || self->version.whenAtLeast(self->desired.get()));
+		}
 			if (self->version.get() < self->desired.get()) {
 				try {
 					ChangeFeedVersionUpdateReply rep = wait(brokenPromiseToNever(
@@ -8649,8 +8650,7 @@ ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, Chan
 				} catch (Error& e) {
 					if (e.code() == error_code_server_overloaded) {
 						if (FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY > CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME) {
-							wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY -
-							           CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME));
+						wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY - CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME));
 						}
 					}
 				}

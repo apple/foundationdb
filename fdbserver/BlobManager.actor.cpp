@@ -921,14 +921,19 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 		if (e.code() == error_code_blob_worker_full) {
 			CODE_PROBE(true, "blob worker too full");
 			ASSERT(assignment.isAssign);
+			try {
 			if (assignment.previousFailure.present() &&
 			    assignment.previousFailure.get().second.code() == error_code_blob_worker_full) {
-				// if previous assignment also failed due to blob_worker_full, multiple workers are full, so wait even
-				// longer
+					// if previous assignment also failed due to blob_worker_full, multiple workers are full, so wait
+					// even longer
 				CODE_PROBE(true, "multiple blob workers too full");
 				wait(delayJittered(10.0));
 			} else {
 				wait(delayJittered(1.0)); // wait a bit before retrying
+			}
+			} catch (Error& e) {
+				--bmData->stats.blockedAssignments;
+				throw;
 			}
 		}
 
