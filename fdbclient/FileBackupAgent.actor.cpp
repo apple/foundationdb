@@ -974,6 +974,8 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
 			decodeKVPairs(&reader, &results);
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
+			// TODO (Nim): Remove once all work is finished, currently codepath should not trigger
+			ASSERT(false);
 			// Get cipher keys
 			SnapshotFileBackupCipherKeysCtx cipherKeyCtx = getCipherKeyCtx(arena);
 			// decode options struct
@@ -1676,11 +1678,13 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 				// Initialize range file writer and write begin key
 				if (Params.encryptionEnabled().get(task)) {
+					// TODO (Nim): Remove once all work is finished, currently codepath should not trigger
+					ASSERT(false);
 					previousTenantId.reset();
 					SnapshotFileBackupCipherKeysCtx cipherKeysCtx = getCipherKeyCtx(arena);
 					rangeFile = std::make_unique<EncryptedRangeFileWriter>(cipherKeysCtx, outFile, blockSize);
 				} else {
-					rangeFile = std::make_unique<RangeFileWriter>();
+					rangeFile = std::make_unique<RangeFileWriter>(outFile, blockSize);
 				}
 				wait(rangeFile->writeKey(beginKey));
 			}
@@ -1689,9 +1693,8 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 			if (values.first.size() != 0) {
 				state size_t i = 0;
 				for (; i < values.first.size(); ++i) {
-					// TODO (Nim): Remove this false check when the param is actually reliable
 					// TODO (Nim): Support backing up system keys
-					if (Params.encryptionEnabled().get(task) && false) {
+					if (Params.encryptionEnabled().get(task)) {
 						// get the current tenant prefix (first 8 bytes of key)
 						KeyRef tenantPrefix = KeyRef(values.first[i].key.begin(), 8);
 						state int64_t curTenantId = TenantMapEntry::prefixToId(tenantPrefix);
@@ -1809,7 +1812,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 	                     Reference<FutureBucket> fb,
 	                     Reference<Task> task) override {
 		// TODO (Nim): Set proper value for this
-		Params.encryptionEnabled().set(task, true);
+		Params.encryptionEnabled().set(task, false);
 		return _execute(cx, tb, fb, task);
 	};
 	Future<Void> finish(Reference<ReadYourWritesTransaction> tr,
