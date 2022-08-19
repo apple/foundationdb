@@ -31,6 +31,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TenantManagement.actor.h"
+#include "fdbclient/Tuple.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/BlobGranuleValidation.actor.h"
 #include "fdbserver/Knobs.h"
@@ -43,6 +44,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define BGW_DEBUG true
+#define BGW_TUPLE_KEY_SIZE 2
 
 struct WriteData {
 	Version writeVersion;
@@ -111,7 +113,7 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 
 		nextKeySequential = deterministicRandom()->random01() < 0.5;
 		reuseKeyProb = 0.1 + (deterministicRandom()->random01() * 0.8);
-		targetIDsPerKey = 1 + deterministicRandom()->randomInt(1, 10);
+		targetIDsPerKey = 1 + deterministicRandom()->randomInt(10, 100);
 
 		if (BGW_DEBUG) {
 			fmt::print("Directory {0} initialized with the following parameters:\n", directoryID);
@@ -124,7 +126,38 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 	}
 
 	// TODO could make keys variable length?
-	Key getKey(uint32_t key, uint32_t id) { return StringRef(format("%08x/%08x", key, id)); }
+	Key getKey(uint32_t key, uint32_t id) { return Tuple().append((int64_t)key).append((int64_t)id).pack(); }
+
+	void validateGranuleBoundary(Key k, Key e, Key lastKey) {
+		if (k == allKeys.begin || k == allKeys.end) {
+			return;
+		}
+
+		// Fully formed tuples are inserted. The expectation is boundaries should be a
+		// sub-tuple of the inserted key.
+		Tuple t = Tuple::unpack(k, true);
+		if (SERVER_KNOBS->BG_KEY_TUPLE_TRUNCATE_OFFSET) {
+			Tuple t2;
+			try {
+				t2 = Tuple::unpack(lastKey);
+			} catch (Error& e) {
+				// Ignore being unable to parse lastKey as it may be a dummy key.
+			}
+
+			if (t2.size() > 0 && t.getInt(0) != t2.getInt(0)) {
+				if (t.size() > BGW_TUPLE_KEY_SIZE - SERVER_KNOBS->BG_KEY_TUPLE_TRUNCATE_OFFSET) {
+					fmt::print("Tenant: {0}, K={1}, E={2}, LK={3}. {4} != {5}\n",
+					           tenant.prefix.printable(),
+					           k.printable(),
+					           e.printable(),
+					           lastKey.printable(),
+					           t.getInt(0),
+					           t2.getInt(0));
+				}
+				ASSERT(t.size() <= BGW_TUPLE_KEY_SIZE - SERVER_KNOBS->BG_KEY_TUPLE_TRUNCATE_OFFSET);
+			}
+		}
+	}
 };
 
 // For debugging mismatches on what data should be and why
@@ -212,13 +245,15 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			fmt::print("Setting up blob granule range for tenant {0}\n", name.printable());
 		}
 
-		TenantMapEntry entry = wait(TenantAPI::createTenant(cx.getReference(), name));
+		Optional<TenantMapEntry> entry = wait(TenantAPI::createTenant(cx.getReference(), name));
+		ASSERT(entry.present());
 
 		if (BGW_DEBUG) {
-			fmt::print("Set up blob granule range for tenant {0}: {1}\n", name.printable(), entry.prefix.printable());
+			fmt::print(
+			    "Set up blob granule range for tenant {0}: {1}\n", name.printable(), entry.get().prefix.printable());
 		}
 
-		return entry;
+		return entry.get();
 	}
 
 	std::string description() const override { return "BlobGranuleCorrectnessWorkload"; }
@@ -245,6 +280,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			self->directories[directoryIdx]->directoryRange =
 			    KeyRangeRef(tenantEntry.prefix, tenantEntry.prefix.withSuffix(normalKeys.end));
 			tenants.push_back({ self->directories[directoryIdx]->tenantName, tenantEntry });
+			bool _success = wait(cx->blobbifyRange(self->directories[directoryIdx]->directoryRange));
+			ASSERT(_success);
 		}
 		tenantData.addTenants(tenants);
 
@@ -435,18 +472,20 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		beginVersionByChunk.insert(normalKeys, 0);
 		int beginCollapsed = 0;
 		int beginNotCollapsed = 0;
+		Key lastBeginKey = LiteralStringRef("");
 		for (auto& chunk : blob.second) {
+			KeyRange beginVersionRange;
+			if (chunk.tenantPrefix.present()) {
+				beginVersionRange = KeyRangeRef(chunk.keyRange.begin.removePrefix(chunk.tenantPrefix.get()),
+				                                chunk.keyRange.end.removePrefix(chunk.tenantPrefix.get()));
+			} else {
+				beginVersionRange = chunk.keyRange;
+			}
+
 			if (!chunk.snapshotFile.present()) {
 				ASSERT(beginVersion > 0);
 				ASSERT(chunk.snapshotVersion == invalidVersion);
 				beginCollapsed++;
-				KeyRange beginVersionRange;
-				if (chunk.tenantPrefix.present()) {
-					beginVersionRange = KeyRangeRef(chunk.keyRange.begin.removePrefix(chunk.tenantPrefix.get()),
-					                                chunk.keyRange.end.removePrefix(chunk.tenantPrefix.get()));
-				} else {
-					beginVersionRange = chunk.keyRange;
-				}
 
 				beginVersionByChunk.insert(beginVersionRange, beginVersion);
 			} else {
@@ -455,6 +494,10 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 					beginNotCollapsed++;
 				}
 			}
+
+			// Validate boundary alignment.
+			threadData->validateGranuleBoundary(beginVersionRange.begin, beginVersionRange.end, lastBeginKey);
+			lastBeginKey = beginVersionRange.begin;
 		}
 		CODE_PROBE(beginCollapsed > 0, "BGCorrectness got collapsed request with beginVersion > 0");
 		CODE_PROBE(beginNotCollapsed > 0, "BGCorrectness got un-collapsed request with beginVersion > 0");
@@ -858,8 +901,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		loop {
 			state Transaction tr(cx, threadData->tenantName);
 			try {
-				Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(normalKeys));
-				ASSERT(ranges.size() >= 1);
+				Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(normalKeys, 1000000));
+				ASSERT(ranges.size() >= 1 && ranges.size() < 1000000);
 				ASSERT(ranges.front().begin == normalKeys.begin);
 				ASSERT(ranges.back().end == normalKeys.end);
 				for (int i = 0; i < ranges.size() - 1; i++) {

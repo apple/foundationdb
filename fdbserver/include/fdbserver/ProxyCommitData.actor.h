@@ -19,6 +19,7 @@
  */
 
 #pragma once
+#include "fdbserver/EncryptionOpsUtils.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H)
 #define FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H
 #include "fdbserver/ProxyCommitData.actor.g.h"
@@ -231,6 +232,8 @@ struct ProxyCommitData {
 	double lastResolverReset;
 	int localTLogCount = -1;
 
+	bool isEncryptionEnabled = false;
+
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to
 	// signify they must be repopulated. We do not repopulate them immediately to avoid a slow task.
@@ -299,7 +302,8 @@ struct ProxyCommitData {
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
 	    singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), lastTxsPop(0), popRemoteTxs(false),
 	    lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0),
-	    lastMasterReset(now()), lastResolverReset(now()) {
+	    lastMasterReset(now()), lastResolverReset(now()),
+	    isEncryptionEnabled(isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, db->get().client)) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 };

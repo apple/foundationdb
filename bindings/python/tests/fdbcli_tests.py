@@ -561,6 +561,7 @@ def profile(logger):
     assert output2 == default_profile_client_get_output
     # set rate and size limit
     run_fdbcli_command('profile', 'client', 'set', '0.5', '1GB')
+    time.sleep(1) # global config can take some time to sync
     output3 = run_fdbcli_command('profile', 'client', 'get')
     logger.debug(output3)
     output3_list = output3.split(' ')
@@ -569,6 +570,7 @@ def profile(logger):
     assert output3_list[-1] == '1000000000.'
     # change back to default value and check
     run_fdbcli_command('profile', 'client', 'set', 'default', 'default')
+    time.sleep(1) # global config can take some time to sync
     assert run_fdbcli_command('profile', 'client', 'get') == default_profile_client_get_output
 
 
@@ -599,7 +601,7 @@ def tenants(logger):
     output = run_fdbcli_command('createtenant tenant')
     assert output == 'The tenant `tenant\' has been created'
 
-    output = run_fdbcli_command('createtenant tenant2')
+    output = run_fdbcli_command('createtenant tenant2 tenant_group=tenant_group2')
     assert output == 'The tenant `tenant2\' has been created'
 
     output = run_fdbcli_command('listtenants')
@@ -616,21 +618,77 @@ def tenants(logger):
 
     output = run_fdbcli_command('gettenant tenant')
     lines = output.split('\n')
-    assert len(lines) == 2
+    assert len(lines) == 3
     assert lines[0].strip().startswith('id: ')
     assert lines[1].strip().startswith('prefix: ')
+    assert lines[2].strip() == 'tenant state: ready'
 
     output = run_fdbcli_command('gettenant tenant JSON')
     json_output = json.loads(output, strict=False)
     assert(len(json_output) == 2)
     assert('tenant' in json_output)
     assert(json_output['type'] == 'success')
-    assert(len(json_output['tenant']) == 2)
+    assert(len(json_output['tenant']) == 4)
     assert('id' in json_output['tenant'])
+    assert('encrypted' in json_output['tenant'])
     assert('prefix' in json_output['tenant'])
     assert(len(json_output['tenant']['prefix']) == 2)
     assert('base64' in json_output['tenant']['prefix'])
     assert('printable' in json_output['tenant']['prefix'])
+    assert(json_output['tenant']['tenant_state'] == 'ready')
+
+    output = run_fdbcli_command('gettenant tenant2')
+    lines = output.split('\n')
+    assert len(lines) == 4
+    assert lines[0].strip().startswith('id: ')
+    assert lines[1].strip().startswith('prefix: ')
+    assert lines[2].strip() == 'tenant state: ready'
+    assert lines[3].strip() == 'tenant group: tenant_group2'
+
+    output = run_fdbcli_command('gettenant tenant2 JSON')
+    json_output = json.loads(output, strict=False)
+    assert(len(json_output) == 2)
+    assert('tenant' in json_output)
+    assert(json_output['type'] == 'success')
+    assert(len(json_output['tenant']) == 5)
+    assert('id' in json_output['tenant'])
+    assert('encrypted' in json_output['tenant'])
+    assert('prefix' in json_output['tenant'])
+    assert(json_output['tenant']['tenant_state'] == 'ready')
+    assert('tenant_group' in json_output['tenant'])
+    assert(len(json_output['tenant']['tenant_group']) == 2)
+    assert('base64' in json_output['tenant']['tenant_group'])
+    assert(json_output['tenant']['tenant_group']['printable'] == 'tenant_group2')
+
+    output = run_fdbcli_command('configuretenant tenant tenant_group=tenant_group1')
+    assert output == 'The configuration for tenant `tenant\' has been updated'
+
+    output = run_fdbcli_command('gettenant tenant')
+    lines = output.split('\n')
+    assert len(lines) == 4
+    assert lines[3].strip() == 'tenant group: tenant_group1'
+
+    output = run_fdbcli_command('configuretenant tenant unset tenant_group')
+    assert output == 'The configuration for tenant `tenant\' has been updated'
+
+    output = run_fdbcli_command('gettenant tenant')
+    lines = output.split('\n')
+    assert len(lines) == 3
+
+    output = run_fdbcli_command_and_get_error('configuretenant tenant tenant_group=tenant_group1 tenant_group=tenant_group2')
+    assert output == 'ERROR: configuration parameter `tenant_group\' specified more than once.'
+
+    output = run_fdbcli_command_and_get_error('configuretenant tenant unset')
+    assert output == 'ERROR: `unset\' specified without a configuration parameter.'
+
+    output = run_fdbcli_command_and_get_error('configuretenant tenant unset tenant_group=tenant_group1')
+    assert output == 'ERROR: unrecognized configuration parameter `tenant_group=tenant_group1\'.'
+
+    output = run_fdbcli_command_and_get_error('configuretenant tenant tenant_group')
+    assert output == 'ERROR: invalid configuration string `tenant_group\'. String must specify a value using `=\'.'
+
+    output = run_fdbcli_command_and_get_error('configuretenant tenant3 tenant_group=tenant_group1')
+    assert output == 'ERROR: Tenant does not exist (2131)'
 
     output = run_fdbcli_command('usetenant')
     assert output == 'Using the default tenant'

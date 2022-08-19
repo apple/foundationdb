@@ -349,7 +349,7 @@ class DDTxnProcessorImpl {
 		// a dummy shard at the end with no keys or servers makes life easier for trackInitialShards()
 		result->shards.push_back(DDShardInfo(allKeys.end));
 
-		if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && numDataMoves > 0) {
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && numDataMoves > 0) {
 			for (int shard = 0; shard < result->shards.size() - 1; ++shard) {
 				const DDShardInfo& iShard = result->shards[shard];
 				KeyRangeRef keys = KeyRangeRef(iShard.key, result->shards[shard + 1].key);
@@ -395,6 +395,21 @@ class DDTxnProcessorImpl {
 			}
 		}
 	}
+
+	ACTOR static Future<Void> pollMoveKeysLock(Database cx, MoveKeysLock lock, const DDEnabledState* ddEnabledState) {
+		loop {
+			wait(delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY));
+			state Transaction tr(cx);
+			loop {
+				try {
+					wait(checkMoveKeysLockReadOnly(&tr, lock, ddEnabledState));
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+		}
+	}
 };
 
 Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(const KeyRangeRef range) {
@@ -430,4 +445,8 @@ Future<Reference<InitialDataDistribution>> DDTxnProcessor::getInitialDataDistrib
 
 Future<Void> DDTxnProcessor::waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const {
 	return DDTxnProcessorImpl::waitForDataDistributionEnabled(cx, ddEnabledState);
+}
+
+Future<Void> DDTxnProcessor::pollMoveKeysLock(MoveKeysLock lock, const DDEnabledState* ddEnabledState) const {
+	return DDTxnProcessorImpl::pollMoveKeysLock(cx, lock, ddEnabledState);
 }

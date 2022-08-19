@@ -21,6 +21,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/DDSharedContext.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/DatabaseContext.h"
 #include "flow/ActorCollection.h"
@@ -68,10 +69,10 @@ ACTOR Future<Void> updateMaxShardSize(Reference<AsyncVar<int64_t>> dbSizeEstimat
 	}
 }
 
-struct DataDistributionTracker {
+struct DataDistributionTracker : public IDDShardTracker {
 	Database cx;
 	UID distributorId;
-	KeyRangeMap<ShardTrackedData>& shards;
+	KeyRangeMap<ShardTrackedData>* shards;
 	ActorCollection sizeChanges;
 
 	int64_t systemSizeEstimate;
@@ -92,7 +93,7 @@ struct DataDistributionTracker {
 	// The reference to trackerCancelled must be extracted by actors,
 	// because by the time (trackerCancelled == true) this memory cannot
 	// be accessed
-	bool& trackerCancelled;
+	bool* trackerCancelled;
 
 	// This class extracts the trackerCancelled reference from a DataDistributionTracker object
 	// Because some actors spawned by the dataDistributionTracker outlive the DataDistributionTracker
@@ -104,7 +105,7 @@ struct DataDistributionTracker {
 
 	public:
 		SafeAccessor(DataDistributionTracker* tracker)
-		  : trackerCancelled(tracker->trackerCancelled), tracker(*tracker) {
+		  : trackerCancelled(*tracker->trackerCancelled), tracker(*tracker) {
 			ASSERT(!trackerCancelled);
 		}
 
@@ -123,18 +124,20 @@ struct DataDistributionTracker {
 	                        PromiseStream<RelocateShard> const& output,
 	                        Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
 	                        Reference<AsyncVar<bool>> anyZeroHealthyTeams,
-	                        KeyRangeMap<ShardTrackedData>& shards,
-	                        bool& trackerCancelled)
-	  : cx(cx), distributorId(distributorId), shards(shards), sizeChanges(false), systemSizeEstimate(0),
-	    dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()), output(output),
-	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), readyToStart(readyToStart),
+	                        KeyRangeMap<ShardTrackedData>* shards,
+	                        bool* trackerCancelled)
+	  : IDDShardTracker(), cx(cx), distributorId(distributorId), shards(shards), sizeChanges(false),
+	    systemSizeEstimate(0), dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()),
+	    output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), readyToStart(readyToStart),
 	    anyZeroHealthyTeams(anyZeroHealthyTeams), trackerCancelled(trackerCancelled) {}
 
-	~DataDistributionTracker() {
-		trackerCancelled = true;
+	~DataDistributionTracker() override {
+		*trackerCancelled = true;
 		// Cancel all actors so they aren't waiting on sizeChanged broken promise
 		sizeChanges.clear(false);
 	}
+
+	double getAverageShardBytes() override { return maxShardSize->get().get() / 2.0; }
 };
 
 void restartShardTrackers(DataDistributionTracker* self,
@@ -399,7 +402,7 @@ ACTOR Future<int64_t> getFirstSize(Reference<AsyncVar<Optional<ShardMetrics>>> s
 ACTOR Future<Void> changeSizes(DataDistributionTracker* self, KeyRange keys, int64_t oldShardsEndingSize) {
 	state std::vector<Future<int64_t>> sizes;
 	state std::vector<Future<int64_t>> systemSizes;
-	for (auto it : self->shards.intersectingRanges(keys)) {
+	for (auto it : self->shards->intersectingRanges(keys)) {
 		Future<int64_t> thisSize = getFirstSize(it->value().stats);
 		sizes.push_back(thisSize);
 		if (it->range().begin >= systemKeys.begin) {
@@ -477,7 +480,8 @@ private:
 ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
                                  KeyRange keys,
                                  Reference<AsyncVar<Optional<ShardMetrics>>> shardSize,
-                                 ShardSizeBounds shardBounds) {
+                                 ShardSizeBounds shardBounds,
+                                 RelocateReason reason) {
 	state StorageMetrics metrics = shardSize->get().get().metrics;
 	state BandwidthStatus bandwidthStatus = getBandwidthStatus(metrics);
 
@@ -524,12 +528,12 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 		for (int i = 0; i < skipRange; i++) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD, RelocateReason::OTHER));
+			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, reason));
 		}
 		for (int i = numShards - 1; i > skipRange; i--) {
 			KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 			self->shardsAffectedByTeamFailure->defineShard(r);
-			self->output.send(RelocateShard(r, SERVER_KNOBS->PRIORITY_SPLIT_SHARD, RelocateReason::OTHER));
+			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, reason));
 		}
 
 		self->sizeChanges.add(changeSizes(self, keys, shardSize->get().get().metrics.bytes));
@@ -556,8 +560,8 @@ Future<Void> shardMerger(DataDistributionTracker* self,
                          Reference<AsyncVar<Optional<ShardMetrics>>> shardSize) {
 	int64_t maxShardSize = self->maxShardSize->get().get();
 
-	auto prevIter = self->shards.rangeContaining(keys.begin);
-	auto nextIter = self->shards.rangeContaining(keys.begin);
+	auto prevIter = self->shards->rangeContaining(keys.begin);
+	auto nextIter = self->shards->rangeContaining(keys.begin);
 
 	CODE_PROBE(true, "shard to be merged");
 	ASSERT(keys.begin > allKeys.begin);
@@ -675,7 +679,7 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 	}
 	restartShardTrackers(self, mergeRange, ShardMetrics(endingStats, lastLowBandwidthStartTime, shardCount));
 	self->shardsAffectedByTeamFailure->defineShard(mergeRange);
-	self->output.send(RelocateShard(mergeRange, SERVER_KNOBS->PRIORITY_MERGE_SHARD, RelocateReason::OTHER));
+	self->output.send(RelocateShard(mergeRange, DataMovementReason::MERGE_SHARD, RelocateReason::MERGE_SHARD));
 
 	// We are about to be cancelled by the call to restartShardTrackers
 	return Void();
@@ -693,9 +697,9 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	ShardSizeBounds shardBounds = getShardSizeBounds(keys, self->maxShardSize->get().get());
 	StorageMetrics const& stats = shardSize->get().get().metrics;
 	auto bandwidthStatus = getBandwidthStatus(stats);
-
-	bool shouldSplit = stats.bytes > shardBounds.max.bytes ||
-	                   (bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin);
+	bool sizeSplit = stats.bytes > shardBounds.max.bytes,
+	     writeSplit = bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin;
+	bool shouldSplit = sizeSplit || writeSplit;
 	bool shouldMerge = stats.bytes < shardBounds.min.bytes && bandwidthStatus == BandwidthStatusLow;
 
 	// Every invocation must set this or clear it
@@ -721,14 +725,14 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	//     .detail("ShardBoundsMaxBytes", shardBounds.max.bytes)
 	//     .detail("ShardBoundsMinBytes", shardBounds.min.bytes)
 	//     .detail("WriteBandwitdhStatus", bandwidthStatus)
-	//     .detail("SplitBecauseHighWriteBandWidth",
-	//             (bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin) ? "Yes" : "No");
+	//     .detail("SplitBecauseHighWriteBandWidth", writeSplit ? "Yes" : "No");
 
 	if (!self->anyZeroHealthyTeams->get() && wantsToMerge->hasBeenTrueForLongEnough()) {
 		onChange = onChange || shardMerger(self, keys, shardSize);
 	}
 	if (shouldSplit) {
-		onChange = onChange || shardSplitter(self, keys, shardSize, shardBounds);
+		RelocateReason reason = writeSplit ? RelocateReason::WRITE_SPLIT : RelocateReason::SIZE_SPLIT;
+		onChange = onChange || shardSplitter(self, keys, shardSize, shardBounds, reason);
 	}
 
 	wait(onChange);
@@ -778,7 +782,7 @@ ACTOR Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self,
 }
 
 void restartShardTrackers(DataDistributionTracker* self, KeyRangeRef keys, Optional<ShardMetrics> startingMetrics) {
-	auto ranges = self->shards.getAffectedRangesAfterInsertion(keys, ShardTrackedData());
+	auto ranges = self->shards->getAffectedRangesAfterInsertion(keys, ShardTrackedData());
 	for (int i = 0; i < ranges.size(); i++) {
 		if (!ranges[i].value.trackShard.isValid() && ranges[i].begin != keys.begin) {
 			// When starting, key space will be full of "dummy" default contructed entries.
@@ -805,7 +809,7 @@ void restartShardTrackers(DataDistributionTracker* self, KeyRangeRef keys, Optio
 		data.stats = shardMetrics;
 		data.trackShard = shardTracker(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics);
 		data.trackBytes = trackShardMetrics(DataDistributionTracker::SafeAccessor(self), ranges[i], shardMetrics);
-		self->shards.insert(ranges[i], data);
+		self->shards->insert(ranges[i], data);
 	}
 }
 
@@ -831,9 +835,8 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 }
 
 ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, GetTopKMetricsRequest req) {
-	ASSERT(req.comparator);
 	state Future<Void> onChange;
-	state std::vector<StorageMetrics> returnMetrics;
+	state std::vector<GetTopKMetricsReply::KeyRangeStorageMetrics> returnMetrics;
 	// random pick a portion of shard
 	if (req.keys.size() > SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT) {
 		deterministicRandom()->randomShuffle(req.keys, SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT);
@@ -848,7 +851,7 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 			for (i = 0; i < SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT && i < req.keys.size(); ++i) {
 				auto range = req.keys[i];
 				StorageMetrics metrics;
-				for (auto t : self->shards.intersectingRanges(range)) {
+				for (auto t : self->shards->intersectingRanges(range)) {
 					auto& stats = t.value().stats;
 					if (!stats->get().present()) {
 						onChange = stats->onChange();
@@ -867,8 +870,7 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 					maxReadLoad = std::max(metrics.bytesReadPerKSecond, maxReadLoad);
 					if (req.minBytesReadPerKSecond <= metrics.bytesReadPerKSecond &&
 					    metrics.bytesReadPerKSecond <= req.maxBytesReadPerKSecond) {
-						metrics.keys = range;
-						returnMetrics.push_back(metrics);
+						returnMetrics.emplace_back(range, metrics);
 					}
 				}
 
@@ -882,11 +884,11 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 					std::nth_element(returnMetrics.begin(),
 					                 returnMetrics.begin() + req.topK - 1,
 					                 returnMetrics.end(),
-					                 req.comparator);
-					req.reply.send(GetTopKMetricsReply(
-					    std::vector<StorageMetrics>(returnMetrics.begin(), returnMetrics.begin() + req.topK),
-					    minReadLoad,
-					    maxReadLoad));
+					                 GetTopKMetricsRequest::compare);
+					req.reply.send(GetTopKMetricsReply(std::vector<GetTopKMetricsReply::KeyRangeStorageMetrics>(
+					                                       returnMetrics.begin(), returnMetrics.begin() + req.topK),
+					                                   minReadLoad,
+					                                   maxReadLoad));
 				}
 				return Void();
 			}
@@ -915,7 +917,7 @@ ACTOR Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetr
 		loop {
 			Future<Void> onChange;
 			StorageMetrics returnMetrics;
-			for (auto t : self->shards.intersectingRanges(req.keys)) {
+			for (auto t : self->shards->intersectingRanges(req.keys)) {
 				auto& stats = t.value().stats;
 				if (!stats->get().present()) {
 					onChange = stats->onChange();
@@ -959,8 +961,8 @@ ACTOR Future<Void> fetchShardMetricsList_impl(DataDistributionTracker* self, Get
 			// list of metrics, regenerate on loop when full range unsuccessful
 			Standalone<VectorRef<DDMetricsRef>> result;
 			Future<Void> onChange;
-			auto beginIter = self->shards.containedRanges(req.keys).begin();
-			auto endIter = self->shards.intersectingRanges(req.keys).end();
+			auto beginIter = self->shards->containedRanges(req.keys).begin();
+			auto endIter = self->shards->intersectingRanges(req.keys).end();
 			for (auto t = beginIter; t != endIter; ++t) {
 				auto& stats = t.value().stats;
 				if (!stats->get().present()) {
@@ -1016,8 +1018,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	                                   output,
 	                                   shardsAffectedByTeamFailure,
 	                                   anyZeroHealthyTeams,
-	                                   *shards,
-	                                   *trackerCancelled);
+	                                   shards,
+	                                   trackerCancelled);
 	state Future<Void> loggingTrigger = Void();
 	state Future<Void> readHotDetect = readHotDetector(&self);
 	state Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");
@@ -1026,12 +1028,10 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 		initData = Reference<InitialDataDistribution>();
 
 		loop choose {
-			when(Promise<int64_t> req = waitNext(getAverageShardBytes)) {
-				req.send(self.maxShardSize->get().get() / 2);
-			}
+			when(Promise<int64_t> req = waitNext(getAverageShardBytes)) { req.send(self.getAverageShardBytes()); }
 			when(wait(loggingTrigger)) {
 				TraceEvent("DDTrackerStats", self.distributorId)
-				    .detail("Shards", self.shards.size())
+				    .detail("Shards", self.shards->size())
 				    .detail("TotalSizeBytes", self.dbSizeEstimate->get())
 				    .detail("SystemSizeBytes", self.systemSizeEstimate)
 				    .trackLatest(ddTrackerStatsEventHolder->trackingKey);
@@ -1058,166 +1058,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	}
 }
 
-std::vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor(Team team) const {
-	std::vector<KeyRange> r;
-	for (auto it = team_shards.lower_bound(std::pair<Team, KeyRange>(team, KeyRangeRef()));
-	     it != team_shards.end() && it->first == team;
-	     ++it)
-		r.push_back(it->second);
-	return r;
-}
-
-bool ShardsAffectedByTeamFailure::hasShards(Team team) const {
-	auto it = team_shards.lower_bound(std::pair<Team, KeyRange>(team, KeyRangeRef()));
-	return it != team_shards.end() && it->first == team;
-}
-
-int ShardsAffectedByTeamFailure::getNumberOfShards(UID ssID) const {
-	auto it = storageServerShards.find(ssID);
-	return it == storageServerShards.end() ? 0 : it->second;
-}
-
-std::pair<std::vector<ShardsAffectedByTeamFailure::Team>, std::vector<ShardsAffectedByTeamFailure::Team>>
-ShardsAffectedByTeamFailure::getTeamsFor(KeyRangeRef keys) {
-	return shard_teams[keys.begin];
-}
-
-void ShardsAffectedByTeamFailure::erase(Team team, KeyRange const& range) {
-	if (team_shards.erase(std::pair<Team, KeyRange>(team, range)) > 0) {
-		for (auto uid = team.servers.begin(); uid != team.servers.end(); ++uid) {
-			// Safeguard against going negative after eraseServer() sets value to 0
-			if (storageServerShards[*uid] > 0) {
-				storageServerShards[*uid]--;
-			}
-		}
-	}
-}
-
-void ShardsAffectedByTeamFailure::insert(Team team, KeyRange const& range) {
-	if (team_shards.insert(std::pair<Team, KeyRange>(team, range)).second) {
-		for (auto uid = team.servers.begin(); uid != team.servers.end(); ++uid)
-			storageServerShards[*uid]++;
-	}
-}
-
-void ShardsAffectedByTeamFailure::defineShard(KeyRangeRef keys) {
-	std::vector<Team> teams;
-	std::vector<Team> prevTeams;
-	auto rs = shard_teams.intersectingRanges(keys);
-	for (auto it = rs.begin(); it != rs.end(); ++it) {
-		for (auto t = it->value().first.begin(); t != it->value().first.end(); ++t) {
-			teams.push_back(*t);
-			erase(*t, it->range());
-		}
-		for (auto t = it->value().second.begin(); t != it->value().second.end(); ++t) {
-			prevTeams.push_back(*t);
-		}
-	}
-	uniquify(teams);
-	uniquify(prevTeams);
-
-	/*TraceEvent("ShardsAffectedByTeamFailureDefine")
-	    .detail("KeyBegin", keys.begin)
-	    .detail("KeyEnd", keys.end)
-	    .detail("TeamCount", teams.size());*/
-
-	auto affectedRanges = shard_teams.getAffectedRangesAfterInsertion(keys);
-	shard_teams.insert(keys, std::make_pair(teams, prevTeams));
-
-	for (auto r = affectedRanges.begin(); r != affectedRanges.end(); ++r) {
-		auto& t = shard_teams[r->begin];
-		for (auto it = t.first.begin(); it != t.first.end(); ++it) {
-			insert(*it, *r);
-		}
-	}
-	check();
-}
-
-// Move keys to destinationTeams by updating shard_teams
-void ShardsAffectedByTeamFailure::moveShard(KeyRangeRef keys, std::vector<Team> destinationTeams) {
-	/*TraceEvent("ShardsAffectedByTeamFailureMove")
-	    .detail("KeyBegin", keys.begin)
-	    .detail("KeyEnd", keys.end)
-	    .detail("NewTeamSize", destinationTeam.size())
-	    .detail("NewTeam", describe(destinationTeam));*/
-
-	auto ranges = shard_teams.intersectingRanges(keys);
-	std::vector<std::pair<std::pair<std::vector<Team>, std::vector<Team>>, KeyRange>> modifiedShards;
-	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
-		if (keys.contains(it->range())) {
-			// erase the many teams that were associated with this one shard
-			for (auto t = it->value().first.begin(); t != it->value().first.end(); ++t) {
-				erase(*t, it->range());
-			}
-
-			// save this modification for later insertion
-			std::vector<Team> prevTeams = it->value().second;
-			prevTeams.insert(prevTeams.end(), it->value().first.begin(), it->value().first.end());
-			uniquify(prevTeams);
-
-			modifiedShards.push_back(std::pair<std::pair<std::vector<Team>, std::vector<Team>>, KeyRange>(
-			    std::make_pair(destinationTeams, prevTeams), it->range()));
-		} else {
-			// for each range that touches this move, add our team as affecting this range
-			for (auto& team : destinationTeams) {
-				insert(team, it->range());
-			}
-
-			// if we are not in the list of teams associated with this shard, add us in
-			auto& teams = it->value();
-			teams.second.insert(teams.second.end(), teams.first.begin(), teams.first.end());
-			uniquify(teams.second);
-
-			teams.first.insert(teams.first.end(), destinationTeams.begin(), destinationTeams.end());
-			uniquify(teams.first);
-		}
-	}
-
-	// we cannot modify the KeyRangeMap while iterating through it, so add saved modifications now
-	for (int i = 0; i < modifiedShards.size(); i++) {
-		for (auto& t : modifiedShards[i].first.first) {
-			insert(t, modifiedShards[i].second);
-		}
-		shard_teams.insert(modifiedShards[i].second, modifiedShards[i].first);
-	}
-
-	check();
-}
-
-void ShardsAffectedByTeamFailure::finishMove(KeyRangeRef keys) {
-	auto ranges = shard_teams.containedRanges(keys);
-	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
-		it.value().second.clear();
-	}
-}
-
-void ShardsAffectedByTeamFailure::check() const {
-	if (EXPENSIVE_VALIDATION) {
-		for (auto t = team_shards.begin(); t != team_shards.end(); ++t) {
-			auto i = shard_teams.rangeContaining(t->second.begin);
-			if (i->range() != t->second || !std::count(i->value().first.begin(), i->value().first.end(), t->first)) {
-				ASSERT(false);
-			}
-		}
-		auto rs = shard_teams.ranges();
-		for (auto i = rs.begin(); i != rs.end(); ++i) {
-			for (auto t = i->value().first.begin(); t != i->value().first.end(); ++t) {
-				if (!team_shards.count(std::make_pair(*t, i->range()))) {
-					std::string teamDesc, shards;
-					for (int k = 0; k < t->servers.size(); k++)
-						teamDesc += format("%llx ", t->servers[k].first());
-					for (auto x = team_shards.lower_bound(std::make_pair(*t, KeyRangeRef()));
-					     x != team_shards.end() && x->first == *t;
-					     ++x)
-						shards += printable(x->second.begin) + "-" + printable(x->second.end) + ",";
-					TraceEvent(SevError, "SATFInvariantError2")
-					    .detail("KB", i->begin())
-					    .detail("KE", i->end())
-					    .detail("Team", teamDesc)
-					    .detail("Shards", shards);
-					ASSERT(false);
-				}
-			}
-		}
-	}
-}
+// Not used yet
+ACTOR Future<Void> dataDistributionTracker(Reference<DDSharedContext> context,
+                                           Reference<InitialDataDistribution> initData,
+                                           Database cx,
+                                           KeyRangeMap<ShardTrackedData>* shards);

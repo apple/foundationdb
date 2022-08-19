@@ -39,10 +39,6 @@ public:
 
 	double FAILURE_MAX_DELAY;
 	double FAILURE_MIN_DELAY;
-	double FAILURE_TIMEOUT_DELAY;
-	double CLIENT_FAILURE_TIMEOUT_DELAY;
-	double FAILURE_EMERGENCY_DELAY;
-	double FAILURE_MAX_GENERATIONS;
 	double RECOVERY_DELAY_START_GENERATION;
 	double RECOVERY_DELAY_SECONDS_PER_GENERATION;
 	double MAX_GENERATIONS;
@@ -61,6 +57,7 @@ public:
 	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is
 	                                 // mostly wrong (e.g. dumping the database after a test)
 	double FUTURE_VERSION_RETRY_DELAY;
+	double GRV_ERROR_RETRY_DELAY;
 	double UNKNOWN_TENANT_RETRY_DELAY;
 	int REPLY_BYTE_LIMIT;
 	double DEFAULT_BACKOFF;
@@ -109,7 +106,6 @@ public:
 	int RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT;
 	bool QUARANTINE_TSS_ON_MISMATCH;
 	double CHANGE_FEED_EMPTY_BATCH_TIME;
-	bool SHARD_ENCODE_LOCATION_METADATA;
 
 	// KeyRangeMap
 	int KRM_GET_RANGE_LIMIT;
@@ -162,10 +158,8 @@ public:
 	double BACKUP_AGGREGATE_POLL_RATE;
 	double BACKUP_AGGREGATE_POLL_RATE_UPDATE_INTERVAL;
 	int BACKUP_LOG_WRITE_BATCH_MAX_SIZE;
-	int BACKUP_LOG_ATOMIC_OPS_SIZE;
 	int BACKUP_MAX_LOG_RANGES;
 	int BACKUP_SIM_COPY_LOG_RANGES;
-	int BACKUP_OPERATION_COST_OVERHEAD;
 	int BACKUP_VERSION_DELAY;
 	int BACKUP_MAP_KEY_LOWER_LIMIT;
 	int BACKUP_MAP_KEY_UPPER_LIMIT;
@@ -205,6 +199,10 @@ public:
 	int32_t DEFAULT_AUTO_RESOLVERS;
 	int32_t DEFAULT_AUTO_LOGS;
 
+	double GLOBAL_CONFIG_REFRESH_BACKOFF;
+	double GLOBAL_CONFIG_REFRESH_MAX_BACKOFF;
+	double GLOBAL_CONFIG_REFRESH_TIMEOUT;
+
 	// Dynamic Knobs
 	double COMMIT_QUORUM_TIMEOUT;
 	double GET_GENERATION_QUORUM_TIMEOUT;
@@ -216,12 +214,7 @@ public:
 	int64_t CSI_SIZE_LIMIT;
 	double CSI_STATUS_DELAY;
 
-	int HTTP_SEND_SIZE;
-	int HTTP_READ_SIZE;
-	int HTTP_VERBOSE_LEVEL;
-	std::string HTTP_REQUEST_ID_HEADER;
 	bool HTTP_REQUEST_AWS_V4_HEADER; // setting this knob to true will enable AWS V4 style header.
-	bool HTTP_RESPONSE_SKIP_VERIFY_CHECKSUM_FOR_PARTIAL_CONTENT; // skip verify md5 checksum for 206 response
 	std::string BLOBSTORE_ENCRYPTION_TYPE;
 	int BLOBSTORE_CONNECT_TRIES;
 	int BLOBSTORE_CONNECT_TIMEOUT;
@@ -271,12 +264,9 @@ public:
 	double BUSYNESS_SPIKE_START_THRESHOLD;
 	double BUSYNESS_SPIKE_SATURATED_THRESHOLD;
 
-	// multi-version client control
-	int MVC_CLIENTLIB_CHUNK_SIZE;
-	int MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION;
-
 	// Blob Granules
 	int BG_MAX_GRANULE_PARALLELISM;
+	int BG_TOO_MANY_GRANULES;
 
 	// The coordinator key/value in storage server might be inconsistent to the value stored in the cluster file.
 	// This might happen when a recovery is happening together with a cluster controller coordinator key change.
@@ -284,6 +274,15 @@ public:
 	// available again. Using a backoffed retry when it happens.
 	int CHANGE_QUORUM_BAD_STATE_RETRY_TIMES;
 	double CHANGE_QUORUM_BAD_STATE_RETRY_DELAY;
+
+	// Tenants and Metacluster
+	int MAX_TENANTS_PER_CLUSTER;
+	int TENANT_TOMBSTONE_CLEANUP_INTERVAL;
+	int MAX_DATA_CLUSTERS;
+	int REMOVE_CLUSTER_TENANT_BATCH_SIZE;
+	int METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK;
+	double METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY;
+	double METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

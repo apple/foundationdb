@@ -26,6 +26,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/FileIdentifier.h"
+#include "fdbrpc/TenantInfo.h"
 #include "flow/PKey.h"
 
 namespace authz {
@@ -63,6 +64,8 @@ struct SignedTokenRef {
 	void serialize(Ar& ar) {
 		serializer(ar, token, keyName, signature);
 	}
+
+	int expectedSize() const { return token.size() + keyName.size() + signature.size(); }
 };
 
 SignedTokenRef signToken(Arena& arena, TokenRef token, StringRef keyName, PrivateKey privateKey);
@@ -82,6 +85,7 @@ namespace authz::jwt {
 struct TokenRef {
 	// header part ("typ": "JWT" implicitly enforced)
 	Algorithm algorithm; // alg
+	StringRef keyId; // kid
 	// payload part
 	Optional<StringRef> issuer; // iss
 	Optional<StringRef> subject; // sub
@@ -89,11 +93,13 @@ struct TokenRef {
 	Optional<uint64_t> issuedAtUnixTime; // iat
 	Optional<uint64_t> expiresAtUnixTime; // exp
 	Optional<uint64_t> notBeforeUnixTime; // nbf
-	Optional<StringRef> keyId; // kid
 	Optional<StringRef> tokenId; // jti
 	Optional<VectorRef<StringRef>> tenants; // tenants
 	// signature part
 	StringRef signature;
+
+	// print each non-signature field in non-JSON, human-readable format e.g. for trace
+	StringRef toStringRef(Arena& arena);
 };
 
 // Make plain JSON token string with fields (except signature) from passed spec
@@ -107,7 +113,7 @@ StringRef signToken(Arena& arena, TokenRef tokenSpec, PrivateKey privateKey);
 
 // Parse passed b64url-encoded header part and materialize its contents into tokenOut,
 // using memory allocated from arena
-bool parseHeaderPart(TokenRef& tokenOut, StringRef b64urlHeaderIn);
+bool parseHeaderPart(Arena& arena, TokenRef& tokenOut, StringRef b64urlHeaderIn);
 
 // Parse passed b64url-encoded payload part and materialize its contents into tokenOut,
 // using memory allocated from arena
@@ -116,6 +122,9 @@ bool parsePayloadPart(Arena& arena, TokenRef& tokenOut, StringRef b64urlPayloadI
 // Parse passed b64url-encoded signature part and materialize its contents into tokenOut,
 // using memory allocated from arena
 bool parseSignaturePart(Arena& arena, TokenRef& tokenOut, StringRef b64urlSignatureIn);
+
+// Returns the base64 encoded signature of the token
+StringRef signaturePart(StringRef token);
 
 // Parse passed token string and materialize its contents into tokenOut,
 // using memory allocated from arena

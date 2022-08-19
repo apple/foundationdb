@@ -25,8 +25,15 @@
 #include "flow/ProtocolVersion.h"
 
 #include <unordered_map>
+#include <any>
 
-using ContextVariableMap = std::unordered_map<std::string_view, void*>;
+using ContextVariableMap = std::unordered_map<std::string_view, std::any>;
+
+template <class T>
+struct HasVariableMap_t : std::false_type {};
+
+template <class T>
+constexpr bool HasVariableMap = HasVariableMap_t<T>::value;
 
 template <class Ar>
 struct LoadContext {
@@ -53,6 +60,11 @@ struct LoadContext {
 	void addArena(Arena& arena) { arena = ar->arena(); }
 
 	LoadContext& context() { return *this; }
+
+	template <class Archiver = Ar>
+	std::enable_if_t<HasVariableMap<Archiver>, std::any&> variable(std::string_view name) {
+		return ar->variable(name);
+	}
 };
 
 template <class Ar, class Allocator>
@@ -90,7 +102,7 @@ public:
 			// Some file identifiers are changed in 7.0, so file identifier mismatches
 			// are expected during a downgrade from 7.0 to 6.3
 			bool expectMismatch = mProtocolVersion.get() >= ProtocolVersion(0x0FDB00B070000000LL) &&
-			                      currentProtocolVersion < ProtocolVersion(0x0FDB00B070000000LL);
+			                      currentProtocolVersion() < ProtocolVersion(0x0FDB00B070000000LL);
 			{
 				TraceEvent te(expectMismatch ? SevInfo : SevError, "MismatchedFileIdentifier");
 				if (expectMismatch) {
@@ -110,23 +122,9 @@ public:
 		deserialize(FileIdentifierFor<Item>::value, item);
 	}
 
-	template <class T>
-	bool variable(std::string_view name, T* val) {
-		auto p = variables->insert(std::make_pair(name, val));
-		return p.second;
-	}
+	std::any& variable(std::string_view name) { return variables->at(name); }
 
-	template <class T>
-	T& variable(std::string_view name) {
-		auto res = variables->at(name);
-		return *reinterpret_cast<T*>(res);
-	}
-
-	template <class T>
-	T const& variable(std::string_view name) const {
-		auto res = variables->at(name);
-		return *reinterpret_cast<T*>(res);
-	}
+	std::any const& variable(std::string_view name) const { return variables->at(name); }
 };
 
 class ObjectReader : public _ObjectReader<ObjectReader> {
@@ -266,6 +264,11 @@ private:
 	uint8_t* data = nullptr;
 	int size = 0;
 };
+
+template <>
+struct HasVariableMap_t<ObjectReader> : std::true_type {};
+template <>
+struct HasVariableMap_t<ArenaObjectReader> : std::true_type {};
 
 // this special case is needed - the code expects
 // Standalone<T> and T to be equivalent for serialization

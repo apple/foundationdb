@@ -199,11 +199,11 @@ TEST_CASE("flow/StreamCipher") {
 	StreamCipherKey const* key = StreamCipherKey::getGlobalCipherKey();
 
 	StreamCipher::IV iv;
-	generateRandomData(iv.data(), iv.size());
+	deterministicRandom()->randomBytes(iv.data(), iv.size());
 
 	Arena arena;
 	std::vector<unsigned char> plaintext(deterministicRandom()->randomInt(0, 10001));
-	generateRandomData(&plaintext.front(), plaintext.size());
+	deterministicRandom()->randomBytes(&plaintext.front(), plaintext.size());
 	std::vector<unsigned char> ciphertext(plaintext.size() + AES_BLOCK_SIZE);
 	std::vector<unsigned char> decryptedtext(plaintext.size() + AES_BLOCK_SIZE);
 

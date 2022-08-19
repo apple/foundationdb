@@ -62,6 +62,13 @@ public:
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
+	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
+
+	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
 
@@ -72,7 +79,8 @@ private:
 	DatabaseContext* db;
 
 public: // Internal use only
-	ThreadSafeDatabase(Reference<IClusterConnectionRecord> connectionRecord, int apiVersion);
+	enum class ConnectionRecordType { FILE, CONNECTION_STRING };
+	ThreadSafeDatabase(ConnectionRecordType connectionRecordType, std::string connectionRecord, int apiVersion);
 	ThreadSafeDatabase(DatabaseContext* db) : db(db) {}
 	DatabaseContext* unsafeGetPtr() const { return db; }
 };
@@ -148,7 +156,8 @@ public:
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                int64_t chunkSize) override;
 
-	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
 
 	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
 	                                           Version beginVersion,
@@ -205,6 +214,7 @@ class ThreadSafeApi : public IClientApi, ThreadSafeReferenceCounted<ThreadSafeAp
 public:
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
+	void useFutureProtocolVersion() override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	void setupNetwork() override;
@@ -221,7 +231,7 @@ private:
 	ThreadSafeApi();
 
 	int apiVersion;
-	const std::string clientVersion;
+	std::string clientVersion;
 	uint64_t transportId;
 
 	Mutex lock;

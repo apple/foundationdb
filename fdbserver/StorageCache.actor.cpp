@@ -23,7 +23,6 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/EncryptedMutationMessage.h"
 #include "fdbserver/GetEncryptCipherKeys.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -1909,25 +1908,19 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 					           OTELSpanContextMessage::isNextIn(cloneReader)) {
 						OTELSpanContextMessage scm;
 						cloneReader >> scm;
-					} else if (cloneReader.protocolVersion().hasEncryptionAtRest() &&
-					           EncryptedMutationMessage::isNextIn(cloneReader) && !cipherKeys.present()) {
-						// Encrypted mutation found, but cipher keys haven't been fetch.
-						// Collect cipher details to fetch cipher keys in one batch.
-						EncryptedMutationMessage emm;
-						cloneReader >> emm;
-						cipherDetails.insert(emm.header.cipherTextDetails);
-						cipherDetails.insert(emm.header.cipherHeaderDetails);
-						collectingCipherKeys = true;
 					} else {
 						MutationRef msg;
-						if (cloneReader.protocolVersion().hasEncryptionAtRest() &&
-						    EncryptedMutationMessage::isNextIn(cloneReader)) {
-							assert(cipherKeys.present());
-							msg = EncryptedMutationMessage::decrypt(cloneReader, cloneReader.arena(), cipherKeys.get());
-						} else {
-							cloneReader >> msg;
+						cloneReader >> msg;
+						if (msg.isEncrypted()) {
+							if (!cipherKeys.present()) {
+								const BlobCipherEncryptHeader* header = msg.encryptionHeader();
+								cipherDetails.insert(header->cipherTextDetails);
+								cipherDetails.insert(header->cipherHeaderDetails);
+								collectingCipherKeys = true;
+							} else {
+								msg = msg.decrypt(cipherKeys.get(), cloneReader.arena());
+							}
 						}
-
 						if (!collectingCipherKeys) {
 							if (firstMutation && msg.param1.startsWith(systemKeys.end))
 								hasPrivateData = true;
@@ -2019,10 +2012,9 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 					reader >> oscm;
 				} else {
 					MutationRef msg;
-					if (reader.protocolVersion().hasEncryptionAtRest() && EncryptedMutationMessage::isNextIn(reader)) {
-						msg = EncryptedMutationMessage::decrypt(reader, reader.arena(), cipherKeys.get());
-					} else {
-						reader >> msg;
+					reader >> msg;
+					if (msg.isEncrypted()) {
+						msg = msg.decrypt(cipherKeys.get(), reader.arena());
 					}
 
 					if (ver != invalidVersion) // This change belongs to a version < minVersion

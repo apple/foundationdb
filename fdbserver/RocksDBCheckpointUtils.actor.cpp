@@ -162,6 +162,7 @@ private:
 		CF cf;
 		Key begin;
 		Key end;
+		std::vector<rocksdb::ColumnFamilyHandle*> handles;
 		double readRangeTimeout;
 		std::unique_ptr<rocksdb::Iterator> cursor;
 	};
@@ -233,7 +234,6 @@ void RocksDBCheckpointReader::Reader::action(RocksDBCheckpointReader::Reader::Op
 		descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, cfOptions });
 	}
 
-	std::vector<rocksdb::ColumnFamilyHandle*> handles;
 	status = rocksdb::DB::OpenForReadOnly(options, a.path, descriptors, &handles, &db);
 
 	if (!status.ok()) {
@@ -287,6 +287,14 @@ void RocksDBCheckpointReader::Reader::action(RocksDBCheckpointReader::Reader::Cl
 		a.done.send(Void());
 		return;
 	}
+
+	for (rocksdb::ColumnFamilyHandle* handle : handles) {
+		if (handle != nullptr) {
+			TraceEvent("RocksDBCheckpointReaderDestroyCF").detail("Path", a.path).detail("CF", handle->GetName());
+			db->DestroyColumnFamilyHandle(handle);
+		}
+	}
+	handles.clear();
 
 	rocksdb::Status s = db->Close();
 	if (!s.ok()) {
@@ -385,6 +393,9 @@ ACTOR Future<Void> RocksDBCheckpointReader::doClose(RocksDBCheckpointReader* sel
 	}
 
 	if (self != nullptr) {
+		if (self->db != nullptr) {
+			delete self->db;
+		}
 		delete self;
 	}
 

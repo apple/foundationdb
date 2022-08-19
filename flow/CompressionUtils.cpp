@@ -98,7 +98,7 @@ TEST_CASE("/CompressionUtils/noCompression") {
 	Arena arena;
 	const int size = deterministicRandom()->randomInt(512, 1024);
 	Standalone<StringRef> uncompressed = makeString(size);
-	generateRandomData(mutateString(uncompressed), size);
+	deterministicRandom()->randomBytes(mutateString(uncompressed), size);
 
 	Standalone<StringRef> compressed = CompressionUtils::compress(CompressionFilter::NONE, uncompressed, arena);
 	ASSERT_EQ(compressed.compare(uncompressed), 0);
@@ -116,10 +116,31 @@ TEST_CASE("/CompressionUtils/gzipCompression") {
 	Arena arena;
 	const int size = deterministicRandom()->randomInt(512, 1024);
 	Standalone<StringRef> uncompressed = makeString(size);
-	generateRandomData(mutateString(uncompressed), size);
+	deterministicRandom()->randomBytes(mutateString(uncompressed), size);
 
 	Standalone<StringRef> compressed = CompressionUtils::compress(CompressionFilter::GZIP, uncompressed, arena);
 	ASSERT_NE(compressed.compare(uncompressed), 0);
+
+	StringRef verify = CompressionUtils::decompress(CompressionFilter::GZIP, compressed, arena);
+	ASSERT_EQ(verify.compare(uncompressed), 0);
+
+	TraceEvent("GzipCompression_Done").log();
+
+	return Void();
+}
+
+TEST_CASE("/CompressionUtils/gzipCompression2") {
+	Arena arena;
+	const int size = deterministicRandom()->randomInt(512, 1024);
+	std::string s(size, 'x');
+	Standalone<StringRef> uncompressed = Standalone<StringRef>(StringRef(s));
+	printf("Size before: %d\n", (int)uncompressed.size());
+
+	Standalone<StringRef> compressed = CompressionUtils::compress(CompressionFilter::GZIP, uncompressed, arena);
+	ASSERT_NE(compressed.compare(uncompressed), 0);
+	printf("Size after: %d\n", (int)compressed.size());
+	// Assert compressed size is less than half.
+	ASSERT(compressed.size() * 2 < uncompressed.size());
 
 	StringRef verify = CompressionUtils::decompress(CompressionFilter::GZIP, compressed, arena);
 	ASSERT_EQ(verify.compare(uncompressed), 0);
