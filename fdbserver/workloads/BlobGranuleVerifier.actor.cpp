@@ -68,6 +68,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	bool initAtEnd;
 	bool strictPurgeChecking;
 	bool doForcePurge;
+	bool purgeAtLatest;
 	bool clearAndMergeCheck;
 
 	DatabaseConfiguration config;
@@ -87,6 +88,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		timeTravelLimit = getOption(options, LiteralStringRef("timeTravelLimit"), testDuration);
 		timeTravelBufferSize = getOption(options, LiteralStringRef("timeTravelBufferSize"), 100000000);
 		threads = getOption(options, LiteralStringRef("threads"), 1);
+
 		enablePurging = getOption(options, LiteralStringRef("enablePurging"), sharedRandomNumber % 3 == 0);
 		sharedRandomNumber /= 3;
 		// FIXME: re-enable this! There exist several bugs with purging active granules where a small amount of state
@@ -98,6 +100,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		doForcePurge = getOption(options, LiteralStringRef("doForcePurge"), sharedRandomNumber % 3 == 0);
 		sharedRandomNumber /= 3;
 
+		purgeAtLatest = getOption(options, LiteralStringRef("purgeAtLatest"), sharedRandomNumber % 3 == 0);
+		sharedRandomNumber /= 3;
+
 		// randomly some tests write data first and then turn on blob granules later, to test conversion of existing DB
 		initAtEnd = !enablePurging && sharedRandomNumber % 10 == 0;
 		sharedRandomNumber /= 10;
@@ -106,14 +111,26 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		sharedRandomNumber /= 10;
 
 		// don't do strictPurgeChecking or forcePurge if !enablePurging
-		strictPurgeChecking &= enablePurging;
-		doForcePurge &= enablePurging;
+		if (!enablePurging) {
+			strictPurgeChecking = false;
+			doForcePurge = false;
+			purgeAtLatest = false;
+		}
+
+		if (doForcePurge) {
+			purgeAtLatest = false;
+		}
+
+		if (purgeAtLatest) {
+			strictPurgeChecking = false;
+		}
 
 		startedForcePurge = false;
 
 		if (doSetup && BGV_DEBUG) {
 			fmt::print("BlobGranuleVerifier starting\n");
 			fmt::print("  enablePurging={0}\n", enablePurging);
+			fmt::print("  purgeAtLatest={0}\n", purgeAtLatest);
 			fmt::print("  strictPurgeChecking={0}\n", strictPurgeChecking);
 			fmt::print("  doForcePurge={0}\n", doForcePurge);
 			fmt::print("  initAtEnd={0}\n", initAtEnd);
@@ -314,7 +331,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 					// before doing read, purge just before read version
 					state Version newPurgeVersion = 0;
-					state bool doPurging = allowPurging && deterministicRandom()->random01() < 0.5;
+					state bool doPurging =
+					    allowPurging && !self->purgeAtLatest && deterministicRandom()->random01() < 0.5;
 					state bool forcePurge = doPurging && self->doForcePurge && deterministicRandom()->random01() < 0.25;
 					if (doPurging) {
 						CODE_PROBE(true, "BGV considering purge");
@@ -442,11 +460,33 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				state KeyRange range = self->granuleRanges.get()[rIndex];
 
 				state std::pair<RangeResult, Version> fdb = wait(readFromFDB(cx, range));
-				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
+				state std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
 				    wait(readFromBlob(cx, self->bstore, range, 0, fdb.second));
+				if (self->purgeAtLatest && timeTravelChecks.empty() && deterministicRandom()->random01() < 0.25) {
+					// purge at this version, and make sure it's still readable after on our immediate re-read
+					try {
+						Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, fdb.second, {}, false));
+						if (BGV_DEBUG) {
+							fmt::print("BGV Purged Latest @ {0}, waiting\n", fdb.second);
+						}
+						wait(cx->waitPurgeGranulesComplete(purgeKey));
+					} catch (Error& e) {
+						if (e.code() == error_code_operation_cancelled) {
+							throw e;
+						}
+						// purging shouldn't error, it should retry.
+						if (BGV_DEBUG) {
+							fmt::print("Unexpected error {0} purging latest @ {1}!\n", e.name(), newPurgeVersion);
+						}
+						ASSERT(false);
+					}
+					self->purges++;
+				}
 				if (compareFDBAndBlob(fdb.first, blob, range, fdb.second, BGV_DEBUG)) {
-					// TODO: bias for immediately re-reading to catch rollback cases
-					double reReadTime = currentTime + deterministicRandom()->random01() * self->timeTravelLimit;
+					bool rereadImmediately = self->purgeAtLatest || deterministicRandom()->random01() < 0.25;
+					double reReadTime =
+					    currentTime +
+					    (rereadImmediately ? 0.0 : deterministicRandom()->random01() * self->timeTravelLimit);
 					int memory = fdb.first.expectedSize();
 					if (reReadTime <= endTime &&
 					    timeTravelChecksMemory + memory <= (self->timeTravelBufferSize / self->threads)) {
@@ -469,7 +509,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				}
 				self->errors++;
 			}
-			// wait(poisson(&last, 5.0));
 			wait(poisson(&last, 0.1));
 		}
 	}
@@ -876,6 +915,61 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		return Void();
 	}
 
+	// Check database against blob granules. This is especially important because during chaos phase this can error, and
+	// initAtEnd doesn't get data checked otherwise
+	ACTOR Future<bool> checkAllData(Database cx, BlobGranuleVerifierWorkload* self) {
+		state Transaction tr(cx);
+		state KeyRange keyRange = normalKeys;
+		state bool gotEOS = false;
+		state int64_t totalRows = 0;
+		loop {
+			state RangeResult output;
+			state Version readVersion;
+			try {
+				Version ver = wait(tr.getReadVersion());
+				readVersion = ver;
+
+				state PromiseStream<Standalone<RangeResultRef>> results;
+				state Future<Void> stream = tr.getRangeStream(results, keyRange, GetRangeLimits());
+
+				loop {
+					Standalone<RangeResultRef> res = waitNext(results.getFuture());
+					output.arena().dependsOn(res.arena());
+					output.append(output.arena(), res.begin(), res.size());
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_operation_cancelled) {
+					throw e;
+				}
+				if (e.code() == error_code_end_of_stream) {
+					gotEOS = true;
+				} else {
+					wait(tr.onError(e));
+				}
+			}
+
+			if (!output.empty()) {
+				state KeyRange rangeToCheck = KeyRangeRef(keyRange.begin, keyAfter(output.back().key));
+				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
+				    wait(readFromBlob(cx, self->bstore, rangeToCheck, 0, readVersion));
+				if (!compareFDBAndBlob(output, blob, rangeToCheck, readVersion, BGV_DEBUG)) {
+					return false;
+				}
+				totalRows += output.size();
+				keyRange = KeyRangeRef(rangeToCheck.end, keyRange.end);
+			}
+			if (gotEOS) {
+				break;
+			}
+		}
+
+		if (BGV_DEBUG) {
+			fmt::print("BGV Final data check complete, checked {0} rows\n", totalRows);
+		}
+
+		return true;
+	}
+
 	ACTOR Future<bool> _check(Database cx, BlobGranuleVerifierWorkload* self) {
 		state Transaction tr(cx);
 		if (self->doForcePurge) {
@@ -887,8 +981,17 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				// don't validate that data was purged since it may never be
 				return true;
 			}
-		} else if (self->enablePurging) {
-			// FIXME: if doPurging was set, possibly do one last purge here, and verify it succeeds with no errors
+		} else if (self->enablePurging && self->purgeAtLatest && deterministicRandom()->coinflip()) {
+			Version latestPurgeVersion = wait(self->doGrv(&tr));
+			if (BGV_DEBUG) {
+				fmt::print("BGV Purging Latest @ {0} before final availability check\n", latestPurgeVersion);
+			}
+			Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, latestPurgeVersion, {}, false));
+			wait(cx->waitPurgeGranulesComplete(purgeKey));
+			if (BGV_DEBUG) {
+				fmt::print("BGV Purged Latest before final availability check complete\n");
+			}
+			self->purges++;
 		}
 
 		// check error counts, and do an availability check at the end
@@ -993,8 +1096,11 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		if (BGV_DEBUG && startReadVersion != readVersion) {
 			fmt::print("Availability check updated read version from {0} to {1}\n", startReadVersion, readVersion);
 		}
+
+		state bool dataPassed = wait(self->checkAllData(cx, self));
+
 		state bool result =
-		    availabilityPassed && self->mismatches == 0 && (checks > 0) && (self->timeTravelTooOld == 0);
+		    availabilityPassed && dataPassed && self->mismatches == 0 && (checks > 0) && (self->timeTravelTooOld == 0);
 		fmt::print("Blob Granule Verifier {0} {1}:\n", self->clientId, result ? "passed" : "failed");
 		fmt::print("  {} successful final granule checks\n", checks);
 		fmt::print("  {} failed final granule checks\n", availabilityPassed ? 0 : 1);
@@ -1006,6 +1112,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		fmt::print("  {} rows\n", self->rowsRead);
 		fmt::print("  {} bytes\n", self->bytesRead);
 		fmt::print("  {} purges\n", self->purges);
+		fmt::print("  {} final data check\n", dataPassed ? "passed" : "failed");
 		// FIXME: add above as details to trace event
 
 		TraceEvent("BlobGranuleVerifierChecked").detail("Result", result);
@@ -1025,17 +1132,37 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			wait(self->validateForcePurge(cx, self, normalKeys));
 
 			return true;
-		} else if (self->enablePurging) {
-			// FIXME: if doPurging was set, possibly do one last purge here, and verify it succeeds with no errors
+		} else if (self->enablePurging && self->purgeAtLatest && deterministicRandom()->coinflip()) {
+			Version latestPurgeVersion = wait(self->doGrv(&tr));
+			if (BGV_DEBUG) {
+				fmt::print("BGV Purging Latest @ {0} after final availability check, waiting\n", latestPurgeVersion);
+			}
+			Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, latestPurgeVersion, {}, false));
+			wait(cx->waitPurgeGranulesComplete(purgeKey));
+			if (BGV_DEBUG) {
+				fmt::print("BGV Purged Latest after final availability check complete\n");
+			}
 		}
 
 		if (self->clientId == 0 && SERVER_KNOBS->BG_ENABLE_MERGING && self->clearAndMergeCheck) {
 			CODE_PROBE(true, "BGV clearing database and awaiting merge");
 			wait(clearAndAwaitMerge(cx, normalKeys));
 
-			// TODO: should do a read to check that not only did it reduce to one granule, but that granule is readable?
+			if (self->enablePurging && self->purgeAtLatest && deterministicRandom()->coinflip()) {
+				Version latestPurgeVersion = wait(self->doGrv(&tr));
+				if (BGV_DEBUG) {
+					fmt::print("BGV Purging Latest @ {0} after clearAndAwaitMerge, waiting\n", latestPurgeVersion);
+				}
+				Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, latestPurgeVersion, {}, false));
+				wait(cx->waitPurgeGranulesComplete(purgeKey));
+				if (BGV_DEBUG) {
+					fmt::print("BGV Purged Latest after clearAndAwaitMerge complete\n");
+				}
+			}
 
-			// FIXME: if doPurging was set, possibly do one last purge here, and verify it succeeds with no errors
+			// read after merge to make sure it completed, granules are available, and data is empty
+			bool dataCheckAfterMerge = wait(self->checkAllData(cx, self));
+			ASSERT(dataCheckAfterMerge);
 		}
 
 		return result;

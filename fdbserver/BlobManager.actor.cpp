@@ -3951,14 +3951,14 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobManagerData> bmData, U
 	}
 }
 
-ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID granuleId) {
+ACTOR Future<bool> canDeleteFullGranuleSplit(Reference<BlobManagerData> self, UID granuleId) {
 	state Transaction tr(self->db);
 	state KeyRange splitRange = blobGranuleSplitKeyRangeFor(granuleId);
 	state KeyRange checkRange = splitRange;
 	state bool retry = false;
 
 	if (BM_PURGE_DEBUG) {
-		fmt::print("BM {0} Fully delete granule check {1}\n", self->epoch, granuleId.toString());
+		fmt::print("BM {0} Fully delete granule split check {1}\n", self->epoch, granuleId.toString());
 	}
 
 	loop {
@@ -4037,6 +4037,51 @@ ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID gra
 	return false;
 }
 
+ACTOR Future<Void> canDeleteFullGranuleMerge(Reference<BlobManagerData> self, Optional<UID> mergeChildId) {
+	// if this granule is the parent of a merged granule, it needs to re-snapshot the merged granule before we can
+	// delete this one
+	if (!mergeChildId.present()) {
+		return Void();
+	}
+	CODE_PROBE(true, "checking canDeleteFullGranuleMerge");
+
+	if (BM_PURGE_DEBUG) {
+		fmt::print("BM {0} Fully delete granule merge check {1}\n", self->epoch, mergeChildId.get().toString());
+	}
+
+	state Transaction tr(self->db);
+	state KeyRange granuleFileRange = blobGranuleFileKeyRangeFor(mergeChildId.get());
+	// loop until granule has snapshotted
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			RangeResult files = wait(tr.getRange(granuleFileRange, 1));
+			if (!files.empty()) {
+				if (BM_PURGE_DEBUG) {
+					fmt::print("BM {0} Fully delete granule merge check {1} done\n",
+					           self->epoch,
+					           mergeChildId.get().toString());
+				}
+				return Void();
+			}
+			wait(delay(1.0));
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID granuleId, Optional<UID> mergeChildId) {
+	state Future<bool> split = canDeleteFullGranuleSplit(self, granuleId);
+	state Future<Void> merge = canDeleteFullGranuleMerge(self, mergeChildId);
+
+	wait(success(split) && merge);
+	bool canDeleteHistory = wait(split);
+	return canDeleteHistory;
+}
+
 static Future<Void> deleteFile(Reference<BlobConnectionProvider> bstoreProvider, std::string filePath) {
 	Reference<BackupContainerFileSystem> bstore = bstoreProvider->getForRead(filePath);
 	return bstore->deleteFile(filePath);
@@ -4069,6 +4114,7 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
                                       Key historyKey,
                                       Version purgeVersion,
                                       KeyRange granuleRange,
+                                      Optional<UID> mergeChildID,
                                       bool force) {
 	if (BM_PURGE_DEBUG) {
 		fmt::print("BM {0} Fully deleting granule [{1} - {2}): {3} @ {4}{5}\n",
@@ -4089,7 +4135,7 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
 	if (force) {
 		canDeleteHistoryKey = true;
 	} else {
-		wait(store(canDeleteHistoryKey, canDeleteFullGranule(self, granuleId)));
+		wait(store(canDeleteHistoryKey, canDeleteFullGranule(self, granuleId, mergeChildID)));
 	}
 	state Reference<BlobConnectionProvider> bstore = wait(getBStoreForGranule(self, granuleRange));
 
@@ -4328,11 +4374,11 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 	    .detail("PurgeVersion", purgeVersion)
 	    .detail("Force", force);
 
-	// queue of <range, startVersion, endVersion> for BFS traversal of history
-	state std::queue<std::tuple<KeyRange, Version, Version>> historyEntryQueue;
+	// queue of <range, startVersion, endVersion, mergeChildID> for BFS traversal of history
+	state std::queue<std::tuple<KeyRange, Version, Version, Optional<UID>>> historyEntryQueue;
 
-	// stacks of <granuleId, historyKey> and <granuleId> to track which granules to delete
-	state std::vector<std::tuple<UID, Key, KeyRange>> toFullyDelete;
+	// stacks of <granuleId, historyKey> and <granuleId> (and mergeChildID) to track which granules to delete
+	state std::vector<std::tuple<UID, Key, KeyRange, Optional<UID>>> toFullyDelete;
 	state std::vector<std::pair<UID, KeyRange>> toPartiallyDelete;
 
 	// track which granules we have already added to traversal
@@ -4449,7 +4495,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 						           history.get().version);
 					}
 					visited.insert({ activeRange.begin.toString(), history.get().version });
-					historyEntryQueue.push({ activeRange, history.get().version, MAX_VERSION });
+					historyEntryQueue.push({ activeRange, history.get().version, MAX_VERSION, {} });
 				} else if (BM_PURGE_DEBUG) {
 					fmt::print("BM {0}   No history for range, ignoring\n", self->epoch);
 				}
@@ -4472,7 +4518,8 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		state KeyRange currRange;
 		state Version startVersion;
 		state Version endVersion;
-		std::tie(currRange, startVersion, endVersion) = historyEntryQueue.front();
+		state Optional<UID> mergeChildID;
+		std::tie(currRange, startVersion, endVersion, mergeChildID) = historyEntryQueue.front();
 		historyEntryQueue.pop();
 
 		if (BM_PURGE_DEBUG) {
@@ -4528,7 +4575,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 				fmt::print(
 				    "BM {0}   Granule {1} will be FULLY deleted\n", self->epoch, currHistoryNode.granuleID.toString());
 			}
-			toFullyDelete.push_back({ currHistoryNode.granuleID, historyKey, currRange });
+			toFullyDelete.push_back({ currHistoryNode.granuleID, historyKey, currRange, mergeChildID });
 		} else if (startVersion < purgeVersion) {
 			if (BM_PURGE_DEBUG) {
 				fmt::print("BM {0}   Granule {1} will be partially deleted\n",
@@ -4542,6 +4589,8 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		if (BM_PURGE_DEBUG) {
 			fmt::print("BM {0}   Checking {1} parents\n", self->epoch, currHistoryNode.parentVersions.size());
 		}
+		Optional<UID> mergeChildID =
+		    currHistoryNode.parentVersions.size() > 1 ? currHistoryNode.granuleID : Optional<UID>();
 		for (int i = 0; i < currHistoryNode.parentVersions.size(); i++) {
 			// for (auto& parent : currHistoryNode.parentVersions.size()) {
 			// if we already added this node to queue, skip it; otherwise, mark it as visited
@@ -4571,7 +4620,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 
 			// the parent's end version is this node's startVersion,
 			// since this node must have started where it's parent finished
-			historyEntryQueue.push({ parentRange, parentVersion, startVersion });
+			historyEntryQueue.push({ parentRange, parentVersion, startVersion, mergeChildID });
 		}
 	}
 
@@ -4612,12 +4661,13 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		state UID granuleId;
 		Key historyKey;
 		KeyRange keyRange;
-		std::tie(granuleId, historyKey, keyRange) = toFullyDelete[i];
+		Optional<UID> mergeChildId;
+		std::tie(granuleId, historyKey, keyRange, mergeChildId) = toFullyDelete[i];
 		// FIXME: consider batching into a single txn (need to take care of txn size limit)
 		if (BM_PURGE_DEBUG) {
 			fmt::print("BM {0}: About to fully delete granule {1}\n", self->epoch, granuleId.toString());
 		}
-		wait(fullyDeleteGranule(self, granuleId, historyKey, purgeVersion, keyRange, force));
+		wait(fullyDeleteGranule(self, granuleId, historyKey, purgeVersion, keyRange, mergeChildId, force));
 	}
 
 	if (BM_PURGE_DEBUG) {
