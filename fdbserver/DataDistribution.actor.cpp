@@ -310,6 +310,7 @@ public:
 	// consumer is a yield stream from producer. The RelocateShard is pushed into relocationProducer and popped from
 	// relocationConsumer (by DDQueue)
 	PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
+	Reference<PhysicalShardCollection> physicalShardCollection;
 
 	StorageQuotaInfo storageQuotaInfo;
 
@@ -437,6 +438,20 @@ public:
 	}
 
 	ACTOR static Future<Void> resumeFromShards(Reference<DataDistributor> self, bool traceShard) {
+		// All physicalShard init must be completed before issuing data move
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+			for (int i = 0; i < self->initData->shards.size() - 1; i++) {
+				const DDShardInfo& iShard = self->initData->shards[i];
+				KeyRangeRef keys = KeyRangeRef(iShard.key, self->initData->shards[i + 1].key);
+				std::vector<ShardsAffectedByTeamFailure::Team> teams;
+				teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.primarySrc, true));
+				if (self->configuration.usableRegions > 1) {
+					teams.push_back(ShardsAffectedByTeamFailure::Team(iShard.remoteSrc, false));
+				}
+				self->physicalShardCollection->initPhysicalShardCollection(keys, teams, iShard.srcId.first(), 0);
+			}
+		}
+
 		state int shard = 0;
 		for (; shard < self->initData->shards.size() - 1; shard++) {
 			const DDShardInfo& iShard = self->initData->shards[shard];
@@ -557,6 +572,17 @@ ACTOR Future<Void> storageQuotaTracker(Database cx, StorageQuotaInfo* storageQuo
 	}
 }
 
+// Periodically check and log the physicalShard status; clean up empty physicalShard;
+ACTOR Future<Void> monitorPhysicalShardStatus(Reference<PhysicalShardCollection> self) {
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
+	loop {
+		self->cleanUpPhysicalShardCollection();
+		self->logPhysicalShardCollection();
+		wait(delay(SERVER_KNOBS->PHYSICAL_SHARD_METRICS_DELAY));
+	}
+}
+
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList,
@@ -604,6 +630,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			state Promise<Void> readyToStart;
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
+			self->physicalShardCollection = makeReference<PhysicalShardCollection>();
 			wait(self->resumeRelocations());
 
 			std::vector<TeamCollectionInterface> tcis; // primary and remote region interface
@@ -635,6 +662,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                                            cx,
 			                                                            self->relocationProducer,
 			                                                            self->shardsAffectedByTeamFailure,
+			                                                            self->physicalShardCollection,
 			                                                            getShardMetrics,
 			                                                            getTopKShardMetrics.getFuture(),
 			                                                            getShardMetricsList,
@@ -656,6 +684,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                                          processingWiggle,
 			                                                          tcis,
 			                                                          self->shardsAffectedByTeamFailure,
+			                                                          self->physicalShardCollection,
 			                                                          self->lock,
 			                                                          getAverageShardBytes,
 			                                                          getUnhealthyRelocationCount.getFuture(),
@@ -731,6 +760,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(primaryTeamCollection));
 			actors.push_back(yieldPromiseStream(self->relocationProducer.getFuture(), self->relocationConsumer));
+			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+				actors.push_back(monitorPhysicalShardStatus(self->physicalShardCollection));
+			}
 
 			wait(waitForAll(actors));
 			return Void();
@@ -1442,6 +1474,9 @@ TEST_CASE("/DataDistribution/Initialization/ResumeFromShard") {
 	state Reference<DataDistributor> self(new DataDistributor(dbInfo, UID()));
 
 	self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+		self->physicalShardCollection = makeReference<PhysicalShardCollection>();
+	}
 	self->initData = makeReference<InitialDataDistribution>();
 	self->configuration.usableRegions = 1;
 	self->configuration.storageTeamSize = 1;
