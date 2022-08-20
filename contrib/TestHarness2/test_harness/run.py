@@ -3,7 +3,7 @@ from __future__ import annotations
 import array
 import base64
 import collections
-import json
+import math
 import os
 import resource
 import shutil
@@ -18,7 +18,7 @@ from functools import total_ordering
 from pathlib import Path
 from test_harness.version import Version
 from test_harness.config import config
-from typing import List, Pattern, OrderedDict, Dict
+from typing import List, Pattern, OrderedDict
 
 from test_harness.summarize import Summary, SummaryTree
 
@@ -28,9 +28,10 @@ class TestDescription:
     def __init__(self, path: Path, name: str, priority: float):
         self.paths: List[Path] = [path]
         self.name = name
-        self.priority = priority
+        self.priority: float = priority
         # we only measure in seconds. Otherwise, keeping determinism will be difficult
         self.total_runtime: int = 0
+        self.num_runs: int = 0
 
     def __lt__(self, other):
         if isinstance(other, TestDescription):
@@ -52,33 +53,8 @@ class StatFetcher:
     def read_stats(self):
         pass
 
-    def add_run_time(self, test_name: str, runtime: int):
+    def add_run_time(self, test_name: str, runtime: int, out: SummaryTree):
         self.tests[test_name].total_runtime += runtime
-
-
-class FileStatsFetcher(StatFetcher):
-    def __init__(self, stat_file: str, tests: OrderedDict[str, TestDescription]):
-        super().__init__(tests)
-        self.stat_file = stat_file
-        self.last_state: Dict[str, int] = {}
-
-    def read_stats(self):
-        p = Path(self.stat_file)
-        if not p.exists() or not p.is_file():
-            return
-        with p.open('r') as f:
-            self.last_state = json.load(f)
-            for k, v in self.last_state.items():
-                if k in self.tests:
-                    self.tests[k].total_runtime = v
-
-    def add_run_time(self, test_name: str, runtime: int):
-        super().add_run_time(test_name, runtime)
-        if test_name not in self.last_state:
-            self.last_state[test_name] = 0
-        self.last_state[test_name] += runtime
-        with Path(self.stat_file).open('w') as f:
-            json.dump(self.last_state, f)
 
 
 class TestPicker:
@@ -97,21 +73,41 @@ class TestPicker:
         for subdir in self.test_dir.iterdir():
             if subdir.is_dir() and subdir.name in config.test_dirs:
                 self.walk_test_dir(subdir)
-        self.fetcher: StatFetcher
-        # self.fetcher = fetcher(self.tests)
+        self.stat_fetcher: StatFetcher
+        if config.stats is not None or config.joshua_dir is None:
+            self.stat_fetcher = StatFetcher(self.tests)
+        else:
+            from test_harness.fdb import FDBStatFetcher
+            self.stat_fetcher = FDBStatFetcher(self.tests)
+        if config.stats is not None:
+            self.load_stats(config.stats)
+        else:
+            self.fetch_stats()
 
-    def add_time(self, test_file: Path, run_time: int) -> None:
+    def add_time(self, test_file: Path, run_time: int, out: SummaryTree) -> None:
         # getting the test name is fairly inefficient. But since we only have 100s of tests, I won't bother
-        test_name = None
+        test_name: str | None = None
+        test_desc: TestDescription | None = None
         for name, test in self.tests.items():
             for p in test.paths:
-                if p.absolute() == test_file.absolute():
-                    test_name = name
+                test_files: List[Path]
+                if self.restart_test.match(p.name):
+                    test_files = self.list_restart_files(p)
+                else:
+                    test_files = [p]
+                for file in test_files:
+                    if file.absolute() == test_file.absolute():
+                        test_name = name
+                        test_desc = test
+                        break
+                if test_name is not None:
                     break
             if test_name is not None:
                 break
-        # assert test_name is not None
-        # self.fetcher.add_run_time(test_name, run_time)
+        assert test_name is not None and test_desc is not None
+        self.stat_fetcher.add_run_time(test_name, run_time, out)
+        out.attributes['TotalTestTime'] = str(test_desc.total_runtime)
+        out.attributes['TestRunCount'] = str(test_desc.num_runs)
 
     def dump_stats(self) -> str:
         res = array.array('I')
@@ -120,8 +116,7 @@ class TestPicker:
         return base64.standard_b64encode(res.tobytes()).decode('utf-8')
 
     def fetch_stats(self):
-        # self.fetcher.read_stats()
-        pass
+        self.stat_fetcher.read_stats()
 
     def load_stats(self, serialized: str):
         times = array.array('I')
@@ -198,9 +193,7 @@ class TestPicker:
         candidates: List[TestDescription] = []
         for _, v in self.tests.items():
             this_time = v.total_runtime * v.priority
-            if min_runtime is None:
-                min_runtime = this_time
-            if this_time < min_runtime:
+            if min_runtime is None or this_time < min_runtime:
                 min_runtime = this_time
                 candidates = [v]
             elif this_time == min_runtime:
@@ -315,7 +308,7 @@ class TestRun:
         self.old_binary_path: Path = config.old_binaries_path
         self.buggify_enabled: bool = config.random.random() < config.buggify_on_ratio
         self.fault_injection_enabled: bool = True
-        self.trace_format = config.trace_format
+        self.trace_format: str | None = config.trace_format
         if Version.of_binary(self.binary) < "6.1.0":
             self.trace_format = None
         self.temp_path = config.run_dir / str(self.uid)
@@ -379,14 +372,14 @@ class TestRun:
             did_kill = True
         resources.stop()
         resources.join()
-        self.run_time = round(resources.time())
+        # we're rounding times up, otherwise we will prefer running very short tests (<1s)
+        self.run_time = math.ceil(resources.time())
         self.summary.runtime = resources.time()
         self.summary.max_rss = resources.max_rss
         self.summary.was_killed = did_kill
         self.summary.valgrind_out_file = valgrind_file
         self.summary.error_out = err_out
         self.summary.summarize(self.temp_path, ' '.join(command))
-        self.summary.out.dump(sys.stdout)
         return self.summary.ok()
 
 
@@ -428,7 +421,8 @@ class TestRunner:
             run = TestRun(binary, file.absolute(), seed + count, self.uid, restarting=count != 0,
                           stats=test_picker.dump_stats(), will_restart=will_restart)
             result = result and run.success
-            test_picker.add_time(test_files[0], run.run_time)
+            test_picker.add_time(test_files[0], run.run_time, run.summary.out)
+            run.summary.out.dump(sys.stdout)
             if not result:
                 return False
             if unseed_check and run.summary.unseed is not None:
@@ -437,17 +431,14 @@ class TestRunner:
                 run2 = TestRun(binary, file.absolute(), seed + count, self.uid, restarting=count != 0,
                                stats=test_picker.dump_stats(), expected_unseed=run.summary.unseed,
                                will_restart=will_restart)
-                test_picker.add_time(file, run2.run_time)
+                test_picker.add_time(file, run2.run_time, run.summary.out)
+                run.summary.out.dump(sys.stdout)
                 result = result and run.success
             count += 1
         return result
 
-    def run(self, stats: str | None) -> bool:
+    def run(self) -> bool:
         seed = config.random.randint(0, 2 ** 32 - 1)
-        if stats is not None:
-            self.test_picker.load_stats(stats)
-        else:
-            self.test_picker.fetch_stats()
         test_files = self.test_picker.choose_test()
         success = self.run_tests(test_files, seed, self.test_picker)
         if config.clean_up:

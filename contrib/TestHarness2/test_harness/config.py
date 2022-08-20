@@ -7,7 +7,7 @@ import os
 import random
 from enum import Enum
 from pathlib import Path
-from typing import List, Any, OrderedDict
+from typing import List, Any, OrderedDict, Dict
 
 
 class BuggifyOptionValue(Enum):
@@ -51,6 +51,8 @@ class ConfigValue:
         if 'short_name' in kwargs:
             short_name = kwargs['short_name']
             del kwargs['short_name']
+        if 'action' in kwargs and kwargs['action'] in ['store_true', 'store_false']:
+            del kwargs['type']
         long_name = long_name.replace('_', '-')
         if short_name is None:
             # line below is useful for debugging
@@ -71,6 +73,15 @@ class ConfigValue:
 class Config:
     def __init__(self):
         self.random = random.Random()
+        self.cluster_file: str | None = None
+        self.cluster_file_args = {'short_name': 'C', 'type': str, 'help': 'Path to fdb cluster file', 'required': False,
+                                  'env_name': 'JOSHUA_CLUSTER_FILE'}
+        self.joshua_dir: str | None = None
+        self.joshua_dir_args = {'type': str, 'help': 'Where to write FDB data to', 'required': False,
+                                'env_name': 'JOSHUA_APP_DIR'}
+        self.stats: str | None = None
+        self.stats_args = {'type': str, 'help': 'A base64 encoded list of statistics (used to reproduce runs)',
+                           'required': False}
         self.kill_seconds: int = 30 * 60
         self.kill_seconds_args = {'help': 'Timeout for individual test'}
         self.buggify_on_ratio: float = 0.8
@@ -91,7 +102,7 @@ class Config:
         self.max_warnings_args = {'short_name': 'W'}
         self.max_errors: int = 10
         self.max_errors_args = {'short_name': 'E'}
-        self.old_binaries_path: Path = Path('/opt/joshua/global_data/oldBinaries')
+        self.old_binaries_path: Path = Path('/app/deploy/global_data/oldBinaries/')
         self.old_binaries_path_args = {'help': 'Path to the directory containing the old fdb binaries'}
         self.use_valgrind: bool = False
         self.use_valgrind_args = {'action': 'store_true'}
@@ -99,12 +110,11 @@ class Config:
         self.buggify_args = {'short_name': 'b', 'choices': ['on', 'off', 'random']}
         self.pretty_print: bool = False
         self.pretty_print_args = {'short_name': 'P', 'action': 'store_true'}
-        self.clean_up = True
+        self.clean_up: bool = True
         self.clean_up_args = {'long_name': 'no_clean_up', 'action': 'store_false'}
         self.run_dir: Path = Path('tmp')
-        self.joshua_seed: int = int(os.getenv('JOSHUA_SEED', str(random.randint(0, 2 ** 32 - 1))))
-        self.random.seed(self.joshua_seed, version=2)
-        self.joshua_seed_args = {'short_name': 's', 'help': 'A random seed'}
+        self.joshua_seed: int = random.randint(0, 2 ** 32 - 1)
+        self.joshua_seed_args = {'short_name': 's', 'help': 'A random seed', 'env_name': 'JOSHUA_SEED'}
         self.print_coverage = False
         self.print_coverage_args = {'action': 'store_true'}
         self.binary = Path('bin') / ('fdbserver.exe' if os.name == 'nt' else 'fdbserver')
@@ -122,46 +132,75 @@ class Config:
         self.max_stderr_bytes: int = 1000
         self.write_stats: bool = True
         self.read_stats: bool = True
-        self.config_map = self._build_map()
+        self._env_names: Dict[str, str] = {}
+        self._config_map = self._build_map()
+        self._read_env()
+        self.random.seed(self.joshua_seed, version=2)
 
-    def _build_map(self):
+    def _get_env_name(self, var_name: str) -> str:
+        return self._env_names.get(var_name, 'TH_{}'.format(var_name.upper()))
+
+    def dump(self):
+        for attr in dir(self):
+            obj = getattr(self, attr)
+            if attr == 'random' or attr.startswith('_') or callable(obj) or attr.endswith('_args'):
+                continue
+            print('config.{}: {} = {}'.format(attr, type(obj), obj))
+
+    def _build_map(self) -> OrderedDict[str, ConfigValue]:
         config_map: OrderedDict[str, ConfigValue] = collections.OrderedDict()
         for attr in dir(self):
             obj = getattr(self, attr)
-            if attr.startswith('_') or callable(obj):
+            if attr == 'random' or attr.startswith('_') or callable(obj):
                 continue
             if attr.endswith('_args'):
                 name = attr[0:-len('_args')]
                 assert name in config_map
                 assert isinstance(obj, dict)
                 for k, v in obj.items():
-                    if k == 'action' and v in ['store_true', 'store_false']:
-                        # we can't combine type and certain actions
-                        del config_map[name].kwargs['type']
-                    config_map[name].kwargs[k] = v
+                    if k == 'env_name':
+                        self._env_names[name] = v
+                    else:
+                        config_map[name].kwargs[k] = v
             else:
+                # attribute_args has to be declared after the attribute
+                assert attr not in config_map
                 val_type = type(obj)
-                env_name = 'TH_{}'.format(attr.upper())
-                new_val = os.getenv(env_name)
-                try:
-                    if new_val is not None:
-                        obj = val_type(new_val)
-                except:
-                    pass
                 kwargs = {'type': val_type, 'default': obj}
                 config_map[attr] = ConfigValue(attr, **kwargs)
         return config_map
 
+    def _read_env(self):
+        for attr in dir(self):
+            obj = getattr(self, attr)
+            if attr == 'random' or attr.startswith('_') or attr.endswith('_args') or callable(obj):
+                continue
+            env_name = self._get_env_name(attr)
+            attr_type = self._config_map[attr].kwargs['type']
+            assert type(None) != attr_type
+            e = os.getenv(env_name)
+            if e is not None:
+                self.__setattr__(attr, attr_type(e))
+
     def build_arguments(self, parser: argparse.ArgumentParser):
-        for val in self.config_map.values():
+        for val in self._config_map.values():
             val.add_to_args(parser)
 
     def extract_args(self, args: argparse.Namespace):
-        for val in self.config_map.values():
+        for val in self._config_map.values():
             k, v = val.get_value(args)
-            config.__setattr__(k, v)
-            if k == 'joshua_seed':
-                self.random.seed(self.joshua_seed, version=2)
+            if v is not None:
+                config.__setattr__(k, v)
+        self.random.seed(self.joshua_seed, version=2)
 
 
 config = Config()
+
+if __name__ == '__main__':
+    # test the config setup
+    parser = argparse.ArgumentParser('TestHarness Config Tester',
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    config.build_arguments(parser)
+    args = parser.parse_args()
+    config.extract_args(args)
+    config.dump()
