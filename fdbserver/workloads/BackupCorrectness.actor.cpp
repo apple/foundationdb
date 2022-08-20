@@ -272,7 +272,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			                               deterministicRandom()->randomInt(0, 100),
 			                               tag.toString(),
 			                               backupRanges,
-			                               SERVER_KNOBS->ENABLE_ENCRYPTION,
+			                               SERVER_KNOBS->ENABLE_ENCRYPTION &&
+			                                   cx->clientInfo->get().tenantMode == TenantMode::REQUIRED,
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               UsePartitionedLog::False,
 			                               IncrementalBackupOnly::False,
@@ -533,7 +534,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
 					                                       self->backupRanges,
-					                                       SERVER_KNOBS->ENABLE_ENCRYPTION,
+					                                       SERVER_KNOBS->ENABLE_ENCRYPTION &&
+					                                           cx->clientInfo->get().tenantMode == TenantMode::REQUIRED,
 					                                       StopWhenDone::True);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)

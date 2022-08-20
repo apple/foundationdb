@@ -227,7 +227,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			                               deterministicRandom()->randomInt(0, 100),
 			                               tag.toString(),
 			                               backupRanges,
-			                               SERVER_KNOBS->ENABLE_ENCRYPTION,
+			                               SERVER_KNOBS->ENABLE_ENCRYPTION &&
+			                                   cx->clientInfo->get().tenantMode == TenantMode::REQUIRED,
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               self->usePartitionedLogs));
 		} catch (Error& e) {
@@ -487,7 +488,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
 					                                       self->backupRanges,
-					                                       SERVER_KNOBS->ENABLE_ENCRYPTION,
+					                                       SERVER_KNOBS->ENABLE_ENCRYPTION &&
+					                                           cx->clientInfo->get().tenantMode == TenantMode::REQUIRED,
 					                                       StopWhenDone::True,
 					                                       UsePartitionedLog::False);
 				} catch (Error& e) {

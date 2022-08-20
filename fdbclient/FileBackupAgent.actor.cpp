@@ -534,13 +534,13 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (!(header.cipherTextDetails.baseCipherId == eKeys.textCipherKey->getBaseCipherId() &&
 		      header.cipherTextDetails.encryptDomainId == eKeys.textCipherKey->getDomainId() &&
 		      header.cipherTextDetails.salt == eKeys.textCipherKey->getSalt())) {
-			TraceEvent("EncryptionHeader_CipherHeaderMismatch")
-			    .detail("HeaderDomainId", eKeys.textCipherKey->getDomainId())
-			    .detail("ExpectedHeaderDomainId", header.cipherTextDetails.encryptDomainId)
-			    .detail("HeaderBaseCipherId", eKeys.textCipherKey->getBaseCipherId())
-			    .detail("ExpectedHeaderBaseCipherId", header.cipherTextDetails.baseCipherId)
-			    .detail("HeaderSalt", eKeys.textCipherKey->getSalt())
-			    .detail("ExpectedHeaderSalt", header.cipherTextDetails.salt);
+			TraceEvent("EncryptionHeader_CipherTextMismatch")
+			    .detail("TextDomainId", eKeys.textCipherKey->getDomainId())
+			    .detail("ExpectedTextDomainId", header.cipherTextDetails.encryptDomainId)
+			    .detail("TextBaseCipherId", eKeys.textCipherKey->getBaseCipherId())
+			    .detail("ExpectedTextBaseCipherId", header.cipherTextDetails.baseCipherId)
+			    .detail("TextSalt", eKeys.textCipherKey->getSalt())
+			    .detail("ExpectedTextSalt", header.cipherTextDetails.salt);
 			throw encrypt_header_metadata_mismatch();
 		}
 
@@ -866,8 +866,13 @@ void getCipherKeys(SnapshotFileBackupEncryptionKeys& eKeys, Arena& arena) {
 		iv[i] = 2;
 	}
 
-	Reference<BlobCipherKey> cipherKey =
-	    makeReference<BlobCipherKey>(domainId, baseCipherId, buf, AES_256_KEY_LENGTH, salt);
+	Reference<BlobCipherKey> cipherKey = makeReference<BlobCipherKey>(domainId,
+	                                                                  baseCipherId,
+	                                                                  buf,
+	                                                                  AES_256_KEY_LENGTH,
+	                                                                  salt,
+	                                                                  std::numeric_limits<int64_t>::max(),
+	                                                                  std::numeric_limits<int64_t>::max());
 
 	eKeys.headerCipherKey = cipherKey;
 	eKeys.textCipherKey = cipherKey;
@@ -930,7 +935,6 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
 			decodeKVPairs(&reader, &results);
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
-			// TODO (Nim): Remove once all work is finished, currently codepath should not trigger
 			// Get cipher keys
 			SnapshotFileBackupEncryptionKeys eKeys;
 			getCipherKeys(eKeys, arena);
@@ -1631,13 +1635,12 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 				// Initialize range file writer and write begin key
 				if (encryptionEnabled) {
-					// TODO (Nim): Remove once all work is finished, currently codepath should not trigger
+					CODE_PROBE(true, "using encrypted snapshot file writer");
 					previousTenantId.reset();
 					SnapshotFileBackupEncryptionKeys eKeys;
 					getCipherKeys(eKeys, arena);
 					rangeFile = std::make_unique<EncryptedRangeFileWriter>(eKeys, outFile, blockSize);
 				} else {
-					ASSERT(false);
 					rangeFile = std::make_unique<RangeFileWriter>(outFile, blockSize);
 				}
 				wait(rangeFile->writeKey(beginKey));
@@ -1648,8 +1651,8 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				state size_t i = 0;
 				for (; i < values.first.size(); ++i) {
 					// TODO (Nim): Support backing up system keys
-					if (encryptionEnabled && false) {
-						// get the current tenant prefix (first 8 bytes of key)
+					if (encryptionEnabled) {
+						// 'get' the current tenant prefix (first 8 bytes of key)
 						KeyRef tenantPrefix = KeyRef(values.first[i].key.begin(), 8);
 						state int64_t curTenantId = TenantMapEntry::prefixToId(tenantPrefix);
 						// if we have crossed tenant boundaries then finish the current
