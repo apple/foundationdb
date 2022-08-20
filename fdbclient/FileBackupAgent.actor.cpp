@@ -935,6 +935,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
 			decodeKVPairs(&reader, &results);
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
+			CODE_PROBE(true, "decoding encrypted block");
 			// Get cipher keys
 			SnapshotFileBackupEncryptionKeys eKeys;
 			getCipherKeys(eKeys, arena);
