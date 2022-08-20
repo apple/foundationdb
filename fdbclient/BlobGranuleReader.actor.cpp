@@ -31,13 +31,6 @@
 #include "fdbclient/FDBTypes.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// TODO more efficient data structure besides std::map? PTree is unnecessary since this isn't versioned, but some other
-// sorted thing could work. And if it used arenas it'd probably be more efficient with allocations, since everything
-// else is in 1 arena and discarded at the end.
-
-// TODO could refactor the file reading code from here and the delta file function into another actor,
-// then this part would also be testable? but meh
-
 ACTOR Future<Standalone<StringRef>> readFile(Reference<BlobConnectionProvider> bstoreProvider, BlobFilePointerRef f) {
 	try {
 		state Arena arena;
