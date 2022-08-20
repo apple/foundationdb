@@ -50,6 +50,7 @@ struct BlobWorkerStats {
 	int activeReadRequests;
 	int granulesPendingSplitCheck;
 	Version minimumCFVersion;
+	Version cfVersionLag;
 	int notAtLatestChangeFeeds;
 	int64_t lastResidentMemory;
 	int64_t estimatedMaxResidentMemory;
@@ -82,13 +83,14 @@ struct BlobWorkerStats {
 	    flushGranuleReqs("FlushGranuleReqs", cc), compressionBytesRaw("CompressionBytesRaw", cc),
 	    compressionBytesFinal("CompressionBytesFinal", cc), fullRejections("FullRejections", cc), numRangesAssigned(0),
 	    mutationBytesBuffered(0), activeReadRequests(0), granulesPendingSplitCheck(0), minimumCFVersion(0),
-	    notAtLatestChangeFeeds(0), lastResidentMemory(0), estimatedMaxResidentMemory(0),
+	    cfVersionLag(0), notAtLatestChangeFeeds(0), lastResidentMemory(0), estimatedMaxResidentMemory(0),
 	    initialSnapshotLock(initialSnapshotLock), resnapshotLock(resnapshotLock), deltaWritesLock(deltaWritesLock) {
 		specialCounter(cc, "NumRangesAssigned", [this]() { return this->numRangesAssigned; });
 		specialCounter(cc, "MutationBytesBuffered", [this]() { return this->mutationBytesBuffered; });
 		specialCounter(cc, "ActiveReadRequests", [this]() { return this->activeReadRequests; });
 		specialCounter(cc, "GranulesPendingSplitCheck", [this]() { return this->granulesPendingSplitCheck; });
 		specialCounter(cc, "MinimumChangeFeedVersion", [this]() { return this->minimumCFVersion; });
+		specialCounter(cc, "CFVersionLag", [this]() { return this->cfVersionLag; });
 		specialCounter(cc, "NotAtLatestChangeFeeds", [this]() { return this->notAtLatestChangeFeeds; });
 		specialCounter(cc, "LastResidentMemory", [this]() { return this->lastResidentMemory; });
 		specialCounter(cc, "EstimatedMaxResidentMemory", [this]() { return this->estimatedMaxResidentMemory; });
