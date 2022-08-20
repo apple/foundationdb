@@ -682,7 +682,6 @@ ACTOR Future<BlobGranuleSplitPoints> splitRange(Reference<BlobManagerData> bmDat
 
 // Picks a worker with the fewest number of already assigned ranges.
 // If there is a tie, picks one such worker at random.
-// TODO: add desired per-blob-worker limit? don't assign ranges to each worker past that limit?
 ACTOR Future<UID> pickWorkerForAssign(Reference<BlobManagerData> bmData,
                                       Optional<std::pair<UID, Error>> previousFailure) {
 	// wait until there are BWs to pick from
@@ -1242,7 +1241,6 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				// read change key at this point along with data
 				state Optional<Value> ckvBegin = wait(tr->get(blobRangeChangeKey));
 
-				// TODO why is there separate arena?
 				state Arena ar;
 				state RangeResult results = wait(krmGetRanges(tr,
 				                                              blobRangeKeys.begin,
@@ -1485,6 +1483,24 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			// make sure we're still manager when this transaction gets committed
 			wait(checkManagerLock(tr, bmData));
+
+			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction(), granuleRange));
+			if (purgeState != ForcedPurgeState::NonePurged) {
+				CODE_PROBE(true, "Initial Split Re-evaluate stopped because of force purge");
+				TraceEvent("GranuleSplitReEvalCancelledForcePurge", bmData->id)
+				    .detail("Epoch", bmData->epoch)
+				    .detail("GranuleRange", granuleRange);
+
+				// destroy already created change feed from worker so it doesn't leak
+				wait(updateChangeFeed(&tr->getTransaction(),
+				                      granuleIDToCFKey(granuleID),
+				                      ChangeFeedStatus::CHANGE_FEED_DESTROY,
+				                      granuleRange));
+
+				wait(tr->commit());
+
+				return Void();
+			}
 
 			// this adds a read conflict range, so if another granule concurrently commits a file, we will retry and see
 			// that
@@ -2171,7 +2187,6 @@ ACTOR Future<std::pair<UID, Version>> persistMergeGranulesStart(Reference<BlobMa
 	}
 }
 
-// FIXME: why not just make parentGranuleRanges vector of N+1 keys?
 // Persists the merge being complete in the database by clearing the merge intent. Once this transaction commits, the
 // merge is considered completed.
 ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
@@ -2221,8 +2236,9 @@ ACTOR Future<Void> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 
 				wait(tr->commit());
 
+				bmData->activeGranuleMerges.insert(mergeRange, invalidVersion);
+				bmData->activeGranuleMerges.coalesce(mergeRange.begin);
 				return Void();
-				// TODO: check this in split re-eval too once that is merged!!
 			}
 
 			tr->clear(blobGranuleMergeKeyFor(mergeGranuleID));
@@ -3597,6 +3613,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		fmt::print("BM {0} final ranges:\n", bmData->epoch);
 	}
 
+	state int totalGranules = 0;
 	state int explicitAssignments = 0;
 	for (auto& range : workerAssignments.intersectingRanges(normalKeys)) {
 		int64_t epoch = std::get<1>(range.value());
@@ -3604,6 +3621,8 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		if (epoch == 0 && seqno == 0) {
 			continue;
 		}
+
+		totalGranules++;
 
 		UID workerId = std::get<0>(range.value());
 		bmData->workerAssignments.insert(range.range(), workerId);
@@ -3647,7 +3666,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	TraceEvent("BlobManagerRecovered", bmData->id)
 	    .detail("Epoch", bmData->epoch)
 	    .detail("Duration", now() - recoveryStartTime)
-	    .detail("Granules", bmData->workerAssignments.size()) // TODO this includes un-set ranges, so it is inaccurate
+	    .detail("Granules", totalGranules)
 	    .detail("Assigned", explicitAssignments)
 	    .detail("Revoked", outOfDateAssignments.size());
 
