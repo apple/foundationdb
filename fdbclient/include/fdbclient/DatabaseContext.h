@@ -378,11 +378,17 @@ public:
 	Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
 
+	// BlobGranule API.
 	Future<Key> purgeBlobGranules(KeyRange keyRange,
 	                              Version purgeVersion,
 	                              Optional<TenantName> tenant,
 	                              bool force = false);
 	Future<Void> waitPurgeGranulesComplete(Key purgeKey);
+
+	Future<bool> blobbifyRange(KeyRange range);
+	Future<bool> unblobbifyRange(KeyRange range);
+	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range, int rangeLimit);
+	Future<Version> verifyBlobRange(const KeyRange& range, Optional<Version> version);
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,

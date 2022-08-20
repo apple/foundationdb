@@ -2853,7 +2853,7 @@ TEST_CASE("Blob Granule Functions") {
 	// test ranges
 
 	while (1) {
-		fdb::KeyRangeArrayFuture f = tr.get_blob_granule_ranges(key("bg"), key("bh"));
+		fdb::KeyRangeArrayFuture f = tr.get_blob_granule_ranges(key("bg"), key("bh"), 1000);
 		fdb_error_t err = wait_future(f);
 		if (err) {
 			fdb::EmptyFuture f2 = tr.on_error(err);

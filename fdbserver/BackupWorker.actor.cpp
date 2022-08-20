@@ -25,7 +25,6 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/BackupProgress.actor.h"
-#include "fdbserver/EncryptedMutationMessage.h"
 #include "fdbserver/GetEncryptCipherKeys.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
@@ -75,24 +74,25 @@ struct VersionedMessage {
 			CODE_PROBE(true, "Returning false for OTELSpanContextMessage");
 			return false;
 		}
-		if (EncryptedMutationMessage::isNextIn(reader)) {
+		reader >> *m;
+		if (m->isEncrypted()) {
 			// In case the mutation is encrypted, get the decrypted mutation and also update message to point to
 			// the decrypted mutation.
 			// We use dedicated arena for decrypt buffer, as the other arena is used to count towards backup lock bytes.
-			*m = EncryptedMutationMessage::decrypt(reader, decryptArena, cipherKeys, &message);
-		} else {
-			reader >> *m;
+			*m = m->decrypt(cipherKeys, decryptArena, &message);
 		}
 		return normalKeys.contains(m->param1) || m->param1 == metadataVersionKey;
 	}
 
 	void collectCipherDetailIfEncrypted(std::unordered_set<BlobCipherDetails>& cipherDetails) {
-		ArenaReader reader(arena, message, AssumeVersion(g_network->protocolVersion()));
-		if (EncryptedMutationMessage::isNextIn(reader)) {
-			EncryptedMutationMessage emm;
-			reader >> emm;
-			cipherDetails.insert(emm.header.cipherTextDetails);
-			cipherDetails.insert(emm.header.cipherHeaderDetails);
+		ASSERT(!message.empty());
+		if (*message.begin() == MutationRef::Encrypted) {
+			ArenaReader reader(arena, message, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+			MutationRef m;
+			reader >> m;
+			const BlobCipherEncryptHeader* header = m.encryptionHeader();
+			cipherDetails.insert(header->cipherTextDetails);
+			cipherDetails.insert(header->cipherHeaderDetails);
 		}
 	}
 };
@@ -453,20 +453,30 @@ struct BackupData {
 	ACTOR static Future<Version> _getMinKnownCommittedVersion(BackupData* self) {
 		state Span span("BA:GetMinCommittedVersion"_loc);
 		loop {
-			GetReadVersionRequest request(span.context,
-			                              0,
-			                              TransactionPriority::DEFAULT,
-			                              invalidVersion,
-			                              GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
-			choose {
-				when(wait(self->cx->onProxiesChanged())) {}
-				when(GetReadVersionReply reply =
-				         wait(basicLoadBalance(self->cx->getGrvProxies(UseProvisionalProxies::False),
-				                               &GrvProxyInterface::getConsistentReadVersion,
-				                               request,
-				                               self->cx->taskID))) {
-					self->cx->ssVersionVectorCache.applyDelta(reply.ssVersionVectorDelta);
-					return reply.version;
+			try {
+				GetReadVersionRequest request(span.context,
+				                              0,
+				                              TransactionPriority::DEFAULT,
+				                              invalidVersion,
+				                              GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
+				choose {
+					when(wait(self->cx->onProxiesChanged())) {}
+					when(GetReadVersionReply reply =
+					         wait(basicLoadBalance(self->cx->getGrvProxies(UseProvisionalProxies::False),
+					                               &GrvProxyInterface::getConsistentReadVersion,
+					                               request,
+					                               self->cx->taskID))) {
+						self->cx->ssVersionVectorCache.applyDelta(reply.ssVersionVectorDelta);
+						return reply.version;
+					}
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_batch_transaction_throttled ||
+				    e.code() == error_code_grv_proxy_memory_limit_exceeded) {
+					// GRV Proxy returns an error
+					wait(delayJittered(CLIENT_KNOBS->GRV_ERROR_RETRY_DELAY));
+				} else {
+					throw;
 				}
 			}
 		}

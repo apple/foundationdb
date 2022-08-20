@@ -25,7 +25,6 @@
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ApplyMetadataMutation.h"
-#include "fdbserver/EncryptedMutationMessage.h"
 #include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LogProtocolMessage.h"
@@ -169,7 +168,7 @@ private:
 		} else {
 			ASSERT(cipherKeys != nullptr);
 			Arena arena;
-			toCommit->writeTypedMessage(EncryptedMutationMessage::encryptMetadata(arena, *cipherKeys, m));
+			toCommit->writeTypedMessage(m.encryptMetadata(*cipherKeys, arena));
 		}
 	}
 

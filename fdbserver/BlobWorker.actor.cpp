@@ -84,7 +84,6 @@ struct GranuleStartState {
 	Optional<GranuleHistory> history;
 };
 
-// FIXME: add global byte limit for pending and buffered deltas
 struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	KeyRange keyRange;
 
@@ -1032,7 +1031,6 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		// FIXME: proper tenant support in Blob Worker
 		tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1059,7 +1057,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			DEBUG_KEY_RANGE("BlobWorkerFDBSnapshot", readVersion, metadata->keyRange, bwData->id);
 
 			// initial snapshot is committed in fdb, we can pop the change feed up to this version
-			inFlightPops->push_back(bwData->db->popChangeFeedMutations(cfKey, readVersion));
+			inFlightPops->push_back(bwData->db->popChangeFeedMutations(cfKey, readVersion + 1));
 			return snapshotWriter.get();
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled) {
@@ -1373,6 +1371,42 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 	return reSnapshotIdx;
 }
 
+ACTOR Future<BlobFileIndex> reSnapshotNoCheck(Reference<BlobWorkerData> bwData,
+                                              Reference<BlobConnectionProvider> bstore,
+                                              Reference<GranuleMetadata> metadata,
+                                              UID granuleID,
+                                              Future<BlobFileIndex> lastDeltaBeforeSnapshot) {
+	BlobFileIndex lastDeltaIdx = wait(lastDeltaBeforeSnapshot);
+	state Version reSnapshotVersion = lastDeltaIdx.version;
+	wait(delay(0, TaskPriority::BlobWorkerUpdateFDB));
+
+	CODE_PROBE(true, "re-snapshotting without BM check because still on old change feed!");
+
+	if (BW_DEBUG) {
+		fmt::print("Granule [{0} - {1}) re-snapshotting @ {2} WITHOUT checking with BM, because it is still on old "
+		           "change feed!\n",
+		           metadata->keyRange.begin.printable(),
+		           metadata->keyRange.end.printable(),
+		           reSnapshotVersion);
+	}
+
+	TraceEvent(SevDebug, "BlobGranuleReSnapshotOldFeed", bwData->id)
+	    .detail("Granule", metadata->keyRange)
+	    .detail("Version", reSnapshotVersion);
+
+	// wait for file updater to make sure that last delta file is in the metadata before
+	while (metadata->files.deltaFiles.empty() || metadata->files.deltaFiles.back().version < reSnapshotVersion) {
+		wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+	}
+
+	std::vector<GranuleFiles> toSnapshot;
+	toSnapshot.push_back(metadata->files);
+	BlobFileIndex reSnapshotIdx =
+	    wait(compactFromBlob(bwData, bstore, metadata, granuleID, toSnapshot, reSnapshotVersion));
+
+	return reSnapshotIdx;
+}
+
 // wait indefinitely to tell manager to re-evaluate this split, until the granule is revoked
 ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
                                           UID granuleID,
@@ -1536,11 +1570,10 @@ void handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
 		}
 		// FIXME: for a write-hot shard, we could potentially batch these and only pop the largest one after
 		// several have completed
-		// FIXME: we actually want to pop at this version + 1 because pop is exclusive?
 		// FIXME: since this is async, and worker could die, new blob worker that opens granule should probably
 		// kick off an async pop at its previousDurableVersion after opening the granule to guarantee it is
 		// eventually popped?
-		Future<Void> popFuture = bwData->db->popChangeFeedMutations(cfKey, completedDeltaFile.version);
+		Future<Void> popFuture = bwData->db->popChangeFeedMutations(cfKey, completedDeltaFile.version + 1);
 		// Do pop asynchronously
 		inFlightPops.push_back(popFuture);
 	}
@@ -1962,6 +1995,13 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			                                                   metadata->keyRange,
 			                                                   bwData->changeFeedStreamReplyBufferSize,
 			                                                   false);
+			// in case previous worker died before popping the latest version, start another pop
+			if (startState.previousDurableVersion != invalidVersion) {
+				ASSERT(startState.previousDurableVersion >= startState.changeFeedStartVersion);
+				Future<Void> popFuture =
+				    bwData->db->popChangeFeedMutations(cfKey, startState.previousDurableVersion + 1);
+				inFlightPops.push_back(popFuture);
+			}
 		}
 
 		// Start actors BEFORE setting new change feed data to ensure the change feed data is properly
@@ -2408,8 +2448,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			// yet
 
 			// If we have enough delta files, try to re-snapshot
-			if (snapshotEligible && metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT &&
-			    metadata->pendingDeltaVersion >= startState.changeFeedStartVersion) {
+			if (snapshotEligible && metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT) {
 				if (BW_DEBUG && !inFlightFiles.empty()) {
 					fmt::print("Granule [{0} - {1}) ready to re-snapshot at {2} after {3} > {4} bytes, "
 					           "waiting for "
@@ -2437,13 +2476,19 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					previousFuture = Future<BlobFileIndex>(metadata->files.deltaFiles.back());
 				}
 				int64_t versionsSinceLastSnapshot = metadata->pendingDeltaVersion - metadata->pendingSnapshotVersion;
-				Future<BlobFileIndex> inFlightBlobSnapshot = checkSplitAndReSnapshot(bwData,
-				                                                                     bstore,
-				                                                                     metadata,
-				                                                                     startState.granuleID,
-				                                                                     metadata->bytesInNewDeltaFiles,
-				                                                                     previousFuture,
-				                                                                     versionsSinceLastSnapshot);
+				Future<BlobFileIndex> inFlightBlobSnapshot;
+				if (metadata->pendingDeltaVersion >= startState.changeFeedStartVersion) {
+					inFlightBlobSnapshot = checkSplitAndReSnapshot(bwData,
+					                                               bstore,
+					                                               metadata,
+					                                               startState.granuleID,
+					                                               metadata->bytesInNewDeltaFiles,
+					                                               previousFuture,
+					                                               versionsSinceLastSnapshot);
+				} else {
+					inFlightBlobSnapshot =
+					    reSnapshotNoCheck(bwData, bstore, metadata, startState.granuleID, previousFuture);
+				}
 				inFlightFiles.push_back(InFlightFile(inFlightBlobSnapshot, metadata->pendingDeltaVersion, 0, true));
 				pendingSnapshots++;
 
@@ -3412,6 +3457,16 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 						           req.readVersion);
 					}
 				}
+				// if feed was popped by another worker and BW only got empty versions, it wouldn't itself see that it
+				// got popped, but we can still reject the in theory this should never happen with other protections but
+				// it's a useful and inexpensive sanity check
+				Version emptyVersion = metadata->activeCFData.get()->popVersion - 1;
+				if (req.readVersion > metadata->durableDeltaVersion.get() &&
+				    emptyVersion > metadata->bufferedDeltaVersion) {
+					CODE_PROBE(true, "feed popped for read but granule updater didn't notice yet");
+					// FIXME: could try to cancel the actor here somehow, but it should find out eventually
+					throw wrong_shard_server();
+				}
 				rangeGranulePair.push_back(std::pair(metadata->keyRange, metadata->files));
 			}
 
@@ -3494,8 +3549,6 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					}
 				}
 
-				// FIXME: get cipher keys for delta files too!
-
 				// new deltas (if version is larger than version of last delta file)
 				// FIXME: do trivial key bounds here if key range is not fully contained in request key
 				// range
@@ -3512,8 +3565,6 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 
 					// prune mutations based on begin version, if possible
 					ASSERT(metadata->durableDeltaVersion.get() == metadata->pendingDeltaVersion);
-					// FIXME: I think we can remove this dependsOn since we are doing push_back_deep
-					rep.arena.dependsOn(metadata->currentDeltas.arena());
 					MutationsAndVersionRef* mutationIt = metadata->currentDeltas.begin();
 					if (granuleBeginVersion > metadata->currentDeltas.back().version) {
 						CODE_PROBE(true, "beginVersion pruning all in-memory mutations");
@@ -4164,7 +4215,9 @@ ACTOR Future<Void> handleRangeAssign(Reference<BlobWorkerData> bwData,
 			wait(waitForAll(toWait));
 
 			if (shouldStart) {
-				bwData->stats.numRangesAssigned++;
+				if (!isSelfReassign) {
+					bwData->stats.numRangesAssigned++;
+				}
 				auto m = bwData->granuleMetadata.rangeContaining(req.keyRange.begin);
 				ASSERT(m.begin() == req.keyRange.begin && m.end() == req.keyRange.end);
 				if (m.value().activeMetadata.isValid()) {
@@ -4253,6 +4306,7 @@ void handleBlobVersionRequest(Reference<BlobWorkerData> bwData, MinBlobVersionRe
 	MinBlobVersionReply rep;
 	rep.version = bwData->db->getMinimumChangeFeedVersion();
 	bwData->stats.minimumCFVersion = rep.version;
+	bwData->stats.cfVersionLag = std::max((Version)0, req.grv - rep.version);
 	bwData->stats.notAtLatestChangeFeeds = bwData->db->notAtLatestChangeFeeds.size();
 	req.reply.send(rep);
 }
@@ -4724,7 +4778,6 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 					if (self->statusStreamInitialized) {
 						copy = self->currentManagerStatusStream.get();
 					}
-					// TODO: pick a reasonable byte limit instead of just piggy-backing
 					req.reply.setByteLimit(SERVER_KNOBS->BLOBWORKERSTATUSSTREAM_LIMIT_BYTES);
 					self->statusStreamInitialized = true;
 

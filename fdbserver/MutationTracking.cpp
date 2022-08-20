@@ -21,7 +21,6 @@
 #include <algorithm>
 #include <vector>
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/EncryptedMutationMessage.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/SpanContextMessage.h"
@@ -103,8 +102,6 @@ TraceEvent debugTagsAndMessageEnabled(const char* context, Version version, Stri
 			BinaryReader br(mutationData, AssumeVersion(rdr.protocolVersion()));
 			OTELSpanContextMessage scm;
 			br >> scm;
-		} else if (EncryptedMutationMessage::startsEncryptedMutationMessage(mutationType)) {
-			throw encrypt_unsupported();
 		} else {
 			MutationRef m;
 			BinaryReader br(mutationData, AssumeVersion(rdr.protocolVersion()));

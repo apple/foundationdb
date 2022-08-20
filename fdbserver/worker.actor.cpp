@@ -1576,6 +1576,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf(new AsyncVar<Optional<RatekeeperInterface>>());
 	state Reference<AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>>> bmEpochAndInterf(
 	    new AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>>());
+	state UID lastBMRecruitRequestId;
 	state Reference<AsyncVar<Optional<EncryptKeyProxyInterface>>> ekpInterf(
 	    new AsyncVar<Optional<EncryptKeyProxyInterface>>());
 	state Future<Void> handleErrors = workerHandleErrors(errors.getFuture()); // Needs to be stopped last
@@ -2090,9 +2091,17 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				recruited.initEndpoints();
 
 				if (bmEpochAndInterf->get().present() && bmEpochAndInterf->get().get().first == req.epoch) {
+					ASSERT(req.reqId == lastBMRecruitRequestId);
 					recruited = bmEpochAndInterf->get().get().second;
 
 					CODE_PROBE(true, "Recruited while already a blob manager.");
+				} else if (lastBMRecruitRequestId == req.reqId && !bmEpochAndInterf->get().present()) {
+					// The previous blob manager WAS present, like the above case, but it died before the CC got the
+					// response to the recruitment request, so the CC retried to recruit the same blob manager id/epoch
+					// from the same reqId. To keep epoch safety between different managers, instead of restarting the
+					// same manager id at the same epoch, we should just tell it the original request succeeded, and let
+					// it realize this manager died via failure detection and start a new one.
+					CODE_PROBE(true, "Recruited while formerly the same blob manager.");
 				} else {
 					// TODO: it'd be more optimal to halt the last manager if present here, but it will figure it out
 					// via the epoch check
@@ -2104,6 +2113,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.haltBlobManager);
 					DUMPTOKEN(recruited.haltBlobGranules);
 					DUMPTOKEN(recruited.blobManagerExclCheckReq);
+
+					lastBMRecruitRequestId = req.reqId;
 
 					Future<Void> blobManagerProcess = blobManager(recruited, dbInfo, req.epoch);
 					errorForwarders.add(
