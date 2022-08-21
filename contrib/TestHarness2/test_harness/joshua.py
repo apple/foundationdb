@@ -83,7 +83,7 @@ def print_errors(ensemble_id: str):
         cmd += ['--crash', '--trace_format', 'json']
         # we want the command as the first attribute
         attributes = {'Command': ' '.join(cmd)}
-        for k, v in res.attributes:
+        for k, v in res.attributes.items():
             attributes[k] = v
         res.attributes = attributes
         res.dump(sys.stdout, prefix=('  ' if config.pretty_print else ''), new_line=config.pretty_print)
