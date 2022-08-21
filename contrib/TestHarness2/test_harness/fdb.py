@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import OrderedDict, Tuple
+from typing import OrderedDict, Tuple, List
 
 import collections
 import fdb
@@ -8,7 +8,7 @@ import struct
 
 from test_harness.run import StatFetcher, TestDescription
 from test_harness.config import config
-from test_harness.summarize import SummaryTree
+from test_harness.summarize import SummaryTree, Coverage
 
 fdb.api_version(630)
 
@@ -20,6 +20,59 @@ def str_to_tuple(s: str | None):
     return tuple(res)
 
 
+fdb_db = None
+
+
+def open_db(cluster_file: str | None):
+    global fdb_db
+    if fdb_db is None:
+        fdb_db = fdb.open(cluster_file)
+    return fdb_db
+
+def chunkify(iterable, sz: int):
+    count = 0
+    res = []
+    for item in iterable:
+        res.append(item)
+        count += 1
+        if count >= sz:
+            yield res
+            res = []
+            count = 0
+    if len(res) > 0:
+        yield res
+
+
+@fdb.transactional
+def write_coverage_chunk(tr, path: Tuple[str, ...], coverage: List[Tuple[Coverage, bool]]):
+    cov_dir = fdb.directory.create_or_open(tr, path)
+    for cov, covered in coverage:
+        tr.add(cov_dir.pack((cov.file, cov.line, cov.comment)), struct.pack('<I', 1 if covered else 0))
+
+
+def write_coverage(cluster_file: str | None, cov_path: Tuple[str, ...], coverage: OrderedDict[Coverage, bool]):
+    db = open_db(cluster_file)
+    assert config.joshua_dir is not None
+    for chunk in chunkify(coverage.items(), 100):
+        write_coverage_chunk(db, cov_path, chunk)
+
+
+@fdb.transactional
+def _read_coverage(tr, cov_path: Tuple[str, ...]) -> OrderedDict[Coverage, int]:
+    res = collections.OrderedDict()
+    cov_dir = fdb.directory.create_or_open(tr, cov_path)
+    for k, v in tr[cov_dir.range()]:
+        file, line, comment = cov_dir.unpack(k)
+        count = struct.unpack('<I', v)[0]
+        res[Coverage(file, line, comment)] = count
+    return res
+
+
+def read_coverage(cluster_file: str | None, cov_path: Tuple[str, ...]) -> OrderedDict[Coverage, int]:
+    db = open_db(cluster_file)
+    return _read_coverage(db, cov_path)
+
+
 class TestStatistics:
     def __init__(self, runtime: int, run_count: int):
         self.runtime: int = runtime
@@ -28,12 +81,12 @@ class TestStatistics:
 
 class Statistics:
     def __init__(self, cluster_file: str | None, joshua_dir: Tuple[str, ...]):
-        self.db: fdb.Database = fdb.open(cluster_file)
-        self.stats_dir: fdb.DirectorySubspace = self.open_stats_dir(self.db, joshua_dir)
+        self.db = open_db(cluster_file)
+        self.stats_dir = self.open_stats_dir(self.db, joshua_dir)
         self.stats: OrderedDict[str, TestStatistics] = self.read_stats_from_db(self.db)
 
     @fdb.transactional
-    def open_stats_dir(self, tr, app_dir: Tuple[str]) -> fdb.DirectorySubspace:
+    def open_stats_dir(self, tr, app_dir: Tuple[str]):
         stats_dir = app_dir + ('runtime_stats',)
         return fdb.directory.create_or_open(tr, stats_dir)
 
@@ -47,11 +100,12 @@ class Statistics:
         return result
 
     @fdb.transactional
-    def _write_runtime(self, tr: fdb.Transaction, test_name: str, time: int) -> None:
+    def _write_runtime(self, tr, test_name: str, time: int) -> None:
         key = self.stats_dir.pack((test_name,))
         tr.add(key, struct.pack('<II', time, 1))
 
     def write_runtime(self, test_name: str, time: int) -> None:
+        assert self.db is not None
         self._write_runtime(self.db, test_name, time)
 
 

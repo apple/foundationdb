@@ -119,8 +119,11 @@ class Config:
         self.print_coverage_args = {'action': 'store_true'}
         self.binary = Path('bin') / ('fdbserver.exe' if os.name == 'nt' else 'fdbserver')
         self.binary_args = {'help': 'Path to executable'}
+        self.hit_per_runs_ratio: int = 20000
+        self.hit_per_runs_ratio_args = {'help': 'How many test runs should hit each code probe at least once'}
         self.output_format: str = 'xml'
-        self.output_format_args = {'short_name': 'O', 'choices': ['json', 'xml']}
+        self.output_format_args = {'short_name': 'O', 'choices': ['json', 'xml'],
+                                   'help': 'What format TestHarness should produce'}
         self.include_test_files: str = r'.*'
         self.include_test_files_args = {'help': 'Only consider test files whose path match against the given regex'}
         self.exclude_test_files: str = r'.^'
@@ -129,6 +132,12 @@ class Config:
         self.include_test_names_args = {'help': 'Only consider tests whose names match against the given regex'}
         self.exclude_test_names: str = r'.^'
         self.exclude_test_names_args = {'help': 'Don\'t consider tests whose names match against the given regex'}
+        self.details: bool = False
+        self.details_args = {'help': 'Print detailed results', 'short_name': 'c'}
+        self.cov_include_files: str = r'.*'
+        self.cov_include_files_args = {'help': 'Only consider coverage traces that originated in files matching regex'}
+        self.cov_exclude_files: str = r'.^'
+        self.cov_exclude_files_args = {'help': 'Ignore coverage traces that originated in files matching regex'}
         self.max_stderr_bytes: int = 1000
         self.write_stats: bool = True
         self.read_stats: bool = True

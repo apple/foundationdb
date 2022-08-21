@@ -3,6 +3,7 @@ from __future__ import annotations
 import collections
 import inspect
 import json
+import os
 import re
 import sys
 import traceback
@@ -44,6 +45,11 @@ class SummaryTree:
         # minidom doesn't support omitting the xml declaration which is a problem for joshua
         # However, our xml is very simple and therefore serializing manually is easy enough
         attrs = []
+        print_width = 120
+        try:
+            print_width, _ = os.get_terminal_size()
+        except OSError:
+            pass
         for k, v in self.attributes.items():
             attrs.append('{}={}'.format(k, xml.sax.saxutils.quoteattr(v)))
         elem = '{}<{}{}'.format(prefix, self.name, ('' if len(attrs) == 0 else ' '))
@@ -52,7 +58,7 @@ class SummaryTree:
             curr_line_len = len(elem)
             for i in range(len(attrs)):
                 attr_len = len(attrs[i])
-                if i == 0 or attr_len + curr_line_len + 1 <= 120:
+                if i == 0 or attr_len + curr_line_len + 1 <= print_width:
                     if i != 0:
                         out.write(' ')
                     out.write(attrs[i])
@@ -381,6 +387,11 @@ class Summary:
         for f in trace_files[0]:
             self.parse_file(f)
         self.done()
+        if config.joshua_dir is not None:
+            import test_harness.fdb
+            test_harness.fdb.write_coverage(config.cluster_file,
+                                            test_harness.fdb.str_to_tuple(config.joshua_dir) + ('coverage',),
+                                            self.coverage)
 
     def ok(self):
         return not self.error
