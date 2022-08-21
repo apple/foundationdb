@@ -293,7 +293,7 @@ class ResourceMonitor(threading.Thread):
 
 class TestRun:
     def __init__(self, binary: Path, test_file: Path, random_seed: int, uid: uuid.UUID,
-                 restarting: bool = False, test_determinism: bool = False,
+                 restarting: bool = False, test_determinism: bool = False, buggify_enabled: bool = False,
                  stats: str | None = None, expected_unseed: int | None = None, will_restart: bool = False):
         self.binary = binary
         self.test_file = test_file
@@ -306,7 +306,7 @@ class TestRun:
         self.err_out: str = 'error.xml'
         self.use_valgrind: bool = config.use_valgrind
         self.old_binary_path: Path = config.old_binaries_path
-        self.buggify_enabled: bool = config.random.random() < config.buggify_on_ratio
+        self.buggify_enabled: bool = buggify_enabled
         self.fault_injection_enabled: bool = True
         self.trace_format: str | None = config.trace_format
         if Version.of_binary(self.binary) < "6.1.0":
@@ -428,11 +428,12 @@ class TestRunner:
             will_restart = count + 1 < len(test_files)
             binary = self.binary_chooser.choose_binary(file)
             unseed_check = config.random.random() < config.unseed_check_ratio
+            buggify_enabled: bool = config.random.random() < config.buggify_on_ratio
             if unseed_check and count != 0:
                 # for restarting tests we will need to restore the sim2 after the first run
                 self.backup_sim_dir(seed + count - 1)
             run = TestRun(binary, file.absolute(), seed + count, self.uid, restarting=count != 0,
-                          stats=test_picker.dump_stats(), will_restart=will_restart)
+                          stats=test_picker.dump_stats(), will_restart=will_restart, buggify_enabled=buggify_enabled)
             result = result and run.success
             test_picker.add_time(test_files[0], run.run_time, run.summary.out)
             decorate_summary(run.summary.out, file, seed + count, run.buggify_enabled)
@@ -444,11 +445,13 @@ class TestRunner:
                     self.restore_sim_dir(seed + count - 1)
                 run2 = TestRun(binary, file.absolute(), seed + count, self.uid, restarting=count != 0,
                                stats=test_picker.dump_stats(), expected_unseed=run.summary.unseed,
-                               will_restart=will_restart)
+                               will_restart=will_restart, buggify_enabled=buggify_enabled)
                 test_picker.add_time(file, run2.run_time, run.summary.out)
                 decorate_summary(run2.summary.out, file, seed + count, run.buggify_enabled)
                 run2.summary.out.dump(sys.stdout)
                 result = result and run2.success
+                if not result:
+                    return False
             count += 1
         return result
 
