@@ -51,7 +51,7 @@ class EnsembleResults:
         if self.coverage_ok:
             self.coverage_ok = self.min_coverage_hit > self.ratio
 
-    def dump(self):
+    def dump(self, prefix: str):
         errors = 0
         out = SummaryTree('EnsembleResults')
         out.attributes['TotalRunTime'] = str(self.global_statistics.total_cpu_time)
@@ -83,17 +83,50 @@ class EnsembleResults:
                 out.append(child)
         if errors > 0:
             out.attributes['Errors'] = str(errors)
-        out.dump(sys.stdout)
+        out.dump(sys.stdout, prefix=prefix, new_line=config.pretty_print)
+
+
+def write_header(ensemble_id: str):
+    if config.output_format == 'json':
+        if config.pretty_print:
+            print('{')
+            print('  {}: {}'.format('ID', ensemble_id))
+        else:
+            sys.stdout.write('{{{}: {}'.format('ID', ensemble_id))
+    elif config.output_format == 'xml':
+        sys.stdout.write('<Ensemble ID="{}">'.format(ensemble_id))
+        if config.pretty_print:
+            sys.stdout.write('\n')
+    else:
+        assert False, 'unknown output format {}'.format(config.output_format)
+
+
+def write_footer():
+    if config.output_format == 'json':
+        sys.stdout.write('}')
+    elif config.output_format == 'xml':
+        sys.stdout.write('</Ensemble>')
+    else:
+        assert False, 'unknown output format {}'.format(config.output_format)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('TestHarness Results', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    config.change_default('pretty_print', True)
     config.build_arguments(parser)
     parser.add_argument('ensemble_id', type=str, help='The ensemble to fetch the result for')
     args = parser.parse_args()
     config.extract_args(args)
-    config.pretty_print = True
     config.output_format = args.output_format
+    write_header(args.ensemble_id)
+    try:
+        import test_harness.joshua
+        test_harness.joshua.print_errors(args.ensemble_id)
+    except ModuleNotFoundError:
+        child = SummaryTree('JoshuaNotFound')
+        child.attributes['Severity'] = '30'
+        child.attributes['Message'] = 'Could not import Joshua -- set PYTHONPATH to joshua checkout dir'
+        child.dump(sys.stdout, prefix=('  ' if config.pretty_print else ''), new_line=config.pretty_print)
     results = EnsembleResults(config.cluster_file, args.ensemble_id)
-    results.dump()
+    results.dump('  ' if config.pretty_print else '')
     exit(0 if results.coverage_ok else 1)

@@ -28,18 +28,22 @@ class SummaryTree:
         self.children.append(element)
 
     def to_dict(self) -> Dict[str, Any]:
-        res: Dict[str, Any] = {'Type': self.name}
-        for k, v in self.attributes.items():
-            res[k] = v
         children = []
         for child in self.children:
             children.append(child.to_dict())
+        if len(children) > 0 and len(self.attributes) == 0:
+            return {self.name: children}
+        res: Dict[str, Any] = {'Type': self.name}
+        for k, v in self.attributes.items():
+            res[k] = v
         if len(children) > 0:
             res['children'] = children
         return res
 
-    def to_json(self, out: TextIO):
-        json.dump(self.to_dict(), out, indent=('  ' if config.pretty_print else None))
+    def to_json(self, out: TextIO, prefix: str = ''):
+        res = json.dumps(self.to_dict(), indent=('  ' if config.pretty_print else None))
+        for line in res.splitlines(False):
+            out.write('{}{}\n'.format(prefix, line))
 
     def to_xml(self, out: TextIO, prefix: str = ''):
         # minidom doesn't support omitting the xml declaration which is a problem for joshua
@@ -79,14 +83,15 @@ class SummaryTree:
                 out.write('\n')
             child.to_xml(out, prefix=('  {}'.format(prefix) if config.pretty_print else prefix))
         if len(self.children) > 0:
-            out.write('{}</{}>'.format(('\n' if config.pretty_print else ''), self.name))
+            out.write('{}{}</{}>'.format(('\n' if config.pretty_print else ''), prefix, self.name))
 
-    def dump(self, out: TextIO):
+    def dump(self, out: TextIO, prefix: str = '', new_line: bool = True):
         if config.output_format == 'json':
-            self.to_json(out)
+            self.to_json(out, prefix=prefix)
         else:
-            self.to_xml(out)
-        out.write('\n')
+            self.to_xml(out, prefix=prefix)
+        if new_line:
+            out.write('\n')
 
 
 ParserCallback = Callable[[Dict[str, str]], Optional[str]]

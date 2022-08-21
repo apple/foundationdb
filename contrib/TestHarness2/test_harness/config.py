@@ -146,6 +146,11 @@ class Config:
         self._read_env()
         self.random.seed(self.joshua_seed, version=2)
 
+    def change_default(self, attr: str, default_val):
+        assert attr in self._config_map, 'Unknown config attribute {}'.format(attr)
+        self.__setattr__(attr, default_val)
+        self._config_map[attr].kwargs['default'] = default_val
+
     def _get_env_name(self, var_name: str) -> str:
         return self._env_names.get(var_name, 'TH_{}'.format(var_name.upper()))
 

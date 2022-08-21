@@ -1,0 +1,63 @@
+from __future__ import annotations
+
+import sys
+import xml.sax
+import xml.sax.handler
+from typing import List
+
+from joshua import joshua_model
+from test_harness.config import config
+from test_harness.summarize import SummaryTree
+
+
+class ToSummaryTree(xml.sax.handler.ContentHandler):
+    def __init__(self):
+        super().__init__()
+        self.root: SummaryTree | None = None
+        self.stack: List[SummaryTree] = []
+
+    def result(self) -> SummaryTree:
+        assert len(self.stack) == 0 and self.root is not None, 'Parse Error'
+        return self.root
+
+    def startElement(self, name, attrs):
+        new_child = SummaryTree(name)
+        for k, v in attrs.items():
+            new_child.attributes[k] = v
+        self.stack.append(new_child)
+
+    def endElement(self, name):
+        closed = self.stack.pop()
+        assert closed.name == name
+        if len(self.stack) == 0:
+            self.root = closed
+        else:
+            self.stack[-1].children.append(closed)
+
+
+def print_errors(ensemble_id: str):
+    joshua_model.open(config.cluster_file)
+    properties = joshua_model.get_ensemble_properties(ensemble_id)
+    compressed = properties["compressed"] if "compressed" in properties else False
+    for rec in joshua_model.tail_results(ensemble_id, errors_only=(not config.details), compressed=compressed):
+        if len(rec) == 5:
+            version_stamp, result_code, host, seed, output = rec
+        elif len(rec) == 4:
+            version_stamp, result_code, host, output = rec
+            seed = None
+        elif len(rec) == 3:
+            version_stamp, result_code, output = rec
+            host = None
+            seed = None
+        elif len(rec) == 2:
+            version_stamp, seed = rec
+            output = str(joshua_model.fdb.tuple.unpack(seed)[0]) + "\n"
+            result_code = None
+            host = None
+            seed = None
+        else:
+            raise Exception("Unknown result format")
+        summary = ToSummaryTree()
+        xml.sax.parseString(output, summary)
+        res = summary.result()
+        res.dump(sys.stdout, prefix=('  ' if config.pretty_print else ''), new_line=config.pretty_print)

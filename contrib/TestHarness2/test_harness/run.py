@@ -383,6 +383,19 @@ class TestRun:
         return self.summary.ok()
 
 
+def decorate_summary(out: SummaryTree, test_file: Path, seed: int, buggify: bool):
+    """Sometimes a test can crash before ProgramStart is written to the traces. These
+    tests are then hard to reproduce (they can be reproduced through TestHarness but
+    require the user to run in the joshua docker container). To account for this we
+    will write the necessary information into the attributes if it is missing."""
+    if 'TestFile' not in out.attributes:
+        out.attributes['TestFile'] = str(test_file)
+    if 'RandomSeed' not in out.attributes:
+        out.attributes['RandomSeed'] = str(seed)
+    if 'BuggifyEnabled' not in out.attributes:
+        out.attributes['BuggifyEnabled'] = '1' if buggify else '0'
+
+
 class TestRunner:
     def __init__(self):
         self.uid = uuid.uuid4()
@@ -422,6 +435,7 @@ class TestRunner:
                           stats=test_picker.dump_stats(), will_restart=will_restart)
             result = result and run.success
             test_picker.add_time(test_files[0], run.run_time, run.summary.out)
+            decorate_summary(run.summary.out, file, seed + count, run.buggify_enabled)
             run.summary.out.dump(sys.stdout)
             if not result:
                 return False
@@ -432,8 +446,9 @@ class TestRunner:
                                stats=test_picker.dump_stats(), expected_unseed=run.summary.unseed,
                                will_restart=will_restart)
                 test_picker.add_time(file, run2.run_time, run.summary.out)
-                run.summary.out.dump(sys.stdout)
-                result = result and run.success
+                decorate_summary(run2.summary.out, file, seed + count, run.buggify_enabled)
+                run2.summary.out.dump(sys.stdout)
+                result = result and run2.success
             count += 1
         return result
 
