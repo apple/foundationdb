@@ -559,9 +559,9 @@ public:
 		                                         reverse);
 	}
 
-	TypedFuture<future_var::KeyRangeRefArray> getBlobGranuleRanges(KeyRef begin, KeyRef end) {
+	TypedFuture<future_var::KeyRangeRefArray> getBlobGranuleRanges(KeyRef begin, KeyRef end, int rangeLimit) {
 		return native::fdb_transaction_get_blob_granule_ranges(
-		    tr.get(), begin.data(), intSize(begin), end.data(), intSize(end));
+		    tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), rangeLimit);
 	}
 
 	Result readBlobGranules(KeyRef begin,

@@ -1,0 +1,247 @@
+<form theme="dark">
+  <label>FoundationDB - Tracing GRV and Commit Long Latency of CC Transactions (6.3 and 7.0+) (DEV)</label>
+  <description>Design for ClusterController issued transactions.</description>
+  <fieldset submitButton="false" autoRun="true">
+    <input type="text" token="Index" searchWhenChanged="true">
+      <label>Index</label>
+      <default></default>
+    </input>
+    <input type="text" token="LogGroup" searchWhenChanged="true">
+      <label>LogGroup</label>
+      <default>*</default>
+    </input>
+    <input type="text" token="transactionID">
+      <label>Hex Transaction ID (optional)</label>
+      <default>*</default>
+    </input>
+    <input type="time" token="time_token" searchWhenChanged="true">
+      <label>Time span</label>
+      <default>
+        <earliest>@d</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <title>All Transactions (Currently, this table also does not cover getrange operation and the operation which not do commit).</title>
+      <table>
+        <title>for FDB 6.3 and 7.0+</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ ID=$transactionID$
+    (Type="TransactionAttachID" OR Type="GetValueAttachID" OR Type="CommitAttachID") 
+| eval To=case(Type=="TransactionAttachID", "0"."-".To, Type="GetValueAttachID", "1"."-".To, Type=="CommitAttachID", "2"."-".To) 
+| stats list(To) by ID 
+| rename list(To) as ToList 
+| table ID ToList 
+| eval Count = mvcount(ToList) 
+| search Count=3 
+| eval To0=mvindex(ToList,0), To1=mvindex(ToList,1), To2=mvindex(ToList,2), To0=split(To0,"-"), To1=split(To1,"-"), To2=split(To2,"-"), GrvID=case(mvindex(To0, 0)=="0", mvindex(To0, 1), mvindex(To1, 0)=="0", mvindex(To1, 1), mvindex(To2, 0)=="0", mvindex(To2, 1)), ReadID=case(mvindex(To0, 0)=="1", mvindex(To0, 1), mvindex(To1, 0)=="1", mvindex(To1, 1), mvindex(To2, 0)=="1", mvindex(To2, 1)), CommitID=case(mvindex(To0, 0)=="2", mvindex(To0, 1), mvindex(To1, 0)=="2", mvindex(To1, 1), mvindex(To2, 0)=="2", mvindex(To2, 1)) 
+| table ID GrvID ReadID CommitID 
+| join GrvID 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="TransactionDebug" AND Location="NativeAPI.getConsistentReadVersion.Before") 
+    | rename ID as GrvID 
+    | rename Time as BeginTime 
+    | table GrvID BeginTime
+        ] 
+| join GrvID 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="TransactionDebug" AND Location="NativeAPI.getConsistentReadVersion.After") 
+    | rename ID as GrvID 
+    | rename Time as GRVDoneTime 
+    | table GrvID GRVDoneTime
+        ] 
+| join ReadID 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="GetValueDebug" AND Location="NativeAPI.getValue.After") 
+    | rename ID as ReadID 
+    | rename Time as ReadDoneTime 
+    | table ReadID ReadDoneTime
+        ] 
+| join CommitID 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="CommitDebug" AND Location="NativeAPI.commit.After") 
+    | rename ID as CommitID 
+    | rename Time as CommitDoneTime 
+    | table CommitID CommitDoneTime
+        ] 
+| rename ID as TransactionID 
+| eval BeginToGRVDone = GRVDoneTime-BeginTime, GRVDoneToReadDone = ReadDoneTime-GRVDoneTime, ReadDoneToCommitDone = CommitDoneTime-ReadDoneTime, Duration=CommitDoneTime-BeginTime, BeginTimeScope=BeginTime-1, EndTimeScope=CommitDoneTime+1, BeginDateTime=strftime(BeginTime, "%Y-%m-%d %H:%M:%S.%Q (%Z)")
+| table TransactionID Duration BeginDateTime BeginToGRVDone GRVDoneToReadDone ReadDoneToCommitDone Duration  GrvID ReadID CommitID BeginTimeScope EndTimeScope | sort -Duration</query>
+          <earliest>$time_token.earliest$</earliest>
+          <latest>$time_token.latest$</latest>
+        </search>
+        <option name="drilldown">cell</option>
+        <drilldown>
+          <set token="BeginTime">$row.BeginTimeScope$</set>
+          <set token="EndTime">$row.EndTimeScope$</set>
+          <set token="ReadID">$row.ReadID$</set>
+          <set token="GrvID">$row.GrvID$</set>
+          <set token="CommitID">$row.CommitID$</set>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Step1: GRV</title>
+      <table>
+        <title>for FDB 6.3 and 7.0+</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ 
+    Type="TransactionDebug" AND (NOT MasterProxyServer.masterProxyServerCore.GetRawCommittedVersion) 
+AND (ID=$GrvID$ OR ID= 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        Type="TransactionAttachID" AND ID=$GrvID$
+    | return $To])
+| table Time Type ID Location Machine Roles
+| eventstats min(Time) as MinTime
+| eval Delta = Time - MinTime, Order = case(Location=="NativeAPI.getConsistentReadVersion.Before", 0, Location like "%ProxyServer.queueTransactionStartRequests.Before", 1, Location=="MasterProxyServer.masterProxyServerCore.Broadcast", 2, Location=="GrvProxyServer.transactionStarter.AskLiveCommittedVersionFromMaster", 2.1, Location like "%ProxyServer.getLiveCommittedVersion.confirmEpochLive", 3, Location=="MasterServer.serveLiveCommittedVersion.GetRawCommittedVersion", 4, Location like "%ProxyServer.getLiveCommittedVersion.After", 5, Location=="NativeAPI.getConsistentReadVersion.After", 6)
+| table Time Delta Order Type ID Location Machine Roles
+| sort 0 Order
+| table Machine Location Delta Time Roles ID Type</query>
+          <earliest>$BeginTime$</earliest>
+          <latest>$EndTime$</latest>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+    <panel>
+      <title>Step1: (Only for FDB v6.3): GRV --- Get Committed Version (MasterProxyServer.masterProxyServerCore.GetRawCommittedVersion Events)</title>
+      <table>
+        <title>only for FDB 6.3</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    Type="TransactionDebug" AND Location="MasterProxyServer.masterProxyServerCore.GetRawCommittedVersion" 
+    AND ID= 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        Type="TransactionAttachID" AND ID=$GrvID$ 
+    | return $To] 
+| table Time Type ID Location Machine Roles
+| eventstats min(Time) as MinTime
+| eval Delta = Time - MinTime
+| sort 0 -Time
+| table Machine Delta Time Roles ID Type</query>
+          <earliest>$BeginTime$</earliest>
+          <latest>$EndTime$</latest>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Step2: GetValue</title>
+      <table>
+        <title>for FDB 6.3 and 7.0+</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type="GetValueDebug" AND ID=$ReadID$ 
+| eventstats min(Time) as MinTime 
+| eval Delta = Time-MinTime 
+| table Machine Location Delta Time Roles ID Type 
+| eval Order=case(Location=="NativeAPI.getKeyLocation.Before", 0, Location=="NativeAPI.getKeyLocation.After", 1, Location=="NativeAPI.getValue.Before", 2, Location=="storageServer.received", 3, Location=="getValueQ.DoRead", 4, Location=="getValueQ.AfterVersion", 5, Location=="Reader.Before", 6, Location=="Reader.After", 7, Location=="getValueQ.AfterRead", 8, Location=="NativeAPI.getValue.After", 9, Location=="NativeAPI.getValue.Error", 10) 
+| sort 0 Order
+| table Machine Location Delta Time Roles ID Type</query>
+          <earliest>$time_token.earliest$</earliest>
+          <latest>$time_token.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Step3: Commit</title>
+      <table>
+        <title>for FDB 6.3 and 7.0+</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    Type="CommitDebug" AND (ID=$CommitID$ OR ID= 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        Type="CommitAttachID" AND ID=$CommitID$ 
+    | return $To]) 
+
+| table Time Type ID Location Machine Roles 
+| eventstats min(Time) as MinTime
+| eval Delta = Time-MinTime
+| table Machine Location Delta Time Roles ID Type
+| eval Order=case(Location=="NativeAPI.commit.Before", 0, Location like "%ProxyServer.batcher", 1, Location like "%ProxyServer.commitBatch.Before", 2, Location like "%ProxyServer.commitBatch.GettingCommitVersion", 3, Location like "%ProxyServer.commitBatch.GotCommitVersion", 4, Location=="Resolver.resolveBatch.Before", 5, Location=="Resolver.resolveBatch.AfterQueueSizeCheck", 6, Location=="Resolver.resolveBatch.AfterOrderer", 7, Location=="Resolver.resolveBatch.After", 8, Location like "%ProxyServer.commitBatch.AfterResolution", 8.5, Location like "%ProxyServer.commitBatch.ProcessingMutations", 9, Location like "%ProxyServer.commitBatch.AfterStoreCommits", 10, Location=="TLogServer.tLogCommit.BeforeWaitForVersion", 11, Location=="TLogServer.tLogCommit.Before", 12, Location=="TLogServer.tLogCommit.AfterTLogCommit", 13, Location=="TLogServer.tLogCommit.After", 14, Location like "%ProxyServer.commitBatch.AfterLogPush", 15, Location=="NativeAPI.commit.After", 16)
+| sort 0 Order
+| table Machine Location Delta Time Roles ID Type</query>
+          <earliest>$BeginTime$</earliest>
+          <latest>$EndTime$</latest>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Step3: Commit --- Resolver</title>
+      <table>
+        <title>for FDB 6.3 and 7.0+</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (Location="Resolver*") 
+| join ID 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        Type="CommitAttachID" AND ID= 
+        [ search index=$Index$ LogGroup=$LogGroup$
+            Type="CommitAttachID" AND ID=$CommitID$ 
+        | return $To] 
+    | rename To as ID 
+    | table ID] 
+| eventstats min(Time) as MinTime 
+| eval Delta = Time-MinTime 
+| eval Order=case(Location=="Resolver.resolveBatch.Before", 5, Location=="Resolver.resolveBatch.AfterQueueSizeCheck", 6, Location=="Resolver.resolveBatch.AfterOrderer", 7, Location=="Resolver.resolveBatch.After", 8)
+| sort 0 Time Order
+| stats list(*) by Type ID Machine Roles
+| rename list(*) as *
+| eval T1=mvindex(Time, 0), T2=mvindex(Time, 3), Duration=T2-T1 | sort -Duration
+| table Machine Roles Duration Location Delta Time
+| join type=left Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$ Type=ProcessMetrics 
+    | dedup Machine, DCID 
+    | rename DCID as DataCenter 
+    | table Machine DataCenter]
+| table Machine DataCenter Roles Duration Location Delta Time</query>
+          <earliest>$time_token.earliest$</earliest>
+          <latest>$time_token.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Step3: Commit --- Commit to TLogs (CommitDebug Events), grouped by Machine and sorted by Duration</title>
+      <table>
+        <title>for FDB 6.3 and 7.0+</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (Location="TLog*") 
+| join ID 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        Type="CommitAttachID" AND ID= 
+        [ search index=$Index$ LogGroup=$LogGroup$
+            Type="CommitAttachID" AND ID=$CommitID$ 
+        | return $To] 
+    | rename To as ID 
+    | table ID] 
+| eventstats min(Time) as MinTime 
+| eval Delta = Time-MinTime 
+| sort 0 Time
+| stats list(*) by Type ID Machine Roles
+| rename list(*) as *
+| eval T1=mvindex(Time, 0), T2=mvindex(Time, 3), Duration=T2-T1 | sort -Duration
+| table Machine Roles Duration Location Delta Time</query>
+          <earliest>$BeginTime$</earliest>
+          <latest>$EndTime$</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+</form>

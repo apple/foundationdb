@@ -40,6 +40,7 @@
 
 #include <cstring>
 #include <fstream> // for perf microbenchmark
+#include <limits>
 #include <vector>
 
 #define BG_READ_DEBUG false
@@ -209,16 +210,21 @@ namespace {
 BlobGranuleFileEncryptionKeys getEncryptBlobCipherKey(const BlobGranuleCipherKeysCtx cipherKeysCtx) {
 	BlobGranuleFileEncryptionKeys eKeys;
 
+	// Cipher key reconstructed is 'never' inserted into BlobCipherKey cache, choose 'neverExpire'
 	eKeys.textCipherKey = makeReference<BlobCipherKey>(cipherKeysCtx.textCipherKey.encryptDomainId,
 	                                                   cipherKeysCtx.textCipherKey.baseCipherId,
 	                                                   cipherKeysCtx.textCipherKey.baseCipher.begin(),
 	                                                   cipherKeysCtx.textCipherKey.baseCipher.size(),
-	                                                   cipherKeysCtx.textCipherKey.salt);
+	                                                   cipherKeysCtx.textCipherKey.salt,
+	                                                   std::numeric_limits<int64_t>::max(),
+	                                                   std::numeric_limits<int64_t>::max());
 	eKeys.headerCipherKey = makeReference<BlobCipherKey>(cipherKeysCtx.headerCipherKey.encryptDomainId,
 	                                                     cipherKeysCtx.headerCipherKey.baseCipherId,
 	                                                     cipherKeysCtx.headerCipherKey.baseCipher.begin(),
 	                                                     cipherKeysCtx.headerCipherKey.baseCipher.size(),
-	                                                     cipherKeysCtx.headerCipherKey.salt);
+	                                                     cipherKeysCtx.headerCipherKey.salt,
+	                                                     std::numeric_limits<int64_t>::max(),
+	                                                     std::numeric_limits<int64_t>::max());
 
 	return eKeys;
 }
@@ -810,10 +816,6 @@ static Standalone<VectorRef<ParsedDeltaBoundaryRef>> loadSnapshotFile(
 
 	ASSERT(file.indexBlockRef.block.children.size() >= 2);
 
-	// TODO: refactor this out of delta tree
-	// int commonPrefixLen = commonPrefixLength(index.dataBlockOffsets.front().first,
-	// index.dataBlockOffsets.back().first);
-
 	// find range of blocks needed to read
 	ChildBlockPointerRef* currentBlock = file.findStartBlock(keyRange.begin);
 
@@ -1163,10 +1165,6 @@ Standalone<VectorRef<ParsedDeltaBoundaryRef>> loadChunkedDeltaFile(const Standal
 
 	ASSERT(file.indexBlockRef.block.children.size() >= 2);
 
-	// TODO: refactor this out of delta tree
-	// int commonPrefixLen = commonPrefixLength(index.dataBlockOffsets.front().first,
-	// index.dataBlockOffsets.back().first);
-
 	// find range of blocks needed to read
 	ChildBlockPointerRef* currentBlock = file.findStartBlock(keyRange.begin);
 
@@ -1175,7 +1173,8 @@ Standalone<VectorRef<ParsedDeltaBoundaryRef>> loadChunkedDeltaFile(const Standal
 		return deltas;
 	}
 
-	// TODO: could cpu optimize first block a bit more by seeking right to start
+	// FIXME: shared prefix for key comparison
+	// FIXME: could cpu optimize first block a bit more by seeking right to start
 	bool lastBlock = false;
 	bool prevClearAfter = false;
 	while (!lastBlock) {
@@ -2378,7 +2377,6 @@ void checkDeltaRead(const KeyValueGen& kvGen,
 	std::string filename = randomBGFilename(
 	    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUniqueID(), readVersion, ".delta");
 	Standalone<BlobGranuleChunkRef> chunk;
-	// TODO need to add cipher keys meta
 	chunk.deltaFiles.emplace_back_deep(
 	    chunk.arena(), filename, 0, serialized->size(), serialized->size(), kvGen.cipherKeys);
 	chunk.keyRange = kvGen.allRange;
@@ -2435,7 +2433,6 @@ static std::tuple<KeyRange, Version, Version> randomizeKeyAndVersions(const KeyV
 		}
 	}
 
-	// TODO randomize begin and read version to sometimes +/- 1 and readRange begin and end to keyAfter sometimes
 	return { readRange, beginVersion, readVersion };
 }
 

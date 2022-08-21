@@ -9,6 +9,7 @@ allowDefaultTenant = false
 [[knobs]]
 shard_encode_location_metadata = true
 storage_server_shard_aware = true
+enable_dd_physical_shard = true
 
 [[test]]
 testTitle = 'PhysicalShardMove'
