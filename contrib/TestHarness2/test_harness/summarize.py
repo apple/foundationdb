@@ -629,6 +629,13 @@ class Summary:
         self.handler.add_handler(('Type', 'BuggifySection'), buggify_section)
         self.handler.add_handler(('Type', 'FaultInjected'), buggify_section)
 
+        def running_unit_test(attrs: Dict[str, str]):
+            child = SummaryTree('RunningUnitTest')
+            child.attributes['Name'] = attrs['Name']
+            child.attributes['File'] = attrs['File']
+            child.attributes['Line'] = attrs['Line']
+        self.handler.add_handler(('Type', 'RunningUnitTest'), running_unit_test)
+
         def stderr_severity(attrs: Dict[str, str]):
             if 'NewSeverity' in attrs:
                 self.stderr_severity = attrs['NewSeverity']
