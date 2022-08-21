@@ -3,9 +3,12 @@ from __future__ import annotations
 import sys
 import xml.sax
 import xml.sax.handler
+from pathlib import Path
 from typing import List
 
 from joshua import joshua_model
+
+import test_harness.run
 from test_harness.config import config
 from test_harness.summarize import SummaryTree
 
@@ -60,4 +63,27 @@ def print_errors(ensemble_id: str):
         summary = ToSummaryTree()
         xml.sax.parseString(output, summary)
         res = summary.result()
+        cmd = []
+        if config.reproduce_prefix is not None:
+            cmd.append(config.reproduce_prefix)
+        cmd.append('fdbserver')
+        if 'TestFile' in res.attributes:
+            file_name = res.attributes['TestFile']
+            role = 'test' if test_harness.run.is_no_sim(Path(file_name)) else 'simulation'
+            cmd += ['-r', role, '-f', file_name]
+        else:
+            cmd += ['-r', 'simulation', '-f', '<ERROR>']
+        if 'BuggifyEnabled' in res.attributes:
+            arg = 'on'
+            if res.attributes['BuggifyEnabled'].lower() in ['0', 'off', 'false']:
+                arg = 'off'
+            cmd += ['-b', arg]
+        else:
+            cmd += ['b', '<ERROR>']
+        cmd += ['--crash', '--trace_format', 'json']
+        # we want the command as the first attribute
+        attributes = {'Command': ' '.join(cmd)}
+        for k, v in res.attributes:
+            attributes[k] = v
+        res.attributes = attributes
         res.dump(sys.stdout, prefix=('  ' if config.pretty_print else ''), new_line=config.pretty_print)

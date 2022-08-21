@@ -141,6 +141,9 @@ class Config:
         self.max_stderr_bytes: int = 1000
         self.write_stats: bool = True
         self.read_stats: bool = True
+        self.reproduce_prefix: str | None = None
+        self.reproduce_prefix_args = {'type': str, 'required': False,
+                                      'help': 'When printing the results, prepend this string to the command'}
         self._env_names: Dict[str, str] = {}
         self._config_map = self._build_map()
         self._read_env()
