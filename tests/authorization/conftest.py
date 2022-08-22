@@ -1,25 +1,14 @@
 import pytest
 import fdb
-import random
-import string
 import subprocess
+import admin_server
 from authlib.jose import JsonWebKey, KeySet, jwt
 from local_cluster import TLSConfig
 from tmp_cluster import TempCluster
 from typing import Union
+from util import random_alphanum_str, random_alphanum_bytes, to_str, to_bytes
 
-fdb.api_version(720)
 cluster_scope = "module"
-
-def to_str(s: Union[str, bytes]):
-    if isinstance(s, bytes):
-        s = s.decode("utf8")
-    return s
-
-def to_bytes(s: Union[str, bytes]):
-    if isinstance(s, str):
-        s = s.encode("utf8")
-    return s
 
 def pytest_addoption(parser):
     parser.addoption(
@@ -32,12 +21,6 @@ def pytest_addoption(parser):
             default=False,
             dest="trusted_client",
             help="Whether client shall be configured trusted, i.e. mTLS-ready")
-
-def random_alphanum_str(k: int):
-    return ''.join(random.choices(string.ascii_letters + string.digits, k=k))
-
-def random_alphanum_bytes(k: int):
-    return random_alphanum_str(k).encode("ascii")
 
 @pytest.fixture(scope="session")
 def build_dir(request):
@@ -98,40 +81,49 @@ def cluster(build_dir, public_key_jwks_str, trusted_client):
             public_key_json_str=public_key_jwks_str,
             remove_at_exit=True,
             custom_config={"code-probes": "all"}) as cluster:
-        fdb.options.set_tls_key_path(str(cluster.client_key_file) if trusted_client else "")
-        fdb.options.set_tls_cert_path(str(cluster.client_cert_file) if trusted_client else "")
-        fdb.options.set_tls_ca_path(str(cluster.server_ca_file))
+        keyfile = str(cluster.client_key_file)
+        certfile = str(cluster.client_cert_file)
+        cafile = str(cluster.server_ca_file)
+        fdb.options.set_tls_key_path(keyfile if trusted_client else "")
+        fdb.options.set_tls_cert_path(certfile if trusted_client else "")
+        fdb.options.set_tls_ca_path(cafile)
         fdb.options.set_trace_enable()
+        admin = admin_server.get()
+        admin.request("configure_tls", [keyfile, certfile, cafile])
+        admin.request("connect")
         yield cluster
 
-@pytest.fixture(scope=cluster_scope)
+@pytest.fixture
 def db(cluster):
     db = fdb.open(str(cluster.cluster_file))
     db.options.set_transaction_timeout(2000) # 2 seconds
     db.options.set_transaction_retry_limit(3)
-    return db
+    yield db
+    admin_server.get().request("cleanup_database")
+    db = None
 
-@pytest.fixture(scope=cluster_scope)
-def tenant_gen(cluster):
+@pytest.fixture
+def tenant_gen(db):
     def fn(tenant):
-        cluster.fdbcli_exec("createtenant {}".format(to_str(tenant)))
+        tenant = to_bytes(tenant)
+        admin_server.get().request("create_tenant", [tenant])
     return fn
 
-@pytest.fixture(scope=cluster_scope)
-def tenant_del(cluster):
+@pytest.fixture
+def tenant_del(db):
     def fn(tenant):
         tenant = to_str(tenant)
-        cluster.fdbcli_exec("writemode on;usetenant {};clearrange \\x00 \\xff;defaulttenant;deletetenant {}".format(tenant, tenant))
+        admin_server.get().request("delete_tenant", [tenant])
     return fn
 
-@pytest.fixture(scope=cluster_scope)
+@pytest.fixture
 def default_tenant(tenant_gen, tenant_del):
     tenant = random_alphanum_bytes(8)
     tenant_gen(tenant)
     yield tenant
     tenant_del(tenant)
 
-@pytest.fixture(scope=cluster_scope)
+@pytest.fixture
 def tenant_tr_gen(db):
     def fn(tenant):
         tenant = db.open_tenant(to_bytes(tenant))

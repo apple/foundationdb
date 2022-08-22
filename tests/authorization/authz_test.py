@@ -3,11 +3,12 @@ import argparse
 import fdb
 import pytest
 import time
-from fdb import FDBError
+import sys
+import fdb
+from multiprocessing import Process, Pipe
 from typing import Union
-from conftest import random_alphanum_str, random_alphanum_bytes, to_str, to_bytes
-
-fdb.api_version(720)
+from util import random_alphanum_str, random_alphanum_bytes, to_str, to_bytes
+from admin_server import AdminServer
 
 def token_claim_1h(tenant_name):
     now = time.time()
@@ -48,7 +49,7 @@ def test_cross_tenant_access_disallowed(default_tenant, token_gen, tenant_gen, t
     try:
         value = tr_second[b"abc"].value()
         assert False, "expected permission denied, but read transaction went through, value: {}".format(value)
-    except FDBError as e:
+    except fdb.FDBError as e:
         assert e.code == 6000, "expected permission_denied, got {} instead".format(e)
     # test that write transaction fails
     tr_second = tenant_tr_gen(second_tenant)
@@ -57,5 +58,10 @@ def test_cross_tenant_access_disallowed(default_tenant, token_gen, tenant_gen, t
         tr_second[b"def"] = b"ghi"
         tr_second.commit().wait()
         assert False, "expected permission denied, but write transaction went through"
-    except FDBError as e:
+    except fdb.FDBError as e:
         assert e.code == 6000, "expected permission_denied, got {} instead".format(e)
+
+if __name__ == "__main__":
+    fdb.api_version(720)
+    with AdminServer() as server:
+        sys.exit(pytest.main(args=sys.argv[1:]))

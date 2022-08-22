@@ -417,7 +417,7 @@ if(WITH_PYTHON)
 
     set(authz_test_cmd "")
     string(APPEND authz_test_cmd "${authz_venv_activate} && ")
-    string(APPEND authz_test_cmd "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib pytest ${CMAKE_SOURCE_DIR}/tests/authorization/authz_test.py --build-dir ${CMAKE_BINARY_DIR}")
+    string(APPEND authz_test_cmd "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib ${authz_venv_dir}/bin/python3 ${CMAKE_SOURCE_DIR}/tests/authorization/authz_test.py --build-dir ${CMAKE_BINARY_DIR}")
     add_test(
       NAME token_based_tenant_authorization
       WORKING_DIRECTORY ${authz_venv_dir}
