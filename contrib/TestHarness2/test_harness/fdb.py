@@ -4,6 +4,7 @@ from typing import OrderedDict, Tuple, List
 
 import collections
 import fdb
+import fdb.tuple
 import struct
 
 from test_harness.run import StatFetcher, TestDescription
@@ -29,6 +30,7 @@ def open_db(cluster_file: str | None):
         fdb_db = fdb.open(cluster_file)
     return fdb_db
 
+
 def chunkify(iterable, sz: int):
     count = 0
     res = []
@@ -44,17 +46,34 @@ def chunkify(iterable, sz: int):
 
 
 @fdb.transactional
-def write_coverage_chunk(tr, path: Tuple[str, ...], coverage: List[Tuple[Coverage, bool]]):
+def write_coverage_chunk(tr, path: Tuple[str, ...], metadata: Tuple[str, ...],
+                         coverage: List[Tuple[Coverage, bool]], initialized: bool) -> bool:
     cov_dir = fdb.directory.create_or_open(tr, path)
+    if not initialized:
+        metadata_dir = fdb.directory.create_or_open(tr, metadata)
+        v = tr[metadata_dir['initialized']]
+        initialized = v.present()
     for cov, covered in coverage:
-        tr.add(cov_dir.pack((cov.file, cov.line, cov.comment)), struct.pack('<I', 1 if covered else 0))
+        if not initialized or covered:
+            tr.add(cov_dir.pack((cov.file, cov.line, cov.comment)), struct.pack('<I', 1 if covered else 0))
+    return initialized
 
 
-def write_coverage(cluster_file: str | None, cov_path: Tuple[str, ...], coverage: OrderedDict[Coverage, bool]):
+@fdb.transactional
+def set_initialized(tr, metadata: Tuple[str, ...]):
+    metadata_dir = fdb.directory.create_or_open(tr, metadata)
+    tr[metadata_dir['initialized']] = fdb.tuple.pack((True,))
+
+
+def write_coverage(cluster_file: str | None, cov_path: Tuple[str, ...], metadata: Tuple[str, ...],
+                   coverage: OrderedDict[Coverage, bool]):
     db = open_db(cluster_file)
     assert config.joshua_dir is not None
+    initialized: bool = False
     for chunk in chunkify(coverage.items(), 100):
-        write_coverage_chunk(db, cov_path, chunk)
+        initialized = write_coverage_chunk(db, cov_path, metadata, chunk, initialized)
+    if not initialized:
+        set_initialized(db, metadata)
 
 
 @fdb.transactional

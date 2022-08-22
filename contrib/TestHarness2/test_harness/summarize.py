@@ -396,6 +396,7 @@ class Summary:
             import test_harness.fdb
             test_harness.fdb.write_coverage(config.cluster_file,
                                             test_harness.fdb.str_to_tuple(config.joshua_dir) + ('coverage',),
+                                            test_harness.fdb.str_to_tuple(config.joshua_dir) + ('coverage-metadata',),
                                             self.coverage)
 
     def ok(self):

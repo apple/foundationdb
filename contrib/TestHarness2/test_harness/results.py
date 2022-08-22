@@ -47,9 +47,10 @@ class EnsembleResults:
             self.global_statistics.total_cpu_time += v.runtime
             self.stats.append((k, v.runtime, v.run_count))
         self.stats.sort(key=lambda x: x[1], reverse=True)
-        self.coverage_ok: bool = self.min_coverage_hit is not None
-        if self.coverage_ok:
+        if self.min_coverage_hit is not None:
             self.coverage_ok = self.min_coverage_hit > self.ratio
+        else:
+            self.coverage_ok = False
 
     def dump(self, prefix: str):
         errors = 0
@@ -70,7 +71,7 @@ class EnsembleResults:
                 child.attributes['Severity'] = str(severity)
                 child.attributes['File'] = cov.file
                 child.attributes['Line'] = str(cov.line)
-                child.attributes['Comment'] = cov.comment
+                child.attributes['Comment'] = '' if cov.comment is None else cov.comment
                 child.attributes['HitCount'] = str(count)
                 out.append(child)
 
