@@ -1591,7 +1591,10 @@ public:
 
 	Future<Optional<Value>> readValue(KeyRef key, ReadOptions const& options) override;
 	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, ReadOptions const& options) override;
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, ReadOptions const& options) override;
+	Future<RangeResult> readRange(KeyRangeRef keys,
+	                              int rowLimit,
+	                              int byteLimit,
+	                              RangeReadOptions const& options) override;
 
 	KeyValueStoreSQLite(std::string const& filename,
 	                    UID logID,
@@ -2230,7 +2233,7 @@ Future<Optional<Value>> KeyValueStoreSQLite::readValuePrefix(KeyRef key, int max
 Future<RangeResult> KeyValueStoreSQLite::readRange(KeyRangeRef keys,
                                                    int rowLimit,
                                                    int byteLimit,
-                                                   ReadOptions const& options) {
+                                                   RangeReadOptions const& options) {
 	++readsRequested;
 	auto p = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 	auto f = p->result.getFuture();

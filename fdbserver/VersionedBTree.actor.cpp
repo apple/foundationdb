@@ -7795,7 +7795,10 @@ public:
 		m_tree->set(keyValue);
 	}
 
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, ReadOptions const& options) override {
+	Future<RangeResult> readRange(KeyRangeRef keys,
+	                              int rowLimit,
+	                              int byteLimit,
+	                              RangeReadOptions const& options) override {
 		debug_printf("READRANGE %s\n", printable(keys).c_str());
 		return catchError(readRange_impl(this, keys, rowLimit, byteLimit, options));
 	}
@@ -7804,7 +7807,7 @@ public:
 	                                                KeyRange keys,
 	                                                int rowLimit,
 	                                                int byteLimit,
-	                                                ReadOptions options) {
+	                                                RangeReadOptions options) {
 		state PagerEventReasons reason =
 		    (options.type == ReadType::FETCH) ? PagerEventReasons::FetchRange : PagerEventReasons::RangeRead;
 		state VersionedBTree::BTreeCursor cur;
@@ -10995,7 +10998,7 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
                                     bool singlePrefix,
                                     int rowLimit,
                                     int byteLimit,
-                                    ReadOptions options = ReadOptions()) {
+                                    RangeReadOptions options = RangeReadOptions()) {
 	fmt::print("\nstoreType: {}\n", static_cast<int>(kvs->getType()));
 	fmt::print("prefixSource: {}\n", source.toString());
 	fmt::print("suffixSize: {}\n", suffixSize);
@@ -11052,7 +11055,7 @@ TEST_CASE(":/redwood/performance/randomRangeScans") {
 	state int suffixSize = 12;
 	state int valueSize = 100;
 	state int maxByteLimit = std::numeric_limits<int>::max();
-	state ReadOptions options;
+	state RangeReadOptions options;
 	options.cacheResult = true;
 	options.type = ReadType::NORMAL;
 

@@ -229,7 +229,10 @@ public:
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, ReadOptions const& options) override {
+	Future<RangeResult> readRange(KeyRangeRef keys,
+	                              int rowLimit,
+	                              int byteLimit,
+	                              RangeReadOptions const& options) override {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
@@ -938,7 +941,7 @@ private:
 	                                                  KeyRange keys,
 	                                                  int rowLimit,
 	                                                  int byteLimit,
-	                                                  ReadOptions options) {
+	                                                  RangeReadOptions options) {
 		wait(self->recovering);
 		return static_cast<IKeyValueStore*>(self)->readRange(keys, rowLimit, byteLimit, options).get();
 	}

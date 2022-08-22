@@ -1529,16 +1529,34 @@ enum class ReadType {
 // debugID helps to trace the path of the read
 struct ReadOptions {
 	ReadType type;
-	bool cacheResult;
-	Optional<Version> consistencyCheckStartVersion;
 	Optional<UID> debugID;
+	bool cacheResult;
 
 	ReadOptions() : type(ReadType::NORMAL), cacheResult(true){};
 	ReadOptions(ReadType type, bool cacheResult) : type(type), cacheResult(cacheResult){};
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, type, cacheResult, consistencyCheckStartVersion, debugID);
+		serializer(ar, type, cacheResult, debugID);
+	}
+};
+
+struct RangeReadOptions : ReadOptions {
+
+	Optional<Version> consistencyCheckStartVersion;
+
+	RangeReadOptions() : ReadOptions(){};
+
+	RangeReadOptions& operator=(const ReadOptions& option) {
+		type = option.type;
+		debugID = option.debugID;
+		cacheResult = option.cacheResult;
+		return *this;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, type, cacheResult, debugID, consistencyCheckStartVersion);
 	}
 };
 

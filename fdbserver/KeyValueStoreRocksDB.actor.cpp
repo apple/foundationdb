@@ -1932,7 +1932,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return result;
 	}
 
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, ReadOptions const& options) override {
+	Future<RangeResult> readRange(KeyRangeRef keys,
+	                              int rowLimit,
+	                              int byteLimit,
+	                              RangeReadOptions const& options) override {
 		if (!shouldThrottle(options.type, keys.begin)) {
 			auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 			auto res = a->result.getFuture();

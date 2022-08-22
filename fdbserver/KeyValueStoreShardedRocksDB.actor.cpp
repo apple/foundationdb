@@ -2382,7 +2382,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit,
 	                              int byteLimit,
-	                              ReadOptions const& options = ReadOptions()) override {
+	                              RangeReadOptions const& options = ReadOptions()) override {
 		TraceEvent(SevVerbose, "ShardedRocksReadRangeBegin", this->id).detail("Range", keys);
 		auto shards = shardManager.getDataShardsByRange(keys);
 

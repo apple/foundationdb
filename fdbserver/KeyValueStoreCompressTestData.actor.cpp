@@ -70,7 +70,10 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, ReadOptions const& options) override {
+	Future<RangeResult> readRange(KeyRangeRef keys,
+	                              int rowLimit,
+	                              int byteLimit,
+	                              RangeReadOptions const& options) override {
 		return doReadRange(store, keys, rowLimit, byteLimit, options);
 	}
 
@@ -99,7 +102,7 @@ private:
 	                                      KeyRangeRef keys,
 	                                      int rowLimit,
 	                                      int byteLimit,
-	                                      ReadOptions options) {
+	                                      RangeReadOptions options) {
 		RangeResult _vs = wait(store->readRange(keys, rowLimit, byteLimit, options));
 		RangeResult vs = _vs; // Get rid of implicit const& from wait statement
 		Arena& a = vs.arena();

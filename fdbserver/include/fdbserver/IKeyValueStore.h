@@ -82,7 +82,7 @@ public:
 	virtual Future<RangeResult> readRange(KeyRangeRef keys,
 	                                      int rowLimit = 1 << 30,
 	                                      int byteLimit = 1 << 30,
-	                                      ReadOptions const& options = ReadOptions()) = 0;
+	                                      RangeReadOptions const& options = RangeReadOptions()) = 0;
 
 	// Shard management APIs.
 	// Adds key range to a physical shard.
