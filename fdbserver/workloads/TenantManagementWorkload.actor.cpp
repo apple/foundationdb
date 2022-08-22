@@ -1255,12 +1255,6 @@ struct TenantManagementWorkload : TestWorkload {
 				} else if (e.code() == error_code_invalid_metacluster_operation) {
 					ASSERT(operationType == OperationType::METACLUSTER != self->useMetacluster);
 					return Void();
-				} else if (e.code() == error_code_tenant_removed) {
-					ASSERT(operationType == OperationType::METACLUSTER);
-					return Void();
-				} else if (e.code() == error_code_invalid_tenant_state) {
-					ASSERT(operationType == OperationType::METACLUSTER);
-					return Void();
 				} else if (e.code() == error_code_cluster_no_capacity) {
 					// This error should only occur on metacluster due to the multi-stage process.
 					// Having temporary tenants may exceed capacity, so we disallow the rename.
