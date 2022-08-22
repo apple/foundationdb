@@ -8725,11 +8725,11 @@ ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, Chan
 						self->version.set(rep.version);
 					}
 				} catch (Error& e) {
-					if (e.code() == error_code_server_overloaded) {
-						if (FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY > CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME) {
-							wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY -
-							           CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME));
-						}
+					if (e.code() != error_code_server_overloaded) {
+						throw;
+					}
+					if (FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY > CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME) {
+						wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY - CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME));
 					}
 				}
 			}
