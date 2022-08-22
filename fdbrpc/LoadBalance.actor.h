@@ -587,6 +587,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		// nextAlt. This logic matters only if model == nullptr. Otherwise, the
 		// bestAlt and nextAlt have been decided.
 		state RequestStream<Request> const* stream = nullptr;
+		state LBDistance::Type distance;
 		for (int alternativeNum = 0; alternativeNum < alternatives->size(); alternativeNum++) {
 			int useAlt = nextAlt;
 			if (nextAlt == startAlt)
@@ -595,6 +596,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				useAlt = (nextAlt + alternatives->size() - 1) % alternatives->size();
 
 			stream = &alternatives->get(useAlt, channel);
+			distance = alternatives->getDistance(useAlt);
 			if (!IFailureMonitor::failureMonitor().getState(stream->getEndpoint()).failed &&
 			    (!firstRequestEndpoint.present() || stream->getEndpoint().token.first() != firstRequestEndpoint.get()))
 				break;
@@ -602,6 +604,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			if (nextAlt == startAlt)
 				triedAllOptions = TriedAllOptions::True;
 			stream = nullptr;
+			distance = LBDistance::DISTANT;
 		}
 
 		if (!stream && !firstRequestData.isValid()) {
@@ -637,6 +640,13 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			firstRequestEndpoint = Optional<uint64_t>();
 		} else if (firstRequestData.isValid()) {
 			// Issue a second request, the first one is taking a long time.
+			if (distance == LBDistance::DISTANT) {
+				TraceEvent("LBDistant2")
+				    .detail("BackOff", backoff)
+				    .detail("TriedAllOptions", triedAllOptions)
+				    .detail("Token", stream->getEndpoint().token)
+				    .detail("Attempts", numAttempts);
+			}
 			secondRequestData.startRequest(backoff, triedAllOptions, stream, request, model, alternatives, channel);
 			state bool firstFinished = false;
 
@@ -666,6 +676,12 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			}
 		} else {
 			// Issue a request, if it takes too long to get a reply, go around the loop
+			if (distance == LBDistance::DISTANT) {
+				TraceEvent("LBDistant")
+				    .detail("BackOff", backoff)
+				    .detail("TriedAllOptions", triedAllOptions)
+				    .detail("Token", stream->getEndpoint().token);
+			}
 			firstRequestData.startRequest(backoff, triedAllOptions, stream, request, model, alternatives, channel);
 			firstRequestEndpoint = stream->getEndpoint().token.first();
 

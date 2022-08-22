@@ -224,6 +224,7 @@ public:
 	F const& get(int index, F T::*member) const {
 		return alternatives[index]->interf.*member;
 	}
+	LBDistance::Type getDistance(int index) const { return (LBDistance::Type)alternatives[index]->distance; }
 
 	T const& getInterface(int index) { return alternatives[index]->interf; }
 	UID getId(int index) const { return alternatives[index]->interf.id(); }
