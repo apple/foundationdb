@@ -747,6 +747,8 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 			Reference<IConnection> _conn = wait(INetworkConnections::net()->connect(host, service, false));
 			conn = _conn;
 		}
+	} else {
+		wait(store(conn, INetworkConnections::net()->connect(host, service, isTLS)));
 	}
 	wait(conn->connectHandshake());
 
