@@ -38,11 +38,38 @@ class ToSummaryTree(xml.sax.handler.ContentHandler):
             self.stack[-1].children.append(closed)
 
 
+def _print_summary(summary: SummaryTree):
+    cmd = []
+    if config.reproduce_prefix is not None:
+        cmd.append(config.reproduce_prefix)
+    cmd.append('fdbserver')
+    if 'TestFile' in summary.attributes:
+        file_name = summary.attributes['TestFile']
+        role = 'test' if test_harness.run.is_no_sim(Path(file_name)) else 'simulation'
+        cmd += ['-r', role, '-f', file_name]
+    else:
+        cmd += ['-r', 'simulation', '-f', '<ERROR>']
+    if 'BuggifyEnabled' in summary.attributes:
+        arg = 'on'
+        if summary.attributes['BuggifyEnabled'].lower() in ['0', 'off', 'false']:
+            arg = 'off'
+        cmd += ['-b', arg]
+    else:
+        cmd += ['b', '<ERROR>']
+    cmd += ['--crash', '--trace_format', 'json']
+    # we want the command as the first attribute
+    attributes = {'Command': ' '.join(cmd)}
+    for k, v in summary.attributes.items():
+        attributes[k] = v
+    summary.attributes = attributes
+    summary.dump(sys.stdout, prefix=('  ' if config.pretty_print else ''), new_line=config.pretty_print)
+
+
 def print_errors(ensemble_id: str):
     joshua_model.open(config.cluster_file)
     properties = joshua_model.get_ensemble_properties(ensemble_id)
     compressed = properties["compressed"] if "compressed" in properties else False
-    for rec in joshua_model.tail_results(ensemble_id, errors_only=(not config.details), compressed=compressed):
+    for rec in joshua_model.tail_results(ensemble_id, errors_only=(not config.success), compressed=compressed):
         if len(rec) == 5:
             version_stamp, result_code, host, seed, output = rec
         elif len(rec) == 4:
@@ -60,30 +87,8 @@ def print_errors(ensemble_id: str):
             seed = None
         else:
             raise Exception("Unknown result format")
-        summary = ToSummaryTree()
-        xml.sax.parseString(output, summary)
-        res = summary.result()
-        cmd = []
-        if config.reproduce_prefix is not None:
-            cmd.append(config.reproduce_prefix)
-        cmd.append('fdbserver')
-        if 'TestFile' in res.attributes:
-            file_name = res.attributes['TestFile']
-            role = 'test' if test_harness.run.is_no_sim(Path(file_name)) else 'simulation'
-            cmd += ['-r', role, '-f', file_name]
-        else:
-            cmd += ['-r', 'simulation', '-f', '<ERROR>']
-        if 'BuggifyEnabled' in res.attributes:
-            arg = 'on'
-            if res.attributes['BuggifyEnabled'].lower() in ['0', 'off', 'false']:
-                arg = 'off'
-            cmd += ['-b', arg]
-        else:
-            cmd += ['b', '<ERROR>']
-        cmd += ['--crash', '--trace_format', 'json']
-        # we want the command as the first attribute
-        attributes = {'Command': ' '.join(cmd)}
-        for k, v in res.attributes.items():
-            attributes[k] = v
-        res.attributes = attributes
-        res.dump(sys.stdout, prefix=('  ' if config.pretty_print else ''), new_line=config.pretty_print)
+        lines = output.splitlines()
+        for line in lines:
+            summary = ToSummaryTree()
+            xml.sax.parseString(line, summary)
+            _print_summary(summary.result())

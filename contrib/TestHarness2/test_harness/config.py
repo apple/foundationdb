@@ -133,7 +133,9 @@ class Config:
         self.exclude_test_names: str = r'.^'
         self.exclude_test_names_args = {'help': 'Don\'t consider tests whose names match against the given regex'}
         self.details: bool = False
-        self.details_args = {'help': 'Print detailed results', 'short_name': 'c'}
+        self.details_args = {'help': 'Print detailed results', 'short_name': 'c', 'action': 'store_true'}
+        self.success: bool = False
+        self.success_args = {'help': 'Print successful results', 'action': 'store_true'}
         self.cov_include_files: str = r'.*'
         self.cov_include_files_args = {'help': 'Only consider coverage traces that originated in files matching regex'}
         self.cov_exclude_files: str = r'.^'
