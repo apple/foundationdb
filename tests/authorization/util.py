@@ -1,6 +1,7 @@
 import random
 import string
 import fdb
+from typing import Union
 
 def to_str(s: Union[str, bytes]):
     if isinstance(s, bytes):

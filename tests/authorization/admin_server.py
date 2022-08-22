@@ -1,3 +1,24 @@
+#!/usr/bin/python
+#
+# admin_server.py
+#
+# This source file is part of the FoundationDB open source project
+#
+# Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+import fdb
 from multiprocessing import Pipe, Process
 from typing import Union, List
 from util import to_str, to_bytes, cleanup_tenant
@@ -13,11 +34,15 @@ class _admin_request(object):
     def __repr__(self):
         return f"admin_request({self.op}, {self.args})"
 
-def _admin_loop(pipe):
+def main_loop(main_pipe, pipe):
+    main_pipe.close()
     db = None
     while True:
-        req = pipe.recv()
-        if not isinstance(req, request):
+        try:
+            req = pipe.recv()
+        except EOFError:
+            return
+        if not isinstance(req, _admin_request):
             pipe.send(TypeError("unexpected type {}".format(type(req))))
             continue
         op = req.op
@@ -25,7 +50,6 @@ def _admin_loop(pipe):
         resp = True
         try:
             if op == "connect":
-                fdb.options.set_trace_enable("admin_server_as_fdb_client")
                 db = fdb.open(req.args[0])
             elif op == "configure_tls":
                 keyfile, certfile, cafile = req.args[:3]
@@ -40,7 +64,6 @@ def _admin_loop(pipe):
                         tenant_str = to_str(tenant)
                         tenant_bytes = to_bytes(tenant)
                         fdb.tenant_management.create_tenant(db, tenant_bytes)
-                        print("created tenant: {}".format(tenant_str))
             elif op == "delete_tenant":
                 if db is None:
                     resp = Exception("db not open")
@@ -48,27 +71,22 @@ def _admin_loop(pipe):
                     for tenant in req.args:
                         tenant_str = to_str(tenant)
                         tenant_bytes = to_bytes(tenant)
-                        cleanup_tenant(tenant_bytes)
-                        print("deleted tenant: {}".format(tenant_str))
+                        cleanup_tenant(db, tenant_bytes)
             elif op == "cleanup_database":
                 if db is None:
-                    resp Exception("db not open")
+                    resp = Exception("db not open")
                 else:
-                    print("initiating database cleanup")
                     tr = db.create_transaction()
-                    del tr[b"\\x00":b"\\xff"]
+                    del tr[b'':b'\xff']
                     tr.commit().wait()
-                    print("global keyspace cleared, deleting tenants")
-                    tenants = fdb.tenant_management.list_tenants(db)
-                    print("active tenants: {}".format(map(to_str, tenants)))
+                    tenants = list(map(lambda x: x.key, list(fdb.tenant_management.list_tenants(db, b'', b'\xff', 0).to_list())))
                     for tenant in tenants:
                         fdb.tenant_management.delete_tenant(db, tenant)
-                        print("tenant {} deleted".format(to_str(tenant)))
+            elif op == "terminate":
+                pipe.send(True)
+                return
             else:
                 resp = ValueError("unknown operation: {}".format(req))
-        except EOFError:
-            print("test process has closed pipe to admin. exiting.")
-            break
         except Exception as e:
             resp = e
         pipe.send(resp)
@@ -78,26 +96,31 @@ _admin_server = None
 def get():
     return _admin_server
 
-class AdminServer(object):
+# server needs to be a singleton running in subprocess, because FDB network layer (including active TLS config) is a global var
+class Server(object):
     def __init__(self):
-        assert __name__ == "__main__"
+        global _admin_server
         assert _admin_server is None, "admin server may be setup once per process"
-        self._main_pipe, self._admin_pipe = Pipe()
+        _admin_server = self
+        self._main_pipe, self._admin_pipe = Pipe(duplex=True)
+        self._admin_proc = Process(target=main_loop, args=(self._main_pipe, self._admin_pipe))
 
     def start(self):
-        self._admin_proc = Process(target=_admin_loop, args=(admin_pipe,))
+        self._admin_proc.start()
 
     def join(self):
         self._main_pipe.close()
+        self._admin_pipe.close()
         self._admin_proc.join()
 
     def __enter__(self):
         self.start()
+        return self
 
-    def __exit__(self):
+    def __exit__(self, exc_type, exc_value, exc_traceback):
         self.join()
 
-    def request(op, args=[]):
+    def request(self, op, args=[]):
         req = _admin_request(op, args)
         try:
             self._main_pipe.send(req)
@@ -107,6 +130,6 @@ class AdminServer(object):
                 raise resp
             else:
                 print("Request {} succeeded".format(req))
-        except ExceptionBase as e:
+        except Exception as e:
             print("admin request {} failed by exception: {}".format(req, e))
             raise

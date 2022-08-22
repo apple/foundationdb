@@ -415,12 +415,13 @@ if(WITH_PYTHON)
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
     set_tests_properties(authorization_venv_setup PROPERTIES FIXTURES_SETUP authz_virtual_env TIMEOUT 60)
 
+	set(authz_script_dir ${CMAKE_SOURCE_DIR}/tests/authorization)
     set(authz_test_cmd "")
     string(APPEND authz_test_cmd "${authz_venv_activate} && ")
-    string(APPEND authz_test_cmd "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib ${authz_venv_dir}/bin/python3 ${CMAKE_SOURCE_DIR}/tests/authorization/authz_test.py --build-dir ${CMAKE_BINARY_DIR}")
+    string(APPEND authz_test_cmd "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib ${authz_venv_dir}/bin/python3 ${authz_script_dir}/authz_test.py --build-dir ${CMAKE_BINARY_DIR} -vvv")
     add_test(
       NAME token_based_tenant_authorization
-      WORKING_DIRECTORY ${authz_venv_dir}
+      WORKING_DIRECTORY ${authz_script_dir}
       COMMAND bash -c ${authz_test_cmd})
     set_tests_properties(token_based_tenant_authorization PROPERTIES ENVIRONMENT PYTHONPATH=${CMAKE_SOURCE_DIR}/tests/TestRunner) # (local|tmp)_cluster.py
     set_tests_properties(token_based_tenant_authorization PROPERTIES FIXTURES_REQUIRED authz_virtual_env)
