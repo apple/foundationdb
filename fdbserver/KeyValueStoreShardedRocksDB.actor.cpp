@@ -164,26 +164,6 @@ std::string getShardMappingKey(KeyRef key, StringRef prefix) {
 	return prefix.toString() + key.toString();
 }
 
-std::vector<std::pair<KeyRange, std::string>> decodeShardMapping(const RangeResult& result, StringRef prefix) {
-	std::vector<std::pair<KeyRange, std::string>> shards;
-	KeyRef endKey;
-	std::string name;
-
-	for (const auto& kv : result) {
-		auto keyWithoutPrefix = kv.key.removePrefix(prefix);
-		if (name.size() > 0) {
-			shards.push_back({ KeyRange(KeyRangeRef(endKey, keyWithoutPrefix)), name });
-			TraceEvent(SevDebug, "DecodeShardMapping")
-			    .detail("BeginKey", endKey)
-			    .detail("EndKey", keyWithoutPrefix)
-			    .detail("Name", name);
-		}
-		endKey = keyWithoutPrefix;
-		name = kv.value.toString();
-	}
-	return shards;
-}
-
 void logRocksDBError(const rocksdb::Status& status, const std::string& method) {
 	auto level = status.IsTimedOut() ? SevWarn : SevError;
 	TraceEvent e(level, "ShardedRocksDBError");
@@ -219,7 +199,7 @@ const char* ShardOpToString(ShardOp op) {
 	}
 }
 void logShardEvent(StringRef name, ShardOp op, Severity severity = SevInfo, const std::string& message = "") {
-	TraceEvent e(severity, "ShardedRocksKVSShardEvent");
+	TraceEvent e(severity, "ShardedRocksDBKVSShardEvent");
 	e.detail("Name", name).detail("Action", ShardOpToString(op));
 	if (!message.empty()) {
 		e.detail("Message", message);
@@ -230,7 +210,7 @@ void logShardEvent(StringRef name,
                    ShardOp op,
                    Severity severity = SevInfo,
                    const std::string& message = "") {
-	TraceEvent e(severity, "ShardedRocksKVSShardEvent");
+	TraceEvent e(severity, "ShardedRocksDBKVSShardEvent");
 	e.detail("Name", name).detail("Action", ShardOpToString(op)).detail("Begin", range.begin).detail("End", range.end);
 	if (message != "") {
 		e.detail("Message", message);
@@ -284,7 +264,7 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	}
 
 	if (rocksdb_block_cache == nullptr) {
-		rocksdb_block_cache = rocksdb::NewLRUCache(128);
+		rocksdb_block_cache = rocksdb::NewLRUCache(SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE);
 	}
 	bbOpts.block_cache = rocksdb_block_cache;
 
@@ -301,6 +281,12 @@ rocksdb::Options getOptions() {
 		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
 	}
 
+	options.delete_obsolete_files_period_micros = SERVER_KNOBS->ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD * 1000000;
+	options.max_total_wal_size = SERVER_KNOBS->ROCKSDB_MAX_TOTAL_WAL_SIZE;
+	options.max_subcompactions = SERVER_KNOBS->ROCKSDB_MAX_SUBCOMPACTIONS;
+	options.max_background_jobs = SERVER_KNOBS->ROCKSDB_MAX_BACKGROUND_JOBS;
+
+	options.db_write_buffer_size = SERVER_KNOBS->ROCKSDB_WRITE_BUFFER_SIZE;
 	options.statistics = rocksdb::CreateDBStatistics();
 	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
@@ -634,6 +620,7 @@ public:
 		if (foundMetadata) {
 			TraceEvent(SevInfo, "ShardedRocksInitLoadPhysicalShards", this->logId)
 			    .detail("PhysicalShardCount", handles.size());
+
 			for (auto handle : handles) {
 				if (handle->GetName() == "kvs-metadata") {
 					metadataShard = std::make_shared<PhysicalShard>(db, "kvs-metadata", handle);
@@ -644,25 +631,58 @@ public:
 				TraceEvent(SevVerbose, "ShardedRocksInitPhysicalShard", this->logId)
 				    .detail("PhysicalShard", handle->GetName());
 			}
-			RangeResult metadata;
-			readRangeInDb(metadataShard.get(), prefixRange(shardMappingPrefix), UINT16_MAX, UINT16_MAX, &metadata);
 
-			std::vector<std::pair<KeyRange, std::string>> mapping = decodeShardMapping(metadata, shardMappingPrefix);
-
-			for (const auto& [range, name] : mapping) {
-				TraceEvent(SevVerbose, "ShardedRocksLoadRange", this->logId)
-				    .detail("Range", range)
-				    .detail("PhysicalShard", name);
-				auto it = physicalShards.find(name);
-				// Raise error if physical shard is missing.
-				if (it == physicalShards.end()) {
-					TraceEvent(SevError, "ShardedRocksDB").detail("MissingShard", name);
-					return rocksdb::Status::NotFound();
+			KeyRange keyRange = prefixRange(shardMappingPrefix);
+			while (true) {
+				RangeResult metadata;
+				const int bytes = readRangeInDb(metadataShard.get(),
+				                                keyRange,
+				                                std::max(2, SERVER_KNOBS->ROCKSDB_READ_RANGE_ROW_LIMIT),
+				                                UINT16_MAX,
+				                                &metadata);
+				if (bytes <= 0) {
+					break;
 				}
-				std::unique_ptr<DataShard> dataShard = std::make_unique<DataShard>(range, it->second.get());
-				dataShardMap.insert(range, dataShard.get());
-				it->second->dataShards[range.begin.toString()] = std::move(dataShard);
-				activePhysicalShardIds.emplace(name);
+
+				ASSERT_GT(metadata.size(), 0);
+				for (int i = 0; i < metadata.size() - 1; ++i) {
+					const std::string name = metadata[i].value.toString();
+					KeyRangeRef range(metadata[i].key.removePrefix(shardMappingPrefix),
+					                  metadata[i + 1].key.removePrefix(shardMappingPrefix));
+					TraceEvent(SevVerbose, "DecodeShardMapping", this->logId)
+					    .detail("Range", range)
+					    .detail("Name", name);
+
+					// Empty name indicates the shard doesn't belong to the SS/KVS.
+					if (name.empty()) {
+						continue;
+					}
+
+					auto it = physicalShards.find(name);
+					// Raise error if physical shard is missing.
+					if (it == physicalShards.end()) {
+						TraceEvent(SevError, "ShardedRocksDB", this->logId).detail("MissingShard", name);
+						return rocksdb::Status::NotFound();
+					}
+
+					std::unique_ptr<DataShard> dataShard = std::make_unique<DataShard>(range, it->second.get());
+					dataShardMap.insert(range, dataShard.get());
+					it->second->dataShards[range.begin.toString()] = std::move(dataShard);
+					activePhysicalShardIds.emplace(name);
+				}
+
+				if (metadata.back().key.removePrefix(shardMappingPrefix) == specialKeys.end) {
+					TraceEvent(SevVerbose, "ShardedRocksLoadShardMappingEnd", this->logId);
+					break;
+				}
+
+				// Read from the current last key since the shard begining with it hasn't been processed.
+				if (metadata.size() == 1 && metadata.back().value.toString().empty()) {
+					// Should not happen, just being paranoid.
+					keyRange = KeyRangeRef(keyAfter(metadata.back().key), keyRange.end);
+				} else {
+					keyRange = KeyRangeRef(metadata.back().key, keyRange.end);
+				}
 			}
 			// TODO: remove unused column families.
 		} else {
@@ -673,7 +693,7 @@ public:
 			std::shared_ptr<PhysicalShard> defaultShard = std::make_shared<PhysicalShard>(db, "default", handles[0]);
 			columnFamilyMap[defaultShard->cf->GetID()] = defaultShard->cf;
 			std::unique_ptr<DataShard> dataShard = std::make_unique<DataShard>(specialKeys, defaultShard.get());
-			dataShardMap.insert(dataShard->range, dataShard.get());
+			dataShardMap.insert(specialKeys, dataShard.get());
 			defaultShard->dataShards[specialKeys.begin.toString()] = std::move(dataShard);
 			physicalShards[defaultShard->id] = defaultShard;
 
@@ -1045,7 +1065,7 @@ public:
 	void logStats(rocksdb::DB* db);
 	// PerfContext
 	void resetPerfContext();
-	void setPerfContext(int index);
+	void collectPerfContext(int index);
 	void logPerfContext(bool ignoreZeroMetric);
 	// For Readers
 	Reference<Histogram> getReadRangeLatencyHistogram(int index);
@@ -1349,9 +1369,9 @@ void RocksDBMetrics::logStats(rocksdb::DB* db) {
 		e.detail(name, stat - cumulation);
 		cumulation = stat;
 	}
-	for (auto& [name, property] : propertyStats) { // Zhe: TODO aggregation
+	for (auto& [name, property] : propertyStats) {
 		stat = 0;
-		ASSERT(db->GetIntProperty(property, &stat));
+		ASSERT(db->GetAggregatedIntProperty(property, &stat));
 		e.detail(name, stat);
 	}
 }
@@ -1360,22 +1380,22 @@ void RocksDBMetrics::logMemUsage(rocksdb::DB* db) {
 	TraceEvent e(SevInfo, "ShardedRocksDBMemMetrics", debugID);
 	uint64_t stat;
 	ASSERT(db != nullptr);
-	ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kBlockCacheUsage, &stat));
+	ASSERT(db->GetAggregatedIntProperty(rocksdb::DB::Properties::kBlockCacheUsage, &stat));
 	e.detail("BlockCacheUsage", stat);
-	ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kEstimateTableReadersMem, &stat));
+	ASSERT(db->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimateTableReadersMem, &stat));
 	e.detail("EstimateSstReaderBytes", stat);
-	ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kCurSizeAllMemTables, &stat));
+	ASSERT(db->GetAggregatedIntProperty(rocksdb::DB::Properties::kCurSizeAllMemTables, &stat));
 	e.detail("AllMemtablesBytes", stat);
-	ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kBlockCachePinnedUsage, &stat));
+	ASSERT(db->GetAggregatedIntProperty(rocksdb::DB::Properties::kBlockCachePinnedUsage, &stat));
 	e.detail("BlockCachePinnedUsage", stat);
 }
 
 void RocksDBMetrics::resetPerfContext() {
-	rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableTimeExceptForMutex);
+	rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableCount);
 	rocksdb::get_perf_context()->Reset();
 }
 
-void RocksDBMetrics::setPerfContext(int index) {
+void RocksDBMetrics::collectPerfContext(int index) {
 	for (auto& [name, metric, vals] : perfContextMetrics) {
 		vals[index] = getRocksdbPerfcontextMetric(metric);
 	}
@@ -1391,12 +1411,7 @@ void RocksDBMetrics::logPerfContext(bool ignoreZeroMetric) {
 		}
 		if (ignoreZeroMetric && s == 0)
 			continue;
-		for (int i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; i++) {
-			if (vals[i] != 0)
-				e.detail("RD" + std::to_string(i) + name, vals[i]);
-		}
-		if (vals[SERVER_KNOBS->ROCKSDB_READ_PARALLELISM] != 0)
-			e.detail("WR" + (std::string)name, vals[SERVER_KNOBS->ROCKSDB_READ_PARALLELISM]);
+		e.detail(name, s);
 	}
 }
 
@@ -1612,6 +1627,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		std::unordered_map<uint32_t, rocksdb::ColumnFamilyHandle*>* columnFamilyMap;
 		std::shared_ptr<RocksDBMetrics> rocksDBMetrics;
 		std::shared_ptr<rocksdb::RateLimiter> rateLimiter;
+		double sampleStartTime;
 
 		explicit Writer(UID logId,
 		                int threadIndex,
@@ -1625,11 +1641,21 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		                          10, // fairness
 		                          rocksdb::RateLimiter::Mode::kWritesOnly,
 		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE)
-		                    : nullptr) {}
+		                    : nullptr),
+		    sampleStartTime(now()) {}
 
 		~Writer() override {}
 
 		void init() override {}
+
+		void sample() {
+			if (SERVER_KNOBS->ROCKSDB_METRICS_SAMPLE_INTERVAL > 0 &&
+			    now() - sampleStartTime >= SERVER_KNOBS->ROCKSDB_METRICS_SAMPLE_INTERVAL) {
+				rocksDBMetrics->collectPerfContext(threadIndex);
+				rocksDBMetrics->resetPerfContext();
+				sampleStartTime = now();
+			}
+		}
 
 		struct OpenAction : TypedAction<Writer, OpenAction> {
 			ShardManager* shardManager;
@@ -1709,7 +1735,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			ThreadReturnPromise<Void> done;
 			double startTime;
 			bool getHistograms;
-			bool getPerfContext;
 			bool logShardMemUsage;
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 			CommitAction(rocksdb::DB* db,
@@ -1723,12 +1748,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					startTime = timer_monotonic();
 				} else {
 					getHistograms = false;
-				}
-				if ((SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE != 0) &&
-				    (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE)) {
-					getPerfContext = true;
-				} else {
-					getPerfContext = false;
 				}
 			}
 		};
@@ -1798,9 +1817,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		void action(CommitAction& a) {
-			if (a.getPerfContext) {
-				rocksDBMetrics->resetPerfContext();
-			}
 			double commitBeginTime;
 			if (a.getHistograms) {
 				commitBeginTime = timer_monotonic();
@@ -1832,9 +1848,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				rocksDBMetrics->getCommitLatencyHistogram()->sampleSeconds(currTime - a.startTime);
 			}
 
-			if (a.getPerfContext) {
-				rocksDBMetrics->setPerfContext(threadIndex);
-			}
+			sample();
 		}
 
 		struct CloseAction : TypedAction<Writer, CloseAction> {
@@ -1864,9 +1878,10 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		double readRangeTimeout;
 		int threadIndex;
 		std::shared_ptr<RocksDBMetrics> rocksDBMetrics;
+		double sampleStartTime;
 
 		explicit Reader(UID logId, int threadIndex, std::shared_ptr<RocksDBMetrics> rocksDBMetrics)
-		  : logId(logId), threadIndex(threadIndex), rocksDBMetrics(rocksDBMetrics) {
+		  : logId(logId), threadIndex(threadIndex), rocksDBMetrics(rocksDBMetrics), sampleStartTime(now()) {
 			if (g_network->isSimulated()) {
 				// In simulation, increasing the read operation timeouts to 5 minutes, as some of the tests have
 				// very high load and single read thread cannot process all the load within the timeouts.
@@ -1882,33 +1897,33 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		void init() override {}
 
+		void sample() {
+			if (SERVER_KNOBS->ROCKSDB_METRICS_SAMPLE_INTERVAL > 0 &&
+			    now() - sampleStartTime >= SERVER_KNOBS->ROCKSDB_METRICS_SAMPLE_INTERVAL) {
+				rocksDBMetrics->collectPerfContext(threadIndex);
+				rocksDBMetrics->resetPerfContext();
+				sampleStartTime = now();
+			}
+		}
 		struct ReadValueAction : TypedAction<Reader, ReadValueAction> {
 			Key key;
 			PhysicalShard* shard;
 			Optional<UID> debugID;
 			double startTime;
 			bool getHistograms;
-			bool getPerfContext;
 			bool logShardMemUsage;
 			ThreadReturnPromise<Optional<Value>> result;
 
 			ReadValueAction(KeyRef key, PhysicalShard* shard, Optional<UID> debugID)
 			  : key(key), shard(shard), debugID(debugID), startTime(timer_monotonic()),
 			    getHistograms(
-			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
-			    getPerfContext(
-			        (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE != 0) &&
-			                (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE)
-			            ? true
-			            : false) {}
+			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false) {
+			}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 
 		void action(ReadValueAction& a) {
-			if (a.getPerfContext) {
-				rocksDBMetrics->resetPerfContext();
-			}
 			double readBeginTime = timer_monotonic();
 			if (a.getHistograms) {
 				rocksDBMetrics->getReadValueQueueWaitHistogram(threadIndex)->sampleSeconds(readBeginTime - a.startTime);
@@ -1961,9 +1976,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				rocksDBMetrics->getReadValueActionHistogram(threadIndex)->sampleSeconds(currTime - readBeginTime);
 				rocksDBMetrics->getReadValueLatencyHistogram(threadIndex)->sampleSeconds(currTime - a.startTime);
 			}
-			if (a.getPerfContext) {
-				rocksDBMetrics->setPerfContext(threadIndex);
-			}
+
+			sample();
 		}
 
 		struct ReadValuePrefixAction : TypedAction<Reader, ReadValuePrefixAction> {
@@ -1973,26 +1987,18 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			Optional<UID> debugID;
 			double startTime;
 			bool getHistograms;
-			bool getPerfContext;
 			bool logShardMemUsage;
 			ThreadReturnPromise<Optional<Value>> result;
 
 			ReadValuePrefixAction(Key key, int maxLength, PhysicalShard* shard, Optional<UID> debugID)
 			  : key(key), maxLength(maxLength), shard(shard), debugID(debugID), startTime(timer_monotonic()),
-			    getHistograms(
-			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
-			    getPerfContext(
-			        (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE != 0) &&
-			                (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE)
-			            ? true
-			            : false){};
+			    getHistograms((deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE)
+			                      ? true
+			                      : false){};
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 
 		void action(ReadValuePrefixAction& a) {
-			if (a.getPerfContext) {
-				rocksDBMetrics->resetPerfContext();
-			}
 			double readBeginTime = timer_monotonic();
 			if (a.getHistograms) {
 				rocksDBMetrics->getReadPrefixQueueWaitHistogram(threadIndex)
@@ -2050,9 +2056,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				rocksDBMetrics->getReadPrefixActionHistogram(threadIndex)->sampleSeconds(currTime - readBeginTime);
 				rocksDBMetrics->getReadPrefixLatencyHistogram(threadIndex)->sampleSeconds(currTime - a.startTime);
 			}
-			if (a.getPerfContext) {
-				rocksDBMetrics->setPerfContext(threadIndex);
-			}
+
+			sample();
 		}
 
 		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
@@ -2061,18 +2066,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			int rowLimit, byteLimit;
 			double startTime;
 			bool getHistograms;
-			bool getPerfContext;
 			bool logShardMemUsage;
 			ThreadReturnPromise<RangeResult> result;
 			ReadRangeAction(KeyRange keys, std::vector<DataShard*> shards, int rowLimit, int byteLimit)
 			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), startTime(timer_monotonic()),
 			    getHistograms(
-			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
-			    getPerfContext(
-			        (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE != 0) &&
-			                (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE)
-			            ? true
-			            : false) {
+			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false) {
 				for (const DataShard* shard : shards) {
 					if (shard != nullptr) {
 						shardRanges.emplace_back(shard->physicalShard, keys & shard->range);
@@ -2083,9 +2082,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		void action(ReadRangeAction& a) {
-			if (a.getPerfContext) {
-				rocksDBMetrics->resetPerfContext();
-			}
 			double readBeginTime = timer_monotonic();
 			if (a.getHistograms) {
 				rocksDBMetrics->getReadRangeQueueWaitHistogram(threadIndex)->sampleSeconds(readBeginTime - a.startTime);
@@ -2149,9 +2145,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				rocksDBMetrics->getReadRangeActionHistogram(threadIndex)->sampleSeconds(currTime - readBeginTime);
 				rocksDBMetrics->getReadRangeLatencyHistogram(threadIndex)->sampleSeconds(currTime - a.startTime);
 			}
-			if (a.getPerfContext) {
-				rocksDBMetrics->setPerfContext(threadIndex);
-			}
+
+			sample();
 		}
 	};
 

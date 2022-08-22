@@ -124,8 +124,10 @@ private:
 			    } else if (err.code() != error_code_success) {
 				    ctx->onError(err);
 			    } else {
-				    auto& [out_kv, out_count, out_more] = out;
+				    auto resCopy = copyKeyValueArray(out);
+				    auto& [resVector, out_more] = resCopy;
 				    ASSERT(!out_more);
+				    results.get()->assign(resVector.begin(), resVector.end());
 				    if (!seenReadSuccess) {
 					    info("BlobGranuleCorrectness::randomReadOp first success\n");
 				    }
@@ -178,7 +180,7 @@ private:
 		}
 		execTransaction(
 		    [begin, end, results](auto ctx) {
-			    fdb::Future f = ctx->tx().getBlobGranuleRanges(begin, end).eraseType();
+			    fdb::Future f = ctx->tx().getBlobGranuleRanges(begin, end, 1000).eraseType();
 			    ctx->continueAfter(
 			        f,
 			        [ctx, f, results]() {

@@ -156,9 +156,14 @@ public:
 	int PRIORITY_TEAM_FAILED; // Priority when a server in the team is excluded as failed
 	int PRIORITY_TEAM_0_LEFT;
 	int PRIORITY_SPLIT_SHARD;
+	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD; // Priority when a physical shard is oversize or anonymous
 
 	// Data distribution
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
+	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
+	int64_t MAX_PHYSICAL_SHARD_BYTES;
+	double PHYSICAL_SHARD_METRICS_DELAY;
+	double ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME;
 
 	double READ_REBALANCE_CPU_THRESHOLD; // read rebalance only happens if the source servers' CPU > threshold
 	int READ_REBALANCE_SRC_PARALLELISM; // the max count a server become a source server within a certain interval
@@ -298,6 +303,7 @@ public:
 	int64_t REPLACE_CONTENTS_BYTES;
 
 	// KeyValueStoreRocksDB
+	int ROCKSDB_READ_RANGE_ROW_LIMIT;
 	int ROCKSDB_BACKGROUND_PARALLELISM;
 	int ROCKSDB_READ_PARALLELISM;
 	int64_t ROCKSDB_MEMTABLE_BYTES;
@@ -324,6 +330,7 @@ public:
 	std::string DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY;
 	bool ROCKSDB_PERFCONTEXT_ENABLE; // Enable rocks perf context metrics. May cause performance overhead
 	double ROCKSDB_PERFCONTEXT_SAMPLE_RATE;
+	double ROCKSDB_METRICS_SAMPLE_INTERVAL;
 	int ROCKSDB_MAX_SUBCOMPACTIONS;
 	int64_t ROCKSDB_SOFT_PENDING_COMPACT_BYTES_LIMIT;
 	int64_t ROCKSDB_HARD_PENDING_COMPACT_BYTES_LIMIT;
@@ -333,6 +340,10 @@ public:
 	int64_t ROCKSDB_COMPACTION_READAHEAD_SIZE;
 	int64_t ROCKSDB_BLOCK_SIZE;
 	bool ENABLE_SHARDED_ROCKSDB;
+	int64_t ROCKSDB_WRITE_BUFFER_SIZE;
+	int64_t ROCKSDB_MAX_TOTAL_WAL_SIZE;
+	int64_t ROCKSDB_MAX_BACKGROUND_JOBS;
+	int64_t ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
