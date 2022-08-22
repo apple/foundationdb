@@ -24,6 +24,8 @@
 
 #include <boost/functional/hash.hpp>
 
+#include "flow/actorcompiler.h" // This must be the last #include.
+
 namespace {
 
 Optional<UID> getEncryptKeyProxyId(const Reference<AsyncVar<ServerDBInfo> const>& db) {
