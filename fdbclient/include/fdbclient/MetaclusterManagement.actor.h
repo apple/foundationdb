@@ -1746,7 +1746,7 @@ struct RenameTenantImpl {
 		wait(store(oldTenantEntry, getTenantTransaction(tr, self->oldName)) &&
 		     store(newTenantEntry, tryGetTenantTransaction(tr, self->newName)));
 
-		if (oldTenantEntry.id != self->tenantId) {
+		if (self->tenantId != -1 && oldTenantEntry.id != self->tenantId) {
 			// The tenant must have been removed simultaneously
 			CODE_PROBE(true, "Metacluster rename old tenant ID mismatch");
 			throw tenant_removed();
