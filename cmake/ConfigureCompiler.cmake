@@ -201,6 +201,8 @@ else()
       -fsanitize=undefined
       # TODO(atn34) Re-enable -fsanitize=alignment once https://github.com/apple/foundationdb/issues/1434 is resolved
       -fno-sanitize=alignment
+      # https://github.com/apple/foundationdb/issues/7955
+      -fno-sanitize=function
       -DBOOST_USE_UCONTEXT)
     list(APPEND SANITIZER_LINK_OPTIONS -fsanitize=undefined)
   endif()
