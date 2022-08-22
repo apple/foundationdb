@@ -489,10 +489,3 @@ TEST_CASE("/fdbserver/MasterServer/FigureVersion/NegativeReferenceVersion") {
 	ASSERT_EQ(figureVersion(0, 2.0, -1e6, 5e5, 0.1, 1e6), 550000);
 	return Void();
 }
-
-TEST_CASE("/fdbserver/MasterServer/FigureVersion/Overflow") {
-	// The upper range used in std::clamp should overflow.
-	ASSERT_EQ(figureVersion(std::numeric_limits<Version>::max() - static_cast<Version>(1e6), 1.0, 0, 1e6, 0.1, 1e6),
-	          std::numeric_limits<Version>::max() - static_cast<Version>(1e6 * 0.1));
-	return Void();
-}

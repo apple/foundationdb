@@ -396,6 +396,46 @@ class DDTxnProcessorImpl {
 		}
 	}
 
+	ACTOR static Future<bool> isDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
+				if (!mode.present() && ddEnabledState->isDDEnabled())
+					return true;
+				if (mode.present()) {
+					BinaryReader rd(mode.get(), Unversioned());
+					int m;
+					rd >> m;
+					if (m && ddEnabledState->isDDEnabled()) {
+						TraceEvent(SevDebug, "IsDDEnabledSucceeded")
+						    .detail("Mode", m)
+						    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
+						return true;
+					}
+				}
+				// SOMEDAY: Write a wrapper in MoveKeys.actor.h
+				Optional<Value> readVal = wait(tr.get(moveKeysLockOwnerKey));
+				UID currentOwner =
+				    readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
+				if (ddEnabledState->isDDEnabled() && (currentOwner != dataDistributionModeLock)) {
+					TraceEvent(SevDebug, "IsDDEnabledSucceeded")
+					    .detail("CurrentOwner", currentOwner)
+					    .detail("DDModeLock", dataDistributionModeLock)
+					    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
+					return true;
+				}
+				TraceEvent(SevDebug, "IsDDEnabledFailed")
+				    .detail("CurrentOwner", currentOwner)
+				    .detail("DDModeLock", dataDistributionModeLock)
+				    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
+				return false;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR static Future<Void> pollMoveKeysLock(Database cx, MoveKeysLock lock, const DDEnabledState* ddEnabledState) {
 		loop {
 			wait(delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY));
@@ -421,7 +461,7 @@ Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> DDTxnProces
 	return NativeAPI::getServerListAndProcessClasses(&tr);
 }
 
-Future<MoveKeysLock> DDTxnProcessor::takeMoveKeysLock(UID ddId) const {
+Future<MoveKeysLock> DDTxnProcessor::takeMoveKeysLock(const UID& ddId) const {
 	return ::takeMoveKeysLock(cx, ddId);
 }
 
@@ -447,6 +487,10 @@ Future<Void> DDTxnProcessor::waitForDataDistributionEnabled(const DDEnabledState
 	return DDTxnProcessorImpl::waitForDataDistributionEnabled(cx, ddEnabledState);
 }
 
-Future<Void> DDTxnProcessor::pollMoveKeysLock(MoveKeysLock lock, const DDEnabledState* ddEnabledState) const {
+Future<bool> DDTxnProcessor::isDataDistributionEnabled(const DDEnabledState* ddEnabledState) const {
+	return DDTxnProcessorImpl::isDataDistributionEnabled(cx, ddEnabledState);
+}
+
+Future<Void> DDTxnProcessor::pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const {
 	return DDTxnProcessorImpl::pollMoveKeysLock(cx, lock, ddEnabledState);
 }

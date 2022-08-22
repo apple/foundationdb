@@ -58,7 +58,6 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
-#include "fdbserver/EncryptedMutationMessage.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/GetEncryptCipherKeys.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -553,7 +552,6 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	Version storageVersion = invalidVersion; // The version between the storage version and the durable version are
 	                                         // being written to disk as part of the current commit in updateStorage.
 	Version durableVersion = invalidVersion; // All versions before the durable version are durable on disk
-	// FIXME: this needs to get persisted to disk to still fix same races across restart!
 	Version metadataVersion = invalidVersion; // Last update to the change feed metadata. Used for reasoning about
 	                                          // fetched metadata vs local metadata
 	Version emptyVersion = 0; // The change feed does not have any mutations before emptyVersion
@@ -1185,11 +1183,6 @@ public:
 			});
 			specialCounter(
 			    cc, "FetchKeysFullFetchWaiting", [self]() { return self->fetchKeysParallelismFullLock.waiters(); });
-			specialCounter(cc, "FetchChangeFeedFetchActive", [self]() {
-				return self->fetchChangeFeedParallelismLock.activePermits();
-			});
-			specialCounter(
-			    cc, "FetchChangeFeedWaiting", [self]() { return self->fetchChangeFeedParallelismLock.waiters(); });
 			specialCounter(cc, "ServeFetchCheckpointActive", [self]() {
 				return self->serveFetchCheckpointParallelismLock.activePermits();
 			});
@@ -1249,7 +1242,6 @@ public:
 	    numWatches(0), noRecentUpdates(false), lastUpdate(now()), updateEagerReads(nullptr),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysParallelismFullLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_FULL),
-	    fetchChangeFeedParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
@@ -5804,10 +5796,6 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
                                       Version endVersion) {
 	wait(delay(0)); // allow this actor to be cancelled by removals
 
-	// bound active change feed fetches
-	wait(data->fetchChangeFeedParallelismLock.take(TaskPriority::DefaultYield));
-	state FlowLock::Releaser holdingFCFPL(data->fetchChangeFeedParallelismLock);
-
 	TraceEvent(SevDebug, "FetchChangeFeed", data->thisServerID)
 	    .detail("RangeID", changeFeedInfo->id)
 	    .detail("Range", changeFeedInfo->range)
@@ -8000,23 +7988,18 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				           OTELSpanContextMessage::isNextIn(cloneReader)) {
 					OTELSpanContextMessage scm;
 					cloneReader >> scm;
-				} else if (cloneReader.protocolVersion().hasEncryptionAtRest() &&
-				           EncryptedMutationMessage::isNextIn(cloneReader) && !cipherKeys.present()) {
-					// Encrypted mutation found, but cipher keys haven't been fetch.
-					// Collect cipher details to fetch cipher keys in one batch.
-					EncryptedMutationMessage emm;
-					cloneReader >> emm;
-					cipherDetails.insert(emm.header.cipherTextDetails);
-					cipherDetails.insert(emm.header.cipherHeaderDetails);
-					collectingCipherKeys = true;
 				} else {
 					MutationRef msg;
-					if (cloneReader.protocolVersion().hasEncryptionAtRest() &&
-					    EncryptedMutationMessage::isNextIn(cloneReader)) {
-						assert(cipherKeys.present());
-						msg = EncryptedMutationMessage::decrypt(cloneReader, eager.arena, cipherKeys.get());
-					} else {
-						cloneReader >> msg;
+					cloneReader >> msg;
+					if (msg.isEncrypted()) {
+						if (!cipherKeys.present()) {
+							const BlobCipherEncryptHeader* header = msg.encryptionHeader();
+							cipherDetails.insert(header->cipherTextDetails);
+							cipherDetails.insert(header->cipherHeaderDetails);
+							collectingCipherKeys = true;
+						} else {
+							msg = msg.decrypt(cipherKeys.get(), eager.arena);
+						}
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
 
@@ -8160,11 +8143,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				spanContext = scm.spanContext;
 			} else {
 				MutationRef msg;
-				if (rd.protocolVersion().hasEncryptionAtRest() && EncryptedMutationMessage::isNextIn(rd)) {
+				rd >> msg;
+				if (msg.isEncrypted()) {
 					ASSERT(cipherKeys.present());
-					msg = EncryptedMutationMessage::decrypt(rd, rd.arena(), cipherKeys.get());
-				} else {
-					rd >> msg;
+					msg = msg.decrypt(cipherKeys.get(), rd.arena());
 				}
 
 				Span span("SS:update"_loc, spanContext);

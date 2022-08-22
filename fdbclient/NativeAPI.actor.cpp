@@ -7806,7 +7806,6 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 				fmt::print("Key range [{0} - {1}) missing worker assignment!\n",
 				           granuleStartKey.printable(),
 				           granuleEndKey.printable());
-				// TODO probably new exception type instead
 			}
 			throw blob_granule_transaction_too_old();
 		}
