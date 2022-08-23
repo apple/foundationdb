@@ -1549,8 +1549,8 @@ void TransportData::applyPublicKeySet(StringRef jwkSetString) {
 		}
 	}
 	TraceEvent(SevInfo, "AuthzPublicKeySetApply")
-		.detail("NumPublicKeys", publicKeys.size())
-		.detail("NumSkippedPrivateKeys", numPrivateKeys);
+	    .detail("NumPublicKeys", publicKeys.size())
+	    .detail("NumSkippedPrivateKeys", numPrivateKeys);
 }
 
 ACTOR static Future<Void> multiVersionCleanupWorker(TransportData* self) {
