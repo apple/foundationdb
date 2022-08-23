@@ -21,10 +21,14 @@ class BuggifyOption:
         self.value = BuggifyOptionValue.RANDOM
         if val is not None:
             v = val.lower()
-            if v == 'on' or v == '1' or v == 'true':
+            if v in ['on', '1', 'true']:
                 self.value = BuggifyOptionValue.ON
-            elif v == 'off' or v == '0' or v == 'false':
+            elif v in ['off', '0', 'false']:
                 self.value = BuggifyOptionValue.OFF
+            elif v in ['random', 'rnd', 'r']:
+                pass
+            else:
+                assert False, 'Invalid value {} -- use true, false, or random'.format(v)
 
 
 class ConfigValue:
@@ -70,8 +74,34 @@ class ConfigValue:
         return self.name, args.__getattribute__(self.get_arg_name())
 
 
-# TODO: document this class
 class Config:
+    """
+    This is the central configuration class for test harness. The values in this class are exposed globally through
+    a global variable test_harness.config.config. This class provides some "magic" to keep test harness flexible.
+    Each parameter can further be configured using an `_args` member variable which is expected to be a dictionary.
+    * The value of any variable can be set through the command line. For a variable named `variable_name` we will
+      by default create a new command line option `--variable-name` (`_` is automatically changed to `-`). This
+      default can be changed by setting the `'long_name'` property in the `_arg` dict.
+    * In addition the user can also optionally set a short-name. This can be achieved by setting the `'short_name'`
+      property in the `_arg` dictionary.
+    * All additional properties in `_args` are passed to `argparse.add_argument`.
+    * If the default of a variable is `None` the user should explicitly set the `'type'` property to an appropriate
+      type.
+    * In addition to command line flags, all configuration options can also be controlled through environment variables.
+      By default, `variable-name` can be changed by setting the environment variable `TH_VARIABLE_NAME`. This default
+      can be changed by setting the `'env_name'` property.
+    * Test harness comes with multiple executables. Each of these should use the config facility. For this,
+      `Config.build_arguments` should be called first with the `argparse` parser. Then `Config.extract_args` needs
+      to be called with the result of `argparse.ArgumentParser.parse_args`. A sample example could look like this:
+      ```
+      parser = argparse.ArgumentParser('TestHarness', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+      config.build_arguments(parser)
+      args = parser.parse_args()
+      config.extract_args(args)
+      ```
+    * Changing the default value for all executables might not always be desirable. If it should be only changed for
+      one executable Config.change_default should be used.
+    """
     def __init__(self):
         self.random = random.Random()
         self.cluster_file: str | None = None

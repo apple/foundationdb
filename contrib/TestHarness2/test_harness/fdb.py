@@ -17,8 +17,7 @@ fdb.api_version(630)
 def str_to_tuple(s: str | None):
     if s is None:
         return s
-    res = s.split(',')
-    return tuple(res)
+    return tuple(s.split(','))
 
 
 fdb_db = None

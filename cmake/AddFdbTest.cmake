@@ -229,7 +229,6 @@ function(stage_correctness_package)
             ${CMAKE_BINARY_DIR}/lib/coverage.flow.xml
             ${CMAKE_BINARY_DIR}/packages/bin/TestHarness.exe
             ${CMAKE_BINARY_DIR}/packages/bin/TraceLogHelper.dll
-            ${harness_files}
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/CMakeCache.txt ${STAGE_OUT_DIR}
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
                                      ${CMAKE_BINARY_DIR}/bin/coverage.fdbserver.xml
