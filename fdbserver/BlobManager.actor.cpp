@@ -921,14 +921,19 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 		if (e.code() == error_code_blob_worker_full) {
 			CODE_PROBE(true, "blob worker too full");
 			ASSERT(assignment.isAssign);
-			if (assignment.previousFailure.present() &&
-			    assignment.previousFailure.get().second.code() == error_code_blob_worker_full) {
-				// if previous assignment also failed due to blob_worker_full, multiple workers are full, so wait even
-				// longer
-				CODE_PROBE(true, "multiple blob workers too full");
-				wait(delayJittered(10.0));
-			} else {
-				wait(delayJittered(1.0)); // wait a bit before retrying
+			try {
+				if (assignment.previousFailure.present() &&
+				    assignment.previousFailure.get().second.code() == error_code_blob_worker_full) {
+					// if previous assignment also failed due to blob_worker_full, multiple workers are full, so wait
+					// even longer
+					CODE_PROBE(true, "multiple blob workers too full");
+					wait(delayJittered(10.0));
+				} else {
+					wait(delayJittered(1.0)); // wait a bit before retrying
+				}
+			} catch (Error& e) {
+				--bmData->stats.blockedAssignments;
+				throw;
 			}
 		}
 
@@ -4902,6 +4907,15 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 // Simulation validation that multiple blob managers aren't started with the same epoch
 static std::map<int64_t, UID> managerEpochsSeen;
 
+ACTOR Future<Void> checkBlobManagerEpoch(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int64_t epoch, UID dbgid) {
+	loop {
+		if (dbInfo->get().blobManager.present() && dbInfo->get().blobManager.get().epoch > epoch) {
+			throw worker_removed();
+		}
+		wait(dbInfo->onChange());
+	}
+}
+
 ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
                                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                int64_t epoch) {
@@ -4917,7 +4931,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		managerEpochsSeen[epoch] = bmInterf.id();
 	}
 	state Reference<BlobManagerData> self =
-	    makeReference<BlobManagerData>(deterministicRandom()->randomUniqueID(),
+	    makeReference<BlobManagerData>(bmInterf.id(),
 	                                   dbInfo,
 	                                   openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True),
 	                                   bmInterf.locality.dcId(),
@@ -4938,10 +4952,11 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		    dbInfo, [](auto const& info) { return info.clusterInterface.recruitBlobWorker; });
 
 		self->addActor.send(blobWorkerRecruiter(self, recruitBlobWorker));
+		self->addActor.send(checkBlobManagerEpoch(dbInfo, epoch, bmInterf.id()));
 
 		// we need to recover the old blob manager's state (e.g. granule assignments) before
 		// before the new blob manager does anything
-		wait(recoverBlobManager(self));
+		wait(recoverBlobManager(self) || collection);
 
 		self->addActor.send(doLockChecks(self));
 		self->addActor.send(monitorClientRanges(self));
@@ -4972,14 +4987,16 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 				break;
 			}
 			when(state HaltBlobGranulesRequest req = waitNext(bmInterf.haltBlobGranules.getFuture())) {
-				wait(haltBlobGranules(self));
+				wait(haltBlobGranules(self) || collection);
 				req.reply.send(Void());
 				TraceEvent("BlobGranulesHalted", bmInterf.id()).detail("Epoch", epoch).detail("ReqID", req.requesterID);
 				break;
 			}
-			when(BlobManagerExclusionSafetyCheckRequest exclCheckReq =
-			         waitNext(bmInterf.blobManagerExclCheckReq.getFuture())) {
-				blobManagerExclusionSafetyCheck(self, exclCheckReq);
+			when(BlobManagerExclusionSafetyCheckRequest req = waitNext(bmInterf.blobManagerExclCheckReq.getFuture())) {
+				blobManagerExclusionSafetyCheck(self, req);
+			}
+			when(BlobManagerBlockedRequest req = waitNext(bmInterf.blobManagerBlockedReq.getFuture())) {
+				req.reply.send(BlobManagerBlockedReply(self->stats.blockedAssignments));
 			}
 			when(wait(collection)) {
 				TraceEvent(SevError, "BlobManagerActorCollectionError");
@@ -4990,6 +5007,9 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	} catch (Error& err) {
 		TraceEvent("BlobManagerDied", bmInterf.id()).errorUnsuppressed(err);
 	}
+	// prevent a reference counting cycle
+	self->assignsInProgress = KeyRangeActorMap();
+	self->boundaryEvaluations.clear();
 	return Void();
 }
 
