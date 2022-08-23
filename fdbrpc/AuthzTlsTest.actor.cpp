@@ -1,5 +1,5 @@
 /*
- * TLSTest.cpp
+ * AuthzTlsTest.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#ifndef _WIN32
 #include <algorithm>
 #include <cstring>
 #include <fmt/format.h>
@@ -348,3 +349,9 @@ int main() {
 	}
 	return 0;
 }
+#else // _WIN32
+
+int main() {
+	return 0;
+}
+#endif // _WIN32
