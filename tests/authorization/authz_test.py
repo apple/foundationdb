@@ -156,13 +156,3 @@ def test_public_key_set_rollover(
             keyfile.write(old_key_json)
         print("key file reverted. waiting {} seconds for the update to take effect...".format(delay))
         time.sleep(delay)
-
-# shouldn't introduce admin server subprocess as fixture
-# because it would clone pytest framework context initialized up to that point as well
-# instead, we fork at the beginning and explicitly pass in test files as cli args
-if __name__ == "__main__":
-    fdb.api_version(720)
-    rc = 0
-    with admin_server.Server() as server:
-        rc = pytest.main(["conftest.py"] + sys.argv) # argv would include this test file and CLI args
-    sys.exit(rc)

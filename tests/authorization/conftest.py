@@ -28,6 +28,8 @@ from tmp_cluster import TempCluster
 from typing import Union
 from util import alg_from_kty, public_keyset_from_keys, random_alphanum_str, random_alphanum_bytes, to_str, to_bytes
 
+fdb.api_version(720)
+
 cluster_scope = "module"
 
 def pytest_addoption(parser):
@@ -105,8 +107,15 @@ def token_gen():
         return jwt.encode(headers, claims, private_key)
     return fn
 
+@pytest.fixture(scope=cluster_scope)
+def admin_ipc():
+    server = admin_server.Server()
+    server.start()
+    yield server
+    server.join()
+
 @pytest.fixture(autouse=True, scope=cluster_scope)
-def cluster(build_dir, public_key_jwks_str, public_key_refresh_interval, trusted_client):
+def cluster(admin_ipc, build_dir, public_key_jwks_str, public_key_refresh_interval, trusted_client):
     with TempCluster(
             build_dir=build_dir,
             tls_config=TLSConfig(server_chain_len=3, client_chain_len=2),
@@ -122,32 +131,31 @@ def cluster(build_dir, public_key_jwks_str, public_key_refresh_interval, trusted
         fdb.options.set_tls_cert_path(certfile if trusted_client else "")
         fdb.options.set_tls_ca_path(cafile)
         fdb.options.set_trace_enable()
-        admin = admin_server.get()
-        admin.request("configure_tls", [keyfile, certfile, cafile])
-        admin.request("connect", [str(cluster.cluster_file)])
+        admin_ipc.request("configure_tls", [keyfile, certfile, cafile])
+        admin_ipc.request("connect", [str(cluster.cluster_file)])
         yield cluster
 
 @pytest.fixture
-def db(cluster):
+def db(cluster, admin_ipc):
     db = fdb.open(str(cluster.cluster_file))
     db.options.set_transaction_timeout(2000) # 2 seconds
     db.options.set_transaction_retry_limit(3)
     yield db
-    admin_server.get().request("cleanup_database")
+    admin_ipc.request("cleanup_database")
     db = None
 
 @pytest.fixture
-def tenant_gen(db):
+def tenant_gen(db, admin_ipc):
     def fn(tenant):
         tenant = to_bytes(tenant)
-        admin_server.get().request("create_tenant", [tenant])
+        admin_ipc.request("create_tenant", [tenant])
     return fn
 
 @pytest.fixture
-def tenant_del(db):
+def tenant_del(db, admin_ipc):
     def fn(tenant):
         tenant = to_str(tenant)
-        admin_server.get().request("delete_tenant", [tenant])
+        admin_ipc.request("delete_tenant", [tenant])
     return fn
 
 @pytest.fixture
