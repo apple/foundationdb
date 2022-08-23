@@ -838,3 +838,10 @@ TEST_CASE("/fdbrpc/JsonWebKeySet/RSA/PrivateKey") {
 	testPrivateKey(&mkcert::makeRsa2048Bit);
 	return Void();
 }
+
+TEST_CASE("/fdbrpc/JsonWebKeySet/Empty") {
+	auto keyset = JsonWebKeySet::parse("{\"keys\":[]}"_sr, {});
+	ASSERT(keyset.present());
+	ASSERT(keyset.get().keys.empty());
+	return Void();
+}
