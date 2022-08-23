@@ -1073,14 +1073,26 @@ static bool handleRangeIsRevoke(Reference<BlobManagerData> bmData, RangeAssignme
 		for (auto& it : currentAssignments) {
 			// ensure range doesn't truncate existing ranges
 			if (it.begin() < assignment.keyRange.begin || it.end() > assignment.keyRange.end) {
-				fmt::print("Assignment [{0} - {1}) truncates range [{2} - {3})\n",
-				           assignment.keyRange.begin.printable(),
-				           assignment.keyRange.end.printable(),
-				           it.begin().printable(),
-				           it.end().printable());
+				// the only case where this is ok is on startup when a BM is revoking old granules after reading
+				// knownBlobRanges and seeing that some are no longer present.
+				auto knownRanges = bmData->knownBlobRanges.intersectingRanges(it.range());
+				bool inKnownBlobRanges = false;
+				for (auto& r : knownRanges) {
+					if (r.value()) {
+						inKnownBlobRanges = true;
+						break;
+					}
+				}
+				if (it.cvalue() != UID() || inKnownBlobRanges) {
+					fmt::print("Assignment [{0} - {1}) truncates range [{2} - {3})\n",
+					           assignment.keyRange.begin.printable(),
+					           assignment.keyRange.end.printable(),
+					           it.begin().printable(),
+					           it.end().printable());
+					// assert on condition again to make assertion failure better than "false"
+					ASSERT(it.cvalue() == UID() && !inKnownBlobRanges);
+				}
 			}
-			ASSERT(it.begin() >= assignment.keyRange.begin);
-			ASSERT(it.end() <= assignment.keyRange.end);
 
 			// It is fine for multiple disjoint sub-ranges to have the same sequence number since they were part
 			// of the same logical change
