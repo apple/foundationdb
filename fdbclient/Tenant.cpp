@@ -47,6 +47,10 @@ std::string TenantMapEntry::tenantStateToString(TenantState tenantState) {
 		return "removing";
 	case TenantState::UPDATING_CONFIGURATION:
 		return "updating configuration";
+	case TenantState::RENAMING_FROM:
+		return "renaming from";
+	case TenantState::RENAMING_TO:
+		return "renaming to";
 	case TenantState::ERROR:
 		return "error";
 	default:
@@ -63,6 +67,10 @@ TenantState TenantMapEntry::stringToTenantState(std::string stateStr) {
 		return TenantState::REMOVING;
 	} else if (stateStr == "updating configuration") {
 		return TenantState::UPDATING_CONFIGURATION;
+	} else if (stateStr == "renaming from") {
+		return TenantState::RENAMING_FROM;
+	} else if (stateStr == "renaming to") {
+		return TenantState::RENAMING_TO;
 	} else if (stateStr == "error") {
 		return TenantState::ERROR;
 	}
@@ -109,7 +117,9 @@ std::string TenantMapEntry::toJson(int apiVersion) const {
 	}
 
 	tenantEntry["tenant_state"] = TenantMapEntry::tenantStateToString(tenantState);
-
+	if (assignedCluster.present()) {
+		tenantEntry["assigned_cluster"] = assignedCluster.get().toString();
+	}
 	if (tenantGroup.present()) {
 		json_spirit::mObject tenantGroupObject;
 		std::string encodedTenantGroup = base64::encoder::from_string(tenantGroup.get().toString());
@@ -125,7 +135,7 @@ std::string TenantMapEntry::toJson(int apiVersion) const {
 }
 
 bool TenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const {
-	return tenantGroup == other.tenantGroup;
+	return tenantGroup == other.tenantGroup && encrypted == other.encrypted;
 }
 
 void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> value) {
@@ -135,6 +145,16 @@ void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> 
 		TraceEvent(SevWarnAlways, "UnknownTenantConfigurationParameter").detail("Parameter", parameter);
 		throw invalid_tenant_configuration();
 	}
+}
+
+TenantMetadataSpecification& TenantMetadata::instance() {
+	static TenantMetadataSpecification _instance = TenantMetadataSpecification("\xff/"_sr);
+	return _instance;
+}
+
+Key TenantMetadata::tenantMapPrivatePrefix() {
+	static Key _prefix = "\xff"_sr.withSuffix(tenantMap().subspace.begin);
+	return _prefix;
 }
 
 TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {

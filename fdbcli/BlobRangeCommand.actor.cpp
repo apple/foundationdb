@@ -23,6 +23,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/NativeAPI.actor.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
@@ -30,33 +31,6 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
-
-// copy to standalones for krm
-ACTOR Future<Void> setBlobRange(Database db, Key startKey, Key endKey, Value value) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
-
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-			// FIXME: check that the set range is currently inactive, and that a revoked range is currently its own
-			// range in the map and fully set.
-
-			tr->set(blobRangeChangeKey, deterministicRandom()->randomUniqueID().toString());
-			// This is not coalescing because we want to keep each range logically separate.
-			wait(krmSetRange(tr, blobRangeKeys.begin, KeyRange(KeyRangeRef(startKey, endKey)), value));
-			wait(tr->commit());
-			printf("Successfully updated blob range [%s - %s) to %s\n",
-			       startKey.printable().c_str(),
-			       endKey.printable().c_str(),
-			       value.printable().c_str());
-			return Void();
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-}
 
 ACTOR Future<Version> getLatestReadVersion(Database db) {
 	state Transaction tr(db);
@@ -78,7 +52,7 @@ ACTOR Future<Void> printAfterDelay(double delaySeconds, std::string message) {
 	return Void();
 }
 
-ACTOR Future<Void> doBlobPurge(Database db, Key startKey, Key endKey, Optional<Version> version) {
+ACTOR Future<Void> doBlobPurge(Database db, Key startKey, Key endKey, Optional<Version> version, bool force) {
 	state Version purgeVersion;
 	if (version.present()) {
 		purgeVersion = version.get();
@@ -86,7 +60,7 @@ ACTOR Future<Void> doBlobPurge(Database db, Key startKey, Key endKey, Optional<V
 		wait(store(purgeVersion, getLatestReadVersion(db)));
 	}
 
-	state Key purgeKey = wait(db->purgeBlobGranules(KeyRange(KeyRangeRef(startKey, endKey)), purgeVersion, {}));
+	state Key purgeKey = wait(db->purgeBlobGranules(KeyRange(KeyRangeRef(startKey, endKey)), purgeVersion, {}, force));
 
 	fmt::print("Blob purge registered for [{0} - {1}) @ {2}\n", startKey.printable(), endKey.printable(), purgeVersion);
 
@@ -100,18 +74,11 @@ ACTOR Future<Void> doBlobPurge(Database db, Key startKey, Key endKey, Optional<V
 }
 
 ACTOR Future<Void> doBlobCheck(Database db, Key startKey, Key endKey, Optional<Version> version) {
-	state Transaction tr(db);
-	state Version readVersionOut = invalidVersion;
 	state double elapsed = -timer_monotonic();
-	loop {
-		try {
-			wait(success(tr.readBlobGranules(KeyRange(KeyRangeRef(startKey, endKey)), 0, version, &readVersionOut)));
-			elapsed += timer_monotonic();
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
+
+	state Version readVersionOut = wait(db->verifyBlobRange(KeyRangeRef(startKey, endKey), version));
+
+	elapsed += timer_monotonic();
 
 	fmt::print("Blob check complete for [{0} - {1}) @ {2} in {3:.6f} seconds\n",
 	           startKey.printable(),
@@ -153,7 +120,7 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 		fmt::print("Invalid blob range [{0} - {1})\n", tokens[2].printable(), tokens[3].printable());
 	} else {
 		if (tokencmp(tokens[1], "start") || tokencmp(tokens[1], "stop")) {
-			bool starting = tokencmp(tokens[1], "start");
+			state bool starting = tokencmp(tokens[1], "start");
 			if (tokens.size() > 4) {
 				printUsage(tokens[0]);
 				return false;
@@ -162,9 +129,22 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 			           starting ? "Starting" : "Stopping",
 			           tokens[2].printable().c_str(),
 			           tokens[3].printable().c_str());
-			wait(setBlobRange(localDb, begin, end, starting ? LiteralStringRef("1") : StringRef()));
-		} else if (tokencmp(tokens[1], "purge") || tokencmp(tokens[1], "check")) {
-			bool purge = tokencmp(tokens[1], "purge");
+			state bool success = false;
+			if (starting) {
+				wait(store(success, localDb->blobbifyRange(KeyRangeRef(begin, end))));
+			} else {
+				wait(store(success, localDb->unblobbifyRange(KeyRangeRef(begin, end))));
+			}
+			if (!success) {
+				fmt::print("{0} blobbify range for [{1} - {2}) failed\n",
+				           starting ? "Starting" : "Stopping",
+				           tokens[2].printable().c_str(),
+				           tokens[3].printable().c_str());
+			}
+			return success;
+		} else if (tokencmp(tokens[1], "purge") || tokencmp(tokens[1], "forcepurge") || tokencmp(tokens[1], "check")) {
+			bool purge = tokencmp(tokens[1], "purge") || tokencmp(tokens[1], "forcepurge");
+			bool forcePurge = tokencmp(tokens[1], "forcepurge");
 
 			Optional<Version> version;
 			if (tokens.size() > 4) {
@@ -177,17 +157,18 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 				version = v;
 			}
 
-			fmt::print("{0} blob range [{1} - {2})",
+			fmt::print("{0} blob range [{1} - {2}){3}",
 			           purge ? "Purging" : "Checking",
 			           tokens[2].printable(),
-			           tokens[3].printable());
+			           tokens[3].printable(),
+			           forcePurge ? " (force)" : "");
 			if (version.present()) {
 				fmt::print(" @ {0}", version.get());
 			}
 			fmt::print("\n");
 
 			if (purge) {
-				wait(doBlobPurge(localDb, begin, end, version));
+				wait(doBlobPurge(localDb, begin, end, version, forcePurge));
 			} else {
 				wait(doBlobCheck(localDb, begin, end, version));
 			}
@@ -199,8 +180,7 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 	return true;
 }
 
-CommandFactory blobRangeFactory("blobrange",
-                                CommandHelp("blobrange <start|stop|purge|check> <startkey> <endkey> [version]",
-                                            "",
-                                            ""));
+CommandFactory blobRangeFactory(
+    "blobrange",
+    CommandHelp("blobrange <start|stop|check|purge|forcepurge> <startkey> <endkey> [version]", "", ""));
 } // namespace fdb_cli

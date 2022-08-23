@@ -20,7 +20,7 @@ Data distribution manages the lifetime of storage servers, decides which storage
 
 **RelocateShard (`struct RelocateShard`)**: A `RelocateShard` records the key range that need to be moved among servers and the data movement’s priority. DD always move shards with higher priorities first.
 
-**Data distribution queue (`struct DDQueueData`)**: It receives shards to be relocated (i.e., RelocateShards), decides which shard should be moved to which server team, prioritizes the data movement based on relocate shard’s priority, and controls the progress of data movement based on servers’ workload.
+**Data distribution queue (`struct DDQueue`)**: It receives shards to be relocated (i.e., RelocateShards), decides which shard should be moved to which server team, prioritizes the data movement based on relocate shard’s priority, and controls the progress of data movement based on servers’ workload.
 
 **Special keys in the system keyspace**: DD saves its state in the system keyspace to recover from failure and to ensure every process (e.g., commit proxies, tLogs and storage servers) has a consistent view of which storage server is responsible for which key range.
 
@@ -153,3 +153,25 @@ CPU utilization. This metric is in a positive relationship with “FinishedQueri
 * The typical movement size under a read-skew scenario is 100M ~ 600M under default KNOB value `READ_REBALANCE_MAX_SHARD_FRAC=0.2, READ_REBALANCE_SRC_PARALLELISM = 20`. Increasing those knobs may accelerate the converge speed with the risk of data movement churn, which overwhelms the destination and over-cold the source.
 * The upper bound of `READ_REBALANCE_MAX_SHARD_FRAC` is 0.5. Any value larger than 0.5 can result in hot server switching.
 * When needing a deeper diagnosis of the read aware DD, `BgDDMountainChopper_New`, and `BgDDValleyFiller_New` trace events are where to go.
+
+## Data Distribution Diagnosis Q&A
+* Why Read-aware DD hasn't been triggered when there's a read imbalance? 
+  * Check `BgDDMountainChopper_New`, `BgDDValleyFiller_New` `SkipReason` field.
+* The Read-aware DD is triggered, and some data movement happened, but it doesn't help the read balance. Why? 
+  * Need to figure out which server is selected as the source and destination. The information is in `BgDDMountainChopper*`, `BgDDValleyFiller*`  `DestTeam` and `SourceTeam` field.
+  * Also, the `DDQueueServerCounter` event tells how many times a server being a source or destination (defined in 
+  ```c++
+  enum CountType : uint8_t { ProposedSource = 0, QueuedSource, LaunchedSource, LaunchedDest };
+  ```
+  ) for different relocation reason (`Other`, `RebalanceDisk` and so on) in different phase within `DD_QUEUE_COUNTER_REFRESH_INTERVAL` (default 60) seconds. For example, 
+  ```xml
+  <Event Severity="10" Time="1659974950.984176" DateTime="2022-08-08T16:09:10Z" Type="DDQueueServerCounter" ID="0000000000000000" ServerId="0000000000000004" OtherPQSD="0 1 3 2" RebalanceDiskPQSD="0 0 1 4" RebalanceReadPQSD="2 0 0 5" MergeShardPQSD="0 0 1 0" SizeSplitPQSD="0 0 5 0" WriteSplitPQSD="1 0 0 0" ThreadID="9733255463206053180" Machine="0.0.0.0:0" LogGroup="default" Roles="TS" />
+  ```
+  `RebalanceReadPQSD="2 0 0 5"` means server `0000000000000004` has been selected as for read balancing for twice, but it's not queued and executed yet. This server also has been a destination for read balancing for 5 times in the past 1 min. Note that the field will be skipped if all 4 numbers are 0. To avoid spammy traces, if is enabled with knob `DD_QUEUE_COUNTER_SUMMARIZE = true`, event `DDQueueServerCounterTooMany` will summarize the unreported servers that involved in launched relocations (aka. `LaunchedSource`, `LaunchedDest` count are non-zero):
+    ```xml
+    <Event Severity="10" Time="1660095057.995837" DateTime="2022-08-10T01:30:57Z" Type="DDQueueServerCounterTooMany" ID="0000000000000000" RemainedLaunchedSources="000000000000007f,00000000000000d9,00000000000000e8,000000000000014c,0000000000000028,00000000000000d6,0000000000000067,000000000000003e,000000000000007d,000000000000000a,00000000000000cb,0000000000000106,00000000000000c1,000000000000003c,000000000000016e,00000000000000e4,000000000000013c,0000000000000016,0000000000000179,0000000000000061,00000000000000c2,000000000000005a,0000000000000001,00000000000000c9,000000000000012a,00000000000000fb,0000000000000146," RemainedLaunchedDestinations="0000000000000079,0000000000000115,000000000000018e,0000000000000167,0000000000000135,0000000000000139,0000000000000077,0000000000000118,00000000000000bb,0000000000000177,00000000000000c0,000000000000014d,000000000000017f,00000000000000c3,000000000000015c,00000000000000fb,0000000000000186,0000000000000157,00000000000000b6,0000000000000072,0000000000000144," ThreadID="1322639651557440362" Machine="0.0.0.0:0" LogGroup="default" Roles="TS" />
+    ```
+* How to track the lifecycle of a relocation attempt for balancing?
+  * First find the TraceId fields in `BgDDMountainChopper*`, `BgDDValleyFiller*`, which indicates a relocation is triggered.
+  * (Only when enabled) Find the `QueuedRelocation` event with the same `BeginPair` and `EndPair` as the original `TraceId`. This means the relocation request is queued.
+  * Find the `RelocateShard` event whose `BeginPair`, `EndPair` field is the same as `TraceId`. This event means the relocation is ongoing.

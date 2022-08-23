@@ -227,6 +227,8 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_set_callback(FDBFuture* f,
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_error(FDBFuture* f);
 #endif
 
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_bool(FDBFuture* f, fdb_bool_t* out);
+
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_int64(FDBFuture* f, int64_t* out);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_uint64(FDBFuture* f, uint64_t* out);
@@ -320,6 +322,32 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_purge_blob_granules(FDBData
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_wait_purge_granules_complete(FDBDatabase* db,
                                                                                   uint8_t const* purge_key_name,
                                                                                   int purge_key_name_length);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_blobbify_range(FDBDatabase* db,
+                                                                    uint8_t const* begin_key_name,
+                                                                    int begin_key_name_length,
+                                                                    uint8_t const* end_key_name,
+                                                                    int end_key_name_length);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_unblobbify_range(FDBDatabase* db,
+                                                                      uint8_t const* begin_key_name,
+                                                                      int begin_key_name_length,
+                                                                      uint8_t const* end_key_name,
+                                                                      int end_key_name_length);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_list_blobbified_ranges(FDBDatabase* db,
+                                                                            uint8_t const* begin_key_name,
+                                                                            int begin_key_name_length,
+                                                                            uint8_t const* end_key_name,
+                                                                            int end_key_name_length,
+                                                                            int rangeLimit);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_verify_blob_range(FDBDatabase* db,
+                                                                       uint8_t const* begin_key_name,
+                                                                       int begin_key_name_length,
+                                                                       uint8_t const* end_key_name,
+                                                                       int end_key_name_length,
+                                                                       int64_t version);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant,
                                                                        FDBTransaction** out_transaction);
@@ -479,7 +507,8 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_blob_granule_ranges(
                                                                                 uint8_t const* begin_key_name,
                                                                                 int begin_key_name_length,
                                                                                 uint8_t const* end_key_name,
-                                                                                int end_key_name_length);
+                                                                                int end_key_name_length,
+                                                                                int rangeLimit);
 
 /* LatestVersion (-2) for readVersion means get read version from transaction
    Separated out as optional because BG reads can support longer-lived reads than normal FDB transactions */

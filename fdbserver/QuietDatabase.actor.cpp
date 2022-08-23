@@ -235,7 +235,9 @@ ACTOR Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
 }
 
 // Returns a vector of blob worker interfaces which have been persisted under the system key space
-ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx, bool use_system_priority = false) {
+ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx,
+                                                              bool use_system_priority = false,
+                                                              Version* grv = nullptr) {
 	state Transaction tr(cx);
 	loop {
 		if (use_system_priority) {
@@ -251,6 +253,9 @@ ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx, bool 
 			blobWorkers.reserve(blobWorkersList.size());
 			for (int i = 0; i < blobWorkersList.size(); i++) {
 				blobWorkers.push_back(decodeBlobWorkerListValue(blobWorkersList[i].value));
+			}
+			if (grv) {
+				*grv = tr.getReadVersion().get();
 			}
 			return blobWorkers;
 		} catch (Error& e) {

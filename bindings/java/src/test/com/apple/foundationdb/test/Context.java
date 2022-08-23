@@ -29,6 +29,7 @@ import java.util.Optional;
 
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
@@ -64,7 +65,7 @@ abstract class Context implements Runnable, AutoCloseable {
 	private List<Thread> children = new LinkedList<>();
 	private static Map<String, TransactionState> transactionMap = new HashMap<>();
 	private static Map<Transaction, AtomicInteger> transactionRefCounts = new HashMap<>();
-	private static Map<byte[], Tenant> tenantMap = new HashMap<>();
+	private static Map<byte[], Tenant> tenantMap = new ConcurrentHashMap<>();
 
 	Context(Database db, byte[] prefix) {
 		this.db = db;

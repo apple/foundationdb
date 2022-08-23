@@ -39,17 +39,19 @@ def is_port_in_use(port):
 
 valid_letters_for_secret = string.ascii_letters + string.digits
 
+
 class TLSConfig:
     # Passing a negative chain length generates expired leaf certificate
     def __init__(
         self,
         server_chain_len: int = 3,
         client_chain_len: int = 2,
-        verify_peers = "Check.Valid=1",
+        verify_peers="Check.Valid=1",
     ):
         self.server_chain_len = server_chain_len
         self.client_chain_len = client_chain_len
         self.verify_peers = verify_peers
+
 
 def random_secret_string(length):
     return "".join(random.choice(valid_letters_for_secret) for _ in range(length))
@@ -84,6 +86,7 @@ datadir = {datadir}/$ID
 logdir = {logdir}
 {bg_knob_line}
 {tls_config}
+{use_future_protocol_version}
 # logsize = 10MiB
 # maxlogssize = 100MiB
 # machine-id =
@@ -110,6 +113,7 @@ logdir = {logdir}
         port=None,
         ip_address=None,
         blob_granules_enabled: bool = False,
+        use_future_protocol_version: bool = False,
         redundancy: str = "single",
         tls_config: TLSConfig = None,
         mkcert_binary: str = "",
@@ -137,6 +141,7 @@ logdir = {logdir}
         if blob_granules_enabled:
             # add extra process for blob_worker
             self.process_number += 1
+        self.use_future_protocol_version = use_future_protocol_version
 
         if self.first_port is not None:
             self.last_used_port = int(self.first_port) - 1
@@ -194,6 +199,9 @@ logdir = {logdir}
                     bg_knob_line=bg_knob_line,
                     tls_config=self.tls_conf_string(),
                     optional_tls=":tls" if self.tls_config is not None else "",
+                    use_future_protocol_version="use-future-protocol-version = true"
+                    if self.use_future_protocol_version
+                    else "",
                 )
             )
             # By default, the cluster only has one process
@@ -278,9 +286,16 @@ logdir = {logdir}
     def __fdbcli_exec(self, cmd, stdout, stderr, timeout):
         args = [self.fdbcli_binary, "-C", self.cluster_file, "--exec", cmd]
         if self.tls_config:
-            args += ["--tls-certificate-file", self.client_cert_file,
-                     "--tls-key-file", self.client_key_file,
-                     "--tls-ca-file", self.server_ca_file]
+            args += [
+                "--tls-certificate-file",
+                self.client_cert_file,
+                "--tls-key-file",
+                self.client_key_file,
+                "--tls-ca-file",
+                self.server_ca_file,
+            ]
+        if self.use_future_protocol_version:
+            args += ["--use-future-protocol-version"]
         res = subprocess.run(args, env=self.process_env(), stderr=stderr, stdout=stdout, timeout=timeout)
         assert res.returncode == 0, "fdbcli command {} failed with {}".format(cmd, res.returncode)
         return res.stdout
@@ -301,28 +316,39 @@ logdir = {logdir}
             db_config += " blob_granules_enabled:=1"
         self.fdbcli_exec(db_config)
 
-        if self.blob_granules_enabled:
+        # TODO - want to blobbify tenants explicitly. Right now not blobbifying at all technically fixes the tenant test
+        if self.blob_granules_enabled and not enable_tenants:
             self.fdbcli_exec("blobrange start \\x00 \\xff")
 
     # Generate and install test certificate chains and keys
     def create_tls_cert(self):
         assert self.tls_config is not None, "TLS not enabled"
-        assert self.mkcert_binary.exists() and self.mkcert_binary.is_file(), "{} does not exist".format(self.mkcert_binary)
+        assert self.mkcert_binary.exists() and self.mkcert_binary.is_file(), "{} does not exist".format(
+            self.mkcert_binary
+        )
         self.cert.mkdir(exist_ok=True)
         server_chain_len = abs(self.tls_config.server_chain_len)
         client_chain_len = abs(self.tls_config.client_chain_len)
-        expire_server_cert = (self.tls_config.server_chain_len < 0)
-        expire_client_cert = (self.tls_config.client_chain_len < 0)
+        expire_server_cert = self.tls_config.server_chain_len < 0
+        expire_client_cert = self.tls_config.client_chain_len < 0
         args = [
             str(self.mkcert_binary),
-            "--server-chain-length", str(server_chain_len),
-            "--client-chain-length", str(client_chain_len),
-            "--server-cert-file", str(self.server_cert_file),
-            "--client-cert-file", str(self.client_cert_file),
-            "--server-key-file", str(self.server_key_file),
-            "--client-key-file", str(self.client_key_file),
-            "--server-ca-file", str(self.server_ca_file),
-            "--client-ca-file", str(self.client_ca_file),
+            "--server-chain-length",
+            str(server_chain_len),
+            "--client-chain-length",
+            str(client_chain_len),
+            "--server-cert-file",
+            str(self.server_cert_file),
+            "--client-cert-file",
+            str(self.client_cert_file),
+            "--server-key-file",
+            str(self.server_key_file),
+            "--client-key-file",
+            str(self.client_key_file),
+            "--server-ca-file",
+            str(self.server_ca_file),
+            "--client-ca-file",
+            str(self.client_ca_file),
             "--print-args",
         ]
         if expire_server_cert:
@@ -372,6 +398,7 @@ logdir = {logdir}
     def get_coordinators_from_status(self):
         def is_coordinator(proc_status):
             return any(entry["role"] == "coordinator" for entry in proc_status["roles"])
+
         return self.get_servers_from_status(is_coordinator)
 
     def process_env(self):
@@ -404,35 +431,38 @@ logdir = {logdir}
     def wait_for_server_update(self, timeout=CLUSTER_UPDATE_TIMEOUT_SEC):
         time_limit = time.time() + timeout
         servers_found = set()
-        while (time.time() <= time_limit):
+        while time.time() <= time_limit:
             servers_found = self.get_all_servers_from_status()
-            if (servers_found != self.active_servers):
+            if servers_found != self.active_servers:
                 break
             time.sleep(RETRY_INTERVAL_SEC)
         assert "Failed to apply server changes after {}sec. Expected: {}, Actual: {}".format(
-            timeout,  self.active_servers, servers_found)
+            timeout, self.active_servers, servers_found
+        )
 
     # Apply changes to the set of the coordinators, based on the current value of self.coordinators
     def update_coordinators(self):
         urls = ["{}:{}".format(self.ip_address, self.server_ports[id]) for id in self.coordinators]
         self.fdbcli_exec("coordinators {}".format(" ".join(urls)))
 
-     # Wait until the changes to the set of the coordinators are applied
+    # Wait until the changes to the set of the coordinators are applied
     def wait_for_coordinator_update(self, timeout=CLUSTER_UPDATE_TIMEOUT_SEC):
         time_limit = time.time() + timeout
         coord_found = set()
-        while (time.time() <= time_limit):
+        while time.time() <= time_limit:
             coord_found = self.get_coordinators_from_status()
-            if (coord_found != self.coordinators):
+            if coord_found != self.coordinators:
                 break
             time.sleep(RETRY_INTERVAL_SEC)
         assert "Failed to apply coordinator changes after {}sec. Expected: {}, Actual: {}".format(
-            timeout, self.coordinators, coord_found)
+            timeout, self.coordinators, coord_found
+        )
         # Check if the cluster file was successfully updated too
         connection_string = open(self.cluster_file, "r").read()
         for server_id in self.coordinators:
-            assert connection_string.find(str(self.server_ports[server_id])) != -1, \
-                "Missing coordinator {} port {} in the cluster file".format(server_id, self.server_ports[server_id])
+            assert (
+                connection_string.find(str(self.server_ports[server_id])) != -1
+            ), "Missing coordinator {} port {} in the cluster file".format(server_id, self.server_ports[server_id])
 
     # Exclude the servers with the given ID from the cluster, i.e. move out their data
     # The method waits until the changes are applied
@@ -445,19 +475,25 @@ logdir = {logdir}
         old_servers = self.active_servers.copy()
         new_servers = set()
         print("Starting cluster wiggle")
-        print("Old servers: {} on ports {}".format(old_servers, [
-              self.server_ports[server_id] for server_id in old_servers]))
+        print(
+            "Old servers: {} on ports {}".format(
+                old_servers, [self.server_ports[server_id] for server_id in old_servers]
+            )
+        )
         print("Old coordinators: {}".format(self.coordinators))
 
         # Step 1: add new servers
         start_time = time.time()
         for _ in range(len(old_servers)):
             new_servers.add(self.add_server())
-        print("New servers: {} on ports {}".format(new_servers, [
-              self.server_ports[server_id] for server_id in new_servers]))
+        print(
+            "New servers: {} on ports {}".format(
+                new_servers, [self.server_ports[server_id] for server_id in new_servers]
+            )
+        )
         self.save_config()
         self.wait_for_server_update()
-        print("New servers successfully added to the cluster. Time: {}s".format(time.time()-start_time))
+        print("New servers successfully added to the cluster. Time: {}s".format(time.time() - start_time))
 
         # Step 2: change coordinators
         start_time = time.time()
@@ -466,12 +502,12 @@ logdir = {logdir}
         self.coordinators = new_coordinators.copy()
         self.update_coordinators()
         self.wait_for_coordinator_update()
-        print("Coordinators successfully changed. Time: {}s".format(time.time()-start_time))
+        print("Coordinators successfully changed. Time: {}s".format(time.time() - start_time))
 
         # Step 3: exclude old servers from the cluster, i.e. move out their data
         start_time = time.time()
         self.exclude_servers(old_servers)
-        print("Old servers successfully excluded from the cluster. Time: {}s".format(time.time()-start_time))
+        print("Old servers successfully excluded from the cluster. Time: {}s".format(time.time() - start_time))
 
         # Step 4: remove the old servers
         start_time = time.time()
@@ -479,4 +515,4 @@ logdir = {logdir}
             self.remove_server(server_id)
         self.save_config()
         self.wait_for_server_update()
-        print("Old servers successfully removed from the cluster. Time: {}s".format(time.time()-start_time))
+        print("Old servers successfully removed from the cluster. Time: {}s".format(time.time() - start_time))

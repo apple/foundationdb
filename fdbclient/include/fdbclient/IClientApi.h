@@ -78,7 +78,8 @@ public:
 	virtual ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                        int64_t chunkSize) = 0;
 
-	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) = 0;
+	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
+	                                                                              int rowLimit) = 0;
 
 	virtual ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
 	                                                   Version beginVersion,
@@ -172,6 +173,13 @@ public:
 	virtual ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) = 0;
 	virtual ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) = 0;
 
+	virtual ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) = 0;
+	virtual ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) = 0;
+	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
+	                                                                              int rangeLimit) = 0;
+
+	virtual ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) = 0;
+
 	// Interface to manage shared state across multiple connections to the same Database
 	virtual ThreadFuture<DatabaseSharedState*> createSharedState() = 0;
 	virtual void setSharedState(DatabaseSharedState* p) = 0;
@@ -190,6 +198,7 @@ public:
 
 	virtual void selectApiVersion(int apiVersion) = 0;
 	virtual const char* getClientVersion() = 0;
+	virtual void useFutureProtocolVersion() = 0;
 
 	virtual void setNetworkOption(FDBNetworkOptions::Option option,
 	                              Optional<StringRef> value = Optional<StringRef>()) = 0;

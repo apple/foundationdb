@@ -34,7 +34,7 @@
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/DataDistributorInterface.h"
-#include "fdbserver/EncryptedMutationMessage.h"
+#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/GetEncryptCipherKeys.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -380,7 +380,7 @@ ACTOR Future<Void> commitBatcher(ProxyCommitData* commitData,
 					// Drop requests if memory is under severe pressure
 					if (commitData->commitBatchesMemBytesCount + bytes > memBytesLimit) {
 						++commitData->stats.txnCommitErrors;
-						req.reply.sendError(proxy_memory_limit_exceeded());
+						req.reply.sendError(commit_proxy_memory_limit_exceeded());
 						TraceEvent(SevWarnAlways, "ProxyCommitBatchMemoryThresholdExceeded")
 						    .suppressFor(60)
 						    .detail("MemBytesCount", commitData->commitBatchesMemBytesCount)
@@ -878,7 +878,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	state double resolutionStart = now();
 	// Sending these requests is the fuzzy border between phase 1 and phase 2; it could conceivably overlap with
 	// resolution processing but is still using CPU
-	ProxyCommitData* pProxyCommitData = self->pProxyCommitData;
+	state ProxyCommitData* pProxyCommitData = self->pProxyCommitData;
 	std::vector<CommitTransactionRequest>& trs = self->trs;
 	state Span span("MP:getResolution"_loc, self->span.context);
 
@@ -916,7 +916,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 
 	// Fetch cipher keys if needed.
 	state Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getCipherKeys;
-	if (SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION) {
+	if (pProxyCommitData->isEncryptionEnabled) {
 		static std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> defaultDomains = {
 			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME },
 			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
@@ -959,8 +959,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 		g_traceBatch.addEvent(
 		    "CommitDebug", self->debugID.get().first(), "CommitProxyServer.commitBatch.AfterResolution");
 	}
-
-	if (SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION) {
+	if (pProxyCommitData->isEncryptionEnabled) {
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys = wait(getCipherKeys);
 		self->cipherKeys = cipherKeys;
 	}
@@ -1104,7 +1103,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 				                       pProxyCommitData->logSystem,
 				                       trs[t].transaction.mutations,
 				                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
-				                       SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION ? &self->cipherKeys : nullptr,
+				                       pProxyCommitData->isEncryptionEnabled ? &self->cipherKeys : nullptr,
 				                       self->forceRecovery,
 				                       self->commitVersion,
 				                       self->commitVersion + 1,
@@ -1159,7 +1158,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 
 void writeMutation(CommitBatchContext* self, int64_t tenantId, const MutationRef& mutation) {
 	static_assert(TenantInfo::INVALID_TENANT == ENCRYPT_INVALID_DOMAIN_ID);
-	if (!SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION || tenantId == TenantInfo::INVALID_TENANT) {
+	if (!self->pProxyCommitData->isEncryptionEnabled || tenantId == TenantInfo::INVALID_TENANT) {
 		// TODO(yiwu): In raw access mode, use tenant prefix to figure out tenant id for user data
 		bool isRawAccess = tenantId == TenantInfo::INVALID_TENANT && !isSystemKey(mutation.param1) &&
 		                   !(mutation.type == MutationRef::ClearRange && isSystemKey(mutation.param2)) &&
@@ -1168,8 +1167,7 @@ void writeMutation(CommitBatchContext* self, int64_t tenantId, const MutationRef
 		self->toCommit.writeTypedMessage(mutation);
 	} else {
 		Arena arena;
-		self->toCommit.writeTypedMessage(
-		    EncryptedMutationMessage::encrypt(arena, self->cipherKeys, tenantId /*domainId*/, mutation));
+		self->toCommit.writeTypedMessage(mutation.encrypt(self->cipherKeys, tenantId /*domainId*/, arena));
 	}
 }
 
@@ -1948,7 +1946,7 @@ ACTOR static Future<Void> readRequestServer(CommitProxyInterface proxy,
 		    commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() >
 		        SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE) {
 			++commitData->stats.keyServerLocationErrors;
-			req.reply.sendError(proxy_memory_limit_exceeded());
+			req.reply.sendError(commit_proxy_memory_limit_exceeded());
 			TraceEvent(SevWarnAlways, "ProxyLocationRequestThresholdExceeded").suppressFor(60);
 		} else {
 			++commitData->stats.keyServerLocationIn;
@@ -2174,7 +2172,8 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 				TraceEvent("SnapCommitProxy_DDSnapResponseError")
 				    .errorUnsuppressed(e)
 				    .detail("SnapPayload", snapReq.snapPayload)
-				    .detail("SnapUID", snapReq.snapUID);
+				    .detail("SnapUID", snapReq.snapUID)
+				    .detail("Retry", snapReqRetry);
 				// Retry if we have network issues
 				if (e.code() != error_code_request_maybe_delivered ||
 				    ++snapReqRetry > SERVER_KNOBS->SNAP_NETWORK_FAILURE_RETRY_LIMIT)
@@ -2470,7 +2469,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	// Wait until we can load the "real" logsystem, since we don't support switching them currently
 	while (!(masterLifetime.isEqual(commitData.db->get().masterLifetime) &&
 	         commitData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION &&
-	         (!SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION || commitData.db->get().encryptKeyProxy.present()))) {
+	         (!isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, db->get().client) ||
+	          commitData.db->get().encryptKeyProxy.present()))) {
 		//TraceEvent("ProxyInit2", proxy.id()).detail("LSEpoch", db->get().logSystemConfig.epoch).detail("Need", epoch);
 		wait(commitData.db->onChange());
 	}
@@ -2496,8 +2496,15 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
 	commitData.logAdapter =
 	    new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
-	commitData.txnStateStore = keyValueStoreLogSystem(
-	    commitData.logAdapter, commitData.db, proxy.id(), 2e9, true, true, true, SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION);
+	commitData.txnStateStore =
+	    keyValueStoreLogSystem(commitData.logAdapter,
+	                           commitData.db,
+	                           proxy.id(),
+	                           2e9,
+	                           true,
+	                           true,
+	                           true,
+	                           isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, db->get().client));
 	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
 
 	commitData.updateLatencyBandConfig(commitData.db->get().latencyBandConfig);
