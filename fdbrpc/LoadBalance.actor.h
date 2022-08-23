@@ -431,6 +431,9 @@ struct RequestData : NonCopyable {
 	}
 };
 
+struct GetKeyValuesRequest;
+struct GetMappedKeyValuesRequest;
+
 // Try to get a reply from one of the alternatives until success, cancellation, or certain errors.
 // Load balancing has a budget to race requests to a second alternative if the first request is slow.
 // Tries to take into account failMon's information for load balancing and avoiding failed servers.
@@ -645,6 +648,9 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				    .detail("BackOff", backoff)
 				    .detail("TriedAllOptions", triedAllOptions)
 				    .detail("Token", stream->getEndpoint().token)
+				    .detail("IsGetRange", std::is_same<Request, GetKeyValuesRequest>::value)
+				    .detail("IsGetMappedValues", std::is_same<Request, GetMappedKeyValuesRequest>::value)
+				    .detail("QueueModel", model ? model->toString() : "")
 				    .detail("Attempts", numAttempts);
 			}
 			secondRequestData.startRequest(backoff, triedAllOptions, stream, request, model, alternatives, channel);
@@ -680,7 +686,10 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				TraceEvent("LBDistant")
 				    .detail("BackOff", backoff)
 				    .detail("TriedAllOptions", triedAllOptions)
-				    .detail("Token", stream->getEndpoint().token);
+				    .detail("Token", stream->getEndpoint().token)
+				    .detail("IsGetRange", std::is_same<Request, GetKeyValuesRequest>::value)
+				    .detail("IsGetMappedValues", std::is_same<Request, GetMappedKeyValuesRequest>::value)
+				    .detail("QueueModel", model ? model->toString() : "");
 			}
 			firstRequestData.startRequest(backoff, triedAllOptions, stream, request, model, alternatives, channel);
 			firstRequestEndpoint = stream->getEndpoint().token.first();

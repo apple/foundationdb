@@ -28,6 +28,7 @@
 #include "flow/ActorCollection.h"
 #include "fdbrpc/TSSComparison.h" // For TSS Metrics
 #include "fdbrpc/FlowTransport.h" // For Endpoint
+#include <fmt/format.h>
 
 struct TSSEndpointData {
 	UID tssId;
@@ -126,6 +127,13 @@ public:
 	~QueueModel() {
 		laggingRequests.cancel();
 		tssComparisons.cancel();
+	}
+
+	std::string toString() {
+		return fmt::format("secondMultiplier = {}, secondBudget = {}, laggingRequestCount = {}",
+		                   secondMultiplier,
+		                   secondBudget,
+		                   laggingRequestCount);
 	}
 
 private:
