@@ -431,8 +431,11 @@ struct RequestData : NonCopyable {
 	}
 };
 
+struct GetValueRequest;
 struct GetKeyValuesRequest;
 struct GetMappedKeyValuesRequest;
+struct GetKeyServerLocationsRequest;
+struct GetKeyRequest;
 
 // Try to get a reply from one of the alternatives until success, cancellation, or certain errors.
 // Load balancing has a budget to race requests to a second alternative if the first request is slow.
@@ -565,6 +568,21 @@ Future<REPLY_TYPE(Request)> loadBalance(
 
 	state int numAttempts = 0;
 	state double backoff = 0;
+	state std::string requestType;
+	if (std::is_same<Request, GetKeyValuesRequest>::value) {
+		requestType = "GetRange";
+	} else if (std::is_same<Request, GetKeyRequest>::value) {
+		requestType = "GetKey";
+	} else if (std::is_same<Request, GetValueRequest>::value) {
+		requestType = "GetValue";
+	} else if (std::is_same<Request, GetMappedKeyValuesRequest>::value) {
+		requestType = "GetMappedRange";
+	} else if (std::is_same<Request, GetKeyServerLocationsRequest>::value) {
+		requestType = "GetKeyServerLocations";
+	} else {
+		requestType = "Unknown";
+	}
+
 	// Issue requests to selected servers.
 	loop {
 		if (now() - startTime > (g_network->isSimulated() ? 30.0 : 600.0)) {
@@ -648,8 +666,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				    .detail("BackOff", backoff)
 				    .detail("TriedAllOptions", triedAllOptions)
 				    .detail("Token", stream->getEndpoint().token)
-				    .detail("IsGetRange", std::is_same<Request, GetKeyValuesRequest>::value)
-				    .detail("IsGetMappedValues", std::is_same<Request, GetMappedKeyValuesRequest>::value)
+				    .detail("Request", requestType)
 				    .detail("QueueModel", model ? model->toString() : "")
 				    .detail("Attempts", numAttempts);
 			}
@@ -687,8 +704,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				    .detail("BackOff", backoff)
 				    .detail("TriedAllOptions", triedAllOptions)
 				    .detail("Token", stream->getEndpoint().token)
-				    .detail("IsGetRange", std::is_same<Request, GetKeyValuesRequest>::value)
-				    .detail("IsGetMappedValues", std::is_same<Request, GetMappedKeyValuesRequest>::value)
+				    .detail("Request", requestType)
 				    .detail("QueueModel", model ? model->toString() : "");
 			}
 			firstRequestData.startRequest(backoff, triedAllOptions, stream, request, model, alternatives, channel);
