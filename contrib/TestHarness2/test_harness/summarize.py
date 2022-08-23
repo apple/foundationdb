@@ -395,6 +395,12 @@ class Summary:
         self.handler = ParseHandler(self.out)
         self.register_handlers()
 
+    def summarize_files(self, trace_files: List[Path]):
+        assert len(trace_files) > 0
+        for f in trace_files:
+            self.parse_file(f)
+        self.done()
+
     def summarize(self, trace_dir: Path, command: str):
         trace_files = TraceFiles(trace_dir)
         if len(trace_files) == 0:
@@ -406,9 +412,7 @@ class Summary:
             child.attributes['Command'] = command
             self.out.append(child)
             return
-        for f in trace_files[0]:
-            self.parse_file(f)
-        self.done()
+        self.summarize_files(trace_files[0])
         if config.joshua_dir is not None:
             import test_harness.fdb
             test_harness.fdb.write_coverage(config.cluster_file,

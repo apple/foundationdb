@@ -303,7 +303,6 @@ class TestRun:
         self.test_determinism = test_determinism
         self.stats: str | None = stats
         self.expected_unseed: int | None = expected_unseed
-        self.err_out: str = 'error.xml'
         self.use_valgrind: bool = config.use_valgrind
         self.old_binary_path: Path = config.old_binaries_path
         self.buggify_enabled: bool = buggify_enabled
@@ -334,11 +333,11 @@ class TestRun:
         valgrind_file: Path | None = None
         if self.use_valgrind:
             command.append('valgrind')
-            valgrind_file = Path('valgrind-{}.xml'.format(self.random_seed))
+            valgrind_file = self.temp_path / Path('valgrind-{}.xml'.format(self.random_seed))
             dbg_path = os.getenv('FDB_VALGRIND_DBGPATH')
             if dbg_path is not None:
                 command.append('--extra-debuginfo-path={}'.format(dbg_path))
-            command += ['--xml=yes', '--xml-file={}'.format(valgrind_file), '-q']
+            command += ['--xml=yes', '--xml-file={}'.format(valgrind_file.absolute()), '-q']
         command += [str(self.binary.absolute()),
                     '-r', 'test' if is_no_sim(self.test_file) else 'simulation',
                     '-f', str(self.test_file),
