@@ -49,7 +49,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 	TenantEntryCacheWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		clientId = wcx.clientId;
-		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 1000));
+		maxTenants = std::max(3, std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 1000)));
 		localTenantNamePrefix = format("%stenant_%d_", tenantNamePrefix.toString().c_str(), clientId);
 	}
 	~TenantEntryCacheWorkload() {}
@@ -134,6 +134,54 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		wait(compareContents(tenantList, cache));
 
 		TraceEvent("CreateTenantsAndLookupEnd").log();
+		return Void();
+	}
+
+	ACTOR static Future<Void> testTenantInsert(Database cx,
+	                                           TenantEntryCacheWorkload* self,
+	                                           std::vector<std::pair<TenantName, TenantMapEntry>>* tenantList) {
+		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(cx, createPayload);
+
+		ASSERT(!tenantList->empty() && tenantList->size() >= 2);
+
+		TraceEvent("TestTenantInsertStart").log();
+
+		wait(cache->init());
+		// Ensure associated counter values gets updated
+		ASSERT_EQ(cache->numRefreshByInit(), 1);
+		ASSERT_GE(cache->numCacheRefreshes(), 1);
+
+		state std::pair<TenantName, TenantMapEntry> p = tenantList->at(0);
+		state Optional<TenantEntryCachePayload<int64_t>> entry;
+
+		// Tenant rename
+		p.first = TenantName(format("%s%08d",
+		                            self->localTenantNamePrefix.toString().c_str(),
+		                            deterministicRandom()->randomInt(self->maxTenants + 100, self->maxTenants + 200)));
+		cache->put(p);
+		Optional<TenantEntryCachePayload<int64_t>> e = wait(cache->getByName(p.first));
+		entry = e;
+		compareTenants(entry, p.second);
+
+		// Tenant delete & recreate
+		p.second.id = p.second.id + deterministicRandom()->randomInt(self->maxTenants + 500, self->maxTenants + 700);
+		cache->put(p);
+		Optional<TenantEntryCachePayload<int64_t>> e1 = wait(cache->getById(p.second.id));
+		entry = e1;
+		compareTenants(entry, p.second);
+		ASSERT_EQ(p.first.contents().toString().compare(entry.get().name.contents().toString()), 0);
+
+		// Delete a tenant and rename an existing TenantEntry to reuse the name of deleted tenant
+		state std::pair<TenantName, TenantMapEntry> p1 = tenantList->back();
+		tenantList->pop_back();
+		wait(TenantAPI::deleteTenant(cx.getReference(), p1.first));
+		cache->put(std::make_pair(p1.first, p.second));
+		Optional<TenantEntryCachePayload<int64_t>> e2 = wait(cache->getById(p.second.id));
+		entry = e2;
+		compareTenants(entry, p.second);
+		ASSERT_EQ(p1.first.contents().toString().compare(entry.get().name.contents().toString()), 0);
+
+		TraceEvent("TestTenantInsertEnd").log();
 		return Void();
 	}
 
@@ -248,6 +296,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 		wait(testTenantNotFound(cx));
 		wait(testCreateTenantsAndLookup(cx, self, &tenantList));
+		wait(testTenantInsert(cx, self, &tenantList));
 		wait(tenantEntryRemove(cx, &tenantList));
 		wait(testTenantCacheDefaultFunc(cx));
 		wait(testCacheRefresh(cx));

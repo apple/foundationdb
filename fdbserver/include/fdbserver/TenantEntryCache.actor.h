@@ -220,7 +220,7 @@ private:
 
 		if (tenantId.present() || tenantPrefix.present()) {
 			// Ensure either tenantId OR tenantPrefix is valid (but not both)
-			ASSERT(tenantId.present() ^ tenantPrefix.present());
+			ASSERT(tenantId.present() != tenantPrefix.present());
 			ASSERT(!tenantName.present());
 
 			int64_t tId = tenantId.present() ? tenantId.get() : TenantMapEntry::prefixToId(tenantPrefix.get());
@@ -342,25 +342,35 @@ public:
 
 	void put(const TenantNameEntryPair& pair) {
 		TenantEntryCachePayload<T> payload = createPayloadFunc(pair.first, pair.second);
-		if (mapByTenantId.find(pair.second.id) == mapByTenantId.end()) {
-			ASSERT(mapByTenantName.find(pair.first) == mapByTenantName.end());
+		auto idItr = mapByTenantId.find(pair.second.id);
+		auto nameItr = mapByTenantName.find(pair.first);
 
-			mapByTenantId[pair.second.id] = payload;
-			mapByTenantName[pair.first] = payload;
-
-			TraceEvent(SevInfo, "TenantEntryCacheNewTenant", uid)
-			    .detail("TenantName", pair.first.contents().toString())
-			    .detail("TenantID", pair.second.id)
-			    .detail("TenantPrefix", pair.second.prefix);
-		} else {
-			mapByTenantId[pair.second.id] = payload;
-			mapByTenantName[pair.first] = payload;
-
-			TraceEvent(SevInfo, "TenantEntryCacheUpdateTenant", uid)
-			    .detail("TenantName", pair.first.contents().toString())
-			    .detail("TenantID", pair.second.id)
-			    .detail("TenantPrefix", pair.second.prefix);
+		Optional<TenantName> existingName;
+		Optional<int64_t> existingId;
+		if (nameItr != mapByTenantName.end()) {
+			existingId = nameItr->value.entry.id;
+			mapByTenantId.erase(nameItr->value.entry.id);
 		}
+		if (idItr != mapByTenantId.end()) {
+			existingName = idItr->value.name;
+			mapByTenantName.erase(idItr->value.name);
+		}
+
+		mapByTenantId[pair.second.id] = payload;
+		mapByTenantName[pair.first] = payload;
+
+		TraceEvent(SevInfo, "TenantEntryCachePut")
+		    .detail("TenantName", pair.first.contents().toString())
+		    .detail("TenantNameExisting", existingName)
+		    .detail("TenantID", pair.second.id)
+		    .detail("TenantIDExisting", existingId)
+		    .detail("TenantPrefix", pair.second.prefix);
+
+		CODE_PROBE(idItr == mapByTenantId.end() && nameItr == mapByTenantName.end(), "TenantCache new entry");
+		CODE_PROBE(idItr != mapByTenantId.end() && nameItr == mapByTenantName.end(), "TenantCache entry name updated");
+		CODE_PROBE(idItr == mapByTenantId.end() && nameItr != mapByTenantName.end(), "TenantCache entry id updated");
+		CODE_PROBE(idItr != mapByTenantId.end() && nameItr != mapByTenantName.end(),
+		           "TenantCache entry id and name updated");
 	}
 
 	Future<Optional<TenantEntryCachePayload<T>>> getById(int64_t tenantId) { return getByIdImpl(this, tenantId); }
