@@ -1025,8 +1025,9 @@ ACTOR template <class Transaction>
 Future<Void> managementClusterRemoveTenantFromGroup(Transaction tr,
                                                     TenantName tenantName,
                                                     TenantMapEntry tenantEntry,
-                                                    DataClusterMetadata* clusterMetadata) {
-	state bool updateClusterCapacity = !tenantEntry.tenantGroup.present();
+                                                    DataClusterMetadata* clusterMetadata,
+                                                    bool isRenamePair = false) {
+	state bool updateClusterCapacity = !tenantEntry.tenantGroup.present() && !isRenamePair;
 	if (tenantEntry.tenantGroup.present()) {
 		ManagementClusterMetadata::tenantMetadata().tenantGroupTenantIndex.erase(
 		    tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), tenantName));
@@ -1356,6 +1357,12 @@ struct DeleteTenantImpl {
 			throw tenant_not_found();
 		}
 
+		if (tenantEntry.get().tenantState == TenantState::REMOVING) {
+			if (tenantEntry.get().renamePair.present()) {
+				self->pairName = tenantEntry.get().renamePair.get();
+			}
+		}
+
 		self->tenantId = tenantEntry.get().id;
 		wait(self->ctx.setCluster(tr, tenantEntry.get().assignedCluster.get()));
 		return tenantEntry.get().tenantState == TenantState::REMOVING;
@@ -1455,7 +1462,7 @@ struct DeleteTenantImpl {
 
 		// Remove the tenant from its tenant group
 		wait(managementClusterRemoveTenantFromGroup(
-		    tr, tenantName, tenantEntry.get(), &self->ctx.dataClusterMetadata.get()));
+		    tr, tenantName, tenantEntry.get(), &self->ctx.dataClusterMetadata.get(), pairDelete));
 
 		wait(pairFuture);
 		return Void();
@@ -1734,7 +1741,7 @@ struct RenameTenantImpl {
 
 		// Remove the tenant from its tenant group
 		wait(managementClusterRemoveTenantFromGroup(
-		    tr, self->oldName, tenantEntry, &self->ctx.dataClusterMetadata.get()));
+		    tr, self->oldName, tenantEntry, &self->ctx.dataClusterMetadata.get(), true));
 
 		return Void();
 	}
@@ -1756,15 +1763,6 @@ struct RenameTenantImpl {
 		if (oldTenantEntry.tenantState == TenantState::REMOVING) {
 			CODE_PROBE(true, "Metacluster rename candidates marked for deletion");
 			throw tenant_removed();
-		}
-
-		// Check cluster capacity. If we would exceed the amount due to temporary extra tenants
-		// then we deny the rename request altogether.
-		int64_t clusterTenantCount = wait(ManagementClusterMetadata::clusterTenantCount.getD(
-		    tr, oldTenantEntry.assignedCluster.get(), Snapshot::False, 0));
-
-		if (clusterTenantCount + 1 > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
-			throw cluster_no_capacity();
 		}
 
 		// If the new entry is present, we can only continue if this is a retry of the same rename
@@ -1795,6 +1793,15 @@ struct RenameTenantImpl {
 				CODE_PROBE(true, "Metacluster unable to proceed with rename operation");
 				throw invalid_tenant_state();
 			}
+		}
+
+		// Check cluster capacity. If we would exceed the amount due to temporary extra tenants
+		// then we deny the rename request altogether.
+		int64_t clusterTenantCount = wait(ManagementClusterMetadata::clusterTenantCount.getD(
+		    tr, oldTenantEntry.assignedCluster.get(), Snapshot::False, 0));
+
+		if (clusterTenantCount + 1 > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
+			throw cluster_no_capacity();
 		}
 
 		TenantMapEntry updatedOldEntry = oldTenantEntry;

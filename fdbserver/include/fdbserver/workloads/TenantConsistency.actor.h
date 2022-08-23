@@ -154,7 +154,6 @@ private:
 				ASSERT(tenantMapEntry.id <= metadata.lastTenantId);
 			}
 			ASSERT(metadata.tenantIdIndex[tenantMapEntry.id] == tenantName);
-			ASSERT(!metadata.tenantTombstones.count(tenantMapEntry.id));
 
 			if (tenantMapEntry.tenantGroup.present()) {
 				auto tenantGroupMapItr = metadata.tenantGroupMap.find(tenantMapEntry.tenantGroup.get());

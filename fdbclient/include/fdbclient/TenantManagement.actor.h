@@ -271,6 +271,50 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 	}
 }
 
+ACTOR template <class Transaction>
+Future<Void> markTenantTombstones(Transaction tr, int64_t tenantId) {
+	// In data clusters, we store a tombstone
+	state Future<KeyBackedRangeResult<int64_t>> latestTombstoneFuture =
+	    TenantMetadata::tenantTombstones().getRange(tr, {}, {}, 1, Snapshot::False, Reverse::True);
+	state Optional<TenantTombstoneCleanupData> cleanupData = wait(TenantMetadata::tombstoneCleanupData().get(tr));
+	state Version transactionReadVersion = wait(safeThreadFutureToFuture(tr->getReadVersion()));
+
+	// If it has been long enough since we last cleaned up the tenant tombstones, we do that first
+	if (!cleanupData.present() || cleanupData.get().nextTombstoneEraseVersion <= transactionReadVersion) {
+		state int64_t deleteThroughId = cleanupData.present() ? cleanupData.get().nextTombstoneEraseId : -1;
+		// Delete all tombstones up through the one currently marked in the cleanup data
+		if (deleteThroughId >= 0) {
+			TenantMetadata::tenantTombstones().erase(tr, 0, deleteThroughId + 1);
+		}
+
+		KeyBackedRangeResult<int64_t> latestTombstone = wait(latestTombstoneFuture);
+		int64_t nextDeleteThroughId = std::max(deleteThroughId, tenantId);
+		if (!latestTombstone.results.empty()) {
+			nextDeleteThroughId = std::max(nextDeleteThroughId, latestTombstone.results[0]);
+		}
+
+		// The next cleanup will happen at or after TENANT_TOMBSTONE_CLEANUP_INTERVAL seconds have elapsed and
+		// will clean up tombstones through the most recently allocated ID.
+		TenantTombstoneCleanupData updatedCleanupData;
+		updatedCleanupData.tombstonesErasedThrough = deleteThroughId;
+		updatedCleanupData.nextTombstoneEraseId = nextDeleteThroughId;
+		updatedCleanupData.nextTombstoneEraseVersion =
+		    transactionReadVersion +
+		    CLIENT_KNOBS->TENANT_TOMBSTONE_CLEANUP_INTERVAL * CLIENT_KNOBS->VERSIONS_PER_SECOND;
+
+		TenantMetadata::tombstoneCleanupData().set(tr, updatedCleanupData);
+
+		// If the tenant being deleted is within the tombstone window, record the tombstone
+		if (tenantId > updatedCleanupData.tombstonesErasedThrough) {
+			TenantMetadata::tenantTombstones().insert(tr, tenantId);
+		}
+	} else if (tenantId > cleanupData.get().tombstonesErasedThrough) {
+		// If the tenant being deleted is within the tombstone window, record the tombstone
+		TenantMetadata::tenantTombstones().insert(tr, tenantId);
+	}
+	return Void();
+}
+
 // Deletes the tenant with the given name. If tenantId is specified, the tenant being deleted must also have the same
 // ID. If no matching tenant is found, this function returns without deleting anything. This behavior allows the
 // function to be used idempotently: if the transaction is retried after having succeeded, it will see that the tenant
@@ -320,45 +364,7 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 	}
 
 	if (clusterType == ClusterType::METACLUSTER_DATA) {
-		// In data clusters, we store a tombstone
-		state Future<KeyBackedRangeResult<int64_t>> latestTombstoneFuture =
-		    TenantMetadata::tenantTombstones().getRange(tr, {}, {}, 1, Snapshot::False, Reverse::True);
-		state Optional<TenantTombstoneCleanupData> cleanupData = wait(TenantMetadata::tombstoneCleanupData().get(tr));
-		state Version transactionReadVersion = wait(safeThreadFutureToFuture(tr->getReadVersion()));
-
-		// If it has been long enough since we last cleaned up the tenant tombstones, we do that first
-		if (!cleanupData.present() || cleanupData.get().nextTombstoneEraseVersion <= transactionReadVersion) {
-			state int64_t deleteThroughId = cleanupData.present() ? cleanupData.get().nextTombstoneEraseId : -1;
-			// Delete all tombstones up through the one currently marked in the cleanup data
-			if (deleteThroughId >= 0) {
-				TenantMetadata::tenantTombstones().erase(tr, 0, deleteThroughId + 1);
-			}
-
-			KeyBackedRangeResult<int64_t> latestTombstone = wait(latestTombstoneFuture);
-			int64_t nextDeleteThroughId = std::max(deleteThroughId, tenantId.get());
-			if (!latestTombstone.results.empty()) {
-				nextDeleteThroughId = std::max(nextDeleteThroughId, latestTombstone.results[0]);
-			}
-
-			// The next cleanup will happen at or after TENANT_TOMBSTONE_CLEANUP_INTERVAL seconds have elapsed and
-			// will clean up tombstones through the most recently allocated ID.
-			TenantTombstoneCleanupData updatedCleanupData;
-			updatedCleanupData.tombstonesErasedThrough = deleteThroughId;
-			updatedCleanupData.nextTombstoneEraseId = nextDeleteThroughId;
-			updatedCleanupData.nextTombstoneEraseVersion =
-			    transactionReadVersion +
-			    CLIENT_KNOBS->TENANT_TOMBSTONE_CLEANUP_INTERVAL * CLIENT_KNOBS->VERSIONS_PER_SECOND;
-
-			TenantMetadata::tombstoneCleanupData().set(tr, updatedCleanupData);
-
-			// If the tenant being deleted is within the tombstone window, record the tombstone
-			if (tenantId.get() > updatedCleanupData.tombstonesErasedThrough) {
-				TenantMetadata::tenantTombstones().insert(tr, tenantId.get());
-			}
-		} else if (tenantId.get() > cleanupData.get().tombstonesErasedThrough) {
-			// If the tenant being deleted is within the tombstone window, record the tombstone
-			TenantMetadata::tenantTombstones().insert(tr, tenantId.get());
-		}
+		wait(markTenantTombstones(tr, tenantId.get()));
 	}
 
 	return Void();
@@ -523,6 +529,10 @@ Future<Void> renameTenantTransaction(Transaction tr,
 		TenantMetadata::tenantGroupTenantIndex().erase(tr, Tuple::makeTuple(oldEntry.get().tenantGroup.get(), oldName));
 		TenantMetadata::tenantGroupTenantIndex().insert(tr,
 		                                                Tuple::makeTuple(oldEntry.get().tenantGroup.get(), newName));
+	}
+
+	if (clusterType == ClusterType::METACLUSTER_DATA) {
+		wait(markTenantTombstones(tr, tenantId.get()));
 	}
 
 	return Void();
