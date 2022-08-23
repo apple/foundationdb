@@ -42,6 +42,7 @@ class TempCluster(LocalCluster):
             tls_config=tls_config,
             mkcert_binary=self.build_dir.joinpath("bin", "mkcert"),
             public_key_json_str=public_key_json_str,
+            custom_config=custom_config,
         )
 
     def __enter__(self):

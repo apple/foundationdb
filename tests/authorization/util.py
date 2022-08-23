@@ -1,7 +1,8 @@
+import fdb
+import json
 import random
 import string
-import fdb
-from typing import Union
+from typing import Union, List
 
 def to_str(s: Union[str, bytes]):
     if isinstance(s, bytes):
@@ -30,4 +31,12 @@ def cleanup_tenant(db, tenant_name):
         else:
             raise
 
+def alg_from_kty(kty: str):
+	if kty == "EC":
+		return "ES256"
+	else:
+		return "RS256"
 
+def public_keyset_from_keys(keys: List):
+	keys = list(map(lambda key: key.as_dict(is_private=False, alg=alg_from_kty(key.kty)), keys))
+	return json.dumps({ "keys": keys })

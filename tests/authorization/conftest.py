@@ -26,7 +26,7 @@ from authlib.jose import JsonWebKey, KeySet, jwt
 from local_cluster import TLSConfig
 from tmp_cluster import TempCluster
 from typing import Union
-from util import random_alphanum_str, random_alphanum_bytes, to_str, to_bytes
+from util import alg_from_kty, public_keyset_from_keys, random_alphanum_str, random_alphanum_bytes, to_str, to_bytes
 
 cluster_scope = "module"
 
@@ -41,6 +41,12 @@ def pytest_addoption(parser):
             default=False,
             dest="trusted_client",
             help="Whether client shall be configured trusted, i.e. mTLS-ready")
+    parser.addoption(
+            "--public-key-refresh-interval",
+            action="store",
+            default=1,
+            dest="public_key_refresh_interval",
+            help="How frequently server refreshes authorization public key file")
 
 @pytest.fixture(scope="session")
 def build_dir(request):
@@ -53,6 +59,10 @@ def kty(request):
 @pytest.fixture(scope="session")
 def trusted_client(request):
     return request.config.option.trusted_client
+
+@pytest.fixture(scope="session")
+def public_key_refresh_interval(request):
+    return request.config.option.public_key_refresh_interval
 
 @pytest.fixture(scope="session")
 def alg(kty):
@@ -79,28 +89,32 @@ def private_key(kty, kid, private_key_gen):
     return private_key_gen(kty, kid)
 
 @pytest.fixture(scope="session")
-def public_key_jwks_str(private_key, kid, alg):
-    return KeySet([private_key]).as_json(
-            is_private=False,
-            alg=alg,
-        )
+def public_key_jwks_str(private_key):
+    return public_keyset_from_keys([private_key])
 
 @pytest.fixture(scope="session")
-def token_gen(private_key, kid, alg):
-    def fn(claims, headers={}):
+def token_gen():
+    def fn(private_key, claims, headers={}):
         if not headers:
-            headers = { "typ": "JWT", "kty": private_key.kty, "alg": alg, "kid": kid }
+            headers = {
+                "typ": "JWT",
+                "kty": private_key.kty,
+                "alg": alg_from_kty(private_key.kty),
+                "kid": private_key.kid,
+            }
         return jwt.encode(headers, claims, private_key)
     return fn
 
 @pytest.fixture(autouse=True, scope=cluster_scope)
-def cluster(build_dir, public_key_jwks_str, trusted_client):
+def cluster(build_dir, public_key_jwks_str, public_key_refresh_interval, trusted_client):
     with TempCluster(
             build_dir=build_dir,
             tls_config=TLSConfig(server_chain_len=3, client_chain_len=2),
             public_key_json_str=public_key_jwks_str,
             remove_at_exit=True,
-            custom_config={"code-probes": "all"}) as cluster:
+            custom_config={
+                "knob-public-key-file-refresh-interval-seconds": public_key_refresh_interval,
+            }) as cluster:
         keyfile = str(cluster.client_key_file)
         certfile = str(cluster.client_cert_file)
         cafile = str(cluster.server_ca_file)

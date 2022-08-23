@@ -126,10 +126,10 @@ class Server(object):
             self._main_pipe.send(req)
             resp = self._main_pipe.recv()
             if resp != True:
-                print("Request {} failed: {}".format(req, resp))
+                print("{} failed: {}".format(req, resp))
                 raise resp
             else:
-                print("Request {} succeeded".format(req))
+                print("{} succeeded".format(req))
         except Exception as e:
-            print("admin request {} failed by exception: {}".format(req, e))
+            print("{} failed by exception: {}".format(req, e))
             raise
