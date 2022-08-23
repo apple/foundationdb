@@ -31,6 +31,7 @@
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include <fmt/format.h>
+#include <cmath>
 #include <iterator>
 #include <string_view>
 #include <type_traits>
@@ -582,9 +583,9 @@ TEST_CASE("/fdbrpc/TokenSign/JWT") {
 			ASSERT(tokenSpec.tokenId == parsedToken.tokenId);
 			ASSERT(tokenSpec.audience == parsedToken.audience);
 			ASSERT(tokenSpec.keyId == parsedToken.keyId);
-			ASSERT_EQ(tokenSpec.issuedAtUnixTime.get(), parsedToken.issuedAtUnixTime.get());
-			ASSERT_EQ(tokenSpec.expiresAtUnixTime.get(), parsedToken.expiresAtUnixTime.get());
-			ASSERT_EQ(tokenSpec.notBeforeUnixTime.get(), parsedToken.notBeforeUnixTime.get());
+			ASSERT_EQ(std::lround(tokenSpec.issuedAtUnixTime.get()), std::lround(parsedToken.issuedAtUnixTime.get()));
+			ASSERT_EQ(std::lround(tokenSpec.expiresAtUnixTime.get()), std::lround(parsedToken.expiresAtUnixTime.get()));
+			ASSERT_EQ(std::lround(tokenSpec.notBeforeUnixTime.get()), std::lround(parsedToken.notBeforeUnixTime.get()));
 			ASSERT(tokenSpec.tenants == parsedToken.tenants);
 			auto optSig = base64url::decode(tmpArena, signaturePart);
 			ASSERT(optSig.present());
