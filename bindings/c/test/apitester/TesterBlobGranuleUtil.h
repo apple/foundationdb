@@ -22,7 +22,7 @@
 
 #ifndef APITESTER_BLOBGRANULE_UTIL_H
 #define APITESTER_BLOBGRANULE_UTIL_H
-
+#include "TesterUtil.h"
 #include "test/fdb_api.hpp"
 #include <unordered_map>
 
@@ -37,13 +37,8 @@ public:
 	TesterGranuleContext(const std::string& basePath) : basePath(basePath), nextId(0) {}
 
 	~TesterGranuleContext() {
-		// FIXME: this should now never happen with proper memory management
-		// ASSERT(loadsInProgress.empty());
-		// TODO remove!!
-		for (auto& it : loadsInProgress) {
-			uint8_t* dataToFree = it.second;
-			delete[] dataToFree;
-		}
+		// this should now never happen with proper memory management
+		ASSERT(loadsInProgress.empty());
 	}
 };
 
