@@ -1286,7 +1286,7 @@ thread_local bool BaseTraceEvent::networkThread = false;
 void BaseTraceEvent::setNetworkThread() {
 	if (!networkThread) {
 		if (FLOW_KNOBS->ALLOCATION_TRACING_ENABLED) {
-			// Ensure that threadID is initialized before we enable allocation tracing, otherwise it would
+			// Ensure that threadId is initialized before we enable allocation tracing, otherwise it would
 			// be initialized either by first normal usage of TraceEvent or by allocation tracing which is
 			// non-deterministic, and we could run into https://github.com/apple/foundationdb/issues/7872.
 			getTraceThreadId();
