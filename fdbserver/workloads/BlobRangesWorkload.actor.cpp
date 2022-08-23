@@ -130,7 +130,7 @@ struct BlobRangesWorkload : TestWorkload {
 		int randomRangeIdx = deterministicRandom()->randomInt(0, self->activeRanges.size());
 		state KeyRange range = self->activeRanges[randomRangeIdx];
 		// remove range from active BEFORE committing txn but add to remove AFTER, to avoid checking a range that could
-		// potentially be in both states
+		// potentially be in either state
 		swapAndPop(&self->activeRanges, randomRangeIdx);
 
 		fmt::print("Unregistering new range [{0} - {1})\n", range.begin.printable(), range.end.printable());
@@ -169,13 +169,11 @@ struct BlobRangesWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		client = blobRangesClient(cx->clone(), this);
-		/*if (clientId == 0) {
-		    unitClient = blobRangesUnitTests(cx->clone(), this);
+		if (clientId == 0) {
+			unitClient = blobRangesUnitTests(cx->clone(), this);
 		} else {
-		    unitClient = Future<Void>(Void());
-		}*/
-		// TODO CHANGE BACK!!
-		unitClient = Future<Void>(Void());
+			unitClient = Future<Void>(Void());
+		}
 		return delay(testDuration);
 	}
 
@@ -289,19 +287,25 @@ struct BlobRangesWorkload : TestWorkload {
 		}
 	}
 
-	enum UnitTestTypes {
-		VERIFY_RANGE_UNIT,
-		VERIFY_RANGE_GAP_UNIT,
-		RANGES_MISALIGNED,
-		BLOBBIFY_IDEMPOTENT,
-		RE_BLOBBIFY,
-		OP_COUNT = 5 /* keep this last */
-	};
+	ACTOR Future<Void> tearDownRangeAfterUnit(Database cx, BlobRangesWorkload* self, KeyRange range) {
+		fmt::print("Tearing down [{0} - {1}) after unit!\n", range.begin.printable(), range.end.printable());
+
+		// tear down range at end
+		Key purgeKey = wait(cx->purgeBlobGranules(range, 1, {}, true));
+		wait(cx->waitPurgeGranulesComplete(purgeKey));
+		bool success = wait(self->setRange(cx, range, false));
+		ASSERT(success);
+
+		fmt::print("Range [{0} - {1}) torn down.\n", range.begin.printable(), range.end.printable());
+
+		return Void();
+	}
 
 	ACTOR Future<Void> verifyRangeUnit(Database cx, BlobRangesWorkload* self, KeyRange range) {
 		state KeyRange activeRange(KeyRangeRef(range.begin.withSuffix("A"_sr), range.begin.withSuffix("B"_sr)));
 		state Key middleKey = range.begin.withSuffix("AF"_sr);
 
+		fmt::print("VerifyRangeUnit: [{0} - {1})\n", range.begin.printable(), range.end.printable());
 		bool setSuccess = wait(self->setRange(cx, activeRange, true));
 		ASSERT(setSuccess);
 		wait(self->checkRange(cx, self, activeRange, true));
@@ -333,6 +337,8 @@ struct BlobRangesWorkload : TestWorkload {
 		bool fail7 = wait(self->isRangeActive(cx, KeyRangeRef(activeRange.begin, range.end)));
 		ASSERT(!fail7);
 
+		wait(self->tearDownRangeAfterUnit(cx, self, range));
+
 		return Void();
 	}
 
@@ -363,6 +369,14 @@ struct BlobRangesWorkload : TestWorkload {
 
 		bool success = wait(self->isRangeActive(cx, range));
 		ASSERT(!success);
+
+		if (rangeToNotBlobbify != 0) {
+			wait(self->tearDownRangeAfterUnit(cx, self, KeyRangeRef(boundaries[0], boundaries[rangeToNotBlobbify])));
+		}
+		if (rangeToNotBlobbify != rangeCount - 1) {
+			wait(self->tearDownRangeAfterUnit(
+			    cx, self, KeyRangeRef(boundaries[rangeToNotBlobbify + 1], boundaries.back())));
+		}
 
 		return Void();
 	}
@@ -423,6 +437,8 @@ struct BlobRangesWorkload : TestWorkload {
 			}
 		}
 		return Void();
+
+		// TODO - also test purging larger range than blob range
 	}
 
 	ACTOR Future<Void> blobbifyIdempotentUnit(Database cx, BlobRangesWorkload* self, KeyRange range) {
@@ -480,6 +496,37 @@ struct BlobRangesWorkload : TestWorkload {
 			}
 		}
 
+		// tear down + check that un-blobbifying at a non-aligned range also doesn't work
+		Key purgeKey = wait(cx->purgeBlobGranules(range, 1, {}, true));
+		wait(cx->waitPurgeGranulesComplete(purgeKey));
+
+		bool unblobbifyFail1 = wait(self->setRange(cx, range, false));
+		ASSERT(!unblobbifyFail1);
+
+		bool unblobbifyFail2 = wait(self->setRange(cx, KeyRangeRef(range.begin, activeRange.end), false));
+		ASSERT(!unblobbifyFail2);
+
+		bool unblobbifyFail3 = wait(self->setRange(cx, KeyRangeRef(activeRange.begin, range.end), false));
+		ASSERT(!unblobbifyFail3);
+
+		bool unblobbifyFail4 = wait(self->setRange(cx, KeyRangeRef(activeRange.begin, middleKey), false));
+		ASSERT(!unblobbifyFail4);
+
+		bool unblobbifyFail5 = wait(self->setRange(cx, KeyRangeRef(middleKey, activeRange.end), false));
+		ASSERT(!unblobbifyFail5);
+
+		bool unblobbifyFail6 = wait(self->setRange(cx, KeyRangeRef(activeRange.begin, middleKey), false));
+		ASSERT(!unblobbifyFail6);
+
+		bool unblobbifyFail7 = wait(self->setRange(cx, KeyRangeRef(middleKey, activeRange.end), false));
+		ASSERT(!unblobbifyFail7);
+
+		bool unblobbifyFail8 = wait(self->setRange(cx, KeyRangeRef(middleKey, middleKey2), false));
+		ASSERT(!unblobbifyFail8);
+
+		bool unblobbifySuccess = wait(self->setRange(cx, activeRange, false));
+		ASSERT(!unblobbifySuccess);
+
 		return Void();
 	}
 
@@ -501,17 +548,50 @@ struct BlobRangesWorkload : TestWorkload {
 		ASSERT(reSetSuccess);
 		wait(self->checkRange(cx, self, range, true));
 
+		wait(self->tearDownRangeAfterUnit(cx, self, range));
+
 		return Void();
 	}
+
+	enum UnitTestTypes {
+		VERIFY_RANGE_UNIT,
+		VERIFY_RANGE_GAP_UNIT,
+		RANGES_MISALIGNED,
+		BLOBBIFY_IDEMPOTENT,
+		RE_BLOBBIFY,
+		OP_COUNT = 5 /* keep this last */
+	};
 
 	ACTOR Future<Void> blobRangesUnitTests(Database cx, BlobRangesWorkload* self) {
 		loop {
 			if (self->stopUnitClient) {
 				return Void();
 			}
+			std::set<UnitTestTypes> excludedTypes;
+			excludedTypes.insert(OP_COUNT);
+
+			// FIXME: fix bugs and enable these tests!
+			excludedTypes.insert(RANGES_MISALIGNED); // TODO - fix in blob manager
+			excludedTypes.insert(BLOBBIFY_IDEMPOTENT); // fix already in progress in a separate PR
+			excludedTypes.insert(RE_BLOBBIFY); // TODO - fix is non-trivial, is desired behavior eventually
+
 			std::string nextRangeKey = "U_" + self->newKey();
 			state KeyRange range(KeyRangeRef(StringRef(nextRangeKey), strinc(StringRef(nextRangeKey))));
-			int op = deterministicRandom()->random01();
+			// prevent infinite loop
+			int loopTries = 1000;
+			int op = OP_COUNT;
+			loop {
+				op = deterministicRandom()->randomInt(0, OP_COUNT);
+				if (!excludedTypes.count((UnitTestTypes)op)) {
+					break;
+				}
+				loopTries--;
+				ASSERT(loopTries >= 0);
+			}
+
+			fmt::print(
+			    "Selected range [{0} - {1}) for unit {2}.\n", range.begin.printable(), range.end.printable(), op);
+
 			if (op == VERIFY_RANGE_UNIT) {
 				wait(self->verifyRangeUnit(cx, self, range));
 			} else if (op == VERIFY_RANGE_GAP_UNIT) {
@@ -525,12 +605,6 @@ struct BlobRangesWorkload : TestWorkload {
 			} else {
 				ASSERT(false);
 			}
-
-			// tear down range at end
-			Key purgeKey = wait(cx->purgeBlobGranules(range, 1, {}, true));
-			wait(cx->waitPurgeGranulesComplete(purgeKey));
-			bool success = wait(self->setRange(cx, range, false));
-			ASSERT(success);
 
 			wait(delay(1.0));
 		}

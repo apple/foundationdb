@@ -1300,9 +1300,6 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 						ASSERT(it.cvalue() == UID());
 					}
 					bmData->workerAssignments.insert(range, UID());
-					fmt::print("Adding new client blob range [{0} - {1}) with dummy value\n",
-					           range.begin.printable(),
-					           range.end.printable());
 
 					// start initial split for range
 					splitFutures.push_back(splitRange(bmData, range, false, true));
