@@ -1125,7 +1125,9 @@ public:
 
 	UID getDebugID() const override { return id; }
 
-	tcp::socket& getSocket() override { return socket; }
+	tcp::socket& getSocket() override {
+		return socket;
+	}
 
 	ssl_socket& getSSLSocket() { return ssl_sock; }
 
