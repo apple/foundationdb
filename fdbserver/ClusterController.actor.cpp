@@ -802,6 +802,7 @@ void checkOutstandingRequests(ClusterControllerData* self) {
 
 ACTOR Future<Void> rebootAndCheck(ClusterControllerData* cluster, Optional<Standalone<StringRef>> processID) {
 	{
+		ASSERT(processID.present());
 		auto watcher = cluster->id_worker.find(processID);
 		ASSERT(watcher != cluster->id_worker.end());
 
@@ -1245,6 +1246,10 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		if (info->second.details.interf.id() != w.id()) {
 			self->removedDBInfoEndpoints.insert(info->second.details.interf.updateServerDBInfo.getEndpoint());
 			info->second.details.interf = w;
+			// Cancel the existing watcher actor; possible race condition could be, the older registered watcher
+			// detects failures and removes the worker from id_worker even before the new watcher starts monitoring the
+			// new interface
+			info->second.watcher.cancel();
 			info->second.watcher = workerAvailabilityWatch(w, newProcessClass, self);
 		}
 		if (req.requestDbInfo) {
