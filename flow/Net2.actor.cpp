@@ -956,8 +956,12 @@ public:
 		doAcceptHandshake(self, connected);
 		try {
 			choose {
-				when(wait(connected.getFuture())) { return Void(); }
-				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) { throw connection_failed(); }
+				when(wait(connected.getFuture())) {
+					return Void();
+				}
+				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+					throw connection_failed();
+				}
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
@@ -1016,8 +1020,12 @@ public:
 		doConnectHandshake(self, connected);
 		try {
 			choose {
-				when(wait(connected.getFuture())) { return Void(); }
-				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) { throw connection_failed(); }
+				when(wait(connected.getFuture())) {
+					return Void();
+				}
+				when(wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT))) {
+					throw connection_failed();
+				}
 			}
 		} catch (Error& e) {
 			// Either the connection failed, or was cancelled by the caller
@@ -1117,19 +1125,25 @@ public:
 		return sent;
 	}
 
-	NetworkAddress getPeerAddress() const override { return peer_address; }
+	NetworkAddress getPeerAddress() const override {
+		return peer_address;
+	}
 
 	bool hasTrustedPeer() const override {
 		return has_trusted_peer;
 	}
 
-	UID getDebugID() const override { return id; }
+	UID getDebugID() const override {
+		return id;
+	}
 
 	tcp::socket& getSocket() override {
 		return socket;
 	}
 
-	ssl_socket& getSSLSocket() { return ssl_sock; }
+	ssl_socket& getSSLSocket() {
+		return ssl_sock;
+	}
 
 private:
 	UID id;
