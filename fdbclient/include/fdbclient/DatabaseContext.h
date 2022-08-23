@@ -168,10 +168,10 @@ struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
 	Future<Void> updater;
 	NotifiedVersion version;
 	NotifiedVersion desired;
-	Promise<Void> destroyed;
 	UID interfToken;
+	DatabaseContext* context;
 
-	~ChangeFeedStorageData() { destroyed.send(Void()); }
+	~ChangeFeedStorageData();
 };
 
 struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
@@ -477,7 +477,7 @@ public:
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
 	// map from changeFeedId -> changeFeedRange
 	std::unordered_map<Key, KeyRange> changeFeedCache;
-	std::unordered_map<UID, Reference<ChangeFeedStorageData>> changeFeedUpdaters;
+	std::unordered_map<UID, ChangeFeedStorageData*> changeFeedUpdaters;
 	std::map<UID, ChangeFeedData*> notAtLatestChangeFeeds;
 
 	Reference<ChangeFeedStorageData> getStorageData(StorageServerInterface interf);
