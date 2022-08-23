@@ -130,7 +130,7 @@ def _print_summary(summary: SummaryTree, commands: Set[str]) -> str:
     if config.output_format == 'json':
         sys.stdout.write('{}"{}": {}'.format('  ' if config.pretty_print else '', key, output.getvalue().strip()))
     else:
-        sys.stdout.write(output.getvalue().strip())
+        sys.stdout.write('{}{}'.format('  ' if config.pretty_print else '', output.getvalue().strip()))
     sys.stdout.write('\n' if config.output_format == 'xml' else ',\n')
 
 
