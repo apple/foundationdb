@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import argparse
+import io
+import json
 import re
 import sys
-from typing import List, Tuple, OrderedDict
+import test_harness.fdb
 
+from typing import List, Tuple, OrderedDict
 from test_harness.summarize import SummaryTree, Coverage
 from test_harness.config import config
-
-import argparse
-import test_harness.fdb
+from xml.sax.saxutils import quoteattr
 
 
 class GlobalStatistics:
@@ -84,18 +86,25 @@ class EnsembleResults:
                 out.append(child)
         if errors > 0:
             out.attributes['Errors'] = str(errors)
-        out.dump(sys.stdout, prefix=prefix, new_line=config.pretty_print)
+        str_io = io.StringIO()
+        out.dump(str_io, prefix=prefix, new_line=config.pretty_print)
+        if config.output_format == 'xml':
+            sys.stdout.write(str_io.getvalue())
+        else:
+            sys.stdout.write('{}"EnsembleResults":{}{}'.format('  ' if config.pretty_print else '',
+                                                               '\n' if config.pretty_print else ' ',
+                                                               str_io.getvalue()))
 
 
 def write_header(ensemble_id: str):
     if config.output_format == 'json':
         if config.pretty_print:
             print('{')
-            print('  {}: {}'.format('ID', ensemble_id))
+            print('  "{}": {},\n'.format('ID', json.dumps(ensemble_id.strip())))
         else:
-            sys.stdout.write('{{{}: {}'.format('ID', ensemble_id))
+            sys.stdout.write('{{{}: {},'.format('ID', json.dumps(ensemble_id.strip())))
     elif config.output_format == 'xml':
-        sys.stdout.write('<Ensemble ID="{}">'.format(ensemble_id))
+        sys.stdout.write('<Ensemble ID={}>'.format(quoteattr(ensemble_id.strip())))
         if config.pretty_print:
             sys.stdout.write('\n')
     else:
@@ -103,10 +112,10 @@ def write_header(ensemble_id: str):
 
 
 def write_footer():
-    if config.output_format == 'json':
-        sys.stdout.write('}')
-    elif config.output_format == 'xml':
-        sys.stdout.write('</Ensemble>')
+    if config.output_format == 'xml':
+        sys.stdout.write('</Ensemble>\n')
+    elif config.output_format == 'json':
+        sys.stdout.write('}\n')
     else:
         assert False, 'unknown output format {}'.format(config.output_format)
 
@@ -114,6 +123,7 @@ def write_footer():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('TestHarness Results', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     config.change_default('pretty_print', True)
+    config.change_default('max_warnings', 0)
     config.build_arguments(parser)
     parser.add_argument('ensemble_id', type=str, help='The ensemble to fetch the result for')
     args = parser.parse_args()
@@ -130,4 +140,5 @@ if __name__ == '__main__':
         child.dump(sys.stdout, prefix=('  ' if config.pretty_print else ''), new_line=config.pretty_print)
     results = EnsembleResults(config.cluster_file, args.ensemble_id)
     results.dump('  ' if config.pretty_print else '')
+    write_footer()
     exit(0 if results.coverage_ok else 1)

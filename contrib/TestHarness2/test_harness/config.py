@@ -70,6 +70,7 @@ class ConfigValue:
         return self.name, args.__getattribute__(self.get_arg_name())
 
 
+# TODO: document this class
 class Config:
     def __init__(self):
         self.random = random.Random()

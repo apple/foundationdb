@@ -27,15 +27,32 @@ class SummaryTree:
     def append(self, element: SummaryTree):
         self.children.append(element)
 
-    def to_dict(self) -> Dict[str, Any]:
-        children = []
-        for child in self.children:
-            children.append(child.to_dict())
-        if len(children) > 0 and len(self.attributes) == 0:
-            return {self.name: children}
-        res: Dict[str, Any] = {'Type': self.name}
+    def to_dict(self, add_name: bool = True) -> Dict[str, Any] | [Any]:
+        if len(self.children) > 0 and len(self.attributes) == 0:
+            children = []
+            for child in self.children:
+                children.append(child.to_dict())
+            if add_name:
+                return {self.name: children}
+            else:
+                return children
+        res: Dict[str, Any] = {}
+        if add_name:
+            res['Type'] = self.name
         for k, v in self.attributes.items():
             res[k] = v
+        children = []
+        child_keys: Dict[str, int] = {}
+        for child in self.children:
+            if child.name in child_keys:
+                child_keys[child.name] += 1
+            else:
+                child_keys[child.name] = 1
+        for child in self.children:
+            if child_keys[child.name] == 1 and child.name not in self.attributes:
+                res[child.name] = child.to_dict(add_name=False)
+            else:
+                children.append(child.to_dict())
         if len(children) > 0:
             res['children'] = children
         return res
