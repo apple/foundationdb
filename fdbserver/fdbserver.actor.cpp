@@ -1110,17 +1110,17 @@ private:
 
 	void parseEnvInternal() {
 		for (std::string knob : getEnvironmentKnobOptions()) {
-			std::vector<std::string> kv;
-			boost::split(kv, knob, [](char c) { return c == '='; });
-			if (kv.size() != 2 || !kv[0].length() || !kv[1].length()) {
+			auto pos = knob.find_first_of("=");
+			if (pos == std::string::npos) {
 				fprintf(stderr,
 				        "Error: malformed environment knob option: %s%s\n",
 				        ENVIRONMENT_KNOB_OPTION_PREFIX,
 				        knob.c_str());
-				flushAndExit(FDB_EXIT_ERROR);
 			} else {
-				knobs.emplace_back(kv[0], kv[1]);
-				manualKnobOverrides[kv[0]] = kv[1];
+				std::string k = knob.substr(0, pos);
+				std::string v = knob.substr(pos + 1, knob.length());
+				knobs.emplace_back(k, v);
+				manualKnobOverrides[k] = v;
 			}
 		}
 	}
