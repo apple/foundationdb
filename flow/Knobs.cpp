@@ -525,7 +525,7 @@ TEST_CASE("/flow/Knobs/ParseKnobValue") {
 
 	ASSERT_EQ(safe_stoi64("4"), (int64_t)4);
 	try {
-		int64_t value = safe_stoi64("4GiB");
+		[[maybe_unused]] int64_t value = safe_stoi64("4GiB");
 		UNREACHABLE();
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_invalid_option_value);
