@@ -39,7 +39,7 @@ function start_servers {
 		mkdir -p ${LOG} ${DATA}
 		PORT=$(( $PORT_PREFIX + $SERVER_COUNT ))
 		ZONE=$(( $j % $REPLICATION_COUNT ))
-		$2 ${FDB} -p auto:${PORT} $KNOBS -c $3 -d $DATA -L $LOG -C $CLUSTER --locality-zoneid Z-$ZONE --locality-machineid M-$SERVER_COUNT &
+		$2 ${FDB} -p auto:${PORT} "$KNOBS" -c $3 -d $DATA -L $LOG -C $CLUSTER --locality-zoneid Z-$ZONE --locality-machineid M-$SERVER_COUNT &
 		SERVER_COUNT=$(( $SERVER_COUNT + 1 ))
 	done
 }
