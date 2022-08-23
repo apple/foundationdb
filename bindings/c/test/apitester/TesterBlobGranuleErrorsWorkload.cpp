@@ -18,66 +18,12 @@
  * limitations under the License.
  */
 #include "TesterApiWorkload.h"
+#include "TesterBlobGranuleUtil.h"
 #include "TesterUtil.h"
 #include <memory>
 #include <fmt/format.h>
 
 namespace FdbApiTester {
-
-// FIXME: avoid duplicating this between files!
-class TesterErrorGranuleContext {
-public:
-	std::unordered_map<int64_t, uint8_t*> loadsInProgress;
-	int64_t nextId = 0;
-	std::string basePath;
-
-	~TesterErrorGranuleContext() {
-		// if there was an error or not all loads finished, delete data
-		for (auto& it : loadsInProgress) {
-			uint8_t* dataToFree = it.second;
-			delete[] dataToFree;
-		}
-	}
-};
-
-static int64_t granule_start_load(const char* filename,
-                                  int filenameLength,
-                                  int64_t offset,
-                                  int64_t length,
-                                  int64_t fullFileLength,
-                                  void* context) {
-
-	TesterErrorGranuleContext* ctx = (TesterErrorGranuleContext*)context;
-	int64_t loadId = ctx->nextId++;
-
-	uint8_t* buffer = new uint8_t[length];
-	std::ifstream fin(ctx->basePath + std::string(filename, filenameLength), std::ios::in | std::ios::binary);
-	if (fin.fail()) {
-		delete[] buffer;
-		buffer = nullptr;
-	} else {
-		fin.seekg(offset);
-		fin.read((char*)buffer, length);
-	}
-
-	ctx->loadsInProgress.insert({ loadId, buffer });
-
-	return loadId;
-}
-
-static uint8_t* granule_get_load(int64_t loadId, void* context) {
-	TesterErrorGranuleContext* ctx = (TesterErrorGranuleContext*)context;
-	return ctx->loadsInProgress.at(loadId);
-}
-
-static void granule_free_load(int64_t loadId, void* context) {
-	TesterErrorGranuleContext* ctx = (TesterErrorGranuleContext*)context;
-	auto it = ctx->loadsInProgress.find(loadId);
-	uint8_t* dataToFree = it->second;
-	delete[] dataToFree;
-
-	ctx->loadsInProgress.erase(it);
-}
 
 class BlobGranuleErrorsWorkload : public ApiWorkload {
 public:
@@ -91,6 +37,10 @@ private:
 		OP_CANCEL_RANGES,
 		OP_LAST = OP_CANCEL_RANGES
 	};
+
+	// Allow reads at the start to get blob_granule_transaction_too_old if BG data isn't initialized yet
+	// FIXME: should still guarantee a read succeeds eventually somehow
+	bool seenReadSuccess = false;
 
 	void doErrorOp(TTaskFct cont,
 	               std::string basePathAddition,
@@ -111,16 +61,9 @@ private:
 		    [this, begin, end, basePathAddition, doMaterialize, readVersion, expectedError](auto ctx) {
 			    ctx->tx().setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
 
-			    TesterErrorGranuleContext testerContext;
-			    testerContext.basePath = ctx->getBGBasePath() + basePathAddition;
-
-			    fdb::native::FDBReadBlobGranuleContext granuleContext;
-			    granuleContext.userContext = &testerContext;
+			    TesterGranuleContext testerContext(ctx->getBGBasePath() + basePathAddition);
+			    fdb::native::FDBReadBlobGranuleContext granuleContext = createGranuleContext(&testerContext);
 			    granuleContext.debugNoMaterialize = !doMaterialize;
-			    granuleContext.granuleParallelism = 1 + Random::get().randomInt(0, 3);
-			    granuleContext.start_load_f = &granule_start_load;
-			    granuleContext.get_load_f = &granule_get_load;
-			    granuleContext.free_load_f = &granule_free_load;
 
 			    fdb::Result res =
 			        ctx->tx().readBlobGranules(begin, end, 0 /* beginVersion */, readVersion, granuleContext);
@@ -131,37 +74,40 @@ private:
 				    error(fmt::format("Operation succeeded in error test!"));
 			    }
 			    ASSERT(err.code() != error_code_success);
+			    if (err.code() != error_code_blob_granule_transaction_too_old) {
+				    seenReadSuccess = true;
+			    }
 			    if (err.code() != expectedError) {
 				    info(fmt::format("incorrect error. Expected {}, Got {}", err.code(), expectedError));
-				    ctx->onError(err);
+				    if (err.code() == error_code_blob_granule_transaction_too_old) {
+					    ASSERT(!seenReadSuccess);
+					    ctx->done();
+				    } else {
+					    ctx->onError(err);
+				    }
 			    } else {
 				    ctx->done();
 			    }
 		    },
-		    [this, cont]() { schedule(cont); },
-		    false);
+		    [this, cont]() { schedule(cont); });
 	}
 
 	void randomOpReadNoMaterialize(TTaskFct cont) {
-		info("DoErrorOp NoMaterialize");
 		// ensure setting noMaterialize flag produces blob_granule_not_materialized
 		doErrorOp(cont, "", false, -2 /*latest read version */, error_code_blob_granule_not_materialized);
 	}
 
 	void randomOpReadFileLoadError(TTaskFct cont) {
-		info("DoErrorOp FileError");
 		// point to a file path that doesn't exist by adding an extra suffix
 		doErrorOp(cont, "extrapath/", true, -2 /*latest read version */, error_code_blob_granule_file_load_error);
 	}
 
 	void randomOpReadTooOld(TTaskFct cont) {
-		info("DoErrorOp TooOld");
 		// read at a version (1) that should predate granule data
 		doErrorOp(cont, "", true, 1, error_code_blob_granule_transaction_too_old);
 	}
 
 	void randomCancelGetRangesOp(TTaskFct cont) {
-		info("DoErrorOp CancelGetRanges");
 		fdb::Key begin = randomKeyName();
 		fdb::Key end = randomKeyName();
 		if (begin > end) {

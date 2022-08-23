@@ -1618,6 +1618,8 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 
 	GranuleLoadIds loadIds[files.size()];
 
+	// FIXME: improve error handling on completion
+
 	bool fileError = false;
 
 	try {

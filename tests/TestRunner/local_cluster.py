@@ -316,7 +316,6 @@ logdir = {logdir}
             db_config += " blob_granules_enabled:=1"
         self.fdbcli_exec(db_config)
 
-        # TODO - want to blobbify tenants explicitly. Right now not blobbifying at all technically fixes the tenant test
         if self.blob_granules_enabled:
             self.fdbcli_exec("blobrange start \\x00 \\xff")
 
