@@ -1423,9 +1423,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
 			// wait for manager stream to become ready, and send a message
 			loop {
 				choose {
-					when(wait(bwData->currentManagerStatusStream.get().onReady())) {
-						break;
-					}
+					when(wait(bwData->currentManagerStatusStream.get().onReady())) { break; }
 					when(wait(bwData->currentManagerStatusStream.onChange())) {}
 				}
 			}

@@ -423,9 +423,7 @@ ACTOR Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProx
 				                        Void()) &&
 				                delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
 			}
-			when(wait(actors.getResult())) {
-				ASSERT(false);
-			}
+			when(wait(actors.getResult())) { ASSERT(false); }
 		}
 	}
 }

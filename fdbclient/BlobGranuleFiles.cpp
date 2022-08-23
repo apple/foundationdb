@@ -2096,9 +2096,7 @@ struct KeyValueGen {
 		return StringRef(ar, value);
 	}
 
-	KeyRef randomUsedKey() const {
-		return usedKeysList[deterministicRandom()->randomInt(0, usedKeysList.size())];
-	}
+	KeyRef randomUsedKey() const { return usedKeysList[deterministicRandom()->randomInt(0, usedKeysList.size())]; }
 
 	KeyRange randomKeyRange() const {
 		ASSERT(!usedKeysList.empty());
