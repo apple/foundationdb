@@ -157,6 +157,19 @@ struct SpecialCounter final : ICounter, FastAllocated<SpecialCounter<F>>, NonCop
 	std::string name;
 	F f;
 };
+
+// Coerce the value of t to the range of representable values of IntT with close to minimal loss of precision.
+template <class FloatT, class IntT = int64_t>
+IntT clampToInt(FloatT t) {
+	static_assert(std::is_floating_point_v<FloatT>);
+	static_assert(std::is_integral_v<IntT>);
+	// One of the possibly two highest values of FloatT within the range of representable values of IntT
+	FloatT max = std::nextafter(FloatT(std::numeric_limits<IntT>::max()), FloatT(0));
+	// One of the possibly two lowest values of FloatT within the range of representable values of IntT
+	FloatT min = std::nextafter(FloatT(std::numeric_limits<IntT>::lowest()), FloatT(0));
+	return IntT(std::clamp(t, min, max));
+}
+
 template <class F>
 static void specialCounter(CounterCollection& collection, std::string const& name, F&& f) {
 	new SpecialCounter<F>(collection, name, std::move(f));

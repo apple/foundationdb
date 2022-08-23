@@ -141,11 +141,11 @@ struct GrvProxyStats {
 		specialCounter(cc, "DefaultGRVQueueSize", [this]() { return this->defaultGRVQueueSize; });
 		specialCounter(cc, "BatchGRVQueueSize", [this]() { return this->batchGRVQueueSize; });
 		specialCounter(
-		    cc, "SystemAndDefaultTxnRateAllowed", [this]() { return int64_t(this->transactionRateAllowed); });
+		    cc, "SystemAndDefaultTxnRateAllowed", [this]() { return clampToInt(this->transactionRateAllowed); });
 		specialCounter(
-		    cc, "BatchTransactionRateAllowed", [this]() { return int64_t(this->batchTransactionRateAllowed); });
-		specialCounter(cc, "SystemAndDefaultTxnLimit", [this]() { return int64_t(this->transactionLimit); });
-		specialCounter(cc, "BatchTransactionLimit", [this]() { return int64_t(this->batchTransactionLimit); });
+		    cc, "BatchTransactionRateAllowed", [this]() { return clampToInt(this->batchTransactionRateAllowed); });
+		specialCounter(cc, "SystemAndDefaultTxnLimit", [this]() { return clampToInt(this->transactionLimit); });
+		specialCounter(cc, "BatchTransactionLimit", [this]() { return clampToInt(this->batchTransactionLimit); });
 		specialCounter(cc, "PercentageOfDefaultGRVQueueProcessed", [this]() {
 			return int64_t(100 * this->percentageOfDefaultGRVQueueProcessed);
 		});
