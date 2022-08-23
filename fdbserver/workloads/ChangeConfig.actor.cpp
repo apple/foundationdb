@@ -119,19 +119,21 @@ struct ChangeConfigWorkload : TestWorkload {
 			}
 			wait(success(ManagementAPI::changeConfig(cx.getReference(), self->configMode, true)));
 		}
-		if (self->networkAddresses.size()) {
-			if (self->networkAddresses == "auto")
-				wait(CoordinatorsChangeActor(cx, self, true));
-			else
-				wait(CoordinatorsChangeActor(cx, self));
-		}
+		if (g_simulator.configDBType != ConfigDBType::SIMPLE) {
+			if (self->networkAddresses.size()) {
+				if (self->networkAddresses == "auto")
+					wait(CoordinatorsChangeActor(cx, self, true));
+				else
+					wait(CoordinatorsChangeActor(cx, self));
+			}
 
-		// Run additional coordinator changes if specified.
-		if (self->networkAddresses.size() && self->networkAddresses == "auto") {
-			state int i;
-			for (i = 1; i < self->coordinatorChanges; ++i) {
-				wait(delay(20));
-				wait(CoordinatorsChangeActor(cx, self, true));
+			// Run additional coordinator changes if specified.
+			if (self->networkAddresses.size() && self->networkAddresses == "auto") {
+				state int i;
+				for (i = 1; i < self->coordinatorChanges; ++i) {
+					wait(delay(20));
+					wait(CoordinatorsChangeActor(cx, self, true));
+				}
 			}
 		}
 
