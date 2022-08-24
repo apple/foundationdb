@@ -108,6 +108,8 @@ struct BlobGranuleFileRequest {
 
 	BlobGranuleFileRequest() {}
 
+	Optional<UID> id() const { return Optional<UID>(); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keyRange, beginVersion, readVersion, canCollapseBegin, reply, arena);

@@ -569,6 +569,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 	state int numAttempts = 0;
 	state double backoff = 0;
 	state std::string requestType;
+	state Optional<UID> dbgid = request.id();
 	if (std::is_same<Request, GetKeyValuesRequest>::value) {
 		requestType = "GetRange";
 	} else if (std::is_same<Request, GetKeyRequest>::value) {
@@ -667,7 +668,23 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				    .detail("TriedAllOptions", triedAllOptions)
 				    .detail("Token", stream->getEndpoint().token)
 				    .detail("Request", requestType)
+				    .detail("DebugID", dbgid.present() ? dbgid.get() : UID())
 				    .detail("QueueModel", model ? model->toString() : "")
+				    .detail("Total", alternatives->size())
+				    .detail("Best", alternatives->countBest())
+				    .detail("Attempts", numAttempts);
+			} else {
+				TraceEvent("LBLocal2")
+				    .suppressFor(0.1)
+				    .detail("Distance", (int)distance)
+				    .detail("BackOff", backoff)
+				    .detail("TriedAllOptions", triedAllOptions)
+				    .detail("Token", stream->getEndpoint().token)
+				    .detail("Request", requestType)
+				    .detail("DebugID", dbgid.present() ? dbgid.get() : UID())
+				    .detail("QueueModel", model ? model->toString() : "")
+				    .detail("Total", alternatives->size())
+				    .detail("Best", alternatives->countBest())
 				    .detail("Attempts", numAttempts);
 			}
 			secondRequestData.startRequest(backoff, triedAllOptions, stream, request, model, alternatives, channel);
@@ -705,7 +722,23 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				    .detail("TriedAllOptions", triedAllOptions)
 				    .detail("Token", stream->getEndpoint().token)
 				    .detail("Request", requestType)
-				    .detail("QueueModel", model ? model->toString() : "");
+				    .detail("DebugID", dbgid.present() ? dbgid.get() : UID())
+				    .detail("QueueModel", model ? model->toString() : "")
+				    .detail("Total", alternatives->size())
+				    .detail("Best", alternatives->countBest());
+			} else {
+				TraceEvent("LBLocal")
+				    .suppressFor(0.1)
+				    .detail("Distance", (int)distance)
+				    .detail("BackOff", backoff)
+				    .detail("TriedAllOptions", triedAllOptions)
+				    .detail("Token", stream->getEndpoint().token)
+				    .detail("Request", requestType)
+				    .detail("DebugID", dbgid.present() ? dbgid.get() : UID())
+				    .detail("QueueModel", model ? model->toString() : "")
+				    .detail("Total", alternatives->size())
+				    .detail("Best", alternatives->countBest())
+				    .detail("Attempts", numAttempts);
 			}
 			firstRequestData.startRequest(backoff, triedAllOptions, stream, request, model, alternatives, channel);
 			firstRequestEndpoint = stream->getEndpoint().token.first();
