@@ -1083,14 +1083,18 @@ static bool handleRangeIsRevoke(Reference<BlobManagerData> bmData, RangeAssignme
 						break;
 					}
 				}
-				if (it.cvalue() != UID() || inKnownBlobRanges) {
-					fmt::print("Assignment [{0} - {1}) truncates range [{2} - {3})\n",
+				bool forcePurging = bmData->isForcePurging(it.range());
+				if (it.cvalue() != UID() || (inKnownBlobRanges && !forcePurging)) {
+					fmt::print("Assignment [{0} - {1}): {2} truncates range [{3} - {4}) ({5}, {6})\n",
 					           assignment.keyRange.begin.printable(),
 					           assignment.keyRange.end.printable(),
+					           it.cvalue().toString().substr(0, 5),
 					           it.begin().printable(),
-					           it.end().printable());
+					           it.end().printable(),
+					           inKnownBlobRanges,
+					           forcePurging);
 					// assert on condition again to make assertion failure better than "false"
-					ASSERT(it.cvalue() == UID() && !inKnownBlobRanges);
+					ASSERT(it.cvalue() == UID() && (!inKnownBlobRanges || forcePurging));
 				}
 			}
 
