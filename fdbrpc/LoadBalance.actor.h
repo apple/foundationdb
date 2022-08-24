@@ -491,7 +491,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 	for (int i = 0; i < alternatives->size(); i++) {
 		distanceV.push_back((int)alternatives->getDistance(i));
 	}
-	state std::string distances = describe(distances);
+	state std::string distances = describe(distanceV);
 
 	state int bestAlt = deterministicRandom()->randomInt(0, alternatives->countBest());
 	state int nextAlt = deterministicRandom()->randomInt(0, std::max(alternatives->size() - 1, 1));
