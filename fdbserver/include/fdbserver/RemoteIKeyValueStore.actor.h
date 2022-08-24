@@ -155,7 +155,7 @@ struct OpenKVStoreRequest {
 struct IKVSGetValueRequest {
 	constexpr static FileIdentifier file_identifier = 1029439;
 	KeyRef key;
-	ReadOptions options;
+	Optional<ReadOptions> options;
 	ReplyPromise<Optional<Value>> reply;
 
 	template <class Ar>
@@ -201,7 +201,7 @@ struct IKVSReadValuePrefixRequest {
 	constexpr static FileIdentifier file_identifier = 1928374;
 	KeyRef key;
 	int maxLength;
-	ReadOptions options;
+	Optional<ReadOptions> options;
 	ReplyPromise<Optional<Value>> reply;
 
 	template <class Ar>
@@ -244,7 +244,7 @@ struct IKVSReadRangeRequest {
 	KeyRangeRef keys;
 	int rowLimit;
 	int byteLimit;
-	RangeReadOptions options;
+	Optional<RangeReadOptions> options;
 	ReplyPromise<IKVSReadRangeReply> reply;
 
 	template <class Ar>
@@ -400,13 +400,13 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 		return commitAndGetStorageBytes(this, commitReply);
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key, ReadOptions const& options = ReadOptions()) override {
+	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options = Optional<ReadOptions>()) override {
 		return readValueImpl(this, IKVSGetValueRequest{ key, options, ReplyPromise<Optional<Value>>() });
 	}
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
-	                                        ReadOptions const& options = ReadOptions()) override {
+	                                        Optional<ReadOptions> options = Optional<ReadOptions>()) override {
 		return interf.readValuePrefix.getReply(
 		    IKVSReadValuePrefixRequest{ key, maxLength, options, ReplyPromise<Optional<Value>>() });
 	}
@@ -414,7 +414,7 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit = 1 << 30,
 	                              int byteLimit = 1 << 30,
-	                              RangeReadOptions const& options = RangeReadOptions()) override {
+	                              Optional<RangeReadOptions> options = Optional<RangeReadOptions>()) override {
 		IKVSReadRangeRequest req{ keys, rowLimit, byteLimit, options, ReplyPromise<IKVSReadRangeReply>() };
 		return fmap([](const IKVSReadRangeReply& reply) { return reply.toRangeResult(); },
 		            interf.readRange.getReply(req));

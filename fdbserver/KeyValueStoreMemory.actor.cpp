@@ -198,7 +198,7 @@ public:
 		return c;
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key, ReadOptions const& options) override {
+	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options) override {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
@@ -210,7 +210,7 @@ public:
 		return Optional<Value>(it.getValue());
 	}
 
-	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, ReadOptions const& options) override {
+	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<ReadOptions> options) override {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
@@ -232,7 +232,7 @@ public:
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit,
 	                              int byteLimit,
-	                              RangeReadOptions const& options) override {
+	                              Optional<RangeReadOptions> options) override {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
@@ -926,14 +926,16 @@ private:
 		}
 	}
 
-	ACTOR static Future<Optional<Value>> waitAndReadValue(KeyValueStoreMemory* self, Key key, ReadOptions options) {
+	ACTOR static Future<Optional<Value>> waitAndReadValue(KeyValueStoreMemory* self,
+	                                                      Key key,
+	                                                      Optional<ReadOptions> options) {
 		wait(self->recovering);
 		return static_cast<IKeyValueStore*>(self)->readValue(key, options).get();
 	}
 	ACTOR static Future<Optional<Value>> waitAndReadValuePrefix(KeyValueStoreMemory* self,
 	                                                            Key key,
 	                                                            int maxLength,
-	                                                            ReadOptions options) {
+	                                                            Optional<ReadOptions> options) {
 		wait(self->recovering);
 		return static_cast<IKeyValueStore*>(self)->readValuePrefix(key, maxLength, options).get();
 	}
@@ -941,7 +943,7 @@ private:
 	                                                  KeyRange keys,
 	                                                  int rowLimit,
 	                                                  int byteLimit,
-	                                                  RangeReadOptions options) {
+	                                                  Optional<RangeReadOptions> options) {
 		wait(self->recovering);
 		return static_cast<IKeyValueStore*>(self)->readRange(keys, rowLimit, byteLimit, options).get();
 	}

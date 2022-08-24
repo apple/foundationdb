@@ -7346,7 +7346,7 @@ public:
 
 	private:
 		PagerEventReasons reason;
-		ReadOptions options;
+		Optional<ReadOptions> options;
 		VersionedBTree* btree;
 		Reference<IPagerSnapshot> pager;
 		bool valid;
@@ -7412,7 +7412,7 @@ public:
 			                    link.get().getChildPage(),
 			                    ioMaxPriority,
 			                    false,
-			                    options.cacheResult || path.back().btPage()->height != 2),
+			                    !options.present() || options.get().cacheResult || path.back().btPage()->height != 2),
 			           [=](Reference<const ArenaPage> p) {
 #if REDWOOD_DEBUG
 				           path.push_back({ p, btree->getCursor(p.getPtr(), link), link.get().getChildPage() });
@@ -7446,7 +7446,7 @@ public:
 		// Initialize or reinitialize cursor
 		Future<Void> init(VersionedBTree* btree_in,
 		                  PagerEventReasons reason_in,
-		                  ReadOptions options_in,
+		                  Optional<ReadOptions> options_in,
 		                  Reference<IPagerSnapshot> pager_in,
 		                  BTreeNodeLink root) {
 			btree = btree_in;
@@ -7649,7 +7649,7 @@ public:
 	Future<Void> initBTreeCursor(BTreeCursor* cursor,
 	                             Version snapshotVersion,
 	                             PagerEventReasons reason,
-	                             ReadOptions options = ReadOptions()) {
+	                             Optional<ReadOptions> options = Optional<ReadOptions>()) {
 		Reference<IPagerSnapshot> snapshot = m_pager->getReadSnapshot(snapshotVersion);
 
 		BTreeNodeLinkRef root;
@@ -7798,7 +7798,7 @@ public:
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit,
 	                              int byteLimit,
-	                              RangeReadOptions const& options) override {
+	                              Optional<RangeReadOptions> options) override {
 		debug_printf("READRANGE %s\n", printable(keys).c_str());
 		return catchError(readRange_impl(this, keys, rowLimit, byteLimit, options));
 	}
@@ -7807,11 +7807,18 @@ public:
 	                                                KeyRange keys,
 	                                                int rowLimit,
 	                                                int byteLimit,
-	                                                RangeReadOptions options) {
-		state PagerEventReasons reason =
-		    (options.type == ReadType::FETCH) ? PagerEventReasons::FetchRange : PagerEventReasons::RangeRead;
+	                                                Optional<RangeReadOptions> options) {
+		state PagerEventReasons reason = PagerEventReasons::RangeRead;
 		state VersionedBTree::BTreeCursor cur;
-		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), reason, options));
+		if (options.present()) {
+			state ReadOptions rOptions = options.get();
+			if (options.get().type == ReadType::FETCH) {
+				reason = PagerEventReasons::FetchRange;
+			}
+			wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), reason, rOptions));
+		} else {
+			wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), reason));
+		}
 		state PriorityMultiLock::Lock lock;
 		state Future<Void> f;
 		++g_redwoodMetrics.metric.opGetRange;
@@ -7947,7 +7954,9 @@ public:
 		return result;
 	}
 
-	ACTOR static Future<Optional<Value>> readValue_impl(KeyValueStoreRedwood* self, Key key, ReadOptions options) {
+	ACTOR static Future<Optional<Value>> readValue_impl(KeyValueStoreRedwood* self,
+	                                                    Key key,
+	                                                    Optional<ReadOptions> options) {
 		state VersionedBTree::BTreeCursor cur;
 		wait(self->m_tree->initBTreeCursor(
 		    &cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::PointRead, options));
@@ -7969,11 +7978,11 @@ public:
 		return Optional<Value>();
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key, ReadOptions const& options) override {
+	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options) override {
 		return catchError(readValue_impl(this, key, options));
 	}
 
-	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, ReadOptions const& options) override {
+	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<ReadOptions> options) override {
 		return catchError(map(readValue_impl(this, key, options), [maxLength](Optional<Value> v) {
 			if (v.present() && v.get().size() > maxLength) {
 				v.get().contents() = v.get().substr(0, maxLength);
@@ -10998,7 +11007,7 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
                                     bool singlePrefix,
                                     int rowLimit,
                                     int byteLimit,
-                                    RangeReadOptions options = RangeReadOptions()) {
+                                    Optional<RangeReadOptions> options = Optional<RangeReadOptions>()) {
 	fmt::print("\nstoreType: {}\n", static_cast<int>(kvs->getType()));
 	fmt::print("prefixSource: {}\n", source.toString());
 	fmt::print("suffixSize: {}\n", suffixSize);
@@ -11055,9 +11064,6 @@ TEST_CASE(":/redwood/performance/randomRangeScans") {
 	state int suffixSize = 12;
 	state int valueSize = 100;
 	state int maxByteLimit = std::numeric_limits<int>::max();
-	state RangeReadOptions options;
-	options.cacheResult = true;
-	options.type = ReadType::NORMAL;
 
 	// TODO change to 100e8 after figuring out no-disk redwood mode
 	state int writeRecordCountTarget = 1e6;
@@ -11073,16 +11079,11 @@ TEST_CASE(":/redwood/performance/randomRangeScans") {
 	    redwood, suffixSize, valueSize, source, writeRecordCountTarget, writePrefixesInOrder, false));
 
 	// divide targets for tiny queries by 10 because they are much slower
-	wait(randomRangeScans(
-	    redwood, suffixSize, source, valueSize, queryRecordTarget / 10, true, 10, maxByteLimit, options));
-	wait(
-	    randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, true, 1000, maxByteLimit, options));
-	wait(randomRangeScans(
-	    redwood, suffixSize, source, valueSize, queryRecordTarget / 10, false, 100, maxByteLimit, options));
-	wait(randomRangeScans(
-	    redwood, suffixSize, source, valueSize, queryRecordTarget, false, 10000, maxByteLimit, options));
-	wait(randomRangeScans(
-	    redwood, suffixSize, source, valueSize, queryRecordTarget, false, 1000000, maxByteLimit, options));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget / 10, true, 10, maxByteLimit));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, true, 1000, maxByteLimit));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget / 10, false, 100, maxByteLimit));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 10000, maxByteLimit));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 1000000, maxByteLimit));
 	wait(closeKVS(redwood));
 	printf("\n");
 	return Void();

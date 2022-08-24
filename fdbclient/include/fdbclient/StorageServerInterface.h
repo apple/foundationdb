@@ -296,7 +296,7 @@ struct GetValueRequest : TimedRequest {
 	Version version;
 	Optional<TagSet> tags;
 	ReplyPromise<GetValueReply> reply;
-	ReadOptions options;
+	Optional<ReadOptions> options;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
@@ -309,7 +309,7 @@ struct GetValueRequest : TimedRequest {
 	                const Key& key,
 	                Version ver,
 	                Optional<TagSet> tags,
-	                ReadOptions options,
+	                Optional<ReadOptions> options,
 	                VersionVector latestCommitVersions)
 	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), tags(tags), options(options),
 	    ssLatestCommitVersions(latestCommitVersions) {}
@@ -394,11 +394,11 @@ struct GetKeyValuesRequest : TimedRequest {
 	int limit, limitBytes;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
+	Optional<RangeReadOptions> options;
 	ReplyPromise<GetKeyValuesReply> reply;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
-	RangeReadOptions options;
 
 	GetKeyValuesRequest() {}
 
@@ -412,12 +412,12 @@ struct GetKeyValuesRequest : TimedRequest {
 		           version,
 		           limit,
 		           limitBytes,
-		           options,
 		           tags,
 		           debugID,
 		           reply,
 		           spanContext,
 		           tenantInfo,
+		           options,
 		           arena,
 		           ssLatestCommitVersions);
 	}
@@ -452,8 +452,8 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	int limit, limitBytes;
 	int matchIndex;
 	Optional<TagSet> tags;
+	Optional<RangeReadOptions> options;
 	ReplyPromise<GetMappedKeyValuesReply> reply;
-	RangeReadOptions options;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key range
@@ -518,7 +518,7 @@ struct GetKeyValuesStreamRequest {
 	Version version; // or latestVersion
 	int limit, limitBytes;
 	Optional<TagSet> tags;
-	RangeReadOptions options;
+	Optional<RangeReadOptions> options;
 	ReplyPromiseStream<GetKeyValuesStreamReply> reply;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
@@ -569,7 +569,7 @@ struct GetKeyRequest : TimedRequest {
 	Version version; // or latestVersion
 	Optional<TagSet> tags;
 	ReplyPromise<GetKeyReply> reply;
-	ReadOptions options;
+	Optional<ReadOptions> options;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
@@ -583,7 +583,7 @@ struct GetKeyRequest : TimedRequest {
 	              KeySelectorRef const& sel,
 	              Version version,
 	              Optional<TagSet> tags,
-	              ReadOptions options,
+	              Optional<ReadOptions> options,
 	              VersionVector latestCommitVersions)
 	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), tags(tags), options(options),
 	    ssLatestCommitVersions(latestCommitVersions) {}

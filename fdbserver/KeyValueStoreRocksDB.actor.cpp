@@ -1880,35 +1880,51 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return result;
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key, ReadOptions const& options) override {
-		if (!shouldThrottle(options.type, key)) {
-			auto a = new Reader::ReadValueAction(key, options.debugID);
+	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options) override {
+		ReadType type = ReadType::NORMAL;
+		Optional<UID> debugID;
+
+		if (options.present()) {
+			type = options.get().type;
+			debugID = options.get().debugID;
+		}
+
+		if (!shouldThrottle(type, key)) {
+			auto a = new Reader::ReadValueAction(key, debugID);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
 		}
 
-		auto& semaphore = (options.type == ReadType::FETCH) ? fetchSemaphore : readSemaphore;
-		int maxWaiters = (options.type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
+		auto& semaphore = (type == ReadType::FETCH) ? fetchSemaphore : readSemaphore;
+		int maxWaiters = (type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
-		auto a = std::make_unique<Reader::ReadValueAction>(key, options.debugID);
+		auto a = std::make_unique<Reader::ReadValueAction>(key, debugID);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
-	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, ReadOptions const& options) override {
-		if (!shouldThrottle(options.type, key)) {
-			auto a = new Reader::ReadValuePrefixAction(key, maxLength, options.debugID);
+	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<ReadOptions> options) override {
+		ReadType type = ReadType::NORMAL;
+		Optional<UID> debugID;
+
+		if (options.present()) {
+			type = options.get().type;
+			debugID = options.get().debugID;
+		}
+
+		if (!shouldThrottle(type, key)) {
+			auto a = new Reader::ReadValuePrefixAction(key, maxLength, debugID);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
 		}
 
-		auto& semaphore = (options.type == ReadType::FETCH) ? fetchSemaphore : readSemaphore;
-		int maxWaiters = (options.type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
+		auto& semaphore = (type == ReadType::FETCH) ? fetchSemaphore : readSemaphore;
+		int maxWaiters = (type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
-		auto a = std::make_unique<Reader::ReadValuePrefixAction>(key, maxLength, options.debugID);
+		auto a = std::make_unique<Reader::ReadValuePrefixAction>(key, maxLength, debugID);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
@@ -1935,16 +1951,22 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit,
 	                              int byteLimit,
-	                              RangeReadOptions const& options) override {
-		if (!shouldThrottle(options.type, keys.begin)) {
+	                              Optional<RangeReadOptions> options) override {
+		ReadType type = ReadType::NORMAL;
+
+		if (options.present()) {
+			type = options.get().type;
+		}
+
+		if (!shouldThrottle(type, keys.begin)) {
 			auto a = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
 		}
 
-		auto& semaphore = (options.type == ReadType::FETCH) ? fetchSemaphore : readSemaphore;
-		int maxWaiters = (options.type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
+		auto& semaphore = (type == ReadType::FETCH) ? fetchSemaphore : readSemaphore;
+		int maxWaiters = (type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
 		auto a = std::make_unique<Reader::ReadRangeAction>(keys, rowLimit, byteLimit);

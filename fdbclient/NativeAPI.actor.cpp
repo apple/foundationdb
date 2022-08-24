@@ -3433,7 +3433,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
                          UseTenant useTenant = UseTenant::True) {
 	wait(success(version));
 
-	state Optional<UID> getKeyID = Optional<UID>();
+	state Optional<UID> getKeyID;
 	state Span span("NAPI:getKey"_loc, trState->spanContext);
 	if (trState->readOptions.debugID.present()) {
 		getKeyID = nondeterministicRandom()->randomUniqueID();
@@ -3466,7 +3466,10 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 
 		state VersionVector ssLatestCommitVersions;
 		trState->cx->getLatestCommitVersions(locationInfo.locations, version.get(), trState, ssLatestCommitVersions);
-		state ReadOptions readOptions;
+		state ReadOptions readOptions = trState->readOptions;
+		readOptions.debugID = getKeyID;
+		state bool sendReadOption =
+		    readOptions.debugID.present() || readOptions.type != ReadType::NORMAL || readOptions.cacheResult != true;
 		try {
 			if (getKeyID.present())
 				g_traceBatch.addEvent(
@@ -3475,15 +3478,13 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 				    "NativeAPI.getKey.Before"); //.detail("StartKey",
 				                                // k.getKey()).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
 			++trState->cx->transactionPhysicalReads;
-			readOptions = trState->readOptions;
-			readOptions.debugID = getKeyID;
 
 			GetKeyRequest req(span.context,
 			                  useTenant ? trState->getTenantInfo() : TenantInfo(),
 			                  k,
 			                  version.get(),
 			                  trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>(),
-			                  readOptions,
+			                  sendReadOption ? readOptions : Optional<ReadOptions>(),
 			                  ssLatestCommitVersions);
 			req.arena.dependsOn(k.arena());
 
@@ -3942,7 +3943,12 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 
 			// FIXME: buggify byte limits on internal functions that use them, instead of globally
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
-			req.options = trState->readOptions;
+			if (trState->readOptions.type != ReadType::NORMAL || trState->readOptions.cacheResult != true ||
+			    trState->readOptions.debugID.present()) {
+				RangeReadOptions rangeOptions;
+				rangeOptions = trState->readOptions;
+				req.options = Optional<RangeReadOptions>(rangeOptions);
+			}
 
 			try {
 				if (trState->readOptions.debugID.present()) {
@@ -4310,7 +4316,12 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 			req.arena.dependsOn(mapper.arena());
 			setMatchIndex<GetKeyValuesFamilyRequest>(req, matchIndex);
 			req.tenantInfo = useTenant ? trState->getTenantInfo() : TenantInfo();
-			req.options = trState->readOptions;
+			if (trState->readOptions.type != ReadType::NORMAL || trState->readOptions.cacheResult != true ||
+			    trState->readOptions.debugID.present()) {
+				RangeReadOptions rangeOptions;
+				rangeOptions = trState->readOptions;
+				req.options = Optional<RangeReadOptions>(rangeOptions);
+			}
 			req.version = readVersion;
 
 			trState->cx->getLatestCommitVersions(
@@ -4763,8 +4774,12 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 			req.spanContext = spanContext;
 			req.limit = reverse ? -CLIENT_KNOBS->REPLY_BYTE_LIMIT : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 			req.limitBytes = std::numeric_limits<int>::max();
-
-			req.options = trState->readOptions;
+			if (trState->readOptions.type != ReadType::NORMAL || trState->readOptions.cacheResult != true ||
+			    trState->readOptions.debugID.present()) {
+				RangeReadOptions rangeOptions;
+				rangeOptions = trState->readOptions;
+				req.options = Optional<RangeReadOptions>(rangeOptions);
+			}
 
 			trState->cx->getLatestCommitVersions(
 			    locations[shard].locations, req.version, trState, req.ssLatestCommitVersions);

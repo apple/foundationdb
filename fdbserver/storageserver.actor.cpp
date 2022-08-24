@@ -399,22 +399,24 @@ struct StorageServerDisk {
 	//  - "a", if key "a" exist
 	//  - "b", if key "a" doesn't exist, and "b" is the next existing key in total order
 	//  - allKeys.end, if keyrange [a, allKeys.end) is empty
-	Future<Key> readNextKeyInclusive(KeyRef key, RangeReadOptions const& options = RangeReadOptions()) {
+	Future<Key> readNextKeyInclusive(KeyRef key, Optional<RangeReadOptions> options = Optional<RangeReadOptions>()) {
 		++(*kvScans);
 		return readFirstKey(storage, KeyRangeRef(key, allKeys.end), options);
 	}
-	Future<Optional<Value>> readValue(KeyRef key, ReadOptions const& options = ReadOptions()) {
+	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options = Optional<ReadOptions>()) {
 		++(*kvGets);
 		return storage->readValue(key, options);
 	}
-	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, ReadOptions const& options = ReadOptions()) {
+	Future<Optional<Value>> readValuePrefix(KeyRef key,
+	                                        int maxLength,
+	                                        Optional<ReadOptions> options = Optional<ReadOptions>()) {
 		++(*kvGets);
 		return storage->readValuePrefix(key, maxLength, options);
 	}
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit = 1 << 30,
 	                              int byteLimit = 1 << 30,
-	                              RangeReadOptions const& options = RangeReadOptions()) {
+	                              Optional<RangeReadOptions> options = Optional<RangeReadOptions>()) {
 		++(*kvScans);
 		return storage->readRange(keys, rowLimit, byteLimit, options);
 	}
@@ -443,7 +445,9 @@ private:
 	IKeyValueStore* storage;
 	void writeMutations(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
 
-	ACTOR static Future<Key> readFirstKey(IKeyValueStore* storage, KeyRangeRef range, RangeReadOptions options) {
+	ACTOR static Future<Key> readFirstKey(IKeyValueStore* storage,
+	                                      KeyRangeRef range,
+	                                      Optional<RangeReadOptions> options) {
 		RangeResult r = wait(storage->readRange(range, 1, 1 << 30, options));
 		if (r.size())
 			return r[0].key;
@@ -1806,17 +1810,17 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		// so we need to downgrade here
 		wait(data->getQueryDelay());
 
-		if (req.options.debugID.present())
+		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
-			                      req.options.debugID.get().first(),
+			                      req.options.get().debugID.get().first(),
 			                      "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
 
 		state Optional<Value> v;
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
 		state Version version = wait(waitForVersion(data, commitVersion, req.version, req.spanContext));
-		if (req.options.debugID.present())
+		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
-			                      req.options.debugID.get().first(),
+			                      req.options.get().debugID.get().first(),
 			                      "getValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
 
 		Optional<TenantMapEntry> entry = data->getTenantEntry(version, req.tenantInfo);
@@ -1884,9 +1888,9 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			data->metrics.notifyBytesReadPerKSecond(req.key, bytesReadPerKSecond);
 		}
 
-		if (req.options.debugID.present())
+		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
-			                      req.options.debugID.get().first(),
+			                      req.options.get().debugID.get().first(),
 			                      "getValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
 
 		// Check if the desired key might be cached
@@ -3230,6 +3234,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 	state GetValueReqAndResultRef getValue;
 	state double getValueStart = g_network->timer();
 	getValue.key = key;
+	state Optional<ReadOptions> options = pOriginalReq->options.castTo<ReadOptions>();
 
 	if (data->shards[key]->isReadable()) {
 		try {
@@ -3239,7 +3244,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 			                    key,
 			                    version,
 			                    pOriginalReq->tags,
-			                    pOriginalReq->options,
+			                    options,
 			                    VersionVector());
 			// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
 			// original request level, rather than individual underlying lookups. The reason is that throttle any
@@ -3286,7 +3291,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
                                           int limit,
                                           int* pLimitBytes,
                                           SpanContext parentSpan,
-                                          RangeReadOptions options,
+                                          Optional<RangeReadOptions> options,
                                           Optional<Key> tenantPrefix) {
 	state GetKeyValuesReply result;
 	state StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
@@ -3527,7 +3532,7 @@ ACTOR Future<Key> findKey(StorageServer* data,
                           KeyRange range,
                           int* pOffset,
                           SpanContext parentSpan,
-                          RangeReadOptions options)
+                          Optional<RangeReadOptions> options)
 // Attempts to find the key indicated by sel in the data at version, within range.
 // Precondition: selectorInRange(sel, range)
 // If it is found, offset is set to 0 and a key is returned which falls inside range.
@@ -3665,7 +3670,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 {
 	state Span span("SS:getKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state RangeReadOptions options = req.options;
+	state Optional<RangeReadOptions> options = req.options;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -3680,16 +3685,16 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.options.type == ReadType::FETCH) {
+	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.options.present() && req.options.get().type == ReadType::FETCH) {
 		wait(delay(0, TaskPriority::FetchKeys));
 	} else {
 		wait(data->getQueryDelay());
 	}
 
 	try {
-		if (req.options.debugID.present())
+		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.debugID.get().first(), "storageserver.getKeyValues.Before");
+			    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getKeyValues.Before");
 
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
 		state Version version = wait(waitForVersion(data, commitVersion, req.version, span.context));
@@ -3705,9 +3710,9 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		//		try {
 		state KeyRange shard = getShardKeyRange(data, req.begin);
 
-		if (req.options.debugID.present())
+		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.debugID.get().first(), "storageserver.getKeyValues.AfterVersion");
+			    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getKeyValues.AfterVersion");
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
 		// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
@@ -3734,9 +3739,9 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
 
-		if (req.options.debugID.present())
+		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.debugID.get().first(), "storageserver.getKeyValues.AfterKeys");
+			    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getKeyValues.AfterKeys");
 		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
 
 		// Offsets of zero indicate begin/end keys in this shard, which obviously means we can answer the query
@@ -3754,9 +3759,9 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		}
 
 		if (begin >= end) {
-			if (req.options.debugID.present())
+			if (req.options.present() && req.options.get().debugID.present())
 				g_traceBatch.addEvent(
-				    "TransactionDebug", req.options.debugID.get().first(), "storageserver.getKeyValues.Send");
+				    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getKeyValues.Send");
 			//.detail("Begin",begin).detail("End",end);
 
 			GetKeyValuesReply none;
@@ -3781,9 +3786,10 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			                                      tenantPrefix));
 			GetKeyValuesReply r = _r;
 
-			if (req.options.debugID.present())
-				g_traceBatch.addEvent(
-				    "TransactionDebug", req.options.debugID.get().first(), "storageserver.getKeyValues.AfterReadRange");
+			if (req.options.present() && req.options.get().debugID.present())
+				g_traceBatch.addEvent("TransactionDebug",
+				                      req.options.get().debugID.get().first(),
+				                      "storageserver.getKeyValues.AfterReadRange");
 			//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
 			data->checkChangeCounter(
 			    changeCounter,
@@ -3860,9 +3866,10 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 	state double getValuesStart = g_network->timer();
 	getRange.begin = firstGreaterOrEqual(KeyRef(*a, prefix));
 	getRange.end = firstGreaterOrEqual(strinc(prefix, *a));
-	if (pOriginalReq->options.debugID.present())
-		g_traceBatch.addEvent(
-		    "TransactionDebug", pOriginalReq->options.debugID.get().first(), "storageserver.quickGetKeyValues.Before");
+	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
+		g_traceBatch.addEvent("TransactionDebug",
+		                      pOriginalReq->options.get().debugID.get().first(),
+		                      "storageserver.quickGetKeyValues.Before");
 	try {
 		// TODO: Use a lower level API may be better?
 		GetKeyValuesRequest req;
@@ -3877,8 +3884,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		req.limit = SERVER_KNOBS->QUICK_GET_KEY_VALUES_LIMIT;
 		req.limitBytes = SERVER_KNOBS->QUICK_GET_KEY_VALUES_LIMIT_BYTES;
 		req.options = pOriginalReq->options;
-		// TODO: tweak priorities?
-		req.options.type = ReadType::NORMAL;
+		// TODO: tweak priorities in req.options.get().type?
 		req.tags = pOriginalReq->tags;
 		req.ssLatestCommitVersions = VersionVector();
 
@@ -3894,9 +3900,9 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 			getRange.result = RangeResultRef(reply.data, reply.more);
 			const double duration = g_network->timer() - getValuesStart;
 			data->counters.mappedRangeLocalSample.addMeasurement(duration);
-			if (pOriginalReq->options.debugID.present())
+			if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 				g_traceBatch.addEvent("TransactionDebug",
-				                      pOriginalReq->options.debugID.get().first(),
+				                      pOriginalReq->options.get().debugID.get().first(),
 				                      "storageserver.quickGetKeyValues.AfterLocalFetch");
 			return getRange;
 		}
@@ -3909,8 +3915,8 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 	if (SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK) {
 		state Transaction tr(data->cx, pOriginalReq->tenantInfo.name.castTo<TenantName>());
 		tr.setVersion(version);
-		if (pOriginalReq->options.debugID.present()) {
-			tr.debugTransaction(pOriginalReq->options.debugID.get());
+		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present()) {
+			tr.debugTransaction(pOriginalReq->options.get().debugID.get());
 		}
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
 		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
@@ -3922,9 +3928,9 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		getRange.result = rangeResult;
 		const double duration = g_network->timer() - getValuesStart;
 		data->counters.mappedRangeRemoteSample.addMeasurement(duration);
-		if (pOriginalReq->options.debugID.present())
+		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 			g_traceBatch.addEvent("TransactionDebug",
-			                      pOriginalReq->options.debugID.get().first(),
+			                      pOriginalReq->options.get().debugID.get().first(),
 			                      "storageserver.quickGetKeyValues.AfterRemoteFetch");
 		return getRange;
 	} else {
@@ -4213,9 +4219,9 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	result.arena.dependsOn(input.arena);
 
 	result.data.reserve(result.arena, input.data.size());
-	if (pOriginalReq->options.debugID.present())
+	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 		g_traceBatch.addEvent(
-		    "TransactionDebug", pOriginalReq->options.debugID.get().first(), "storageserver.mapKeyValues.Start");
+		    "TransactionDebug", pOriginalReq->options.get().debugID.get().first(), "storageserver.mapKeyValues.Start");
 	state Tuple mappedKeyFormatTuple;
 	state Tuple mappedKeyTuple;
 
@@ -4234,9 +4240,10 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	state std::vector<MappedKeyValueRef> kvms(k);
 	state std::vector<Future<Void>> subqueries;
 	state int offset = 0;
-	if (pOriginalReq->options.debugID.present())
-		g_traceBatch.addEvent(
-		    "TransactionDebug", pOriginalReq->options.debugID.get().first(), "storageserver.mapKeyValues.BeforeLoop");
+	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
+		g_traceBatch.addEvent("TransactionDebug",
+		                      pOriginalReq->options.get().debugID.get().first(),
+		                      "storageserver.mapKeyValues.BeforeLoop");
 	for (; offset < sz; offset += SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE) {
 		// Divide into batches of MAX_PARALLEL_QUICK_GET_VALUE subqueries
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
@@ -4272,18 +4279,19 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			                                 mappedKey));
 		}
 		wait(waitForAll(subqueries));
-		if (pOriginalReq->options.debugID.present())
+		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
 			g_traceBatch.addEvent("TransactionDebug",
-			                      pOriginalReq->options.debugID.get().first(),
+			                      pOriginalReq->options.get().debugID.get().first(),
 			                      "storageserver.mapKeyValues.AfterBatch");
 		subqueries.clear();
 		for (int i = 0; i + offset < sz && i < SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE; i++) {
 			result.data.push_back(result.arena, kvms[i]);
 		}
 	}
-	if (pOriginalReq->options.debugID.present())
-		g_traceBatch.addEvent(
-		    "TransactionDebug", pOriginalReq->options.debugID.get().first(), "storageserver.mapKeyValues.AfterAll");
+	if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
+		g_traceBatch.addEvent("TransactionDebug",
+		                      pOriginalReq->options.get().debugID.get().first(),
+		                      "storageserver.mapKeyValues.AfterAll");
 	return result;
 }
 
@@ -4409,7 +4417,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 {
 	state Span span("SS:getMappedKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state RangeReadOptions options = req.options;
+	state Optional<RangeReadOptions> options = req.options;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -4424,16 +4432,16 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.options.type == ReadType::FETCH) {
+	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.options.present() && req.options.get().type == ReadType::FETCH) {
 		wait(delay(0, TaskPriority::FetchKeys));
 	} else {
 		wait(data->getQueryDelay());
 	}
 
 	try {
-		if (req.options.debugID.present())
+		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.debugID.get().first(), "storageserver.getMappedKeyValues.Before");
+			    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getMappedKeyValues.Before");
 		// VERSION_VECTOR change
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
 		state Version version = wait(waitForVersion(data, commitVersion, req.version, span.context));
@@ -4449,9 +4457,10 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		//		try {
 		state KeyRange shard = getShardKeyRange(data, req.begin);
 
-		if (req.options.debugID.present())
-			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.debugID.get().first(), "storageserver.getMappedKeyValues.AfterVersion");
+		if (req.options.present() && req.options.get().debugID.present())
+			g_traceBatch.addEvent("TransactionDebug",
+			                      req.options.get().debugID.get().first(),
+			                      "storageserver.getMappedKeyValues.AfterVersion");
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
 		// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
@@ -4491,9 +4500,10 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			}
 		}
 
-		if (req.options.debugID.present())
-			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.debugID.get().first(), "storageserver.getMappedKeyValues.AfterKeys");
+		if (req.options.present() && req.options.get().debugID.present())
+			g_traceBatch.addEvent("TransactionDebug",
+			                      req.options.get().debugID.get().first(),
+			                      "storageserver.getMappedKeyValues.AfterKeys");
 		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
 
 		// Offsets of zero indicate begin/end keys in this shard, which obviously means we can answer the query
@@ -4511,9 +4521,10 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		}
 
 		if (begin >= end) {
-			if (req.options.debugID.present())
-				g_traceBatch.addEvent(
-				    "TransactionDebug", req.options.debugID.get().first(), "storageserver.getMappedKeyValues.Send");
+			if (req.options.present() && req.options.get().debugID.present())
+				g_traceBatch.addEvent("TransactionDebug",
+				                      req.options.get().debugID.get().first(),
+				                      "storageserver.getMappedKeyValues.Send");
 			//.detail("Begin",begin).detail("End",end);
 
 			GetMappedKeyValuesReply none;
@@ -4548,9 +4559,9 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 				throw;
 			}
 
-			if (req.options.debugID.present())
+			if (req.options.present() && req.options.get().debugID.present())
 				g_traceBatch.addEvent("TransactionDebug",
-				                      req.options.debugID.get().first(),
+				                      req.options.get().debugID.get().first(),
 				                      "storageserver.getMappedKeyValues.AfterReadRange");
 			//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
 			data->checkChangeCounter(
@@ -4617,7 +4628,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 {
 	state Span span("SS:getKeyValuesStream"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state RangeReadOptions options = req.options;
+	state Optional<RangeReadOptions> options = req.options;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -4631,16 +4642,16 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.options.type == ReadType::FETCH) {
+	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.options.present() && req.options.get().type == ReadType::FETCH) {
 		wait(delay(0, TaskPriority::FetchKeys));
 	} else {
 		wait(delay(0, TaskPriority::DefaultEndpoint));
 	}
 
 	try {
-		if (req.options.debugID.present())
+		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.debugID.get().first(), "storageserver.getKeyValuesStream.Before");
+			    "TransactionDebug", req.options.get().debugID.get().first(), "storageserver.getKeyValuesStream.Before");
 
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
 		state Version version = wait(waitForVersion(data, commitVersion, req.version, span.context));
@@ -4656,9 +4667,10 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		//		try {
 		state KeyRange shard = getShardKeyRange(data, req.begin);
 
-		if (req.options.debugID.present())
-			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.debugID.get().first(), "storageserver.getKeyValuesStream.AfterVersion");
+		if (req.options.present() && req.options.get().debugID.present())
+			g_traceBatch.addEvent("TransactionDebug",
+			                      req.options.get().debugID.get().first(),
+			                      "storageserver.getKeyValuesStream.AfterVersion");
 		//.detail("ShardBegin", shard.begin).detail("ShardEnd", shard.end);
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin",
 		// req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard",
@@ -4684,9 +4696,10 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		                             : findKey(data, req.end, version, searchRange, &offset2, span.context, options);
 		state Key begin = wait(fBegin);
 		state Key end = wait(fEnd);
-		if (req.options.debugID.present())
-			g_traceBatch.addEvent(
-			    "TransactionDebug", req.options.debugID.get().first(), "storageserver.getKeyValuesStream.AfterKeys");
+		if (req.options.present() && req.options.get().debugID.present())
+			g_traceBatch.addEvent("TransactionDebug",
+			                      req.options.get().debugID.get().first(),
+			                      "storageserver.getKeyValuesStream.AfterKeys");
 		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
 
 		// Offsets of zero indicate begin/end keys in this shard, which obviously means we can answer the query
@@ -4704,9 +4717,10 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		}
 
 		if (begin >= end) {
-			if (req.options.debugID.present())
-				g_traceBatch.addEvent(
-				    "TransactionDebug", req.options.debugID.get().first(), "storageserver.getKeyValuesStream.Send");
+			if (req.options.present() && req.options.get().debugID.present())
+				g_traceBatch.addEvent("TransactionDebug",
+				                      req.options.get().debugID.get().first(),
+				                      "storageserver.getKeyValuesStream.Send");
 			//.detail("Begin",begin).detail("End",end);
 
 			GetKeyValuesStreamReply none;
@@ -4742,9 +4756,9 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				                                      tenantPrefix));
 				GetKeyValuesStreamReply r(_r);
 
-				if (req.options.debugID.present())
+				if (req.options.present() && req.options.get().debugID.present())
 					g_traceBatch.addEvent("TransactionDebug",
-					                      req.options.debugID.get().first(),
+					                      req.options.get().debugID.get().first(),
 					                      "storageserver.getKeyValuesStream.AfterReadRange");
 				//.detail("Begin",begin).detail("End",end).detail("SizeOf",r.data.size());
 				data->checkChangeCounter(
@@ -4799,7 +4813,8 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 					end = lastKey;
 				}
 
-				if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.options.type == ReadType::FETCH) {
+				if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.options.present() &&
+				    req.options.get().type == ReadType::FETCH) {
 					wait(delay(0, TaskPriority::FetchKeys));
 				} else {
 					wait(delay(0, TaskPriority::DefaultEndpoint));
@@ -4829,7 +4844,9 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	}
 	state int64_t resultSize = 0;
 	state RangeReadOptions options;
-	options = req.options;
+	if (req.options.present()) {
+		options = req.options.get();
+	}
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
 	++data->counters.getKeyQueries;
@@ -4855,7 +4872,13 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		KeyRangeRef searchRange = data->clampRangeToTenant(shard, tenantEntry, req.arena);
 
 		state int offset;
-		Key absoluteKey = wait(findKey(data, req.sel, version, searchRange, &offset, req.spanContext, options));
+		Key absoluteKey = wait(findKey(data,
+		                               req.sel,
+		                               version,
+		                               searchRange,
+		                               &offset,
+		                               req.spanContext,
+		                               req.options.present() ? options : Optional<RangeReadOptions>()));
 
 		data->checkChangeCounter(changeCounter,
 		                         KeyRangeRef(std::min<KeyRef>(req.sel.getKey(), absoluteKey),
@@ -9761,9 +9784,9 @@ ACTOR Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetVa
 		GetValueRequest req = waitNext(getValue);
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
 		// downgrade before doing real work
-		if (req.options.debugID.present())
+		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
-			                      req.options.debugID.get().first(),
+			                      req.options.get().debugID.get().first(),
 			                      "storageServer.received"); //.detail("TaskID", g_network->getCurrentTask());
 
 		if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key))
