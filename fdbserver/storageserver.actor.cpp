@@ -5913,8 +5913,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		}
 
 		// FIXME: remove when we no longer support upgrades from 5.X
-		data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::True;
-		TraceEvent(SevWarnAlways, "FKReenableLB").detail("FKID", fetchKeysID);
+		if (!data->cx->enableLocalityLoadBalance) {
+			data->cx->enableLocalityLoadBalance = EnableLocalityLoadBalance::True;
+			TraceEvent(SevWarnAlways, "FKReenableLB").detail("FKID", fetchKeysID);
+		}
 
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
 		//  As we have finished this work, we will allow more work to start...
