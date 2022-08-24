@@ -165,52 +165,64 @@ def test_public_key_set_rollover(
     with open(cluster.public_key_json_file, "r") as keyfile:
         old_key_json = keyfile.read()
 
-    delay = public_key_refresh_interval * 3
+    delay = public_key_refresh_interval
 
     try:
         with open(cluster.public_key_json_file, "w") as keyfile:
             keyfile.write(interim_set)
-        print(f"sleeping {delay} seconds for interim key file to take effect")
+
+        print(f"sleeping {delay} second(s) for interim key file to take effect")
         time.sleep(delay)
 
-        tr_default = tenant_tr_gen(default_tenant)
-        tr_default.options.set_authorization_token(token_default)
-        tr_default[b"abc"] = b"def"
-        tr_default.commit().wait()
+        repeat = 0
+        max_repeat = delay * 4
+        while repeat < max_repeat:
+            try:
+                tr_second = tenant_tr_gen(second_tenant)
+                tr_second.options.set_authorization_token(token_second)
+                tr_second[b"ghi"] = b"jkl"
+                tr_second.commit().wait()
+                break
+            except fdb.FDBError as e:
+                assert e.code == 6000
+                repeat += 1
+                time.sleep(delay)
+                continue
 
-        tr_second = tenant_tr_gen(second_tenant)
-        tr_second.options.set_authorization_token(token_second)
-        tr_second[b"ghi"] = b"jkl"
-        tr_second.commit().wait()
-
+        assert repeat < max_repeat, f"interim keyset not activated in {max_repeat * delay} seconds"
+        print("interim key set activated")
         final_set = public_keyset_from_keys([new_key])
         print(f"final keyset: {final_set}")
         with open(cluster.public_key_json_file, "w") as keyfile:
             keyfile.write(final_set)
 
-        print(f"sleeping {delay} seconds for final key file to take effect")
+        print(f"sleeping {delay} second(s) for final key file to take effect")
         time.sleep(delay)
 
-        # token_default is still cached and with active TTL. transaction should work
-        tr_default = tenant_tr_gen(default_tenant)
-        tr_default.options.set_authorization_token(token_default)
-        value = tr_default[b"abc"].value
+        repeat = 0
+        while repeat < max_repeat:
+            # Generate and use a new token for default tenant
+            # As this token is not cached, it should fail
+            tr_default = tenant_tr_gen(default_tenant)
+            tr_default.options.set_authorization_token(token_gen(private_key, token_claim_1h(default_tenant)))
+            read_blocked = False
+            write_blocked = False
+            try:
+                value = tr_default[b"abc"].value
+            except fdb.FDBError as ferr:
+                assert ferr.code == 6000, f"expected permission_denied, got {ferr} instead"
+                read_blocked = True
+            try:
+                tr_default[b"abc"] = b"ghi"
+                tr_default.commit().wait()
+            except fdb.FDBError as ferr:
+                assert ferr.code == 6000, f"expected permission_denied, got {ferr} instead"
+                write_blocked = True
+            if read_blocked and write_blocked:
+                break
+            repeat += 1
 
-        # Generate and use a new token for default tenant
-        # As this token is not cached, it should fail
-        tr_default = tenant_tr_gen(default_tenant)
-        tr_default.options.set_authorization_token(token_gen(private_key, token_claim_1h(default_tenant)))
-        try:
-            value = tr_default[b"abc"].value
-            assert False, "expected permission_denied, but read transaction went through"
-        except fdb.FDBError as ferr:
-            assert ferr.code == 6000, f"expected permission_denied, got {ferr} instead"
-        try:
-            tr_default[b"abc"] = b"ghi"
-            tr_default.commit().wait()
-        except fdb.FDBError as ferr:
-            assert ferr.code == 6000, f"expected permission_denied, got {ferr} instead"
-
+        assert repeat < max_repeat, f"final keyset not activated in {max_repeat * delay} seconds"
         tr_second = tenant_tr_gen(second_tenant)
         tr_second.options.set_authorization_token(token_second)
         assert tr_second[b"ghi"] == b"jkl", "earlier write transaction for tenant {} not visible".format(second_tenant)
@@ -220,7 +232,7 @@ def test_public_key_set_rollover(
     finally:
         with open(cluster.public_key_json_file, "w") as keyfile:
             keyfile.write(old_key_json)
-        print(f"key file reverted. waiting {delay} seconds for the update to take effect...")
+        print(f"key file reverted. waiting {delay * 2} seconds for the update to take effect...")
         time.sleep(delay)
 
 def test_bad_token(private_key, token_gen, default_tenant, tenant_tr_gen):
