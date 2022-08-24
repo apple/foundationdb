@@ -7,10 +7,10 @@ injectSSDelay = true
 storageEngineExcludeTypes = [4, 5]
 
 [[test]]
-testTitle = 'BlobRanges'
+testTitle = 'BlobGranuleRanges'
 
     [[test.workload]]
-    testName = 'BlobRanges'
+    testName = 'BlobGranuleRanges'
     testDuration = 30.0
 
 # TODO add chaos

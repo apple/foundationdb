@@ -1,5 +1,5 @@
 /*
- * BlobRangesWorkload.actor.cpp
+ * BlobGranuleRangesWorkload.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -36,10 +36,12 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+#define BGRW_DEBUG true
+
 // FIXME: need to do multiple changes per commit to properly exercise future change feed logic
 // A workload specifically designed to stress the blob range management of the blob manager + blob worker, and test the
 // blob database api functions
-struct BlobRangesWorkload : TestWorkload {
+struct BlobGranuleRangesWorkload : TestWorkload {
 	// test settings
 	double testDuration;
 	int operationsPerSecond;
@@ -56,7 +58,7 @@ struct BlobRangesWorkload : TestWorkload {
 	std::vector<KeyRange> inactiveRanges;
 	std::vector<KeyRange> activeRanges;
 
-	BlobRangesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	BlobGranuleRangesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 30.0);
 		operationsPerSecond = getOption(options, "opsPerSecond"_sr, deterministicRandom()->randomInt(1, 100));
 		operationsPerSecond /= clientCount;
@@ -83,10 +85,10 @@ struct BlobRangesWorkload : TestWorkload {
 
 		stopUnitClient = false;
 
-		TraceEvent("BlobRangesWorkloadInit").detail("TargetRanges", targetRanges);
+		TraceEvent("BlobGranuleRangesWorkloadInit").detail("TargetRanges", targetRanges);
 	}
 
-	std::string description() const override { return "BlobRangesWorkload"; }
+	std::string description() const override { return "BlobGranuleRangesWorkload"; }
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
 	std::string newKey() {
@@ -108,53 +110,61 @@ struct BlobRangesWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> registerNewRange(Database cx, BlobRangesWorkload* self) {
+	ACTOR Future<Void> registerNewRange(Database cx, BlobGranuleRangesWorkload* self) {
 		std::string nextRangeKey = "R_" + self->newKey();
 		state KeyRange range(KeyRangeRef(StringRef(nextRangeKey), strinc(StringRef(nextRangeKey))));
-		// TODO REMOVE
-		fmt::print("Registering new range [{0} - {1})\n", range.begin.printable(), range.end.printable());
+		if (BGRW_DEBUG) {
+			fmt::print("Registering new range [{0} - {1})\n", range.begin.printable(), range.end.printable());
+		}
 
 		// don't put in active ranges until AFTER set range command succeeds, to avoid checking a range that maybe
 		// wasn't initialized
 		bool success = wait(self->setRange(cx, range, true));
 		ASSERT(success);
 
-		// TODO REMOVE
-		fmt::print("Registered new range [{0} - {1})\n", range.begin.printable(), range.end.printable());
+		if (BGRW_DEBUG) {
+			fmt::print("Registered new range [{0} - {1})\n", range.begin.printable(), range.end.printable());
+		}
 
 		self->activeRanges.push_back(range);
 		return Void();
 	}
 
-	ACTOR Future<Void> unregisterRandomRange(Database cx, BlobRangesWorkload* self) {
+	ACTOR Future<Void> unregisterRandomRange(Database cx, BlobGranuleRangesWorkload* self) {
 		int randomRangeIdx = deterministicRandom()->randomInt(0, self->activeRanges.size());
 		state KeyRange range = self->activeRanges[randomRangeIdx];
 		// remove range from active BEFORE committing txn but add to remove AFTER, to avoid checking a range that could
 		// potentially be in either state
 		swapAndPop(&self->activeRanges, randomRangeIdx);
 
-		fmt::print("Unregistering new range [{0} - {1})\n", range.begin.printable(), range.end.printable());
+		if (BGRW_DEBUG) {
+			fmt::print("Unregistering new range [{0} - {1})\n", range.begin.printable(), range.end.printable());
+		}
 
 		if (deterministicRandom()->coinflip()) {
-			fmt::print("Force purging range before un-registering: [{0} - {1})\n",
-			           range.begin.printable(),
-			           range.end.printable());
+			if (BGRW_DEBUG) {
+				fmt::print("Force purging range before un-registering: [{0} - {1})\n",
+				           range.begin.printable(),
+				           range.end.printable());
+			}
 			Key purgeKey = wait(cx->purgeBlobGranules(range, 1, {}, true));
 			wait(cx->waitPurgeGranulesComplete(purgeKey));
 		}
 		bool success = wait(self->setRange(cx, range, false));
 		ASSERT(success);
 
-		fmt::print("Unregistered new range [{0} - {1})\n", range.begin.printable(), range.end.printable());
+		if (BGRW_DEBUG) {
+			fmt::print("Unregistered new range [{0} - {1})\n", range.begin.printable(), range.end.printable());
+		}
 
 		self->inactiveRanges.push_back(range);
 
 		return Void();
 	}
 
-	ACTOR Future<Void> _setup(Database cx, BlobRangesWorkload* self) {
+	ACTOR Future<Void> _setup(Database cx, BlobGranuleRangesWorkload* self) {
 		// create initial target ranges
-		TraceEvent("BlobRangesSetup").detail("InitialRanges", self->targetRanges).log();
+		TraceEvent("BlobGranuleRangesSetup").detail("InitialRanges", self->targetRanges).log();
 		// set up blob granules
 		wait(success(ManagementAPI::changeConfig(cx.getReference(), "blob_granules_enabled=1", true)));
 
@@ -163,14 +173,14 @@ struct BlobRangesWorkload : TestWorkload {
 		for (i = 0; i < self->targetRanges; i++) {
 			wait(self->registerNewRange(cx, self));
 		}
-		TraceEvent("BlobRangesSetupComplete");
+		TraceEvent("BlobGranuleRangesSetupComplete");
 		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override {
-		client = blobRangesClient(cx->clone(), this);
+		client = blobGranuleRangesClient(cx->clone(), this);
 		if (clientId == 0) {
-			unitClient = blobRangesUnitTests(cx->clone(), this);
+			unitClient = blobGranuleRangesUnitTests(cx->clone(), this);
 		} else {
 			unitClient = Future<Void>(Void());
 		}
@@ -188,7 +198,7 @@ struct BlobRangesWorkload : TestWorkload {
 		return v != invalidVersion;
 	}
 
-	ACTOR Future<Void> checkRange(Database cx, BlobRangesWorkload* self, KeyRange range, bool isActive) {
+	ACTOR Future<Void> checkRange(Database cx, BlobGranuleRangesWorkload* self, KeyRange range, bool isActive) {
 		// Check that a read completes for the range. If not loop around and try again
 		loop {
 			bool completed = wait(self->isRangeActive(cx, range));
@@ -197,10 +207,12 @@ struct BlobRangesWorkload : TestWorkload {
 				break;
 			}
 
-			fmt::print("CHECK: {0} range [{1} - {2}) failed!\n",
-			           isActive ? "Active" : "Inactive",
-			           range.begin.printable(),
-			           range.end.printable());
+			if (BGRW_DEBUG) {
+				fmt::print("CHECK: {0} range [{1} - {2}) failed!\n",
+				           isActive ? "Active" : "Inactive",
+				           range.begin.printable(),
+				           range.end.printable());
+			}
 
 			wait(delay(1.0));
 		}
@@ -226,8 +238,7 @@ struct BlobRangesWorkload : TestWorkload {
 						ASSERT(granules[i].end == granules[i + 1].begin);
 					}
 				} else {
-					//  TODO REMOVE
-					if (!granules.empty()) {
+					if (BGRW_DEBUG) {
 						fmt::print("Granules for [{0} - {1}) not empty! ({2}):\n",
 						           range.begin.printable(),
 						           range.end.printable(),
@@ -247,13 +258,16 @@ struct BlobRangesWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<bool> _check(Database cx, BlobRangesWorkload* self) {
-		TraceEvent("BlobRangesCheck")
+	ACTOR Future<bool> _check(Database cx, BlobGranuleRangesWorkload* self) {
+		TraceEvent("BlobGranuleRangesCheck")
 		    .detail("ActiveRanges", self->activeRanges.size())
 		    .detail("InactiveRanges", self->inactiveRanges.size())
 		    .log();
-		fmt::print(
-		    "Checking {0} active and {1} inactive ranges\n", self->activeRanges.size(), self->inactiveRanges.size());
+		if (BGRW_DEBUG) {
+			fmt::print("Checking {0} active and {1} inactive ranges\n",
+			           self->activeRanges.size(),
+			           self->inactiveRanges.size());
+		}
 		state std::vector<Future<Void>> checks;
 		for (int i = 0; i < self->activeRanges.size(); i++) {
 			checks.push_back(self->checkRange(cx, self, self->activeRanges[i], true));
@@ -266,13 +280,13 @@ struct BlobRangesWorkload : TestWorkload {
 		}*/
 		wait(waitForAll(checks));
 		wait(self->unitClient);
-		TraceEvent("BlobRangesCheckComplete");
+		TraceEvent("BlobGranuleRangesCheckComplete");
 		return true;
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR Future<Void> blobRangesClient(Database cx, BlobRangesWorkload* self) {
+	ACTOR Future<Void> blobGranuleRangesClient(Database cx, BlobGranuleRangesWorkload* self) {
 		state double last = now();
 		loop {
 			state Future<Void> waitNextOp = poisson(&last, 1.0 / self->operationsPerSecond);
@@ -287,8 +301,10 @@ struct BlobRangesWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> tearDownRangeAfterUnit(Database cx, BlobRangesWorkload* self, KeyRange range) {
-		fmt::print("Tearing down [{0} - {1}) after unit!\n", range.begin.printable(), range.end.printable());
+	ACTOR Future<Void> tearDownRangeAfterUnit(Database cx, BlobGranuleRangesWorkload* self, KeyRange range) {
+		if (BGRW_DEBUG) {
+			fmt::print("Tearing down [{0} - {1}) after unit!\n", range.begin.printable(), range.end.printable());
+		}
 
 		// tear down range at end
 		Key purgeKey = wait(cx->purgeBlobGranules(range, 1, {}, true));
@@ -296,16 +312,20 @@ struct BlobRangesWorkload : TestWorkload {
 		bool success = wait(self->setRange(cx, range, false));
 		ASSERT(success);
 
-		fmt::print("Range [{0} - {1}) torn down.\n", range.begin.printable(), range.end.printable());
+		if (BGRW_DEBUG) {
+			fmt::print("Range [{0} - {1}) torn down.\n", range.begin.printable(), range.end.printable());
+		}
 
 		return Void();
 	}
 
-	ACTOR Future<Void> verifyRangeUnit(Database cx, BlobRangesWorkload* self, KeyRange range) {
+	ACTOR Future<Void> verifyRangeUnit(Database cx, BlobGranuleRangesWorkload* self, KeyRange range) {
 		state KeyRange activeRange(KeyRangeRef(range.begin.withSuffix("A"_sr), range.begin.withSuffix("B"_sr)));
 		state Key middleKey = range.begin.withSuffix("AF"_sr);
 
-		fmt::print("VerifyRangeUnit: [{0} - {1})\n", range.begin.printable(), range.end.printable());
+		if (BGRW_DEBUG) {
+			fmt::print("VerifyRangeUnit: [{0} - {1})\n", range.begin.printable(), range.end.printable());
+		}
 		bool setSuccess = wait(self->setRange(cx, activeRange, true));
 		ASSERT(setSuccess);
 		wait(self->checkRange(cx, self, activeRange, true));
@@ -342,7 +362,7 @@ struct BlobRangesWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> verifyRangeGapUnit(Database cx, BlobRangesWorkload* self, KeyRange range) {
+	ACTOR Future<Void> verifyRangeGapUnit(Database cx, BlobGranuleRangesWorkload* self, KeyRange range) {
 		state std::vector<Key> boundaries;
 		boundaries.push_back(range.begin);
 		state int rangeCount = deterministicRandom()->randomExp(3, 6) + 1;
@@ -381,7 +401,7 @@ struct BlobRangesWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> rangesMisalignedUnit(Database cx, BlobRangesWorkload* self, KeyRange range) {
+	ACTOR Future<Void> rangesMisalignedUnit(Database cx, BlobGranuleRangesWorkload* self, KeyRange range) {
 		// FIXME: parts of this don't work yet
 		bool setSuccess = wait(self->setRange(cx, range, true));
 		ASSERT(setSuccess);
@@ -441,7 +461,7 @@ struct BlobRangesWorkload : TestWorkload {
 		// TODO - also test purging larger range than blob range
 	}
 
-	ACTOR Future<Void> blobbifyIdempotentUnit(Database cx, BlobRangesWorkload* self, KeyRange range) {
+	ACTOR Future<Void> blobbifyIdempotentUnit(Database cx, BlobGranuleRangesWorkload* self, KeyRange range) {
 		state KeyRange activeRange(KeyRangeRef(range.begin.withSuffix("A"_sr), range.begin.withSuffix("B"_sr)));
 		state Key middleKey = range.begin.withSuffix("AF"_sr);
 		state Key middleKey2 = range.begin.withSuffix("AG"_sr);
@@ -530,7 +550,7 @@ struct BlobRangesWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> reBlobbifyUnit(Database cx, BlobRangesWorkload* self, KeyRange range) {
+	ACTOR Future<Void> reBlobbifyUnit(Database cx, BlobGranuleRangesWorkload* self, KeyRange range) {
 		bool setSuccess = wait(self->setRange(cx, range, true));
 		ASSERT(setSuccess);
 		wait(self->checkRange(cx, self, range, true));
@@ -562,7 +582,7 @@ struct BlobRangesWorkload : TestWorkload {
 		OP_COUNT = 5 /* keep this last */
 	};
 
-	ACTOR Future<Void> blobRangesUnitTests(Database cx, BlobRangesWorkload* self) {
+	ACTOR Future<Void> blobGranuleRangesUnitTests(Database cx, BlobGranuleRangesWorkload* self) {
 		loop {
 			if (self->stopUnitClient) {
 				return Void();
@@ -589,8 +609,10 @@ struct BlobRangesWorkload : TestWorkload {
 				ASSERT(loopTries >= 0);
 			}
 
-			fmt::print(
-			    "Selected range [{0} - {1}) for unit {2}.\n", range.begin.printable(), range.end.printable(), op);
+			if (BGRW_DEBUG) {
+				fmt::print(
+				    "Selected range [{0} - {1}) for unit {2}.\n", range.begin.printable(), range.end.printable(), op);
+			}
 
 			if (op == VERIFY_RANGE_UNIT) {
 				wait(self->verifyRangeUnit(cx, self, range));
@@ -611,4 +633,4 @@ struct BlobRangesWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<BlobRangesWorkload> BlobRangesWorkloadFactory("BlobRanges");
+WorkloadFactory<BlobGranuleRangesWorkload> BlobGranuleRangesWorkloadFactory("BlobGranuleRanges");
