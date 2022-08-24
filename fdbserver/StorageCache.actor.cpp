@@ -43,8 +43,6 @@
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-FDB_DEFINE_BOOLEAN_PARAM(CacheResult);
-
 // TODO storageCache server shares quite a bit of storageServer functionality, although simplified
 // Need to look into refactoring common code out for better code readability and to avoid duplication
 
