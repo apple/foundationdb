@@ -1021,7 +1021,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	    db->clientInfo->get().isEncryptionEnabled != SERVER_KNOBS->ENABLE_ENCRYPTION ||
 	    db->clientInfo->get().clusterType != db->clusterType ||
 	    db->clientInfo->get().metaclusterName != db->metaclusterName ||
-		db->clientInfo->get().encryptKeyProxy != db->serverInfo->get().encryptKeyProxy) {
+	    db->clientInfo->get().encryptKeyProxy != db->serverInfo->get().encryptKeyProxy) {
 		TraceEvent("PublishNewClientInfo", self->id)
 		    .detail("Master", dbInfo.master.id())
 		    .detail("GrvProxies", db->clientInfo->get().grvProxies)

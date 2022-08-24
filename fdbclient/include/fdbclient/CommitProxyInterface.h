@@ -143,7 +143,7 @@ struct ClientDBInfo {
 		           history,
 		           tenantMode,
 		           isEncryptionEnabled,
-				   encryptKeyProxy,
+		           encryptKeyProxy,
 		           clusterId,
 		           clusterType,
 		           metaclusterName);
