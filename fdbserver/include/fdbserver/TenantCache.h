@@ -54,7 +54,7 @@ private:
 	int cleanup();
 
 	// return a list of all tenant prefixes stored in the tenant cache
-	std::vector<KeyRef> getTenantPrefixList() const;
+	std::vector<Key> getTenantPrefixList() const;
 
 	// update the size for a tenant; do nothing if the tenant doesn't exist in the map
 	void updateStorageUsage(KeyRef prefix, int64_t size);

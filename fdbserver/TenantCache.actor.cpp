@@ -22,6 +22,7 @@
 #include "fdbserver/TenantCache.h"
 #include <limits>
 #include <string>
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h"
 
 class TenantCacheImpl {
@@ -117,8 +118,7 @@ public:
 
 		state ReadYourWritesTransaction tr(tenantCache->dbcx());
 
-		// Reuse the TENANT_CACHE_LIST_REFRESH_INTERVAL knob for now.
-		state int refreshInterval = SERVER_KNOBS->TENANT_CACHE_LIST_REFRESH_INTERVAL;
+		state int refreshInterval = SERVER_KNOBS->TENANT_CACHE_STORAGE_REFRESH_INTERVAL;
 		state double lastTenantListFetchTime = now();
 
 		loop {
@@ -127,12 +127,13 @@ public:
 					TraceEvent(SevWarn, "TenantCacheGetStorageUsageRefreshDelay", tenantCache->id()).log();
 				}
 
-				state std::vector<KeyRef> tenantPrefixList = tenantCache->getTenantPrefixList();
+				state std::vector<Key> tenantPrefixList = tenantCache->getTenantPrefixList();
 
-				state KeyRangeRef range("/"_sr, "0"_sr);
+				state KeyRangeRef rangeBoundaries("/"_sr, "0"_sr);
 				state int i;
 				for (i = 0; i < tenantPrefixList.size(); i++) {
-					state int64_t size = wait(tr.getEstimatedRangeSizeBytes(range.withPrefix(tenantPrefixList[i])));
+					state int64_t size =
+					    wait(tr.getEstimatedRangeSizeBytes(rangeBoundaries.withPrefix(tenantPrefixList[i])));
 					tenantCache->updateStorageUsage(tenantPrefixList[i], size);
 				}
 
@@ -203,10 +204,10 @@ int TenantCache::cleanup() {
 	return tenantsRemoved;
 }
 
-std::vector<KeyRef> TenantCache::getTenantPrefixList() const {
-	std::vector<KeyRef> prefixes;
+std::vector<Key> TenantCache::getTenantPrefixList() const {
+	std::vector<Key> prefixes;
 	for (const auto& [prefix, entry] : tenantCache) {
-		prefixes.push_back(prefix);
+		prefixes.emplace_back(prefix);
 	}
 	return prefixes;
 }
