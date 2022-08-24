@@ -32,6 +32,7 @@
 #include "flow/flow.h"
 #include "flow/Knobs.h"
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
@@ -470,6 +471,27 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		return Never();
 
 	ASSERT(alternatives->size());
+	state std::string requestType;
+	state Optional<UID> dbgid = request.id();
+	if (std::is_same<Request, GetKeyValuesRequest>::value) {
+		requestType = "GetRange";
+	} else if (std::is_same<Request, GetKeyRequest>::value) {
+		requestType = "GetKey";
+	} else if (std::is_same<Request, GetValueRequest>::value) {
+		requestType = "GetValue";
+	} else if (std::is_same<Request, GetMappedKeyValuesRequest>::value) {
+		requestType = "GetMappedRange";
+	} else if (std::is_same<Request, GetKeyServerLocationsRequest>::value) {
+		requestType = "GetKeyServerLocations";
+	} else {
+		requestType = "Unknown";
+	}
+
+	std::vector<int> distanceV;
+	for (int i = 0; i < alternatives->size(); i++) {
+		distanceV.push_back((int)alternatives->getDistance(i));
+	}
+	state std::string distances = describe(distances);
 
 	state int bestAlt = deterministicRandom()->randomInt(0, alternatives->countBest());
 	state int nextAlt = deterministicRandom()->randomInt(0, std::max(alternatives->size() - 1, 1));
@@ -492,6 +514,14 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				// server count is within "LOAD_BALANCE_MAX_BAD_OPTIONS". We
 				// do not need to consider any remote servers.
 				break;
+			} else if (badServers == alternatives->countBest() && i == badServers) {
+				TraceEvent("AllLocalFailed")
+				    .detail("Alternatives", alternatives->description())
+				    .detail("Distances", distances)
+				    .detail("DebugID", dbgid.present() ? dbgid.get() : UID())
+				    .detail("Total", alternatives->size())
+				    .detail("Best", alternatives->countBest())
+				    .detail("Bad", badServers);
 			}
 
 			RequestStream<Request> const* thisStream = &alternatives->get(i, channel);
@@ -568,21 +598,6 @@ Future<REPLY_TYPE(Request)> loadBalance(
 
 	state int numAttempts = 0;
 	state double backoff = 0;
-	state std::string requestType;
-	state Optional<UID> dbgid = request.id();
-	if (std::is_same<Request, GetKeyValuesRequest>::value) {
-		requestType = "GetRange";
-	} else if (std::is_same<Request, GetKeyRequest>::value) {
-		requestType = "GetKey";
-	} else if (std::is_same<Request, GetValueRequest>::value) {
-		requestType = "GetValue";
-	} else if (std::is_same<Request, GetMappedKeyValuesRequest>::value) {
-		requestType = "GetMappedRange";
-	} else if (std::is_same<Request, GetKeyServerLocationsRequest>::value) {
-		requestType = "GetKeyServerLocations";
-	} else {
-		requestType = "Unknown";
-	}
 
 	// Issue requests to selected servers.
 	loop {
@@ -664,8 +679,11 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			// Issue a second request, the first one is taking a long time.
 			if (distance == LBDistance::DISTANT) {
 				TraceEvent("LBDistant2")
+				    .detail("Distance", (int)distance)
 				    .detail("BackOff", backoff)
 				    .detail("TriedAllOptions", triedAllOptions)
+				    .detail("Alternatives", alternatives->description())
+				    .detail("Distances", distances)
 				    .detail("Token", stream->getEndpoint().token)
 				    .detail("Request", requestType)
 				    .detail("DebugID", dbgid.present() ? dbgid.get() : UID())
@@ -675,10 +693,11 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				    .detail("Attempts", numAttempts);
 			} else {
 				TraceEvent("LBLocal2")
-				    .suppressFor(0.1)
 				    .detail("Distance", (int)distance)
 				    .detail("BackOff", backoff)
 				    .detail("TriedAllOptions", triedAllOptions)
+				    .detail("Alternatives", alternatives->description())
+				    .detail("Distances", distances)
 				    .detail("Token", stream->getEndpoint().token)
 				    .detail("Request", requestType)
 				    .detail("DebugID", dbgid.present() ? dbgid.get() : UID())
@@ -718,19 +737,24 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			// Issue a request, if it takes too long to get a reply, go around the loop
 			if (distance == LBDistance::DISTANT) {
 				TraceEvent("LBDistant")
+				    .detail("Distance", (int)distance)
 				    .detail("BackOff", backoff)
 				    .detail("TriedAllOptions", triedAllOptions)
+				    .detail("Alternatives", alternatives->description())
+				    .detail("Distances", distances)
 				    .detail("Token", stream->getEndpoint().token)
 				    .detail("Request", requestType)
 				    .detail("DebugID", dbgid.present() ? dbgid.get() : UID())
 				    .detail("QueueModel", model ? model->toString() : "")
 				    .detail("Total", alternatives->size())
-				    .detail("Best", alternatives->countBest());
+				    .detail("Best", alternatives->countBest())
+				    .detail("Attempts", numAttempts);
 			} else {
 				TraceEvent("LBLocal")
-				    .suppressFor(0.1)
 				    .detail("Distance", (int)distance)
 				    .detail("BackOff", backoff)
+				    .detail("Alternatives", alternatives->description())
+				    .detail("Distances", distances)
 				    .detail("TriedAllOptions", triedAllOptions)
 				    .detail("Token", stream->getEndpoint().token)
 				    .detail("Request", requestType)
