@@ -56,6 +56,7 @@ std::string describe(KVPair<K, V> const& p) {
 	return format("%d ", p.k) + describe(p.v);
 }
 
+struct StorageServerInterface;
 template <class T>
 struct ReferencedInterface : public ReferenceCounted<ReferencedInterface<T>> {
 	T interf;
@@ -66,6 +67,13 @@ struct ReferencedInterface : public ReferenceCounted<ReferencedInterface<T>> {
 		                                                            LBLocalityData<T>::getLocality(interf),
 		                                                            LBLocalityData<T>::getAddress(interf))
 		                                      : LBDistance::DISTANT;
+		if (std::is_same<T, StorageServerInterface>::value) {
+			TraceEvent("LBSS", interf.id())
+			    .detail("Distance", distance)
+			    .detail("Present", LBLocalityData<T>::Present)
+			    .detail("Locality", locality.toString())
+			    .detail("InterfLocality", LBLocalityData<T>::getLocality(interf).toString());
+		}
 	}
 	virtual ~ReferencedInterface() {}
 
