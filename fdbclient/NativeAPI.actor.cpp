@@ -8033,12 +8033,19 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRan
 	state Standalone<VectorRef<KeyRangeRef>> allRanges;
 	state KeyRange curRegion = KeyRangeRef(range.begin, range.begin);
 	state Version readVersionOut = invalidVersion;
-	state int batchSize = CLIENT_KNOBS->BG_TOO_MANY_GRANULES / 2;
+	state int batchSize = BUGGIFY ? deterministicRandom()->randomInt(2, 10) : CLIENT_KNOBS->BG_TOO_MANY_GRANULES / 2;
+	state int loadSize = (BUGGIFY ? deterministicRandom()->randomInt(1, 20) : 20) * batchSize;
 	loop {
-		try {
-			wait(store(allRanges, tr.getBlobGranuleRanges(KeyRangeRef(curRegion.begin, range.end), 20 * batchSize)));
-		} catch (Error& e) {
-			wait(tr.onError(e));
+		if (curRegion.begin >= range.end) {
+			return readVersionOut;
+		}
+		loop {
+			try {
+				wait(store(allRanges, tr.getBlobGranuleRanges(KeyRangeRef(curRegion.begin, range.end), loadSize)));
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
 		}
 
 		if (allRanges.empty()) {
@@ -8069,7 +8076,15 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRan
 			checkParts.push_back(checkBlobSubrange(db, curRegion, version));
 		}
 
-		wait(waitForAll(checkParts));
+		try {
+			wait(waitForAll(checkParts));
+		} catch (Error& e) {
+			if (e.code() == error_code_blob_granule_transaction_too_old) {
+				return invalidVersion;
+			}
+			throw e;
+		}
+		ASSERT(!checkParts.empty());
 		readVersionOut = checkParts.back().get();
 		curRegion = KeyRangeRef(curRegion.end, curRegion.end);
 	}
@@ -9929,7 +9944,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRangesActor(Refer
 			blobRanges.arena().dependsOn(results.arena());
 			for (int i = 0; i < results.size() - 1; i++) {
 				if (results[i].value == LiteralStringRef("1")) {
-					blobRanges.push_back(blobRanges.arena(), KeyRangeRef(results[i].value, results[i + 1].value));
+					blobRanges.push_back(blobRanges.arena(), KeyRangeRef(results[i].key, results[i + 1].key));
 				}
 				if (blobRanges.size() == rangeLimit) {
 					return blobRanges;
