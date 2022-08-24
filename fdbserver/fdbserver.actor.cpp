@@ -2316,7 +2316,18 @@ int main(int argc, char* argv[]) {
 
 			f = result;
 		} else if (role == ServerRole::FlowProcess) {
-			TraceEvent(SevDebug, "StartingFlowProcess").detail("From", "fdbserver");
+			std::string traceFormat = getTraceFormatExtension();
+			// close and reopen trace file with the correct process listen address to name the file
+			closeTraceFile();
+			// writer is not shutdown immediately, addref on it
+			disposeTraceFileWriter();
+			// use the same trace format as before
+			selectTraceFormatter(traceFormat);
+			// create the trace file with the correct process address
+			openTraceFile(
+			    g_network->getLocalAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
+			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
+			TraceEvent(SevDebug, "StartingFlowProcess").detail("FlowProcessName", opts.flowProcessName);
 #if defined(__linux__) || defined(__FreeBSD__)
 			prctl(PR_SET_PDEATHSIG, SIGTERM);
 			if (getppid() == 1) /* parent already died before prctl */

@@ -256,9 +256,8 @@ public:
 
 	// Run storage enginee on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;
-	// A delay to avoid race on file resources if the new kv store process started immediately after the previous kv
-	// store process died
-	double REMOTE_KV_STORE_INIT_DELAY;
+	// A delay to avoid race on file resources after seeing lock_file_failure
+	double REBOOT_KV_STORE_DELAY;
 	// max waiting time for the remote kv store to initialize
 	double REMOTE_KV_STORE_MAX_INIT_DURATION;
 

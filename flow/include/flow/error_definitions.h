@@ -125,7 +125,7 @@ ERROR( dd_tracker_cancelled, 1215, "The data distribution tracker has been cance
 ERROR( failed_to_progress, 1216, "Process has failed to make sufficient progress" )
 ERROR( invalid_cluster_id, 1217, "Attempted to join cluster with a different cluster ID" )
 ERROR( restart_cluster_controller, 1218, "Restart cluster controller process" )
-ERROR( please_reboot_remote_kv_store, 1219, "Need to reboot the storage engine process as it died abnormally")
+ERROR( please_reboot_kv_store, 1219, "Need to reboot the storage engine")
 ERROR( incompatible_software_version, 1220, "Current software does not support database format" )
 
 // 15xx Platform errors
@@ -152,6 +152,7 @@ ERROR( http_bad_request_id, 1525, "HTTP response contained an unexpected X-Reque
 ERROR( rest_invalid_uri, 1526, "Invalid REST URI")
 ERROR( rest_invalid_rest_client_knob, 1527, "Invalid RESTClient knob")
 ERROR( rest_connectpool_key_not_found, 1528, "ConnectKey not found in connection pool")
+ERROR( lock_file_failure, 1529, "Unable to lock the file")
 
 
 // 2xxx Attempt (presumably by a _client_) to do something illegal.  If an error is known to
