@@ -1,0 +1,323 @@
+<form theme="dark">
+  <label>FoundationDB - Performance Overview (Dev WiP)</label>
+  <fieldset submitButton="false" autoRun="true">
+    <input type="text" token="Index" searchWhenChanged="true">
+      <label>Index</label>
+      <default>*</default>
+    </input>
+    <input type="text" token="LogGroup" searchWhenChanged="true">
+      <label>LogGroup</label>
+      <default></default>
+    </input>
+    <input type="time" token="TimeSpan" searchWhenChanged="true">
+      <label>TimeSpan</label>
+      <default>
+        <earliest>-60m@m</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="dropdown" token="UpdateRateTypeToken" searchWhenChanged="true">
+      <label>RK: Normal or Batch Txn</label>
+      <choice value="">Normal</choice>
+      <choice value="Batch">Batch</choice>
+      <default></default>
+    </input>
+    <input type="text" token="ChartBinSizeToken" searchWhenChanged="true">
+      <label>Chart Bin Size</label>
+      <default>60s</default>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <title>Transaction Rate measured on Proxies</title>
+      <chart>
+        <title>Sum in $ChartBinSizeToken$ seconds</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ host=* Machine=*  (Type="ProxyMetrics" OR Type="GrvProxyMetrics") AND TrackLatestType="Original" 
+| makemv delim=" " TxnRequestIn | makemv delim=" " TxnRequestOut | makemv delim=" " TxnStartIn | makemv delim=" " TxnStartOut | makemv delim=" " TxnThrottled
+| eval TxnRequestInRate=mvindex(TxnRequestIn, 0), TxnRequestOutRate=mvindex(TxnRequestOut, 0), TxnStartInRate=mvindex(TxnStartIn, 0), TxnStartOutRate=mvindex(TxnStartOut, 0), TxnThrottledRate=mvindex(TxnThrottled, 0)
+| timechart span=$ChartBinSizeToken$ sum(TxnRequestInRate) as StartedTxnBatchRate, sum(TxnRequestOutRate) as FinishedTxnBatchRate, sum(TxnStartInRate) as StartedTxnRate, sum(TxnStartOutRate) as FinishedTxnRate, sum(TxnThrottledRate) as ThrottledTxnRate</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Read Rate measured on Storage Servers</title>
+      <chart>
+        <title>Average in $ChartBinSizeToken$ seconds</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=StorageMetrics TrackLatestType="Original" 
+| rex field=BytesQueried "(?&lt;RRate&gt;.*) (?&lt;RRoughness&gt;.*) (?&lt;RCounter&gt;.*)" 
+| rex field=RowsQueried "(?&lt;KRate&gt;.*) (?&lt;KRoughness&gt;.*) (?&lt;KCounter&gt;.*)" 
+| rex field=BytesInput "(?&lt;WRate&gt;.*) (?&lt;WRoughness&gt;.*) (?&lt;WCounter&gt;.*)" 
+| rex field=BytesFetched "(?&lt;FRate&gt;.*) (?&lt;FRoughness&gt;.*) (?&lt;FCounter&gt;.*)" 
+| timechart span=$ChartBinSizeToken$ avg(RRate) as BytesReadPerSecond, avg(KRate) as RowsReadPerSecond, avg(FRate) as DDReadPerSecond</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">linear</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Write Rate measured on Proxies</title>
+      <chart>
+        <title>1min Average</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ host=* Machine=*  (Type="ProxyMetrics" OR Type="GrvProxyMetrics") AND TrackLatestType="Original" 
+| makemv delim=" " MutationBytes
+| makemv delim=" " Mutations
+| eval MutationBytesRate=mvindex(MutationBytes, 0), MutationsRate=mvindex(Mutations,0)
+| bucket span=5s _time
+| stats sum(MutationBytesRate) as MutationBytes, sum(MutationsRate) as Mutations by _time
+|eval MutationMB=MutationBytes/1024/1024, MutationsK=Mutations/1000
+| timechart span=$ChartBinSizeToken$ avg(MutationMB) as MutationMB, avg(MutationsK) as MutationsK</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.abbreviation">none</option>
+        <option name="charting.axisY.scale">linear</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.layout.splitSeries">0</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Write Rate measured on Storage Servers</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=StorageMetrics TrackLatestType="Original" 
+| rex field=BytesInput "(?&lt;WRate&gt;.*) (?&lt;WRoughness&gt;.*) (?&lt;WCounter&gt;.*)" 
+| rex field=BytesFetched "(?&lt;FRate&gt;.*) (?&lt;FRoughness&gt;.*) (?&lt;FCounter&gt;.*)" 
+| timechart span=$ChartBinSizeToken$ avg(WRate) as BytesPerSecond, avg(FRate) as DDBytesWrittenPerSecond</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>GRV Latency measured on all Proxies</title>
+      <chart>
+        <title>Seconds</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=GRVLatencyMetrics AND TrackLatestType="Original"
+| timechart span=$ChartBinSizeToken$ avg(Max) as maxLatency, avg(Mean) as meanLatency, avg(P99) as P99Latency, avg(P99.9) as P999Latency, avg(P95) as P95Latency</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Commit Latency measured on all Proxies</title>
+      <chart>
+        <title>Seconds</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$  Type=CommitLatencyMetrics AND TrackLatestType="Original"
+| timechart span=$ChartBinSizeToken$ avg(Max) as maxLatency, avg(Mean) as meanLatency, avg(P99) as P99Latency, avg(P99.9) as P999Latency, avg(P95) as P95Latency</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Read Latency measured on all Storage Servers</title>
+      <chart>
+        <title>Seconds</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$  Type=ReadLatencyMetrics AND TrackLatestType="Original"
+| timechart span=$ChartBinSizeToken$ avg(Max) as maxLatency, avg(Mean) as meanLatency, avg(P99) as P99Latency, avg(P99.9) as P999Latency, avg(P95) as P95Latency</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>RateKeeper: ReleasedTPS vs LimitTPS</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=RkUpdate$UpdateRateTypeToken$ AND TrackLatestType="Original" 
+| replace inf with 100000000000 
+| eval _time=Time
+| table _time ReleasedTPS TPSLimit
+| timechart span=$ChartBinSizeToken$ avg(ReleasedTPS) avg(TPSLimit)</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">log</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="height">251</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>RateKeeper: Throttling Reason</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=RkUpdate$UpdateRateTypeToken$ AND TrackLatestType="Original" 
+| replace inf with 100000000000 
+| eval _time=Time
+| table _time Reason</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisLabelsY.majorUnit">1</option>
+        <option name="charting.axisY.abbreviation">none</option>
+        <option name="charting.axisY.scale">linear</option>
+        <option name="charting.chart">area</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.mode">standard</option>
+        <option name="height">249</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>RateKeeper: Throttling Server</title>
+      <table>
+        <title>Ratekeeper: Limit Reason: ReasonServerID (Most recent 10 records)</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=RkUpdate AND TrackLatestType="Original" 
+| streamstats count as numOfEvents 
+| where numOfEvents &lt; 10
+| eval DateTime=strftime(Time, "%Y-%m-%dT%H:%M:%S")
+| table DateTime, ReasonServerID</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Disk Overhead = Disk Usage / Logical KV Size</title>
+      <chart>
+        <title>Y-axis is capped at 10</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ host=* Machine=*  (Type=StorageMetrics OR Type=DDTrackerStats) TrackLatestType=Original
+| bucket _time span=5s 
+| stats sum(KvstoreBytesUsed) as StorageDiskUsedBytes, sum(KvstoreBytesTotal) as StorageDiskTotalBytes, avg(TotalSizeBytes) as LogicalKVBytes by _time
+| eval overhead=StorageDiskUsedBytes/LogicalKVBytes
+| timechart avg(overhead)</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.maximumNumber">10</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">bottom</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>KV Data Size</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+Roles=*DD* host=* Machine=*  Type=DDTrackerStats TrackLatestType=Original
+| eval TotalKVGB=TotalSizeBytes/1024/1024/1024, SystemKVGB=SystemSizeBytes/1024/1024/1024
+|timechart avg(TotalKVGB), avg(SystemKVGB), avg(Shards)</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Disk Usage</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ host=* Machine=*  Type=StorageMetrics TrackLatestType=Original
+| bucket _time span=5s 
+| stats sum(KvstoreBytesUsed) as StorageDiskUsedBytes, sum(KvstoreBytesTotal) as StorageDiskTotalBytes by _time
+|eval StorageDiskTotalMB = StorageDiskTotalBytes/1024/1024, StorageDiskUsedMB=StorageDiskUsedBytes/1024/1024
+| timechart avg(StorageDiskTotalMB) as StorageDiskTotalMB, avg(StorageDiskUsedMB) as StorageDiskUsedMB</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Cluster Roles</title>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=ProcessMetrics TrackLatestType="Original"
+| rex field=host "(?&lt;HostDC&gt;..).*-..(?&lt;HostConfig&gt;..).*"
+| eval HostDC=if(isnotnull(pie_work_unit), pie_work_unit, HostDC) 
+| makemv delim="," Roles
+| stats dc(Machine) as MachineCount by Roles, HostDC
+| stats list(HostDC), list(MachineCount) by Roles
+| sort Roles</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Storage Engine</title>
+      <table>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=Role Origination=Recruited As=StorageServer | table StorageEngine, OriginalDateTime, DateTime |head 2</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </table>
+    </panel>
+    <panel>
+      <title>Cluster Generations</title>
+      <chart>
+        <title>Indicate FDB recoveries</title>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=TLogMetrics |timechart max(Generation)</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+</form>

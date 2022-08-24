@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/EncryptKeyProxyInterface.h"
+#include "fdbclient/EncryptKeyProxyInterface.h"
 
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Stats.h"

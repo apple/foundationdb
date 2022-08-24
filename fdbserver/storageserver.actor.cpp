@@ -23,6 +23,7 @@
 #include <type_traits>
 #include <unordered_map>
 
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fmt/format.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
@@ -41,6 +42,8 @@
 #include "fdbclient/Tracing.h"
 #include "flow/Util.h"
 #include "fdbclient/Atomic.h"
+#include "fdbclient/BlobConnectionProvider.h"
+#include "fdbclient/BlobGranuleReader.actor.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
@@ -59,7 +62,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbserver/GetEncryptCipherKeys.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LatencyBandConfig.h"
@@ -552,7 +555,6 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	Version storageVersion = invalidVersion; // The version between the storage version and the durable version are
 	                                         // being written to disk as part of the current commit in updateStorage.
 	Version durableVersion = invalidVersion; // All versions before the durable version are durable on disk
-	// FIXME: this needs to get persisted to disk to still fix same races across restart!
 	Version metadataVersion = invalidVersion; // Last update to the change feed metadata. Used for reasoning about
 	                                          // fetched metadata vs local metadata
 	Version emptyVersion = 0; // The change feed does not have any mutations before emptyVersion
@@ -1184,11 +1186,6 @@ public:
 			});
 			specialCounter(
 			    cc, "FetchKeysFullFetchWaiting", [self]() { return self->fetchKeysParallelismFullLock.waiters(); });
-			specialCounter(cc, "FetchChangeFeedFetchActive", [self]() {
-				return self->fetchChangeFeedParallelismLock.activePermits();
-			});
-			specialCounter(
-			    cc, "FetchChangeFeedWaiting", [self]() { return self->fetchChangeFeedParallelismLock.waiters(); });
 			specialCounter(cc, "ServeFetchCheckpointActive", [self]() {
 				return self->serveFetchCheckpointParallelismLock.activePermits();
 			});
@@ -1211,6 +1208,9 @@ public:
 	int64_t bytesRestored = 0;
 
 	Reference<EventCacheHolder> storageServerSourceTLogIDEventHolder;
+
+	// Connection to blob store for fetchKeys()
+	Reference<BlobConnectionProvider> blobConn;
 
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
@@ -1248,7 +1248,6 @@ public:
 	    numWatches(0), noRecentUpdates(false), lastUpdate(now()), updateEagerReads(nullptr),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysParallelismFullLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_FULL),
-	    fetchChangeFeedParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
@@ -1278,6 +1277,14 @@ public:
 		this->storage.kvGets = &counters.kvGets;
 		this->storage.kvScans = &counters.kvScans;
 		this->storage.kvCommits = &counters.kvCommits;
+
+		if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
+			try {
+				blobConn = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BG_URL);
+			} catch (Error& e) {
+				// Skip any error when establishing blob connection
+			}
+		}
 	}
 
 	//~StorageServer() { fclose(log); }
@@ -2497,7 +2504,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    .detail("StreamUID", streamUID)
 		    .detail("Range", req.range)
 		    .detail("Begin", req.begin)
-		    .detail("End", req.end);
+		    .detail("End", req.end)
+		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 	}
 
 	if (data->version.get() < req.begin) {
@@ -2543,7 +2551,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    .detail("FetchStorageVersion", fetchStorageVersion)
 		    .detail("FetchVersion", feedInfo->fetchVersion)
 		    .detail("DurableFetchVersion", feedInfo->durableFetchVersion.get())
-		    .detail("DurableValidationVersion", durableValidationVersion);
+		    .detail("DurableValidationVersion", durableValidationVersion)
+		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 	}
 
 	if (req.end > emptyVersion + 1) {
@@ -2784,7 +2793,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    .detail("FirstVersion", reply.mutations.empty() ? invalidVersion : reply.mutations.front().version)
 		    .detail("LastVersion", reply.mutations.empty() ? invalidVersion : reply.mutations.back().version)
 		    .detail("Count", reply.mutations.size())
-		    .detail("GotAll", gotAll);
+		    .detail("GotAll", gotAll)
+		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 	}
 
 	if (DEBUG_CF_MISSING(req.rangeID, req.range, req.begin, reply.mutations.back().version) && !req.canReadPopped) {
@@ -2937,7 +2947,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			    .detail("Range", req.range)
 			    .detail("Begin", req.begin)
 			    .detail("End", req.end)
-			    .detail("CanReadPopped", req.canReadPopped);
+			    .detail("CanReadPopped", req.canReadPopped)
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 		}
 		data->activeFeedQueries++;
 
@@ -2958,7 +2969,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			    .detail("Begin", req.begin)
 			    .detail("End", req.end)
 			    .detail("CanReadPopped", req.canReadPopped)
-			    .detail("Version", req.begin - 1);
+			    .detail("Version", req.begin - 1)
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 		}
 
 		loop {
@@ -2974,7 +2986,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					    .detail("Begin", req.begin)
 					    .detail("End", req.end)
 					    .detail("CanReadPopped", req.canReadPopped)
-					    .detail("Version", blockedVersion.present() ? blockedVersion.get() : data->prevVersion);
+					    .detail("Version", blockedVersion.present() ? blockedVersion.get() : data->prevVersion)
+					    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 				}
 				removeUID = true;
 			}
@@ -2994,7 +3007,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					    .detail("Begin", req.begin)
 					    .detail("End", req.end)
 					    .detail("CanReadPopped", req.canReadPopped)
-					    .detail("Version", blockedVersion.present() ? blockedVersion.get() : data->prevVersion);
+					    .detail("Version", blockedVersion.present() ? blockedVersion.get() : data->prevVersion)
+					    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 				}
 			}
 			std::pair<ChangeFeedStreamReply, bool> _feedReply = wait(feedReplyFuture);
@@ -5449,6 +5463,11 @@ public:
 };
 
 ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* tr, KeyRange keys) {
+	if (SERVER_KNOBS->FETCH_USING_STREAMING) {
+		wait(tr->getRangeStream(results, keys, GetRangeLimits(), Snapshot::True));
+		return Void();
+	}
+
 	state KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
 	state KeySelectorRef end = firstGreaterOrEqual(keys.end);
 
@@ -5480,6 +5499,73 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 		results.sendError(e);
 		throw;
 	}
+}
+
+// Read blob granules mapping from system keyspace. It keeps retrying until reaching maxRetryCount.
+ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> tryReadBlobGranules(Transaction* tr,
+                                                                             KeyRange keys,
+                                                                             Version fetchVersion,
+                                                                             int maxRetryCount = 10) {
+	state int retryCount = 0;
+	state Version readVersion = fetchVersion;
+	loop {
+		try {
+			Standalone<VectorRef<BlobGranuleChunkRef>> chunks = wait(tr->readBlobGranules(keys, 0, readVersion));
+			return chunks;
+		} catch (Error& e) {
+			if (retryCount >= maxRetryCount) {
+				throw e;
+			}
+			wait(tr->onError(e));
+			retryCount += 1;
+		}
+	}
+}
+
+// Read keys from blob storage if they exist. Fail back to tryGetRange, which reads keys
+// from storage servers with locally attached disks
+ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
+                                       Transaction* tr,
+                                       KeyRange keys,
+                                       Version fetchVersion,
+                                       Reference<BlobConnectionProvider> blobConn) {
+	ASSERT(blobConn.isValid());
+	try {
+
+		state Standalone<VectorRef<BlobGranuleChunkRef>> chunks = wait(tryReadBlobGranules(tr, keys, fetchVersion));
+
+		if (chunks.size() == 0) {
+			throw blob_granule_transaction_too_old(); // no data on blob
+		}
+
+		// todo check if blob storage covers all the expected key range
+
+		for (const BlobGranuleChunkRef& chunk : chunks) {
+			state KeyRangeRef chunkRange = chunk.keyRange;
+			state RangeResult rows = wait(readBlobGranule(chunk, keys, 0, fetchVersion, blobConn));
+			TraceEvent("ReadBlobData")
+			    .detail("Rows", rows.size())
+			    .detail("ChunkRange", chunkRange.toString())
+			    .detail("Keys", keys.toString());
+
+			if (rows.size() == 0) {
+				rows.readThrough = KeyRef(rows.arena(), chunkRange.end);
+			}
+			results.send(rows);
+		}
+		results.sendError(end_of_stream()); // end of range read
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "ReadBlobDataFailure")
+		    .suppressFor(5.0)
+		    .detail("Keys", keys.toString())
+		    .detail("FetchVersion", fetchVersion)
+		    .detail("Error", e.what());
+		tr->reset();
+		tr->setVersion(fetchVersion);
+		tr->trState->taskID = TaskPriority::FetchKeys;
+		wait(tryGetRange(results, tr, keys)); // fail back to storage server
+	}
+	return Void();
 }
 
 // We have to store the version the change feed was stopped at in the SS instead of just the stopped status
@@ -5802,10 +5888,6 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
                                       Version beginVersion,
                                       Version endVersion) {
 	wait(delay(0)); // allow this actor to be cancelled by removals
-
-	// bound active change feed fetches
-	wait(data->fetchChangeFeedParallelismLock.take(TaskPriority::DefaultYield));
-	state FlowLock::Releaser holdingFCFPL(data->fetchChangeFeedParallelismLock);
 
 	TraceEvent(SevDebug, "FetchChangeFeed", data->thisServerID)
 	    .detail("RangeID", changeFeedInfo->id)
@@ -6362,9 +6444,13 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			tr.setVersion(fetchVersion);
 			tr.trState->taskID = TaskPriority::FetchKeys;
 			state PromiseStream<RangeResult> results;
-			state Future<Void> hold = SERVER_KNOBS->FETCH_USING_STREAMING
-			                              ? tr.getRangeStream(results, keys, GetRangeLimits(), Snapshot::True)
-			                              : tryGetRange(results, &tr, keys);
+			state Future<Void> hold;
+			if (SERVER_KNOBS->FETCH_USING_BLOB) {
+				hold = tryGetRangeFromBlob(results, &tr, keys, fetchVersion, data->blobConn);
+			} else {
+				hold = tryGetRange(results, &tr, keys);
+			}
+
 			state Key nfk = keys.begin;
 
 			try {
