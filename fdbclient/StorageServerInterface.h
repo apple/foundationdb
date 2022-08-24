@@ -285,6 +285,7 @@ struct GetValueRequest : TimedRequest {
 	                VersionVector latestCommitVersions)
 	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), tags(tags), debugID(debugID),
 	    ssLatestCommitVersions(latestCommitVersions) {}
+	Optional<UID> id() const { return debugID; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -328,6 +329,7 @@ struct WatchValueRequest {
 	                  Optional<UID> debugID)
 	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), value(value), version(ver), tags(tags),
 	    debugID(debugID) {}
+	Optional<UID> id() const { return debugID; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -371,6 +373,7 @@ struct GetKeyValuesRequest : TimedRequest {
 	                                      // serve the given key
 
 	GetKeyValuesRequest() : isFetchKeys(false) {}
+	Optional<UID> id() const { return debugID; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -427,6 +430,7 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	                                      // serve the given key range
 
 	GetMappedKeyValuesRequest() : isFetchKeys(false) {}
+	Optional<UID> id() const { return debugID; }
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -491,6 +495,7 @@ struct GetKeyValuesStreamRequest {
 	                                      // serve the given key range
 
 	GetKeyValuesStreamRequest() : isFetchKeys(false) {}
+	Optional<UID> id() const { return debugID; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -550,6 +555,8 @@ struct GetKeyRequest : TimedRequest {
 	              VersionVector latestCommitVersions)
 	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), debugID(debugID),
 	    ssLatestCommitVersions(latestCommitVersions) {}
+
+	Optional<UID> id() const { return debugID; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -679,6 +686,8 @@ struct WaitMetricsRequest {
 	WaitMetricsRequest(KeyRangeRef const& keys, StorageMetrics const& min, StorageMetrics const& max)
 	  : keys(arena, keys), min(min), max(max) {}
 
+	Optional<UID> id() const { return Optional<UID>(); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keys, min, max, reply, arena);
@@ -713,6 +722,8 @@ struct SplitMetricsRequest {
 	                    StorageMetrics const& estimated,
 	                    bool isLastShard)
 	  : keys(arena, keys), limits(limits), used(used), estimated(estimated), isLastShard(isLastShard) {}
+
+	Optional<UID> id() const { return Optional<UID>(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -764,6 +775,7 @@ struct ReadHotSubRangeRequest {
 	ReadHotSubRangeRequest() {}
 	ReadHotSubRangeRequest(KeyRangeRef const& keys) : keys(arena, keys) {}
 
+	Optional<UID> id() const { return Optional<UID>(); }
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keys, reply, arena);
@@ -795,6 +807,7 @@ struct SplitRangeRequest {
 	SplitRangeRequest(TenantInfo tenantInfo, KeyRangeRef const& keys, int64_t chunkSize)
 	  : tenantInfo(tenantInfo), keys(arena, keys), chunkSize(chunkSize) {}
 
+	Optional<UID> id() const { return Optional<UID>(); }
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keys, chunkSize, reply, tenantInfo, arena);
@@ -841,6 +854,8 @@ struct ChangeFeedStreamRequest {
 	              // change feed data, it is left in the interface
 
 	ReplyPromiseStream<ChangeFeedStreamReply> reply;
+
+	Optional<UID> id() const { return debugUID; }
 
 	ChangeFeedStreamRequest() {}
 	template <class Ar>
@@ -965,6 +980,7 @@ struct OverlappingChangeFeedsRequest {
 
 	OverlappingChangeFeedsRequest() {}
 	explicit OverlappingChangeFeedsRequest(KeyRange const& range) : range(range) {}
+	Optional<UID> id() const { return Optional<UID>(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
