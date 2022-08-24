@@ -129,11 +129,10 @@ public:
 
 				state std::vector<Key> tenantPrefixList = tenantCache->getTenantPrefixList();
 
-				state KeyRangeRef rangeBoundaries("/"_sr, "0"_sr);
 				state int i;
 				for (i = 0; i < tenantPrefixList.size(); i++) {
 					state int64_t size =
-					    wait(tr.getEstimatedRangeSizeBytes(rangeBoundaries.withPrefix(tenantPrefixList[i])));
+					    wait(tr.getEstimatedRangeSizeBytes(KeyRangeRef::entireRangeWithPrefix(tenantPrefixList[i])));
 					tenantCache->updateStorageUsage(tenantPrefixList[i], size);
 				}
 
