@@ -53,6 +53,10 @@
 
 namespace {
 
+const std::string REST_KMS_CONNECTOR_TYPE_STR = "RESTKmsConnector";
+const std::string FDB_PREF_KMS_CONNECTOR_TYPE_STR = "FDBPerfKmsConnector";
+const std::string FDB_SIM_KMS_CONNECTOR_TYPE_STR = "SimKmsConnector";
+
 struct CipherKeyValidityTS {
 	int64_t refreshAtTS;
 	int64_t expAtTS;
@@ -774,15 +778,19 @@ void refreshBlobMetadata(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnect
 }
 
 void activateKmsConnector(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnectorInterface kmsConnectorInf) {
-	if (g_network->isSimulated()) {
+	if (g_network->isSimulated() || (SERVER_KNOBS->KMS_CONNECTOR_TYPE.compare(FDB_PREF_KMS_CONNECTOR_TYPE_STR) == 0)) {
 		ekpProxyData->kmsConnector = std::make_unique<SimKmsConnector>();
-	} else if (SERVER_KNOBS->KMS_CONNECTOR_TYPE.compare("RESTKmsConnector")) {
+	} else if (SERVER_KNOBS->KMS_CONNECTOR_TYPE.compare(REST_KMS_CONNECTOR_TYPE_STR) == 0) {
 		ekpProxyData->kmsConnector = std::make_unique<RESTKmsConnector>();
 	} else {
 		throw not_implemented();
 	}
 
-	TraceEvent("EKP_ActiveKmsConnector", ekpProxyData->myId).detail("ConnectorType", SERVER_KNOBS->KMS_CONNECTOR_TYPE);
+	TraceEvent("EKPActiveKmsConnector", ekpProxyData->myId)
+	    .detail("ConnectorType",
+	            g_network->isSimulated() ? FDB_SIM_KMS_CONNECTOR_TYPE_STR : SERVER_KNOBS->KMS_CONNECTOR_TYPE)
+	    .detail("InfId", kmsConnectorInf.id());
+
 	ekpProxyData->addActor.send(ekpProxyData->kmsConnector->connectorCore(kmsConnectorInf));
 }
 

@@ -514,8 +514,8 @@ private:
 	KeyRangeMap<uint64_t> keyRangePhysicalShardIDMap;
 	// Indicate what physical shards owned by a team
 	std::map<ShardsAffectedByTeamFailure::Team, std::set<uint64_t>> teamPhysicalShardIDs;
-	double lastTransitionStartTime;
 	bool requireTransition;
+	double lastTransitionStartTime;
 };
 
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer
