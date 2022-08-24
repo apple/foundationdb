@@ -244,7 +244,7 @@ struct IKVSReadRangeRequest {
 	KeyRangeRef keys;
 	int rowLimit;
 	int byteLimit;
-	Optional<RangeReadOptions> options;
+	Optional<ReadOptions> options;
 	ReplyPromise<IKVSReadRangeReply> reply;
 
 	template <class Ar>
@@ -414,7 +414,7 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit = 1 << 30,
 	                              int byteLimit = 1 << 30,
-	                              Optional<RangeReadOptions> options = Optional<RangeReadOptions>()) override {
+	                              Optional<ReadOptions> options = Optional<ReadOptions>()) override {
 		IKVSReadRangeRequest req{ keys, rowLimit, byteLimit, options, ReplyPromise<IKVSReadRangeReply>() };
 		return fmap([](const IKVSReadRangeReply& reply) { return reply.toRangeResult(); },
 		            interf.readRange.getReply(req));

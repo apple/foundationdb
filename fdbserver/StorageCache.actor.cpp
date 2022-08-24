@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/OTELSpanContextMessage.h"
 #include "flow/Arena.h"
 #include "fdbclient/FDBOptions.g.h"
@@ -41,6 +42,8 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+FDB_DEFINE_BOOLEAN_PARAM(CacheResult);
 
 // TODO storageCache server shares quite a bit of storageServer functionality, although simplified
 // Need to look into refactoring common code out for better code readability and to avoid duplication
@@ -1187,6 +1190,7 @@ ACTOR Future<RangeResult> tryFetchRange(Database cx,
 	state RangeResult output;
 	state KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
 	state KeySelectorRef end = firstGreaterOrEqual(keys.end);
+	state ReadOptions options = ReadOptions(Optional<UID>(), ReadType::FETCH);
 
 	if (*isTooOld)
 		throw transaction_too_old();
@@ -1194,8 +1198,7 @@ ACTOR Future<RangeResult> tryFetchRange(Database cx,
 	ASSERT(!cx->switchable);
 	tr.setVersion(version);
 	tr.trState->taskID = TaskPriority::FetchKeys;
-	tr.trState->readOptions.type = ReadType::FETCH;
-	tr.trState->readOptions.cacheResult = false;
+	tr.trState->readOptions = options;
 	limits.minRows = 0;
 
 	try {

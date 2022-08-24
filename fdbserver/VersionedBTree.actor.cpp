@@ -7798,7 +7798,7 @@ public:
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit,
 	                              int byteLimit,
-	                              Optional<RangeReadOptions> options) override {
+	                              Optional<ReadOptions> options) override {
 		debug_printf("READRANGE %s\n", printable(keys).c_str());
 		return catchError(readRange_impl(this, keys, rowLimit, byteLimit, options));
 	}
@@ -7807,18 +7807,14 @@ public:
 	                                                KeyRange keys,
 	                                                int rowLimit,
 	                                                int byteLimit,
-	                                                Optional<RangeReadOptions> options) {
+	                                                Optional<ReadOptions> options) {
 		state PagerEventReasons reason = PagerEventReasons::RangeRead;
 		state VersionedBTree::BTreeCursor cur;
-		if (options.present()) {
-			state ReadOptions rOptions = options.get();
-			if (options.get().type == ReadType::FETCH) {
-				reason = PagerEventReasons::FetchRange;
-			}
-			wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), reason, rOptions));
-		} else {
-			wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), reason));
+		if (options.present() && options.get().type == ReadType::FETCH) {
+			reason = PagerEventReasons::FetchRange;
 		}
+		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), reason, options));
+
 		state PriorityMultiLock::Lock lock;
 		state Future<Void> f;
 		++g_redwoodMetrics.metric.opGetRange;
@@ -11007,7 +11003,7 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
                                     bool singlePrefix,
                                     int rowLimit,
                                     int byteLimit,
-                                    Optional<RangeReadOptions> options = Optional<RangeReadOptions>()) {
+                                    Optional<ReadOptions> options = Optional<ReadOptions>()) {
 	fmt::print("\nstoreType: {}\n", static_cast<int>(kvs->getType()));
 	fmt::print("prefixSource: {}\n", source.toString());
 	fmt::print("suffixSize: {}\n", suffixSize);

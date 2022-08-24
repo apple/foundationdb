@@ -1951,7 +1951,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit,
 	                              int byteLimit,
-	                              Optional<RangeReadOptions> options) override {
+	                              Optional<ReadOptions> options) override {
 		ReadType type = ReadType::NORMAL;
 
 		if (options.present()) {

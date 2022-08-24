@@ -399,7 +399,7 @@ struct StorageServerDisk {
 	//  - "a", if key "a" exist
 	//  - "b", if key "a" doesn't exist, and "b" is the next existing key in total order
 	//  - allKeys.end, if keyrange [a, allKeys.end) is empty
-	Future<Key> readNextKeyInclusive(KeyRef key, Optional<RangeReadOptions> options = Optional<RangeReadOptions>()) {
+	Future<Key> readNextKeyInclusive(KeyRef key, Optional<ReadOptions> options = Optional<ReadOptions>()) {
 		++(*kvScans);
 		return readFirstKey(storage, KeyRangeRef(key, allKeys.end), options);
 	}
@@ -416,7 +416,7 @@ struct StorageServerDisk {
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit = 1 << 30,
 	                              int byteLimit = 1 << 30,
-	                              Optional<RangeReadOptions> options = Optional<RangeReadOptions>()) {
+	                              Optional<ReadOptions> options = Optional<ReadOptions>()) {
 		++(*kvScans);
 		return storage->readRange(keys, rowLimit, byteLimit, options);
 	}
@@ -445,9 +445,7 @@ private:
 	IKeyValueStore* storage;
 	void writeMutations(const VectorRef<MutationRef>& mutations, Version debugVersion, const char* debugContext);
 
-	ACTOR static Future<Key> readFirstKey(IKeyValueStore* storage,
-	                                      KeyRangeRef range,
-	                                      Optional<RangeReadOptions> options) {
+	ACTOR static Future<Key> readFirstKey(IKeyValueStore* storage, KeyRangeRef range, Optional<ReadOptions> options) {
 		RangeResult r = wait(storage->readRange(range, 1, 1 << 30, options));
 		if (r.size())
 			return r[0].key;
@@ -2495,7 +2493,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	state Version startVersion = data->version.get();
 	// TODO: Change feed reads should probably at least set cacheResult to false, possibly set a different ReadType as
 	// well, perhaps high priority?
-	state RangeReadOptions options;
+	state ReadOptions options;
 
 	if (DEBUG_CF_TRACE) {
 		TraceEvent(SevDebug, "TraceChangeFeedMutationsBegin", data->thisServerID)
@@ -3234,7 +3232,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 	state GetValueReqAndResultRef getValue;
 	state double getValueStart = g_network->timer();
 	getValue.key = key;
-	state Optional<ReadOptions> options = pOriginalReq->options.castTo<ReadOptions>();
+	state Optional<ReadOptions> options = pOriginalReq->options;
 
 	if (data->shards[key]->isReadable()) {
 		try {
@@ -3291,7 +3289,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
                                           int limit,
                                           int* pLimitBytes,
                                           SpanContext parentSpan,
-                                          Optional<RangeReadOptions> options,
+                                          Optional<ReadOptions> options,
                                           Optional<Key> tenantPrefix) {
 	state GetKeyValuesReply result;
 	state StorageServer::VersionedData::ViewAtVersion view = data->data().at(version);
@@ -3532,7 +3530,7 @@ ACTOR Future<Key> findKey(StorageServer* data,
                           KeyRange range,
                           int* pOffset,
                           SpanContext parentSpan,
-                          Optional<RangeReadOptions> options)
+                          Optional<ReadOptions> options)
 // Attempts to find the key indicated by sel in the data at version, within range.
 // Precondition: selectorInRange(sel, range)
 // If it is found, offset is set to 0 and a key is returned which falls inside range.
@@ -3670,7 +3668,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 {
 	state Span span("SS:getKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state Optional<RangeReadOptions> options = req.options;
+	state Optional<ReadOptions> options = req.options;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -4417,7 +4415,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 {
 	state Span span("SS:getMappedKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state Optional<RangeReadOptions> options = req.options;
+	state Optional<ReadOptions> options = req.options;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -4628,7 +4626,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 {
 	state Span span("SS:getKeyValuesStream"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state Optional<RangeReadOptions> options = req.options;
+	state Optional<ReadOptions> options = req.options;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -4843,7 +4841,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
 	state int64_t resultSize = 0;
-	state RangeReadOptions options;
+	state ReadOptions options;
 	if (req.options.present()) {
 		options = req.options.get();
 	}
@@ -4878,7 +4876,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		                               searchRange,
 		                               &offset,
 		                               req.spanContext,
-		                               req.options.present() ? options : Optional<RangeReadOptions>()));
+		                               req.options.present() ? options : Optional<ReadOptions>()));
 
 		data->checkChangeCounter(changeCounter,
 		                         KeyRangeRef(std::min<KeyRef>(req.sel.getKey(), absoluteKey),
@@ -4973,7 +4971,7 @@ void getQueuingMetrics(StorageServer* self, StorageQueuingMetricsRequest const& 
 
 ACTOR Future<Void> doEagerReads(StorageServer* data, UpdateEagerReadInfo* eager) {
 	eager->finishKeyBegin();
-	state RangeReadOptions options;
+	state ReadOptions options;
 	options.type = ReadType::EAGER;
 	if (SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS) {
 		std::vector<Future<Key>> keyEnd(eager->keyBegin.size());
@@ -6347,6 +6345,12 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		state int debug_nextRetryToLog = 1;
 		state Error lastError;
 
+		// TODO: update to FETCH once the priority multi lock is used.
+		// leaving the readtype off for now to prevent data fetches stall under heavy load
+		// it is used to inform the storage that the rangeRead is for Fetch
+		// state ReadOptions options = ReadOptions(Optional<UID>(), ReadType::FETCH);
+		state ReadOptions options = ReadOptions(Optional<UID>(), ReadType::NORMAL);
+
 		// FIXME: The client cache does not notice when servers are added to a team. To read from a local storage server
 		// we must refresh the cache manually.
 		data->cx->invalidateCache(Key(), keys);
@@ -6401,12 +6405,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				shard->updates.pop_front();
 			tr.setVersion(fetchVersion);
 			tr.trState->taskID = TaskPriority::FetchKeys;
-			// TODO: update to FETCH once the priority multi lock is used.
-			// leaving the readtype off for now to prevent data fetches stall under heavy load
-			// it is used to inform the storage that the rangeRead is for Fetch
-			// tr.trState->readOptions.type = ReadType::FETCH;
-			tr.trState->readOptions.type = ReadType::NORMAL;
-			tr.trState->readOptions.cacheResult = false;
+			tr.trState->readOptions = options;
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold = SERVER_KNOBS->FETCH_USING_STREAMING
 			                              ? tr.getRangeStream(results, keys, GetRangeLimits(), Snapshot::True)

@@ -232,7 +232,7 @@ public:
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit,
 	                              int byteLimit,
-	                              Optional<RangeReadOptions> options) override {
+	                              Optional<ReadOptions> options) override {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
@@ -943,7 +943,7 @@ private:
 	                                                  KeyRange keys,
 	                                                  int rowLimit,
 	                                                  int byteLimit,
-	                                                  Optional<RangeReadOptions> options) {
+	                                                  Optional<ReadOptions> options) {
 		wait(self->recovering);
 		return static_cast<IKeyValueStore*>(self)->readRange(keys, rowLimit, byteLimit, options).get();
 	}

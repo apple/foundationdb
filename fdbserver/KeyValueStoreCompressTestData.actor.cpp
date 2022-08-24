@@ -73,7 +73,7 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit,
 	                              int byteLimit,
-	                              Optional<RangeReadOptions> options = Optional<RangeReadOptions>()) override {
+	                              Optional<ReadOptions> options = Optional<ReadOptions>()) override {
 		return doReadRange(store, keys, rowLimit, byteLimit, options);
 	}
 
@@ -102,7 +102,7 @@ private:
 	                                      KeyRangeRef keys,
 	                                      int rowLimit,
 	                                      int byteLimit,
-	                                      Optional<RangeReadOptions> options) {
+	                                      Optional<ReadOptions> options) {
 		RangeResult _vs = wait(store->readRange(keys, rowLimit, byteLimit, options));
 		RangeResult vs = _vs; // Get rid of implicit const& from wait statement
 		Arena& a = vs.arena();

@@ -1522,6 +1522,9 @@ enum class ReadType {
 	NORMAL,
 	HIGH,
 };
+
+FDB_DECLARE_BOOLEAN_PARAM(CacheResult);
+
 // store options for storage engine read
 // ReadType describes the usage and priority of the read
 // cacheResult determines whether the storage engine cache for this read
@@ -1529,30 +1532,17 @@ enum class ReadType {
 // debugID helps to trace the path of the read
 struct ReadOptions {
 	ReadType type;
-	Optional<UID> debugID;
 	bool cacheResult;
-
-	ReadOptions() : type(ReadType::NORMAL), cacheResult(true){};
-	ReadOptions(ReadType type, bool cacheResult) : type(type), cacheResult(cacheResult){};
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, type, cacheResult, debugID);
-	}
-};
-
-struct RangeReadOptions : ReadOptions {
-
+	Optional<UID> debugID;
 	Optional<Version> consistencyCheckStartVersion;
 
-	RangeReadOptions() : ReadOptions(){};
+	ReadOptions() : type(ReadType::NORMAL), cacheResult(CacheResult::True){};
 
-	RangeReadOptions& operator=(const ReadOptions& option) {
-		type = option.type;
-		debugID = option.debugID;
-		cacheResult = option.cacheResult;
-		return *this;
-	}
+	ReadOptions(Optional<UID> debugID,
+	            ReadType type = ReadType::NORMAL,
+	            CacheResult cache = CacheResult::False,
+	            Optional<Version> version = Optional<Version>())
+	  : type(type), cacheResult(cache), debugID(debugID), consistencyCheckStartVersion(version){};
 
 	template <class Ar>
 	void serialize(Ar& ar) {

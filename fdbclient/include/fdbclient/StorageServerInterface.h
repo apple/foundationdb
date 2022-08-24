@@ -394,7 +394,7 @@ struct GetKeyValuesRequest : TimedRequest {
 	int limit, limitBytes;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
-	Optional<RangeReadOptions> options;
+	Optional<ReadOptions> options;
 	ReplyPromise<GetKeyValuesReply> reply;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
@@ -452,7 +452,7 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	int limit, limitBytes;
 	int matchIndex;
 	Optional<TagSet> tags;
-	Optional<RangeReadOptions> options;
+	Optional<ReadOptions> options;
 	ReplyPromise<GetMappedKeyValuesReply> reply;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
@@ -518,7 +518,7 @@ struct GetKeyValuesStreamRequest {
 	Version version; // or latestVersion
 	int limit, limitBytes;
 	Optional<TagSet> tags;
-	Optional<RangeReadOptions> options;
+	Optional<ReadOptions> options;
 	ReplyPromiseStream<GetKeyValuesStreamReply> reply;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
