@@ -47,7 +47,7 @@ if __name__ == '__main__':
 
     for directory in dirs_with_files_matching(Path.cwd(), re.compile(r'trace.*\.(json|xml)'), recurse=True):
         trace_files = TraceFiles(directory)
-        for files in trace_files:
+        for files in trace_files.items():
             if config.use_valgrind:
                 for valgrind_file in valgrind_files:
                     summary = Summary(Path('bin/fdbserver'), was_killed=True)

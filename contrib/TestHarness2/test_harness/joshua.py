@@ -40,7 +40,7 @@ class ToSummaryTree(xml.sax.handler.ContentHandler):
             self.stack[-1].children.append(closed)
 
 
-def _print_summary(summary: SummaryTree, commands: Set[str]) -> str:
+def _print_summary(summary: SummaryTree, commands: Set[str]):
     cmd = []
     if config.reproduce_prefix is not None:
         cmd.append(config.reproduce_prefix)

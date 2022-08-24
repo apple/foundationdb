@@ -439,6 +439,9 @@ class TestRunner:
             result = result and run.success
             test_picker.add_time(test_files[0], run.run_time, run.summary.out)
             decorate_summary(run.summary.out, file, seed + count, run.buggify_enabled)
+            # TODO: Remove debugging code
+            if unseed_check and run.summary.unseed:
+                run.summary.out.append(run.summary.list_simfdb())
             run.summary.out.dump(sys.stdout)
             if not result:
                 return False
@@ -458,7 +461,7 @@ class TestRunner:
         return result
 
     def run(self) -> bool:
-        seed = config.random_seed if not None else config.random.randint(0, 2 ** 32 - 1)
+        seed = config.random_seed if config.random_seed is not None else config.random.randint(0, 2 ** 32 - 1)
         test_files = self.test_picker.choose_test()
         success = self.run_tests(test_files, seed, self.test_picker)
         if config.clean_up:

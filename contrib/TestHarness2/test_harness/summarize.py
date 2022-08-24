@@ -13,7 +13,7 @@ import xml.sax.handler
 import xml.sax.saxutils
 
 from pathlib import Path
-from typing import List, Dict, TextIO, Callable, Optional, OrderedDict, Any, Tuple
+from typing import List, Dict, TextIO, Callable, Optional, OrderedDict, Any, Tuple, Iterator, Iterable
 
 from test_harness.config import config
 from test_harness.valgrind import parse_valgrind_output
@@ -28,7 +28,7 @@ class SummaryTree:
     def append(self, element: SummaryTree):
         self.children.append(element)
 
-    def to_dict(self, add_name: bool = True) -> Dict[str, Any] | [Any]:
+    def to_dict(self, add_name: bool = True) -> Dict[str, Any] | List[Any]:
         if len(self.children) > 0 and len(self.attributes) == 0:
             children = []
             for child in self.children:
@@ -294,6 +294,22 @@ class TraceFiles:
     def __len__(self) -> int:
         return len(self.runs)
 
+    def items(self) -> Iterator[List[Path]]:
+        class TraceFilesIterator(Iterable[List[Path]]):
+            def __init__(self, trace_files: TraceFiles):
+                self.current = 0
+                self.trace_files: TraceFiles = trace_files
+
+            def __iter__(self):
+                return self
+
+            def __next__(self) -> List[Path]:
+                if len(self.trace_files) <= self.current:
+                    raise StopIteration
+                self.current += 1
+                return self.trace_files[self.current - 1]
+        return TraceFilesIterator(self)
+
 
 class Summary:
     def __init__(self, binary: Path, runtime: float = 0, max_rss: int | None = None,
@@ -322,6 +338,7 @@ class Summary:
         self.error_out = error_out
         self.stderr_severity: str = '40'
         self.will_restart: bool = will_restart
+        self.test_dir: Path | None = None
 
         if uid is not None:
             self.out.attributes['TestUID'] = str(uid)
@@ -340,6 +357,7 @@ class Summary:
         self.done()
 
     def summarize(self, trace_dir: Path, command: str):
+        self.test_dir = trace_dir
         trace_files = TraceFiles(trace_dir)
         if len(trace_files) == 0:
             self.error = True
@@ -357,6 +375,24 @@ class Summary:
                                             test_harness.fdb.str_to_tuple(config.joshua_dir) + ('coverage',),
                                             test_harness.fdb.str_to_tuple(config.joshua_dir) + ('coverage-metadata',),
                                             self.coverage)
+
+    def list_simfdb(self) -> SummaryTree:
+        res = SummaryTree('SimFDB')
+        res.attributes['TestDir'] = str(self.test_dir)
+        if self.test_dir is None:
+            return res
+        simfdb = self.test_dir / Path('simfdb')
+        if not simfdb.exists():
+            res.attributes['NoSimDir'] = "simfdb doesn't exist"
+            return res
+        elif not simfdb.is_dir():
+            res.attributes['NoSimDir'] = 'simfdb is not a directory'
+            return res
+        for file in simfdb.iterdir():
+            child = SummaryTree('Directory' if file.is_dir() else 'File')
+            child.attributes['Name'] = file.name
+            res.append(child)
+        return res
 
     def ok(self):
         return not self.error
