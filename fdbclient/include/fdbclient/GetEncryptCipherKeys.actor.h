@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_GETCIPHERKEYS_ACTOR_G_H)
-#define FDBSERVER_GETCIPHERKEYS_ACTOR_G_H
-#include "fdbserver/GetEncryptCipherKeys.actor.g.h"
-#elif !defined(FDBSERVER_GETCIPHERKEYS_ACTOR_H)
-#define FDBSERVER_GETCIPHERKEYS_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_GETCIPHERKEYS_ACTOR_G_H)
+#define FDBCLIENT_GETCIPHERKEYS_ACTOR_G_H
+#include "fdbclient/GetEncryptCipherKeys.actor.g.h"
+#elif !defined(FDBCLIENT_GETCIPHERKEYS_ACTOR_H)
+#define FDBCLIENT_GETCIPHERKEYS_ACTOR_H
 
 #include "fdbclient/EncryptKeyProxyInterface.h"
 #include "flow/BlobCipher.h"
