@@ -3316,9 +3316,9 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 			++trState->cx->transactionPhysicalReads;
 
             // TODO@ZZX: delete
-            // if (locationInfo.locations->locations()) {
-            //     TraceEvent("GetValueAlternatives").suppressFor(0.5).detail("NumberOfReplicas", locationInfo.locations->locations()->size());
-            // }
+            if (locationInfo.locations.isValid() && locationInfo.locations->locations().isValid()) {
+                TraceEvent("GetValueAlternatives").suppressFor(0.5).detail("NumberOfReplicas", locationInfo.locations->locations()->size()).detail("Key", key);
+            }
 
 			state GetValueReply reply;
 			try {

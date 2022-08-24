@@ -211,6 +211,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 
 		wait(updateServerShards(cx, self));
 		for (self->currentHotRound = 0; self->currentHotRound < self->skewRound; ++self->currentHotRound) {
+            g_traceBatch.addEvent("HotRound", self->currentHotRound, "In each round of for-loop");
 			self->setHotServers();
 			self->startReadWriteClients(cx, clients);
 			wait(timeout(waitForAll(clients), self->testDuration / self->skewRound, Void()));
@@ -225,14 +226,17 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 	// calculate hot server count
 	void setHotServers() {
 		hotServerCount = ceil(hotServerFraction * serverShards.size());
-		std::cout << "Choose " << hotServerCount << "/" << serverShards.size() << "/" << serverInterfaces.size()
-		          << " hot servers: [";
+        std::stringstream ss;
+		ss << "Choose " << hotServerCount << "/" << serverShards.size() << "/" << serverInterfaces.size()
+		          << " hot servers: [";        
 		int begin = currentHotRound * hotServerCount;
 		for (int i = 0; i < hotServerCount; ++i) {
 			int idx = (begin + i) % serverShards.size();
-			std::cout << serverInterfaces.at(serverShards[idx].first).address().toString() << ",";
+			ss << serverInterfaces.at(serverShards[idx].first).address().toString() << ",";
 		}
-		std::cout << "]\n";
+		ss << "]\n";
+        printf("%s", ss.str().c_str());
+        
 	}
 
 	int64_t getRandomKeyFromHotServer(bool hotServerRead = true) {

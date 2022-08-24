@@ -1,5 +1,5 @@
 [[test]]
-testTitle = 'SkewedReadWriteTest'
+testTitle = 'SkewedReadLongTest'
 connectionFailuresDisableDuration = 100000
 # waitForQuiescenceBegin= false
 # waitForQuiescenceEnd=false
@@ -9,21 +9,22 @@ timeout = 3600.0
 
 [[test.workload]]
 testName = 'SkewedReadWrite'
-transactionsPerSecond = 100000
-testDuration = 1200.0
+transactionsPerSecond = 1000000
+# testDuration = 1200.0
+testDuration = 600.0
 skewRound = 1
 # 12GB
 nodeCount = 60000000
 valueBytes = 200
-readsPerTransactionA = 8
+readsPerTransactionA = 10
 writesPerTransactionA = 0
-readsPerTransactionB = 0
-writesPerTransactionB = 1
-alpha = 0.5
+writesPerTransactionB = 0
+alpha = 0.0
 discardEdgeMeasurements = false
-hotServerFraction = 0.2
-hotServerReadFrac = 0.8
-hotServerWriteFrac = 0.6
-# hotReadWriteServerOverlap = 0.5
-hotServerShardFraction = 0.3
+hotServerFraction = 0.1
+hotServerReadFrac = 1.0
+hotServerShardFraction = 0.1
 warmingDelay = 10.0
+
+
+

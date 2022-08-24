@@ -78,6 +78,7 @@ public:
 	void moveShard(KeyRangeRef keys, std::vector<Team> destinationTeam);
 	void finishMove(KeyRangeRef keys);
 	void check() const;
+    int getTotalShardCount() const;
 
 	void setCheckMode(CheckMode);
 

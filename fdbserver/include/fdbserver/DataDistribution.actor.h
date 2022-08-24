@@ -46,7 +46,7 @@
 class RelocateReason {
 public:
 	enum Value : int8_t {
-		OTHER,
+		OTHER = 0,
 		REBALANCE_DISK,
 		MOVE_SHARD,
 		MULTIPLY_SHARD,

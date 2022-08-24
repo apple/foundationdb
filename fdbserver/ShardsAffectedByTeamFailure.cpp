@@ -20,6 +20,15 @@
 
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
 
+
+int ShardsAffectedByTeamFailure::getTotalShardCount() const {
+    int count = 0;
+    for (auto it: storageServerShards) {
+        count += it.second;
+    }
+    return count;
+}
+
 std::vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor(Team team) const {
 	std::vector<KeyRange> r;
 	for (auto it = team_shards.lower_bound(std::pair<Team, KeyRange>(team, KeyRangeRef()));

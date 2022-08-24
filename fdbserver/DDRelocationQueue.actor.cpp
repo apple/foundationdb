@@ -1651,11 +1651,14 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
                 TraceEvent("RelocateByMultplyShard")
                     .detail("Source", rd.src)
                     .detail("CompleteSrc", rd.completeSources)
-                    .detail("BestTeam", destServersString(bestTeams))
-                    .detail("SrcTeam", destServersString(srcTeams))
                     .detail("DestinationTeam", destinationTeams)
                     .detail("HealthIds", healthyIds)
-                    .detail("DestIds", destIds);
+                    .detail("DestIds", destIds)
+                    .detail("SrcTeam", srcTeams[0].first->getDesc())
+                    .detail("DestTeam", bestTeams[0].first->getDesc())
+                    .detail("TeamSize", self->teamSize)
+                    .detail("SingleRegionTeamSize", self->singleRegionTeamSize)
+                    .detail("Priority", rd.priority);
             } else if (rd.reason == RelocateReason::REDUCE_SHARD) {
                 // Looks like don't have to do anything in particular?
                 TraceEvent("RelocateByReduceShard")
@@ -1986,8 +1989,9 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 		return false;
 	}
 
-	state Future<bool> reduceShards = rebalanceByReduceShard(self, randomTeam, moveReason, primary);
-    wait(ready(reduceShards));
+    // TODO@ZZX: uncomment
+	// state Future<bool> reduceShards = rebalanceByReduceShard(self, randomTeam, moveReason, primary);
+    // wait(ready(reduceShards));
 	
 	state std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
@@ -2011,7 +2015,8 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 	// check team difference
 	state double srcLoad = sourceTeam->getLoadReadBandwidth(false);
 	state double destLoad = destTeam->getLoadReadBandwidth();
-	traceEvent->detail("SrcReadBandwidth", srcLoad).detail("DestReadBandwidth", destLoad);
+	traceEvent->detail("SrcReadBandwidth", srcLoad).detail("DestReadBandwidth", destLoad)
+    .detail("ShardInCluster", self->shardsAffectedByTeamFailure->getTotalShardCount());
 
 	// read bandwidth difference is less than 30% of src load
 	if ((1.0 - SERVER_KNOBS->READ_REBALANCE_DIFF_FRAC) * srcLoad <= destLoad) {
@@ -2053,14 +2058,13 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 
 	RelocateReason relocateReason = selectRelocateReason(
 	    self, traceEvent, moveReason, reply.minReadLoad, reply.maxReadLoad, metrics.bytesReadPerKSecond, srcLoad, shard);
-
     
 	if (relocateReason == RelocateReason::OTHER) {
 		// do nothing
 		traceEvent->detail("SkipReason", "NotMoveAuxTeam");
 		return false;
 	} else {
-		traceEvent->detail("RelocateReason", relocateReason.toString()).detail("ServerSize", sourceTeam->size());
+		traceEvent->detail("RelocateReason", relocateReason.toString()).detail("ServerSize", sourceTeam->size()).detail("KeyRange", shard);
 
 		for (int i = 0; i < shards.size(); i++) {
 			if (shard == shards[i]) {
@@ -2186,19 +2190,27 @@ RelocateReason selectRelocateReason(DDQueue* self,
 			// If three of them are equal, it means we only have one shard whose readLoad > 0 in sourceTeam. In this
 			// case, moving shard to another team won't solve the problem, so we would use MULTIPLY_SHARD here.
 			relocateReason = RelocateReason::MULTIPLY_SHARD;
-        // TODO@ZZX: delete *0.5
-		} else if (shardReadLoad >= srcLoad * SERVER_KNOBS->DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC * 0.5) {
+        // TODO@ZZX: delete *0.2
+		} else if (shardReadLoad >= srcLoad * SERVER_KNOBS->DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC * 0.2) {
 			// If one team has a very hot shard, we will try to multiply replicas.
 			relocateReason = RelocateReason::MULTIPLY_SHARD;
 		} else {
-			relocateReason = RelocateReason::MOVE_SHARD;
+            // TODO@ZZX:
+			relocateReason = RelocateReason::OTHER;
 		}
 	} else {
         if (srcTeamSize > self->teamSize) {
 			// Already have an auxiliary team
 			relocateReason = RelocateReason::OTHER;
 		} else {
-            relocateReason = RelocateReason::MOVE_SHARD;
+            // TODO@ZZX: delete
+            relocateReason = RelocateReason::OTHER;
+            // if (shardReadLoad >= srcLoad * SERVER_KNOBS->DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC * 0.2) {
+            //     // If one team has a very hot shard, we will try to multiply replicas.
+            //     relocateReason = RelocateReason::MULTIPLY_SHARD;
+            // } else {
+            //     relocateReason = RelocateReason::MOVE_SHARD;
+	    	// }
         }
 	}
 
@@ -2452,6 +2464,7 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueue* self, int teamCollectionIndex) {
 				}
 			}
 
+            skipCurrentLoop = true;
 			traceEvent.detail("Enabled", !skipCurrentLoop);
 
 			wait(delayF);
@@ -2550,6 +2563,9 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueue* self, int teamCollectionIndex) {
 					}
 				}
 			}
+
+            // TODO@ZZX:
+            skipCurrentLoop = true;
 
 			traceEvent.detail("Enabled", !skipCurrentLoop);
 
