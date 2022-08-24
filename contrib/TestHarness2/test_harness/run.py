@@ -429,7 +429,7 @@ class TestRunner:
         for file in test_files:
             will_restart = count + 1 < len(test_files)
             binary = self.binary_chooser.choose_binary(file)
-            unseed_check = is_no_sim(file) and config.random.random() < config.unseed_check_ratio
+            unseed_check = not is_no_sim(file) and config.random.random() < config.unseed_check_ratio
             buggify_enabled: bool = config.random.random() < config.buggify_on_ratio
             if unseed_check and count != 0:
                 # for restarting tests we will need to restore the sim2 after the first run
