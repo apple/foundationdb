@@ -37,7 +37,7 @@
 
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/EncryptionOpsUtils.h"
-#include "fdbserver/GetEncryptCipherKeys.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/ServerDBInfo.h"
