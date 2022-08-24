@@ -7998,6 +7998,86 @@ ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAw
 	return version;
 }
 
+ACTOR Future<Version> checkBlobSubrange(Database db, KeyRange keyRange, Optional<Version> version) {
+	state Transaction tr(db);
+	state Version readVersionOut = invalidVersion;
+	loop {
+		try {
+			wait(success(tr.readBlobGranules(keyRange, 0, version, &readVersionOut)));
+			return readVersionOut;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRange range, Optional<Version> version) {
+	state Database db(cx);
+	state Transaction tr(db);
+	state Standalone<VectorRef<KeyRangeRef>> allRanges;
+	state KeyRange curRegion = KeyRangeRef(range.begin, range.begin);
+	state Version readVersionOut = invalidVersion;
+	state int batchSize = BUGGIFY ? deterministicRandom()->randomInt(2, 10) : CLIENT_KNOBS->BG_TOO_MANY_GRANULES / 2;
+	state int loadSize = (BUGGIFY ? deterministicRandom()->randomInt(1, 20) : 20) * batchSize;
+	loop {
+		if (curRegion.begin >= range.end) {
+			return readVersionOut;
+		}
+		loop {
+			try {
+				wait(store(allRanges, tr.getBlobGranuleRanges(KeyRangeRef(curRegion.begin, range.end), loadSize)));
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
+		if (allRanges.empty()) {
+			if (curRegion.begin < range.end) {
+				return invalidVersion;
+			}
+			return readVersionOut;
+		}
+
+		state std::vector<Future<Version>> checkParts;
+		// Chunk up to smaller ranges than this limit. Must be smaller than BG_TOO_MANY_GRANULES to not hit the limit
+		int batchCount = 0;
+		for (auto& it : allRanges) {
+			if (it.begin != curRegion.end) {
+				return invalidVersion;
+			}
+
+			curRegion = KeyRangeRef(curRegion.begin, it.end);
+			batchCount++;
+
+			if (batchCount == batchSize) {
+				checkParts.push_back(checkBlobSubrange(db, curRegion, version));
+				batchCount = 0;
+				curRegion = KeyRangeRef(curRegion.end, curRegion.end);
+			}
+		}
+		if (!curRegion.empty()) {
+			checkParts.push_back(checkBlobSubrange(db, curRegion, version));
+		}
+
+		try {
+			wait(waitForAll(checkParts));
+		} catch (Error& e) {
+			if (e.code() == error_code_blob_granule_transaction_too_old) {
+				return invalidVersion;
+			}
+			throw e;
+		}
+		ASSERT(!checkParts.empty());
+		readVersionOut = checkParts.back().get();
+		curRegion = KeyRangeRef(curRegion.end, curRegion.end);
+	}
+}
+
+Future<Version> DatabaseContext::verifyBlobRange(const KeyRange& range, Optional<Version> version) {
+	return verifyBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, version);
+}
+
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
                                                                                       bool primary,
                                                                                       bool use_system_priority) {
@@ -9796,6 +9876,89 @@ ACTOR Future<Void> waitPurgeGranulesCompleteActor(Reference<DatabaseContext> db,
 
 Future<Void> DatabaseContext::waitPurgeGranulesComplete(Key purgeKey) {
 	return waitPurgeGranulesCompleteActor(Reference<DatabaseContext>::addRef(this), purgeKey);
+}
+
+ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx, KeyRange range, bool active) {
+	state Database db(cx);
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+
+	state Value value = active ? blobRangeActive : blobRangeInactive;
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			if (active) {
+				state RangeResult results = wait(krmGetRanges(tr, blobRangeKeys.begin, range));
+				ASSERT(results.size() >= 2);
+				if (results[0].key == range.begin && results[1].key == range.end &&
+				    results[0].value == blobRangeActive) {
+					return true;
+				} else {
+					for (int i = 0; i < results.size(); i++) {
+						if (results[i].value == blobRangeActive) {
+							return false;
+						}
+					}
+				}
+			}
+
+			tr->set(blobRangeChangeKey, deterministicRandom()->randomUniqueID().toString());
+			// This is not coalescing because we want to keep each range logically separate.
+			wait(krmSetRange(tr, blobRangeKeys.begin, range, value));
+			wait(tr->commit());
+			printf("Successfully updated blob range [%s - %s) to %s\n",
+			       range.begin.printable().c_str(),
+			       range.end.printable().c_str(),
+			       value.printable().c_str());
+			return true;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+Future<bool> DatabaseContext::blobbifyRange(KeyRange range) {
+	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, true);
+}
+
+Future<bool> DatabaseContext::unblobbifyRange(KeyRange range) {
+	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, false);
+}
+
+ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRangesActor(Reference<DatabaseContext> cx,
+                                                                           KeyRange range,
+                                                                           int rangeLimit) {
+	state Database db(cx);
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	state Standalone<VectorRef<KeyRangeRef>> blobRanges;
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+			state RangeResult results = wait(krmGetRanges(tr, blobRangeKeys.begin, range, 2 * rangeLimit + 2));
+
+			blobRanges.arena().dependsOn(results.arena());
+			for (int i = 0; i < results.size() - 1; i++) {
+				if (results[i].value == LiteralStringRef("1")) {
+					blobRanges.push_back(blobRanges.arena(), KeyRangeRef(results[i].key, results[i + 1].key));
+				}
+				if (blobRanges.size() == rangeLimit) {
+					return blobRanges;
+				}
+			}
+
+			return blobRanges;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges(KeyRange range, int rowLimit) {
+	return listBlobbifiedRangesActor(Reference<DatabaseContext>::addRef(this), range, rowLimit);
 }
 
 int64_t getMaxKeySize(KeyRef const& key) {
