@@ -276,7 +276,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_FAILURE_TIME,                                       1.0 ); if( randomize && BUGGIFY ) DD_FAILURE_TIME = 10.0;
 	init( DD_ZERO_HEALTHY_TEAM_DELAY,                            1.0 );
 	init( REMOTE_KV_STORE,                                     false );
-	init( REMOTE_KV_STORE_INIT_DELAY,                            0.1 );
+	init( REBOOT_KV_STORE_DELAY,                                 0.1 );
 	init( REMOTE_KV_STORE_MAX_INIT_DURATION,                    10.0 );
 	init( REBALANCE_MAX_RETRIES,                                 100 );
 	init( DD_OVERLAP_PENALTY,                                  10000 );
@@ -673,15 +673,18 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DURABILITY_LAG_INCREASE_RATE,                        1.001 );
 	init( STORAGE_SERVER_LIST_FETCH_TIMEOUT,                    20.0 );
 	init( BW_THROTTLING_ENABLED,                                true );
-	init( TARGET_BW_LAG,                                        50.0 );
-	init( TARGET_BW_LAG_BATCH,                                  20.0 );
-	init( TARGET_BW_LAG_UPDATE,                                  9.0 );
+
+	bool buggifySmallBWLag = false; //randomize && BUGGIFY;
+	init( TARGET_BW_LAG,                                        50.0 ); if(buggifySmallBWLag) TARGET_BW_LAG = 10.0;
+	init( TARGET_BW_LAG_BATCH,                                  20.0 ); if(buggifySmallBWLag) TARGET_BW_LAG_BATCH = 4.0;
+	init( TARGET_BW_LAG_UPDATE,                                  9.0 ); if(buggifySmallBWLag) TARGET_BW_LAG_UPDATE = 1.0;
 	init( MIN_BW_HISTORY,                                         10 );
-	init( BW_ESTIMATION_INTERVAL,                               10.0 );
+	init( BW_ESTIMATION_INTERVAL,                               10.0 ); if(buggifySmallBWLag) BW_ESTIMATION_INTERVAL = 2.0;
 	init( BW_LAG_INCREASE_AMOUNT,                                1.1 );
 	init( BW_LAG_DECREASE_AMOUNT,                                0.9 );
 	init( BW_FETCH_WORKERS_INTERVAL,                             5.0 );
 	init( BW_RW_LOGGING_INTERVAL,                                5.0 );
+	init( BW_MAX_BLOCKED_INTERVAL,                              10.0 ); if(buggifySmallBWLag) BW_MAX_BLOCKED_INTERVAL = 2.0;
 
 	init( MAX_AUTO_THROTTLED_TRANSACTION_TAGS,                     5 ); if(randomize && BUGGIFY) MAX_AUTO_THROTTLED_TRANSACTION_TAGS = 1;
 	init( MAX_MANUAL_THROTTLED_TRANSACTION_TAGS,                  40 ); if(randomize && BUGGIFY) MAX_MANUAL_THROTTLED_TRANSACTION_TAGS = 1;
@@ -719,6 +722,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGE_LIMIT_BYTES,                                500000 );
 	init( BUGGIFY_LIMIT_BYTES,                                  1000 );
 	init( FETCH_USING_STREAMING,                               false ); if( randomize && isSimulated && BUGGIFY ) FETCH_USING_STREAMING = true; //Determines if fetch keys uses streaming reads
+	init( FETCH_USING_BLOB,                                    false );
 	init( FETCH_BLOCK_BYTES,                                     2e6 );
 	init( FETCH_KEYS_PARALLELISM_BYTES,                          4e6 ); if( randomize && BUGGIFY ) FETCH_KEYS_PARALLELISM_BYTES = 3e6;
 	init( FETCH_KEYS_PARALLELISM,                                  2 );
