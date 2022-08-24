@@ -223,15 +223,6 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> getSummaries(Database
 			Standalone<VectorRef<BlobGranuleSummaryRef>> summaries =
 			    wait(tr.summarizeBlobGranules(range, summaryVersion, 1000000));
 
-			fmt::print("Got {0} Summaries at {1} for [{2} - {3})\n",
-			           summaries.size(),
-			           summaryVersion,
-			           range.begin.printable(),
-			           range.end.printable());
-			for (auto& it : summaries) {
-				fmt::print("  [{0} - {1})\n", it.keyRange.begin.printable(), it.keyRange.end.printable());
-			}
-
 			// do some basic validation
 			ASSERT(!summaries.empty());
 			ASSERT(summaries.front().keyRange.begin == range.begin);
