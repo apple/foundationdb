@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import List, Dict, TextIO, Callable, Optional, OrderedDict, Any, Tuple
 
 from test_harness.config import config
+from test_harness.valgrind import parse_valgrind_output
 
 
 class SummaryTree:
@@ -216,69 +217,6 @@ def format_test_error(attrs: Dict[str, str], include_details: bool) -> str:
     return res
 
 
-class ValgrindError:
-    def __init__(self, what: str = '', kind: str = ''):
-        self.what: str = what
-        self.kind: str = kind
-
-    def __str__(self):
-        return 'ValgrindError(what="{}", kind="{}")'.format(self.what, self.kind)
-
-
-class ValgrindHandler(xml.sax.handler.ContentHandler):
-    def __init__(self):
-        super().__init__()
-        self.stack: List[ValgrindError] = []
-        self.result: List[ValgrindError] = []
-        self.in_kind = False
-        self.in_what = False
-
-    @staticmethod
-    def from_content(content):
-        if isinstance(content, bytes):
-            return content.decode()
-        assert isinstance(content, str)
-        return content
-
-    def characters(self, content):
-        if len(self.stack) == 0:
-            return
-        elif self.in_kind:
-            self.stack[-1].kind += self.from_content(content)
-        elif self.in_what:
-            self.stack[-1].what += self.from_content(content)
-
-    def startElement(self, name, attrs):
-        if name == 'error':
-            self.stack.append(ValgrindError())
-        if len(self.stack) == 0:
-            return
-        if name == 'kind':
-            self.in_kind = True
-        elif name == 'what':
-            self.in_what = True
-
-    def endElement(self, name):
-        if name == 'error':
-            self.result.append(self.stack.pop())
-        elif name == 'kind':
-            self.in_kind = False
-        elif name == 'what':
-            self.in_what = False
-
-
-def parse_valgrind_output(valgrind_out_file: Path) -> List[str]:
-    res: List[str] = []
-    handler = ValgrindHandler()
-    with valgrind_out_file.open('r') as f:
-        xml.sax.parse(f, handler)
-    for err in handler.result:
-        if err.kind.startswith('Leak'):
-            continue
-        res.append(err.kind)
-    return res
-
-
 class Coverage:
     def __init__(self, file: str, line: str | int, comment: str | None = None):
         self.file = file
@@ -454,18 +392,28 @@ class Summary:
             self.out.attributes['PeakMemory'] = str(self.max_rss)
         if self.valgrind_out_file is not None:
             try:
-                whats = parse_valgrind_output(self.valgrind_out_file)
-                for what in whats:
+                valgrind_errors = parse_valgrind_output(self.valgrind_out_file)
+                for valgrind_error in valgrind_errors:
+                    if valgrind_error.kind.startswith('Leak'):
+                        continue
                     self.error = True
                     child = SummaryTree('ValgrindError')
                     child.attributes['Severity'] = '40'
-                    child.attributes['What'] = what
+                    child.attributes['What'] = valgrind_error.what.what
+                    child.attributes['Backtrace'] = valgrind_error.what.backtrace
+                    aux_count = 0
+                    for aux in valgrind_error.aux:
+                        child.attributes['WhatAux{}'.format(aux_count)] = aux.what
+                        child.attributes['BacktraceAux{}'.format(aux_count)] = aux.backtrace
+                        aux_count += 1
                     self.out.append(child)
             except Exception as e:
                 self.error = True
                 child = SummaryTree('ValgrindParseError')
                 child.attributes['Severity'] = '40'
                 child.attributes['ErrorMessage'] = str(e)
+                _, _, exc_traceback = sys.exc_info()
+                child.attributes['Trace'] = repr(traceback.format_tb(exc_traceback))
                 self.out.append(child)
                 self.error_list.append('Failed to parse valgrind output: {}'.format(str(e)))
         if not self.test_end_found:
