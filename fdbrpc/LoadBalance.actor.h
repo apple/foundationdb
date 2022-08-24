@@ -433,6 +433,12 @@ struct RequestData : NonCopyable {
 	}
 };
 
+struct GetValueRequest;
+struct GetKeyValuesRequest;
+struct GetMappedKeyValuesRequest;
+struct GetKeyServerLocationsRequest;
+struct GetKeyRequest;
+
 // Try to get a reply from one of the alternatives until success, cancellation, or certain errors.
 // Load balancing has a budget to race requests to a second alternative if the first request is slow.
 // Tries to take into account failMon's information for load balancing and avoiding failed servers.
@@ -494,6 +500,14 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				    .detail("Alternatives", alternatives->description())
 				    .detail("Total", alternatives->size())
 				    .detail("Best", alternatives->countBest())
+				    .detail("Reasons", reasons);
+			} else if (i >= alternatives->countBest()) {
+				TraceEvent("AllLocalAlternativesFailed2")
+				    .detail("Alternatives", alternatives->description())
+				    .detail("Total", alternatives->size())
+				    .detail("Best", alternatives->countBest())
+					.detail("I", i)
+					.detail("Bad", badServers)
 				    .detail("Reasons", reasons);
 			}
 
@@ -574,6 +588,22 @@ Future<REPLY_TYPE(Request)> loadBalance(
 
 	state int numAttempts = 0;
 	state double backoff = 0;
+	state std::string requestType;
+	state Optional<UID> dbgid = request.id();
+	if (std::is_same<Request, GetKeyValuesRequest>::value) {
+		requestType = "GetRange";
+	} else if (std::is_same<Request, GetKeyRequest>::value) {
+		requestType = "GetKey";
+	} else if (std::is_same<Request, GetValueRequest>::value) {
+		requestType = "GetValue";
+	} else if (std::is_same<Request, GetMappedKeyValuesRequest>::value) {
+		requestType = "GetMappedRange";
+	} else if (std::is_same<Request, GetKeyServerLocationsRequest>::value) {
+		requestType = "GetKeyServerLocations";
+	} else {
+		requestType = "Unknown";
+	}
+
 	// Issue requests to selected servers.
 	loop {
 		if (now() - startTime > (g_network->isSimulated() ? 30.0 : 600.0)) {
@@ -660,6 +690,22 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				    .detail("TriedAllOptions", triedAllOptions)
 				    .detail("Alternatives", alternatives->description())
 				    .detail("Token", stream->getEndpoint().token)
+				    .detail("Request", requestType)
+				    .detail("DebugID", dbgid.present() ? dbgid.get() : UID())
+				    .detail("QueueModel", model ? model->toString() : "")
+				    .detail("Total", alternatives->size())
+				    .detail("Best", alternatives->countBest())
+				    .detail("Attempts", numAttempts);
+			} else {
+				TraceEvent("LBLocal2")
+				    .suppressFor(0.1)
+				    .detail("Distance", (int)distance)
+				    .detail("BackOff", backoff)
+				    .detail("TriedAllOptions", triedAllOptions)
+				    .detail("Token", stream->getEndpoint().token)
+				    .detail("Request", requestType)
+				    .detail("DebugID", dbgid.present() ? dbgid.get() : UID())
+				    .detail("QueueModel", model ? model->toString() : "")
 				    .detail("Total", alternatives->size())
 				    .detail("Best", alternatives->countBest())
 				    .detail("Attempts", numAttempts);
@@ -695,12 +741,25 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			// Issue a request, if it takes too long to get a reply, go around the loop
 			if (distance == LBDistance::DISTANT) {
 				TraceEvent("LBDistant")
-				    .suppressFor(0.1)
 				    .detail("Distance", (int)distance)
 				    .detail("BackOff", backoff)
 				    .detail("TriedAllOptions", triedAllOptions)
 				    .detail("Alternatives", alternatives->description())
 				    .detail("Token", stream->getEndpoint().token)
+				    .detail("Request", requestType)
+				    .detail("DebugID", dbgid.present() ? dbgid.get() : UID())
+				    .detail("QueueModel", model ? model->toString() : "")
+				    .detail("Total", alternatives->size())
+				    .detail("Best", alternatives->countBest());
+			} else {
+				TraceEvent("LBLocal")
+				    .detail("Distance", (int)distance)
+				    .detail("BackOff", backoff)
+				    .detail("TriedAllOptions", triedAllOptions)
+				    .detail("Token", stream->getEndpoint().token)
+				    .detail("Request", requestType)
+				    .detail("DebugID", dbgid.present() ? dbgid.get() : UID())
+				    .detail("QueueModel", model ? model->toString() : "")
 				    .detail("Total", alternatives->size())
 				    .detail("Best", alternatives->countBest())
 				    .detail("Attempts", numAttempts);

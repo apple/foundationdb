@@ -350,6 +350,7 @@ struct GetKeyServerLocationsRequest {
 	                             Arena const& arena)
 	  : arena(arena), spanContext(spanContext), tenant(tenant), begin(begin), end(end), limit(limit), reverse(reverse),
 	    minTenantVersion(minTenantVersion) {}
+	Optional<UID> id() const { return Optional<UID>(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
