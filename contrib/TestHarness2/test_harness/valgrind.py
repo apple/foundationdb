@@ -30,7 +30,7 @@ class ValgrindParseState(enum.Enum):
     STACK = enum.auto()
     STACK_AUX = enum.auto()
     STACK_IP = enum.auto()
-    STACK_IP_AUX = enum.auto
+    STACK_IP_AUX = enum.auto()
 
 
 class ValgrindHandler(xml.sax.handler.ContentHandler):

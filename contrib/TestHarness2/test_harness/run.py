@@ -328,6 +328,9 @@ class TestRun:
         test_plan.attributes['DeterminismCheck'] = '1' if self.test_determinism else '0'
         out.append(test_plan)
 
+    def delete_simdir(self):
+        shutil.rmtree(self.temp_path / Path('simfdb'))
+
     def run(self):
         command: List[str] = []
         valgrind_file: Path | None = None
@@ -442,6 +445,8 @@ class TestRunner:
             if unseed_check and run.summary.unseed is not None:
                 if count != 0:
                     self.restore_sim_dir(seed + count - 1)
+                else:
+                    run.delete_simdir()
                 run2 = TestRun(binary, file.absolute(), seed + count, self.uid, restarting=count != 0,
                                stats=test_picker.dump_stats(), expected_unseed=run.summary.unseed,
                                will_restart=will_restart, buggify_enabled=buggify_enabled)
