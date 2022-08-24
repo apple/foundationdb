@@ -113,6 +113,10 @@ class Config:
         self.stats: str | None = None
         self.stats_args = {'type': str, 'help': 'A base64 encoded list of statistics (used to reproduce runs)',
                            'required': False}
+        self.random_seed: int | None = None
+        self.random_seed_args = {'type': int,
+                                 'help': 'Force given seed given to fdbserver -- mostly useful for debugging',
+                                 'required': False}
         self.kill_seconds: int = 30 * 60
         self.kill_seconds_args = {'help': 'Timeout for individual test'}
         self.buggify_on_ratio: float = 0.8

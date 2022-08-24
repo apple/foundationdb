@@ -429,7 +429,7 @@ class TestRunner:
         for file in test_files:
             will_restart = count + 1 < len(test_files)
             binary = self.binary_chooser.choose_binary(file)
-            unseed_check = config.random.random() < config.unseed_check_ratio
+            unseed_check = is_no_sim(file) and config.random.random() < config.unseed_check_ratio
             buggify_enabled: bool = config.random.random() < config.buggify_on_ratio
             if unseed_check and count != 0:
                 # for restarting tests we will need to restore the sim2 after the first run
@@ -445,8 +445,6 @@ class TestRunner:
             if unseed_check and run.summary.unseed is not None:
                 if count != 0:
                     self.restore_sim_dir(seed + count - 1)
-                else:
-                    run.delete_simdir()
                 run2 = TestRun(binary, file.absolute(), seed + count, self.uid, restarting=count != 0,
                                stats=test_picker.dump_stats(), expected_unseed=run.summary.unseed,
                                will_restart=will_restart, buggify_enabled=buggify_enabled)
@@ -460,7 +458,7 @@ class TestRunner:
         return result
 
     def run(self) -> bool:
-        seed = config.random.randint(0, 2 ** 32 - 1)
+        seed = config.random_seed if not None else config.random.randint(0, 2 ** 32 - 1)
         test_files = self.test_picker.choose_test()
         success = self.run_tests(test_files, seed, self.test_picker)
         if config.clean_up:
