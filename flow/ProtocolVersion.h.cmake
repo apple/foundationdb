@@ -38,7 +38,7 @@ constexpr uint64_t futureProtocolVersionValue = @FDB_PV_FUTURE_VERSION@;
 
 // The first check second expression version doesn't need to change because it's just for earlier protocol versions.
 #define PROTOCOL_VERSION_FEATURE(v, x)                                                                                 \
-	static_assert((v & 0xF0FFFFLL) == 0 || v < 0x0FDB00B071000000LL, "Unexpected feature protocol version");           \
+	static_assert((v & 0xFFFFLL) == 0 || v < 0x0FDB00B071000000LL, "Unexpected feature protocol version");             \
 	static_assert(v <= defaultProtocolVersionValue, "Feature protocol version too large");                             \
 	struct x {                                                                                                         \
 		static constexpr uint64_t protocolVersion = v;                                                                 \
