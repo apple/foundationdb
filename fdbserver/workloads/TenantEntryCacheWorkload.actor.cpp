@@ -181,7 +181,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		compareTenants(entry, p.second);
 		ASSERT_EQ(p1.first.contents().toString().compare(entry.get().name.contents().toString()), 0);
 
-		TraceEvent("TestTenantInsertEnd").log();
+		TraceEvent("TestTenantInsertEnd");
 		return Void();
 	}
 
