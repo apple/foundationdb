@@ -634,6 +634,10 @@ public:
 				    .detail("PhysicalShard", handle->GetName());
 			}
 
+			std::set<std::string> unusedShards(columnFamilies.begin(), columnFamilies.end());
+			unusedShards.erase("kvs-metadata");
+			unusedShards.erase("default");
+
 			KeyRange keyRange = prefixRange(shardMappingPrefix);
 			while (true) {
 				RangeResult metadata;
@@ -671,6 +675,7 @@ public:
 					dataShardMap.insert(range, dataShard.get());
 					it->second->dataShards[range.begin.toString()] = std::move(dataShard);
 					activePhysicalShardIds.emplace(name);
+					unusedShards.erase(name);
 				}
 
 				if (metadata.back().key.removePrefix(shardMappingPrefix) == specialKeys.end) {
@@ -686,7 +691,20 @@ public:
 					keyRange = KeyRangeRef(metadata.back().key, keyRange.end);
 				}
 			}
-			// TODO: remove unused column families.
+
+			for (const auto& name : unusedShards) {
+				TraceEvent(SevDebug, "UnusedShardName", logId).detail("Name", name);
+				auto it = physicalShards.find(name);
+				ASSERT(it != physicalShards.end());
+				auto shard = it->second;
+				if (shard->dataShards.size() == 0) {
+					shard->deleteTimeSec = now();
+					pendingDeletionShards.push_back(name);
+				}
+			}
+			if (unusedShards.size() > 0) {
+				TraceEvent("ShardedRocksDB", logId).detail("CleanUpUnusedShards", unusedShards.size());
+			}
 		} else {
 			// DB is opened with default shard.
 			ASSERT(handles.size() == 1);
@@ -860,13 +878,9 @@ public:
 		return shardIds;
 	}
 
-	std::vector<std::shared_ptr<PhysicalShard>> getPendingDeletionShards() {
+	std::vector<std::shared_ptr<PhysicalShard>> getPendingDeletionShards(double cleanUpDelay) {
 		std::vector<std::shared_ptr<PhysicalShard>> emptyShards;
 		double currentTime = now();
-		double cleanUpDelay = SERVER_KNOBS->ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY;
-		if (g_network->isSimulated()) {
-			cleanUpDelay = 120.0;
-		}
 		while (!pendingDeletionShards.empty()) {
 			const auto& id = pendingDeletionShards.front();
 			auto it = physicalShards.find(id);
@@ -919,9 +933,11 @@ public:
 
 		for (auto it = rangeIterator.begin(); it != rangeIterator.end(); ++it) {
 			if (it.value() == nullptr) {
+				TraceEvent(SevDebug, "ShardedRocksDB").detail("ClearNonExistentRange", it.range());
 				continue;
 			}
-			writeBatch->DeleteRange(it.value()->physicalShard->cf, toSlice(range.begin), toSlice(range.end));
+			auto dataShard = it.value();
+			writeBatch->DeleteRange(dataShard->physicalShard->cf, toSlice(range.begin), toSlice(range.end));
 			dirtyShards->insert(it.value()->physicalShard);
 		}
 	}
@@ -2422,11 +2438,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	                                            Future<Void> openFuture,
 	                                            ShardManager* shardManager,
 	                                            Reference<IThreadPool> writeThread) {
-		state double cleanUpPeriod = SERVER_KNOBS->ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY * 2;
+		state double cleanUpDelay = SERVER_KNOBS->ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY;
 		if (g_network->isSimulated()) {
 			// We have longer read timeout in simulation. Set clean up delay accordingly.
-			cleanUpPeriod = 240;
+			cleanUpDelay = 300.0;
 		}
+		state double cleanUpPeriod = cleanUpDelay * 2;
 		try {
 			wait(openFuture);
 			loop {
@@ -2434,10 +2451,11 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				if (rState->closing) {
 					break;
 				}
-				auto shards = shardManager->getPendingDeletionShards();
+				auto shards = shardManager->getPendingDeletionShards(cleanUpDelay);
 				auto a = new Writer::RemoveShardAction(shards);
 				Future<Void> f = a->done.getFuture();
 				writeThread->post(a);
+				TraceEvent(SevInfo, "ShardedRocksDB").detail("DeleteEmptyShards", shards.size());
 				wait(f);
 			}
 		} catch (Error& e) {
