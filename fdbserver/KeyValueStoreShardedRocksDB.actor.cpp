@@ -936,8 +936,7 @@ public:
 				TraceEvent(SevDebug, "ShardedRocksDB").detail("ClearNonExistentRange", it.range());
 				continue;
 			}
-			auto dataShard = it.value();
-			writeBatch->DeleteRange(dataShard->physicalShard->cf, toSlice(range.begin), toSlice(range.end));
+			writeBatch->DeleteRange(it.value()->physicalShard->cf, toSlice(range.begin), toSlice(range.end));
 			dirtyShards->insert(it.value()->physicalShard);
 		}
 	}
@@ -1916,11 +1915,11 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		explicit Reader(UID logId, int threadIndex, std::shared_ptr<RocksDBMetrics> rocksDBMetrics)
 		  : logId(logId), threadIndex(threadIndex), rocksDBMetrics(rocksDBMetrics), sampleStartTime(now()) {
 			if (g_network->isSimulated()) {
-				// In simulation, increasing the read operation timeouts to 5 minutes, as some of the tests have
+				// In simulation, increasing the read operation timeouts to 200s, as some of the tests have
 				// very high load and single read thread cannot process all the load within the timeouts.
-				readValueTimeout = 60 * 5;
-				readValuePrefixTimeout = 60 * 5;
-				readRangeTimeout = 60 * 5;
+				readValueTimeout = 200.0;
+				readValuePrefixTimeout = 200.0;
+				readRangeTimeout = 200.0;
 			} else {
 				readValueTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_TIMEOUT;
 				readValuePrefixTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
@@ -2480,14 +2479,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	void persistRangeMapping(KeyRangeRef range, bool isAdd) override {
 		return shardManager.persistRangeMapping(range, isAdd);
-	}
-
-	Future<Void> cleanUpShardsIfNeeded(const std::vector<std::string>& shardIds) override {
-		/*auto shards = shardManager.cleanUpShards(shardIds);
-		auto a = new Writer::RemoveShardAction(shards);
-		Future<Void> res = a->done.getFuture();
-		writeThread->post(a);*/
-		return Void();
 	}
 
 	// Used for debugging shard mapping issue.
