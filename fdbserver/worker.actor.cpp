@@ -1884,6 +1884,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						    .detail("Locality", localInfo.myLocality.toString());
 
 						dbInfo->set(localInfo);
+						TraceEvent("DBInfoLocalityChange").detail("Locality", dbInfo->get().myLocality.toString());
 					}
 					errorForwarders.add(
 					    success(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, notUpdated, true)));
@@ -2924,7 +2925,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		ServerDBInfo info;
 		info.myLocality = localities;
 		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>();
-		dbInfo->set(info);
+		dbInfo->setUnconditional(info); // To really set it, set() won't update dbInfo
+		TraceEvent("DBInfoLocality").detail("Locality", dbInfo->get().myLocality.toString());
 
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
 		                              "MonitorAndWriteCCPriorityInfo"));
