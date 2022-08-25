@@ -79,7 +79,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 	ACTOR static Future<Void> testTenantNotFound(Database cx) {
 		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(cx, createPayload);
-		TraceEvent("TenantNotFoundStart").log();
+		TraceEvent("TenantNotFoundStart");
 
 		wait(cache->init());
 		// Ensure associated counter values gets updated
