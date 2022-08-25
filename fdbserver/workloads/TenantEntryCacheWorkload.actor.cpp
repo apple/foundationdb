@@ -144,7 +144,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 		ASSERT(!tenantList->empty() && tenantList->size() >= 2);
 
-		TraceEvent("TestTenantInsertStart").log();
+		TraceEvent("TestTenantInsertStart");
 
 		wait(cache->init());
 		// Ensure associated counter values gets updated
