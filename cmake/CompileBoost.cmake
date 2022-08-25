@@ -56,6 +56,18 @@ function(compile_boost)
   set(USER_CONFIG_FLAG --user-config=${CMAKE_BINARY_DIR}/user-config.jam)
 
   # Build boost
+  # Download zlib
+  include(ExternalProject)
+  set(ZSTD_SOURCE_DIR "${CMAKE_BINARY_DIR}/zstd")
+  ExternalProject_add("${COMPILE_BOOST_TARGET}_zstd_source"
+    URL "https://github.com/facebook/zstd/releases/download/v1.5.2/zstd-1.5.2.tar.gz"
+    URL_HASH SHA256=7c42d56fac126929a6a85dbc73ff1db2411d04f104fae9bdea51305663a83fd0
+    SOURCE_DIR ${ZSTD_SOURCE_DIR}
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ""
+    LOG_DOWNLOAD ON)
+
   include(ExternalProject)
   set(BOOST_INSTALL_DIR "${CMAKE_BINARY_DIR}/boost_install")
   ExternalProject_add("${COMPILE_BOOST_TARGET}Project"
