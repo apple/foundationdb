@@ -300,6 +300,22 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	ACTOR Future<Void> testSpecialKeySpaceErrors(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
 		Database cx = cx_->clone();
 		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
+		state Reference<ReadYourWritesTransaction> tenantTx =
+		    makeReference<ReadYourWritesTransaction>(cx, TenantName("foobar"_sr));
+		// tenant transaction accessing modules that do not support tenants
+		try {
+			tenantTx->setOption(FDBTransactionOptions::RAW_ACCESS);
+			wait(success(tenantTx->getRange(
+			    singleKeyRange(LiteralStringRef("version_epoch"))
+			        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin),
+			    CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			ASSERT(e.code() == error_code_illegal_tenant_access);
+			tenantTx->reset();
+		}
 		// begin key outside module range
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
