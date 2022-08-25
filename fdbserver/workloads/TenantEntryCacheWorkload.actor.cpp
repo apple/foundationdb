@@ -226,7 +226,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		// InitRefresh + multiple timer based invocations
 		ASSERT_GE(cache->numCacheRefreshes(), 3);
 
-		TraceEvent("TestCacheRefreshEnd").log();
+		TraceEvent("TestCacheRefreshEnd");
 		return Void();
 	}
 
