@@ -591,12 +591,13 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
 	try {
 		KmsConnLookupEKsByDomainIdsReq req;
 		req.debugId = debugId;
-		req.encryptDomainInfos.reserve(req.arena, ekpProxyData->baseCipherDomainIdCache.size());
+		// req.encryptDomainInfos.reserve(req.arena, ekpProxyData->baseCipherDomainIdCache.size());
 
 		int64_t currTS = (int64_t)now();
 		for (auto itr = ekpProxyData->baseCipherDomainIdCache.begin();
 		     itr != ekpProxyData->baseCipherDomainIdCache.end();) {
 			if (isCipherKeyEligibleForRefresh(itr->second, currTS)) {
+				TraceEvent("RefreshEKs").detail("Id", itr->first);
 				req.encryptDomainInfos.emplace_back_deep(req.arena, itr->first, itr->second.domainName);
 			}
 
@@ -612,9 +613,9 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
 		for (const auto& item : rep.cipherKeyDetails) {
 			const auto itr = ekpProxyData->baseCipherDomainIdCache.find(item.encryptDomainId);
 			if (itr == ekpProxyData->baseCipherDomainIdCache.end()) {
-				TraceEvent(SevError, "RefreshEKs_DomainIdNotFound", ekpProxyData->myId)
+				TraceEvent(SevInfo, "RefreshEKs_DomainIdNotFound", ekpProxyData->myId)
 				    .detail("DomainId", item.encryptDomainId);
-				// Continue updating the cache with othe elements
+				// Continue updating the cache with other elements
 				continue;
 			}
 
@@ -637,7 +638,7 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
 
 		ekpProxyData->baseCipherKeysRefreshed += rep.cipherKeyDetails.size();
 
-		t.detail("nKeys", rep.cipherKeyDetails.size());
+		t.detail("NumKeys", rep.cipherKeyDetails.size());
 	} catch (Error& e) {
 		if (!canReplyWith(e)) {
 			TraceEvent(SevWarn, "RefreshEKs_Error").error(e);
@@ -650,8 +651,8 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
 	return Void();
 }
 
-void refreshEncryptionKeys(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnectorInterface kmsConnectorInf) {
-	Future<Void> ignored = refreshEncryptionKeysCore(ekpProxyData, kmsConnectorInf);
+Future<Void> refreshEncryptionKeys(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnectorInterface kmsConnectorInf) {
+	return refreshEncryptionKeysCore(ekpProxyData, kmsConnectorInf);
 }
 
 ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxyData,
@@ -813,9 +814,11 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface, 
 	// FLOW_KNOB->ENCRRYPTION_KEY_REFRESH_INTERVAL_SEC, allowing the interactions with external Encryption Key Manager
 	// mostly not co-inciding with FDB process encryption key refresh attempts.
 
-	self->encryptionKeyRefresher = recurring([&]() { refreshEncryptionKeys(self, kmsConnectorInf); },
-	                                         FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL,
-	                                         TaskPriority::Worker);
+	self->encryptionKeyRefresher = recurringAsync([&]() { return refreshEncryptionKeys(self, kmsConnectorInf); },
+	                                              FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL, /* interval */
+	                                              true, /* absoluteIntervalDelay */
+	                                              FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL, /* initialDelay */
+	                                              TaskPriority::Worker);
 
 	self->blobMetadataRefresher = recurring([&]() { refreshBlobMetadata(self, kmsConnectorInf); },
 	                                        SERVER_KNOBS->BLOB_METADATA_REFRESH_INTERVAL,
