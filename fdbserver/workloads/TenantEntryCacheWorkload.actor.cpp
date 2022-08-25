@@ -133,7 +133,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 		wait(compareContents(tenantList, cache));
 
-		TraceEvent("CreateTenantsAndLookupEnd").log();
+		TraceEvent("CreateTenantsAndLookupEnd");
 		return Void();
 	}
 
