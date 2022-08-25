@@ -1055,7 +1055,7 @@ Future<Void> managementClusterRemoveTenantFromGroup(Transaction tr,
 }
 
 template <class DB>
-struct RestoreCluterImpl {
+struct RestoreClusterImpl {
 	MetaclusterOperationContext<DB> ctx;
 
 	// Initialization parameters
@@ -1075,16 +1075,16 @@ struct RestoreCluterImpl {
 	std::vector<std::pair<TenantName, TenantMapEntry>> addList;
 	std::vector<TenantNameRef> removeList;
 
-	RestoreCluterImpl(Reference<DB> managementDb,
-	                  ClusterName clusterName,
-	                  ClusterConnectionString connectionString,
-	                  DataClusterEntry clusterEntry,
-	                  AddNewTenants addNewTenants,
-	                  RemoveMissingTenants removeMissingTenants)
+	RestoreClusterImpl(Reference<DB> managementDb,
+	                   ClusterName clusterName,
+	                   ClusterConnectionString connectionString,
+	                   DataClusterEntry clusterEntry,
+	                   AddNewTenants addNewTenants,
+	                   RemoveMissingTenants removeMissingTenants)
 	  : ctx(managementDb, clusterName), clusterName(clusterName), connectionString(connectionString),
 	    clusterEntry(clusterEntry), addNewTenants(addNewTenants), removeMissingTenants(removeMissingTenants) {}
 
-	ACTOR static Future<bool> markClusterRestoring(RestoreCluterImpl* self, Reference<typename DB::TransactionT> tr) {
+	ACTOR static Future<bool> markClusterRestoring(RestoreClusterImpl* self, Reference<typename DB::TransactionT> tr) {
 		if (self->ctx.dataClusterMetadata.get().entry.clusterState != DataClusterState::RESTORING) {
 			DataClusterEntry updatedEntry = self->ctx.dataClusterMetadata.get().entry;
 			updatedEntry.clusterState = DataClusterState::RESTORING;
@@ -1103,7 +1103,7 @@ struct RestoreCluterImpl {
 		return true;
 	}
 
-	ACTOR static Future<Void> markClusterReady(RestoreCluterImpl* self, Reference<typename DB::TransactionT> tr) {
+	ACTOR static Future<Void> markClusterReady(RestoreClusterImpl* self, Reference<typename DB::TransactionT> tr) {
 		if (self->ctx.dataClusterMetadata.get().entry.clusterState == DataClusterState::RESTORING) {
 			DataClusterEntry updatedEntry = self->ctx.dataClusterMetadata.get().entry;
 			updatedEntry.clusterState = DataClusterState::READY;
@@ -1122,7 +1122,7 @@ struct RestoreCluterImpl {
 		return Void();
 	}
 
-	ACTOR static Future<bool> getTenantsFromDataCluster(RestoreCluterImpl* self, Reference<ITransaction> tr) {
+	ACTOR static Future<bool> getTenantsFromDataCluster(RestoreClusterImpl* self, Reference<ITransaction> tr) {
 		TenantNameRef begin = self->lastTenantName;
 		TenantNameRef end = "\xff\xff"_sr;
 		state Future<KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>>> tenantsFuture =
@@ -1139,7 +1139,7 @@ struct RestoreCluterImpl {
 		return !tenants.more;
 	}
 
-	ACTOR static Future<Void> getAllTenantsFromDataCluster(RestoreCluterImpl* self) {
+	ACTOR static Future<Void> getAllTenantsFromDataCluster(RestoreClusterImpl* self) {
 		loop {
 			bool gotAllTenants = wait(self->ctx.runDataClusterTransaction(
 			    [self = self](Reference<ITransaction> tr) { return getTenantsFromDataCluster(self, tr); }));
@@ -1152,7 +1152,7 @@ struct RestoreCluterImpl {
 		return Void();
 	}
 
-	ACTOR static Future<bool> getTenantsFromMgmtCluster(RestoreCluterImpl* self, Reference<ITransaction> tr) {
+	ACTOR static Future<bool> getTenantsFromMgmtCluster(RestoreClusterImpl* self, Reference<ITransaction> tr) {
 		TenantNameRef begin = self->lastTenantName;
 		TenantNameRef end = "\xff\xff"_sr;
 		state Future<KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>>> tenantsFuture =
@@ -1170,7 +1170,7 @@ struct RestoreCluterImpl {
 		return !tenants.more;
 	}
 
-	ACTOR static Future<bool> getTenantsFromMgmtClusterForCurrentDataCluster(RestoreCluterImpl* self,
+	ACTOR static Future<bool> getTenantsFromMgmtClusterForCurrentDataCluster(RestoreClusterImpl* self,
 	                                                                         Reference<ITransaction> tr) {
 		std::pair<Tuple, Tuple> clusterTupleRange =
 		    std::make_pair(Tuple::makeTuple(self->lastClusterName), Tuple::makeTuple(keyAfter(self->clusterName)));
@@ -1191,7 +1191,7 @@ struct RestoreCluterImpl {
 		return !tenantEntries.more;
 	}
 
-	ACTOR static Future<Void> getAllTenantsFromMgmtCluster(RestoreCluterImpl* self) {
+	ACTOR static Future<Void> getAllTenantsFromMgmtCluster(RestoreClusterImpl* self) {
 		// get all tenants across all data clusters
 		self->lastClusterName = self->clusterName;
 		loop {
@@ -1220,7 +1220,7 @@ struct RestoreCluterImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> addTenants(RestoreCluterImpl* self, Reference<typename DB::TransactionT> tr) {
+	ACTOR static Future<Void> addTenants(RestoreClusterImpl* self, Reference<typename DB::TransactionT> tr) {
 		for (auto t : self->addList) {
 			// Add the tenant to the tenantmap
 			ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, t.first, t.second);
@@ -1234,7 +1234,7 @@ struct RestoreCluterImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> removeTenants(RestoreCluterImpl* self, Reference<typename DB::TransactionT> tr) {
+	ACTOR static Future<Void> removeTenants(RestoreClusterImpl* self, Reference<typename DB::TransactionT> tr) {
 		for (auto t : self->removeList) {
 			// Erase the tenant from the tenantmap
 			ManagementClusterMetadata::tenantMetadata().tenantMap.erase(tr, t);
@@ -1245,7 +1245,7 @@ struct RestoreCluterImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> run(RestoreCluterImpl* self) {
+	ACTOR static Future<Void> run(RestoreClusterImpl* self) {
 		state bool clusterIsPresent;
 		// set state to restoring
 		try {
@@ -1333,7 +1333,7 @@ Future<Void> restoreCluster(Reference<DB> db,
                             DataClusterEntry entry,
                             AddNewTenants addNewTenants,
                             RemoveMissingTenants removeMissingTenants) {
-	state RestoreCluterImpl<DB> impl(db, name, connectionString, entry, addNewTenants, removeMissingTenants);
+	state RestoreClusterImpl<DB> impl(db, name, connectionString, entry, addNewTenants, removeMissingTenants);
 	wait(impl.run());
 	return Void();
 }
