@@ -1120,7 +1120,7 @@ private:
 				        "Error: malformed environment knob option: %s%s\n",
 				        ENVIRONMENT_KNOB_OPTION_PREFIX,
 				        knob.c_str());
-				TraceEvent(SevWarnAlways, "Error: malformed environment knob option")
+				TraceEvent(SevWarnAlways, "MalformedEnvironmentVariableKnob")
 				    .detail("Key", ENVIRONMENT_KNOB_OPTION_PREFIX + knob);
 			} else {
 				std::string k = knob.substr(0, pos);
