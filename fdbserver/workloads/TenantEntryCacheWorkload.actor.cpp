@@ -106,7 +106,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(cx, createPayload);
 		state int nTenants = deterministicRandom()->randomInt(5, self->maxTenants);
 
-		TraceEvent("CreateTenantsAndLookupStart").log();
+		TraceEvent("CreateTenantsAndLookupStart");
 
 		wait(cache->init());
 		// Ensure associated counter values gets updated
