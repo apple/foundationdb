@@ -8,7 +8,7 @@ from test_harness.summarize import Summary, TraceFiles
 from typing import Pattern, List
 
 
-def files_matching(path: Path, pattern: Pattern, recurs: bool = True) -> List[Path]:
+def files_matching(path: Path, pattern: Pattern, recurse: bool = True) -> List[Path]:
     res: List[Path] = []
     for file in path.iterdir():
         if file.is_file() and pattern.match(file.name) is not None:

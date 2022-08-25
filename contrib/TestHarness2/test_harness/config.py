@@ -155,7 +155,7 @@ class Config:
         self.binary = Path('bin') / ('fdbserver.exe' if os.name == 'nt' else 'fdbserver')
         self.binary_args = {'help': 'Path to executable'}
         self.hit_per_runs_ratio: int = 20000
-        self.hit_per_runs_ratio_args = {'help': 'How many test runs should hit each code probe at least once'}
+        self.hit_per_runs_ratio_args = {'help': 'Maximum test runs before each code probe hit at least once'}
         self.output_format: str = 'xml'
         self.output_format_args = {'short_name': 'O', 'choices': ['json', 'xml'],
                                    'help': 'What format TestHarness should produce'}

@@ -57,7 +57,7 @@ class EnsembleResults:
     def dump(self, prefix: str):
         errors = 0
         out = SummaryTree('EnsembleResults')
-        out.attributes['TotalRunTime'] = str(self.global_statistics.total_cpu_time)
+        out.attributes['TotalRuntime'] = str(self.global_statistics.total_cpu_time)
         out.attributes['TotalTestRuns'] = str(self.global_statistics.total_test_runs)
         out.attributes['TotalProbesHit'] = str(self.global_statistics.total_probes_hit)
         out.attributes['MinProbeHit'] = str(self.min_coverage_hit)

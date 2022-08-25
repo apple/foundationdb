@@ -416,7 +416,7 @@ class Summary:
         if self.errors > config.max_errors:
             child = SummaryTree('ErrorLimitExceeded')
             child.attributes['Severity'] = '40'
-            child.attributes['ErrorCount'] = str(self.warnings)
+            child.attributes['ErrorCount'] = str(self.errors)
             self.out.append(child)
             self.error_list.append('ErrorLimitExceeded')
         if self.was_killed:

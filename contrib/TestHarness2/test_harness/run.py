@@ -123,7 +123,7 @@ class TestPicker:
         times.frombytes(base64.standard_b64decode(serialized))
         assert len(times) == len(self.tests.items())
         idx = 0
-        for _, spec in self.tests.items():
+        for idx, (_, spec) in enumerate(self.tests.items()):
             spec.total_runtime = times[idx]
             idx += 1
 
@@ -426,7 +426,7 @@ class TestRunner:
     def run_tests(self, test_files: List[Path], seed: int, test_picker: TestPicker) -> bool:
         count = 0
         result: bool = True
-        for file in test_files:
+        for count, file in enumerate(test_files):
             will_restart = count + 1 < len(test_files)
             binary = self.binary_chooser.choose_binary(file)
             unseed_check = not is_no_sim(file) and config.random.random() < config.unseed_check_ratio
