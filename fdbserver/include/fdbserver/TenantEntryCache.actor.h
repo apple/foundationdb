@@ -170,7 +170,7 @@ private:
 			return ret;
 		}
 
-		TraceEvent(SevInfo, "TenantEntryCacheGetByNameRefresh").detail("TenantName", name.contents().toString());
+		TraceEvent("TenantEntryCacheGetByNameRefresh").detail("TenantName", name);
 
 		// Entry not found. Refresh cacheEntries by scanning underlying KeyRange.
 		// TODO: Cache will implement a "KeyRange" watch, monitoring notification when a new entry gets added or any
