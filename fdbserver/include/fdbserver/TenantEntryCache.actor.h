@@ -97,7 +97,7 @@ private:
 		        tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 		ASSERT(tenantList.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantList.more);
 
-		TraceEvent(SevDebug, "TenantEntryCache.GetTenantList").detail("Count", tenantList.results.size());
+		TraceEvent(SevDebug, "TenantEntryCacheGetTenantList").detail("Count", tenantList.results.size());
 
 		return tenantList.results;
 	}
