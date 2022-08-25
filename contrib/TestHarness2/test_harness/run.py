@@ -63,7 +63,7 @@ class TestPicker:
             raise RuntimeError('{} is neither a directory nor a file'.format(test_dir))
         self.include_files_regex = re.compile(config.include_test_files)
         self.exclude_files_regex = re.compile(config.exclude_test_files)
-        self.include_tests_regex = re.compile(config.include_test_names)
+        self.include_tests_regex = re.compile(config.include_test_classes)
         self.exclude_tests_regex = re.compile(config.exclude_test_names)
         self.test_dir: Path = test_dir
         self.tests: OrderedDict[str, TestDescription] = collections.OrderedDict()
@@ -122,10 +122,8 @@ class TestPicker:
         times = array.array('I')
         times.frombytes(base64.standard_b64decode(serialized))
         assert len(times) == len(self.tests.items())
-        idx = 0
         for idx, (_, spec) in enumerate(self.tests.items()):
             spec.total_runtime = times[idx]
-            idx += 1
 
     def parse_txt(self, path: Path):
         if self.include_files_regex.search(str(path)) is None or self.exclude_files_regex.search(str(path)) is not None:
@@ -149,7 +147,8 @@ class TestPicker:
                     try:
                         priority = float(kv[1])
                     except ValueError:
-                        pass
+                        raise RuntimeError("Can't parse {} -- testPriority in {} should be set to a float".format(kv[1],
+                                                                                                                  path))
                 if test_name is not None and test_class is not None and priority is not None:
                     break
             if test_name is None:
@@ -424,7 +423,6 @@ class TestRunner:
         shutil.move(src_dir, dest_dir)
 
     def run_tests(self, test_files: List[Path], seed: int, test_picker: TestPicker) -> bool:
-        count = 0
         result: bool = True
         for count, file in enumerate(test_files):
             will_restart = count + 1 < len(test_files)
@@ -456,7 +454,6 @@ class TestRunner:
                 result = result and run2.success
                 if not result:
                     return False
-            count += 1
         return result
 
     def run(self) -> bool:

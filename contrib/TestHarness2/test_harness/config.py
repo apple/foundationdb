@@ -163,8 +163,8 @@ class Config:
         self.include_test_files_args = {'help': 'Only consider test files whose path match against the given regex'}
         self.exclude_test_files: str = r'.^'
         self.exclude_test_files_args = {'help': 'Don\'t consider test files whose path match against the given regex'}
-        self.include_test_names: str = r'.*'
-        self.include_test_names_args = {'help': 'Only consider tests whose names match against the given regex'}
+        self.include_test_classes: str = r'.*'
+        self.include_test_classes_args = {'help': 'Only consider tests whose names match against the given regex'}
         self.exclude_test_names: str = r'.^'
         self.exclude_test_names_args = {'help': 'Don\'t consider tests whose names match against the given regex'}
         self.details: bool = False

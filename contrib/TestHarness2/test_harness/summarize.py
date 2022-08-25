@@ -121,10 +121,7 @@ class ParseHandler:
         self.events: OrderedDict[Optional[Tuple[str, Optional[str]]], List[ParserCallback]] = collections.OrderedDict()
 
     def add_handler(self, attr: Tuple[str, Optional[str]], callback: ParserCallback) -> None:
-        if attr in self.events:
-            self.events[attr].append(callback)
-        else:
-            self.events[attr] = [callback]
+        self.events.setdefault(attr, []).append(callback)
 
     def _call(self, callback: ParserCallback, attrs: Dict[str, str]) -> str | None:
         try:
@@ -186,35 +183,6 @@ class JsonParser(Parser):
         for line in file:
             obj = json.loads(line)
             handler.handle(obj)
-
-
-def format_test_error(attrs: Dict[str, str], include_details: bool) -> str:
-    trace_type = attrs['Type']
-    res = trace_type
-    if trace_type == 'InternalError':
-        res = '{} {} {}'.format(trace_type, attrs['File'], attrs['Line'])
-    elif trace_type == 'TestFailure':
-        res = '{} {}'.format(trace_type, attrs['Reason'])
-    elif trace_type == 'ValgrindError':
-        res = '{} {}'.format(trace_type, attrs['What'])
-    elif trace_type == 'ExitCode':
-        res = '{0} 0x{1:x}'.format(trace_type, int(attrs['Code']))
-    elif trace_type == 'StdErrOutput':
-        res = '{}: {}'.format(trace_type, attrs['Output'])
-    elif trace_type == 'BTreeIntegrityCheck':
-        res = '{}: {}'.format(trace_type, attrs['ErrorDetail'])
-    for k in ['Error', 'WinErrorCode', 'LinuxErrorCode']:
-        if k in attrs:
-            res += ' {}'.format(attrs[k])
-    if 'Status' in attrs:
-        res += ' Status={}'.format(attrs['Status'])
-    if 'In' in attrs:
-        res += ' In {}'.format(attrs['In'])
-    if 'SQLiteError' in attrs:
-        res += ' SQLiteError={0}({1})'.format(attrs['SQLiteError'], attrs['SQLiteErrorCode'])
-    if 'Details' in attrs and include_details:
-        res += ': {}'.format(attrs['Details'])
-    return res
 
 
 class Coverage:
@@ -330,7 +298,6 @@ class Summary:
         self.severity_map: OrderedDict[tuple[str, int], int] = collections.OrderedDict()
         self.error: bool = False
         self.errors: int = 0
-        self.error_list: List[str] = []
         self.warnings: int = 0
         self.coverage: OrderedDict[Coverage, bool] = collections.OrderedDict()
         self.test_count: int = 0
@@ -361,7 +328,6 @@ class Summary:
         trace_files = TraceFiles(trace_dir)
         if len(trace_files) == 0:
             self.error = True
-            self.error_list.append('No traces produced')
             child = SummaryTree('NoTracesFound')
             child.attributes['Severity'] = '40'
             child.attributes['Path'] = str(trace_dir.absolute())
@@ -418,7 +384,6 @@ class Summary:
             child.attributes['Severity'] = '40'
             child.attributes['ErrorCount'] = str(self.errors)
             self.out.append(child)
-            self.error_list.append('ErrorLimitExceeded')
         if self.was_killed:
             child = SummaryTree('ExternalTimeout')
             child.attributes['Severity'] = '40'
@@ -451,7 +416,6 @@ class Summary:
                 _, _, exc_traceback = sys.exc_info()
                 child.attributes['Trace'] = repr(traceback.format_tb(exc_traceback))
                 self.out.append(child)
-                self.error_list.append('Failed to parse valgrind output: {}'.format(str(e)))
         if not self.test_end_found:
             child = SummaryTree('TestUnexpectedlyNotFinished')
             child.attributes['Severity'] = '40'
@@ -513,7 +477,6 @@ class Summary:
                 child.attributes['Severity'] = '40'
                 child.attributes['ErrorMessage'] = str(e)
                 self.out.append(child)
-                self.error_list.append('SummarizationError {}'.format(str(e)))
 
     def register_handlers(self):
         def remap_event_severity(attrs):
@@ -568,7 +531,6 @@ class Summary:
                     child.attributes['Severity'] = str(severity)
                     if severity >= 40:
                         self.error = True
-                        self.error_list.append('UnseedMismatch')
                     self.out.append(child)
             self.out.attributes['SimElapsedTime'] = attrs['SimTime']
             self.out.attributes['RealElapsedTime'] = attrs['RealTime']
@@ -598,7 +560,6 @@ class Summary:
             for k, v in attrs.items():
                 child.attributes[k] = v
             self.out.append(child)
-            self.error_list.append(format_test_error(attrs, True))
 
         self.handler.add_handler(('Severity', '40'), parse_error)
 

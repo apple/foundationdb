@@ -13,8 +13,8 @@ def files_matching(path: Path, pattern: Pattern, recurse: bool = True) -> List[P
     for file in path.iterdir():
         if file.is_file() and pattern.match(file.name) is not None:
             res.append(file)
-        elif file.is_dir() and recurs:
-            res += files_matching(file, pattern, recurs)
+        elif file.is_dir() and recurse:
+            res += files_matching(file, pattern, recurse)
     return res
 
 
@@ -29,9 +29,9 @@ def dirs_with_files_matching(path: Path, pattern: Pattern, recurse: bool = True)
             sub_directories.append(file)
     if has_file:
         res.append(path)
-        if recurse:
-            for file in sub_directories:
-                res += dirs_with_files_matching(file, pattern, recurse=True)
+    if recurse:
+        for file in sub_directories:
+            res += dirs_with_files_matching(file, pattern, recurse=True)
     res.sort()
     return res
 

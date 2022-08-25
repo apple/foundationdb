@@ -11,6 +11,9 @@ from test_harness.run import StatFetcher, TestDescription
 from test_harness.config import config
 from test_harness.summarize import SummaryTree, Coverage
 
+# Before increasing this, make sure that all Joshua clusters (at Apple and Snowflake) have been upgraded.
+# This version needs to be changed if we either need newer features from FDB or the current API version is
+# getting retired.
 fdb.api_version(630)
 
 
@@ -31,15 +34,12 @@ def open_db(cluster_file: str | None):
 
 
 def chunkify(iterable, sz: int):
-    count = 0
     res = []
     for item in iterable:
         res.append(item)
-        count += 1
-        if count >= sz:
+        if len(res) >= sz:
             yield res
             res = []
-            count = 0
     if len(res) > 0:
         yield res
 

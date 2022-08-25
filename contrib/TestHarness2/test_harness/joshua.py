@@ -62,7 +62,7 @@ def _print_summary(summary: SummaryTree, commands: Set[str]):
         cmd += ['-b', arg]
     else:
         cmd += ['b', '<ERROR>']
-    cmd += ['--crash', '--trace_format', 'json']
+    cmd += ['--crash', '--trace_format', config.trace_format]
     key = ' '.join(cmd)
     count = 1
     while key in commands:
@@ -106,10 +106,7 @@ def _print_summary(summary: SummaryTree, commands: Set[str]):
         if child.name == 'BuggifySection':
             file = child.attributes['File']
             line = int(child.attributes['Line'])
-            if file in buggifies:
-                buggifies[file].append(line)
-            else:
-                buggifies[file] = [line]
+            buggifies.setdefault(file, []).append(line)
     buggifies_elem = SummaryTree('Buggifies')
     for file, lines in buggifies.items():
         lines.sort()
