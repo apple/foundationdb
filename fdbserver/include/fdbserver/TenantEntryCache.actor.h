@@ -305,7 +305,7 @@ public:
 	}
 
 	Future<Void> init() {
-		TraceEvent(SevInfo, "TenantEntryCacheInit", uid).log();
+		TraceEvent("TenantEntryCacheInit", uid);
 
 		Future<Void> f = refreshImpl(this, TenantEntryCacheRefreshReason::INIT);
 
