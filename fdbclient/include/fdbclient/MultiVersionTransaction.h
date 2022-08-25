@@ -122,6 +122,8 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	// Network
 	fdb_error_t (*selectApiVersion)(int runtimeVersion, int headerVersion);
 	const char* (*getClientVersion)();
+	void (*useFutureProtocolVersion)();
+
 	fdb_error_t (*setNetworkOption)(FDBNetworkOption option, uint8_t const* value, int valueLength);
 	fdb_error_t (*setupNetwork)();
 	fdb_error_t (*runNetwork)();
@@ -168,6 +170,32 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	FDBFuture* (*databaseWaitPurgeGranulesComplete)(FDBDatabase* db,
 	                                                uint8_t const* purge_key_name,
 	                                                int purge_key_name_length);
+
+	FDBFuture* (*databaseBlobbifyRange)(FDBDatabase* db,
+	                                    uint8_t const* begin_key_name,
+	                                    int begin_key_name_length,
+	                                    uint8_t const* end_key_name,
+	                                    int end_key_name_length);
+
+	FDBFuture* (*databaseUnblobbifyRange)(FDBDatabase* db,
+	                                      uint8_t const* begin_key_name,
+	                                      int begin_key_name_length,
+	                                      uint8_t const* end_key_name,
+	                                      int end_key_name_length);
+
+	FDBFuture* (*databaseListBlobbifiedRanges)(FDBDatabase* db,
+	                                           uint8_t const* begin_key_name,
+	                                           int begin_key_name_length,
+	                                           uint8_t const* end_key_name,
+	                                           int end_key_name_length,
+	                                           int rangeLimit);
+
+	FDBFuture* (*databaseVerifyBlobRange)(FDBDatabase* db,
+	                                      uint8_t const* begin_key_name,
+	                                      int begin_key_name_length,
+	                                      uint8_t const* end_key_name,
+	                                      int end_key_name_length,
+	                                      Optional<Version> version);
 
 	// Tenant
 	fdb_error_t (*tenantCreateTransaction)(FDBTenant* tenant, FDBTransaction** outTransaction);
@@ -274,7 +302,8 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                              uint8_t const* begin_key_name,
 	                                              int begin_key_name_length,
 	                                              uint8_t const* end_key_name,
-	                                              int end_key_name_length);
+	                                              int end_key_name_length,
+	                                              int rangeLimit);
 
 	FDBResult* (*transactionReadBlobGranules)(FDBTransaction* db,
 	                                          uint8_t const* begin_key_name,
@@ -374,7 +403,8 @@ public:
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                int64_t chunkSize) override;
-	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
 
 	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
 	                                           Version beginVersion,
@@ -474,6 +504,12 @@ public:
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
+	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
+	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
 
@@ -492,6 +528,7 @@ public:
 
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
+	void useFutureProtocolVersion() override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	void setupNetwork() override;
@@ -571,7 +608,8 @@ public:
 
 	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                int64_t chunkSize) override;
-	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
 
 	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
 	                                           Version beginVersion,
@@ -655,8 +693,10 @@ private:
 struct ClientDesc {
 	std::string const libPath;
 	bool const external;
+	bool const useFutureVersion;
 
-	ClientDesc(std::string libPath, bool external) : libPath(libPath), external(external) {}
+	ClientDesc(std::string libPath, bool external, bool useFutureVersion)
+	  : libPath(libPath), external(external), useFutureVersion(useFutureVersion) {}
 };
 
 struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
@@ -668,11 +708,11 @@ struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 
 	ClientInfo()
-	  : ClientDesc(std::string(), false), protocolVersion(0), api(nullptr), failed(true), initialized(false) {}
+	  : ClientDesc(std::string(), false, false), protocolVersion(0), api(nullptr), failed(true), initialized(false) {}
 	ClientInfo(IClientApi* api)
-	  : ClientDesc("internal", false), protocolVersion(0), api(api), failed(false), initialized(false) {}
-	ClientInfo(IClientApi* api, std::string libPath)
-	  : ClientDesc(libPath, true), protocolVersion(0), api(api), failed(false), initialized(false) {}
+	  : ClientDesc("internal", false, false), protocolVersion(0), api(api), failed(false), initialized(false) {}
+	ClientInfo(IClientApi* api, std::string libPath, bool useFutureVersion)
+	  : ClientDesc(libPath, true, useFutureVersion), protocolVersion(0), api(api), failed(false), initialized(false) {}
 
 	void loadVersion();
 	bool canReplace(Reference<ClientInfo> other) const;
@@ -812,6 +852,12 @@ public:
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
 
+	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
+	ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) override;
+
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
 
@@ -919,6 +965,7 @@ class MultiVersionApi : public IClientApi {
 public:
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
+	void useFutureProtocolVersion() override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	void setupNetwork() override;
@@ -965,7 +1012,7 @@ private:
 
 	void disableMultiVersionClientApi();
 	void setCallbacksOnExternalThreads();
-	void addExternalLibrary(std::string path);
+	void addExternalLibrary(std::string path, bool useFutureVersion);
 	void addExternalLibraryDirectory(std::string path);
 	// Return a vector of (pathname, unlink_on_close) pairs.  Makes threadCount - 1 copies of the library stored in
 	// path, and returns a vector of length threadCount.

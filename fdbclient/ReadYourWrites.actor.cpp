@@ -1783,7 +1783,8 @@ Future<Standalone<VectorRef<KeyRef>>> ReadYourWritesTransaction::getRangeSplitPo
 	return waitOrError(tr.getRangeSplitPoints(range, chunkSize), resetPromise.getFuture());
 }
 
-Future<Standalone<VectorRef<KeyRangeRef>>> ReadYourWritesTransaction::getBlobGranuleRanges(const KeyRange& range) {
+Future<Standalone<VectorRef<KeyRangeRef>>> ReadYourWritesTransaction::getBlobGranuleRanges(const KeyRange& range,
+                                                                                           int rangeLimit) {
 	if (checkUsedDuringCommit()) {
 		return used_during_commit();
 	}
@@ -1794,7 +1795,7 @@ Future<Standalone<VectorRef<KeyRangeRef>>> ReadYourWritesTransaction::getBlobGra
 	if (range.begin > maxKey || range.end > maxKey)
 		return key_outside_legal_range();
 
-	return waitOrError(tr.getBlobGranuleRanges(range), resetPromise.getFuture());
+	return waitOrError(tr.getBlobGranuleRanges(range, rangeLimit), resetPromise.getFuture());
 }
 
 Future<Standalone<VectorRef<BlobGranuleChunkRef>>> ReadYourWritesTransaction::readBlobGranules(

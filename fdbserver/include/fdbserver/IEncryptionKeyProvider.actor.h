@@ -24,7 +24,9 @@
 #elif !defined(FDBSERVER_IENCRYPTIONKEYPROVIDER_ACTOR_H)
 #define FDBSERVER_IENCRYPTIONKEYPROVIDER_ACTOR_H
 
-#include "fdbserver/GetEncryptCipherKeys.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/Tenant.h"
+#include "fdbserver/ServerDBInfo.h"
 #include "flow/Arena.h"
 
 #define XXH_INLINE_ALL
@@ -164,7 +166,9 @@ private:
 		                                    cipherDetails.baseCipherId,
 		                                    digest.begin(),
 		                                    AES_256_KEY_LENGTH,
-		                                    cipherDetails.salt);
+		                                    cipherDetails.salt,
+		                                    std::numeric_limits<int64_t>::max() /* refreshAt */,
+		                                    std::numeric_limits<int64_t>::max() /* expireAt */);
 	}
 
 	Reference<BlobCipherKey> getRandomCipherKey() {

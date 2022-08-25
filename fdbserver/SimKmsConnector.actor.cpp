@@ -76,18 +76,20 @@ struct SimKmsConnectorContext : NonCopyable, ReferenceCounted<SimKmsConnectorCon
 };
 
 namespace {
-Optional<int64_t> getRefreshInterval(int64_t now, int64_t defaultTtl) {
+Optional<int64_t> getRefreshInterval(const int64_t now, const int64_t defaultTtl) {
 	if (BUGGIFY) {
-		return Optional<int64_t>(now + defaultTtl);
+		return Optional<int64_t>(now);
 	}
-	return Optional<int64_t>();
+	return Optional<int64_t>(now + defaultTtl);
 }
 
-Optional<int64_t> getExpireInterval(Optional<int64_t> refTS) {
+Optional<int64_t> getExpireInterval(Optional<int64_t> refTS, const int64_t defaultTtl) {
+	ASSERT(refTS.present());
+
 	if (BUGGIFY) {
 		return Optional<int64_t>(-1);
 	}
-	return refTS;
+	return (refTS.get() + defaultTtl);
 }
 } // namespace
 
@@ -105,11 +107,17 @@ ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
 	}
 
 	// Lookup corresponding EncryptKeyCtx for input keyId
+	const int64_t currTS = (int64_t)now();
+	// Fetch default TTL to avoid BUGGIFY giving different value per invocation causing refTS > expTS
+	const int64_t defaultTtl = FLOW_KNOBS->ENCRYPT_CIPHER_KEY_CACHE_TTL;
+	Optional<int64_t> refAtTS = getRefreshInterval(currTS, defaultTtl);
+	Optional<int64_t> expAtTS = getExpireInterval(refAtTS, defaultTtl);
+	TraceEvent("SimKms.EKLookupById").detail("RefreshAt", refAtTS).detail("ExpireAt", expAtTS);
 	for (const auto& item : req.encryptKeyInfos) {
 		const auto& itr = ctx->simEncryptKeyStore.find(item.baseCipherId);
 		if (itr != ctx->simEncryptKeyStore.end()) {
 			rep.cipherKeyDetails.emplace_back_deep(
-			    rep.arena, item.domainId, itr->first, StringRef(itr->second.get()->key));
+			    rep.arena, item.domainId, itr->first, StringRef(itr->second.get()->key), refAtTS, expAtTS);
 
 			if (dbgKIdTrace.present()) {
 				// {encryptDomainId, baseCipherId} forms a unique tuple across encryption domains
@@ -145,11 +153,12 @@ ACTOR Future<Void> ekLookupByDomainIds(Reference<SimKmsConnectorContext> ctx,
 	// Map encryptionDomainId to corresponding EncryptKeyCtx element using a modulo operation. This
 	// would mean multiple domains gets mapped to the same encryption key which is fine, the
 	// EncryptKeyStore guarantees that keyId -> plaintext encryptKey mapping is idempotent.
-	int64_t currTS = (int64_t)now();
+	const int64_t currTS = (int64_t)now();
 	// Fetch default TTL to avoid BUGGIFY giving different value per invocation causing refTS > expTS
-	int64_t defaultTtl = FLOW_KNOBS->ENCRYPT_CIPHER_KEY_CACHE_TTL;
+	const int64_t defaultTtl = FLOW_KNOBS->ENCRYPT_CIPHER_KEY_CACHE_TTL;
 	Optional<int64_t> refAtTS = getRefreshInterval(currTS, defaultTtl);
-	Optional<int64_t> expAtTS = getExpireInterval(refAtTS);
+	Optional<int64_t> expAtTS = getExpireInterval(refAtTS, defaultTtl);
+	TraceEvent("SimKms.EKLookupByDomainId").detail("RefreshAt", refAtTS).detail("ExpireAt", expAtTS);
 	for (const auto& info : req.encryptDomainInfos) {
 		EncryptCipherBaseKeyId keyId = 1 + abs(info.domainId) % SERVER_KNOBS->SIM_KMS_MAX_KEYS;
 		const auto& itr = ctx->simEncryptKeyStore.find(keyId);

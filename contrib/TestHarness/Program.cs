@@ -302,6 +302,7 @@ namespace SummarizeTest
                         uniqueFileSet.Add(file.Substring(0, file.LastIndexOf("-"))); // all restarting tests end with -1.txt or -2.txt
                     }
                     uniqueFiles = uniqueFileSet.ToArray();
+                    Array.Sort(uniqueFiles);
                     testFile = random.Choice(uniqueFiles);
                     // The on-disk format changed in 4.0.0, and 5.x can't load files from 3.x.
                     string oldBinaryVersionLowerBound = "4.0.0";
@@ -334,8 +335,9 @@ namespace SummarizeTest
                         // thus, by definition, if "until_" appears, we do not want to run with the current binary version
                         oldBinaries = oldBinaries.Concat(currentBinary);
                     }
-                    List<string> oldBinariesList = oldBinaries.ToList<string>();
-                    if (oldBinariesList.Count == 0) {
+                    string[] oldBinariesList = oldBinaries.ToArray<string>();
+                    Array.Sort(oldBinariesList);
+                    if (oldBinariesList.Count() == 0) {
                         // In theory, restarting tests are named to have at least one old binary version to run
                         // But if none of the provided old binaries fall in the range, we just skip the test
                         Console.WriteLine("No available old binary version from {0} to {1}", oldBinaryVersionLowerBound, oldBinaryVersionUpperBound);
@@ -347,6 +349,7 @@ namespace SummarizeTest
                 else
                 {
                     uniqueFiles = Directory.GetFiles(testDir);
+                    Array.Sort(uniqueFiles);
                     testFile = random.Choice(uniqueFiles);
                 }
             }
@@ -718,7 +721,7 @@ namespace SummarizeTest
                         process.Refresh();
                         if (process.HasExited)
                             return;
-                        long mem = process.PrivateMemorySize64;
+                        long mem = process.PagedMemorySize64;
                         MaxMem = Math.Max(MaxMem, mem);
                         //Console.WriteLine(string.Format("Process used {0} bytes", MaxMem));
                         Thread.Sleep(1000);
@@ -744,16 +747,28 @@ namespace SummarizeTest
             AppendToSummary(summaryFileName, xout);
         }
 
-        // Parses the valgrind XML file and returns a list of "what" tags for each error.
+        static string ParseValgrindStack(XElement stackElement) {
+            string backtrace = "";
+            foreach (XElement frame in stackElement.Elements()) {
+                backtrace += " " + frame.Element("ip").Value.ToLower();
+            }
+            if (backtrace.Length > 0) {
+                backtrace = "addr2line -e fdbserver.debug -p -C -f -i" + backtrace;
+            }
+
+            return backtrace;
+        }
+
+        // Parses the valgrind XML file and returns a list of error elements.
         //  All errors for which the "kind" tag starts with "Leak" are ignored
-        static string[] ParseValgrindOutput(string valgrindOutputFileName, bool traceToStdout)
+        static XElement[] ParseValgrindOutput(string valgrindOutputFileName, bool traceToStdout)
         {
             if (!traceToStdout)
             {
                 Console.WriteLine("Reading vXML file: " + valgrindOutputFileName);
             }
 
-            ISet<string> whats = new HashSet<string>();
+            IList<XElement> errors = new List<XElement>();
             XElement xdoc = XDocument.Load(valgrindOutputFileName).Element("valgrindoutput");
             foreach(var elem in xdoc.Elements()) {
                 if (elem.Name != "error")
@@ -761,9 +776,29 @@ namespace SummarizeTest
                 string kind = elem.Element("kind").Value;
                 if(kind.StartsWith("Leak"))
                     continue;
-                whats.Add(elem.Element("what").Value);
+
+                XElement errorElement = new XElement("ValgrindError",
+                                new XAttribute("Severity", (int)Magnesium.Severity.SevError));
+
+                int num = 1;
+                string suffix = "";
+                foreach (XElement sub in elem.Elements()) {
+                    if (sub.Name == "what") {
+                        errorElement.SetAttributeValue("What", sub.Value);
+                    } else if (sub.Name == "auxwhat") {
+                        suffix = "Aux" + num++;
+                        errorElement.SetAttributeValue("What" + suffix, sub.Value);
+                    } else if (sub.Name == "stack") {
+                        errorElement.SetAttributeValue("Backtrace" + suffix, ParseValgrindStack(sub));
+                    } else if (sub.Name == "origin") {
+                        errorElement.SetAttributeValue("WhatOrigin", sub.Element("what").Value);
+                        errorElement.SetAttributeValue("BacktraceOrigin", ParseValgrindStack(sub.Element("stack")));
+                    }
+                }
+
+                errors.Add(errorElement);
             }
-            return whats.ToArray();
+            return errors.ToArray();
         }
 
         delegate IEnumerable<Magnesium.Event> parseDelegate(System.IO.Stream stream, string file,
@@ -927,6 +962,10 @@ namespace SummarizeTest
                             {
                                 xout.Add(new XElement(ev.Type, new XAttribute("File", ev.Details.File), new XAttribute("Line", ev.Details.Line)));
                             }
+                            if (ev.Type == "RunningUnitTest") 
+                            {
+                                xout.Add(new XElement(ev.Type, new XAttribute("Name", ev.Details.Name), new XAttribute("File", ev.Details.File), new XAttribute("Line", ev.Details.Line)));
+                            }
                             if (ev.Type == "TestsExpectedToPass")
                                 testCount = int.Parse(ev.Details.Count);
                             if (ev.Type == "TestResults" && ev.Details.Passed == "1")
@@ -1065,12 +1104,10 @@ namespace SummarizeTest
                 try
                 {
                     // If there are any errors reported "ok" will be set to false
-                    var whats = ParseValgrindOutput(valgrindOutputFileName, traceToStdout);
-                    foreach (var what in whats)
+                    var valgrindErrors = ParseValgrindOutput(valgrindOutputFileName, traceToStdout);
+                    foreach (var vError in valgrindErrors)
                     {
-                        xout.Add(new XElement("ValgrindError",
-                                new XAttribute("Severity", (int)Magnesium.Severity.SevError),
-                                new XAttribute("What", what)));
+                        xout.Add(vError);
                         ok = false;
                         error = true;
                     }

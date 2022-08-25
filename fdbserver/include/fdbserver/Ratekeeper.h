@@ -46,6 +46,8 @@ enum limitReason_t {
 	log_server_min_free_space_ratio,
 	storage_server_durability_lag, // 10
 	storage_server_list_fetch_failed,
+	blob_worker_lag,
+	blob_worker_missing,
 	limitReason_t_end
 };
 
@@ -111,6 +113,8 @@ struct RatekeeperLimits {
 	int64_t lastDurabilityLag;
 	double durabilityLagLimit;
 
+	double bwLagTarget;
+
 	TransactionPriority priority;
 	std::string context;
 
@@ -123,7 +127,8 @@ struct RatekeeperLimits {
 	                 int64_t logTargetBytes,
 	                 int64_t logSpringBytes,
 	                 double maxVersionDifference,
-	                 int64_t durabilityLagTargetVersions);
+	                 int64_t durabilityLagTargetVersions,
+	                 double bwLagTarget);
 };
 
 class Ratekeeper {
@@ -137,6 +142,18 @@ class Ratekeeper {
 
 		double lastUpdateTime{ 0.0 };
 		double lastTagPushTime{ 0.0 };
+		Version version{ 0 };
+	};
+
+	struct VersionInfo {
+		int64_t totalTransactions;
+		int64_t batchTransactions;
+		double created;
+
+		VersionInfo(int64_t totalTransactions, int64_t batchTransactions, double created)
+		  : totalTransactions(totalTransactions), batchTransactions(batchTransactions), created(created) {}
+
+		VersionInfo() : totalTransactions(0), batchTransactions(0), created(0.0) {}
 	};
 
 	UID id;
@@ -165,7 +182,27 @@ class Ratekeeper {
 	RatekeeperLimits batchLimits;
 
 	Deque<double> actualTpsHistory;
+	Version maxVersion;
+	double blobWorkerTime;
+	double unblockedAssignmentTime;
+	std::map<Version, Ratekeeper::VersionInfo> version_transactions;
+	std::map<Version, std::pair<double, Optional<double>>> version_recovery;
+	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
 	Optional<Key> remoteDC;
+
+	double getRecoveryDuration(Version ver) {
+		auto it = version_recovery.lower_bound(ver);
+		double recoveryDuration = 0;
+		while (it != version_recovery.end()) {
+			if (it->second.second.present()) {
+				recoveryDuration += it->second.second.get() - it->second.first;
+			} else {
+				recoveryDuration += now() - it->second.first;
+			}
+			++it;
+		}
+		return recoveryDuration;
+	}
 
 	Ratekeeper(UID id, Database db);
 
@@ -182,6 +219,7 @@ class Ratekeeper {
 	void tryAutoThrottleTag(TransactionTag, double rate, double busyness, TagThrottledReason);
 	void tryAutoThrottleTag(StorageQueueInfo&, int64_t storageQueue, int64_t storageDurabilityLag);
 	Future<Void> monitorThrottlingChanges();
+	Future<Void> monitorBlobWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 
 public:
 	static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);

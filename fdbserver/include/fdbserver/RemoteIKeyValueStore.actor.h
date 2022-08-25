@@ -449,7 +449,7 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 			when(wait(delay(SERVER_KNOBS->REMOTE_KV_STORE_MAX_INIT_DURATION))) {
 				TraceEvent(SevError, "RemoteIKVSInitTooLong")
 				    .detail("TimeLimit", SERVER_KNOBS->REMOTE_KV_STORE_MAX_INIT_DURATION);
-				throw please_reboot_remote_kv_store();
+				throw please_reboot_kv_store(); // this will reboot the kv store
 			}
 		}
 		state Future<Void> connectionCheckingDelay = delay(FLOW_KNOBS->FAILURE_DETECTION_DELAY);
@@ -463,21 +463,21 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 				if (e.isError())
 					throw e.getError();
 				else
-					return e.get();
+					return Never();
 			}
 			when(int res = wait(returnCode)) {
 				TraceEvent(res != 0 ? SevError : SevInfo, "SpawnedProcessDied").detail("Res", res);
 				if (res)
-					throw please_reboot_remote_kv_store(); // this will reboot the worker
+					throw please_reboot_kv_store(); // this will reboot the kv store
 				else
-					return Void();
+					return Never();
 			}
 			when(wait(connectionCheckingDelay)) {
 				// for the corner case where the child process stuck and waitpid also does not give update on it
 				// In this scenario, we need to manually reboot the storage engine process
 				if (IFailureMonitor::failureMonitor().getState(childAddr).isFailed()) {
 					TraceEvent(SevError, "RemoteKVStoreConnectionStuck").log();
-					throw please_reboot_remote_kv_store(); // this will reboot the worker
+					throw please_reboot_kv_store(); // this will reboot the kv store
 				}
 				connectionCheckingDelay = delay(FLOW_KNOBS->FAILURE_DETECTION_DELAY);
 			}

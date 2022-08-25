@@ -112,8 +112,8 @@ enum {
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
-	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS, OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT,
-	OPT_NEW_CLUSTER_KEY
+	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONNECTOR_TYPE, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,
+	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_USE_FUTURE_PROTOCOL_VERSION
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -208,10 +208,11 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_FLOW_PROCESS_ENDPOINT, "--process-endpoint",          SO_REQ_SEP },
 	{ OPT_IP_TRUSTED_MASK,       "--trusted-subnet-",           SO_REQ_SEP },
 	{ OPT_NEW_CLUSTER_KEY,       "--new-cluster-key",           SO_REQ_SEP },
-	{ OPT_KMS_CONN_DISCOVERY_URL_FILE,           "--discover-kms-conn-url-file",            SO_REQ_SEP},
-	{ OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,     "--kms-conn-validation-token-details",     SO_REQ_SEP},
-	{ OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-encryption-keys-endpoint", SO_REQ_SEP},
-	
+	{ OPT_KMS_CONN_DISCOVERY_URL_FILE,           "--discover-kms-conn-url-file",            SO_REQ_SEP },
+	{ OPT_KMS_CONNECTOR_TYPE,    "--kms-connector-type",        SO_REQ_SEP },
+	{ OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,     "--kms-conn-validation-token-details",     SO_REQ_SEP },
+	{ OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-encryption-keys-endpoint", SO_REQ_SEP },
+	{ OPT_USE_FUTURE_PROTOCOL_VERSION, 			 "--use-future-protocol-version",			SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -539,7 +540,7 @@ static void printBuildInformation() {
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getSourceVersion());
-	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion().version());
 }
 
 static void printHelpTeaser(const char* name) {
@@ -732,6 +733,9 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("--io-trust-warn-only",
 		                 " Instead of failing when an I/O operation exceeds io_trust_seconds, just"
 		                 " log a warning to the trace log. Has no effect if io_trust_seconds is unspecified.");
+		printOptionUsage("--use-future-protocol-version [true,false]",
+		                 " Run the process with a simulated future protocol version."
+		                 " This option can be used testing purposes only!");
 		printf("\n"
 		       "The 'kvfiledump' role dump all key-values from kvfile to stdout in binary format:\n"
 		       "{key length}{key binary}{value length}{value binary}, length is 4 bytes int\n"
@@ -750,6 +754,7 @@ static void printUsage(const char* name, bool devhelp) {
 		    "The given cluster file passed in by '-C, --cluster-file' is considered to contain the old cluster key.\n"
 		    "It is used before restoring a snapshotted cluster to let the cluster have a different cluster key.\n"
 		    "Please make sure run it on every host in the cluster with the same '--new-cluster-key'.\n");
+
 	} else {
 		printOptionUsage("--dev-help", "Display developer-specific help and exit.");
 	}
@@ -1663,6 +1668,10 @@ private:
 				knobs.emplace_back("rest_kms_connector_kms_discovery_url_file", args.OptionArg());
 				break;
 			}
+			case OPT_KMS_CONNECTOR_TYPE: {
+				knobs.emplace_back("kms_connector_type", args.OptionArg());
+				break;
+			}
 			case OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS: {
 				knobs.emplace_back("rest_kms_connector_validation_token_details", args.OptionArg());
 				break;
@@ -1681,6 +1690,12 @@ private:
 					std::cerr << "Invalid cluster key(description:id) '" << newClusterKey << "' from --new-cluster-key"
 					          << std::endl;
 					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
+			}
+			case OPT_USE_FUTURE_PROTOCOL_VERSION: {
+				if (!strcmp(args.OptionArg(), "true")) {
+					::useFutureProtocolVersion();
 				}
 				break;
 			}
@@ -2034,6 +2049,7 @@ int main(int argc, char* argv[]) {
 		    .detail("FaultInjectionEnabled", opts.faultInjectionEnabled)
 		    .detail("MemoryLimit", opts.memLimit)
 		    .detail("VirtualMemoryLimit", opts.virtualMemLimit)
+		    .detail("ProtocolVersion", currentProtocolVersion())
 		    .trackLatest("ProgramStart");
 
 		Error::init();
@@ -2307,7 +2323,18 @@ int main(int argc, char* argv[]) {
 
 			f = result;
 		} else if (role == ServerRole::FlowProcess) {
-			TraceEvent(SevDebug, "StartingFlowProcess").detail("From", "fdbserver");
+			std::string traceFormat = getTraceFormatExtension();
+			// close and reopen trace file with the correct process listen address to name the file
+			closeTraceFile();
+			// writer is not shutdown immediately, addref on it
+			disposeTraceFileWriter();
+			// use the same trace format as before
+			selectTraceFormatter(traceFormat);
+			// create the trace file with the correct process address
+			openTraceFile(
+			    g_network->getLocalAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
+			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
+			TraceEvent(SevDebug, "StartingFlowProcess").detail("FlowProcessName", opts.flowProcessName);
 #if defined(__linux__) || defined(__FreeBSD__)
 			prctl(PR_SET_PDEATHSIG, SIGTERM);
 			if (getppid() == 1) /* parent already died before prctl */

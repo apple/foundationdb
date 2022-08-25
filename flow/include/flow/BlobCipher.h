@@ -19,8 +19,6 @@
  */
 #ifndef FLOW_BLOB_CIPHER_H
 #define FLOW_BLOB_CIPHER_H
-#include "flow/ProtocolVersion.h"
-#include "flow/serialize.h"
 #pragma once
 
 #include "flow/Arena.h"
@@ -28,10 +26,14 @@
 #include "flow/FastRef.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
+#include "flow/Knobs.h"
 #include "flow/network.h"
+#include "flow/ProtocolVersion.h"
+#include "flow/serialize.h"
 
 #include <boost/functional/hash.hpp>
 #include <cinttypes>
+#include <limits>
 #include <memory>
 #include <openssl/aes.h>
 #include <openssl/engine.h>
@@ -216,15 +218,20 @@ public:
 	BlobCipherKey(const EncryptCipherDomainId& domainId,
 	              const EncryptCipherBaseKeyId& baseCiphId,
 	              const uint8_t* baseCiph,
-	              int baseCiphLen);
+	              int baseCiphLen,
+	              const int64_t refreshAt,
+	              int64_t expireAt);
 	BlobCipherKey(const EncryptCipherDomainId& domainId,
 	              const EncryptCipherBaseKeyId& baseCiphId,
 	              const uint8_t* baseCiph,
 	              int baseCiphLen,
-	              const EncryptCipherRandomSalt& salt);
+	              const EncryptCipherRandomSalt& salt,
+	              const int64_t refreshAt,
+	              const int64_t expireAt);
 
 	uint8_t* data() const { return cipher.get(); }
-	uint64_t getCreationTime() const { return creationTime; }
+	uint64_t getRefreshAtTS() const { return refreshAtTS; }
+	uint64_t getExpireAtTS() const { return expireAtTS; }
 	EncryptCipherDomainId getDomainId() const { return encryptDomainId; }
 	EncryptCipherRandomSalt getSalt() const { return randomSalt; }
 	EncryptCipherBaseKeyId getBaseCipherId() const { return baseCipherId; }
@@ -243,6 +250,20 @@ public:
 		       randomSalt == details.salt;
 	}
 
+	inline bool needsRefresh() {
+		if (refreshAtTS == std::numeric_limits<int64_t>::max()) {
+			return false;
+		}
+		return now() >= refreshAtTS ? true : false;
+	}
+
+	inline bool isExpired() {
+		if (expireAtTS == std::numeric_limits<int64_t>::max()) {
+			return false;
+		}
+		return now() >= expireAtTS ? true : false;
+	}
+
 	void reset();
 
 private:
@@ -254,16 +275,20 @@ private:
 	EncryptCipherBaseKeyId baseCipherId;
 	// Random salt used for encryption cipher key derivation
 	EncryptCipherRandomSalt randomSalt;
-	// Creation timestamp for the derived encryption cipher key
-	uint64_t creationTime;
 	// Derived encryption cipher key
 	std::unique_ptr<uint8_t[]> cipher;
+	// CipherKey needs refreshAt
+	int64_t refreshAtTS;
+	// CipherKey is valid until
+	int64_t expireAtTS;
 
 	void initKey(const EncryptCipherDomainId& domainId,
 	             const uint8_t* baseCiph,
 	             int baseCiphLen,
 	             const EncryptCipherBaseKeyId& baseCiphId,
-	             const EncryptCipherRandomSalt& salt);
+	             const EncryptCipherRandomSalt& salt,
+	             const int64_t refreshAt,
+	             const int64_t expireAt);
 	void applyHmacSha256Derivation();
 };
 
@@ -326,7 +351,9 @@ public:
 
 	Reference<BlobCipherKey> insertBaseCipherKey(const EncryptCipherBaseKeyId& baseCipherId,
 	                                             const uint8_t* baseCipher,
-	                                             int baseCipherLen);
+	                                             int baseCipherLen,
+	                                             const int64_t refreshAt,
+	                                             const int64_t expireAt);
 
 	// API enables inserting base encryption cipher details to the BlobCipherKeyIdCache
 	// Given cipherKeys are immutable, attempting to re-insert same 'identical' cipherKey
@@ -341,7 +368,9 @@ public:
 	Reference<BlobCipherKey> insertBaseCipherKey(const EncryptCipherBaseKeyId& baseCipherId,
 	                                             const uint8_t* baseCipher,
 	                                             int baseCipherLen,
-	                                             const EncryptCipherRandomSalt& salt);
+	                                             const EncryptCipherRandomSalt& salt,
+	                                             const int64_t refreshAt,
+	                                             const int64_t expireAt);
 
 	// API cleanup the cache by dropping all cached cipherKeys
 	void cleanup();
@@ -377,7 +406,9 @@ public:
 	Reference<BlobCipherKey> insertCipherKey(const EncryptCipherDomainId& domainId,
 	                                         const EncryptCipherBaseKeyId& baseCipherId,
 	                                         const uint8_t* baseCipher,
-	                                         int baseCipherLen);
+	                                         int baseCipherLen,
+	                                         const int64_t refreshAt,
+	                                         const int64_t expireAt);
 
 	// Enable clients to insert base encryption cipher details to the BlobCipherKeyCache.
 	// The cipherKeys are indexed using 'baseCipherId', given cipherKeys are immutable,
@@ -394,7 +425,9 @@ public:
 	                                         const EncryptCipherBaseKeyId& baseCipherId,
 	                                         const uint8_t* baseCipher,
 	                                         int baseCipherLen,
-	                                         const EncryptCipherRandomSalt& salt);
+	                                         const EncryptCipherRandomSalt& salt,
+	                                         const int64_t refreshAt,
+	                                         const int64_t expireAt);
 
 	// API returns the last insert cipherKey for a given encryption domain Id.
 	// If domain Id is invalid, it would throw 'encrypt_invalid_id' exception,

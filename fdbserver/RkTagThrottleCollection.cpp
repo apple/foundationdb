@@ -353,6 +353,7 @@ void RkTagThrottleCollection::incrementBusyTagCount(TagThrottledReason reason) {
 	} else if (reason == TagThrottledReason::BUSY_WRITE) {
 		++busyWriteTagCount;
 	} else {
-		ASSERT(false);
+		ASSERT(reason == TagThrottledReason::UNSET);
+		CODE_PROBE(true, "tag throttled reason is unset, probably because of upgrading");
 	}
 }

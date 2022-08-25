@@ -8,7 +8,6 @@ injectSSDelay = true
 storageEngineExcludeTypes = [4, 5]
 
 [[knobs]]
-bg_range_source = "tenant"
 bg_metadata_source = "tenant"
 bg_key_tuple_truncate_offset = 1
 enable_encryption = true

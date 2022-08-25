@@ -35,7 +35,6 @@
 #define BG_ENCRYPT_COMPRESS_DEBUG false
 
 // file format of actual blob files
-// FIXME: use VecSerStrategy::String serialization for this
 struct GranuleSnapshot : VectorRef<KeyValueRef> {
 
 	constexpr static FileIdentifier file_identifier = 1300395;
@@ -252,7 +251,6 @@ struct BlobGranuleMergeBoundary {
 struct BlobGranuleHistoryValue {
 	constexpr static FileIdentifier file_identifier = 991434;
 	UID granuleID;
-	// VectorRef<std::pair<KeyRangeRef, Version>> parentGranules;
 	VectorRef<KeyRef> parentBoundaries;
 	VectorRef<Version> parentVersions;
 

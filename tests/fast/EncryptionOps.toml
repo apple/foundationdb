@@ -1,3 +1,6 @@
+[[knobs]]
+enable_encryption = false
+
 [[test]]
 testTitle = 'EncryptDecrypt'
 

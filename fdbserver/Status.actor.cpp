@@ -1078,76 +1078,61 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	return processMap;
 }
 
-struct ClientStats {
-	int count;
-	std::set<std::pair<NetworkAddress, Key>> examples;
-
-	ClientStats() : count(0) {}
-};
-
 static JsonBuilderObject clientStatusFetcher(
     std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>>* clientStatusMap) {
 	JsonBuilderObject clientStatus;
 
 	int64_t clientCount = 0;
-	std::map<Key, ClientStats> issues;
-	std::map<Standalone<ClientVersionRef>, ClientStats> supportedVersions;
-	std::map<Key, ClientStats> maxSupportedProtocol;
+	// Here we handle versions and maxSupportedProtocols, the issues will be handled in getClientIssuesAsMessages
+	std::map<Standalone<ClientVersionRef>, OpenDatabaseRequest::Samples> supportedVersions;
+	std::map<Key, OpenDatabaseRequest::Samples> maxSupportedProtocol;
 
 	for (auto iter = clientStatusMap->begin(); iter != clientStatusMap->end();) {
-		if (now() - iter->second.first < 2 * SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL) {
-			clientCount += iter->second.second.clientCount;
-			for (auto& it : iter->second.second.issues) {
-				auto& issue = issues[it.item];
-				issue.count += it.count;
-				issue.examples.insert(it.examples.begin(), it.examples.end());
-			}
-			for (auto& it : iter->second.second.supportedVersions) {
-				auto& version = supportedVersions[it.item];
-				version.count += it.count;
-				version.examples.insert(it.examples.begin(), it.examples.end());
-			}
-			for (auto& it : iter->second.second.maxProtocolSupported) {
-				auto& protocolVersion = maxSupportedProtocol[it.item];
-				protocolVersion.count += it.count;
-				protocolVersion.examples.insert(it.examples.begin(), it.examples.end());
-			}
-			++iter;
-		} else {
+		if (now() - iter->second.first >= 2 * SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL) {
 			iter = clientStatusMap->erase(iter);
+			continue;
 		}
+
+		clientCount += iter->second.second.clientCount;
+		for (const auto& [version, samples] : iter->second.second.supportedVersions) {
+			supportedVersions[version] += samples;
+		}
+		for (const auto& [protocol, samples] : iter->second.second.maxProtocolSupported) {
+			maxSupportedProtocol[protocol] += samples;
+		}
+		++iter;
 	}
 
 	clientStatus["count"] = clientCount;
 
 	JsonBuilderArray versionsArray = JsonBuilderArray();
-	for (auto& cv : supportedVersions) {
+	for (const auto& [clientVersionRef, samples] : supportedVersions) {
 		JsonBuilderObject ver;
-		ver["count"] = (int64_t)cv.second.count;
-		ver["client_version"] = cv.first.clientVersion.toString();
-		ver["protocol_version"] = cv.first.protocolVersion.toString();
-		ver["source_version"] = cv.first.sourceVersion.toString();
+		ver["count"] = (int64_t)samples.count;
+		ver["client_version"] = clientVersionRef.clientVersion.toString();
+		ver["protocol_version"] = clientVersionRef.protocolVersion.toString();
+		ver["source_version"] = clientVersionRef.sourceVersion.toString();
 
 		JsonBuilderArray clients = JsonBuilderArray();
-		for (auto& client : cv.second.examples) {
+		for (const auto& [networkAddress, trackLogGroup] : samples.samples) {
 			JsonBuilderObject cli;
-			cli["address"] = client.first.toString();
-			cli["log_group"] = client.second.toString();
+			cli["address"] = networkAddress.toString();
+			cli["log_group"] = trackLogGroup.toString();
 			clients.push_back(cli);
 		}
 
-		auto iter = maxSupportedProtocol.find(cv.first.protocolVersion);
-		if (iter != maxSupportedProtocol.end()) {
+		auto iter = maxSupportedProtocol.find(clientVersionRef.protocolVersion);
+		if (iter != std::end(maxSupportedProtocol)) {
 			JsonBuilderArray maxClients = JsonBuilderArray();
-			for (auto& client : iter->second.examples) {
+			for (const auto& [networkAddress, trackLogGroup] : iter->second.samples) {
 				JsonBuilderObject cli;
-				cli["address"] = client.first.toString();
-				cli["log_group"] = client.second.toString();
+				cli["address"] = networkAddress.toString();
+				cli["log_group"] = trackLogGroup.toString();
 				maxClients.push_back(cli);
 			}
 			ver["max_protocol_count"] = iter->second.count;
 			ver["max_protocol_clients"] = maxClients;
-			maxSupportedProtocol.erase(cv.first.protocolVersion);
+			maxSupportedProtocol.erase(clientVersionRef.protocolVersion);
 		}
 
 		ver["connected_clients"] = clients;
@@ -1533,10 +1518,10 @@ struct ProtocolVersionData {
 	ProtocolVersion runningProtocolVersion;
 	ProtocolVersion newestProtocolVersion;
 	ProtocolVersion lowestCompatibleProtocolVersion;
-	ProtocolVersionData() : runningProtocolVersion(currentProtocolVersion) {}
+	ProtocolVersionData() : runningProtocolVersion(currentProtocolVersion()) {}
 
 	ProtocolVersionData(uint64_t newestProtocolVersionValue, uint64_t lowestCompatibleProtocolVersionValue)
-	  : runningProtocolVersion(currentProtocolVersion), newestProtocolVersion(newestProtocolVersionValue),
+	  : runningProtocolVersion(currentProtocolVersion()), newestProtocolVersion(newestProtocolVersionValue),
 	    lowestCompatibleProtocolVersion(lowestCompatibleProtocolVersionValue) {}
 };
 
@@ -2170,10 +2155,20 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 
 	// Transactions
 	try {
-		state TraceEventFields ratekeeper = wait(
-		    timeoutError(rkWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("RkUpdate"))), 1.0));
-		TraceEventFields batchRatekeeper = wait(timeoutError(
-		    rkWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("RkUpdateBatch"))), 1.0));
+		state Future<TraceEventFields> f1 =
+		    timeoutError(rkWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("RkUpdate"))), 1.0);
+		state Future<TraceEventFields> f2 = timeoutError(
+		    rkWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("RkUpdateBatch"))), 1.0);
+		state Future<GlobalTagThrottlerStatusReply> f3 =
+		    SERVER_KNOBS->GLOBAL_TAG_THROTTLING
+		        ? timeoutError(db->get().ratekeeper.get().getGlobalTagThrottlerStatus.getReply(
+		                           GlobalTagThrottlerStatusRequest{}),
+		                       1.0)
+		        : Future<GlobalTagThrottlerStatusReply>(GlobalTagThrottlerStatusReply{});
+		wait(success(f1) && success(f2) && success(f3));
+		TraceEventFields ratekeeper = f1.get();
+		TraceEventFields batchRatekeeper = f2.get();
+		auto const globalTagThrottlerStatus = f3.get();
 
 		bool autoThrottlingEnabled = ratekeeper.getInt("AutoThrottlingEnabled");
 		double tpsLimit = ratekeeper.getDouble("TPSLimit");
@@ -2234,6 +2229,23 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 		throttledTagsObj["manual"] = manualThrottledTagsObj;
 
 		(*qos)["throttled_tags"] = throttledTagsObj;
+
+		if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
+			JsonBuilderObject globalTagThrottlerObj;
+			for (const auto& [tag, tagStats] : globalTagThrottlerStatus.status) {
+				JsonBuilderObject tagStatsObj;
+				tagStatsObj["desired_tps"] = tagStats.desiredTps;
+				tagStatsObj["reserved_tps"] = tagStats.reservedTps;
+				if (tagStats.limitingTps.present()) {
+					tagStatsObj["limiting_tps"] = tagStats.limitingTps.get();
+				} else {
+					tagStatsObj["limiting_tps"] = "<unset>"_sr;
+				}
+				tagStatsObj["target_tps"] = tagStats.targetTps;
+				globalTagThrottlerObj[printable(tag)] = tagStatsObj;
+			}
+			(*qos)["global_tag_throttler"] = globalTagThrottlerObj;
+		}
 
 		JsonBuilderObject perfLimit = getPerfLimit(ratekeeper, transPerSec, tpsLimit);
 		if (!perfLimit.empty()) {
@@ -2355,6 +2367,53 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(
 		incomplete_reasons->insert("Unknown cache statistics.");
 	}
 
+	return statusObj;
+}
+
+ACTOR static Future<JsonBuilderObject> blobWorkerStatusFetcher(
+    std::vector<BlobWorkerInterface> servers,
+    std::unordered_map<NetworkAddress, WorkerInterface> addressWorkersMap,
+    std::set<std::string>* incompleteReason) {
+
+	state JsonBuilderObject statusObj;
+	state std::vector<Future<Optional<TraceEventFields>>> futures;
+
+	statusObj["number_of_blob_workers"] = static_cast<int>(servers.size());
+
+	try {
+		for (auto& intf : servers) {
+			auto workerIntf = addressWorkersMap[intf.address()];
+			futures.push_back(latestEventOnWorker(workerIntf, "BlobWorkerMetrics"));
+		}
+
+		wait(waitForAll(futures));
+
+		state int totalRanges = 0;
+		for (auto future : futures) {
+			if (future.get().present()) {
+				auto latestTrace = future.get().get();
+				int numRanges = latestTrace.getInt("NumRangesAssigned");
+				totalRanges += numRanges;
+
+				JsonBuilderObject workerStatusObj;
+				workerStatusObj["number_of_key_ranges"] = numRanges;
+				workerStatusObj["put_requests"] = StatusCounter(latestTrace.getValue("S3PutReqs")).getStatus();
+				workerStatusObj["get_requests"] = StatusCounter(latestTrace.getValue("S3GetReqs")).getStatus();
+				workerStatusObj["delete_requests"] = StatusCounter(latestTrace.getValue("S3DeleteReqs")).getStatus();
+				workerStatusObj["bytes_buffered"] = latestTrace.getInt64("MutationBytesBuffered");
+				workerStatusObj["compression_bytes_raw"] =
+				    StatusCounter(latestTrace.getValue("CompressionBytesRaw")).getStatus();
+				workerStatusObj["compression_bytes_final"] =
+				    StatusCounter(latestTrace.getValue("CompressionBytesFinal")).getStatus();
+				statusObj[latestTrace.getValue("ID")] = workerStatusObj;
+			}
+		}
+		statusObj["number_of_key_ranges"] = totalRanges;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		incompleteReason->insert("Unknown blob worker stats");
+	}
 	return statusObj;
 }
 
@@ -2586,18 +2645,19 @@ static JsonBuilderArray getClientIssuesAsMessages(
 		std::map<std::string, std::pair<int, std::vector<std::string>>> deduplicatedIssues;
 
 		for (auto iter = clientStatusMap->begin(); iter != clientStatusMap->end();) {
-			if (now() - iter->second.first < 2 * SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL) {
-				for (auto& issue : iter->second.second.issues) {
-					auto& t = deduplicatedIssues[issue.item.toString()];
-					t.first += issue.count;
-					for (auto& example : issue.examples) {
-						t.second.push_back(formatIpPort(example.first.ip, example.first.port));
-					}
-				}
-				++iter;
-			} else {
+			if (now() - iter->second.first >= 2 * SERVER_KNOBS->COORDINATOR_REGISTER_INTERVAL) {
 				iter = clientStatusMap->erase(iter);
+				continue;
 			}
+
+			for (const auto& [issueKey, samples] : iter->second.second.issues) {
+				auto& t = deduplicatedIssues[issueKey.toString()];
+				t.first += samples.count;
+				for (const auto& sample : samples.samples) {
+					t.second.push_back(formatIpPort(sample.first.ip, sample.first.port));
+				}
+			}
+			++iter;
 		}
 
 		// FIXME: add the log_group in addition to the network address
@@ -2985,6 +3045,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		state Optional<DatabaseConfiguration> configuration;
 		state Optional<LoadConfigurationResult> loadResult;
+		state std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
 
 		if (statusCode != RecoveryStatus::configuration_missing) {
 			std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>> loadResults =
@@ -3038,7 +3099,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			// Start getting storage servers now (using system priority) concurrently.  Using sys priority because
 			// having storage servers in status output is important to give context to error messages in status that
 			// reference a storage server role ID.
-			state std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
 			for (auto const& worker : workers) {
 				address_workers[worker.interf.address()] = worker.interf;
 			}
@@ -3258,6 +3318,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		                              &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
 		statusObj["clients"] = clientStatusFetcher(clientStatus);
+
+		if (configuration.present() && configuration.get().blobGranulesEnabled) {
+			JsonBuilderObject blobGranuelsStatus =
+			    wait(blobWorkerStatusFetcher(blobWorkers, address_workers, &status_incomplete_reasons));
+			statusObj["blob_granules"] = blobGranuelsStatus;
+		}
 
 		JsonBuilderArray incompatibleConnectionsArray;
 		for (auto it : incompatibleConnections) {
