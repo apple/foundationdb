@@ -212,7 +212,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 	ACTOR static Future<Void> testCacheRefresh(Database cx) {
 		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(cx, createPayload);
 
-		TraceEvent("TestCacheRefreshStart").log();
+		TraceEvent("TestCacheRefreshStart");
 
 		wait(cache->init());
 		// Ensure associated counter values gets updated
