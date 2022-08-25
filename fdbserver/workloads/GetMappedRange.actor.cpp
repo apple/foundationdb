@@ -176,12 +176,11 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				ASSERT(rangeResult.size() == SPLIT_SIZE);
 				for (int split = 0; split < SPLIT_SIZE; split++) {
 					auto& kv = rangeResult[split];
-					std::cout << "kv.key=" << printable(kv.key)
-					          << ", recordKey(expectedId, split)=" << printable(recordKey(expectedId, split))
-					          << std::endl;
-					std::cout << "kv.value=" << printable(kv.value)
-					          << ", recordValue(expectedId, split)=" << printable(recordValue(expectedId, split))
-					          << std::endl;
+					//				std::cout << "kv.key=" << printable(kv.key)
+					//						   << ", recordKey(id, split)=" << printable(recordKey(id, split)) <<
+					// std::endl; std::cout << "kv.value=" << printable(kv.value)
+					//						   << ", recordValue(id, split)=" << printable(recordValue(id,split)) <<
+					// std::endl;
 					ASSERT(kv.key == recordKey(expectedId, split));
 					ASSERT(kv.value == recordValue(expectedId, split));
 				}
