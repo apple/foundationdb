@@ -528,6 +528,7 @@ public:
 	Counter transactionsExpensiveClearCostEstCount;
 	Counter transactionGrvFullBatches;
 	Counter transactionGrvTimedOutBatches;
+	Counter transactionCommitVersionNotFoundForSS;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
 	    bytesPerCommit, bgLatencies, bgGranulesPerRequest;
