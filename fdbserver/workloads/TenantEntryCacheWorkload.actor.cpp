@@ -200,7 +200,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 		wait(compareContents(tenantList, cache));
 
-		TraceEvent("CacheReloadEnd").log();
+		TraceEvent("CacheReloadEnd");
 		return Void();
 	}
 
