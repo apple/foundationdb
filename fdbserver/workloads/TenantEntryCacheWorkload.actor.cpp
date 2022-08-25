@@ -95,7 +95,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		// Ensure associated counter values gets updated
 		ASSERT_EQ(cache->numRefreshByMisses(), 2);
 
-		TraceEvent("TenantNotFoundEnd").log();
+		TraceEvent("TenantNotFoundEnd");
 		return Void();
 	}
 
