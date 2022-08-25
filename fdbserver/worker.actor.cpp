@@ -153,6 +153,9 @@ Database openDBOnServer(Reference<AsyncVar<ServerDBInfo> const> const& db,
                         LockAware lockAware,
                         EnableLocalityLoadBalance enableLocalityLoadBalance) {
 	auto info = makeReference<AsyncVar<ClientDBInfo>>();
+	TraceEvent("MyLocality")
+	    .detail("Locality", db->get().myLocality.toString())
+	    .detail("EnabledLB", enableLocalityLoadBalance);
 	auto cx = DatabaseContext::create(info,
 	                                  extractClientInfo(db, info),
 	                                  enableLocalityLoadBalance ? db->get().myLocality : LocalityData(),
@@ -1877,7 +1880,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						    .detail("BlobManagerID",
 						            localInfo.blobManager.present() ? localInfo.blobManager.get().id() : UID())
 						    .detail("EncryptKeyProxyID",
-						            localInfo.encryptKeyProxy.present() ? localInfo.encryptKeyProxy.get().id() : UID());
+						            localInfo.encryptKeyProxy.present() ? localInfo.encryptKeyProxy.get().id() : UID())
+						    .detail("Locality", localInfo.myLocality.toString());
 
 						dbInfo->set(localInfo);
 					}
