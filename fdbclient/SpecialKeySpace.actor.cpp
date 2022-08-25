@@ -376,6 +376,21 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 	}
 	state RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::Ranges ranges =
 	    sks->getReadImpls().intersectingRanges(KeyRangeRef(begin.getKey(), end.getKey()));
+
+	// Check tenant legality separately from below iterations
+	// because it may be partially completed and returned
+	// before illegal range is checked due to the limits handler
+	if (ryw->getTenant().present()) {
+		for (auto iter : ranges) {
+			if (iter->value() == nullptr) {
+				continue;
+			}
+			if (!iter->value()->supportsTenants()) {
+				throw illegal_tenant_access();
+			}
+		}
+	}
+
 	// TODO : workaround to write this two together to make the code compact
 	// The issue here is boost::iterator_range<> doest not provide rbegin(), rend()
 	iter = reverse ? ranges.end() : ranges.begin();
@@ -501,6 +516,9 @@ void SpecialKeySpace::set(ReadYourWritesTransaction* ryw, const KeyRef& key, con
 		    .detail("Value", value.toString());
 		throw special_keys_no_write_module_found();
 	}
+	if (!impl->supportsTenants() && ryw->getTenant().present()) {
+		throw illegal_tenant_access();
+	}
 	return impl->set(ryw, key, value);
 }
 
@@ -518,6 +536,9 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& r
 		TraceEvent(SevDebug, "SpecialKeySpaceNoWriteModuleFound").detail("Range", range);
 		throw special_keys_no_write_module_found();
 	}
+	if (!begin->supportsTenants() && ryw->getTenant().present()) {
+		throw illegal_tenant_access();
+	}
 	return begin->clear(ryw, range);
 }
 
@@ -527,6 +548,9 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	auto impl = writeImpls[key];
 	if (impl == nullptr)
 		throw special_keys_no_write_module_found();
+	if (!impl->supportsTenants() && ryw->getTenant().present()) {
+		throw illegal_tenant_access();
+	}
 	return impl->clear(ryw, key);
 }
 
@@ -614,7 +638,11 @@ ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* 
 		++iter;
 	}
 	state std::vector<SpecialKeyRangeRWImpl*>::const_iterator it;
+	state bool hasTenant = ryw->getTenant().present();
 	for (it = writeModulePtrs.begin(); it != writeModulePtrs.end(); ++it) {
+		if (hasTenant && !(*it)->supportsTenants()) {
+			throw illegal_tenant_access();
+		}
 		Optional<std::string> msg = wait((*it)->commit(ryw));
 		if (msg.present()) {
 			ryw->setSpecialKeySpaceErrorMsg(msg.get());

@@ -60,6 +60,8 @@ public:
 	// TODO : give this function a more descriptive name
 	virtual bool isAsync() const { return false; }
 
+	virtual bool supportsTenants() const { return false; }
+
 	virtual ~SpecialKeyRangeReadImpl() {}
 
 protected:
@@ -301,6 +303,7 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
+	bool supportsTenants() const override { return true; };
 };
 
 class ReadConflictRangeImpl : public SpecialKeyRangeReadImpl {
@@ -309,6 +312,7 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
+	bool supportsTenants() const override { return true; };
 };
 
 class WriteConflictRangeImpl : public SpecialKeyRangeReadImpl {
@@ -317,6 +321,7 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
+	bool supportsTenants() const override { return true; };
 };
 
 class DDStatsRangeImpl : public SpecialKeyRangeAsyncImpl {
@@ -406,6 +411,7 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+	bool supportsTenants() const override { return true; };
 };
 
 class ProcessClassSourceRangeImpl : public SpecialKeyRangeReadImpl {
@@ -414,6 +420,7 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
+	bool supportsTenants() const override { return true; };
 };
 
 class LockDatabaseImpl : public SpecialKeyRangeRWImpl {
@@ -467,6 +474,7 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+	bool supportsTenants() const override { return true; };
 };
 
 class CoordinatorsAutoImpl : public SpecialKeyRangeReadImpl {

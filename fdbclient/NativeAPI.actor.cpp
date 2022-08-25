@@ -1293,12 +1293,17 @@ struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
 		});
 	}
 
-	SingleSpecialKeyImpl(KeyRef k, const std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)>& f)
-	  : SpecialKeyRangeReadImpl(singleKeyRange(k)), k(k), f(f) {}
+	SingleSpecialKeyImpl(KeyRef k,
+	                     const std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)>& f,
+	                     bool supportsTenants = false)
+	  : SpecialKeyRangeReadImpl(singleKeyRange(k)), k(k), f(f), tenantSupport(supportsTenants) {}
+
+	bool supportsTenants() const override { return tenantSupport; };
 
 private:
 	Key k;
 	std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)> f;
+	bool tenantSupport;
 };
 
 class HealthMetricsRangeImpl : public SpecialKeyRangeAsyncImpl {
@@ -1499,21 +1504,23 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	globalConfig = std::make_unique<GlobalConfig>(this);
 
 	if (apiVersionAtLeast(720)) {
-		registerSpecialKeysImpl(
-		    SpecialKeySpace::MODULE::CLUSTERID,
-		    SpecialKeySpace::IMPLTYPE::READONLY,
-		    std::make_unique<SingleSpecialKeyImpl>(
-		        LiteralStringRef("\xff\xff/cluster_id"), [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
-			        try {
-				        if (ryw->getDatabase().getPtr()) {
-					        return map(getClusterId(ryw->getDatabase()),
-					                   [](UID id) { return Optional<Value>(StringRef(id.toString())); });
-				        }
-			        } catch (Error& e) {
-				        return e;
-			        }
-			        return Optional<Value>();
-		        }));
+		registerSpecialKeysImpl(SpecialKeySpace::MODULE::CLUSTERID,
+		                        SpecialKeySpace::IMPLTYPE::READONLY,
+		                        std::make_unique<SingleSpecialKeyImpl>(
+		                            LiteralStringRef("\xff\xff/cluster_id"),
+		                            [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+			                            try {
+				                            if (ryw->getDatabase().getPtr()) {
+					                            return map(getClusterId(ryw->getDatabase()), [](UID id) {
+						                            return Optional<Value>(StringRef(id.toString()));
+					                            });
+				                            }
+			                            } catch (Error& e) {
+				                            return e;
+			                            }
+			                            return Optional<Value>();
+		                            },
+		                            true));
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
@@ -1682,7 +1689,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 			                            } else {
 				                            return Optional<Value>();
 			                            }
-		                            }));
+		                            },
+		                            true));
 		registerSpecialKeysImpl(SpecialKeySpace::MODULE::CLUSTERFILEPATH,
 		                        SpecialKeySpace::IMPLTYPE::READONLY,
 		                        std::make_unique<SingleSpecialKeyImpl>(
@@ -1699,7 +1707,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 				                            return e;
 			                            }
 			                            return Optional<Value>();
-		                            }));
+		                            },
+		                            true));
 
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::CONNECTIONSTRING,
@@ -1717,7 +1726,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 				        return e;
 			        }
 			        return Optional<Value>();
-		        }));
+		        },
+		        true));
 	}
 	throttleExpirer = recurring([this]() { expireThrottles(); }, CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
 
