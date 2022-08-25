@@ -359,8 +359,8 @@ public:
 		mapByTenantId[pair.second.id] = payload;
 		mapByTenantName[pair.first] = payload;
 
-		TraceEvent(SevInfo, "TenantEntryCachePut")
-		    .detail("TenantName", pair.first.contents().toString())
+		TraceEvent("TenantEntryCachePut")
+		    .detail("TenantName", pair.first)
 		    .detail("TenantNameExisting", existingName)
 		    .detail("TenantID", pair.second.id)
 		    .detail("TenantIDExisting", existingId)
