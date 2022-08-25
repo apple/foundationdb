@@ -1083,6 +1083,7 @@ struct CLIOptions {
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
 		opts.parseArgsInternal(argc, argv);
+		opts.parseEnvInternal();
 		return opts;
 	}
 
@@ -1111,6 +1112,25 @@ struct CLIOptions {
 
 private:
 	CLIOptions() = default;
+
+	void parseEnvInternal() {
+		for (std::string knob : getEnvironmentKnobOptions()) {
+			auto pos = knob.find_first_of("=");
+			if (pos == std::string::npos) {
+				fprintf(stderr,
+				        "Error: malformed environment knob option: %s%s\n",
+				        ENVIRONMENT_KNOB_OPTION_PREFIX,
+				        knob.c_str());
+				TraceEvent(SevWarnAlways, "MalformedEnvironmentVariableKnob")
+				    .detail("Key", ENVIRONMENT_KNOB_OPTION_PREFIX + knob);
+			} else {
+				std::string k = knob.substr(0, pos);
+				std::string v = knob.substr(pos + 1, knob.length());
+				knobs.emplace_back(k, v);
+				manualKnobOverrides[k] = v;
+			}
+		}
+	}
 
 	void parseArgsInternal(int argc, char* argv[]) {
 		for (int a = 0; a < argc; a++) {
@@ -2029,6 +2049,14 @@ int main(int argc, char* argv[]) {
 				throw;
 		}
 
+		std::string environmentKnobOptions;
+		for (std::string knobOption : getEnvironmentKnobOptions()) {
+			environmentKnobOptions += knobOption + " ";
+		}
+		if (environmentKnobOptions.length()) {
+			environmentKnobOptions.pop_back();
+		}
+
 		TraceEvent("ProgramStart")
 		    .setMaxEventLength(12000)
 		    .detail("RandomSeed", opts.randomSeed)
@@ -2043,6 +2071,7 @@ int main(int argc, char* argv[]) {
 		            opts.connectionFile ? opts.connectionFile->getConnectionString().toString() : "")
 		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 		    .setMaxFieldLength(10000)
+		    .detail("EnvironmentKnobOptions", environmentKnobOptions.length() ? environmentKnobOptions : "none")
 		    .detail("CommandLine", opts.commandLine)
 		    .setMaxFieldLength(0)
 		    .detail("BuggifyEnabled", opts.buggifyEnabled)

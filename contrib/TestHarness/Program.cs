@@ -19,6 +19,7 @@
  */
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -488,6 +489,16 @@ namespace SummarizeTest
                         process.StartInfo.FileName, process.StartInfo.Arguments, tempPath,
                         buggify ? "on" : "off",
                         useValgrind ? "on" : "off");
+                    }
+
+                    IDictionary data = Environment.GetEnvironmentVariables();
+                    foreach (DictionaryEntry i in data)
+                    {
+                        string k=(string)i.Key;
+                        string v=(string)i.Value;
+                        if (k.StartsWith("FDB_KNOB")) {
+                           process.StartInfo.EnvironmentVariables[k]=v;
+                        }
                     }
 
                     process.Start();
