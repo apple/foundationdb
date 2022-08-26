@@ -9206,6 +9206,7 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	results->notAtLatest.set(interfs.size());
 	if (results->context) {
 		results->context->notAtLatestChangeFeeds[results->dbgid] = results.getPtr();
+		results->created = now();
 	}
 	refresh.send(Void());
 
@@ -9412,6 +9413,7 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	results->notAtLatest.set(1);
 	if (results->context) {
 		results->context->notAtLatestChangeFeeds[results->dbgid] = results.getPtr();
+		results->created = now();
 	}
 	refresh.send(Void());
 
@@ -9536,6 +9538,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				results->notAtLatest.set(1);
 				if (results->context) {
 					results->context->notAtLatestChangeFeeds[results->dbgid] = results.getPtr();
+					results->created = now();
 				}
 			}
 
