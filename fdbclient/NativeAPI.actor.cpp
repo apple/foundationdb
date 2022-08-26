@@ -270,8 +270,8 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 				}
 			}
 		}
-		// commitVersion == readVersion is common, do not log.
-		if (!updatedVersionMap && commitVersion != readVersion) {
+		// Do not log if commitVersion >= readVersion.
+		if (!updatedVersionMap && commitVersion == invalidVersion) {
 			TraceEvent(SevDebug, "CommitVersionNotFoundForSS")
 			    .detail("InSSIDMap", iter != ssidTagMapping.end() ? 1 : 0)
 			    .detail("Tag", tag)
