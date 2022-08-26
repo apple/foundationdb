@@ -2917,7 +2917,10 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
 		auto asyncPriorityInfo =
 		    makeReference<AsyncVar<ClusterControllerPriorityInfo>>(getCCPriorityInfo(fitnessFilePath, processClass));
-		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>();
+		auto serverDBInfo = ServerDBInfo();
+		serverDBInfo.myLocality = localities;
+		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>(serverDBInfo);
+		TraceEvent("MyLocality").detail("Locality", dbInfo->get().myLocality.toString());
 
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
 		                              "MonitorAndWriteCCPriorityInfo"));
