@@ -468,18 +468,6 @@ void DatabaseContext::validateVersion(Version version) const {
 	ASSERT(version > 0 || version == latestVersion);
 }
 
-void validateOptionValuePresent(Optional<StringRef> value) {
-	if (!value.present()) {
-		throw invalid_option_value();
-	}
-}
-
-void validateOptionValueNotPresent(Optional<StringRef> value) {
-	if (value.present() && value.get().size() > 0) {
-		throw invalid_option_value();
-	}
-}
-
 void dumpMutations(const MutationListRef& mutations) {
 	for (auto m = mutations.begin(); m; ++m) {
 		switch (m->type) {
@@ -1992,28 +1980,6 @@ bool DatabaseContext::sampleOnCost(uint64_t cost) const {
 	if (sampleCost <= 0)
 		return false;
 	return deterministicRandom()->random01() <= (double)cost / sampleCost;
-}
-
-int64_t extractIntOption(Optional<StringRef> value, int64_t minValue, int64_t maxValue) {
-	validateOptionValuePresent(value);
-	if (value.get().size() != 8) {
-		throw invalid_option_value();
-	}
-
-	int64_t passed = *((int64_t*)(value.get().begin()));
-	if (passed > maxValue || passed < minValue) {
-		throw invalid_option_value();
-	}
-
-	return passed;
-}
-
-uint64_t extractHexOption(StringRef value) {
-	char* end;
-	uint64_t id = strtoull(value.toString().c_str(), &end, 16);
-	if (*end)
-		throw invalid_option_value();
-	return id;
 }
 
 void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {

@@ -215,6 +215,25 @@ inline void save(Archive& ar, const Arena& p) {
 	// No action required
 }
 
+template <typename, typename = void>
+struct ref_type_traits : std::false_type {};
+
+template <typename T>
+struct ref_type_traits<T, std::void_t<decltype(T(std::declval<Arena&>(), std::declval<T>()))>> : std::true_type {};
+
+template <typename T>
+constexpr bool is_ref_type = ref_type_traits<T>::value;
+
+template <class T>
+typename std::enable_if<is_ref_type<T>, T>::type copyRefType(Arena& arena, T const& val) {
+	return T(arena, val);
+}
+
+template <class T>
+typename std::enable_if<!is_ref_type<T>, T>::type copyRefType(Arena& arena, T const& val) {
+	return val;
+}
+
 // Optional is a wrapper for std::optional. There
 // are two primary reasons to use this wrapper instead
 // of using std::optional directly:
@@ -241,6 +260,7 @@ public:
 	Optional<Optional<int>>). Use .castTo<>() instead. template <class S> Optional(const Optional<S>& o) :
 	valid(o.present()) { if (valid) new (&value) T(o.get()); } */
 
+	template <class U = T, class = typename std::enable_if<is_ref_type<U>>::type>
 	Optional(Arena& a, const Optional<T>& o) {
 		if (o.present())
 			impl = std::make_optional<T>(a, o.get());
@@ -788,6 +808,7 @@ inline static StringRef makeAlignedString(int alignment, int length, Arena& aren
 // contents of the given StringRef (it will also accept Standalone<StringRef>).  Obviously this
 // is only legitimate if you know where the StringRef's memory came from and that it is not shared!
 inline static uint8_t* mutateString(StringRef& s) {
+	StringRef x;
 	return const_cast<uint8_t*>(s.begin());
 }
 

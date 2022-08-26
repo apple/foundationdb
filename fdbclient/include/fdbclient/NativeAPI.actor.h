@@ -55,9 +55,6 @@ void addref(DatabaseContext* ptr);
 template <>
 void delref(DatabaseContext* ptr);
 
-void validateOptionValuePresent(Optional<StringRef> value);
-void validateOptionValueNotPresent(Optional<StringRef> value);
-
 void enableClientInfoLogging();
 
 struct NetworkOptions {
@@ -519,10 +516,6 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
                                                                                   int shardLimit);
 
 std::string unprintable(const std::string&);
-
-int64_t extractIntOption(Optional<StringRef> value,
-                         int64_t minValue = std::numeric_limits<int64_t>::min(),
-                         int64_t maxValue = std::numeric_limits<int64_t>::max());
 
 // Takes a snapshot of the cluster, specifically the following persistent
 // states: coordinator, TLog and storage state

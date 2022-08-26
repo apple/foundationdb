@@ -335,14 +335,21 @@ public:
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
-	void send(Never) {
+	// Sends Never through the assignment var if it is not already set. Otherwise does nothing.
+	// Returns true if the assignment var was not already set; otherwise returns false.
+	bool trySend(Never) {
 		if (TRACE_SAMPLE())
 			TraceEvent(SevSample, "Promise_sendNever").log();
 		ThreadSpinLockHolder holder(mutex);
 		if (!canBeSetUnsafe())
-			ASSERT(false); // Promise fulfilled twice
+			return false;
 		this->status = NeverSet;
+
+		return true;
 	}
+
+	// Like trySend, except that it is assumed the assignment var is not already set.
+	void send(Never) { ASSERT(trySend(Never())); }
 
 	// Sends an error through the assignment var if it is not already set. Otherwise does nothing.
 	// Returns true if the assignment var was not already set; otherwise returns false.
@@ -524,19 +531,21 @@ public:
 
 	void delref() override { ThreadSafeReferenceCounted<ThreadSingleAssignmentVar<T>>::delref(); }
 
-	void send(const T& value) {
+	// Sends a value through the assignment var if it is not already set. Otherwise does nothing.
+	// Returns true if the assignment var was not already set; otherwise returns false.
+	bool trySend(const T& value) {
 		if (TRACE_SAMPLE())
 			TraceEvent(SevSample, "Promise_send").log();
 		this->mutex.enter();
 		if (!canBeSetUnsafe()) {
 			this->mutex.leave();
-			ASSERT(false); // Promise fulfilled twice
+			return false;
 		}
 		this->value = value; //< Danger: polymorphic operation inside lock
 		this->status = Set;
 		if (!callback) {
 			this->mutex.leave();
-			return;
+			return true;
 		}
 
 		auto func = callback;
@@ -552,7 +561,12 @@ public:
 			int userParam = 0;
 			func->fire(Void(), userParam);
 		}
+
+		return true;
 	}
+
+	// Like trySend, except that it is assumed the assignment var is not already set.
+	void send(const T& value) { ASSERT(trySend(value)); }
 
 	void cleanupUnsafe() override {
 		value = T();
@@ -563,6 +577,8 @@ public:
 template <class T>
 class ThreadFuture {
 public:
+	using ValueType = T;
+
 	T get() { return sav->get(); }
 	T getBlocking() {
 		sav->blockUntilReady();
@@ -634,6 +650,15 @@ public:
 private:
 	ThreadSingleAssignmentVar<T>* sav;
 };
+
+template <typename>
+struct thread_future_type_traits : std::false_type {};
+
+template <typename T>
+struct thread_future_type_traits<ThreadFuture<T>> : std::true_type {};
+
+template <typename T>
+constexpr bool is_thread_future_type = thread_future_type_traits<T>::value;
 
 // A callback class used to convert a ThreadFuture into a Future
 template <class T>
