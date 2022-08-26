@@ -488,6 +488,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				break;
 			} else if (badServers == alternatives->countBest() && i == badServers) {
 				TraceEvent("AllLocalAlternativesFailed")
+				    .suppressFor(1.0)
 				    .detail("Alternatives", alternatives->description())
 				    .detail("Total", alternatives->size())
 				    .detail("Best", alternatives->countBest());
