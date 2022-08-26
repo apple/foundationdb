@@ -1532,6 +1532,7 @@ FDB_DECLARE_BOOLEAN_PARAM(CacheResult);
 // debugID helps to trace the path of the read
 struct ReadOptions {
 	ReadType type;
+	// Once CacheResult is serializable, change type from bool to CacheResult
 	bool cacheResult;
 	Optional<UID> debugID;
 	Optional<Version> consistencyCheckStartVersion;
