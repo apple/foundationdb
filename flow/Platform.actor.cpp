@@ -39,11 +39,14 @@
 
 #include "flow/Knobs.h"
 
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <cstring>
-#include <algorithm>
+#include <string>
+#include <string_view>
+#include <vector>
 #include <boost/format.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/operations.hpp>
@@ -1940,27 +1943,36 @@ std::string epochsToGMTString(double epochs) {
 }
 
 std::vector<std::string> getEnvironmentKnobOptions() {
-	char** e = nullptr;
-#ifdef __linux__
-	e = environ;
-#elif defined(_WIN32)
-	e = GetEnvironmentStrings();
+	constexpr const size_t ENVKNOB_PREFIX_LEN = sizeof(ENVIRONMENT_KNOB_OPTION_PREFIX) - 1;
+	std::vector<std::string> knobOptions;
+#if defined(_WIN32)
+	auto e = GetEnvironmentStrings();
 	if (e == nullptr)
 		return {};
 	auto cleanup = ScopeExit([e]() { FreeEnvironmentStrings(e); });
+	while (*e) {
+		auto candidate = std::string_view(e);
+		if (boost::starts_with(candidate, ENVIRONMENT_KNOB_OPTION_PREFIX))
+			knobOptions.emplace_back(candidate.substr(ENVKNOB_PREFIX_LEN));
+		e += (candidate.size() + 1);
+	}
+#else
+	char** e = nullptr;
+#ifdef __linux__
+	e = environ;
 #elif defined(__APPLE__)
 	e = *_NSGetEnviron();
 #else
 #error Port me!
 #endif
-	std::vector<std::string> knobOptions;
 	for (; e && *e; e++) {
-		std::string envOption(*e);
+		std::string_view envOption(*e);
 		if (boost::starts_with(envOption, ENVIRONMENT_KNOB_OPTION_PREFIX)) {
-			knobOptions.push_back(envOption.substr(strlen(ENVIRONMENT_KNOB_OPTION_PREFIX)));
+			knobOptions.emplace_back(envOption.substr(ENVKNOB_PREFIX_LEN));
 		}
 	}
 	return knobOptions;
+#endif
 }
 
 void setMemoryQuota(size_t limit) {
