@@ -1115,7 +1115,7 @@ private:
 	CLIOptions() = default;
 
 	void parseEnvInternal() {
-		for (const std::string& knob : getEnvironmentKnobOptions()) {
+		for (std::string knob : getEnvironmentKnobOptions()) {
 			auto pos = knob.find_first_of("=");
 			if (pos == std::string::npos) {
 				fprintf(stderr,
@@ -2065,7 +2065,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		std::string environmentKnobOptions;
-		for (const std::string& knobOption : getEnvironmentKnobOptions()) {
+		for (std::string knobOption : getEnvironmentKnobOptions()) {
 			environmentKnobOptions += knobOption + " ";
 		}
 		if (environmentKnobOptions.length()) {
