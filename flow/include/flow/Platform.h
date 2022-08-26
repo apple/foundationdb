@@ -282,6 +282,10 @@ void getLocalTime(const time_t* timep, struct tm* result);
 // get GMT time string from an epoch seconds double
 std::string epochsToGMTString(double epochs);
 
+#define ENVIRONMENT_KNOB_OPTION_PREFIX "FDB_KNOB_"
+// returns list of environment variables with prefix ENVIRONMENT_KNOB_OPTION_PREFIX
+std::vector<std::string> getEnvironmentKnobOptions();
+
 void setMemoryQuota(size_t limit);
 
 void* allocate(size_t length, bool allowLargePages, bool includeGuardPages);

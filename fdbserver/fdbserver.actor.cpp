@@ -112,8 +112,8 @@ enum {
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
-	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS, OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT,
-	OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION
+	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONNECTOR_TYPE, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,
+	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -148,70 +148,71 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_NOBOX,                 "-q",                          	SO_NONE },
 	{ OPT_NOBOX,                 "--no-dialog",                 	SO_NONE },
 #endif
-	{ OPT_KVFILE,                "--kvfile",                    	SO_REQ_SEP },
-	{ OPT_TESTFILE,              "-f",                          	SO_REQ_SEP },
-	{ OPT_TESTFILE,              "--testfile",                  	SO_REQ_SEP },
-	{ OPT_RESTARTING,            "-R",                          	SO_NONE },
-	{ OPT_RESTARTING,            "--restarting",                	SO_NONE },
-	{ OPT_RANDOMSEED,            "-s",                          	SO_REQ_SEP },
-	{ OPT_RANDOMSEED,            "--seed",                      	SO_REQ_SEP },
-	{ OPT_KEY,                   "-k",                          	SO_REQ_SEP },
-	{ OPT_KEY,                   "--key",                       	SO_REQ_SEP },
-	{ OPT_MEMLIMIT,              "-m",                          	SO_REQ_SEP },
-	{ OPT_MEMLIMIT,              "--memory",                    	SO_REQ_SEP },
-	{ OPT_VMEMLIMIT,             "--memory-vsize",              	SO_REQ_SEP },
-	{ OPT_STORAGEMEMLIMIT,       "-M",                          	SO_REQ_SEP },
-	{ OPT_STORAGEMEMLIMIT,       "--storage-memory",            	SO_REQ_SEP },
-	{ OPT_CACHEMEMLIMIT,         "--cache-memory",              	SO_REQ_SEP },
-	{ OPT_MACHINEID,             "-i",                          	SO_REQ_SEP },
-	{ OPT_MACHINEID,             "--machine-id",                	SO_REQ_SEP },
-	{ OPT_DCID,                  "-a",                          	SO_REQ_SEP },
-	{ OPT_DCID,                  "--datacenter-id",             	SO_REQ_SEP },
-	{ OPT_MACHINE_CLASS,         "-c",                          	SO_REQ_SEP },
-	{ OPT_MACHINE_CLASS,         "--class",                     	SO_REQ_SEP },
-	{ OPT_BUGGIFY,               "-b",                          	SO_REQ_SEP },
-	{ OPT_BUGGIFY,               "--buggify",                   	SO_REQ_SEP },
-	{ OPT_VERSION,               "-v",                          	SO_NONE },
-	{ OPT_VERSION,               "--version",                   	SO_NONE },
-	{ OPT_BUILD_FLAGS,           "--build-flags",               	SO_NONE },
-	{ OPT_CRASHONERROR,          "--crash",                     	SO_NONE },
-	{ OPT_NETWORKIMPL,           "-N",                          	SO_REQ_SEP },
-	{ OPT_NETWORKIMPL,           "--network",                   	SO_REQ_SEP },
-	{ OPT_NOBUFSTDOUT,           "--unbufferedout",             	SO_NONE },
-	{ OPT_BUFSTDOUTERR,          "--bufferedout",               	SO_NONE },
-	{ OPT_TRACECLOCK,            "--traceclock",                	SO_REQ_SEP },
-	{ OPT_NUMTESTERS,            "--num-testers",               	SO_REQ_SEP },
-	{ OPT_HELP,                  "-?",                          	SO_NONE },
-	{ OPT_HELP,                  "-h",                          	SO_NONE },
-	{ OPT_HELP,                  "--help",                      	SO_NONE },
-	{ OPT_DEVHELP,               "--dev-help",                  	SO_NONE },
-	{ OPT_PRINT_CODE_PROBES,     "--code-probes",               	SO_REQ_SEP },
-	{ OPT_KNOB,                  "--knob-",                     	SO_REQ_SEP },
-	{ OPT_UNITTESTPARAM,         "--test-",                     	SO_REQ_SEP },
-	{ OPT_LOCALITY,              "--locality-",                 	SO_REQ_SEP },
-	{ OPT_TESTSERVERS,           "--testservers",               	SO_REQ_SEP },
-	{ OPT_TEST_ON_SERVERS,       "--testonservers",             	SO_NONE },
-	{ OPT_METRICSCONNFILE,       "--metrics-cluster",           	SO_REQ_SEP },
-	{ OPT_METRICSPREFIX,         "--metrics-prefix",            	SO_REQ_SEP },
-	{ OPT_IO_TRUST_SECONDS,      "--io-trust-seconds",          	SO_REQ_SEP },
-	{ OPT_IO_TRUST_WARN_ONLY,    "--io-trust-warn-only",        	SO_NONE },
-	{ OPT_TRACE_FORMAT,          "--trace-format",              	SO_REQ_SEP },
-	{ OPT_WHITELIST_BINPATH,     "--whitelist-binpath",         	SO_REQ_SEP },
-	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob-credential-file",      	SO_REQ_SEP },
-	{ OPT_CONFIG_PATH,           "--config-path",               	SO_REQ_SEP },
-	{ OPT_USE_TEST_CONFIG_DB,    "--use-test-config-db",        	SO_NONE },
-	{ OPT_FAULT_INJECTION,       "-fi",                         	SO_REQ_SEP },
-	{ OPT_FAULT_INJECTION,       "--fault-injection",           	SO_REQ_SEP },
-	{ OPT_PROFILER,	             "--profiler-",                 	SO_REQ_SEP },
-	{ OPT_PRINT_SIMTIME,         "--print-sim-time",            	 SO_NONE },
-	{ OPT_FLOW_PROCESS_NAME,     "--process-name",              	SO_REQ_SEP },
-	{ OPT_FLOW_PROCESS_ENDPOINT, "--process-endpoint",          	SO_REQ_SEP },
-	{ OPT_IP_TRUSTED_MASK,       "--trusted-subnet-",           	SO_REQ_SEP },
-	{ OPT_NEW_CLUSTER_KEY,       "--new-cluster-key",           	SO_REQ_SEP },
+	{ OPT_KVFILE,                "--kvfile",                    SO_REQ_SEP },
+	{ OPT_TESTFILE,              "-f",                          SO_REQ_SEP },
+	{ OPT_TESTFILE,              "--testfile",                  SO_REQ_SEP },
+	{ OPT_RESTARTING,            "-R",                          SO_NONE },
+	{ OPT_RESTARTING,            "--restarting",                SO_NONE },
+	{ OPT_RANDOMSEED,            "-s",                          SO_REQ_SEP },
+	{ OPT_RANDOMSEED,            "--seed",                      SO_REQ_SEP },
+	{ OPT_KEY,                   "-k",                          SO_REQ_SEP },
+	{ OPT_KEY,                   "--key",                       SO_REQ_SEP },
+	{ OPT_MEMLIMIT,              "-m",                          SO_REQ_SEP },
+	{ OPT_MEMLIMIT,              "--memory",                    SO_REQ_SEP },
+	{ OPT_VMEMLIMIT,             "--memory-vsize",              SO_REQ_SEP },
+	{ OPT_STORAGEMEMLIMIT,       "-M",                          SO_REQ_SEP },
+	{ OPT_STORAGEMEMLIMIT,       "--storage-memory",            SO_REQ_SEP },
+	{ OPT_CACHEMEMLIMIT,         "--cache-memory",              SO_REQ_SEP },
+	{ OPT_MACHINEID,             "-i",                          SO_REQ_SEP },
+	{ OPT_MACHINEID,             "--machine-id",                SO_REQ_SEP },
+	{ OPT_DCID,                  "-a",                          SO_REQ_SEP },
+	{ OPT_DCID,                  "--datacenter-id",             SO_REQ_SEP },
+	{ OPT_MACHINE_CLASS,         "-c",                          SO_REQ_SEP },
+	{ OPT_MACHINE_CLASS,         "--class",                     SO_REQ_SEP },
+	{ OPT_BUGGIFY,               "-b",                          SO_REQ_SEP },
+	{ OPT_BUGGIFY,               "--buggify",                   SO_REQ_SEP },
+	{ OPT_VERSION,               "-v",                          SO_NONE },
+	{ OPT_VERSION,               "--version",                   SO_NONE },
+	{ OPT_BUILD_FLAGS,           "--build-flags",               SO_NONE },
+	{ OPT_CRASHONERROR,          "--crash",                     SO_NONE },
+	{ OPT_NETWORKIMPL,           "-N",                          SO_REQ_SEP },
+	{ OPT_NETWORKIMPL,           "--network",                   SO_REQ_SEP },
+	{ OPT_NOBUFSTDOUT,           "--unbufferedout",             SO_NONE },
+	{ OPT_BUFSTDOUTERR,          "--bufferedout",               SO_NONE },
+	{ OPT_TRACECLOCK,            "--traceclock",                SO_REQ_SEP },
+	{ OPT_NUMTESTERS,            "--num-testers",               SO_REQ_SEP },
+	{ OPT_HELP,                  "-?",                          SO_NONE },
+	{ OPT_HELP,                  "-h",                          SO_NONE },
+	{ OPT_HELP,                  "--help",                      SO_NONE },
+	{ OPT_DEVHELP,               "--dev-help",                  SO_NONE },
+	{ OPT_PRINT_CODE_PROBES,     "--code-probes",               SO_REQ_SEP },
+	{ OPT_KNOB,                  "--knob-",                     SO_REQ_SEP },
+	{ OPT_UNITTESTPARAM,         "--test-",                     SO_REQ_SEP },
+	{ OPT_LOCALITY,              "--locality-",                 SO_REQ_SEP },
+	{ OPT_TESTSERVERS,           "--testservers",               SO_REQ_SEP },
+	{ OPT_TEST_ON_SERVERS,       "--testonservers",             SO_NONE },
+	{ OPT_METRICSCONNFILE,       "--metrics-cluster",           SO_REQ_SEP },
+	{ OPT_METRICSPREFIX,         "--metrics-prefix",            SO_REQ_SEP },
+	{ OPT_IO_TRUST_SECONDS,      "--io-trust-seconds",          SO_REQ_SEP },
+	{ OPT_IO_TRUST_WARN_ONLY,    "--io-trust-warn-only",        SO_NONE },
+	{ OPT_TRACE_FORMAT,          "--trace-format",              SO_REQ_SEP },
+	{ OPT_WHITELIST_BINPATH,     "--whitelist-binpath",         SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob-credential-file",      SO_REQ_SEP },
+	{ OPT_CONFIG_PATH,           "--config-path",               SO_REQ_SEP },
+	{ OPT_USE_TEST_CONFIG_DB,    "--use-test-config-db",        SO_NONE },
+	{ OPT_FAULT_INJECTION,       "-fi",                         SO_REQ_SEP },
+	{ OPT_FAULT_INJECTION,       "--fault-injection",           SO_REQ_SEP },
+	{ OPT_PROFILER,	             "--profiler-",                 SO_REQ_SEP },
+	{ OPT_PRINT_SIMTIME,         "--print-sim-time",             SO_NONE },
+	{ OPT_FLOW_PROCESS_NAME,     "--process-name",              SO_REQ_SEP },
+	{ OPT_FLOW_PROCESS_ENDPOINT, "--process-endpoint",          SO_REQ_SEP },
+	{ OPT_IP_TRUSTED_MASK,       "--trusted-subnet-",           SO_REQ_SEP },
+	{ OPT_NEW_CLUSTER_KEY,       "--new-cluster-key",           SO_REQ_SEP },
 	{ OPT_AUTHZ_PUBLIC_KEY_FILE, "--authorization-public-key-file", SO_REQ_SEP },
-	{ OPT_KMS_CONN_DISCOVERY_URL_FILE,           "--discover-kms-conn-url-file",            SO_REQ_SEP},
-	{ OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,     "--kms-conn-validation-token-details",     SO_REQ_SEP},
-	{ OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-encryption-keys-endpoint", SO_REQ_SEP},
+	{ OPT_KMS_CONN_DISCOVERY_URL_FILE,           "--discover-kms-conn-url-file",            SO_REQ_SEP },
+	{ OPT_KMS_CONNECTOR_TYPE,    "--kms-connector-type",        SO_REQ_SEP },
+	{ OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,     "--kms-conn-validation-token-details",     SO_REQ_SEP },
+	{ OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-encryption-keys-endpoint", SO_REQ_SEP },
 	{ OPT_USE_FUTURE_PROTOCOL_VERSION, 			 "--use-future-protocol-version",			SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -1083,6 +1084,7 @@ struct CLIOptions {
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
 		opts.parseArgsInternal(argc, argv);
+		opts.parseEnvInternal();
 		return opts;
 	}
 
@@ -1111,6 +1113,25 @@ struct CLIOptions {
 
 private:
 	CLIOptions() = default;
+
+	void parseEnvInternal() {
+		for (std::string knob : getEnvironmentKnobOptions()) {
+			auto pos = knob.find_first_of("=");
+			if (pos == std::string::npos) {
+				fprintf(stderr,
+				        "Error: malformed environment knob option: %s%s\n",
+				        ENVIRONMENT_KNOB_OPTION_PREFIX,
+				        knob.c_str());
+				TraceEvent(SevWarnAlways, "MalformedEnvironmentVariableKnob")
+				    .detail("Key", ENVIRONMENT_KNOB_OPTION_PREFIX + knob);
+			} else {
+				std::string k = knob.substr(0, pos);
+				std::string v = knob.substr(pos + 1, knob.length());
+				knobs.emplace_back(k, v);
+				manualKnobOverrides[k] = v;
+			}
+		}
+	}
 
 	void parseArgsInternal(int argc, char* argv[]) {
 		for (int a = 0; a < argc; a++) {
@@ -1668,6 +1689,10 @@ private:
 				knobs.emplace_back("rest_kms_connector_kms_discovery_url_file", args.OptionArg());
 				break;
 			}
+			case OPT_KMS_CONNECTOR_TYPE: {
+				knobs.emplace_back("kms_connector_type", args.OptionArg());
+				break;
+			}
 			case OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS: {
 				knobs.emplace_back("rest_kms_connector_validation_token_details", args.OptionArg());
 				break;
@@ -2039,6 +2064,14 @@ int main(int argc, char* argv[]) {
 				throw;
 		}
 
+		std::string environmentKnobOptions;
+		for (std::string knobOption : getEnvironmentKnobOptions()) {
+			environmentKnobOptions += knobOption + " ";
+		}
+		if (environmentKnobOptions.length()) {
+			environmentKnobOptions.pop_back();
+		}
+
 		TraceEvent("ProgramStart")
 		    .setMaxEventLength(12000)
 		    .detail("RandomSeed", opts.randomSeed)
@@ -2053,6 +2086,7 @@ int main(int argc, char* argv[]) {
 		            opts.connectionFile ? opts.connectionFile->getConnectionString().toString() : "")
 		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 		    .setMaxFieldLength(10000)
+		    .detail("EnvironmentKnobOptions", environmentKnobOptions.length() ? environmentKnobOptions : "none")
 		    .detail("CommandLine", opts.commandLine)
 		    .setMaxFieldLength(0)
 		    .detail("BuggifyEnabled", opts.buggifyEnabled)
@@ -2331,7 +2365,18 @@ int main(int argc, char* argv[]) {
 
 			f = result;
 		} else if (role == ServerRole::FlowProcess) {
-			TraceEvent(SevDebug, "StartingFlowProcess").detail("From", "fdbserver");
+			std::string traceFormat = getTraceFormatExtension();
+			// close and reopen trace file with the correct process listen address to name the file
+			closeTraceFile();
+			// writer is not shutdown immediately, addref on it
+			disposeTraceFileWriter();
+			// use the same trace format as before
+			selectTraceFormatter(traceFormat);
+			// create the trace file with the correct process address
+			openTraceFile(
+			    g_network->getLocalAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
+			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
+			TraceEvent(SevDebug, "StartingFlowProcess").detail("FlowProcessName", opts.flowProcessName);
 #if defined(__linux__) || defined(__FreeBSD__)
 			prctl(PR_SET_PDEATHSIG, SIGTERM);
 			if (getppid() == 1) /* parent already died before prctl */

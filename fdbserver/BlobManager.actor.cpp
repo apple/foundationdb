@@ -925,14 +925,19 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 		if (e.code() == error_code_blob_worker_full) {
 			CODE_PROBE(true, "blob worker too full");
 			ASSERT(assignment.isAssign);
-			if (assignment.previousFailure.present() &&
-			    assignment.previousFailure.get().second.code() == error_code_blob_worker_full) {
-				// if previous assignment also failed due to blob_worker_full, multiple workers are full, so wait even
-				// longer
-				CODE_PROBE(true, "multiple blob workers too full");
-				wait(delayJittered(10.0));
-			} else {
-				wait(delayJittered(1.0)); // wait a bit before retrying
+			try {
+				if (assignment.previousFailure.present() &&
+				    assignment.previousFailure.get().second.code() == error_code_blob_worker_full) {
+					// if previous assignment also failed due to blob_worker_full, multiple workers are full, so wait
+					// even longer
+					CODE_PROBE(true, "multiple blob workers too full");
+					wait(delayJittered(10.0));
+				} else {
+					wait(delayJittered(1.0)); // wait a bit before retrying
+				}
+			} catch (Error& e) {
+				--bmData->stats.blockedAssignments;
+				throw;
 			}
 		}
 
@@ -1077,14 +1082,30 @@ static bool handleRangeIsRevoke(Reference<BlobManagerData> bmData, RangeAssignme
 		for (auto& it : currentAssignments) {
 			// ensure range doesn't truncate existing ranges
 			if (it.begin() < assignment.keyRange.begin || it.end() > assignment.keyRange.end) {
-				fmt::print("Assignment [{0} - {1}) truncates range [{2} - {3})\n",
-				           assignment.keyRange.begin.printable(),
-				           assignment.keyRange.end.printable(),
-				           it.begin().printable(),
-				           it.end().printable());
+				// the only case where this is ok is on startup when a BM is revoking old granules after reading
+				// knownBlobRanges and seeing that some are no longer present.
+				auto knownRanges = bmData->knownBlobRanges.intersectingRanges(it.range());
+				bool inKnownBlobRanges = false;
+				for (auto& r : knownRanges) {
+					if (r.value()) {
+						inKnownBlobRanges = true;
+						break;
+					}
+				}
+				bool forcePurging = bmData->isForcePurging(it.range());
+				if (it.cvalue() != UID() || (inKnownBlobRanges && !forcePurging)) {
+					fmt::print("Assignment [{0} - {1}): {2} truncates range [{3} - {4}) ({5}, {6})\n",
+					           assignment.keyRange.begin.printable(),
+					           assignment.keyRange.end.printable(),
+					           it.cvalue().toString().substr(0, 5),
+					           it.begin().printable(),
+					           it.end().printable(),
+					           inKnownBlobRanges,
+					           forcePurging);
+					// assert on condition again to make assertion failure better than "false"
+					ASSERT(it.cvalue() == UID() && (!inKnownBlobRanges || forcePurging));
+				}
 			}
-			ASSERT(it.begin() >= assignment.keyRange.begin);
-			ASSERT(it.end() <= assignment.keyRange.end);
 
 			// It is fine for multiple disjoint sub-ranges to have the same sequence number since they were part
 			// of the same logical change
@@ -1290,6 +1311,24 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 					}
 				}
 
+				state std::vector<Future<BlobGranuleSplitPoints>> splitFutures;
+				// Divide new ranges up into equal chunks by using SS byte sample
+				for (KeyRangeRef range : rangesToAdd) {
+					TraceEvent("ClientBlobRangeAdded", bmData->id).detail("Range", range);
+					// add client range as known "granule" until we determine initial split, in case a purge or
+					// unblobbify comes in before we finish splitting
+
+					// TODO can remove validation eventually
+					auto r = bmData->workerAssignments.intersectingRanges(range);
+					for (auto& it : r) {
+						ASSERT(it.cvalue() == UID());
+					}
+					bmData->workerAssignments.insert(range, UID());
+
+					// start initial split for range
+					splitFutures.push_back(splitRange(bmData, range, false, true));
+				}
+
 				for (KeyRangeRef range : rangesToRemove) {
 					TraceEvent("ClientBlobRangeRemoved", bmData->id).detail("Range", range);
 					if (BM_DEBUG) {
@@ -1302,13 +1341,6 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 					ra.keyRange = range;
 					ra.revoke = RangeRevokeData(true); // dispose=true
 					handleRangeAssign(bmData, ra);
-				}
-
-				state std::vector<Future<BlobGranuleSplitPoints>> splitFutures;
-				// Divide new ranges up into equal chunks by using SS byte sample
-				for (KeyRangeRef range : rangesToAdd) {
-					TraceEvent("ClientBlobRangeAdded", bmData->id).detail("Range", range);
-					splitFutures.push_back(splitRange(bmData, range, false, true));
 				}
 
 				if (firstLoad) {
@@ -4433,6 +4465,26 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	}
 
+	// if range isn't in known blob ranges, do nothing after writing force purge range to database
+	bool anyKnownRanges = false;
+	auto knownRanges = self->knownBlobRanges.intersectingRanges(range);
+	for (auto& it : knownRanges) {
+		if (it.cvalue()) {
+			anyKnownRanges = true;
+			break;
+		}
+	}
+
+	if (!anyKnownRanges) {
+		CODE_PROBE(true, "skipping purge because not in known blob ranges");
+		TraceEvent("PurgeGranulesSkippingUnknownRange", self->id)
+		    .detail("Epoch", self->epoch)
+		    .detail("Range", range)
+		    .detail("PurgeVersion", purgeVersion)
+		    .detail("Force", force);
+		return Void();
+	}
+
 	// wait for all active splits and merges in the range to come to a stop, so no races with purging
 	std::vector<Future<Void>> activeBoundaryEvals;
 	auto boundaries = self->boundaryEvaluations.intersectingRanges(range);
@@ -4460,13 +4512,27 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		activeRanges.push_back(it.range());
 	}
 
+	state std::set<Key> knownBoundariesPurged;
+
 	if (force) {
 		// revoke range from all active blob workers - AFTER we copy set of active ranges to purge
-		RangeAssignment ra;
-		ra.isAssign = false;
-		ra.keyRange = range;
-		ra.revoke = RangeRevokeData(true); // dispose=true
-		handleRangeAssign(self, ra);
+		// if purge covers multiple blobbified ranges, revoke each separately
+		auto knownRanges = self->knownBlobRanges.intersectingRanges(range);
+		for (auto& it : knownRanges) {
+			if (it.cvalue()) {
+				RangeAssignment ra;
+				ra.isAssign = false;
+				ra.keyRange = range & it.range();
+				ra.revoke = RangeRevokeData(true); // dispose=true
+				if (ra.keyRange.begin > range.begin) {
+					knownBoundariesPurged.insert(ra.keyRange.begin);
+				}
+				if (ra.keyRange.end < range.end) {
+					knownBoundariesPurged.insert(ra.keyRange.end);
+				}
+				handleRangeAssign(self, ra);
+			}
+		}
 	}
 
 	state int rangeIdx;
@@ -4714,6 +4780,12 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 				// read them
 				wait(checkManagerLock(&tr, self));
 				wait(krmSetRange(&tr, blobGranuleMappingKeys.begin, range, blobGranuleMappingValueFor(UID())));
+				// FIXME: there is probably a cleaner fix than setting extra keys in the database if someone does a
+				// purge that's not aligned to boundaries
+				for (auto& it : knownBoundariesPurged) {
+					// keep original bounds in granule mapping as to not confuse future managers on recovery
+					tr.set(it.withPrefix(blobGranuleMappingKeys.begin), blobGranuleMappingValueFor(UID()));
+				}
 				wait(tr.commit());
 				break;
 			} catch (Error& e) {
@@ -5035,6 +5107,15 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 // Simulation validation that multiple blob managers aren't started with the same epoch
 static std::map<int64_t, UID> managerEpochsSeen;
 
+ACTOR Future<Void> checkBlobManagerEpoch(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int64_t epoch, UID dbgid) {
+	loop {
+		if (dbInfo->get().blobManager.present() && dbInfo->get().blobManager.get().epoch > epoch) {
+			throw worker_removed();
+		}
+		wait(dbInfo->onChange());
+	}
+}
+
 ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
                                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                int64_t epoch) {
@@ -5050,7 +5131,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		managerEpochsSeen[epoch] = bmInterf.id();
 	}
 	state Reference<BlobManagerData> self =
-	    makeReference<BlobManagerData>(deterministicRandom()->randomUniqueID(),
+	    makeReference<BlobManagerData>(bmInterf.id(),
 	                                   dbInfo,
 	                                   openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True),
 	                                   bmInterf.locality.dcId(),
@@ -5071,10 +5152,11 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		    dbInfo, [](auto const& info) { return info.clusterInterface.recruitBlobWorker; });
 
 		self->addActor.send(blobWorkerRecruiter(self, recruitBlobWorker));
+		self->addActor.send(checkBlobManagerEpoch(dbInfo, epoch, bmInterf.id()));
 
 		// we need to recover the old blob manager's state (e.g. granule assignments) before
 		// before the new blob manager does anything
-		wait(recoverBlobManager(self));
+		wait(recoverBlobManager(self) || collection);
 
 		self->addActor.send(doLockChecks(self));
 		self->addActor.send(monitorClientRanges(self));
@@ -5105,14 +5187,16 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 				break;
 			}
 			when(state HaltBlobGranulesRequest req = waitNext(bmInterf.haltBlobGranules.getFuture())) {
-				wait(haltBlobGranules(self));
+				wait(haltBlobGranules(self) || collection);
 				req.reply.send(Void());
 				TraceEvent("BlobGranulesHalted", bmInterf.id()).detail("Epoch", epoch).detail("ReqID", req.requesterID);
 				break;
 			}
-			when(BlobManagerExclusionSafetyCheckRequest exclCheckReq =
-			         waitNext(bmInterf.blobManagerExclCheckReq.getFuture())) {
-				blobManagerExclusionSafetyCheck(self, exclCheckReq);
+			when(BlobManagerExclusionSafetyCheckRequest req = waitNext(bmInterf.blobManagerExclCheckReq.getFuture())) {
+				blobManagerExclusionSafetyCheck(self, req);
+			}
+			when(BlobManagerBlockedRequest req = waitNext(bmInterf.blobManagerBlockedReq.getFuture())) {
+				req.reply.send(BlobManagerBlockedReply(self->stats.blockedAssignments));
 			}
 			when(wait(collection)) {
 				TraceEvent(SevError, "BlobManagerActorCollectionError");
@@ -5123,6 +5207,9 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	} catch (Error& err) {
 		TraceEvent("BlobManagerDied", bmInterf.id()).errorUnsuppressed(err);
 	}
+	// prevent a reference counting cycle
+	self->assignsInProgress = KeyRangeActorMap();
+	self->boundaryEvaluations.clear();
 	return Void();
 }
 

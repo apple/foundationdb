@@ -62,7 +62,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbserver/GetEncryptCipherKeys.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LatencyBandConfig.h"
@@ -2504,7 +2504,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    .detail("StreamUID", streamUID)
 		    .detail("Range", req.range)
 		    .detail("Begin", req.begin)
-		    .detail("End", req.end);
+		    .detail("End", req.end)
+		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 	}
 
 	if (data->version.get() < req.begin) {
@@ -2550,7 +2551,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    .detail("FetchStorageVersion", fetchStorageVersion)
 		    .detail("FetchVersion", feedInfo->fetchVersion)
 		    .detail("DurableFetchVersion", feedInfo->durableFetchVersion.get())
-		    .detail("DurableValidationVersion", durableValidationVersion);
+		    .detail("DurableValidationVersion", durableValidationVersion)
+		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 	}
 
 	if (req.end > emptyVersion + 1) {
@@ -2791,7 +2793,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    .detail("FirstVersion", reply.mutations.empty() ? invalidVersion : reply.mutations.front().version)
 		    .detail("LastVersion", reply.mutations.empty() ? invalidVersion : reply.mutations.back().version)
 		    .detail("Count", reply.mutations.size())
-		    .detail("GotAll", gotAll);
+		    .detail("GotAll", gotAll)
+		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 	}
 
 	if (DEBUG_CF_MISSING(req.rangeID, req.range, req.begin, reply.mutations.back().version) && !req.canReadPopped) {
@@ -2944,7 +2947,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			    .detail("Range", req.range)
 			    .detail("Begin", req.begin)
 			    .detail("End", req.end)
-			    .detail("CanReadPopped", req.canReadPopped);
+			    .detail("CanReadPopped", req.canReadPopped)
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 		}
 		data->activeFeedQueries++;
 
@@ -2965,7 +2969,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			    .detail("Begin", req.begin)
 			    .detail("End", req.end)
 			    .detail("CanReadPopped", req.canReadPopped)
-			    .detail("Version", req.begin - 1);
+			    .detail("Version", req.begin - 1)
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 		}
 
 		loop {
@@ -2981,7 +2986,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					    .detail("Begin", req.begin)
 					    .detail("End", req.end)
 					    .detail("CanReadPopped", req.canReadPopped)
-					    .detail("Version", blockedVersion.present() ? blockedVersion.get() : data->prevVersion);
+					    .detail("Version", blockedVersion.present() ? blockedVersion.get() : data->prevVersion)
+					    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 				}
 				removeUID = true;
 			}
@@ -3001,7 +3007,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					    .detail("Begin", req.begin)
 					    .detail("End", req.end)
 					    .detail("CanReadPopped", req.canReadPopped)
-					    .detail("Version", blockedVersion.present() ? blockedVersion.get() : data->prevVersion);
+					    .detail("Version", blockedVersion.present() ? blockedVersion.get() : data->prevVersion)
+					    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 				}
 			}
 			std::pair<ChangeFeedStreamReply, bool> _feedReply = wait(feedReplyFuture);
