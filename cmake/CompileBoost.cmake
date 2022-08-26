@@ -56,7 +56,8 @@ function(compile_boost)
   set(USER_CONFIG_FLAG --user-config=${CMAKE_BINARY_DIR}/user-config.jam)
 
   # Build boost
-  # Download zlib
+
+  # Download zstd
   include(ExternalProject)
   set(ZSTD_SOURCE_DIR "${CMAKE_BINARY_DIR}/zstd")
   ExternalProject_add("${COMPILE_BOOST_TARGET}_zstd_source"
@@ -74,14 +75,15 @@ function(compile_boost)
     URL "https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.bz2"
     URL_HASH SHA256=8681f175d4bdb26c52222665793eef08490d7758529330f98d3b29dd0735bccc
     CONFIGURE_COMMAND ${BOOTSTRAP_COMMAND} ${BOOTSTRAP_ARGS} --with-libraries=${BOOTSTRAP_LIBRARIES} --with-toolset=${BOOST_TOOLSET}
-    BUILD_COMMAND ${B2_COMMAND} link=static ${COMPILE_BOOST_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} ${USER_CONFIG_FLAG} install
+    BUILD_COMMAND ${B2_COMMAND} link=static cxxflags=-fPIC ${COMPILE_BOOST_BUILD_ARGS} --prefix=${BOOST_INSTALL_DIR} -sZSTD_SOURCE=${ZSTD_SOURCE_DIR} ${USER_CONFIG_FLAG} install
     BUILD_IN_SOURCE ON
     INSTALL_COMMAND ""
     UPDATE_COMMAND ""
     BUILD_BYPRODUCTS "${BOOST_INSTALL_DIR}/boost/config.hpp"
                      "${BOOST_INSTALL_DIR}/lib/libboost_context.a"
                      "${BOOST_INSTALL_DIR}/lib/libboost_filesystem.a"
-                     "${BOOST_INSTALL_DIR}/lib/libboost_iostreams.a")
+                     "${BOOST_INSTALL_DIR}/lib/libboost_iostreams.a"
+                     "${BOOST_INSTALL_DIR}/lib/libboost_zstd.a")
 
   add_library(${COMPILE_BOOST_TARGET}_context STATIC IMPORTED)
   add_dependencies(${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}Project)
@@ -95,9 +97,13 @@ function(compile_boost)
   add_dependencies(${COMPILE_BOOST_TARGET}_iostreams ${COMPILE_BOOST_TARGET}Project)
   set_target_properties(${COMPILE_BOOST_TARGET}_iostreams PROPERTIES IMPORTED_LOCATION "${BOOST_INSTALL_DIR}/lib/libboost_iostreams.a")
 
+  add_library(${COMPILE_BOOST_TARGET}_zstd STATIC IMPORTED)
+  add_dependencies(${COMPILE_BOOST_TARGET}_zstd ${COMPILE_BOOST_TARGET}Project)
+  set_target_properties(${COMPILE_BOOST_TARGET}_zstd PROPERTIES IMPORTED_LOCATION "${BOOST_INSTALL_DIR}/lib/libboost_zstd.a")
+
   add_library(${COMPILE_BOOST_TARGET} INTERFACE)
   target_include_directories(${COMPILE_BOOST_TARGET} SYSTEM INTERFACE ${BOOST_INSTALL_DIR}/include)
-  target_link_libraries(${COMPILE_BOOST_TARGET} INTERFACE ${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}_filesystem ${COMPILE_BOOST_TARGET}_iostreams)
+  target_link_libraries(${COMPILE_BOOST_TARGET} INTERFACE ${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}_filesystem ${COMPILE_BOOST_TARGET}_iostreams ${COMPILE_BOOST_TARGET}_zstd)
 
 endfunction(compile_boost)
 
