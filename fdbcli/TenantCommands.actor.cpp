@@ -509,50 +509,56 @@ ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector
 	state Key tenantOldNameKey = tenantMapSpecialKeyRange(apiVersion).begin.withSuffix(tokens[1]);
 	state Key tenantNewNameKey = tenantMapSpecialKeyRange(apiVersion).begin.withSuffix(tokens[2]);
 	state bool firstTry = true;
-	state int64_t id;
+	state int64_t id = -1;
 	loop {
-		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
-			// Hold the reference to the standalone's memory
-			state ThreadFuture<Optional<Value>> oldEntryFuture = tr->get(tenantOldNameKey);
-			state ThreadFuture<Optional<Value>> newEntryFuture = tr->get(tenantNewNameKey);
-			state Optional<Value> oldEntry = wait(safeThreadFutureToFuture(oldEntryFuture));
-			state Optional<Value> newEntry = wait(safeThreadFutureToFuture(newEntryFuture));
-			if (firstTry) {
-				if (!oldEntry.present()) {
-					throw tenant_not_found();
-				}
-				if (newEntry.present()) {
-					throw tenant_already_exists();
-				}
-				// Store the id we see when first reading this key
-				id = getTenantId(oldEntry.get());
-
-				firstTry = false;
+			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
+			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
+				wait(MetaclusterAPI::renameTenant(db, tokens[1], tokens[2]));
 			} else {
-				// If we got commit_unknown_result, the rename may have already occurred.
-				if (newEntry.present()) {
-					int64_t checkId = getTenantId(newEntry.get());
-					if (id == checkId) {
-						ASSERT(!oldEntry.present() || getTenantId(oldEntry.get()) != id);
-						return true;
+				// Hold the reference to the standalone's memory
+				state ThreadFuture<Optional<Value>> oldEntryFuture = tr->get(tenantOldNameKey);
+				state ThreadFuture<Optional<Value>> newEntryFuture = tr->get(tenantNewNameKey);
+				state Optional<Value> oldEntry = wait(safeThreadFutureToFuture(oldEntryFuture));
+				state Optional<Value> newEntry = wait(safeThreadFutureToFuture(newEntryFuture));
+				if (firstTry) {
+					if (!oldEntry.present()) {
+						throw tenant_not_found();
 					}
-					// If the new entry is present but does not match, then
-					// the rename should fail, so we throw an error.
-					throw tenant_already_exists();
+					if (newEntry.present()) {
+						throw tenant_already_exists();
+					}
+					// Store the id we see when first reading this key
+					id = getTenantId(oldEntry.get());
+
+					firstTry = false;
+				} else {
+					// If we got commit_unknown_result, the rename may have already occurred.
+					if (newEntry.present()) {
+						int64_t checkId = getTenantId(newEntry.get());
+						if (id == checkId) {
+							ASSERT(!oldEntry.present() || getTenantId(oldEntry.get()) != id);
+							return true;
+						}
+						// If the new entry is present but does not match, then
+						// the rename should fail, so we throw an error.
+						throw tenant_already_exists();
+					}
+					if (!oldEntry.present()) {
+						throw tenant_not_found();
+					}
+					int64_t checkId = getTenantId(oldEntry.get());
+					// If the id has changed since we made our first attempt,
+					// then it's possible we've already moved the tenant. Don't move it again.
+					if (id != checkId) {
+						throw tenant_not_found();
+					}
 				}
-				if (!oldEntry.present()) {
-					throw tenant_not_found();
-				}
-				int64_t checkId = getTenantId(oldEntry.get());
-				// If the id has changed since we made our first attempt,
-				// then it's possible we've already moved the tenant. Don't move it again.
-				if (id != checkId) {
-					throw tenant_not_found();
-				}
+				tr->set(tenantRenameKey, tokens[2]);
+				wait(safeThreadFutureToFuture(tr->commit()));
 			}
-			tr->set(tenantRenameKey, tokens[2]);
-			wait(safeThreadFutureToFuture(tr->commit()));
 			break;
 		} catch (Error& e) {
 			state Error err(e);

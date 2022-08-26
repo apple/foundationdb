@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ClientKnobs.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/Ratekeeper.h"
@@ -246,7 +247,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> monitorBlobWorkers(Ratekeeper* self) {
+	ACTOR static Future<Void> monitorBlobWorkers(Ratekeeper* self, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		state std::vector<BlobWorkerInterface> blobWorkers;
 		state int workerFetchCount = 0;
 		state double lastStartTime = 0;
@@ -276,6 +277,13 @@ public:
 			startTime = now();
 
 			if (blobWorkers.size() > 0) {
+				state Future<Optional<BlobManagerBlockedReply>> blockedAssignments;
+				if (dbInfo->get().blobManager.present()) {
+					blockedAssignments =
+					    timeout(brokenPromiseToNever(dbInfo->get().blobManager.get().blobManagerBlockedReq.getReply(
+					                BlobManagerBlockedRequest())),
+					            SERVER_KNOBS->BLOB_WORKER_TIMEOUT);
+				}
 				state std::vector<Future<Optional<MinBlobVersionReply>>> aliveVersions;
 				aliveVersions.reserve(blobWorkers.size());
 				for (auto& it : blobWorkers) {
@@ -283,6 +291,12 @@ public:
 					req.grv = grv;
 					aliveVersions.push_back(timeout(brokenPromiseToNever(it.minBlobVersionRequest.getReply(req)),
 					                                SERVER_KNOBS->BLOB_WORKER_TIMEOUT));
+				}
+				if (blockedAssignments.isValid()) {
+					wait(success(blockedAssignments));
+					if (blockedAssignments.get().present() && blockedAssignments.get().get().blockedAssignments == 0) {
+						self->unblockedAssignmentTime = now();
+					}
 				}
 				wait(waitForAll(aliveVersions));
 				Version minVer = grv;
@@ -297,10 +311,12 @@ public:
 					} else {
 						blobWorkerDead = true;
 						minVer = 0;
+						minIdx = i;
 						break;
 					}
 				}
-				if (minVer > 0 && blobWorkers.size() > 0) {
+				if (minVer > 0 && blobWorkers.size() > 0 &&
+				    now() - self->unblockedAssignmentTime < SERVER_KNOBS->BW_MAX_BLOCKED_INTERVAL) {
 					while (!self->blobWorkerVersionHistory.empty() &&
 					       minVer < self->blobWorkerVersionHistory.back().second) {
 						self->blobWorkerVersionHistory.pop_back();
@@ -316,7 +332,8 @@ public:
 					lastLoggedTime = now();
 					TraceEvent("RkMinBlobWorkerVersion")
 					    .detail("BWVersion", minVer)
-					    .detail("MinId", blobWorkers[minIdx].id());
+					    .detail("MaxVer", self->maxVersion)
+					    .detail("MinId", blobWorkers.size() > 0 ? blobWorkers[minIdx].id() : UID());
 				}
 			}
 			wait(blobWorkerDelay);
@@ -344,7 +361,7 @@ public:
 
 		self.addActor.send(self.monitorThrottlingChanges());
 		if (SERVER_KNOBS->BW_THROTTLING_ENABLED) {
-			self.addActor.send(self.monitorBlobWorkers());
+			self.addActor.send(self.monitorBlobWorkers(dbInfo));
 		}
 		self.addActor.send(self.refreshStorageServerCommitCosts());
 
@@ -374,6 +391,12 @@ public:
 		}
 
 		self.remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
+
+		state bool recovering = dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS;
+		state Version recoveryVersion = std::numeric_limits<Version>::max();
+		if (recovering) {
+			self.version_recovery[recoveryVersion] = std::make_pair(now(), Optional<double>());
+		}
 
 		try {
 			state bool lastLimited = false;
@@ -414,6 +437,9 @@ public:
 							}
 						}
 					}
+					while (self.version_recovery.size() > CLIENT_KNOBS->MAX_GENERATIONS) {
+						self.version_recovery.erase(self.version_recovery.begin());
+					}
 
 					self.updateRate(&self.normalLimits);
 					self.updateRate(&self.batchLimits);
@@ -450,6 +476,15 @@ public:
 					p.batchTransactions = req.batchReleasedTransactions;
 					p.version = req.version;
 					self.maxVersion = std::max(self.maxVersion, req.version);
+
+					if (recoveryVersion == std::numeric_limits<Version>::max() &&
+					    self.version_recovery.count(recoveryVersion)) {
+						recoveryVersion = self.maxVersion;
+						self.version_recovery[recoveryVersion] =
+						    self.version_recovery[std::numeric_limits<Version>::max()];
+						self.version_recovery.erase(std::numeric_limits<Version>::max());
+					}
+
 					p.lastUpdateTime = now();
 
 					reply.transactionRate = self.normalLimits.tpsLimit / self.grvProxyInfo.size();
@@ -496,6 +531,27 @@ public:
 				}
 				when(wait(err.getFuture())) {}
 				when(wait(dbInfo->onChange())) {
+					if (!recovering && dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+						recovering = true;
+						recoveryVersion = self.maxVersion;
+						if (recoveryVersion == 0) {
+							recoveryVersion = std::numeric_limits<Version>::max();
+						}
+						if (self.version_recovery.count(recoveryVersion)) {
+							auto& it = self.version_recovery[recoveryVersion];
+							double existingEnd = it.second.present() ? it.second.get() : now();
+							double existingDuration = existingEnd - it.first;
+							self.version_recovery[recoveryVersion] =
+							    std::make_pair(now() - existingDuration, Optional<double>());
+						} else {
+							self.version_recovery[recoveryVersion] = std::make_pair(now(), Optional<double>());
+						}
+					}
+					if (recovering && dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
+						recovering = false;
+						self.version_recovery[recoveryVersion].second = now();
+					}
+
 					if (tlogInterfs != dbInfo->get().logSystemConfig.allLocalLogs()) {
 						tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
 						tlogTrackers = std::vector<Future<Void>>();
@@ -553,8 +609,8 @@ Future<Void> Ratekeeper::monitorThrottlingChanges() {
 	return tagThrottler->monitorThrottlingChanges();
 }
 
-Future<Void> Ratekeeper::monitorBlobWorkers() {
-	return RatekeeperImpl::monitorBlobWorkers(this);
+Future<Void> Ratekeeper::monitorBlobWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	return RatekeeperImpl::monitorBlobWorkers(this, dbInfo);
 }
 
 Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
@@ -584,7 +640,7 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
                 SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH,
                 SERVER_KNOBS->TARGET_BW_LAG_BATCH),
-    maxVersion(0), blobWorkerTime(now()) {
+    maxVersion(0), blobWorkerTime(now()), unblockedAssignmentTime(now()) {
 	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
 		tagThrottler = std::make_unique<GlobalTagThrottler>(db, id);
 	} else {
@@ -861,7 +917,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 				                          now() - (maxVersion - lastBWVer) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND);
 			}
 		}
-		double blobWorkerLag = now() - blobWorkerTime;
+		double blobWorkerLag = (now() - blobWorkerTime) - getRecoveryDuration(lastBWVer);
 		if (blobWorkerLag > limits->bwLagTarget / 2 && !blobWorkerVersionHistory.empty()) {
 			double elapsed = blobWorkerVersionHistory.back().first - blobWorkerVersionHistory.front().first;
 			Version firstBWVer = blobWorkerVersionHistory.front().second;
@@ -873,6 +929,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 					double targetRateRatio;
 					if (blobWorkerLag > 3 * limits->bwLagTarget) {
 						targetRateRatio = 0;
+						// ASSERT(!g_network->isSimulated() || limits->bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
+						//        now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + 50);
 					} else if (blobWorkerLag > limits->bwLagTarget) {
 						targetRateRatio = SERVER_KNOBS->BW_LAG_DECREASE_AMOUNT;
 					} else {
@@ -898,7 +956,9 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 							    .detail("BWRate", bwTPS)
 							    .detail("Ratio", targetRateRatio)
 							    .detail("Released", totalTransactions)
-							    .detail("Elapsed", elapsed);
+							    .detail("Elapsed", elapsed)
+							    .detail("LastVer", lastBWVer)
+							    .detail("RecoveryDuration", getRecoveryDuration(lastBWVer));
 						}
 						limits->tpsLimit = bwTPS;
 						limitReason = limitReason_t::blob_worker_lag;
@@ -918,9 +978,17 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 							TraceEvent("RatekeeperLimitReasonDetails")
 							    .detail("Reason", limitReason_t::blob_worker_missing)
 							    .detail("LastValid", lastIter != version_transactions.end())
-							    .detail("FirstValid", firstIter != version_transactions.begin());
+							    .detail("FirstValid", firstIter != version_transactions.begin())
+							    .detail("FirstVersion",
+							            version_transactions.size() ? version_transactions.begin()->first : -1)
+							    .detail("FirstBWVer", firstBWVer)
+							    .detail("LastBWVer", lastBWVer)
+							    .detail("VerTransactions", version_transactions.size())
+							    .detail("RecoveryDuration", getRecoveryDuration(lastBWVer));
 						}
 						limitReason = limitReason_t::blob_worker_missing;
+						// ASSERT(!g_network->isSimulated() || limits->bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
+						//        now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + 50);
 					} else if (bwTPS < limits->tpsLimit) {
 						if (printRateKeepLimitReasonDetails) {
 							TraceEvent("RatekeeperLimitReasonDetails")
@@ -942,10 +1010,14 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 					    .detail("Reason", limitReason_t::blob_worker_missing)
 					    .detail("Elapsed", elapsed)
 					    .detail("LastVer", lastBWVer)
-					    .detail("FirstVer", firstBWVer);
+					    .detail("FirstVer", firstBWVer)
+					    .detail("BWLag", blobWorkerLag)
+					    .detail("RecoveryDuration", getRecoveryDuration(lastBWVer));
 					;
 				}
 				limitReason = limitReason_t::blob_worker_missing;
+				// ASSERT(!g_network->isSimulated() || limits->bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
+				//        now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + 50);
 			}
 		} else if (blobWorkerLag > 3 * limits->bwLagTarget) {
 			limits->tpsLimit = 0.0;
@@ -953,12 +1025,16 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 				TraceEvent("RatekeeperLimitReasonDetails")
 				    .detail("Reason", limitReason_t::blob_worker_missing)
 				    .detail("BWLag", blobWorkerLag)
+				    .detail("RecoveryDuration", getRecoveryDuration(lastBWVer))
 				    .detail("HistorySize", blobWorkerVersionHistory.size());
 			}
 			limitReason = limitReason_t::blob_worker_missing;
+			// ASSERT(!g_network->isSimulated() || limits->bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
+			//        now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + 50);
 		}
 	} else {
 		blobWorkerTime = now();
+		unblockedAssignmentTime = now();
 	}
 
 	healthMetrics.worstStorageQueue = worstStorageQueueStorageServer;

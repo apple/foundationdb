@@ -82,6 +82,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 	std::vector<std::tuple<KeyRange, Version, UID, Future<GranuleFiles>>> purgedDataToCheck;
 
+	Future<Void> summaryClient;
+	Promise<Void> triggerSummaryComplete;
+
 	BlobGranuleVerifierWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		doSetup = !clientId; // only do this on the "first" client
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 120.0);
@@ -292,7 +295,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 
 		ASSERT(!self->purgedDataToCheck.empty());
-
 		return Void();
 	}
 
@@ -524,6 +526,11 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				clients.push_back(timeout(
 				    reportErrors(verifyGranules(cx, this, false), "BlobGranuleVerifier"), testDuration, Void()));
 			}
+		}
+		if (!enablePurging) {
+			summaryClient = validateGranuleSummaries(cx, normalKeys, {}, triggerSummaryComplete);
+		} else {
+			summaryClient = Future<Void>(Void());
 		}
 		return delay(testDuration);
 	}
@@ -924,7 +931,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		state int64_t totalRows = 0;
 		loop {
 			state RangeResult output;
-			state Version readVersion;
+			state Version readVersion = invalidVersion;
 			try {
 				Version ver = wait(tr.getReadVersion());
 				readVersion = ver;
@@ -950,10 +957,21 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 			if (!output.empty()) {
 				state KeyRange rangeToCheck = KeyRangeRef(keyRange.begin, keyAfter(output.back().key));
-				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
-				    wait(readFromBlob(cx, self->bstore, rangeToCheck, 0, readVersion));
-				if (!compareFDBAndBlob(output, blob, rangeToCheck, readVersion, BGV_DEBUG)) {
-					return false;
+				try {
+					std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
+					    wait(readFromBlob(cx, self->bstore, rangeToCheck, 0, readVersion));
+					if (!compareFDBAndBlob(output, blob, rangeToCheck, readVersion, BGV_DEBUG)) {
+						return false;
+					}
+				} catch (Error& e) {
+					if (BGV_DEBUG && e.code() == error_code_blob_granule_transaction_too_old) {
+						fmt::print("CheckAllData got BG_TTO for [{0} - {1}) @ {2}\n",
+						           rangeToCheck.begin.printable(),
+						           rangeToCheck.end.printable(),
+						           readVersion);
+					}
+					ASSERT(e.code() != error_code_blob_granule_transaction_too_old);
+					throw e;
 				}
 				totalRows += output.size();
 				keyRange = KeyRangeRef(rangeToCheck.end, keyRange.end);
@@ -971,6 +989,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> _check(Database cx, BlobGranuleVerifierWorkload* self) {
+		if (self->triggerSummaryComplete.canBeSet()) {
+			self->triggerSummaryComplete.send(Void());
+		}
 		state Transaction tr(cx);
 		if (self->doForcePurge) {
 			if (self->startedForcePurge) {
@@ -1009,35 +1030,33 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		state bool availabilityPassed = true;
 
 		state Standalone<VectorRef<KeyRangeRef>> allRanges;
-		if (self->granuleRanges.get().empty()) {
+
+		state Future<Void> rangeFetcher = self->findGranules(cx, self);
+		loop {
+			// wait until entire keyspace has granules
+			if (!self->granuleRanges.get().empty()) {
+				bool haveAll = true;
+				if (self->granuleRanges.get().front().begin != normalKeys.begin ||
+				    self->granuleRanges.get().back().end != normalKeys.end) {
+					haveAll = false;
+				}
+				for (int i = 0; haveAll && i < self->granuleRanges.get().size() - 1; i++) {
+					if (self->granuleRanges.get()[i].end != self->granuleRanges.get()[i + 1].begin) {
+						haveAll = false;
+					}
+				}
+				if (haveAll) {
+					break;
+				}
+			}
 			if (BGV_DEBUG) {
 				fmt::print("Waiting to get granule ranges for check\n");
 			}
-			state Future<Void> rangeFetcher = self->findGranules(cx, self);
-			loop {
-				wait(self->granuleRanges.onChange());
-				// wait until entire keyspace has granules
-				if (!self->granuleRanges.get().empty()) {
-					bool haveAll = true;
-					if (self->granuleRanges.get().front().begin != normalKeys.begin ||
-					    self->granuleRanges.get().back().end != normalKeys.end) {
-						haveAll = false;
-					}
-					for (int i = 0; haveAll && i < self->granuleRanges.get().size() - 1; i++) {
-						if (self->granuleRanges.get()[i].end != self->granuleRanges.get()[i + 1].begin) {
-							haveAll = false;
-						}
-					}
-					if (haveAll) {
-						break;
-					}
-				}
-			}
-			rangeFetcher.cancel();
-			if (BGV_DEBUG) {
-				fmt::print("Got granule ranges for check\n");
-			}
+			wait(self->granuleRanges.onChange());
 		}
+
+		rangeFetcher.cancel();
+
 		allRanges = self->granuleRanges.get();
 		for (auto& range : allRanges) {
 			state KeyRange r = range;
@@ -1163,6 +1182,17 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			// read after merge to make sure it completed, granules are available, and data is empty
 			bool dataCheckAfterMerge = wait(self->checkAllData(cx, self));
 			ASSERT(dataCheckAfterMerge);
+		}
+
+		if (BGV_DEBUG) {
+			fmt::print("BGV check waiting on summarizer to complete\n");
+		}
+
+		// validate that summary completes without error
+		wait(self->summaryClient);
+
+		if (BGV_DEBUG) {
+			fmt::print("BGV check done\n");
 		}
 
 		return result;

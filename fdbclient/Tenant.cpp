@@ -78,6 +78,31 @@ TenantState TenantMapEntry::stringToTenantState(std::string stateStr) {
 	UNREACHABLE();
 }
 
+std::string TenantMapEntry::tenantLockStateToString(TenantLockState tenantState) {
+	switch (tenantState) {
+	case TenantLockState::UNLOCKED:
+		return "unlocked";
+	case TenantLockState::READ_ONLY:
+		return "read only";
+	case TenantLockState::LOCKED:
+		return "locked";
+	default:
+		UNREACHABLE();
+	}
+}
+
+TenantLockState TenantMapEntry::stringToTenantLockState(std::string stateStr) {
+	if (stateStr == "unlocked") {
+		return TenantLockState::UNLOCKED;
+	} else if (stateStr == "read only") {
+		return TenantLockState::READ_ONLY;
+	} else if (stateStr == "locked") {
+		return TenantLockState::LOCKED;
+	}
+
+	UNREACHABLE();
+}
+
 TenantMapEntry::TenantMapEntry() {}
 TenantMapEntry::TenantMapEntry(int64_t id, TenantState tenantState, bool encrypted)
   : tenantState(tenantState), encrypted(encrypted) {

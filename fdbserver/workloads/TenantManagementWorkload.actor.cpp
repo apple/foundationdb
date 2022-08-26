@@ -1168,7 +1168,7 @@ struct TenantManagementWorkload : TestWorkload {
 			auto iter = tenantRenames.begin();
 			wait(TenantAPI::renameTenant(self->dataDb.getReference(), iter->first, iter->second));
 			ASSERT(!tenantNotFound && !tenantExists);
-		} else { // operationType == OperationType::MANAGEMENT_TRANSACTION
+		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			std::vector<Future<Void>> renameFutures;
 			for (auto& iter : tenantRenames) {
@@ -1177,6 +1177,10 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(waitForAll(renameFutures));
 			wait(tr->commit());
 			ASSERT(!tenantNotFound && !tenantExists);
+		} else { // operationType == OperationType::METACLUSTER
+			ASSERT(tenantRenames.size() == 1);
+			auto iter = tenantRenames.begin();
+			wait(MetaclusterAPI::renameTenant(self->mvDb, iter->first, iter->second));
 		}
 		return Void();
 	}
@@ -1188,11 +1192,6 @@ struct TenantManagementWorkload : TestWorkload {
 
 		if (operationType == OperationType::SPECIAL_KEYS || operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			numTenants = deterministicRandom()->randomInt(1, 5);
-		}
-
-		// TODO: remove this when we have metacluster support for renames
-		if (operationType == OperationType::METACLUSTER) {
-			operationType = OperationType::MANAGEMENT_DATABASE;
 		}
 
 		state std::map<TenantName, TenantName> tenantRenames;
@@ -1232,12 +1231,11 @@ struct TenantManagementWorkload : TestWorkload {
 			try {
 				wait(renameImpl(tr, operationType, tenantRenames, tenantNotFound, tenantExists, tenantOverlap, self));
 				wait(verifyTenantRenames(self, tenantRenames));
+				// Check that using the wrong rename API fails depending on whether we are using a metacluster
+				ASSERT(self->useMetacluster == (operationType == OperationType::METACLUSTER));
 				return Void();
 			} catch (Error& e) {
 				if (e.code() == error_code_tenant_not_found) {
-					TraceEvent("RenameTenantOldTenantNotFound")
-					    .detail("TenantRenames", describe(tenantRenames))
-					    .detail("CommitUnknownResult", unknownResult);
 					if (unknownResult) {
 						wait(verifyTenantRenames(self, tenantRenames));
 					} else {
@@ -1245,9 +1243,6 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 					return Void();
 				} else if (e.code() == error_code_tenant_already_exists) {
-					TraceEvent("RenameTenantNewTenantAlreadyExists")
-					    .detail("TenantRenames", describe(tenantRenames))
-					    .detail("CommitUnknownResult", unknownResult);
 					if (unknownResult) {
 						wait(verifyTenantRenames(self, tenantRenames));
 					} else {
@@ -1255,8 +1250,15 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 					return Void();
 				} else if (e.code() == error_code_special_keys_api_failure) {
-					TraceEvent("RenameTenantNameConflict").detail("TenantRenames", describe(tenantRenames));
 					ASSERT(tenantOverlap);
+					return Void();
+				} else if (e.code() == error_code_invalid_metacluster_operation) {
+					ASSERT(operationType == OperationType::METACLUSTER != self->useMetacluster);
+					return Void();
+				} else if (e.code() == error_code_cluster_no_capacity) {
+					// This error should only occur on metacluster due to the multi-stage process.
+					// Having temporary tenants may exceed capacity, so we disallow the rename.
+					ASSERT(operationType == OperationType::METACLUSTER);
 					return Void();
 				} else {
 					try {
@@ -1264,8 +1266,8 @@ struct TenantManagementWorkload : TestWorkload {
 						// until it's successful. Next loop around may throw error because it's
 						// already been moved, so account for that and update internal map as needed.
 						if (e.code() == error_code_commit_unknown_result) {
-							TraceEvent("RenameTenantCommitUnknownResult").error(e);
-							ASSERT(operationType != OperationType::MANAGEMENT_DATABASE);
+							ASSERT(operationType != OperationType::MANAGEMENT_DATABASE &&
+							       operationType != OperationType::METACLUSTER);
 							unknownResult = true;
 						}
 						wait(tr->onError(e));
@@ -1437,8 +1439,7 @@ struct TenantManagementWorkload : TestWorkload {
 				wait(getTenant(self));
 			} else if (operation == 3) {
 				wait(listTenants(self));
-			} else if (operation == 4 && !self->useMetacluster) {
-				// TODO: reenable this for metacluster once it is supported
+			} else if (operation == 4) {
 				wait(renameTenant(self));
 			} else if (operation == 5) {
 				wait(configureTenant(self));
