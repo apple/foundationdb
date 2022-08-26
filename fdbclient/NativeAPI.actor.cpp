@@ -8764,6 +8764,7 @@ Reference<ChangeFeedStorageData> DatabaseContext::getStorageData(StorageServerIn
 		newStorageUpdater->interfToken = token;
 		newStorageUpdater->updater = storageFeedVersionUpdater(interf, newStorageUpdater.getPtr());
 		newStorageUpdater->context = this;
+		newStorageUpdater->created = now();
 		changeFeedUpdaters[token] = newStorageUpdater.getPtr();
 		return newStorageUpdater;
 	}
@@ -8773,12 +8774,12 @@ Reference<ChangeFeedStorageData> DatabaseContext::getStorageData(StorageServerIn
 Version DatabaseContext::getMinimumChangeFeedVersion() {
 	Version minVersion = std::numeric_limits<Version>::max();
 	for (auto& it : changeFeedUpdaters) {
-		if (it.second->version.get() > 0) {
+		if (now() - it.second->created > CLIENT_KNOBS->CHANGE_FEED_START_INTERVAL) {
 			minVersion = std::min(minVersion, it.second->version.get());
 		}
 	}
 	for (auto& it : notAtLatestChangeFeeds) {
-		if (it.second->getVersion() > 0) {
+		if (now() - it.second->created > CLIENT_KNOBS->CHANGE_FEED_START_INTERVAL) {
 			minVersion = std::min(minVersion, it.second->getVersion());
 		}
 	}
@@ -8800,7 +8801,7 @@ ChangeFeedStorageData::~ChangeFeedStorageData() {
 }
 
 ChangeFeedData::ChangeFeedData(DatabaseContext* context)
-  : dbgid(deterministicRandom()->randomUniqueID()), context(context), notAtLatest(1) {
+  : dbgid(deterministicRandom()->randomUniqueID()), context(context), notAtLatest(1), created(now()) {
 	if (context) {
 		context->notAtLatestChangeFeeds[dbgid] = this;
 	}
