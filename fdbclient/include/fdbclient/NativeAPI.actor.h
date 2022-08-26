@@ -421,6 +421,10 @@ public:
 	                                                                    Optional<Version> readVersion,
 	                                                                    Version* readVersionOut = nullptr);
 
+	Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRange& range,
+	                                                                           Version summaryVersion,
+	                                                                           int rangeLimit);
+
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set(const KeyRef& key, const ValueRef& value, AddConflictRange = AddConflictRange::True);
 	void atomicOp(const KeyRef& key,
