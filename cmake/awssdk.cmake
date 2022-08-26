@@ -11,7 +11,7 @@ endif()
 include(ExternalProject)
 ExternalProject_Add(awssdk_project
   GIT_REPOSITORY    https://github.com/aws/aws-sdk-cpp.git
-  GIT_TAG           2af3ce543c322cb259471b3b090829464f825972 # v1.9.200
+  GIT_TAG           e4b4b310d8631bc7e9a797b6ac03a73c6f210bf6 # v1.9.331
   SOURCE_DIR        "${CMAKE_CURRENT_BINARY_DIR}/awssdk-src"
   BINARY_DIR        "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build"
   GIT_CONFIG        advice.detachedHead=false
@@ -35,6 +35,7 @@ ExternalProject_Add(awssdk_project
                     "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-event-stream.a"
                     "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-http.a"
                     "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-mqtt.a"
+                    "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-sdkutils.a"
                     "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-io.a"
                     "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-checksums.a"
                     "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-compression.a"
@@ -75,6 +76,10 @@ add_library(awssdk_c_io STATIC IMPORTED)
 add_dependencies(awssdk_c_io awssdk_project)
 set_target_properties(awssdk_c_io PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-io.a")
 
+add_library(awssdk_c_sdkutils STATIC IMPORTED)
+add_dependencies(awssdk_c_sdkutils awssdk_project)
+set_target_properties(awssdk_c_sdkutils PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-c-sdkutils.a")
+
 add_library(awssdk_checksums STATIC IMPORTED)
 add_dependencies(awssdk_checksums awssdk_project)
 set_target_properties(awssdk_checksums PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/lib64/libaws-checksums.a")
@@ -94,4 +99,4 @@ set_target_properties(awssdk_c_common PROPERTIES IMPORTED_LOCATION "${CMAKE_CURR
 # link them all together in one interface target
 add_library(awssdk_target INTERFACE)
 target_include_directories(awssdk_target SYSTEM INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/awssdk-build/install/include)
-target_link_libraries(awssdk_target INTERFACE awssdk_core awssdk_crt awssdk_c_s3 awssdk_c_auth awssdk_c_eventstream awssdk_c_http awssdk_c_mqtt awssdk_c_io awssdk_checksums awssdk_c_compression awssdk_c_cal awssdk_c_common curl)
+target_link_libraries(awssdk_target INTERFACE awssdk_core awssdk_crt awssdk_c_s3 awssdk_c_auth awssdk_c_eventstream awssdk_c_http awssdk_c_mqtt awssdk_c_sdkutils awssdk_c_io awssdk_checksums awssdk_c_compression awssdk_c_cal awssdk_c_common curl)

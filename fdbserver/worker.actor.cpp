@@ -41,7 +41,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/MetricLogger.actor.h"
 #include "fdbserver/BackupInterface.h"
-#include "fdbserver/EncryptKeyProxyInterface.h"
+#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbserver/RoleLineage.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -226,9 +226,9 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 			if (e.isError() && e.getError().code() == error_code_broken_promise && !storeError.isReady()) {
 				wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY));
 			}
-			if (storeError.isReady() &&
-			    !((storeError.get().isError() && storeError.get().getError().code() == error_code_file_not_found))) {
-				throw storeError.get().isError() ? storeError.get().getError() : actor_cancelled();
+			if (storeError.isReady() && storeError.isError() &&
+			    storeError.getError().code() != error_code_file_not_found) {
+				throw storeError.get().getError();
 			}
 			if (e.isError()) {
 				throw e.getError();
@@ -236,18 +236,18 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 				return e.get();
 		}
 		when(ErrorOr<Void> e = wait(storeError)) {
-			// for remote kv store, worker can terminate without an error, so throws actor_cancelled
-			// (there's probably a better way tho)
-			TraceEvent("WorkerTerminatingByIOError", id)
-			    .errorUnsuppressed(e.isError() ? e.getError() : actor_cancelled());
+			TraceEvent("WorkerTerminatingByIOError", id).errorUnsuppressed(e.getError());
 			actor.cancel();
 			// file_not_found can occur due to attempting to open a partially deleted DiskQueue, which should not be
 			// reported SevError.
-			if (e.isError() && e.getError().code() == error_code_file_not_found) {
+			if (e.getError().code() == error_code_file_not_found) {
 				CODE_PROBE(true, "Worker terminated with file_not_found error");
 				return Void();
+			} else if (e.getError().code() == error_code_lock_file_failure) {
+				CODE_PROBE(true, "Unable to lock file");
+				throw please_reboot_kv_store();
 			}
-			throw e.isError() ? e.getError() : actor_cancelled();
+			throw e.getError();
 		}
 	}
 }
@@ -269,7 +269,6 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 			endRole(err.role, err.id, "Error", ok, err.error);
 
 			if (err.error.code() == error_code_please_reboot ||
-			    err.error.code() == error_code_please_reboot_remote_kv_store ||
 			    (err.role == Role::SHARED_TRANSACTION_LOG &&
 			     (err.error.code() == error_code_io_error || err.error.code() == error_code_io_timeout)))
 				throw err.error;
@@ -1252,16 +1251,47 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
                                                  std::string folder,
                                                  ActorCollection* filesClosed,
                                                  int64_t memoryLimit,
-                                                 IKeyValueStore* store) {
+                                                 IKeyValueStore* store,
+                                                 bool validateDataFiles,
+                                                 Promise<Void>* rebootKVStore) {
 	state TrackRunningStorage _(id, storeType, runningStorages);
 	loop {
 		ErrorOr<Void> e = wait(errorOr(prevStorageServer));
 		if (!e.isError())
 			return Void();
-		else if (e.getError().code() != error_code_please_reboot)
+		else if (e.getError().code() != error_code_please_reboot &&
+		         e.getError().code() != error_code_please_reboot_kv_store)
 			throw e.getError();
 
-		TraceEvent("StorageServerRequestedReboot", id).log();
+		TraceEvent("StorageServerRequestedReboot", id)
+		    .detail("RebootStorageEngine", e.getError().code() == error_code_please_reboot_kv_store)
+		    .log();
+
+		if (e.getError().code() == error_code_please_reboot_kv_store) {
+			// Add the to actorcollection to make sure filesClosed not return
+			filesClosed->add(rebootKVStore->getFuture());
+			wait(delay(SERVER_KNOBS->REBOOT_KV_STORE_DELAY));
+			// reopen KV store
+			store = openKVStore(
+			    storeType,
+			    filename,
+			    id,
+			    memoryLimit,
+			    false,
+			    validateDataFiles,
+			    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled */
+			        (g_network->isSimulated()
+			             ? (/* Disable for RocksDB */ storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
+			                deterministicRandom()->coinflip())
+			             : true));
+			Promise<Void> nextRebootKVStorePromise;
+			filesClosed->add(store->onClosed() ||
+			                 nextRebootKVStorePromise
+			                     .getFuture() /* clear the onClosed() Future in actorCollection when rebooting */);
+			// remove the original onClosed signal from the actorCollection
+			rebootKVStore->send(Void());
+			rebootKVStore->swap(nextRebootKVStorePromise);
+		}
 
 		StorageServerInterface recruited;
 		recruited.uniqueID = id;
@@ -1583,6 +1613,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
 	state double loggingDelay = SERVER_KNOBS->WORKER_LOGGING_INTERVAL;
+	// These two promises are destroyed after the "filesClosed" below to avoid broken_promise
+	state Promise<Void> rebootKVSPromise;
+	state Promise<Void> rebootKVSPromise2;
 	state ActorCollection filesClosed(true);
 	state Promise<Void> stopping;
 	state WorkerCache<InitializeStorageReply> storageCache;
@@ -1698,7 +1731,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                s.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 				                deterministicRandom()->coinflip())
 				             : true));
-				Future<Void> kvClosed = kv->onClosed();
+				Future<Void> kvClosed =
+				    kv->onClosed() ||
+				    rebootKVSPromise.getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
 				filesClosed.add(kvClosed);
 
 				// std::string doesn't have startsWith
@@ -1757,7 +1792,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                                  folder,
 				                                  &filesClosed,
 				                                  memoryLimit,
-				                                  kv);
+				                                  kv,
+				                                  validateDataFiles,
+				                                  &rebootKVSPromise);
 				errorForwarders.add(forwardError(errors, ssRole, recruited.id(), f));
 			} else if (s.storedComponent == DiskStore::TLogData) {
 				LocalLineage _;
@@ -1771,7 +1808,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					logQueueBasename = fileLogQueuePrefix.toString() + optionsString.toString() + "-";
 				}
 				ASSERT_WE_THINK(abspath(parentDirectory(s.filename)) == folder);
-				// TraceEvent(SevDebug, "openRemoteKVStore").detail("storeType", "TlogData");
 				IKeyValueStore* kv = openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles);
 				const DiskQueueVersion dqv = s.tLogOptions.getDiskQueueVersion();
 				const int64_t diskQueueWarnSize =
@@ -2096,7 +2132,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			when(InitializeBlobManagerRequest req = waitNext(interf.blobManager.getFuture())) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobManager;
-				BlobManagerInterface recruited(locality, req.reqId);
+				BlobManagerInterface recruited(locality, req.reqId, req.epoch);
 				recruited.initEndpoints();
 
 				if (bmEpochAndInterf->get().present() && bmEpochAndInterf->get().get().first == req.epoch) {
@@ -2216,7 +2252,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
 					std::string filename =
 					    filenameFromId(req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId);
-					// TraceEvent(SevDebug, "openRemoteKVStore").detail("storeType", "3");
 					IKeyValueStore* data = openKVStore(req.storeType, filename, logId, memoryLimit);
 					const DiskQueueVersion dqv = tLogOptions.getDiskQueueVersion();
 					IDiskQueue* queue = openDiskQueue(
@@ -2297,7 +2332,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.changeFeedStream);
 					DUMPTOKEN(recruited.changeFeedPop);
 					DUMPTOKEN(recruited.changeFeedVersionUpdate);
-					// printf("Recruited as storageServer\n");
 
 					std::string filename =
 					    filenameFromId(req.storeType,
@@ -2319,7 +2353,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                deterministicRandom()->coinflip())
 					             : true));
 
-					Future<Void> kvClosed = data->onClosed();
+					Future<Void> kvClosed =
+					    data->onClosed() ||
+					    rebootKVSPromise2
+					        .getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
 					filesClosed.add(kvClosed);
 					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
 					storageCache.set(req.reqId, storageReady.getFuture());
@@ -2345,7 +2382,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                                  folder,
 					                                  &filesClosed,
 					                                  memoryLimit,
-					                                  data);
+					                                  data,
+					                                  false,
+					                                  &rebootKVSPromise2);
 					errorForwarders.add(forwardError(errors, ssRole, recruited.id(), s));
 				} else if (storageCache.exists(req.reqId)) {
 					forwardPromise(req.reply, storageCache.get(req.reqId));
@@ -2610,26 +2649,21 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			when(wait(handleErrors)) {}
 		}
 	} catch (Error& err) {
-		TraceEvent(SevDebug, "WorkerServer").detail("Error", err.code()).backtrace();
 		// Make sure actors are cancelled before "recovery" promises are destructed.
 		for (auto f : recoveries)
 			f.cancel();
 		state Error e = err;
 		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_actor_cancelled ||
-		          e.code() == error_code_please_reboot_delete || e.code() == error_code_please_reboot_remote_kv_store;
+		          e.code() == error_code_please_reboot_delete;
 
 		endRole(Role::WORKER, interf.id(), "WorkerError", ok, e);
 		errorForwarders.clear(false);
 		sharedLogs.clear();
 
-		if (e.code() != error_code_actor_cancelled && e.code() != error_code_please_reboot_remote_kv_store) {
+		if (e.code() != error_code_actor_cancelled) {
 			// actor_cancelled:
 			// We get cancelled e.g. when an entire simulation times out, but in that case
 			// we won't be restarted and don't need to wait for shutdown
-			// reboot_remote_kv_store:
-			// The child process running the storage engine died abnormally,
-			// the current solution is to reboot the worker.
-			// Some refactoring work in the future can make it only reboot the storage server
 			stopping.send(Void());
 			wait(filesClosed.getResult()); // Wait for complete shutdown of KV stores
 			wait(delay(0.0)); // Unwind the callstack to make sure that IAsyncFile references are all gone
@@ -3333,7 +3367,9 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		    makeReference<AsyncVar<ClusterControllerPriorityInfo>>(getCCPriorityInfo(fitnessFilePath, processClass));
 		auto serverDBInfo = ServerDBInfo();
 		serverDBInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
+		serverDBInfo.myLocality = localities;
 		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>(serverDBInfo);
+		TraceEvent("MyLocality").detail("Locality", dbInfo->get().myLocality.toString());
 
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
 		                              "MonitorAndWriteCCPriorityInfo"));
