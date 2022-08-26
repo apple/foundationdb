@@ -66,6 +66,7 @@
 #include <direct.h>
 #include <pdh.h>
 #include <pdhmsg.h>
+#include <processenv.h>
 #pragma comment(lib, "pdh.lib")
 
 // for SHGetFolderPath
