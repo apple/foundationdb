@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "fdbclient/CommitProxyInterface.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "flow/Arena.h"
 #include "flow/BlobCipher.h"
 #include "flow/ObjectSerializer.h"
@@ -49,6 +51,7 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
+#include <string>
 #include <unordered_map>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -503,17 +506,18 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		}
 	};
 
-	EncryptedRangeFileWriter(SnapshotFileBackupEncryptionKeys cipherKeys,
+	EncryptedRangeFileWriter(Database cx,
+	                         Arena* arena,
 	                         Reference<IBackupFile> file = Reference<IBackupFile>(),
 	                         int blockSize = 0,
 	                         Options options = Options(true))
-	  : cipherKeys(cipherKeys), file(file), blockSize(blockSize), blockEnd(0),
+	  : cx(cx), arena(arena), file(file), blockSize(blockSize), blockEnd(0),
 	    fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION), options(options) {
 		buffer = makeString(blockSize);
 		wPtr = mutateString(buffer);
 	}
 
-	static void validateEncryptionHeader(SnapshotFileBackupEncryptionKeys& eKeys,
+	static void validateEncryptionHeader(const SnapshotFileBackupEncryptionKeys& eKeys,
 	                                     BlobCipherEncryptHeader& header,
 	                                     const StringRef& ivRef) {
 		// Validate encryption header 'cipherHeader' details
@@ -553,17 +557,38 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		}
 	}
 
-	static StringRef decrypt(StringRef headerS,
-	                         const uint8_t* dataP,
-	                         int64_t dataLen,
-	                         Arena& arena,
-	                         SnapshotFileBackupEncryptionKeys& cipherKeys) {
+	ACTOR static Future<SnapshotFileBackupEncryptionKeys> getEncryptionKeysFromHeader(Database cx,
+	                                                                                  BlobCipherEncryptHeader header) {
+		Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
+		TextAndHeaderCipherKeys cipherKeysV = wait(getEncryptCipherKeys(dbInfo, header));
+		ASSERT(cipherKeysV.cipherHeaderKey.isValid() && cipherKeysV.cipherTextKey.isValid());
+		SnapshotFileBackupEncryptionKeys cipherKeys;
+		cipherKeys.headerCipherKey = cipherKeysV.cipherHeaderKey;
+		cipherKeys.textCipherKey = cipherKeysV.cipherTextKey;
+		cipherKeys.ivRef = StringRef(header.iv, AES_256_IV_LENGTH);
+		return cipherKeys;
+	}
+
+	ACTOR static Future<StringRef> decryptImpl(Database cx,
+	                                           StringRef headerS,
+	                                           const uint8_t* dataP,
+	                                           int64_t dataLen,
+	                                           Arena* arena) {
+		state BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(headerS);
+		SnapshotFileBackupEncryptionKeys cipherKeys = wait(getEncryptionKeysFromHeader(cx, header));
 		ASSERT(cipherKeys.headerCipherKey.isValid() && cipherKeys.textCipherKey.isValid());
-		BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(headerS);
 		validateEncryptionHeader(cipherKeys, header, cipherKeys.ivRef);
 		DecryptBlobCipherAes256Ctr decryptor(
 		    cipherKeys.textCipherKey, cipherKeys.headerCipherKey, cipherKeys.ivRef.begin());
-		return decryptor.decrypt(dataP, dataLen, header, arena)->toStringRef();
+		return decryptor.decrypt(dataP, dataLen, header, *arena)->toStringRef();
+	}
+
+	static Future<StringRef> decrypt(Database cx,
+	                                 StringRef headerS,
+	                                 const uint8_t* dataP,
+	                                 int64_t dataLen,
+	                                 Arena* arena) {
+		return decryptImpl(cx, headerS, dataP, dataLen, arena);
 	}
 
 	void encrypt() {
@@ -585,6 +610,38 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 		// write data to buffer
 		std::memcpy(encryptHeaderP + BlobCipherEncryptHeader::headerSize, encryptedData->begin(), payloadSize);
+	}
+
+	ACTOR static Future<Void> updateEncryptionKeys(EncryptedRangeFileWriter* self, KeyRef key) {
+		// Get the tenant prefix (first 8 bytes of key)
+		KeyRef tenantPrefix = KeyRef(key.begin(), 8);
+		state int64_t curTenantId = TenantMapEntry::prefixToId(tenantPrefix);
+		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
+		// TODO (Nim): Get actual tenant name for given tenant id
+		domains.emplace(curTenantId, StringRef(std::to_string(curTenantId)));
+		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
+		// Get the latest write encryption key for the given tenant
+		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> textCipherKeys =
+		    wait(getLatestEncryptCipherKeys(dbInfo, domains));
+		ASSERT(textCipherKeys.find(curTenantId) != textCipherKeys.end());
+		self->cipherKeys.textCipherKey = textCipherKeys.at(curTenantId);
+
+		// Get and Set Header Cipher Key
+		TextAndHeaderCipherKeys systemCipherKeys = wait(getLatestSystemEncryptCipherKeys(dbInfo));
+		self->cipherKeys.headerCipherKey = systemCipherKeys.cipherHeaderKey;
+
+		// Set ivRef
+		self->cipherKeys.ivRef = makeString(AES_256_IV_LENGTH, *self->arena);
+		deterministicRandom()->randomBytes(mutateString(self->cipherKeys.ivRef), AES_256_IV_LENGTH);
+		return Void();
+	}
+
+	Future<Void> updateEncryptionKeysIfNeeded(KeyRef key) {
+		if (!options.encryptionEnabled ||
+		    (cipherKeys.headerCipherKey.isValid() && cipherKeys.textCipherKey.isValid())) {
+			return Void();
+		}
+		return updateEncryptionKeys(this, key);
 	}
 
 	// Returns the number of bytes that have been written to the buffer
@@ -622,7 +679,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (expectedFileSize(self) > 0) {
 			// write buffer to file since block is finished
 			ASSERT(currentBufferSize(self) == self->blockSize);
-			if (self->options.encryptionEnabled) {
+			if (self->options.encryptionEnabled && self->lastKey.size() > 0) {
 				self->encrypt();
 			}
 			wait(self->file->append(self->buffer.begin(), self->blockSize));
@@ -684,6 +741,9 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	ACTOR static Future<Void> writeKV_impl(EncryptedRangeFileWriter* self, Key k, Value v) {
 		int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
 		wait(self->newBlockIfNeeded(toWrite));
+		// If a new block was started then the encryption keys were reset
+		// so we need to fetch new keys
+		wait(self->updateEncryptionKeysIfNeeded(k));
 		appendStringRefWithLenToBuffer(self, &k);
 		appendStringRefWithLenToBuffer(self, &v);
 		self->lastKey = k;
@@ -706,7 +766,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	Future<Void> finish() {
 		// Write any outstanding bytes to the file
 		if (currentBufferSize(this) > 0) {
-			if (options.encryptionEnabled) {
+			if (options.encryptionEnabled && lastKey.size() > 0) {
 				encrypt();
 			}
 			return file->append(buffer.begin(), currentBufferSize(this));
@@ -714,7 +774,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		return Void();
 	}
 
-	SnapshotFileBackupEncryptionKeys cipherKeys;
+	Database cx;
+	Arena* arena;
 	Reference<IBackupFile> file;
 	int blockSize;
 
@@ -727,6 +788,7 @@ private:
 	Options options;
 	Key lastKey;
 	Key lastValue;
+	SnapshotFileBackupEncryptionKeys cipherKeys;
 };
 
 // File Format handlers.
@@ -916,7 +978,8 @@ void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* 
 
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
-                                                                      int len) {
+                                                                      int len,
+                                                                      Optional<Database> cx) {
 	state Standalone<StringRef> buf = makeString(len);
 	int rLen = wait(file->read(mutateString(buf), len, offset));
 	if (rLen != len)
@@ -924,9 +987,8 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 
 	simulateBlobFailure();
 
-	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
+	state Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
 	state StringRefReader reader(buf, restore_corrupted_data());
-	state Arena arena;
 
 	try {
 		// Read header, currently only decoding BACKUP_AGENT_SNAPSHOT_FILE_VERSION or
@@ -936,9 +998,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			decodeKVPairs(&reader, &results);
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 			CODE_PROBE(true, "decoding encrypted block");
-			// Get cipher keys
-			SnapshotFileBackupEncryptionKeys eKeys;
-			getCipherKeys(eKeys, arena);
+			ASSERT(cx.present());
 			// decode options struct
 			uint32_t optionsLen = reader.consumeNetworkUInt32();
 			const uint8_t* o = reader.consume(optionsLen);
@@ -955,7 +1015,8 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			int64_t bytesRead = sizeof(int32_t) + sizeof(uint32_t) + optionsLen + BlobCipherEncryptHeader::headerSize;
 			// get the size of the encrypted payload and decrypt it
 			int64_t dataLen = len - bytesRead;
-			StringRef decryptedData = EncryptedRangeFileWriter::decrypt(header, dataP, dataLen, results.arena(), eKeys);
+			StringRef decryptedData =
+			    wait(EncryptedRangeFileWriter::decrypt(cx.get(), header, dataP, dataLen, &results.arena()));
 			reader = StringRefReader(decryptedData, restore_corrupted_data());
 			decodeKVPairs(&reader, &results);
 		} else {
@@ -1638,9 +1699,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				if (encryptionEnabled) {
 					CODE_PROBE(true, "using encrypted snapshot file writer");
 					previousTenantId.reset();
-					SnapshotFileBackupEncryptionKeys eKeys;
-					getCipherKeys(eKeys, arena);
-					rangeFile = std::make_unique<EncryptedRangeFileWriter>(eKeys, outFile, blockSize);
+					rangeFile = std::make_unique<EncryptedRangeFileWriter>(cx, &arena, outFile, blockSize);
 				} else {
 					rangeFile = std::make_unique<RangeFileWriter>(outFile, blockSize);
 				}
@@ -3395,7 +3454,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		}
 
 		state Reference<IAsyncFile> inFile = wait(bc.get()->readFile(rangeFile.fileName));
-		state Standalone<VectorRef<KeyValueRef>> blockData = wait(decodeRangeFileBlock(inFile, readOffset, readLen));
+		state Standalone<VectorRef<KeyValueRef>> blockData =
+		    wait(decodeRangeFileBlock(inFile, readOffset, readLen, cx));
 
 		// First and last key are the range for this file
 		state KeyRange fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
@@ -4473,7 +4533,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
 		}
 		state Optional<RestorableFileSet> restorable =
-		    wait(bc->getRestoreSet(restoreVersion, keyRangesFilter, logsOnly, beginVersion));
+		    wait(bc->getRestoreSet(restoreVersion, cx, keyRangesFilter, logsOnly, beginVersion));
 		if (!restorable.present())
 			throw restore_missing_data();
 
@@ -4735,7 +4795,7 @@ public:
 			    .detail("OverrideTargetVersion", targetVersion);
 		}
 
-		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
+		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion, cx));
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
@@ -5699,7 +5759,7 @@ public:
 		}
 
 		Optional<RestorableFileSet> restoreSet =
-		    wait(bc->getRestoreSet(targetVersion, ranges, onlyApplyMutationLogs, beginVersion));
+		    wait(bc->getRestoreSet(targetVersion, cx, ranges, onlyApplyMutationLogs, beginVersion));
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")

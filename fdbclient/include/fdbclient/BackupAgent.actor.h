@@ -1013,7 +1013,8 @@ struct StringRefReader {
 namespace fileBackup {
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
-                                                                      int len);
+                                                                      int len,
+                                                                      Optional<Database> cx);
 
 // Reads a mutation log block from file and parses into batch mutation blocks for further parsing.
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Reference<IAsyncFile> file,

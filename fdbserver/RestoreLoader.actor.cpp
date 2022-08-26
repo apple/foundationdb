@@ -52,7 +52,9 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
                               const RestoreAsset& asset);
 
 void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<RestoreLoaderData> self);
-ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self);
+ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req,
+                                         Reference<RestoreLoaderData> self,
+                                         Optional<Database> cx);
 ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequest req,
                                               Reference<RestoreLoaderData> self);
 ACTOR Future<Void> sendMutationsToApplier(
@@ -79,13 +81,14 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     LoaderCounters* cc,
     Reference<IBackupContainer> bc,
     Version version,
-    RestoreAsset asset);
+    RestoreAsset asset,
+    Optional<Database> cx);
 ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreLoaderData> self);
 
 // Dispatch requests based on node's business (i.e, cpu usage for now) and requests' priorities
 // Requests for earlier version batches are preferred; which is equivalent to
 // sendMuttionsRequests are preferred than loadingFileRequests
-ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
+ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self, Optional<Database> cx) {
 	try {
 		state int curVBInflightReqs = 0;
 		state int sendLoadParams = 0;
@@ -204,7 +207,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 					self->loadingQueue.pop();
 					ASSERT(false); // Check if this ever happens easily
 				} else {
-					self->addActor.send(handleLoadFileRequest(req, self));
+					self->addActor.send(handleLoadFileRequest(req, self, cx));
 					self->loadingQueue.pop();
 					lastLoadReqs++;
 				}
@@ -244,7 +247,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
 	actors.add(updateProcessMetrics(self));
 	actors.add(traceProcessMetrics(self, "RestoreLoader"));
 
-	self->addActor.send(dispatchRequests(self));
+	self->addActor.send(dispatchRequests(self, cx));
 
 	loop {
 		state std::string requestTypeStr = "[Init]";
@@ -532,7 +535,8 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions,
                                         LoadingParam param,
                                         Reference<LoaderBatchData> batchData,
                                         UID loaderID,
-                                        Reference<IBackupContainer> bc) {
+                                        Reference<IBackupContainer> bc,
+                                        Optional<Database> cx) {
 	// Temporary data structure for parsing log files into (version, <K, V, mutationType>)
 	// Must use StandAlone to save mutations, otherwise, the mutationref memory will be corrupted
 	// mutationMap: Key is the unique identifier for a batch of mutation logs at the same version
@@ -562,7 +566,7 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions,
 		subAsset.len = std::min<int64_t>(param.blockSize, param.asset.len - j);
 		if (param.isRangeFile) {
 			fileParserFutures.push_back(_parseRangeFileToMutationsOnLoader(
-			    kvOpsPerLPIter, samplesIter, &batchData->counters, bc, param.rangeVersion.get(), subAsset));
+			    kvOpsPerLPIter, samplesIter, &batchData->counters, bc, param.rangeVersion.get(), subAsset, cx));
 		} else {
 			// TODO: Sanity check the log file's range is overlapped with the restored version range
 			if (param.isPartitionedLog()) {
@@ -594,7 +598,9 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions,
 }
 
 // A loader can process multiple RestoreLoadFileRequest in parallel.
-ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<RestoreLoaderData> self) {
+ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req,
+                                         Reference<RestoreLoaderData> self,
+                                         Optional<Database> cx) {
 	state Reference<LoaderBatchData> batchData = self->batch[req.batchIndex];
 	state bool isDuplicated = true;
 	state bool printTrace = false;
@@ -623,7 +629,7 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 		    .detail("ProcessLoadParam", req.param.toString());
 		ASSERT(batchData->sampleMutations.find(req.param) == batchData->sampleMutations.end());
 		batchData->processedFileParams[req.param] =
-		    _processLoadingParam(&self->rangeVersions, req.param, batchData, self->id(), self->bc);
+		    _processLoadingParam(&self->rangeVersions, req.param, batchData, self->id(), self->bc, cx);
 		self->inflightLoadingReqs++;
 		isDuplicated = false;
 	} else {
@@ -1194,7 +1200,8 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     LoaderCounters* cc,
     Reference<IBackupContainer> bc,
     Version version,
-    RestoreAsset asset) {
+    RestoreAsset asset,
+    Optional<Database> cx) {
 	state VersionedMutationsMap& kvOps = kvOpsIter->second;
 	state SampledMutationsVec& sampleMutations = samplesIter->second;
 
@@ -1217,7 +1224,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 			// version
 			Reference<IAsyncFile> inFile = wait(bc->readFile(asset.filename));
 			Standalone<VectorRef<KeyValueRef>> kvs =
-			    wait(fileBackup::decodeRangeFileBlock(inFile, asset.offset, asset.len));
+			    wait(fileBackup::decodeRangeFileBlock(inFile, asset.offset, asset.len, cx));
 			TraceEvent("FastRestoreLoaderDecodedRangeFile")
 			    .detail("BatchIndex", asset.batchIndex)
 			    .detail("Filename", asset.filename)

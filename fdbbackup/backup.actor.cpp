@@ -2375,7 +2375,7 @@ ACTOR Future<Void> runRestore(Database db,
 				fmt::print("Restored to version {}\n", restoredVersion);
 			}
 		} else {
-			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion, ranges));
+			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion, db, ranges));
 
 			if (!rset.present()) {
 				fmt::print(stderr,
@@ -2485,7 +2485,7 @@ ACTOR Future<Void> runFastRestoreTool(Database db,
 				restoreVersion = dbVersion;
 			}
 
-			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion));
+			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion, db));
 			if (!rset.present()) {
 				fmt::print(stderr, "Insufficient data to restore to version {}\n", restoreVersion);
 				throw restore_invalid_version();
@@ -2690,7 +2690,8 @@ ACTOR Future<Void> queryBackup(const char* name,
                                Version restoreVersion,
                                std::string originalClusterFile,
                                std::string restoreTimestamp,
-                               Verbose verbose) {
+                               Verbose verbose,
+                               Optional<Database> cx) {
 	state UID operationId = deterministicRandom()->randomUniqueID();
 	state JsonBuilderObject result;
 	state std::string errorMessage;
@@ -2755,7 +2756,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 			                           format("the specified restorable version %lld is not valid", restoreVersion));
 			return Void();
 		}
-		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, keyRangesFilter));
+		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, cx, keyRangesFilter));
 		if (fileSet.present()) {
 			int64_t totalRangeFilesSize = 0, totalLogFilesSize = 0;
 			result["restore_version"] = fileSet.get().targetVersion;
@@ -4092,7 +4093,8 @@ int main(int argc, char* argv[]) {
 				                          restoreVersion,
 				                          restoreClusterFileOrig,
 				                          restoreTimestamp,
-				                          Verbose{ !quietDisplay }));
+				                          Verbose{ !quietDisplay },
+				                          db));
 				break;
 
 			case BackupType::DUMP:
