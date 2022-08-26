@@ -177,11 +177,7 @@ SignedTokenRef signToken(Arena& arena, TokenRef token, StringRef keyName, Privat
 	auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
 	writer.serialize(token);
 	auto tokenStr = writer.toStringRef();
-	auto [signAlgo, digest] = getMethod(Algorithm::ES256);
-	if (!checkSignAlgorithm(signAlgo, privateKey)) {
-		throw digital_signature_ops_error();
-	}
-	auto sig = privateKey.sign(arena, tokenStr, *digest);
+	auto sig = privateKey.sign(arena, tokenStr, *::EVP_sha256());
 	ret.token = tokenStr;
 	ret.signature = sig;
 	ret.keyName = StringRef(arena, keyName);
@@ -189,10 +185,7 @@ SignedTokenRef signToken(Arena& arena, TokenRef token, StringRef keyName, Privat
 }
 
 bool verifyToken(SignedTokenRef signedToken, PublicKey publicKey) {
-	auto [keyAlg, digest] = getMethod(Algorithm::ES256);
-	if (!checkVerifyAlgorithm(keyAlg, publicKey))
-		return false;
-	return publicKey.verify(signedToken.token, signedToken.signature, *digest);
+	return publicKey.verify(signedToken.token, signedToken.signature, *::EVP_sha256());
 }
 
 TokenRef makeRandomTokenSpec(Arena& arena, IRandom& rng) {
@@ -318,8 +311,12 @@ StringRef signToken(Arena& arena, TokenRef tokenSpec, PrivateKey privateKey) {
 	if (tokenSpec.algorithm == Algorithm::ES256) {
 		// Need to convert ASN.1/DER signature to IEEE-P1363
 		auto convertedSig = convertEs256DerToP1363(tmpArena, plainSig);
-		if (!convertedSig.present())
+		if (!convertedSig.present()) {
+			auto tmpArena = Arena();
+			TraceEvent(SevWarn, "TokenSigConversionFailure")
+			    .detail("TokenSpec", tokenSpec.toStringRef(tmpArena).toString());
 			throw digital_signature_ops_error();
+		}
 		plainSig = convertedSig.get();
 	}
 	auto const sigPartLen = base64url::encodedLength(plainSig.size());
@@ -507,9 +504,6 @@ bool verifyToken(StringRef signedToken, PublicKey publicKey) {
 }
 
 TokenRef makeRandomTokenSpec(Arena& arena, IRandom& rng, Algorithm alg) {
-	if (alg != Algorithm::ES256) {
-		throw unsupported_operation();
-	}
 	auto ret = TokenRef{};
 	ret.algorithm = alg;
 	ret.keyId = genRandomAlphanumStringRef(arena, rng, MaxKeyNameLenPlus1);
@@ -630,68 +624,68 @@ TEST_CASE("/fdbrpc/TokenSign/JWT/ToStringRef") {
 }
 
 TEST_CASE("/fdbrpc/TokenSign/bench") {
-	constexpr auto repeat = 5;
-	constexpr auto numSamples = 10000;
-	auto keys = std::vector<PrivateKey>(numSamples);
-	auto pubKeys = std::vector<PublicKey>(numSamples);
-	for (auto i = 0; i < numSamples; i++) {
-		keys[i] = mkcert::makeEcP256();
-		pubKeys[i] = keys[i].toPublic();
-	}
-	fmt::print("{} keys generated\n", numSamples);
-	auto& rng = *deterministicRandom();
-	auto arena = Arena();
-	auto jwtSpecs = new (arena) authz::jwt::TokenRef[numSamples];
-	auto fbSpecs = new (arena) authz::flatbuffers::TokenRef[numSamples];
-	auto jwts = new (arena) StringRef[numSamples];
-	auto fbs = new (arena) StringRef[numSamples];
-	for (auto i = 0; i < numSamples; i++) {
-		jwtSpecs[i] = authz::jwt::makeRandomTokenSpec(arena, rng, authz::Algorithm::ES256);
-		fbSpecs[i] = authz::flatbuffers::makeRandomTokenSpec(arena, rng);
-	}
-	{
-		auto const jwtSignBegin = timer_monotonic();
+	auto keyTypes = std::array<StringRef, 2>{ "EC"_sr, "RSA"_sr };
+	for (auto kty : keyTypes) {
+		constexpr auto repeat = 5;
+		constexpr auto numSamples = 10000;
+		fmt::print("=== {} keys case\n", kty.toString());
+		auto key = kty == "EC"_sr ? mkcert::makeEcP256() : mkcert::makeRsa4096Bit();
+		auto pubKey = key.toPublic();
+		auto& rng = *deterministicRandom();
+		auto arena = Arena();
+		auto jwtSpecs = new (arena) authz::jwt::TokenRef[numSamples];
+		auto fbSpecs = new (arena) authz::flatbuffers::TokenRef[numSamples];
+		auto jwts = new (arena) StringRef[numSamples];
+		auto fbs = new (arena) StringRef[numSamples];
 		for (auto i = 0; i < numSamples; i++) {
-			jwts[i] = authz::jwt::signToken(arena, jwtSpecs[i], keys[i]);
+			jwtSpecs[i] = authz::jwt::makeRandomTokenSpec(
+			    arena, rng, kty == "EC"_sr ? authz::Algorithm::ES256 : authz::Algorithm::RS256);
+			fbSpecs[i] = authz::flatbuffers::makeRandomTokenSpec(arena, rng);
 		}
-		auto const jwtSignEnd = timer_monotonic();
-		fmt::print("JWT Sign   :         {:.2f} OPS\n", numSamples / (jwtSignEnd - jwtSignBegin));
-	}
-	{
-		auto const jwtVerifyBegin = timer_monotonic();
-		for (auto rep = 0; rep < repeat; rep++) {
+		{
+			auto const jwtSignBegin = timer_monotonic();
 			for (auto i = 0; i < numSamples; i++) {
-				auto verifyOk = authz::jwt::verifyToken(jwts[i], pubKeys[i]);
-				ASSERT(verifyOk);
+				jwts[i] = authz::jwt::signToken(arena, jwtSpecs[i], key);
 			}
+			auto const jwtSignEnd = timer_monotonic();
+			fmt::print("JWT Sign   :         {:.2f} OPS\n", numSamples / (jwtSignEnd - jwtSignBegin));
 		}
-		auto const jwtVerifyEnd = timer_monotonic();
-		fmt::print("JWT Verify :         {:.2f} OPS\n", repeat * numSamples / (jwtVerifyEnd - jwtVerifyBegin));
-	}
-	{
-		auto tmpArena = Arena();
-		auto const fbSignBegin = timer_monotonic();
-		for (auto i = 0; i < numSamples; i++) {
-			auto fbToken = authz::flatbuffers::signToken(tmpArena, fbSpecs[i], "defaultKey"_sr, keys[i]);
-			auto wr = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, Unversioned());
-			wr.serialize(fbToken);
-			fbs[i] = wr.toStringRef();
+		{
+			auto const jwtVerifyBegin = timer_monotonic();
+			for (auto rep = 0; rep < repeat; rep++) {
+				for (auto i = 0; i < numSamples; i++) {
+					auto verifyOk = authz::jwt::verifyToken(jwts[i], pubKey);
+					ASSERT(verifyOk);
+				}
+			}
+			auto const jwtVerifyEnd = timer_monotonic();
+			fmt::print("JWT Verify :         {:.2f} OPS\n", repeat * numSamples / (jwtVerifyEnd - jwtVerifyBegin));
 		}
-		auto const fbSignEnd = timer_monotonic();
-		fmt::print("FlatBuffers Sign   : {:.2f} OPS\n", numSamples / (fbSignEnd - fbSignBegin));
-	}
-	{
-		auto const fbVerifyBegin = timer_monotonic();
-		for (auto rep = 0; rep < repeat; rep++) {
+		{
+			auto tmpArena = Arena();
+			auto const fbSignBegin = timer_monotonic();
 			for (auto i = 0; i < numSamples; i++) {
-				auto signedToken =
-				    ObjectReader::fromStringRef<Standalone<authz::flatbuffers::SignedTokenRef>>(fbs[i], Unversioned());
-				auto verifyOk = authz::flatbuffers::verifyToken(signedToken, pubKeys[i]);
-				ASSERT(verifyOk);
+				auto fbToken = authz::flatbuffers::signToken(tmpArena, fbSpecs[i], "defaultKey"_sr, key);
+				auto wr = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, Unversioned());
+				wr.serialize(fbToken);
+				fbs[i] = wr.toStringRef();
 			}
+			auto const fbSignEnd = timer_monotonic();
+			fmt::print("FlatBuffers Sign   : {:.2f} OPS\n", numSamples / (fbSignEnd - fbSignBegin));
 		}
-		auto const fbVerifyEnd = timer_monotonic();
-		fmt::print("FlatBuffers Verify : {:.2f} OPS\n", repeat * numSamples / (fbVerifyEnd - fbVerifyBegin));
+		{
+			auto const fbVerifyBegin = timer_monotonic();
+			for (auto rep = 0; rep < repeat; rep++) {
+				for (auto i = 0; i < numSamples; i++) {
+					auto signedToken = ObjectReader::fromStringRef<Standalone<authz::flatbuffers::SignedTokenRef>>(
+					    fbs[i], Unversioned());
+					auto verifyOk = authz::flatbuffers::verifyToken(signedToken, pubKey);
+					ASSERT(verifyOk);
+				}
+			}
+			auto const fbVerifyEnd = timer_monotonic();
+			fmt::print("FlatBuffers Verify : {:.2f} OPS\n", repeat * numSamples / (fbVerifyEnd - fbVerifyBegin));
+		}
 	}
 	return Void();
 }
