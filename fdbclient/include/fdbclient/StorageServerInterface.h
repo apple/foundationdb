@@ -393,7 +393,6 @@ struct GetKeyValuesRequest : TimedRequest {
 	Version version; // or latestVersion
 	int limit, limitBytes;
 	Optional<TagSet> tags;
-	Optional<UID> debugID;
 	Optional<ReadOptions> options;
 	ReplyPromise<GetKeyValuesReply> reply;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
@@ -413,7 +412,6 @@ struct GetKeyValuesRequest : TimedRequest {
 		           limit,
 		           limitBytes,
 		           tags,
-		           debugID,
 		           reply,
 		           spanContext,
 		           tenantInfo,
