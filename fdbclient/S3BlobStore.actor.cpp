@@ -735,16 +735,21 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 		service = b->knobs.secure_connection ? "https" : "http";
 	}
 	bool isTLS = b->knobs.secure_connection == 1;
+	state Reference<IConnection> conn;
 	if (b->useProxy) {
-		// TODO(renxuan): Support http proxy + TLS
-		if (isTLS || b->service == "443") {
-			fprintf(stderr, "ERROR: TLS is not supported yet when using HTTP proxy.\n");
-			throw connection_failed();
+		if (isTLS) {
+			Reference<IConnection> _conn =
+			    wait(HTTP::proxyConnect(host, service, b->proxyHost.get(), b->proxyPort.get()));
+			conn = _conn;
+		} else {
+			host = b->proxyHost.get();
+			service = b->proxyPort.get();
+			Reference<IConnection> _conn = wait(INetworkConnections::net()->connect(host, service, false));
+			conn = _conn;
 		}
-		host = b->proxyHost.get();
-		service = b->proxyPort.get();
+	} else {
+		wait(store(conn, INetworkConnections::net()->connect(host, service, isTLS)));
 	}
-	state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(host, service, isTLS));
 	wait(conn->connectHandshake());
 
 	TraceEvent("S3BlobStoreEndpointNewConnection")
@@ -892,7 +897,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 				canonicalURI += boost::algorithm::join(queryParameters, "&");
 			}
 
-			if (bstore->useProxy) {
+			if (bstore->useProxy && bstore->knobs.secure_connection == 0) {
 				// Has to be in absolute-form.
 				canonicalURI = "http://" + bstore->host + ":" + bstore->service + canonicalURI;
 			}
