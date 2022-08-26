@@ -33,6 +33,7 @@
 
 #include "flow/StreamCipher.h"
 #include "flow/BlobCipher.h"
+#include "flow/ScopeExit.h"
 #include "flow/Trace.h"
 #include "flow/Error.h"
 
@@ -148,6 +149,9 @@
 #endif
 
 #ifdef __APPLE__
+/* Needed for cross-platform 'environ' */
+#include <crt_externs.h>
+
 #include <sys/uio.h>
 #include <sys/syslimits.h>
 #include <mach/mach.h>
@@ -1935,9 +1939,21 @@ std::string epochsToGMTString(double epochs) {
 }
 
 std::vector<std::string> getEnvironmentKnobOptions() {
-	char** e = environ;
+	char** e = nullptr;
+#ifdef __linux__
+	e = environ;
+#elif defined(_WIN32)
+	e = GetEnvironmentStrings();
+	if (e == nullptr)
+		return {};
+	auto cleanup = ScopeExit([e]() { FreeEnvironmentStrings(e); });
+#elif defined(__APPLE__)
+	e = *_NSGetEnviron();
+#else
+#error Port me!
+#endif
 	std::vector<std::string> knobOptions;
-	for (; *e; e++) {
+	for (; e && *e; e++) {
 		std::string envOption(*e);
 		if (boost::starts_with(envOption, ENVIRONMENT_KNOB_OPTION_PREFIX)) {
 			knobOptions.push_back(envOption.substr(strlen(ENVIRONMENT_KNOB_OPTION_PREFIX)));
