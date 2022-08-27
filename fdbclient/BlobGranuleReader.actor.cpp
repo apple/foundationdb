@@ -133,3 +133,70 @@ ACTOR Future<Void> readBlobGranules(BlobGranuleFileRequest request,
 
 	return Void();
 }
+
+// Return true if a given range is fully covered by blob chunks
+bool isRangeFullyCovered(KeyRange range, Standalone<VectorRef<BlobGranuleChunkRef>> blobChunks) {
+	std::vector<KeyRangeRef> blobRanges;
+	for (const BlobGranuleChunkRef& chunk : blobChunks) {
+		blobRanges.push_back(chunk.keyRange);
+	}
+
+	return range.isCovered(blobRanges);
+}
+
+void testAddChunkRange(KeyRef begin, KeyRef end, Standalone<VectorRef<BlobGranuleChunkRef>>& chunks) {
+	BlobGranuleChunkRef chunk;
+	chunk.keyRange = KeyRangeRef(begin, end);
+	chunks.push_back(chunks.arena(), chunk);
+}
+
+TEST_CASE("/fdbserver/blobgranule/isRangeCoveredByBlob") {
+	Standalone<VectorRef<BlobGranuleChunkRef>> chunks;
+	// chunk1 key_a1 - key_a9
+	testAddChunkRange("key_a1"_sr, "key_a9"_sr, chunks);
+	// chunk2 key_b1 - key_b9
+	testAddChunkRange("key_b1"_sr, "key_b9"_sr, chunks);
+
+	// check empty range. not covered
+	{ ASSERT(isRangeFullyCovered(KeyRangeRef(), chunks) == false); }
+
+	// check empty chunks. not covered
+	{
+		Standalone<VectorRef<BlobGranuleChunkRef>> empyChunks;
+		ASSERT(isRangeFullyCovered(KeyRangeRef(), empyChunks) == false);
+	}
+
+	// check '' to \xff
+	{ ASSERT(isRangeFullyCovered(KeyRangeRef(LiteralStringRef(""), LiteralStringRef("\xff")), chunks) == false); }
+
+	// check {key_a1, key_a9}
+	{ ASSERT(isRangeFullyCovered(KeyRangeRef("key_a1"_sr, "key_a9"_sr), chunks)); }
+
+	// check {key_a1, key_a3}
+	{ ASSERT(isRangeFullyCovered(KeyRangeRef("key_a1"_sr, "key_a3"_sr), chunks)); }
+
+	// check {key_a0, key_a3}
+	{ ASSERT(isRangeFullyCovered(KeyRangeRef("key_a0"_sr, "key_a3"_sr), chunks) == false); }
+
+	// check {key_a5, key_b2}
+	{
+		auto range = KeyRangeRef("key_a5"_sr, "key_b5"_sr);
+		ASSERT(isRangeFullyCovered(range, chunks) == false);
+		ASSERT(range.begin == "key_a5"_sr);
+		ASSERT(range.end == "key_b5"_sr);
+	}
+
+	// check unsorted chunks
+	{
+		Standalone<VectorRef<BlobGranuleChunkRef>> unsortedChunks(chunks);
+		testAddChunkRange("key_0"_sr, "key_a"_sr, unsortedChunks);
+		ASSERT(isRangeFullyCovered(KeyRangeRef("key_00"_sr, "key_01"_sr), unsortedChunks));
+	}
+	// check continued chunks
+	{
+		Standalone<VectorRef<BlobGranuleChunkRef>> continuedChunks(chunks);
+		testAddChunkRange("key_a9"_sr, "key_b1"_sr, continuedChunks);
+		ASSERT(isRangeFullyCovered(KeyRangeRef("key_a1"_sr, "key_b9"_sr), continuedChunks) == false);
+	}
+	return Void();
+}
