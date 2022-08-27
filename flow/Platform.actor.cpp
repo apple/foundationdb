@@ -1956,6 +1956,7 @@ std::vector<std::string> getEnvironmentKnobOptions() {
 			knobOptions.emplace_back(candidate.substr(ENVKNOB_PREFIX_LEN));
 		e += (candidate.size() + 1);
 	}
+	return knonOptions;
 #else
 	char** e = nullptr;
 #ifdef __linux__
