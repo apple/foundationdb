@@ -577,6 +577,7 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 	    .detail("Workload", workload->description())
 	    .detail("DatabasePingDelay", databasePingDelay);
 
+    databasePingDelay = 0.0;
 	state Future<Void> databaseError =
 	    databasePingDelay == 0.0 ? Never() : testDatabaseLiveness(cx, databasePingDelay, "RunWorkloadAsync");
 

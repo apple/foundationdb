@@ -2929,8 +2929,10 @@ Future<KeyRangeLocationInfo> getKeyLocation(Database const& cx,
                                             Reverse isBackward,
                                             Version version) {
 	// we first check whether this range is cached
+    static double lastRefreshTime = 0;
 	Optional<KeyRangeLocationInfo> locationInfo = cx->getCachedLocation(tenant.name, key, isBackward);
-	if (!locationInfo.present()) {
+	if (!locationInfo.present() || (now() - lastRefreshTime > 5)) {
+        lastRefreshTime = now();
 		return getKeyLocation_internal(
 		    cx, tenant, key, spanContext, debugID, useProvisionalProxies, isBackward, version);
 	}
@@ -3316,9 +3318,9 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 			++trState->cx->transactionPhysicalReads;
 
             // TODO@ZZX: delete
-            if (locationInfo.locations.isValid() && locationInfo.locations->locations().isValid()) {
-                TraceEvent("GetValueAlternatives").suppressFor(0.5).detail("NumberOfReplicas", locationInfo.locations->locations()->size()).detail("Key", key);
-            }
+            // if (locationInfo.locations.isValid() && locationInfo.locations->locations().isValid()) {
+            //     TraceEvent("GetValueAlternatives").suppressFor(0.5).detail("NumberOfReplicas", locationInfo.locations->locations()->size()).detail("Key", key);
+            // }
 
 			state GetValueReply reply;
 			try {

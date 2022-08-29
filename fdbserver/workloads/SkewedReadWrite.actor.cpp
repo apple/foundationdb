@@ -281,8 +281,9 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 			state std::vector<KeyRange> extra_ranges;
 			int reads = aTransaction ? self->readsPerTransactionA : self->readsPerTransactionB;
 			state int writes = aTransaction ? self->writesPerTransactionA : self->writesPerTransactionB;
-			for (int op = 0; op < reads; op++)
+			for (int op = 0; op < reads; op++) {
 				keys.push_back(self->getRandomKey(self->nodeCount));
+            }
 
 			values.reserve(writes);
 			for (int op = 0; op < writes; op++)

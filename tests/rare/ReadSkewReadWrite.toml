@@ -10,7 +10,7 @@ timeout = 3600.0
 [[test.workload]]
 testName = 'SkewedReadWrite'
 transactionsPerSecond = 100
-testDuration = 40.0
+testDuration = 60.0
 skewRound = 1
 nodeCount = 3000 # 30000000
 valueBytes = 100

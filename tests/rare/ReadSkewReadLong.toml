@@ -11,7 +11,7 @@ timeout = 3600.0
 testName = 'SkewedReadWrite'
 transactionsPerSecond = 1000000
 # testDuration = 1200.0
-testDuration = 600.0
+testDuration = 1200.0
 skewRound = 1
 # 12GB
 nodeCount = 60000000

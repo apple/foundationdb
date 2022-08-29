@@ -1420,6 +1420,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 		    .detail("KeyBegin", rd.keys.begin)
 		    .detail("KeyEnd", rd.keys.end)
 		    .detail("Priority", rd.priority)
+            .detail("Reason", rd.reason.toString())
 		    .detail("SuppressedEventCount", self->suppressIntervals);
 
 		if (relocateShardInterval.severity != SevDebug) {
@@ -1648,16 +1649,19 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 
             if (rd.reason == RelocateReason::MULTIPLY_SHARD) {
                 addSrcTeamsToDestTeams(srcTeams, destinationTeams, healthyIds, destIds);
+                healthyDestinations.addTeam(srcTeams[0].first);
                 TraceEvent("RelocateByMultplyShard")
                     .detail("Source", rd.src)
                     .detail("CompleteSrc", rd.completeSources)
                     .detail("DestinationTeam", destinationTeams)
                     .detail("HealthIds", healthyIds)
                     .detail("DestIds", destIds)
+                    .detail("ExtraIds", extraIds)
                     .detail("SrcTeam", srcTeams[0].first->getDesc())
                     .detail("DestTeam", bestTeams[0].first->getDesc())
                     .detail("TeamSize", self->teamSize)
                     .detail("SingleRegionTeamSize", self->singleRegionTeamSize)
+                    .detail("RegionSize", self->teamCollections.size())
                     .detail("Priority", rd.priority);
             } else if (rd.reason == RelocateReason::REDUCE_SHARD) {
                 // Looks like don't have to do anything in particular?
@@ -2028,9 +2032,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
     int topK = std::min(int(0.1 * shards.size()), SERVER_KNOBS->READ_REBALANCE_SHARD_TOPK);
 	state Future<HealthMetrics> healthMetrics = self->cx->getHealthMetrics(true);
 	state GetTopKMetricsRequest req(
-        // TODO@ZZX: revert
-	    // shards, topK, (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC, srcLoad / shards.size());
-        shards, topK, srcLoad - destLoad, 0);
+	    shards, topK, (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC, srcLoad / shards.size());
 	state GetTopKMetricsReply reply = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
 	wait(ready(healthMetrics));
 	auto cpu = getWorstCpu(healthMetrics.get(), sourceTeam->getServerIDs());
@@ -2065,11 +2067,11 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 		return false;
 	} else {
 		traceEvent->detail("RelocateReason", relocateReason.toString()).detail("ServerSize", sourceTeam->size()).detail("KeyRange", shard);
-
 		for (int i = 0; i < shards.size(); i++) {
 			if (shard == shards[i]) {
 				UID traceId = deterministicRandom()->randomUniqueID();
-				self->output.send(RelocateShard(shard, moveReason, relocateReason, traceId));
+                TraceEvent("ZZXDEBUG").detail("RelocateReason", relocateReason.toString()).detail("MoveReason", moveReason).detail("Shard", shard);
+                self->output.send(RelocateShard(shard, moveReason, relocateReason, traceId));
 				traceEvent->detail("TraceId", traceId);
 
 				auto serverIds = sourceTeam->getServerIDs();
@@ -2196,7 +2198,7 @@ RelocateReason selectRelocateReason(DDQueue* self,
 			relocateReason = RelocateReason::MULTIPLY_SHARD;
 		} else {
             // TODO@ZZX:
-			relocateReason = RelocateReason::OTHER;
+			relocateReason = RelocateReason::MULTIPLY_SHARD;
 		}
 	} else {
         if (srcTeamSize > self->teamSize) {
@@ -2338,7 +2340,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 		state GetTeamRequest srcReq;
 		state GetTeamRequest destReq;
 		state TraceEvent traceEvent(eventName, self->distributorId);
-		traceEvent.suppressFor(5.0)
+		traceEvent.suppressFor(1.0)
 		    .detail("PollingInterval", SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL)
 		    .detail("Rebalance", readRebalance ? "Read" : "Disk");
 
