@@ -5239,6 +5239,17 @@ public:
 			self->m_lazyClearQueue.recover(self->m_pager, self->m_header.lazyDeleteQueue, "LazyClearQueueRecovered");
 			debug_printf("BTree recovered.\n");
 
+			if (ArenaPage::isEncodingTypeEncrypted(self->m_header.encodingType) &&
+			    self->m_encodingType == EncodingType::XXHash64) {
+				// On restart the encryption config of the cluster could be unknown. In that case if we find the Redwood
+				// instance is encrypted, we should use the same encryption encoding.
+				self->m_encodingType = self->m_header.encodingType;
+				self->m_enforceEncodingType = true;
+				TraceEvent(SevWarn, "RedwoodBTreeNodeForceEncryption")
+				    .detail("InstanceName", self->m_pager->getName())
+				    .detail("EncodingFound", self->m_header.encodingType)
+				    .detail("EncodingDesired", self->m_encodingType);
+			}
 			if (self->m_header.encodingType != self->m_encodingType) {
 				TraceEvent(SevWarn, "RedwoodBTreeNodeEncodingMismatch")
 				    .detail("InstanceName", self->m_pager->getName())
@@ -7702,16 +7713,16 @@ public:
 		        : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW_BYTES;
 
 		EncodingType encodingType = EncodingType::XXHash64;
-		// TODO(yiwu): We should enable encryption only when tenant is in required mode, but currently when existing
-		// storage engine instance is reopen on worker server start, the tenant mode is unknown.
-		if (SERVER_KNOBS->ENABLE_STORAGE_SERVER_ENCRYPTION) {
+
+		// When reopening Redwood on restart, the cluser encryption config could be unknown at this point,
+		// for which shouldEnableEncryption will return false. In that case, if the Redwood instance was encrypted
+		// before, the encoding type in the header page will be used instead.
+		//
+		// TODO(yiwu): When the cluster encryption config is available later, fail if the cluster is configured to
+		// enable encryption, but the Redwood instance is unencrypted.
+		if (encryptionKeyProvider && encryptionKeyProvider->shouldEnableEncryption()) {
 			encodingType = EncodingType::AESEncryptionV1;
-			ASSERT(encryptionKeyProvider.isValid());
 			m_keyProvider = encryptionKeyProvider;
-		} else if (g_network->isSimulated() && logID.hash() % 2 == 0) {
-			// Deterministically enable encryption based on uid
-			encodingType = EncodingType::XOREncryption_TestOnly;
-			m_keyProvider = makeReference<XOREncryptionKeyProvider_TestOnly>(filename);
 		}
 
 		IPager2* pager = new DWALPager(pageSize,

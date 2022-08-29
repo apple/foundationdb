@@ -26,6 +26,7 @@
 
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/Tenant.h"
+#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/Arena.h"
 
@@ -74,6 +75,8 @@ public:
 
 	// Setting tenant prefix to tenant name map.
 	virtual void setTenantPrefixIndex(Reference<TenantPrefixIndex> tenantPrefixIndex) {}
+
+	virtual bool shouldEnableEncryption() const = 0;
 };
 
 // The null key provider is useful to simplify page decoding.
@@ -81,6 +84,7 @@ public:
 class NullKeyProvider : public IEncryptionKeyProvider {
 public:
 	virtual ~NullKeyProvider() {}
+	bool shouldEnableEncryption() const override { return true; }
 	Future<EncryptionKey> getSecrets(const EncryptionKeyRef& key) override { throw encryption_key_not_found(); }
 	Future<EncryptionKey> getByRange(const KeyRef& begin, const KeyRef& end) override {
 		throw encryption_key_not_found();
@@ -105,7 +109,9 @@ public:
 
 	virtual ~XOREncryptionKeyProvider_TestOnly() {}
 
-	virtual Future<EncryptionKey> getSecrets(const EncryptionKeyRef& key) override {
+	bool shouldEnableEncryption() const override { return true; }
+
+	Future<EncryptionKey> getSecrets(const EncryptionKeyRef& key) override {
 		if (!key.id.present()) {
 			throw encryption_key_not_found();
 		}
@@ -115,7 +121,7 @@ public:
 		return s;
 	}
 
-	virtual Future<EncryptionKey> getByRange(const KeyRef& begin, const KeyRef& end) override {
+	Future<EncryptionKey> getByRange(const KeyRef& begin, const KeyRef& end) override {
 		EncryptionKeyRef k;
 		k.id = end.empty() ? 0 : *(end.end() - 1);
 		return getSecrets(k);
@@ -138,7 +144,9 @@ public:
 	}
 	virtual ~RandomEncryptionKeyProvider() = default;
 
-	virtual Future<EncryptionKey> getSecrets(const EncryptionKeyRef& key) override {
+	bool shouldEnableEncryption() const override { return true; }
+
+	Future<EncryptionKey> getSecrets(const EncryptionKeyRef& key) override {
 		ASSERT(key.cipherHeader.present());
 		EncryptionKey s = key;
 		s.cipherKeys.cipherTextKey = cipherKeys[key.cipherHeader.get().cipherTextDetails.encryptDomainId];
@@ -146,7 +154,7 @@ public:
 		return s;
 	}
 
-	virtual Future<EncryptionKey> getByRange(const KeyRef& /*begin*/, const KeyRef& /*end*/) override {
+	Future<EncryptionKey> getByRange(const KeyRef& /*begin*/, const KeyRef& /*end*/) override {
 		EncryptionKey s;
 		s.cipherKeys.cipherTextKey = getRandomCipherKey();
 		s.cipherKeys.cipherHeaderKey = getRandomCipherKey();
@@ -187,6 +195,10 @@ public:
 
 	virtual ~TenantAwareEncryptionKeyProvider() = default;
 
+	bool shouldEnableEncryption() const override {
+		return isEncryptionOpSupported(EncryptOperationType::STORAGE_SERVER_ENCRYPTION, db->get().client);
+	}
+
 	ACTOR static Future<EncryptionKey> getSecrets(TenantAwareEncryptionKeyProvider* self, EncryptionKeyRef key) {
 		if (!key.cipherHeader.present()) {
 			TraceEvent("TenantAwareEncryptionKeyProvider_CipherHeaderMissing");
@@ -198,7 +210,7 @@ public:
 		return s;
 	}
 
-	virtual Future<EncryptionKey> getSecrets(const EncryptionKeyRef& key) override { return getSecrets(this, key); }
+	Future<EncryptionKey> getSecrets(const EncryptionKeyRef& key) override { return getSecrets(this, key); }
 
 	ACTOR static Future<EncryptionKey> getByRange(TenantAwareEncryptionKeyProvider* self, KeyRef begin, KeyRef end) {
 		EncryptCipherDomainName domainName;
@@ -209,11 +221,12 @@ public:
 		return s;
 	}
 
-	virtual Future<EncryptionKey> getByRange(const KeyRef& begin, const KeyRef& end) override {
+	Future<EncryptionKey> getByRange(const KeyRef& begin, const KeyRef& end) override {
 		return getByRange(this, begin, end);
 	}
 
-	virtual void setTenantPrefixIndex(Reference<TenantPrefixIndex> tenantPrefixIndex) override {
+	void setTenantPrefixIndex(Reference<TenantPrefixIndex> tenantPrefixIndex) override {
+		ASSERT(tenantPrefixIndex.isValid());
 		this->tenantPrefixIndex = tenantPrefixIndex;
 	}
 
@@ -233,9 +246,7 @@ private:
 				*domainName = *itr;
 				domainId = beginTenantId;
 			} else {
-				// TODO(yiwu): assert this couldn't happen, after we change to only allow encryption when tenant
-				// mode is in required mode.
-				// ASSERT(false);
+				// No tenant with the same tenant id. We could be in optional or disabled tenant mode.
 			}
 		}
 		if (domainId == SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
