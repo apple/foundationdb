@@ -1843,6 +1843,8 @@ ACTOR Future<bool> checkFileNotFoundForcePurgeRace(Reference<BlobWorkerData> bwD
 	state Transaction tr(bwData->db);
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr, range));
 			return purgeState != ForcedPurgeState::NonePurged;
 		} catch (Error& e) {
