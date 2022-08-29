@@ -3150,7 +3150,7 @@ bool canReplyWith(Error e) {
 	switch (e.code()) {
 	case error_code_blob_granule_transaction_too_old:
 	case error_code_transaction_too_old:
-	case error_code_future_version: // not thrown yet
+	case error_code_future_version:
 	case error_code_wrong_shard_server:
 	case error_code_process_behind: // not thrown yet
 	case error_code_blob_worker_full:
@@ -3189,6 +3189,7 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 
 	// wait for change feed version to catch up to ensure we have all data
 	if (metadata->activeCFData.get()->getVersion() < v) {
+		// FIXME: add future version timeout and throw here, same as SS
 		wait(metadata->activeCFData.get()->whenAtLeast(v));
 		ASSERT(metadata->activeCFData.get()->getVersion() >= v);
 	}

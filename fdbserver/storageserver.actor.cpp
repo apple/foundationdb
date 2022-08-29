@@ -2267,7 +2267,14 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 
 ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChangeFeedsRequest req) {
 	wait(delay(0));
-	wait(data->version.whenAtLeast(req.minVersion));
+	try {
+		wait(success(waitForVersionNoTooOld(data, req.minVersion)));
+	} catch (Error& e) {
+		if (!canReplyWith(e))
+			throw;
+		req.reply.sendError(e);
+		return Void();
+	}
 
 	if (!data->isReadable(req.range)) {
 		req.reply.sendError(wrong_shard_server());
@@ -2941,6 +2948,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			    .detail("CanReadPopped", req.canReadPopped);
 		}
 		data->activeFeedQueries++;
+
+		wait(success(waitForVersionNoTooOld(data, req.begin)));
 
 		// send an empty version at begin - 1 to establish the stream quickly
 		ChangeFeedStreamReply emptyInitialReply;
