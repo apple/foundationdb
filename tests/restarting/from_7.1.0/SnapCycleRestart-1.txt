@@ -1,3 +1,4 @@
+testClass=SnapshotTest
 storageEngineExcludeTypes=[3, 4, 5]
 
 ;Take snap and do cycle test

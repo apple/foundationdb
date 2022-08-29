@@ -86,7 +86,8 @@ struct GranuleFiles {
 	              bool canCollapse,
 	              BlobGranuleChunkRef& chunk,
 	              Arena& replyArena,
-	              int64_t& deltaBytesCounter) const;
+	              int64_t& deltaBytesCounter,
+	              bool summarize) const;
 };
 
 // serialize change feed key as UID bytes, to use 16 bytes on disk
