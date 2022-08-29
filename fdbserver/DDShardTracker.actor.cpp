@@ -905,6 +905,7 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 
 				wait(yield());
 			}
+
 			// FIXME(xwang): Do we need to track slow task here?
 			if (!onChange.isValid()) {
 				if (req.topK >= returnMetrics.size())
@@ -913,7 +914,8 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 					std::nth_element(returnMetrics.begin(),
 					                 returnMetrics.begin() + req.topK - 1,
 					                 returnMetrics.end(),
-					                 GetTopKMetricsRequest::compare);
+					                 req.isTop ? GetTopKMetricsRequest::topkCompare
+					                           : GetTopKMetricsRequest::bottomkCompare);
 					req.reply.send(GetTopKMetricsReply(std::vector<GetTopKMetricsReply::KeyRangeStorageMetrics>(
 					                                       returnMetrics.begin(), returnMetrics.begin() + req.topK),
 					                                   minReadLoad,

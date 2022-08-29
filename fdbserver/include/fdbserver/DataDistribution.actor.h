@@ -45,7 +45,17 @@
 // RelocateReason to DataMovementReason is one-to-N mapping
 class RelocateReason {
 public:
-	enum Value : int8_t { OTHER = 0, REBALANCE_DISK, REBALANCE_READ, MERGE_SHARD, SIZE_SPLIT, WRITE_SPLIT, __COUNT };
+	enum Value : int8_t {
+		OTHER,
+		REBALANCE_DISK,
+		MOVE_SHARD,
+		MULTIPLY_SHARD,
+		REDUCE_SHARD,
+		MERGE_SHARD,
+		SIZE_SPLIT,
+		WRITE_SPLIT,
+		__COUNT
+	};
 	RelocateReason(Value v) : value(v) { ASSERT(value != __COUNT); }
 	explicit RelocateReason(int v) : value((Value)v) { ASSERT(value != __COUNT); }
 	std::string toString() const {
@@ -54,8 +64,12 @@ public:
 			return "Other";
 		case REBALANCE_DISK:
 			return "RebalanceDisk";
-		case REBALANCE_READ:
-			return "RebalanceRead";
+		case MOVE_SHARD:
+			return "MoveShard";
+		case MULTIPLY_SHARD:
+			return "MultiplyShard";
+		case REDUCE_SHARD:
+			return "ReduceShard";
 		case MERGE_SHARD:
 			return "MergeShard";
 		case SIZE_SPLIT:
@@ -69,6 +83,8 @@ public:
 	}
 	operator int() const { return (int)value; }
 	constexpr static int8_t typeCount() { return (int)__COUNT; }
+
+	bool isReadRebalance() { return value == MOVE_SHARD || value == MULTIPLY_SHARD || value == REDUCE_SHARD; }
 
 private:
 	Value value;
@@ -227,6 +243,7 @@ struct GetTeamRequest {
 	    teamMustHaveShards(teamMustHaveShards), forReadBalance(forReadBalance),
 	    preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty),
 	    findTeamByServers(FindTeamByServers::False) {}
+
 	GetTeamRequest(std::vector<UID> servers)
 	  : wantsNewServers(WantNewServers::False), wantsTrueBest(WantTrueBest::False),
 	    preferLowerDiskUtil(PreferLowerDiskUtil::False), teamMustHaveShards(TeamMustHaveShards::False),
@@ -303,26 +320,39 @@ struct GetTopKMetricsRequest {
 	std::vector<KeyRange> keys;
 	Promise<GetTopKMetricsReply> reply; // topK storage metrics
 	double maxBytesReadPerKSecond = 0, minBytesReadPerKSecond = 0; // all returned shards won't exceed this read load
+	bool isTop; // Choose TopK OR BottomK
 
 	GetTopKMetricsRequest() {}
 	GetTopKMetricsRequest(std::vector<KeyRange> const& keys,
 	                      int topK = 1,
 	                      double maxBytesReadPerKSecond = std::numeric_limits<double>::max(),
-	                      double minBytesReadPerKSecond = 0)
+	                      double minBytesReadPerKSecond = 0,
+	                      bool isTop = true)
 	  : topK(topK), keys(keys), maxBytesReadPerKSecond(maxBytesReadPerKSecond),
-	    minBytesReadPerKSecond(minBytesReadPerKSecond) {}
+	    minBytesReadPerKSecond(minBytesReadPerKSecond), isTop(isTop) {}
 
 	// Return true if a.score > b.score, return the largest topK in keys
-	static bool compare(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
-	                    const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
-		return compareByReadDensity(a, b);
+	static bool topkCompare(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
+	                        const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
+		return compareByReadDensityTop(a, b);
+	}
+
+	static bool bottomkCompare(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
+	                           const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
+		return compareByReadDensityBottom(a, b);
 	}
 
 private:
 	// larger read density means higher score
-	static bool compareByReadDensity(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
-	                                 const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
+	static bool compareByReadDensityTop(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
+	                                    const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
 		return a.metrics.bytesReadPerKSecond / std::max(a.metrics.bytes * 1.0, 1.0) >
+		       b.metrics.bytesReadPerKSecond / std::max(b.metrics.bytes * 1.0, 1.0);
+	}
+
+	static bool compareByReadDensityBottom(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
+	                                       const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
+		return a.metrics.bytesReadPerKSecond / std::max(a.metrics.bytes * 1.0, 1.0) <
 		       b.metrics.bytesReadPerKSecond / std::max(b.metrics.bytes * 1.0, 1.0);
 	}
 };
