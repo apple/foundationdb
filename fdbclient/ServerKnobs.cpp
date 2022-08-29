@@ -615,6 +615,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( RATEKEEPER_PRINT_LIMIT_REASON,                       false ); if( randomize && BUGGIFY ) RATEKEEPER_PRINT_LIMIT_REASON = true;
 	init( RATEKEEPER_MIN_RATE,                                   0.0 );
 	init( RATEKEEPER_MAX_RATE,                                   1e9 );
+	init( RATEKEEPER_BATCH_MIN_RATE,                             0.0 );
+	init( RATEKEEPER_BATCH_MAX_RATE,                             1e9 );
 
 	bool smallStorageTarget = randomize && BUGGIFY;
 	init( TARGET_BYTES_PER_STORAGE_SERVER,                    1000e6 ); if( smallStorageTarget ) TARGET_BYTES_PER_STORAGE_SERVER = 3000e3;
