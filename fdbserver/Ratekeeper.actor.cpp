@@ -1243,6 +1243,9 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	if (limits->priority == TransactionPriority::DEFAULT) {
 		limits->tpsLimit = std::max(limits->tpsLimit, SERVER_KNOBS->RATEKEEPER_MIN_RATE);
 		limits->tpsLimit = std::min(limits->tpsLimit, SERVER_KNOBS->RATEKEEPER_MAX_RATE);
+	} else if (limits->priority == TransactionPriority::BATCH) {
+		limits->tpsLimit = std::max(limits->tpsLimit, SERVER_KNOBS->RATEKEEPER_BATCH_MIN_RATE);
+		limits->tpsLimit = std::min(limits->tpsLimit, SERVER_KNOBS->RATEKEEPER_BATCH_MAX_RATE);
 	}
 
 	if (deterministicRandom()->random01() < 0.1) {
