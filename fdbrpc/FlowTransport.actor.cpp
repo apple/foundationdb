@@ -1549,9 +1549,10 @@ void TransportData::applyPublicKeySet(StringRef jwkSetString) {
 			numPrivateKeys++;
 		}
 	}
-	TraceEvent(SevInfo, "AuthzPublicKeySetApply")
-	    .detail("NumPublicKeys", publicKeys.size())
-	    .detail("NumSkippedPrivateKeys", numPrivateKeys);
+	TraceEvent(SevInfo, "AuthzPublicKeySetApply").detail("NumPublicKeys", publicKeys.size());
+	if (numPrivateKeys > 0) {
+		TraceEvent(SevWarnAlways, "AuthzPublicKeySetContainsPrivateKeys").detail("NumPrivateKeys", numPrivateKeys);
+	}
 }
 
 ACTOR static Future<Void> multiVersionCleanupWorker(TransportData* self) {
@@ -2012,6 +2013,8 @@ ACTOR static Future<Void> watchPublicKeyJwksFile(std::string filePath, Transport
 	state AsyncTrigger fileChanged;
 	state Future<Void> fileWatch;
 	state unsigned errorCount = 0; // error since watch start or last successful refresh
+
+	// Make sure this watch setup does not break due to async file system initialization not having been called
 	loop {
 		if (IAsyncFileSystem::filesystem())
 			break;

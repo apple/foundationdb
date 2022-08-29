@@ -245,12 +245,12 @@ void putField(Optional<FieldType> const& field, Writer& wr, const char* fieldNam
 		return;
 	wr.Key(fieldName);
 	auto const& value = field.get();
-	static_assert(std::is_same_v<StringRef, FieldType> || std::is_same_v<FieldType, double> ||
+	static_assert(std::is_same_v<StringRef, FieldType> || std::is_same_v<FieldType, uint64_t> ||
 	              std::is_same_v<FieldType, VectorRef<StringRef>>);
 	if constexpr (std::is_same_v<StringRef, FieldType>) {
 		wr.String(reinterpret_cast<const char*>(value.begin()), value.size());
-	} else if constexpr (std::is_same_v<FieldType, double>) {
-		wr.Double(value);
+	} else if constexpr (std::is_same_v<FieldType, uint64_t>) {
+		wr.Uint64(value);
 	} else {
 		wr.StartArray();
 		for (auto elem : value) {
@@ -379,16 +379,16 @@ bool parseField(Arena& arena, Optional<FieldType>& out, const rapidjson::Documen
 	if (fieldItr == d.MemberEnd())
 		return true;
 	auto const& field = fieldItr->value;
-	static_assert(std::is_same_v<StringRef, FieldType> || std::is_same_v<FieldType, double> ||
+	static_assert(std::is_same_v<StringRef, FieldType> || std::is_same_v<FieldType, uint64_t> ||
 	              std::is_same_v<FieldType, VectorRef<StringRef>>);
 	if constexpr (std::is_same_v<FieldType, StringRef>) {
 		if (!field.IsString())
 			return false;
 		out = StringRef(arena, reinterpret_cast<const uint8_t*>(field.GetString()), field.GetStringLength());
-	} else if constexpr (std::is_same_v<FieldType, double>) {
+	} else if constexpr (std::is_same_v<FieldType, uint64_t>) {
 		if (!field.IsNumber())
 			return false;
-		out = field.GetDouble();
+		out = static_cast<uint64_t>(field.GetDouble());
 	} else {
 		if (!field.IsArray())
 			return false;
@@ -577,9 +577,9 @@ TEST_CASE("/fdbrpc/TokenSign/JWT") {
 			ASSERT(tokenSpec.tokenId == parsedToken.tokenId);
 			ASSERT(tokenSpec.audience == parsedToken.audience);
 			ASSERT(tokenSpec.keyId == parsedToken.keyId);
-			ASSERT_EQ(std::lround(tokenSpec.issuedAtUnixTime.get()), std::lround(parsedToken.issuedAtUnixTime.get()));
-			ASSERT_EQ(std::lround(tokenSpec.expiresAtUnixTime.get()), std::lround(parsedToken.expiresAtUnixTime.get()));
-			ASSERT_EQ(std::lround(tokenSpec.notBeforeUnixTime.get()), std::lround(parsedToken.notBeforeUnixTime.get()));
+			ASSERT_EQ(tokenSpec.issuedAtUnixTime.get(), parsedToken.issuedAtUnixTime.get());
+			ASSERT_EQ(tokenSpec.expiresAtUnixTime.get(), parsedToken.expiresAtUnixTime.get());
+			ASSERT_EQ(tokenSpec.notBeforeUnixTime.get(), parsedToken.notBeforeUnixTime.get());
 			ASSERT(tokenSpec.tenants == parsedToken.tenants);
 			auto optSig = base64url::decode(tmpArena, signaturePart);
 			ASSERT(optSig.present());

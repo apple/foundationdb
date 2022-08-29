@@ -185,7 +185,7 @@ bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, Network
 		CODE_PROBE(true, "Token has no expiration time");
 		TRACE_INVALID_PARSED_TOKEN("NoExpirationTime", t);
 		return false;
-	} else if (t.expiresAtUnixTime.get() <= currentTime) {
+	} else if (double(t.expiresAtUnixTime.get()) <= currentTime) {
 		CODE_PROBE(true, "Expired token");
 		TRACE_INVALID_PARSED_TOKEN("Expired", t);
 		return false;
@@ -193,7 +193,7 @@ bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, Network
 		CODE_PROBE(true, "Token has no not-before field");
 		TRACE_INVALID_PARSED_TOKEN("NoNotBefore", t);
 		return false;
-	} else if (t.notBeforeUnixTime.get() > currentTime) {
+	} else if (double(t.notBeforeUnixTime.get()) > currentTime) {
 		CODE_PROBE(true, "Tokens not-before is in the future");
 		TRACE_INVALID_PARSED_TOKEN("TokenNotYetValid", t);
 		return false;
