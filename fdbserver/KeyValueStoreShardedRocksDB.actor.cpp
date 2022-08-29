@@ -889,6 +889,7 @@ public:
 				continue;
 			}
 			if (currentTime - it->second->deleteTimeSec > cleanUpDelay) {
+				pendingDeletionShards.pop_front();
 				emptyShards.push_back(it->second);
 				physicalShards.erase(id);
 			} else {
