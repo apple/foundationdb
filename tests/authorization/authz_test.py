@@ -22,13 +22,14 @@ import admin_server
 import argparse
 import authlib
 import fdb
+import os
 import pytest
 import random
 import sys
 import time
 from multiprocessing import Process, Pipe
 from typing import Union
-from util import alg_from_kty, public_keyset_from_keys, random_alphanum_str, random_alphanum_bytes, to_str, to_bytes
+from util import alg_from_kty, public_keyset_from_keys, random_alphanum_str, random_alphanum_bytes, to_str, to_bytes, KeyFileReverter, token_claim_1h, wait_until_tenant_tr_succeeds, wait_until_tenant_tr_fails
 
 special_key_ranges = [
     ("transaction description", b"/description", b"/description\x00"),
@@ -40,19 +41,6 @@ special_key_ranges = [
     ("data distribution stats", b"/metrics/data_distribution_stats/", b"/metrics/data_distribution_stats/\xff\xff"),
     ("kill storage", b"/globals/killStorage", b"/globals/killStorage\x00"),
 ]
-
-def token_claim_1h(tenant_name):
-    now = time.time()
-    return {
-        "iss": "fdb-authz-tester",
-        "sub": "authz-test",
-        "aud": ["tmp-cluster"],
-        "iat": now,
-        "nbf": now - 1,
-        "exp": now + 60 * 60, 
-        "jti": random_alphanum_str(10),
-        "tenants": [to_str(tenant_name)],
-    }
 
 def test_simple_tenant_access(private_key, token_gen, default_tenant, tenant_tr_gen):
     token = token_gen(private_key, token_claim_1h(default_tenant))
@@ -159,6 +147,7 @@ def test_public_key_set_rollover(
     token_second = token_gen(new_key, token_claim_1h(second_tenant))
 
     interim_set = public_keyset_from_keys([new_key, private_key])
+    max_repeat = 10
 
     print(f"interim keyset: {interim_set}")
     old_key_json = None
@@ -167,73 +156,80 @@ def test_public_key_set_rollover(
 
     delay = public_key_refresh_interval
 
-    try:
+    with KeyFileReverter(cluster.public_key_json_file, old_key_json, delay):
         with open(cluster.public_key_json_file, "w") as keyfile:
             keyfile.write(interim_set)
-
-        print(f"sleeping {delay} second(s) for interim key file to take effect")
-        time.sleep(delay)
-
-        repeat = 0
-        max_repeat = delay * 4
-        while repeat < max_repeat:
-            try:
-                tr_second = tenant_tr_gen(second_tenant)
-                tr_second.options.set_authorization_token(token_second)
-                tr_second[b"ghi"] = b"jkl"
-                tr_second.commit().wait()
-                break
-            except fdb.FDBError as e:
-                assert e.code == 6000
-                repeat += 1
-                time.sleep(delay)
-                continue
-
-        assert repeat < max_repeat, f"interim keyset not activated in {max_repeat * delay} seconds"
+        wait_until_tenant_tr_succeeds(second_tenant, new_key, tenant_tr_gen, token_gen, max_repeat, delay)
         print("interim key set activated")
         final_set = public_keyset_from_keys([new_key])
         print(f"final keyset: {final_set}")
         with open(cluster.public_key_json_file, "w") as keyfile:
             keyfile.write(final_set)
+        wait_until_tenant_tr_fails(default_tenant, private_key, tenant_tr_gen, token_gen, max_repeat, delay)
 
-        print(f"sleeping {delay} second(s) for final key file to take effect")
-        time.sleep(delay)
+def test_public_key_set_broken_file_tolerance(
+        private_key, public_key_refresh_interval,
+        cluster, public_key_jwks_str, default_tenant, token_gen, tenant_tr_gen):
+    delay = public_key_refresh_interval
+    # retry limit in waiting for keyset file update to propagate to FDB server's internal keyset
+    max_repeat = 10
 
-        repeat = 0
-        while repeat < max_repeat:
-            # Generate and use a new token for default tenant
-            # As this token is not cached, it should fail
-            tr_default = tenant_tr_gen(default_tenant)
-            tr_default.options.set_authorization_token(token_gen(private_key, token_claim_1h(default_tenant)))
-            read_blocked = False
-            write_blocked = False
-            try:
-                value = tr_default[b"abc"].value
-            except fdb.FDBError as ferr:
-                assert ferr.code == 6000, f"expected permission_denied, got {ferr} instead"
-                read_blocked = True
-            try:
-                tr_default[b"abc"] = b"ghi"
-                tr_default.commit().wait()
-            except fdb.FDBError as ferr:
-                assert ferr.code == 6000, f"expected permission_denied, got {ferr} instead"
-                write_blocked = True
-            if read_blocked and write_blocked:
-                break
-            repeat += 1
-
-        assert repeat < max_repeat, f"final keyset not activated in {max_repeat * delay} seconds"
-        tr_second = tenant_tr_gen(second_tenant)
-        tr_second.options.set_authorization_token(token_second)
-        assert tr_second[b"ghi"] == b"jkl", "earlier write transaction for tenant {} not visible".format(second_tenant)
-    except Exception as e:
-        print(f"unexpected exception {e}, reverting key file to default")
-        raise e
-    finally:
+    with KeyFileReverter(cluster.public_key_json_file, public_key_jwks_str, delay):
+        # key file update should take effect even after witnessing broken key file
         with open(cluster.public_key_json_file, "w") as keyfile:
-            keyfile.write(old_key_json)
-        print(f"key file reverted. waiting {delay * 2} seconds for the update to take effect...")
+            keyfile.write(public_key_jwks_str.strip()[:10]) # make the file partial, injecting parse error
+        time.sleep(delay * 2)
+        # should still work; internal key set only clears with a valid, empty key set file
+        tr_default = tenant_tr_gen(default_tenant)
+        tr_default.options.set_authorization_token(token_gen(private_key, token_claim_1h(default_tenant)))
+        tr_default[b"abc"] = b"def"
+        tr_default.commit().wait()
+        with open(cluster.public_key_json_file, "w") as keyfile:
+            keyfile.write('{"keys":[]}')
+        # eventually internal key set will become empty and won't accept any new tokens
+        wait_until_tenant_tr_fails(default_tenant, private_key, tenant_tr_gen, token_gen, max_repeat, delay)
+
+def test_public_key_set_deletion_tolerance(
+        private_key, public_key_refresh_interval,
+        cluster, public_key_jwks_str, default_tenant, token_gen, tenant_tr_gen):
+    delay = public_key_refresh_interval
+    # retry limit in waiting for keyset file update to propagate to FDB server's internal keyset
+    max_repeat = 10
+
+    with KeyFileReverter(cluster.public_key_json_file, public_key_jwks_str, delay):
+        # key file update should take effect even after witnessing deletion of key file
+        with open(cluster.public_key_json_file, "w") as keyfile:
+            keyfile.write('{"keys":[]}')
         time.sleep(delay)
+        wait_until_tenant_tr_fails(default_tenant, private_key, tenant_tr_gen, token_gen, max_repeat, delay)
+        os.remove(cluster.public_key_json_file)
+        time.sleep(delay * 2)
+        with open(cluster.public_key_json_file, "w") as keyfile:
+            keyfile.write(public_key_jwks_str)
+        # eventually updated key set should take effect and transaction should be accepted
+        wait_until_tenant_tr_succeeds(default_tenant, private_key, tenant_tr_gen, token_gen, max_repeat, delay)
+
+def test_public_key_set_empty_file_tolerance(
+        private_key, public_key_refresh_interval,
+        cluster, public_key_jwks_str, default_tenant, token_gen, tenant_tr_gen):
+    delay = public_key_refresh_interval
+    # retry limit in waiting for keyset file update to propagate to FDB server's internal keyset
+    max_repeat = 10
+
+    with KeyFileReverter(cluster.public_key_json_file, public_key_jwks_str, delay):
+        # key file update should take effect even after witnessing an empty file
+        with open(cluster.public_key_json_file, "w") as keyfile:
+            keyfile.write('{"keys":[]}')
+        # eventually internal key set will become empty and won't accept any new tokens
+        wait_until_tenant_tr_fails(default_tenant, private_key, tenant_tr_gen, token_gen, max_repeat, delay)
+        # empty the key file
+        with open(cluster.public_key_json_file, "w") as keyfile:
+            pass
+        time.sleep(delay * 2)
+        with open(cluster.public_key_json_file, "w") as keyfile:
+            keyfile.write(public_key_jwks_str)
+        # eventually key file should update and transactions should go through
+        wait_until_tenant_tr_succeeds(default_tenant, private_key, tenant_tr_gen, token_gen, max_repeat, delay)
 
 def test_bad_token(private_key, token_gen, default_tenant, tenant_tr_gen):
     def del_attr(d, attr):
