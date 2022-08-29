@@ -28,7 +28,7 @@ int64_t StorageMetricSample::getEstimate(KeyRangeRef keys) const {
 
 KeyRef StorageMetricSample::splitEstimate(KeyRangeRef range, int64_t offset, bool front) const {
 	auto fwd_split = sample.index(front ? sample.sumTo(sample.lower_bound(range.begin)) + offset
-		                                : sample.sumTo(sample.lower_bound(range.end)) - offset);
+	                                    : sample.sumTo(sample.lower_bound(range.end)) - offset);
 
 	if (fwd_split == sample.end() || *fwd_split >= range.end)
 		return range.end;
@@ -40,26 +40,26 @@ KeyRef StorageMetricSample::splitEstimate(KeyRangeRef range, int64_t offset, boo
 
 	// Butterfly search - start at midpoint then go in both directions.
 	while ((fwd_split != sample.end() && *fwd_split < range.end) ||
-		    (bck_split != sample.begin() && *bck_split > range.begin)) {
+	       (bck_split != sample.begin() && *bck_split > range.begin)) {
 		if (bck_split != sample.begin() && *bck_split > range.begin) {
 			auto it = bck_split;
 			bck_split.decrementNonEnd();
 
 			KeyRef split = keyBetween(KeyRangeRef(
-				bck_split != sample.begin() ? std::max<KeyRef>(*bck_split, range.begin) : range.begin, *it));
+			    bck_split != sample.begin() ? std::max<KeyRef>(*bck_split, range.begin) : range.begin, *it));
 			if (!front || (getEstimate(KeyRangeRef(range.begin, split)) > 0 &&
-				           split.size() <= CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT))
-			return split;
+			               split.size() <= CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT))
+				return split;
 		}
 
 		if (fwd_split != sample.end() && *fwd_split < range.end) {
 			auto it = fwd_split;
 			++it;
 
-			KeyRef split = keyBetween(
-				KeyRangeRef(*fwd_split, it != sample.end() ? std::min<KeyRef>(*it, range.end) : range.end));
-			if (front || (getEstimate(KeyRangeRef(split, range.end)) > 0 &&
-				          split.size() <= CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT))
+			KeyRef split =
+			    keyBetween(KeyRangeRef(*fwd_split, it != sample.end() ? std::min<KeyRef>(*it, range.end) : range.end));
+			if (front ||
+			    (getEstimate(KeyRangeRef(split, range.end)) > 0 && split.size() <= CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT))
 				return split;
 
 			fwd_split = it;
@@ -76,13 +76,12 @@ StorageMetrics StorageServerMetrics::getMetrics(KeyRangeRef const& keys) const {
 	StorageMetrics result;
 	result.bytes = byteSample.getEstimate(keys);
 	result.bytesPerKSecond =
-		bandwidthSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
-	result.iosPerKSecond =
-		iopsSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	    bandwidthSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	result.iosPerKSecond = iopsSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	result.bytesReadPerKSecond =
-		bytesReadSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	    bytesReadSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	return result;
-}	
+}
 
 // Called when metrics should change (IO for a given key)
 // Notifies waiting WaitMetricsRequests through waitMetricsMap, and updates metricsAverageQueue and metricsSampleMap
@@ -100,13 +99,13 @@ void StorageServerMetrics::notify(KeyRef key, StorageMetrics& metrics) {
 
 	if (metrics.bytesPerKSecond)
 		notifyMetrics.bytesPerKSecond = bandwidthSample.addAndExpire(key, metrics.bytesPerKSecond, expire) *
-										SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+		                                SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	if (metrics.iosPerKSecond)
 		notifyMetrics.iosPerKSecond = iopsSample.addAndExpire(key, metrics.iosPerKSecond, expire) *
-										SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+		                              SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	if (metrics.bytesReadPerKSecond)
 		notifyMetrics.bytesReadPerKSecond = bytesReadSample.addAndExpire(key, metrics.bytesReadPerKSecond, expire) *
-											SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+		                                    SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	if (!notifyMetrics.allZero()) {
 		auto& v = waitMetricsMap[key];
 		for (int i = 0; i < v.size(); i++) {
@@ -124,7 +123,7 @@ void StorageServerMetrics::notify(KeyRef key, StorageMetrics& metrics) {
 void StorageServerMetrics::notifyBytesReadPerKSecond(KeyRef key, int64_t in) {
 	double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
 	int64_t bytesReadPerKSecond =
-		bytesReadSample.addAndExpire(key, in, expire) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	    bytesReadSample.addAndExpire(key, in, expire) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	if (bytesReadPerKSecond > 0) {
 		StorageMetrics notifyMetrics;
 		notifyMetrics.bytesReadPerKSecond = bytesReadPerKSecond;
@@ -138,8 +137,9 @@ void StorageServerMetrics::notifyBytesReadPerKSecond(KeyRef key, int64_t in) {
 
 // Called by StorageServerDisk when the size of a key in byteSample changes, to notify WaitMetricsRequest
 // Should not be called for keys past allKeys.end
-void StorageServerMetrics::notifyBytes(RangeMap<Key, std::vector<PromiseStream<StorageMetrics>>, KeyRangeRef>::iterator shard,
-					int64_t bytes) {
+void StorageServerMetrics::notifyBytes(
+    RangeMap<Key, std::vector<PromiseStream<StorageMetrics>>, KeyRangeRef>::iterator shard,
+    int64_t bytes) {
 	ASSERT(shard.end() <= allKeys.end);
 
 	StorageMetrics notifyMetrics;
@@ -195,16 +195,16 @@ void StorageServerMetrics::poll() {
 
 // This function can run on untrusted user data.  We must validate all divisions carefully.
 KeyRef StorageServerMetrics::getSplitKey(int64_t remaining,
-					int64_t estimated,
-					int64_t limits,
-					int64_t used,
-					int64_t infinity,
-					bool isLastShard,
-					const StorageMetricSample& sample,
-					double divisor,
-					KeyRef const& lastKey,
-					KeyRef const& key,
-					bool hasUsed) const {
+                                         int64_t estimated,
+                                         int64_t limits,
+                                         int64_t used,
+                                         int64_t infinity,
+                                         bool isLastShard,
+                                         const StorageMetricSample& sample,
+                                         double divisor,
+                                         KeyRef const& lastKey,
+                                         KeyRef const& key,
+                                         bool hasUsed) const {
 	ASSERT(remaining >= 0);
 	ASSERT(limits > 0);
 	ASSERT(divisor > 0);
@@ -226,9 +226,9 @@ KeyRef StorageServerMetrics::getSplitKey(int64_t remaining,
 			if (offset <= 0)
 				return hasUsed ? lastKey : key;
 			return sample.splitEstimate(
-				KeyRangeRef(lastKey, key),
-				offset * ((1.0 - SERVER_KNOBS->SPLIT_JITTER_AMOUNT) +
-							2 * deterministicRandom()->random01() * SERVER_KNOBS->SPLIT_JITTER_AMOUNT));
+			    KeyRangeRef(lastKey, key),
+			    offset * ((1.0 - SERVER_KNOBS->SPLIT_JITTER_AMOUNT) +
+			              2 * deterministicRandom()->random01() * SERVER_KNOBS->SPLIT_JITTER_AMOUNT));
 		}
 	}
 
@@ -252,41 +252,41 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 			KeyRef key = req.keys.end;
 			bool hasUsed = used.bytes != 0 || used.bytesPerKSecond != 0 || used.iosPerKSecond != 0;
 			key = getSplitKey(remaining.bytes,
-								estimated.bytes,
-								req.limits.bytes,
-								used.bytes,
-								req.limits.infinity,
-								req.isLastShard,
-								byteSample,
-								1,
-								lastKey,
-								key,
-								hasUsed);
+			                  estimated.bytes,
+			                  req.limits.bytes,
+			                  used.bytes,
+			                  req.limits.infinity,
+			                  req.isLastShard,
+			                  byteSample,
+			                  1,
+			                  lastKey,
+			                  key,
+			                  hasUsed);
 			if (used.bytes < minSplitBytes)
 				key = std::max(
-					key, byteSample.splitEstimate(KeyRangeRef(lastKey, req.keys.end), minSplitBytes - used.bytes));
+				    key, byteSample.splitEstimate(KeyRangeRef(lastKey, req.keys.end), minSplitBytes - used.bytes));
 			key = getSplitKey(remaining.iosPerKSecond,
-								estimated.iosPerKSecond,
-								req.limits.iosPerKSecond,
-								used.iosPerKSecond,
-								req.limits.infinity,
-								req.isLastShard,
-								iopsSample,
-								SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS,
-								lastKey,
-								key,
-								hasUsed);
+			                  estimated.iosPerKSecond,
+			                  req.limits.iosPerKSecond,
+			                  used.iosPerKSecond,
+			                  req.limits.infinity,
+			                  req.isLastShard,
+			                  iopsSample,
+			                  SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS,
+			                  lastKey,
+			                  key,
+			                  hasUsed);
 			key = getSplitKey(remaining.bytesPerKSecond,
-								estimated.bytesPerKSecond,
-								req.limits.bytesPerKSecond,
-								used.bytesPerKSecond,
-								req.limits.infinity,
-								req.isLastShard,
-								bandwidthSample,
-								SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS,
-								lastKey,
-								key,
-								hasUsed);
+			                  estimated.bytesPerKSecond,
+			                  req.limits.bytesPerKSecond,
+			                  used.bytesPerKSecond,
+			                  req.limits.infinity,
+			                  req.isLastShard,
+			                  bandwidthSample,
+			                  SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS,
+			                  lastKey,
+			                  key,
+			                  hasUsed);
 			ASSERT(key != lastKey || hasUsed);
 			if (key == req.keys.end)
 				break;
@@ -308,10 +308,10 @@ void StorageServerMetrics::splitMetrics(SplitMetricsRequest req) const {
 }
 
 void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
-						StorageBytes sb,
-						double bytesInputRate,
-						int64_t versionLag,
-						double lastUpdate) const {
+                                             StorageBytes sb,
+                                             double bytesInputRate,
+                                             int64_t versionLag,
+                                             double lastUpdate) const {
 	GetStorageMetricsReply rep;
 
 	// SOMEDAY: make bytes dynamic with hard disk space
@@ -319,11 +319,11 @@ void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
 
 	if (sb.free < 1e9) {
 		TraceEvent(SevWarn, "PhysicalDiskMetrics")
-			.suppressFor(60.0)
-			.detail("Free", sb.free)
-			.detail("Total", sb.total)
-			.detail("Available", sb.available)
-			.detail("Load", rep.load.bytes);
+		    .suppressFor(60.0)
+		    .detail("Free", sb.free)
+		    .detail("Total", sb.total)
+		    .detail("Available", sb.available)
+		    .detail("Load", rep.load.bytes);
 	}
 
 	rep.available.bytes = sb.available;
@@ -347,31 +347,31 @@ void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
 // Given a read hot shard, this function will divide the shard into chunks and find those chunks whose
 // readBytes/sizeBytes exceeds the `readDensityRatio`. Please make sure to run unit tests
 // `StorageMetricsSampleTests.txt` after change made.
-std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::getReadHotRanges(KeyRangeRef shard,
-														double readDensityRatio,
-														int64_t baseChunkSize,
-														int64_t minShardReadBandwidthPerKSeconds) const {
+std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::getReadHotRanges(
+    KeyRangeRef shard,
+    double readDensityRatio,
+    int64_t baseChunkSize,
+    int64_t minShardReadBandwidthPerKSeconds) const {
 	std::vector<ReadHotRangeWithMetrics> toReturn;
 
 	double shardSize = (double)byteSample.getEstimate(shard);
 	int64_t shardReadBandwidth = bytesReadSample.getEstimate(shard);
 	if (shardReadBandwidth * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS <=
-		minShardReadBandwidthPerKSeconds) {
+	    minShardReadBandwidthPerKSeconds) {
 		return toReturn;
 	}
 	if (shardSize <= baseChunkSize) {
 		// Shard is small, use it as is
 		if (bytesReadSample.getEstimate(shard) > (readDensityRatio * shardSize)) {
 			toReturn.emplace_back(shard,
-									bytesReadSample.getEstimate(shard) / shardSize,
-									bytesReadSample.getEstimate(shard) /
-										SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
+			                      bytesReadSample.getEstimate(shard) / shardSize,
+			                      bytesReadSample.getEstimate(shard) / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
 		}
 		return toReturn;
 	}
 	KeyRef beginKey = shard.begin;
 	auto endKey =
-		byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + baseChunkSize);
+	    byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + baseChunkSize);
 	while (endKey != byteSample.sample.end()) {
 		if (*endKey > shard.end) {
 			endKey = byteSample.sample.lower_bound(shard.end);
@@ -385,21 +385,21 @@ std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::getReadHotRanges(KeyR
 			continue;
 		}
 		if (bytesReadSample.getEstimate(KeyRangeRef(beginKey, *endKey)) >
-			(readDensityRatio * std::max(baseChunkSize, byteSample.getEstimate(KeyRangeRef(beginKey, *endKey))))) {
+		    (readDensityRatio * std::max(baseChunkSize, byteSample.getEstimate(KeyRangeRef(beginKey, *endKey))))) {
 			auto range = KeyRangeRef(beginKey, *endKey);
 			if (!toReturn.empty() && toReturn.back().keys.end == range.begin) {
 				// in case two consecutive chunks both are over the ratio, merge them.
 				range = KeyRangeRef(toReturn.back().keys.begin, *endKey);
 				toReturn.pop_back();
 			}
-			toReturn.emplace_back(
-				range,
-				(double)bytesReadSample.getEstimate(range) / std::max(baseChunkSize, byteSample.getEstimate(range)),
-				bytesReadSample.getEstimate(range) / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
+			toReturn.emplace_back(range,
+			                      (double)bytesReadSample.getEstimate(range) /
+			                          std::max(baseChunkSize, byteSample.getEstimate(range)),
+			                      bytesReadSample.getEstimate(range) / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
 		}
 		beginKey = *endKey;
-		endKey = byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) +
-											baseChunkSize);
+		endKey =
+		    byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + baseChunkSize);
 	}
 	return toReturn;
 }
@@ -407,9 +407,9 @@ std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::getReadHotRanges(KeyR
 void StorageServerMetrics::getReadHotRanges(ReadHotSubRangeRequest req) const {
 	ReadHotSubRangeReply reply;
 	auto _ranges = getReadHotRanges(req.keys,
-									SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO,
-									SERVER_KNOBS->READ_HOT_SUB_RANGE_CHUNK_SIZE,
-									SERVER_KNOBS->SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS);
+	                                SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO,
+	                                SERVER_KNOBS->READ_HOT_SUB_RANGE_CHUNK_SIZE,
+	                                SERVER_KNOBS->SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS);
 	reply.readHotRanges = VectorRef(_ranges.data(), _ranges.size());
 	req.reply.send(reply);
 }
@@ -426,11 +426,13 @@ void StorageServerMetrics::getSplitPoints(SplitRangeRequest req, Optional<Key> p
 	req.reply.send(reply);
 }
 
-std::vector<KeyRef> StorageServerMetrics::getSplitPoints(KeyRangeRef range, int64_t chunkSize, Optional<Key> prefixToRemove) const {
+std::vector<KeyRef> StorageServerMetrics::getSplitPoints(KeyRangeRef range,
+                                                         int64_t chunkSize,
+                                                         Optional<Key> prefixToRemove) const {
 	std::vector<KeyRef> toReturn;
 	KeyRef beginKey = range.begin;
 	IndexedSet<Key, int64_t>::const_iterator endKey =
-		byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + chunkSize);
+	    byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + chunkSize);
 	while (endKey != byteSample.sample.end()) {
 		if (*endKey > range.end) {
 			break;
@@ -445,8 +447,7 @@ std::vector<KeyRef> StorageServerMetrics::getSplitPoints(KeyRangeRef range, int6
 		}
 		toReturn.push_back(splitPoint);
 		beginKey = *endKey;
-		endKey =
-			byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + chunkSize);
+		endKey = byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + chunkSize);
 	}
 	return toReturn;
 }
@@ -496,11 +497,11 @@ void TransientStorageMetricSample::erase(KeyRangeRef keys) {
 }
 
 bool TransientStorageMetricSample::roll(KeyRef key, int64_t metric) const {
-	return deterministicRandom()->random01() <
-			(double)metric / metricUnitsPerSample; //< SOMEDAY: Better randomInt64?
+	return deterministicRandom()->random01() < (double)metric / metricUnitsPerSample; //< SOMEDAY: Better randomInt64?
 }
 
-void TransientStorageMetricSample::poll(KeyRangeMap<std::vector<PromiseStream<StorageMetrics>>>& waitMap, StorageMetrics m) {
+void TransientStorageMetricSample::poll(KeyRangeMap<std::vector<PromiseStream<StorageMetrics>>>& waitMap,
+                                        StorageMetrics m) {
 	double now = ::now();
 	while (queue.size() && queue.front().first <= now) {
 		KeyRef key = queue.front().second.first;

@@ -67,7 +67,6 @@ struct TransientStorageMetricSample : StorageMetricSample {
 private:
 	bool roll(KeyRef key, int64_t metric) const;
 	int64_t add(KeyRef key, int64_t metric);
-
 };
 
 struct StorageServerMetrics {
@@ -90,14 +89,14 @@ struct StorageServerMetrics {
 	void notifyBytesReadPerKSecond(KeyRef key, int64_t in);
 
 	void notifyBytes(RangeMap<Key, std::vector<PromiseStream<StorageMetrics>>, KeyRangeRef>::iterator shard,
-					 int64_t bytes);
+	                 int64_t bytes);
 
 	void notifyBytes(KeyRef key, int64_t bytes);
 
 	void notifyNotReadable(KeyRangeRef keys);
 
 	void poll();
-	
+
 	// static void waitMetrics( StorageServerMetrics* const& self, WaitMetricsRequest const& req );
 
 	KeyRef getSplitKey(int64_t remaining,
@@ -128,7 +127,7 @@ struct StorageServerMetrics {
 	                                                      int64_t minShardReadBandwidthPerKSeconds) const;
 
 	void getReadHotRanges(ReadHotSubRangeRequest req) const;
-	
+
 	std::vector<KeyRef> getSplitPoints(KeyRangeRef range, int64_t chunkSize, Optional<Key> prefixToRemove) const;
 
 	void getSplitPoints(SplitRangeRequest req, Optional<Key> prefix) const;
