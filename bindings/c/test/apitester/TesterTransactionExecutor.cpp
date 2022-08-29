@@ -42,6 +42,11 @@ void TransactionActorBase::complete(fdb::Error err) {
 	context = {};
 }
 
+void DatabaseActorBase::complete(fdb::Error err) {
+	error = err;
+	context = {};
+}
+
 void ITransactionContext::continueAfterAll(std::vector<fdb::Future> futures, TTaskFct cont) {
 	auto counter = std::make_shared<std::atomic<int>>(futures.size());
 	auto errorCode = std::make_shared<std::atomic<fdb::Error>>(fdb::Error::success());
@@ -497,6 +502,215 @@ protected:
 };
 
 /**
+ * Database context base class, containing reusable functionality
+ *  FIXME: there is some duplicated code between Database* and Transaction* but it's not trivial to share
+ */
+class DatabaseContextBase : public IDatabaseContext {
+public:
+	DatabaseContextBase(fdb::Database db, std::shared_ptr<IDatabaseActor> dbActor, TTaskFct cont, IScheduler* scheduler)
+	  : fdbDb(db), dbActor(dbActor), isDone(false), contAfterDone(cont), scheduler(scheduler) {}
+
+	fdb::Database db() override { return fdbDb; }
+
+	// Set a continuation to be executed when a future gets ready
+	void continueAfter(fdb::Future f, TTaskFct cont) override { doContinueAfter(f, cont); }
+
+	void done() override {
+		std::unique_lock<std::mutex> lock(mutex);
+		if (isDone) {
+			return;
+		}
+		isDone = true;
+		lock.unlock();
+		dbActor->complete(fdb::Error::success());
+		cleanUp();
+		contAfterDone();
+	}
+
+protected:
+	virtual void doContinueAfter(fdb::Future f, TTaskFct cont) = 0;
+
+	// Clean up transaction state after completing the transaction
+	// Note that the object may live longer, because it is referenced
+	// by not yet triggered callbacks
+	virtual void cleanUp() {
+		ASSERT(isDone);
+		dbActor = {};
+	}
+
+	// FDB database
+	fdb::Database fdbDb;
+
+	// Actor implementing the database operation worklflow
+	std::shared_ptr<IDatabaseActor> dbActor;
+
+	// database operation state
+	bool isDone;
+
+	// Mutex protecting access to shared mutable state
+	std::mutex mutex;
+
+	// Continuation to be called after completion of the transaction
+	TTaskFct contAfterDone;
+
+	// Reference to the scheduler
+	IScheduler* scheduler;
+};
+
+/**
+ *  Database context using blocking waits to implement continuations on futures
+ */
+class BlockingDatabaseContext : public DatabaseContextBase {
+public:
+	BlockingDatabaseContext(fdb::Database db,
+	                        std::shared_ptr<IDatabaseActor> dbActor,
+	                        TTaskFct cont,
+	                        IScheduler* scheduler)
+	  : DatabaseContextBase(db, dbActor, cont, scheduler) {}
+
+protected:
+	void doContinueAfter(fdb::Future f, TTaskFct cont) override {
+		auto thisRef = std::static_pointer_cast<BlockingDatabaseContext>(shared_from_this());
+		scheduler->schedule([thisRef, f, cont]() mutable { thisRef->blockingContinueAfter(f, cont); });
+	}
+
+	void blockingContinueAfter(fdb::Future f, TTaskFct cont) {
+		std::unique_lock<std::mutex> lock(mutex);
+		if (isDone) {
+			return;
+		}
+		lock.unlock();
+		auto start = timeNow();
+		fdb::Error err = f.blockUntilReady();
+		if (err) {
+			dbActor->complete(err);
+			return;
+		}
+		err = f.error();
+		auto waitTimeUs = timeElapsedInUs(start);
+		if (waitTimeUs > LONG_WAIT_TIME_US) {
+			fmt::print("Long waiting time on a future: {:.3f}s, return code {} ({})\n",
+			           microsecToSec(waitTimeUs),
+			           err.code(),
+			           err.what());
+		}
+		if (err.code() == error_code_success) {
+			scheduler->schedule([cont]() { cont(); });
+		} else {
+			dbActor->complete(err);
+		}
+	}
+};
+
+/**
+ *  Database context using callbacks to implement continuations on future
+ */
+class AsyncDatabaseContext : public DatabaseContextBase {
+public:
+	AsyncDatabaseContext(fdb::Database db,
+	                     std::shared_ptr<IDatabaseActor> dbActor,
+	                     TTaskFct cont,
+	                     IScheduler* scheduler)
+	  : DatabaseContextBase(db, dbActor, cont, scheduler) {}
+
+protected:
+	void doContinueAfter(fdb::Future f, TTaskFct cont) override {
+		std::unique_lock<std::mutex> lock(mutex);
+		if (isDone) {
+			return;
+		}
+		callbackMap[f] = DBCallbackInfo{ f, cont, shared_from_this(), timeNow() };
+		lock.unlock();
+		try {
+			f.then([this](fdb::Future f) { futureReadyCallback(f, this); });
+		} catch (std::runtime_error& err) {
+			lock.lock();
+			callbackMap.erase(f);
+			lock.unlock();
+			dbActor->complete(fdb::Error(error_code_operation_failed));
+		}
+	}
+
+	static void futureReadyCallback(fdb::Future f, void* param) {
+		try {
+			AsyncDatabaseContext* dbCtx = (AsyncDatabaseContext*)param;
+			dbCtx->onFutureReady(f);
+		} catch (std::runtime_error& err) {
+			fmt::print("Unexpected exception in callback {}\n", err.what());
+			abort();
+		} catch (...) {
+			fmt::print("Unknown error in callback\n");
+			abort();
+		}
+	}
+
+	void onFutureReady(fdb::Future f) {
+		auto endTime = timeNow();
+		injectRandomSleep();
+		// Hold a reference to this to avoid it to be
+		// destroyed before releasing the mutex
+		auto thisRef = shared_from_this();
+		std::unique_lock<std::mutex> lock(mutex);
+		auto iter = callbackMap.find(f);
+		ASSERT(iter != callbackMap.end());
+		DBCallbackInfo cbInfo = iter->second;
+		callbackMap.erase(iter);
+		if (isDone) {
+			return;
+		}
+		lock.unlock();
+		fdb::Error err = f.error();
+		auto waitTimeUs = timeElapsedInUs(cbInfo.startTime, endTime);
+		if (waitTimeUs > LONG_WAIT_TIME_US) {
+			fmt::print("Long waiting time on a future: {:.3f}s, return code {} ({})\n",
+			           microsecToSec(waitTimeUs),
+			           err.code(),
+			           err.what());
+		}
+
+		if (err.code() == error_code_success) {
+			scheduler->schedule(cbInfo.cont);
+		} else {
+			dbActor->complete(err);
+		}
+	}
+
+	// Inject a random sleep with a low probability
+	void injectRandomSleep() {
+		if (Random::get().randomBool(0.01)) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(Random::get().randomInt(1, 5)));
+		}
+	}
+
+	void cleanUp() override {
+		DatabaseContextBase::cleanUp();
+
+		// Cancel all pending operations
+		// Note that the callbacks of the cancelled futures will still be called
+		std::unique_lock<std::mutex> lock(mutex);
+		std::vector<fdb::Future> futures;
+		for (auto& iter : callbackMap) {
+			futures.push_back(iter.second.future);
+		}
+		lock.unlock();
+		for (auto& f : futures) {
+			f.cancel();
+		}
+	}
+
+	// Object references for a future callback
+	struct DBCallbackInfo {
+		fdb::Future future;
+		TTaskFct cont;
+		std::shared_ptr<IDatabaseContext> thisRef;
+		TimePoint startTime;
+	};
+
+	// Map for keeping track of future waits and holding necessary object references
+	std::unordered_map<fdb::Future, DBCallbackInfo> callbackMap;
+};
+
+/**
  * Transaction executor base class, containing reusable functionality
  */
 class TransactionExecutorBase : public ITransactionExecutor {
@@ -530,6 +744,22 @@ protected:
 		}
 	}
 
+	void executeDBOperationOnDatabase(fdb::Database db, std::shared_ptr<IDatabaseActor> dbActor, TTaskFct cont) {
+		try {
+			std::shared_ptr<IDatabaseContext> ctx;
+			if (options.blockOnFutures) {
+				ctx = std::make_shared<BlockingDatabaseContext>(db, dbActor, cont, scheduler);
+			} else {
+				ctx = std::make_shared<AsyncDatabaseContext>(db, dbActor, cont, scheduler);
+			}
+			dbActor->init(ctx);
+			dbActor->start();
+		} catch (...) {
+			dbActor->complete(fdb::Error(error_code_operation_failed));
+			cont();
+		}
+	}
+
 protected:
 	TransactionExecutorOptions options;
 	std::string bgBasePath;
@@ -559,6 +789,11 @@ public:
 		executeOnDatabase(databases[idx], txActor, cont);
 	}
 
+	void executeDBOperation(std::shared_ptr<IDatabaseActor> dbActor, TTaskFct cont) override {
+		int idx = Random::get().randomInt(0, options.numDatabases - 1);
+		executeDBOperationOnDatabase(databases[idx], dbActor, cont);
+	}
+
 	void release() { databases.clear(); }
 
 private:
@@ -575,6 +810,11 @@ public:
 	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) override {
 		fdb::Database db(clusterFile.c_str());
 		executeOnDatabase(db, txActor, cont);
+	}
+
+	void executeDBOperation(std::shared_ptr<IDatabaseActor> dbActor, TTaskFct cont) override {
+		fdb::Database db(clusterFile.c_str());
+		executeDBOperationOnDatabase(db, dbActor, cont);
 	}
 };
 

@@ -309,6 +309,7 @@ public:
 
 class Future {
 protected:
+	friend class Database;
 	friend class Transaction;
 	friend std::hash<Future>;
 	std::shared_ptr<native::FDBFuture> f;
@@ -706,6 +707,13 @@ public:
 		if (err)
 			throwError("Failed to create transaction: ", err);
 		return Transaction(tx_native);
+	}
+
+	TypedFuture<future_var::KeyRangeRefArray> listBlobbifiedRanges(KeyRef begin, KeyRef end, int rangeLimit) {
+		if (!db)
+			throw std::runtime_error("list_blobbified_ranges from null database");
+		return native::fdb_database_list_blobbified_ranges(
+		    db.get(), begin.data(), intSize(begin), end.data(), intSize(end), rangeLimit);
 	}
 };
 

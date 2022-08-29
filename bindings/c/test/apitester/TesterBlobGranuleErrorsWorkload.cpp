@@ -30,6 +30,7 @@ public:
 	BlobGranuleErrorsWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
 
 private:
+	// FIXME: finish adding other op types
 	enum OpType {
 		OP_READ_NO_MATERIALIZE,
 		OP_READ_FILE_LOAD_ERROR,
@@ -78,7 +79,7 @@ private:
 				    seenReadSuccess = true;
 			    }
 			    if (err.code() != expectedError) {
-				    info(fmt::format("incorrect error. Expected {}, Got {}", err.code(), expectedError));
+				    info(fmt::format("incorrect error. Expected {}, Got {}", expectedError, err.code()));
 				    if (err.code() == error_code_blob_granule_transaction_too_old) {
 					    ASSERT(!seenReadSuccess);
 					    ctx->done();

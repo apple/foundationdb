@@ -123,6 +123,14 @@ protected:
 		execTransaction(std::make_shared<TransactionFct>(start), cont, failOnError);
 	}
 
+	// Execute a transaction within the workload
+	void execDBOperation(std::shared_ptr<IDatabaseActor> tx, TTaskFct cont, bool failOnError = true);
+
+	// Execute a transaction within the workload, a convenience method for a tranasaction defined by a lambda function
+	void execDBOperation(TDBStartFct start, TTaskFct cont, bool failOnError = true) {
+		execDBOperation(std::make_shared<DatabaseFct>(start), cont, failOnError);
+	}
+
 	// Log an error message, increase error counter
 	void error(const std::string& msg);
 
@@ -164,6 +172,9 @@ protected:
 
 	// Number of completed transactions
 	std::atomic<int> numTxCompleted;
+
+	// Number of completed database operations
+	std::atomic<int> numDBOpsCompleted;
 };
 
 // Workload manager

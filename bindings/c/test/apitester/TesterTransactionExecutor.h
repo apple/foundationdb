@@ -114,6 +114,72 @@ private:
 	TTxStartFct startFct;
 };
 
+class IDatabaseContext : public std::enable_shared_from_this<IDatabaseContext> {
+public:
+	virtual ~IDatabaseContext() {}
+
+	// Current FDB database
+	virtual fdb::Database db() = 0;
+
+	// Schedule a continuation to be executed when the future gets ready
+	virtual void continueAfter(fdb::Future f, TTaskFct cont) = 0;
+
+	// Mark the database operation as done
+	virtual void done() = 0;
+};
+
+/**
+ * Interface of an actor object implementing a concrete database operation
+ */
+class IDatabaseActor {
+public:
+	virtual ~IDatabaseActor() {}
+
+	// Initialize with the given database context
+	virtual void init(std::shared_ptr<IDatabaseContext> ctx) = 0;
+
+	// Start execution of the database operation
+	virtual void start() = 0;
+
+	// Database operation completion result (error_code_success in case of success)
+	virtual fdb::Error getError() = 0;
+
+	// Notification about the completion of the database operation
+	virtual void complete(fdb::Error err) = 0;
+};
+
+/**
+ * A helper base class for database actors
+ */
+class DatabaseActorBase : public IDatabaseActor {
+public:
+	void init(std::shared_ptr<IDatabaseContext> ctx) override { context = ctx; }
+	fdb::Error getError() override { return error; }
+	void complete(fdb::Error err) override;
+
+protected:
+	std::shared_ptr<IDatabaseContext> ctx() { return context; }
+
+private:
+	std::shared_ptr<IDatabaseContext> context;
+	fdb::Error error = fdb::Error::success();
+};
+
+// Type of the lambda functions implementing a database operation
+using TDBStartFct = std::function<void(std::shared_ptr<IDatabaseContext>)>;
+
+/**
+ * A wrapper class for database operations implemented by lambda functions
+ */
+class DatabaseFct : public DatabaseActorBase {
+public:
+	DatabaseFct(TDBStartFct startFct) : startFct(startFct) {}
+	void start() override { startFct(this->ctx()); }
+
+private:
+	TDBStartFct startFct;
+};
+
 /**
  * Configuration of transaction execution mode
  */
@@ -141,6 +207,7 @@ public:
 	virtual ~ITransactionExecutor() {}
 	virtual void init(IScheduler* sched, const char* clusterFile, const std::string& bgBasePath) = 0;
 	virtual void execute(std::shared_ptr<ITransactionActor> tx, TTaskFct cont) = 0;
+	virtual void executeDBOperation(std::shared_ptr<IDatabaseActor> db, TTaskFct cont) = 0;
 };
 
 // Create a transaction executor for the given options

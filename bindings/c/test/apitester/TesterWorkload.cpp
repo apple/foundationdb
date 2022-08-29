@@ -80,7 +80,7 @@ bool WorkloadConfig::getBoolOption(const std::string& name, bool defaultVal) con
 
 WorkloadBase::WorkloadBase(const WorkloadConfig& config)
   : manager(nullptr), tasksScheduled(0), numErrors(0), clientId(config.clientId), numClients(config.numClients),
-    failed(false), numTxCompleted(0) {
+    failed(false), numTxCompleted(0), numDBOpsCompleted(0) {
 	maxErrors = config.getIntOption("maxErrors", 10);
 	workloadId = fmt::format("{}{}", config.name, clientId);
 }
@@ -91,6 +91,9 @@ void WorkloadBase::init(WorkloadManager* manager) {
 
 void WorkloadBase::printStats() {
 	info(fmt::format("{} transactions completed", numTxCompleted.load()));
+	if (numDBOpsCompleted > 0) {
+		info(fmt::format("{} transactions completed", numDBOpsCompleted.load()));
+	}
 }
 
 void WorkloadBase::schedule(TTaskFct task) {
@@ -116,6 +119,30 @@ void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskF
 			cont();
 		} else {
 			std::string msg = fmt::format("Transaction failed with error: {} ({})", err.code(), err.what());
+			if (failOnError) {
+				error(msg);
+				failed = true;
+			} else {
+				info(msg);
+				cont();
+			}
+		}
+		scheduledTaskDone();
+	});
+}
+
+void WorkloadBase::execDBOperation(std::shared_ptr<IDatabaseActor> db, TTaskFct cont, bool failOnError) {
+	if (failed) {
+		return;
+	}
+	tasksScheduled++;
+	manager->txExecutor->executeDBOperation(db, [this, db, cont, failOnError]() {
+		numDBOpsCompleted++;
+		fdb::Error err = db->getError();
+		if (err.code() == error_code_success) {
+			cont();
+		} else {
+			std::string msg = fmt::format("Database operation failed with error: {} ({})", err.code(), err.what());
 			if (failOnError) {
 				error(msg);
 				failed = true;
