@@ -8501,12 +8501,12 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			if (data->otherError.getFuture().isReady())
 				data->otherError.getFuture().get();
 
-			// TraceEvent(SevDebug, "SetDesiredOldestVersion", data->thisServerID)
-			// 	.detail("CursorMinKnownCommitted", cursor->getMinKnownCommittedVersion())
-			// 	.detail("VersionIndexerKnownCommittedVersion", data->versionIndexerReportedCommitted)
-			// 	.detail("StorageVersion", data->storageVersion())
-			// 	.detail("Version", data->version.get())
-			// 	.log();
+			TraceEvent(SevDebug, "SetDesiredOldestVersion", data->thisServerID)
+			 	.detail("CursorMinKnownCommitted", cursor->getMinKnownCommittedVersion())
+				.detail("VersionIndexerKnownCommittedVersion", data->versionIndexerReportedCommitted)
+				.detail("StorageVersion", data->storageVersion())
+				.detail("Version", data->version.get())
+				.log();
 			data->updateDesiredOldestVersion(
 			    std::max(cursor->getMinKnownCommittedVersion(), data->versionIndexerReportedCommitted));
 		}
@@ -10222,11 +10222,11 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 				prevVersion = reply.versions[i + j].first;
 			}
 			if (updatedVersion != invalidVersion) {
-				// TraceEvent("SetNextVersionWithNoData", self->thisServerID)
-				//     .detail("Version", updatedVersion)
-				//     .detail("Previous", self->nextVersionWithNoData.get())
-				// 		.detail("DataVersion", self->version.get())
-				// 		.detail("MyTag", self->tag);
+				TraceEvent("SetNextVersionWithNoData", self->thisServerID)
+					.detail("Version", updatedVersion)
+					.detail("Previous", self->nextVersionWithNoData.get())
+					.detail("DataVersion", self->version.get())
+					.detail("MyTag", self->tag);
 				self->nextVersionWithNoData.set(updatedVersion);
 			}
 			if (j > 0) {
