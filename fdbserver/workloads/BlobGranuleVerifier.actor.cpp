@@ -925,6 +925,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		loop {
 			state RangeResult output;
 			state Version readVersion;
+			state int64_t bufferedBytes = 0;
 			try {
 				Version ver = wait(tr.getReadVersion());
 				readVersion = ver;
@@ -936,6 +937,11 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					Standalone<RangeResultRef> res = waitNext(results.getFuture());
 					output.arena().dependsOn(res.arena());
 					output.append(output.arena(), res.begin(), res.size());
+					bufferedBytes += res.expectedSize();
+					// force checking if we have enough data
+					if (bufferedBytes >= 10 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
+						break;
+					}
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_operation_cancelled) {
