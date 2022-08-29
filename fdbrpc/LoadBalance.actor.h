@@ -28,6 +28,8 @@
 #elif !defined(FLOW_LOADBALANCE_ACTOR_H)
 #define FLOW_LOADBALANCE_ACTOR_H
 
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
+
 #include "flow/BooleanParam.h"
 #include "flow/flow.h"
 #include "flow/Knobs.h"
@@ -476,6 +478,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		double bestTime = 1e9; // The latency to the server with the least outstanding requests.
 		double nextTime = 1e9;
 		int badServers = 0;
+		std::string reasons;
 
 		for (int i = 0; i < alternatives->size(); i++) {
 			// countBest(): the number of alternatives in the same locality (i.e., DC by default) as alternatives[0].
@@ -488,10 +491,10 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				break;
 			} else if (badServers == alternatives->countBest() && i == badServers) {
 				TraceEvent("AllLocalAlternativesFailed")
-				    .suppressFor(1.0)
 				    .detail("Alternatives", alternatives->description())
 				    .detail("Total", alternatives->size())
-				    .detail("Best", alternatives->countBest());
+				    .detail("Best", alternatives->countBest())
+				    .detail("Reasons", reasons);
 			}
 
 			RequestStream<Request> const* thisStream = &alternatives->get(i, channel);
@@ -505,6 +508,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 						// penalty value is 1.0), consider this server as bad.
 						// penalty is sent from server.
 						++badServers;
+						reasons += fmt::format(", {} penalty {}", i, qd.penalty);
 					}
 
 					if (thisMetric < bestMetric) {
@@ -523,9 +527,11 @@ Future<REPLY_TYPE(Request)> loadBalance(
 					}
 				} else {
 					++badServers;
+					reasons += fmt::format(", {} failedUntil {}", i, qd.failedUntil);
 				}
 			} else {
 				++badServers;
+				reasons += fmt::format(", {}", i);
 			}
 		}
 		if (nextMetric > 1e8) {
