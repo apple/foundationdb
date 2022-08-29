@@ -34,6 +34,7 @@
 #include "flow/flow.h"
 #include "flow/Knobs.h"
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
@@ -478,6 +479,28 @@ Future<REPLY_TYPE(Request)> loadBalance(
 	if (nextAlt >= bestAlt)
 		nextAlt++;
 
+	state std::string requestType;
+	state Optional<UID> dbgid = request.id();
+	if (std::is_same<Request, GetKeyValuesRequest>::value) {
+		requestType = "GetRange";
+	} else if (std::is_same<Request, GetKeyRequest>::value) {
+		requestType = "GetKey";
+	} else if (std::is_same<Request, GetValueRequest>::value) {
+		requestType = "GetValue";
+	} else if (std::is_same<Request, GetMappedKeyValuesRequest>::value) {
+		requestType = "GetMappedRange";
+	} else if (std::is_same<Request, GetKeyServerLocationsRequest>::value) {
+		requestType = "GetKeyServerLocations";
+	} else {
+		requestType = "Unknown";
+	}
+
+	std::vector<int> distanceV;
+	for (int i = 0; i < alternatives->size(); i++) {
+		distanceV.push_back((int)alternatives->getDistance(i));
+	}
+	state std::string distances = describe(distanceV);
+
 	if (model) {
 		double bestMetric = 1e9; // Storage server with the least outstanding requests.
 		double nextMetric = 1e9;
@@ -496,18 +519,20 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				// do not need to consider any remote servers.
 				break;
 			} else if (badServers == alternatives->countBest() && i == badServers) {
-				TraceEvent("AllLocalAlternativesFailed")
+				TraceEvent("AllLocalAlternativesFailed", dbgid.present() ? dbgid.get() : UID())
 				    .detail("Alternatives", alternatives->description())
+				    .detail("Distances", distances)
 				    .detail("Total", alternatives->size())
 				    .detail("Best", alternatives->countBest())
 				    .detail("Reasons", reasons);
 			} else if (i >= alternatives->countBest()) {
-				TraceEvent("AllLocalAlternativesFailed2")
+				TraceEvent("AllLocalAlternativesFailed2", dbgid.present() ? dbgid.get() : UID())
 				    .detail("Alternatives", alternatives->description())
+				    .detail("Distances", distances)
 				    .detail("Total", alternatives->size())
 				    .detail("Best", alternatives->countBest())
-					.detail("I", i)
-					.detail("Bad", badServers)
+				    .detail("I", i)
+				    .detail("Bad", badServers)
 				    .detail("Reasons", reasons);
 			}
 
@@ -583,27 +608,12 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		}
 	}
 
+	TraceEvent("LBNextAlt", dbgid.present() ? dbgid.get() : UID()).detail("Next", nextAlt);
 	state int startAlt = nextAlt;
 	state int startDistance = (bestAlt + alternatives->size() - startAlt) % alternatives->size();
 
 	state int numAttempts = 0;
 	state double backoff = 0;
-	state std::string requestType;
-	state Optional<UID> dbgid = request.id();
-	if (std::is_same<Request, GetKeyValuesRequest>::value) {
-		requestType = "GetRange";
-	} else if (std::is_same<Request, GetKeyRequest>::value) {
-		requestType = "GetKey";
-	} else if (std::is_same<Request, GetValueRequest>::value) {
-		requestType = "GetValue";
-	} else if (std::is_same<Request, GetMappedKeyValuesRequest>::value) {
-		requestType = "GetMappedRange";
-	} else if (std::is_same<Request, GetKeyServerLocationsRequest>::value) {
-		requestType = "GetKeyServerLocations";
-	} else {
-		requestType = "Unknown";
-	}
-
 	// Issue requests to selected servers.
 	loop {
 		if (now() - startTime > (g_network->isSimulated() ? 30.0 : 600.0)) {
@@ -630,6 +640,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		// bestAlt and nextAlt have been decided.
 		state RequestStream<Request> const* stream = nullptr;
 		state LBDistance::Type distance;
+		state int chosenAlt = -1;
 		for (int alternativeNum = 0; alternativeNum < alternatives->size(); alternativeNum++) {
 			int useAlt = nextAlt;
 			if (nextAlt == startAlt)
@@ -639,6 +650,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 
 			stream = &alternatives->get(useAlt, channel);
 			distance = alternatives->getDistance(useAlt);
+			chosenAlt = useAlt;
 			if (!IFailureMonitor::failureMonitor().getState(stream->getEndpoint()).failed &&
 			    (!firstRequestEndpoint.present() || stream->getEndpoint().token.first() != firstRequestEndpoint.get()))
 				break;
@@ -647,6 +659,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				triedAllOptions = TriedAllOptions::True;
 			stream = nullptr;
 			distance = LBDistance::DISTANT;
+			chosenAlt = -1;
 		}
 
 		if (!stream && !firstRequestData.isValid()) {
@@ -664,7 +677,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				// Making this SevWarn means a lot of clutter
 				if (now() - g_network->networkInfo.newestAlternativesFailure > 1 ||
 				    deterministicRandom()->random01() < 0.01) {
-					TraceEvent("AllAlternativesFailed").detail("Alternatives", alternatives->description());
+					TraceEvent("AllAlternativesFailed", dbgid.present() ? dbgid.get() : UID())
+					    .detail("Alternatives", alternatives->description());
 				}
 				wait(allAlternativesFailedDelay(okFuture));
 			} else {
@@ -683,28 +697,29 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		} else if (firstRequestData.isValid()) {
 			// Issue a second request, the first one is taking a long time.
 			if (distance == LBDistance::DISTANT) {
-				TraceEvent("LBDistant2nd")
-				    .suppressFor(0.1)
+				TraceEvent("LBDistant2", dbgid.present() ? dbgid.get() : UID())
 				    .detail("Distance", (int)distance)
 				    .detail("BackOff", backoff)
 				    .detail("TriedAllOptions", triedAllOptions)
 				    .detail("Alternatives", alternatives->description())
+				    .detail("Distances", distances)
+				    .detail("Chosen", chosenAlt)
 				    .detail("Token", stream->getEndpoint().token)
 				    .detail("Request", requestType)
-				    .detail("DebugID", dbgid.present() ? dbgid.get() : UID())
 				    .detail("QueueModel", model ? model->toString() : "")
 				    .detail("Total", alternatives->size())
 				    .detail("Best", alternatives->countBest())
 				    .detail("Attempts", numAttempts);
 			} else {
-				TraceEvent("LBLocal2")
-				    .suppressFor(0.1)
+				TraceEvent("LBLocal2", dbgid.present() ? dbgid.get() : UID())
 				    .detail("Distance", (int)distance)
 				    .detail("BackOff", backoff)
 				    .detail("TriedAllOptions", triedAllOptions)
+				    .detail("Alternatives", alternatives->description())
+				    .detail("Distances", distances)
+				    .detail("Chosen", chosenAlt)
 				    .detail("Token", stream->getEndpoint().token)
 				    .detail("Request", requestType)
-				    .detail("DebugID", dbgid.present() ? dbgid.get() : UID())
 				    .detail("QueueModel", model ? model->toString() : "")
 				    .detail("Total", alternatives->size())
 				    .detail("Best", alternatives->countBest())
@@ -740,25 +755,28 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		} else {
 			// Issue a request, if it takes too long to get a reply, go around the loop
 			if (distance == LBDistance::DISTANT) {
-				TraceEvent("LBDistant")
+				TraceEvent("LBDistant", dbgid.present() ? dbgid.get() : UID())
 				    .detail("Distance", (int)distance)
 				    .detail("BackOff", backoff)
 				    .detail("TriedAllOptions", triedAllOptions)
 				    .detail("Alternatives", alternatives->description())
+				    .detail("Distances", distances)
+				    .detail("Chosen", chosenAlt)
 				    .detail("Token", stream->getEndpoint().token)
 				    .detail("Request", requestType)
-				    .detail("DebugID", dbgid.present() ? dbgid.get() : UID())
 				    .detail("QueueModel", model ? model->toString() : "")
 				    .detail("Total", alternatives->size())
 				    .detail("Best", alternatives->countBest());
 			} else {
-				TraceEvent("LBLocal")
+				TraceEvent("LBLocal", dbgid.present() ? dbgid.get() : UID())
 				    .detail("Distance", (int)distance)
 				    .detail("BackOff", backoff)
 				    .detail("TriedAllOptions", triedAllOptions)
+				    .detail("Alternatives", alternatives->description())
+				    .detail("Distances", distances)
+				    .detail("Chosen", chosenAlt)
 				    .detail("Token", stream->getEndpoint().token)
 				    .detail("Request", requestType)
-				    .detail("DebugID", dbgid.present() ? dbgid.get() : UID())
 				    .detail("QueueModel", model ? model->toString() : "")
 				    .detail("Total", alternatives->size())
 				    .detail("Best", alternatives->countBest())
