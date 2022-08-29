@@ -256,6 +256,7 @@ FORMAT_TRACEABLE(long int, "%ld");
 FORMAT_TRACEABLE(unsigned long int, "%lu");
 FORMAT_TRACEABLE(long long int, "%lld");
 FORMAT_TRACEABLE(unsigned long long int, "%llu");
+FORMAT_TRACEABLE(float, "%g");
 FORMAT_TRACEABLE(double, "%g");
 FORMAT_TRACEABLE(void*, "%p");
 FORMAT_TRACEABLE(volatile long, "%ld");

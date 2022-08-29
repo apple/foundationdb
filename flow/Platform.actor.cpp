@@ -33,16 +33,20 @@
 
 #include "flow/StreamCipher.h"
 #include "flow/BlobCipher.h"
+#include "flow/ScopeExit.h"
 #include "flow/Trace.h"
 #include "flow/Error.h"
 
 #include "flow/Knobs.h"
 
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <cstring>
-#include <algorithm>
+#include <string>
+#include <string_view>
+#include <vector>
 #include <boost/format.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/operations.hpp>
@@ -65,6 +69,7 @@
 #include <direct.h>
 #include <pdh.h>
 #include <pdhmsg.h>
+#include <processenv.h>
 #pragma comment(lib, "pdh.lib")
 
 // for SHGetFolderPath
@@ -148,6 +153,9 @@
 #endif
 
 #ifdef __APPLE__
+/* Needed for cross-platform 'environ' */
+#include <crt_externs.h>
+
 #include <sys/uio.h>
 #include <sys/syslimits.h>
 #include <mach/mach.h>
@@ -1935,14 +1943,35 @@ std::string epochsToGMTString(double epochs) {
 }
 
 std::vector<std::string> getEnvironmentKnobOptions() {
-	char** e = environ;
+	constexpr const size_t ENVKNOB_PREFIX_LEN = sizeof(ENVIRONMENT_KNOB_OPTION_PREFIX) - 1;
 	std::vector<std::string> knobOptions;
-	for (; *e; e++) {
-		std::string envOption(*e);
+#if defined(_WIN32)
+	auto e = GetEnvironmentStrings();
+	if (e == nullptr)
+		return {};
+	auto cleanup = ScopeExit([e]() { FreeEnvironmentStrings(e); });
+	while (*e) {
+		auto candidate = std::string_view(e);
+		if (boost::starts_with(candidate, ENVIRONMENT_KNOB_OPTION_PREFIX))
+			knobOptions.emplace_back(candidate.substr(ENVKNOB_PREFIX_LEN));
+		e += (candidate.size() + 1);
+	}
+#else
+	char** e = nullptr;
+#ifdef __linux__
+	e = environ;
+#elif defined(__APPLE__)
+	e = *_NSGetEnviron();
+#else
+#error Port me!
+#endif
+	for (; e && *e; e++) {
+		std::string_view envOption(*e);
 		if (boost::starts_with(envOption, ENVIRONMENT_KNOB_OPTION_PREFIX)) {
-			knobOptions.push_back(envOption.substr(strlen(ENVIRONMENT_KNOB_OPTION_PREFIX)));
+			knobOptions.emplace_back(envOption.substr(ENVKNOB_PREFIX_LEN));
 		}
 	}
+#endif
 	return knobOptions;
 }
 

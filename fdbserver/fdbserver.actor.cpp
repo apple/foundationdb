@@ -1115,7 +1115,7 @@ private:
 	CLIOptions() = default;
 
 	void parseEnvInternal() {
-		for (std::string knob : getEnvironmentKnobOptions()) {
+		for (const std::string& knob : getEnvironmentKnobOptions()) {
 			auto pos = knob.find_first_of("=");
 			if (pos == std::string::npos) {
 				fprintf(stderr,
@@ -1866,6 +1866,30 @@ private:
 			localities.set(LocalityData::keyDcId, dcId);
 	}
 };
+
+// Returns true iff validation is successful
+bool validateSimulationDataFiles(std::string const& dataFolder, bool isRestarting) {
+	std::vector<std::string> files = platform::listFiles(dataFolder);
+	if (!isRestarting) {
+		for (const auto& file : files) {
+			if (file != "restartInfo.ini" && file != getTestEncryptionFileName()) {
+				TraceEvent(SevError, "IncompatibleFileFound").detail("DataFolder", dataFolder).detail("FileName", file);
+				fprintf(stderr,
+				        "ERROR: Data folder `%s' is non-empty; please use clean, fdb-only folder\n",
+				        dataFolder.c_str());
+				return false;
+			}
+		}
+	} else if (isRestarting && files.empty()) {
+		TraceEvent(SevWarnAlways, "FileNotFound").detail("DataFolder", dataFolder);
+		printf("ERROR: Data folder `%s' is empty, but restarting option selected. Run Phase 1 test first\n",
+		       dataFolder.c_str());
+		return false;
+	}
+
+	return true;
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -2065,7 +2089,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		std::string environmentKnobOptions;
-		for (std::string knobOption : getEnvironmentKnobOptions()) {
+		for (const std::string& knobOption : getEnvironmentKnobOptions()) {
 			environmentKnobOptions += knobOption + " ";
 		}
 		if (environmentKnobOptions.length()) {
@@ -2131,17 +2155,8 @@ int main(int argc, char* argv[]) {
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 			}
-			std::vector<std::string> files = platform::listFiles(dataFolder);
-			if ((files.size() > 1 || (files.size() == 1 && files[0] != "restartInfo.ini")) && !opts.restarting) {
-				TraceEvent(SevError, "IncompatibleFileFound").detail("DataFolder", dataFolder);
-				fprintf(stderr,
-				        "ERROR: Data folder `%s' is non-empty; please use clean, fdb-only folder\n",
-				        dataFolder.c_str());
-				flushAndExit(FDB_EXIT_ERROR);
-			} else if (files.empty() && opts.restarting) {
-				TraceEvent(SevWarnAlways, "FileNotFound").detail("DataFolder", dataFolder);
-				printf("ERROR: Data folder `%s' is empty, but restarting option selected. Run Phase 1 test first\n",
-				       dataFolder.c_str());
+
+			if (!validateSimulationDataFiles(dataFolder, opts.restarting)) {
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 
