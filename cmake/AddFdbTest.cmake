@@ -198,16 +198,17 @@ function(stage_correctness_package)
       set(src_dir "${src_dir}/")
       string(SUBSTRING ${src_dir} ${dir_len} -1 dest_dir)
       string(SUBSTRING ${file} ${dir_len} -1 rel_out_file)
-	  set(out_file ${STAGE_OUT_DIR}/${rel_out_file})
+      set(out_file ${STAGE_OUT_DIR}/${rel_out_file})
       list(APPEND external_files ${out_file})
-	  add_custom_command(
+      add_custom_command(
         OUTPUT ${out_file}
-		DEPENDS ${file}
-		COMMAND ${CMAKE_COMMAND} -E copy ${file} ${out_file}
-		COMMENT "Copying ${STAGE_CONTEXT} external file ${file}"
-		)
+        DEPENDS ${file}
+        COMMAND ${CMAKE_COMMAND} -E copy ${file} ${out_file}
+        COMMENT "Copying ${STAGE_CONTEXT} external file ${file}"
+        )
     endforeach()
   endforeach()
+
   list(APPEND package_files ${STAGE_OUT_DIR}/bin/fdbserver
                             ${STAGE_OUT_DIR}/bin/coverage.fdbserver.xml
                             ${STAGE_OUT_DIR}/bin/coverage.fdbclient.xml
@@ -217,6 +218,7 @@ function(stage_correctness_package)
                             ${STAGE_OUT_DIR}/bin/TraceLogHelper.dll
                             ${STAGE_OUT_DIR}/CMakeCache.txt
     )
+
   add_custom_command(
     OUTPUT ${package_files}
     DEPENDS ${CMAKE_BINARY_DIR}/CMakeCache.txt
@@ -238,6 +240,20 @@ function(stage_correctness_package)
                                      ${STAGE_OUT_DIR}/bin
     COMMENT "Copying files for ${STAGE_CONTEXT} package"
     )
+
+  set(test_harness_dir "${CMAKE_SOURCE_DIR}/contrib/TestHarness2")
+  file(GLOB_RECURSE test_harness2_files RELATIVE "${test_harness_dir}" CONFIGURE_DEPENDS "${test_harness_dir}/*.py")
+  foreach(file IN LISTS test_harness2_files)
+    set(src_file "${test_harness_dir}/${file}")
+    set(out_file "${STAGE_OUT_DIR}/${file}")
+    get_filename_component(dir "${out_file}" DIRECTORY)
+    file(MAKE_DIRECTORY "${dir}")
+    add_custom_command(OUTPUT ${out_file}
+      COMMAND ${CMAKE_COMMAND} -E copy "${src_file}" "${out_file}"
+      DEPENDS "${src_file}")
+    list(APPEND package_files "${out_file}")
+  endforeach()
+
   list(APPEND package_files ${test_files} ${external_files})
   if(STAGE_OUT_FILES)
     set(${STAGE_OUT_FILES} ${package_files} PARENT_SCOPE)

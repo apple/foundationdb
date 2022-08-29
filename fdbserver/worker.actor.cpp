@@ -3358,7 +3358,9 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		    makeReference<AsyncVar<ClusterControllerPriorityInfo>>(getCCPriorityInfo(fitnessFilePath, processClass));
 		auto serverDBInfo = ServerDBInfo();
 		serverDBInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
+		serverDBInfo.myLocality = localities;
 		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>(serverDBInfo);
+		TraceEvent("MyLocality").detail("Locality", dbInfo->get().myLocality.toString());
 
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
 		                              "MonitorAndWriteCCPriorityInfo"));
