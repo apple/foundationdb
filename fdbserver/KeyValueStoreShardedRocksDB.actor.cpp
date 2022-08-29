@@ -1914,17 +1914,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		explicit Reader(UID logId, int threadIndex, std::shared_ptr<RocksDBMetrics> rocksDBMetrics)
 		  : logId(logId), threadIndex(threadIndex), rocksDBMetrics(rocksDBMetrics), sampleStartTime(now()) {
-			if (g_network->isSimulated()) {
-				// In simulation, increasing the read operation timeouts to 200s, as some of the tests have
-				// very high load and single read thread cannot process all the load within the timeouts.
-				readValueTimeout = 200.0;
-				readValuePrefixTimeout = 200.0;
-				readRangeTimeout = 200.0;
-			} else {
-				readValueTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_TIMEOUT;
-				readValuePrefixTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
-				readRangeTimeout = SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT;
-			}
+			readValueTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_TIMEOUT;
+			readValuePrefixTimeout = SERVER_KNOBS->ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
+			readRangeTimeout = SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT;
 		}
 
 		void init() override {}
@@ -2438,10 +2430,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	                                            ShardManager* shardManager,
 	                                            Reference<IThreadPool> writeThread) {
 		state double cleanUpDelay = SERVER_KNOBS->ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY;
-		if (g_network->isSimulated()) {
-			// We have longer read timeout in simulation. Set clean up delay accordingly.
-			cleanUpDelay = 300.0;
-		}
 		state double cleanUpPeriod = cleanUpDelay * 2;
 		try {
 			wait(openFuture);
