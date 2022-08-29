@@ -337,7 +337,7 @@ ThreadResult<RangeResult> DLTransaction::readBlobGranulesFinish(
 	                                                               keyRange.end.size(),
 	                                                               beginVersion,
 	                                                               readVersion,
-	                                                               context);
+	                                                               &context);
 
 	return ThreadResult<RangeResult>((ThreadSingleAssignmentVar<RangeResult>*)(r));
 };
@@ -1211,6 +1211,7 @@ ThreadResult<RangeResult> MultiVersionTransaction::readBlobGranules(const KeyRan
                                                                     Version beginVersion,
                                                                     Optional<Version> readVersion,
                                                                     ReadBlobGranuleContext granuleContext) {
+	// FIXME: prevent from calling this from another main thread?
 	auto tr = getTransaction();
 	if (tr.transaction) {
 		Version readVersionOut;
@@ -1220,10 +1221,11 @@ ThreadResult<RangeResult> MultiVersionTransaction::readBlobGranules(const KeyRan
 		if (abortableF.isError()) {
 			return ThreadResult<RangeResult>(abortableF.getError());
 		}
-		auto result = tr.transaction->readBlobGranulesFinish(
+		if (granuleContext.debugNoMaterialize) {
+			return ThreadResult<RangeResult>(blob_granule_not_materialized());
+		}
+		return tr.transaction->readBlobGranulesFinish(
 		    abortableF, keyRange, beginVersion, readVersionOut, granuleContext);
-		f.cancel();
-		return result;
 	} else {
 		return abortableTimeoutResult<RangeResult>(tr.onChange);
 	}

@@ -972,15 +972,15 @@ extern "C" DLLEXPORT FDBResult* fdb_transaction_read_blob_granules_finish(FDBTra
                                                                           int end_key_name_length,
                                                                           int64_t beginVersion,
                                                                           int64_t readVersion,
-                                                                          FDBReadBlobGranuleContext granule_context) {
+                                                                          FDBReadBlobGranuleContext* granule_context) {
 	// FIXME: better way to convert?
 	ReadBlobGranuleContext context;
-	context.userContext = granule_context.userContext;
-	context.start_load_f = granule_context.start_load_f;
-	context.get_load_f = granule_context.get_load_f;
-	context.free_load_f = granule_context.free_load_f;
-	context.debugNoMaterialize = granule_context.debugNoMaterialize;
-	context.granuleParallelism = granule_context.granuleParallelism;
+	context.userContext = granule_context->userContext;
+	context.start_load_f = granule_context->start_load_f;
+	context.get_load_f = granule_context->get_load_f;
+	context.free_load_f = granule_context->free_load_f;
+	context.debugNoMaterialize = granule_context->debugNoMaterialize;
+	context.granuleParallelism = granule_context->granuleParallelism;
 	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture(
 	    TSAV(Standalone<VectorRef<BlobGranuleChunkRef>>, f));
 

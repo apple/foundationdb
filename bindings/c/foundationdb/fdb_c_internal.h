@@ -70,7 +70,7 @@ DLLEXPORT FDBResult* fdb_transaction_read_blob_granules_finish(FDBTransaction* t
                                                                int end_key_name_length,
                                                                int64_t beginVersion,
                                                                int64_t readVersion,
-                                                               FDBReadBlobGranuleContext granuleContext);
+                                                               FDBReadBlobGranuleContext* granuleContext);
 
 #ifdef __cplusplus
 }

@@ -400,19 +400,8 @@ ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranules(const KeyRange
                                                                   Version beginVersion,
                                                                   Optional<Version> readVersion,
                                                                   ReadBlobGranuleContext granule_context) {
-	// FIXME: prevent from calling this from another main thread!
-	Version readVersionOut;
-	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> getFilesFuture =
-	    readBlobGranulesStart(keyRange, beginVersion, readVersion, &readVersionOut);
-	// in the non-multi-version-client case, this doens't need to worry about aborting and switching versions. Just
-	// block on the future
-	getFilesFuture.blockUntilReadyCheckOnMainThread();
-
-	if (getFilesFuture.isError()) {
-		return ThreadResult<RangeResult>(getFilesFuture.getError());
-	}
-
-	return readBlobGranulesFinish(getFilesFuture, keyRange, beginVersion, readVersionOut, granule_context);
+	// This should not be called directly, bypassMultiversionApi should not be set
+	return ThreadResult<RangeResult>(unsupported_operation());
 }
 
 ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> ThreadSafeTransaction::readBlobGranulesStart(
@@ -437,12 +426,7 @@ ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranulesFinish(
     ReadBlobGranuleContext granuleContext) {
 	// do this work off of fdb network threads for performance!
 	Standalone<VectorRef<BlobGranuleChunkRef>> files = startFuture.get();
-
-	if (granuleContext.debugNoMaterialize) {
-		return ThreadResult<RangeResult>(blob_granule_not_materialized());
-	} else {
-		return loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersion, granuleContext);
-	}
+	return loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersion, granuleContext);
 }
 
 void ThreadSafeTransaction::addReadConflictRange(const KeyRangeRef& keys) {

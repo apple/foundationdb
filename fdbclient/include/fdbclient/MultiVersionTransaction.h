@@ -330,7 +330,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                                int end_key_name_length,
 	                                                int64_t beginVersion,
 	                                                int64_t readVersion,
-	                                                FDBReadBlobGranuleContext granule_context);
+	                                                FDBReadBlobGranuleContext* granule_context);
 
 	FDBFuture* (*transactionCommit)(FDBTransaction* tr);
 	fdb_error_t (*transactionGetCommittedVersion)(FDBTransaction* tr, int64_t* outVersion);
