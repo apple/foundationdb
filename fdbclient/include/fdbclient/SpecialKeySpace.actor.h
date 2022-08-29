@@ -411,7 +411,6 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
-	bool supportsTenants() const override { return true; };
 };
 
 class ProcessClassSourceRangeImpl : public SpecialKeyRangeReadImpl {
@@ -420,7 +419,6 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	bool supportsTenants() const override { return true; };
 };
 
 class LockDatabaseImpl : public SpecialKeyRangeRWImpl {
@@ -474,7 +472,6 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
-	bool supportsTenants() const override { return true; };
 };
 
 class CoordinatorsAutoImpl : public SpecialKeyRangeReadImpl {
@@ -483,7 +480,6 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	bool supportsTenants() const override { return true; };
 };
 
 class AdvanceVersionImpl : public SpecialKeyRangeRWImpl {
@@ -522,7 +518,6 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	bool supportsTenants() const override { return true; };
 };
 
 class ActorProfilerConf : public SpecialKeyRangeRWImpl {
@@ -538,7 +533,6 @@ public:
 	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
 	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
-	bool supportsTenants() const override { return true; };
 };
 
 class MaintenanceImpl : public SpecialKeyRangeRWImpl {
