@@ -1028,6 +1028,9 @@ static bool handleRangeIsAssign(Reference<BlobManagerData> bmData, RangeAssignme
 
 	bool forcePurging = bmData->isForcePurging(assignment.keyRange);
 
+	if (forcePurging && assignment.previousFailure.present()) {
+		--bmData->stats.blockedAssignments;
+	}
 	if (assignment.worker.present() && assignment.worker.get().isValid()) {
 		if (BM_DEBUG) {
 			fmt::print("BW {0} already chosen for seqno {1} in BM {2}\n",
