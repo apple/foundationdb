@@ -117,7 +117,7 @@ enum {
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
-	{ OPT_CONNFILE,              "-C",							SO_REQ_SEP },
+	{ OPT_CONNFILE,              "-C",                          SO_REQ_SEP },
 	{ OPT_CONNFILE,              "--cluster-file",              SO_REQ_SEP },
 	{ OPT_SEEDCONNFILE,          "--seed-cluster-file",         SO_REQ_SEP },
 	{ OPT_SEEDCONNSTRING,        "--seed-connection-string",    SO_REQ_SEP },
@@ -128,8 +128,8 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_LISTEN,                "-l",                          SO_REQ_SEP },
 	{ OPT_LISTEN,                "--listen-address",            SO_REQ_SEP },
 #ifdef __linux__
-	{ OPT_FILESYSTEM,           "--data-filesystem",			SO_REQ_SEP },
-	{ OPT_PROFILER_RSS_SIZE,    "--rsssize",					SO_REQ_SEP },
+	{ OPT_FILESYSTEM,           "--data-filesystem",            SO_REQ_SEP },
+	{ OPT_PROFILER_RSS_SIZE,    "--rsssize",                    SO_REQ_SEP },
 #endif
 	{ OPT_DATAFOLDER,            "-d",                          SO_REQ_SEP },
 	{ OPT_DATAFOLDER,            "--datadir",                   SO_REQ_SEP },
