@@ -81,6 +81,8 @@ public:
 	  : fdbTx(tx), txActor(txActor), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
 	    txState(TxState::IN_PROGRESS), commitCalled(false), bgBasePath(bgBasePath) {}
 
+	virtual ~TransactionContextBase() { ASSERT(txState == TxState::DONE); }
+
 	// A state machine:
 	// IN_PROGRESS -> (ON_ERROR -> IN_PROGRESS)* [-> ON_ERROR] -> DONE
 	enum class TxState { IN_PROGRESS, ON_ERROR, DONE };
@@ -124,6 +126,7 @@ public:
 		fdbTx.cancel();
 		txActor->complete(fdb::Error::success());
 		cleanUp();
+		ASSERT(txState == TxState::DONE);
 		contAfterDone();
 	}
 
@@ -164,6 +167,7 @@ protected:
 			transactionFailed(err);
 		} else {
 			std::unique_lock<std::mutex> lock(mutex);
+			ASSERT(txState == TxState::ON_ERROR);
 			txState = TxState::IN_PROGRESS;
 			commitCalled = false;
 			lock.unlock();
@@ -383,7 +387,6 @@ protected:
 		if (txState != TxState::IN_PROGRESS) {
 			return;
 		}
-		lock.unlock();
 		fdb::Error err = f.error();
 		auto waitTimeUs = timeElapsedInUs(cbInfo.startTime, endTime);
 		if (waitTimeUs > LONG_WAIT_TIME_US) {
@@ -399,6 +402,7 @@ protected:
 			scheduler->schedule(cbInfo.cont);
 			return;
 		}
+		lock.unlock();
 		onError(err);
 	}
 
