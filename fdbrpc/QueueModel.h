@@ -22,6 +22,8 @@
 #define FLOW_QUEUEMODEL_H
 #pragma once
 
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
+
 #include "flow/flow.h"
 #include "fdbrpc/Smoother.h"
 #include "flow/Knobs.h"
@@ -126,6 +128,13 @@ public:
 	~QueueModel() {
 		laggingRequests.cancel();
 		tssComparisons.cancel();
+	}
+
+	std::string toString() {
+		return fmt::format("secondMultiplier = {}, secondBudget = {}, laggingRequestCount = {}",
+		                   secondMultiplier,
+		                   secondBudget,
+		                   laggingRequestCount);
 	}
 
 private:
