@@ -136,7 +136,7 @@ class DDMockTxnProcessor : public IDDTxnProcessor {
 	std::shared_ptr<MockGlobalState> mgs;
 
 	std::vector<DDShardInfo> getDDShardInfos() const;
-	std::set<std::vector<UID>> getPrimaryTeams() const;
+	std::set<std::vector<UID>> getAllTeamsInRegion(bool primary) const;
 
 public:
 	explicit DDMockTxnProcessor(std::shared_ptr<MockGlobalState> mgs = nullptr) : mgs(mgs){};

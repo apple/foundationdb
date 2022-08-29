@@ -67,6 +67,7 @@ public:
 	//       no longer in the map), the servers will be set for all contained shards and added to all
 	//       intersecting shards.
 
+	std::set<Team> getAllTeams() const;
 	int getNumberOfShards(UID ssID) const;
 	std::vector<KeyRange> getShardsFor(Team team) const;
 	bool hasShards(Team team) const;
@@ -103,6 +104,12 @@ private:
 
 	void erase(Team team, KeyRange const& range);
 	void insert(Team team, KeyRange const& range);
+
+public:
+	// return the iterator that can traverse all ranges
+	auto getAllRanges() const -> decltype(shard_teams)::ConstRanges;
+	// get total shards count
+	size_t getNumberOfShards() const;
 };
 
 #endif // FOUNDATIONDB_SHARDSAFFECTEDBYTEAMFAILURE_H

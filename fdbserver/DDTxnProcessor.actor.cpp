@@ -498,36 +498,55 @@ Future<Void> DDTxnProcessor::pollMoveKeysLock(const MoveKeysLock& lock, const DD
 Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>>
 DDMockTxnProcessor::getServerListAndProcessClasses() {
 	std::vector<std::pair<StorageServerInterface, ProcessClass>> res;
-	for (auto& [_, mss] : mgs->servers) {
+	for (auto& [_, mss] : mgs->allServers) {
 		res.emplace_back(mss.ssi, ProcessClass(ProcessClass::StorageClass, ProcessClass::DBSource));
 	}
 	return res;
 }
 
-std::set<std::vector<UID>> DDMockTxnProcessor::getPrimaryTeams() const {
+std::set<std::vector<UID>> DDMockTxnProcessor::getAllTeamsInRegion(bool primary) const {
+	auto teams = mgs->shardMapping->getAllTeams();
 	std::set<std::vector<UID>> res;
-	for (auto& [idx, team] : mgs->teams) {
-		res.emplace(team.getServerIds());
+	for (auto& team : teams) {
+		if (primary == team.primary) {
+			res.emplace(team.servers);
+		}
 	}
 	return res;
 }
 
+inline void transformTeamsToServerIds(std::vector<ShardsAffectedByTeamFailure::Team>& teams,
+                                std::vector<UID>& primaryIds, std::vector<UID>& remoteIds) {
+	std::set<UID> primary, remote;
+	for (auto& team : teams) {
+		team.primary ? primary.insert(team.servers.begin(), team.servers.end())
+		             : remote.insert(team.servers.begin(), team.servers.end());
+	}
+	primaryIds = std::vector<UID>(primary.begin(), primary.end());
+	remoteIds = std::vector<UID>(remote.begin(), remote.end());
+}
+
 std::vector<DDShardInfo> DDMockTxnProcessor::getDDShardInfos() const {
 	std::vector<DDShardInfo> res;
-	res.reserve(mgs->keyServers.size() - 1);
-	for (auto& [beginK, value] : mgs->keyServers) {
-		if (beginK == allKeys.end)
-			break;
-
+	res.reserve(mgs->shardMapping->getNumberOfShards());
+	auto allRange = mgs->shardMapping->getAllRanges();
+	ASSERT(allRange.end().end() == allKeys.end);
+	for (auto it = allRange.begin(); it != allRange.end(); ++it) {
 		// FIXME: now just use anonymousShardId
-		DDShardInfo info(beginK, anonymousShardId, anonymousShardId);
-		info.primarySrc = mgs->teams.at(value.srcIdx).getServerIds();
-		if (value.destIdx.present()) {
-			info.primaryDest = mgs->teams.at(value.destIdx.get()).getServerIds();
+		KeyRangeRef curRange = it->range();
+		DDShardInfo info(curRange.begin, anonymousShardId, anonymousShardId);
+		auto teams = mgs->shardMapping->getTeamsFor(curRange);
+		if (!teams.second.empty()) {
+			// in-flight shard
 			info.hasDest = true;
+			transformTeamsToServerIds(teams.second, info.primarySrc, info.remoteSrc);
+			transformTeamsToServerIds(teams.first, info.primaryDest, info.remoteDest);
+		} else {
+			transformTeamsToServerIds(teams.first, info.primarySrc, info.remoteSrc);
 		}
 	}
 	res.emplace_back(allKeys.end);
+	return res;
 }
 
 Future<Reference<InitialDataDistribution>> DDMockTxnProcessor::getInitialDataDistribution(
@@ -542,6 +561,7 @@ Future<Reference<InitialDataDistribution>> DDMockTxnProcessor::getInitialDataDis
 	res->allServers = getServerListAndProcessClasses().get();
 	// TODO: consider remote region setting. For now assume all server is in primary dc
 	res->shards = getDDShardInfos();
-	res->primaryTeams = getPrimaryTeams();
+	res->primaryTeams = getAllTeamsInRegion(true);
+	res->remoteTeams = getAllTeamsInRegion(false);
 	return res;
 }
