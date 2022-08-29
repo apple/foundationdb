@@ -85,7 +85,7 @@ bool destructed = false;
 class TestConfig: public BasicTestConfig {
 	class ConfigBuilder {
 		using value_type = toml::basic_value<toml::discard_comments>;
-		using base_variant = std::variant<int, bool, std::string, std::vector<int>, ConfigDBType>;
+		using base_variant = std::variant<int, float, double, bool, std::string, std::vector<int>, ConfigDBType>;
 		using types =
 		    variant_map<variant_concat<base_variant, variant_map<base_variant, Optional>>, std::add_pointer_t>;
 		std::unordered_map<std::string_view, types> confMap;
@@ -95,6 +95,10 @@ class TestConfig: public BasicTestConfig {
 			visitor(const value_type& v) : value(v) {}
 			void operator()(int* val) const { *val = value.as_integer(); }
 			void operator()(Optional<int>* val) const { *val = value.as_integer(); }
+			void operator()(float* val) const { *val = value.as_floating(); }
+			void operator()(Optional<float>* val) const { *val = value.as_floating(); }
+			void operator()(double* val) const { *val = value.as_floating(); }
+			void operator()(Optional<double>* val) const { *val = value.as_floating(); }
 			void operator()(bool* val) const { *val = value.as_boolean(); }
 			void operator()(Optional<bool>* val) const { *val = value.as_boolean(); }
 			void operator()(std::string* val) const { *val = value.as_string(); }
@@ -343,6 +347,8 @@ public:
 	bool allowCreatingTenants = true;
 	bool injectTargetedSSRestart = false;
 	bool injectSSDelay = false;
+	std::string testClass; // unused -- used in TestHarness
+	float testPriority; // unused -- used in TestHarness
 
 	ConfigDBType getConfigDBType() const { return configDBType; }
 
@@ -370,7 +376,9 @@ public:
 		}
 		std::string extraDatabaseModeStr;
 		ConfigBuilder builder;
-		builder.add("extraDatabaseMode", &extraDatabaseModeStr)
+		builder.add("testClass", &testClass)
+		    .add("testPriority", &testPriority)
+		    .add("extraDatabaseMode", &extraDatabaseModeStr)
 		    .add("extraDatabaseCount", &extraDatabaseCount)
 		    .add("minimumReplication", &minimumReplication)
 		    .add("minimumRegions", &minimumRegions)

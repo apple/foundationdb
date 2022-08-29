@@ -271,19 +271,52 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR static Future<Void> renameTenant(TenantManagementConcurrencyWorkload* self) {
+		state TenantName oldTenant = self->chooseTenantName();
+		state TenantName newTenant = self->chooseTenantName();
+
+		try {
+			loop {
+				Future<Void> renameFuture =
+				    self->useMetacluster ? MetaclusterAPI::renameTenant(self->mvDb, oldTenant, newTenant)
+				                         : TenantAPI::renameTenant(self->dataDb.getReference(), oldTenant, newTenant);
+				Optional<Void> result = wait(timeout(renameFuture, 30));
+
+				if (result.present()) {
+					break;
+				}
+			}
+
+			return Void();
+		} catch (Error& e) {
+			if (e.code() == error_code_invalid_tenant_state || e.code() == error_code_tenant_removed ||
+			    e.code() == error_code_cluster_no_capacity) {
+				ASSERT(self->useMetacluster);
+			} else if (e.code() != error_code_tenant_not_found && e.code() != error_code_tenant_already_exists) {
+				TraceEvent(SevError, "RenameTenantFailure")
+				    .error(e)
+				    .detail("OldTenant", oldTenant)
+				    .detail("NewTenant", newTenant);
+			}
+			return Void();
+		}
+	}
+
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	ACTOR static Future<Void> _start(Database cx, TenantManagementConcurrencyWorkload* self) {
 		state double start = now();
 
 		// Run a random sequence of tenant management operations for the duration of the test
 		while (now() < start + self->testDuration) {
-			state int operation = deterministicRandom()->randomInt(0, 3);
+			state int operation = deterministicRandom()->randomInt(0, 4);
 			if (operation == 0) {
 				wait(createTenant(self));
 			} else if (operation == 1) {
 				wait(deleteTenant(self));
 			} else if (operation == 2) {
 				wait(configureTenant(self));
+			} else if (operation == 3) {
+				wait(renameTenant(self));
 			}
 		}
 

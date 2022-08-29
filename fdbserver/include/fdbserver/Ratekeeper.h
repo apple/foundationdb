@@ -184,9 +184,25 @@ class Ratekeeper {
 	Deque<double> actualTpsHistory;
 	Version maxVersion;
 	double blobWorkerTime;
+	double unblockedAssignmentTime;
 	std::map<Version, Ratekeeper::VersionInfo> version_transactions;
+	std::map<Version, std::pair<double, Optional<double>>> version_recovery;
 	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
 	Optional<Key> remoteDC;
+
+	double getRecoveryDuration(Version ver) {
+		auto it = version_recovery.lower_bound(ver);
+		double recoveryDuration = 0;
+		while (it != version_recovery.end()) {
+			if (it->second.second.present()) {
+				recoveryDuration += it->second.second.get() - it->second.first;
+			} else {
+				recoveryDuration += now() - it->second.first;
+			}
+			++it;
+		}
+		return recoveryDuration;
+	}
 
 	Ratekeeper(UID id, Database db);
 
@@ -203,7 +219,7 @@ class Ratekeeper {
 	void tryAutoThrottleTag(TransactionTag, double rate, double busyness, TagThrottledReason);
 	void tryAutoThrottleTag(StorageQueueInfo&, int64_t storageQueue, int64_t storageDurabilityLag);
 	Future<Void> monitorThrottlingChanges();
-	Future<Void> monitorBlobWorkers();
+	Future<Void> monitorBlobWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 
 public:
 	static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);

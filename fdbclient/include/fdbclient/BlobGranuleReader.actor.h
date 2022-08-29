@@ -51,5 +51,7 @@ ACTOR Future<Void> readBlobGranules(BlobGranuleFileRequest request,
                                     Reference<BlobConnectionProvider> bstore,
                                     PromiseStream<RangeResult> results);
 
+bool isRangeFullyCovered(KeyRange range, Standalone<VectorRef<BlobGranuleChunkRef>> blobChunks);
+
 #include "flow/unactorcompiler.h"
 #endif

@@ -19,8 +19,11 @@
  */
 
 #include "flow/flow.h"
+#include "flow/Error.h"
 #include "flow/Knobs.h"
 #include "flow/BooleanParam.h"
+#include "flow/UnitTest.h"
+
 #include <cmath>
 #include <cinttypes>
 
@@ -309,22 +312,68 @@ static std::string toLower(std::string const& name) {
 	return lower_name;
 }
 
+// Converts the given string into a double. If any errors are
+// encountered, it throws an invalid_option_value exception.
+static double safe_stod(std::string const& str) {
+	size_t n;
+	double value = std::stod(str, &n);
+	if (n < str.size()) {
+		throw invalid_option_value();
+	}
+	return value;
+}
+
+// Converts the given (possibly hexadecimal) string into an
+// integer. If any errors are encountered, it throws an
+// invalid_option_value exception.
+static int safe_stoi(std::string const& str) {
+	size_t n;
+	int value = std::stoi(str, &n, 0);
+	if (n < str.size()) {
+		throw invalid_option_value();
+	}
+	return value;
+}
+
+// Converts the given (possibly hexadecimal) string into a 64-bit
+// integer. If any errors are encountered, it throws an
+// invalid_option_value exception.
+static int64_t safe_stoi64(std::string const& str) {
+	size_t n;
+	int64_t value = static_cast<int64_t>(std::stoll(str, &n, 0));
+	if (n < str.size()) {
+		throw invalid_option_value();
+	}
+	return value;
+}
+
+// Converts the given string into a bool. "true" and "false" are case
+// insenstively interpreted as true and false. Otherwise, any non-zero
+// integer is true. If any errors are encountered, it throws an
+// invalid_option_value exception.
+static bool safe_stob(std::string const& str) {
+	if (toLower(str) == "true") {
+		return true;
+	} else if (toLower(str) == "false") {
+		return false;
+	} else {
+		return safe_stoi(str) != 0;
+	}
+}
+
+// Parses a string value into the appropriate type based upon the knob
+// name. If any errors are encountered, it throws an
+// invalid_option_value exception.
 ParsedKnobValue Knobs::parseKnobValue(std::string const& knob, std::string const& value) const {
 	try {
 		if (double_knobs.count(knob)) {
-			return std::stod(value);
+			return safe_stod(value);
 		} else if (bool_knobs.count(knob)) {
-			if (toLower(value) == "true") {
-				return true;
-			} else if (toLower(value) == "false") {
-				return false;
-			} else {
-				return (std::stoi(value) != 0);
-			}
+			return safe_stob(value);
 		} else if (int64_knobs.count(knob)) {
-			return static_cast<int64_t>(std::stol(value, nullptr, 0));
+			return safe_stoi64(value);
 		} else if (int_knobs.count(knob)) {
-			return std::stoi(value, nullptr, 0);
+			return safe_stoi(value);
 		} else if (string_knobs.count(knob)) {
 			return value;
 		}
@@ -475,4 +524,24 @@ void Knobs::trace() const {
 		    .detail("Name", k.first.c_str())
 		    .detail("Value", *k.second.value)
 		    .detail("Atomic", k.second.atomic);
+}
+
+TEST_CASE("/flow/Knobs/ParseKnobValue") {
+	// Test the safe conversion functions.
+	ASSERT_EQ(safe_stod("4.0"), 4.0);
+
+	ASSERT_EQ(safe_stoi("4"), 4);
+
+	ASSERT_EQ(safe_stoi64("4"), (int64_t)4);
+	try {
+		[[maybe_unused]] int64_t value = safe_stoi64("4GiB");
+		UNREACHABLE();
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_invalid_option_value);
+	}
+
+	ASSERT_EQ(safe_stob("true"), true);
+	ASSERT_EQ(safe_stob("false"), false);
+
+	return Void();
 }

@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
@@ -118,6 +119,7 @@ struct ClientDBInfo {
 	std::vector<VersionHistory> history;
 	UID clusterId;
 	bool isEncryptionEnabled = false;
+	Optional<EncryptKeyProxyInterface> encryptKeyProxy;
 
 	TenantMode tenantMode;
 	ClusterType clusterType = ClusterType::STANDALONE;
@@ -141,6 +143,7 @@ struct ClientDBInfo {
 		           history,
 		           tenantMode,
 		           isEncryptionEnabled,
+		           encryptKeyProxy,
 		           clusterId,
 		           clusterType,
 		           metaclusterName);
