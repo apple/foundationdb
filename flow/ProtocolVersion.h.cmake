@@ -23,29 +23,22 @@
 #include <cstdint>
 
 // This version impacts both communications and the deserialization of certain database and IKeyValueStore keys.
-//
-// The convention is that 'x' and 'y' should match the major and minor version of the software, and 'z' should be 0.
-// To make a change without a corresponding increase to the x.y version, increment the 'dev' digit.
-//
-// The last 2 bytes (4 digits) of the protocol version do not affect compatibility. These two bytes are not currently
-// used and should not be changed from 0.
-//                                                         xyzdev
-//                                                         vvvv
-constexpr uint64_t defaultProtocolVersionValue = 0x0FDB00B072000000LL;
+constexpr uint64_t defaultProtocolVersionValue = @FDB_PV_DEFAULT_VERSION@;
 
 // The first protocol version that cannot be downgraded from. Ordinarily, this will be two release versions larger
 // than the current version, meaning that we only support downgrades between consecutive release versions.
-constexpr uint64_t minInvalidProtocolVersionValue = 0x0FDB00B074000000LL;
+constexpr uint64_t minInvalidProtocolVersionValue = @FDB_PV_MIN_INVALID_VERSION@;
 
 // The lowest protocol version that can be downgraded to.
-constexpr uint64_t minCompatibleProtocolVersionValue = 0x0FDB00B071000000LL;
+constexpr uint64_t minCompatibleProtocolVersionValue = @FDB_PV_MIN_COMPATIBLE_VERSION@;
 
 // The protocol version that will most likely follow the current one
 // Used only for testing upgrades to the future version
-constexpr uint64_t futureProtocolVersionValue = 0x0FDB00B073000000LL;
+constexpr uint64_t futureProtocolVersionValue = @FDB_PV_FUTURE_VERSION@;
 
+// The first check second expression version doesn't need to change because it's just for earlier protocol versions.
 #define PROTOCOL_VERSION_FEATURE(v, x)                                                                                 \
-	static_assert((v & 0xF0FFFFLL) == 0 || v < 0x0FDB00B071000000LL, "Unexpected feature protocol version");           \
+	static_assert((v & 0xFFFFLL) == 0 || v < 0x0FDB00B071000000LL, "Unexpected feature protocol version");             \
 	static_assert(v <= defaultProtocolVersionValue, "Feature protocol version too large");                             \
 	struct x {                                                                                                         \
 		static constexpr uint64_t protocolVersion = v;                                                                 \
@@ -111,74 +104,74 @@ public: // introduced features
 	// We stopped using the dev version consistently in the past.
 	// To ensure binaries work across patch releases (e.g., 6.2.0 to 6.2.22), we require that the protocol version be
 	// the same for each of them.
-	PROTOCOL_VERSION_FEATURE(0x0FDB00A200090000LL, Watches);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00A2000D0000LL, MovableCoordinatedState);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00A340000000LL, ProcessID);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00A400040000LL, OpenDatabase);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00A446020000LL, Locality);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00A460010000LL, MultiGenerationTLog);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00A460010000LL, SharedMutations);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00A551000000LL, InexpensiveMultiVersionClient);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00A560010000LL, TagLocality);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B060000000LL, Fearless);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B061020000LL, EndpointAddrList);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B061030000LL, IPv6);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B061030000LL, TLogVersion);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B061070000LL, PseudoLocalities);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B061070000LL, ShardedTxsTags);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, TLogQueueEntryRef);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, GenerationRegVal);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, MovableCoordinatedStateV2);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, KeyServerValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, LogsValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, ServerTagValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, TagLocalityListValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, DatacenterReplicasValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, ProcessClassValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, WorkerListValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, BackupStartValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, LogRangeEncodeValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, HealthyZoneValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, DRBackupRanges);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, RegionConfiguration);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, ReplicationPolicy);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, BackupMutations);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, ClusterControllerPriorityInfo);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, ProcessIDFile);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, CloseUnusedConnection);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, DBCoreState);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, TagThrottleValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, StorageCacheValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreStatusValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreRequestValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreRequestDoneVersionValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreRequestTriggerValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreWorkerInterfaceValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, BackupProgressValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, KeyServerValueV2);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B063000000LL, UnifiedTLogSpilling);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, BackupWorker);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, ReportConflictingKeys);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, SmallEndpoints);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, CacheRole);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010000LL, StableInterfaces);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, ServerListValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, TagThrottleValueReason);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, SpanContext);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, TSS);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, ChangeFeed);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, BlobGranule);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, NetworkAddressHostnameFlag);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, StorageMetadata);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, PerpetualWiggleMetadata);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, StorageInterfaceReadiness);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, ResolverPrivateMutations);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B072000000LL, OTELSpanContext);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B072000000LL, SWVersionTracking);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B072000000LL, EncryptionAtRest);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B072000000LL, ShardEncodeLocationMetaData);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B072000000LL, Tenants);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B072000000LL, BlobGranuleFile);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_WATCHES@, Watches);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_MOVABLE_COORDINATED_STATE@, MovableCoordinatedState);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_PROCESS_ID@, ProcessID);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_OPEN_DATABASE@, OpenDatabase);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_LOCALITY@, Locality);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_MULTIGENERATION_TLOG@, MultiGenerationTLog);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_SHARED_MUTATIONS@, SharedMutations);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_INEXPENSIVE_MULTIVERSION_CLIENT@, InexpensiveMultiVersionClient);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_TAG_LOCALITY@, TagLocality);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_FEARLESS@, Fearless);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_ENDPOINT_ADDR_LIST@, EndpointAddrList);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_IPV6@, IPv6);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_TLOG_VERSION@, TLogVersion);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_PSEUDO_LOCALITIES@, PseudoLocalities);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_SHARDED_TXS_TAGS@, ShardedTxsTags);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_TLOG_QUEUE_ENTRY_REF@, TLogQueueEntryRef);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_GENERATION_REG_VAL@, GenerationRegVal);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_MOVABLE_COORDINATED_STATE_V2@, MovableCoordinatedStateV2);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_KEY_SERVER_VALUE@, KeyServerValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_LOGS_VALUE@, LogsValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_SERVER_TAG_VALUE@, ServerTagValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_TAG_LOCALITY_LIST_VALUE@, TagLocalityListValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_DATACENTER_REPLICAS_VALUE@, DatacenterReplicasValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_PROCESS_CLASS_VALUE@, ProcessClassValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_WORKER_LIST_VALUE@, WorkerListValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_BACKUP_START_VALUE@, BackupStartValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_LOG_RANGE_ENCODE_VALUE@, LogRangeEncodeValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_HEALTHY_ZONE_VALUE@, HealthyZoneValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_DR_BACKUP_RANGES@, DRBackupRanges);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_REGION_CONFIGURATION@, RegionConfiguration);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_REPLICATION_POLICY@, ReplicationPolicy);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_BACKUP_MUTATIONS@, BackupMutations);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_CLUSTER_CONTROLLER_PRIORITY_INFO@, ClusterControllerPriorityInfo);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_PROCESS_ID_FILE@, ProcessIDFile);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_CLOSE_UNUSED_CONNECTION@, CloseUnusedConnection);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_DB_CORE_STATE@, DBCoreState);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_TAG_THROTTLE_VALUE@, TagThrottleValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_STORAGE_CACHE_VALUE@, StorageCacheValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_RESTORE_STATUS_VALUE@, RestoreStatusValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_RESTORE_REQUEST_VALUE@, RestoreRequestValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_RESTORE_REQUEST_DONE_VERSION_VALUE@, RestoreRequestDoneVersionValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_RESTORE_REQUEST_TRIGGER_VALUE@, RestoreRequestTriggerValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_RESTORE_WORKER_INTERFACE_VALUE@, RestoreWorkerInterfaceValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_BACKUP_PROGRESS_VALUE@, BackupProgressValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_KEY_SERVER_VALUE_V2@, KeyServerValueV2);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_UNIFIED_TLOG_SPILLING@, UnifiedTLogSpilling);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_BACKUP_WORKER@, BackupWorker);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_REPORT_CONFLICTING_KEYS@, ReportConflictingKeys);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_SMALL_ENDPOINTS@, SmallEndpoints);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_CACHE_ROLE@, CacheRole);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_STABLE_INTERFACES@, StableInterfaces);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_SERVER_LIST_VALUE@, ServerListValue);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_TAG_THROTTLE_VALUE_REASON@, TagThrottleValueReason);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_SPAN_CONTEXT@, SpanContext);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_TSS@, TSS);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_CHANGE_FEED@, ChangeFeed);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_BLOB_GRANULE@, BlobGranule);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_NETWORK_ADDRESS_HOSTNAME_FLAG@, NetworkAddressHostnameFlag);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_STORAGE_METADATA@, StorageMetadata);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_PERPETUAL_WIGGLE_METADATA@, PerpetualWiggleMetadata);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_STORAGE_INTERFACE_READINESS@, StorageInterfaceReadiness);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_RESOLVER_PRIVATE_MUTATIONS@, ResolverPrivateMutations);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_OTEL_SPAN_CONTEXT@, OTELSpanContext);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_SW_VERSION_TRACKING@, SWVersionTracking);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_ENCRYPTION_AT_REST@, EncryptionAtRest);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_SHARD_ENCODE_LOCATION_METADATA@, ShardEncodeLocationMetaData);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_TENANTS@, Tenants);
+	PROTOCOL_VERSION_FEATURE(@FDB_PV_BLOB_GRANULE_FILE@, BlobGranuleFile);
 };
 
 template <>
@@ -202,7 +195,7 @@ void useFutureProtocolVersion();
 
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
 // change when we reach version 10.
-static_assert(defaultProtocolVersion.version() < 0x0FDB00B100000000LL, "Unexpected protocol version");
+static_assert(defaultProtocolVersion.version() < @FDB_PV_LEFT_MOST_CHECK@, "Unexpected protocol version");
 
 // The last two bytes of the protocol version are currently masked out in compatibility checks. We do not use them,
 // so prevent them from being inadvertently changed.
