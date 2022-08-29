@@ -102,8 +102,8 @@ func (o NetworkOptions) SetTraceFileIdentifier(param string) error {
 	return o.setOpt(36, []byte(param))
 }
 
-// Include client thread identifiers (version and thread index) into the trace file names.
-func (o NetworkOptions) SetTraceIncludeThreadIds() error {
+// Use the same base trace file name for all client threads as it before version 7.2. The current default behavior is to use distict trace file names for client threads by including their version and thread index.
+func (o NetworkOptions) SetTraceShareAmongClientThreads() error {
 	return o.setOpt(37, nil)
 }
 

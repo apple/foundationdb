@@ -1040,7 +1040,7 @@ private:
 	int nextThread = 0;
 	int threadCount;
 	std::string tmpDir;
-	bool traceIncludeThreadIds;
+	bool traceShareBaseNameAmongThreads;
 	std::string traceFileIdentifier;
 
 	Mutex lock;

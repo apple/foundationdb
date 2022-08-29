@@ -2340,9 +2340,9 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 			// While for external clients the trace file identifiers are determined in setupNetwork
 			localClient->api->setNetworkOption(option, value);
 		}
-	} else if (option == FDBNetworkOptions::TRACE_INCLUDE_THREAD_IDS) {
+	} else if (option == FDBNetworkOptions::TRACE_SHARE_AMONG_CLIENT_THREADS) {
 		validateOption(value, false, true);
-		traceIncludeThreadIds = true;
+		traceShareBaseNameAmongThreads = true;
 	} else {
 		forwardOption = true;
 	}
@@ -2439,7 +2439,8 @@ void MultiVersionApi::setupNetwork() {
 		});
 
 		std::string baseTraceFileId;
-		if (!traceFileIdentifier.empty() || traceIncludeThreadIds) {
+		if (apiVersion >= 630) {
+			// TRACE_FILE_IDENTIFIER option is supported since 6.3
 			baseTraceFileId = traceFileIdentifier.empty() ? format("%d", getpid()) : traceFileIdentifier;
 		}
 
@@ -2450,9 +2451,9 @@ void MultiVersionApi::setupNetwork() {
 			}
 			client->api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT_TRANSPORT_ID, std::to_string(transportId));
 			if (!baseTraceFileId.empty()) {
-				client->api->setNetworkOption(FDBNetworkOptions::TRACE_FILE_IDENTIFIER,
-				                              traceIncludeThreadIds ? client->getTraceFileIdentifier(baseTraceFileId)
-				                                                    : baseTraceFileId);
+				client->api->setNetworkOption(
+				    FDBNetworkOptions::TRACE_FILE_IDENTIFIER,
+				    traceShareBaseNameAmongThreads ? baseTraceFileId : client->getTraceFileIdentifier(baseTraceFileId));
 			}
 			client->api->setupNetwork();
 		});
@@ -2792,7 +2793,7 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 MultiVersionApi::MultiVersionApi()
   : callbackOnMainThread(true), localClientDisabled(false), networkStartSetup(false), networkSetup(false),
     bypassMultiClientApi(false), externalClient(false), apiVersion(0), threadCount(0), tmpDir("/tmp"),
-    traceIncludeThreadIds(false), envOptionsLoaded(false) {}
+    traceShareBaseNameAmongThreads(false), envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 
