@@ -91,6 +91,9 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 	Promise<Void> firstWriteSuccessful;
 	Version minSuccessfulReadVersion = MAX_VERSION;
 
+	Future<Void> summaryClient;
+	Promise<Void> triggerSummaryComplete;
+
 	// stats
 	int64_t errors = 0;
 	int64_t mismatches = 0;
@@ -886,6 +889,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		for (auto& it : directories) {
 			// Wait for blob worker to initialize snapshot before starting test for that range
 			Future<Void> start = waitFirstSnapshot(this, cx, it, true);
+			it->summaryClient = validateGranuleSummaries(cx, normalKeys, it->tenantName, it->triggerSummaryComplete);
 			clients.push_back(timeout(writeWorker(this, start, cx, it), testDuration, Void()));
 			clients.push_back(timeout(readWorker(this, start, cx, it), testDuration, Void()));
 		}
@@ -919,6 +923,9 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 	                                  BlobGranuleCorrectnessWorkload* self,
 	                                  Reference<ThreadData> threadData) {
 
+		if (threadData->triggerSummaryComplete.canBeSet()) {
+			threadData->triggerSummaryComplete.send(Void());
+		}
 		state bool result = true;
 		state int finalRowsValidated;
 		if (threadData->writeVersions.empty()) {
@@ -984,6 +991,9 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			CODE_PROBE(true, "BGCorrectness clearing database and awaiting merge");
 			wait(clearAndAwaitMerge(cx, threadData->directoryRange));
 		}
+
+		// validate that summary completes without error
+		wait(threadData->summaryClient);
 
 		return result;
 	}

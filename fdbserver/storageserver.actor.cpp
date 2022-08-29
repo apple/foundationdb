@@ -5538,7 +5538,9 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 			throw blob_granule_transaction_too_old(); // no data on blob
 		}
 
-		// todo check if blob storage covers all the expected key range
+		if (!isRangeFullyCovered(keys, chunks)) {
+			throw blob_granule_transaction_too_old();
+		}
 
 		for (const BlobGranuleChunkRef& chunk : chunks) {
 			state KeyRangeRef chunkRange = chunk.keyRange;

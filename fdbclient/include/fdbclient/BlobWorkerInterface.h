@@ -113,6 +113,7 @@ struct BlobGranuleFileRequest {
 	Version readVersion;
 	bool canCollapseBegin = true;
 	TenantInfo tenantInfo;
+	bool summarize = false;
 	ReplyPromise<BlobGranuleFileReply> reply;
 
 	BlobGranuleFileRequest() {}
@@ -121,7 +122,7 @@ struct BlobGranuleFileRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyRange, beginVersion, readVersion, canCollapseBegin, tenantInfo, reply, arena);
+		serializer(ar, keyRange, beginVersion, readVersion, canCollapseBegin, tenantInfo, summarize, reply, arena);
 	}
 };
 

@@ -624,6 +624,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( RATEKEEPER_PRINT_LIMIT_REASON,                       false ); if( randomize && BUGGIFY ) RATEKEEPER_PRINT_LIMIT_REASON = true;
 	init( RATEKEEPER_MIN_RATE,                                   0.0 );
 	init( RATEKEEPER_MAX_RATE,                                   1e9 );
+	init( RATEKEEPER_BATCH_MIN_RATE,                             0.0 );
+	init( RATEKEEPER_BATCH_MAX_RATE,                             1e9 );
 
 	bool smallStorageTarget = randomize && BUGGIFY;
 	init( TARGET_BYTES_PER_STORAGE_SERVER,                    1000e6 ); if( smallStorageTarget ) TARGET_BYTES_PER_STORAGE_SERVER = 3000e3;
@@ -675,7 +677,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGE_SERVER_LIST_FETCH_TIMEOUT,                    20.0 );
 	init( BW_THROTTLING_ENABLED,                                true );
 
-	bool buggifySmallBWLag = false; //randomize && BUGGIFY;
+	bool buggifySmallBWLag = randomize && BUGGIFY;
 	init( TARGET_BW_LAG,                                        50.0 ); if(buggifySmallBWLag) TARGET_BW_LAG = 10.0;
 	init( TARGET_BW_LAG_BATCH,                                  20.0 ); if(buggifySmallBWLag) TARGET_BW_LAG_BATCH = 4.0;
 	init( TARGET_BW_LAG_UPDATE,                                  9.0 ); if(buggifySmallBWLag) TARGET_BW_LAG_UPDATE = 1.0;
