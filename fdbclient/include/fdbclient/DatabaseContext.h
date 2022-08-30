@@ -170,6 +170,7 @@ struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
 	NotifiedVersion desired;
 	UID interfToken;
 	DatabaseContext* context;
+	double created;
 
 	~ChangeFeedStorageData();
 };
@@ -191,6 +192,7 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	Version endVersion = invalidVersion;
 	Version popVersion =
 	    invalidVersion; // like TLog pop version, set by SS and client can check it to see if they missed data
+	double created = 0;
 
 	explicit ChangeFeedData(DatabaseContext* context = nullptr);
 	~ChangeFeedData();

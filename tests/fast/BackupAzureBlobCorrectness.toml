@@ -1,3 +1,5 @@
+testClass = "Backup"
+
 [[test]]
 testTitle = 'Cycle'
 clearAfterTest = 'false'

@@ -233,6 +233,22 @@ struct BlobGranuleChunkRef {
 	}
 };
 
+struct BlobGranuleSummaryRef {
+	constexpr static FileIdentifier file_identifier = 9774587;
+	KeyRangeRef keyRange;
+	Version snapshotVersion;
+	int64_t snapshotSize;
+	Version deltaVersion;
+	int64_t deltaSize;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keyRange, snapshotVersion, snapshotSize, deltaVersion, deltaSize);
+	}
+};
+
+BlobGranuleSummaryRef summarizeGranuleChunk(Arena& ar, const BlobGranuleChunkRef& chunk);
+
 enum BlobGranuleSplitState { Unknown = 0, Initialized = 1, Assigned = 2, Done = 3 };
 
 // Boundary metadata for each range indexed by the beginning of the range.
