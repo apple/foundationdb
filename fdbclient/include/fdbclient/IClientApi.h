@@ -22,6 +22,7 @@
 #define FDBCLIENT_ICLIENTAPI_H
 #pragma once
 
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"
@@ -85,6 +86,19 @@ public:
 	                                                   Version beginVersion,
 	                                                   Optional<Version> readVersion,
 	                                                   ReadBlobGranuleContext granuleContext) = 0;
+
+	virtual ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesStart(
+	    const KeyRangeRef& keyRange,
+	    Version beginVersion,
+	    Optional<Version> readVersion,
+	    Version* readVersionOut) = 0;
+
+	virtual ThreadResult<RangeResult> readBlobGranulesFinish(
+	    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
+	    const KeyRangeRef& keyRange,
+	    Version beginVersion,
+	    Version readVersion,
+	    ReadBlobGranuleContext granuleContext) = 0;
 
 	virtual void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) = 0;
 	virtual void set(const KeyRef& key, const ValueRef& value) = 0;
