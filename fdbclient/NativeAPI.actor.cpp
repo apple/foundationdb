@@ -7820,11 +7820,9 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			    getValue(self->trState, blobWorkerListKeyFor(workerId), self->getReadVersion(), UseTenant::False)));
 			// from the time the mapping was read from the db, the associated blob worker
 			// could have died and so its interface wouldn't be present as part of the blobWorkerList
-			// we persist in the db. So throw wrong_shard_server to get the new mapping
+			// we persist in the db. So throw blob_granule_request_failed to get the new mapping
 			if (!workerInterface.present()) {
-				// need to re-read mapping, throw transaction_too_old so client retries. TODO better error?
-				// throw wrong_shard_server();
-				throw transaction_too_old();
+				throw blob_granule_request_failed();
 			}
 			// FIXME: maybe just want to insert here if there are racing queries for the same worker or something?
 			self->trState->cx->blobWorker_interf[workerId] = decodeBlobWorkerListValue(workerInterface.get());
