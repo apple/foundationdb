@@ -20,6 +20,7 @@
 
 #include "flow/Arena.h"
 #include "flow/BlobCipher.h"
+#include "flow/CodeProbe.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
@@ -470,7 +471,7 @@ Value makePadding(int size) {
 
 struct IRangeFileWriter {
 public:
-	virtual Future<Void> padEnd(bool final, Optional<StringRef> nextKey) = 0;
+	virtual Future<Void> padEnd(bool final) = 0;
 
 	virtual Future<Void> writeKV(Key k, Value v) = 0;
 
@@ -487,6 +488,39 @@ struct SnapshotFileBackupEncryptionKeys {
 	StringRef ivRef;
 };
 
+// File Format handlers.
+// Both Range and Log formats are designed to be readable starting at any 1MB boundary
+// so they can be read in parallel.
+//
+// Writer instances must be kept alive while any member actors are in progress.
+//
+// EncryptedRangeFileWriter must be used as follows:
+//   1 - writeKey(key) the queried key range begin
+//   2 - writeKV(k, v) each kv pair to restore
+//   3 - writeKey(key) the queried key range end
+//   4 - finish()
+//
+// EncryptedRangeFileWriter will insert the required padding, header, and extra
+// end/begin keys around the 1MB boundaries as needed.
+//
+// Example:
+//   The range a-z is queries and returns c-j which covers 3 blocks across 2 tenants.
+//   The client code writes keys in this sequence:
+//             t1a t1c t1d t1e t1f t1g t2h t2i t2j t2z
+//
+//   H = header   P = padding   a...z = keys  v = value | = block boundary
+//
+//   Encoded file:  H t1a t1cv t1dv t1ev P | H t1e t1ev t1fv t1gv t2 P | H t2 t2hv t2iv t2jv t2z
+//   Decoded in blocks yields:
+//           Block 1: range [t1a, t1e) with kv pairs t1cv, t1dv
+//           Block 2: range [t1e, t2) with kv pairs t1ev, t1fv, t1gv
+//           Block 3: range [t2, t2z) with kv pairs t2hv, t2iv, t2jv
+//
+//   NOTE: All blocks except for the final block will have one last
+//   value which will not be used.  This isn't actually a waste since
+//   if the next KV pair wouldn't fit within the block after the value
+//   then the space after the final key to the next 1MB boundary would
+//   just be padding anyway.
 struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	struct Options {
 		constexpr static FileIdentifier file_identifier = 3152016;
@@ -679,8 +713,10 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                                                          int bytesNeeded,
 	                                                          bool truncateKey) {
 		KeyRef newKey = self->lastKey;
+		// if there exists at least one block in this file then write the last KV pair
 		if (self->blockEnd > 0) {
 			ValueRef newValue = self->lastValue;
+			// if tenant boundaries have been crossed then truncate the last key to only the tenant prefix
 			if (truncateKey) {
 				newKey = StringRef(self->lastKey.begin(), 8);
 				newValue = StringRef();
@@ -695,9 +731,9 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		return Void();
 	}
 
-	Future<Void> padEnd(bool final, Optional<StringRef> nextKey) {
+	Future<Void> padEnd(bool final) {
 		if (expectedFileSize(this) > 0) {
-			return newBlock(this, 0, lastKey, final);
+			return newBlock(this, 0, StringRef(), final);
 		}
 		return Void();
 	}
@@ -718,6 +754,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	ACTOR static Future<Void> writeKV_impl(EncryptedRangeFileWriter* self, Key k, Value v) {
 		state int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
 		wait(newBlockIfNeeded(self, toWrite, Optional<KeyRef>()));
+		// If we had a last KV pair then write it to the buffer and save the new KV pair received
 		if (self->lastKey.size() > 0) {
 			appendStringRefWithLenToBuffer(self, &self->lastKey);
 			self->lastWrittenKey = self->lastKey;
@@ -741,6 +778,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	ACTOR static Future<Void> writeKey_impl(EncryptedRangeFileWriter* self, Key k) {
 		int toWrite = sizeof(uint32_t) + k.size();
 		wait(newBlockIfNeeded(self, toWrite, Optional<KeyRef>()));
+		// If we had a last KV pair then write it to the buffer and save the new KV pair received
 		if (self->lastKey.size() > 0) {
 			appendStringRefWithLenToBuffer(self, &self->lastKey);
 			appendStringRefWithLenToBuffer(self, &self->lastValue);
@@ -789,6 +827,7 @@ private:
 //   1 - writeKey(key) the queried key range begin
 //   2 - writeKV(k, v) each kv pair to restore
 //   3 - writeKey(key) the queried key range end
+//	 4 - finish()
 //
 // RangeFileWriter will insert the required padding, header, and extra
 // end/begin keys around the 1MB boundaries as needed.
@@ -851,7 +890,7 @@ struct RangeFileWriter : public IRangeFileWriter {
 	}
 
 	// Used in simulation only to create backup file sizes which are an integer multiple of the block size
-	Future<Void> padEnd(bool final, Optional<StringRef> nextKey) {
+	Future<Void> padEnd(bool final) {
 		ASSERT(g_network->isSimulated());
 		if (file->size() > 0) {
 			return newBlock(this, 0, final);
@@ -951,10 +990,14 @@ void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* 
 		}
 
 		if (encryptedBlock) {
+			// Ensure that if current key is located in a different tenant than the previous key it is the last key in
+			// the block and that it is truncated
 			KeyRef curKey = KeyRef(k, kLen);
 			if (prevKey.size() > 0 &&
 			    EncryptedRangeFileWriter::getTenantId(curKey) != EncryptedRangeFileWriter::getTenantId(prevKey)) {
+				CODE_PROBE(true, "decode crossing tenant boundaries");
 				ASSERT(!done);
+				ASSERT(curKey.size() == 8);
 				done = true;
 			}
 			prevKey = curKey;
@@ -1640,7 +1683,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 					wait(rangeFile->writeKey(nextKey));
 
 					if (BUGGIFY) {
-						wait(rangeFile->padEnd(true, Optional<StringRef>()));
+						wait(rangeFile->padEnd(true));
 					}
 
 					wait(rangeFile->finish());

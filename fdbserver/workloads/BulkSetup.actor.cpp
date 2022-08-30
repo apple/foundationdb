@@ -27,31 +27,30 @@
 
 struct BulkSetupWorkload : TestWorkload {
 
-    std::vector<TenantName> tenantNames;
-    int nodeCount;
-    double transactionsPerSecond;
-    Key keyPrefix;
+	std::vector<TenantName> tenantNames;
+	int nodeCount;
+	double transactionsPerSecond;
+	Key keyPrefix;
 
-	BulkSetupWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx) {
-        transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
+	BulkSetupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
 		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
-        keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString());
-        std::vector<std::string> tenants = getOption(options, "tenants"_sr, std::vector<std::string>());
-        for(std::string tenant: tenants) {
-            tenantNames.push_back(TenantName(tenant));
-        }
+		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString());
+		std::vector<std::string> tenants = getOption(options, "tenants"_sr, std::vector<std::string>());
+		for (std::string tenant : tenants) {
+			tenantNames.push_back(TenantName(tenant));
+		}
 	}
 
 	std::string description() const override { return "BulkSetup"; }
 
-    void getMetrics(std::vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-    Key keyForIndex(int n) { return key(n); }
-    Key key(int n) { return doubleToTestKey((double)n / nodeCount, keyPrefix); }
+	Key keyForIndex(int n) { return key(n); }
+	Key key(int n) { return doubleToTestKey((double)n / nodeCount, keyPrefix); }
 	Value value(int n) { return doubleToTestKey(n, keyPrefix); }
 
-    Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(key(n), value((n + 1) % nodeCount)); }
+	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(key(n), value((n + 1) % nodeCount)); }
 
 	Future<Void> start(Database const& cx) override {
 		return bulkSetup(cx,
@@ -70,9 +69,7 @@ struct BulkSetupWorkload : TestWorkload {
 		                 this->tenantNames);
 	}
 
-	Future<bool> check(Database const& cx) override {
-		return true;
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 };
 
 WorkloadFactory<BulkSetupWorkload> BulkSetupWorkloadFactory("BulkSetup");
