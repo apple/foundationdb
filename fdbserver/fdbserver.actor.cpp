@@ -113,7 +113,7 @@ enum {
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
 	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONNECTOR_TYPE, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,
-	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_USE_FUTURE_PROTOCOL_VERSION
+	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -128,8 +128,8 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_LISTEN,                "-l",                          SO_REQ_SEP },
 	{ OPT_LISTEN,                "--listen-address",            SO_REQ_SEP },
 #ifdef __linux__
-	{ OPT_FILESYSTEM,           "--data-filesystem",           SO_REQ_SEP },
-	{ OPT_PROFILER_RSS_SIZE,    "--rsssize",                   SO_REQ_SEP },
+	{ OPT_FILESYSTEM,           "--data-filesystem",            SO_REQ_SEP },
+	{ OPT_PROFILER_RSS_SIZE,    "--rsssize",                    SO_REQ_SEP },
 #endif
 	{ OPT_DATAFOLDER,            "-d",                          SO_REQ_SEP },
 	{ OPT_DATAFOLDER,            "--datadir",                   SO_REQ_SEP },
@@ -208,6 +208,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_FLOW_PROCESS_ENDPOINT, "--process-endpoint",          SO_REQ_SEP },
 	{ OPT_IP_TRUSTED_MASK,       "--trusted-subnet-",           SO_REQ_SEP },
 	{ OPT_NEW_CLUSTER_KEY,       "--new-cluster-key",           SO_REQ_SEP },
+	{ OPT_AUTHZ_PUBLIC_KEY_FILE, "--authorization-public-key-file", SO_REQ_SEP },
 	{ OPT_KMS_CONN_DISCOVERY_URL_FILE,           "--discover-kms-conn-url-file",            SO_REQ_SEP },
 	{ OPT_KMS_CONNECTOR_TYPE,    "--kms-connector-type",        SO_REQ_SEP },
 	{ OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,     "--kms-conn-validation-token-details",     SO_REQ_SEP },
@@ -1022,8 +1023,8 @@ enum class ServerRole {
 };
 struct CLIOptions {
 	std::string commandLine;
-	std::string fileSystemPath, dataFolder, connFile, seedConnFile, seedConnString, logFolder = ".", metricsConnFile,
-	                                                                                metricsPrefix, newClusterKey;
+	std::string fileSystemPath, dataFolder, connFile, seedConnFile, seedConnString,
+	    logFolder = ".", metricsConnFile, metricsPrefix, newClusterKey, authzPublicKeyFile;
 	std::string logGroup = "default";
 	uint64_t rollsize = TRACE_DEFAULT_ROLL_SIZE;
 	uint64_t maxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
@@ -1713,6 +1714,10 @@ private:
 				}
 				break;
 			}
+			case OPT_AUTHZ_PUBLIC_KEY_FILE: {
+				authzPublicKeyFile = args.OptionArg();
+				break;
+			}
 			case OPT_USE_FUTURE_PROTOCOL_VERSION: {
 				if (!strcmp(args.OptionArg(), "true")) {
 					::useFutureProtocolVersion();
@@ -2029,6 +2034,16 @@ int main(int argc, char* argv[]) {
 			openTraceFile(
 			    opts.publicAddresses.address, opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			g_network->initTLS();
+			if (!opts.authzPublicKeyFile.empty()) {
+				try {
+					FlowTransport::transport().loadPublicKeyFile(opts.authzPublicKeyFile);
+				} catch (Error& e) {
+					TraceEvent("AuthzPublicKeySetLoadError").error(e);
+				}
+				FlowTransport::transport().watchPublicKeyFile(opts.authzPublicKeyFile);
+			} else {
+				TraceEvent(SevInfo, "AuthzPublicKeyFileNotSet");
+			}
 
 			if (expectsPublicAddress) {
 				for (int ii = 0; ii < (opts.publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {

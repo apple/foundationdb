@@ -18,6 +18,9 @@ class TempCluster(LocalCluster):
         port: str = None,
         blob_granules_enabled: bool = False,
         tls_config: TLSConfig = None,
+        public_key_json_str: str = None,
+        remove_at_exit: bool = True,
+        custom_config: dict = {},
         enable_tenants: bool = True,
     ):
         self.build_dir = Path(build_dir).resolve()
@@ -26,6 +29,7 @@ class TempCluster(LocalCluster):
         tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
         tmp_dir.mkdir(parents=True)
         self.tmp_dir = tmp_dir
+        self.remove_at_exit = remove_at_exit
         self.enable_tenants = enable_tenants
         super().__init__(
             tmp_dir,
@@ -37,6 +41,8 @@ class TempCluster(LocalCluster):
             blob_granules_enabled=blob_granules_enabled,
             tls_config=tls_config,
             mkcert_binary=self.build_dir.joinpath("bin", "mkcert"),
+            public_key_json_str=public_key_json_str,
+            custom_config=custom_config,
         )
 
     def __enter__(self):
@@ -49,11 +55,13 @@ class TempCluster(LocalCluster):
 
     def __exit__(self, xc_type, exc_value, traceback):
         super().__exit__(xc_type, exc_value, traceback)
-        shutil.rmtree(self.tmp_dir)
+        if self.remove_at_exit:
+            shutil.rmtree(self.tmp_dir)
 
     def close(self):
         super().__exit__(None, None, None)
-        shutil.rmtree(self.tmp_dir)
+        if self.remove_at_exit:
+            shutil.rmtree(self.tmp_dir)
 
 
 if __name__ == "__main__":
@@ -147,11 +155,11 @@ if __name__ == "__main__":
         print("log-dir: {}".format(cluster.log))
         print("etc-dir: {}".format(cluster.etc))
         print("data-dir: {}".format(cluster.data))
-        print("cluster-file: {}".format(cluster.etc.joinpath("fdb.cluster")))
+        print("cluster-file: {}".format(cluster.cluster_file))
         cmd_args = []
         for cmd in args.cmd:
             if cmd == "@CLUSTER_FILE@":
-                cmd_args.append(str(cluster.etc.joinpath("fdb.cluster")))
+                cmd_args.append(str(cluster.cluster_file))
             elif cmd == "@DATA_DIR@":
                 cmd_args.append(str(cluster.data))
             elif cmd == "@LOG_DIR@":
@@ -178,7 +186,7 @@ if __name__ == "__main__":
                 cmd_args.append(cmd)
         env = dict(**os.environ)
         env["FDB_CLUSTER_FILE"] = env.get(
-            "FDB_CLUSTER_FILE", cluster.etc.joinpath("fdb.cluster")
+            "FDB_CLUSTER_FILE", cluster.cluster_file
         )
         errcode = subprocess.run(
             cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env
