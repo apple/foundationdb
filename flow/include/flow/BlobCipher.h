@@ -353,7 +353,8 @@ public:
 	                                             const uint8_t* baseCipher,
 	                                             int baseCipherLen,
 	                                             const int64_t refreshAt,
-	                                             const int64_t expireAt);
+	                                             const int64_t expireAt,
+	                                             bool* newCipherKeyCreated);
 
 	// API enables inserting base encryption cipher details to the BlobCipherKeyIdCache
 	// Given cipherKeys are immutable, attempting to re-insert same 'identical' cipherKey
@@ -370,13 +371,17 @@ public:
 	                                             int baseCipherLen,
 	                                             const EncryptCipherRandomSalt& salt,
 	                                             const int64_t refreshAt,
-	                                             const int64_t expireAt);
+	                                             const int64_t expireAt,
+	                                             bool* newCipherKeyCreated);
 
 	// API cleanup the cache by dropping all cached cipherKeys
 	void cleanup();
 
 	// API returns list of all 'cached' cipherKeys
 	std::vector<Reference<BlobCipherKey>> getAllCipherKeys();
+
+	// Return number of cipher keys in the cahce.
+	size_t getSize() const { return keyIdCache.size(); }
 
 private:
 	EncryptCipherDomainId domainId;
@@ -447,8 +452,10 @@ public:
 
 	// API enables dropping all 'cached' cipherKeys for a given encryption domain Id.
 	// Useful to cleanup cache if an encryption domain gets removed/destroyed etc.
-
 	void resetEncryptDomainId(const EncryptCipherDomainId domainId);
+
+	// Total number of cipher keys in the cache.
+	size_t getSize() const { return size; }
 
 	static Reference<BlobCipherKeyCache> getInstance() {
 		if (g_network->isSimulated()) {
@@ -466,6 +473,7 @@ public:
 
 private:
 	BlobCipherDomainCacheMap domainCacheMap;
+	size_t size = 0;
 
 	BlobCipherKeyCache() {}
 };

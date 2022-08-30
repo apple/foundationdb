@@ -1093,6 +1093,7 @@ public:
 		Counter updateBatches, updateVersions;
 		Counter loops;
 		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
+		Counter fetchGetEncryptCipherKeysMS, fetchDecryptMutationMS;
 		Counter readsRejected;
 		Counter wrongShardServer;
 		Counter fetchedVersions;
@@ -1144,7 +1145,9 @@ public:
 		    changeFeedMutationsDurable("ChangeFeedMutationsDurable", cc), updateBatches("UpdateBatches", cc),
 		    updateVersions("UpdateVersions", cc), loops("Loops", cc), fetchWaitingMS("FetchWaitingMS", cc),
 		    fetchWaitingCount("FetchWaitingCount", cc), fetchExecutingMS("FetchExecutingMS", cc),
-		    fetchExecutingCount("FetchExecutingCount", cc), readsRejected("ReadsRejected", cc),
+		    fetchExecutingCount("FetchExecutingCount", cc),
+		    fetchGetEncryptCipherKeysMS("FetchGetEncryptCipherKeysMS", cc),
+		    fetchDecryptMutationMS("FetchDecryptMutationMS", cc), readsRejected("ReadsRejected", cc),
 		    wrongShardServer("WrongShardServer", cc), fetchedVersions("FetchedVersions", cc),
 		    fetchesFromLogs("FetchesFromLogs", cc), quickGetValueHit("QuickGetValueHit", cc),
 		    quickGetValueMiss("QuickGetValueMiss", cc), quickGetKeyValuesHit("QuickGetKeyValuesHit", cc),
@@ -1200,6 +1203,12 @@ public:
 			specialCounter(cc, "KvstoreInlineKey", [self]() { return std::get<2>(self->storage.getSize()); });
 			specialCounter(cc, "ActiveChangeFeeds", [self]() { return self->uidChangeFeed.size(); });
 			specialCounter(cc, "ActiveChangeFeedQueries", [self]() { return self->activeFeedQueries; });
+			specialCounter(cc, "StorageEncryptMS", [self]() {
+				return int(self->encryptionKeyProvider->flushEncryptTime() * 1000);
+			});
+			specialCounter(cc, "StorageDecryptMS", [self]() {
+				return int(self->encryptionKeyProvider->flushDecryptTime() * 1000);
+			});
 		}
 	} counters;
 
@@ -8144,6 +8153,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		state Reference<ILogSystem::IPeekCursor> cloneCursor2 = cursor->cloneNoMore();
 		state Optional<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> cipherKeys;
 		state bool collectingCipherKeys = false;
+		state double decryptMutationTime = 0.0;
 
 		// Collect eager read keys.
 		// If encrypted mutation is encountered, we collect cipher details and fetch cipher keys, then start over.
@@ -8187,7 +8197,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 							cipherDetails.insert(header->cipherHeaderDetails);
 							collectingCipherKeys = true;
 						} else {
-							msg = msg.decrypt(cipherKeys.get(), eager.arena);
+							msg = msg.decrypt(cipherKeys.get(), eager.arena, nullptr /*buf*/, &decryptMutationTime);
 						}
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
@@ -8209,11 +8219,13 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 
 			if (collectingCipherKeys) {
+				state double getEncryptCipherKeysStartTime = now();
 				std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
 				    wait(getEncryptCipherKeys(data->db, cipherDetails));
 				cipherKeys = getCipherKeysResult;
 				collectingCipherKeys = false;
 				eager = UpdateEagerReadInfo();
+				data->counters.fetchGetEncryptCipherKeysMS += 1000 * (now() - getEncryptCipherKeysStartTime);
 			} else {
 				// Any fetchKeys which are ready to transition their shards to the adding,transferred state do so now.
 				// If there is an epoch end we skip this step, to increase testability and to prevent inserting a
@@ -8335,7 +8347,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				rd >> msg;
 				if (msg.isEncrypted()) {
 					ASSERT(cipherKeys.present());
-					msg = msg.decrypt(cipherKeys.get(), rd.arena());
+					msg = msg.decrypt(cipherKeys.get(), rd.arena(), nullptr /*buf*/, &decryptMutationTime);
 				}
 
 				Span span("SS:update"_loc, spanContext);
@@ -8400,6 +8412,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					    .detail("Version", cloneCursor2->version().toString());
 			}
 		}
+		data->counters.fetchDecryptMutationMS += 1000 * decryptMutationTime;
 		data->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeTLogMsgsUpdates);
 		if (data->currentChangeFeeds.size()) {
 			data->changeFeedVersions.emplace_back(
@@ -8680,9 +8693,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				data->tenantMap.createNewVersion(newOldestVersion);
 				data->tenantPrefixIndex->createNewVersion(newOldestVersion);
 			}
-			// We want to forget things from these data structures atomically with changing oldestVersion (and "before",
-			// since oldestVersion.set() may trigger waiting actors) forgetVersionsBeforeAsync visibly forgets
-			// immediately (without waiting) but asynchronously frees memory.
+			// We want to forget things from these data structures atomically with changing oldestVersion (and
+			// "before", since oldestVersion.set() may trigger waiting actors) forgetVersionsBeforeAsync visibly
+			// forgets immediately (without waiting) but asynchronously frees memory.
 			Future<Void> finishedForgetting =
 			    data->mutableData().forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage) &&
 			    data->tenantMap.forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage) &&
@@ -8747,8 +8760,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 					data->storage.writeKeyValue(
 					    KeyValueRef(changeFeedDurableKey(info->second->id, it.version),
 					                changeFeedDurableValue(it.mutations, it.knownCommittedVersion)));
-					// FIXME: there appears to be a bug somewhere where the exact same mutation appears twice in a row
-					// in the stream. We should fix this assert to be strictly > and re-enable it
+					// FIXME: there appears to be a bug somewhere where the exact same mutation appears twice in a
+					// row in the stream. We should fix this assert to be strictly > and re-enable it
 					ASSERT(it.version >= info->second->storageVersion);
 					info->second->storageVersion = it.version;
 					durableChangeFeedMutations++;
@@ -8761,9 +8774,9 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				if (alreadyFetched > info->second->storageVersion) {
 					info->second->storageVersion = std::min(alreadyFetched, newOldestVersion);
 					if (alreadyFetched > info->second->storageVersion) {
-						// This change feed still has pending mutations fetched and written to storage that are higher
-						// than the new durableVersion. To ensure its storage and durable version get updated, we need
-						// to add it back to fetchingChangeFeeds
+						// This change feed still has pending mutations fetched and written to storage that are
+						// higher than the new durableVersion. To ensure its storage and durable version get
+						// updated, we need to add it back to fetchingChangeFeeds
 						data->fetchingChangeFeeds.insert(info->first);
 					}
 				}
@@ -8878,8 +8891,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		curFeed = 0;
 		while (curFeed < feedFetchVersions.size()) {
 			auto info = data->uidChangeFeed.find(feedFetchVersions[curFeed].first);
-			// Don't update if the feed is pending cleanup. Either it will get cleaned up and destroyed, or it will get
-			// fetched again, where the fetch version will get reset.
+			// Don't update if the feed is pending cleanup. Either it will get cleaned up and destroyed, or it will
+			// get fetched again, where the fetch version will get reset.
 			if (info != data->uidChangeFeed.end() && !data->changeFeedCleanupDurable.count(info->second->id)) {
 				if (feedFetchVersions[curFeed].second > info->second->durableFetchVersion.get()) {
 					info->second->durableFetchVersion.set(feedFetchVersions[curFeed].second);
@@ -9945,8 +9958,8 @@ ACTOR Future<Void> serveGetMappedKeyValuesRequests(StorageServer* self,
 	loop {
 		GetMappedKeyValuesRequest req = waitNext(getMappedKeyValues);
 
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
-		// before doing real work
+		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
+		// downgrade before doing real work
 		self->actors.add(self->readGuard(req, getMappedKeyValuesQ));
 	}
 }

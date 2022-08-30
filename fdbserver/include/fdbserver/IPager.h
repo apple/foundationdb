@@ -19,6 +19,7 @@
  */
 #pragma once
 
+#include "flow/Platform.h"
 #ifndef FDBSERVER_IPAGER_H
 #define FDBSERVER_IPAGER_H
 #include <cstddef>
@@ -465,7 +466,7 @@ public:
 	//        Secret is set if needed
 	// Post:  Main and Encoding subheaders are updated
 	//        Payload is possibly encrypted
-	void preWrite(PhysicalPageID pageID) const {
+	void preWrite(PhysicalPageID pageID, double* elapsed) const {
 		// Explicitly check payload definedness to make the source of valgrind errors more clear.
 		// Without this check, calculating a checksum on a payload with undefined bytes does not
 		// cause a valgrind error but the resulting checksum is undefined which causes errors later.
@@ -480,7 +481,9 @@ public:
 			xh->encode(encryptionKey.secret[0], pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::AESEncryptionV1) {
 			AESEncryptionV1Encoder* eh = page->getEncodingHeader<AESEncryptionV1Encoder>();
+			double startTime = timer_monotonic();
 			eh->encode(encryptionKey.cipherKeys, pPayload, payloadSize);
+			*elapsed += timer_monotonic() - startTime;
 		} else {
 			throw page_encoding_not_supported();
 		}
@@ -526,7 +529,7 @@ public:
 
 	// Pre:   postReadHeader has been called, encoding-specific parameters (such as the encryption secret) have been set
 	// Post:  Payload has been verified and decrypted if necessary
-	void postReadPayload(PhysicalPageID pageID) {
+	void postReadPayload(PhysicalPageID pageID, double* elapsed) {
 		if (page->encodingType == EncodingType::XXHash64) {
 			page->getEncodingHeader<XXHashEncoder>()->decode(pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::XOREncryption_TestOnly) {
@@ -534,7 +537,10 @@ public:
 			page->getEncodingHeader<XOREncryptionEncoder>()->decode(
 			    encryptionKey.secret[0], pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::AESEncryptionV1) {
-			page->getEncodingHeader<AESEncryptionV1Encoder>()->decode(encryptionKey.cipherKeys, pPayload, payloadSize);
+			double startTime = timer_monotonic();
+			page->getEncodingHeader<AESEncryptionV1Encoder>()->decode(
+			    encryptionKey.cipherKeys, pPayload, payloadSize);
+			*elapsed += timer_monotonic() - startTime;
 		} else {
 			throw page_encoding_not_supported();
 		}

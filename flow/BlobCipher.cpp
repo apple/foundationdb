@@ -184,8 +184,11 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::insertBaseCipherKey(const Encrypt
                                                                    const uint8_t* baseCipher,
                                                                    int baseCipherLen,
                                                                    const int64_t refreshAt,
-                                                                   const int64_t expireAt) {
+                                                                   const int64_t expireAt,
+                                                                   bool* newCipherKeyCreated) {
 	ASSERT_GT(baseCipherId, ENCRYPT_INVALID_CIPHER_KEY_ID);
+	ASSERT(newCipherKeyCreated != nullptr);
+	*newCipherKeyCreated = false;
 
 	// BaseCipherKeys are immutable, given the routine invocation updates 'latestCipher',
 	// ensure no key-tampering is done
@@ -223,6 +226,7 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::insertBaseCipherKey(const Encrypt
 	latestBaseCipherKeyId = baseCipherId;
 	latestRandomSalt = cipherKey->getSalt();
 
+	*newCipherKeyCreated = true;
 	return cipherKey;
 }
 
@@ -231,9 +235,12 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::insertBaseCipherKey(const Encrypt
                                                                    int baseCipherLen,
                                                                    const EncryptCipherRandomSalt& salt,
                                                                    const int64_t refreshAt,
-                                                                   const int64_t expireAt) {
+                                                                   const int64_t expireAt,
+                                                                   bool* newCipherKeyCreated) {
 	ASSERT_NE(baseCipherId, ENCRYPT_INVALID_CIPHER_KEY_ID);
 	ASSERT_NE(salt, ENCRYPT_INVALID_RANDOM_SALT);
+	ASSERT(newCipherKeyCreated != nullptr);
+	*newCipherKeyCreated = false;
 
 	BlobCipherKeyIdCacheKey cacheKey = getCacheKey(baseCipherId, salt);
 
@@ -267,6 +274,7 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::insertBaseCipherKey(const Encrypt
 	Reference<BlobCipherKey> cipherKey =
 	    makeReference<BlobCipherKey>(domainId, baseCipherId, baseCipher, baseCipherLen, salt, refreshAt, expireAt);
 	keyIdCache.emplace(cacheKey, cipherKey);
+	*newCipherKeyCreated = true;
 	return cipherKey;
 }
 
@@ -298,19 +306,22 @@ Reference<BlobCipherKey> BlobCipherKeyCache::insertCipherKey(const EncryptCipher
 		throw encrypt_invalid_id();
 	}
 
+	Reference<BlobCipherKey> cipherKey;
+	bool newCipherKeyCreated = false;
+
 	try {
 		auto domainItr = domainCacheMap.find(domainId);
 		if (domainItr == domainCacheMap.end()) {
 			// Add mapping to track new encryption domain
 			Reference<BlobCipherKeyIdCache> keyIdCache = makeReference<BlobCipherKeyIdCache>(domainId);
-			Reference<BlobCipherKey> cipherKey =
-			    keyIdCache->insertBaseCipherKey(baseCipherId, baseCipher, baseCipherLen, refreshAt, expireAt);
+			cipherKey = keyIdCache->insertBaseCipherKey(
+			    baseCipherId, baseCipher, baseCipherLen, refreshAt, expireAt, &newCipherKeyCreated);
 			domainCacheMap.emplace(domainId, keyIdCache);
-			return cipherKey;
 		} else {
 			// Track new baseCipher keys
 			Reference<BlobCipherKeyIdCache> keyIdCache = domainItr->second;
-			return keyIdCache->insertBaseCipherKey(baseCipherId, baseCipher, baseCipherLen, refreshAt, expireAt);
+			cipherKey = keyIdCache->insertBaseCipherKey(
+			    baseCipherId, baseCipher, baseCipherLen, refreshAt, expireAt, &newCipherKeyCreated);
 		}
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "BlobCipher.InsertCipherKeyFailed")
@@ -318,6 +329,10 @@ Reference<BlobCipherKey> BlobCipherKeyCache::insertCipherKey(const EncryptCipher
 		    .detail("DomainId", domainId);
 		throw;
 	}
+	if (newCipherKeyCreated) {
+		size++;
+	}
+	return cipherKey;
 }
 
 Reference<BlobCipherKey> BlobCipherKeyCache::insertCipherKey(const EncryptCipherDomainId& domainId,
@@ -333,19 +348,20 @@ Reference<BlobCipherKey> BlobCipherKeyCache::insertCipherKey(const EncryptCipher
 	}
 
 	Reference<BlobCipherKey> cipherKey;
+	bool newCipherKeyCreated = false;
 	try {
 		auto domainItr = domainCacheMap.find(domainId);
 		if (domainItr == domainCacheMap.end()) {
 			// Add mapping to track new encryption domain
 			Reference<BlobCipherKeyIdCache> keyIdCache = makeReference<BlobCipherKeyIdCache>(domainId);
-			cipherKey =
-			    keyIdCache->insertBaseCipherKey(baseCipherId, baseCipher, baseCipherLen, salt, refreshAt, expireAt);
+			cipherKey = keyIdCache->insertBaseCipherKey(
+			    baseCipherId, baseCipher, baseCipherLen, salt, refreshAt, expireAt, &newCipherKeyCreated);
 			domainCacheMap.emplace(domainId, keyIdCache);
 		} else {
 			// Track new baseCipher keys
 			Reference<BlobCipherKeyIdCache> keyIdCache = domainItr->second;
-			cipherKey =
-			    keyIdCache->insertBaseCipherKey(baseCipherId, baseCipher, baseCipherLen, salt, refreshAt, expireAt);
+			cipherKey = keyIdCache->insertBaseCipherKey(
+			    baseCipherId, baseCipher, baseCipherLen, salt, refreshAt, expireAt, &newCipherKeyCreated);
 		}
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "BlobCipher.InsertCipherKey_Failed")
@@ -354,7 +370,9 @@ Reference<BlobCipherKey> BlobCipherKeyCache::insertCipherKey(const EncryptCipher
 		    .detail("Salt", salt);
 		throw;
 	}
-
+	if (newCipherKeyCreated) {
+		size++;
+	}
 	return cipherKey;
 }
 
@@ -421,6 +439,8 @@ void BlobCipherKeyCache::resetEncryptDomainId(const EncryptCipherDomainId domain
 	}
 
 	Reference<BlobCipherKeyIdCache> keyIdCache = domainItr->second;
+	ASSERT(keyIdCache->getSize() <= size);
+	size -= keyIdCache->getSize();
 	keyIdCache->cleanup();
 	TraceEvent(SevInfo, "BlobCipher.ResetEncryptDomainId").detail("DomainId", domainId);
 }
@@ -437,6 +457,7 @@ void BlobCipherKeyCache::cleanup() noexcept {
 	}
 
 	instance->domainCacheMap.clear();
+	instance->size = 0;
 }
 
 std::vector<Reference<BlobCipherKey>> BlobCipherKeyCache::getAllCiphers(const EncryptCipherDomainId& domainId) {

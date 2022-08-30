@@ -354,6 +354,7 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
                                                                   Arena* arena) {
 	state BlobGranuleCipherKeysCtx cipherKeysCtx;
 	state Reference<GranuleTenantData> tenantData = bwData->tenantData.getDataForGranule(keyRange);
+	state double startTime = now();
 
 	ASSERT(tenantData.isValid());
 
@@ -372,6 +373,9 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 	cipherKeysCtx.ivRef = makeString(AES_256_IV_LENGTH, *arena);
 	deterministicRandom()->randomBytes(mutateString(cipherKeysCtx.ivRef), AES_256_IV_LENGTH);
 
+	++bwData->stats.getLatestEncryptCipherKeysReqs;
+	bwData->stats.getLatestEncryptCipherKeysMS += int((now() - startTime) * 1000);
+
 	if (BG_ENCRYPT_COMPRESS_DEBUG) {
 		TraceEvent(SevDebug, "GetLatestGranuleCipherKey")
 		    .detail("TextDomainId", cipherKeysCtx.textCipherKey.encryptDomainId)
@@ -389,10 +393,13 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 ACTOR Future<BlobGranuleCipherKey> lookupCipherKey(Reference<BlobWorkerData> bwData,
                                                    BlobCipherDetails cipherDetails,
                                                    Arena* arena) {
+	state double startTime = now();
 	std::unordered_set<BlobCipherDetails> cipherDetailsSet;
 	cipherDetailsSet.emplace(cipherDetails);
-	state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeyMap =
+	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeyMap =
 	    wait(getEncryptCipherKeys(bwData->dbInfo, cipherDetailsSet));
+	++bwData->stats.getEncryptCipherKeysReqs;
+	bwData->stats.getEncryptCipherKeysMS += int((now() - startTime) * 1000);
 
 	ASSERT(cipherKeyMap.size() == 1);
 

@@ -80,6 +80,25 @@ public:
 	virtual void setTenantPrefixIndex(Reference<TenantPrefixIndex> tenantPrefixIndex) {}
 
 	virtual bool shouldEnableEncryption() const = 0;
+
+	double* encryptTimePtr() { return &encryptTime; }
+	double* decryptTimePtr() { return &decryptTime; }
+
+	double flushEncryptTime() {
+		double result = encryptTime;
+		encryptTime = 0.0;
+		return result;
+	}
+
+	double flushDecryptTime() {
+		double result = decryptTime;
+		decryptTime = 0.0;
+		return result;
+	}
+
+private:
+	double encryptTime = 0.0;
+	double decryptTime = 0.0;
 };
 
 // The null key provider is useful to simplify page decoding.

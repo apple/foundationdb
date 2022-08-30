@@ -25,13 +25,43 @@
 #define FDBCLIENT_GETCIPHERKEYS_ACTOR_H
 
 #include "fdbclient/EncryptKeyProxyInterface.h"
+#include "fdbrpc/Stats.h"
 #include "flow/BlobCipher.h"
+#include "flow/Knobs.h"
 #include "flow/IRandom.h"
 
 #include <unordered_map>
 #include <unordered_set>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+struct BlobCipherKeyCacheMetrics {
+	CounterCollection cc;
+	Counter cacheHit;
+	Counter cacheMiss;
+	LatencySample getCipherKeysLatency;
+	LatencySample getLatestCipherKeysLatency;
+	Future<Void> traceFuture;
+
+	BlobCipherKeyCacheMetrics()
+	  : cc("BlobCipherKeyCache"), cacheHit("CacheHit", cc), cacheMiss("CacheMiss", cc),
+	    getCipherKeysLatency("GetCipherKeysLatency",
+	                         UID(),
+	                         FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
+	                         FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SAMPLE_SIZE),
+	    getLatestCipherKeysLatency("GetLatestCipherKeysLatency",
+	                               UID(),
+	                               FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
+	                               FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SAMPLE_SIZE) {
+		specialCounter(cc, "CacheSize", []() { return BlobCipherKeyCache::getInstance()->getSize(); });
+		traceFuture =
+		    traceCounters("BlobCipherKeyCacheMetrics", UID(), FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL, &cc);
+	}
+};
+
+// The counters should be member of BlobCipherKeyCache, but moving it into BlobCipherKeyCache will make flow depend on
+// fdbrpc.
+extern BlobCipherKeyCacheMetrics g_blobCipherKeyCacheMetrics;
 
 template <class T>
 Optional<UID> getEncryptKeyProxyId(const Reference<AsyncVar<T> const>& db) {
@@ -108,10 +138,13 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getL
 			    domain.first /*domainId*/, domain.second /*domainName*/, request.arena);
 		}
 	}
+	g_blobCipherKeyCacheMetrics.cacheHit += cipherKeys.size();
+	g_blobCipherKeyCacheMetrics.cacheMiss += domains.size() - cipherKeys.size();
 	if (request.encryptDomainInfos.empty()) {
 		return cipherKeys;
 	}
 	// Fetch any uncached cipher keys.
+	state double startTime = now();
 	loop choose {
 		when(EKPGetLatestBaseCipherKeysReply reply = wait(getUncachedLatestEncryptCipherKeys(db, request))) {
 			// Insert base cipher keys into cache and construct result.
@@ -140,6 +173,7 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getL
 		// In case encryptKeyProxy has changed, retry the request.
 		when(wait(onEncryptKeyProxyChange(db))) {}
 	}
+	g_blobCipherKeyCacheMetrics.getLatestCipherKeysLatency.addMeasurement(now() - startTime);
 	return cipherKeys;
 }
 
@@ -199,6 +233,8 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncry
 			uncachedBaseCipherIds.insert(std::make_pair(details.encryptDomainId, details.baseCipherId));
 		}
 	}
+	g_blobCipherKeyCacheMetrics.cacheHit += cipherKeys.size();
+	g_blobCipherKeyCacheMetrics.cacheMiss += cipherDetails.size() - cipherKeys.size();
 	if (uncachedBaseCipherIds.empty()) {
 		return cipherKeys;
 	}
@@ -207,6 +243,7 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncry
 		    id.first /*domainId*/, id.second /*baseCipherId*/, StringRef() /*domainName*/, request.arena);
 	}
 	// Fetch any uncached cipher keys.
+	state double startTime = now();
 	loop choose {
 		when(EKPGetBaseCipherKeysByIdsReply reply = wait(getUncachedEncryptCipherKeys(db, request))) {
 			std::unordered_map<BaseCipherIndex, EKPBaseCipherDetails, boost::hash<BaseCipherIndex>> baseCipherKeys;
@@ -242,6 +279,7 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncry
 		// In case encryptKeyProxy has changed, retry the request.
 		when(wait(onEncryptKeyProxyChange(db))) {}
 	}
+	g_blobCipherKeyCacheMetrics.getCipherKeysLatency.addMeasurement(now() - startTime);
 	return cipherKeys;
 }
 
