@@ -79,6 +79,8 @@ public:
 	void defineShard(KeyRangeRef keys);
 	void moveShard(KeyRangeRef keys, std::vector<Team> destinationTeam);
 	void finishMove(KeyRangeRef keys);
+	// a convenient function for (defineShard, moveShard, finishMove) pipeline
+	void assignRangeToTeams(KeyRangeRef keys, const std::vector<Team>& destinationTeam);
 	void check() const;
 	void setCheckMode(CheckMode);
 

@@ -64,9 +64,13 @@ public:
 
 	virtual Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const { return Void(); };
 
-	virtual Future<bool> isDataDistributionEnabled(const DDEnabledState* ddEnabledState) const = 0;
+	virtual Future<bool> isDataDistributionEnabled(const DDEnabledState* ddEnabledState) const {
+		return ddEnabledState->isDDEnabled();
+	};
 
-	virtual Future<Void> pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const = 0;
+	virtual Future<Void> pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const {
+		return Never();
+	};
 
 	virtual Future<Void> removeKeysFromFailedServer(const UID& serverID,
 	                                                const std::vector<UID>& teamForDroppedRange,
@@ -139,7 +143,7 @@ class DDMockTxnProcessor : public IDDTxnProcessor {
 	std::set<std::vector<UID>> getAllTeamsInRegion(bool primary) const;
 
 public:
-	explicit DDMockTxnProcessor(std::shared_ptr<MockGlobalState> mgs = nullptr) : mgs(mgs){};
+	explicit DDMockTxnProcessor(std::shared_ptr<MockGlobalState> mgs = nullptr) : mgs(std::move(mgs)){};
 
 	Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() override;
 
@@ -148,6 +152,16 @@ public:
 	    const MoveKeysLock& moveKeysLock,
 	    const std::vector<Optional<Key>>& remoteDcIds,
 	    const DDEnabledState* ddEnabledState) override;
+
+	Future<Void> removeKeysFromFailedServer(const UID& serverID,
+	                                        const std::vector<UID>& teamForDroppedRange,
+	                                        const MoveKeysLock& lock,
+	                                        const DDEnabledState* ddEnabledState) const override;
+
+	Future<Void> removeStorageServer(const UID& serverID,
+	                                 const Optional<UID>& tssPairID,
+	                                 const MoveKeysLock& lock,
+	                                 const DDEnabledState* ddEnabledState) const override;
 };
 
 #endif // FOUNDATIONDB_DDTXNPROCESSOR_H

@@ -32,7 +32,10 @@ class MockStorageServer {
 public:
 	// control plane statistics associated with a real storage server
 	uint64_t usedDiskSpace = 0, availableDiskSpace;
-	KeyRangeMap<KeyRange, uint64_t> shardTotalBytes; // randomly generated in setup phase
+
+	// In-memory counterpart of the `serverKeys` in system keyspace
+	// the value bool is equal to "[[serverKeysTrue]]" |" [[serverKeysFalse]]" and metrics uint64_t is the shard size
+	KeyRangeMap<bool, uint64_t> serverKeys;
 
 	// sampled metrics
 	StorageServerMetrics metrics;
@@ -40,6 +43,7 @@ public:
 
 	StorageServerInterface ssi; // serve RPC requests
 	UID id;
+	bool primary = true; // Only support single region MGS for now
 
 	MockStorageServer() = default;
 	MockStorageServer(const UID& id, uint64_t availableDiskSpace, uint64_t usedDiskSpace = 0)
@@ -50,7 +54,10 @@ public:
 
 class MockGlobalState {
 public:
+	typedef ShardsAffectedByTeamFailure::Team Team;
+	// In-memory counterpart of the `keyServers` in system keyspace
 	Reference<ShardsAffectedByTeamFailure> shardMapping;
+	// In-memory counterpart of the `serverListKeys` in system keyspace
 	std::map<UID, MockStorageServer> allServers;
 	DatabaseConfiguration configuration;
 

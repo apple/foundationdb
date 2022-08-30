@@ -28,9 +28,7 @@ void MockGlobalState::initialAsEmptyDatabaseMGS(const DatabaseConfiguration& con
 		UID id = indexToUID(i);
 		serverIds.push_back(id);
 		allServers[id] = MockStorageServer(id, defaultDiskSpace);
+		allServers[id].serverKeys.insert(allKeys, true);
 	}
-
-	shardMapping->defineShard(allKeys);
-	shardMapping->moveShard(allKeys, {ShardsAffectedByTeamFailure::Team(serverIds, true)});
-	shardMapping->finishMove(allKeys);
+	shardMapping->assignRangeToTeams(allKeys, {Team(serverIds, true)});
 }

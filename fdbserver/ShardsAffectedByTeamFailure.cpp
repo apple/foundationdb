@@ -211,3 +211,9 @@ size_t ShardsAffectedByTeamFailure::getNumberOfShards() const {
 auto ShardsAffectedByTeamFailure::getAllRanges() const -> decltype(shard_teams)::ConstRanges {
 	return shard_teams.ranges();
 }
+
+void ShardsAffectedByTeamFailure::assignRangeToTeams(KeyRangeRef keys, const std::vector<Team>& destinationTeam) {
+	defineShard(keys);
+	moveShard(keys, destinationTeam);
+	finishMove(keys);
+}

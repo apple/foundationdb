@@ -565,3 +565,23 @@ Future<Reference<InitialDataDistribution>> DDMockTxnProcessor::getInitialDataDis
 	res->remoteTeams = getAllTeamsInRegion(false);
 	return res;
 }
+
+Future<Void> DDMockTxnProcessor::removeKeysFromFailedServer(const UID& serverID,
+                                                            const std::vector<UID>& teamForDroppedRange,
+                                                            const MoveKeysLock& lock,
+                                                            const DDEnabledState* ddEnabledState) const {
+	ShardsAffectedByTeamFailure::Team team(teamForDroppedRange, true);
+
+	team.primary = false;
+
+	return Void();
+}
+
+Future<Void> DDMockTxnProcessor::removeStorageServer(const UID& serverID,
+                                                     const Optional<UID>& tssPairID,
+                                                     const MoveKeysLock& lock,
+                                                     const DDEnabledState* ddEnabledState) const {
+
+	mgs->allServers.erase(serverID);
+	return Void();
+}
