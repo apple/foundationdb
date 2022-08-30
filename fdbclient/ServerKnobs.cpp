@@ -164,6 +164,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,           960 ); if( randomize && BUGGIFY ) PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD = 360; // Set as the lowest priority
 
 	// Data distribution
+    init( DYNAMIC_REPLICATION_ENABLED,                          false);
+	init( DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC,               0.2);
 	init( SHARD_ENCODE_LOCATION_METADATA,                      false ); if( randomize && BUGGIFY )  SHARD_ENCODE_LOCATION_METADATA = true;
 	init( ENABLE_DD_PHYSICAL_SHARD,                            false ); // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true; When true, optimization of data move between DCs is disabled
 	init( MAX_PHYSICAL_SHARD_BYTES,                        500000000 ); // 500 MB; for ENABLE_DD_PHYSICAL_SHARD; smaller leads to larger number of physicalShard per storage server
@@ -980,9 +982,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// acceptable format: "<token_name1>#<absolute_file_path1>,<token_name2>#<absolute_file_path2>,.."
 	// NOTE: 'token-name" can NOT contain '#' character
 	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS,             "");
-
-	init( DYNAMIC_REPLICATION_ENABLED,                           false);
-	init( DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC,               0.2);
 
 	// clang-format on
 

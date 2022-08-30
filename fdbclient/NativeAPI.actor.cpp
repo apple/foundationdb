@@ -2933,7 +2933,12 @@ Future<KeyRangeLocationInfo> getKeyLocation(Database const& cx,
                                             Version version) {
 	// we first check whether this range is cached
 	Optional<KeyRangeLocationInfo> locationInfo = cx->getCachedLocation(tenant.name, key, isBackward);
-	if (!locationInfo.present()) {
+	// For dynamic replication, we may need to refresh cache after adding replicas. Otherwise, the load balancer
+	// cannot find the added replicas.
+	// FIXME: For now, we just refresh cache every 5 seconds, this is a little cruel.
+	static double lastRefreshTime = 0;
+	if (!locationInfo.present() || (CLIENT_KNOBS->DYNAMIC_REPLICATION_REFRESH_CACHE && now() - lastRefreshTime > 5)) {
+		lastRefreshTime = now();
 		return getKeyLocation_internal(
 		    cx, tenant, key, spanContext, debugID, useProvisionalProxies, isBackward, version);
 	}

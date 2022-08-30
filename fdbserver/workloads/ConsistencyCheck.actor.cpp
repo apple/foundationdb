@@ -1222,7 +1222,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}*/
 
 			// In a quiescent database, check that the team size is the same as the desired team size
-			// TODO@ZZX: Make sure this(Knobs) make sense, and add comments?
+			// FIXME: When dynamic replication is on, the team size might not match. For now, we just skip the check.
 			if (self->firstClient && self->performQuiescentChecks &&
 			    (sourceStorageServers.size() != configuration.usableRegions * configuration.storageTeamSize &&
 			     !SERVER_KNOBS->DYNAMIC_REPLICATION_ENABLED)) {

@@ -159,6 +159,9 @@ public:
 	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD; // Priority when a physical shard is oversize or anonymous
 
 	// Data distribution
+	bool DYNAMIC_REPLICATION_ENABLED;
+	double DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC; // Dynamic replication happens when shard's bandwidth > srcLoad *
+	                                                 // BANDWIDTH_FRAC
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
 	int64_t MAX_PHYSICAL_SHARD_BYTES;
@@ -943,11 +946,6 @@ public:
 	bool REST_KMS_CONNECTOR_REFRESH_KMS_URLS;
 	double REST_KMS_CONNECTOR_REFRESH_KMS_URLS_INTERVAL_SEC;
 	std::string REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT;
-
-	// DYNAMIC REPLICATION
-	bool DYNAMIC_REPLICATION_ENABLED;
-	// Dynamic replication happens when shard's bandwidth > srcLoad * BANDWIDTH_FRAC
-	double DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

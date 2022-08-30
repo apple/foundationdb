@@ -1615,7 +1615,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 							       physicalShardIDCandidate != anonymousShardId.first());
 						}
 
-						if (rd.reason == RelocateReason::MULTIPLY_SHARD) {
+						if (rd.reason == RelocateReason::ADD_SHARD) {
 							wait(getSrcTeam(self, &rd, inflightPenalty, tciIndex, &srcTeams));
 						}
 					}
@@ -1765,9 +1765,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				    .detail("DestTeamSize", totalIds);
 			}
 
-			if (rd.reason == RelocateReason::MULTIPLY_SHARD) {
+			if (rd.reason == RelocateReason::ADD_SHARD) {
 				addSrcTeamsToDestTeams(srcTeams, destinationTeams, healthyIds, destIds);
-				TraceEvent("RelocateByMultplyShard")
+				TraceEvent("RelocateByAddShard")
 				    .detail("Source", rd.src)
 				    .detail("CompleteSrc", rd.completeSources)
 				    .detail("BestTeam", destServersString(bestTeams))
@@ -2310,11 +2310,11 @@ RelocateReason selectRelocateReason(DDQueue* self,
 			relocateReason = RelocateReason::OTHER;
 		} else if (fabs(minReadLoad - maxReadLoad) < epsilon && fabs(minReadLoad - shardReadLoad) < epsilon) {
 			// If three of them are equal, it means we only have one shard whose readLoad > 0 in sourceTeam. In this
-			// case, moving shard to another team won't solve the problem, so we would use MULTIPLY_SHARD here.
-			relocateReason = RelocateReason::MULTIPLY_SHARD;
+			// case, moving shard to another team won't solve the problem, so we would use ADD_SHARD here.
+			relocateReason = RelocateReason::ADD_SHARD;
 		} else if (shardReadLoad >= srcLoad * SERVER_KNOBS->DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC) {
-			// If one team has a very hot shard, we will try to multiply replicas.
-			relocateReason = RelocateReason::MULTIPLY_SHARD;
+			// If one team has a very hot shard, we will try to add  replicas.
+			relocateReason = RelocateReason::ADD_SHARD;
 		} else {
 			relocateReason = RelocateReason::MOVE_SHARD;
 		}
