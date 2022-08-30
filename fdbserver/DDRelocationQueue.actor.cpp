@@ -2119,7 +2119,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 	// For read rebalance if there is just 1 hot shard remained, move this shard to another server won't solve the
 	// problem.
 	// UPDATE: This problem can be solved by dynamic replication & split,merge
-	if (shards.size() < 1) {
+	if (shards.size() <= 1 && !SERVER_KNOBS->DYNAMIC_REPLICATION_ENABLED) {
 		traceEvent->detail("SkipReason", "NoShardOnSource");
 		return false;
 	}

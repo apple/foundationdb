@@ -2933,12 +2933,8 @@ Future<KeyRangeLocationInfo> getKeyLocation(Database const& cx,
                                             Version version) {
 	// we first check whether this range is cached
 	Optional<KeyRangeLocationInfo> locationInfo = cx->getCachedLocation(tenant.name, key, isBackward);
-	// For dynamic replication, we may need to refresh cache after adding replicas. Otherwise, the load balancer
-	// cannot find the added replicas.
-	// FIXME: For now, we just refresh cache every 5 seconds, this is a little cruel.
 	static double lastRefreshTime = 0;
-	if (!locationInfo.present() || (CLIENT_KNOBS->DYNAMIC_REPLICATION_REFRESH_CACHE && now() - lastRefreshTime > 5)) {
-		lastRefreshTime = now();
+	if (!locationInfo.present()) {
 		return getKeyLocation_internal(
 		    cx, tenant, key, spanContext, debugID, useProvisionalProxies, isBackward, version);
 	}
@@ -2950,7 +2946,12 @@ Future<KeyRangeLocationInfo> getKeyLocation(Database const& cx,
 		}
 	}
 
-	if (onlyEndpointFailedAndNeedRefresh) {
+	// For dynamic replication, we may need to refresh cache after adding replicas. Otherwise, the load balancer
+	// cannot find the added replicas.
+	// FIXME: For now, we just refresh cache every 5 seconds, this is a little cruel.
+	if (onlyEndpointFailedAndNeedRefresh ||
+	    (CLIENT_KNOBS->DYNAMIC_REPLICATION_REFRESH_CACHE && now() - lastRefreshTime > 5)) {
+		lastRefreshTime = now();
 		cx->invalidateCache(locationInfo.get().tenantEntry.prefix, key);
 
 		// Refresh the cache with a new getKeyLocations made to proxies.
