@@ -1993,9 +1993,8 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 		return false;
 	}
 
-    // TODO@ZZX: uncomment
-	// state Future<bool> reduceShards = rebalanceByReduceShard(self, randomTeam, moveReason, primary);
-    // wait(ready(reduceShards));
+	state Future<bool> reduceShards = rebalanceByReduceShard(self, randomTeam, moveReason, primary);
+    wait(ready(reduceShards));
 	
 	state std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));

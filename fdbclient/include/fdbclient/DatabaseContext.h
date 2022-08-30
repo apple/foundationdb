@@ -70,7 +70,6 @@ struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>
 	LocationInfo& operator=(const LocationInfo&) = delete;
 	LocationInfo& operator=(LocationInfo&&) = delete;
 	bool hasCaches = false;
-    double lastRefreshTime = 0;
 	Reference<Locations> locations() { return Reference<Locations>::addRef(this); }
 };
 

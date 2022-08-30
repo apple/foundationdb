@@ -28,7 +28,6 @@
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include <string>
 
 // The used bandwidth of a shard. The higher the value is, the busier the shard is.
 enum BandwidthStatus { BandwidthStatusLow, BandwidthStatusNormal, BandwidthStatusHigh };
@@ -701,7 +700,6 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 	bool sizeSplit = stats.bytes > shardBounds.max.bytes,
 	     writeSplit = bandwidthStatus == BandwidthStatusHigh && keys.begin < keyServersKeys.begin;
 	bool shouldSplit = sizeSplit || writeSplit;
-    // TODO@ZZX: delete 'false'
 	bool shouldMerge = stats.bytes < shardBounds.min.bytes && bandwidthStatus == BandwidthStatusLow;
 
 	// Every invocation must set this or clear it
