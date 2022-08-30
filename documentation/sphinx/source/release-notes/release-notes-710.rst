@@ -9,7 +9,7 @@ Release Notes
 7.1.20
 ======
 * Released with AVX disabled.
-* Fixed missing localities for fdbserver that can cause cross DC calls. `(PR #7995) <https://github.com/apple/foundationdb/pull/7995>`_
+* Fixed missing localities for fdbserver that can cause cross DC calls among storage servers. `(PR #7995) <https://github.com/apple/foundationdb/pull/7995>`_
 * Removed extremely spammy trace event in FetchKeys and fixed transaction_profiling_analyzer.py. `(PR #7934) <https://github.com/apple/foundationdb/pull/7934>`_
 * Fixed bugs when GRV proxy returns an error. `(PR #7860) <https://github.com/apple/foundationdb/pull/7860>`_
 
