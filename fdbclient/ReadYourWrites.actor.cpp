@@ -2492,6 +2492,8 @@ void ReadYourWritesTransaction::setOptionImpl(FDBTransactionOptions::Option opti
 		validateOptionValueNotPresent(value);
 		options.bypassUnreadable = true;
 		break;
+	case FDBTransactionOptions::AUTHORIZATION_TOKEN:
+		tr.setOption(option, value);
 	default:
 		break;
 	}
