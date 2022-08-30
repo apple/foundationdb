@@ -577,7 +577,9 @@ public:
 	// Calls `fn` when stop() is called.
 	// addStopCallback can be called more than once, and each added `fn` will be run once.
 
-	virtual bool isSimulated() const = 0;
+    virtual void installSwiftConcurrencyHooks() = 0;
+
+    virtual bool isSimulated() const = 0;
 	// Returns true if this network is a local simulation
 
 	virtual bool isOnMainThread() const = 0;
