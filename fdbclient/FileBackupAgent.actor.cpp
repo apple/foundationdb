@@ -764,7 +764,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		self->lastValue = v;
 		if (self->lastWrittenKey.size() > 0) {
 			// crossing tenant boundaries
-			// TODO (Nim): Support when tenants aren't supported
+			// TODO (Nim): Address this case when tenants aren't supported/enabled
 			if (getTenantId(self->lastWrittenKey) != getTenantId(self->lastKey)) {
 				CODE_PROBE(true, "crossed tenant boundaries");
 				wait(finishCurrentBlockWriteNewBlock(self, toWrite, true));
