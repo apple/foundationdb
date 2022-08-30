@@ -288,6 +288,7 @@ rocksdb::Options getOptions() {
 	options.max_background_jobs = SERVER_KNOBS->ROCKSDB_MAX_BACKGROUND_JOBS;
 
 	options.db_write_buffer_size = SERVER_KNOBS->ROCKSDB_WRITE_BUFFER_SIZE;
+	options.write_buffer_size = SERVER_KNOBS->ROCKSDB_CF_WRITE_BUFFER_SIZE;
 	options.statistics = rocksdb::CreateDBStatistics();
 	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
