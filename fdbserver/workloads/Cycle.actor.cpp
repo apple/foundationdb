@@ -41,6 +41,7 @@ template <>
 struct CycleMembers<true> {
 	Arena arena;
 	TenantName tenant;
+	TenantName tenant2;
 	authz::jwt::TokenRef token;
 	StringRef signedToken;
 };
@@ -52,6 +53,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	Key keyPrefix;
 
 	std::vector<Future<Void>> clients;
+	std::vector<TenantName> tenantNames;
 	PerfIntCounter transactions, retries, tooOldRetries, commitFailedRetries;
 	PerfDoubleCounter totalLatency;
 
@@ -68,7 +70,8 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		if constexpr (MultiTenancy) {
 			ASSERT(g_network->isSimulated());
 			auto k = g_simulator.authKeys.begin();
-			this->tenant = getOption(options, "tenant"_sr, "CycleTenant"_sr);
+			this->tenant = getOption(options, "tenantTwo"_sr, "CycleTenant"_sr);
+			this->tenant2 = getOption(options, "tenant"_sr, "CycleTenant"_sr);
 			// make it comfortably longer than the timeout of the workload
 			auto currentTime = uint64_t(lround(g_network->timer()));
 			this->token.algorithm = authz::Algorithm::ES256;
@@ -79,7 +82,14 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 			this->token.notBeforeUnixTime = currentTime - 10;
 			VectorRef<StringRef> tenants;
 			tenants.push_back_deep(this->arena, this->tenant);
+			tenants.push_back_deep(this->arena, this->tenant2);
 			this->token.tenants = tenants;
+			tenantNames.push_back(this->tenant);
+			tenantNames.push_back(this->tenant2);
+			// std::vector<std::string> names = getOption(options, "tenantNames"_sr, std::vector<std::string>());
+			// for (std::string tenantName : names) {
+			// 	tenantNames.push_back(this->tenant);
+			// }
 			// we currently don't support this workload to be run outside of simulation
 			this->signedToken = authz::jwt::signToken(this->arena, this->token, k->second);
 		}
@@ -100,13 +110,26 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 
 	Future<Void> setup(Database const& cx) override {
 		if constexpr (MultiTenancy) {
-			cx->defaultTenant = this->tenant;
+			cx->defaultTenant = this->tenant2;
 		}
-		return bulkSetup(cx, this, nodeCount, Promise<double>());
+		return bulkSetup(cx,
+		                 this,
+		                 nodeCount,
+		                 Promise<double>(),
+		                 false,
+		                 0.0,
+		                 1e12,
+		                 std::vector<uint64_t>(),
+		                 Promise<std::vector<std::pair<uint64_t, double>>>(),
+		                 0,
+		                 0.1,
+		                 0,
+		                 0,
+		                 this->tenantNames);
 	}
 	Future<Void> start(Database const& cx) override {
 		if constexpr (MultiTenancy) {
-			cx->defaultTenant = this->tenant;
+			cx->defaultTenant = this->tenant2;
 		}
 		for (int c = 0; c < actorCount; c++)
 			clients.push_back(
@@ -115,7 +138,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	}
 	Future<bool> check(Database const& cx) override {
 		if constexpr (MultiTenancy) {
-			cx->defaultTenant = this->tenant;
+			cx->defaultTenant = this->tenant2;
 		}
 		int errors = 0;
 		for (int c = 0; c < clients.size(); c++)

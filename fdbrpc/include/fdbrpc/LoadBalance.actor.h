@@ -486,6 +486,11 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				// server count is within "LOAD_BALANCE_MAX_BAD_OPTIONS". We
 				// do not need to consider any remote servers.
 				break;
+			} else if (badServers == alternatives->countBest() && i == badServers) {
+				TraceEvent("AllLocalAlternativesFailed")
+				    .detail("Alternatives", alternatives->description())
+				    .detail("Total", alternatives->size())
+				    .detail("Best", alternatives->countBest());
 			}
 
 			RequestStream<Request, P> const* thisStream = &alternatives->get(i, channel);
@@ -587,6 +592,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		// nextAlt. This logic matters only if model == nullptr. Otherwise, the
 		// bestAlt and nextAlt have been decided.
 		state RequestStream<Request, P> const* stream = nullptr;
+		state LBDistance::Type distance;
 		for (int alternativeNum = 0; alternativeNum < alternatives->size(); alternativeNum++) {
 			int useAlt = nextAlt;
 			if (nextAlt == startAlt)
@@ -595,6 +601,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				useAlt = (nextAlt + alternatives->size() - 1) % alternatives->size();
 
 			stream = &alternatives->get(useAlt, channel);
+			distance = alternatives->getDistance(useAlt);
 			if (!IFailureMonitor::failureMonitor().getState(stream->getEndpoint()).failed &&
 			    (!firstRequestEndpoint.present() || stream->getEndpoint().token.first() != firstRequestEndpoint.get()))
 				break;
@@ -602,6 +609,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			if (nextAlt == startAlt)
 				triedAllOptions = TriedAllOptions::True;
 			stream = nullptr;
+			distance = LBDistance::DISTANT;
 		}
 
 		if (!stream && !firstRequestData.isValid()) {
@@ -637,6 +645,18 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			firstRequestEndpoint = Optional<uint64_t>();
 		} else if (firstRequestData.isValid()) {
 			// Issue a second request, the first one is taking a long time.
+			if (distance == LBDistance::DISTANT) {
+				TraceEvent("LBDistant2nd")
+				    .suppressFor(0.1)
+				    .detail("Distance", (int)distance)
+				    .detail("BackOff", backoff)
+				    .detail("TriedAllOptions", triedAllOptions)
+				    .detail("Alternatives", alternatives->description())
+				    .detail("Token", stream->getEndpoint().token)
+				    .detail("Total", alternatives->size())
+				    .detail("Best", alternatives->countBest())
+				    .detail("Attempts", numAttempts);
+			}
 			secondRequestData.startRequest(backoff, triedAllOptions, stream, request, model, alternatives, channel);
 
 			loop choose {
@@ -664,6 +684,18 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			}
 		} else {
 			// Issue a request, if it takes too long to get a reply, go around the loop
+			if (distance == LBDistance::DISTANT) {
+				TraceEvent("LBDistant")
+				    .suppressFor(0.1)
+				    .detail("Distance", (int)distance)
+				    .detail("BackOff", backoff)
+				    .detail("TriedAllOptions", triedAllOptions)
+				    .detail("Alternatives", alternatives->description())
+				    .detail("Token", stream->getEndpoint().token)
+				    .detail("Total", alternatives->size())
+				    .detail("Best", alternatives->countBest())
+				    .detail("Attempts", numAttempts);
+			}
 			firstRequestData.startRequest(backoff, triedAllOptions, stream, request, model, alternatives, channel);
 			firstRequestEndpoint = stream->getEndpoint().token.first();
 

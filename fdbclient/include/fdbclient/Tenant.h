@@ -71,6 +71,9 @@ struct TenantMapEntry {
 	static std::string tenantStateToString(TenantState tenantState);
 	static TenantState stringToTenantState(std::string stateStr);
 
+	static std::string tenantLockStateToString(TenantLockState tenantState);
+	static TenantLockState stringToTenantLockState(std::string stateStr);
+
 	int64_t id = -1;
 	Key prefix;
 	TenantState tenantState = TenantState::READY;

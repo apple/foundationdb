@@ -43,6 +43,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	bool allowPauses;
 	bool shareLogRange;
 	bool shouldSkipRestoreRanges;
+	bool enableBackupEncryption;
 	Optional<std::string> encryptionKeyFileName;
 
 	BackupAndRestoreCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -53,6 +54,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		backupTag = getOption(options, "backupTag"_sr, BackupAgentBase::getDefaultTag());
 		backupRangesCount = getOption(options, "backupRangesCount"_sr, 5);
 		backupRangeLengthMax = getOption(options, "backupRangeLengthMax"_sr, 1);
+		enableBackupEncryption = getOption(options, "enableBackupEncryption"_sr, false);
 		abortAndRestartAfter =
 		    getOption(options,
 		              "abortAndRestartAfter"_sr,
@@ -272,8 +274,9 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			                               deterministicRandom()->randomInt(0, 100),
 			                               tag.toString(),
 			                               backupRanges,
-			                               SERVER_KNOBS->ENABLE_ENCRYPTION &&
-			                                   cx->clientInfo->get().tenantMode == TenantMode::REQUIRED,
+			                               self->enableBackupEncryption && SERVER_KNOBS->ENABLE_ENCRYPTION &&
+			                                   (cx->clientInfo->get().tenantMode == TenantMode::REQUIRED ||
+			                                    cx->clientInfo->get().tenantMode == TenantMode::OPTIONAL_TENANT),
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               UsePartitionedLog::False,
 			                               IncrementalBackupOnly::False,
@@ -527,16 +530,18 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			if (!self->locked && BUGGIFY) {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
 				try {
-					extraBackup = backupAgent.submitBackup(cx,
-					                                       "file://simfdb/backups/"_sr,
-					                                       {},
-					                                       deterministicRandom()->randomInt(0, 60),
-					                                       deterministicRandom()->randomInt(0, 100),
-					                                       self->backupTag.toString(),
-					                                       self->backupRanges,
-					                                       SERVER_KNOBS->ENABLE_ENCRYPTION &&
-					                                           cx->clientInfo->get().tenantMode == TenantMode::REQUIRED,
-					                                       StopWhenDone::True);
+					extraBackup =
+					    backupAgent.submitBackup(cx,
+					                             "file://simfdb/backups/"_sr,
+					                             {},
+					                             deterministicRandom()->randomInt(0, 60),
+					                             deterministicRandom()->randomInt(0, 100),
+					                             self->backupTag.toString(),
+					                             self->backupRanges,
+					                             self->enableBackupEncryption && SERVER_KNOBS->ENABLE_ENCRYPTION &&
+					                                 (cx->clientInfo->get().tenantMode == TenantMode::REQUIRED ||
+					                                  cx->clientInfo->get().tenantMode == TenantMode::OPTIONAL_TENANT),
+					                             StopWhenDone::True);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
 					    .error(e)
