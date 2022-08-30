@@ -298,21 +298,39 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                             int end_key_name_length,
 	                                             int64_t chunkSize);
 
-	FDBFuture* (*transactionGetBlobGranuleRanges)(FDBTransaction* db,
+	FDBFuture* (*transactionGetBlobGranuleRanges)(FDBTransaction* tr,
 	                                              uint8_t const* begin_key_name,
 	                                              int begin_key_name_length,
 	                                              uint8_t const* end_key_name,
 	                                              int end_key_name_length,
 	                                              int rangeLimit);
 
-	FDBResult* (*transactionReadBlobGranules)(FDBTransaction* db,
+	FDBResult* (*transactionReadBlobGranules)(FDBTransaction* tr,
 	                                          uint8_t const* begin_key_name,
 	                                          int begin_key_name_length,
 	                                          uint8_t const* end_key_name,
 	                                          int end_key_name_length,
 	                                          int64_t beginVersion,
-	                                          int64_t readVersion,
-	                                          FDBReadBlobGranuleContext granule_context);
+	                                          int64_t readVersion);
+
+	FDBFuture* (*transactionReadBlobGranulesStart)(FDBTransaction* tr,
+	                                               uint8_t const* begin_key_name,
+	                                               int begin_key_name_length,
+	                                               uint8_t const* end_key_name,
+	                                               int end_key_name_length,
+	                                               int64_t beginVersion,
+	                                               int64_t readVersion,
+	                                               int64_t* readVersionOut);
+
+	FDBResult* (*transactionReadBlobGranulesFinish)(FDBTransaction* tr,
+	                                                FDBFuture* startFuture,
+	                                                uint8_t const* begin_key_name,
+	                                                int begin_key_name_length,
+	                                                uint8_t const* end_key_name,
+	                                                int end_key_name_length,
+	                                                int64_t beginVersion,
+	                                                int64_t readVersion,
+	                                                FDBReadBlobGranuleContext* granule_context);
 
 	FDBFuture* (*transactionCommit)(FDBTransaction* tr);
 	fdb_error_t (*transactionGetCommittedVersion)(FDBTransaction* tr, int64_t* outVersion);
@@ -410,6 +428,18 @@ public:
 	                                           Version beginVersion,
 	                                           Optional<Version> readVersion,
 	                                           ReadBlobGranuleContext granule_context) override;
+
+	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesStart(const KeyRangeRef& keyRange,
+	                                                                               Version beginVersion,
+	                                                                               Optional<Version> readVersion,
+	                                                                               Version* readVersionOut) override;
+
+	ThreadResult<RangeResult> readBlobGranulesFinish(
+	    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
+	    const KeyRangeRef& keyRange,
+	    Version beginVersion,
+	    Version readVersion,
+	    ReadBlobGranuleContext granuleContext) override;
 
 	void addReadConflictRange(const KeyRangeRef& keys) override;
 
@@ -616,6 +646,18 @@ public:
 	                                           Optional<Version> readVersion,
 	                                           ReadBlobGranuleContext granule_context) override;
 
+	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesStart(const KeyRangeRef& keyRange,
+	                                                                               Version beginVersion,
+	                                                                               Optional<Version> readVersion,
+	                                                                               Version* readVersionOut) override;
+
+	ThreadResult<RangeResult> readBlobGranulesFinish(
+	    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
+	    const KeyRangeRef& keyRange,
+	    Version beginVersion,
+	    Version readVersion,
+	    ReadBlobGranuleContext granuleContext) override;
+
 	void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) override;
 	void set(const KeyRef& key, const ValueRef& value) override;
 	void clear(const KeyRef& begin, const KeyRef& end) override;
@@ -680,6 +722,9 @@ private:
 
 	template <class T>
 	ThreadResult<T> abortableTimeoutResult(ThreadFuture<Void> abortSignal);
+
+	template <class T>
+	ThreadResult<T> abortableResult(ThreadResult<T> result, ThreadFuture<Void> abortSignal);
 
 	TransactionInfo transaction;
 
