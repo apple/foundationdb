@@ -5245,7 +5245,7 @@ public:
 				// instance is encrypted, we should use the same encryption encoding.
 				self->m_encodingType = self->m_header.encodingType;
 				self->m_enforceEncodingType = true;
-				TraceEvent(SevWarn, "RedwoodBTreeNodeForceEncryption")
+				TraceEvent("RedwoodBTreeNodeForceEncryption")
 				    .detail("InstanceName", self->m_pager->getName())
 				    .detail("EncodingFound", self->m_header.encodingType)
 				    .detail("EncodingDesired", self->m_encodingType);
