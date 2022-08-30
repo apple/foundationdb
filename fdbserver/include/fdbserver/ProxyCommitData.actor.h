@@ -234,6 +234,11 @@ struct ProxyCommitData {
 
 	bool isEncryptionEnabled = false;
 
+	// Conservatice count of the number of metadata upates, useful
+	// to invalidate optimistically tagged mutations whose
+	// key->tag mapping may have changed.
+	int metadataUpdateCount = 0;
+
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to
 	// signify they must be repopulated. We do not repopulate them immediately to avoid a slow task.
