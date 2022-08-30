@@ -384,7 +384,7 @@ struct RequestData : NonCopyable {
 	// A return value of true means that the request completed successfully
 	// A return value of false means that the request failed but should be retried
 	// In the event of a non-retryable failure, an error is thrown indicating the failure
-	bool checkAndProcessResult(AtMostOnce atMostOnce) {
+	bool checkAndProcessResult(AtMostOnce atMostOnce, UID dbgid) {
 		ASSERT(response.isReady());
 		requestProcessed = true;
 
@@ -392,11 +392,13 @@ struct RequestData : NonCopyable {
 		    checkAndProcessResultImpl(response.get(), std::move(modelHolder), atMostOnce, triedAllOptions);
 
 		if (outcome.isError()) {
+			TraceEvent("LBBranchErr", dbgid);
 			throw outcome.getError();
 		} else if (!outcome.get()) {
+			TraceEvent("LBBranchEmpty", dbgid);
 			response = Future<Reply>();
 		}
-
+		TraceEvent("LBBranchNormal", dbgid);
 		return outcome.get();
 	}
 
@@ -654,8 +656,19 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			distance = alternatives->getDistance(useAlt);
 			chosenAlt = useAlt;
 			if (!IFailureMonitor::failureMonitor().getState(stream->getEndpoint()).failed &&
-			    (!firstRequestEndpoint.present() || stream->getEndpoint().token.first() != firstRequestEndpoint.get()))
-				break;
+			    (!firstRequestEndpoint.present() || stream->getEndpoint().token.first() != firstRequestEndpoint.get())) {
+					TraceEvent("FinalizeEndpoint", dbgid)
+						.detail("AlternativeNum", alternativeNum)
+						.detail("NextAlt", nextAlt)
+						.detail("UseAlt", useAlt)
+						.detail("ChosenAlt", chosenAlt)
+						.detail("BestAlt", bestAlt);
+					break;
+				}
+			TraceEvent("ReplaceNextAlt", dbgid)
+				.detail("AlternativeNum", alternativeNum)
+				.detail("Current", nextAlt)
+				.detail("Next", (nextAlt + 1) % alternatives->size());
 			nextAlt = (nextAlt + 1) % alternatives->size();
 			if (nextAlt == startAlt)
 				triedAllOptions = TriedAllOptions::True;
@@ -665,6 +678,8 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		}
 
 		if (!stream && !firstRequestData.isValid()) {
+			TraceEvent("LBBranchAllDown", dbgid);
+
 			// Everything is down!  Wait for someone to be up.
 
 			std::vector<Future<Void>> ok(alternatives->size());
@@ -688,9 +703,11 @@ Future<REPLY_TYPE(Request)> loadBalance(
 
 			numAttempts = 0; // now that we've got a server back, reset the backoff
 		} else if (!stream) {
+			TraceEvent("LBBranchNotStream", dbgid);
+
 			// Only the first location is available.
 			ErrorOr<REPLY_TYPE(Request)> result = wait(firstRequestData.response);
-			if (firstRequestData.checkAndProcessResult(atMostOnce)) {
+			if (firstRequestData.checkAndProcessResult(atMostOnce, dbgid)) {
 				return result.get();
 			}
 
@@ -732,7 +749,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			loop choose {
 				when(ErrorOr<REPLY_TYPE(Request)> result =
 				         wait(firstRequestData.response.isValid() ? firstRequestData.response : Never())) {
-					if (firstRequestData.checkAndProcessResult(atMostOnce)) {
+					if (firstRequestData.checkAndProcessResult(atMostOnce, dbgid)) {
 						return result.get();
 					}
 
@@ -740,7 +757,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 					firstFinished = true;
 				}
 				when(ErrorOr<REPLY_TYPE(Request)> result = wait(secondRequestData.response)) {
-					if (secondRequestData.checkAndProcessResult(atMostOnce)) {
+					if (secondRequestData.checkAndProcessResult(atMostOnce, dbgid)) {
 						return result.get();
 					}
 
@@ -797,15 +814,18 @@ Future<REPLY_TYPE(Request)> loadBalance(
 							             FLOW_KNOBS->SECOND_REQUEST_MAX_BUDGET);
 						}
 
-						if (firstRequestData.checkAndProcessResult(atMostOnce)) {
+						if (firstRequestData.checkAndProcessResult(atMostOnce, dbgid)) {
+							TraceEvent("LBBranch1", dbgid);
 							return result.get();
 						}
-
+						// is firstRequestEndpoint.response still valid after  response = Future<Reply>();
 						firstRequestEndpoint = Optional<uint64_t>();
+						TraceEvent("LBBranch2", dbgid);
 						break;
 					}
 					when(wait(secondDelay)) {
 						secondDelay = Never();
+						TraceEvent("LBBranch3", dbgid).detail("Break", model && model->secondBudget >= 1.0);
 						if (model && model->secondBudget >= 1.0) {
 							model->secondMultiplier += FLOW_KNOBS->SECOND_REQUEST_MULTIPLIER_GROWTH;
 							model->secondBudget -= 1.0;
