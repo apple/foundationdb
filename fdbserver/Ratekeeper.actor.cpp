@@ -520,10 +520,6 @@ public:
 					TraceEvent("RatekeeperHalted", rkInterf.id()).detail("ReqID", req.requesterID);
 					break;
 				}
-				when(GlobalTagThrottlerStatusRequest req = waitNext(rkInterf.getGlobalTagThrottlerStatus.getFuture())) {
-					req.reply.send(self.tagThrottler->getGlobalTagThrottlerStatusReply());
-					break;
-				}
 				when(ReportCommitCostEstimationRequest req =
 				         waitNext(rkInterf.reportCommitCostEstimation.getFuture())) {
 					self.updateCommitCostEstimation(req.ssTrTagCommitCost);
