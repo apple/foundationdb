@@ -1026,9 +1026,7 @@ ACTOR Future<Void> fetchShardMetricsList_impl(DataDistributionTracker* self, Get
 ACTOR Future<Void> fetchShardMetricsList(DataDistributionTracker* self, GetMetricsListRequest req) {
 	choose {
 		when(wait(fetchShardMetricsList_impl(self, req))) {}
-		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) {
-			req.reply.sendError(timed_out());
-		}
+		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) { req.reply.sendError(timed_out()); }
 	}
 	return Void();
 }
@@ -1064,9 +1062,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 		initData = Reference<InitialDataDistribution>();
 
 		loop choose {
-			when(Promise<int64_t> req = waitNext(getAverageShardBytes)) {
-				req.send(self.getAverageShardBytes());
-			}
+			when(Promise<int64_t> req = waitNext(getAverageShardBytes)) { req.send(self.getAverageShardBytes()); }
 			when(wait(loggingTrigger)) {
 				TraceEvent("DDTrackerStats", self.distributorId)
 				    .detail("Shards", self.shards->size())
