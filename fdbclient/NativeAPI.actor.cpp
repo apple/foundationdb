@@ -7208,7 +7208,8 @@ Future<Void> Transaction::onError(Error const& e) {
 	if (e.code() == error_code_not_committed || e.code() == error_code_commit_unknown_result ||
 	    e.code() == error_code_database_locked || e.code() == error_code_commit_proxy_memory_limit_exceeded ||
 	    e.code() == error_code_grv_proxy_memory_limit_exceeded || e.code() == error_code_process_behind ||
-	    e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled) {
+	    e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled ||
+	    e.code() == error_code_blob_granule_request_failed) {
 		if (e.code() == error_code_not_committed)
 			++trState->cx->transactionsNotCommitted;
 		else if (e.code() == error_code_commit_unknown_result)
@@ -7978,10 +7979,8 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 				           e.name());
 			}
 			// worker is up but didn't actually have granule, or connection failed
-			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed ||
-			    e.code() == error_code_unknown_tenant) {
-				// need to re-read mapping, throw transaction_too_old so client retries. TODO better error?
-				throw transaction_too_old();
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed) {
+				throw blob_granule_request_failed();
 			}
 			throw e;
 		}
