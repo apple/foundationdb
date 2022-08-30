@@ -2946,11 +2946,11 @@ Future<KeyRangeLocationInfo> getKeyLocation(Database const& cx,
 		}
 	}
 
-	// For dynamic replication, we may need to refresh cache after adding replicas. Otherwise, the load balancer
-	// cannot find the added replicas.
-	// FIXME: For now, we just refresh cache every 5 seconds, this is a little cruel.
+	// FIXME: For dynamic replication, we may need to refresh cache after adding replicas. Now, we just refresh cache
+	// every 5 seconds, this is a little crude.
 	if (onlyEndpointFailedAndNeedRefresh ||
-	    (CLIENT_KNOBS->DYNAMIC_REPLICATION_REFRESH_CACHE && now() - lastRefreshTime > 5)) {
+	    (CLIENT_KNOBS->DYNAMIC_REPLICATION_REFRESH_CACHE_ENABLED &&
+	     now() - lastRefreshTime > CLIENT_KNOBS->DYNAMIC_REPLICATION_REFRESH_CACHE_INTERVAL)) {
 		lastRefreshTime = now();
 		cx->invalidateCache(locationInfo.get().tenantEntry.prefix, key);
 

@@ -107,8 +107,9 @@ public:
 	int RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT;
 	bool QUARANTINE_TSS_ON_MISMATCH;
 	double CHANGE_FEED_EMPTY_BATCH_TIME;
-	bool DYNAMIC_REPLICATION_REFRESH_CACHE; // FIXME: When dynamic replication enabled, we need to refresh cache to make
-	                                        // load rebalancer find the newly added replicas.
+	bool DYNAMIC_REPLICATION_REFRESH_CACHE_ENABLED; // FIXME: When dynamic replication enabled, we need to refresh cache
+	                                                // to make load rebalancer find the newly added replicas.
+	double DYNAMIC_REPLICATION_REFRESH_CACHE_INTERVAL;
 
 	// KeyRangeMap
 	int KRM_GET_RANGE_LIMIT;

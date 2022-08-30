@@ -49,8 +49,8 @@ public:
 		OTHER,
 		REBALANCE_DISK,
 		MOVE_SHARD,
-		ADD_SHARD,
-		REDUCE_SHARD,
+		ADD_REPLICAS,
+		REDUCE_REPLICAS,
 		MERGE_SHARD,
 		SIZE_SPLIT,
 		WRITE_SPLIT,
@@ -66,10 +66,10 @@ public:
 			return "RebalanceDisk";
 		case MOVE_SHARD:
 			return "MoveShard";
-		case ADD_SHARD:
-			return "AddShard";
-		case REDUCE_SHARD:
-			return "ReduceShard";
+		case ADD_REPLICAS:
+			return "AddReplicas";
+		case REDUCE_REPLICAS:
+			return "ReduceReplicas";
 		case MERGE_SHARD:
 			return "MergeShard";
 		case SIZE_SPLIT:
@@ -84,7 +84,7 @@ public:
 	operator int() const { return (int)value; }
 	constexpr static int8_t typeCount() { return (int)__COUNT; }
 
-	bool isReadRebalance() { return value == MOVE_SHARD || value == ADD_SHARD || value == REDUCE_SHARD; }
+	bool isReadRebalance() { return value == MOVE_SHARD || value == ADD_REPLICAS || value == REDUCE_REPLICAS; }
 
 private:
 	Value value;
