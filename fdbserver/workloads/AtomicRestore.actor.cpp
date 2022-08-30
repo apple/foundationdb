@@ -99,8 +99,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 			                              deterministicRandom()->randomInt(0, 100),
 			                              BackupAgentBase::getDefaultTagName(),
 			                              self->backupRanges,
-			                              SERVER_KNOBS->ENABLE_ENCRYPTION &&
-			                                  cx->clientInfo->get().tenantMode == TenantMode::REQUIRED,
+			                              false,
 			                              StopWhenDone::False,
 			                              self->usePartitionedLogs));
 		} catch (Error& e) {

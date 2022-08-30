@@ -943,6 +943,57 @@ extern "C" DLLEXPORT FDBResult* fdb_transaction_read_blob_granules(FDBTransactio
 	    return (FDBResult*)(TXN(tr)->readBlobGranules(range, beginVersion, rv, context).extractPtr()););
 }
 
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules_start(FDBTransaction* tr,
+                                                                         uint8_t const* begin_key_name,
+                                                                         int begin_key_name_length,
+                                                                         uint8_t const* end_key_name,
+                                                                         int end_key_name_length,
+                                                                         int64_t beginVersion,
+                                                                         int64_t readVersion,
+                                                                         int64_t* readVersionOut) {
+	Optional<Version> rv;
+	if (readVersion != latestVersion) {
+		rv = readVersion;
+	}
+	return (FDBFuture*)(TXN(tr)
+	                        ->readBlobGranulesStart(KeyRangeRef(KeyRef(begin_key_name, begin_key_name_length),
+	                                                            KeyRef(end_key_name, end_key_name_length)),
+	                                                beginVersion,
+	                                                rv,
+	                                                readVersionOut)
+	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT FDBResult* fdb_transaction_read_blob_granules_finish(FDBTransaction* tr,
+                                                                          FDBFuture* f,
+                                                                          uint8_t const* begin_key_name,
+                                                                          int begin_key_name_length,
+                                                                          uint8_t const* end_key_name,
+                                                                          int end_key_name_length,
+                                                                          int64_t beginVersion,
+                                                                          int64_t readVersion,
+                                                                          FDBReadBlobGranuleContext* granule_context) {
+	// FIXME: better way to convert?
+	ReadBlobGranuleContext context;
+	context.userContext = granule_context->userContext;
+	context.start_load_f = granule_context->start_load_f;
+	context.get_load_f = granule_context->get_load_f;
+	context.free_load_f = granule_context->free_load_f;
+	context.debugNoMaterialize = granule_context->debugNoMaterialize;
+	context.granuleParallelism = granule_context->granuleParallelism;
+	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture(
+	    TSAV(Standalone<VectorRef<BlobGranuleChunkRef>>, f));
+
+	return (FDBResult*)(TXN(tr)
+	                        ->readBlobGranulesFinish(startFuture,
+	                                                 KeyRangeRef(KeyRef(begin_key_name, begin_key_name_length),
+	                                                             KeyRef(end_key_name, end_key_name_length)),
+	                                                 beginVersion,
+	                                                 readVersion,
+	                                                 context)
+	                        .extractPtr());
+}
+
 #include "fdb_c_function_pointers.g.h"
 
 #define FDB_API_CHANGED(func, ver)                                                                                     \

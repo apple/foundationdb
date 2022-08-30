@@ -63,8 +63,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 			                                    self->snapshotInterval,
 			                                    self->tag.toString(),
 			                                    backupRanges,
-			                                    SERVER_KNOBS->ENABLE_ENCRYPTION &&
-			                                        cx->clientInfo->get().tenantMode == TenantMode::REQUIRED,
+			                                    false,
 			                                    self->stopWhenDone,
 			                                    UsePartitionedLog::False,
 			                                    self->incremental));

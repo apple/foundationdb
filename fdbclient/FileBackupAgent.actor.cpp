@@ -22,6 +22,7 @@
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "flow/Arena.h"
 #include "flow/BlobCipher.h"
+#include "flow/CodeProbe.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
@@ -490,6 +491,39 @@ struct SnapshotFileBackupEncryptionKeys {
 	StringRef ivRef;
 };
 
+// File Format handlers.
+// Both Range and Log formats are designed to be readable starting at any 1MB boundary
+// so they can be read in parallel.
+//
+// Writer instances must be kept alive while any member actors are in progress.
+//
+// EncryptedRangeFileWriter must be used as follows:
+//   1 - writeKey(key) the queried key range begin
+//   2 - writeKV(k, v) each kv pair to restore
+//   3 - writeKey(key) the queried key range end
+//   4 - finish()
+//
+// EncryptedRangeFileWriter will insert the required padding, header, and extra
+// end/begin keys around the 1MB boundaries as needed.
+//
+// Example:
+//   The range a-z is queries and returns c-j which covers 3 blocks across 2 tenants.
+//   The client code writes keys in this sequence:
+//             t1a t1c t1d t1e t1f t1g t2h t2i t2j t2z
+//
+//   H = header   P = padding   a...z = keys  v = value | = block boundary
+//
+//   Encoded file:  H t1a t1cv t1dv t1ev P | H t1e t1ev t1fv t1gv t2 P | H t2 t2hv t2iv t2jv t2z
+//   Decoded in blocks yields:
+//           Block 1: range [t1a, t1e) with kv pairs t1cv, t1dv
+//           Block 2: range [t1e, t2) with kv pairs t1ev, t1fv, t1gv
+//           Block 3: range [t2, t2z) with kv pairs t2hv, t2iv, t2jv
+//
+//   NOTE: All blocks except for the final block will have one last
+//   value which will not be used.  This isn't actually a waste since
+//   if the next KV pair wouldn't fit within the block after the value
+//   then the space after the final key to the next 1MB boundary would
+//   just be padding anyway.
 struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	struct Options {
 		constexpr static FileIdentifier file_identifier = 3152016;
@@ -624,24 +658,25 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> textCipherKeys =
 		    wait(getLatestEncryptCipherKeys(dbInfo, domains));
 		ASSERT(textCipherKeys.find(curTenantId) != textCipherKeys.end());
+		if (self->cipherKeys.headerCipherKey.isValid() && self->cipherKeys.textCipherKey.isValid()) {
+			TraceEvent("Nim::hereo")
+			    .detail("curHK", self->cipherKeys.headerCipherKey->getDomainId())
+			    .detail("curTK", self->cipherKeys.textCipherKey->getDomainId());
+		}
+
 		self->cipherKeys.textCipherKey = textCipherKeys.at(curTenantId);
 
 		// Get and Set Header Cipher Key
 		TextAndHeaderCipherKeys systemCipherKeys = wait(getLatestSystemEncryptCipherKeys(dbInfo));
 		self->cipherKeys.headerCipherKey = systemCipherKeys.cipherHeaderKey;
+		TraceEvent("Nim::hereo2")
+		    .detail("newHK", self->cipherKeys.headerCipherKey->getDomainId())
+		    .detail("newTK", self->cipherKeys.textCipherKey->getDomainId());
 
 		// Set ivRef
 		self->cipherKeys.ivRef = makeString(AES_256_IV_LENGTH, *self->arena);
 		deterministicRandom()->randomBytes(mutateString(self->cipherKeys.ivRef), AES_256_IV_LENGTH);
 		return Void();
-	}
-
-	Future<Void> updateEncryptionKeysIfNeeded(KeyRef key) {
-		if (!options.encryptionEnabled ||
-		    (cipherKeys.headerCipherKey.isValid() && cipherKeys.textCipherKey.isValid())) {
-			return Void();
-		}
-		return updateEncryptionKeys(this, key);
 	}
 
 	// Returns the number of bytes that have been written to the buffer
@@ -666,11 +701,20 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		copyToBuffer(self, s->begin(), s->size());
 	}
 
+	static int64_t getTenantId(KeyRef key) {
+		KeyRef tenantPrefix = KeyRef(key.begin(), 8);
+		return TenantMapEntry::prefixToId(tenantPrefix);
+	}
+
 	// Handles the first block and internal blocks.  Ends current block if needed.
 	// The final flag is used in simulation to pad the file's final block to a whole block size
-	ACTOR static Future<Void> newBlock(EncryptedRangeFileWriter* self, int bytesNeeded, bool final = false) {
+	ACTOR static Future<Void> newBlock(EncryptedRangeFileWriter* self,
+	                                   int bytesNeeded,
+	                                   KeyRef lastKey,
+	                                   bool final = false) {
 		// Write padding to finish current block if needed
 		int bytesLeft = self->blockEnd - expectedFileSize(self);
+		ASSERT(bytesLeft >= 0);
 		if (bytesLeft > 0) {
 			state Value paddingFFs = makePadding(bytesLeft);
 			copyToBuffer(self, paddingFFs.begin(), bytesLeft);
@@ -710,7 +754,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 		// If this is NOT the first block then write duplicate stuff needed from last block
 		if (self->blockEnd > self->blockSize) {
-			appendStringRefWithLenToBuffer(self, &self->lastKey);
+			appendStringRefWithLenToBuffer(self, &lastKey);
 			appendStringRefWithLenToBuffer(self, &self->lastKey);
 			appendStringRefWithLenToBuffer(self, &self->lastValue);
 		}
@@ -723,31 +767,73 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		return Void();
 	}
 
+	ACTOR static Future<Void> finishCurrentBlockWriteNewBlock(EncryptedRangeFileWriter* self,
+	                                                          int bytesNeeded,
+	                                                          bool truncateKey) {
+		KeyRef newKey = self->lastKey;
+		// if there exists at least one block in this file then write the last KV pair
+		if (self->blockEnd > 0) {
+			ValueRef newValue = self->lastValue;
+			// if tenant boundaries have been crossed then truncate the last key to only the tenant prefix
+			if (truncateKey) {
+				newKey = StringRef(self->lastKey.begin(), 8);
+				newValue = StringRef();
+			}
+			appendStringRefWithLenToBuffer(self, &newKey);
+			appendStringRefWithLenToBuffer(self, &newValue);
+		}
+		wait(newBlock(self, bytesNeeded, newKey));
+		self->lastWrittenKey = self->lastKey;
+		self->lastKey = StringRef();
+		self->lastValue = StringRef();
+		return Void();
+	}
+
 	Future<Void> padEnd(bool final) {
 		if (expectedFileSize(this) > 0) {
-			return newBlock(this, 0, final);
+			return newBlock(this, 0, StringRef(), final);
 		}
 		return Void();
 	}
 
 	// Ends the current block if necessary based on bytesNeeded.
-	Future<Void> newBlockIfNeeded(int bytesNeeded) {
-		if (expectedFileSize(this) + bytesNeeded > blockEnd)
-			return newBlock(this, bytesNeeded);
+	ACTOR static Future<Void> newBlockIfNeeded(EncryptedRangeFileWriter* self, int bytesNeeded, Optional<KeyRef> k) {
+		int prevToWrite = 0;
+		if (self->lastKey.size() > 0) {
+			prevToWrite = sizeof(int32_t) + self->lastKey.size() + sizeof(int32_t) + self->lastValue.size();
+		}
+		if (expectedFileSize(self) + prevToWrite + bytesNeeded > self->blockEnd) {
+			wait(finishCurrentBlockWriteNewBlock(self, bytesNeeded, false));
+		}
 		return Void();
 	}
 
 	// Start a new block if needed, then write the key and value
 	ACTOR static Future<Void> writeKV_impl(EncryptedRangeFileWriter* self, Key k, Value v) {
-		int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
-		wait(self->newBlockIfNeeded(toWrite));
-		// If a new block was started then the encryption keys were reset
-		// so we need to fetch new keys
-		wait(self->updateEncryptionKeysIfNeeded(k));
-		appendStringRefWithLenToBuffer(self, &k);
-		appendStringRefWithLenToBuffer(self, &v);
+		state int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
+		wait(newBlockIfNeeded(self, toWrite, Optional<KeyRef>()));
+		// If we had a last KV pair then write it to the buffer and save the new KV pair received
+		if (self->lastKey.size() > 0) {
+			appendStringRefWithLenToBuffer(self, &self->lastKey);
+			self->lastWrittenKey = self->lastKey;
+			appendStringRefWithLenToBuffer(self, &self->lastValue);
+		}
 		self->lastKey = k;
 		self->lastValue = v;
+		// if encryption keys are not present then fetch them from the EKP
+		if (!self->cipherKeys.headerCipherKey.isValid() || !self->cipherKeys.textCipherKey.isValid()) {
+			wait(updateEncryptionKeys(self, self->lastKey));
+		}
+		if (self->lastWrittenKey.size() > 0) {
+			// crossing tenant boundaries
+			if (getTenantId(self->lastWrittenKey) != getTenantId(self->lastKey)) {
+				CODE_PROBE(true, "crossed tenant boundaries");
+				wait(finishCurrentBlockWriteNewBlock(self, toWrite, true));
+				// update encryption keys to reflect new tenant
+				TraceEvent("Nim::hereo3").detail("lwk", self->lastWrittenKey).detail("k", self->lastKey);
+				wait(updateEncryptionKeys(self, self->lastKey));
+			}
+		}
 		return Void();
 	}
 
@@ -756,8 +842,14 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	// Write begin key or end key.
 	ACTOR static Future<Void> writeKey_impl(EncryptedRangeFileWriter* self, Key k) {
 		int toWrite = sizeof(uint32_t) + k.size();
-		wait(self->newBlockIfNeeded(toWrite));
+		wait(newBlockIfNeeded(self, toWrite, Optional<KeyRef>()));
+		// If we had a last KV pair then write it to the buffer and save the new KV pair received
+		if (self->lastKey.size() > 0) {
+			appendStringRefWithLenToBuffer(self, &self->lastKey);
+			appendStringRefWithLenToBuffer(self, &self->lastValue);
+		}
 		appendStringRefWithLenToBuffer(self, &k);
+		self->lastWrittenKey = k;
 		return Void();
 	}
 
@@ -789,6 +881,7 @@ private:
 	Key lastKey;
 	Key lastValue;
 	SnapshotFileBackupEncryptionKeys cipherKeys;
+	Key lastWrittenKey;
 };
 
 // File Format handlers.
@@ -801,6 +894,7 @@ private:
 //   1 - writeKey(key) the queried key range begin
 //   2 - writeKV(k, v) each kv pair to restore
 //   3 - writeKey(key) the queried key range end
+//	 4 - finish()
 //
 // RangeFileWriter will insert the required padding, header, and extra
 // end/begin keys around the 1MB boundaries as needed.
@@ -942,11 +1036,13 @@ void getCipherKeys(SnapshotFileBackupEncryptionKeys& eKeys, Arena& arena) {
 	memcpy(mutateString(eKeys.ivRef), iv, AES_256_IV_LENGTH);
 }
 
-void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* results) {
+void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* results, bool encryptedBlock) {
 	// Read begin key, if this fails then block was invalid.
 	uint32_t kLen = reader->consumeNetworkUInt32();
 	const uint8_t* k = reader->consume(kLen);
 	results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
+	KeyRef prevKey;
+	bool done = false;
 
 	// Read kv pairs and end key
 	while (1) {
@@ -958,6 +1054,20 @@ void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* 
 		if (reader->eof() || *reader->rptr == 0xFF) {
 			results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
 			break;
+		}
+
+		if (encryptedBlock) {
+			// Ensure that if current key is located in a different tenant than the previous key it is the last key in
+			// the block and that it is truncated
+			KeyRef curKey = KeyRef(k, kLen);
+			if (prevKey.size() > 0 &&
+			    EncryptedRangeFileWriter::getTenantId(curKey) != EncryptedRangeFileWriter::getTenantId(prevKey)) {
+				CODE_PROBE(true, "decode crossing tenant boundaries");
+				ASSERT(!done);
+				ASSERT(curKey.size() == 8);
+				done = true;
+			}
+			prevKey = curKey;
 		}
 
 		// Read a value, which must exist or the block is invalid
@@ -995,7 +1105,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		// BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION
 		int32_t file_version = reader.consume<int32_t>();
 		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
-			decodeKVPairs(&reader, &results);
+			decodeKVPairs(&reader, &results, false);
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 			CODE_PROBE(true, "decoding encrypted block");
 			ASSERT(cx.present());
@@ -1018,7 +1128,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			StringRef decryptedData =
 			    wait(EncryptedRangeFileWriter::decrypt(cx.get(), header, dataP, dataLen, &results.arena()));
 			reader = StringRefReader(decryptedData, restore_corrupted_data());
-			decodeKVPairs(&reader, &results);
+			decodeKVPairs(&reader, &results, true);
 		} else {
 			throw restore_unsupported_file_version();
 		}
@@ -1616,7 +1726,6 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 		state bool done = false;
 		state int64_t nrKeys = 0;
-		state std::optional<int64_t> previousTenantId;
 		state bool encryptionEnabled = false;
 
 		loop {
@@ -1698,7 +1807,6 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				// Initialize range file writer and write begin key
 				if (encryptionEnabled) {
 					CODE_PROBE(true, "using encrypted snapshot file writer");
-					previousTenantId.reset();
 					rangeFile = std::make_unique<EncryptedRangeFileWriter>(cx, &arena, outFile, blockSize);
 				} else {
 					rangeFile = std::make_unique<RangeFileWriter>(outFile, blockSize);
@@ -1711,17 +1819,6 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				state size_t i = 0;
 				for (; i < values.first.size(); ++i) {
 					// TODO (Nim): Support backing up system keys
-					if (encryptionEnabled) {
-						// 'get' the current tenant prefix (first 8 bytes of key)
-						KeyRef tenantPrefix = KeyRef(values.first[i].key.begin(), 8);
-						state int64_t curTenantId = TenantMapEntry::prefixToId(tenantPrefix);
-						// if we have crossed tenant boundaries then finish the current
-						// block and start a new one
-						if (previousTenantId.has_value() && curTenantId != previousTenantId.value()) {
-							wait(rangeFile->padEnd(false));
-						}
-						previousTenantId = curTenantId;
-					}
 					wait(rangeFile->writeKV(values.first[i].key, values.first[i].value));
 				}
 				lastKey = values.first.back().key;
@@ -3529,7 +3626,6 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 					                 : data[start].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()),
 					    (iend == end) ? fileRange.end
 					                  : data[iend].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()));
-
 					tr->clear(trRange);
 
 					for (; i < iend; ++i) {

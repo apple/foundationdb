@@ -158,8 +158,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                    1e8,
 				                                    self->tag.toString(),
 				                                    backupRanges,
-				                                    SERVER_KNOBS->ENABLE_ENCRYPTION &&
-				                                        cx->clientInfo->get().tenantMode == TenantMode::REQUIRED,
+				                                    false,
 				                                    StopWhenDone::False,
 				                                    UsePartitionedLog::False,
 				                                    IncrementalBackupOnly::True));

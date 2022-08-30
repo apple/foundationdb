@@ -369,7 +369,12 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 WorkloadFactory<SkewedReadWriteWorkload> SkewedReadWriteWorkloadFactory("SkewedReadWrite");
 
 TEST_CASE("/KVWorkload/methods/ParseKeyForIndex") {
-	auto wk = SkewedReadWriteWorkload(WorkloadContext());
+	WorkloadContext wcx;
+	wcx.clientId = 1;
+	wcx.clientCount = 1;
+	wcx.sharedRandomNumber = 1;
+
+	auto wk = SkewedReadWriteWorkload(wcx);
 	for (int i = 0; i < 1000; ++i) {
 		auto idx = deterministicRandom()->randomInt64(0, wk.nodeCount);
 		Key k = wk.keyForIndex(idx);

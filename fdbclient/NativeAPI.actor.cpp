@@ -270,8 +270,8 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 				}
 			}
 		}
-		// commitVersion == readVersion is common, do not log.
-		if (!updatedVersionMap && commitVersion != readVersion) {
+		// Do not log if commitVersion >= readVersion.
+		if (!updatedVersionMap && commitVersion == invalidVersion) {
 			TraceEvent(SevDebug, "CommitVersionNotFoundForSS")
 			    .detail("InSSIDMap", iter != ssidTagMapping.end() ? 1 : 0)
 			    .detail("Tag", tag)
@@ -7208,7 +7208,8 @@ Future<Void> Transaction::onError(Error const& e) {
 	if (e.code() == error_code_not_committed || e.code() == error_code_commit_unknown_result ||
 	    e.code() == error_code_database_locked || e.code() == error_code_commit_proxy_memory_limit_exceeded ||
 	    e.code() == error_code_grv_proxy_memory_limit_exceeded || e.code() == error_code_process_behind ||
-	    e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled) {
+	    e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled ||
+	    e.code() == error_code_blob_granule_request_failed) {
 		if (e.code() == error_code_not_committed)
 			++trState->cx->transactionsNotCommitted;
 		else if (e.code() == error_code_commit_unknown_result)
@@ -7717,7 +7718,11 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
     KeyRange range,
     Version begin,
     Optional<Version> read,
-    Version* readVersionOut) { // read not present is "use transaction version"
+    Version* readVersionOut,
+    int chunkLimit,
+    bool summarize) { // read not present is "use transaction version"
+
+	ASSERT(chunkLimit > 0);
 
 	state RangeResult blobGranuleMapping;
 	state Key granuleStartKey;
@@ -7872,6 +7877,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		req.readVersion = rv;
 		req.tenantInfo = self->getTenant().present() ? self->trState->getTenantInfo() : TenantInfo();
 		req.canCollapseBegin = true; // TODO make this a parameter once we support it
+		req.summarize = summarize;
 
 		std::vector<Reference<ReferencedInterface<BlobWorkerInterface>>> v;
 		v.push_back(
@@ -7942,6 +7948,12 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 							chunkEndKey = chunkEndKey.removePrefix(tenantPrefix.get());
 						}
 						keyRange = KeyRangeRef(std::min(chunkEndKey, keyRange.end), keyRange.end);
+						if (summarize && results.size() == chunkLimit) {
+							break;
+						}
+					}
+					if (summarize && results.size() == chunkLimit) {
+						break;
 					}
 				}
 				// if we detect that this blob worker fails, cancel the request, as otherwise load balance will
@@ -7967,10 +7979,8 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 				           e.name());
 			}
 			// worker is up but didn't actually have granule, or connection failed
-			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed ||
-			    e.code() == error_code_unknown_tenant) {
-				// need to re-read mapping, throw transaction_too_old so client retries. TODO better error?
-				throw transaction_too_old();
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed) {
+				throw blob_granule_request_failed();
 			}
 			throw e;
 		}
@@ -7990,7 +8000,32 @@ Future<Standalone<VectorRef<BlobGranuleChunkRef>>> Transaction::readBlobGranules
                                                                                  Version begin,
                                                                                  Optional<Version> readVersion,
                                                                                  Version* readVersionOut) {
-	return readBlobGranulesActor(this, range, begin, readVersion, readVersionOut);
+	return readBlobGranulesActor(
+	    this, range, begin, readVersion, readVersionOut, std::numeric_limits<int>::max(), false);
+}
+
+ACTOR Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranulesActor(Transaction* self,
+                                                                                      KeyRange range,
+                                                                                      Version summaryVersion,
+                                                                                      int rangeLimit) {
+	state Version readVersionOut;
+	Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
+	    wait(readBlobGranulesActor(self, range, 0, summaryVersion, &readVersionOut, rangeLimit, true));
+	ASSERT(chunks.size() <= rangeLimit);
+	ASSERT(readVersionOut == summaryVersion);
+	Standalone<VectorRef<BlobGranuleSummaryRef>> summaries;
+	summaries.reserve(summaries.arena(), chunks.size());
+	for (auto& it : chunks) {
+		summaries.push_back(summaries.arena(), summarizeGranuleChunk(summaries.arena(), it));
+	}
+
+	return summaries;
+}
+
+Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> Transaction::summarizeBlobGranules(const KeyRange& range,
+                                                                                        Version summaryVersion,
+                                                                                        int rangeLimit) {
+	return summarizeBlobGranulesActor(this, range, summaryVersion, rangeLimit);
 }
 
 ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware) {
@@ -8016,11 +8051,18 @@ ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAw
 
 ACTOR Future<Version> checkBlobSubrange(Database db, KeyRange keyRange, Optional<Version> version) {
 	state Transaction tr(db);
-	state Version readVersionOut = invalidVersion;
 	loop {
 		try {
-			wait(success(tr.readBlobGranules(keyRange, 0, version, &readVersionOut)));
-			return readVersionOut;
+			state Version summaryVersion;
+			if (version.present()) {
+				summaryVersion = version.get();
+			} else {
+				wait(store(summaryVersion, tr.getReadVersion()));
+			}
+			// same properties as a read for validating granule is readable, just much less memory and network bandwidth
+			// used
+			wait(success(tr.summarizeBlobGranules(keyRange, summaryVersion, std::numeric_limits<int>::max())));
+			return summaryVersion;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -8033,12 +8075,19 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRan
 	state Standalone<VectorRef<KeyRangeRef>> allRanges;
 	state KeyRange curRegion = KeyRangeRef(range.begin, range.begin);
 	state Version readVersionOut = invalidVersion;
-	state int batchSize = CLIENT_KNOBS->BG_TOO_MANY_GRANULES / 2;
+	state int batchSize = BUGGIFY ? deterministicRandom()->randomInt(2, 10) : CLIENT_KNOBS->BG_TOO_MANY_GRANULES / 2;
+	state int loadSize = (BUGGIFY ? deterministicRandom()->randomInt(1, 20) : 20) * batchSize;
 	loop {
-		try {
-			wait(store(allRanges, tr.getBlobGranuleRanges(KeyRangeRef(curRegion.begin, range.end), 20 * batchSize)));
-		} catch (Error& e) {
-			wait(tr.onError(e));
+		if (curRegion.begin >= range.end) {
+			return readVersionOut;
+		}
+		loop {
+			try {
+				wait(store(allRanges, tr.getBlobGranuleRanges(KeyRangeRef(curRegion.begin, range.end), loadSize)));
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
 		}
 
 		if (allRanges.empty()) {
@@ -8069,7 +8118,15 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRan
 			checkParts.push_back(checkBlobSubrange(db, curRegion, version));
 		}
 
-		wait(waitForAll(checkParts));
+		try {
+			wait(waitForAll(checkParts));
+		} catch (Error& e) {
+			if (e.code() == error_code_blob_granule_transaction_too_old) {
+				return invalidVersion;
+			}
+			throw e;
+		}
+		ASSERT(!checkParts.empty());
 		readVersionOut = checkParts.back().get();
 		curRegion = KeyRangeRef(curRegion.end, curRegion.end);
 	}
@@ -8749,6 +8806,7 @@ Reference<ChangeFeedStorageData> DatabaseContext::getStorageData(StorageServerIn
 		newStorageUpdater->interfToken = token;
 		newStorageUpdater->updater = storageFeedVersionUpdater(interf, newStorageUpdater.getPtr());
 		newStorageUpdater->context = this;
+		newStorageUpdater->created = now();
 		changeFeedUpdaters[token] = newStorageUpdater.getPtr();
 		return newStorageUpdater;
 	}
@@ -8758,12 +8816,12 @@ Reference<ChangeFeedStorageData> DatabaseContext::getStorageData(StorageServerIn
 Version DatabaseContext::getMinimumChangeFeedVersion() {
 	Version minVersion = std::numeric_limits<Version>::max();
 	for (auto& it : changeFeedUpdaters) {
-		if (it.second->version.get() > 0) {
+		if (now() - it.second->created > CLIENT_KNOBS->CHANGE_FEED_START_INTERVAL) {
 			minVersion = std::min(minVersion, it.second->version.get());
 		}
 	}
 	for (auto& it : notAtLatestChangeFeeds) {
-		if (it.second->getVersion() > 0) {
+		if (now() - it.second->created > CLIENT_KNOBS->CHANGE_FEED_START_INTERVAL) {
 			minVersion = std::min(minVersion, it.second->getVersion());
 		}
 	}
@@ -8785,7 +8843,7 @@ ChangeFeedStorageData::~ChangeFeedStorageData() {
 }
 
 ChangeFeedData::ChangeFeedData(DatabaseContext* context)
-  : dbgid(deterministicRandom()->randomUniqueID()), context(context), notAtLatest(1) {
+  : dbgid(deterministicRandom()->randomUniqueID()), context(context), notAtLatest(1), created(now()) {
 	if (context) {
 		context->notAtLatestChangeFeeds[dbgid] = this;
 	}
@@ -9190,6 +9248,7 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	results->notAtLatest.set(interfs.size());
 	if (results->context) {
 		results->context->notAtLatestChangeFeeds[results->dbgid] = results.getPtr();
+		results->created = now();
 	}
 	refresh.send(Void());
 
@@ -9396,6 +9455,7 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	results->notAtLatest.set(1);
 	if (results->context) {
 		results->context->notAtLatestChangeFeeds[results->dbgid] = results.getPtr();
+		results->created = now();
 	}
 	refresh.send(Void());
 
@@ -9520,12 +9580,13 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				results->notAtLatest.set(1);
 				if (results->context) {
 					results->context->notAtLatestChangeFeeds[results->dbgid] = results.getPtr();
+					results->created = now();
 				}
 			}
 
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    e.code() == error_code_connection_failed || e.code() == error_code_unknown_change_feed ||
-			    e.code() == error_code_broken_promise) {
+			    e.code() == error_code_broken_promise || e.code() == error_code_future_version) {
 				db->changeFeedCache.erase(rangeID);
 				cx->invalidateCache(Key(), keys);
 				if (begin == lastBeginVersion) {
@@ -9647,7 +9708,8 @@ ACTOR Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeedsActor(Referenc
 			}
 			return result;
 		} catch (Error& e) {
-			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
+			    e.code() == error_code_future_version) {
 				cx->invalidateCache(Key(), range);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
 			} else {
@@ -9929,7 +9991,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRangesActor(Refer
 			blobRanges.arena().dependsOn(results.arena());
 			for (int i = 0; i < results.size() - 1; i++) {
 				if (results[i].value == LiteralStringRef("1")) {
-					blobRanges.push_back(blobRanges.arena(), KeyRangeRef(results[i].value, results[i + 1].value));
+					blobRanges.push_back(blobRanges.arena(), KeyRangeRef(results[i].key, results[i + 1].key));
 				}
 				if (blobRanges.size() == rangeLimit) {
 					return blobRanges;

@@ -352,7 +352,7 @@ FDB_DECLARE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
 
 class PhysicalShardCollection : public ReferenceCounted<PhysicalShardCollection> {
 public:
-	PhysicalShardCollection() : requireTransition(false), lastTransitionStartTime(now()) {}
+	PhysicalShardCollection() : lastTransitionStartTime(now()), requireTransition(false) {}
 
 	enum class PhysicalShardCreationTime { DDInit, DDRelocator };
 
@@ -514,8 +514,8 @@ private:
 	KeyRangeMap<uint64_t> keyRangePhysicalShardIDMap;
 	// Indicate what physical shards owned by a team
 	std::map<ShardsAffectedByTeamFailure::Team, std::set<uint64_t>> teamPhysicalShardIDs;
-	double lastTransitionStartTime;
 	bool requireTransition;
+	double lastTransitionStartTime;
 };
 
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer
