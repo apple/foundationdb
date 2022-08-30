@@ -2023,10 +2023,10 @@ public:
 		// This sets the page cache size for all PageCacheT instances using the same evictor
 		pageCache.evictor().sizeLimit = pageCacheBytes;
 
+		g_redwoodMetrics.ioLock = &ioLock;
 		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();
 		}
-		g_redwoodMetrics.ioLock = &ioLock;
 
 		commitFuture = Void();
 		recoverFuture = forwardError(recover(this), errorPromise);
@@ -7550,6 +7550,8 @@ public:
 
 	ACTOR void shutdown(KeyValueStoreRedwood* self, bool dispose) {
 		TraceEvent(SevInfo, "RedwoodShutdown").detail("Filename", self->m_filename).detail("Dispose", dispose);
+
+		g_redwoodMetrics.ioLock = nullptr;
 
 		// In simulation, if the instance is being disposed of then sometimes run destructive sanity check.
 		if (g_network->isSimulated() && dispose && BUGGIFY) {
