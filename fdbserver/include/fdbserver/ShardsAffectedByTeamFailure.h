@@ -75,9 +75,12 @@ public:
 	// The first element of the pair is either the source for non-moving shards or the destination team for in-flight
 	// shards The second element of the pair is all previous sources for in-flight shards
 	std::pair<std::vector<Team>, std::vector<Team>> getTeamsFor(KeyRangeRef keys);
-
+	// Shard boundaries are modified in defineShard and the content of what servers correspond to each shard is a copy
+	// or union of the shards already there
 	void defineShard(KeyRangeRef keys);
+	// moveShard never change the shard boundary but just change the team value
 	void moveShard(KeyRangeRef keys, std::vector<Team> destinationTeam);
+	// finishMove never change the shard boundary but just clear the old source team value
 	void finishMove(KeyRangeRef keys);
 	// a convenient function for (defineShard, moveShard, finishMove) pipeline
 	void assignRangeToTeams(KeyRangeRef keys, const std::vector<Team>& destinationTeam);
@@ -104,11 +107,13 @@ private:
 	std::set<std::pair<Team, KeyRange>, OrderByTeamKey> team_shards;
 	std::map<UID, int> storageServerShards;
 
+	// only erase from team_shards
 	void erase(Team team, KeyRange const& range);
+	// only insert into team_shards
 	void insert(Team team, KeyRange const& range);
 
 public:
-	// return the iterator that can traverse all ranges
+	// return the iterator that traversing all ranges
 	auto getAllRanges() const -> decltype(shard_teams)::ConstRanges;
 	// get total shards count
 	size_t getNumberOfShards() const;

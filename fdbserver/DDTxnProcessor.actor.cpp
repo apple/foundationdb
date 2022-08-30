@@ -566,13 +566,15 @@ Future<Reference<InitialDataDistribution>> DDMockTxnProcessor::getInitialDataDis
 	return res;
 }
 
+// Remove the server from shardMapping and set serverKeysFalse to the server's serverKeys list.
+// Changes to keyServer and serverKey must happen symmetrically in this function.
+// If serverID is the last source server for a shard, the shard will be erased, and then be assigned
+// to teamForDroppedRange.
 Future<Void> DDMockTxnProcessor::removeKeysFromFailedServer(const UID& serverID,
                                                             const std::vector<UID>& teamForDroppedRange,
                                                             const MoveKeysLock& lock,
                                                             const DDEnabledState* ddEnabledState) const {
-	ShardsAffectedByTeamFailure::Team team(teamForDroppedRange, true);
-
-	team.primary = false;
+	auto& mss = mgs->allServers.at(serverID);
 
 	return Void();
 }
