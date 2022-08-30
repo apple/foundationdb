@@ -31,7 +31,7 @@ project(foundationdb
   VERSION 7.2.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
-  LANGUAGES C CXX ASM)
+  LANGUAGES C CXX ASM Swift)
 
 set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH};${PROJECT_SOURCE_DIR}/cmake")
 message (STATUS "${PROJECT_SOURCE_DIR} ${PROJECT_BINARY_DIR}")
@@ -203,6 +203,10 @@ endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
   add_link_options(-lexecinfo)
+endif()
+
+if(NOT WIN32) # TODO: If Swift is on the Windows Builder, remove this check
+  add_subdirectory(swifttestapp)
 endif()
 
 ################################################################################
