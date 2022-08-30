@@ -259,6 +259,9 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 		ASSERT(false);
 		return;
 	}
+    void installSwiftConcurrencyHooks() override {
+        ASSERT(false);
+    }
 	bool isSimulated() const override { return baseNetwork->isSimulated(); }
 	void onMainThread(Promise<Void>&& signal, TaskPriority taskID) override {
 		return baseNetwork->onMainThread(std::move(signal), taskID);
