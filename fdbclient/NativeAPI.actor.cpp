@@ -9944,6 +9944,39 @@ Future<Void> DatabaseContext::waitPurgeGranulesComplete(Key purgeKey) {
 	return waitPurgeGranulesCompleteActor(Reference<DatabaseContext>::addRef(this), purgeKey);
 }
 
+ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobRanges(Reference<ReadYourWritesTransaction> tr,
+                                                               KeyRange range,
+                                                               int batchLimit) {
+	state Standalone<VectorRef<KeyRangeRef>> blobRanges;
+	state Key beginKey = range.begin;
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+			state RangeResult results = wait(
+			    krmGetRangesUnaligned(tr, blobRangeKeys.begin, KeyRangeRef(beginKey, range.end), 2 * batchLimit + 2));
+
+			blobRanges.arena().dependsOn(results.arena());
+			for (int i = 0; i < results.size() - 1; i++) {
+				if (results[i].value == blobRangeActive) {
+					blobRanges.push_back(blobRanges.arena(), KeyRangeRef(results[i].key, results[i + 1].key));
+				}
+				if (blobRanges.size() == batchLimit) {
+					return blobRanges;
+				}
+			}
+
+			if (!results.more) {
+				return blobRanges;
+			}
+			beginKey = results.back().key;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx, KeyRange range, bool active) {
 	state Database db(cx);
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
@@ -9955,18 +9988,26 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx, KeyRange ran
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
+			state Standalone<VectorRef<KeyRangeRef>> startBlobRanges = wait(getBlobRanges(tr, range, 10));
+			state Standalone<VectorRef<KeyRangeRef>> endBlobRanges =
+			    wait(getBlobRanges(tr, KeyRangeRef(range.end, keyAfter(range.end)), 10));
+
 			if (active) {
-				state RangeResult results = wait(krmGetRanges(tr, blobRangeKeys.begin, range));
-				ASSERT(results.size() >= 2);
-				if (results[0].key == range.begin && results[1].key == range.end &&
-				    results[0].value == blobRangeActive) {
+				// Idempotent request.
+				if (!startBlobRanges.empty() && !endBlobRanges.empty()) {
+					return startBlobRanges.front().begin == range.begin && endBlobRanges.front().end == range.end;
+				}
+			} else {
+				// An unblobbify request must be aligned to boundaries.
+				// It is okay to unblobbify multiple regions all at once.
+				if (startBlobRanges.empty() && endBlobRanges.empty()) {
 					return true;
-				} else {
-					for (int i = 0; i < results.size(); i++) {
-						if (results[i].value == blobRangeActive) {
-							return false;
-						}
-					}
+				}
+				// If there is a blob at the beginning of the range and it isn't aligned,
+				// or there is a blob range that begins before the end of the range, then fail.
+				if ((!startBlobRanges.empty() && startBlobRanges.front().begin != range.begin) ||
+				    (!endBlobRanges.empty() && endBlobRanges.front().begin < range.end)) {
+					return false;
 				}
 			}
 
@@ -9998,29 +10039,10 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRangesActor(Refer
                                                                            int rangeLimit) {
 	state Database db(cx);
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
-	state Standalone<VectorRef<KeyRangeRef>> blobRanges;
 
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	state Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(getBlobRanges(tr, range, rangeLimit));
 
-			state RangeResult results = wait(krmGetRanges(tr, blobRangeKeys.begin, range, 2 * rangeLimit + 2));
-
-			blobRanges.arena().dependsOn(results.arena());
-			for (int i = 0; i < results.size() - 1; i++) {
-				if (results[i].value == LiteralStringRef("1")) {
-					blobRanges.push_back(blobRanges.arena(), KeyRangeRef(results[i].key, results[i + 1].key));
-				}
-				if (blobRanges.size() == rangeLimit) {
-					return blobRanges;
-				}
-			}
-
-			return blobRanges;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
+	return blobRanges;
 }
 
 Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges(KeyRange range, int rowLimit) {
