@@ -421,11 +421,17 @@ class Summary:
             child.attributes['Severity'] = '40'
             self.out.append(child)
         if self.error_out is not None and len(self.error_out) > 0:
-            if self.stderr_severity == '40':
-                self.error = True
-            lines = self.error_out.split('\n')
+            lines = self.error_out.splitlines()
             stderr_bytes = 0
             for line in lines:
+                if line.endswith("WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!"):
+                    # When running ASAN we expect to see this message. Boost coroutine should be using the correct asan annotations so that it shouldn't produce any false positives.
+                    continue
+                if line.endswith("Warning: unimplemented fcntl command: 1036"):
+                    # Valgrind produces this warning when F_SET_RW_HINT is used
+                    continue
+                if self.stderr_severity == '40':
+                    self.error = True
                 remaining_bytes = config.max_stderr_bytes - stderr_bytes
                 if remaining_bytes > 0:
                     out_err = line[0:remaining_bytes] + ('...' if len(line) > remaining_bytes else '')
