@@ -144,7 +144,7 @@ struct EKPGetBaseCipherKeysRequestInfo {
 	EncryptCipherBaseKeyId baseCipherId;
 	// Encryption domain name - ancillairy metadata information, an encryption key should be uniquely identified by
 	// {domainId, cipherBaseId} tuple
-	EncryptCipherDomainName domainName;
+	EncryptCipherDomainNameRef domainName;
 
 	EKPGetBaseCipherKeysRequestInfo()
 	  : domainId(ENCRYPT_INVALID_DOMAIN_ID), baseCipherId(ENCRYPT_INVALID_CIPHER_KEY_ID) {}
@@ -203,7 +203,7 @@ struct EKPGetLatestCipherKeysRequestInfo {
 	EncryptCipherDomainId domainId;
 	// Encryption domain name - ancillairy metadata information, an encryption key should be uniquely identified by
 	// {domainId, cipherBaseId} tuple
-	EncryptCipherDomainName domainName;
+	EncryptCipherDomainNameRef domainName;
 
 	EKPGetLatestCipherKeysRequestInfo() : domainId(ENCRYPT_INVALID_DOMAIN_ID) {}
 	EKPGetLatestCipherKeysRequestInfo(const EncryptCipherDomainId dId, StringRef name, Arena& arena)

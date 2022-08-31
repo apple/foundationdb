@@ -357,7 +357,7 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 
 	ASSERT(tenantData.isValid());
 
-	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
+	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains;
 	domains.emplace(tenantData->entry.id, StringRef(*arena, tenantData->name));
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> domainKeyMap =
 	    wait(getLatestEncryptCipherKeys(bwData->dbInfo, domains));
