@@ -809,7 +809,7 @@ TEST_CASE("/GlobalTagThrottler/Simple") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
@@ -827,7 +827,7 @@ TEST_CASE("/GlobalTagThrottler/WriteThrottling") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
@@ -852,7 +852,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagThrottling") {
 		    return GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag1, 100.0 / 6.0) &&
 		           GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag2, 100.0 / 6.0);
 	    });
-	wait(timeoutError(waitForAny(futures) || monitor, 300.0));
+	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
 	return Void();
 }
 
@@ -870,7 +870,7 @@ TEST_CASE("/GlobalTagThrottler/AttemptWorkloadAboveQuota") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
@@ -891,7 +891,7 @@ TEST_CASE("/GlobalTagThrottler/MultiClientThrottling") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || client2 || updater, 300.0));
+	wait(timeoutError(monitor || client || client2 || updater, 600.0));
 	return Void();
 }
 
@@ -912,7 +912,7 @@ TEST_CASE("/GlobalTagThrottler/MultiClientThrottling2") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
@@ -934,7 +934,7 @@ TEST_CASE("/GlobalTagThrottler/SkewedMultiClientThrottling") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
@@ -953,13 +953,13 @@ TEST_CASE("/GlobalTagThrottler/UpdateQuota") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	tagQuotaValue.totalReadQuota = 50.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	monitor = GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [](auto& gtt) {
 		return GlobalTagThrottlerTesting::targetRateIsNear(gtt, "sampleTag1"_sr, 50.0 / 6.0);
 	});
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
@@ -977,12 +977,12 @@ TEST_CASE("/GlobalTagThrottler/RemoveQuota") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	globalTagThrottler.removeQuota(testTag);
 	monitor = GlobalTagThrottlerTesting::monitor(&globalTagThrottler, [](auto& gtt) {
 		return GlobalTagThrottlerTesting::targetRateIsNear(gtt, "sampleTag1"_sr, {});
 	});
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
@@ -1000,7 +1000,7 @@ TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
@@ -1027,7 +1027,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling") {
 		           gtt.busyReadTagCount() == 2;
 	    });
 	futures.push_back(GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers));
-	wait(timeoutError(waitForAny(futures) || monitor, 300.0));
+	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
 	return Void();
 }
 
@@ -1053,7 +1053,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling2") {
 		           GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag2, 50 / 6.0) && gtt.busyReadTagCount() == 2;
 	    });
 	futures.push_back(GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers));
-	wait(timeoutError(waitForAny(futures) || monitor, 300.0));
+	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
 	return Void();
 }
 
@@ -1079,7 +1079,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling3") {
 		           GlobalTagThrottlerTesting::targetRateIsNear(gtt, testTag2, 100 / 6.0) && gtt.busyReadTagCount() == 1;
 	    });
 	futures.push_back(GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers));
-	wait(timeoutError(waitForAny(futures) || monitor, 300.0));
+	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
 	return Void();
 }
 
@@ -1098,7 +1098,7 @@ TEST_CASE("/GlobalTagThrottler/ReservedReadQuota") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
@@ -1117,7 +1117,7 @@ TEST_CASE("/GlobalTagThrottler/ReservedWriteQuota") {
 	});
 	state Future<Void> updater =
 	    GlobalTagThrottlerTesting::updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 300.0));
+	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
 }
 
