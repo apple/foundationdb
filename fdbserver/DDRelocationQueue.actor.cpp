@@ -149,8 +149,9 @@ struct RelocateData {
 	  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
 	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), startTime(now()),
 	    randomId(rs.traceId.isValid() ? rs.traceId : deterministicRandom()->randomUniqueID()),
-	    dataMoveId(rs.dataMoveId), workFactor(0), wantsNewServers(isDataMovementForMountainChopper(rs.moveReason) ||
-	                                                              isDataMovementForValleyFiller(rs.moveReason) ||
+	    dataMoveId(rs.dataMoveId), workFactor(0), wantsNewServers(
+                                                                  ((isDataMovementForMountainChopper(rs.moveReason) ||
+	                                                              isDataMovementForValleyFiller(rs.moveReason)) && rs.reason != RelocateReason::REDUCE_SHARD) ||
 	                                                              rs.moveReason == DataMovementReason::SPLIT_SHARD ||
 	                                                              rs.moveReason == DataMovementReason::TEAM_REDUNDANT),
 	    cancellable(true), interval("QueuedRelocation", randomId), dataMove(rs.dataMove) {
@@ -2002,7 +2003,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 	// For read rebalance if there is just 1 hot shard remained, move this shard to another server won't solve the
 	// problem.
 	// UPDATE: This problem can be solved by dynamic replication & split,merge
-	if (shards.size() < 1) {
+	if (shards.size() <= 1 && !SERVER_KNOBS->DYNAMIC_REPLICATION_ENABLED) {
 		traceEvent->detail("SkipReason", "NoShardOnSource");
 		return false;
 	}
@@ -2031,7 +2032,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
     int topK = std::min(int(0.1 * shards.size()), SERVER_KNOBS->READ_REBALANCE_SHARD_TOPK);
 	state Future<HealthMetrics> healthMetrics = self->cx->getHealthMetrics(true);
 	state GetTopKMetricsRequest req(
-	    shards, topK, (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC, srcLoad / shards.size());
+	    shards, topK, srcLoad - destLoad, srcLoad / shards.size());
 	state GetTopKMetricsReply reply = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
 	wait(ready(healthMetrics));
 	auto cpu = getWorstCpu(healthMetrics.get(), sourceTeam->getServerIDs());
@@ -2062,9 +2063,14 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
     
 	if (relocateReason == RelocateReason::OTHER) {
 		// do nothing
-		traceEvent->detail("SkipReason", "NotMoveAuxTeam");
+		traceEvent->detail("SkipReason", "NotMoveShardWithMultiplyTeam");
 		return false;
-	} else {
+	} else if (relocateReason == RelocateReason::MOVE_SHARD && 
+        metrics.bytesReadPerKSecond >= (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC) {
+        traceEvent->detail("SkipReason", "NotMoveTooHotShard");
+		return false;
+    } else {
+
 		traceEvent->detail("RelocateReason", relocateReason.toString()).detail("ServerSize", sourceTeam->size()).detail("KeyRange", shard);
 		for (int i = 0; i < shards.size(); i++) {
 			if (shard == shards[i]) {
@@ -2191,26 +2197,19 @@ RelocateReason selectRelocateReason(DDQueue* self,
 			// If three of them are equal, it means we only have one shard whose readLoad > 0 in sourceTeam. In this
 			// case, moving shard to another team won't solve the problem, so we would use MULTIPLY_SHARD here.
 			relocateReason = RelocateReason::MULTIPLY_SHARD;
-        // TODO@ZZX: delete *0.2
-		} else if (shardReadLoad >= srcLoad * SERVER_KNOBS->DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC * 0.2) {
+		} else if (shardReadLoad >= srcLoad * SERVER_KNOBS->DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC) {
 			// If one team has a very hot shard, we will try to multiply replicas.
 			relocateReason = RelocateReason::MULTIPLY_SHARD;
 		} else {
             // TODO@ZZX:
-			relocateReason = RelocateReason::MULTIPLY_SHARD;
+			relocateReason = RelocateReason::MOVE_SHARD;
 		}
 	} else {
         if (srcTeamSize > self->teamSize) {
 			// Already have an auxiliary team
 			relocateReason = RelocateReason::OTHER;
 		} else {
-            // TODO@ZZX: delete
-            relocateReason = RelocateReason::OTHER;
-            // if (shardReadLoad >= srcLoad * SERVER_KNOBS->DYNAMIC_REPLICATION_SHARD_BANDWIDTH_FRAC * 0.2) {
-            //     // If one team has a very hot shard, we will try to multiply replicas.
-            //     relocateReason = RelocateReason::MULTIPLY_SHARD;
-            // } else {
-            //     relocateReason = RelocateReason::MOVE_SHARD;
+            relocateReason = RelocateReason::MOVE_SHARD;
 	    	// }
         }
 	}

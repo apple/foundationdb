@@ -9,16 +9,20 @@ timeout = 3600.0
 
 [[test.workload]]
 testName = 'SkewedReadWrite'
-transactionsPerSecond = 100
-testDuration = 60.0
+transactionsPerSecond = 100000
+testDuration = 1200.0
 skewRound = 1
-nodeCount = 3000 # 30000000
-valueBytes = 100
-readsPerTransactionA = 8
+# 12GB
+nodeCount = 60000000
+valueBytes = 200
+readsPerTransactionA = 10
 writesPerTransactionA = 0
-alpha = 0
+readsPerTransactionB = 0
+writesPerTransactionB = 0
+alpha = 0.0
 discardEdgeMeasurements = false
 hotServerFraction = 0.1
 hotServerReadFrac = 1.0
+hotServerWriteFrac = 0
 hotServerShardFraction = 0.1
-warmingDelay = 180.0
+warmingDelay = 10.0
