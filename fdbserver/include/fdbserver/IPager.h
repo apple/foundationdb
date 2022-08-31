@@ -46,10 +46,18 @@ typedef uint32_t QueueID;
 enum class PagerEvents { CacheLookup = 0, CacheHit, CacheMiss, PageWrite, MAXEVENTS };
 static const char* const PagerEventsStrings[] = { "Lookup", "Hit", "Miss", "Write", "Unknown" };
 // Reasons for page level events.
-enum class PagerEventReasons { PointRead = 0, RangeRead, RangePrefetch, Commit, LazyClear, MetaData, MAXEVENTREASONS };
-static const char* const PagerEventReasonsStrings[] = {
-	"Get", "GetR", "GetRPF", "Commit", "LazyClr", "Meta", "Unknown"
+enum class PagerEventReasons {
+	PointRead = 0,
+	FetchRange,
+	RangeRead,
+	RangePrefetch,
+	Commit,
+	LazyClear,
+	MetaData,
+	MAXEVENTREASONS
 };
+static const char* const PagerEventReasonsStrings[] = { "Get",    "FetchR",  "GetR", "GetRPF",
+	                                                    "Commit", "LazyClr", "Meta", "Unknown" };
 
 static const unsigned int nonBtreeLevel = 0;
 static const std::vector<std::pair<PagerEvents, PagerEventReasons>> possibleEventReasonPairs = {
@@ -57,14 +65,17 @@ static const std::vector<std::pair<PagerEvents, PagerEventReasons>> possibleEven
 	{ PagerEvents::CacheLookup, PagerEventReasons::LazyClear },
 	{ PagerEvents::CacheLookup, PagerEventReasons::PointRead },
 	{ PagerEvents::CacheLookup, PagerEventReasons::RangeRead },
+	{ PagerEvents::CacheLookup, PagerEventReasons::FetchRange },
 	{ PagerEvents::CacheHit, PagerEventReasons::Commit },
 	{ PagerEvents::CacheHit, PagerEventReasons::LazyClear },
 	{ PagerEvents::CacheHit, PagerEventReasons::PointRead },
 	{ PagerEvents::CacheHit, PagerEventReasons::RangeRead },
+	{ PagerEvents::CacheHit, PagerEventReasons::FetchRange },
 	{ PagerEvents::CacheMiss, PagerEventReasons::Commit },
 	{ PagerEvents::CacheMiss, PagerEventReasons::LazyClear },
 	{ PagerEvents::CacheMiss, PagerEventReasons::PointRead },
 	{ PagerEvents::CacheMiss, PagerEventReasons::RangeRead },
+	{ PagerEvents::CacheMiss, PagerEventReasons::FetchRange },
 	{ PagerEvents::PageWrite, PagerEventReasons::Commit },
 	{ PagerEvents::PageWrite, PagerEventReasons::LazyClear },
 };

@@ -242,8 +242,8 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	Optional<Standalone<StringRef>> authToken;
 	Reference<TransactionLogInfo> trLogInfo;
 	TransactionOptions options;
+	Optional<ReadOptions> readOptions;
 
-	Optional<UID> debugID;
 	TaskPriority taskID;
 	SpanContext spanContext;
 	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
@@ -459,7 +459,13 @@ public:
 	void fullReset();
 	double getBackoff(int errCode);
 
-	void debugTransaction(UID dID) { trState->debugID = dID; }
+	void debugTransaction(UID dID) {
+		if (trState->readOptions.present()) {
+			trState->readOptions.get().debugID = dID;
+		} else {
+			trState->readOptions = ReadOptions(dID);
+		}
+	}
 	VersionVector getVersionVector() const;
 	SpanContext getSpanContext() const { return trState->spanContext; }
 
