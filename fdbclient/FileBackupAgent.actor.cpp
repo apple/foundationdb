@@ -733,10 +733,11 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 			// TODO (Nim): Address this case when tenants aren't supported/enabled
 			if (getTenantId(k) != getTenantId(self->lastKey)) {
 				CODE_PROBE(true, "crossed tenant boundaries");
+				int prefixLength = commonPrefixLength(self->lastKey, k) + 1;
+				KeyRef tenantPrefix = StringRef(k.begin(), prefixLength);
+				ValueRef newValue = StringRef();
 				self->lastKey = k;
 				self->lastValue = v;
-				KeyRef tenantPrefix = StringRef(self->lastKey.begin(), 8);
-				ValueRef newValue = StringRef();
 				appendStringRefWithLenToBuffer(self, &tenantPrefix);
 				appendStringRefWithLenToBuffer(self, &newValue);
 				wait(newBlock(self, 0, tenantPrefix));
