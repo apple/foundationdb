@@ -882,6 +882,7 @@ public:
 	int SIM_KMS_MAX_KEYS;
 	int ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH;
 	bool ENABLE_TLOG_ENCRYPTION;
+	bool ENABLE_STORAGE_SERVER_ENCRYPTION; // Currently only Redwood engine supports encryption
 	bool ENABLE_BLOB_GRANULE_ENCRYPTION;
 
 	// Compression

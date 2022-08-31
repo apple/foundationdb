@@ -17,20 +17,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#pragma once
 
 #ifndef FDBSERVER_IPAGER_H
 #define FDBSERVER_IPAGER_H
-#include "flow/Error.h"
-#include "flow/FastAlloc.h"
-#include "flow/ProtocolVersion.h"
 #include <cstddef>
 #include <stdint.h>
-#pragma once
-
-#include "fdbserver/IKeyValueStore.h"
-
-#include "flow/flow.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/Tenant.h"
+#include "fdbserver/IEncryptionKeyProvider.actor.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "flow/BlobCipher.h"
+#include "flow/Error.h"
+#include "flow/FastAlloc.h"
+#include "flow/flow.h"
+#include "flow/ProtocolVersion.h"
+
 #define XXH_INLINE_ALL
 #include "flow/xxhash.h"
 
@@ -89,11 +91,7 @@ static const std::vector<std::pair<PagerEvents, PagerEventReasons>> L0PossibleEv
 	{ PagerEvents::PageWrite, PagerEventReasons::MetaData },
 };
 
-enum EncodingType : uint8_t {
-	XXHash64 = 0,
-	// For testing purposes
-	XOREncryption = 1
-};
+enum EncodingType : uint8_t { XXHash64 = 0, XOREncryption_TestOnly = 1, AESEncryptionV1 = 2, MAX_ENCODING_TYPE = 3 };
 
 enum PageType : uint8_t {
 	HeaderPage = 0,
@@ -102,41 +100,6 @@ enum PageType : uint8_t {
 	BTreeSuperNode = 3,
 	QueuePageStandalone = 4,
 	QueuePageInExtent = 5
-};
-
-// Encryption key ID
-typedef uint64_t KeyID;
-
-// EncryptionKeyRef is somewhat multi-variant, it will contain members representing the union
-// of all fields relevant to any implemented encryption scheme.  They are generally of
-// the form
-//   Page Fields - fields which come from or are stored in the Page
-//   Secret Fields - fields which are only known by the Key Provider
-// but it is up to each encoding and provider which fields are which and which ones are used
-struct EncryptionKeyRef {
-
-	EncryptionKeyRef(){};
-	EncryptionKeyRef(Arena& arena, const EncryptionKeyRef& toCopy) : secret(arena, toCopy.secret), id(toCopy.id) {}
-	int expectedSize() const { return secret.size(); }
-
-	StringRef secret;
-	Optional<KeyID> id;
-};
-typedef Standalone<EncryptionKeyRef> EncryptionKey;
-
-// Interface used by pager to get encryption keys by ID when reading pages from disk
-// and by the BTree to get encryption keys to use for new pages
-class IEncryptionKeyProvider {
-public:
-	virtual ~IEncryptionKeyProvider() {}
-
-	// Get an EncryptionKey with Secret Fields populated based on the given Page Fields.
-	// It is up to the implementation which fields those are.
-	// The output Page Fields must match the input Page Fields.
-	virtual Future<EncryptionKey> getSecrets(const EncryptionKeyRef& key) = 0;
-
-	// Get encryption key that should be used for a given user Key-Value range
-	virtual Future<EncryptionKey> getByRange(const KeyRef& begin, const KeyRef& end) = 0;
 };
 
 // This is a hacky way to attach an additional object of an arbitrary type at runtime to another object.
@@ -339,7 +302,7 @@ public:
 	};
 
 	// An encoding that validates the payload with an XXHash checksum
-	struct XXHashEncodingHeader {
+	struct XXHashEncoder {
 		XXH64_hash_t checksum;
 		void encode(uint8_t* payload, int len, PhysicalPageID seed) {
 			checksum = XXH3_64bits_withSeed(payload, len, seed);
@@ -353,7 +316,7 @@ public:
 
 	// A dummy "encrypting" encoding which uses XOR with a 1 byte secret key on
 	// the payload to obfuscate it and protects the payload with an XXHash checksum.
-	struct XOREncryptionEncodingHeader {
+	struct XOREncryptionEncoder {
 		// Checksum is on unencrypted payload
 		XXH64_hash_t checksum;
 		uint8_t keyID;
@@ -373,6 +336,27 @@ public:
 			}
 		}
 	};
+
+	struct AESEncryptionV1Encoder {
+		BlobCipherEncryptHeader header;
+
+		void encode(const TextAndHeaderCipherKeys& cipherKeys, uint8_t* payload, int len) {
+			EncryptBlobCipherAes265Ctr cipher(
+			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+			Arena arena;
+			StringRef ciphertext = cipher.encrypt(payload, len, &header, arena)->toStringRef();
+			ASSERT_EQ(len, ciphertext.size());
+			memcpy(payload, ciphertext.begin(), len);
+		}
+
+		void decode(const TextAndHeaderCipherKeys& cipherKeys, uint8_t* payload, int len) {
+			DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.iv);
+			Arena arena;
+			StringRef plaintext = cipher.decrypt(payload, len, header, arena)->toStringRef();
+			ASSERT_EQ(len, plaintext.size());
+			memcpy(payload, plaintext.begin(), len);
+		}
+	};
 #pragma pack(pop)
 
 	// Get the size of the encoding header based on type
@@ -380,9 +364,11 @@ public:
 	// existing pages, the payload offset is stored in the page.
 	static int encodingHeaderSize(EncodingType t) {
 		if (t == EncodingType::XXHash64) {
-			return sizeof(XXHashEncodingHeader);
-		} else if (t == EncodingType::XOREncryption) {
-			return sizeof(XOREncryptionEncodingHeader);
+			return sizeof(XXHashEncoder);
+		} else if (t == EncodingType::XOREncryption_TestOnly) {
+			return sizeof(XOREncryptionEncoder);
+		} else if (t == EncodingType::AESEncryptionV1) {
+			return sizeof(AESEncryptionV1Encoder);
 		} else {
 			throw page_encoding_not_supported();
 		}
@@ -486,12 +472,15 @@ public:
 		ASSERT(VALGRIND_CHECK_MEM_IS_DEFINED(pPayload, payloadSize) == 0);
 
 		if (page->encodingType == EncodingType::XXHash64) {
-			page->getEncodingHeader<XXHashEncodingHeader>()->encode(pPayload, payloadSize, pageID);
-		} else if (page->encodingType == EncodingType::XOREncryption) {
+			page->getEncodingHeader<XXHashEncoder>()->encode(pPayload, payloadSize, pageID);
+		} else if (page->encodingType == EncodingType::XOREncryption_TestOnly) {
 			ASSERT(encryptionKey.secret.size() == 1);
-			XOREncryptionEncodingHeader* xh = page->getEncodingHeader<XOREncryptionEncodingHeader>();
+			XOREncryptionEncoder* xh = page->getEncodingHeader<XOREncryptionEncoder>();
 			xh->keyID = encryptionKey.id.orDefault(0);
 			xh->encode(encryptionKey.secret[0], pPayload, payloadSize, pageID);
+		} else if (page->encodingType == EncodingType::AESEncryptionV1) {
+			AESEncryptionV1Encoder* eh = page->getEncodingHeader<AESEncryptionV1Encoder>();
+			eh->encode(encryptionKey.cipherKeys, pPayload, payloadSize);
 		} else {
 			throw page_encoding_not_supported();
 		}
@@ -515,8 +504,11 @@ public:
 		payloadSize = logicalSize - (pPayload - buffer);
 
 		// Populate encryption key with relevant fields from page
-		if (page->encodingType == EncodingType::XOREncryption) {
-			encryptionKey.id = page->getEncodingHeader<XOREncryptionEncodingHeader>()->keyID;
+		if (page->encodingType == EncodingType::XOREncryption_TestOnly) {
+			encryptionKey.id = page->getEncodingHeader<XOREncryptionEncoder>()->keyID;
+		} else if (page->encodingType == EncodingType::AESEncryptionV1) {
+			AESEncryptionV1Encoder* eh = page->getEncodingHeader<AESEncryptionV1Encoder>();
+			encryptionKey.cipherHeader = eh->header;
 		}
 
 		if (page->headerVersion == 1) {
@@ -536,11 +528,13 @@ public:
 	// Post:  Payload has been verified and decrypted if necessary
 	void postReadPayload(PhysicalPageID pageID) {
 		if (page->encodingType == EncodingType::XXHash64) {
-			page->getEncodingHeader<XXHashEncodingHeader>()->decode(pPayload, payloadSize, pageID);
-		} else if (page->encodingType == EncodingType::XOREncryption) {
+			page->getEncodingHeader<XXHashEncoder>()->decode(pPayload, payloadSize, pageID);
+		} else if (page->encodingType == EncodingType::XOREncryption_TestOnly) {
 			ASSERT(encryptionKey.secret.size() == 1);
-			page->getEncodingHeader<XOREncryptionEncodingHeader>()->decode(
+			page->getEncodingHeader<XOREncryptionEncoder>()->decode(
 			    encryptionKey.secret[0], pPayload, payloadSize, pageID);
+		} else if (page->encodingType == EncodingType::AESEncryptionV1) {
+			page->getEncodingHeader<AESEncryptionV1Encoder>()->decode(encryptionKey.cipherKeys, pPayload, payloadSize);
 		} else {
 			throw page_encoding_not_supported();
 		}
@@ -548,7 +542,9 @@ public:
 
 	const Arena& getArena() const { return arena; }
 
-	static bool isEncodingTypeEncrypted(EncodingType t) { return t == EncodingType::XOREncryption; }
+	static bool isEncodingTypeEncrypted(EncodingType t) {
+		return t == EncodingType::AESEncryptionV1 || t == EncodingType::XOREncryption_TestOnly;
+	}
 
 	// Returns true if the page's encoding type employs encryption
 	bool isEncrypted() const { return isEncodingTypeEncrypted(getEncodingType()); }
@@ -748,54 +744,6 @@ public:
 
 protected:
 	~IPager2() {} // Destruction should be done using close()/dispose() from the IClosable interface
-};
-
-// The null key provider is useful to simplify page decoding.
-// It throws an error for any key info requested.
-class NullKeyProvider : public IEncryptionKeyProvider {
-public:
-	virtual ~NullKeyProvider() {}
-	Future<EncryptionKey> getSecrets(const EncryptionKeyRef& key) override { throw encryption_key_not_found(); }
-	Future<EncryptionKey> getByRange(const KeyRef& begin, const KeyRef& end) override {
-		throw encryption_key_not_found();
-	}
-};
-
-// Key provider for dummy XOR encryption scheme
-class XOREncryptionKeyProvider : public IEncryptionKeyProvider {
-public:
-	XOREncryptionKeyProvider(std::string filename) {
-		ASSERT(g_network->isSimulated());
-
-		// Choose a deterministic random filename (without path) byte for secret generation
-		// Remove any leading directory names
-		size_t lastSlash = filename.find_last_of("\\/");
-		if (lastSlash != filename.npos) {
-			filename.erase(0, lastSlash);
-		}
-		xorWith = filename.empty() ? 0x5e
-		                           : (uint8_t)filename[XXH3_64bits(filename.data(), filename.size()) % filename.size()];
-	}
-
-	virtual ~XOREncryptionKeyProvider() {}
-
-	virtual Future<EncryptionKey> getSecrets(const EncryptionKeyRef& key) override {
-		if (!key.id.present()) {
-			throw encryption_key_not_found();
-		}
-		EncryptionKey s = key;
-		uint8_t secret = ~(uint8_t)key.id.get() ^ xorWith;
-		s.secret = StringRef(s.arena(), &secret, 1);
-		return s;
-	}
-
-	virtual Future<EncryptionKey> getByRange(const KeyRef& begin, const KeyRef& end) override {
-		EncryptionKeyRef k;
-		k.id = end.empty() ? 0 : *(end.end() - 1);
-		return getSecrets(k);
-	}
-
-	uint8_t xorWith;
 };
 
 #endif
