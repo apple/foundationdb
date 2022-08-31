@@ -291,7 +291,7 @@ public:
 	};
 
 	// An encoding that validates the payload with an XXHash checksum
-	struct XXHashEncodingHeader {
+	struct XXHashEncoder {
 		XXH64_hash_t checksum;
 		void encode(uint8_t* payload, int len, PhysicalPageID seed) {
 			checksum = XXH3_64bits_withSeed(payload, len, seed);
@@ -305,7 +305,7 @@ public:
 
 	// A dummy "encrypting" encoding which uses XOR with a 1 byte secret key on
 	// the payload to obfuscate it and protects the payload with an XXHash checksum.
-	struct XOREncryptionEncodingHeader {
+	struct XOREncryptionEncoder {
 		// Checksum is on unencrypted payload
 		XXH64_hash_t checksum;
 		uint8_t keyID;
@@ -326,7 +326,7 @@ public:
 		}
 	};
 
-	struct AESEncryptionV1EncodingHeader {
+	struct AESEncryptionV1Encoder {
 		BlobCipherEncryptHeader header;
 
 		void encode(const TextAndHeaderCipherKeys& cipherKeys, uint8_t* payload, int len) {
@@ -353,11 +353,11 @@ public:
 	// existing pages, the payload offset is stored in the page.
 	static int encodingHeaderSize(EncodingType t) {
 		if (t == EncodingType::XXHash64) {
-			return sizeof(XXHashEncodingHeader);
+			return sizeof(XXHashEncoder);
 		} else if (t == EncodingType::XOREncryption_TestOnly) {
-			return sizeof(XOREncryptionEncodingHeader);
+			return sizeof(XOREncryptionEncoder);
 		} else if (t == EncodingType::AESEncryptionV1) {
-			return sizeof(AESEncryptionV1EncodingHeader);
+			return sizeof(AESEncryptionV1Encoder);
 		} else {
 			throw page_encoding_not_supported();
 		}
@@ -461,14 +461,14 @@ public:
 		ASSERT(VALGRIND_CHECK_MEM_IS_DEFINED(pPayload, payloadSize) == 0);
 
 		if (page->encodingType == EncodingType::XXHash64) {
-			page->getEncodingHeader<XXHashEncodingHeader>()->encode(pPayload, payloadSize, pageID);
+			page->getEncodingHeader<XXHashEncoder>()->encode(pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::XOREncryption_TestOnly) {
 			ASSERT(encryptionKey.secret.size() == 1);
-			XOREncryptionEncodingHeader* xh = page->getEncodingHeader<XOREncryptionEncodingHeader>();
+			XOREncryptionEncoder* xh = page->getEncodingHeader<XOREncryptionEncoder>();
 			xh->keyID = encryptionKey.id.orDefault(0);
 			xh->encode(encryptionKey.secret[0], pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::AESEncryptionV1) {
-			AESEncryptionV1EncodingHeader* eh = page->getEncodingHeader<AESEncryptionV1EncodingHeader>();
+			AESEncryptionV1Encoder* eh = page->getEncodingHeader<AESEncryptionV1Encoder>();
 			eh->encode(encryptionKey.cipherKeys, pPayload, payloadSize);
 		} else {
 			throw page_encoding_not_supported();
@@ -494,9 +494,9 @@ public:
 
 		// Populate encryption key with relevant fields from page
 		if (page->encodingType == EncodingType::XOREncryption_TestOnly) {
-			encryptionKey.id = page->getEncodingHeader<XOREncryptionEncodingHeader>()->keyID;
+			encryptionKey.id = page->getEncodingHeader<XOREncryptionEncoder>()->keyID;
 		} else if (page->encodingType == EncodingType::AESEncryptionV1) {
-			AESEncryptionV1EncodingHeader* eh = page->getEncodingHeader<AESEncryptionV1EncodingHeader>();
+			AESEncryptionV1Encoder* eh = page->getEncodingHeader<AESEncryptionV1Encoder>();
 			encryptionKey.cipherHeader = eh->header;
 		}
 
@@ -517,14 +517,13 @@ public:
 	// Post:  Payload has been verified and decrypted if necessary
 	void postReadPayload(PhysicalPageID pageID) {
 		if (page->encodingType == EncodingType::XXHash64) {
-			page->getEncodingHeader<XXHashEncodingHeader>()->decode(pPayload, payloadSize, pageID);
+			page->getEncodingHeader<XXHashEncoder>()->decode(pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::XOREncryption_TestOnly) {
 			ASSERT(encryptionKey.secret.size() == 1);
-			page->getEncodingHeader<XOREncryptionEncodingHeader>()->decode(
+			page->getEncodingHeader<XOREncryptionEncoder>()->decode(
 			    encryptionKey.secret[0], pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::AESEncryptionV1) {
-			page->getEncodingHeader<AESEncryptionV1EncodingHeader>()->decode(
-			    encryptionKey.cipherKeys, pPayload, payloadSize);
+			page->getEncodingHeader<AESEncryptionV1Encoder>()->decode(encryptionKey.cipherKeys, pPayload, payloadSize);
 		} else {
 			throw page_encoding_not_supported();
 		}

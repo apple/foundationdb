@@ -43,6 +43,9 @@ typedef uint64_t XOREncryptionKeyID;
 //   Page Fields - fields which come from or are stored in the Page
 //   Secret Fields - fields which are only known by the Key Provider
 // but it is up to each encoding and provider which fields are which and which ones are used
+//
+// TODO(yiwu): Rename and/or refactor this struct. It doesn't sound like an encryption key should
+// contain page fields like encryption header.
 struct EncryptionKeyRef {
 
 	EncryptionKeyRef(){};
