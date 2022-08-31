@@ -22,6 +22,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 #include "libb64/encode.h"
+#include "flow/ApiVersion.h"
 #include "flow/UnitTest.h"
 
 Key TenantMapEntry::idToPrefix(int64_t id) {
@@ -127,7 +128,7 @@ std::string TenantMapEntry::toJson(int apiVersion) const {
 	tenantEntry["id"] = id;
 	tenantEntry["encrypted"] = encrypted;
 
-	if (apiVersion >= 720 || apiVersion == Database::API_VERSION_LATEST) {
+	if (apiVersion >= ApiVersion::withTenantsV2().version() || apiVersion == Database::API_VERSION_LATEST) {
 		json_spirit::mObject prefixObject;
 		std::string encodedPrefix = base64::encoder::from_string(prefix.toString());
 		// Remove trailing newline

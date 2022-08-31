@@ -96,7 +96,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		Reference<IDatabase> threadSafeHandle =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
 
-		MultiVersionApi::api->selectApiVersion(cx->apiVersion);
+		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 		self->managementDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
 		ASSERT(g_simulator.extraDatabases.size() > 0);

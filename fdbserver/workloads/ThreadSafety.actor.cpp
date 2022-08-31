@@ -149,7 +149,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 		self->db = dbRef;
 
 		if (deterministicRandom()->coinflip()) {
-			MultiVersionApi::api->selectApiVersion(cx->apiVersion);
+			MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 			self->db = MultiVersionDatabase::debugCreateFromExistingDatabase(dbRef);
 		}
 

@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_THREADSAFETRANSACTION_H
 #define FDBCLIENT_THREADSAFETRANSACTION_H
+#include "flow/ApiVersion.h"
 #include "flow/ProtocolVersion.h"
 #pragma once
 
@@ -242,7 +243,7 @@ private:
 	friend IClientApi* getLocalClientAPI();
 	ThreadSafeApi();
 
-	int apiVersion;
+	ApiVersion apiVersion;
 	std::string clientVersion;
 	uint64_t transportId;
 

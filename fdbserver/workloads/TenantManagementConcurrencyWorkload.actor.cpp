@@ -96,7 +96,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		Reference<IDatabase> threadSafeHandle =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
 
-		MultiVersionApi::api->selectApiVersion(cx->apiVersion);
+		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 		self->mvDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
 		if (self->useMetacluster && self->clientId == 0) {

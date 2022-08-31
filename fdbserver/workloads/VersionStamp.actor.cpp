@@ -78,7 +78,7 @@ struct VersionStampWorkload : TestWorkload {
 
 		allowMetadataVersionKey = apiVersion >= 610 || apiVersion == Database::API_VERSION_LATEST;
 
-		cx->apiVersion = apiVersion;
+		cx->apiVersion = ApiVersion(apiVersion);
 		if (clientId == 0)
 			return _start(cx, this, 1 / transactionsPerSecond);
 		return Void();
