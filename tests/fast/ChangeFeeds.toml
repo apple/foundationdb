@@ -1,4 +1,5 @@
 [configuration]
+testClass = "ChangeFeeds"
 allowDefaultTenant = false
 
 [[test]]

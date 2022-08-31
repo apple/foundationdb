@@ -239,6 +239,13 @@ func (o NetworkOptions) SetClientThreadsPerVersion(param int64) error {
 	return o.setOpt(65, int64ToBytes(param))
 }
 
+// Adds an external client library to be used with a future version protocol. This option can be used testing purposes only!
+//
+// Parameter: path to client library
+func (o NetworkOptions) SetFutureVersionClientLibrary(param string) error {
+	return o.setOpt(66, []byte(param))
+}
+
 // Disables logging of client statistics, such as sampled transaction activity.
 func (o NetworkOptions) SetDisableClientStatisticsLogging() error {
 	return o.setOpt(70, nil)
@@ -613,6 +620,13 @@ func (o TransactionOptions) SetBypassUnreadable() error {
 // Allows this transaction to use cached GRV from the database context. Defaults to off. Upon first usage, starts a background updater to periodically update the cache to avoid stale read versions.
 func (o TransactionOptions) SetUseGrvCache() error {
 	return o.setOpt(1101, nil)
+}
+
+// Attach given authorization token to the transaction such that subsequent tenant-aware requests are authorized
+//
+// Parameter: A JSON Web Token authorized to access data belonging to one or more tenants, indicated by 'tenants' claim of the token's payload.
+func (o TransactionOptions) SetAuthorizationToken(param string) error {
+	return o.setOpt(2000, []byte(param))
 }
 
 type StreamingMode int

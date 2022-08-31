@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -378,6 +379,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 	bool adjacentWrites;
 	int extraReadConflictRangesPerTransaction, extraWriteConflictRangesPerTransaction;
 	int readType;
+	bool cacheResult;
 	Optional<Key> transactionTag;
 
 	int transactionsTagThrottled{ 0 };
@@ -403,6 +405,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		batchPriority = getOption(options, LiteralStringRef("batchPriority"), false);
 		descriptionString = getOption(options, LiteralStringRef("description"), LiteralStringRef("ReadWrite"));
 		readType = getOption(options, LiteralStringRef("readType"), 3);
+		cacheResult = getOption(options, LiteralStringRef("cacheResult"), true);
 		if (hasOption(options, LiteralStringRef("transactionTag"))) {
 			transactionTag = getOption(options, LiteralStringRef("transactionTag"), ""_sr);
 		}
@@ -432,7 +435,10 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		if (transactionTag.present() && tr.getTags().size() == 0) {
 			tr.setOption(FDBTransactionOptions::AUTO_THROTTLE_TAG, transactionTag.get());
 		}
-		tr.getTransaction().trState->readType = static_cast<ReadType>(readType);
+		ReadOptions options;
+		options.type = static_cast<ReadType>(readType);
+		options.cacheResult = cacheResult;
+		tr.getTransaction().trState->readOptions = options;
 	}
 
 	std::string description() const override { return descriptionString.toString(); }

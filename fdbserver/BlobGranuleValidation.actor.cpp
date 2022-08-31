@@ -115,23 +115,34 @@ bool compareFDBAndBlob(RangeResult fdb,
 			Optional<KeyValueRef> lastCorrect;
 			for (int i = 0; i < std::max(fdb.size(), blob.first.size()); i++) {
 				if (i >= fdb.size() || i >= blob.first.size() || fdb[i] != blob.first[i]) {
+					TraceEvent ev("GranuleMismatchInfo");
+					ev.detail("Idx", i);
 					printf("  Found mismatch at %d.\n", i);
 					if (lastCorrect.present()) {
 						printf("    last correct: %s=%s\n",
 						       lastCorrect.get().key.printable().c_str(),
 						       lastCorrect.get().value.printable().c_str());
+						ev.detail("LastCorrectKey", lastCorrect.get().key);
 					}
 					if (i < fdb.size()) {
 						printf("    FDB: %s=%s\n", fdb[i].key.printable().c_str(), fdb[i].value.printable().c_str());
+						ev.detail("FDBKey", fdb[i].key);
 					} else {
 						printf("    FDB: <missing>\n");
+						ev.detail("FDBKey", "Missing");
 					}
 					if (i < blob.first.size()) {
 						printf("    BLB: %s=%s\n",
 						       blob.first[i].key.printable().c_str(),
 						       blob.first[i].value.printable().c_str());
+						ev.detail("BlobKey", blob.first[i].key);
 					} else {
 						printf("    BLB: <missing>\n");
+						ev.detail("BlobKey", "Missing");
+					}
+					if (i < fdb.size() && i < blob.first.size() && fdb[i].key == blob.first[i].key) {
+						// value mismatch
+						ev.detail("FDBValue", fdb[i].value).detail("BlobValue", blob.first[i].value);
 					}
 					printf("\n");
 					break;
@@ -178,7 +189,7 @@ ACTOR Future<Void> clearAndAwaitMerge(Database cx, KeyRange range) {
 	state int reClearInterval = 1; // do quadratic backoff on clear rate, b/c large keys can keep it not write-cold
 	loop {
 		try {
-			Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(range));
+			Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(range, 2));
 			if (ranges.size() == 1) {
 				return Void();
 			}
@@ -199,5 +210,125 @@ ACTOR Future<Void> clearAndAwaitMerge(Database cx, KeyRange range) {
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
+	}
+}
+
+ACTOR Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> getSummaries(Database cx,
+                                                                        KeyRange range,
+                                                                        Version summaryVersion,
+                                                                        Optional<TenantName> tenantName) {
+	state Transaction tr(cx, tenantName);
+	loop {
+		try {
+			Standalone<VectorRef<BlobGranuleSummaryRef>> summaries =
+			    wait(tr.summarizeBlobGranules(range, summaryVersion, 1000000));
+
+			// do some basic validation
+			ASSERT(!summaries.empty());
+			ASSERT(summaries.front().keyRange.begin == range.begin);
+			ASSERT(summaries.back().keyRange.end == range.end);
+
+			for (int i = 0; i < summaries.size() - 1; i++) {
+				ASSERT(summaries[i].keyRange.end == summaries[i + 1].keyRange.begin);
+			}
+
+			return summaries;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<Void> validateGranuleSummaries(Database cx,
+                                            KeyRange range,
+                                            Optional<TenantName> tenantName,
+                                            Promise<Void> testComplete) {
+	state Arena lastSummaryArena;
+	state KeyRangeMap<Optional<BlobGranuleSummaryRef>> lastSummary;
+	state Version lastSummaryVersion = invalidVersion;
+	state Transaction tr(cx, tenantName);
+	state int successCount = 0;
+	try {
+		loop {
+			// get grv and get latest summaries
+			state Version nextSummaryVersion;
+			tr.reset();
+			loop {
+				try {
+					wait(store(nextSummaryVersion, tr.getReadVersion()));
+					ASSERT(nextSummaryVersion >= lastSummaryVersion);
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+
+			state Standalone<VectorRef<BlobGranuleSummaryRef>> nextSummary;
+			try {
+				wait(store(nextSummary, getSummaries(cx, range, nextSummaryVersion, tenantName)));
+			} catch (Error& e) {
+				if (e.code() == error_code_blob_granule_transaction_too_old) {
+					ASSERT(lastSummaryVersion == invalidVersion);
+
+					wait(delay(1.0));
+					continue;
+				} else {
+					throw e;
+				}
+			}
+
+			if (lastSummaryVersion != invalidVersion) {
+				CODE_PROBE(true, "comparing multiple summaries");
+				// diff with last summary ranges to ensure versions never decreased for any range
+				for (auto& it : nextSummary) {
+					auto lastSummaries = lastSummary.intersectingRanges(it.keyRange);
+					for (auto& itLast : lastSummaries) {
+
+						if (!itLast.cvalue().present()) {
+							ASSERT(lastSummaryVersion == invalidVersion);
+							continue;
+						}
+						auto& last = itLast.cvalue().get();
+
+						ASSERT(it.snapshotVersion >= last.snapshotVersion);
+						// same invariant isn't always true for delta version because of force flushing around granule
+						// merges
+						if (it.keyRange == itLast.range()) {
+							ASSERT(it.deltaVersion >= last.deltaVersion);
+							if (it.snapshotVersion == last.snapshotVersion) {
+								ASSERT(it.snapshotSize == last.snapshotSize);
+							}
+							if (it.snapshotVersion == last.snapshotVersion && it.deltaVersion == last.deltaVersion) {
+								ASSERT(it.snapshotSize == last.snapshotSize);
+								ASSERT(it.deltaSize == last.deltaSize);
+							} else if (it.snapshotVersion == last.snapshotVersion) {
+								ASSERT(it.deltaSize > last.deltaSize);
+							}
+							break;
+						}
+					}
+				}
+
+				if (!testComplete.canBeSet()) {
+					return Void();
+				}
+			}
+
+			successCount++;
+
+			lastSummaryArena = nextSummary.arena();
+			lastSummaryVersion = nextSummaryVersion;
+			lastSummary.insert(range, {});
+			for (auto& it : nextSummary) {
+				lastSummary.insert(it.keyRange, it);
+			}
+
+			wait(delayJittered(deterministicRandom()->randomInt(1, 10)));
+		}
+	} catch (Error& e) {
+		if (e.code() != error_code_operation_cancelled) {
+			TraceEvent(SevError, "UnexpectedErrorValidateGranuleSummaries").error(e);
+		}
+		throw e;
 	}
 }

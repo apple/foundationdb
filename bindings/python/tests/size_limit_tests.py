@@ -66,6 +66,9 @@ def test_size_limit_option(db):
     except fdb.FDBError as e:
         assert(e.code == 2101)  # Transaction exceeds byte limit (2101)
 
+    # Reset the size limit for future tests
+    db.options.set_transaction_size_limit(10000000)
+
 @fdb.transactional
 def test_get_approximate_size(tr):
     tr[b'key1'] = b'value1'

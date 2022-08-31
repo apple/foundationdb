@@ -1146,7 +1146,13 @@ ACTOR Future<bool> runTest(Database cx,
 std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKeys = {
 	// These are read by SimulatedCluster and used before testers exist.  Thus, they must
 	// be recognized and accepted, but there's no point in placing them into a testSpec.
-	{ "extraDB", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedExtraDB", ""); } },
+	// testClass and testPriority are only used for TestHarness, we'll ignore those here
+	{ "testClass", [](std::string const&) {} },
+	{ "testPriority", [](std::string const&) {} },
+	{ "extraDatabaseMode",
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedExtraDatabaseMode", ""); } },
+	{ "extraDatabaseCount",
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedExtraDatabaseCount", ""); } },
 	{ "configureLocked",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedConfigureLocked", ""); } },
 	{ "minimumReplication",

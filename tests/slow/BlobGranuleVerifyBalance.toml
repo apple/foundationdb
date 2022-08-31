@@ -6,9 +6,6 @@ injectSSDelay = true
 # FIXME: re-enable rocks at some point
 storageEngineExcludeTypes = [4, 5]
 
-[[knobs]]
-bg_range_source = "blobRangeKeys"
-
 [[test]]
 testTitle = 'BlobGranuleVerifyBalance'
 

@@ -69,6 +69,7 @@ if(WIN32)
   add_definitions(-DWIN32_LEAN_AND_MEAN)
   add_definitions(-D_ITERATOR_DEBUG_LEVEL=0)
   add_definitions(-DNOGDI) # WinGDI.h defines macro ERROR
+  add_definitions(-D_USE_MATH_DEFINES) # Math constants
 endif()
 
 if (USE_CCACHE)
@@ -191,6 +192,7 @@ else()
   endif()
 
   if(USE_GCOV)
+    add_compile_options(--coverage)
     add_link_options(--coverage)
   endif()
 
@@ -199,6 +201,8 @@ else()
       -fsanitize=undefined
       # TODO(atn34) Re-enable -fsanitize=alignment once https://github.com/apple/foundationdb/issues/1434 is resolved
       -fno-sanitize=alignment
+      # https://github.com/apple/foundationdb/issues/7955
+      -fno-sanitize=function
       -DBOOST_USE_UCONTEXT)
     list(APPEND SANITIZER_LINK_OPTIONS -fsanitize=undefined)
   endif()

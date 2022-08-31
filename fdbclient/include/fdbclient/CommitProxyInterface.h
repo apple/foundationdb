@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
@@ -118,8 +119,11 @@ struct ClientDBInfo {
 	std::vector<VersionHistory> history;
 	UID clusterId;
 	bool isEncryptionEnabled = false;
+	Optional<EncryptKeyProxyInterface> encryptKeyProxy;
 
 	TenantMode tenantMode;
+	ClusterType clusterType = ClusterType::STANDALONE;
+	Optional<ClusterName> metaclusterName;
 
 	ClientDBInfo() {}
 
@@ -131,7 +135,18 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, grvProxies, commitProxies, id, forward, history, tenantMode, clusterId, isEncryptionEnabled);
+		serializer(ar,
+		           grvProxies,
+		           commitProxies,
+		           id,
+		           forward,
+		           history,
+		           tenantMode,
+		           isEncryptionEnabled,
+		           encryptKeyProxy,
+		           clusterId,
+		           clusterType,
+		           metaclusterName);
 	}
 };
 

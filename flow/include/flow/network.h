@@ -104,7 +104,7 @@ enum class TaskPriority {
 	BlobWorkerReadChangeFeed = 2720,
 	BlobWorkerUpdateFDB = 2710,
 	BlobWorkerUpdateStorage = 2700,
-	CheckPoint = 2500,
+	FetchKeys = 2500,
 	RestoreApplierWriteDB = 2310,
 	RestoreApplierReceiveMutations = 2300,
 	RestoreLoaderFinishVersionBatch = 2220,
@@ -467,6 +467,11 @@ public:
 	// this may not be an address we can connect to!
 	virtual NetworkAddress getPeerAddress() const = 0;
 
+	// Returns whether the peer is trusted.
+	// For TLS-enabled connections, this is true if the peer has presented a valid chain of certificates trusted by the
+	// local endpoint. For non-TLS connections this is always true for any valid open connection.
+	virtual bool hasTrustedPeer() const = 0;
+
 	virtual UID getDebugID() const = 0;
 
 	// At present, implemented by Sim2Conn where we want to disable bits flip for connections between parent process and
@@ -579,7 +584,7 @@ public:
 	// Returns true if the current thread is the main thread
 
 	virtual void onMainThread(Promise<Void>&& signal, TaskPriority taskID) = 0;
-	// Executes signal.send(Void()) on a/the thread belonging to this network
+	// Executes signal.send(Void()) on a/the thread belonging to this network in FIFO order
 
 	virtual THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*),
 	                                  void* arg,

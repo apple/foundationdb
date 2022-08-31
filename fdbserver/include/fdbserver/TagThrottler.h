@@ -40,6 +40,10 @@ public:
 	// Also, erase expired tags
 	virtual PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() = 0;
 
+	// For each tag and priority combination, return the throughput limit for the cluster
+	// (to be shared across all GRV proxies)
+	virtual PrioritizedTransactionTagMap<double> getProxyRates(int numProxies) = 0;
+
 	virtual int64_t autoThrottleCount() const = 0;
 	virtual uint32_t busyReadTagCount() const = 0;
 	virtual uint32_t busyWriteTagCount() const = 0;
@@ -62,6 +66,7 @@ public:
 	void addRequests(TransactionTag tag, int count) override;
 	uint64_t getThrottledTagChangeId() const override;
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() override;
+	PrioritizedTransactionTagMap<double> getProxyRates(int numProxies) override { throw not_implemented(); }
 	int64_t autoThrottleCount() const override;
 	uint32_t busyReadTagCount() const override;
 	uint32_t busyWriteTagCount() const override;
@@ -89,6 +94,7 @@ public:
 
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override;
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() override;
+	PrioritizedTransactionTagMap<double> getProxyRates(int numProxies) override;
 
 	// Testing only:
 public:

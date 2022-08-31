@@ -282,6 +282,10 @@ void getLocalTime(const time_t* timep, struct tm* result);
 // get GMT time string from an epoch seconds double
 std::string epochsToGMTString(double epochs);
 
+#define ENVIRONMENT_KNOB_OPTION_PREFIX "FDB_KNOB_"
+// returns list of environment variables with prefix ENVIRONMENT_KNOB_OPTION_PREFIX
+std::vector<std::string> getEnvironmentKnobOptions();
+
 void setMemoryQuota(size_t limit);
 
 void* allocate(size_t length, bool allowLargePages, bool includeGuardPages);
@@ -316,7 +320,7 @@ std::string readFileBytes(std::string const& filename, int maxSize);
 
 // Read a file into memory supplied by the caller
 // If 'len' is greater than file size, then read the filesize bytes.
-void readFileBytes(std::string const& filename, uint8_t* buff, int64_t len);
+size_t readFileBytes(std::string const& filename, uint8_t* buff, int64_t len);
 
 // Write data buffer into file
 void writeFileBytes(std::string const& filename, const char* data, size_t count);

@@ -1,5 +1,5 @@
 /*
- * GetEncryptCipherKeys.actor.cpp
+ * GetEncryptCipherKeys.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -17,18 +17,29 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#pragma once
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_GETCIPHERKEYS_ACTOR_G_H)
+#define FDBCLIENT_GETCIPHERKEYS_ACTOR_G_H
+#include "fdbclient/GetEncryptCipherKeys.actor.g.h"
+#elif !defined(FDBCLIENT_GETCIPHERKEYS_ACTOR_H)
+#define FDBCLIENT_GETCIPHERKEYS_ACTOR_H
 
-#include "fdbserver/GetEncryptCipherKeys.h"
+#include "fdbclient/EncryptKeyProxyInterface.h"
+#include "flow/BlobCipher.h"
+#include "flow/IRandom.h"
 
-#include <boost/functional/hash.hpp>
+#include <unordered_map>
+#include <unordered_set>
 
-namespace {
+#include "flow/actorcompiler.h" // This must be the last #include.
 
-Optional<UID> getEncryptKeyProxyId(const Reference<AsyncVar<ServerDBInfo> const>& db) {
-	return db->get().encryptKeyProxy.map<UID>([](EncryptKeyProxyInterface proxy) { return proxy.id(); });
+template <class T>
+Optional<UID> getEncryptKeyProxyId(const Reference<AsyncVar<T> const>& db) {
+	return db->get().encryptKeyProxy.template map<UID>([](EncryptKeyProxyInterface proxy) { return proxy.id(); });
 }
 
-ACTOR Future<Void> onEncryptKeyProxyChange(Reference<AsyncVar<ServerDBInfo> const> db) {
+ACTOR template <class T>
+Future<Void> onEncryptKeyProxyChange(Reference<AsyncVar<T> const> db) {
 	state Optional<UID> previousProxyId = getEncryptKeyProxyId(db);
 	state Optional<UID> currentProxyId;
 	loop {
@@ -44,9 +55,9 @@ ACTOR Future<Void> onEncryptKeyProxyChange(Reference<AsyncVar<ServerDBInfo> cons
 	return Void();
 }
 
-ACTOR Future<EKPGetLatestBaseCipherKeysReply> getUncachedLatestEncryptCipherKeys(
-    Reference<AsyncVar<ServerDBInfo> const> db,
-    EKPGetLatestBaseCipherKeysRequest request) {
+ACTOR template <class T>
+Future<EKPGetLatestBaseCipherKeysReply> getUncachedLatestEncryptCipherKeys(Reference<AsyncVar<T> const> db,
+                                                                           EKPGetLatestBaseCipherKeysRequest request) {
 	Optional<EncryptKeyProxyInterface> proxy = db->get().encryptKeyProxy;
 	if (!proxy.present()) {
 		// Wait for onEncryptKeyProxyChange.
@@ -71,10 +82,12 @@ ACTOR Future<EKPGetLatestBaseCipherKeysReply> getUncachedLatestEncryptCipherKeys
 	}
 }
 
-} // anonymous namespace
-
-ACTOR Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getLatestEncryptCipherKeys(
-    Reference<AsyncVar<ServerDBInfo> const> db,
+// Get latest cipher keys for given encryption domains. It tries to get the cipher keys from local cache.
+// In case of cache miss, it fetches the cipher keys from EncryptKeyProxy and put the result in the local cache
+// before return.
+ACTOR template <class T>
+Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getLatestEncryptCipherKeys(
+    Reference<AsyncVar<T> const> db,
     std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains) {
 	state Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
@@ -105,8 +118,12 @@ ACTOR Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>
 			for (const EKPBaseCipherDetails& details : reply.baseCipherDetails) {
 				EncryptCipherDomainId domainId = details.encryptDomainId;
 				if (domains.count(domainId) > 0 && cipherKeys.count(domainId) == 0) {
-					Reference<BlobCipherKey> cipherKey = cipherKeyCache->insertCipherKey(
-					    domainId, details.baseCipherId, details.baseCipherKey.begin(), details.baseCipherKey.size());
+					Reference<BlobCipherKey> cipherKey = cipherKeyCache->insertCipherKey(domainId,
+					                                                                     details.baseCipherId,
+					                                                                     details.baseCipherKey.begin(),
+					                                                                     details.baseCipherKey.size(),
+					                                                                     details.refreshAt,
+					                                                                     details.expireAt);
 					ASSERT(cipherKey.isValid());
 					cipherKeys[domainId] = cipherKey;
 				}
@@ -126,10 +143,9 @@ ACTOR Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>
 	return cipherKeys;
 }
 
-namespace {
-
-ACTOR Future<EKPGetBaseCipherKeysByIdsReply> getUncachedEncryptCipherKeys(Reference<AsyncVar<ServerDBInfo> const> db,
-                                                                          EKPGetBaseCipherKeysByIdsRequest request) {
+ACTOR template <class T>
+Future<EKPGetBaseCipherKeysByIdsReply> getUncachedEncryptCipherKeys(Reference<AsyncVar<T> const> db,
+                                                                    EKPGetBaseCipherKeysByIdsRequest request) {
 	Optional<EncryptKeyProxyInterface> proxy = db->get().encryptKeyProxy;
 	if (!proxy.present()) {
 		// Wait for onEncryptKeyProxyChange.
@@ -156,10 +172,12 @@ ACTOR Future<EKPGetBaseCipherKeysByIdsReply> getUncachedEncryptCipherKeys(Refere
 
 using BaseCipherIndex = std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>;
 
-} // anonymous namespace
-
-ACTOR Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncryptCipherKeys(
-    Reference<AsyncVar<ServerDBInfo> const> db,
+// Get cipher keys specified by the list of cipher details. It tries to get the cipher keys from local cache.
+// In case of cache miss, it fetches the cipher keys from EncryptKeyProxy and put the result in the local cache
+// before return.
+ACTOR template <class T>
+Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncryptCipherKeys(
+    Reference<AsyncVar<T> const> db,
     std::unordered_set<BlobCipherDetails> cipherDetails) {
 	state Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 	state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys;
@@ -191,10 +209,10 @@ ACTOR Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> ge
 	// Fetch any uncached cipher keys.
 	loop choose {
 		when(EKPGetBaseCipherKeysByIdsReply reply = wait(getUncachedEncryptCipherKeys(db, request))) {
-			std::unordered_map<BaseCipherIndex, StringRef, boost::hash<BaseCipherIndex>> baseCipherKeys;
+			std::unordered_map<BaseCipherIndex, EKPBaseCipherDetails, boost::hash<BaseCipherIndex>> baseCipherKeys;
 			for (const EKPBaseCipherDetails& baseDetails : reply.baseCipherDetails) {
 				BaseCipherIndex baseIdx = std::make_pair(baseDetails.encryptDomainId, baseDetails.baseCipherId);
-				baseCipherKeys[baseIdx] = baseDetails.baseCipherKey;
+				baseCipherKeys[baseIdx] = baseDetails;
 			}
 			// Insert base cipher keys into cache and construct result.
 			for (const BlobCipherDetails& details : cipherDetails) {
@@ -211,9 +229,11 @@ ACTOR Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> ge
 				}
 				Reference<BlobCipherKey> cipherKey = cipherKeyCache->insertCipherKey(details.encryptDomainId,
 				                                                                     details.baseCipherId,
-				                                                                     itr->second.begin(),
-				                                                                     itr->second.size(),
-				                                                                     details.salt);
+				                                                                     itr->second.baseCipherKey.begin(),
+				                                                                     itr->second.baseCipherKey.size(),
+				                                                                     details.salt,
+				                                                                     itr->second.refreshAt,
+				                                                                     itr->second.expireAt);
 				ASSERT(cipherKey.isValid());
 				cipherKeys[details] = cipherKey;
 			}
@@ -225,24 +245,35 @@ ACTOR Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> ge
 	return cipherKeys;
 }
 
-ACTOR Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(Reference<AsyncVar<ServerDBInfo> const> db) {
-	static std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains = {
-		{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME },
-		{ ENCRYPT_HEADER_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
-	};
+struct TextAndHeaderCipherKeys {
+	Reference<BlobCipherKey> cipherTextKey;
+	Reference<BlobCipherKey> cipherHeaderKey;
+};
+
+ACTOR template <class T>
+Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(Reference<AsyncVar<T> const> db,
+                                                                    EncryptCipherDomainId domainId,
+                                                                    EncryptCipherDomainName domainName) {
+	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
+	domains[domainId] = domainName;
+	domains[ENCRYPT_HEADER_DOMAIN_ID] = FDB_DEFAULT_ENCRYPT_DOMAIN_NAME;
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys =
 	    wait(getLatestEncryptCipherKeys(db, domains));
-	ASSERT(cipherKeys.count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
+	ASSERT(cipherKeys.count(domainId) > 0);
 	ASSERT(cipherKeys.count(ENCRYPT_HEADER_DOMAIN_ID) > 0);
-	TextAndHeaderCipherKeys result{ cipherKeys.at(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID),
-		                            cipherKeys.at(ENCRYPT_HEADER_DOMAIN_ID) };
+	TextAndHeaderCipherKeys result{ cipherKeys.at(domainId), cipherKeys.at(ENCRYPT_HEADER_DOMAIN_ID) };
 	ASSERT(result.cipherTextKey.isValid());
 	ASSERT(result.cipherHeaderKey.isValid());
 	return result;
 }
 
-ACTOR Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<ServerDBInfo> const> db,
-                                                           BlobCipherEncryptHeader header) {
+template <class T>
+Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(const Reference<AsyncVar<T> const>& db) {
+	return getLatestEncryptCipherKeysForDomain(db, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
+}
+
+ACTOR template <class T>
+Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db, BlobCipherEncryptHeader header) {
 	std::unordered_set<BlobCipherDetails> cipherDetails{ header.cipherTextDetails, header.cipherHeaderDetails };
 	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys =
 	    wait(getEncryptCipherKeys(db, cipherDetails));
@@ -254,3 +285,6 @@ ACTOR Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<Se
 	ASSERT(result.cipherHeaderKey.isValid());
 	return result;
 }
+
+#include "flow/unactorcompiler.h"
+#endif

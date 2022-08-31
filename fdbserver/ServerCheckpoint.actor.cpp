@@ -35,7 +35,7 @@ ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, UID
 }
 
 ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint) {
-	wait(delay(0, TaskPriority::CheckPoint));
+	wait(delay(0, TaskPriority::FetchKeys));
 	state CheckpointFormat format = checkpoint.getFormat();
 	if (format == RocksDBColumnFamily || format == RocksDB) {
 		wait(deleteRocksCheckpoint(checkpoint));

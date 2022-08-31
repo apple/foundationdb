@@ -294,15 +294,13 @@ struct GetValueRequest : TimedRequest {
 	TenantInfo tenantInfo;
 	Key key;
 	Version version;
-	ReadType readType;
 	Optional<TagSet> tags;
-	Optional<UID> debugID;
 	ReplyPromise<GetValueReply> reply;
+	Optional<ReadOptions> options;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
-
-	GetValueRequest() : readType(ReadType::NORMAL) {}
+	GetValueRequest() {}
 
 	bool verify() const { return tenantInfo.isAuthorized(); }
 
@@ -310,16 +308,15 @@ struct GetValueRequest : TimedRequest {
 	                const TenantInfo& tenantInfo,
 	                const Key& key,
 	                Version ver,
-	                ReadType type,
 	                Optional<TagSet> tags,
-	                Optional<UID> debugID,
+	                Optional<ReadOptions> options,
 	                VersionVector latestCommitVersions)
-	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), readType(type), tags(tags),
-	    debugID(debugID), ssLatestCommitVersions(latestCommitVersions) {}
+	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), tags(tags), options(options),
+	    ssLatestCommitVersions(latestCommitVersions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, version, readType, tags, debugID, reply, spanContext, tenantInfo, ssLatestCommitVersions);
+		serializer(ar, key, version, tags, reply, spanContext, tenantInfo, options, ssLatestCommitVersions);
 	}
 };
 
@@ -395,15 +392,14 @@ struct GetKeyValuesRequest : TimedRequest {
 	KeyRef mapper = KeyRef();
 	Version version; // or latestVersion
 	int limit, limitBytes;
-	ReadType readType;
 	Optional<TagSet> tags;
-	Optional<UID> debugID;
+	Optional<ReadOptions> options;
 	ReplyPromise<GetKeyValuesReply> reply;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
 
-	GetKeyValuesRequest() : readType(ReadType::NORMAL) {}
+	GetKeyValuesRequest() {}
 
 	bool verify() const { return tenantInfo.isAuthorized(); }
 
@@ -415,12 +411,11 @@ struct GetKeyValuesRequest : TimedRequest {
 		           version,
 		           limit,
 		           limitBytes,
-		           readType,
 		           tags,
-		           debugID,
 		           reply,
 		           spanContext,
 		           tenantInfo,
+		           options,
 		           arena,
 		           ssLatestCommitVersions);
 	}
@@ -454,15 +449,14 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	Version version; // or latestVersion
 	int limit, limitBytes;
 	int matchIndex;
-	ReadType readType;
 	Optional<TagSet> tags;
-	Optional<UID> debugID;
+	Optional<ReadOptions> options;
 	ReplyPromise<GetMappedKeyValuesReply> reply;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key range
 
-	GetMappedKeyValuesRequest() : readType(ReadType::NORMAL) {}
+	GetMappedKeyValuesRequest() {}
 
 	bool verify() const { return tenantInfo.isAuthorized(); }
 
@@ -475,12 +469,11 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 		           version,
 		           limit,
 		           limitBytes,
-		           readType,
 		           tags,
-		           debugID,
 		           reply,
 		           spanContext,
 		           tenantInfo,
+		           options,
 		           arena,
 		           ssLatestCommitVersions,
 		           matchIndex);
@@ -522,15 +515,14 @@ struct GetKeyValuesStreamRequest {
 	KeySelectorRef begin, end;
 	Version version; // or latestVersion
 	int limit, limitBytes;
-	ReadType readType;
 	Optional<TagSet> tags;
-	Optional<UID> debugID;
+	Optional<ReadOptions> options;
 	ReplyPromiseStream<GetKeyValuesStreamReply> reply;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key range
 
-	GetKeyValuesStreamRequest() : readType(ReadType::NORMAL) {}
+	GetKeyValuesStreamRequest() {}
 
 	bool verify() const { return tenantInfo.isAuthorized(); }
 
@@ -542,12 +534,11 @@ struct GetKeyValuesStreamRequest {
 		           version,
 		           limit,
 		           limitBytes,
-		           readType,
 		           tags,
-		           debugID,
 		           reply,
 		           spanContext,
 		           tenantInfo,
+		           options,
 		           arena,
 		           ssLatestCommitVersions);
 	}
@@ -574,15 +565,14 @@ struct GetKeyRequest : TimedRequest {
 	TenantInfo tenantInfo;
 	KeySelectorRef sel;
 	Version version; // or latestVersion
-	ReadType readType;
 	Optional<TagSet> tags;
-	Optional<UID> debugID;
 	ReplyPromise<GetKeyReply> reply;
+	Optional<ReadOptions> options;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
 
-	GetKeyRequest() : readType(ReadType::NORMAL) {}
+	GetKeyRequest() {}
 
 	bool verify() const { return tenantInfo.isAuthorized(); }
 
@@ -590,17 +580,15 @@ struct GetKeyRequest : TimedRequest {
 	              TenantInfo tenantInfo,
 	              KeySelectorRef const& sel,
 	              Version version,
-	              ReadType type,
 	              Optional<TagSet> tags,
-	              Optional<UID> debugID,
+	              Optional<ReadOptions> options,
 	              VersionVector latestCommitVersions)
-	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), readType(type), debugID(debugID),
+	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), tags(tags), options(options),
 	    ssLatestCommitVersions(latestCommitVersions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, sel, version, readType, tags, debugID, reply, spanContext, tenantInfo, arena, ssLatestCommitVersions);
+		serializer(ar, sel, version, tags, reply, spanContext, tenantInfo, options, arena, ssLatestCommitVersions);
 	}
 };
 

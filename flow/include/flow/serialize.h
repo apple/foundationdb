@@ -373,7 +373,7 @@ struct _Unversioned {
 };
 
 // These functions return valid options to the VersionOptions parameter of the constructor of each archive type
-inline _IncludeVersion IncludeVersion(ProtocolVersion defaultVersion = currentProtocolVersion) {
+inline _IncludeVersion IncludeVersion(ProtocolVersion defaultVersion = currentProtocolVersion()) {
 	return _IncludeVersion(defaultVersion);
 }
 inline _AssumeVersion AssumeVersion(ProtocolVersion version) {

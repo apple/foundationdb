@@ -21,6 +21,7 @@
 #include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
+#include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
@@ -143,13 +144,47 @@ ThreadFuture<Void> ThreadSafeDatabase::waitPurgeGranulesComplete(const KeyRef& p
 	return onMainThread([db, key]() -> Future<Void> { return db->waitPurgeGranulesComplete(key); });
 }
 
-ThreadSafeDatabase::ThreadSafeDatabase(Reference<IClusterConnectionRecord> connectionRecord, int apiVersion) {
+ThreadFuture<bool> ThreadSafeDatabase::blobbifyRange(const KeyRangeRef& keyRange) {
+	DatabaseContext* db = this->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> { return db->blobbifyRange(range); });
+}
+
+ThreadFuture<bool> ThreadSafeDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {
+	DatabaseContext* db = this->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<bool> { return db->blobbifyRange(range); });
+}
+
+ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeDatabase::listBlobbifiedRanges(const KeyRangeRef& keyRange,
+                                                                                          int rangeLimit) {
+	DatabaseContext* db = this->db;
+	KeyRange range = keyRange;
+	return onMainThread(
+	    [=]() -> Future<Standalone<VectorRef<KeyRangeRef>>> { return db->listBlobbifiedRanges(range, rangeLimit); });
+}
+
+ThreadFuture<Version> ThreadSafeDatabase::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
+	DatabaseContext* db = this->db;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<Version> { return db->verifyBlobRange(range, version); });
+}
+
+ThreadSafeDatabase::ThreadSafeDatabase(ConnectionRecordType connectionRecordType,
+                                       std::string connectionRecordString,
+                                       int apiVersion) {
 	// Allocate memory for the Database from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 	DatabaseContext* db = this->db = DatabaseContext::allocateOnForeignThread();
 
-	onMainThreadVoid([db, connectionRecord, apiVersion]() {
+	onMainThreadVoid([db, connectionRecordType, connectionRecordString, apiVersion]() {
 		try {
+			Reference<IClusterConnectionRecord> connectionRecord =
+			    connectionRecordType == ConnectionRecordType::FILE
+			        ? Reference<IClusterConnectionRecord>(ClusterConnectionFile::openOrDefault(connectionRecordString))
+			        : Reference<IClusterConnectionRecord>(
+			              new ClusterConnectionMemoryRecord(ClusterConnectionString(connectionRecordString)));
+
 			Database::createDatabase(connectionRecord, apiVersion, IsInternal::False, LocalityData(), db).extractPtr();
 		} catch (Error& e) {
 			new (db) DatabaseContext(e);
@@ -350,13 +385,14 @@ ThreadFuture<Standalone<VectorRef<const char*>>> ThreadSafeTransaction::getAddre
 }
 
 ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeTransaction::getBlobGranuleRanges(
-    const KeyRangeRef& keyRange) {
+    const KeyRangeRef& keyRange,
+    int rangeLimit) {
 	ISingleThreadTransaction* tr = this->tr;
 	KeyRange r = keyRange;
 
-	return onMainThread([tr, r]() -> Future<Standalone<VectorRef<KeyRangeRef>>> {
+	return onMainThread([=]() -> Future<Standalone<VectorRef<KeyRangeRef>>> {
 		tr->checkDeferredError();
-		return tr->getBlobGranuleRanges(r);
+		return tr->getBlobGranuleRanges(r, rangeLimit);
 	});
 }
 
@@ -364,34 +400,33 @@ ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranules(const KeyRange
                                                                   Version beginVersion,
                                                                   Optional<Version> readVersion,
                                                                   ReadBlobGranuleContext granule_context) {
-	// FIXME: prevent from calling this from another main thread!
+	// This should not be called directly, bypassMultiversionApi should not be set
+	return ThreadResult<RangeResult>(unsupported_operation());
+}
 
+ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> ThreadSafeTransaction::readBlobGranulesStart(
+    const KeyRangeRef& keyRange,
+    Version beginVersion,
+    Optional<Version> readVersion,
+    Version* readVersionOut) {
 	ISingleThreadTransaction* tr = this->tr;
 	KeyRange r = keyRange;
 
-	int64_t readVersionOut;
-	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> getFilesFuture = onMainThread(
-	    [tr, r, beginVersion, readVersion, &readVersionOut]() -> Future<Standalone<VectorRef<BlobGranuleChunkRef>>> {
+	return onMainThread(
+	    [tr, r, beginVersion, readVersion, readVersionOut]() -> Future<Standalone<VectorRef<BlobGranuleChunkRef>>> {
 		    tr->checkDeferredError();
-		    return tr->readBlobGranules(r, beginVersion, readVersion, &readVersionOut);
+		    return tr->readBlobGranules(r, beginVersion, readVersion, readVersionOut);
 	    });
-
-	// FIXME: can this safely avoid another main thread jump?
-	getFilesFuture.blockUntilReadyCheckOnMainThread();
-
-	// propagate error to client
-	if (getFilesFuture.isError()) {
-		return ThreadResult<RangeResult>(getFilesFuture.getError());
-	}
-
-	Standalone<VectorRef<BlobGranuleChunkRef>> files = getFilesFuture.get();
-
+}
+ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranulesFinish(
+    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
+    const KeyRangeRef& keyRange,
+    Version beginVersion,
+    Version readVersion,
+    ReadBlobGranuleContext granuleContext) {
 	// do this work off of fdb network threads for performance!
-	if (granule_context.debugNoMaterialize) {
-		return ThreadResult<RangeResult>(blob_granule_not_materialized());
-	} else {
-		return loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersionOut, granule_context);
-	}
+	Standalone<VectorRef<BlobGranuleChunkRef>> files = startFuture.get();
+	return loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersion, granuleContext);
 }
 
 void ThreadSafeTransaction::addReadConflictRange(const KeyRangeRef& keys) {
@@ -563,17 +598,23 @@ void ThreadSafeTransaction::reset() {
 
 extern const char* getSourceVersion();
 
-ThreadSafeApi::ThreadSafeApi()
-  : apiVersion(-1), clientVersion(format("%s,%s,%llx", FDB_VT_VERSION, getSourceVersion(), currentProtocolVersion)),
-    transportId(0) {}
+ThreadSafeApi::ThreadSafeApi() : apiVersion(-1), transportId(0) {}
 
 void ThreadSafeApi::selectApiVersion(int apiVersion) {
 	this->apiVersion = apiVersion;
 }
 
 const char* ThreadSafeApi::getClientVersion() {
-	// There is only one copy of the ThreadSafeAPI, and it never gets deleted. Also, clientVersion is never modified.
+	// There is only one copy of the ThreadSafeAPI, and it never gets deleted.
+	// Also, clientVersion is initialized on demand and never modified afterwards.
+	if (clientVersion.empty()) {
+		clientVersion = format("%s,%s,%llx", FDB_VT_VERSION, getSourceVersion(), currentProtocolVersion());
+	}
 	return clientVersion.c_str();
+}
+
+void ThreadSafeApi::useFutureProtocolVersion() {
+	::useFutureProtocolVersion();
 }
 
 void ThreadSafeApi::setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value) {
@@ -632,12 +673,12 @@ void ThreadSafeApi::stopNetwork() {
 
 Reference<IDatabase> ThreadSafeApi::createDatabase(const char* clusterFilePath) {
 	return Reference<IDatabase>(
-	    new ThreadSafeDatabase(ClusterConnectionFile::openOrDefault(clusterFilePath), apiVersion));
+	    new ThreadSafeDatabase(ThreadSafeDatabase::ConnectionRecordType::FILE, clusterFilePath, apiVersion));
 }
 
 Reference<IDatabase> ThreadSafeApi::createDatabaseFromConnectionString(const char* connectionString) {
 	return Reference<IDatabase>(new ThreadSafeDatabase(
-	    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(connectionString)), apiVersion));
+	    ThreadSafeDatabase::ConnectionRecordType::CONNECTION_STRING, connectionString, apiVersion));
 }
 
 void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) {

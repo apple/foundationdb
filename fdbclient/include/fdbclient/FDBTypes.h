@@ -331,6 +331,22 @@ struct KeyRangeRef {
 	bool empty() const { return begin == end; }
 	bool singleKeyRange() const { return equalsKeyAfter(begin, end); }
 
+	// Return true if it's fully covered by given range list. Note that ranges should be sorted
+	bool isCovered(std::vector<KeyRangeRef>& ranges) {
+		ASSERT(std::is_sorted(ranges.begin(), ranges.end(), KeyRangeRef::ArbitraryOrder()));
+		KeyRangeRef clone(begin, end);
+		for (auto r : ranges) {
+			if (begin < r.begin)
+				return false; // uncovered gap between clone.begin and r.begin
+			if (end <= r.end)
+				return true; // range is fully covered
+			if (end > r.begin)
+				// {clone.begin, r.end} is covered. need to check coverage for {r.end, clone.end}
+				clone = KeyRangeRef(r.end, clone.end);
+		}
+		return false;
+	}
+
 	Standalone<KeyRangeRef> withPrefix(const StringRef& prefix) const {
 		return KeyRangeRef(begin.withPrefix(prefix), end.withPrefix(prefix));
 	}
@@ -1283,8 +1299,6 @@ struct WorkerBackupStatus {
 
 enum class TransactionPriority : uint8_t { BATCH, DEFAULT, IMMEDIATE, MIN = BATCH, MAX = IMMEDIATE };
 
-enum class ReadType { EAGER = 0, FETCH = 1, LOW = 2, NORMAL = 3, HIGH = 4, MIN = EAGER, MAX = HIGH };
-
 const std::array<TransactionPriority, (int)TransactionPriority::MAX + 1> allTransactionPriorities = {
 	TransactionPriority::BATCH,
 	TransactionPriority::DEFAULT,
@@ -1394,6 +1408,11 @@ struct TenantMode {
 	uint32_t mode;
 };
 
+typedef StringRef ClusterNameRef;
+typedef Standalone<ClusterNameRef> ClusterName;
+
+enum class ClusterType { STANDALONE, METACLUSTER_MANAGEMENT, METACLUSTER_DATA };
+
 struct GRVCacheSpace {
 	Version cachedReadVersion;
 	double lastGrvTime;
@@ -1415,7 +1434,7 @@ struct DatabaseSharedState {
 	std::atomic<int> refCount;
 
 	DatabaseSharedState()
-	  : protocolVersion(currentProtocolVersion), mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
+	  : protocolVersion(currentProtocolVersion()), mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
 };
 
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
@@ -1462,7 +1481,7 @@ struct StorageMetadataType {
 	bool wrongConfigured = false;
 
 	StorageMetadataType() : createdTime(0) {}
-	StorageMetadataType(uint64_t t, KeyValueStoreType storeType = KeyValueStoreType::END, bool wrongConfigured = false)
+	StorageMetadataType(double t, KeyValueStoreType storeType = KeyValueStoreType::END, bool wrongConfigured = false)
 	  : createdTime(t), storeType(storeType), wrongConfigured(wrongConfigured) {}
 
 	static double currentTime() { return g_network->timer(); }
@@ -1509,6 +1528,44 @@ struct StorageWiggleValue {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, id);
+	}
+};
+
+enum class ReadType {
+	EAGER = 0,
+	FETCH = 1,
+	LOW = 2,
+	NORMAL = 3,
+	HIGH = 4,
+	MIN = EAGER,
+	MAX = HIGH
+};
+
+FDB_DECLARE_BOOLEAN_PARAM(CacheResult);
+
+// store options for storage engine read
+// ReadType describes the usage and priority of the read
+// cacheResult determines whether the storage engine cache for this read
+// consistencyCheckStartVersion indicates the consistency check which began at this version
+// debugID helps to trace the path of the read
+struct ReadOptions {
+	ReadType type;
+	// Once CacheResult is serializable, change type from bool to CacheResult
+	bool cacheResult;
+	Optional<UID> debugID;
+	Optional<Version> consistencyCheckStartVersion;
+
+	ReadOptions() : type(ReadType::NORMAL), cacheResult(CacheResult::True){};
+
+	ReadOptions(Optional<UID> debugID,
+	            ReadType type = ReadType::NORMAL,
+	            CacheResult cache = CacheResult::False,
+	            Optional<Version> version = Optional<Version>())
+	  : type(type), cacheResult(cache), debugID(debugID), consistencyCheckStartVersion(version){};
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, type, cacheResult, debugID, consistencyCheckStartVersion);
 	}
 };
 

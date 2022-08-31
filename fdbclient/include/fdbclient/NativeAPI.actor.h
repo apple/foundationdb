@@ -239,14 +239,12 @@ FDB_DECLARE_BOOLEAN_PARAM(AllowInvalidTenantID);
 
 struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
-	int64_t tenantId = TenantInfo::INVALID_TENANT;
 	Optional<Standalone<StringRef>> authToken;
 	Reference<TransactionLogInfo> trLogInfo;
 	TransactionOptions options;
+	Optional<ReadOptions> readOptions;
 
-	Optional<UID> debugID;
 	TaskPriority taskID;
-	ReadType readType = ReadType::NORMAL;
 	SpanContext spanContext;
 	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
 	bool readVersionObtainedFromGrvProxy;
@@ -286,8 +284,18 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	Optional<TenantName> const& tenant();
 	bool hasTenant() const;
 
+	int64_t tenantId() const { return tenantId_; }
+	void trySetTenantId(int64_t tenantId) {
+		if (tenantId_ == TenantInfo::INVALID_TENANT) {
+			tenantId_ = tenantId;
+		}
+	}
+
+	Future<Void> handleUnknownTenant();
+
 private:
 	Optional<TenantName> tenant_;
+	int64_t tenantId_ = TenantInfo::INVALID_TENANT;
 	bool tenantSet;
 };
 
@@ -407,11 +415,15 @@ public:
 	// The returned list would still be in form of [keys.begin, splitPoint1, splitPoint2, ... , keys.end]
 	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize);
 
-	Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRange& range);
+	Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRange& range, int rangeLimit);
 	Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranules(const KeyRange& range,
 	                                                                    Version begin,
 	                                                                    Optional<Version> readVersion,
 	                                                                    Version* readVersionOut = nullptr);
+
+	Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRange& range,
+	                                                                           Version summaryVersion,
+	                                                                           int rangeLimit);
 
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set(const KeyRef& key, const ValueRef& value, AddConflictRange = AddConflictRange::True);
@@ -447,7 +459,13 @@ public:
 	void fullReset();
 	double getBackoff(int errCode);
 
-	void debugTransaction(UID dID) { trState->debugID = dID; }
+	void debugTransaction(UID dID) {
+		if (trState->readOptions.present()) {
+			trState->readOptions.get().debugID = dID;
+		} else {
+			trState->readOptions = ReadOptions(dID);
+		}
+	}
 	VersionVector getVersionVector() const;
 	SpanContext getSpanContext() const { return trState->spanContext; }
 
