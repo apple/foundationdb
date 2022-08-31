@@ -345,7 +345,6 @@ if(NOT WIN32)
       )
   set_tests_properties("fdb_c_upgrade_to_future_version" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
 
-if (0) # reenable after stabilizing the test
   add_test(NAME fdb_c_upgrade_to_future_version_blob_granules
     COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
@@ -354,7 +353,6 @@ if (0) # reenable after stabilizing the test
         --blob-granules-enabled
         --process-number 3
       )
-endif()
 
   if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
     add_test(NAME fdb_c_upgrade_single_threaded_630api

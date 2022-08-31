@@ -520,10 +520,6 @@ public:
 					TraceEvent("RatekeeperHalted", rkInterf.id()).detail("ReqID", req.requesterID);
 					break;
 				}
-				when(GlobalTagThrottlerStatusRequest req = waitNext(rkInterf.getGlobalTagThrottlerStatus.getFuture())) {
-					req.reply.send(self.tagThrottler->getGlobalTagThrottlerStatusReply());
-					break;
-				}
 				when(ReportCommitCostEstimationRequest req =
 				         waitNext(rkInterf.reportCommitCostEstimation.getFuture())) {
 					self.updateCommitCostEstimation(req.ssTrTagCommitCost);
@@ -929,8 +925,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 					double targetRateRatio;
 					if (blobWorkerLag > 3 * limits->bwLagTarget) {
 						targetRateRatio = 0;
-						// ASSERT(!g_network->isSimulated() || limits->bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
-						//        now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + 50);
+						ASSERT(!g_network->isSimulated() || limits->bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
+						       now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + 50);
 					} else if (blobWorkerLag > limits->bwLagTarget) {
 						targetRateRatio = SERVER_KNOBS->BW_LAG_DECREASE_AMOUNT;
 					} else {
@@ -987,8 +983,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 							    .detail("RecoveryDuration", getRecoveryDuration(lastBWVer));
 						}
 						limitReason = limitReason_t::blob_worker_missing;
-						// ASSERT(!g_network->isSimulated() || limits->bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
-						//        now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + 50);
+						ASSERT(!g_network->isSimulated() || limits->bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
+						       now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + 50);
 					} else if (bwTPS < limits->tpsLimit) {
 						if (printRateKeepLimitReasonDetails) {
 							TraceEvent("RatekeeperLimitReasonDetails")
@@ -1016,8 +1012,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 					;
 				}
 				limitReason = limitReason_t::blob_worker_missing;
-				// ASSERT(!g_network->isSimulated() || limits->bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
-				//        now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + 50);
+				ASSERT(!g_network->isSimulated() || limits->bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
+				       now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + 50);
 			}
 		} else if (blobWorkerLag > 3 * limits->bwLagTarget) {
 			limits->tpsLimit = 0.0;
@@ -1029,8 +1025,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 				    .detail("HistorySize", blobWorkerVersionHistory.size());
 			}
 			limitReason = limitReason_t::blob_worker_missing;
-			// ASSERT(!g_network->isSimulated() || limits->bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
-			//        now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + 50);
+			ASSERT(!g_network->isSimulated() || limits->bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
+			       now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + 50);
 		}
 	} else {
 		blobWorkerTime = now();
@@ -1243,6 +1239,9 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	if (limits->priority == TransactionPriority::DEFAULT) {
 		limits->tpsLimit = std::max(limits->tpsLimit, SERVER_KNOBS->RATEKEEPER_MIN_RATE);
 		limits->tpsLimit = std::min(limits->tpsLimit, SERVER_KNOBS->RATEKEEPER_MAX_RATE);
+	} else if (limits->priority == TransactionPriority::BATCH) {
+		limits->tpsLimit = std::max(limits->tpsLimit, SERVER_KNOBS->RATEKEEPER_BATCH_MIN_RATE);
+		limits->tpsLimit = std::min(limits->tpsLimit, SERVER_KNOBS->RATEKEEPER_BATCH_MAX_RATE);
 	}
 
 	if (deterministicRandom()->random01() < 0.1) {

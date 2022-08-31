@@ -331,6 +331,22 @@ struct KeyRangeRef {
 	bool empty() const { return begin == end; }
 	bool singleKeyRange() const { return equalsKeyAfter(begin, end); }
 
+	// Return true if it's fully covered by given range list. Note that ranges should be sorted
+	bool isCovered(std::vector<KeyRangeRef>& ranges) {
+		ASSERT(std::is_sorted(ranges.begin(), ranges.end(), KeyRangeRef::ArbitraryOrder()));
+		KeyRangeRef clone(begin, end);
+		for (auto r : ranges) {
+			if (begin < r.begin)
+				return false; // uncovered gap between clone.begin and r.begin
+			if (end <= r.end)
+				return true; // range is fully covered
+			if (end > r.begin)
+				// {clone.begin, r.end} is covered. need to check coverage for {r.end, clone.end}
+				clone = KeyRangeRef(r.end, clone.end);
+		}
+		return false;
+	}
+
 	Standalone<KeyRangeRef> withPrefix(const StringRef& prefix) const {
 		return KeyRangeRef(begin.withPrefix(prefix), end.withPrefix(prefix));
 	}
@@ -1512,6 +1528,42 @@ struct StorageWiggleValue {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, id);
+	}
+};
+
+enum class ReadType {
+	EAGER,
+	FETCH,
+	LOW,
+	NORMAL,
+	HIGH,
+};
+
+FDB_DECLARE_BOOLEAN_PARAM(CacheResult);
+
+// store options for storage engine read
+// ReadType describes the usage and priority of the read
+// cacheResult determines whether the storage engine cache for this read
+// consistencyCheckStartVersion indicates the consistency check which began at this version
+// debugID helps to trace the path of the read
+struct ReadOptions {
+	ReadType type;
+	// Once CacheResult is serializable, change type from bool to CacheResult
+	bool cacheResult;
+	Optional<UID> debugID;
+	Optional<Version> consistencyCheckStartVersion;
+
+	ReadOptions() : type(ReadType::NORMAL), cacheResult(CacheResult::True){};
+
+	ReadOptions(Optional<UID> debugID,
+	            ReadType type = ReadType::NORMAL,
+	            CacheResult cache = CacheResult::False,
+	            Optional<Version> version = Optional<Version>())
+	  : type(type), cacheResult(cache), debugID(debugID), consistencyCheckStartVersion(version){};
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, type, cacheResult, debugID, consistencyCheckStartVersion);
 	}
 };
 

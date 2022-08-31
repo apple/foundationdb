@@ -103,6 +103,8 @@
 #endif
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+FDB_DEFINE_BOOLEAN_PARAM(CacheResult);
+
 extern const char* getSourceVersion();
 
 namespace {
@@ -231,8 +233,9 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
                                               VersionVector& latestCommitVersions) {
 	latestCommitVersions.clear();
 
-	if (info->debugID.present()) {
-		g_traceBatch.addEvent("TransactionDebug", info->debugID.get().first(), "NativeAPI.getLatestCommitVersions");
+	if (info->readOptions.present() && info->readOptions.get().debugID.present()) {
+		g_traceBatch.addEvent(
+		    "TransactionDebug", info->readOptions.get().debugID.get().first(), "NativeAPI.getLatestCommitVersions");
 	}
 
 	if (!info->readVersionObtainedFromGrvProxy) {
@@ -270,8 +273,8 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 				}
 			}
 		}
-		// commitVersion == readVersion is common, do not log.
-		if (!updatedVersionMap && commitVersion != readVersion) {
+		// Do not log if commitVersion >= readVersion.
+		if (!updatedVersionMap && commitVersion == invalidVersion) {
 			TraceEvent(SevDebug, "CommitVersionNotFoundForSS")
 			    .detail("InSSIDMap", iter != ssidTagMapping.end() ? 1 : 0)
 			    .detail("Tag", tag)
@@ -2968,7 +2971,7 @@ Future<KeyRangeLocationInfo> getKeyLocation(Reference<TransactionState> trState,
 	                        key,
 	                        member,
 	                        trState->spanContext,
-	                        trState->debugID,
+	                        trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>(),
 	                        trState->useProvisionalProxies,
 	                        isBackward,
 	                        version);
@@ -3109,7 +3112,7 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<Transac
 	                              reverse,
 	                              member,
 	                              trState->spanContext,
-	                              trState->debugID,
+	                              trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>(),
 	                              trState->useProvisionalProxies,
 	                              version);
 
@@ -3131,16 +3134,16 @@ ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange 
 	state Version version = wait(fVersion);
 
 	loop {
-		std::vector<KeyRangeLocationInfo> locations =
-		    wait(getKeyRangeLocations_internal(trState->cx,
-		                                       trState->getTenantInfo(),
-		                                       keys,
-		                                       CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT,
-		                                       Reverse::False,
-		                                       trState->spanContext,
-		                                       trState->debugID,
-		                                       trState->useProvisionalProxies,
-		                                       version));
+		std::vector<KeyRangeLocationInfo> locations = wait(getKeyRangeLocations_internal(
+		    trState->cx,
+		    trState->getTenantInfo(),
+		    keys,
+		    CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT,
+		    Reverse::False,
+		    trState->spanContext,
+		    trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>(),
+		    trState->useProvisionalProxies,
+		    version));
 		totalRanges += CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT;
 		totalRequests++;
 		if (locations.size() == 0 || totalRanges >= trState->cx->locationCacheSize ||
@@ -3298,12 +3301,16 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 		state uint64_t startTime;
 		state double startTimeD;
 		state VersionVector ssLatestCommitVersions;
+		state Optional<ReadOptions> readOptions = trState->readOptions;
+
 		trState->cx->getLatestCommitVersions(locationInfo.locations, ver, trState, ssLatestCommitVersions);
 		try {
-			if (trState->debugID.present()) {
+			if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
 				getValueID = nondeterministicRandom()->randomUniqueID();
+				readOptions.get().debugID = getValueID;
 
-				g_traceBatch.addAttach("GetValueAttachID", trState->debugID.get().first(), getValueID.get().first());
+				g_traceBatch.addAttach(
+				    "GetValueAttachID", trState->readOptions.get().debugID.get().first(), getValueID.get().first());
 				g_traceBatch.addEvent("GetValueDebug",
 				                      getValueID.get().first(),
 				                      "NativeAPI.getValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
@@ -3336,7 +3343,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 					                         ver,
 					                         trState->cx->sampleReadTags() ? trState->options.readTags
 					                                                       : Optional<TagSet>(),
-					                         getValueID,
+					                         readOptions,
 					                         ssLatestCommitVersions),
 					         TaskPriority::DefaultPromiseEndpoint,
 					         AtMostOnce::False,
@@ -3411,12 +3418,16 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
                          UseTenant useTenant = UseTenant::True) {
 	wait(success(version));
 
-	state Optional<UID> getKeyID = Optional<UID>();
-	state Span span("NAPI:getKey"_loc, trState->spanContext);
-	if (trState->debugID.present()) {
-		getKeyID = nondeterministicRandom()->randomUniqueID();
+	state Optional<UID> getKeyID;
+	state Optional<ReadOptions> readOptions = trState->readOptions;
 
-		g_traceBatch.addAttach("GetKeyAttachID", trState->debugID.get().first(), getKeyID.get().first());
+	state Span span("NAPI:getKey"_loc, trState->spanContext);
+	if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
+		getKeyID = nondeterministicRandom()->randomUniqueID();
+		readOptions.get().debugID = getKeyID;
+
+		g_traceBatch.addAttach(
+		    "GetKeyAttachID", trState->readOptions.get().debugID.get().first(), getKeyID.get().first());
 		g_traceBatch.addEvent(
 		    "GetKeyDebug",
 		    getKeyID.get().first(),
@@ -3459,7 +3470,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 			                  k,
 			                  version.get(),
 			                  trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>(),
-			                  getKeyID,
+			                  readOptions,
 			                  ssLatestCommitVersions);
 			req.arena.dependsOn(k.arena());
 
@@ -3924,13 +3935,15 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 
 			// FIXME: buggify byte limits on internal functions that use them, instead of globally
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
-			req.debugID = trState->debugID;
+
+			req.options = trState->readOptions;
 
 			try {
-				if (trState->debugID.present()) {
-					g_traceBatch.addEvent(
-					    "TransactionDebug", trState->debugID.get().first(), "NativeAPI.getExactRange.Before");
-					/*TraceEvent("TransactionDebugGetExactRangeInfo", trState->debugID.get())
+				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
+					g_traceBatch.addEvent("TransactionDebug",
+					                      trState->readOptions.get().debugID.get().first(),
+					                      "NativeAPI.getExactRange.Before");
+					/*TraceEvent("TransactionDebugGetExactRangeInfo", trState->readOptions.debugID.get())
 					    .detail("ReqBeginKey", req.begin.getKey())
 					    .detail("ReqEndKey", req.end.getKey())
 					    .detail("ReqLimit", req.limit)
@@ -3960,9 +3973,10 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 					++trState->cx->transactionPhysicalReadsCompleted;
 					throw;
 				}
-				if (trState->debugID.present())
-					g_traceBatch.addEvent(
-					    "TransactionDebug", trState->debugID.get().first(), "NativeAPI.getExactRange.After");
+				if (trState->readOptions.present() && trState->readOptions.get().debugID.present())
+					g_traceBatch.addEvent("TransactionDebug",
+					                      trState->readOptions.get().debugID.get().first(),
+					                      "NativeAPI.getExactRange.After");
 				output.arena().dependsOn(rep.arena);
 				output.append(output.arena(), rep.data.begin(), rep.data.size());
 
@@ -4290,7 +4304,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 			req.arena.dependsOn(mapper.arena());
 			setMatchIndex<GetKeyValuesFamilyRequest>(req, matchIndex);
 			req.tenantInfo = useTenant ? trState->getTenantInfo() : TenantInfo();
-			req.isFetchKeys = (trState->taskID == TaskPriority::FetchKeys);
+			req.options = trState->readOptions;
 			req.version = readVersion;
 
 			trState->cx->getLatestCommitVersions(
@@ -4328,13 +4342,13 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
-			req.debugID = trState->debugID;
 			req.spanContext = span.context;
 			try {
-				if (trState->debugID.present()) {
-					g_traceBatch.addEvent(
-					    "TransactionDebug", trState->debugID.get().first(), "NativeAPI.getRange.Before");
-					/*TraceEvent("TransactionDebugGetRangeInfo", trState->debugID.get())
+				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
+					g_traceBatch.addEvent("TransactionDebug",
+					                      trState->readOptions.get().debugID.get().first(),
+					                      "NativeAPI.getRange.Before");
+					/*TraceEvent("TransactionDebugGetRangeInfo", trState->readOptions.debugID.get())
 					    .detail("ReqBeginKey", req.begin.getKey())
 					    .detail("ReqEndKey", req.end.getKey())
 					    .detail("OriginalBegin", originalBegin.toString())
@@ -4373,11 +4387,11 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					throw;
 				}
 
-				if (trState->debugID.present()) {
+				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
 					g_traceBatch.addEvent("TransactionDebug",
-					                      trState->debugID.get().first(),
+					                      trState->readOptions.get().debugID.get().first(),
 					                      "NativeAPI.getRange.After"); //.detail("SizeOf", rep.data.size());
-					/*TraceEvent("TransactionDebugGetRangeDone", trState->debugID.get())
+					/*TraceEvent("TransactionDebugGetRangeDone", trState->readOptions.debugID.get())
 					    .detail("ReqBeginKey", req.begin.getKey())
 					    .detail("ReqEndKey", req.end.getKey())
 					    .detail("RepIsMore", rep.more)
@@ -4489,10 +4503,11 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 				}
 
 			} catch (Error& e) {
-				if (trState->debugID.present()) {
-					g_traceBatch.addEvent(
-					    "TransactionDebug", trState->debugID.get().first(), "NativeAPI.getRange.Error");
-					TraceEvent("TransactionDebugError", trState->debugID.get()).error(e);
+				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
+					g_traceBatch.addEvent("TransactionDebug",
+					                      trState->readOptions.get().debugID.get().first(),
+					                      "NativeAPI.getRange.Error");
+					TraceEvent("TransactionDebugError", trState->readOptions.get().debugID.get()).error(e);
 				}
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 				    (e.code() == error_code_transaction_too_old && readVersion == latestVersion)) {
@@ -4744,9 +4759,8 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 			req.spanContext = spanContext;
 			req.limit = reverse ? -CLIENT_KNOBS->REPLY_BYTE_LIMIT : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 			req.limitBytes = std::numeric_limits<int>::max();
-			// leaving the flag off for now to prevent data fetches stall under heavy load
-			// it is used to inform the storage that the rangeRead is for Fetch
-			// req.isFetchKeys = (trState->taskID == TaskPriority::FetchKeys);
+			req.options = trState->readOptions;
+
 			trState->cx->getLatestCommitVersions(
 			    locations[shard].locations, req.version, trState, req.ssLatestCommitVersions);
 
@@ -4757,12 +4771,12 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 
 			// FIXME: buggify byte limits on internal functions that use them, instead of globally
 			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
-			req.debugID = trState->debugID;
 
 			try {
-				if (trState->debugID.present()) {
-					g_traceBatch.addEvent(
-					    "TransactionDebug", trState->debugID.get().first(), "NativeAPI.RangeStream.Before");
+				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
+					g_traceBatch.addEvent("TransactionDebug",
+					                      trState->readOptions.get().debugID.get().first(),
+					                      "NativeAPI.RangeStream.Before");
 				}
 				++trState->cx->transactionPhysicalReads;
 				state GetKeyValuesStreamReply rep;
@@ -4856,9 +4870,10 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 						}
 						rep = GetKeyValuesStreamReply();
 					}
-					if (trState->debugID.present())
-						g_traceBatch.addEvent(
-						    "TransactionDebug", trState->debugID.get().first(), "NativeAPI.getExactRange.After");
+					if (trState->readOptions.present() && trState->readOptions.get().debugID.present())
+						g_traceBatch.addEvent("TransactionDebug",
+						                      trState->readOptions.get().debugID.get().first(),
+						                      "NativeAPI.getExactRange.After");
 					RangeResult output(RangeResultRef(rep.data, rep.more), rep.arena);
 
 					if (tssDuplicateStream.present() && !tssDuplicateStream.get().done()) {
@@ -5337,7 +5352,7 @@ Future<Void> Transaction::watch(Reference<Watch> watch) {
 	    trState->options.readTags,
 	    trState->spanContext,
 	    trState->taskID,
-	    trState->debugID,
+	    trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>(),
 	    trState->useProvisionalProxies);
 }
 
@@ -6005,16 +6020,17 @@ void Transaction::setupWatches() {
 		Future<Version> watchVersion = getCommittedVersion() > 0 ? getCommittedVersion() : getReadVersion();
 
 		for (int i = 0; i < watches.size(); ++i)
-			watches[i]->setWatch(watchValueMap(watchVersion,
-			                                   trState->getTenantInfo(),
-			                                   watches[i]->key,
-			                                   watches[i]->value,
-			                                   trState->cx,
-			                                   trState->options.readTags,
-			                                   trState->spanContext,
-			                                   trState->taskID,
-			                                   trState->debugID,
-			                                   trState->useProvisionalProxies));
+			watches[i]->setWatch(
+			    watchValueMap(watchVersion,
+			                  trState->getTenantInfo(),
+			                  watches[i]->key,
+			                  watches[i]->value,
+			                  trState->cx,
+			                  trState->options.readTags,
+			                  trState->spanContext,
+			                  trState->taskID,
+			                  trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>(),
+			                  trState->useProvisionalProxies));
 
 		watches.clear();
 	} catch (Error&) {
@@ -6135,7 +6151,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 	state TraceInterval interval("TransactionCommit");
 	state double startTime = now();
 	state Span span("NAPI:tryCommit"_loc, trState->spanContext);
-	state Optional<UID> debugID = trState->debugID;
+	state Optional<UID> debugID = trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>();
 	state TenantPrefixPrepended tenantPrefixPrepended = TenantPrefixPrepended::False;
 	if (debugID.present()) {
 		TraceEvent(interval.begin()).detail("Parent", debugID.get());
@@ -6539,10 +6555,10 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 			    makeReference<TransactionLogInfo>(value.get().printable(), TransactionLogInfo::DONT_LOG);
 			trState->trLogInfo->maxFieldLength = trState->options.maxTransactionLoggingFieldLength;
 		}
-		if (trState->debugID.present()) {
+		if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
 			TraceEvent(SevInfo, "TransactionBeingTraced")
 			    .detail("DebugTransactionID", trState->trLogInfo->identifier)
-			    .detail("ServerTraceID", trState->debugID.get());
+			    .detail("ServerTraceID", trState->readOptions.get().debugID.get());
 		}
 		break;
 
@@ -6574,10 +6590,11 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 	case FDBTransactionOptions::SERVER_REQUEST_TRACING:
 		validateOptionValueNotPresent(value);
 		debugTransaction(deterministicRandom()->randomUniqueID());
-		if (trState->trLogInfo && !trState->trLogInfo->identifier.empty()) {
+		if (trState->trLogInfo && !trState->trLogInfo->identifier.empty() && trState->readOptions.present() &&
+		    trState->readOptions.get().debugID.present()) {
 			TraceEvent(SevInfo, "TransactionBeingTraced")
 			    .detail("DebugTransactionID", trState->trLogInfo->identifier)
-			    .detail("ServerTraceID", trState->debugID.get());
+			    .detail("ServerTraceID", trState->readOptions.get().debugID.get());
 		}
 		break;
 
@@ -7048,7 +7065,9 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 
 		Location location = "NAPI:getReadVersion"_loc;
 		SpanContext spanContext = generateSpanID(trState->cx->transactionTracingSample, trState->spanContext);
-		auto const req = DatabaseContext::VersionRequest(spanContext, trState->options.tags, trState->debugID);
+		Optional<UID> versionDebugID =
+		    trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>();
+		auto const req = DatabaseContext::VersionRequest(spanContext, trState->options.tags, versionDebugID);
 		batcher.stream.send(req);
 		trState->startTime = now();
 		readVersion = extractReadVersion(trState, location, spanContext, req.reply.getFuture(), metadataVersion);
@@ -7208,7 +7227,8 @@ Future<Void> Transaction::onError(Error const& e) {
 	if (e.code() == error_code_not_committed || e.code() == error_code_commit_unknown_result ||
 	    e.code() == error_code_database_locked || e.code() == error_code_commit_proxy_memory_limit_exceeded ||
 	    e.code() == error_code_grv_proxy_memory_limit_exceeded || e.code() == error_code_process_behind ||
-	    e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled) {
+	    e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled ||
+	    e.code() == error_code_blob_granule_request_failed) {
 		if (e.code() == error_code_not_committed)
 			++trState->cx->transactionsNotCommitted;
 		else if (e.code() == error_code_commit_unknown_result)
@@ -7616,14 +7636,15 @@ ACTOR Future<TenantMapEntry> blobGranuleGetTenantEntry(Transaction* self, Key ra
 	Optional<KeyRangeLocationInfo> cachedLocationInfo =
 	    self->trState->cx->getCachedLocation(self->getTenant().get(), rangeStartKey, Reverse::False);
 	if (!cachedLocationInfo.present()) {
-		KeyRangeLocationInfo l = wait(getKeyLocation_internal(self->trState->cx,
-		                                                      self->trState->getTenantInfo(AllowInvalidTenantID::True),
-		                                                      rangeStartKey,
-		                                                      self->trState->spanContext,
-		                                                      self->trState->debugID,
-		                                                      self->trState->useProvisionalProxies,
-		                                                      Reverse::False,
-		                                                      latestVersion));
+		KeyRangeLocationInfo l = wait(getKeyLocation_internal(
+		    self->trState->cx,
+		    self->trState->getTenantInfo(AllowInvalidTenantID::True),
+		    rangeStartKey,
+		    self->trState->spanContext,
+		    self->trState->readOptions.present() ? self->trState->readOptions.get().debugID : Optional<UID>(),
+		    self->trState->useProvisionalProxies,
+		    Reverse::False,
+		    latestVersion));
 		self->trState->trySetTenantId(l.tenantEntry.id);
 		return l.tenantEntry;
 	} else {
@@ -7839,11 +7860,9 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			    getValue(self->trState, blobWorkerListKeyFor(workerId), self->getReadVersion(), UseTenant::False)));
 			// from the time the mapping was read from the db, the associated blob worker
 			// could have died and so its interface wouldn't be present as part of the blobWorkerList
-			// we persist in the db. So throw wrong_shard_server to get the new mapping
+			// we persist in the db. So throw blob_granule_request_failed to get the new mapping
 			if (!workerInterface.present()) {
-				// need to re-read mapping, throw transaction_too_old so client retries. TODO better error?
-				// throw wrong_shard_server();
-				throw transaction_too_old();
+				throw blob_granule_request_failed();
 			}
 			// FIXME: maybe just want to insert here if there are racing queries for the same worker or something?
 			self->trState->cx->blobWorker_interf[workerId] = decodeBlobWorkerListValue(workerInterface.get());
@@ -7978,10 +7997,8 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 				           e.name());
 			}
 			// worker is up but didn't actually have granule, or connection failed
-			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed ||
-			    e.code() == error_code_unknown_tenant) {
-				// need to re-read mapping, throw transaction_too_old so client retries. TODO better error?
-				throw transaction_too_old();
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed) {
+				throw blob_granule_request_failed();
 			}
 			throw e;
 		}
@@ -8807,6 +8824,7 @@ Reference<ChangeFeedStorageData> DatabaseContext::getStorageData(StorageServerIn
 		newStorageUpdater->interfToken = token;
 		newStorageUpdater->updater = storageFeedVersionUpdater(interf, newStorageUpdater.getPtr());
 		newStorageUpdater->context = this;
+		newStorageUpdater->created = now();
 		changeFeedUpdaters[token] = newStorageUpdater.getPtr();
 		return newStorageUpdater;
 	}
@@ -8816,12 +8834,12 @@ Reference<ChangeFeedStorageData> DatabaseContext::getStorageData(StorageServerIn
 Version DatabaseContext::getMinimumChangeFeedVersion() {
 	Version minVersion = std::numeric_limits<Version>::max();
 	for (auto& it : changeFeedUpdaters) {
-		if (it.second->version.get() > 0) {
+		if (now() - it.second->created > CLIENT_KNOBS->CHANGE_FEED_START_INTERVAL) {
 			minVersion = std::min(minVersion, it.second->version.get());
 		}
 	}
 	for (auto& it : notAtLatestChangeFeeds) {
-		if (it.second->getVersion() > 0) {
+		if (now() - it.second->created > CLIENT_KNOBS->CHANGE_FEED_START_INTERVAL) {
 			minVersion = std::min(minVersion, it.second->getVersion());
 		}
 	}
@@ -8843,7 +8861,7 @@ ChangeFeedStorageData::~ChangeFeedStorageData() {
 }
 
 ChangeFeedData::ChangeFeedData(DatabaseContext* context)
-  : dbgid(deterministicRandom()->randomUniqueID()), context(context), notAtLatest(1) {
+  : dbgid(deterministicRandom()->randomUniqueID()), context(context), notAtLatest(1), created(now()) {
 	if (context) {
 		context->notAtLatestChangeFeeds[dbgid] = this;
 	}
@@ -9248,6 +9266,7 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	results->notAtLatest.set(interfs.size());
 	if (results->context) {
 		results->context->notAtLatestChangeFeeds[results->dbgid] = results.getPtr();
+		results->created = now();
 	}
 	refresh.send(Void());
 
@@ -9454,6 +9473,7 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	results->notAtLatest.set(1);
 	if (results->context) {
 		results->context->notAtLatestChangeFeeds[results->dbgid] = results.getPtr();
+		results->created = now();
 	}
 	refresh.send(Void());
 
@@ -9578,12 +9598,13 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				results->notAtLatest.set(1);
 				if (results->context) {
 					results->context->notAtLatestChangeFeeds[results->dbgid] = results.getPtr();
+					results->created = now();
 				}
 			}
 
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    e.code() == error_code_connection_failed || e.code() == error_code_unknown_change_feed ||
-			    e.code() == error_code_broken_promise) {
+			    e.code() == error_code_broken_promise || e.code() == error_code_future_version) {
 				db->changeFeedCache.erase(rangeID);
 				cx->invalidateCache(Key(), keys);
 				if (begin == lastBeginVersion) {
@@ -9705,7 +9726,8 @@ ACTOR Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeedsActor(Referenc
 			}
 			return result;
 		} catch (Error& e) {
-			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
+			    e.code() == error_code_future_version) {
 				cx->invalidateCache(Key(), range);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
 			} else {

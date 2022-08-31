@@ -13,6 +13,7 @@ set(FDB_PV_FUTURE_VERSION                       "0x0FDB00B073000000LL")
 set(FDB_PV_MIN_COMPATIBLE_VERSION               "0x0FDB00B071000000LL")
 set(FDB_PV_MIN_INVALID_VERSION                  "0x0FDB00B074000000LL")
 set(FDB_PV_LEFT_MOST_CHECK                      "0x0FDB00B100000000LL")
+set(FDB_PV_LSB_MASK                             "0xF0FFFFLL")
 
 # The 5th digit from right is dev version, for example, 2 in 0x0FDB00B061020000LL;
 # It was used to identify a protocol change (e.g., interface change) between major/minor versions (say 5.1 and 5.2)
