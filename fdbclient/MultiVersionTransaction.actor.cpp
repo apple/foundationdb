@@ -342,6 +342,29 @@ ThreadResult<RangeResult> DLTransaction::readBlobGranulesFinish(
 	return ThreadResult<RangeResult>((ThreadSingleAssignmentVar<RangeResult>*)(r));
 };
 
+ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>>
+DLTransaction::summarizeBlobGranules(const KeyRangeRef& keyRange, Optional<Version> summaryVersion, int rangeLimit) {
+	if (!api->transactionSummarizeBlobGranules) {
+		return unsupported_operation();
+	}
+
+	int64_t sv = summaryVersion.present() ? summaryVersion.get() : latestVersion;
+
+	FdbCApi::FDBFuture* f = api->transactionSummarizeBlobGranules(
+	    tr, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), sv, rangeLimit);
+
+	return toThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>>(
+	    api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		    const FdbCApi::FDBGranuleSummary* summaries;
+		    int summariesLength;
+		    FdbCApi::fdb_error_t error = api->futureGetGranuleSummaryArray(f, &summaries, &summariesLength);
+		    ASSERT(!error);
+		    // The memory for this is stored in the FDBFuture and is released when the future gets destroyed
+		    return Standalone<VectorRef<BlobGranuleSummaryRef>>(
+		        VectorRef<BlobGranuleSummaryRef>((BlobGranuleSummaryRef*)summaries, summariesLength), Arena());
+	    });
+}
+
 void DLTransaction::addReadConflictRange(const KeyRangeRef& keys) {
 	throwIfError(api->transactionAddConflictRange(
 	    tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDB_CONFLICT_RANGE_TYPE_READ));
@@ -858,6 +881,11 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_transaction_read_blob_granules_finish",
 	                   headerVersion >= 720);
+	loadClientFunction(&api->transactionSummarizeBlobGranules,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_summarize_blob_granules",
+	                   headerVersion >= 720);
 	loadClientFunction(&api->futureGetInt64,
 	                   lib,
 	                   fdbCPath,
@@ -876,6 +904,11 @@ void DLApi::init() {
 	    &api->futureGetKeyValueArray, lib, fdbCPath, "fdb_future_get_keyvalue_array", headerVersion >= 0);
 	loadClientFunction(
 	    &api->futureGetMappedKeyValueArray, lib, fdbCPath, "fdb_future_get_mappedkeyvalue_array", headerVersion >= 710);
+	loadClientFunction(&api->futureGetGranuleSummaryArray,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_future_get_granule_summary_array",
+	                   headerVersion >= 720);
 	loadClientFunction(&api->futureGetSharedState, lib, fdbCPath, "fdb_future_get_shared_state", headerVersion >= 710);
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel", headerVersion >= 0);
@@ -1248,6 +1281,16 @@ ThreadResult<RangeResult> MultiVersionTransaction::readBlobGranulesFinish(
     ReadBlobGranuleContext granuleContext) {
 	// can't call this directly
 	return ThreadResult<RangeResult>(unsupported_operation());
+}
+
+ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> MultiVersionTransaction::summarizeBlobGranules(
+    const KeyRangeRef& keyRange,
+    Optional<Version> summaryVersion,
+    int rangeLimit) {
+	auto tr = getTransaction();
+	auto f = tr.transaction ? tr.transaction->summarizeBlobGranules(keyRange, summaryVersion, rangeLimit)
+	                        : makeTimeout<Standalone<VectorRef<BlobGranuleSummaryRef>>>();
+	return abortableFuture(f, tr.onChange);
 }
 
 void MultiVersionTransaction::atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) {

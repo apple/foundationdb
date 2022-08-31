@@ -64,6 +64,11 @@ public:
 	                                                                    Version* readVersionOut) override {
 		throw client_invalid_operation();
 	}
+	Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(KeyRange const& range,
+	                                                                           Optional<Version> readVersion,
+	                                                                           int rangeLimit) override {
+		throw client_invalid_operation();
+	}
 	Future<int64_t> getEstimatedRangeSizeBytes(KeyRange const& keys) override { throw client_invalid_operation(); }
 	void addReadConflictRange(KeyRangeRef const& keys) override { throw client_invalid_operation(); }
 	void makeSelfConflicting() override { throw client_invalid_operation(); }

@@ -324,6 +324,15 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_key_array(FDBFuture* f, FDBKey c
 	                 *out_count = na.size(););
 }
 
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_granule_summary_array(FDBFuture* f,
+                                                                      FDBGranuleSummary const** out_ranges,
+                                                                      int* out_count) {
+	CATCH_AND_RETURN(Standalone<VectorRef<BlobGranuleSummaryRef>> na =
+	                     TSAV(Standalone<VectorRef<BlobGranuleSummaryRef>>, f)->get();
+	                 *out_ranges = (FDBGranuleSummary*)na.begin();
+	                 *out_count = na.size(););
+}
+
 extern "C" DLLEXPORT void fdb_result_destroy(FDBResult* r) {
 	CATCH_AND_DIE(TSAVB(r)->cancel(););
 }
@@ -992,6 +1001,23 @@ extern "C" DLLEXPORT FDBResult* fdb_transaction_read_blob_granules_finish(FDBTra
 	                                                 readVersion,
 	                                                 context)
 	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_summarize_blob_granules(FDBTransaction* tr,
+                                                                        uint8_t const* begin_key_name,
+                                                                        int begin_key_name_length,
+                                                                        uint8_t const* end_key_name,
+                                                                        int end_key_name_length,
+                                                                        int64_t summaryVersion,
+                                                                        int rangeLimit) {
+	RETURN_FUTURE_ON_ERROR(
+	    Standalone<VectorRef<BlobGranuleSummaryRef>>,
+	    KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+
+	    Optional<Version> sv;
+	    if (summaryVersion != latestVersion) { sv = summaryVersion; }
+
+	    return (FDBFuture*)(TXN(tr)->summarizeBlobGranules(range, sv, rangeLimit).extractPtr()););
 }
 
 #include "fdb_c_function_pointers.g.h"

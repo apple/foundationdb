@@ -422,7 +422,7 @@ public:
 	                                                                    Version* readVersionOut = nullptr);
 
 	Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRange& range,
-	                                                                           Version summaryVersion,
+	                                                                           Optional<Version> summaryVersion,
 	                                                                           int rangeLimit);
 
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key

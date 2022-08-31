@@ -176,6 +176,10 @@ public:
 	    Version readVersion,
 	    ReadBlobGranuleContext granuleContext) override;
 
+	ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRangeRef& keyRange,
+	                                                                                 Optional<Version> summaryVersion,
+	                                                                                 int rangeLimit) override;
+
 	void addReadConflictRange(const KeyRangeRef& keys) override;
 	void makeSelfConflicting();
 

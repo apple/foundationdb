@@ -8024,13 +8024,15 @@ Future<Standalone<VectorRef<BlobGranuleChunkRef>>> Transaction::readBlobGranules
 
 ACTOR Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranulesActor(Transaction* self,
                                                                                       KeyRange range,
-                                                                                      Version summaryVersion,
+                                                                                      Optional<Version> summaryVersion,
                                                                                       int rangeLimit) {
 	state Version readVersionOut;
 	Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
 	    wait(readBlobGranulesActor(self, range, 0, summaryVersion, &readVersionOut, rangeLimit, true));
 	ASSERT(chunks.size() <= rangeLimit);
-	ASSERT(readVersionOut == summaryVersion);
+	if (summaryVersion.present()) {
+		ASSERT(readVersionOut == summaryVersion.get());
+	}
 	Standalone<VectorRef<BlobGranuleSummaryRef>> summaries;
 	summaries.reserve(summaries.arena(), chunks.size());
 	for (auto& it : chunks) {
@@ -8040,9 +8042,8 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules
 	return summaries;
 }
 
-Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> Transaction::summarizeBlobGranules(const KeyRange& range,
-                                                                                        Version summaryVersion,
-                                                                                        int rangeLimit) {
+Future<Standalone<VectorRef<BlobGranuleSummaryRef>>>
+Transaction::summarizeBlobGranules(const KeyRange& range, Optional<Version> summaryVersion, int rangeLimit) {
 	return summarizeBlobGranulesActor(this, range, summaryVersion, rangeLimit);
 }
 
