@@ -8042,19 +8042,23 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of
 		// memory. This is often referred to as the storage server e-brake (emergency brake)
 
-		// We allow the storage server to make some progress between e-brake periods, referreed to as "overage", in
+		// We allow the storage server to make some progress between e-brake periods, referred to as "overage", in
 		// order to ensure that it advances desiredOldestVersion enough for updateStorage to make enough progress on
-		// freeing up queue size.
+		// freeing up queue size. We also increase these limits if speed up simulation was set IF they were buggified to
+		// a very small value.
+		state int64_t hardLimit = SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES;
+		state int64_t hardLimitOverage = SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES_OVERAGE;
+		if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
+			hardLimit = SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES_SPEED_UP_SIM;
+			hardLimitOverage = SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES_OVERAGE_SPEED_UP_SIM;
+		}
 		state double waitStartT = 0;
-		if (data->queueSize() >= SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES &&
-		    data->durableVersion.get() < data->desiredOldestVersion.get() &&
+		if (data->queueSize() >= hardLimit && data->durableVersion.get() < data->desiredOldestVersion.get() &&
 		    ((data->desiredOldestVersion.get() - SERVER_KNOBS->STORAGE_HARD_LIMIT_VERSION_OVERAGE >
 		      data->lastDurableVersionEBrake) ||
-		     (data->counters.bytesInput.getValue() - SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES_OVERAGE >
-		      data->lastBytesInputEBrake))) {
+		     (data->counters.bytesInput.getValue() - hardLimitOverage > data->lastBytesInputEBrake))) {
 
-			while (data->queueSize() >= SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES &&
-			       data->durableVersion.get() < data->desiredOldestVersion.get()) {
+			while (data->queueSize() >= hardLimit && data->durableVersion.get() < data->desiredOldestVersion.get()) {
 				if (now() - waitStartT >= 1) {
 					TraceEvent(SevWarn, "StorageServerUpdateLag", data->thisServerID)
 					    .detail("Version", data->version.get())

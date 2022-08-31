@@ -637,6 +637,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SPRING_BYTES_STORAGE_SERVER_BATCH,                   100e6 ); if( smallStorageTarget ) SPRING_BYTES_STORAGE_SERVER_BATCH = 150e3;
 	init( STORAGE_HARD_LIMIT_BYTES,                           1500e6 ); if( smallStorageTarget ) STORAGE_HARD_LIMIT_BYTES = 4500e3;
 	init( STORAGE_HARD_LIMIT_BYTES_OVERAGE,                   5000e3 ); if( smallStorageTarget ) STORAGE_HARD_LIMIT_BYTES_OVERAGE = 100e3; // byte+version overage ensures storage server makes enough progress on freeing up storage queue memory at hard limit by ensuring it advances desiredOldestVersion enough per commit cycle.
+	init( STORAGE_HARD_LIMIT_BYTES_SPEED_UP_SIM, STORAGE_HARD_LIMIT_BYTES ); if( smallStorageTarget ) STORAGE_HARD_LIMIT_BYTES_SPEED_UP_SIM *= 10;
+	init( STORAGE_HARD_LIMIT_BYTES_OVERAGE_SPEED_UP_SIM, STORAGE_HARD_LIMIT_BYTES_OVERAGE ); if( smallStorageTarget ) STORAGE_HARD_LIMIT_BYTES_OVERAGE_SPEED_UP_SIM *= 10;
 	init( STORAGE_HARD_LIMIT_VERSION_OVERAGE, VERSIONS_PER_SECOND / 4.0 );
 	init( STORAGE_DURABILITY_LAG_HARD_MAX,                    2000e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_HARD_MAX = 100e6;
 	init( STORAGE_DURABILITY_LAG_SOFT_MAX,                     250e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_SOFT_MAX = 10e6;
