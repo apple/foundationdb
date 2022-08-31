@@ -1,4 +1,7 @@
 import Flow
+print("Hello World")
+
+/*
 import Foundation
 
 let tls = TLSConfig() // TODO: potentially
@@ -10,5 +13,5 @@ Task {
     print("Hello!") // this should have been executed on the net2 runloop
 }
 
-
 Thread.sleep(1000)
+*/
