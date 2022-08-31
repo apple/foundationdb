@@ -6457,6 +6457,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		loop {
 			state Transaction tr(data->cx);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			// fetchVersion = data->version.get();
 			// A quick fix:
 			// By default, we use data->version as the fetchVersion.
@@ -9291,6 +9293,7 @@ ACTOR Future<UID> getClusterId(StorageServer* self) {
 		try {
 			self->cx->invalidateCache(Key(), systemKeys);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> clusterId = wait(tr.get(clusterIdKey));
 			ASSERT(clusterId.present());
@@ -9885,6 +9888,8 @@ ACTOR Future<Void> checkBehind(StorageServer* self) {
 		state Transaction tr(self->cx);
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Version readVersion = wait(tr.getRawReadVersion());
 				if (readVersion > self->version.get() + SERVER_KNOBS->BEHIND_CHECK_VERSIONS) {
 					behindCount++;
@@ -10387,6 +10392,8 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			state Version version = wait(tr->getReadVersion());
 			// This limits the number of tenants, but eventually we shouldn't need to do this at all
 			// when SSs store only the local tenants
@@ -10430,6 +10437,7 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 				try {
 					tr.reset();
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 					tr.setVersion(rep.version);
 
 					tr.addReadConflictRange(singleKeyRange(serverListKeyFor(ssi.id())));
@@ -10515,6 +10523,7 @@ ACTOR Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterfa
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			Optional<Value> pairTagValue = wait(tr->get(serverTagKeyFor(self->tssPairID.get())));
 
