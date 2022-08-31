@@ -164,6 +164,18 @@ public:
 	                                           Optional<Version> readVersion,
 	                                           ReadBlobGranuleContext granuleContext) override;
 
+	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesStart(const KeyRangeRef& keyRange,
+	                                                                               Version beginVersion,
+	                                                                               Optional<Version> readVersion,
+	                                                                               Version* readVersionOut) override;
+
+	ThreadResult<RangeResult> readBlobGranulesFinish(
+	    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
+	    const KeyRangeRef& keyRange,
+	    Version beginVersion,
+	    Version readVersion,
+	    ReadBlobGranuleContext granuleContext) override;
+
 	void addReadConflictRange(const KeyRangeRef& keys) override;
 	void makeSelfConflicting();
 

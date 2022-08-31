@@ -70,30 +70,19 @@ public:
 	virtual Future<Void> commit(
 	    bool sequential = false) = 0; // returns when prior sets and clears are (atomically) durable
 
-	enum class ReadType {
-		EAGER,
-		FETCH,
-		LOW,
-		NORMAL,
-		HIGH,
-	};
-
-	virtual Future<Optional<Value>> readValue(KeyRef key,
-	                                          ReadType type = ReadType::NORMAL,
-	                                          Optional<UID> debugID = Optional<UID>()) = 0;
+	virtual Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options = Optional<ReadOptions>()) = 0;
 
 	// Like readValue(), but returns only the first maxLength bytes of the value if it is longer
 	virtual Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                                int maxLength,
-	                                                ReadType type = ReadType::NORMAL,
-	                                                Optional<UID> debugID = Optional<UID>()) = 0;
+	                                                Optional<ReadOptions> options = Optional<ReadOptions>()) = 0;
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
 	virtual Future<RangeResult> readRange(KeyRangeRef keys,
 	                                      int rowLimit = 1 << 30,
 	                                      int byteLimit = 1 << 30,
-	                                      ReadType type = ReadType::NORMAL) = 0;
+	                                      Optional<ReadOptions> options = Optional<ReadOptions>()) = 0;
 
 	// Shard management APIs.
 	// Adds key range to a physical shard.

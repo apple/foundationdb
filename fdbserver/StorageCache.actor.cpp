@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/OTELSpanContextMessage.h"
 #include "flow/Arena.h"
 #include "fdbclient/FDBOptions.g.h"
@@ -480,18 +481,18 @@ ACTOR Future<Void> getValueQ(StorageCacheData* data, GetValueRequest req) {
 		// TODO what's this?
 		wait(delay(0, TaskPriority::DefaultEndpoint));
 
-		if (req.debugID.present()) {
+		if (req.options.present() && req.options.get().debugID.present()) {
 			g_traceBatch.addEvent("GetValueDebug",
-			                      req.debugID.get().first(),
+			                      req.options.get().debugID.get().first(),
 			                      "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
 			// FIXME
 		}
 
 		state Optional<Value> v;
 		state Version version = wait(waitForVersion(data, req.version));
-		if (req.debugID.present())
+		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
-			                      req.debugID.get().first(),
+			                      req.options.get().debugID.get().first(),
 			                      "getValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
 
 		state uint64_t changeCounter = data->cacheRangeChangeCounter;
@@ -526,9 +527,9 @@ ACTOR Future<Void> getValueQ(StorageCacheData* data, GetValueRequest req) {
 			//TraceEvent(SevDebug, "SCGetValueQPresent", data->thisServerID).detail("ResultSize",resultSize).detail("Version", version).detail("ReqKey",req.key).detail("Value",v);
 		}
 
-		if (req.debugID.present())
+		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
-			                      req.debugID.get().first(),
+			                      req.options.get().debugID.get().first(),
 			                      "getValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
 
 		GetValueReply reply(v, true);
@@ -731,7 +732,7 @@ ACTOR Future<Void> getKeyValues(StorageCacheData* data, GetKeyValuesRequest req)
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	TaskPriority taskType = TaskPriority::DefaultEndpoint;
-	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.isFetchKeys) {
+	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.options.present() && req.options.get().type == ReadType::FETCH) {
 		taskType = TaskPriority::FetchKeys;
 		// } else if (false) {
 		// 	// Placeholder for up-prioritizing fetches for important requests
@@ -740,17 +741,18 @@ ACTOR Future<Void> getKeyValues(StorageCacheData* data, GetKeyValuesRequest req)
 	wait(delay(0, taskType));
 
 	try {
-		if (req.debugID.present())
-			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storagecache.getKeyValues.Before");
+		if (req.options.present() && req.options.get().debugID.present())
+			g_traceBatch.addEvent(
+			    "TransactionDebug", req.options.get().debugID.get().first(), "storagecache.getKeyValues.Before");
 		state Version version = wait(waitForVersion(data, req.version));
 
 		state uint64_t changeCounter = data->cacheRangeChangeCounter;
 
 		state KeyRange cachedKeyRange = getCachedKeyRange(data, req.begin);
 
-		if (req.debugID.present())
+		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent(
-			    "TransactionDebug", req.debugID.get().first(), "storagecache.getKeyValues.AfterVersion");
+			    "TransactionDebug", req.options.get().debugID.get().first(), "storagecache.getKeyValues.AfterVersion");
 		//.detail("CacheRangeBegin", cachedKeyRange.begin).detail("CacheRangeEnd", cachedKeyRange.end);
 
 		if (!selectorInRange(req.end, cachedKeyRange) &&
@@ -768,8 +770,9 @@ ACTOR Future<Void> getKeyValues(StorageCacheData* data, GetKeyValuesRequest req)
 		                      : findKey(data, req.begin, version, cachedKeyRange, &offset1);
 		state Key end = req.end.isFirstGreaterOrEqual() ? req.end.getKey()
 		                                                : findKey(data, req.end, version, cachedKeyRange, &offset2);
-		if (req.debugID.present())
-			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storagecache.getKeyValues.AfterKeys");
+		if (req.options.present() && req.options.get().debugID.present())
+			g_traceBatch.addEvent(
+			    "TransactionDebug", req.options.get().debugID.get().first(), "storagecache.getKeyValues.AfterKeys");
 		//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",req.begin.getKey()).detail("ReqEnd",req.end.getKey());
 
 		// Offsets of zero indicate begin/end keys in this cachedKeyRange, which obviously means we can answer the query
@@ -794,8 +797,9 @@ ACTOR Future<Void> getKeyValues(StorageCacheData* data, GetKeyValuesRequest req)
 		// offset1).detail("EndOffset", offset2);
 
 		if (begin >= end) {
-			if (req.debugID.present())
-				g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storagecache.getKeyValues.Send");
+			if (req.options.present() && req.options.get().debugID.present())
+				g_traceBatch.addEvent(
+				    "TransactionDebug", req.options.get().debugID.get().first(), "storagecache.getKeyValues.Send");
 			//.detail("Begin",begin).detail("End",end);
 
 			GetKeyValuesReply none;
@@ -811,9 +815,10 @@ ACTOR Future<Void> getKeyValues(StorageCacheData* data, GetKeyValuesRequest req)
 			GetKeyValuesReply _r = readRange(data, version, KeyRangeRef(begin, end), req.limit, &remainingLimitBytes);
 			GetKeyValuesReply r = _r;
 
-			if (req.debugID.present())
-				g_traceBatch.addEvent(
-				    "TransactionDebug", req.debugID.get().first(), "storagecache.getKeyValues.AfterReadRange");
+			if (req.options.present() && req.options.get().debugID.present())
+				g_traceBatch.addEvent("TransactionDebug",
+				                      req.options.get().debugID.get().first(),
+				                      "storagecache.getKeyValues.AfterReadRange");
 			data->checkChangeCounter(
 			    changeCounter,
 			    KeyRangeRef(std::min<KeyRef>(begin, std::min<KeyRef>(req.begin.getKey(), req.end.getKey())),
@@ -1182,6 +1187,7 @@ ACTOR Future<RangeResult> tryFetchRange(Database cx,
 	state RangeResult output;
 	state KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
 	state KeySelectorRef end = firstGreaterOrEqual(keys.end);
+	state ReadOptions options = ReadOptions(Optional<UID>(), ReadType::FETCH);
 
 	if (*isTooOld)
 		throw transaction_too_old();
@@ -1189,6 +1195,7 @@ ACTOR Future<RangeResult> tryFetchRange(Database cx,
 	ASSERT(!cx->switchable);
 	tr.setVersion(version);
 	tr.trState->taskID = TaskPriority::FetchKeys;
+	tr.trState->readOptions = options;
 	limits.minRows = 0;
 
 	try {
