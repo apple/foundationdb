@@ -177,6 +177,10 @@ bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, Network
 		CODE_PROBE(true, "Token referencing non-existing key");
 		TRACE_INVALID_PARSED_TOKEN("UnknownKey", t);
 		return false;
+	} else if (!t.issuedAtUnixTime.present()) {
+		CODE_PROBE(true, "Token has no issued-at field");
+		TRACE_INVALID_PARSED_TOKEN("NoIssuedAt", t);
+		return false;
 	} else if (!t.expiresAtUnixTime.present()) {
 		CODE_PROBE(true, "Token has no expiration time");
 		TRACE_INVALID_PARSED_TOKEN("NoExpirationTime", t);
@@ -203,7 +207,7 @@ bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, Network
 		return false;
 	} else {
 		CacheEntry c;
-		c.expirationTime = double(t.expiresAtUnixTime.get());
+		c.expirationTime = t.expiresAtUnixTime.get();
 		c.tenants.reserve(c.arena, t.tenants.get().size());
 		for (auto tenant : t.tenants.get()) {
 			c.tenants.push_back_deep(c.arena, tenant);
@@ -265,7 +269,7 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 		},
 		{
 		    [](Arena&, IRandom& rng, authz::jwt::TokenRef& token) {
-		        token.expiresAtUnixTime = uint64_t(std::max<double>(g_network->timer() - 10 - rng.random01() * 50, 0));
+		        token.expiresAtUnixTime = std::max<double>(g_network->timer() - 10 - rng.random01() * 50, 0);
 		    },
 		    "ExpiredToken",
 		},
@@ -275,10 +279,15 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 		},
 		{
 		    [](Arena&, IRandom& rng, authz::jwt::TokenRef& token) {
-		        token.notBeforeUnixTime = uint64_t(g_network->timer() + 10 + rng.random01() * 50);
+		        token.notBeforeUnixTime = g_network->timer() + 10 + rng.random01() * 50;
 		    },
 		    "TokenNotYetValid",
 		},
+		{
+		    [](Arena&, IRandom&, authz::jwt::TokenRef& token) { token.issuedAtUnixTime.reset(); },
+		    "NoIssuedAt",
+		},
+
 		{
 		    [](Arena& arena, IRandom&, authz::jwt::TokenRef& token) { token.tenants.reset(); },
 		    "NoTenants",
@@ -336,7 +345,7 @@ TEST_CASE("/fdbrpc/authz/TokenCache/GoodTokens") {
 	    authz::jwt::makeRandomTokenSpec(arena, *deterministicRandom(), authz::Algorithm::ES256);
 	state StringRef signedToken;
 	FlowTransport::transport().addPublicKey(pubKeyName, privateKey.toPublic());
-	tokenSpec.expiresAtUnixTime = static_cast<uint64_t>(g_network->timer() + 2.0);
+	tokenSpec.expiresAtUnixTime = g_network->timer() + 2.0;
 	tokenSpec.keyId = pubKeyName;
 	signedToken = authz::jwt::signToken(arena, tokenSpec, privateKey);
 	if (!TokenCache::instance().validate(tokenSpec.tenants.get()[0], signedToken)) {

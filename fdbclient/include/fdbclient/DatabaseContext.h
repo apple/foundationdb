@@ -168,10 +168,11 @@ struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
 	Future<Void> updater;
 	NotifiedVersion version;
 	NotifiedVersion desired;
-	Promise<Void> destroyed;
 	UID interfToken;
+	DatabaseContext* context;
+	double created;
 
-	~ChangeFeedStorageData() { destroyed.send(Void()); }
+	~ChangeFeedStorageData();
 };
 
 struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
@@ -191,6 +192,7 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	Version endVersion = invalidVersion;
 	Version popVersion =
 	    invalidVersion; // like TLog pop version, set by SS and client can check it to see if they missed data
+	double created = 0;
 
 	explicit ChangeFeedData(DatabaseContext* context = nullptr);
 	~ChangeFeedData();
@@ -378,11 +380,17 @@ public:
 	Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
 
+	// BlobGranule API.
 	Future<Key> purgeBlobGranules(KeyRange keyRange,
 	                              Version purgeVersion,
 	                              Optional<TenantName> tenant,
 	                              bool force = false);
 	Future<Void> waitPurgeGranulesComplete(Key purgeKey);
+
+	Future<bool> blobbifyRange(KeyRange range);
+	Future<bool> unblobbifyRange(KeyRange range);
+	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range, int rangeLimit);
+	Future<Version> verifyBlobRange(const KeyRange& range, Optional<Version> version);
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
@@ -471,7 +479,7 @@ public:
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
 	// map from changeFeedId -> changeFeedRange
 	std::unordered_map<Key, KeyRange> changeFeedCache;
-	std::unordered_map<UID, Reference<ChangeFeedStorageData>> changeFeedUpdaters;
+	std::unordered_map<UID, ChangeFeedStorageData*> changeFeedUpdaters;
 	std::map<UID, ChangeFeedData*> notAtLatestChangeFeeds;
 
 	Reference<ChangeFeedStorageData> getStorageData(StorageServerInterface interf);

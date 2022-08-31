@@ -162,8 +162,8 @@ public:
 			       // by l_whence and l_start through to the end of file, no matter how large the file grows."
 			lockDesc.l_pid = 0;
 			if (fcntl(fd, F_SETLK, &lockDesc) == -1) {
-				TraceEvent(SevError, "UnableToLockFile").detail("Filename", filename).GetLastError();
-				return io_error();
+				TraceEvent(SevWarn, "UnableToLockFile").detail("Filename", filename).GetLastError();
+				return lock_file_failure();
 			}
 		}
 

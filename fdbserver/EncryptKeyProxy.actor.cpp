@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/EncryptKeyProxyInterface.h"
+#include "fdbclient/EncryptKeyProxyInterface.h"
 
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Stats.h"
@@ -52,6 +52,10 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
+
+const std::string REST_KMS_CONNECTOR_TYPE_STR = "RESTKmsConnector";
+const std::string FDB_PREF_KMS_CONNECTOR_TYPE_STR = "FDBPerfKmsConnector";
+const std::string FDB_SIM_KMS_CONNECTOR_TYPE_STR = "SimKmsConnector";
 
 struct CipherKeyValidityTS {
 	int64_t refreshAtTS;
@@ -587,12 +591,13 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
 	try {
 		KmsConnLookupEKsByDomainIdsReq req;
 		req.debugId = debugId;
-		req.encryptDomainInfos.reserve(req.arena, ekpProxyData->baseCipherDomainIdCache.size());
+		// req.encryptDomainInfos.reserve(req.arena, ekpProxyData->baseCipherDomainIdCache.size());
 
 		int64_t currTS = (int64_t)now();
 		for (auto itr = ekpProxyData->baseCipherDomainIdCache.begin();
 		     itr != ekpProxyData->baseCipherDomainIdCache.end();) {
 			if (isCipherKeyEligibleForRefresh(itr->second, currTS)) {
+				TraceEvent("RefreshEKs").detail("Id", itr->first);
 				req.encryptDomainInfos.emplace_back_deep(req.arena, itr->first, itr->second.domainName);
 			}
 
@@ -608,9 +613,9 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
 		for (const auto& item : rep.cipherKeyDetails) {
 			const auto itr = ekpProxyData->baseCipherDomainIdCache.find(item.encryptDomainId);
 			if (itr == ekpProxyData->baseCipherDomainIdCache.end()) {
-				TraceEvent(SevError, "RefreshEKs_DomainIdNotFound", ekpProxyData->myId)
+				TraceEvent(SevInfo, "RefreshEKs_DomainIdNotFound", ekpProxyData->myId)
 				    .detail("DomainId", item.encryptDomainId);
-				// Continue updating the cache with othe elements
+				// Continue updating the cache with other elements
 				continue;
 			}
 
@@ -633,7 +638,7 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
 
 		ekpProxyData->baseCipherKeysRefreshed += rep.cipherKeyDetails.size();
 
-		t.detail("nKeys", rep.cipherKeyDetails.size());
+		t.detail("NumKeys", rep.cipherKeyDetails.size());
 	} catch (Error& e) {
 		if (!canReplyWith(e)) {
 			TraceEvent(SevWarn, "RefreshEKs_Error").error(e);
@@ -646,8 +651,8 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
 	return Void();
 }
 
-void refreshEncryptionKeys(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnectorInterface kmsConnectorInf) {
-	Future<Void> ignored = refreshEncryptionKeysCore(ekpProxyData, kmsConnectorInf);
+Future<Void> refreshEncryptionKeys(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnectorInterface kmsConnectorInf) {
+	return refreshEncryptionKeysCore(ekpProxyData, kmsConnectorInf);
 }
 
 ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxyData,
@@ -774,15 +779,19 @@ void refreshBlobMetadata(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnect
 }
 
 void activateKmsConnector(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnectorInterface kmsConnectorInf) {
-	if (g_network->isSimulated()) {
+	if (g_network->isSimulated() || (SERVER_KNOBS->KMS_CONNECTOR_TYPE.compare(FDB_PREF_KMS_CONNECTOR_TYPE_STR) == 0)) {
 		ekpProxyData->kmsConnector = std::make_unique<SimKmsConnector>();
-	} else if (SERVER_KNOBS->KMS_CONNECTOR_TYPE.compare("RESTKmsConnector")) {
+	} else if (SERVER_KNOBS->KMS_CONNECTOR_TYPE.compare(REST_KMS_CONNECTOR_TYPE_STR) == 0) {
 		ekpProxyData->kmsConnector = std::make_unique<RESTKmsConnector>();
 	} else {
 		throw not_implemented();
 	}
 
-	TraceEvent("EKP_ActiveKmsConnector", ekpProxyData->myId).detail("ConnectorType", SERVER_KNOBS->KMS_CONNECTOR_TYPE);
+	TraceEvent("EKPActiveKmsConnector", ekpProxyData->myId)
+	    .detail("ConnectorType",
+	            g_network->isSimulated() ? FDB_SIM_KMS_CONNECTOR_TYPE_STR : SERVER_KNOBS->KMS_CONNECTOR_TYPE)
+	    .detail("InfId", kmsConnectorInf.id());
+
 	ekpProxyData->addActor.send(ekpProxyData->kmsConnector->connectorCore(kmsConnectorInf));
 }
 
@@ -805,9 +814,11 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface, 
 	// FLOW_KNOB->ENCRRYPTION_KEY_REFRESH_INTERVAL_SEC, allowing the interactions with external Encryption Key Manager
 	// mostly not co-inciding with FDB process encryption key refresh attempts.
 
-	self->encryptionKeyRefresher = recurring([&]() { refreshEncryptionKeys(self, kmsConnectorInf); },
-	                                         FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL,
-	                                         TaskPriority::Worker);
+	self->encryptionKeyRefresher = recurringAsync([&]() { return refreshEncryptionKeys(self, kmsConnectorInf); },
+	                                              FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL, /* interval */
+	                                              true, /* absoluteIntervalDelay */
+	                                              FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL, /* initialDelay */
+	                                              TaskPriority::Worker);
 
 	self->blobMetadataRefresher = recurring([&]() { refreshBlobMetadata(self, kmsConnectorInf); },
 	                                        SERVER_KNOBS->BLOB_METADATA_REFRESH_INTERVAL,

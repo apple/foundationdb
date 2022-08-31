@@ -816,10 +816,6 @@ static Standalone<VectorRef<ParsedDeltaBoundaryRef>> loadSnapshotFile(
 
 	ASSERT(file.indexBlockRef.block.children.size() >= 2);
 
-	// TODO: refactor this out of delta tree
-	// int commonPrefixLen = commonPrefixLength(index.dataBlockOffsets.front().first,
-	// index.dataBlockOffsets.back().first);
-
 	// find range of blocks needed to read
 	ChildBlockPointerRef* currentBlock = file.findStartBlock(keyRange.begin);
 
@@ -1169,10 +1165,6 @@ Standalone<VectorRef<ParsedDeltaBoundaryRef>> loadChunkedDeltaFile(const Standal
 
 	ASSERT(file.indexBlockRef.block.children.size() >= 2);
 
-	// TODO: refactor this out of delta tree
-	// int commonPrefixLen = commonPrefixLength(index.dataBlockOffsets.front().first,
-	// index.dataBlockOffsets.back().first);
-
 	// find range of blocks needed to read
 	ChildBlockPointerRef* currentBlock = file.findStartBlock(keyRange.begin);
 
@@ -1181,7 +1173,8 @@ Standalone<VectorRef<ParsedDeltaBoundaryRef>> loadChunkedDeltaFile(const Standal
 		return deltas;
 	}
 
-	// TODO: could cpu optimize first block a bit more by seeking right to start
+	// FIXME: shared prefix for key comparison
+	// FIXME: could cpu optimize first block a bit more by seeking right to start
 	bool lastBlock = false;
 	bool prevClearAfter = false;
 	while (!lastBlock) {
@@ -1565,12 +1558,23 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 	return mergeDeltaStreams(chunk, streams, startClears);
 }
 
+struct GranuleLoadFreeHandle : NonCopyable, ReferenceCounted<GranuleLoadFreeHandle> {
+	const ReadBlobGranuleContext* granuleContext;
+	int64_t loadId;
+
+	GranuleLoadFreeHandle(const ReadBlobGranuleContext* granuleContext, int64_t loadId)
+	  : granuleContext(granuleContext), loadId(loadId) {}
+
+	~GranuleLoadFreeHandle() { granuleContext->free_load_f(loadId, granuleContext->userContext); }
+};
+
 struct GranuleLoadIds {
 	Optional<int64_t> snapshotId;
 	std::vector<int64_t> deltaIds;
+	std::vector<Reference<GranuleLoadFreeHandle>> freeHandles;
 };
 
-static void startLoad(const ReadBlobGranuleContext granuleContext,
+static void startLoad(const ReadBlobGranuleContext* granuleContext,
                       const BlobGranuleChunkRef& chunk,
                       GranuleLoadIds& loadIds) {
 
@@ -1580,12 +1584,13 @@ static void startLoad(const ReadBlobGranuleContext granuleContext,
 		// FIXME: remove when we implement file multiplexing
 		ASSERT(chunk.snapshotFile.get().offset == 0);
 		ASSERT(chunk.snapshotFile.get().length == chunk.snapshotFile.get().fullFileLength);
-		loadIds.snapshotId = granuleContext.start_load_f(snapshotFname.c_str(),
-		                                                 snapshotFname.size(),
-		                                                 chunk.snapshotFile.get().offset,
-		                                                 chunk.snapshotFile.get().length,
-		                                                 chunk.snapshotFile.get().fullFileLength,
-		                                                 granuleContext.userContext);
+		loadIds.snapshotId = granuleContext->start_load_f(snapshotFname.c_str(),
+		                                                  snapshotFname.size(),
+		                                                  chunk.snapshotFile.get().offset,
+		                                                  chunk.snapshotFile.get().length,
+		                                                  chunk.snapshotFile.get().fullFileLength,
+		                                                  granuleContext->userContext);
+		loadIds.freeHandles.push_back(makeReference<GranuleLoadFreeHandle>(granuleContext, loadIds.snapshotId.get()));
 	}
 	loadIds.deltaIds.reserve(chunk.deltaFiles.size());
 	for (int deltaFileIdx = 0; deltaFileIdx < chunk.deltaFiles.size(); deltaFileIdx++) {
@@ -1593,13 +1598,14 @@ static void startLoad(const ReadBlobGranuleContext granuleContext,
 		// FIXME: remove when we implement file multiplexing
 		ASSERT(chunk.deltaFiles[deltaFileIdx].offset == 0);
 		ASSERT(chunk.deltaFiles[deltaFileIdx].length == chunk.deltaFiles[deltaFileIdx].fullFileLength);
-		int64_t deltaLoadId = granuleContext.start_load_f(deltaFName.c_str(),
-		                                                  deltaFName.size(),
-		                                                  chunk.deltaFiles[deltaFileIdx].offset,
-		                                                  chunk.deltaFiles[deltaFileIdx].length,
-		                                                  chunk.deltaFiles[deltaFileIdx].fullFileLength,
-		                                                  granuleContext.userContext);
+		int64_t deltaLoadId = granuleContext->start_load_f(deltaFName.c_str(),
+		                                                   deltaFName.size(),
+		                                                   chunk.deltaFiles[deltaFileIdx].offset,
+		                                                   chunk.deltaFiles[deltaFileIdx].length,
+		                                                   chunk.deltaFiles[deltaFileIdx].fullFileLength,
+		                                                   granuleContext->userContext);
 		loadIds.deltaIds.push_back(deltaLoadId);
+		loadIds.freeHandles.push_back(makeReference<GranuleLoadFreeHandle>(granuleContext, deltaLoadId));
 	}
 }
 
@@ -1618,17 +1624,16 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 
 	GranuleLoadIds loadIds[files.size()];
 
-	// Kick off first file reads if parallelism > 1
-	for (int i = 0; i < parallelism - 1 && i < files.size(); i++) {
-		startLoad(granuleContext, files[i], loadIds[i]);
-	}
-
 	try {
+		// Kick off first file reads if parallelism > 1
+		for (int i = 0; i < parallelism - 1 && i < files.size(); i++) {
+			startLoad(&granuleContext, files[i], loadIds[i]);
+		}
 		RangeResult results;
 		for (int chunkIdx = 0; chunkIdx < files.size(); chunkIdx++) {
 			// Kick off files for this granule if parallelism == 1, or future granule if parallelism > 1
 			if (chunkIdx + parallelism - 1 < files.size()) {
-				startLoad(granuleContext, files[chunkIdx + parallelism - 1], loadIds[chunkIdx + parallelism - 1]);
+				startLoad(&granuleContext, files[chunkIdx + parallelism - 1], loadIds[chunkIdx + parallelism - 1]);
 			}
 
 			RangeResult chunkRows;
@@ -1644,7 +1649,8 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 				}
 			}
 
-			StringRef deltaData[files[chunkIdx].deltaFiles.size()];
+			// +1 to avoid UBSAN variable length array of size zero
+			StringRef deltaData[files[chunkIdx].deltaFiles.size() + 1];
 			for (int i = 0; i < files[chunkIdx].deltaFiles.size(); i++) {
 				deltaData[i] =
 				    StringRef(granuleContext.get_load_f(loadIds[chunkIdx].deltaIds[i], granuleContext.userContext),
@@ -1662,12 +1668,8 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 			results.arena().dependsOn(chunkRows.arena());
 			results.append(results.arena(), chunkRows.begin(), chunkRows.size());
 
-			if (loadIds[chunkIdx].snapshotId.present()) {
-				granuleContext.free_load_f(loadIds[chunkIdx].snapshotId.get(), granuleContext.userContext);
-			}
-			for (int i = 0; i < loadIds[chunkIdx].deltaIds.size(); i++) {
-				granuleContext.free_load_f(loadIds[chunkIdx].deltaIds[i], granuleContext.userContext);
-			}
+			// free once done by forcing FreeHandles to trigger
+			loadIds[chunkIdx].freeHandles.clear();
 		}
 		return ErrorOr<RangeResult>(results);
 	} catch (Error& e) {
@@ -2384,7 +2386,6 @@ void checkDeltaRead(const KeyValueGen& kvGen,
 	std::string filename = randomBGFilename(
 	    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUniqueID(), readVersion, ".delta");
 	Standalone<BlobGranuleChunkRef> chunk;
-	// TODO need to add cipher keys meta
 	chunk.deltaFiles.emplace_back_deep(
 	    chunk.arena(), filename, 0, serialized->size(), serialized->size(), kvGen.cipherKeys);
 	chunk.keyRange = kvGen.allRange;
@@ -2441,7 +2442,6 @@ static std::tuple<KeyRange, Version, Version> randomizeKeyAndVersions(const KeyV
 		}
 	}
 
-	// TODO randomize begin and read version to sometimes +/- 1 and readRange begin and end to keyAfter sometimes
 	return { readRange, beginVersion, readVersion };
 }
 
@@ -2665,7 +2665,11 @@ TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 	                 serializedDeltaFiles,
 	                 inMemoryDeltas);
 
-	for (int i = 0; i < std::min(100, 5 + snapshotData.size() * deltaData.size()); i++) {
+	// prevent overflow by doing min before multiply
+	int maxRuns = 100;
+	int snapshotAndDeltaSize = 5 + std::min(maxRuns, snapshotData.size()) * std::min(maxRuns, deltaData.size());
+	int lim = std::min(maxRuns, snapshotAndDeltaSize);
+	for (int i = 0; i < lim; i++) {
 		auto params = randomizeKeyAndVersions(kvGen, deltaData);
 		fmt::print("Partial test {0}: [{1} - {2}) @ {3} - {4}\n",
 		           i,

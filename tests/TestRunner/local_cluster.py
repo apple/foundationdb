@@ -86,6 +86,8 @@ datadir = {datadir}/$ID
 logdir = {logdir}
 {bg_knob_line}
 {tls_config}
+{authz_public_key_config}
+{custom_config}
 {use_future_protocol_version}
 # logsize = 10MiB
 # maxlogssize = 100MiB
@@ -117,6 +119,8 @@ logdir = {logdir}
         redundancy: str = "single",
         tls_config: TLSConfig = None,
         mkcert_binary: str = "",
+        custom_config: dict = {},
+        public_key_json_str: str = "",
     ):
         self.basedir = Path(basedir)
         self.etc = self.basedir.joinpath("etc")
@@ -137,6 +141,7 @@ logdir = {logdir}
         self.redundancy = redundancy
         self.ip_address = "127.0.0.1" if ip_address is None else ip_address
         self.first_port = port
+        self.custom_config = custom_config
         self.blob_granules_enabled = blob_granules_enabled
         if blob_granules_enabled:
             # add extra process for blob_worker
@@ -158,6 +163,7 @@ logdir = {logdir}
         self.coordinators = set()
         self.active_servers = set(self.server_ports.keys())
         self.tls_config = tls_config
+        self.public_key_json_file = None
         self.mkcert_binary = Path(mkcert_binary)
         self.server_cert_file = self.cert.joinpath("server_cert.pem")
         self.client_cert_file = self.cert.joinpath("client_cert.pem")
@@ -166,12 +172,19 @@ logdir = {logdir}
         self.server_ca_file = self.cert.joinpath("server_ca.pem")
         self.client_ca_file = self.cert.joinpath("client_ca.pem")
 
+        if public_key_json_str:
+            self.public_key_json_file = self.etc.joinpath("public_keys.json")
+            with open(self.public_key_json_file, "w") as pubkeyfile:
+                pubkeyfile.write(public_key_json_str)
+
         if create_config:
             self.create_cluster_file()
             self.save_config()
 
         if self.tls_config is not None:
             self.create_tls_cert()
+
+        self.cluster_file = self.etc.joinpath("fdb.cluster")
 
     def __next_port(self):
         if self.first_port is None:
@@ -198,10 +211,10 @@ logdir = {logdir}
                     ip_address=self.ip_address,
                     bg_knob_line=bg_knob_line,
                     tls_config=self.tls_conf_string(),
+                    authz_public_key_config=self.authz_public_key_conf_string(),
                     optional_tls=":tls" if self.tls_config is not None else "",
-                    use_future_protocol_version="use-future-protocol-version = true"
-                    if self.use_future_protocol_version
-                    else "",
+                    custom_config='\n'.join(["{} = {}".format(key, value) for key, value in self.custom_config.items()]),
+                    use_future_protocol_version="use-future-protocol-version = true" if self.use_future_protocol_version else "",
                 )
             )
             # By default, the cluster only has one process
@@ -316,8 +329,7 @@ logdir = {logdir}
             db_config += " blob_granules_enabled:=1"
         self.fdbcli_exec(db_config)
 
-        # TODO - want to blobbify tenants explicitly. Right now not blobbifying at all technically fixes the tenant test
-        if self.blob_granules_enabled and not enable_tenants:
+        if self.blob_granules_enabled:
             self.fdbcli_exec("blobrange start \\x00 \\xff")
 
     # Generate and install test certificate chains and keys
@@ -369,6 +381,12 @@ logdir = {logdir}
                 "tls-verify-peers": self.tls_config.verify_peers,
             }
             return "\n".join("{} = {}".format(k, v) for k, v in conf_map.items())
+
+    def authz_public_key_conf_string(self):
+        if self.public_key_json_file is not None:
+            return "authorization-public-key-file = {}".format(self.public_key_json_file)
+        else:
+            return ""
 
     # Get cluster status using fdbcli
     def get_status(self):

@@ -22,6 +22,7 @@
 #define FDBCLIENT_ICLIENTAPI_H
 #pragma once
 
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"
@@ -78,12 +79,26 @@ public:
 	virtual ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
 	                                                                        int64_t chunkSize) = 0;
 
-	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange) = 0;
+	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
+	                                                                              int rowLimit) = 0;
 
 	virtual ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
 	                                                   Version beginVersion,
 	                                                   Optional<Version> readVersion,
 	                                                   ReadBlobGranuleContext granuleContext) = 0;
+
+	virtual ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesStart(
+	    const KeyRangeRef& keyRange,
+	    Version beginVersion,
+	    Optional<Version> readVersion,
+	    Version* readVersionOut) = 0;
+
+	virtual ThreadResult<RangeResult> readBlobGranulesFinish(
+	    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
+	    const KeyRangeRef& keyRange,
+	    Version beginVersion,
+	    Version readVersion,
+	    ReadBlobGranuleContext granuleContext) = 0;
 
 	virtual void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) = 0;
 	virtual void set(const KeyRef& key, const ValueRef& value) = 0;
@@ -171,6 +186,13 @@ public:
 	// completion.
 	virtual ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) = 0;
 	virtual ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) = 0;
+
+	virtual ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) = 0;
+	virtual ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) = 0;
+	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
+	                                                                              int rangeLimit) = 0;
+
+	virtual ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) = 0;
 
 	// Interface to manage shared state across multiple connections to the same Database
 	virtual ThreadFuture<DatabaseSharedState*> createSharedState() = 0;

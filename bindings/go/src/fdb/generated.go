@@ -622,6 +622,13 @@ func (o TransactionOptions) SetUseGrvCache() error {
 	return o.setOpt(1101, nil)
 }
 
+// Attach given authorization token to the transaction such that subsequent tenant-aware requests are authorized
+//
+// Parameter: A JSON Web Token authorized to access data belonging to one or more tenants, indicated by 'tenants' claim of the token's payload.
+func (o TransactionOptions) SetAuthorizationToken(param string) error {
+	return o.setOpt(2000, []byte(param))
+}
+
 type StreamingMode int
 
 const (
