@@ -357,7 +357,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		bool fail7 = wait(self->isRangeActive(cx, KeyRangeRef(activeRange.begin, range.end)));
 		ASSERT(!fail7);
 
-		wait(self->tearDownRangeAfterUnit(cx, self, range));
+		wait(self->tearDownRangeAfterUnit(cx, self, activeRange));
 
 		return Void();
 	}

@@ -242,7 +242,7 @@ public interface Database extends AutoCloseable, TransactionContext {
 	}
 
 	/**
-	 * Sets a range to be unblobbified in the database.
+	 * Unsets a blobbified range in the database. The range must be aligned to known blob ranges.
 	 *
 	 * @param beginKey start of the key range
 	 * @param endKey end of the key range
@@ -260,7 +260,7 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 * @param rangeLimit batch size
 	 * @param e the {@link Executor} to use for asynchronous callbacks
 
-	 * @return a future with the list of blobbified ranges.
+	 * @return a future with the list of blobbified ranges: [lastLessThan(beginKey), firstGreaterThanOrEqual(endKey)]
 	 */
 	 default CompletableFuture<KeyRangeArrayResult> listBlobbifiedRanges(byte[] beginKey, byte[] endKey, int rangeLimit) {
 		return listBlobbifiedRanges(beginKey, endKey, rangeLimit, getExecutor());
@@ -274,7 +274,7 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 * @param rangeLimit batch size
 	 * @param e the {@link Executor} to use for asynchronous callbacks
 
-	 * @return a future with the list of blobbified ranges.
+	 * @return a future with the list of blobbified ranges: [lastLessThan(beginKey), firstGreaterThanOrEqual(endKey)]
 	 */
 	 CompletableFuture<KeyRangeArrayResult> listBlobbifiedRanges(byte[] beginKey, byte[] endKey, int rangeLimit, Executor e);
 
