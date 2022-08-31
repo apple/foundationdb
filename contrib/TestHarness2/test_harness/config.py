@@ -175,7 +175,7 @@ class Config:
         self.cov_include_files_args = {'help': 'Only consider coverage traces that originated in files matching regex'}
         self.cov_exclude_files: str = r'.^'
         self.cov_exclude_files_args = {'help': 'Ignore coverage traces that originated in files matching regex'}
-        self.max_stderr_bytes: int = 1000
+        self.max_stderr_bytes: int = 10000
         self.write_stats: bool = True
         self.read_stats: bool = True
         self.reproduce_prefix: str | None = None
