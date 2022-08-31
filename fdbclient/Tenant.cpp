@@ -128,7 +128,7 @@ std::string TenantMapEntry::toJson(int apiVersion) const {
 	tenantEntry["id"] = id;
 	tenantEntry["encrypted"] = encrypted;
 
-	if (apiVersion >= ApiVersion::withTenantsV2().version() || apiVersion == Database::API_VERSION_LATEST) {
+	if (apiVersion >= ApiVersion::withTenantsV2().version()) {
 		json_spirit::mObject prefixObject;
 		std::string encodedPrefix = base64::encoder::from_string(prefix.toString());
 		// Remove trailing newline

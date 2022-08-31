@@ -23,6 +23,7 @@
 #include <boost/lexical_cast.hpp>
 
 #include "fdbclient/FDBTypes.h"
+#include "flow/ApiVersion.h"
 #include "flow/IAsyncFile.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/GlobalConfig.actor.h"
@@ -1657,7 +1658,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		if (metricsConnFile.size() > 0) {
 			try {
 				state Database db =
-				    Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST, IsInternal::True, locality);
+				    Database::createDatabase(metricsConnFile, ApiVersion::LATEST_VERSION, IsInternal::True, locality);
 				metricsLogger = runMetrics(db, KeyRef(metricsPrefix));
 				db->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 			} catch (Error& e) {

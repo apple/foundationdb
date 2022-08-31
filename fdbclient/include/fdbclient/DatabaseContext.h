@@ -238,7 +238,7 @@ public:
 	                       EnableLocalityLoadBalance,
 	                       TaskPriority taskID = TaskPriority::DefaultEndpoint,
 	                       LockAware = LockAware::False,
-	                       int _apiVersion = Database::API_VERSION_LATEST,
+	                       int _apiVersion = ApiVersion::LATEST_VERSION,
 	                       IsSwitchable = IsSwitchable::False);
 
 	~DatabaseContext();
