@@ -637,7 +637,6 @@ public:
 	  : key(key), value(value), version(version), tags(tags), debugID(debugID) {}
 };
 
-
 struct BusiestWriteTagContext {
 	const std::string busiestWriteTagTrackingKey;
 	UID ratekeeperID;
@@ -647,11 +646,6 @@ struct BusiestWriteTagContext {
 	BusiestWriteTagContext(const UID& thisServerID)
 	  : busiestWriteTagTrackingKey(thisServerID.toString() + "/BusiestWriteTag"), ratekeeperID(UID()),
 	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(-1) {}
-};
-
-struct VersionStreamMessage {
-	Version previous, version;
-	bool expectData;
 };
 
 struct StorageServer {
@@ -1033,7 +1027,6 @@ public:
 
 	Promise<Void> otherError;
 	Promise<Void> coreStarted;
-	PromiseStream<VersionStreamMessage> versionStream;
 	bool shuttingDown;
 
 	Promise<Void> registerInterfaceAcceptingRequests;
@@ -1446,9 +1439,9 @@ public:
 
 	void updateDesiredOldestVersion(Version knownCommittedVersion) {
 		Version maxVersionsInMemory =
-			(g_network->isSimulated() && g_simulator.speedUpSimulation)
-			? std::max(5 * SERVER_KNOBS->VERSIONS_PER_SECOND, SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
-			: SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+		    (g_network->isSimulated() && g_simulator.speedUpSimulation)
+		        ? std::max(5 * SERVER_KNOBS->VERSIONS_PER_SECOND, SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
+		        : SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
 		for (int i = 0; i < recoveryVersionSkips.size(); i++) {
 			maxVersionsInMemory += recoveryVersionSkips[i].second;
 		}
@@ -1460,13 +1453,6 @@ public:
 		proposedOldestVersion = std::max(proposedOldestVersion, oldestVersion.get());
 		proposedOldestVersion = std::max(proposedOldestVersion, desiredOldestVersion.get());
 		proposedOldestVersion = std::max(proposedOldestVersion, initialClusterVersion);
-
-		//TraceEvent("StorageServerUpdated", thisServerID).detail("Ver", ver).detail("DataVersion", version.get())
-		//	.detail("LastTLogVersion", lastTLogVersion).detail("NewOldest",
-		// oldestVersion.get()).detail("DesiredOldest",desiredOldestVersion.get())
-		//	.detail("MaxVersionInMemory", maxVersionsInMemory).detail("Proposed",
-		// proposedOldestVersion).detail("PrimaryLocality", primaryLocality).detail("Tag",
-		// tag.toString());
 
 		while (!recoveryVersionSkips.empty() && proposedOldestVersion > recoveryVersionSkips.front().first) {
 			recoveryVersionSkips.pop_front();
@@ -1705,17 +1691,8 @@ void updateProcessStats(StorageServer* self) {
 
 ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, SpanContext spanContext) {
 	state Span span("SS:WaitForVersion"_loc, spanContext);
-	state double beginWait = now();
-
 	choose {
 		when(wait(data->version.whenAtLeast(version))) {
-			auto waitTime = now() - beginWait;
-			if (waitTime > 0.01) {
-				TraceEvent(SevWarn, "LongWaitDelay", data->thisServerID)
-				    .detail("Version", version)
-				    .detail("MyVersion", data->version.get())
-				    .detail("ServerID", data->thisServerID);
-			}
 			// FIXME: A bunch of these can block with or without the following delay 0.
 			// wait( delay(0) );  // don't do a whole bunch of these at once
 			if (version < data->oldestVersion.get())
@@ -8280,57 +8257,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 
 			if (cloneCursor2->version().version > ver) {
-				if (cloneCursor2->version().version <= data->version.get()) {
-					TraceEvent(SevError, "DataAtPastVersion", data->thisServerID)
-					    .detail("DataVersion", data->version.get())
-					    .detail("CursorVersion", cloneCursor2->version().version)
-					    .detail("Ver", ver)
-					    .detail("MyTag", data->tag)
-					    .log();
-					for (const auto& p : data->history) {
-						TraceEvent(SevError, "DataAtPastVersionHistory", data->thisServerID)
-						    .detail("Version", p.first)
-						    .detail("Tag", p.second)
-						    .log();
-					}
-					auto& rd = *cloneCursor2->reader();
-					for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
-						if (LogProtocolMessage::isNextIn(rd)) {
-							LogProtocolMessage lpm;
-							rd >> lpm;
-
-							data->logProtocol = rd.protocolVersion();
-							data->storage.changeLogProtocol(ver, data->logProtocol);
-							cloneCursor2->setProtocolVersion(rd.protocolVersion());
-							TraceEvent(SevError, "DataAtPastVersionLogProtocolMessage", data->thisServerID)
-							    .detail("Version", rd.protocolVersion());
-						} else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
-							SpanContextMessage scm;
-							rd >> scm;
-							spanContext =
-								SpanContext(UID(scm.spanContext.first(), scm.spanContext.second()),
-									    0,
-									    scm.spanContext.first() != 0 && scm.spanContext.second() != 0 ? TraceFlags::sampled
-									    : TraceFlags::unsampled);
-							TraceEvent(SevError, "DataAtPastVersionSpanContext", data->thisServerID);
-							//.detail("Context", spanContext);
-						} else if (rd.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(rd)) {
-							OTELSpanContextMessage scm;
-							rd >> scm;
-							spanContext = scm.spanContext;
-							TraceEvent(SevError, "DataAtPastVersionOTELSpanContext", data->thisServerID);
-							//.detail("Context", spanContext);
-						} else {
-							MutationRef msg;
-							rd >> msg;
-							TraceEvent(SevError, "DataAtPastVersionMutation", data->thisServerID)
-							    .detail("MutationType", msg.type)
-							    .detail("Param1", msg.param1)
-							    .detail("Param2", msg.param2);
-						}
-					}
-					ASSERT(false);
-				}
+				ASSERT(cloneCursor2->version().version > data->version.get());
 			}
 
 			auto& rd = *cloneCursor2->reader();
@@ -8504,11 +8431,11 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				data->otherError.getFuture().get();
 
 			TraceEvent(SevDebug, "SetDesiredOldestVersion", data->thisServerID)
-			 	.detail("CursorMinKnownCommitted", cursor->getMinKnownCommittedVersion())
-				.detail("VersionIndexerKnownCommittedVersion", data->versionIndexerReportedCommitted)
-				.detail("StorageVersion", data->storageVersion())
-				.detail("Version", data->version.get())
-				.log();
+			    .detail("CursorMinKnownCommitted", cursor->getMinKnownCommittedVersion())
+			    .detail("VersionIndexerKnownCommittedVersion", data->versionIndexerReportedCommitted)
+			    .detail("StorageVersion", data->storageVersion())
+			    .detail("Version", data->version.get())
+			    .log();
 			data->updateDesiredOldestVersion(
 			    std::max(cursor->getMinKnownCommittedVersion(), data->versionIndexerReportedCommitted));
 		}
@@ -8525,7 +8452,11 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 		}
 
-		data->logCursor->advanceTo(cloneCursor2->version());
+		if (data->version.get() > cloneCursor2->version().version) {
+			data->logCursor->advanceTo(LogMessageVersion(data->version.get()));
+		} else {
+			data->logCursor->advanceTo(cloneCursor2->version());
+		}
 		if (cursor->version().version >= data->lastTLogVersion) {
 			if (data->behind) {
 				TraceEvent("StorageServerNoLongerBehind", data->thisServerID)
@@ -10213,7 +10144,7 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 			ASSERT(reply.versions[i + 1].first > reply.versions[i].first);
 		}
 		wait(self->version.whenAtLeast(prevVersion));
-		self->versionIndexerReportedCommitted = reply.committedVersion;
+		self->versionIndexerReportedCommitted = reply.minKnownCommittedVersion;
 		for (i = 0; i < reply.versions.size(); ++i) {
 			wait(self->version.whenAtLeast(prevVersion));
 			prevVersion = reply.versions[i].first;
@@ -10225,10 +10156,10 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 			}
 			if (updatedVersion != invalidVersion) {
 				TraceEvent("SetNextVersionWithNoData", self->thisServerID)
-					.detail("Version", updatedVersion)
-					.detail("Previous", self->nextVersionWithNoData.get())
-					.detail("DataVersion", self->version.get())
-					.detail("MyTag", self->tag);
+				    .detail("Version", updatedVersion)
+				    .detail("Previous", self->nextVersionWithNoData.get())
+				    .detail("DataVersion", self->version.get())
+				    .detail("MyTag", self->tag);
 				self->nextVersionWithNoData.set(updatedVersion);
 			}
 			if (j > 0) {

@@ -1225,7 +1225,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 
 ACTOR Future<Void> versionIndexer(VersionIndexerInterface interface,
                                   InitializeVersionIndexerRequest req,
-                                  Reference<AsyncVar<ServerDBInfo>> db);
+                                  Reference<AsyncVar<ServerDBInfo> const> db);
 
 typedef decltype(&tLog) TLogFn;
 

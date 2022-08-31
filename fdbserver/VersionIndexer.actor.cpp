@@ -93,10 +93,18 @@ ACTOR Future<Void> versionPeek(VersionIndexerState* self, VersionIndexerPeekRequ
 	auto iter = std::upper_bound(self->versionWindow.begin(), self->versionWindow.end(), searchEntry);
 	ASSERT(iter != self->versionWindow.end());
 	VersionIndexerPeekReply reply;
-	reply.committedVersion = self->committedVersion;
+	reply.minKnownCommittedVersion = self->committedVersion;
 	reply.previousVersion = iter != self->versionWindow.begin() ? (iter - 1)->version : self->previousVersion;
 	std::vector<Tag> tags;
 	tags.push_back(req.tag);
+	TraceEvent event(SevDebug, "VersionIndexerPeek", self->id);
+	event.detail("Tag", req.tag).detail("LastKnownVersion", req.lastKnownVersion);
+	for (int i = 0; i < req.history.size(); ++i) {
+		auto kVer = format("HistoryVersion%d", i);
+		auto kTag = format("HistoryTag%d", i);
+		event.detail(kVer.c_str(), req.history[i].first);
+		event.detail(kVer.c_str(), req.history[i].second);
+	}
 	while (req.history.size() && req.lastKnownVersion >= req.history.back().first) {
 		req.history.pop_back();
 	}
@@ -116,8 +124,7 @@ ACTOR Future<Void> versionPeek(VersionIndexerState* self, VersionIndexerPeekRequ
 		ASSERT(iter->version > req.lastKnownVersion);
 		reply.versions.emplace_back(iter->version, hasMutations);
 	}
-	TraceEvent event(SevDebug, "VersionIndexerPeek", self->id);
-	event.detail("Tag", req.tag).detail("PrevVersion", reply.previousVersion);
+	event.detail("PreviousVersion", reply.previousVersion);
 	for (int i = 0; i < reply.versions.size(); ++i) {
 		auto kVer = format("Version%d", i);
 		auto kVal = format("HasData%d", i);
@@ -141,35 +148,35 @@ void truncateWindow(VersionIndexerState* self) {
 
 ACTOR Future<Void> addVersion(VersionIndexerState* self, VersionIndexerCommitRequest req) {
 	state bool firstCommit = self->version.get() == invalidVersion;
-	self->committedVersion = std::max(self->committedVersion, req.committedVersion);
+	self->committedVersion = std::max(self->committedVersion, req.minKnownCommittedVersion);
 	if (!firstCommit) {
 		req.reply.send(Void());
 	}
 	++self->stats.commits;
-	self->stats.lastCommittedVersion = std::max(self->stats.lastCommittedVersion, req.committedVersion);
+	self->stats.lastCommittedVersion = std::max(self->stats.lastCommittedVersion, req.minKnownCommittedVersion);
 	if (self->version.get() != invalidVersion) {
 		wait(self->version.whenAtLeast(req.previousVersion));
 	}
-	if (self->version.get() < req.version) {
+	if (self->version.get() < req.commitVersion) {
 		ASSERT(firstCommit || self->version.get() == req.previousVersion);
 		VersionIndexerState::VersionEntry entry;
-		entry.version = req.version;
+		entry.version = req.commitVersion;
 		entry.tags = std::move(req.tags);
 		std::sort(entry.tags.begin(), entry.tags.end());
 		TraceEvent event(SevDebug, "VersionIndexerAddVersion", self->id);
-		event.detail("Version", req.version)
-			.detail("PrevVersion", req.previousVersion)
-			.detail("IndexerVersion", self->version.get())
-			.detail("NumTags", entry.tags.size())
-			.detail("FirstCommit", firstCommit);
+		event.detail("CommitVersion", req.commitVersion)
+		    .detail("PreviousVersion", req.previousVersion)
+		    .detail("IndexerVersion", self->version.get())
+		    .detail("NumTags", entry.tags.size())
+		    .detail("FirstCommit", firstCommit);
 		for (int i = 0; i < entry.tags.size(); ++i) {
 			auto k = format("Tag%d", i);
 			event.detail(k.c_str(), entry.tags[i]);
 		}
-		//event.log();
+		// event.log();
 		self->versionWindow.emplace_back(std::move(entry));
-		self->version.set(req.version);
-		self->stats.windowEnd = req.version;
+		self->version.set(req.commitVersion);
+		self->stats.windowEnd = req.commitVersion;
 		if (firstCommit) {
 			req.reply.send(Void());
 		}
@@ -179,7 +186,7 @@ ACTOR Future<Void> addVersion(VersionIndexerState* self, VersionIndexerCommitReq
 	return Void();
 }
 
-ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db,
+ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                                 uint64_t recoveryCount,
                                 VersionIndexerInterface myInterface) {
 	loop {
@@ -199,7 +206,7 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db,
 
 ACTOR Future<Void> versionIndexer(VersionIndexerInterface interface,
                                   InitializeVersionIndexerRequest req,
-                                  Reference<AsyncVar<ServerDBInfo>> db) {
+                                  Reference<AsyncVar<ServerDBInfo> const> db) {
 	state VersionIndexerState self(interface.id());
 	state ActorCollection actors(false);
 	state Future<Void> removed = checkRemoved(db, req.recoveryCount, interface);

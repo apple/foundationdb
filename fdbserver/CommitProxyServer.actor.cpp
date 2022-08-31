@@ -1352,9 +1352,9 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 // future, but for now it isn't in order to simplify the implementation.
 Future<Void> informVersionIndexers(CommitBatchContext* self) {
 	VersionIndexerCommitRequest req;
-	req.version = self->commitVersion;
+	req.commitVersion = self->commitVersion;
 	req.previousVersion = self->prevVersion;
-	req.committedVersion = self->pProxyCommitData->minKnownCommittedVersion;
+	req.minKnownCommittedVersion = self->pProxyCommitData->minKnownCommittedVersion;
 	const std::unordered_set<Tag>& tags = self->toCommit.getWrittenTags();
 	req.tags.reserve(tags.size());
 	req.tags.insert(req.tags.end(), tags.begin(), tags.end());
@@ -1529,15 +1529,15 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		tpcvMap = self->tpcvMap;
 	}
 	self->loggingComplete =
-		loggingComplete(pProxyCommitData->logSystem->push(self->prevVersion,
-	                                                          self->commitVersion,
-	                                                          pProxyCommitData->committedVersion.get(),
-	                                                          pProxyCommitData->minKnownCommittedVersion,
-	                                                          self->toCommit,
-	                                                          span.context,
-	                                                          self->debugID,
-	                                                          tpcvMap),
-				informVersionIndexers(self));
+	    loggingComplete(pProxyCommitData->logSystem->push(self->prevVersion,
+	                                                      self->commitVersion,
+	                                                      pProxyCommitData->committedVersion.get(),
+	                                                      pProxyCommitData->minKnownCommittedVersion,
+	                                                      self->toCommit,
+	                                                      span.context,
+	                                                      self->debugID,
+	                                                      tpcvMap),
+	                    informVersionIndexers(self));
 
 	float ratio = self->toCommit.getEmptyMessageRatio();
 	pProxyCommitData->stats.commitBatchingEmptyMessageRatio.addMeasurement(ratio);
