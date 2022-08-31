@@ -709,30 +709,6 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		return Void();
 	}
 
-	ACTOR static Future<Void> finishCurrentBlockWriteNewBlock(EncryptedRangeFileWriter* self,
-	                                                          int bytesNeeded,
-	                                                          Optional<KeyRef> lastWrittenKey) {
-		KeyRef newKey = self->lastKey;
-		// if there exists at least one block in this file then write the last KV pair
-		if (self->blockEnd > 0) {
-			ValueRef newValue = self->lastValue;
-			// Truncate the last key in the block to the common prefix between itself and the previously written key.
-			// When tenants are enabled this would be the tenant prefix
-			if (lastWrittenKey.present() && lastWrittenKey.get().size() > 0) {
-				int prefixLength = commonPrefixLength(self->lastKey, lastWrittenKey.get()) + 1;
-				newKey = StringRef(self->lastKey.begin(), std::min(prefixLength, self->lastKey.size()));
-				newValue = StringRef();
-			}
-			appendStringRefWithLenToBuffer(self, &newKey);
-			appendStringRefWithLenToBuffer(self, &newValue);
-		}
-		wait(newBlock(self, bytesNeeded, newKey));
-		self->lastWrittenKey = self->lastKey;
-		self->lastKey = StringRef();
-		self->lastValue = StringRef();
-		return Void();
-	}
-
 	Future<Void> padEnd(bool final) {
 		if (expectedFileSize(this) > 0) {
 			return newBlock(this, 0, StringRef(), final);
@@ -741,13 +717,9 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	}
 
 	// Ends the current block if necessary based on bytesNeeded.
-	ACTOR static Future<Void> newBlockIfNeeded(EncryptedRangeFileWriter* self, int bytesNeeded, Optional<KeyRef> k) {
-		int prevToWrite = 0;
-		if (self->lastKey.size() > 0) {
-			prevToWrite = sizeof(int32_t) + self->lastKey.size() + sizeof(int32_t) + self->lastValue.size();
-		}
-		if (expectedFileSize(self) + prevToWrite + bytesNeeded > self->blockEnd) {
-			wait(finishCurrentBlockWriteNewBlock(self, bytesNeeded, k));
+	ACTOR static Future<Void> newBlockIfNeeded(EncryptedRangeFileWriter* self, int bytesNeeded) {
+		if (expectedFileSize(self) + bytesNeeded > self->blockEnd) {
+			wait(newBlock(self, bytesNeeded, self->lastKey));
 		}
 		return Void();
 	}
@@ -755,23 +727,26 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	// Start a new block if needed, then write the key and value
 	ACTOR static Future<Void> writeKV_impl(EncryptedRangeFileWriter* self, Key k, Value v) {
 		state int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
-		wait(newBlockIfNeeded(self, toWrite, self->lastWrittenKey));
-		// If we had a last KV pair then write it to the buffer and save the new KV pair received
+		wait(newBlockIfNeeded(self, toWrite));
 		if (self->lastKey.size() > 0) {
-			appendStringRefWithLenToBuffer(self, &self->lastKey);
-			self->lastWrittenKey = self->lastKey;
-			appendStringRefWithLenToBuffer(self, &self->lastValue);
-		}
-		self->lastKey = k;
-		self->lastValue = v;
-		if (self->lastWrittenKey.size() > 0) {
 			// crossing tenant boundaries
 			// TODO (Nim): Address this case when tenants aren't supported/enabled
-			if (getTenantId(self->lastWrittenKey) != getTenantId(self->lastKey)) {
+			if (getTenantId(k) != getTenantId(self->lastKey)) {
 				CODE_PROBE(true, "crossed tenant boundaries");
-				wait(finishCurrentBlockWriteNewBlock(self, toWrite, self->lastWrittenKey));
+				self->lastKey = k;
+				self->lastValue = v;
+				KeyRef tenantPrefix = StringRef(self->lastKey.begin(), 8);
+				ValueRef newValue = StringRef();
+				appendStringRefWithLenToBuffer(self, &tenantPrefix);
+				appendStringRefWithLenToBuffer(self, &newValue);
+				wait(newBlock(self, 0, tenantPrefix));
+				return Void();
 			}
 		}
+		appendStringRefWithLenToBuffer(self, &k);
+		appendStringRefWithLenToBuffer(self, &v);
+		self->lastKey = k;
+		self->lastValue = v;
 		return Void();
 	}
 
@@ -780,14 +755,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	// Write begin key or end key.
 	ACTOR static Future<Void> writeKey_impl(EncryptedRangeFileWriter* self, Key k) {
 		int toWrite = sizeof(uint32_t) + k.size();
-		wait(newBlockIfNeeded(self, toWrite, self->lastWrittenKey));
-		// If we had a last KV pair then write it to the buffer and save the new KV pair received
-		if (self->lastKey.size() > 0) {
-			appendStringRefWithLenToBuffer(self, &self->lastKey);
-			appendStringRefWithLenToBuffer(self, &self->lastValue);
-		}
+		wait(newBlockIfNeeded(self, toWrite));
 		appendStringRefWithLenToBuffer(self, &k);
-		self->lastWrittenKey = k;
 		return Void();
 	}
 
@@ -817,7 +786,6 @@ private:
 	Options options;
 	Key lastKey;
 	Key lastValue;
-	Key lastWrittenKey;
 };
 
 // File Format handlers.
@@ -1740,6 +1708,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				    wait(bc->writeRangeFile(snapshotBeginVersion, snapshotRangeFileCount, outVersion, blockSize));
 				outFile = f;
 
+				encryptionEnabled = encryptionEnabled && cx->clientInfo->get().isEncryptionEnabled;
 				// Initialize range file writer and write begin key
 				if (encryptionEnabled) {
 					CODE_PROBE(true, "using encrypted snapshot file writer");

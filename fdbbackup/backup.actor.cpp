@@ -139,7 +139,6 @@ enum {
 	OPT_BACKUPKEYS_FILTER,
 	OPT_INCREMENTALONLY,
 	OPT_ENCRYPTION_KEY_FILE,
-	OPT_ENCRYPTION_ENABLED,
 
 	// Backup Modify
 	OPT_MOD_ACTIVE_INTERVAL,
@@ -269,7 +268,6 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
-	{ OPT_ENCRYPTION_ENABLED, "--enable-encryption", SO_NONE },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -3381,7 +3379,8 @@ int main(int argc, char* argv[]) {
 		bool trace = false;
 		bool quietDisplay = false;
 		bool dryRun = false;
-		bool encryptionEnabled = false;
+		// TODO (Nim): Set this value when we add optional encrypt_files CLI argument to backup agent start
+		bool encryptionEnabled = true;
 		std::string traceDir = "";
 		std::string traceFormat = "";
 		std::string traceLogGroup;
@@ -3654,9 +3653,6 @@ int main(int argc, char* argv[]) {
 				break;
 			case OPT_ENCRYPTION_KEY_FILE:
 				encryptionKeyFile = args->OptionArg();
-				break;
-			case OPT_ENCRYPTION_ENABLED:
-				encryptionEnabled = true;
 				break;
 			case OPT_RESTORECONTAINER:
 				restoreContainer = args->OptionArg();
