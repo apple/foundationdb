@@ -6412,6 +6412,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		loop {
 			state Transaction tr(data->cx);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			// fetchVersion = data->version.get();
 			// A quick fix:
 			// By default, we use data->version as the fetchVersion.
