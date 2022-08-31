@@ -4453,7 +4453,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	state Span span("SS:getMappedKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
 	state Optional<ReadOptions> options = req.options;
-	state ReadType type  = options.present() ? options.get().type : ReadType::NORMAL;
+	state ReadType type = options.present() ? options.get().type : ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -6462,11 +6462,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		state int debug_nextRetryToLog = 1;
 		state Error lastError;
 
-		// TODO: update to FETCH once the priority multi lock is used.
-		// leaving the readtype off for now to prevent data fetches stall under heavy load
 		// it is used to inform the storage that the rangeRead is for Fetch
-		// state ReadOptions options = ReadOptions(Optional<UID>(), ReadType::FETCH);
-		state ReadOptions options = ReadOptions(Optional<UID>(), ReadType::NORMAL);
+		state ReadOptions options = ReadOptions(fetchKeysID, ReadType::FETCH);
 
 		// FIXME: The client cache does not notice when servers are added to a team. To read from a local storage server
 		// we must refresh the cache manually.
