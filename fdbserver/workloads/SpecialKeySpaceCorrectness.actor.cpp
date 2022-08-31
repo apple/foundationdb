@@ -303,6 +303,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		state Reference<ReadYourWritesTransaction> tenantTx =
 		    makeReference<ReadYourWritesTransaction>(cx, TenantName("foobar"_sr));
 		// tenant transaction accessing modules that do not support tenants
+		// tenant getRange
 		try {
 			wait(success(tenantTx->getRange(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT),
 			                                CLIENT_KNOBS->TOO_MANY)));
@@ -312,6 +313,38 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				throw;
 			ASSERT(e.code() == error_code_illegal_tenant_access);
 			tenantTx->reset();
+		}
+		// tenant set + commit
+		try {
+			tenantTx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tenantTx->set(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck"), ValueRef());
+			wait(tenantTx->commit());
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			ASSERT(e.code() == error_code_illegal_tenant_access);
+			tenantTx->reset();
+		}
+		// tenant clear
+		try {
+			tenantTx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tenantTx->clear(SpecialKeySpace::getManagementApiCommandRange("exclude"));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			ASSERT(e.code() == error_code_illegal_tenant_access);
+			tenantTx->reset();
+		}
+		// tenant pass
+		try {
+			tenantTx->addReadConflictRange(singleKeyRange(LiteralStringRef("testKey")));
+			wait(success(tenantTx->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			ASSERT(false);
 		}
 		// begin key outside module range
 		try {

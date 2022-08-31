@@ -403,7 +403,6 @@ public:
 	}
 
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override { return commitImpl(this, ryw); }
-	bool supportsTenants() const override { return true; };
 };
 
 #include "flow/unactorcompiler.h"
