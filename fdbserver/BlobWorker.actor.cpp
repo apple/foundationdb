@@ -1839,6 +1839,20 @@ ACTOR Future<Void> waitVersionCommitted(Reference<BlobWorkerData> bwData,
 	return Void();
 }
 
+ACTOR Future<bool> checkFileNotFoundForcePurgeRace(Reference<BlobWorkerData> bwData, KeyRange range) {
+	state Transaction tr(bwData->db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr, range));
+			return purgeState != ForcedPurgeState::NonePurged;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 // updater for a single granule
 // TODO: this is getting kind of large. Should try to split out this actor if it continues to grow?
 ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
@@ -2637,17 +2651,31 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			throw e;
 		}
 
+		state Error e2 = e;
+		if (e.code() == error_code_file_not_found) {
+			// FIXME: better way to fix this?
+			bool isForcePurging = wait(checkFileNotFoundForcePurgeRace(bwData, metadata->keyRange));
+			if (isForcePurging) {
+				CODE_PROBE(true, "Granule got file not found from force purge");
+				TraceEvent("GranuleFileUpdaterFileNotFoundForcePurge", bwData->id)
+				    .error(e2)
+				    .detail("KeyRange", metadata->keyRange)
+				    .detail("GranuleID", startState.granuleID);
+				return Void();
+			}
+		}
+
 		TraceEvent(SevError, "GranuleFileUpdaterUnexpectedError", bwData->id)
-		    .error(e)
+		    .error(e2)
 		    .detail("Granule", metadata->keyRange)
 		    .detail("GranuleID", startState.granuleID);
 		ASSERT_WE_THINK(false);
 
 		// if not simulation, kill the BW
 		if (bwData->fatalError.canBeSet()) {
-			bwData->fatalError.sendError(e);
+			bwData->fatalError.sendError(e2);
 		}
-		throw e;
+		throw e2;
 	}
 }
 
@@ -3195,7 +3223,7 @@ bool canReplyWith(Error e) {
 	switch (e.code()) {
 	case error_code_blob_granule_transaction_too_old:
 	case error_code_transaction_too_old:
-	case error_code_future_version: // not thrown yet
+	case error_code_future_version:
 	case error_code_wrong_shard_server:
 	case error_code_process_behind: // not thrown yet
 	case error_code_blob_worker_full:
@@ -3234,6 +3262,7 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 
 	// wait for change feed version to catch up to ensure we have all data
 	if (metadata->activeCFData.get()->getVersion() < v) {
+		// FIXME: add future version timeout and throw here, same as SS
 		wait(metadata->activeCFData.get()->whenAtLeast(v));
 		ASSERT(metadata->activeCFData.get()->getVersion() >= v);
 	}

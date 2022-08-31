@@ -2192,15 +2192,15 @@ public:
 	          int64_t remapCleanupWindowBytes,
 	          int concurrentExtentReads,
 	          bool memoryOnly,
-	          std::shared_ptr<IEncryptionKeyProvider> keyProvider,
+	          Reference<IEncryptionKeyProvider> keyProvider,
 	          Promise<Void> errorPromise = {})
 	  : keyProvider(keyProvider), ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2),
 	    pageCacheBytes(pageCacheSizeBytes), desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize),
 	    filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
 	    remapCleanupWindowBytes(remapCleanupWindowBytes), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
 
-		if (keyProvider == nullptr) {
-			keyProvider = std::make_shared<NullKeyProvider>();
+		if (!keyProvider) {
+			keyProvider = makeReference<NullKeyProvider>();
 		}
 
 		// This sets the page cache size for all PageCacheT instances using the same evictor
@@ -2963,11 +2963,8 @@ public:
 		             page->rawData(),
 		             header);
 
-		int readBytes = wait(readPhysicalBlock(self,
-		                                       page->rawData(),
-		                                       page->rawSize(),
-		                                       (int64_t)pageID * page->rawSize(),
-		                                       std::min(priority, ioMaxPriority)));
+		int readBytes = wait(
+		    readPhysicalBlock(self, page->rawData(), page->rawSize(), (int64_t)pageID * page->rawSize(), priority));
 		debug_printf("DWALPager(%s) op=readPhysicalDiskReadComplete %s ptr=%p bytes=%d\n",
 		             self->filename.c_str(),
 		             toString(pageID).c_str(),
@@ -3958,7 +3955,7 @@ private:
 	int physicalExtentSize;
 	int pagesPerExtent;
 
-	std::shared_ptr<IEncryptionKeyProvider> keyProvider;
+	Reference<IEncryptionKeyProvider> keyProvider;
 
 	PriorityMultiLock ioLock;
 
@@ -5039,7 +5036,7 @@ public:
 	VersionedBTree(IPager2* pager,
 	               std::string name,
 	               EncodingType defaultEncodingType,
-	               std::shared_ptr<IEncryptionKeyProvider> keyProvider)
+	               Reference<IEncryptionKeyProvider> keyProvider)
 	  : m_pager(pager), m_encodingType(defaultEncodingType), m_enforceEncodingType(false), m_keyProvider(keyProvider),
 	    m_pBuffer(nullptr), m_mutationCount(0), m_name(name) {
 
@@ -5047,13 +5044,13 @@ public:
 		// This prevents an attack where an encrypted page is replaced by an attacker with an unencrypted page
 		// or an encrypted page fabricated using a compromised scheme.
 		if (ArenaPage::isEncodingTypeEncrypted(m_encodingType)) {
-			ASSERT(keyProvider != nullptr);
+			ASSERT(keyProvider.isValid());
 			m_enforceEncodingType = true;
 		}
 
 		// If key provider isn't given, instantiate the null provider
-		if (m_keyProvider == nullptr) {
-			m_keyProvider = std::make_shared<NullKeyProvider>();
+		if (!m_keyProvider) {
+			m_keyProvider = makeReference<NullKeyProvider>();
 		}
 
 		m_pBoundaryVerifier = DecodeBoundaryVerifier::getVerifier(name);
@@ -5239,6 +5236,17 @@ public:
 			self->m_lazyClearQueue.recover(self->m_pager, self->m_header.lazyDeleteQueue, "LazyClearQueueRecovered");
 			debug_printf("BTree recovered.\n");
 
+			if (ArenaPage::isEncodingTypeEncrypted(self->m_header.encodingType) &&
+			    self->m_encodingType == EncodingType::XXHash64) {
+				// On restart the encryption config of the cluster could be unknown. In that case if we find the Redwood
+				// instance is encrypted, we should use the same encryption encoding.
+				self->m_encodingType = self->m_header.encodingType;
+				self->m_enforceEncodingType = true;
+				TraceEvent("RedwoodBTreeNodeForceEncryption")
+				    .detail("InstanceName", self->m_pager->getName())
+				    .detail("EncodingFound", self->m_header.encodingType)
+				    .detail("EncodingDesired", self->m_encodingType);
+			}
 			if (self->m_header.encodingType != self->m_encodingType) {
 				TraceEvent(SevWarn, "RedwoodBTreeNodeEncodingMismatch")
 				    .detail("InstanceName", self->m_pager->getName())
@@ -5535,7 +5543,7 @@ private:
 	IPager2* m_pager;
 	EncodingType m_encodingType;
 	bool m_enforceEncodingType;
-	std::shared_ptr<IEncryptionKeyProvider> m_keyProvider;
+	Reference<IEncryptionKeyProvider> m_keyProvider;
 
 	// Counter to update with DecodeCache memory usage
 	int64_t* m_pDecodeCacheMemory = nullptr;
@@ -7355,6 +7363,7 @@ public:
 
 	private:
 		PagerEventReasons reason;
+		Optional<ReadOptions> options;
 		VersionedBTree* btree;
 		Reference<IPagerSnapshot> pager;
 		bool valid;
@@ -7420,7 +7429,7 @@ public:
 			                    link.get().getChildPage(),
 			                    ioMaxPriority,
 			                    false,
-			                    true),
+			                    !options.present() || options.get().cacheResult || path.back().btPage()->height != 2),
 			           [=](Reference<const ArenaPage> p) {
 #if REDWOOD_DEBUG
 				           path.push_back({ p, btree->getCursor(p.getPtr(), link), link.get().getChildPage() });
@@ -7454,10 +7463,12 @@ public:
 		// Initialize or reinitialize cursor
 		Future<Void> init(VersionedBTree* btree_in,
 		                  PagerEventReasons reason_in,
+		                  Optional<ReadOptions> options_in,
 		                  Reference<IPagerSnapshot> pager_in,
 		                  BTreeNodeLink root) {
 			btree = btree_in;
 			reason = reason_in;
+			options = options_in;
 			pager = pager_in;
 			path.clear();
 			path.reserve(6);
@@ -7652,7 +7663,10 @@ public:
 		Future<Void> movePrev() { return path.empty() ? Void() : move_impl(this, false); }
 	};
 
-	Future<Void> initBTreeCursor(BTreeCursor* cursor, Version snapshotVersion, PagerEventReasons reason) {
+	Future<Void> initBTreeCursor(BTreeCursor* cursor,
+	                             Version snapshotVersion,
+	                             PagerEventReasons reason,
+	                             Optional<ReadOptions> options = Optional<ReadOptions>()) {
 		Reference<IPagerSnapshot> snapshot = m_pager->getReadSnapshot(snapshotVersion);
 
 		BTreeNodeLinkRef root;
@@ -7669,7 +7683,7 @@ public:
 			root = *snapshot->extra.getPtr<BTreeNodeLink>();
 		}
 
-		return cursor->init(this, reason, snapshot, root);
+		return cursor->init(this, reason, options, snapshot, root);
 	}
 };
 
@@ -7680,7 +7694,7 @@ RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"))
 
 class KeyValueStoreRedwood : public IKeyValueStore {
 public:
-	KeyValueStoreRedwood(std::string filename, UID logID)
+	KeyValueStoreRedwood(std::string filename, UID logID, Reference<IEncryptionKeyProvider> encryptionKeyProvider)
 	  : m_filename(filename), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS, 0),
 	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 
@@ -7703,10 +7717,15 @@ public:
 
 		EncodingType encodingType = EncodingType::XXHash64;
 
-		// Deterministically enable encryption based on uid
-		if (g_network->isSimulated() && logID.hash() % 2 == 0) {
-			encodingType = EncodingType::XOREncryption;
-			m_keyProvider = std::make_shared<XOREncryptionKeyProvider>(filename);
+		// When reopening Redwood on restart, the cluser encryption config could be unknown at this point,
+		// for which shouldEnableEncryption will return false. In that case, if the Redwood instance was encrypted
+		// before, the encoding type in the header page will be used instead.
+		//
+		// TODO(yiwu): When the cluster encryption config is available later, fail if the cluster is configured to
+		// enable encryption, but the Redwood instance is unencrypted.
+		if (encryptionKeyProvider && encryptionKeyProvider->shouldEnableEncryption()) {
+			encodingType = EncodingType::AESEncryptionV1;
+			m_keyProvider = encryptionKeyProvider;
 		}
 
 		IPager2* pager = new DWALPager(pageSize,
@@ -7798,18 +7817,26 @@ public:
 		m_tree->set(keyValue);
 	}
 
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, IKeyValueStore::ReadType) override {
+	Future<RangeResult> readRange(KeyRangeRef keys,
+	                              int rowLimit,
+	                              int byteLimit,
+	                              Optional<ReadOptions> options) override {
 		debug_printf("READRANGE %s\n", printable(keys).c_str());
-		return catchError(readRange_impl(this, keys, rowLimit, byteLimit));
+		return catchError(readRange_impl(this, keys, rowLimit, byteLimit, options));
 	}
 
 	ACTOR static Future<RangeResult> readRange_impl(KeyValueStoreRedwood* self,
 	                                                KeyRange keys,
 	                                                int rowLimit,
-	                                                int byteLimit) {
+	                                                int byteLimit,
+	                                                Optional<ReadOptions> options) {
+		state PagerEventReasons reason = PagerEventReasons::RangeRead;
 		state VersionedBTree::BTreeCursor cur;
-		wait(
-		    self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::RangeRead));
+		if (options.present() && options.get().type == ReadType::FETCH) {
+			reason = PagerEventReasons::FetchRange;
+		}
+		wait(self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), reason, options));
+
 		state PriorityMultiLock::Lock lock;
 		state Future<Void> f;
 		++g_redwoodMetrics.metric.opGetRange;
@@ -7945,10 +7972,12 @@ public:
 		return result;
 	}
 
-	ACTOR static Future<Optional<Value>> readValue_impl(KeyValueStoreRedwood* self, Key key, Optional<UID> debugID) {
+	ACTOR static Future<Optional<Value>> readValue_impl(KeyValueStoreRedwood* self,
+	                                                    Key key,
+	                                                    Optional<ReadOptions> options) {
 		state VersionedBTree::BTreeCursor cur;
-		wait(
-		    self->m_tree->initBTreeCursor(&cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::PointRead));
+		wait(self->m_tree->initBTreeCursor(
+		    &cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::PointRead, options));
 
 		// Not locking for point reads, instead relying on IO priority lock
 		// state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock());
@@ -7967,15 +7996,12 @@ public:
 		return Optional<Value>();
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) override {
-		return catchError(readValue_impl(this, key, debugID));
+	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options) override {
+		return catchError(readValue_impl(this, key, options));
 	}
 
-	Future<Optional<Value>> readValuePrefix(KeyRef key,
-	                                        int maxLength,
-	                                        IKeyValueStore::ReadType,
-	                                        Optional<UID> debugID) override {
-		return catchError(map(readValue_impl(this, key, debugID), [maxLength](Optional<Value> v) {
+	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<ReadOptions> options) override {
+		return catchError(map(readValue_impl(this, key, options), [maxLength](Optional<Value> v) {
 			if (v.present() && v.get().size() > maxLength) {
 				v.get().contents() = v.get().substr(0, maxLength);
 			}
@@ -7994,7 +8020,7 @@ private:
 	PriorityMultiLock m_concurrentReads;
 	bool prefetch;
 	Version m_nextCommitVersion;
-	std::shared_ptr<IEncryptionKeyProvider> m_keyProvider;
+	Reference<IEncryptionKeyProvider> m_keyProvider;
 	Future<Void> m_lastCommit = Void();
 
 	template <typename T>
@@ -8003,8 +8029,10 @@ private:
 	}
 };
 
-IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename, UID logID) {
-	return new KeyValueStoreRedwood(filename, logID);
+IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
+                                       UID logID,
+                                       Reference<IEncryptionKeyProvider> encryptionKeyProvider) {
+	return new KeyValueStoreRedwood(filename, logID, encryptionKeyProvider);
 }
 
 int randomSize(int max) {
@@ -9735,7 +9763,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state bool shortTest = params.getInt("shortTest").orDefault(deterministicRandom()->random01() < 0.25);
 
 	state int pageSize =
-	    shortTest ? 200 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(200, 400));
+	    shortTest ? 250 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(250, 400));
 	state int extentSize =
 	    params.getInt("extentSize")
 	        .orDefault(deterministicRandom()->coinflip() ? SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE
@@ -9784,12 +9812,13 @@ TEST_CASE("Lredwood/correctness/btree") {
 	// Max number of records in the BTree or the versioned written map to visit
 	state int64_t maxRecordsRead = params.getInt("maxRecordsRead").orDefault(300e6);
 
-	state EncodingType encodingType = EncodingType::XXHash64;
-	state std::shared_ptr<IEncryptionKeyProvider> keyProvider;
-
-	if (deterministicRandom()->coinflip()) {
-		encodingType = EncodingType::XOREncryption;
-		keyProvider = std::make_shared<XOREncryptionKeyProvider>(file);
+	state EncodingType encodingType =
+	    static_cast<EncodingType>(deterministicRandom()->randomInt(0, EncodingType::MAX_ENCODING_TYPE));
+	state Reference<IEncryptionKeyProvider> keyProvider;
+	if (encodingType == EncodingType::AESEncryptionV1) {
+		keyProvider = makeReference<RandomEncryptionKeyProvider>();
+	} else if (encodingType == EncodingType::XOREncryption_TestOnly) {
+		keyProvider = makeReference<XOREncryptionKeyProvider_TestOnly>(file);
 	}
 
 	printf("\n");
@@ -10271,7 +10300,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 		                      remapCleanupWindowBytes,
 		                      concurrentExtentReads,
 		                      false,
-		                      nullptr);
+		                      Reference<IEncryptionKeyProvider>());
 
 		wait(success(pager->init()));
 
@@ -10322,8 +10351,14 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	}
 
 	printf("Reopening pager file from disk.\n");
-	pager = new DWALPager(
-	    pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindowBytes, concurrentExtentReads, false, nullptr);
+	pager = new DWALPager(pageSize,
+	                      extentSize,
+	                      fileName,
+	                      cacheSizeBytes,
+	                      remapCleanupWindowBytes,
+	                      concurrentExtentReads,
+	                      false,
+	                      Reference<IEncryptionKeyProvider>());
 	wait(success(pager->init()));
 
 	printf("Starting ExtentQueue FastPath Recovery from Disk.\n");
@@ -10468,8 +10503,9 @@ TEST_CASE(":/redwood/performance/set") {
 	                                 remapCleanupWindowBytes,
 	                                 concurrentExtentReads,
 	                                 pagerMemoryOnly,
-	                                 nullptr);
-	state VersionedBTree* btree = new VersionedBTree(pager, file, EncodingType::XXHash64, nullptr);
+	                                 Reference<IEncryptionKeyProvider>());
+	state VersionedBTree* btree =
+	    new VersionedBTree(pager, file, EncodingType::XXHash64, Reference<IEncryptionKeyProvider>());
 	wait(btree->init());
 	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 
@@ -10997,7 +11033,9 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
                                     int valueSize,
                                     int recordCountTarget,
                                     bool singlePrefix,
-                                    int rowLimit) {
+                                    int rowLimit,
+                                    int byteLimit,
+                                    Optional<ReadOptions> options = Optional<ReadOptions>()) {
 	fmt::print("\nstoreType: {}\n", static_cast<int>(kvs->getType()));
 	fmt::print("prefixSource: {}\n", source.toString());
 	fmt::print("suffixSize: {}\n", suffixSize);
@@ -11030,7 +11068,7 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
 		KeyRangeRef range = source.getKeyRangeRef(singlePrefix, suffixSize);
 		int rowLim = (deterministicRandom()->randomInt(0, 2) != 0) ? rowLimit : -rowLimit;
 
-		RangeResult result = wait(kvs->readRange(range, rowLim));
+		RangeResult result = wait(kvs->readRange(range, rowLim, byteLimit, options));
 
 		recordsRead += result.size();
 		bytesRead += result.size() * recordSize;
@@ -11053,6 +11091,7 @@ TEST_CASE(":/redwood/performance/randomRangeScans") {
 	state int prefixLen = 30;
 	state int suffixSize = 12;
 	state int valueSize = 100;
+	state int maxByteLimit = std::numeric_limits<int>::max();
 
 	// TODO change to 100e8 after figuring out no-disk redwood mode
 	state int writeRecordCountTarget = 1e6;
@@ -11068,11 +11107,11 @@ TEST_CASE(":/redwood/performance/randomRangeScans") {
 	    redwood, suffixSize, valueSize, source, writeRecordCountTarget, writePrefixesInOrder, false));
 
 	// divide targets for tiny queries by 10 because they are much slower
-	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget / 10, true, 10));
-	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, true, 1000));
-	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget / 10, false, 100));
-	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 10000));
-	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 1000000));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget / 10, true, 10, maxByteLimit));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, true, 1000, maxByteLimit));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget / 10, false, 100, maxByteLimit));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 10000, maxByteLimit));
+	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 1000000, maxByteLimit));
 	wait(closeKVS(redwood));
 	printf("\n");
 	return Void();

@@ -1589,12 +1589,12 @@ public:
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override;
 	Future<Void> commit(bool sequential = false) override;
 
-	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) override;
-	Future<Optional<Value>> readValuePrefix(KeyRef key,
-	                                        int maxLength,
-	                                        IKeyValueStore::ReadType,
-	                                        Optional<UID> debugID) override;
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, IKeyValueStore::ReadType) override;
+	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> optionss) override;
+	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<ReadOptions> options) override;
+	Future<RangeResult> readRange(KeyRangeRef keys,
+	                              int rowLimit,
+	                              int byteLimit,
+	                              Optional<ReadOptions> options) override;
 
 	KeyValueStoreSQLite(std::string const& filename,
 	                    UID logID,
@@ -2216,18 +2216,23 @@ Future<Void> KeyValueStoreSQLite::commit(bool sequential) {
 	writeThread->post(p);
 	return f;
 }
-Future<Optional<Value>> KeyValueStoreSQLite::readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) {
+Future<Optional<Value>> KeyValueStoreSQLite::readValue(KeyRef key, Optional<ReadOptions> options) {
 	++readsRequested;
+	Optional<UID> debugID;
+	if (options.present()) {
+		debugID = options.get().debugID;
+	}
 	auto p = new Reader::ReadValueAction(key, debugID);
 	auto f = p->result.getFuture();
 	readThreads->post(p);
 	return f;
 }
-Future<Optional<Value>> KeyValueStoreSQLite::readValuePrefix(KeyRef key,
-                                                             int maxLength,
-                                                             IKeyValueStore::ReadType,
-                                                             Optional<UID> debugID) {
+Future<Optional<Value>> KeyValueStoreSQLite::readValuePrefix(KeyRef key, int maxLength, Optional<ReadOptions> options) {
 	++readsRequested;
+	Optional<UID> debugID;
+	if (options.present()) {
+		debugID = options.get().debugID;
+	}
 	auto p = new Reader::ReadValuePrefixAction(key, maxLength, debugID);
 	auto f = p->result.getFuture();
 	readThreads->post(p);
@@ -2236,7 +2241,7 @@ Future<Optional<Value>> KeyValueStoreSQLite::readValuePrefix(KeyRef key,
 Future<RangeResult> KeyValueStoreSQLite::readRange(KeyRangeRef keys,
                                                    int rowLimit,
                                                    int byteLimit,
-                                                   IKeyValueStore::ReadType) {
+                                                   Optional<ReadOptions> options) {
 	++readsRequested;
 	auto p = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 	auto f = p->result.getFuture();

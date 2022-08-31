@@ -1146,6 +1146,8 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		if (testConfig.disableEncryption) {
 			g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
 			g_knobs.setKnob("enable_tlog_encryption", KnobValueRef::create(bool{ false }));
+			g_knobs.setKnob("enable_storage_server_encryption", KnobValueRef::create(bool{ false }));
+			g_knobs.setKnob("enable_blob_granule_encryption", KnobValueRef::create(bool{ false }));
 			TraceEvent(SevDebug, "DisableEncryption");
 		}
 		*pConnString = conn;
@@ -1933,6 +1935,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	if (testConfig.disableEncryption) {
 		g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
 		g_knobs.setKnob("enable_tlog_encryption", KnobValueRef::create(bool{ false }));
+		g_knobs.setKnob("enable_storage_server_encryption", KnobValueRef::create(bool{ false }));
+		g_knobs.setKnob("enable_blob_granule_encryption", KnobValueRef::create(bool{ false }));
 		TraceEvent(SevDebug, "DisableEncryption");
 	}
 	auto configDBType = testConfig.getConfigDBType();

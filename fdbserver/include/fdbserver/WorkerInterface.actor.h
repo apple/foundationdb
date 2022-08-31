@@ -1114,6 +1114,7 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei, Reference<
 class IKeyValueStore;
 class ServerCoordinators;
 class IDiskQueue;
+class IEncryptionKeyProvider;
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
@@ -1122,7 +1123,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder);
+                                 std::string folder,
+                                 Reference<IEncryptionKeyProvider> encryptionKeyProvider);
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,
@@ -1130,7 +1132,8 @@ ACTOR Future<Void> storageServer(
     std::string folder,
     Promise<Void> recovered,
     Reference<IClusterConnectionRecord>
-        connRecord); // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
+        connRecord, // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
+    Reference<IEncryptionKeyProvider> encryptionKeyProvider);
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
