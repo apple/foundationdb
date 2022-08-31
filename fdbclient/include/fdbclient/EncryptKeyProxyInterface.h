@@ -176,7 +176,7 @@ struct EKPGetBaseCipherKeysByIdsRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, baseCipherInfos, debugId, reply);
+		serializer(ar, baseCipherInfos, debugId, reply, arena);
 	}
 };
 
@@ -193,7 +193,7 @@ struct EKPGetLatestBaseCipherKeysReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, baseCipherDetails, numHits, error);
+		serializer(ar, baseCipherDetails, numHits, error, arena);
 	}
 };
 
@@ -239,7 +239,7 @@ struct EKPGetLatestBaseCipherKeysRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, encryptDomainInfos, debugId, reply);
+		serializer(ar, encryptDomainInfos, debugId, reply, arena);
 	}
 };
 

@@ -213,7 +213,7 @@ struct KmsConnLookupEKsByDomainIdsReq {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, encryptDomainInfos, debugId, reply);
+		serializer(ar, encryptDomainInfos, debugId, reply, arena);
 	}
 };
 
