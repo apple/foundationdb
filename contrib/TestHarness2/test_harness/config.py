@@ -234,7 +234,10 @@ class Config:
             assert type(None) != attr_type
             e = os.getenv(env_name)
             if e is not None:
-                self.__setattr__(attr, attr_type(e))
+                # Use the env var to supply the default value, so that if the
+                # environment variable is set and the corresponding command line
+                # flag is not, the environment variable has an effect.
+                self._config_map[attr].kwargs['default'] = attr_type(e)
 
     def build_arguments(self, parser: argparse.ArgumentParser):
         for val in self._config_map.values():
