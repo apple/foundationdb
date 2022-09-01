@@ -709,7 +709,10 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	static bool isSystemKey(KeyRef key) { return key.size() && key[0] == systemKeys.begin[0]; }
 
 	static Optional<int64_t> getTenantId(KeyRef key) {
-		if (key.size() < 8 || isSystemKey(key)) {
+		if (isSystemKey(key)) {
+			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
+		}
+		if (key.size() < 8) {
 			return Optional<int64_t>();
 		}
 		KeyRef tenantPrefix = KeyRef(key.begin(), 8);
