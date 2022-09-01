@@ -562,19 +562,10 @@ Future<Reference<InitialDataDistribution>> DDMockTxnProcessor::getInitialDataDis
 	Reference<InitialDataDistribution> res = makeReference<InitialDataDistribution>();
 	res->mode = 1;
 	res->allServers = getServerListAndProcessClasses().get();
-	// TODO: consider remote region setting. For now assume all server is in primary dc
 	res->shards = getDDShardInfos();
 	res->primaryTeams = getAllTeamsInRegion(true);
 	res->remoteTeams = getAllTeamsInRegion(false);
 	return res;
-}
-
-inline void removeFailedServerFromTeams(std::vector<ShardsAffectedByTeamFailure::Team>& teams, const UID& serverID) {
-	for (auto& team : teams) {
-		team.removeServer(serverID);
-	}
-	teams.erase(std::remove_if(teams.begin(), teams.end(), [](const auto& team) { return team.servers.empty(); }),
-	            teams.end());
 }
 
 // Remove the server from shardMapping and set serverKeysFalse to the server's serverKeys list.
@@ -585,24 +576,19 @@ Future<Void> DDMockTxnProcessor::removeKeysFromFailedServer(const UID& serverID,
                                                             const std::vector<UID>& teamForDroppedRange,
                                                             const MoveKeysLock& lock,
                                                             const DDEnabledState* ddEnabledState) const {
+
 	auto& mss = mgs->allServers.at(serverID);
 	auto allRange = mss.getAllRanges();
 	for (auto it = allRange.begin(); it != allRange.end(); ++it) {
 		KeyRangeRef curRange = it->range();
-		auto [curTeams, prevTeams] = mgs->shardMapping->getTeamsFor(curRange);
-		bool inFlight = !prevTeams.empty();
-		// remove failed server from source and destination teams
-		removeFailedServerFromTeams(curTeams, serverID);
-		removeFailedServerFromTeams(prevTeams, serverID);
-
-		if (inFlight) {
-
-		} else {
-			if (curTeams.empty()) {
-			}
-		}
+		mgs->shardMapping->removeFailedServerForRange(curRange, serverID);
+		// TODO: check whether source is empty
+		// emptySource => found available dest
+		// emptysource && empty dest => assign to teamForDroppedRange, mark lost
 	}
 
+	// teams.erase(std::remove_if(teams.begin(), teams.end(), [](const auto& team) { return team.servers.empty(); }),
+	//             teams.end());
 	return Void();
 }
 
@@ -610,7 +596,7 @@ Future<Void> DDMockTxnProcessor::removeStorageServer(const UID& serverID,
                                                      const Optional<UID>& tssPairID,
                                                      const MoveKeysLock& lock,
                                                      const DDEnabledState* ddEnabledState) const {
-	ASSERT(mgs->shardMapping->getNumberOfShards(serverID) == 0);
+	ASSERT(mgs->allShardRemovedFromServer(serverID));
 	mgs->allServers.erase(serverID);
 	return Void();
 }

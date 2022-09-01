@@ -45,7 +45,7 @@ void MockGlobalState::initialAsEmptyDatabaseMGS(const DatabaseConfiguration& con
 }
 
 bool MockGlobalState::serverIsSourceForShard(const UID& serverId, KeyRangeRef shard, bool inFlightShard) {
-	if (allServers.find(serverId) == allServers.end())
+	if (!allServers.count(serverId))
 		return false;
 
 	// check serverKeys
@@ -66,7 +66,24 @@ bool MockGlobalState::serverIsSourceForShard(const UID& serverId, KeyRangeRef sh
 }
 
 bool MockGlobalState::serverIsDestForShard(const UID& serverId, KeyRangeRef shard) {
-	return false;
+	if (!allServers.count(serverId))
+		return false;
+
+	// check serverKeys
+	auto& mss = allServers.at(serverId);
+	if (!mss.allShardStatusEqual(shard, MockShardStatus::INFLIGHT)) {
+		return false;
+	}
+
+	// check keyServers
+	auto teams = shardMapping->getTeamsFor(shard);
+	return !teams.second.empty() && std::any_of(teams.first.begin(), teams.first.end(), [&serverId](const Team& team) {
+		return team.hasServer(serverId);
+	});
+}
+
+bool MockGlobalState::allShardRemovedFromServer(const UID& serverId) {
+	return allServers.count(serverId) && shardMapping->getNumberOfShards(serverId) == 0;
 }
 
 TEST_CASE("/MockGlobalState/initialAsEmptyDatabaseMGS/SimpleThree") {

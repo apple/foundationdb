@@ -49,12 +49,12 @@ public:
 		bool operator==(const Team& r) const { return servers == r.servers && primary == r.primary; }
 		bool operator!=(const Team& r) const { return !(*this == r); }
 
-		bool hasServer(const UID& id) const {
-			return std::find(servers.begin(), servers.end(), id) != servers.end();
-		}
+		bool hasServer(const UID& id) const { return std::find(servers.begin(), servers.end(), id) != servers.end(); }
 
-		void removeServer(const UID& id) {
+		bool removeServer(const UID& id) {
+			auto oldSize = servers.size();
 			servers.erase(std::remove(servers.begin(), servers.end(), id), servers.end());
+			return oldSize != servers.size();
 		}
 
 		std::string toString() const { return describe(servers); };
@@ -120,13 +120,14 @@ private:
 	// only insert into team_shards
 	void insert(Team team, KeyRange const& range);
 
+	bool removeFailedServerForSingleRange(ShardsAffectedByTeamFailure::Team& team, const UID& id, KeyRangeRef keys);
+
 public:
 	// return the iterator that traversing all ranges
 	auto getAllRanges() const -> decltype(shard_teams)::ConstRanges;
 	// get total shards count
 	size_t getNumberOfShards() const;
-	// void removeFailedServerForRange(KeyRangeRef keys, const UID& serverID, const std::pair<std::vector<Team>,
-	// std::vector<Team>>& involvedTeams);
+	void removeFailedServerForRange(KeyRangeRef keys, const UID& serverID);
 };
 
 #endif // FOUNDATIONDB_SHARDSAFFECTEDBYTEAMFAILURE_H

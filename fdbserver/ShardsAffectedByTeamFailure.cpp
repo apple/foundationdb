@@ -198,7 +198,7 @@ void ShardsAffectedByTeamFailure::check() const {
 
 std::set<ShardsAffectedByTeamFailure::Team> ShardsAffectedByTeamFailure::getAllTeams() const {
 	std::set<ShardsAffectedByTeamFailure::Team> res;
-	for(const auto& teamKeys: team_shards) {
+	for (const auto& teamKeys : team_shards) {
 		res.insert(res.end(), teamKeys.first);
 	}
 	return res;
@@ -216,4 +216,31 @@ void ShardsAffectedByTeamFailure::assignRangeToTeams(KeyRangeRef keys, const std
 	defineShard(keys);
 	moveShard(keys, destinationTeam);
 	finishMove(keys);
+}
+
+bool ShardsAffectedByTeamFailure::removeFailedServerForSingleRange(ShardsAffectedByTeamFailure::Team& team,
+                                                                   const UID& id,
+                                                                   KeyRangeRef keys) {
+	if (team.hasServer(id)) {
+		erase(team, keys);
+		team.removeServer(id);
+		insert(team, keys);
+		return true;
+	}
+	return false;
+}
+
+void ShardsAffectedByTeamFailure::removeFailedServerForRange(KeyRangeRef keys, const UID& serverID) {
+	auto rs = shard_teams.intersectingRanges(keys);
+	for (auto it = rs.begin(); it != rs.end(); ++it) {
+		// first team vector
+		for (std::vector<Team>::iterator t = it->value().first.begin(); t != it->value().first.end(); ++t) {
+			removeFailedServerForSingleRange(*t, serverID, it->range());
+		}
+		// second team vector
+		for (std::vector<Team>::iterator t = it->value().second.begin(); t != it->value().second.end(); ++t) {
+			removeFailedServerForSingleRange(*t, serverID, it->range());
+		}
+	}
+	check();
 }
