@@ -312,6 +312,10 @@ void net2_enqueueGlobal_hook_impl(Job* _Nonnull job,
 //                              swift_task_enqueueGlobal_original _Nonnull original) {
                               void (* _Nonnull)(Job *) __attribute__((swiftcall))) {
 	printf("[c++] intercepted job enqueue: %p - run it inline\n", job);
+
+	INetwork* net = _swift_newNet2(nullptr, false, false);
+	printf("[c++] net = %p", net);
+
 	swift_job_run(job, ExecutorRef::generic());
 }
 

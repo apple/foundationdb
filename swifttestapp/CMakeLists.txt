@@ -1,5 +1,7 @@
 add_executable(swifttestapp main.swift)
 
+target_link_libraries(swifttestapp flow)
+
 target_include_directories(swifttestapp PUBLIC
     "${CMAKE_SOURCE_DIR}/flow/include"
     "${CMAKE_BINARY_DIR}/flow/include"
