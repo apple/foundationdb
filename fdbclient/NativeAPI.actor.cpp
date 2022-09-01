@@ -4981,7 +4981,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 					throw;
 				}
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-				    e.code() == error_code_connection_failed) {
+				    e.code() == error_code_connection_failed || e.code() == error_code_request_maybe_delivered) {
 					const KeyRangeRef& range = locations[shard].range;
 
 					if (reverse)
@@ -9543,6 +9543,10 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				if (useIdx >= 0) {
 					chosenLocations[loc] = useIdx;
 					loc++;
+					if (g_network->isSimulated() && !g_simulator.speedUpSimulation && BUGGIFY_WITH_PROB(0.01)) {
+						// simulate as if we had to wait for all alternatives delayed, before the next one
+						wait(delay(deterministicRandom()->random01()));
+					}
 					continue;
 				}
 
@@ -9604,7 +9608,8 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    e.code() == error_code_connection_failed || e.code() == error_code_unknown_change_feed ||
-			    e.code() == error_code_broken_promise || e.code() == error_code_future_version) {
+			    e.code() == error_code_broken_promise || e.code() == error_code_future_version ||
+			    e.code() == error_code_request_maybe_delivered) {
 				db->changeFeedCache.erase(rangeID);
 				cx->invalidateCache(Key(), keys);
 				if (begin == lastBeginVersion) {
