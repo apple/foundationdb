@@ -37,6 +37,7 @@ struct DataDistributorInterface {
 	RequestStream<struct GetDataDistributorMetricsRequest> dataDistributorMetrics;
 	RequestStream<struct DistributorSplitRangeRequest> distributorSplitRange;
 	RequestStream<struct GetStorageWigglerStateRequest> storageWigglerState;
+	RequestStream<struct TriggerAuditRequest> triggerAudit;
 
 	DataDistributorInterface() {}
 	explicit DataDistributorInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}

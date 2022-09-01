@@ -3673,7 +3673,7 @@ ACTOR Future<Void> validateRangeShard(StorageServer* data, KeyRange range, std::
 	return Void();
 }
 
-ACTOR Future<Void> validateStorageQ(StorageServer* self, ValidateStorageRequest req) {
+ACTOR Future<Void> validateStorageQ(StorageServer* self, AuditStorageRequest req) {
 	wait(self->serveValidateStorageParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(self->serveValidateStorageParallelismLock);
 
@@ -10328,7 +10328,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 			when(FetchCheckpointKeyValuesRequest req = waitNext(ssi.fetchCheckpointKeyValues.getFuture())) {
 				self->actors.add(fetchCheckpointKeyValuesQ(self, req));
 			}
-			when(ValidateStorageRequest req = waitNext(ssi.validateStorage.getFuture())) {
+			when(AuditStorageRequest req = waitNext(ssi.validateStorage.getFuture())) {
 				self->actors.add(validateStorageQ(self, req));
 			}
 			when(wait(updateProcessStatsTimer)) {

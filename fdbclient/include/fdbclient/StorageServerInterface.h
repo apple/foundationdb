@@ -93,7 +93,7 @@ struct StorageServerInterface {
 	RequestStream<struct GetCheckpointRequest> checkpoint;
 	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
 	RequestStream<struct FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues;
-	RequestStream<struct ValidateStorageRequest> validateStorage;
+	RequestStream<struct AuditStorageRequest> auditStorage;
 
 private:
 	bool acceptingRequests;
@@ -164,7 +164,8 @@ public:
 				    RequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
 				fetchCheckpointKeyValues = RequestStream<struct FetchCheckpointKeyValuesRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(21));
-				validateStorage = RequestStream<struct ValidateStorageRequest>(getValue.getEndpoint().getAdjustedEndpoint(22));
+				auditStorage =
+				    RequestStream<struct AuditStorageRequest>(getValue.getEndpoint().getAdjustedEndpoint(22));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -215,7 +216,7 @@ public:
 		streams.push_back(checkpoint.getReceiver());
 		streams.push_back(fetchCheckpoint.getReceiver());
 		streams.push_back(fetchCheckpointKeyValues.getReceiver());
-		streams.push_back(validateStorage.getReceiver());
+		streams.push_back(auditStorage.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -1144,48 +1145,4 @@ struct StorageQueuingMetricsRequest {
 		serializer(ar, reply);
 	}
 };
-
-struct ValidateStorageResult {
-	constexpr static FileIdentifier file_identifier = 13804340;
-
-	UID requestId;
-	std::string error;
-
-	ValidateStorageResult() = default;
-	ValidateStorageResult(UID requestId) : requestId(requestId) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, requestId, error);
-	}
-};
-
-struct ValidateStorageRequest {
-	constexpr static FileIdentifier file_identifier = 13804341;
-
-	enum Action { VALIDATE_HA = 0 };
-
-	UID requestId;
-	KeyRange range;
-	std::vector<int32_t> actions;
-	ReplyPromise<ValidateStorageResult> reply;
-
-	ValidateStorageRequest() = default;
-	ValidateStorageRequest(UID requestId, KeyRange range) : requestId(requestId), range(range) {}
-
-	void addItem(Action action) { this->actions.push_back(static_cast<int32_t>(action)); }
-	std::vector<Action> getActions() const {
-		std::vector<Action> res;
-		for (const int32_t action : this->actions) {
-			res.push_back(static_cast<Action>(action));
-		}
-		return res;
-	}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, requestId, range, actions, reply);
-	}
-};
-
 #endif

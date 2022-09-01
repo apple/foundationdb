@@ -122,7 +122,7 @@ struct ValidateStorage : TestWorkload {
 
 		loop {
 			try {
-        std::cout << "1" << std::endl;
+                std::cout << "1" << std::endl;
 				state RangeResult shards =
 				    wait(krmGetRanges(&tr, keyServersPrefix, range, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!shards.empty() && !shards.more);
@@ -143,7 +143,7 @@ struct ValidateStorage : TestWorkload {
 					Optional<Value> serverListValue = wait(tr.get(serverListKeyFor(src[idx])));
 					ASSERT(serverListValue.present());
 					const StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
-					ValidateStorageRequest req(deterministicRandom()->randomUniqueID(),
+					AuditStorageRequest req(deterministicRandom()->randomUniqueID(),
 					                           KeyRangeRef(shards[i].key, shards[i + 1].key));
 					ValidateStorageResult vResult = wait(ssi.validateStorage.getReply(req));
 

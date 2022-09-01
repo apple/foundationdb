@@ -317,6 +317,8 @@ public:
 	// relocationConsumer (by DDQueue)
 	PromiseStream<RelocateShard> relocationProducer, relocationConsumer;
 
+	Promise<Void> initialized;
+
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id)
 	  : dbInfo(db), ddId(id), txnProcessor(nullptr), initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
 	    movingDataEventHolder(makeReference<EventCacheHolder>("MovingData")),
@@ -580,7 +582,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			state PromiseStream<GetTopKMetricsRequest> getTopKShardMetrics;
 			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
-			state Promise<Void> readyToStart;
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 			wait(self->resumeRelocations());
@@ -618,7 +619,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                                            getTopKShardMetrics.getFuture(),
 			                                                            getShardMetricsList,
 			                                                            getAverageShardBytes.getFuture(),
-			                                                            readyToStart,
+			                                                            self->initialized,
 			                                                            anyZeroHealthyTeams,
 			                                                            self->ddId,
 			                                                            &shards,
@@ -656,7 +657,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    self->configuration,
 			    self->primaryDcId,
 			    self->configuration.usableRegions > 1 ? self->remoteDcIds : std::vector<Optional<Key>>(),
-			    readyToStart.getFuture(),
+			    self->initialized.getFuture(),
 			    zeroHealthyTeams[0],
 			    IsPrimary::True,
 			    processingUnhealthy,
@@ -677,7 +678,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				                                    self->configuration,
 				                                    self->remoteDcIds,
 				                                    Optional<std::vector<Optional<Key>>>(),
-				                                    readyToStart.getFuture() && remoteRecovered(self->dbInfo),
+				                                    self->initialized.getFuture() && remoteRecovered(self->dbInfo),
 				                                    zeroHealthyTeams[1],
 				                                    IsPrimary::False,
 				                                    processingUnhealthy,
@@ -1289,6 +1290,124 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 	return Void();
 }
 
+ACTOR Future<Void> validateStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
+ACTOR Future<Void> scheduleAuditForRange(UID auditId,
+                                         KeyRange range,
+                                         AuditType type,
+                                         Reference<ActorCollection> actors,
+                                         Reference<KeyRangeMap<AuditPhase>> auditMap);
+ACTOR Future<Void> doAuditStorage(Reference<ActorCollection> actors,
+                                     Reference<KeyRangeMap<AuditPhase>> auditMap,
+                                     StorageServerInterface ssi,
+                                     AuditStorageRequest req);
+
+ACTOR Future<Void> validateStorage(Reference<DataDistributor> self, TriggerAuditRequest req) {
+	// TODO(heliu): Load running audit, and create one if no audit is running.
+	state Reference<KeyRangeMap<AuditPhase>> auditMap =
+	    makeReference<KeyRangeMap<AuditPhase>>(AuditPhase::Invalid, allKeys.end);
+	state Reference<ActorCollection> actors = makeReference<ActorCollection>(true);
+	state UID auditId = deterministicRandom()->randomUniqueID();
+
+	Ranges f = auditMap.intersectingRanges(req.range);
+	for (auto it = f.begin(); it != f.end(); ++it) {
+		if (it->value() == AuditPhase::Invalid || it->value() == AuditPhase::Error) {
+			subReq.range = KeyRangeRef(it->range().begin, it->range().end);
+			actors->add(scheduleAuditForRange(
+			    auditId, KeyRangeRef(it->range().begin, it->range().end), req.getType(), actors, auditMap));
+		}
+	}
+
+	try {
+		wait(actors.getResult());
+		req.reply.send(Void());
+	} catch (Error& e) {
+		TraceEvent(SevWarnAlways, "DDValidateStorageError", req.requestId)
+		    .errorUnsuppressed(e)
+		    .detail("Range", req.range);
+		req.reply.sendError(e);
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> scheduleAuditForRange(UID auditId,
+                                         KeyRange range,
+                                         AuditType type,
+                                         Reference<ActorCollection> actors,
+                                         Reference<KeyRangeMap<AuditPhase>> auditMap) {
+	state Key begin = req.range.begin;
+
+	while (begin < req.range.end) {
+		state Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+		try {
+			std::cout << "1" << std::endl;
+			state RangeResult shards = wait(krmGetRanges(&tr,
+			                                             keyServersPrefix,
+			                                             KeyRangeRef(begin, req.end),
+			                                             SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+			                                             SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
+			ASSERT(!shards.empty());
+
+			state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+
+			state int i = 0;
+			for (i = 0; i < shards.size() - 1; ++i) {
+				std::cout << "2" << std::endl;
+				std::vector<UID> src;
+				std::vector<UID> dest;
+				UID srcId, destId;
+				decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
+
+				const int idx = deterministicRandom()->randomInt(0, src.size());
+				Optional<Value> serverListValue = wait(tr.get(serverListKeyFor(src[idx])));
+				ASSERT(serverListValue.present());
+				const StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
+
+				AuditStorageRequest req(auditId,KeyRangeRef(shards[i].key, shards[i + 1].key), type);
+				actors->add(doAuditStorage(actors, auditMap, ssi, req));
+				begin = req.range.end;
+				std::cout << "3" << std::endl;
+				wait(delay(0.01));
+			}
+		} catch (Error& e) {
+			TraceEvent(SevWarnAlways, "TestValidateStorageError").errorUnsuppressed(e).detail("Range", range);
+			wait(tr.onError(e));
+		}
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> doAuditStorage(Reference<ActorCollection> actors,
+                                     Reference<KeyRangeMap<AuditPhase>> auditMap,
+                                     StorageServerInterface ssi,
+                                     AuditStorageRequest req) {
+	try {
+		auditMap->insert(req.range, AuditPhase::Running);
+		ValidateStorageResult vResult = wait(ssi.validateStorage.getReply(req));
+		TraceEvent e(vResult.error.empty() ? SevInfo : SevWarnAlways, "DDValidateStorageResult", req.requestId);
+		e.detail("Range", req.range);
+		e.detail("StorageServer", ssi.toString());
+		if (!vResult.error.empty()) {
+			e.detail("ErrorMessage", vResult.error);
+		}
+	} catch (Error& e) {
+		TraceEvent(SevWarning, "DDValidateStorageError", req.requestId)
+		    .errorUnsuppressed(e)
+		    .detail("Range", req.range)
+		    .detail("StorageServer", ssi.toString());
+		if (e.code() != error_code_actor_cancelled) {
+			actors.add(ScheduleAuditForRange(req.id, req.range, req.getType(), actors, auditMap));
+		}
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<ServerDBInfo> const> db) {
 	state Reference<DataDistributor> self(new DataDistributor(db, di.id()));
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
@@ -1356,6 +1475,9 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			}
 			when(GetStorageWigglerStateRequest req = waitNext(di.storageWigglerState.getFuture())) {
 				req.reply.send(getStorageWigglerStates(self));
+			}
+			when(TriggerAuditRequest req = waitNext(di.validateStorage.getFuture())) {
+				actors.add(validateStorage(self, req));
 			}
 		}
 	} catch (Error& err) {
