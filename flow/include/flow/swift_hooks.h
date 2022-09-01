@@ -292,7 +292,38 @@ SWIFT_EXPORT_FROM(swift_Concurrency) SWIFT_CC(swift)
 void (*swift_task_enqueueMainExecutor_hook)(
         Job *job, swift_task_enqueueMainExecutor_original original);
 
+SWIFT_EXPORT_FROM(swift_Concurrency) SWIFT_CC(swift)
+void swift_job_run(Job *job, ExecutorRef executor);
 
+
+// FIXME: why is adding this function causing TDB issues, even if it is not a Swift declared thing?
+//    <unknown>:0: error: symbol '_Z17s_job_run_genericP3Job' (_Z17s_job_run_genericP3Job) is in generated IR file, but not in TBD file
+//    <unknown>:0: error: please submit a bug report (https://swift.org/contributing/#reporting-bugs) and include the project, and add '-Xfrontend -validate-tbd-against-ir=none' to squash the errors
+//    WORKAROUND: skipping TBD validation
+// This function exists so we can get the generic executor, and don't have to do that from Swift.
+void swift_job_run_generic(Job *job) {
+	// FIXME: why can't I move impl to swift_hooks.cpp? It should be found properly...
+	swift_job_run(job, ExecutorRef::generic());
+}
+
+SWIFT_CC(swift)
+void net2_enqueueGlobal_hook_impl(Job* _Nonnull job,
+//                              swift_task_enqueueGlobal_original _Nonnull original) {
+                              void (* _Nonnull)(Job *) __attribute__((swiftcall))) {
+	printf("[c++] intercepted job enqueue: %p - run it inline\n", job);
+	swift_job_run(job, ExecutorRef::generic());
+}
+
+// TODO: have this hook up a concrete event loop, not just pretend to do so; it'd take a Net2 instance
+void installGlobalSwiftConcurrencyHooks() {
+	//   'SWIFT_CC(swift) void ((* _Nullable))(Job *, swift_task_enqueueGlobal_original _Nonnull) __attribute__((swiftcall))'
+	// 	  (aka 'void (*)(Job *         , void (* _Nonnull)(Job *) __attribute__((swiftcall))) __attribute__((swiftcall))')
+	// 	  (aka 'void    (Job * _Nonnull, void (* _Nonnull)(Job *) __attribute__((swiftcall)))')
+	// from incompatible type
+	// 	  'void (Job * _Nonnull, swift_task_enqueueGlobal_original _Nonnull)'
+	swift_task_enqueueGlobal_hook = &net2_enqueueGlobal_hook_impl;
+}
 
 
 #endif
+

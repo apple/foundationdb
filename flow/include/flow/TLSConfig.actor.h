@@ -119,7 +119,8 @@ private:
 	friend class LoadAsyncActorState;
 };
 
-class TLSConfig {
+class SWIFT_CXX_REF_IMMORTAL
+TLSConfig {
 public:
 	enum {
 		OPT_TLS = 100000,
@@ -133,6 +134,11 @@ public:
 
 	TLSConfig() = default;
 	explicit TLSConfig(TLSEndpointType endpointType) : endpointType(endpointType) {}
+
+
+	static TLSConfig* make() {
+		return new TLSConfig();
+	}
 
 	void setCertificatePath(const std::string& path) {
 		tlsCertPath = path;

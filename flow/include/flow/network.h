@@ -21,6 +21,7 @@
 #ifndef FLOW_OPENNETWORK_H
 #define FLOW_OPENNETWORK_H
 #include "flow/ProtocolVersion.h"
+#include "flow/swift.h"
 #pragma once
 
 #include <array>
@@ -496,12 +497,17 @@ typedef void* flowGlobalType;
 typedef NetworkAddress (*NetworkAddressFuncPtr)();
 typedef NetworkAddressList (*NetworkAddressesFuncPtr)();
 
-class TLSConfig;
-class INetwork;
+class SWIFT_CXX_REF_IMMORTAL TLSConfig;
+
+class SWIFT_CXX_REF_IMMORTAL INetwork;
+
 extern INetwork* g_network;
 extern INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool = false, bool useMetrics = false);
+extern INetwork* _swift_newNet2(const TLSConfig* tlsConfig, bool useThreadPool = false, bool useMetrics = false) {
+	return newNet2(tlsConfig, useThreadPool, useMetrics);
+}
 
-class INetwork {
+class SWIFT_CXX_REF_IMMORTAL INetwork {
 public:
 	// This interface abstracts the physical or simulated network, event loop and hardware that FoundationDB is running
 	// on. Note that there are tools for disk access, scheduling, etc as well as networking, and that almost all access

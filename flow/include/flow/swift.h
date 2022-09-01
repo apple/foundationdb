@@ -40,6 +40,10 @@
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 
+# define SWIFT_CXX_REF_IMMORTAL __attribute__((swift_attr("import_as_ref"))) __attribute__((swift_attr("retain:immortal"))) __attribute__((swift_attr("release:immortal")))
+
+// ==== ----------------------------------------------------------------------------------------------------------------
+
 /// A count in nanoseconds.
 using JobDelay = unsigned long long;
 
@@ -68,6 +72,19 @@ public:
 
 class AsyncTask: public Job {
 
+};
+
+class ExecutorRef {
+	void* Identity;
+	uintptr_t Implementation;
+
+	constexpr ExecutorRef(void *identity, uintptr_t implementation)
+	  : Identity(identity), Implementation(implementation) {}
+
+public:
+	constexpr static ExecutorRef generic() {
+		return ExecutorRef(nullptr, 0);
+	}
 };
 
 #endif

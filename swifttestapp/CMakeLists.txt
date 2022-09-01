@@ -17,4 +17,5 @@ target_link_directories(swifttestapp PRIVATE
   "/opt/rh/devtoolset-8/root/usr/lib/gcc/x86_64-redhat-linux/8"
 )
 
-target_compile_options(swifttestapp PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++17 -enable-experimental-cxx-interop>")
+# TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?
+target_compile_options(swifttestapp PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++17 -enable-experimental-cxx-interop -Xfrontend -validate-tbd-against-ir=none>")

@@ -1,17 +1,23 @@
 import Flow
-print("Hello World")
+//import std
 
-/*
-import Foundation
+print("[swift] start")
 
-let tls = TLSConfig() // TODO: potentially
-let net: INetwork = newNet2()
+installGlobalSwiftConcurrencyHooks() // hook swift concurrency up to the net runloop
 
-net.installSwiftConcurrencyHooks() // hook swift concurrency up to the net runloop
-
-Task {
-    print("Hello!") // this should have been executed on the net2 runloop
+func test() async {
+    print("[swift] executing inside \(#function)")
 }
 
-Thread.sleep(1000)
-*/
+let task = Task { // task execution will be intercepted
+    print("[swift] Started a task...")
+    await test()
+    print("[swift] returned from 'await test()'")
+    exit(0)
+}
+
+// ==== ---------------------------------------------------------------------------------------------------------------
+
+// FIXME: await task.value awaiting on top level causes:
+// swift-frontend: /home/build-user/swift/lib/SILGen/SILGen.cpp:2068: (anonymous namespace)::SourceFileScope::~SourceFileScope(): Assertion `exitFuncDecl && "Failed to find exit function declaration"' failed.
+while true {}
