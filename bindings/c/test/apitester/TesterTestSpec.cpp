@@ -35,8 +35,8 @@ void processIntOption(const std::string& value, const std::string& optionName, i
 		throw TesterError(fmt::format("Invalid test file. Invalid value {} for {}", value, optionName));
 	}
 	if (res < minVal || res > maxVal) {
-		throw TesterError(
-		    fmt::format("Invalid test file. Value for {} must be between {} and {}", optionName, minVal, maxVal));
+		throw TesterError(fmt::format(
+		    "Invalid test file. Value {} for {} must be between {} and {}", res, optionName, minVal, maxVal));
 	}
 }
 
