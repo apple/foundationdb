@@ -102,6 +102,23 @@ public:
 #endif
 };
 
+class Task {
+public:
+	virtual void operator()() = 0;
+};
+
+struct OrderedTask {
+	int64_t priority;
+	TaskPriority taskID;
+	Task* task;
+	OrderedTask(int64_t priority, TaskPriority taskID, Task* task) : priority(priority), taskID(taskID), task(task) {}
+	bool operator<(OrderedTask const& rhs) const { return priority < rhs.priority; }
+};
+
+class Net2;
+
+extern Net2* g_net2;
+
 } // namespace N2
 
 #endif

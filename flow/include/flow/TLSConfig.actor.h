@@ -197,7 +197,9 @@ public:
 	std::string getKeyPathSync() const;
 	std::string getCAPathSync() const;
 
+#ifndef PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP
 private:
+#endif
 	ACTOR static Future<LoadedTLSConfig> loadAsync(const TLSConfig* self);
 	template <typename T>
 	friend class LoadAsyncActorState;

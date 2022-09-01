@@ -70,7 +70,7 @@ void net2_swift_task_enqueueGlobal(Job *job,
 	N2::Net2 *net = N2::g_net2;
 	ASSERT(net);
 
-	double at = net->now();
+	double at = 0.0; // TODO: now() net->now();
 	int64_t priority = 1; // FIXME: how to determine
 	TaskPriority taskID; // FIXME: how to determine
 
@@ -78,7 +78,7 @@ void net2_swift_task_enqueueGlobal(Job *job,
 	N2::OrderedTask orderedTask = N2::OrderedTask(priority, taskID, jobTask);
 	//    net->threadReady.push(orderedTask);
 
-	net->ready.push(orderedTask);
+	// TODO: add function that does this to Net2.actor.cpp	net->ready.push(orderedTask);
 
 	assert(false && "just mocking out APIs");
 }
@@ -101,6 +101,7 @@ void net2_swift_task_enqueueGlobalWithDelay(JobDelay delay, Job *job) {
 	ASSERT(false && "just mocking out APIs");
 }
 
-void N2::Net2::installSwiftConcurrencyHooks() {
+// TODO: goes into Net2.actor.cpp (somehow) 
+// void N2::Net2::installSwiftConcurrencyHooks() {
 	// swift_task_enqueueGlobal_hook = net2_swift_task_enqueueGlobal; // FIXME: slight type issues still
-}
+// }

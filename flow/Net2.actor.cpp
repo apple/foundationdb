@@ -110,25 +110,11 @@ DESCR struct SlowTask {
 
 namespace N2 { // No indent, it's the whole file
 
-class Net2;
 class Peer;
 class Connection;
 
 // Outlives main
 Net2* g_net2 = nullptr;
-
-class Task {
-public:
-	virtual void operator()() = 0;
-};
-
-struct OrderedTask {
-	int64_t priority;
-	TaskPriority taskID;
-	Task* task;
-	OrderedTask(int64_t priority, TaskPriority taskID, Task* task) : priority(priority), taskID(taskID), task(task) {}
-	bool operator<(OrderedTask const& rhs) const { return priority < rhs.priority; }
-};
 
 template <class T>
 class ReadyQueue : public std::priority_queue<T, std::vector<T>> {
@@ -2124,7 +2110,7 @@ INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetric
 }
 
 INetwork* _swift_newNet2(TLSConfig* tlsConfig, bool useThreadPool, bool useMetrics) {
-	return newNet2(tlsConfig, useThreadPool, useMetrics);
+	return newNet2(*tlsConfig, useThreadPool, useMetrics);
 }
 
 struct TestGVR {

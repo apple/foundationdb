@@ -70,7 +70,7 @@ public:
     }
 };
 
-class AsyncTask: public Job {
+class AsyncSwiftTask: public Job {
 
 };
 

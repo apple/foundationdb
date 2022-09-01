@@ -23,6 +23,7 @@
 
 #include "swift.h"
 #include <stdint.h>
+#include "flow/AsioReactor.h"
 
 #if !defined(__has_feature)
 #define __has_feature(x) 0

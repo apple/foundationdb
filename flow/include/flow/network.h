@@ -504,7 +504,7 @@ class SWIFT_CXX_REF_IMMORTAL INetwork;
 extern INetwork* g_network;
 extern INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool = false, bool useMetrics = false);
 extern INetwork* _swift_newNet2(const TLSConfig* tlsConfig, bool useThreadPool = false, bool useMetrics = false) {
-	return newNet2(tlsConfig, useThreadPool, useMetrics);
+	return newNet2(*tlsConfig, useThreadPool, useMetrics);
 }
 
 class SWIFT_CXX_REF_IMMORTAL INetwork {
