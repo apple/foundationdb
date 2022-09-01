@@ -61,7 +61,14 @@ struct BlobCipherKeyCacheMetrics {
 
 // The counters should be member of BlobCipherKeyCache, but moving it into BlobCipherKeyCache will make flow depend on
 // fdbrpc.
-extern BlobCipherKeyCacheMetrics g_blobCipherKeyCacheMetrics;
+extern BlobCipherKeyCacheMetrics* g_blobCipherKeyCacheMetrics;
+
+inline BlobCipherKeyCacheMetrics* getBlobCipherKeyCacheMetrics() {
+	if (g_blobCipherKeyCacheMetrics == nullptr) {
+		g_blobCipherKeyCacheMetrics = new BlobCipherKeyCacheMetrics;
+	}
+	return g_blobCipherKeyCacheMetrics;
+}
 
 template <class T>
 Optional<UID> getEncryptKeyProxyId(const Reference<AsyncVar<T> const>& db) {
@@ -138,8 +145,8 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getL
 			    domain.first /*domainId*/, domain.second /*domainName*/, request.arena);
 		}
 	}
-	g_blobCipherKeyCacheMetrics.cacheHit += cipherKeys.size();
-	g_blobCipherKeyCacheMetrics.cacheMiss += domains.size() - cipherKeys.size();
+	getBlobCipherKeyCacheMetrics()->cacheHit += cipherKeys.size();
+	getBlobCipherKeyCacheMetrics()->cacheMiss += domains.size() - cipherKeys.size();
 	if (request.encryptDomainInfos.empty()) {
 		return cipherKeys;
 	}
@@ -173,7 +180,7 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getL
 		// In case encryptKeyProxy has changed, retry the request.
 		when(wait(onEncryptKeyProxyChange(db))) {}
 	}
-	g_blobCipherKeyCacheMetrics.getLatestCipherKeysLatency.addMeasurement(now() - startTime);
+	getBlobCipherKeyCacheMetrics()->getLatestCipherKeysLatency.addMeasurement(now() - startTime);
 	return cipherKeys;
 }
 
@@ -233,8 +240,8 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncry
 			uncachedBaseCipherIds.insert(std::make_pair(details.encryptDomainId, details.baseCipherId));
 		}
 	}
-	g_blobCipherKeyCacheMetrics.cacheHit += cipherKeys.size();
-	g_blobCipherKeyCacheMetrics.cacheMiss += cipherDetails.size() - cipherKeys.size();
+	getBlobCipherKeyCacheMetrics()->cacheHit += cipherKeys.size();
+	getBlobCipherKeyCacheMetrics()->cacheMiss += cipherDetails.size() - cipherKeys.size();
 	if (uncachedBaseCipherIds.empty()) {
 		return cipherKeys;
 	}
@@ -279,7 +286,7 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncry
 		// In case encryptKeyProxy has changed, retry the request.
 		when(wait(onEncryptKeyProxyChange(db))) {}
 	}
-	g_blobCipherKeyCacheMetrics.getCipherKeysLatency.addMeasurement(now() - startTime);
+	getBlobCipherKeyCacheMetrics()->getCipherKeysLatency.addMeasurement(now() - startTime);
 	return cipherKeys;
 }
 

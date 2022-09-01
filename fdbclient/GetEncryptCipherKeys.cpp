@@ -20,4 +20,4 @@
 
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 
-BlobCipherKeyCacheMetrics g_blobCipherKeyCacheMetrics;
+BlobCipherKeyCacheMetrics* g_blobCipherKeyCacheMetrics = nullptr;
