@@ -3338,7 +3338,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 					         locationInfo.locations,
 					         &StorageServerInterface::getValue,
 					         GetValueRequest(span.context,
-					         useTenant ? trState->getTenantInfo() : TenantInfo(),
+					                         useTenant ? trState->getTenantInfo() : TenantInfo(),
 					                         key,
 					                         ver,
 					                         trState->cx->sampleReadTags() ? trState->options.readTags

@@ -7512,7 +7512,7 @@ RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"))
 
 class KeyValueStoreRedwood : public IKeyValueStore {
 public:
-	KeyValueStoreRedwood(std::string filename, UID logID,  Reference<IEncryptionKeyProvider> encryptionKeyProvider)
+	KeyValueStoreRedwood(std::string filename, UID logID, Reference<IEncryptionKeyProvider> encryptionKeyProvider)
 	  : m_filename(filename), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS,
 	                                            0,
 	                                            std::to_string(maxConcurrentReadsLaunchLimit)),
