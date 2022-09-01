@@ -86,8 +86,8 @@ public:
 		int64_t getLatestEncryptCipherKeysReqs = 0;
 		double getEncryptCipherKeysTime = 0.0;
 		double getLatestEncryptCipherKeysTime = 0.0;
-		double encryptTime = 0.0;
-		double decryptTime = 0.0;
+		double encryptionCPUTime = 0.0;
+		double decryptionCPUTime = 0.0;
 	} stats;
 };
 

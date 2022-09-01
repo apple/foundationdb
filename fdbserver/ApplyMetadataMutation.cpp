@@ -71,14 +71,14 @@ public:
 	                           Reference<ILogSystem> logSystem_,
 	                           LogPushData* toCommit_,
 	                           const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* cipherKeys_,
-	                           double* encryptionTime_,
+	                           double* encryptionCPUTime_,
 	                           bool& confChange_,
 	                           Version version,
 	                           Version popVersion_,
 	                           bool initialCommit_)
 	  : spanContext(spanContext_), dbgid(proxyCommitData_.dbgid), arena(arena_), mutations(mutations_),
 	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_), cipherKeys(cipherKeys_),
-	    encryptionTime(encryptionTime_), confChange(confChange_), logSystem(logSystem_), version(version),
+	    encryptionCPUTime(encryptionCPUTime_), confChange(confChange_), logSystem(logSystem_), version(version),
 	    popVersion(popVersion_), vecBackupKeys(&proxyCommitData_.vecBackupKeys), keyInfo(&proxyCommitData_.keyInfo),
 	    cacheInfo(&proxyCommitData_.cacheInfo),
 	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
@@ -116,7 +116,7 @@ private:
 
 	// Cipher keys used to encrypt to be committed mutations
 	const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* cipherKeys = nullptr;
-	double* encryptionTime = nullptr;
+	double* encryptionCPUTime = nullptr;
 
 	// Flag indicates if the configure is changed
 	bool& confChange;
@@ -170,7 +170,7 @@ private:
 		} else {
 			ASSERT(cipherKeys != nullptr);
 			Arena arena;
-			toCommit->writeTypedMessage(m.encryptMetadata(*cipherKeys, arena, encryptionTime));
+			toCommit->writeTypedMessage(m.encryptMetadata(*cipherKeys, arena, encryptionCPUTime));
 		}
 	}
 
@@ -1283,7 +1283,7 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             const VectorRef<MutationRef>& mutations,
                             LogPushData* toCommit,
                             const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* pCipherKeys,
-                            double* encryptionTime,
+                            double* encryptionCPUTime,
                             bool& confChange,
                             Version version,
                             Version popVersion,
@@ -1295,7 +1295,7 @@ void applyMetadataMutations(SpanContext const& spanContext,
 	                           logSystem,
 	                           toCommit,
 	                           pCipherKeys,
-	                           encryptionTime,
+	                           encryptionCPUTime,
 	                           confChange,
 	                           version,
 	                           popVersion,

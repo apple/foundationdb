@@ -1227,7 +1227,7 @@ public:
 				try {
 					page->postReadHeader(c.pageID);
 					// These pages are not encrypted
-					page->postReadPayload(c.pageID, &self->keyProvider->stats.decryptTime);
+					page->postReadPayload(c.pageID, &self->keyProvider->stats.decryptionCPUTime);
 				} catch (Error& e) {
 					TraceEvent(SevError, "RedwoodChecksumFailed")
 					    .error(e)
@@ -1668,8 +1668,8 @@ struct RedwoodMetrics {
 		unsigned int pagerEvictFail;
 		unsigned int btreeLeafPreload;
 		unsigned int btreeLeafPreloadExt;
-		double encryptionTime;
-		double decryptionTime;
+		double encryptionCPUTime;
+		double decryptionCPUTime;
 	};
 
 	RedwoodMetrics() {
@@ -2757,7 +2757,7 @@ public:
 			page = page->clone();
 		}
 
-		page->preWrite(pageIDs.front(), &keyProvider->stats.encryptTime);
+		page->preWrite(pageIDs.front(), &keyProvider->stats.encryptionCPUTime);
 
 		int blockSize = header ? smallestPhysicalBlock : physicalPageSize;
 		Future<Void> f;
@@ -3000,7 +3000,7 @@ public:
 				EncryptionKey k = wait(self->keyProvider->getSecrets(page->encryptionKey));
 				page->encryptionKey = k;
 			}
-			page->postReadPayload(pageID, &self->keyProvider->stats.decryptTime);
+			page->postReadPayload(pageID, &self->keyProvider->stats.decryptionCPUTime);
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p\n",
 			             self->filename.c_str(),
 			             toString(pageID).c_str(),
@@ -3068,7 +3068,7 @@ public:
 				EncryptionKey k = wait(self->keyProvider->getSecrets(page->encryptionKey));
 				page->encryptionKey = k;
 			}
-			page->postReadPayload(pageIDs.front(), &self->keyProvider->stats.decryptTime);
+			page->postReadPayload(pageIDs.front(), &self->keyProvider->stats.decryptionCPUTime);
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p bytes=%d\n",
 			             self->filename.c_str(),
 			             toString(pageIDs).c_str(),

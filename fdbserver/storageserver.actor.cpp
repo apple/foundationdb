@@ -1227,14 +1227,14 @@ public:
 				value = 0.0;
 				return ret;
 			});
-			specialCounter(cc, "StorageEncryptMS", [self]() {
-				double& value = self->encryptionKeyProvider->stats.encryptTime;
+			specialCounter(cc, "StorageEncryptionCPUMS", [self]() {
+				double& value = self->encryptionKeyProvider->stats.encryptionCPUTime;
 				int64_t ret = value * 1000;
 				value = 0.0;
 				return ret;
 			});
-			specialCounter(cc, "StorageDecryptMS", [self]() {
-				double& value = self->encryptionKeyProvider->stats.decryptTime;
+			specialCounter(cc, "StorageDecryptionCPUMS", [self]() {
+				double& value = self->encryptionKeyProvider->stats.decryptionCPUTime;
 				int64_t ret = value * 1000;
 				value = 0.0;
 				return ret;

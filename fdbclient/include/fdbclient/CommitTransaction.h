@@ -143,10 +143,10 @@ struct MutationRef {
 	MutationRef encrypt(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
 	                    const EncryptCipherDomainId& domainId,
 	                    Arena& arena,
-	                    double* timer = nullptr) const {
+	                    double* elapsed = nullptr) const {
 		ASSERT_NE(domainId, ENCRYPT_INVALID_DOMAIN_ID);
 		double startTime = 0.0;
-		if (timer != nullptr) {
+		if (elapsed != nullptr) {
 			startTime = timer_monotonic();
 		}
 		auto textCipherItr = cipherKeys.find(domainId);
@@ -166,24 +166,24 @@ struct MutationRef {
 		StringRef headerRef(reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader));
 		StringRef payload =
 		    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), header, arena)->toStringRef();
-		if (timer != nullptr) {
-			*timer += timer_monotonic() - startTime;
+		if (elapsed != nullptr) {
+			*elapsed += timer_monotonic() - startTime;
 		}
 		return MutationRef(Encrypted, headerRef, payload);
 	}
 
 	MutationRef encryptMetadata(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
 	                            Arena& arena,
-	                            double* timer = nullptr) const {
-		return encrypt(cipherKeys, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, arena, timer);
+	                            double* elapsed = nullptr) const {
+		return encrypt(cipherKeys, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, arena, elapsed);
 	}
 
 	MutationRef decrypt(const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys,
 	                    Arena& arena,
 	                    StringRef* buf = nullptr,
-	                    double* timer = nullptr) const {
+	                    double* elapsed = nullptr) const {
 		double startTime = 0.0;
-		if (timer != nullptr) {
+		if (elapsed != nullptr) {
 			startTime = timer_monotonic();
 		}
 		const BlobCipherEncryptHeader* header = encryptionHeader();
@@ -199,8 +199,8 @@ struct MutationRef {
 		ArenaReader reader(arena, plaintext, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 		MutationRef mutation;
 		reader >> mutation;
-		if (timer != nullptr) {
-			*timer += timer_monotonic() - startTime;
+		if (elapsed != nullptr) {
+			*elapsed += timer_monotonic() - startTime;
 		}
 		return mutation;
 	}
