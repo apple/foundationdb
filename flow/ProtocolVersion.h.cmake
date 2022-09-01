@@ -36,9 +36,13 @@ constexpr uint64_t minCompatibleProtocolVersionValue = @FDB_PV_MIN_COMPATIBLE_VE
 // Used only for testing upgrades to the future version
 constexpr uint64_t futureProtocolVersionValue = @FDB_PV_FUTURE_VERSION@;
 
+// Snowflake specific incompatible window (lastValid, invalidRange, firstValid).
+constexpr uint64_t minIncompatibleSFCWindow = 0x0FDB00B0710A0000LL;
+constexpr uint64_t maxIncompatibleSFCWindow = 0x0FDB00C071200000LL;
+
 // The first check second expression version doesn't need to change because it's just for earlier protocol versions.
 #define PROTOCOL_VERSION_FEATURE(v, x)                                                                                 \
-	static_assert((v & 0xFFFFLL) == 0 || v < 0x0FDB00B071000000LL, "Unexpected feature protocol version");             \
+	static_assert((v & @FDB_PV_LSB_MASK@) == 0 || v < 0x0FDB00B071000000LL, "Unexpected feature protocol version");             \
 	static_assert(v <= defaultProtocolVersionValue, "Feature protocol version too large");                             \
 	struct x {                                                                                                         \
 		static constexpr uint64_t protocolVersion = v;                                                                 \
@@ -73,7 +77,11 @@ public:
 	constexpr ProtocolVersion normalizedVersion() const {
 		return ProtocolVersion(_version & compatibleProtocolVersionMask);
 	}
-	constexpr bool isValid() const { return version() >= minValidProtocolVersion; }
+
+	constexpr bool isValid() const {
+		return (version() >= minValidProtocolVersion &&
+				(version() <= minIncompatibleSFCWindow || version() >= maxIncompatibleSFCWindow));
+	}
 
 	constexpr bool isInvalid() const { return version() == invalidProtocolVersion; }
 
@@ -201,7 +209,7 @@ static_assert(defaultProtocolVersion.version() < @FDB_PV_LEFT_MOST_CHECK@, "Unex
 // so prevent them from being inadvertently changed.
 //
 // We also do not modify the protocol version for patch releases, so prevent modifying the patch version digit.
-static_assert((defaultProtocolVersion.version() & 0xF0FFFFLL) == 0, "Unexpected protocol version");
+static_assert((defaultProtocolVersion.version() & @FDB_PV_LSB_MASK@) == 0, "Unexpected protocol version");
 
 // Downgrades must support at least one minor version.
 static_assert(minInvalidProtocolVersion.version() >=
