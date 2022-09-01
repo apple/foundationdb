@@ -208,7 +208,7 @@ Tuple& Tuple::append(double value) {
 	return *this;
 }
 
-Tuple& Tuple::append(nullptr_t) {
+Tuple& Tuple::append(std::nullptr_t) {
 	offsets.push_back(data.size());
 	data.push_back(data.arena(), (uint8_t)'\x00');
 	return *this;
