@@ -641,6 +641,30 @@ std::vector<RangeToSplit> findTenantShardBoundaries(KeyRangeMap<ShardTrackedData
 	return result;
 }
 
+bool faultLinesMatch(std::vector<RangeToSplit>& ranges, std::vector<std::vector<KeyRef>>& expectedFaultLines) {
+	if (ranges.size() != expectedFaultLines.size()) {
+		return false;
+	}
+
+	for (auto& range : ranges) {
+		KeyRangeRef keys = KeyRangeRef(range.shard->begin(), range.shard->end());
+		traceSplit(keys, range.faultLines);
+	}
+
+	for (int r = 0; r < ranges.size(); r++) {
+		if (ranges[r].faultLines.size() != expectedFaultLines[r].size()) {
+			return false;
+		}
+		for (int fl = 0; fl < ranges[r].faultLines.size(); fl++) {
+			if (ranges[r].faultLines[fl] != expectedFaultLines[r][fl]) {
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
 TEST_CASE("/DataDistribution/Tenant/SingleShardSplit") {
 	wait(Future<Void>(Void()));
 	ShardTrackedData data;
@@ -659,18 +683,8 @@ TEST_CASE("/DataDistribution/Tenant/SingleShardSplit") {
 
 	std::vector<RangeToSplit> result = findTenantShardBoundaries(&shards, tenantKeys);
 
-	ASSERT(result.size() == 1);
-	std::vector<KeyRef> expectedFaultLines = { "a"_sr, "b"_sr, "c"_sr, "f"_sr };
-	ASSERT(result[0].faultLines.size() == expectedFaultLines.size());
-
-	for (auto& range : result) {
-		KeyRangeRef keys = KeyRangeRef(range.shard->begin(), range.shard->end());
-		traceSplit(keys, range.faultLines);
-	}
-
-	for (int fl = 0; fl < result[0].faultLines.size(); fl++) {
-		ASSERT(result[0].faultLines[fl] == expectedFaultLines[fl]);
-	}
+	std::vector<std::vector<KeyRef>> expectedFaultLines = { { "a"_sr, "b"_sr, "c"_sr, "f"_sr } };
+	ASSERT(faultLinesMatch(result, expectedFaultLines));
 
 	return Void();
 }
@@ -693,7 +707,8 @@ TEST_CASE("/DataDistribution/Tenant/SingleShardTenantAligned") {
 
 	std::vector<RangeToSplit> result = findTenantShardBoundaries(&shards, tenantKeys);
 
-	ASSERT(result.size() == 0);
+	std::vector<std::vector<KeyRef>> expectedFaultLines = {};
+	ASSERT(faultLinesMatch(result, expectedFaultLines));
 
 	return Void();
 }
@@ -716,19 +731,8 @@ TEST_CASE("/DataDistribution/Tenant/SingleShardTenantAlignedAtStart") {
 
 	std::vector<RangeToSplit> result = findTenantShardBoundaries(&shards, tenantKeys);
 
-	ASSERT(result.size() == 1);
-
-	std::vector<KeyRef> expectedFaultLines = { "a"_sr, "d"_sr, "f"_sr };
-	ASSERT(result[0].faultLines.size() == expectedFaultLines.size());
-
-	for (auto& range : result) {
-		KeyRangeRef keys = KeyRangeRef(range.shard->begin(), range.shard->end());
-		traceSplit(keys, range.faultLines);
-	}
-
-	for (int fl = 0; fl < result[0].faultLines.size(); fl++) {
-		ASSERT(result[0].faultLines[fl] == expectedFaultLines[fl]);
-	}
+	std::vector<std::vector<KeyRef>> expectedFaultLines = { { "a"_sr, "d"_sr, "f"_sr } };
+	ASSERT(faultLinesMatch(result, expectedFaultLines));
 
 	return Void();
 }
@@ -751,19 +755,8 @@ TEST_CASE("/DataDistribution/Tenant/SingleShardTenantAlignedAtEnd") {
 
 	std::vector<RangeToSplit> result = findTenantShardBoundaries(&shards, tenantKeys);
 
-	ASSERT(result.size() == 1);
-
-	std::vector<KeyRef> expectedFaultLines = { "a"_sr, "b"_sr, "f"_sr };
-	ASSERT(result[0].faultLines.size() == expectedFaultLines.size());
-
-	for (auto& range : result) {
-		KeyRangeRef keys = KeyRangeRef(range.shard->begin(), range.shard->end());
-		traceSplit(keys, range.faultLines);
-	}
-
-	for (int fl = 0; fl < result[0].faultLines.size(); fl++) {
-		ASSERT(result[0].faultLines[fl] == expectedFaultLines[fl]);
-	}
+	std::vector<std::vector<KeyRef>> expectedFaultLines = { { "a"_sr, "b"_sr, "f"_sr } };
+	ASSERT(faultLinesMatch(result, expectedFaultLines));
 
 	return Void();
 }
@@ -797,16 +790,8 @@ TEST_CASE("/DataDistribution/Tenant/DoubleShardSplit") {
 		traceSplit(keys, range.faultLines);
 	}
 
-	ASSERT(result.size() == 2);
-	std::vector<KeyRef> expectedFaultLines[] = { { "a"_sr, "b"_sr, "c"_sr }, { "d"_sr, "e"_sr, "f"_sr } };
-
-	for (int r = 0; r < result.size(); r++) {
-		ASSERT(result[r].faultLines.size() == expectedFaultLines[r].size());
-
-		for (int fl = 0; fl < result[r].faultLines.size(); fl++) {
-			ASSERT(result[r].faultLines[fl] == expectedFaultLines[r][fl]);
-		}
-	}
+	std::vector<std::vector<KeyRef>> expectedFaultLines = { { "a"_sr, "b"_sr, "c"_sr }, { "d"_sr, "e"_sr, "f"_sr } };
+	ASSERT(faultLinesMatch(result, expectedFaultLines));
 
 	return Void();
 }
@@ -835,21 +820,8 @@ TEST_CASE("/DataDistribution/Tenant/DoubleShardTenantAlignedAtStart") {
 
 	std::vector<RangeToSplit> result = findTenantShardBoundaries(&shards, tenantKeys);
 
-	for (auto& range : result) {
-		KeyRangeRef keys = KeyRangeRef(range.shard->begin(), range.shard->end());
-		traceSplit(keys, range.faultLines);
-	}
-
-	ASSERT(result.size() == 1);
-	std::vector<KeyRef> expectedFaultLines[] = { { "d"_sr, "e"_sr, "f"_sr } };
-
-	for (int r = 0; r < result.size(); r++) {
-		ASSERT(result[r].faultLines.size() == expectedFaultLines[r].size());
-
-		for (int fl = 0; fl < result[r].faultLines.size(); fl++) {
-			ASSERT(result[r].faultLines[fl] == expectedFaultLines[r][fl]);
-		}
-	}
+	std::vector<std::vector<KeyRef>> expectedFaultLines = { { "d"_sr, "e"_sr, "f"_sr } };
+	ASSERT(faultLinesMatch(result, expectedFaultLines));
 
 	return Void();
 }
@@ -878,21 +850,8 @@ TEST_CASE("/DataDistribution/Tenant/DoubleShardTenantAlignedAtEnd") {
 
 	std::vector<RangeToSplit> result = findTenantShardBoundaries(&shards, tenantKeys);
 
-	for (auto& range : result) {
-		KeyRangeRef keys = KeyRangeRef(range.shard->begin(), range.shard->end());
-		traceSplit(keys, range.faultLines);
-	}
-
-	ASSERT(result.size() == 1);
-	std::vector<KeyRef> expectedFaultLines[] = { { "a"_sr, "b"_sr, "c"_sr } };
-
-	for (int r = 0; r < result.size(); r++) {
-		ASSERT(result[r].faultLines.size() == expectedFaultLines[r].size());
-
-		for (int fl = 0; fl < result[r].faultLines.size(); fl++) {
-			ASSERT(result[r].faultLines[fl] == expectedFaultLines[r][fl]);
-		}
-	}
+	std::vector<std::vector<KeyRef>> expectedFaultLines = { { "a"_sr, "b"_sr, "c"_sr } };
+	ASSERT(faultLinesMatch(result, expectedFaultLines));
 
 	return Void();
 }
