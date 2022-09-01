@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
@@ -589,14 +590,14 @@ std::vector<RangeToSplit> findTenantShardBoundaries(KeyRangeMap<ShardTrackedData
 			if (startShardSize->get().present()) {
 				Standalone<VectorRef<KeyRef>> faultLines;
 
-				faultLines.push_back(faultLines.arena(), shardContainingTenantStart->begin());
+				faultLines.push_back_deep(faultLines.arena(), shardContainingTenantStart->begin());
 				if (shardContainingTenantStart->begin() != tenantKeys.begin) {
-					faultLines.push_back(faultLines.arena(), tenantKeys.begin);
+					faultLines.push_back_deep(faultLines.arena(), tenantKeys.begin);
 				}
 				if (shardContainingTenantStart->end() != tenantKeys.end) {
-					faultLines.push_back(faultLines.arena(), tenantKeys.end);
+					faultLines.push_back_deep(faultLines.arena(), tenantKeys.end);
 				}
-				faultLines.push_back(faultLines.arena(), shardContainingTenantStart->end());
+				faultLines.push_back_deep(faultLines.arena(), shardContainingTenantStart->end());
 
 				result.emplace_back(shardContainingTenantStart, faultLines);
 			}
@@ -609,17 +610,17 @@ std::vector<RangeToSplit> findTenantShardBoundaries(KeyRangeMap<ShardTrackedData
 
 		if (startShardSize->get().present() && endShardSize->get().present()) {
 			if (shardContainingTenantStart->begin() != tenantKeys.begin) {
-				startShardFaultLines.push_back(startShardFaultLines.arena(), shardContainingTenantStart->begin());
-				startShardFaultLines.push_back(startShardFaultLines.arena(), tenantKeys.begin);
-				startShardFaultLines.push_back(startShardFaultLines.arena(), shardContainingTenantStart->end());
+				startShardFaultLines.push_back_deep(startShardFaultLines.arena(), shardContainingTenantStart->begin());
+				startShardFaultLines.push_back_deep(startShardFaultLines.arena(), tenantKeys.begin);
+				startShardFaultLines.push_back_deep(startShardFaultLines.arena(), shardContainingTenantStart->end());
 
 				result.emplace_back(shardContainingTenantStart, startShardFaultLines);
 			}
 
 			if (shardContainingTenantEnd->end() != tenantKeys.end) {
-				endShardFaultLines.push_back(endShardFaultLines.arena(), shardContainingTenantEnd->begin());
-				endShardFaultLines.push_back(endShardFaultLines.arena(), tenantKeys.end);
-				endShardFaultLines.push_back(endShardFaultLines.arena(), shardContainingTenantEnd->end());
+				endShardFaultLines.push_back_deep(endShardFaultLines.arena(), shardContainingTenantEnd->begin());
+				endShardFaultLines.push_back_deep(endShardFaultLines.arena(), tenantKeys.end);
+				endShardFaultLines.push_back_deep(endShardFaultLines.arena(), shardContainingTenantEnd->end());
 
 				result.emplace_back(shardContainingTenantEnd, endShardFaultLines);
 			}
@@ -629,9 +630,258 @@ std::vector<RangeToSplit> findTenantShardBoundaries(KeyRangeMap<ShardTrackedData
 	return result;
 }
 
-TEST_CASE("DataDistribution/Tenant/ShardSplitter") {
-	ShardTrackedData s1;
-	s1.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+TEST_CASE("/DataDistribution/Tenant/SingleShardSplit") {
+	wait(Future<Void>(Void()));
+	ShardTrackedData data;
+	ShardMetrics sm(StorageMetrics(), now(), 1);
+	data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+
+	KeyRangeMap<ShardTrackedData> shards;
+
+	KeyRef begin = "a"_sr, end = "f"_sr;
+	KeyRangeRef k(begin, end);
+	shards.insert(k, data);
+
+	KeyRangeRef tenantKeys("b"_sr, "c"_sr);
+
+	data.stats->set(sm);
+
+	std::vector<RangeToSplit> result = findTenantShardBoundaries(&shards, tenantKeys);
+
+	ASSERT(result.size() == 1);
+	std::vector<KeyRef> expectedFaultLines = { "a"_sr, "b"_sr, "c"_sr, "f"_sr };
+	ASSERT(result[0].faultLines.size() == expectedFaultLines.size());
+
+	for (auto& range : result) {
+		KeyRangeRef keys = KeyRangeRef(range.shard->begin(), range.shard->end());
+		traceSplit(keys, range.faultLines);
+	}
+
+	for (int fl = 0; fl < result[0].faultLines.size(); fl++) {
+		ASSERT(result[0].faultLines[fl] == expectedFaultLines[fl]);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Tenant/SingleShardTenantAligned") {
+	wait(Future<Void>(Void()));
+	ShardTrackedData data;
+	ShardMetrics sm(StorageMetrics(), now(), 1);
+	data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+
+	KeyRangeMap<ShardTrackedData> shards;
+
+	KeyRef begin = "a"_sr, end = "f"_sr;
+	KeyRangeRef k(begin, end);
+	shards.insert(k, data);
+
+	KeyRangeRef tenantKeys("a"_sr, "f"_sr);
+
+	data.stats->set(sm);
+
+	std::vector<RangeToSplit> result = findTenantShardBoundaries(&shards, tenantKeys);
+
+	ASSERT(result.size() == 0);
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Tenant/SingleShardTenantAlignedAtStart") {
+	wait(Future<Void>(Void()));
+	ShardTrackedData data;
+	ShardMetrics sm(StorageMetrics(), now(), 1);
+	data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+
+	KeyRangeMap<ShardTrackedData> shards;
+
+	KeyRef begin = "a"_sr, end = "f"_sr;
+	KeyRangeRef k(begin, end);
+	shards.insert(k, data);
+
+	KeyRangeRef tenantKeys("a"_sr, "d"_sr);
+
+	data.stats->set(sm);
+
+	std::vector<RangeToSplit> result = findTenantShardBoundaries(&shards, tenantKeys);
+
+	ASSERT(result.size() == 1);
+
+	std::vector<KeyRef> expectedFaultLines = { "a"_sr, "d"_sr, "f"_sr };
+	ASSERT(result[0].faultLines.size() == expectedFaultLines.size());
+
+	for (auto& range : result) {
+		KeyRangeRef keys = KeyRangeRef(range.shard->begin(), range.shard->end());
+		traceSplit(keys, range.faultLines);
+	}
+
+	for (int fl = 0; fl < result[0].faultLines.size(); fl++) {
+		ASSERT(result[0].faultLines[fl] == expectedFaultLines[fl]);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Tenant/SingleShardTenantAlignedAtEnd") {
+	wait(Future<Void>(Void()));
+	ShardTrackedData data;
+	ShardMetrics sm(StorageMetrics(), now(), 1);
+	data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+
+	KeyRangeMap<ShardTrackedData> shards;
+
+	KeyRef begin = "a"_sr, end = "f"_sr;
+	KeyRangeRef k(begin, end);
+	shards.insert(k, data);
+
+	KeyRangeRef tenantKeys("b"_sr, "f"_sr);
+
+	data.stats->set(sm);
+
+	std::vector<RangeToSplit> result = findTenantShardBoundaries(&shards, tenantKeys);
+
+	ASSERT(result.size() == 1);
+
+	std::vector<KeyRef> expectedFaultLines = { "a"_sr, "b"_sr, "f"_sr };
+	ASSERT(result[0].faultLines.size() == expectedFaultLines.size());
+
+	for (auto& range : result) {
+		KeyRangeRef keys = KeyRangeRef(range.shard->begin(), range.shard->end());
+		traceSplit(keys, range.faultLines);
+	}
+
+	for (int fl = 0; fl < result[0].faultLines.size(); fl++) {
+		ASSERT(result[0].faultLines[fl] == expectedFaultLines[fl]);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Tenant/DoubleShardSplit") {
+	wait(Future<Void>(Void()));
+	ShardTrackedData data1, data2;
+	ShardMetrics sm(StorageMetrics(), now(), 1);
+	data1.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+	data2.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+
+	KeyRangeMap<ShardTrackedData> shards;
+
+	KeyRef begin1 = "a"_sr, end1 = "c"_sr;
+	KeyRef begin2 = "d"_sr, end2 = "f"_sr;
+	KeyRangeRef k1(begin1, end1);
+	KeyRangeRef k2(begin2, end2);
+
+	shards.insert(k1, data1);
+	shards.insert(k2, data2);
+
+	KeyRangeRef tenantKeys("b"_sr, "e"_sr);
+
+	data1.stats->set(sm);
+	data2.stats->set(sm);
+
+	std::vector<RangeToSplit> result = findTenantShardBoundaries(&shards, tenantKeys);
+
+	for (auto& range : result) {
+		KeyRangeRef keys = KeyRangeRef(range.shard->begin(), range.shard->end());
+		traceSplit(keys, range.faultLines);
+	}
+
+	ASSERT(result.size() == 2);
+	std::vector<KeyRef> expectedFaultLines[] = { { "a"_sr, "b"_sr, "c"_sr }, { "d"_sr, "e"_sr, "f"_sr } };
+
+	for (int r = 0; r < result.size(); r++) {
+		ASSERT(result[r].faultLines.size() == expectedFaultLines[r].size());
+
+		for (int fl = 0; fl < result[r].faultLines.size(); fl++) {
+			ASSERT(result[r].faultLines[fl] == expectedFaultLines[r][fl]);
+		}
+	}
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Tenant/DoubleShardTenantAlignedAtStart") {
+	wait(Future<Void>(Void()));
+	ShardTrackedData data1, data2;
+	ShardMetrics sm(StorageMetrics(), now(), 1);
+	data1.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+	data2.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+
+	KeyRangeMap<ShardTrackedData> shards;
+
+	KeyRef begin1 = "a"_sr, end1 = "c"_sr;
+	KeyRef begin2 = "d"_sr, end2 = "f"_sr;
+	KeyRangeRef k1(begin1, end1);
+	KeyRangeRef k2(begin2, end2);
+
+	shards.insert(k1, data1);
+	shards.insert(k2, data2);
+
+	KeyRangeRef tenantKeys("a"_sr, "e"_sr);
+
+	data1.stats->set(sm);
+	data2.stats->set(sm);
+
+	std::vector<RangeToSplit> result = findTenantShardBoundaries(&shards, tenantKeys);
+
+	for (auto& range : result) {
+		KeyRangeRef keys = KeyRangeRef(range.shard->begin(), range.shard->end());
+		traceSplit(keys, range.faultLines);
+	}
+
+	ASSERT(result.size() == 1);
+	std::vector<KeyRef> expectedFaultLines[] = { { "d"_sr, "e"_sr, "f"_sr } };
+
+	for (int r = 0; r < result.size(); r++) {
+		ASSERT(result[r].faultLines.size() == expectedFaultLines[r].size());
+
+		for (int fl = 0; fl < result[r].faultLines.size(); fl++) {
+			ASSERT(result[r].faultLines[fl] == expectedFaultLines[r][fl]);
+		}
+	}
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/Tenant/DoubleShardTenantAlignedAtEnd") {
+	wait(Future<Void>(Void()));
+	ShardTrackedData data1, data2;
+	ShardMetrics sm(StorageMetrics(), now(), 1);
+	data1.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+	data2.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+
+	KeyRangeMap<ShardTrackedData> shards;
+
+	KeyRef begin1 = "a"_sr, end1 = "c"_sr;
+	KeyRef begin2 = "d"_sr, end2 = "f"_sr;
+	KeyRangeRef k1(begin1, end1);
+	KeyRangeRef k2(begin2, end2);
+
+	shards.insert(k1, data1);
+	shards.insert(k2, data2);
+
+	KeyRangeRef tenantKeys("b"_sr, "f"_sr);
+
+	data1.stats->set(sm);
+	data2.stats->set(sm);
+
+	std::vector<RangeToSplit> result = findTenantShardBoundaries(&shards, tenantKeys);
+
+	for (auto& range : result) {
+		KeyRangeRef keys = KeyRangeRef(range.shard->begin(), range.shard->end());
+		traceSplit(keys, range.faultLines);
+	}
+
+	ASSERT(result.size() == 1);
+	std::vector<KeyRef> expectedFaultLines[] = { { "a"_sr, "b"_sr, "c"_sr } };
+
+	for (int r = 0; r < result.size(); r++) {
+		ASSERT(result[r].faultLines.size() == expectedFaultLines[r].size());
+
+		for (int fl = 0; fl < result[r].faultLines.size(); fl++) {
+			ASSERT(result[r].faultLines[fl] == expectedFaultLines[r][fl]);
+		}
+	}
 
 	return Void();
 }
