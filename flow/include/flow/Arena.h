@@ -366,6 +366,8 @@ class Standalone : private Arena, public T {
 public:
 	using RefType = T;
 
+	constexpr static auto fb_must_appear_last = false;
+
 	// T must have no destructor
 	Arena& arena() { return *(Arena*)this; }
 	const Arena& arena() const { return *(const Arena*)this; }

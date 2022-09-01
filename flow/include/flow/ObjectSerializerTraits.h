@@ -60,7 +60,8 @@ template <class T, typename = void>
 struct fb_must_appear_last_t : std::false_type {};
 
 template <class T>
-struct fb_must_appear_last_t<T, typename std::enable_if<T::fb_must_appear_last>::type> : std::true_type {};
+struct fb_must_appear_last_t<T, typename std::enable_if<T::fb_must_appear_last>::type>
+  : std::conditional_t<T::fb_must_appear_last, std::true_type, std::false_type> {};
 
 template <class T>
 constexpr bool fb_must_appear_last = fb_must_appear_last_t<T>::value;
