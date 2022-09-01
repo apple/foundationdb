@@ -102,7 +102,7 @@ bool processIntOption(const std::string& optionName, const std::string& value, i
 		return false;
 	}
 	if (res < minValue || res > maxValue) {
-		fmt::print(stderr, "Value for {} must be between {} and {}", optionName, minValue, maxValue);
+		fmt::print(stderr, "Value {} for {} must be between {} and {}", res, optionName, minValue, maxValue);
 		return false;
 	}
 	return true;
