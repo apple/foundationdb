@@ -1748,7 +1748,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	           self->dbgid)
 	    .detail("NumOfOldGensOfLogs", self->cstate.myDBState.oldTLogData.size())
 	    .detail("AvailableAtVersion", self->recoveryTransactionVersion)
-	    .trackLatest("MasterRecoveryAvailable");
+	    .trackLatest(self->clusterRecoveryAvailableEventHolder->trackingKey);
 
 	self->addActor.send(changeCoordinators(self));
 	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
