@@ -454,7 +454,7 @@ public:
 	}
 
 	TestConfig() = default;
-	TestConfig(const BasicTestConfig& config): BasicTestConfig(config){}
+	TestConfig(const BasicTestConfig& config) : BasicTestConfig(config) {}
 };
 
 template <class T>
@@ -1857,7 +1857,7 @@ void SimulationConfig::setTss(const TestConfig& testConfig) {
 }
 
 void setConfigDB(TestConfig const& testConfig) {
-	if(g_pSimulator) {
+	if (g_pSimulator) {
 		g_simulator.configDBType = testConfig.getConfigDBType();
 	}
 }
