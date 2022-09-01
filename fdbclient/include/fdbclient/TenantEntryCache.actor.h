@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TENANTENTRYCACHE_ACTOR_G_H)
-#define FDBSERVER_TENANTENTRYCACHE_ACTOR_G_H
-#include "fdbserver/TenantEntryCache.actor.g.h"
-#elif !defined(FDBSERVER_TENANTENTRYCACHE_ACTOR_H)
-#define FDBSERVER_TENANTENTRYCACHE_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_TENANTENTRYCACHE_ACTOR_G_H)
+#define FDBCLIENT_TENANTENTRYCACHE_ACTOR_G_H
+#include "fdbclient/TenantEntryCache.actor.g.h"
+#elif !defined(FDBCLIENT_TENANTENTRYCACHE_ACTOR_H)
+#define FDBCLIENT_TENANTENTRYCACHE_ACTOR_H
 
 #pragma once
 
@@ -32,7 +32,7 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbclient/Knobs.h"
 #include "fdbrpc/TenantName.h"
 #include "flow/IndexedSet.h"
 
@@ -313,9 +313,9 @@ public:
 		TenantEntryCacheRefreshReason reason = TenantEntryCacheRefreshReason::PERIODIC_TASK;
 		if (refreshMode == TenantEntryCacheRefreshMode::PERIODIC_TASK) {
 			refresher = recurringAsync([&, reason]() { return refresh(reason); },
-			                           SERVER_KNOBS->TENANT_CACHE_LIST_REFRESH_INTERVAL, /* interval */
+			                           CLIENT_KNOBS->TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL, /* interval */
 			                           true, /* absoluteIntervalDelay */
-			                           SERVER_KNOBS->TENANT_CACHE_LIST_REFRESH_INTERVAL, /* intialDelay */
+			                           CLIENT_KNOBS->TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL, /* intialDelay */
 			                           TaskPriority::Worker);
 		}
 
@@ -387,4 +387,4 @@ public:
 };
 
 #include "flow/unactorcompiler.h"
-#endif // FDBSERVER_TENANTENTRYCACHE_ACTOR_H
+#endif // FDBCLIENT_TENANTENTRYCACHE_ACTOR_H
