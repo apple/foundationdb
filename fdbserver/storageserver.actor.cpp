@@ -1203,11 +1203,41 @@ public:
 			specialCounter(cc, "KvstoreInlineKey", [self]() { return std::get<2>(self->storage.getSize()); });
 			specialCounter(cc, "ActiveChangeFeeds", [self]() { return self->uidChangeFeed.size(); });
 			specialCounter(cc, "ActiveChangeFeedQueries", [self]() { return self->activeFeedQueries; });
+			specialCounter(cc, "StorageGetEncryptCipherKeysReqs", [self]() {
+				int64_t& value = self->encryptionKeyProvider->stats.getEncryptCipherKeysReqs;
+				int64_t ret = value;
+				value = 0;
+				return ret;
+			});
+			specialCounter(cc, "StorageGetLatestEncryptCipherKeysReqs", [self]() {
+				int64_t& value = self->encryptionKeyProvider->stats.getLatestEncryptCipherKeysReqs;
+				int64_t ret = value;
+				value = 0;
+				return ret;
+			});
+			specialCounter(cc, "StorageGetEncryptCipherKeysMS", [self]() {
+				double& value = self->encryptionKeyProvider->stats.getEncryptCipherKeysTime;
+				int64_t ret = value * 1000;
+				value = 0.0;
+				return ret;
+			});
+			specialCounter(cc, "StorageGetLatestEncryptCipherKeysMS", [self]() {
+				double& value = self->encryptionKeyProvider->stats.getLatestEncryptCipherKeysTime;
+				int64_t ret = value * 1000;
+				value = 0.0;
+				return ret;
+			});
 			specialCounter(cc, "StorageEncryptMS", [self]() {
-				return int(self->encryptionKeyProvider->flushEncryptTime() * 1000);
+				double& value = self->encryptionKeyProvider->stats.encryptTime;
+				int64_t ret = value * 1000;
+				value = 0.0;
+				return ret;
 			});
 			specialCounter(cc, "StorageDecryptMS", [self]() {
-				return int(self->encryptionKeyProvider->flushDecryptTime() * 1000);
+				double& value = self->encryptionKeyProvider->stats.decryptTime;
+				int64_t ret = value * 1000;
+				value = 0.0;
+				return ret;
 			});
 		}
 	} counters;

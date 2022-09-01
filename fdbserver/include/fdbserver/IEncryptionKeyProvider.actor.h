@@ -81,24 +81,14 @@ public:
 
 	virtual bool shouldEnableEncryption() const = 0;
 
-	double* encryptTimePtr() { return &encryptTime; }
-	double* decryptTimePtr() { return &decryptTime; }
-
-	double flushEncryptTime() {
-		double result = encryptTime;
-		encryptTime = 0.0;
-		return result;
-	}
-
-	double flushDecryptTime() {
-		double result = decryptTime;
-		decryptTime = 0.0;
-		return result;
-	}
-
-private:
-	double encryptTime = 0.0;
-	double decryptTime = 0.0;
+	struct Stats {
+		int64_t getEncryptCipherKeysReqs = 0;
+		int64_t getLatestEncryptCipherKeysReqs = 0;
+		double getEncryptCipherKeysTime = 0.0;
+		double getLatestEncryptCipherKeysTime = 0.0;
+		double encryptTime = 0.0;
+		double decryptTime = 0.0;
+	} stats;
 };
 
 // The null key provider is useful to simplify page decoding.
@@ -226,20 +216,26 @@ public:
 			TraceEvent("TenantAwareEncryptionKeyProvider_CipherHeaderMissing");
 			throw encrypt_ops_error();
 		}
+		state double startTime = now();
 		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(self->db, key.cipherHeader.get()));
 		EncryptionKey s = key;
 		s.cipherKeys = cipherKeys;
+		++self->stats.getEncryptCipherKeysReqs;
+		self->stats.getEncryptCipherKeysTime += now() - startTime;
 		return s;
 	}
 
 	Future<EncryptionKey> getSecrets(const EncryptionKeyRef& key) override { return getSecrets(this, key); }
 
 	ACTOR static Future<EncryptionKey> getByRange(TenantAwareEncryptionKeyProvider* self, KeyRef begin, KeyRef end) {
+		state double startTime = now();
 		EncryptCipherDomainNameRef domainName;
 		EncryptCipherDomainId domainId = self->getEncryptionDomainId(begin, end, &domainName);
 		TextAndHeaderCipherKeys cipherKeys = wait(getLatestEncryptCipherKeysForDomain(self->db, domainId, domainName));
 		EncryptionKey s;
 		s.cipherKeys = cipherKeys;
+		++self->stats.getLatestEncryptCipherKeysReqs;
+		self->stats.getLatestEncryptCipherKeysTime += now() - startTime;
 		return s;
 	}
 
