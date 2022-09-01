@@ -100,6 +100,7 @@ FDB_DECLARE_BOOLEAN_PARAM(FastInaccurateEstimate);
 // memory is freed by deleting the entire Arena at once. See flow/README.md for details on using Arenas.
 class Arena {
 public:
+	constexpr static auto fb_must_appear_last = true;
 	Arena();
 	explicit Arena(size_t reservedSize);
 	//~Arena();
