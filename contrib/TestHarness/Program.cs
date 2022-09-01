@@ -327,7 +327,7 @@ namespace SummarizeTest
                     var snowflakePath = Path.Combine("/app", "deploy", "global_data", "snowflakeBinaries");
                     string[] snowflakeBinaries = Directory.Exists(snowflakePath) ? Directory.GetFiles(snowflakePath) : Array.Empty<string>();
 
-                    IEnumerable<string> oldBinaries = Array.FindAll(Directory.GetFiles(oldBinaryFolder).Concat(snowflakeBinaries).ToArray(),
+                    IEnumerable<string> oldBinaries = Array.FindAll(snowflakeBinaries,
                                                          x => versionGreaterThanOrEqual(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionLowerBound)
                                                            && versionLessThan(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionUpperBound));
                     if (!lastFolderName.Contains("until_")) {
