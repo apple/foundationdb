@@ -538,8 +538,7 @@ public:
 			    encryptionKey.secret[0], pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::AESEncryptionV1) {
 			double startTime = timer_monotonic();
-			page->getEncodingHeader<AESEncryptionV1Encoder>()->decode(
-			    encryptionKey.cipherKeys, pPayload, payloadSize);
+			page->getEncodingHeader<AESEncryptionV1Encoder>()->decode(encryptionKey.cipherKeys, pPayload, payloadSize);
 			*elapsed += timer_monotonic() - startTime;
 		} else {
 			throw page_encoding_not_supported();
