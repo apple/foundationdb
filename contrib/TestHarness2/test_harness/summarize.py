@@ -443,7 +443,7 @@ class Summary:
             if stderr_bytes > config.max_stderr_bytes:
                 child = SummaryTree('StdErrOutputTruncated')
                 child.attributes['Severity'] = self.stderr_severity
-                child.attributes['BytesRemaining'] = stderr_bytes - config.max_stderr_bytes
+                child.attributes['BytesRemaining'] = str(stderr_bytes - config.max_stderr_bytes)
                 self.out.append(child)
 
         self.out.attributes['Ok'] = '1' if self.ok() else '0'
