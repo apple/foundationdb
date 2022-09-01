@@ -20,15 +20,71 @@
 
 #include "fdbserver/MockGlobalState.h"
 
+bool MockStorageServer::allShardStatusEqual(KeyRangeRef range, MockShardStatus status) {
+	auto ranges = serverKeys.intersectingRanges(range);
+	ASSERT(!ranges.empty()); // at least the range is allKeys
+
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		if (it->cvalue().status != status)
+			return false;
+	}
+	return true;
+}
+
 void MockGlobalState::initialAsEmptyDatabaseMGS(const DatabaseConfiguration& conf, uint64_t defaultDiskSpace) {
 	ASSERT(conf.storageTeamSize > 0);
 	configuration = conf;
 	std::vector<UID> serverIds;
-	for(int i = 1; i <= conf.storageTeamSize; ++ i) {
+	for (int i = 1; i <= conf.storageTeamSize; ++i) {
 		UID id = indexToUID(i);
 		serverIds.push_back(id);
 		allServers[id] = MockStorageServer(id, defaultDiskSpace);
-		allServers[id].serverKeys.insert(allKeys, true);
+		allServers[id].serverKeys.insert(allKeys, { MockShardStatus::COMPLETED, 0 });
 	}
-	shardMapping->assignRangeToTeams(allKeys, {Team(serverIds, true)});
+	shardMapping->assignRangeToTeams(allKeys, { Team(serverIds, true) });
+}
+
+bool MockGlobalState::serverIsSourceForShard(const UID& serverId, KeyRangeRef shard, bool inFlightShard) {
+	if (allServers.find(serverId) == allServers.end())
+		return false;
+
+	// check serverKeys
+	auto& mss = allServers.at(serverId);
+	if (!mss.allShardStatusEqual(shard, MockShardStatus::COMPLETED)) {
+		return false;
+	}
+
+	// check keyServers
+	auto teams = shardMapping->getTeamsFor(shard);
+	if (inFlightShard) {
+		return std::any_of(teams.second.begin(), teams.second.end(), [&serverId](const Team& team) {
+			return team.hasServer(serverId);
+		});
+	}
+	return std::any_of(
+	    teams.first.begin(), teams.first.end(), [&serverId](const Team& team) { return team.hasServer(serverId); });
+}
+
+bool MockGlobalState::serverIsDestForShard(const UID& serverId, KeyRangeRef shard) {
+	return false;
+}
+
+TEST_CASE("/MockGlobalState/initialAsEmptyDatabaseMGS/SimpleThree") {
+	BasicTestConfig testConfig;
+	testConfig.simpleConfig = true;
+	testConfig.minimumReplication = 3;
+	testConfig.logAntiQuorum = 0;
+	DatabaseConfiguration dbConfig = generateNormalDatabaseConfiguration(testConfig);
+	TraceEvent("UnitTestDbConfig").detail("Config", dbConfig.toString());
+
+	auto mgs = std::make_shared<MockGlobalState>();
+	mgs->initialAsEmptyDatabaseMGS(dbConfig);
+	for (int i = 1; i <= dbConfig.storageTeamSize; ++i) {
+		auto id = MockGlobalState::indexToUID(i);
+		std::cout << "Check server " << i << "\n";
+		ASSERT(mgs->serverIsSourceForShard(id, allKeys));
+		ASSERT(mgs->allServers.at(id).serverKeys.sumRange(allKeys.begin, allKeys.end) == 0);
+	}
+
+	return Void();
 }

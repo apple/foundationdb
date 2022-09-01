@@ -504,6 +504,7 @@ DDMockTxnProcessor::getServerListAndProcessClasses() {
 	return res;
 }
 
+// reconstruct team combination from shardMapping
 std::set<std::vector<UID>> DDMockTxnProcessor::getAllTeamsInRegion(bool primary) const {
 	auto teams = mgs->shardMapping->getAllTeams();
 	std::set<std::vector<UID>> res;
@@ -516,7 +517,8 @@ std::set<std::vector<UID>> DDMockTxnProcessor::getAllTeamsInRegion(bool primary)
 }
 
 inline void transformTeamsToServerIds(std::vector<ShardsAffectedByTeamFailure::Team>& teams,
-                                std::vector<UID>& primaryIds, std::vector<UID>& remoteIds) {
+                                      std::vector<UID>& primaryIds,
+                                      std::vector<UID>& remoteIds) {
 	std::set<UID> primary, remote;
 	for (auto& team : teams) {
 		team.primary ? primary.insert(team.servers.begin(), team.servers.end())
@@ -526,6 +528,7 @@ inline void transformTeamsToServerIds(std::vector<ShardsAffectedByTeamFailure::T
 	remoteIds = std::vector<UID>(remote.begin(), remote.end());
 }
 
+// reconstruct DDShardInfos from shardMapping
 std::vector<DDShardInfo> DDMockTxnProcessor::getDDShardInfos() const {
 	std::vector<DDShardInfo> res;
 	res.reserve(mgs->shardMapping->getNumberOfShards());
@@ -566,6 +569,14 @@ Future<Reference<InitialDataDistribution>> DDMockTxnProcessor::getInitialDataDis
 	return res;
 }
 
+inline void removeFailedServerFromTeams(std::vector<ShardsAffectedByTeamFailure::Team>& teams, const UID& serverID) {
+	for (auto& team : teams) {
+		team.removeServer(serverID);
+	}
+	teams.erase(std::remove_if(teams.begin(), teams.end(), [](const auto& team) { return team.servers.empty(); }),
+	            teams.end());
+}
+
 // Remove the server from shardMapping and set serverKeysFalse to the server's serverKeys list.
 // Changes to keyServer and serverKey must happen symmetrically in this function.
 // If serverID is the last source server for a shard, the shard will be erased, and then be assigned
@@ -575,6 +586,22 @@ Future<Void> DDMockTxnProcessor::removeKeysFromFailedServer(const UID& serverID,
                                                             const MoveKeysLock& lock,
                                                             const DDEnabledState* ddEnabledState) const {
 	auto& mss = mgs->allServers.at(serverID);
+	auto allRange = mss.getAllRanges();
+	for (auto it = allRange.begin(); it != allRange.end(); ++it) {
+		KeyRangeRef curRange = it->range();
+		auto [curTeams, prevTeams] = mgs->shardMapping->getTeamsFor(curRange);
+		bool inFlight = !prevTeams.empty();
+		// remove failed server from source and destination teams
+		removeFailedServerFromTeams(curTeams, serverID);
+		removeFailedServerFromTeams(prevTeams, serverID);
+
+		if (inFlight) {
+
+		} else {
+			if (curTeams.empty()) {
+			}
+		}
+	}
 
 	return Void();
 }
@@ -583,7 +610,7 @@ Future<Void> DDMockTxnProcessor::removeStorageServer(const UID& serverID,
                                                      const Optional<UID>& tssPairID,
                                                      const MoveKeysLock& lock,
                                                      const DDEnabledState* ddEnabledState) const {
-
+	ASSERT(mgs->shardMapping->getNumberOfShards(serverID) == 0);
 	mgs->allServers.erase(serverID);
 	return Void();
 }

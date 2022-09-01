@@ -49,6 +49,14 @@ public:
 		bool operator==(const Team& r) const { return servers == r.servers && primary == r.primary; }
 		bool operator!=(const Team& r) const { return !(*this == r); }
 
+		bool hasServer(const UID& id) const {
+			return std::find(servers.begin(), servers.end(), id) != servers.end();
+		}
+
+		void removeServer(const UID& id) {
+			servers.erase(std::remove(servers.begin(), servers.end(), id), servers.end());
+		}
+
 		std::string toString() const { return describe(servers); };
 	};
 
@@ -117,6 +125,8 @@ public:
 	auto getAllRanges() const -> decltype(shard_teams)::ConstRanges;
 	// get total shards count
 	size_t getNumberOfShards() const;
+	// void removeFailedServerForRange(KeyRangeRef keys, const UID& serverID, const std::pair<std::vector<Team>,
+	// std::vector<Team>>& involvedTeams);
 };
 
 #endif // FOUNDATIONDB_SHARDSAFFECTEDBYTEAMFAILURE_H

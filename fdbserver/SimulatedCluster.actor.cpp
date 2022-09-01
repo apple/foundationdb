@@ -82,7 +82,7 @@ bool destructed = false;
 
 // Configuration details specified in workload test files that change the simulation
 // environment details
-class TestConfig: public BasicTestConfig {
+class TestConfig : public BasicTestConfig {
 	class ConfigBuilder {
 		using value_type = toml::basic_value<toml::discard_comments>;
 		using base_variant = std::variant<int, float, double, bool, std::string, std::vector<int>, ConfigDBType>;
@@ -452,6 +452,9 @@ public:
 			}
 		}
 	}
+
+	TestConfig() = default;
+	TestConfig(const BasicTestConfig& config): BasicTestConfig(config){}
 };
 
 template <class T>
@@ -1852,7 +1855,9 @@ void SimulationConfig::setTss(const TestConfig& testConfig) {
 }
 
 void setConfigDB(TestConfig const& testConfig) {
-	g_simulator.configDBType = testConfig.getConfigDBType();
+	if(g_pSimulator) {
+		g_simulator.configDBType = testConfig.getConfigDBType();
+	}
 }
 
 // Generates and sets an appropriate configuration for the database according to
@@ -2605,9 +2610,8 @@ ACTOR void setupAndRun(std::string dataFolder,
 	ASSERT(false);
 }
 
-DatabaseConfiguration generateNormalDatabaseConfiguration(const BasicTestConfig& testConfig, uint64_t defaultDiskSpace) {
-	TestConfig config;
-	config.BasicTestConfig::operator=(testConfig);
+DatabaseConfiguration generateNormalDatabaseConfiguration(const BasicTestConfig& testConfig) {
+	TestConfig config(testConfig);
 	SimulationConfig simConf(config);
 	return simConf.db;
 }

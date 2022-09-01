@@ -28,14 +28,29 @@
 #include "SimulatedCluster.h"
 #include "ShardsAffectedByTeamFailure.h"
 
+
+template <class Metric>
+struct ShardSizeMetric {
+	template <typename pair_type>
+	Metric operator()(pair_type const& p) const {
+		return Metric(p.value.shardSize);
+	}
+};
+
+enum class MockShardStatus { EMPTY = 0, COMPLETED, INFLIGHT };
+
 class MockStorageServer {
 public:
+	struct ShardInfo {
+		MockShardStatus status;
+		uint64_t shardSize;
+	};
 	// control plane statistics associated with a real storage server
 	uint64_t usedDiskSpace = 0, availableDiskSpace;
 
 	// In-memory counterpart of the `serverKeys` in system keyspace
-	// the value bool is equal to "[[serverKeysTrue]]" |" [[serverKeysFalse]]" and metrics uint64_t is the shard size
-	KeyRangeMap<bool, uint64_t> serverKeys;
+	// the value ShardStatus is [InFlight, Completed, Empty] and metrics uint64_t is the shard size
+	KeyRangeMap<ShardInfo, uint64_t, ShardSizeMetric<uint64_t>> serverKeys;
 
 	// sampled metrics
 	StorageServerMetrics metrics;
@@ -50,6 +65,10 @@ public:
 	  : usedDiskSpace(usedDiskSpace), availableDiskSpace(availableDiskSpace), id(id) {
 		ssi.uniqueID = id;
 	}
+
+	decltype(serverKeys)::Ranges getAllRanges() { return serverKeys.ranges(); }
+
+	bool allShardStatusEqual(KeyRangeRef range, MockShardStatus status);
 };
 
 class MockGlobalState {
@@ -70,6 +89,11 @@ public:
 	static UID indexToUID(uint64_t a) { return UID(a, a); }
 	void initialAsEmptyDatabaseMGS(const DatabaseConfiguration& conf,
 	                               uint64_t defaultDiskSpace = 1000LL * 1024 * 1024 * 1024);
+
+	// check methods
+	bool serverIsSourceForShard(const UID& serverId, KeyRangeRef shard, bool inFlightShard = false);
+	bool serverIsDestForShard(const UID& serverId, KeyRangeRef shard);
+	bool allShardRemovedFromServer(const UID& serverId);
 };
 
 #endif // FOUNDATIONDB_MOCKGLOBALSTATE_H
