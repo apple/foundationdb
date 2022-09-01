@@ -573,6 +573,26 @@ struct RangeToSplit {
 	  : shard(shard), faultLines(faultLines) {}
 };
 
+Standalone<VectorRef<KeyRef>> findShardFaultLines(KeyRef shardBegin,
+                                                  KeyRef shardEnd,
+                                                  KeyRef tenantBegin,
+                                                  KeyRef tenantEnd) {
+	Standalone<VectorRef<KeyRef>> faultLines;
+
+	ASSERT((shardBegin < tenantBegin && shardEnd > tenantBegin) || (shardBegin < tenantEnd && shardEnd > tenantEnd));
+
+	faultLines.push_back_deep(faultLines.arena(), shardBegin);
+	if (shardBegin < tenantBegin && shardEnd > tenantBegin) {
+		faultLines.push_back_deep(faultLines.arena(), tenantBegin);
+	}
+	if (shardBegin < tenantEnd && shardEnd > tenantEnd) {
+		faultLines.push_back_deep(faultLines.arena(), tenantEnd);
+	}
+	faultLines.push_back_deep(faultLines.arena(), shardEnd);
+
+	return faultLines;
+}
+
 std::vector<RangeToSplit> findTenantShardBoundaries(KeyRangeMap<ShardTrackedData>* shards, KeyRange tenantKeys) {
 
 	std::vector<RangeToSplit> result;
@@ -581,48 +601,39 @@ std::vector<RangeToSplit> findTenantShardBoundaries(KeyRangeMap<ShardTrackedData
 
 	// same shard
 	if (shardContainingTenantStart == shardContainingTenantEnd) {
-		// If tenant boundaries are not aligned with tenantKeys
+		// If shard boundaries are not aligned with tenantKeys
 		if (shardContainingTenantStart.begin() != tenantKeys.begin ||
 		    shardContainingTenantStart.end() != tenantKeys.end) {
 
 			auto startShardSize = shardContainingTenantStart->value().stats;
 
 			if (startShardSize->get().present()) {
-				Standalone<VectorRef<KeyRef>> faultLines;
-
-				faultLines.push_back_deep(faultLines.arena(), shardContainingTenantStart->begin());
-				if (shardContainingTenantStart->begin() != tenantKeys.begin) {
-					faultLines.push_back_deep(faultLines.arena(), tenantKeys.begin);
-				}
-				if (shardContainingTenantStart->end() != tenantKeys.end) {
-					faultLines.push_back_deep(faultLines.arena(), tenantKeys.end);
-				}
-				faultLines.push_back_deep(faultLines.arena(), shardContainingTenantStart->end());
-
+				auto faultLines = findShardFaultLines(shardContainingTenantStart->begin(),
+				                                      shardContainingTenantStart->end(),
+				                                      tenantKeys.begin,
+				                                      tenantKeys.end);
 				result.emplace_back(shardContainingTenantStart, faultLines);
 			}
 		}
 	} else {
 		auto startShardSize = shardContainingTenantStart->value().stats;
 		auto endShardSize = shardContainingTenantEnd->value().stats;
-		Standalone<VectorRef<KeyRef>> startShardFaultLines;
-		Standalone<VectorRef<KeyRef>> endShardFaultLines;
 
 		if (startShardSize->get().present() && endShardSize->get().present()) {
 			if (shardContainingTenantStart->begin() != tenantKeys.begin) {
-				startShardFaultLines.push_back_deep(startShardFaultLines.arena(), shardContainingTenantStart->begin());
-				startShardFaultLines.push_back_deep(startShardFaultLines.arena(), tenantKeys.begin);
-				startShardFaultLines.push_back_deep(startShardFaultLines.arena(), shardContainingTenantStart->end());
-
-				result.emplace_back(shardContainingTenantStart, startShardFaultLines);
+				auto faultLines = findShardFaultLines(shardContainingTenantStart->begin(),
+				                                      shardContainingTenantStart->end(),
+				                                      tenantKeys.begin,
+				                                      tenantKeys.end);
+				result.emplace_back(shardContainingTenantStart, faultLines);
 			}
 
 			if (shardContainingTenantEnd->end() != tenantKeys.end) {
-				endShardFaultLines.push_back_deep(endShardFaultLines.arena(), shardContainingTenantEnd->begin());
-				endShardFaultLines.push_back_deep(endShardFaultLines.arena(), tenantKeys.end);
-				endShardFaultLines.push_back_deep(endShardFaultLines.arena(), shardContainingTenantEnd->end());
-
-				result.emplace_back(shardContainingTenantEnd, endShardFaultLines);
+				auto faultLines = findShardFaultLines(shardContainingTenantEnd->begin(),
+				                                      shardContainingTenantEnd->end(),
+				                                      tenantKeys.begin,
+				                                      tenantKeys.end);
+				result.emplace_back(shardContainingTenantEnd, faultLines);
 			}
 		}
 	}
