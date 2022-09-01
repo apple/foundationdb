@@ -103,7 +103,7 @@ struct RatekeeperSingleton : Singleton<RatekeeperInterface> {
 		}
 	}
 	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present()) {
+		if (interface.present() && cc->id_worker.count(pid)) {
 			cc->id_worker[pid].haltRatekeeper =
 			    brokenPromiseToNever(interface.get().haltRatekeeper.getReply(HaltRatekeeperRequest(cc->id)));
 		}
@@ -128,7 +128,7 @@ struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
 		}
 	}
 	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present()) {
+		if (interface.present() && cc->id_worker.count(pid)) {
 			cc->id_worker[pid].haltDistributor =
 			    brokenPromiseToNever(interface.get().haltDataDistributor.getReply(HaltDataDistributorRequest(cc->id)));
 		}
@@ -153,7 +153,7 @@ struct BlobManagerSingleton : Singleton<BlobManagerInterface> {
 		}
 	}
 	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present()) {
+		if (interface.present() && cc->id_worker.count(pid)) {
 			cc->id_worker[pid].haltBlobManager =
 			    brokenPromiseToNever(interface.get().haltBlobManager.getReply(HaltBlobManagerRequest(cc->id)));
 		}
@@ -185,7 +185,7 @@ struct EncryptKeyProxySingleton : Singleton<EncryptKeyProxyInterface> {
 		}
 	}
 	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present()) {
+		if (interface.present() && cc->id_worker.count(pid)) {
 			cc->id_worker[pid].haltEncryptKeyProxy =
 			    brokenPromiseToNever(interface.get().haltEncryptKeyProxy.getReply(HaltEncryptKeyProxyRequest(cc->id)));
 		}
@@ -2058,8 +2058,9 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 			choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().distributor.get().waitFailure,
 				                            SERVER_KNOBS->DD_FAILURE_TIME))) {
-					TraceEvent("CCDataDistributorDied", self->id)
-					    .detail("DDID", self->db.serverInfo->get().distributor.get().id());
+					const auto& distributor = self->db.serverInfo->get().distributor;
+					TraceEvent("CCDataDistributorDied", self->id).detail("DDID", distributor.get().id());
+					DataDistributorSingleton(distributor).halt(self, distributor.get().locality.processId());
 					self->db.clearInterf(ProcessClass::DataDistributorClass);
 				}
 				when(wait(self->recruitDistributor.onChange())) {}
@@ -2149,8 +2150,9 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData* self) {
 			choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().ratekeeper.get().waitFailure,
 				                            SERVER_KNOBS->RATEKEEPER_FAILURE_TIME))) {
-					TraceEvent("CCRatekeeperDied", self->id)
-					    .detail("RKID", self->db.serverInfo->get().ratekeeper.get().id());
+					const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
+					TraceEvent("CCRatekeeperDied", self->id).detail("RKID", ratekeeper.get().id());
+					RatekeeperSingleton(ratekeeper).halt(self, ratekeeper.get().locality.processId());
 					self->db.clearInterf(ProcessClass::RatekeeperClass);
 				}
 				when(wait(self->recruitRatekeeper.onChange())) {}
@@ -2245,6 +2247,8 @@ ACTOR Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
 				when(wait(waitFailureClient(self->db.serverInfo->get().encryptKeyProxy.get().waitFailure,
 				                            SERVER_KNOBS->ENCRYPT_KEY_PROXY_FAILURE_TIME))) {
 					TraceEvent("CCEKP_Died", self->id);
+					const auto& encryptKeyProxy = self->db.serverInfo->get().encryptKeyProxy;
+					EncryptKeyProxySingleton(encryptKeyProxy).halt(self, encryptKeyProxy.get().locality.processId());
 					self->db.clearInterf(ProcessClass::EncryptKeyProxyClass);
 				}
 				when(wait(self->recruitEncryptKeyProxy.onChange())) {}
@@ -2389,8 +2393,9 @@ ACTOR Future<Void> monitorBlobManager(ClusterControllerData* self) {
 			loop {
 				choose {
 					when(wait(wfClient)) {
-						TraceEvent("CCBlobManagerDied", self->id)
-						    .detail("BMID", self->db.serverInfo->get().blobManager.get().id());
+						const auto& blobManager = self->db.serverInfo->get().blobManager;
+						TraceEvent("CCBlobManagerDied", self->id).detail("BMID", blobManager.get().id());
+						BlobManagerSingleton(blobManager).halt(self, blobManager.get().locality.processId());
 						self->db.clearInterf(ProcessClass::BlobManagerClass);
 						break;
 					}

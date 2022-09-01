@@ -62,6 +62,8 @@ enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, R
 // Can be used in conjunction with the other tenant states above.
 enum class TenantLockState { UNLOCKED, READ_ONLY, LOCKED };
 
+constexpr int TENANT_PREFIX_SIZE = sizeof(int64_t);
+
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
 
@@ -201,6 +203,6 @@ struct TenantMetadata {
 };
 
 typedef VersionedMap<TenantName, TenantMapEntry> TenantMap;
-typedef VersionedMap<Key, TenantName> TenantPrefixIndex;
+class TenantPrefixIndex : public VersionedMap<Key, TenantName>, public ReferenceCounted<TenantPrefixIndex> {};
 
 #endif

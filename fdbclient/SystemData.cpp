@@ -1332,7 +1332,7 @@ int64_t decodeBlobManagerEpochValue(ValueRef const& value) {
 
 // blob granule data
 const KeyRef blobRangeActive = LiteralStringRef("1");
-const KeyRef blobRangeInactive = LiteralStringRef("0");
+const KeyRef blobRangeInactive = StringRef();
 
 const KeyRangeRef blobGranuleFileKeys(LiteralStringRef("\xff\x02/bgf/"), LiteralStringRef("\xff\x02/bgf0"));
 const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff\x02/bgm/"), LiteralStringRef("\xff\x02/bgm0"));

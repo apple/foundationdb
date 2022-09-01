@@ -345,7 +345,6 @@ if(NOT WIN32)
       )
   set_tests_properties("fdb_c_upgrade_to_future_version" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
 
-if (0) # reenable after stabilizing the test
   add_test(NAME fdb_c_upgrade_to_future_version_blob_granules
     COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
@@ -354,7 +353,6 @@ if (0) # reenable after stabilizing the test
         --blob-granules-enabled
         --process-number 3
       )
-endif()
 
   if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
     add_test(NAME fdb_c_upgrade_single_threaded_630api
@@ -489,7 +487,7 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT USE_SANITIZER) # Linux Only, non-santizer
     DEPENDS ${IMPLIBSO_SRC}
     COMMENT "Generating source code for C shim library")
 
-  add_library(fdb_c_shim SHARED ${SHIM_LIB_GEN_SRC} foundationdb/fdb_c_shim.h fdb_c_shim.cpp)
+  add_library(fdb_c_shim STATIC ${SHIM_LIB_GEN_SRC} foundationdb/fdb_c_shim.h fdb_c_shim.cpp)
   target_link_options(fdb_c_shim PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map,-z,nodelete,-z,noexecstack")
   target_link_libraries(fdb_c_shim PUBLIC dl)
   target_include_directories(fdb_c_shim PUBLIC

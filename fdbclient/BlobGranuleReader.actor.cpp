@@ -186,16 +186,12 @@ TEST_CASE("/fdbserver/blobgranule/isRangeCoveredByBlob") {
 		ASSERT(range.end == "key_b5"_sr);
 	}
 
-	// check unsorted chunks
-	{
-		Standalone<VectorRef<BlobGranuleChunkRef>> unsortedChunks(chunks);
-		testAddChunkRange("key_0"_sr, "key_a"_sr, unsortedChunks);
-		ASSERT(isRangeFullyCovered(KeyRangeRef("key_00"_sr, "key_01"_sr), unsortedChunks));
-	}
 	// check continued chunks
 	{
-		Standalone<VectorRef<BlobGranuleChunkRef>> continuedChunks(chunks);
+		Standalone<VectorRef<BlobGranuleChunkRef>> continuedChunks;
+		testAddChunkRange("key_a1"_sr, "key_a9"_sr, continuedChunks);
 		testAddChunkRange("key_a9"_sr, "key_b1"_sr, continuedChunks);
+		testAddChunkRange("key_b1"_sr, "key_b9"_sr, continuedChunks);
 		ASSERT(isRangeFullyCovered(KeyRangeRef("key_a1"_sr, "key_b9"_sr), continuedChunks) == false);
 	}
 	return Void();
