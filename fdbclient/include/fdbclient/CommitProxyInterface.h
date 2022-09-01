@@ -197,7 +197,7 @@ struct CommitTransactionRequest : TimedRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(
-		    ar, transaction, reply, arena, flags, debugID, commitCostEstimation, tagSet, spanContext, tenantInfo);
+		    ar, transaction, reply, flags, debugID, commitCostEstimation, tagSet, spanContext, tenantInfo, arena);
 	}
 };
 
@@ -339,7 +339,7 @@ struct GetKeyServerLocationsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, results, resultsTssMapping, tenantEntry, arena, resultsTagMapping);
+		serializer(ar, results, resultsTssMapping, tenantEntry, resultsTagMapping, arena);
 	}
 };
 
@@ -543,7 +543,7 @@ struct ProxySnapRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, snapPayload, snapUID, reply, arena, debugID);
+		serializer(ar, snapPayload, snapUID, reply, debugID, arena);
 	}
 };
 
