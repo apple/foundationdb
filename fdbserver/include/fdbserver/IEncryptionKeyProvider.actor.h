@@ -216,7 +216,7 @@ public:
 	Future<EncryptionKey> getSecrets(const EncryptionKeyRef& key) override { return getSecrets(this, key); }
 
 	ACTOR static Future<EncryptionKey> getByRange(TenantAwareEncryptionKeyProvider* self, KeyRef begin, KeyRef end) {
-		EncryptCipherDomainName domainName;
+		EncryptCipherDomainNameRef domainName;
 		EncryptCipherDomainId domainId = self->getEncryptionDomainId(begin, end, &domainName);
 		TextAndHeaderCipherKeys cipherKeys = wait(getLatestEncryptCipherKeysForDomain(self->db, domainId, domainName));
 		EncryptionKey s;
@@ -236,7 +236,7 @@ public:
 private:
 	EncryptCipherDomainId getEncryptionDomainId(const KeyRef& begin,
 	                                            const KeyRef& end,
-	                                            EncryptCipherDomainName* domainName) {
+	                                            EncryptCipherDomainNameRef* domainName) {
 		int64_t domainId = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 		int64_t beginTenantId = getTenant(begin, true /*inclusive*/);
 		int64_t endTenantId = getTenant(end, false /*inclusive*/);

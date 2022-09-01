@@ -141,7 +141,7 @@ CipherKeyValidityTS getCipherKeyValidityTS(Optional<int64_t> refreshInterval, Op
 
 struct EncryptBaseCipherKey {
 	EncryptCipherDomainId domainId;
-	Standalone<EncryptCipherDomainName> domainName;
+	Standalone<EncryptCipherDomainNameRef> domainName;
 	EncryptCipherBaseKeyId baseCipherId;
 	Standalone<StringRef> baseCipherKey;
 	// Timestamp after which the cached CipherKey is eligible for KMS refresh
@@ -159,13 +159,13 @@ struct EncryptBaseCipherKey {
 
 	EncryptBaseCipherKey() : domainId(0), baseCipherId(0), baseCipherKey(StringRef()), refreshAt(0), expireAt(0) {}
 	explicit EncryptBaseCipherKey(EncryptCipherDomainId dId,
-	                              EncryptCipherDomainName dName,
+	                              Standalone<EncryptCipherDomainNameRef> dName,
 	                              EncryptCipherBaseKeyId cipherId,
-	                              StringRef cipherKey,
+	                              Standalone<StringRef> cipherKey,
 	                              int64_t refAtTS,
 	                              int64_t expAtTS)
-	  : domainId(dId), domainName(Standalone<StringRef>(dName)), baseCipherId(cipherId),
-	    baseCipherKey(Standalone<StringRef>(cipherKey)), refreshAt(refAtTS), expireAt(expAtTS) {}
+	  : domainId(dId), domainName(dName), baseCipherId(cipherId), baseCipherKey(cipherKey), refreshAt(refAtTS),
+	    expireAt(expAtTS) {}
 
 	bool isValid() const {
 		int64_t currTS = (int64_t)now();
@@ -244,9 +244,9 @@ public:
 	}
 
 	void insertIntoBaseDomainIdCache(const EncryptCipherDomainId domainId,
-	                                 EncryptCipherDomainName domainName,
+	                                 Standalone<EncryptCipherDomainNameRef> domainName,
 	                                 const EncryptCipherBaseKeyId baseCipherId,
-	                                 StringRef baseCipherKey,
+	                                 Standalone<StringRef> baseCipherKey,
 	                                 int64_t refreshAtTS,
 	                                 int64_t expireAtTS) {
 		// Entries in domainId cache are eligible for periodic refreshes to support 'limiting lifetime of encryption
@@ -263,9 +263,9 @@ public:
 	}
 
 	void insertIntoBaseCipherIdCache(const EncryptCipherDomainId domainId,
-	                                 EncryptCipherDomainName domainName,
+	                                 Standalone<EncryptCipherDomainNameRef> domainName,
 	                                 const EncryptCipherBaseKeyId baseCipherId,
-	                                 const StringRef baseCipherKey,
+	                                 const Standalone<StringRef> baseCipherKey,
 	                                 int64_t refreshAtTS,
 	                                 int64_t expireAtTS) {
 		// Given an cipherKey is immutable, it is OK to NOT expire cached information.
