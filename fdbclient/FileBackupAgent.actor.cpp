@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Tenant.h"
 #include "flow/Arena.h"
 #include "flow/BlobCipher.h"
 #include "flow/CodeProbe.h"
@@ -36,6 +37,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/JsonBuilder.h"
+#include "fdbclient/TenantEntryCache.actor.h"
 
 #include <cinttypes>
 #include <ctime>
@@ -538,10 +540,11 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	};
 
 	EncryptedRangeFileWriter(SnapshotFileBackupEncryptionKeys cipherKeys,
+	                         Reference<TenantEntryCache<Void>> tenantCache,
 	                         Reference<IBackupFile> file = Reference<IBackupFile>(),
 	                         int blockSize = 0,
 	                         Options options = Options(true))
-	  : cipherKeys(cipherKeys), file(file), blockSize(blockSize), blockEnd(0),
+	  : cipherKeys(cipherKeys), tenantCache(tenantCache), file(file), blockSize(blockSize), blockEnd(0),
 	    fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION), options(options) {
 		buffer = makeString(blockSize);
 		wPtr = mutateString(buffer);
@@ -645,16 +648,26 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	static bool isSystemKey(KeyRef key) { return key.size() && key[0] == systemKeys.begin[0]; }
 
-	static Optional<int64_t> getTenantId(KeyRef key) {
+	ACTOR static Future<int64_t> getTenantIdImpl(KeyRef key, Reference<TenantEntryCache<Void>> tenantCache) {
 		if (isSystemKey(key)) {
 			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 		}
+		// TODO (Nim): Replace with custom encryption domain
 		if (key.size() < 8) {
-			return Optional<int64_t>();
+			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 		}
 		KeyRef tenantPrefix = KeyRef(key.begin(), 8);
-		// TODO (Nim): Check if tenant id is a valid tenant entry
-		return TenantMapEntry::prefixToId(tenantPrefix);
+		state int64_t tenantId = TenantMapEntry::prefixToId(tenantPrefix);
+		Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getById(tenantId));
+		if (payload.present()) {
+			return tenantId;
+		}
+		// TODO (Nim): Replace with custom encryption domain
+		return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
+	}
+
+	static Future<int64_t> getTenantId(KeyRef key, Reference<TenantEntryCache<Void>> tenantCache) {
+		return getTenantIdImpl(key, tenantCache);
 	}
 
 	// Handles the first block and internal blocks.  Ends current block if needed.
@@ -740,10 +753,14 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                                                               Key k,
 	                                                               Value v,
 	                                                               bool writeValue) {
-		Optional<int64_t> curKeyTenantId = getTenantId(k);
-		Optional<int64_t> prevKeyTenantId = getTenantId(self->lastKey);
+		// Don't want to start a new block if the current key or previous key is empty
+		if (self->lastKey.size() == 0 || k.size() == 0) {
+			return false;
+		}
+		state int64_t curKeyTenantId = wait(getTenantId(k, self->tenantCache));
+		state int64_t prevKeyTenantId = wait(getTenantId(self->lastKey, self->tenantCache));
 		// crossing tenant boundaries so finish the current block using only the tenant prefix of the new key
-		if (curKeyTenantId.present() && prevKeyTenantId.present() && curKeyTenantId.get() != prevKeyTenantId.get()) {
+		if (curKeyTenantId != prevKeyTenantId) {
 			CODE_PROBE(true, "crossed tenant boundaries");
 			int prefixLength = commonPrefixLength(self->lastKey, k) + 1;
 			KeyRef tenantPrefix = StringRef(k.begin(), prefixLength);
@@ -802,6 +819,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	}
 
 	SnapshotFileBackupEncryptionKeys cipherKeys;
+	Reference<TenantEntryCache<Void>> tenantCache;
 	Reference<IBackupFile> file;
 	int blockSize;
 
@@ -973,8 +991,6 @@ void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* 
 	uint32_t kLen = reader->consumeNetworkUInt32();
 	const uint8_t* k = reader->consume(kLen);
 	results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
-	KeyRef prevKey;
-	bool done = false;
 
 	// Read kv pairs and end key
 	while (1) {
@@ -986,19 +1002,6 @@ void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* 
 		if (reader->eof() || *reader->rptr == 0xFF) {
 			results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
 			break;
-		}
-
-		if (encryptedBlock) {
-			// Ensure that if current key is located in a different tenant than the previous key it is the last key in
-			// the block and that it is truncated
-			KeyRef curKey = KeyRef(k, kLen);
-			if (prevKey.size() > 0 &&
-			    EncryptedRangeFileWriter::getTenantId(curKey) != EncryptedRangeFileWriter::getTenantId(prevKey)) {
-				CODE_PROBE(true, "decode crossing tenant boundaries");
-				ASSERT(!done);
-				done = true;
-			}
-			prevKey = curKey;
 		}
 
 		// Read a value, which must exist or the block is invalid
@@ -1648,6 +1651,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		state std::unique_ptr<IRangeFileWriter> rangeFile;
 		state BackupConfig backup(task);
 		state Arena arena;
+		state Reference<TenantEntryCache<Void>> tenantCache = makeReference<TenantEntryCache<Void>>(cx);
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but if
 		// bc is false then clearly the backup is no longer in progress
@@ -1742,7 +1746,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 					CODE_PROBE(true, "using encrypted snapshot file writer");
 					SnapshotFileBackupEncryptionKeys eKeys;
 					getCipherKeys(eKeys, arena);
-					rangeFile = std::make_unique<EncryptedRangeFileWriter>(eKeys, outFile, blockSize);
+					rangeFile = std::make_unique<EncryptedRangeFileWriter>(eKeys, tenantCache, outFile, blockSize);
 				} else {
 					rangeFile = std::make_unique<RangeFileWriter>(outFile, blockSize);
 				}
