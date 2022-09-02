@@ -19,6 +19,7 @@
  */
 
 #include <cmath>
+#include "flow/ApiVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/DatabaseContext.h"
@@ -417,7 +418,7 @@ TEST_CASE("/fdbserver/metrics/TraceEvents") {
 	}
 	fprintf(stdout, "Using environment variables METRICS_CONNFILE and METRICS_PREFIX.\n");
 
-	state Database metricsDb = Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST);
+	state Database metricsDb = Database::createDatabase(metricsConnFile, ApiVersion::LATEST_VERSION);
 	TDMetricCollection::getTDMetrics()->address = LiteralStringRef("0.0.0.0:0");
 	state Future<Void> metrics = runMetrics(metricsDb, KeyRef(metricsPrefix));
 	state int64_t x = 0;

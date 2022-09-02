@@ -26,6 +26,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IClientApi.h"
+#include "flow/ApiVersion.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/ThreadHelper.actor.h"
 
@@ -1048,7 +1049,7 @@ public:
 	};
 	std::map<std::string, SharedStateInfo> clusterSharedStateMap;
 
-	static bool apiVersionAtLeast(int minVersion);
+	ApiVersion getApiVersion() { return apiVersion; }
 
 private:
 	MultiVersionApi();
@@ -1075,7 +1076,7 @@ private:
 	volatile bool networkSetup;
 	volatile bool bypassMultiClientApi;
 	volatile bool externalClient;
-	int apiVersion;
+	ApiVersion apiVersion;
 
 	int nextThread = 0;
 	int threadCount;

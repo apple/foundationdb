@@ -473,7 +473,7 @@ ACTOR Future<Void> runBackup(Reference<IClusterConnectionRecord> connRecord) {
 	}
 
 	if (g_simulator.backupAgents == ISimulator::BackupAgentType::BackupToFile) {
-		Database cx = Database::createDatabase(connRecord, -1);
+		Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
 		state FileBackupAgent fileAgent;
 		agentFutures.push_back(fileAgent.run(
@@ -501,11 +501,11 @@ ACTOR Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 
 	if (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
 		ASSERT(g_simulator.extraDatabases.size() == 1);
-		Database cx = Database::createDatabase(connRecord, -1);
+		Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
 		auto extraFile =
 		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
-		state Database drDatabase = Database::createDatabase(extraFile, -1);
+		state Database drDatabase = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 
 		TraceEvent("StartingDrAgents")
 		    .detail("ConnectionString", connRecord->getConnectionString().toString())
@@ -1145,6 +1145,8 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		if (testConfig.disableEncryption) {
 			g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
 			g_knobs.setKnob("enable_tlog_encryption", KnobValueRef::create(bool{ false }));
+			g_knobs.setKnob("enable_storage_server_encryption", KnobValueRef::create(bool{ false }));
+			g_knobs.setKnob("enable_blob_granule_encryption", KnobValueRef::create(bool{ false }));
 			TraceEvent(SevDebug, "DisableEncryption");
 		}
 		*pConnString = conn;
@@ -1926,6 +1928,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	if (testConfig.disableEncryption) {
 		g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
 		g_knobs.setKnob("enable_tlog_encryption", KnobValueRef::create(bool{ false }));
+		g_knobs.setKnob("enable_storage_server_encryption", KnobValueRef::create(bool{ false }));
+		g_knobs.setKnob("enable_blob_granule_encryption", KnobValueRef::create(bool{ false }));
 		TraceEvent(SevDebug, "DisableEncryption");
 	}
 	auto configDBType = testConfig.getConfigDBType();

@@ -357,7 +357,7 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 
 	ASSERT(tenantData.isValid());
 
-	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
+	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains;
 	domains.emplace(tenantData->entry.id, StringRef(*arena, tenantData->name));
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> domainKeyMap =
 	    wait(getLatestEncryptCipherKeys(bwData->dbInfo, domains));
@@ -1185,14 +1185,14 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		}
 		ASSERT(lastDeltaVersion >= version);
 		chunk.includedVersion = version;
-
-		if (BW_DEBUG) {
-			fmt::print("Re-snapshotting [{0} - {1}) @ {2} from blob\n",
-			           metadata->keyRange.begin.printable(),
-			           metadata->keyRange.end.printable(),
-			           version);
-		}
 		chunksToRead.push_back(readBlobGranule(chunk, metadata->keyRange, 0, version, bstore, &bwData->stats));
+	}
+
+	if (BW_DEBUG) {
+		fmt::print("Re-snapshotting [{0} - {1}) @ {2} from blob\n",
+		           metadata->keyRange.begin.printable(),
+		           metadata->keyRange.end.printable(),
+		           version);
 	}
 
 	try {

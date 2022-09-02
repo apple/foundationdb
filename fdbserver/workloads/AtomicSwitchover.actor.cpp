@@ -42,7 +42,7 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		ASSERT(g_simulator.extraDatabases.size() == 1);
 		auto extraFile =
 		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
-		extraDB = Database::createDatabase(extraFile, -1);
+		extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 	}
 
 	std::string description() const override { return "AtomicSwitchover"; }
