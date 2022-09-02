@@ -127,6 +127,10 @@ public:
 	                                                                    Optional<Version> readVersion,
 	                                                                    Version* readVersionOut) override;
 
+	Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRange& range,
+	                                                                           Optional<Version> summaryVersion,
+	                                                                           int rangeLimit) override;
+
 	void addReadConflictRange(KeyRangeRef const& keys) override;
 	void makeSelfConflicting() override { tr.makeSelfConflicting(); }
 

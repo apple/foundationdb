@@ -242,7 +242,7 @@ FDB_DECLARE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
 
 class PhysicalShardCollection : public ReferenceCounted<PhysicalShardCollection> {
 public:
-	PhysicalShardCollection() : lastTransitionStartTime(now()), requireTransition(false) {}
+	PhysicalShardCollection() : requireTransition(false), lastTransitionStartTime(now()) {}
 
 	enum class PhysicalShardCreationTime { DDInit, DDRelocator };
 

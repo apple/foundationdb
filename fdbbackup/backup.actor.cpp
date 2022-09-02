@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/ApiVersion.h"
 #include "fmt/format.h"
 #include "fdbbackup/BackupTLSConfig.h"
 #include "fdbclient/JsonBuilder.h"
@@ -2314,7 +2315,7 @@ ACTOR Future<Void> runRestore(Database db,
 			throw restore_error();
 		}
 
-		origDb = Database::createDatabase(originalClusterFile, Database::API_VERSION_LATEST);
+		origDb = Database::createDatabase(originalClusterFile, ApiVersion::LATEST_VERSION);
 		Version v = wait(timeKeeperVersionFromDatetime(targetTimestamp, origDb.get()));
 		fmt::print("Timestamp '{0}' resolves to version {1}\n", targetTimestamp, v);
 		targetVersion = v;
@@ -2720,7 +2721,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 			return Void();
 		}
 
-		Database origDb = Database::createDatabase(originalClusterFile, Database::API_VERSION_LATEST);
+		Database origDb = Database::createDatabase(originalClusterFile, ApiVersion::LATEST_VERSION);
 		Version v = wait(timeKeeperVersionFromDatetime(restoreTimestamp, origDb));
 		result["restore_timestamp"] = restoreTimestamp;
 		result["restore_timestamp_resolved_version"] = v;
@@ -3127,7 +3128,7 @@ Optional<Database> connectToCluster(std::string const& clusterFile,
 	}
 
 	try {
-		db = Database::createDatabase(ccf, -1, IsInternal::True, localities);
+		db = Database::createDatabase(ccf, ApiVersion::LATEST_VERSION, IsInternal::True, localities);
 	} catch (Error& e) {
 		if (!quiet) {
 			fprintf(stderr, "ERROR: %s\n", e.what());
@@ -4123,7 +4124,7 @@ int main(int argc, char* argv[]) {
 				}
 
 				try {
-					db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST);
+					db = Database::createDatabase(restoreClusterFileDest, ApiVersion::LATEST_VERSION);
 				} catch (Error& e) {
 					fprintf(stderr,
 					        "Restore destination cluster file '%s' invalid: %s\n",
@@ -4202,7 +4203,7 @@ int main(int argc, char* argv[]) {
 				}
 
 				try {
-					db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST);
+					db = Database::createDatabase(restoreClusterFileDest, ApiVersion::LATEST_VERSION);
 				} catch (Error& e) {
 					fprintf(stderr,
 					        "Restore destination cluster file '%s' invalid: %s\n",

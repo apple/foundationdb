@@ -26,6 +26,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IClientApi.h"
+#include "flow/ApiVersion.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/ThreadHelper.actor.h"
 
@@ -89,6 +90,14 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 		const void* endKey;
 		int endKeyLength;
 	} FDBKeyRange;
+
+	typedef struct granulesummary {
+		FDBKeyRange key_range;
+		int64_t snapshot_version;
+		int64_t snapshot_size;
+		int64_t delta_version;
+		int64_t delta_size;
+	} FDBGranuleSummary;
 #pragma pack(pop)
 
 	typedef struct readgranulecontext {
@@ -332,6 +341,14 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                                int64_t readVersion,
 	                                                FDBReadBlobGranuleContext* granule_context);
 
+	FDBFuture* (*transactionSummarizeBlobGranules)(FDBTransaction* tr,
+	                                               uint8_t const* begin_key_name,
+	                                               int begin_key_name_length,
+	                                               uint8_t const* end_key_name,
+	                                               int end_key_name_length,
+	                                               int64_t summaryVersion,
+	                                               int rangeLimit);
+
 	FDBFuture* (*transactionCommit)(FDBTransaction* tr);
 	fdb_error_t (*transactionGetCommittedVersion)(FDBTransaction* tr, int64_t* outVersion);
 	FDBFuture* (*transactionGetApproximateSize)(FDBTransaction* tr);
@@ -363,6 +380,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                            FDBMappedKeyValue const** outKVM,
 	                                            int* outCount,
 	                                            fdb_bool_t* outMore);
+	fdb_error_t (*futureGetGranuleSummaryArray)(FDBFuture* f, const FDBGranuleSummary** out_summaries, int* outCount);
 	fdb_error_t (*futureGetSharedState)(FDBFuture* f, DatabaseSharedState** outPtr);
 	fdb_error_t (*futureSetCallback)(FDBFuture* f, FDBCallback callback, void* callback_parameter);
 	void (*futureCancel)(FDBFuture* f);
@@ -440,6 +458,10 @@ public:
 	    Version beginVersion,
 	    Version readVersion,
 	    ReadBlobGranuleContext granuleContext) override;
+
+	ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRangeRef& keyRange,
+	                                                                                 Optional<Version> summaryVersion,
+	                                                                                 int rangeLimit) override;
 
 	void addReadConflictRange(const KeyRangeRef& keys) override;
 
@@ -657,6 +679,10 @@ public:
 	    Version beginVersion,
 	    Version readVersion,
 	    ReadBlobGranuleContext granuleContext) override;
+
+	ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRangeRef& keyRange,
+	                                                                                 Optional<Version> summaryVersion,
+	                                                                                 int rangeLimit) override;
 
 	void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) override;
 	void set(const KeyRef& key, const ValueRef& value) override;
@@ -1048,7 +1074,7 @@ public:
 	};
 	std::map<std::string, SharedStateInfo> clusterSharedStateMap;
 
-	static bool apiVersionAtLeast(int minVersion);
+	ApiVersion getApiVersion() { return apiVersion; }
 
 private:
 	MultiVersionApi();
@@ -1075,7 +1101,7 @@ private:
 	volatile bool networkSetup;
 	volatile bool bypassMultiClientApi;
 	volatile bool externalClient;
-	int apiVersion;
+	ApiVersion apiVersion;
 
 	int nextThread = 0;
 	int threadCount;

@@ -25,6 +25,7 @@
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/ApiVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct VersionStampWorkload : TestWorkload {
@@ -72,13 +73,13 @@ struct VersionStampWorkload : TestWorkload {
 		} else if (choice < 0.3) {
 			apiVersion = 520;
 		} else {
-			apiVersion = Database::API_VERSION_LATEST;
+			apiVersion = ApiVersion::LATEST_VERSION;
 		}
 		TraceEvent("VersionStampApiVersion").detail("ApiVersion", apiVersion);
 
-		allowMetadataVersionKey = apiVersion >= 610 || apiVersion == Database::API_VERSION_LATEST;
+		allowMetadataVersionKey = apiVersion >= 610 || apiVersion == ApiVersion::LATEST_VERSION;
 
-		cx->apiVersion = apiVersion;
+		cx->apiVersion = ApiVersion(apiVersion);
 		if (clientId == 0)
 			return _start(cx, this, 1 / transactionsPerSecond);
 		return Void();
@@ -158,7 +159,7 @@ struct VersionStampWorkload : TestWorkload {
 			ASSERT(g_simulator.extraDatabases.size() == 1);
 			auto extraFile =
 			    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
-			cx = Database::createDatabase(extraFile, -1);
+			cx = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 		}
 		state ReadYourWritesTransaction tr(cx);
 		// We specifically wish to grab the smalles read version that we can get and maintain it, to
@@ -318,7 +319,7 @@ struct VersionStampWorkload : TestWorkload {
 			ASSERT(g_simulator.extraDatabases.size() == 1);
 			auto extraFile =
 			    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
-			extraDB = Database::createDatabase(extraFile, -1);
+			extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 		}
 
 		state Future<Void> metadataWatch = Void();

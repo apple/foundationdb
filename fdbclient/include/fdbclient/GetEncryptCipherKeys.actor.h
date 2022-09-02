@@ -88,7 +88,7 @@ Future<EKPGetLatestBaseCipherKeysReply> getUncachedLatestEncryptCipherKeys(Refer
 ACTOR template <class T>
 Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getLatestEncryptCipherKeys(
     Reference<AsyncVar<T> const> db,
-    std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains) {
+    std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains) {
 	state Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
 	state EKPGetLatestBaseCipherKeysRequest request;
@@ -250,27 +250,28 @@ struct TextAndHeaderCipherKeys {
 	Reference<BlobCipherKey> cipherHeaderKey;
 };
 
-// Helper method to get latest cipher text key and cipher header key for system domain,
-// used for encrypting system data.
 ACTOR template <class T>
-Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(Reference<AsyncVar<T> const> db) {
-	static std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains = {
-		{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME },
-		{ ENCRYPT_HEADER_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
-	};
+Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(Reference<AsyncVar<T> const> db,
+                                                                    EncryptCipherDomainId domainId,
+                                                                    EncryptCipherDomainNameRef domainName) {
+	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains;
+	domains[domainId] = domainName;
+	domains[ENCRYPT_HEADER_DOMAIN_ID] = FDB_DEFAULT_ENCRYPT_DOMAIN_NAME;
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys =
 	    wait(getLatestEncryptCipherKeys(db, domains));
-	ASSERT(cipherKeys.count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) > 0);
+	ASSERT(cipherKeys.count(domainId) > 0);
 	ASSERT(cipherKeys.count(ENCRYPT_HEADER_DOMAIN_ID) > 0);
-	TextAndHeaderCipherKeys result{ cipherKeys.at(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID),
-		                            cipherKeys.at(ENCRYPT_HEADER_DOMAIN_ID) };
+	TextAndHeaderCipherKeys result{ cipherKeys.at(domainId), cipherKeys.at(ENCRYPT_HEADER_DOMAIN_ID) };
 	ASSERT(result.cipherTextKey.isValid());
 	ASSERT(result.cipherHeaderKey.isValid());
 	return result;
 }
 
-// Helper method to get both text cipher key and header cipher key for the given encryption header,
-// used for decrypting given encrypted data with encryption header.
+template <class T>
+Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(const Reference<AsyncVar<T> const>& db) {
+	return getLatestEncryptCipherKeysForDomain(db, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
+}
+
 ACTOR template <class T>
 Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db, BlobCipherEncryptHeader header) {
 	std::unordered_set<BlobCipherDetails> cipherDetails{ header.cipherTextDetails, header.cipherHeaderDetails };

@@ -781,8 +781,10 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 
 			newMetrics = nextIter->value().stats->get();
 
-			// If going forward, give up when the next shard's stats are not yet present.
-			if (!newMetrics.present() || shardCount + newMetrics.get().shardCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT) {
+			// If going forward, give up when the next shard's stats are not yet present, or if the
+			// the shard is already over the merge bounds.
+			if (!newMetrics.present() || shardCount + newMetrics.get().shardCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT ||
+			    (endingStats.bytes + newMetrics.get().metrics.bytes > maxShardSize)) {
 				--nextIter;
 				forwardComplete = true;
 				continue;
@@ -799,7 +801,8 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 			// If going backward, stop when the stats are not present or if the shard is already over the merge
 			//  bounds. If this check triggers right away (if we have not merged anything) then return a trigger
 			//  on the previous shard changing "size".
-			if (!newMetrics.present() || shardCount + newMetrics.get().shardCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT) {
+			if (!newMetrics.present() || shardCount + newMetrics.get().shardCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT ||
+			    (endingStats.bytes + newMetrics.get().metrics.bytes > maxShardSize)) {
 				if (shardsMerged == 1) {
 					CODE_PROBE(true, "shardMerger cannot merge anything");
 					return brokenPromiseToReady(prevIter->value().stats->onChange());
