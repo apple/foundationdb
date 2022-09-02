@@ -23,11 +23,6 @@
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 
-void installGlobalSwiftConcurrencyHooks(void* net2) {
-}
-
-
-
 // ==== ----------------------------------------------------------------------------------------------------------------
 // ==== ----------------------------------------------------------------------------------------------------------------
 
@@ -101,7 +96,20 @@ void net2_swift_task_enqueueGlobalWithDelay(JobDelay delay, Job *job) {
 	ASSERT(false && "just mocking out APIs");
 }
 
-// TODO: goes into Net2.actor.cpp (somehow) 
-// void N2::Net2::installSwiftConcurrencyHooks() {
-	// swift_task_enqueueGlobal_hook = net2_swift_task_enqueueGlobal; // FIXME: slight type issues still
-// }
+SWIFT_CC(swift)
+void net2_enqueueGlobal_hook_impl(Job* _Nonnull job,
+//                              swift_task_enqueueGlobal_original _Nonnull original) {
+                                  void (* _Nonnull)(Job *) __attribute__((swiftcall))) {
+	printf("[c++] intercepted job enqueue: %p - run it inline\n", job);
+
+	INetwork* net = _swift_newNet2(nullptr, false, false);
+	printf("[c++] net = %p", net);
+
+	swift_job_run(job, ExecutorRef::generic());
+}
+
+void swift_job_run_generic(Job *job) {
+	// FIXME: why can't I move impl to swift_hooks.cpp? It should be found properly...
+	swift_job_run(job, ExecutorRef::generic());
+}
+

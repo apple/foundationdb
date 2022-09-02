@@ -196,8 +196,6 @@ public:
 			onMainThreadVoid([this, fn] { this->stopCallbacks.emplace_back(std::move(fn)); });
 	}
 
-    void installSwiftConcurrencyHooks() override;
-
 	bool isSimulated() const override { return false; }
 	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override;
 
@@ -2109,9 +2107,9 @@ INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetric
 	return N2::g_net2;
 }
 
-INetwork* _swift_newNet2(TLSConfig* tlsConfig, bool useThreadPool, bool useMetrics) {
-	return newNet2(*tlsConfig, useThreadPool, useMetrics);
-}
+//INetwork* _swift_newNet2(TLSConfig* tlsConfig, bool useThreadPool, bool useMetrics) {
+//	return newNet2(*tlsConfig, useThreadPool, useMetrics);
+//}
 
 struct TestGVR {
 	Standalone<StringRef> key;

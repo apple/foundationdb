@@ -302,25 +302,15 @@ void swift_job_run(Job *job, ExecutorRef executor);
 //    <unknown>:0: error: please submit a bug report (https://swift.org/contributing/#reporting-bugs) and include the project, and add '-Xfrontend -validate-tbd-against-ir=none' to squash the errors
 //    WORKAROUND: skipping TBD validation
 // This function exists so we can get the generic executor, and don't have to do that from Swift.
-void swift_job_run_generic(Job *job) {
-	// FIXME: why can't I move impl to swift_hooks.cpp? It should be found properly...
-	swift_job_run(job, ExecutorRef::generic());
-}
+void swift_job_run_generic(Job *job);
 
 SWIFT_CC(swift)
 void net2_enqueueGlobal_hook_impl(Job* _Nonnull job,
 //                              swift_task_enqueueGlobal_original _Nonnull original) {
-                              void (* _Nonnull)(Job *) __attribute__((swiftcall))) {
-	printf("[c++] intercepted job enqueue: %p - run it inline\n", job);
-
-	INetwork* net = _swift_newNet2(nullptr, false, false);
-	printf("[c++] net = %p", net);
-
-	swift_job_run(job, ExecutorRef::generic());
-}
+                              void (* _Nonnull)(Job *) __attribute__((swiftcall)));
 
 // TODO: have this hook up a concrete event loop, not just pretend to do so; it'd take a Net2 instance
-void installGlobalSwiftConcurrencyHooks() {
+inline void installGlobalSwiftConcurrencyHooks() {
 	//   'SWIFT_CC(swift) void ((* _Nullable))(Job *, swift_task_enqueueGlobal_original _Nonnull) __attribute__((swiftcall))'
 	// 	  (aka 'void (*)(Job *         , void (* _Nonnull)(Job *) __attribute__((swiftcall))) __attribute__((swiftcall))')
 	// 	  (aka 'void    (Job * _Nonnull, void (* _Nonnull)(Job *) __attribute__((swiftcall)))')
