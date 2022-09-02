@@ -322,10 +322,7 @@ inline void installGlobalSwiftConcurrencyHooks() {
 //	}
 
 	swift_task_enqueueGlobal_hook = &net2_enqueueGlobal_hook_impl;
-
-//	API* fdb = FDB::API::selectAPIVersion(720);
-//	fdb->setupNetwork();
-
+	printf("[c++] configured: swift_task_enqueueGlobal_hook\n");
 }
 
 inline void globalNetworkRun() {

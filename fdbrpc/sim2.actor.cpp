@@ -906,6 +906,9 @@ public:
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		return delay(seconds, taskID, currentProcess, true);
 	}
+	void _swiftEnqueue(void *task) override {
+		exit(-1);
+	}
 	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine, bool ordered = false) {
 		ASSERT(seconds >= -0.0001);
 		seconds = std::max(0.0, seconds);

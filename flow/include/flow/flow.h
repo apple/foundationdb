@@ -1350,6 +1350,9 @@ inline Future<Void> delay(double seconds, TaskPriority taskID = TaskPriority::De
 inline Future<Void> orderedDelay(double seconds, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	return g_network->orderedDelay(seconds, taskID);
 }
+inline void _swiftEnqueue(void *task) {
+	return g_network->_swiftEnqueue(task);
+}
 inline Future<Void> delayUntil(double time, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	return g_network->delay(std::max(0.0, time - g_network->now()), taskID);
 }

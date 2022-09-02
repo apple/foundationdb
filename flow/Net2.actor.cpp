@@ -174,6 +174,7 @@ public:
 	double timer_monotonic() override { return ::timer_monotonic(); };
 	Future<Void> delay(double seconds, TaskPriority taskId) override;
 	Future<Void> orderedDelay(double seconds, TaskPriority taskId) override;
+	void _swiftEnqueue(void *task) override;
 	Future<class Void> yield(TaskPriority taskID) override;
 	bool check_yield(TaskPriority taskId) override;
 	TaskPriority getCurrentTask() const override { return currentTaskID; }
@@ -1538,6 +1539,7 @@ void Net2::run() {
 
 			try {
 				++tasksSinceReact;
+				printf("[c++][net:%p] Net2::run execute task: %p\n", this, task);
 				(*task)();
 			} catch (Error& e) {
 				TraceEvent(SevError, "TaskError").error(e);
@@ -1805,6 +1807,14 @@ Future<Void> Net2::orderedDelay(double seconds, TaskPriority taskId) {
 	// The regular delay already provides the required ordering property
 	return delay(seconds, taskId);
 }
+
+void Net2::_swiftEnqueue(void *task) {
+	printf("[c++][net2:%p] ready.push task: %p\n", this, task);
+
+	OrderedTask *orderedTask = (OrderedTask*) task;
+	this->ready.push(*orderedTask);
+}
+
 
 void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
 	if (stopped)

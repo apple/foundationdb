@@ -13,6 +13,7 @@ let task = Task { // task execution will be intercepted
     print("[swift] Started a task...")
     await test()
     print("[swift] returned from 'await test()'")
+    exit(0)
 }
 
 // ==== ---------------------------------------------------------------------------------------------------------------

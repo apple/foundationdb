@@ -43,10 +43,14 @@
 
 struct SwiftJobTask final : public N2::Task, public FastAllocated<SwiftJobTask> {
 	Job *job;
-	explicit SwiftJobTask(Job* job) noexcept : job(job) {}
+	explicit SwiftJobTask(Job* job) noexcept : job(job) {
+		printf("[c++][job:%p] prepare job\n", job);
+	}
 
 	void operator()() override {
-		job->runInFullyEstablishedContext(); // FIXME: not right; how to actually "just run"
+		printf("[c++][job:%p] run job\n", job);
+
+		swift_job_run(job, ExecutorRef::generic());
 		delete this;
 	}
 };
@@ -101,20 +105,19 @@ SWIFT_CC(swift)
 void net2_enqueueGlobal_hook_impl(Job* _Nonnull job,
 //                              swift_task_enqueueGlobal_original _Nonnull original) {
                                   void (* _Nonnull)(Job *) __attribute__((swiftcall))) {
-	printf("[c++] intercepted job enqueue: %p - run it inline\n", job);
+	// auto net = N2::g_net2; // TODO: can't access Net2 since it's incomplete here, would be nicer to not expose API on INetwork I suppose
+	auto net = g_network; // TODO: can't access Net2 since it's incomplete here, would be nicer to not expose API on INetwork I suppose
 
-//	auto tls = new TLSConfig();
-//	INetwork* net = _swift_newNet2(tls, false, false);
-//	printf("[c++] net        = %p\n", net);
-//	printf("[c++] N2::g_net2 = %p\n", N2::g_net2);
-//	if (net != N2::g_net2) {
-//		printf("[c++] Failed to initialize the global network var: N2::g_net2\n");
-//		exit(-1);
-//	}
-//
-//	printf("[c++] net2.runnable = %d\n", net->checkRunnable());
+	printf("[c++] intercepted job enqueue: %p to g_network (%p)\n", job, net);
 
-	swift_job_run(job, ExecutorRef::generic());
+	double at = 0.0; // TODO: now() net->now();
+	int64_t priority = 1; // FIXME: how to determine
+	TaskPriority taskID; // FIXME: how to determine
+
+	SwiftJobTask *jobTask = new SwiftJobTask(job);
+	N2::OrderedTask *orderedTask = new N2::OrderedTask(priority, taskID, jobTask);
+
+	net->_swiftEnqueue(orderedTask);
 }
 
 void swift_job_run_generic(Job *job) {

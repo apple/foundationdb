@@ -507,6 +507,9 @@ inline INetwork* _swift_newNet2(const TLSConfig* tlsConfig, bool useThreadPool =
 	return newNet2(*tlsConfig, useThreadPool, useMetrics);
 }
 
+// FIXME(swift): we should likely not leak this type in the INetwork interface, but we need a "submit this thing" API
+class OrderedTask;
+
 class SWIFT_CXX_REF_IMMORTAL INetwork {
 public:
 	// This interface abstracts the physical or simulated network, event loop and hardware that FoundationDB is running
@@ -553,6 +556,8 @@ public:
 
 	virtual double timer_monotonic() = 0;
 	// Similar to timer, but monotonic
+
+	virtual void _swiftEnqueue(void* task) = 0;
 
 	virtual Future<class Void> delay(double seconds, TaskPriority taskID) = 0;
 	// The given future will be set after seconds have elapsed
