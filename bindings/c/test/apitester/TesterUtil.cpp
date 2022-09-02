@@ -106,4 +106,17 @@ KeyRangeArray copyKeyRangeArray(fdb::future_var::KeyRangeRefArray::Type array) {
 	return out;
 };
 
+GranuleSummaryArray copyGranuleSummaryArray(fdb::future_var::GranuleSummaryRefArray::Type array) {
+	auto& [in_summaries, in_count] = array;
+
+	GranuleSummaryArray out;
+
+	for (int i = 0; i < in_count; ++i) {
+		fdb::native::FDBGranuleSummary nativeSummary = *in_summaries++;
+		fdb::GranuleSummary summary(nativeSummary);
+		out.push_back(summary);
+	}
+	return out;
+};
+
 } // namespace FdbApiTester

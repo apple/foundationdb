@@ -100,6 +100,9 @@ public:
 	    Version readVersion,
 	    ReadBlobGranuleContext granuleContext) = 0;
 
+	virtual ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>>
+	summarizeBlobGranules(const KeyRangeRef& keyRange, Optional<Version> summaryVersion, int rangeLimit) = 0;
+
 	virtual void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) = 0;
 	virtual void set(const KeyRef& key, const ValueRef& value) = 0;
 	virtual void clear(const KeyRef& begin, const KeyRef& end) = 0;

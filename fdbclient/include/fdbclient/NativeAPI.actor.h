@@ -82,8 +82,6 @@ struct NetworkOptions {
 
 class Database {
 public:
-	enum { API_VERSION_LATEST = -1 };
-
 	// Creates a database object that represents a connection to a cluster
 	// This constructor uses a preallocated DatabaseContext that may have been created
 	// on another thread
@@ -422,7 +420,7 @@ public:
 	                                                                    Version* readVersionOut = nullptr);
 
 	Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRange& range,
-	                                                                           Version summaryVersion,
+	                                                                           Optional<Version> summaryVersion,
 	                                                                           int rangeLimit);
 
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key

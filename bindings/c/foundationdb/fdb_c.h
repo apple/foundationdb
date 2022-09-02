@@ -179,6 +179,14 @@ typedef struct keyrange {
 	const uint8_t* end_key;
 	int end_key_length;
 } FDBKeyRange;
+
+typedef struct granulesummary {
+	FDBKeyRange key_range;
+	int64_t snapshot_version;
+	int64_t snapshot_size;
+	int64_t delta_version;
+	int64_t delta_size;
+} FDBGranuleSummary;
 #pragma pack(pop)
 
 typedef struct readgranulecontext {
@@ -263,6 +271,10 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_string_array(FDBFuture* 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_keyrange_array(FDBFuture* f,
                                                                        FDBKeyRange const** out_ranges,
                                                                        int* out_count);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_granule_summary_array(FDBFuture* f,
+                                                                              FDBGranuleSummary const** out_summaries,
+                                                                              int* out_count);
 
 /* FDBResult is a synchronous computation result, as opposed to a future that is asynchronous. */
 DLLEXPORT void fdb_result_destroy(FDBResult* r);
@@ -520,6 +532,14 @@ DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_transaction_read_blob_granules(FDBTr
                                                                            int64_t beginVersion,
                                                                            int64_t readVersion,
                                                                            FDBReadBlobGranuleContext granuleContext);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_summarize_blob_granules(FDBTransaction* tr,
+                                                                                uint8_t const* begin_key_name,
+                                                                                int begin_key_name_length,
+                                                                                uint8_t const* end_key_name,
+                                                                                int end_key_name_length,
+                                                                                int64_t summaryVersion,
+                                                                                int rangeLimit);
 
 #define FDB_KEYSEL_LAST_LESS_THAN(k, l) k, l, 0, 0
 #define FDB_KEYSEL_LAST_LESS_OR_EQUAL(k, l) k, l, 1, 0

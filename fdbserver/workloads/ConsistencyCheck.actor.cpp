@@ -444,9 +444,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (serverIndices.size()) {
 				KeyRangeRef range(cacheKey[k].key, (k < cacheKey.size() - 1) ? cacheKey[k + 1].key : allKeys.end);
 				cachedKeysLocationMap.insert(range, cacheServerInterfaces);
-				TraceEvent(SevDebug, "CheckCacheConsistency", self->id)
-				    .detail("CachedRange", range)
-				    .detail("Index", k);
+				TraceEvent(SevDebug, "CheckCacheConsistency", self->id).detail("CachedRange", range).detail("Index", k);
 			}
 		}
 		// Second, insert corresponding storage servers into the list
@@ -726,8 +724,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						begin = firstGreaterThan(result[result.size() - 1].key);
 						ASSERT(begin.getKey() != allKeys.end);
 						lastStartSampleKey = lastSampleKey;
-						TraceEvent(SevDebug, "CacheConsistencyCheckNextBeginKey", self->id)
-							.detail("Key", begin);
+						TraceEvent(SevDebug, "CacheConsistencyCheckNextBeginKey", self->id).detail("Key", begin);
 					} else
 						break;
 				} catch (Error& e) {

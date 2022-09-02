@@ -3304,7 +3304,8 @@ ACTOR Future<Void> loadForcePurgedRanges(Reference<BlobManagerData> bmData) {
 			beginKey = results.back().key;
 		} catch (Error& e) {
 			if (BM_DEBUG) {
-				fmt::print("BM {0} got error reading granule mapping during recovery: {1}\n", bmData->epoch, e.name());
+				fmt::print(
+				    "BM {0} got error reading force purge ranges during recovery: {1}\n", bmData->epoch, e.name());
 			}
 			wait(tr->onError(e));
 		}

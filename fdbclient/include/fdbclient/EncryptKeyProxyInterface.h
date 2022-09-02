@@ -144,7 +144,7 @@ struct EKPGetBaseCipherKeysRequestInfo {
 	EncryptCipherBaseKeyId baseCipherId;
 	// Encryption domain name - ancillairy metadata information, an encryption key should be uniquely identified by
 	// {domainId, cipherBaseId} tuple
-	EncryptCipherDomainName domainName;
+	EncryptCipherDomainNameRef domainName;
 
 	EKPGetBaseCipherKeysRequestInfo()
 	  : domainId(ENCRYPT_INVALID_DOMAIN_ID), baseCipherId(ENCRYPT_INVALID_CIPHER_KEY_ID) {}
@@ -176,7 +176,7 @@ struct EKPGetBaseCipherKeysByIdsRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, baseCipherInfos, debugId, reply);
+		serializer(ar, baseCipherInfos, debugId, reply, arena);
 	}
 };
 
@@ -193,7 +193,7 @@ struct EKPGetLatestBaseCipherKeysReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, baseCipherDetails, numHits, error);
+		serializer(ar, baseCipherDetails, numHits, error, arena);
 	}
 };
 
@@ -203,7 +203,7 @@ struct EKPGetLatestCipherKeysRequestInfo {
 	EncryptCipherDomainId domainId;
 	// Encryption domain name - ancillairy metadata information, an encryption key should be uniquely identified by
 	// {domainId, cipherBaseId} tuple
-	EncryptCipherDomainName domainName;
+	EncryptCipherDomainNameRef domainName;
 
 	EKPGetLatestCipherKeysRequestInfo() : domainId(ENCRYPT_INVALID_DOMAIN_ID) {}
 	EKPGetLatestCipherKeysRequestInfo(const EncryptCipherDomainId dId, StringRef name, Arena& arena)
@@ -239,7 +239,7 @@ struct EKPGetLatestBaseCipherKeysRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, encryptDomainInfos, debugId, reply);
+		serializer(ar, encryptDomainInfos, debugId, reply, arena);
 	}
 };
 

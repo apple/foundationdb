@@ -418,6 +418,7 @@ ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> ThreadSafeTransaction::
 		    return tr->readBlobGranules(r, beginVersion, readVersion, readVersionOut);
 	    });
 }
+
 ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranulesFinish(
     ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
     const KeyRangeRef& keyRange,
@@ -427,6 +428,19 @@ ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranulesFinish(
 	// do this work off of fdb network threads for performance!
 	Standalone<VectorRef<BlobGranuleChunkRef>> files = startFuture.get();
 	return loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersion, granuleContext);
+}
+
+ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> ThreadSafeTransaction::summarizeBlobGranules(
+    const KeyRangeRef& keyRange,
+    Optional<Version> summaryVersion,
+    int rangeLimit) {
+	ISingleThreadTransaction* tr = this->tr;
+	KeyRange r = keyRange;
+
+	return onMainThread([=]() -> Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> {
+		tr->checkDeferredError();
+		return tr->summarizeBlobGranules(r, summaryVersion, rangeLimit);
+	});
 }
 
 void ThreadSafeTransaction::addReadConflictRange(const KeyRangeRef& keys) {
@@ -601,7 +615,7 @@ extern const char* getSourceVersion();
 ThreadSafeApi::ThreadSafeApi() : apiVersion(-1), transportId(0) {}
 
 void ThreadSafeApi::selectApiVersion(int apiVersion) {
-	this->apiVersion = apiVersion;
+	this->apiVersion = ApiVersion(apiVersion);
 }
 
 const char* ThreadSafeApi::getClientVersion() {
@@ -673,12 +687,12 @@ void ThreadSafeApi::stopNetwork() {
 
 Reference<IDatabase> ThreadSafeApi::createDatabase(const char* clusterFilePath) {
 	return Reference<IDatabase>(
-	    new ThreadSafeDatabase(ThreadSafeDatabase::ConnectionRecordType::FILE, clusterFilePath, apiVersion));
+	    new ThreadSafeDatabase(ThreadSafeDatabase::ConnectionRecordType::FILE, clusterFilePath, apiVersion.version()));
 }
 
 Reference<IDatabase> ThreadSafeApi::createDatabaseFromConnectionString(const char* connectionString) {
 	return Reference<IDatabase>(new ThreadSafeDatabase(
-	    ThreadSafeDatabase::ConnectionRecordType::CONNECTION_STRING, connectionString, apiVersion));
+	    ThreadSafeDatabase::ConnectionRecordType::CONNECTION_STRING, connectionString, apiVersion.version()));
 }
 
 void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) {

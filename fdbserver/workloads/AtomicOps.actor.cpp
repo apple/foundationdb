@@ -111,7 +111,7 @@ struct AtomicOpsWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (apiVersion500)
-			cx->apiVersion = 500;
+			cx->apiVersion = ApiVersion(500);
 
 		if (clientId != 0)
 			return Void();

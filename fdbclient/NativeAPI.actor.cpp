@@ -1273,7 +1273,7 @@ void DatabaseContext::registerSpecialKeysImpl(SpecialKeySpace::MODULE module,
                                               std::unique_ptr<SpecialKeyRangeReadImpl>&& impl,
                                               int deprecatedVersion) {
 	// if deprecated, add the implementation when the api version is less than the deprecated version
-	if (deprecatedVersion == -1 || apiVersion < deprecatedVersion) {
+	if (deprecatedVersion == -1 || apiVersion.version() < deprecatedVersion) {
 		specialKeySpace->registerKeyRange(module, type, impl->getKeyRange(), impl.get());
 		specialKeySpaceModules.push_back(std::move(impl));
 	}
@@ -1426,7 +1426,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
                                  EnableLocalityLoadBalance enableLocalityLoadBalance,
                                  LockAware lockAware,
                                  IsInternal internal,
-                                 int apiVersion,
+                                 int _apiVersion,
                                  IsSwitchable switchable,
                                  Optional<TenantName> defaultTenant)
   : lockAware(lockAware), switchable(switchable), connectionRecord(connectionRecord), proxyProvisional(false),
@@ -1466,10 +1466,12 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     bgGranulesPerRequest(1000), outstandingWatches(0), sharedStatePtr(nullptr), lastGrvTime(0.0), cachedReadVersion(0),
     lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0), lastProxyRequestTime(0.0),
     transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor),
-    coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
+    coordinator(coordinator), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
     detailedHealthMetricsLastUpdated(0), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
+
+	apiVersion = ApiVersion(_apiVersion);
 
 	dbId = deterministicRandom()->randomUniqueID();
 
@@ -1482,7 +1484,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	metadataVersionCache.resize(CLIENT_KNOBS->METADATA_VERSION_CACHE_SIZE);
 	maxOutstandingWatches = CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES;
 
-	snapshotRywEnabled = apiVersionAtLeast(300) ? 1 : 0;
+	snapshotRywEnabled = apiVersion.hasSnapshotRYW() ? 1 : 0;
 
 	logger = databaseLogger(this) && tssLogger(this);
 	locationCacheSize = g_network->isSimulated() ? CLIENT_KNOBS->LOCATION_CACHE_EVICTION_SIZE_SIM
@@ -1501,7 +1503,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 	globalConfig = std::make_unique<GlobalConfig>(this);
 
-	if (apiVersionAtLeast(720)) {
+	if (apiVersion.hasTenantsV2()) {
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::CLUSTERID,
 		    SpecialKeySpace::IMPLTYPE::READONLY,
@@ -1521,14 +1523,13 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<TenantRangeImpl<true>>(SpecialKeySpace::getManagementApiCommandRange("tenant")));
-	}
-	if (apiVersionAtLeast(710) && !apiVersionAtLeast(720)) {
+	} else if (apiVersion.hasTenantsV1()) {
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<TenantRangeImpl<false>>(SpecialKeySpace::getManagementApiCommandRange("tenantmap")));
 	}
-	if (apiVersionAtLeast(700)) {
+	if (apiVersion.version() >= 700) {
 		registerSpecialKeysImpl(SpecialKeySpace::MODULE::ERRORMSG,
 		                        SpecialKeySpace::IMPLTYPE::READONLY,
 		                        std::make_unique<SingleSpecialKeyImpl>(
@@ -1651,7 +1652,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		                        std::make_unique<ActorProfilerConf>(
 		                            SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ACTOR_PROFILER_CONF)));
 	}
-	if (apiVersionAtLeast(630)) {
+	if (apiVersion.version() >= 630) {
 		registerSpecialKeysImpl(SpecialKeySpace::MODULE::TRANSACTION,
 		                        SpecialKeySpace::IMPLTYPE::READONLY,
 		                        std::make_unique<ConflictingKeysImpl>(conflictingKeysRange));
@@ -4981,7 +4982,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 					throw;
 				}
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-				    e.code() == error_code_connection_failed) {
+				    e.code() == error_code_connection_failed || e.code() == error_code_request_maybe_delivered) {
 					const KeyRangeRef& range = locations[shard].range;
 
 					if (reverse)
@@ -8024,13 +8025,13 @@ Future<Standalone<VectorRef<BlobGranuleChunkRef>>> Transaction::readBlobGranules
 
 ACTOR Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranulesActor(Transaction* self,
                                                                                       KeyRange range,
-                                                                                      Version summaryVersion,
+                                                                                      Optional<Version> summaryVersion,
                                                                                       int rangeLimit) {
 	state Version readVersionOut;
 	Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
 	    wait(readBlobGranulesActor(self, range, 0, summaryVersion, &readVersionOut, rangeLimit, true));
 	ASSERT(chunks.size() <= rangeLimit);
-	ASSERT(readVersionOut == summaryVersion);
+	ASSERT(!summaryVersion.present() || readVersionOut == summaryVersion.get());
 	Standalone<VectorRef<BlobGranuleSummaryRef>> summaries;
 	summaries.reserve(summaries.arena(), chunks.size());
 	for (auto& it : chunks) {
@@ -8040,9 +8041,8 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules
 	return summaries;
 }
 
-Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> Transaction::summarizeBlobGranules(const KeyRange& range,
-                                                                                        Version summaryVersion,
-                                                                                        int rangeLimit) {
+Future<Standalone<VectorRef<BlobGranuleSummaryRef>>>
+Transaction::summarizeBlobGranules(const KeyRange& range, Optional<Version> summaryVersion, int rangeLimit) {
 	return summarizeBlobGranulesActor(this, range, summaryVersion, rangeLimit);
 }
 
@@ -9543,6 +9543,10 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				if (useIdx >= 0) {
 					chosenLocations[loc] = useIdx;
 					loc++;
+					if (g_network->isSimulated() && !g_simulator.speedUpSimulation && BUGGIFY_WITH_PROB(0.01)) {
+						// simulate as if we had to wait for all alternatives delayed, before the next one
+						wait(delay(deterministicRandom()->random01()));
+					}
 					continue;
 				}
 
@@ -9604,7 +9608,8 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    e.code() == error_code_connection_failed || e.code() == error_code_unknown_change_feed ||
-			    e.code() == error_code_broken_promise || e.code() == error_code_future_version) {
+			    e.code() == error_code_broken_promise || e.code() == error_code_future_version ||
+			    e.code() == error_code_request_maybe_delivered) {
 				db->changeFeedCache.erase(rangeID);
 				cx->invalidateCache(Key(), keys);
 				if (begin == lastBeginVersion) {

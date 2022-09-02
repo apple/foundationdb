@@ -447,7 +447,8 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 		CODE_PROBE(err.code() == error_code_commit_proxy_failed, "Master: terminated due to commit proxy failure");
 		CODE_PROBE(err.code() == error_code_grv_proxy_failed, "Master: terminated due to GRV proxy failure");
 		CODE_PROBE(err.code() == error_code_resolver_failed, "Master: terminated due to resolver failure");
-		CODE_PROBE(err.code() == error_code_version_indexer_failed, "Master: terminated due to version indexer failure");
+		CODE_PROBE(err.code() == error_code_version_indexer_failed,
+		           "Master: terminated due to version indexer failure");
 		CODE_PROBE(err.code() == error_code_backup_worker_failed, "Master: terminated due to backup worker failure");
 
 		if (normalMasterErrors().count(err.code())) {
