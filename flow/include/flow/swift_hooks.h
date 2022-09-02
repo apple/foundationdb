@@ -24,6 +24,7 @@
 #include "swift.h"
 #include <stdint.h>
 #include "flow/AsioReactor.h"
+#include "flow/TLSConfig.actor.h"
 
 #if !defined(__has_feature)
 #define __has_feature(x) 0
@@ -311,12 +312,24 @@ void net2_enqueueGlobal_hook_impl(Job* _Nonnull job,
 
 // TODO: have this hook up a concrete event loop, not just pretend to do so; it'd take a Net2 instance
 inline void installGlobalSwiftConcurrencyHooks() {
-	//   'SWIFT_CC(swift) void ((* _Nullable))(Job *, swift_task_enqueueGlobal_original _Nonnull) __attribute__((swiftcall))'
-	// 	  (aka 'void (*)(Job *         , void (* _Nonnull)(Job *) __attribute__((swiftcall))) __attribute__((swiftcall))')
-	// 	  (aka 'void    (Job * _Nonnull, void (* _Nonnull)(Job *) __attribute__((swiftcall)))')
-	// from incompatible type
-	// 	  'void (Job * _Nonnull, swift_task_enqueueGlobal_original _Nonnull)'
+	auto tls = new TLSConfig();
+	g_network = _swift_newNet2(tls, false, false);
+	printf("[c++] net        = %p\n", g_network);
+	printf("[c++] N2::g_net2 = %p\n", N2::g_net2);
+//	if (net != N2::g_net2) {
+//		printf("[c++] Failed to initialize the global network var: N2::g_net2\n");
+//		exit(-1);
+//	}
+
 	swift_task_enqueueGlobal_hook = &net2_enqueueGlobal_hook_impl;
+
+//	API* fdb = FDB::API::selectAPIVersion(720);
+//	fdb->setupNetwork();
+
+}
+
+inline void globalNetworkRun() {
+	g_network->run(); // BLOCKS; dedicates this thread to the runloop
 }
 
 

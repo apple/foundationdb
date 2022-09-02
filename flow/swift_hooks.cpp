@@ -103,9 +103,16 @@ void net2_enqueueGlobal_hook_impl(Job* _Nonnull job,
                                   void (* _Nonnull)(Job *) __attribute__((swiftcall))) {
 	printf("[c++] intercepted job enqueue: %p - run it inline\n", job);
 
-	auto tls = new TLSConfig();
-	INetwork* net = _swift_newNet2(tls, false, false);
-	printf("[c++] net = %p\n", net);
+//	auto tls = new TLSConfig();
+//	INetwork* net = _swift_newNet2(tls, false, false);
+//	printf("[c++] net        = %p\n", net);
+//	printf("[c++] N2::g_net2 = %p\n", N2::g_net2);
+//	if (net != N2::g_net2) {
+//		printf("[c++] Failed to initialize the global network var: N2::g_net2\n");
+//		exit(-1);
+//	}
+//
+//	printf("[c++] net2.runnable = %d\n", net->checkRunnable());
 
 	swift_job_run(job, ExecutorRef::generic());
 }
