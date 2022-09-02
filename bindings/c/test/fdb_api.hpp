@@ -70,8 +70,7 @@ struct GranuleSummary {
 	int64_t deltaSize;
 
 	GranuleSummary(const native::FDBGranuleSummary& nativeSummary) {
-		keyRange.beginKey =
-		    fdb::Key(nativeSummary.key_range.begin_key, nativeSummary.key_range.begin_key_length);
+		keyRange.beginKey = fdb::Key(nativeSummary.key_range.begin_key, nativeSummary.key_range.begin_key_length);
 		keyRange.endKey = fdb::Key(nativeSummary.key_range.end_key, nativeSummary.key_range.end_key_length);
 		snapshotVersion = nativeSummary.snapshot_version;
 		snapshotSize = nativeSummary.snapshot_size;
