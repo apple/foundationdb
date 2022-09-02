@@ -2528,27 +2528,25 @@ ACTOR void setupAndRun(std::string dataFolder,
 
 	state Optional<TenantName> defaultTenant;
 	state Standalone<VectorRef<TenantNameRef>> tenantsToCreate;
-	state TenantMode tenantMode = TenantMode::REQUIRED;
-	// if (allowDefaultTenant && deterministicRandom()->random01() < 0.5) {
-	// 	defaultTenant = "SimulatedDefaultTenant"_sr;
-	// 	tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
-	// 	if (deterministicRandom()->random01() < 0.9) {
-	// 		tenantMode = TenantMode::REQUIRED;
-	// 	} else {
-	// 		tenantMode = TenantMode::OPTIONAL_TENANT;
-	// 	}
-	// } else if (!allowDisablingTenants || deterministicRandom()->random01() < 0.5) {
-	// 	tenantMode = TenantMode::OPTIONAL_TENANT;
-	// }
+	state TenantMode tenantMode = TenantMode::DISABLED;
+	if (allowDefaultTenant && deterministicRandom()->random01() < 0.5) {
+		defaultTenant = "SimulatedDefaultTenant"_sr;
+		tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
+		if (deterministicRandom()->random01() < 0.9) {
+			tenantMode = TenantMode::REQUIRED;
+		} else {
+			tenantMode = TenantMode::OPTIONAL_TENANT;
+		}
+	} else if (!allowDisablingTenants || deterministicRandom()->random01() < 0.5) {
+		tenantMode = TenantMode::OPTIONAL_TENANT;
+	}
 
-	if (allowCreatingTenants && tenantMode != TenantMode::DISABLED) {
+	if (allowCreatingTenants && tenantMode != TenantMode::DISABLED && deterministicRandom()->random01() < 0.5) {
 		int numTenants = deterministicRandom()->randomInt(1, 6);
 		for (int i = 0; i < numTenants; ++i) {
 			tenantsToCreate.push_back_deep(tenantsToCreate.arena(),
 			                               TenantNameRef(format("SimulatedExtraTenant%04d", i)));
 		}
-	} else {
-		tenantMode = TenantMode::DISABLED;
 	}
 
 	TraceEvent("SimulatedClusterTenantMode")
