@@ -1823,6 +1823,25 @@ Future<Standalone<VectorRef<BlobGranuleChunkRef>>> ReadYourWritesTransaction::re
 	return waitOrError(tr.readBlobGranules(range, begin, readVersion, readVersionOut), resetPromise.getFuture());
 }
 
+Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> ReadYourWritesTransaction::summarizeBlobGranules(
+    const KeyRange& range,
+    Optional<Version> summaryVersion,
+    int rangeLimit) {
+
+	if (checkUsedDuringCommit()) {
+		return used_during_commit();
+	}
+
+	if (resetPromise.isSet())
+		return resetPromise.getFuture().getError();
+
+	KeyRef maxKey = getMaxReadKey();
+	if (range.begin > maxKey || range.end > maxKey)
+		return key_outside_legal_range();
+
+	return waitOrError(tr.summarizeBlobGranules(range, summaryVersion, rangeLimit), resetPromise.getFuture());
+}
+
 void ReadYourWritesTransaction::addReadConflictRange(KeyRangeRef const& keys) {
 	if (checkUsedDuringCommit()) {
 		throw used_during_commit();

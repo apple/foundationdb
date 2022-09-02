@@ -120,6 +120,9 @@ KeyValueArray copyKeyValueArray(fdb::future_var::KeyValueRefArray::Type array);
 using KeyRangeArray = std::vector<fdb::KeyRange>;
 KeyRangeArray copyKeyRangeArray(fdb::future_var::KeyRangeRefArray::Type array);
 
+using GranuleSummaryArray = std::vector<fdb::GranuleSummary>;
+GranuleSummaryArray copyGranuleSummaryArray(fdb::future_var::GranuleSummaryRefArray::Type array);
+
 static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "Do not support non-little-endian systems");
 
 // Converts a little-endian encoded number into an integral type.

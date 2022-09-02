@@ -418,6 +418,7 @@ ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> ThreadSafeTransaction::
 		    return tr->readBlobGranules(r, beginVersion, readVersion, readVersionOut);
 	    });
 }
+
 ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranulesFinish(
     ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
     const KeyRangeRef& keyRange,
@@ -427,6 +428,19 @@ ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranulesFinish(
 	// do this work off of fdb network threads for performance!
 	Standalone<VectorRef<BlobGranuleChunkRef>> files = startFuture.get();
 	return loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersion, granuleContext);
+}
+
+ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> ThreadSafeTransaction::summarizeBlobGranules(
+    const KeyRangeRef& keyRange,
+    Optional<Version> summaryVersion,
+    int rangeLimit) {
+	ISingleThreadTransaction* tr = this->tr;
+	KeyRange r = keyRange;
+
+	return onMainThread([=]() -> Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> {
+		tr->checkDeferredError();
+		return tr->summarizeBlobGranules(r, summaryVersion, rangeLimit);
+	});
 }
 
 void ThreadSafeTransaction::addReadConflictRange(const KeyRangeRef& keys) {
