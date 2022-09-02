@@ -113,14 +113,7 @@ GranuleSummaryArray copyGranuleSummaryArray(fdb::future_var::GranuleSummaryRefAr
 
 	for (int i = 0; i < in_count; ++i) {
 		fdb::native::FDBGranuleSummary nativeSummary = *in_summaries++;
-		fdb::GranuleSummary summary;
-		summary.keyRange.beginKey =
-		    fdb::Key(nativeSummary.key_range.begin_key, nativeSummary.key_range.begin_key_length);
-		summary.keyRange.endKey = fdb::Key(nativeSummary.key_range.end_key, nativeSummary.key_range.end_key_length);
-		summary.snapshotVersion = nativeSummary.snapshot_version;
-		summary.snapshotSize = nativeSummary.snapshot_size;
-		summary.deltaVersion = nativeSummary.delta_version;
-		summary.deltaSize = nativeSummary.delta_size;
+		fdb::GranuleSummary summary(nativeSummary);
 		out.push_back(summary);
 	}
 	return out;

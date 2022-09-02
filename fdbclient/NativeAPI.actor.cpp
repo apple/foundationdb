@@ -8031,9 +8031,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules
 	Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
 	    wait(readBlobGranulesActor(self, range, 0, summaryVersion, &readVersionOut, rangeLimit, true));
 	ASSERT(chunks.size() <= rangeLimit);
-	if (summaryVersion.present()) {
-		ASSERT(readVersionOut == summaryVersion.get());
-	}
+	ASSERT(!summaryVersion.present() || readVersionOut == summaryVersion.get());
 	Standalone<VectorRef<BlobGranuleSummaryRef>> summaries;
 	summaries.reserve(summaries.arena(), chunks.size());
 	for (auto& it : chunks) {
