@@ -746,7 +746,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	bool shouldSpillByReference(Tag t) const { return !shouldSpillByValue(t); }
 
 	void unblockWaitingPeeks() {
-		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+		if (/*SERVER_KNOBS->ENABLE_VERSION_VECTOR &&*/ true) {
 			for (auto& iter : waitingTags) {
 				TraceEvent("UnblockWaitingPeeks", tLogData->dbgid)
 				    .detail("LogId", logId)

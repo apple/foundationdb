@@ -97,14 +97,6 @@ ACTOR Future<Void> versionPeek(VersionIndexerState* self, VersionIndexerPeekRequ
 	reply.previousVersion = iter != self->versionWindow.begin() ? (iter - 1)->version : self->previousVersion;
 	std::vector<Tag> tags;
 	tags.push_back(req.tag);
-	TraceEvent event(SevDebug, "VersionIndexerPeek", self->id);
-	event.detail("Tag", req.tag).detail("LastKnownVersion", req.lastKnownVersion);
-	for (int i = 0; i < req.history.size(); ++i) {
-		auto kVer = format("HistoryVersion%d", i);
-		auto kTag = format("HistoryTag%d", i);
-		event.detail(kVer.c_str(), req.history[i].first);
-		event.detail(kVer.c_str(), req.history[i].second);
-	}
 	while (req.history.size() && req.lastKnownVersion >= req.history.back().first) {
 		req.history.pop_back();
 	}
@@ -123,13 +115,6 @@ ACTOR Future<Void> versionPeek(VersionIndexerState* self, VersionIndexerPeekRequ
 		}
 		ASSERT(iter->version > req.lastKnownVersion);
 		reply.versions.emplace_back(iter->version, hasMutations);
-	}
-	event.detail("PreviousVersion", reply.previousVersion);
-	for (int i = 0; i < reply.versions.size(); ++i) {
-		auto kVer = format("Version%d", i);
-		auto kVal = format("HasData%d", i);
-		event.detail(kVer.c_str(), reply.versions[i].first);
-		event.detail(kVal.c_str(), reply.versions[i].second);
 	}
 	req.reply.send(std::move(reply));
 	return Void();
@@ -163,17 +148,6 @@ ACTOR Future<Void> addVersion(VersionIndexerState* self, VersionIndexerCommitReq
 		entry.version = req.commitVersion;
 		entry.tags = std::move(req.tags);
 		std::sort(entry.tags.begin(), entry.tags.end());
-		TraceEvent event(SevDebug, "VersionIndexerAddVersion", self->id);
-		event.detail("CommitVersion", req.commitVersion)
-		    .detail("PreviousVersion", req.previousVersion)
-		    .detail("IndexerVersion", self->version.get())
-		    .detail("NumTags", entry.tags.size())
-		    .detail("FirstCommit", firstCommit);
-		for (int i = 0; i < entry.tags.size(); ++i) {
-			auto k = format("Tag%d", i);
-			event.detail(k.c_str(), entry.tags[i]);
-		}
-		// event.log();
 		self->versionWindow.emplace_back(std::move(entry));
 		self->version.set(req.commitVersion);
 		self->stats.windowEnd = req.commitVersion;
