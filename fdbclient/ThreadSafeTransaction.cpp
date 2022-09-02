@@ -615,7 +615,7 @@ extern const char* getSourceVersion();
 ThreadSafeApi::ThreadSafeApi() : apiVersion(-1), transportId(0) {}
 
 void ThreadSafeApi::selectApiVersion(int apiVersion) {
-	this->apiVersion = apiVersion;
+	this->apiVersion = ApiVersion(apiVersion);
 }
 
 const char* ThreadSafeApi::getClientVersion() {
@@ -687,12 +687,12 @@ void ThreadSafeApi::stopNetwork() {
 
 Reference<IDatabase> ThreadSafeApi::createDatabase(const char* clusterFilePath) {
 	return Reference<IDatabase>(
-	    new ThreadSafeDatabase(ThreadSafeDatabase::ConnectionRecordType::FILE, clusterFilePath, apiVersion));
+	    new ThreadSafeDatabase(ThreadSafeDatabase::ConnectionRecordType::FILE, clusterFilePath, apiVersion.version()));
 }
 
 Reference<IDatabase> ThreadSafeApi::createDatabaseFromConnectionString(const char* connectionString) {
 	return Reference<IDatabase>(new ThreadSafeDatabase(
-	    ThreadSafeDatabase::ConnectionRecordType::CONNECTION_STRING, connectionString, apiVersion));
+	    ThreadSafeDatabase::ConnectionRecordType::CONNECTION_STRING, connectionString, apiVersion.version()));
 }
 
 void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) {

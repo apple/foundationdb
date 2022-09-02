@@ -684,7 +684,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 		startRole(Role::TESTER, workIface.id(), UID(), details);
 
 		if (work.useDatabase) {
-			cx = Database::createDatabase(ccr, -1, IsInternal::True, locality);
+			cx = Database::createDatabase(ccr, ApiVersion::LATEST_VERSION, IsInternal::True, locality);
 			cx->defaultTenant = work.defaultTenant.castTo<TenantName>();
 			wait(delay(1.0));
 		}
