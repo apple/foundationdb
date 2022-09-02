@@ -337,7 +337,7 @@ if(NOT WIN32)
     COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-        --upgrade-path "7.2.0" "7.3.0" "7.2.0"
+        --upgrade-path "71.2.0" "71.3.0" "71.2.0"
         --process-number 3
       )
   set_tests_properties("fdb_c_upgrade_to_future_version" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
@@ -347,84 +347,84 @@ if (0) # reenable after stabilizing the test
     COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/ApiBlobGranulesCorrectness.toml
-        --upgrade-path "7.2.0" "7.3.0" "7.2.0"
+        --upgrade-path "71.2.0" "71.3.0" "71.2.0"
         --blob-granules-enabled
         --process-number 3
       )
 endif()
 
-  if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
-    add_test(NAME fdb_c_upgrade_single_threaded_630api
-      COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-            --build-dir ${CMAKE_BINARY_DIR}
-            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-            --upgrade-path "6.3.23" "7.0.0" "7.1.9" "7.2.0"
-            --process-number 1
-            )
-
-    add_test(NAME fdb_c_upgrade_single_threaded_700api
-      COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-            --build-dir ${CMAKE_BINARY_DIR}
-            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-            --upgrade-path "7.0.0" "7.1.9" "7.2.0"
-            --process-number 1
-            )
-
-    add_test(NAME fdb_c_upgrade_multi_threaded_630api
-        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-            --build-dir ${CMAKE_BINARY_DIR}
-            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "6.3.23" "7.0.0" "7.1.9" "7.2.0" "7.1.9"
-            --process-number 3
-          )
-
-    add_test(NAME fdb_c_upgrade_multi_threaded_700api
-        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-            --build-dir ${CMAKE_BINARY_DIR}
-            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "7.0.0" "7.1.9" "7.2.0" "7.1.9"
-            --process-number 3
-          )
-
-    add_test(NAME fdb_c_upgrade_multi_threaded_710api
-        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-            --build-dir ${CMAKE_BINARY_DIR}
-            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "7.1.9" "7.2.0" "7.1.9"
-            --process-number 3
-          )
-
-    add_test(NAME fdb_c_cluster_wiggle
-          COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-              --build-dir ${CMAKE_BINARY_DIR}
-              --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-              --upgrade-path "7.2.0" "wiggle"
-              --disable-log-dump
-              --process-number 3
-              --redundancy double
-            )
-
-    add_test(NAME fdb_c_wiggle_and_upgrade_latest
-      COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-          --build-dir ${CMAKE_BINARY_DIR}
-          --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-          --upgrade-path "7.1.9" "wiggle" "7.2.0"
-          --disable-log-dump
-          --process-number 3
-          --redundancy double
-        )
-
-      add_test(NAME fdb_c_wiggle_and_upgrade_63
-        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-            --build-dir ${CMAKE_BINARY_DIR}
-            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-            --upgrade-path "6.3.24" "wiggle" "7.0.0"
-            --disable-log-dump
-            --process-number 3
-            --redundancy double
-          )
-
-  endif()
+#  if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
+#    add_test(NAME fdb_c_upgrade_single_threaded_630api
+#      COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+#            --build-dir ${CMAKE_BINARY_DIR}
+#            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
+#            --upgrade-path "6.3.23" "7.0.0" "7.1.9" "7.2.0"
+#            --process-number 1
+#            )
+#
+#    add_test(NAME fdb_c_upgrade_single_threaded_700api
+#      COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+#            --build-dir ${CMAKE_BINARY_DIR}
+#            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
+#            --upgrade-path "7.0.0" "7.1.9" "7.2.0"
+#            --process-number 1
+#            )
+#
+#    add_test(NAME fdb_c_upgrade_multi_threaded_630api
+#        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+#            --build-dir ${CMAKE_BINARY_DIR}
+#            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+#            --upgrade-path "6.3.23" "7.0.0" "7.1.9" "7.2.0" "7.1.9"
+#            --process-number 3
+#          )
+#
+#    add_test(NAME fdb_c_upgrade_multi_threaded_700api
+#        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+#            --build-dir ${CMAKE_BINARY_DIR}
+#            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+#            --upgrade-path "7.0.0" "7.1.9" "7.2.0" "7.1.9"
+#            --process-number 3
+#          )
+#
+#    add_test(NAME fdb_c_upgrade_multi_threaded_710api
+#        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+#            --build-dir ${CMAKE_BINARY_DIR}
+#            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+#            --upgrade-path "7.1.9" "7.2.0" "7.1.9"
+#            --process-number 3
+#          )
+#
+#    add_test(NAME fdb_c_cluster_wiggle
+#          COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+#              --build-dir ${CMAKE_BINARY_DIR}
+#              --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+#              --upgrade-path "7.2.0" "wiggle"
+#              --disable-log-dump
+#              --process-number 3
+#              --redundancy double
+#            )
+#
+#    add_test(NAME fdb_c_wiggle_and_upgrade_latest
+#      COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+#          --build-dir ${CMAKE_BINARY_DIR}
+#          --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+#          --upgrade-path "7.1.9" "wiggle" "7.2.0"
+#          --disable-log-dump
+#          --process-number 3
+#          --redundancy double
+#        )
+#
+#      add_test(NAME fdb_c_wiggle_and_upgrade_63
+#        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+#            --build-dir ${CMAKE_BINARY_DIR}
+#            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+#            --upgrade-path "6.3.24" "wiggle" "7.0.0"
+#            --disable-log-dump
+#            --process-number 3
+#            --redundancy double
+#          )
+#
+#  endif()
 
 endif()
 
