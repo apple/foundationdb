@@ -286,9 +286,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 					req.reply.send(Void());
 					TraceEvent(SevDebug, "BackupWorkerDoneRequest", cluster->id).log();
 				}
-				when(wait(collection)) {
-					throw internal_error();
-				}
+				when(wait(collection)) { throw internal_error(); }
 			}
 			// failed master (better master exists) could happen while change-coordinators request processing is
 			// in-progress
