@@ -442,6 +442,13 @@ void printStatus(StatusObjectReader statusObj,
 					outputString += "\n  Blob granules          - enabled";
 				}
 
+				outputString += "\n  Encryption at-rest    - ";
+				if (statusObjConfig.get("encryption_at_rest_mode", strVal)) {
+					outputString += strVal;
+				} else {
+					outputString += "disabled";
+				}
+
 				outputString += "\n  Coordinators           - ";
 				if (statusObjConfig.get("coordinators_count", intVal)) {
 					outputString += std::to_string(intVal);

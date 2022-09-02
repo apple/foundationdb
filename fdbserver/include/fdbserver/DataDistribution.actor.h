@@ -189,7 +189,9 @@ struct GetTopKMetricsReply {
 };
 
 struct GetTopKMetricsRequest {
+private:
 	int topK = 1; // default only return the top 1 shard based on the GetTopKMetricsRequest::compare function
+public:
 	std::vector<KeyRange> keys;
 	Promise<GetTopKMetricsReply> reply; // topK storage metrics
 	double maxBytesReadPerKSecond = 0, minBytesReadPerKSecond = 0; // all returned shards won't exceed this read load
@@ -200,7 +202,11 @@ struct GetTopKMetricsRequest {
 	                      double maxBytesReadPerKSecond = std::numeric_limits<double>::max(),
 	                      double minBytesReadPerKSecond = 0)
 	  : topK(topK), keys(keys), maxBytesReadPerKSecond(maxBytesReadPerKSecond),
-	    minBytesReadPerKSecond(minBytesReadPerKSecond) {}
+	    minBytesReadPerKSecond(minBytesReadPerKSecond) {
+		ASSERT_GE(topK, 1);
+	}
+
+	int getTopK() const { return topK; };
 
 	// Return true if a.score > b.score, return the largest topK in keys
 	static bool compare(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
