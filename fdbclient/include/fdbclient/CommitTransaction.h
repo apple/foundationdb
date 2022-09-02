@@ -146,7 +146,7 @@ struct MutationRef {
 	                    double* elapsed = nullptr) const {
 		ASSERT_NE(domainId, ENCRYPT_INVALID_DOMAIN_ID);
 		double startTime = 0.0;
-		if (elapsed != nullptr) {
+		if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING && elapsed != nullptr) {
 			startTime = timer_monotonic();
 		}
 		auto textCipherItr = cipherKeys.find(domainId);
@@ -166,7 +166,7 @@ struct MutationRef {
 		StringRef headerRef(reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader));
 		StringRef payload =
 		    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), header, arena)->toStringRef();
-		if (elapsed != nullptr) {
+		if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING && elapsed != nullptr) {
 			*elapsed += timer_monotonic() - startTime;
 		}
 		return MutationRef(Encrypted, headerRef, payload);
@@ -183,7 +183,7 @@ struct MutationRef {
 	                    StringRef* buf = nullptr,
 	                    double* elapsed = nullptr) const {
 		double startTime = 0.0;
-		if (elapsed != nullptr) {
+		if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING && elapsed != nullptr) {
 			startTime = timer_monotonic();
 		}
 		const BlobCipherEncryptHeader* header = encryptionHeader();
@@ -199,7 +199,7 @@ struct MutationRef {
 		ArenaReader reader(arena, plaintext, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 		MutationRef mutation;
 		reader >> mutation;
-		if (elapsed != nullptr) {
+		if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING && elapsed != nullptr) {
 			*elapsed += timer_monotonic() - startTime;
 		}
 		return mutation;
