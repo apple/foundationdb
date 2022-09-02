@@ -66,28 +66,26 @@ struct fb_must_appear_last_t<T, typename std::enable_if<T::fb_must_appear_last>:
 template <class T>
 constexpr bool fb_must_appear_last = fb_must_appear_last_t<T>::value;
 
-namespace detail {
 template <class Item, class... Items>
-constexpr bool appears_last_property_helper(pack<Item, Items...>) {
+constexpr bool fb_appears_last_property_helper(pack<Item, Items...>) {
 	if constexpr (sizeof...(Items) == 0) {
 		return true;
 	} else {
-		return !fb_must_appear_last<Item> && appears_last_property_helper(pack<Items...>{});
+		return !fb_must_appear_last<Item> && fb_appears_last_property_helper(pack<Items...>{});
 	}
 }
 template <class... Items>
-constexpr bool appears_last_property(pack<Items...>) {
+constexpr bool fb_appears_last_property(pack<Items...>) {
 	if constexpr (sizeof...(Items) == 0) {
 		return true;
 	} else {
-		return appears_last_property_helper(pack<Items...>{});
+		return fb_appears_last_property_helper(pack<Items...>{});
 	}
 }
-} // namespace detail
 
 template <class Visitor, class... Items>
 typename std::enable_if<is_fb_function<Visitor>, void>::type serializer(Visitor& visitor, Items&... items) {
-	static_assert(detail::appears_last_property(pack<Items...>{}),
+	static_assert(fb_appears_last_property(pack<Items...>{}),
 	              "An argument to a serializer call that must appear last (Arena?) does not appear last");
 	visitor(items...);
 }
