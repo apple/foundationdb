@@ -466,6 +466,16 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		state Key middleKey = range.begin.withSuffix("AF"_sr);
 		state Key middleKey2 = range.begin.withSuffix("AG"_sr);
 
+		if (BGRW_DEBUG) {
+			fmt::print("IdempotentUnit: [{0} - {1})\n", range.begin.printable(), range.end.printable());
+		}
+
+		// unblobbifying range that already doesn't exist should be no-op
+		if (deterministicRandom()->coinflip()) {
+			bool unblobbifyStartSuccess = wait(self->setRange(cx, activeRange, false));
+			ASSERT(unblobbifyStartSuccess);
+		}
+
 		bool success = wait(self->setRange(cx, activeRange, true));
 		ASSERT(success);
 		wait(self->checkRange(cx, self, activeRange, true));
@@ -544,8 +554,11 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		bool unblobbifyFail8 = wait(self->setRange(cx, KeyRangeRef(middleKey, middleKey2), false));
 		ASSERT(!unblobbifyFail8);
 
-		bool unblobbifySuccess = wait(self->setRange(cx, activeRange, false));
-		ASSERT(!unblobbifySuccess);
+		bool unblobbifySuccess = wait(self->setRange(cx, activeRange, true));
+		ASSERT(unblobbifySuccess);
+
+		bool unblobbifySuccessAgain = wait(self->setRange(cx, activeRange, true));
+		ASSERT(unblobbifySuccessAgain);
 
 		return Void();
 	}
@@ -592,7 +605,6 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 
 			// FIXME: fix bugs and enable these tests!
 			excludedTypes.insert(RANGES_MISALIGNED); // TODO - fix in blob manager
-			excludedTypes.insert(BLOBBIFY_IDEMPOTENT); // fix already in progress in a separate PR
 			excludedTypes.insert(RE_BLOBBIFY); // TODO - fix is non-trivial, is desired behavior eventually
 
 			std::string nextRangeKey = "U_" + self->newKey();
