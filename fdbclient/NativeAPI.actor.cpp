@@ -9958,31 +9958,32 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx, KeyRange ran
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 
 	state Value value = active ? blobRangeActive : blobRangeInactive;
-
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			state Standalone<VectorRef<KeyRangeRef>> startBlobRanges = wait(getBlobRanges(tr, range, 10));
-			state Standalone<VectorRef<KeyRangeRef>> endBlobRanges =
-			    wait(getBlobRanges(tr, KeyRangeRef(range.end, keyAfter(range.end)), 10));
+			Standalone<VectorRef<KeyRangeRef>> startBlobRanges = wait(getBlobRanges(tr, range, 1));
 
 			if (active) {
 				// Idempotent request.
-				if (!startBlobRanges.empty() && !endBlobRanges.empty()) {
-					return startBlobRanges.front().begin == range.begin && endBlobRanges.front().end == range.end;
+				if (!startBlobRanges.empty()) {
+					return startBlobRanges.front().begin == range.begin && startBlobRanges.front().end == range.end;
 				}
 			} else {
 				// An unblobbify request must be aligned to boundaries.
 				// It is okay to unblobbify multiple regions all at once.
-				if (startBlobRanges.empty() && endBlobRanges.empty()) {
+				if (startBlobRanges.empty()) {
+					// already unblobbified
 					return true;
+				} else if (startBlobRanges.front().begin != range.begin) {
+					// If there is a blob at the beginning of the range and it isn't aligned
+					return false;
 				}
-				// If there is a blob at the beginning of the range and it isn't aligned,
-				// or there is a blob range that begins before the end of the range, then fail.
-				if ((!startBlobRanges.empty() && startBlobRanges.front().begin != range.begin) ||
-				    (!endBlobRanges.empty() && endBlobRanges.front().begin < range.end)) {
+				// if blob range does start at the specified, key, we need to make sure the end of also a boundary of a
+				// blob range
+				Optional<Value> endPresent = wait(tr->get(range.end.withPrefix(blobRangeKeys.begin)));
+				if (!endPresent.present()) {
 					return false;
 				}
 			}
@@ -9991,10 +9992,6 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx, KeyRange ran
 			// This is not coalescing because we want to keep each range logically separate.
 			wait(krmSetRange(tr, blobRangeKeys.begin, range, value));
 			wait(tr->commit());
-			printf("Successfully updated blob range [%s - %s) to %s\n",
-			       range.begin.printable().c_str(),
-			       range.end.printable().c_str(),
-			       value.printable().c_str());
 			return true;
 		} catch (Error& e) {
 			wait(tr->onError(e));

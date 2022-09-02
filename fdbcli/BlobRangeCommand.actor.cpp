@@ -135,7 +135,12 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 			} else {
 				wait(store(success, localDb->unblobbifyRange(KeyRangeRef(begin, end))));
 			}
-			if (!success) {
+			if (success) {
+				fmt::print("Successfully updated blob range [{0} - {1}) to {2}\n",
+				           range.begin.printable(),
+				           range.end.printable(),
+				           value.printable());
+			} else {
 				fmt::print("{0} blobbify range for [{1} - {2}) failed\n",
 				           starting ? "Starting" : "Stopping",
 				           tokens[2].printable().c_str(),
