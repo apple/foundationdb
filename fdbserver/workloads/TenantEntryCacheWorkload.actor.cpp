@@ -22,8 +22,8 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
 
-#include "fdbserver/Knobs.h"
-#include "fdbserver/TenantEntryCache.actor.h"
+#include "fdbclient/Knobs.h"
+#include "fdbclient/TenantEntryCache.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
 #include "flow/Error.h"
@@ -220,7 +220,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		ASSERT_GE(cache->numCacheRefreshes(), 1);
 
 		int refreshWait =
-		    SERVER_KNOBS->TENANT_CACHE_LIST_REFRESH_INTERVAL * 10; // initial delay + multiple refresh runs
+		    CLIENT_KNOBS->TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL * 10; // initial delay + multiple refresh runs
 		wait(delay(refreshWait));
 
 		// InitRefresh + multiple timer based invocations
@@ -277,7 +277,7 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0 && g_network->isSimulated() && BUGGIFY) {
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob("tenant_cache_list_refresh_interval",
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob("tenant_entry_cache_list_refresh_interval",
 			                                                          KnobValueRef::create(int{ 2 }));
 		}
 

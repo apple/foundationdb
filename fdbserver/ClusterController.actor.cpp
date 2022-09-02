@@ -196,21 +196,9 @@ struct EncryptKeyProxySingleton : Singleton<EncryptKeyProxyInterface> {
 	}
 };
 
-ACTOR Future<Void> handleLeaderReplacement(Reference<ClusterRecoveryData> self, Future<Void> leaderFail) {
-	loop choose {
-		when(wait(leaderFail)) {
-			TraceEvent("LeaderReplaced", self->controllerData->id).log();
-			// We are no longer the leader if this has changed.
-			self->controllerData->shouldCommitSuicide = true;
-			throw restart_cluster_controller();
-		}
-	}
-}
-
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
                                         ClusterControllerData::DBInfo* db,
                                         ServerCoordinators coordinators,
-                                        Future<Void> leaderFail,
                                         Future<Void> recoveredDiskFiles) {
 	state MasterInterface iMaster;
 	state Reference<ClusterRecoveryData> recoveryData;
@@ -307,7 +295,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 					TraceEvent(SevDebug, "BackupWorkerDoneRequest", cluster->id).log();
 				}
 				when(wait(collection)) { throw internal_error(); }
-				when(wait(handleLeaderReplacement(recoveryData, leaderFail))) { throw internal_error(); }
 			}
 			// failed master (better master exists) could happen while change-coordinators request processing is
 			// in-progress
@@ -2558,8 +2545,8 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		self.addActor.send(monitorEncryptKeyProxy(&self));
 	}
-	self.addActor.send(clusterWatchDatabase(
-	    &self, &self.db, coordinators, leaderFail, recoveredDiskFiles)); // Start the master database
+	self.addActor.send(
+	    clusterWatchDatabase(&self, &self.db, coordinators, recoveredDiskFiles)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
 	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(),
 	                                &self,
@@ -2668,6 +2655,12 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		}
 		when(GetServerDBInfoRequest req = waitNext(interf.getServerDBInfo.getFuture())) {
 			self.addActor.send(clusterGetServerInfo(&self.db, req.knownServerInfoID, req.reply));
+		}
+		when(wait(leaderFail)) {
+			// We are no longer the leader if this has changed.
+			endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Leader Replaced", true);
+			CODE_PROBE(true, "Leader replaced");
+			return Void();
 		}
 		when(ReplyPromise<Void> ping = waitNext(interf.clientInterface.ping.getFuture())) { ping.send(Void()); }
 	}
