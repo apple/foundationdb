@@ -465,7 +465,7 @@ struct StorageServerMetrics {
 		req.reply.send(rep);
 	}
 
-	Future<Void> waitMetrics(WaitMetricsRequest req, Future<Void> delay);
+	Future<Void> waitMetrics(WaitMetricsRequest req, Future<Void> delay, Optional<Key> tenantPrefix);
 
 	// Given a read hot shard, this function will divide the shard into chunks and find those chunks whose
 	// readBytes/sizeBytes exceeds the `readDensityRatio`. Please make sure to run unit tests

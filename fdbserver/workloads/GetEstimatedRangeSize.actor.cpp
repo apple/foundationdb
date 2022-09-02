@@ -101,7 +101,6 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload, Members {
 
 	void setAuthToken(ReadYourWritesTransaction& tr) {
 		tr.setOption(FDBTransactionOptions::AUTHORIZATION_TOKEN, this->signedToken);
-		tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 	}
 
 	Key keyForIndex(int n) { return key(n); }
@@ -111,30 +110,23 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload, Members {
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(key(n), value((n + 1) % nodeCount)); }
 
 	ACTOR static Future<Void> checkSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
-		// TraceEvent(SevWarnAlways, "AKDebug").detail("Status", "checkSize-1").detail("Tenant", cx->defaultTenant.get());
 		int64_t size = wait(getSize(self, cx));
-		// TraceEvent(SevWarnAlways, "AKDebug").detail("Status", "checkSize-2").detail("Tenant", cx->defaultTenant.get());
-		TraceEvent(SevWarnAlways, "AKGetEstimatedRangeSizeResults")
+		TraceEvent(SevDebug, "GetEstimatedRangeSizeResults")
 		    .detail("Tenant", cx->defaultTenant.get())
 		    .detail("TenantSize", size);
-		ASSERT_LT(size, 0);
+		ASSERT_GT(size, 0);
 		return Void();
 	}
 
 	ACTOR static Future<int64_t> getSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
-		// TraceEvent(SevWarnAlways, "AKDebug").detail("Status", "getSize-1").detail("Tenant", cx->defaultTenant.get());
-		state ReadYourWritesTransaction tr(cx);
+		state ReadYourWritesTransaction tr(cx, cx->defaultTenant);
 		loop {
 			try {
 				self->setAuthToken(tr);
 				state int64_t size = wait(tr.getEstimatedRangeSizeBytes(normalKeys));
-				// TraceEvent(SevWarnAlways, "AKDebug")
-				//     .detail("Status", "getSize-2")
-				//     .detail("Tenant", cx->defaultTenant.get());
 				tr.reset();
 				return size;
 			} catch (Error& e) {
-				// TraceEvent(SevWarnAlways, "AKDebugError").detail("Status", "getSize-3").detail("Error", e.name());
 				wait(tr.onError(e));
 			}
 		}
