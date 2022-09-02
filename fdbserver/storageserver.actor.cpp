@@ -1266,8 +1266,7 @@ public:
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
-		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
-		    (SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE || storage->shardAware())) {
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && storage->shardAware()) {
 			addShard(ShardInfo::newShard(this, StorageServerShard::notAssigned(allKeys)));
 		} else {
 			addShard(ShardInfo::newNotAssigned(allKeys));
@@ -10596,8 +10595,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  std::string folder,
                                  Reference<IEncryptionKeyProvider> encryptionKeyProvider) {
 	state StorageServer self(persistentData, db, ssi, encryptionKeyProvider);
-	self.shardAware = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
-	                  (SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE || persistentData->shardAware());
+	self.shardAware = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && persistentData->shardAware();
 	state Future<Void> ssCore;
 	self.clusterId.send(clusterId);
 	self.initialClusterVersion = startVersion;
