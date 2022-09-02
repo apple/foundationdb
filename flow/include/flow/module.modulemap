@@ -2,5 +2,6 @@ module Flow {
   header "swift.h"
   header "swift_hooks.h"
   header "network.h"
+  header "TLSConfig.actor.h"
   header "AsioReactor.h"
 }

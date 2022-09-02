@@ -20,6 +20,7 @@
 
 #include "flow/swift.h"
 #include "flow/swift_hooks.h"
+#include "flow/TLSConfig.actor.h"
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 
@@ -102,8 +103,9 @@ void net2_enqueueGlobal_hook_impl(Job* _Nonnull job,
                                   void (* _Nonnull)(Job *) __attribute__((swiftcall))) {
 	printf("[c++] intercepted job enqueue: %p - run it inline\n", job);
 
-	INetwork* net = _swift_newNet2(nullptr, false, false);
-	printf("[c++] net = %p", net);
+	auto tls = new TLSConfig();
+	INetwork* net = _swift_newNet2(tls, false, false);
+	printf("[c++] net = %p\n", net);
 
 	swift_job_run(job, ExecutorRef::generic());
 }

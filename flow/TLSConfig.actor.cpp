@@ -287,60 +287,60 @@ ACTOR static Future<Void> readEntireFile(std::string filename, std::string* dest
 	return Void();
 }
 
-ACTOR Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
-	state LoadedTLSConfig loaded;
-	state std::vector<Future<Void>> reads;
-
-	state int32_t certIdx = -1;
-	state int32_t keyIdx = -1;
-	state int32_t caIdx = -1;
-
-	state std::string certPath = self->getCertificatePathSync();
-	if (certPath.size()) {
-		reads.push_back(readEntireFile(certPath, &loaded.tlsCertBytes));
-		certIdx = reads.size() - 1;
-	} else {
-		loaded.tlsCertBytes = self->tlsCertBytes;
-	}
-
-	state std::string keyPath = self->getKeyPathSync();
-	if (keyPath.size()) {
-		reads.push_back(readEntireFile(keyPath, &loaded.tlsKeyBytes));
-		keyIdx = reads.size() - 1;
-	} else {
-		loaded.tlsKeyBytes = self->tlsKeyBytes;
-	}
-
-	state std::string CAPath = self->getCAPathSync();
-	if (CAPath.size()) {
-		reads.push_back(readEntireFile(CAPath, &loaded.tlsCABytes));
-		caIdx = reads.size() - 1;
-	} else {
-		loaded.tlsCABytes = self->tlsCABytes;
-	}
-
-	try {
-		wait(waitForAll(reads));
-	} catch (Error& e) {
-		if (certIdx != -1 && reads[certIdx].isError()) {
-			fprintf(stderr, "Failure reading TLS Certificate [%s]: %s\n", certPath.c_str(), e.what());
-		} else if (keyIdx != -1 && reads[keyIdx].isError()) {
-			fprintf(stderr, "Failure reading TLS Key [%s]: %s\n", keyPath.c_str(), e.what());
-		} else if (caIdx != -1 && reads[caIdx].isError()) {
-			fprintf(stderr, "Failure reading TLS Key [%s]: %s\n", CAPath.c_str(), e.what());
-		} else {
-			fprintf(stderr, "Failure reading TLS needed file: %s\n", e.what());
-		}
-
-		throw;
-	}
-
-	loaded.tlsPassword = self->tlsPassword;
-	loaded.tlsVerifyPeers = self->tlsVerifyPeers;
-	loaded.endpointType = self->endpointType;
-
-	return loaded;
-}
+//ACTOR Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
+//	state LoadedTLSConfig loaded;
+//	state std::vector<Future<Void>> reads;
+//
+//	state int32_t certIdx = -1;
+//	state int32_t keyIdx = -1;
+//	state int32_t caIdx = -1;
+//
+//	state std::string certPath = self->getCertificatePathSync();
+//	if (certPath.size()) {
+//		reads.push_back(readEntireFile(certPath, &loaded.tlsCertBytes));
+//		certIdx = reads.size() - 1;
+//	} else {
+//		loaded.tlsCertBytes = self->tlsCertBytes;
+//	}
+//
+//	state std::string keyPath = self->getKeyPathSync();
+//	if (keyPath.size()) {
+//		reads.push_back(readEntireFile(keyPath, &loaded.tlsKeyBytes));
+//		keyIdx = reads.size() - 1;
+//	} else {
+//		loaded.tlsKeyBytes = self->tlsKeyBytes;
+//	}
+//
+//	state std::string CAPath = self->getCAPathSync();
+//	if (CAPath.size()) {
+//		reads.push_back(readEntireFile(CAPath, &loaded.tlsCABytes));
+//		caIdx = reads.size() - 1;
+//	} else {
+//		loaded.tlsCABytes = self->tlsCABytes;
+//	}
+//
+//	try {
+//		wait(waitForAll(reads));
+//	} catch (Error& e) {
+//		if (certIdx != -1 && reads[certIdx].isError()) {
+//			fprintf(stderr, "Failure reading TLS Certificate [%s]: %s\n", certPath.c_str(), e.what());
+//		} else if (keyIdx != -1 && reads[keyIdx].isError()) {
+//			fprintf(stderr, "Failure reading TLS Key [%s]: %s\n", keyPath.c_str(), e.what());
+//		} else if (caIdx != -1 && reads[caIdx].isError()) {
+//			fprintf(stderr, "Failure reading TLS Key [%s]: %s\n", CAPath.c_str(), e.what());
+//		} else {
+//			fprintf(stderr, "Failure reading TLS needed file: %s\n", e.what());
+//		}
+//
+//		throw;
+//	}
+//
+//	loaded.tlsPassword = self->tlsPassword;
+//	loaded.tlsVerifyPeers = self->tlsVerifyPeers;
+//	loaded.endpointType = self->endpointType;
+//
+//	return loaded;
+//}
 
 std::string TLSPolicy::ErrorString(boost::system::error_code e) {
 	char* str = ERR_error_string(e.value(), nullptr);
