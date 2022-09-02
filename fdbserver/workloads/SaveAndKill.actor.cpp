@@ -70,6 +70,8 @@ struct SaveAndKillWorkload : TestWorkload {
 
 		ini.SetBoolValue("META", "enableEncryption", SERVER_KNOBS->ENABLE_ENCRYPTION);
 		ini.SetBoolValue("META", "enableTLogEncryption", SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION);
+		ini.SetBoolValue("META", "enableStorageServerEncryption", SERVER_KNOBS->ENABLE_STORAGE_SERVER_ENCRYPTION);
+		ini.SetBoolValue("META", "enableBlobGranuleEncryption", SERVER_KNOBS->ENABLE_BLOB_GRANULE_ENCRYPTION);
 
 		std::vector<ISimulator::ProcessInfo*> processes = g_simulator.getAllProcesses();
 		std::map<NetworkAddress, ISimulator::ProcessInfo*> rebootingProcesses = g_simulator.currentlyRebootingProcesses;

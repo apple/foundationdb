@@ -1,0 +1,928 @@
+<form theme="dark">
+  <label>FoundationDB - RateKeeper (Dev)</label>
+  <fieldset submitButton="false">
+    <input type="text" token="Index" searchWhenChanged="true">
+      <label>Index</label>
+      <default>*</default>
+    </input>
+    <input type="text" token="LogGroup" searchWhenChanged="true">
+      <label>LogGroup</label>
+      <default></default>
+    </input>
+    <input type="time" token="TimeSpan" searchWhenChanged="true">
+      <label>TimeSpan</label>
+      <default>
+        <earliest>-60m@m</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="dropdown" token="UpdateRateTypeToken" searchWhenChanged="true">
+      <label>RKChart: Normal or Batch</label>
+      <choice value="">Normal</choice>
+      <choice value="Batch">Batch</choice>
+      <default></default>
+    </input>
+    <input type="text" token="ChartBinSizeToken" searchWhenChanged="true">
+      <label>Chart Bin Size</label>
+      <default>30s</default>
+    </input>
+    <input type="dropdown" token="ChartByMachineToken" searchWhenChanged="true">
+      <label>ClusterStateMetric byMachine</label>
+      <choice value="by Machine">Yes</choice>
+      <choice value="">No</choice>
+      <default></default>
+    </input>
+    <input type="dropdown" token="RolePerformanceChartToken" searchWhenChanged="true">
+      <label>Role for Proc Perf Charts</label>
+      <choice value="MasterServer">MasterServer</choice>
+      <choice value="MasterProxyServer">MasterProxyServer</choice>
+      <choice value="StorageServer">StorageServer</choice>
+      <choice value="TLog">TLog</choice>
+      <choice value="Resolver">Resolver</choice>
+      <choice value="GrvProxyServer">GrvProxyServer</choice>
+      <choice value="CommitProxyServer">CommitProxyServer</choice>
+    </input>
+    <input type="dropdown" token="SourcePerfConnectionToken" searchWhenChanged="true">
+      <label>Source for Perf Connection</label>
+      <choice value="MasterServer">MasterServer</choice>
+      <choice value="MasterProxyServer">MasterProxyServer</choice>
+      <choice value="Resolver">Resolver</choice>
+      <choice value="TLog">TLog</choice>
+      <choice value="StorageServer">StorageServer</choice>
+      <choice value="GrvProxyServer">GrvProxyServer</choice>
+      <choice value="CommitProxyServer">CommitProxyServer</choice>
+    </input>
+    <input type="dropdown" token="DestinationPerfConnectionToken" searchWhenChanged="true">
+      <label>Dest for Perf Connection</label>
+      <choice value="MasterServer">MasterServer</choice>
+      <choice value="MasterProxyServer">MasterProxyServer</choice>
+      <choice value="Resolver">Resolver</choice>
+      <choice value="TLog">TLog</choice>
+      <choice value="StorageServer">StorageServer</choice>
+      <choice value="GrvProxyServer">GrvProxyServer</choice>
+      <choice value="CommitProxyServer">CommitProxyServer</choice>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <title>Aggregated Storage Server Bandwidth</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=StorageMetrics TrackLatestType="Original" 
+        | rex field=BytesQueried "(?&lt;RRate&gt;.*) (?&lt;RRoughness&gt;.*) (?&lt;RCounter&gt;.*)" 
+         |  rex field=BytesInput "(?&lt;WRate&gt;.*) (?&lt;WRoughness&gt;.*) (?&lt;WCounter&gt;.*)" 
+          | rex field=BytesFetched "(?&lt;FRate&gt;.*) (?&lt;FRoughness&gt;.*) (?&lt;FCounter&gt;.*)" 
+          | bin span=5s _time 
+          | stats sum(RRate) as ReadSum, sum(WRate) as WriteSum, sum(FRate) as FetchedKeyRate by _time
+          | eval ReadSpeedMB=ReadSum/1024/1024, WriteSpeedMB=WriteSum/1024/1024, FetchedKeyRateMB=FetchedKeyRate/1024/1024
+          |timechart avg(ReadSpeedMB), avg(WriteSpeedMB), avg(FetchedKeyRateMB)</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Aggregated Proxy Bandwidth</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ (Type="ProxyMetrics" OR Type="GrvProxyMetrics") AND TrackLatestType="Original" 
+| makemv delim=" " TxnRequestIn | makemv delim=" " TxnRequestOut | makemv delim=" " TxnStartIn | makemv delim=" " TxnStartOut | makemv delim=" " MutationBytes
+| eval TxnRequestInRate=mvindex(TxnRequestIn, 0), TxnRequestOutRate=mvindex(TxnRequestOut, 0), TxnStartInRate=mvindex(TxnStartIn, 0), TxnStartOutRate=mvindex(TxnStartOut, 0), MutationBytesRate=mvindex(MutationBytes, 0)
+| bin span=60s _time
+| stats avg(TxnRequestInRate) as TxnRequestInRatePerHost, avg(TxnRequestOutRate) as TxnRequestOutRatePerHost, avg(TxnStartInRate) as TxnStartInRatePerHost, avg(TxnStartOutRate) as TxnStartOutRatePerHost, avg(MutationBytesRate) as MutationBytesRatePerHost by Machine,_time
+| eval WriteThroughputKB=sum(MutationBytesRatePerHost)/1000  
+| timechart span=1m sum(TxnRequestInRatePerHost), sum(TxnRequestOutRatePerHost), sum(TxnStartInRatePerHost), sum(TxnStartOutRatePerHost), sum(WriteThroughputKB)</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 1: Overview - GRV Arrivals and Leaves per Second Seen by Proxies</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ (Type="ProxyMetrics" OR Type="GrvProxyMetrics") AND TrackLatestType="Original" 
+| eval TxnRequestIn=mvindex(TxnRequestIn, 0), TxnRequestOut=mvindex(TxnRequestOut, 0), TxnStartIn=mvindex(TxnStartIn, 0), TxnStartOut=mvindex(TxnStartOut, 0) 
+| timechart span=30s avg(TxnRequestIn) avg(TxnRequestOut) avg(TxnStartIn) avg(TxnStartOut) by Machine</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">log</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="height">249</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 2: RKOverview - Input ReleasedTPS and Output TPSLimit</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=RkUpdate$UpdateRateTypeToken$ AND TrackLatestType="Original" 
+| replace inf with 100000000000 
+| eval _time=Time
+| table _time ReleasedTPS TPSLimit
+| timechart span=$ChartBinSizeToken$ avg(ReleasedTPS) avg(TPSLimit)</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">log</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="height">251</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 3: RKOverview - RKLimitReason</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=RkUpdate$UpdateRateTypeToken$ AND TrackLatestType="Original" 
+| replace inf with 100000000000 
+| eval _time=Time
+| table _time Reason</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisLabelsY.majorUnit">1</option>
+        <option name="charting.axisY.abbreviation">none</option>
+        <option name="charting.axisY.scale">linear</option>
+        <option name="charting.chart">area</option>
+        <option name="charting.drilldown">none</option>
+        <option name="height">249</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 4: Don't Process Transactions - RkSSListFetchTimeout (TpsLimit = 0)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ 
+Type="RkSSListFetchTimeout" 
+| timechart span=1s count</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 5: Don't Process Transactions - RkTlogMinFreeSpaceZero (TpsLimit = 0)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ 
+Type="RkTlogMinFreeSpaceZero" 
+| timechart span=1s count</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 6: Don't Process Transactions - ProxyGRVThresholdExceeded</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ (Type="ProxyGRVThresholdExceeded*") AND TrackLatestType="Original" 
+| timechart span=1s count by Type</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 7: RKLimitReasonCandidate - LimitingStorageServerDurabilityLag (MVCCVersionInMemory)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=RkUpdate$UpdateRateTypeToken$ AND TrackLatestType="Original" 
+| replace inf with 100000000000 
+| timechart span=$ChartBinSizeToken$ avg(LimitingStorageServerDurabilityLag)</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 8: RKLimitReasonCandidate - LimitingStorageServerVersionLag (TLogVer-SSVer)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=RkUpdate$UpdateRateTypeToken$ AND TrackLatestType="Original" 
+| replace inf with 100000000000 
+| timechart span=$ChartBinSizeToken$ avg(LimitingStorageServerVersionLag)</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 9: RKLimitReasonCandidate - LimitingStorageServerQueue</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=RkUpdate$UpdateRateTypeToken$ AND TrackLatestType="Original" 
+| replace inf with 100000000000 
+| timechart span=$ChartBinSizeToken$ avg(LimitingStorageServerQueue)</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 10: Runtime Monitoring - StorageServer MVCCVersionInMemory (storage_server_durability_lag)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type="StorageMetrics" AND TrackLatestType="Original" 
+| eval NonDurableVersions=Version-DurableVersion
+| timechart span=$ChartBinSizeToken$ limit=0 avg(NonDurableVersions) $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">linear</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="height">251</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 11: Runtime Monitoring - StorageServer LocalRate (higher MVCCVersionInMemory -&gt; lower LocalRate)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type="StorageMetrics" 
+| timechart limit=0 avg(LocalRate) $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 12: Runtime Monitoring - StorageServer ReadsRejected (lower LocalRate -&gt; higher probability of rejecting read))</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type="StorageMetrics" 
+| timechart limit=0 avg(ReadsRejected) $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 13: Runtime Monitoring - Version Lag between StorageServer and Tlog (storage_server_readable_behind)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type="StorageMetrics" AND TrackLatestType="Original" 
+| eval SSFallBehindVersions=VersionLag
+| timechart span=$ChartBinSizeToken$ limit=0 avg(SSFallBehindVersions) $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">linear</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 14: Runtime Monitoring - StorageServerBytes (storage_server_write_queue_size)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type="StorageMetrics" AND TrackLatestType="Original" 
+| makemv delim=" " BytesInput | makemv delim=" " BytesDurable | makemv delim=" " BytesFetched | makemv delim=" " MutationBytes
+| eval BytesInput=mvindex(BytesInput, 2), BytesDurable=mvindex(BytesDurable, 2), BytesFetched=mvindex(BytesFetched, 2), MutationBytes=mvindex(MutationBytes, 2), BytesInMemoryQueue=BytesInput-BytesDurable
+| timechart span=$ChartBinSizeToken$ limit=0 avg(BytesInMemoryQueue) $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">linear</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 15: Runtime Monitoring - StorageServer KVStore Free Space Ratio (storage_server_min_free_space)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type="StorageMetrics" AND TrackLatestType="Original" 
+| eval KvstoreBytesFreeRatio=KvstoreBytesFree/KvstoreBytesTotal
+| timechart span=$ChartBinSizeToken$ limit=0 avg(KvstoreBytesFreeRatio) $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 16: Runtime Monitoring - TLog Queue Free Space Ratio (log_server_min_free_space)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type="TLogMetrics" AND TrackLatestType="Original" 
+| eval QueueBytesFreeRatio=QueueDiskBytesFree/QueueDiskBytesTotal
+| timechart span=$ChartBinSizeToken$ limit=0 avg(QueueBytesFreeRatio) $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 17: Runtime Monitoring - TLog KVStore Free Space Ratio (log_server_min_free_space)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type="TLogMetrics" AND TrackLatestType="Original" 
+| eval KvstoreBytesFreeRatio=KvstoreBytesFree/KvstoreBytesTotal
+| timechart span=$ChartBinSizeToken$ limit=0 avg(KvstoreBytesFreeRatio) $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 18: Runtime Monitoring - TLogBytes (log_server_write_queue)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type="TLogMetrics" AND TrackLatestType="Original" 
+| makemv delim=" " BytesInput 
+| makemv delim=" " BytesDurable 
+| eval BytesInput=mvindex(BytesInput, 2), BytesDurable=mvindex(BytesDurable, 2), BytesInMemoryQueue=BytesInput-BytesDurable | timechart span=$ChartBinSizeToken$ limit=0 avg(BytesInMemoryQueue) $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">log</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 19: Runtime Monitoring - Proxy Throughput</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ (Type="ProxyMetrics" OR Type="GrvProxyMetrics") AND TrackLatestType="Original" 
+| timechart span=$ChartBinSizeToken$ limit=0 avg(TxnRequestIn) avg(TxnRequestOut) avg(TxnStartIn) avg(TxnStartOut) avg(TxnStartBatch) avg(TxnStartErrors) avg(TxnCommitIn) avg(TxnCommitVersionAssigned) avg(TxnCommitResolving) avg(TxnCommitResolved) avg(TxnCommitOut) avg(TxnCommitOutSuccess) avg(TxnCommitErrors) avg(TxnThrottled) avg(TxnConflicts) avg(CommitBatchIn) avg(CommitBatchOut) avg(TxnRejectedForQueuedTooLong) avg(Mutations)  $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">log</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 20: Runtime Monitoring - Proxy Queue Length</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ (Type="ProxyMetrics" OR Type="GrvProxyMetrics") AND TrackLatestType="Original" | timechart span=$ChartBinSizeToken$ limit=0 avg(*QueueSize*)  $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 21: Runtime Monitoring - TLog UnpoppedVersion</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type="TLogMetrics" AND TrackLatestType="Original" 
+| eval UnpoppedVersion=PersistentDataDurableVersion-QueuePoppedVersion 
+| timechart span=$ChartBinSizeToken$ limit=0 avg(UnpoppedVersion) $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">log</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 22: Runtime Monitoring - Storage Server Disk (AIODiskStall)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type="ProcessMetrics" 
+| join Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$ Type="Role" AND As="StorageServer" 
+    | stats first(Machine) by Machine 
+    | rename first(Machine) as Machine 
+    | table Machine] 
+| timechart span=$ChartBinSizeToken$ limit=0 avg(AIODiskStall) $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 23: Runtime Monitoring - StorageServer Query Queue Length</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type="StorageMetrics" AND TrackLatestType="Original" 
+| makemv QueryQueue | eval QueryQueue=mvindex(QueryQueue, 1) | table _time QueryQueue Machine
+| timechart span=$ChartBinSizeToken$ limit=0 avg(QueryQueue) $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">log</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 24: Transaction Trace Stats - GRV Latency (only show CC transactions by default; it shows client transactions only when you manually open client transaction trace)</title>
+      <input type="dropdown" token="GRVByMachineStatsToken" searchWhenChanged="true">
+        <label>By Machine</label>
+        <choice value="Machine">Yes</choice>
+        <choice value="">No</choice>
+        <default></default>
+      </input>
+      <input type="text" token="StatsGRVSpanToken" searchWhenChanged="true">
+        <label>Span</label>
+        <default>500ms</default>
+      </input>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    Type="TransactionDebug" AND (*ProxyServer.masterProxyServerCore.Broadcast OR *ProxyServer.getLiveCommittedVersion.confirmEpochLive OR *ProxyServer.getLiveCommittedVersion.After) 
+| table Time Type ID Location Machine Roles 
+| append 
+    [ search index=$Index$ LogGroup=$LogGroup$ Type="TransactionDebug" AND (*ProxyServer.queueTransactionStartRequests.Before) 
+    | rename ID as ParentID 
+    | table Time Type ParentID Location Machine Roles 
+    | join ParentID 
+        [ search index=$Index$ LogGroup=$LogGroup$ Type="TransactionAttachID" 
+        | rename ID as ParentID 
+        | rename To as ID 
+        | table ParentID ID] 
+    | table Time Type ID Location Machine Roles] 
+| table Time Type ID Location Machine Roles 
+| sort 0 Time 
+| table Machine Location Time Roles Type ID 
+| stats list(*) by ID 
+| rename list(*) as * 
+| eval TBegin=mvindex(Time, 0), TEnd=mvindex(Time, -1), TimeSpan=TEnd-TBegin, _time=TBegin 
+| bin bins=20 span=$StatsGRVSpanToken$ TimeSpan 
+| chart limit=0 count by TimeSpan $GRVByMachineStatsToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">log</option>
+        <option name="charting.chart">column</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 25: Transaction Trace Stats - GetValue Latency (only show CC transactions by default; it shows client transactions only when you manually open client transaction trace)</title>
+      <input type="dropdown" token="GetValueByMachineStatsToken" searchWhenChanged="true">
+        <label>By Machine</label>
+        <choice value="Machine">Yes</choice>
+        <choice value="">No</choice>
+        <default></default>
+      </input>
+      <input type="text" token="StatsReadSpanToken" searchWhenChanged="true">
+        <label>Span</label>
+        <default>500ms</default>
+      </input>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (storageServer.received OR getValueQ.DoRead OR getValueQ.AfterVersion OR Reader.Before OR Reader.After OR getValueQ.AfterRead OR NativeAPI.getKeyLocation.Before OR NativeAPI.getKeyLocation.After) 
+| table Machine Location Time Roles ID Type 
+| eval Order=case(Location=="NativeAPI.getKeyLocation.Before", 0, Location=="NativeAPI.getKeyLocation.After", 1, Location=="NativeAPI.getValue.Before", 2, Location=="storageServer.received", 3, Location=="getValueQ.DoRead", 4, Location=="getValueQ.AfterVersion", 5, Location=="Reader.Before", 6, Location=="Reader.After", 7, Location=="getValueQ.AfterRead", 8, Location=="NativeAPI.getValue.After", 9, Location=="NativeAPI.getValue.Error", 10) 
+| sort 0 Time Order 
+| stats list(*) by ID 
+| rename list(*) as * 
+| table Machine Location Time Roles ID Type 
+| eval count = mvcount(Location)
+| search count&gt;2
+| eval TEnd=mvindex(Time, -1), TBegin=mvindex(Time, 0), TimeSpan=TEnd-TBegin, _time=TBegin
+| table _time ID TimeSpan Machine Location Time 
+| bin bins=20 span=$StatsReadSpanToken$ TimeSpan 
+| chart limit=0 count by TimeSpan $GetValueByMachineStatsToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">log</option>
+        <option name="charting.chart">column</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 26: Transaction Trace Stats - Commit Latency (only show CC transactions by default; it shows client transactions only when you manually open client transaction trace)</title>
+      <input type="dropdown" token="CommitByMachineStatsToken">
+        <label>By Machine</label>
+        <choice value="Machine">Yes</choice>
+        <choice value="">No</choice>
+        <default>Machine</default>
+      </input>
+      <input type="text" token="StatsCommitSpanToken" searchWhenChanged="true">
+        <label>Span</label>
+        <default>500ms</default>
+      </input>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    Type="CommitDebug" AND (*ProxyServer.commitBatch.Before OR *ProxyServer.commitBatch.GettingCommitVersion OR *ProxyServer.commitBatch.GotCommitVersion OR *ProxyServer.commitBatch.ProcessingMutations OR *ProxyServer.commitBatch.AfterStoreCommits OR *ProxyServer.commitBatch.AfterLogPush OR *ProxyServer.commitBatch.AfterResolution) 
+| table Time Type ID Location Machine Roles 
+| sort 0 Time 
+| table Machine Location Time Roles Type ID
+| stats list(*) by ID
+| rename list(*) as *
+| eval Count=mvcount(Location)
+| search Count&gt;=2
+| eval TBegin=mvindex(Time, 0), TEnd=mvindex(Time, -1), TimeSpan=TEnd-TBegin, _time=T1
+| table _time TimeSpan Machine
+| bin bins=20 span=$StatsCommitSpanToken$ TimeSpan 
+| chart limit=0 count by TimeSpan $CommitByMachineStatsToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">log</option>
+        <option name="charting.chart">column</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 27: Transaction Tracing - GRV Latency (only show CC transactions by default; it shows client transactions only when you manually open client transaction trace)</title>
+      <input type="dropdown" token="GRVLatencyByMachineToken" searchWhenChanged="true">
+        <label>By Machine</label>
+        <choice value="by Machine">Yes</choice>
+        <choice value="">No</choice>
+        <default></default>
+      </input>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    Type="TransactionDebug" AND (*ProxyServer.*ProxyServerCore.Broadcast OR *ProxyServer.getLiveCommittedVersion.confirmEpochLive OR *ProxyServer.getLiveCommittedVersion.After) 
+| table Time Type ID Location Machine Roles 
+| append 
+    [ search index=$Index$ LogGroup=$LogGroup$ Type="TransactionDebug" AND (*ProxyServer.queueTransactionStartRequests.Before) 
+    | rename ID as ParentID 
+    | table Time Type ParentID Location Machine Roles 
+    | join ParentID 
+        [ search index=$Index$ LogGroup=$LogGroup$ Type="TransactionAttachID" 
+        | rename ID as ParentID 
+        | rename To as ID 
+        | table ParentID ID] 
+    | table Time Type ID Location Machine Roles] 
+| table Time Type ID Location Machine Roles 
+| eval Order = case(Location=="NativeAPI.getConsistentReadVersion.Before", 0, Location like "%ProxyServer.queueTransactionStartRequests.Before", 1, Location="MasterProxyServer.masterProxyServerCore.Broadcast", 2, Location like "%ProxyServer.getLiveCommittedVersion.confirmEpochLive", 3, Location like "%ProxyServer.getLiveCommittedVersion.After", 5, Location=="NativeAPI.getConsistentReadVersion.After", 6) 
+| table Time Order Type ID Location Machine Roles 
+| sort 0 Order Time 
+| table Machine Location Time Roles Type ID 
+| stats list(*) by ID 
+| rename list(*) as * 
+| eval T1=mvindex(Time, 0), T2=mvindex(Time, 1), T3=mvindex(Time, 2), T4=mvindex(Time, 3), TimeInQueue = T2-T1, TimeGetVersionFromProxies = if(mvcount==4, T3-T2, -0.0000001), TimeConfirmLivenessFromTLogs = if(mvcount==4, T4-T3, T3-T2), TimeSpan=if(mvcount==4,T4-T1,T3-T1), _time=T1 
+| table _time TimeSpan TimeInQueue TimeGetVersionFromProxies TimeConfirmLivenessFromTLogs Machine 
+| timechart span=$ChartBinSizeToken$ limit=0 avg(TimeSpan), avg(TimeInQueue), avg(TimeGetVersionFromProxies), avg(TimeConfirmLivenessFromTLogs) $GRVLatencyByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 28: Transaction Tracing - GetValue Latency (only show CC transactions by default; it shows client transactions only when you manually open client transaction trace)</title>
+      <input type="dropdown" token="GetValueLatencyByMachineToken" searchWhenChanged="true">
+        <label>By Machine</label>
+        <choice value="by Machine">Yes</choice>
+        <choice value="">No</choice>
+        <default></default>
+      </input>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (storageServer.received OR getValueQ.DoRead OR getValueQ.AfterVersion OR Reader.Before OR Reader.After OR getValueQ.AfterRead OR NativeAPI.getKeyLocation.Before OR NativeAPI.getKeyLocation.After) 
+| table Machine Location Time Roles ID Type 
+| eval Order=case(Location=="NativeAPI.getKeyLocation.Before", 0, Location=="NativeAPI.getKeyLocation.After", 1, Location=="NativeAPI.getValue.Before", 2, Location=="storageServer.received", 3, Location=="getValueQ.DoRead", 4, Location=="getValueQ.AfterVersion", 5, Location=="Reader.Before", 6, Location=="Reader.After", 7, Location=="getValueQ.AfterRead", 8, Location=="NativeAPI.getValue.After", 9, Location=="NativeAPI.getValue.Error", 10) 
+| sort 0 Time Order 
+| stats list(*) by ID 
+| rename list(*) as * 
+| table Machine Location Time Roles ID Type 
+| eval count = mvcount(Location)
+| search count&gt;2
+| eval TEnd=mvindex(Time, -1), TBegin=mvindex(Time, 0), TimeSpan=TEnd-TBegin, _time=TBegin
+| table _time TimeSpan  
+| timechart span=30s limit=0 avg(TimeSpan) $GetValueLatencyByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 29: Transaction Tracing - Commit Latency (only show CC transactions by default; it shows client transactions only when you manually open client transaction trace)</title>
+      <input type="dropdown" token="CommitByMachineToken" searchWhenChanged="true">
+        <label>By Machine</label>
+        <choice value="By Machine">Yes</choice>
+        <choice value="">No</choice>
+        <default></default>
+      </input>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    Type="CommitDebug" AND (*ProxyServer.commitBatch.Before OR *ProxyServer.commitBatch.GettingCommitVersion OR *ProxyServer.commitBatch.GotCommitVersion OR *ProxyServer.commitBatch.ProcessingMutations OR *ProxyServer.commitBatch.AfterStoreCommits OR *ProxyServer.commitBatch.AfterLogPush OR *ProxyServer.commitBatch.AfterResolution) 
+| table Time Type ID Location Machine Roles 
+| eval Order=case(Location=="NativeAPI.commit.Before", 0, Location like "%ProxyServer.batcher", 1, Location like "%ProxyServer.commitBatch.Before", 2, Location like "%ProxyServer.commitBatch.GettingCommitVersion", 3, Location like "%ProxyServer.commitBatch.GotCommitVersion", 4, Location=="Resolver.resolveBatch.Before", 5, Location=="Resolver.resolveBatch.AfterQueueSizeCheck", 6, Location=="Resolver.resolveBatch.AfterOrderer", 7, Location=="Resolver.resolveBatch.After", 8, Location like "%ProxyServer.commitBatch.AfterResolution", 8.5, Location like "%ProxyServer.commitBatch.ProcessingMutations", 9, Location like "%ProxyServer.commitBatch.AfterStoreCommits", 10, Location=="TLog.tLogCommit.BeforeWaitForVersion", 11, Location=="TLog.tLogCommit.Before", 12, Location=="TLog.tLogCommit.AfterTLogCommit", 13, Location=="TLog.tLogCommit.After", 14, Location like "%ProxyServer.commitBatch.AfterLogPush", 15, Location=="NativeAPI.commit.After", 16)
+| table Time Order Type ID Location Machine Roles 
+| sort 0 Time Order 
+| table Machine Location Time Roles Type ID
+| stats list(*) by ID
+| rename list(*) as *
+| eval Count=mvcount(Location)
+| search Count=7
+| eval T1=mvindex(Time, 0), T2=mvindex(Time, 1), T3=mvindex(Time, 2), T4=mvindex(Time, 3), T5=mvindex(Time, 4), T6=mvindex(Time, 5), T7=mvindex(Time, 6), TimeSpan=T7-T1, TimeResolution=T4-T3, TimePostResolution=T5-T4, TimeProcessingMutation=T6-T5, TimeTLogPush=T7-T6, _time=T1
+| table _time TimeSpan TimeResolution TimePostResolution TimeProcessingMutation TimeTLogPush Machine
+| timechart span=$ChartBinSizeToken$ limit=0 avg(TimeSpan), avg(TimeResolution), avg(TimePostResolution), avg(TimeProcessingMutation), avg(TimeTLogPush) $CommitByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 30: Transaction Tracing - Commit - TLogPush and Resolver Latency (only show CC transactions by default; it shows client transactions only when you manually open client transaction trace)</title>
+      <input type="dropdown" token="TLogResolverByMachineToken" searchWhenChanged="true">
+        <label>By Machine</label>
+        <choice value="MachineStep">Yes</choice>
+        <choice value="Step">No</choice>
+        <default>Step</default>
+      </input>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    Type="CommitDebug" AND (Resolver.resolveBatch.Before OR Resolver.resolveBatch.AfterQueueSizeCheck OR Resolver.resolveBatch.AfterOrderer OR Resolver.resolveBatch.After OR TLog.tLogCommit.BeforeWaitForVersion OR TLog.tLogCommit.Before OR TLog.tLogCommit.AfterTLogCommit OR TLog.tLogCommit.After) 
+| table Time Type ID Location Machine Roles 
+| eval Order=case(Location=="NativeAPI.commit.Before", 0, Location=="MasterProxyServer.batcher", 1, Location=="MasterProxyServer.commitBatch.Before", 2, Location=="MasterProxyServer.commitBatch.GettingCommitVersion", 3, Location=="MasterProxyServer.commitBatch.GotCommitVersion", 4, Location=="Resolver.resolveBatch.Before", 5, Location=="Resolver.resolveBatch.AfterQueueSizeCheck", 6, Location=="Resolver.resolveBatch.AfterOrderer", 7, Location=="Resolver.resolveBatch.After", 8, Location=="MasterProxyServer.commitBatch.AfterResolution", 8.5, Location=="MasterProxyServer.commitBatch.ProcessingMutations", 9, Location=="MasterProxyServer.commitBatch.AfterStoreCommits", 10, Location=="TLog.tLogCommit.BeforeWaitForVersion", 11, Location=="TLog.tLogCommit.Before", 12, Location=="TLog.tLogCommit.AfterTLogCommit", 13, Location=="TLog.tLogCommit.After", 14, Location=="MasterProxyServer.commitBatch.AfterLogPush", 15, Location=="NativeAPI.commit.After", 16)
+| table Time Order Type ID Location Machine Roles 
+| sort 0 Time Order 
+| table Machine Location Time Roles Type ID
+| stats list(*) by ID
+| rename list(*) as *
+| eval Count=mvcount(Location), Step=case(Count=4 and (mvindex(Location, 0) like "TLog%"), "TimeTLogCommit", Count=4 and (mvindex(Location, 0) like "Resolver%"), "TimeResolver", Count=10, "TimeSpan"), BeginTime=mvindex(Time, 0), EndTime=mvindex(Time, -1), Duration=EndTime-BeginTime, _time=BeginTime
+| search Count=4
+| eval Machinei=mvindex(Machine, 0), MachineStep = Step."-".Machinei
+| table _time Step Duration Machinei Location Machine MachineStep
+| timechart span=$ChartBinSizeToken$ limit=0 avg(Duration) by $TLogResolverByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 31: Machine Performance - CPU Utilization (CPU Time divided by Elapsed)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=ProcessMetrics AND TrackLatestType="Original" 
+| table _time Machine CPUSeconds DiskFreeBytes DiskIdleSeconds DiskQueueDepth DiskReadsCount DiskWriteSectors DiskTotalBytes DiskWritesCount FileReads MbpsReceived MbpsSent Memory ResidentMemory UnusedAllocatedMemory Elapsed
+| join Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$ Type="Role" AND As=$RolePerformanceChartToken$ 
+    | stats first(Machine) by Machine 
+    | rename first(Machine) as Machine 
+    | table Machine] 
+| eval Utilization=CPUSeconds/Elapsed
+| timechart span=$ChartBinSizeToken$ avg(Utilization) $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">linear</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 32: Machine Performance - Memory Utilization (ResidentMemory divided by Memory)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=ProcessMetrics AND TrackLatestType="Original" 
+| table _time Machine CPUSeconds DiskFreeBytes DiskIdleSeconds DiskQueueDepth DiskReadsCount DiskWriteSectors DiskTotalBytes DiskWritesCount FileReads MbpsReceived MbpsSent Memory ResidentMemory UnusedAllocatedMemory 
+| join Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$ Type="Role" AND As=$RolePerformanceChartToken$ 
+    | stats first(Machine) by Machine 
+    | rename first(Machine) as Machine 
+    | table Machine] 
+| eval Utilization = ResidentMemory/Memory
+| timechart span=$ChartBinSizeToken$ avg(Utilization) $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">linear</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 33: Machine Performance - Disk Utilization ((DiskTotalBytes-DiskFreeBytes)/DiskTotalBytes)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=ProcessMetrics AND TrackLatestType="Original" 
+| table _time Machine CPUSeconds DiskFreeBytes DiskIdleSeconds DiskQueueDepth DiskReadsCount DiskWriteSectors DiskTotalBytes DiskWritesCount FileReads MbpsReceived MbpsSent Memory ResidentMemory UnusedAllocatedMemory 
+| join Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$ Type="Role" AND As=$RolePerformanceChartToken$
+    | stats first(Machine) by Machine 
+    | rename first(Machine) as Machine 
+    | table Machine] 
+| eval Utilization = (DiskTotalBytes-DiskFreeBytes)/DiskTotalBytes
+| timechart span=$ChartBinSizeToken$ avg(Utilization) $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 34: Machine Performance - Network (Mbps Received and Mbps Sent)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=ProcessMetrics AND TrackLatestType="Original" 
+| table _time Machine CPUSeconds DiskFreeBytes DiskIdleSeconds DiskQueueDepth DiskReadsCount DiskWriteSectors DiskTotalBytes DiskWritesCount FileReads MbpsReceived MbpsSent Memory ResidentMemory UnusedAllocatedMemory 
+| join Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$ Type="Role" AND As=$RolePerformanceChartToken$ 
+    | stats first(Machine) by Machine 
+    | rename first(Machine) as Machine 
+    | table Machine] 
+| timechart span=$ChartBinSizeToken$ avg(MbpsReceived) avg(MbpsSent) $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.axisY.scale">log</option>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 35: Machine Performance - Disk (Reads Count and Writes Count)</title>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$ Type=ProcessMetrics AND TrackLatestType="Original" 
+| table _time Machine CPUSeconds DiskFreeBytes DiskIdleSeconds DiskQueueDepth DiskReadsCount DiskWriteSectors DiskTotalBytes DiskWritesCount FileReads MbpsReceived MbpsSent Memory ResidentMemory UnusedAllocatedMemory 
+| join Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$ Type="Role" AND As=$RolePerformanceChartToken$ 
+    | stats first(Machine) by Machine 
+    | rename first(Machine) as Machine 
+    | table Machine] 
+| timechart span=$ChartBinSizeToken$ avg(DiskReadsCount) avg(DiskWritesCount) $ChartByMachineToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Chart 36: Network Performance - Timeout</title>
+      <input type="dropdown" token="TimeoutByConnectionToken" searchWhenChanged="true">
+        <label>By Connection</label>
+        <choice value="By Connection">Yes</choice>
+        <choice value="">No</choice>
+        <default></default>
+      </input>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (Type=ConnectionTimedOut OR Type=ConnectionTimeout) 
+| replace *:tls with * in PeerAddr 
+| join Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="Role" AND ($SourcePerfConnectionToken$)) 
+    | dedup ID] 
+| join PeerAddr 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="Role" AND ($DestinationPerfConnectionToken$)) 
+    | dedup ID 
+    | rename Machine as PeerAddr] 
+| eval Connection=Machine."-".PeerAddr
+| timechart useother=0 span=$ChartBinSizeToken$ count $TimeoutByConnectionToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Chart 37: Network Performance - PingLatency</title>
+      <input type="dropdown" token="PingLatencyByConnectionToken" searchWhenChanged="true">
+        <label>By Connection</label>
+        <choice value="By Connection">Yes</choice>
+        <choice value="">No</choice>
+        <default></default>
+      </input>
+      <chart>
+        <search>
+          <query>index=$Index$ LogGroup=$LogGroup$
+    (Type=PingLatency) 
+| replace *:tls with * in PeerAddr 
+| join Machine 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="Role" AND ($SourcePerfConnectionToken$)) 
+    | dedup ID] 
+| join PeerAddr 
+    [ search index=$Index$ LogGroup=$LogGroup$
+        (Type="Role" AND ($DestinationPerfConnectionToken$)) 
+    | dedup ID 
+    | rename Machine as PeerAddr] 
+| eval Connection=Machine."-".PeerAddr
+| timechart useother=0 span=$ChartBinSizeToken$ avg(MeanLatency) avg(MaxLatency)   $PingLatencyByConnectionToken$</query>
+          <earliest>$TimeSpan.earliest$</earliest>
+          <latest>$TimeSpan.latest$</latest>
+        </search>
+        <option name="charting.chart">line</option>
+        <option name="charting.drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+</form>

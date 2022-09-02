@@ -295,7 +295,7 @@ ACTOR Future<Void> testRunWorkload(KmsConnectorInterface inf, uint32_t nEncrypti
 		for (i = 0; i < maxDomainIds; i++) {
 			// domainIdsReq.encryptDomainIds.push_back(i);
 			EncryptCipherDomainId domainId = i;
-			EncryptCipherDomainName domainName = StringRef(domainIdsReq.arena, std::to_string(domainId));
+			EncryptCipherDomainNameRef domainName = StringRef(domainIdsReq.arena, std::to_string(domainId));
 			domainIdsReq.encryptDomainInfos.emplace_back(domainIdsReq.arena, i, domainName);
 		}
 		KmsConnLookupEKsByDomainIdsRep domainIdsRep = wait(inf.ekLookupByDomainIds.getReply(domainIdsReq));

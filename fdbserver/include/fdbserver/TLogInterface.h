@@ -189,7 +189,7 @@ struct TLogPeekReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, messages, end, popped, maxKnownVersion, minKnownCommittedVersion, begin, onlySpilled);
+		serializer(ar, messages, end, popped, maxKnownVersion, minKnownCommittedVersion, begin, onlySpilled, arena);
 	}
 };
 

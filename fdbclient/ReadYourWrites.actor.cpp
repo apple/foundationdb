@@ -681,7 +681,8 @@ public:
 				break;
 
 			if (it.is_unknown_range()) {
-				if (limits.hasByteLimit() && result.size() && itemsPastEnd >= 1 - end.offset) {
+				if (limits.hasByteLimit() && limits.hasSatisfiedMinRows() && result.size() &&
+				    itemsPastEnd >= 1 - end.offset) {
 					result.more = true;
 					break;
 				}
@@ -1820,6 +1821,25 @@ Future<Standalone<VectorRef<BlobGranuleChunkRef>>> ReadYourWritesTransaction::re
 		return key_outside_legal_range();
 
 	return waitOrError(tr.readBlobGranules(range, begin, readVersion, readVersionOut), resetPromise.getFuture());
+}
+
+Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> ReadYourWritesTransaction::summarizeBlobGranules(
+    const KeyRange& range,
+    Optional<Version> summaryVersion,
+    int rangeLimit) {
+
+	if (checkUsedDuringCommit()) {
+		return used_during_commit();
+	}
+
+	if (resetPromise.isSet())
+		return resetPromise.getFuture().getError();
+
+	KeyRef maxKey = getMaxReadKey();
+	if (range.begin > maxKey || range.end > maxKey)
+		return key_outside_legal_range();
+
+	return waitOrError(tr.summarizeBlobGranules(range, summaryVersion, rangeLimit), resetPromise.getFuture());
 }
 
 void ReadYourWritesTransaction::addReadConflictRange(KeyRangeRef const& keys) {

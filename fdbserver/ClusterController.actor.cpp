@@ -27,7 +27,7 @@
 
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "fdbserver/EncryptKeyProxyInterface.h"
+#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -103,7 +103,7 @@ struct RatekeeperSingleton : Singleton<RatekeeperInterface> {
 		}
 	}
 	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present()) {
+		if (interface.present() && cc->id_worker.count(pid)) {
 			cc->id_worker[pid].haltRatekeeper =
 			    brokenPromiseToNever(interface.get().haltRatekeeper.getReply(HaltRatekeeperRequest(cc->id)));
 		}
@@ -128,7 +128,7 @@ struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
 		}
 	}
 	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present()) {
+		if (interface.present() && cc->id_worker.count(pid)) {
 			cc->id_worker[pid].haltDistributor =
 			    brokenPromiseToNever(interface.get().haltDataDistributor.getReply(HaltDataDistributorRequest(cc->id)));
 		}
@@ -153,7 +153,7 @@ struct BlobManagerSingleton : Singleton<BlobManagerInterface> {
 		}
 	}
 	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present()) {
+		if (interface.present() && cc->id_worker.count(pid)) {
 			cc->id_worker[pid].haltBlobManager =
 			    brokenPromiseToNever(interface.get().haltBlobManager.getReply(HaltBlobManagerRequest(cc->id)));
 		}
@@ -185,7 +185,7 @@ struct EncryptKeyProxySingleton : Singleton<EncryptKeyProxyInterface> {
 		}
 	}
 	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present()) {
+		if (interface.present() && cc->id_worker.count(pid)) {
 			cc->id_worker[pid].haltEncryptKeyProxy =
 			    brokenPromiseToNever(interface.get().haltEncryptKeyProxy.getReply(HaltEncryptKeyProxyRequest(cc->id)));
 		}
@@ -196,21 +196,9 @@ struct EncryptKeyProxySingleton : Singleton<EncryptKeyProxyInterface> {
 	}
 };
 
-ACTOR Future<Void> handleLeaderReplacement(Reference<ClusterRecoveryData> self, Future<Void> leaderFail) {
-	loop choose {
-		when(wait(leaderFail)) {
-			TraceEvent("LeaderReplaced", self->controllerData->id).log();
-			// We are no longer the leader if this has changed.
-			self->controllerData->shouldCommitSuicide = true;
-			throw restart_cluster_controller();
-		}
-	}
-}
-
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
                                         ClusterControllerData::DBInfo* db,
                                         ServerCoordinators coordinators,
-                                        Future<Void> leaderFail,
                                         Future<Void> recoveredDiskFiles) {
 	state MasterInterface iMaster;
 	state Reference<ClusterRecoveryData> recoveryData;
@@ -249,6 +237,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
 			dbInfo.myLocality = db->serverInfo->get().myLocality;
 			dbInfo.client = ClientDBInfo();
+			dbInfo.client.encryptKeyProxy = db->serverInfo->get().encryptKeyProxy;
 			dbInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 			dbInfo.client.tenantMode = TenantAPI::tenantModeForClusterType(db->clusterType, db->config.tenantMode);
 			dbInfo.client.clusterId = db->serverInfo->get().client.clusterId;
@@ -306,7 +295,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 					TraceEvent(SevDebug, "BackupWorkerDoneRequest", cluster->id).log();
 				}
 				when(wait(collection)) { throw internal_error(); }
-				when(wait(handleLeaderReplacement(recoveryData, leaderFail))) { throw internal_error(); }
 			}
 			// failed master (better master exists) could happen while change-coordinators request processing is
 			// in-progress
@@ -802,6 +790,7 @@ void checkOutstandingRequests(ClusterControllerData* self) {
 
 ACTOR Future<Void> rebootAndCheck(ClusterControllerData* cluster, Optional<Standalone<StringRef>> processID) {
 	{
+		ASSERT(processID.present());
 		auto watcher = cluster->id_worker.find(processID);
 		ASSERT(watcher != cluster->id_worker.end());
 
@@ -1018,7 +1007,8 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 	    db->clientInfo->get().tenantMode != db->config.tenantMode || db->clientInfo->get().clusterId != req.clusterId ||
 	    db->clientInfo->get().isEncryptionEnabled != SERVER_KNOBS->ENABLE_ENCRYPTION ||
 	    db->clientInfo->get().clusterType != db->clusterType ||
-	    db->clientInfo->get().metaclusterName != db->metaclusterName) {
+	    db->clientInfo->get().metaclusterName != db->metaclusterName ||
+	    db->clientInfo->get().encryptKeyProxy != db->serverInfo->get().encryptKeyProxy) {
 		TraceEvent("PublishNewClientInfo", self->id)
 		    .detail("Master", dbInfo.master.id())
 		    .detail("GrvProxies", db->clientInfo->get().grvProxies)
@@ -1037,6 +1027,7 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		isChanged = true;
 		// TODO why construct a new one and not just copy the old one and change proxies + id?
 		ClientDBInfo clientInfo;
+		clientInfo.encryptKeyProxy = db->serverInfo->get().encryptKeyProxy;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
 		clientInfo.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 		clientInfo.commitProxies = req.commitProxies;
@@ -1245,6 +1236,10 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		if (info->second.details.interf.id() != w.id()) {
 			self->removedDBInfoEndpoints.insert(info->second.details.interf.updateServerDBInfo.getEndpoint());
 			info->second.details.interf = w;
+			// Cancel the existing watcher actor; possible race condition could be, the older registered watcher
+			// detects failures and removes the worker from id_worker even before the new watcher starts monitoring the
+			// new interface
+			info->second.watcher.cancel();
 			info->second.watcher = workerAvailabilityWatch(w, newProcessClass, self);
 		}
 		if (req.requestDbInfo) {
@@ -2050,8 +2045,9 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 			choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().distributor.get().waitFailure,
 				                            SERVER_KNOBS->DD_FAILURE_TIME))) {
-					TraceEvent("CCDataDistributorDied", self->id)
-					    .detail("DDID", self->db.serverInfo->get().distributor.get().id());
+					const auto& distributor = self->db.serverInfo->get().distributor;
+					TraceEvent("CCDataDistributorDied", self->id).detail("DDID", distributor.get().id());
+					DataDistributorSingleton(distributor).halt(self, distributor.get().locality.processId());
 					self->db.clearInterf(ProcessClass::DataDistributorClass);
 				}
 				when(wait(self->recruitDistributor.onChange())) {}
@@ -2141,8 +2137,9 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData* self) {
 			choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().ratekeeper.get().waitFailure,
 				                            SERVER_KNOBS->RATEKEEPER_FAILURE_TIME))) {
-					TraceEvent("CCRatekeeperDied", self->id)
-					    .detail("RKID", self->db.serverInfo->get().ratekeeper.get().id());
+					const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
+					TraceEvent("CCRatekeeperDied", self->id).detail("RKID", ratekeeper.get().id());
+					RatekeeperSingleton(ratekeeper).halt(self, ratekeeper.get().locality.processId());
 					self->db.clearInterf(ProcessClass::RatekeeperClass);
 				}
 				when(wait(self->recruitRatekeeper.onChange())) {}
@@ -2237,6 +2234,8 @@ ACTOR Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
 				when(wait(waitFailureClient(self->db.serverInfo->get().encryptKeyProxy.get().waitFailure,
 				                            SERVER_KNOBS->ENCRYPT_KEY_PROXY_FAILURE_TIME))) {
 					TraceEvent("CCEKP_Died", self->id);
+					const auto& encryptKeyProxy = self->db.serverInfo->get().encryptKeyProxy;
+					EncryptKeyProxySingleton(encryptKeyProxy).halt(self, encryptKeyProxy.get().locality.processId());
 					self->db.clearInterf(ProcessClass::EncryptKeyProxyClass);
 				}
 				when(wait(self->recruitEncryptKeyProxy.onChange())) {}
@@ -2381,8 +2380,9 @@ ACTOR Future<Void> monitorBlobManager(ClusterControllerData* self) {
 			loop {
 				choose {
 					when(wait(wfClient)) {
-						TraceEvent("CCBlobManagerDied", self->id)
-						    .detail("BMID", self->db.serverInfo->get().blobManager.get().id());
+						const auto& blobManager = self->db.serverInfo->get().blobManager;
+						TraceEvent("CCBlobManagerDied", self->id).detail("BMID", blobManager.get().id());
+						BlobManagerSingleton(blobManager).halt(self, blobManager.get().locality.processId());
 						self->db.clearInterf(ProcessClass::BlobManagerClass);
 						break;
 					}
@@ -2545,8 +2545,8 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		self.addActor.send(monitorEncryptKeyProxy(&self));
 	}
-	self.addActor.send(clusterWatchDatabase(
-	    &self, &self.db, coordinators, leaderFail, recoveredDiskFiles)); // Start the master database
+	self.addActor.send(
+	    clusterWatchDatabase(&self, &self.db, coordinators, recoveredDiskFiles)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
 	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(),
 	                                &self,
@@ -2655,6 +2655,12 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		}
 		when(GetServerDBInfoRequest req = waitNext(interf.getServerDBInfo.getFuture())) {
 			self.addActor.send(clusterGetServerInfo(&self.db, req.knownServerInfoID, req.reply));
+		}
+		when(wait(leaderFail)) {
+			// We are no longer the leader if this has changed.
+			endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Leader Replaced", true);
+			CODE_PROBE(true, "Leader replaced");
+			return Void();
 		}
 		when(ReplyPromise<Void> ping = waitNext(interf.clientInterface.ping.getFuture())) { ping.send(Void()); }
 	}
