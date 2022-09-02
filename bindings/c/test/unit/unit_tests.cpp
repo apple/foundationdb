@@ -2761,6 +2761,7 @@ TEST_CASE("Blob Granule Functions") {
 	auto confValue =
 	    get_value("\xff/conf/blob_granules_enabled", /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
 	if (!confValue.has_value() || confValue.value() != "1") {
+		// std::cout << "skipping blob granule test" << std::endl;
 		return;
 	}
 
@@ -2817,7 +2818,6 @@ TEST_CASE("Blob Granule Functions") {
 		fdb::KeyValueArrayResult r =
 		    tr.read_blob_granules(key("bg"), key("bh"), originalReadVersion, -2, granuleContext);
 		fdb_error_t err = r.get(&out_kv, &out_count, &out_more);
-		;
 		if (err && err != 2037 /* blob_granule_not_materialized */) {
 			fdb::EmptyFuture f2 = tr.on_error(err);
 			fdb_check(wait_future(f2));
@@ -2865,6 +2865,10 @@ TEST_CASE("Blob Granule Functions") {
 		int out_count;
 		fdb_check(f.get(&out_kr, &out_count));
 
+		CHECK(std::string((const char*)out_kr[0].begin_key, out_kr[0].begin_key_length) <= key("bg"));
+		CHECK(std::string((const char*)out_kr[out_count - 1].end_key, out_kr[out_count - 1].end_key_length) >=
+		      key("bh"));
+
 		CHECK(out_count >= 1);
 		// check key ranges are in order
 		for (int i = 0; i < out_count; i++) {
@@ -2872,9 +2876,9 @@ TEST_CASE("Blob Granule Functions") {
 			CHECK(std::string((const char*)out_kr[i].begin_key, out_kr[i].begin_key_length) <
 			      std::string((const char*)out_kr[i].end_key, out_kr[i].end_key_length));
 		}
-		// Ranges themselves are sorted
+		// Ranges themselves are sorted and contiguous
 		for (int i = 0; i < out_count - 1; i++) {
-			CHECK(std::string((const char*)out_kr[i].end_key, out_kr[i].end_key_length) <=
+			CHECK(std::string((const char*)out_kr[i].end_key, out_kr[i].end_key_length) ==
 			      std::string((const char*)out_kr[i + 1].begin_key, out_kr[i + 1].begin_key_length));
 		}
 
@@ -2900,7 +2904,6 @@ TEST_CASE("Blob Granule Functions") {
 	fdb_check(wait_future(waitPurgeFuture));
 
 	// re-read again at the purge version to make sure it is still valid
-
 	while (1) {
 		fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
 		fdb::KeyValueArrayResult r =
@@ -2913,6 +2916,56 @@ TEST_CASE("Blob Granule Functions") {
 		}
 
 		CHECK(err == 2037 /* blob_granule_not_materialized */);
+
+		tr.reset();
+		break;
+	}
+
+	// check granule summary
+	while (1) {
+		fdb::GranuleSummaryArrayFuture f = tr.summarize_blob_granules(key("bg"), key("bh"), originalReadVersion, 100);
+		fdb_error_t err = wait_future(f);
+		if (err) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		const FDBGranuleSummary* out_summaries;
+		int out_count;
+		fdb_check(f.get(&out_summaries, &out_count));
+
+		CHECK(out_count >= 1);
+		CHECK(out_count <= 100);
+
+		// check that ranges cover requested range
+		CHECK(std::string((const char*)out_summaries[0].key_range.begin_key,
+		                  out_summaries[0].key_range.begin_key_length) <= key("bg"));
+		CHECK(std::string((const char*)out_summaries[out_count - 1].key_range.end_key,
+		                  out_summaries[out_count - 1].key_range.end_key_length) >= key("bh"));
+
+		// check key ranges are in order
+		for (int i = 0; i < out_count; i++) {
+			// key range start < end
+			CHECK(std::string((const char*)out_summaries[i].key_range.begin_key,
+			                  out_summaries[i].key_range.begin_key_length) <
+			      std::string((const char*)out_summaries[i].key_range.end_key,
+			                  out_summaries[i].key_range.end_key_length));
+			// sanity check versions and sizes
+			CHECK(out_summaries[i].snapshot_version <= originalReadVersion);
+			CHECK(out_summaries[i].delta_version <= originalReadVersion);
+			CHECK(out_summaries[i].snapshot_version <= out_summaries[i].delta_version);
+			CHECK(out_summaries[i].snapshot_size > 0);
+			CHECK(out_summaries[i].delta_size >= 0);
+		}
+
+		// Ranges themselves are sorted and contiguous
+		for (int i = 0; i < out_count - 1; i++) {
+			CHECK(std::string((const char*)out_summaries[i].key_range.end_key,
+			                  out_summaries[i].key_range.end_key_length) ==
+			      std::string((const char*)out_summaries[i + 1].key_range.begin_key,
+			                  out_summaries[i + 1].key_range.begin_key_length));
+		}
 
 		tr.reset();
 		break;
