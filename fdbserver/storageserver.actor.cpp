@@ -23,6 +23,7 @@
 #include <type_traits>
 #include <unordered_map>
 
+#include "flow/ApiVersion.h"
 #include "fmt/format.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
@@ -10229,7 +10230,7 @@ ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<IClusterC
 	}
 
 	// create a temp client connect to DB
-	Database cx = Database::createDatabase(connRecord, Database::API_VERSION_LATEST);
+	Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 	state int noCanRemoveCount = 0;

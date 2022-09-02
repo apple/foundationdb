@@ -82,8 +82,6 @@ struct NetworkOptions {
 
 class Database {
 public:
-	enum { API_VERSION_LATEST = -1 };
-
 	// Creates a database object that represents a connection to a cluster
 	// This constructor uses a preallocated DatabaseContext that may have been created
 	// on another thread
