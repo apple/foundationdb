@@ -1007,7 +1007,7 @@ public:
 
 	FlowLock serveFetchCheckpointParallelismLock;
 
-	FlowLock serveValidateStorageParallelismLock;
+	FlowLock serveAuditStorageParallelismLock;
 
 	int64_t instanceID;
 
@@ -1186,10 +1186,10 @@ public:
 				return self->serveFetchCheckpointParallelismLock.waiters();
 			});
 			specialCounter(cc, "ServeValidateStorageActive", [self]() {
-				return self->serveValidateStorageParallelismLock.activePermits();
+				return self->serveAuditStorageParallelismLock.activePermits();
 			});
 			specialCounter(cc, "ServeValidateStorageWaiting", [self]() {
-				return self->serveValidateStorageParallelismLock.waiters();
+				return self->serveAuditStorageParallelismLock.waiters();
 			});
 			specialCounter(cc, "QueryQueueMax", [self]() { return self->getAndResetMaxQueryQueueSize(); });
 			specialCounter(cc, "BytesStored", [self]() { return self->metrics.byteSample.getEstimate(allKeys); });
@@ -1247,7 +1247,7 @@ public:
 	    fetchChangeFeedParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
-	    serveValidateStorageParallelismLock(SERVER_KNOBS->SERVE_VALIDATE_STORAGE_PARALLELISM),
+	    serveAuditStorageParallelismLock(SERVER_KNOBS->SERVE_AUDIT_STORAGE_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
 	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()), counters(this),
@@ -3604,13 +3604,12 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 		    .detail("Version", version)
 		    .detail("ErrorMessage", error)
 		    .detail("RemoteServer", remoteServer.toString());
-		throw validate_storage_error();
 	}
 
 	TraceEvent(SevDebug, "ServeValidateRangeAgainstServerEnd", data->thisServerID)
 	    .detail("Range", range)
 	    .detail("Version", version)
-		.detail("ValidatedKeys", validatedKeys)
+	    .detail("ValidatedKeys", validatedKeys)
 	    .detail("Servers", remoteServer.toString());
 
 	return Void();
@@ -3673,49 +3672,49 @@ ACTOR Future<Void> validateRangeShard(StorageServer* data, KeyRange range, std::
 	return Void();
 }
 
-ACTOR Future<Void> validateStorageQ(StorageServer* self, AuditStorageRequest req) {
-	wait(self->serveValidateStorageParallelismLock.take(TaskPriority::DefaultYield));
-	state FlowLock::Releaser holder(self->serveValidateStorageParallelismLock);
+ACTOR Future<Void> auditStorageQ(StorageServer* self, AuditStorageRequest req) {
+	wait(self->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
+	state FlowLock::Releaser holder(self->serveAuditStorageParallelismLock);
 
-	TraceEvent("ServeValidateStorageBegin", self->thisServerID)
-	    .detail("RequestID", req.requestId)
-	    .detail("Range", req.range);
+	TraceEvent("ServeAuditStorageBegin", self->thisServerID)
+	    .detail("RequestID", req.id)
+	    .detail("Range", req.range)
+	    .detail("Type", req.type);
 
 	state Transaction tr(self->cx);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-	loop {
-		try {
-			state RangeResult shards = wait(krmGetRanges(&tr,
-			                                             keyServersPrefix,
-			                                             req.range,
-			                                             SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
-			                                             SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
-			ASSERT(!shards.empty() && !shards.more);
+	try {
+		loop {
+			try {
+				state RangeResult shards = wait(krmGetRanges(&tr,
+				                                             keyServersPrefix,
+				                                             req.range,
+				                                             SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+				                                             SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
+				ASSERT(!shards.empty() && !shards.more);
 
-			state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
-			ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
-			std::vector<Future<Void>> fs;
-			for (int i = 0; i < shards.size() - 1; ++i) {
-				std::vector<UID> src;
-				std::vector<UID> dest;
-				UID srcId, destId;
-				decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
-				fs.push_back(validateRangeShard(self, KeyRangeRef(shards[i].key, shards[i + 1].key), src));
-			}
+				std::vector<Future<Void>> fs;
+				for (int i = 0; i < shards.size() - 1; ++i) {
+					std::vector<UID> src;
+					std::vector<UID> dest;
+					UID srcId, destId;
+					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
+					fs.push_back(validateRangeShard(self, KeyRangeRef(shards[i].key, shards[i + 1].key), src));
+				}
 
-			wait(waitForAll(fs));
-			req.reply.send(ValidateStorageResult(req.requestId));
-			break;
-		} catch (Error& e) {
-			if (e.code() == error_code_validate_storage_error) {
-				req.reply.sendError(e);
+				wait(waitForAll(fs));
 				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
 			}
-			wait(tr.onError(e));
 		}
+	} catch (Error& e) {
+		req.reply.sendError(audit_storage_failed());
 	}
 
 	return Void();
@@ -10328,8 +10327,8 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 			when(FetchCheckpointKeyValuesRequest req = waitNext(ssi.fetchCheckpointKeyValues.getFuture())) {
 				self->actors.add(fetchCheckpointKeyValuesQ(self, req));
 			}
-			when(AuditStorageRequest req = waitNext(ssi.validateStorage.getFuture())) {
-				self->actors.add(validateStorageQ(self, req));
+			when(AuditStorageRequest req = waitNext(ssi.auditStorage.getFuture())) {
+				self->actors.add(auditStorageQ(self, req));
 			}
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);

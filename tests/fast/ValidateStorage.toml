@@ -1,0 +1,12 @@
+[configuration]
+config = 'triple'
+generateFearless = true
+allowDefaultTenant = false
+machineCount = 15
+
+[[test]]
+testTitle = 'ValidateStorageWorkload'
+useDB = true
+
+    [[test.workload]]
+    testName = 'ValidateStorageWorkload'

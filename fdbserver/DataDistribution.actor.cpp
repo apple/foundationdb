@@ -1290,18 +1290,18 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 	return Void();
 }
 
-ACTOR Future<Void> validateStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
+ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
 ACTOR Future<Void> scheduleAuditForRange(UID auditId,
                                          KeyRange range,
                                          AuditType type,
                                          Reference<ActorCollection> actors,
                                          Reference<KeyRangeMap<AuditPhase>> auditMap);
 ACTOR Future<Void> doAuditStorage(Reference<ActorCollection> actors,
-                                     Reference<KeyRangeMap<AuditPhase>> auditMap,
-                                     StorageServerInterface ssi,
-                                     AuditStorageRequest req);
+                                  Reference<KeyRangeMap<AuditPhase>> auditMap,
+                                  StorageServerInterface ssi,
+                                  AuditStorageRequest req);
 
-ACTOR Future<Void> validateStorage(Reference<DataDistributor> self, TriggerAuditRequest req) {
+ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req) {
 	// TODO(heliu): Load running audit, and create one if no audit is running.
 	state Reference<KeyRangeMap<AuditPhase>> auditMap =
 	    makeReference<KeyRangeMap<AuditPhase>>(AuditPhase::Invalid, allKeys.end);
@@ -1311,20 +1311,21 @@ ACTOR Future<Void> validateStorage(Reference<DataDistributor> self, TriggerAudit
 	Ranges f = auditMap.intersectingRanges(req.range);
 	for (auto it = f.begin(); it != f.end(); ++it) {
 		if (it->value() == AuditPhase::Invalid || it->value() == AuditPhase::Error) {
-			subReq.range = KeyRangeRef(it->range().begin, it->range().end);
 			actors->add(scheduleAuditForRange(
 			    auditId, KeyRangeRef(it->range().begin, it->range().end), req.getType(), actors, auditMap));
 		}
 	}
 
+	req.reply.send(auditId);
+
 	try {
 		wait(actors.getResult());
-		req.reply.send(Void());
+		// TODO(heliu): Set the audit result, and clear auditId.
 	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "DDValidateStorageError", req.requestId)
+		TraceEvent(SevWarnAlways, "DDAuditStorageOperationError", auditId)
 		    .errorUnsuppressed(e)
-		    .detail("Range", req.range);
-		req.reply.sendError(e);
+		    .detail("Range", req.range)
+		    .detail("Type", req.type);
 	}
 
 	return Void();
@@ -1335,18 +1336,18 @@ ACTOR Future<Void> scheduleAuditForRange(UID auditId,
                                          AuditType type,
                                          Reference<ActorCollection> actors,
                                          Reference<KeyRangeMap<AuditPhase>> auditMap) {
-	state Key begin = req.range.begin;
+    // TODO(heliu): Load the audit map, or make auditStorage a streaming call, to skip audited ranges.
+	state Key begin = range.begin;
 
-	while (begin < req.range.end) {
+	while (begin < range.end) {
 		state Transaction tr(cx);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 		try {
-			std::cout << "1" << std::endl;
 			state RangeResult shards = wait(krmGetRanges(&tr,
 			                                             keyServersPrefix,
-			                                             KeyRangeRef(begin, req.end),
+			                                             KeyRangeRef(begin, range.end),
 			                                             SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
 			                                             SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
 			ASSERT(!shards.empty());
@@ -1356,21 +1357,25 @@ ACTOR Future<Void> scheduleAuditForRange(UID auditId,
 
 			state int i = 0;
 			for (i = 0; i < shards.size() - 1; ++i) {
-				std::cout << "2" << std::endl;
 				std::vector<UID> src;
 				std::vector<UID> dest;
 				UID srcId, destId;
 				decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
 
-				const int idx = deterministicRandom()->randomInt(0, src.size());
-				Optional<Value> serverListValue = wait(tr.get(serverListKeyFor(src[idx])));
-				ASSERT(serverListValue.present());
+				state UID ssId = serverListKeyFor(src[deterministicRandom()->randomInt(0, src.size())]);
+				Optional<Value> serverListValue = wait(tr.get(serverListKeyFor(ssId)));
+				KeyRangeRef currentRange(shards[i].key, shards[i + 1].key);
+				if (!serverListValue.present()) {
+					TraceEvent(SevWarnAlways, "ScheduleAuditForRangeMissingServer", auditId)
+					    .detail("StorageServer", ssId)
+					    .detail("Range", currentRange);
+					break;
+				}
 				const StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
 
-				AuditStorageRequest req(auditId,KeyRangeRef(shards[i].key, shards[i + 1].key), type);
+				const AuditStorageRequest req(auditId, currentRange, type);
 				actors->add(doAuditStorage(actors, auditMap, ssi, req));
 				begin = req.range.end;
-				std::cout << "3" << std::endl;
 				wait(delay(0.01));
 			}
 		} catch (Error& e) {
@@ -1383,12 +1388,17 @@ ACTOR Future<Void> scheduleAuditForRange(UID auditId,
 }
 
 ACTOR Future<Void> doAuditStorage(Reference<ActorCollection> actors,
-                                     Reference<KeyRangeMap<AuditPhase>> auditMap,
-                                     StorageServerInterface ssi,
-                                     AuditStorageRequest req) {
+                                  Reference<KeyRangeMap<AuditPhase>> auditMap,
+                                  StorageServerInterface ssi,
+                                  AuditStorageRequest req) {
+	TraceEvent(SevDebug, "DDAuditStorageBegin", req.id)
+	    .detail("Range", req.range)
+	    .detail("Type", req.type)
+	    .detail("StorageServer", ssi.toString());
+
 	try {
 		auditMap->insert(req.range, AuditPhase::Running);
-		ValidateStorageResult vResult = wait(ssi.validateStorage.getReply(req));
+		ValidateStorageResult vResult = wait(ssi.auditStorage.getReply(req));
 		TraceEvent e(vResult.error.empty() ? SevInfo : SevWarnAlways, "DDValidateStorageResult", req.requestId);
 		e.detail("Range", req.range);
 		e.detail("StorageServer", ssi.toString());
@@ -1401,6 +1411,7 @@ ACTOR Future<Void> doAuditStorage(Reference<ActorCollection> actors,
 		    .detail("Range", req.range)
 		    .detail("StorageServer", ssi.toString());
 		if (e.code() != error_code_actor_cancelled) {
+			auditMap->insert(req.range, AuditPhase::Error);
 			actors.add(ScheduleAuditForRange(req.id, req.range, req.getType(), actors, auditMap));
 		}
 	}
@@ -1476,8 +1487,8 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			when(GetStorageWigglerStateRequest req = waitNext(di.storageWigglerState.getFuture())) {
 				req.reply.send(getStorageWigglerStates(self));
 			}
-			when(TriggerAuditRequest req = waitNext(di.validateStorage.getFuture())) {
-				actors.add(validateStorage(self, req));
+			when(TriggerAuditRequest req = waitNext(di.auditStorage.getFuture())) {
+				actors.add(auditStorage(self, req));
 			}
 		}
 	} catch (Error& err) {

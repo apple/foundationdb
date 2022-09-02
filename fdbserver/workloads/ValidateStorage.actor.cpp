@@ -145,7 +145,7 @@ struct ValidateStorage : TestWorkload {
 					const StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
 					AuditStorageRequest req(deterministicRandom()->randomUniqueID(),
 					                           KeyRangeRef(shards[i].key, shards[i + 1].key));
-					ValidateStorageResult vResult = wait(ssi.validateStorage.getReply(req));
+					ValidateStorageResult vResult = wait(ssi.auditStorage.getReply(req));
 
                     std::cout << "3" << std::endl;
 				}
