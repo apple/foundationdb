@@ -681,7 +681,8 @@ public:
 				break;
 
 			if (it.is_unknown_range()) {
-				if (limits.hasByteLimit() && result.size() && itemsPastEnd >= 1 - end.offset) {
+				if (limits.hasByteLimit() && limits.hasSatisfiedMinRows() && result.size() &&
+				    itemsPastEnd >= 1 - end.offset) {
 					result.more = true;
 					break;
 				}

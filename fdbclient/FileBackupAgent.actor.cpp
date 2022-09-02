@@ -20,6 +20,7 @@
 
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/Tenant.h"
 #include "flow/Arena.h"
 #include "flow/BlobCipher.h"
 #include "flow/CodeProbe.h"
@@ -38,6 +39,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/JsonBuilder.h"
+#include "fdbclient/TenantEntryCache.actor.h"
 
 #include <cinttypes>
 #include <ctime>
@@ -542,10 +544,11 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	EncryptedRangeFileWriter(Database cx,
 	                         Arena* arena,
+	                         Reference<TenantEntryCache<Void>> tenantCache,
 	                         Reference<IBackupFile> file = Reference<IBackupFile>(),
 	                         int blockSize = 0,
 	                         Options options = Options(true))
-	  : cx(cx), arena(arena), file(file), blockSize(blockSize), blockEnd(0),
+	  : cx(cx), arena(arena), tenantCache(tenantCache), file(file), blockSize(blockSize), blockEnd(0),
 	    fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION), options(options) {
 		buffer = makeString(blockSize);
 		wPtr = mutateString(buffer);
@@ -627,9 +630,9 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	void encrypt() {
 		ASSERT(cipherKeys.headerCipherKey.isValid() && cipherKeys.textCipherKey.isValid());
-		TraceEvent("Nim::hereo13")
-		    .detail("header", cipherKeys.headerCipherKey->getDomainId())
-		    .detail("text", cipherKeys.textCipherKey->getDomainId());
+		// TraceEvent("Nim::hereo13")
+		// .detail("header", cipherKeys.headerCipherKey->getDomainId())
+		//     .detail("text", cipherKeys.textCipherKey->getDomainId());
 		EncryptBlobCipherAes265Ctr encryptor(cipherKeys.textCipherKey,
 		                                     cipherKeys.headerCipherKey,
 		                                     cipherKeys.ivRef.begin(),
@@ -649,26 +652,25 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		std::memcpy(encryptHeaderP + BlobCipherEncryptHeader::headerSize, encryptedData->begin(), payloadSize);
 	}
 
-	ACTOR static Future<Void> updateEncryptionKeys(EncryptedRangeFileWriter* self, KeyRef key) {
-		state Optional<int64_t> curTenantIdOpt = getTenantId(key);
+	ACTOR static Future<Void> updateEncryptionKeys(EncryptedRangeFileWriter* self,
+	                                               KeyRef key,
+	                                               Reference<TenantEntryCache<Void>> cache) {
+		state int64_t curTenantId = wait(getTenantId(key, cache));
 		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 		// Get and Set Header Cipher Key
 		TextAndHeaderCipherKeys systemCipherKeys = wait(getLatestSystemEncryptCipherKeys(dbInfo));
 		self->cipherKeys.headerCipherKey = systemCipherKeys.cipherHeaderKey;
 
 		// Get text cipher key if we have a valid tenant id
-		if (curTenantIdOpt.present()) {
-			state int64_t curTenantId = curTenantIdOpt.get();
-			std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
-			// TODO (Nim): Get actual tenant name for given tenant id
-			domains.emplace(curTenantId, StringRef(std::to_string(curTenantId)));
-			// Get the latest write encryption key for the given tenant
-			std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> textCipherKeys =
-			    wait(getLatestEncryptCipherKeys(dbInfo, domains));
-			ASSERT(textCipherKeys.find(curTenantId) != textCipherKeys.end());
+		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
+		// TODO (Nim): Get actual tenant name for given tenant id
+		domains.emplace(curTenantId, StringRef(std::to_string(curTenantId)));
+		// Get the latest write encryption key for the given tenant
+		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> textCipherKeys =
+		    wait(getLatestEncryptCipherKeys(dbInfo, domains));
+		ASSERT(textCipherKeys.find(curTenantId) != textCipherKeys.end());
 
-			self->cipherKeys.textCipherKey = textCipherKeys.at(curTenantId);
-		}
+		self->cipherKeys.textCipherKey = textCipherKeys.at(curTenantId);
 
 		// Set ivRef
 		self->cipherKeys.ivRef = makeString(AES_256_IV_LENGTH, *self->arena);
@@ -700,16 +702,26 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	static bool isSystemKey(KeyRef key) { return key.size() && key[0] == systemKeys.begin[0]; }
 
-	static Optional<int64_t> getTenantId(KeyRef key) {
+	ACTOR static Future<int64_t> getTenantIdImpl(KeyRef key, Reference<TenantEntryCache<Void>> tenantCache) {
 		if (isSystemKey(key)) {
 			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 		}
+		// TODO (Nim): Replace with custom encryption domain
 		if (key.size() < 8) {
-			return Optional<int64_t>();
+			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 		}
 		KeyRef tenantPrefix = KeyRef(key.begin(), 8);
-		// TODO (Nim): Check if tenant id is a valid tenant entry
-		return TenantMapEntry::prefixToId(tenantPrefix);
+		state int64_t tenantId = TenantMapEntry::prefixToId(tenantPrefix);
+		// Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getById(tenantId));
+		// if (payload.present()) {
+		// 	return tenantId;
+		// }
+		// TODO (Nim): Replace with custom encryption domain
+		return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
+	}
+
+	static Future<int64_t> getTenantId(KeyRef key, Reference<TenantEntryCache<Void>> tenantCache) {
+		return getTenantIdImpl(key, tenantCache);
 	}
 
 	// Handles the first block and internal blocks.  Ends current block if needed.
@@ -731,9 +743,9 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 			// write buffer to file since block is finished
 			ASSERT(currentBufferSize(self) == self->blockSize);
 			if (self->options.encryptionEnabled) {
-				TraceEvent("Nim::hereo4")
-				    .detail("hV", self->cipherKeys.headerCipherKey.isValid())
-				    .detail("tV", self->cipherKeys.textCipherKey.isValid());
+				// TraceEvent("Nim::hereo4")
+				// .detail("hV", self->cipherKeys.headerCipherKey.isValid())
+				// .detail("tV", self->cipherKeys.textCipherKey.isValid());
 				self->encrypt();
 			}
 			wait(self->file->append(self->buffer.begin(), self->blockSize));
@@ -798,21 +810,25 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                                                               Key k,
 	                                                               Value v,
 	                                                               bool writeValue) {
-		Optional<int64_t> curKeyTenantId = getTenantId(k);
-		Optional<int64_t> prevKeyTenantId = getTenantId(self->lastKey);
+		// Don't want to start a new block if the current key or previous key is empty
+		if (self->lastKey.size() == 0 || k.size() == 0) {
+			return false;
+		}
+		state int64_t curKeyTenantId = wait(getTenantId(k, self->tenantCache));
+		state int64_t prevKeyTenantId = wait(getTenantId(self->lastKey, self->tenantCache));
 		// crossing tenant boundaries so finish the current block using only the tenant prefix of the new key
-		if (curKeyTenantId.present() && prevKeyTenantId.present() && curKeyTenantId.get() != prevKeyTenantId.get()) {
+		if (curKeyTenantId != prevKeyTenantId) {
 			CODE_PROBE(true, "crossed tenant boundaries");
 			int prefixLength = commonPrefixLength(self->lastKey, k) + 1;
 			KeyRef tenantPrefix = StringRef(k.begin(), prefixLength);
 			ValueRef newValue = StringRef();
-			TraceEvent("Nim::hereo12").detail("lK", self->lastKey).detail("cK", k).detail("nK", tenantPrefix);
+			// TraceEvent("Nim::hereo12").detail("lK", self->lastKey).detail("cK", k).detail("nK", tenantPrefix);
 			self->lastKey = k;
 			self->lastValue = v;
 			appendStringRefWithLenToBuffer(self, &tenantPrefix);
 			appendStringRefWithLenToBuffer(self, &newValue);
 			wait(newBlock(self, 0, tenantPrefix, writeValue));
-			wait(updateEncryptionKeys(self, self->lastKey));
+			wait(updateEncryptionKeys(self, self->lastKey, self->tenantCache));
 			return true;
 		}
 		return false;
@@ -824,7 +840,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		wait(newBlockIfNeeded(self, toWrite));
 		// get encryption keys if not already set
 		if (!self->cipherKeys.headerCipherKey.isValid() || !self->cipherKeys.textCipherKey.isValid()) {
-			wait(updateEncryptionKeys(self, k));
+			wait(updateEncryptionKeys(self, k, self->tenantCache));
 		}
 		bool createdNewBlock = wait(finishCurTenantBlockStartNewIfNeeded(self, k, v, true));
 		if (createdNewBlock) {
@@ -842,11 +858,12 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	// Write begin key or end key.
 	ACTOR static Future<Void> writeKey_impl(EncryptedRangeFileWriter* self, Key k) {
 		int toWrite = sizeof(uint32_t) + k.size();
-		TraceEvent("Nim::hereo10").detail("k", k);
+		// TraceEvent("Nim::hereo10").detail("k", k);
 		wait(newBlockIfNeeded(self, toWrite));
 		// get encryption keys if not already set
-		if (!self->cipherKeys.headerCipherKey.isValid() || !self->cipherKeys.textCipherKey.isValid()) {
-			wait(updateEncryptionKeys(self, k));
+		if (k.size() > 0 &&
+		    (!self->cipherKeys.headerCipherKey.isValid() || !self->cipherKeys.textCipherKey.isValid())) {
+			wait(updateEncryptionKeys(self, k, self->tenantCache));
 		}
 		bool createdNewBlock = wait(finishCurTenantBlockStartNewIfNeeded(self, k, StringRef(), false));
 		if (createdNewBlock) {
@@ -863,9 +880,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		// Write any outstanding bytes to the file
 		if (currentBufferSize(this) > 0) {
 			if (options.encryptionEnabled) {
-				TraceEvent("Nim::hereo3")
-				    .detail("hV", cipherKeys.headerCipherKey.isValid())
-				    .detail("tV", cipherKeys.textCipherKey.isValid());
+				// TraceEvent("Nim::hereo3")
+				// .detail("hV", cipherKeys.headerCipherKey.isValid()).detail("tV", cipherKeys.textCipherKey.isValid());
 				encrypt();
 			}
 			return file->append(buffer.begin(), currentBufferSize(this));
@@ -875,6 +891,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	Database cx;
 	Arena* arena;
+	Reference<TenantEntryCache<Void>> tenantCache;
 	Reference<IBackupFile> file;
 	int blockSize;
 
@@ -1018,8 +1035,6 @@ void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* 
 	uint32_t kLen = reader->consumeNetworkUInt32();
 	const uint8_t* k = reader->consume(kLen);
 	results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
-	KeyRef prevKey;
-	bool done = false;
 
 	// Read kv pairs and end key
 	while (1) {
@@ -1031,19 +1046,6 @@ void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* 
 		if (reader->eof() || *reader->rptr == 0xFF) {
 			results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
 			break;
-		}
-
-		if (encryptedBlock) {
-			// Ensure that if current key is located in a different tenant than the previous key it is the last key in
-			// the block and that it is truncated
-			KeyRef curKey = KeyRef(k, kLen);
-			if (prevKey.size() > 0 &&
-			    EncryptedRangeFileWriter::getTenantId(curKey) != EncryptedRangeFileWriter::getTenantId(prevKey)) {
-				CODE_PROBE(true, "decode crossing tenant boundaries");
-				ASSERT(!done);
-				done = true;
-			}
-			prevKey = curKey;
 		}
 
 		// Read a value, which must exist or the block is invalid
@@ -1692,6 +1694,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		state std::unique_ptr<IRangeFileWriter> rangeFile;
 		state BackupConfig backup(task);
 		state Arena arena;
+		state Reference<TenantEntryCache<Void>> tenantCache = makeReference<TenantEntryCache<Void>>(cx);
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but if
 		// bc is false then clearly the backup is no longer in progress
@@ -1781,10 +1784,11 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				outFile = f;
 
 				encryptionEnabled = encryptionEnabled && cx->clientInfo->get().isEncryptionEnabled;
+				encryptionEnabled = true;
 				// Initialize range file writer and write begin key
 				if (encryptionEnabled) {
 					CODE_PROBE(true, "using encrypted snapshot file writer");
-					rangeFile = std::make_unique<EncryptedRangeFileWriter>(cx, &arena, outFile, blockSize);
+					rangeFile = std::make_unique<EncryptedRangeFileWriter>(cx, &arena, tenantCache, outFile, blockSize);
 				} else {
 					ASSERT(false);
 					rangeFile = std::make_unique<RangeFileWriter>(outFile, blockSize);

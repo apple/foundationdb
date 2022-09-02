@@ -288,6 +288,7 @@ rocksdb::Options getOptions() {
 	options.max_background_jobs = SERVER_KNOBS->ROCKSDB_MAX_BACKGROUND_JOBS;
 
 	options.db_write_buffer_size = SERVER_KNOBS->ROCKSDB_WRITE_BUFFER_SIZE;
+	options.write_buffer_size = SERVER_KNOBS->ROCKSDB_CF_WRITE_BUFFER_SIZE;
 	options.statistics = rocksdb::CreateDBStatistics();
 	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
@@ -2309,8 +2310,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	// We don't throttle eager reads and reads to the FF keyspace because FDB struggles when those reads fail.
 	// Thus far, they have been low enough volume to not cause an issue.
-	static bool shouldThrottle(IKeyValueStore::ReadType type, KeyRef key) {
-		return type != IKeyValueStore::ReadType::EAGER && !(key.startsWith(systemKeys.begin));
+	static bool shouldThrottle(ReadType type, KeyRef key) {
+		return type != ReadType::EAGER && !(key.startsWith(systemKeys.begin));
 	}
 
 	ACTOR template <class Action>
@@ -2331,7 +2332,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return result;
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType type, Optional<UID> debugID) override {
+	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options) override {
 		auto* shard = shardManager.getDataShard(key);
 		if (shard == nullptr || !shard->physicalShard->initialized()) {
 			// TODO: read non-exist system key range should not cause an error.
@@ -2339,6 +2340,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			    .detail("Detail", "Read non-exist key range")
 			    .detail("ReadKey", key);
 			return Optional<Value>();
+		}
+
+		ReadType type = ReadType::NORMAL;
+		Optional<UID> debugID;
+
+		if (options.present()) {
+			type = options.get().type;
+			debugID = options.get().debugID;
 		}
 
 		if (!shouldThrottle(type, key)) {
@@ -2348,18 +2357,15 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			return res;
 		}
 
-		auto& semaphore = (type == IKeyValueStore::ReadType::FETCH) ? fetchSemaphore : readSemaphore;
-		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
+		auto& semaphore = (type == ReadType::FETCH) ? fetchSemaphore : readSemaphore;
+		int maxWaiters = (type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
 		auto a = std::make_unique<Reader::ReadValueAction>(key, shard->physicalShard, debugID);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
-	Future<Optional<Value>> readValuePrefix(KeyRef key,
-	                                        int maxLength,
-	                                        IKeyValueStore::ReadType type,
-	                                        Optional<UID> debugID) override {
+	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<ReadOptions> options) override {
 		auto* shard = shardManager.getDataShard(key);
 		if (shard == nullptr || !shard->physicalShard->initialized()) {
 			// TODO: read non-exist system key range should not cause an error.
@@ -2369,6 +2375,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			return Optional<Value>();
 		}
 
+		ReadType type = ReadType::NORMAL;
+		Optional<UID> debugID;
+
+		if (options.present()) {
+			type = options.get().type;
+			debugID = options.get().debugID;
+		}
+
 		if (!shouldThrottle(type, key)) {
 			auto a = new Reader::ReadValuePrefixAction(key, maxLength, shard->physicalShard, debugID);
 			auto res = a->result.getFuture();
@@ -2376,8 +2390,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			return res;
 		}
 
-		auto& semaphore = (type == IKeyValueStore::ReadType::FETCH) ? fetchSemaphore : readSemaphore;
-		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
+		auto& semaphore = (type == ReadType::FETCH) ? fetchSemaphore : readSemaphore;
+		int maxWaiters = (type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
 		auto a = std::make_unique<Reader::ReadValuePrefixAction>(key, maxLength, shard->physicalShard, debugID);
@@ -2407,9 +2421,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit,
 	                              int byteLimit,
-	                              IKeyValueStore::ReadType type) override {
+	                              Optional<ReadOptions> options = Optional<ReadOptions>()) override {
 		TraceEvent(SevVerbose, "ShardedRocksReadRangeBegin", this->id).detail("Range", keys);
 		auto shards = shardManager.getDataShardsByRange(keys);
+
+		ReadType type = ReadType::NORMAL;
+		if (options.present()) {
+			type = options.get().type;
+		}
 
 		if (!shouldThrottle(type, keys.begin)) {
 			auto a = new Reader::ReadRangeAction(keys, shards, rowLimit, byteLimit);
@@ -2418,8 +2437,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			return res;
 		}
 
-		auto& semaphore = (type == IKeyValueStore::ReadType::FETCH) ? fetchSemaphore : readSemaphore;
-		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
+		auto& semaphore = (type == ReadType::FETCH) ? fetchSemaphore : readSemaphore;
+		int maxWaiters = (type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 		checkWaiters(semaphore, maxWaiters);
 
 		auto a = std::make_unique<Reader::ReadRangeAction>(keys, shards, rowLimit, byteLimit);
@@ -2608,24 +2627,21 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 
 	// Range read
 	// Read forward full range.
-	RangeResult result =
-	    wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), 1000, 10000, IKeyValueStore::ReadType::NORMAL));
+	RangeResult result = wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), 1000, 10000));
 	ASSERT_EQ(result.size(), expectedRows.size());
 	for (int i = 0; i < expectedRows.size(); ++i) {
 		ASSERT(result[i] == expectedRows[i]);
 	}
 
 	// Read backward full range.
-	RangeResult result =
-	    wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), -1000, 10000, IKeyValueStore::ReadType::NORMAL));
+	RangeResult result = wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), -1000, 10000));
 	ASSERT_EQ(result.size(), expectedRows.size());
 	for (int i = 0; i < expectedRows.size(); ++i) {
 		ASSERT(result[i] == expectedRows[59 - i]);
 	}
 
 	// Forward with row limit.
-	RangeResult result =
-	    wait(kvStore->readRange(KeyRangeRef("2"_sr, "6"_sr), 10, 10000, IKeyValueStore::ReadType::NORMAL));
+	RangeResult result = wait(kvStore->readRange(KeyRangeRef("2"_sr, "6"_sr), 10, 10000));
 	ASSERT_EQ(result.size(), 10);
 	for (int i = 0; i < 10; ++i) {
 		ASSERT(result[i] == expectedRows[20 + i]);
@@ -2651,16 +2667,14 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 	wait(kvStore->init());
 
 	// Read all values.
-	RangeResult result =
-	    wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), 1000, 10000, IKeyValueStore::ReadType::NORMAL));
+	RangeResult result = wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), 1000, 10000));
 	ASSERT_EQ(result.size(), expectedRows.size());
 	for (int i = 0; i < expectedRows.size(); ++i) {
 		ASSERT(result[i] == expectedRows[i]);
 	}
 
 	// Read partial range with row limit
-	RangeResult result =
-	    wait(kvStore->readRange(KeyRangeRef("5"_sr, ":"_sr), 35, 10000, IKeyValueStore::ReadType::NORMAL));
+	RangeResult result = wait(kvStore->readRange(KeyRangeRef("5"_sr, ":"_sr), 35, 10000));
 	ASSERT_EQ(result.size(), 35);
 	for (int i = 0; i < result.size(); ++i) {
 		ASSERT(result[i] == expectedRows[40 + i]);
@@ -2670,8 +2684,7 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 	kvStore->clear(KeyRangeRef("40"_sr, "45"_sr));
 	wait(kvStore->commit(false));
 
-	RangeResult result =
-	    wait(kvStore->readRange(KeyRangeRef("4"_sr, "5"_sr), 20, 10000, IKeyValueStore::ReadType::NORMAL));
+	RangeResult result = wait(kvStore->readRange(KeyRangeRef("4"_sr, "5"_sr), 20, 10000));
 	ASSERT_EQ(result.size(), 5);
 
 	// Clear a single value.
@@ -2691,12 +2704,10 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 	kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	wait(kvStore->init());
 
-	RangeResult result =
-	    wait(kvStore->readRange(KeyRangeRef("1"_sr, "8"_sr), 1000, 10000, IKeyValueStore::ReadType::NORMAL));
+	RangeResult result = wait(kvStore->readRange(KeyRangeRef("1"_sr, "8"_sr), 1000, 10000));
 	ASSERT_EQ(result.size(), 0);
 
-	RangeResult result =
-	    wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), 1000, 10000, IKeyValueStore::ReadType::NORMAL));
+	RangeResult result = wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), 1000, 10000));
 	ASSERT_EQ(result.size(), 19);
 
 	Future<Void> closed = kvStore->onClosed();

@@ -27,19 +27,20 @@
 
 typedef enum { TLOG_ENCRYPTION = 0, STORAGE_SERVER_ENCRYPTION = 1, BLOB_GRANULE_ENCRYPTION = 2 } EncryptOperationType;
 
-inline bool isEncryptionOpSupported(EncryptOperationType operation_type, ClientDBInfo dbInfo) {
+inline bool isEncryptionOpSupported(EncryptOperationType operation_type, const ClientDBInfo& dbInfo) {
 	if (!dbInfo.isEncryptionEnabled) {
 		return false;
 	}
 
 	if (operation_type == TLOG_ENCRYPTION) {
 		return SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION;
+	} else if (operation_type == STORAGE_SERVER_ENCRYPTION) {
+		return SERVER_KNOBS->ENABLE_STORAGE_SERVER_ENCRYPTION;
 	} else if (operation_type == BLOB_GRANULE_ENCRYPTION) {
 		bool supported = SERVER_KNOBS->ENABLE_BLOB_GRANULE_ENCRYPTION && SERVER_KNOBS->BG_METADATA_SOURCE == "tenant";
 		ASSERT((supported && SERVER_KNOBS->ENABLE_ENCRYPTION) || !supported);
 		return supported;
 	} else {
-		// TODO (Nim): Add once storage server encryption knob is created
 		return false;
 	}
 }

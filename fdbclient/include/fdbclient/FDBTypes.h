@@ -1531,6 +1531,42 @@ struct StorageWiggleValue {
 	}
 };
 
+enum class ReadType {
+	EAGER,
+	FETCH,
+	LOW,
+	NORMAL,
+	HIGH,
+};
+
+FDB_DECLARE_BOOLEAN_PARAM(CacheResult);
+
+// store options for storage engine read
+// ReadType describes the usage and priority of the read
+// cacheResult determines whether the storage engine cache for this read
+// consistencyCheckStartVersion indicates the consistency check which began at this version
+// debugID helps to trace the path of the read
+struct ReadOptions {
+	ReadType type;
+	// Once CacheResult is serializable, change type from bool to CacheResult
+	bool cacheResult;
+	Optional<UID> debugID;
+	Optional<Version> consistencyCheckStartVersion;
+
+	ReadOptions() : type(ReadType::NORMAL), cacheResult(CacheResult::True){};
+
+	ReadOptions(Optional<UID> debugID,
+	            ReadType type = ReadType::NORMAL,
+	            CacheResult cache = CacheResult::False,
+	            Optional<Version> version = Optional<Version>())
+	  : type(type), cacheResult(cache), debugID(debugID), consistencyCheckStartVersion(version){};
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, type, cacheResult, debugID, consistencyCheckStartVersion);
+	}
+};
+
 // Can be used to identify types (e.g. IDatabase) that can be used to create transactions with a `createTransaction`
 // function
 template <typename, typename = void>
