@@ -3507,29 +3507,29 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 	state int validatedKeys = 0;
 	loop {
 		try {
-			state GetKeyValuesRequest req;
 			state int limit = 1e4;
 			state int limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+			state GetKeyValuesRequest req;
+			state GetKeyValuesRequest localReq;
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
 			req.limit = limit;
 			req.limitBytes = limitBytes;
 			req.version = version;
 			req.tags = TagSet();
+			localReq.begin = firstGreaterOrEqual(range.begin);
+			localReq.end = firstGreaterOrEqual(range.end);
+			localReq.limit = limit;
+			localReq.limitBytes = limitBytes;
+			localReq.version = version;
+			localReq.tags = TagSet();
 
 			// Try getting the entries in the specified range
 			state Future<ErrorOr<GetKeyValuesReply>> remoteKeyValueFuture =
 			    remoteServer.getKeyValues.getReplyUnlessFailedFor(req, 2, 0);
-			state Future<GetKeyValuesReply> localKeyValueFuture = readRange(data,
-			                                                                version,
-			                                                                range,
-			                                                                limit,
-			                                                                &limitBytes,
-			                                                                SpanContext(),
-			                                                                IKeyValueStore::ReadType::LOW,
-			                                                                Optional<Key>());
+			data->actors.add(getKeyValuesQ(data, localReq));
 			state ErrorOr<GetKeyValuesReply> remoteResult = wait(remoteKeyValueFuture);
-			GetKeyValuesReply local = wait(localKeyValueFuture);
+			GetKeyValuesReply local = wait(localReq.reply.getFuture());
 			Key lastKey = range.begin;
 			state std::string error;
 
@@ -3616,7 +3616,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 }
 
 ACTOR Future<Void> validateRangeShard(StorageServer* data, KeyRange range, std::vector<UID> candidates) {
-	TraceEvent("ServeValidateRangeShardBegin", data->thisServerID)
+	TraceEvent(SevDebug, "ServeValidateRangeShardBegin", data->thisServerID)
 	    .detail("Range", range)
 	    .detail("Servers", describe(candidates));
 

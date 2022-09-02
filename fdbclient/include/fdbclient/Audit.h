@@ -24,7 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 
-enum class AuditPhase { Invalid = 0; Running = 1; Complete = 2; Error = 3; };
+enum class AuditPhase { Invalid = 0; Running = 1; Complete = 2; Error = 3; Failed = 4; };
 
 enum class AuditType { Invalid = 0; ValidateHA = 1 };
 

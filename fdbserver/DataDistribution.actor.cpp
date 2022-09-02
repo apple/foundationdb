@@ -1411,7 +1411,7 @@ ACTOR Future<Void> doAuditStorage(Reference<ActorCollection> actors,
 		    .detail("Range", req.range)
 		    .detail("StorageServer", ssi.toString());
 		if (e.code() != error_code_actor_cancelled) {
-			auditMap->insert(req.range, AuditPhase::Error);
+			auditMap->insert(req.range, AuditPhase::Failed);
 			actors.add(ScheduleAuditForRange(req.id, req.range, req.getType(), actors, auditMap));
 		}
 	}
