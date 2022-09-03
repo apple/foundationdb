@@ -1,5 +1,5 @@
 /*
- * BlobGranuleServerCommon.h
+ * BlobGranuleServerCommon.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
