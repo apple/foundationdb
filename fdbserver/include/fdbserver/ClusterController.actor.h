@@ -185,10 +185,10 @@ public:
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
 			newInfo.encryptKeyProxy = interf;
+			serverInfo->set(newInfo);
 			auto newClientInfo = clientInfo->get();
 			newClientInfo.id = deterministicRandom()->randomUniqueID();
 			newClientInfo.encryptKeyProxy = interf;
-			serverInfo->set(newInfo);
 			clientInfo->set(newClientInfo);
 		}
 
@@ -196,6 +196,8 @@ public:
 			auto newInfo = serverInfo->get();
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
+			auto newClientInfo = clientInfo->get();
+			newClientInfo.id = deterministicRandom()->randomUniqueID();
 			if (t == ProcessClass::DataDistributorClass) {
 				newInfo.distributor = Optional<DataDistributorInterface>();
 			} else if (t == ProcessClass::RatekeeperClass) {
@@ -204,12 +206,10 @@ public:
 				newInfo.blobManager = Optional<BlobManagerInterface>();
 			} else if (t == ProcessClass::EncryptKeyProxyClass) {
 				newInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
-				auto newClientInfo = clientInfo->get();
-				newClientInfo.id = deterministicRandom()->randomUniqueID();
 				newClientInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
-				clientInfo->set(newClientInfo);
 			}
 			serverInfo->set(newInfo);
+			clientInfo->set(newClientInfo);
 		}
 
 		ACTOR static Future<Void> countClients(DBInfo* self) {
