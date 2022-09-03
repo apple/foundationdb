@@ -31,6 +31,7 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/RatekeeperInterface.h"
+#include "fdbclient/ConsistencyScanInterface.h"
 #include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbclient/BlobWorkerInterface.h"
@@ -57,6 +58,7 @@ struct WorkerInterface {
 	RequestStream<struct InitializeRatekeeperRequest> ratekeeper;
 	RequestStream<struct InitializeBlobManagerRequest> blobManager;
 	RequestStream<struct InitializeBlobWorkerRequest> blobWorker;
+	RequestStream<struct InitializeConsistencyScanRequest> consistencyScan;
 	RequestStream<struct InitializeResolverRequest> resolver;
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
@@ -112,6 +114,7 @@ struct WorkerInterface {
 		           ratekeeper,
 		           blobManager,
 		           blobWorker,
+		           consistencyScan,
 		           resolver,
 		           storage,
 		           logRouter,
@@ -428,6 +431,7 @@ struct RegisterWorkerRequest {
 	Optional<RatekeeperInterface> ratekeeperInterf;
 	Optional<BlobManagerInterface> blobManagerInterf;
 	Optional<EncryptKeyProxyInterface> encryptKeyProxyInterf;
+	Optional<ConsistencyScanInterface> consistencyScanInterf;
 	Standalone<VectorRef<StringRef>> issues;
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise<RegisterWorkerReply> reply;
@@ -449,6 +453,7 @@ struct RegisterWorkerRequest {
 	                      Optional<RatekeeperInterface> rkInterf,
 	                      Optional<BlobManagerInterface> bmInterf,
 	                      Optional<EncryptKeyProxyInterface> ekpInterf,
+	                      Optional<ConsistencyScanInterface> csInterf,
 	                      bool degraded,
 	                      Optional<Version> lastSeenKnobVersion,
 	                      Optional<ConfigClassSet> knobConfigClassSet,
@@ -456,9 +461,9 @@ struct RegisterWorkerRequest {
 	                      ConfigBroadcastInterface configBroadcastInterface)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), blobManagerInterf(bmInterf),
-	    encryptKeyProxyInterf(ekpInterf), degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion),
-	    knobConfigClassSet(knobConfigClassSet), requestDbInfo(false), recoveredDiskFiles(recoveredDiskFiles),
-	    configBroadcastInterface(configBroadcastInterface) {}
+	    encryptKeyProxyInterf(ekpInterf), consistencyScanInterf(csInterf), degraded(degraded),
+	    lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet), requestDbInfo(false),
+	    recoveredDiskFiles(recoveredDiskFiles), configBroadcastInterface(configBroadcastInterface) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -472,6 +477,7 @@ struct RegisterWorkerRequest {
 		           ratekeeperInterf,
 		           blobManagerInterf,
 		           encryptKeyProxyInterf,
+		           consistencyScanInterf,
 		           issues,
 		           incompatiblePeers,
 		           reply,
@@ -722,6 +728,19 @@ struct InitializeRatekeeperRequest {
 
 	InitializeRatekeeperRequest() {}
 	explicit InitializeRatekeeperRequest(UID uid) : reqId(uid) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reqId, reply);
+	}
+};
+
+struct InitializeConsistencyScanRequest {
+	constexpr static FileIdentifier file_identifier = 3104275;
+	UID reqId;
+	ReplyPromise<ConsistencyScanInterface> reply;
+
+	InitializeConsistencyScanRequest() {}
+	explicit InitializeConsistencyScanRequest(UID uid) : reqId(uid) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reqId, reply);
@@ -990,6 +1009,7 @@ struct Role {
 	static const Role COORDINATOR;
 	static const Role BACKUP;
 	static const Role ENCRYPT_KEY_PROXY;
+	static const Role CONSISTENCYSCAN;
 
 	std::string roleName;
 	std::string abbreviation;
@@ -1027,6 +1047,8 @@ struct Role {
 			return BACKUP;
 		case ProcessClass::EncryptKeyProxy:
 			return ENCRYPT_KEY_PROXY;
+		case ProcessClass::ConsistencyScan:
+			return CONSISTENCYSCAN;
 		case ProcessClass::Worker:
 			return WORKER;
 		case ProcessClass::NoRole:
@@ -1148,6 +1170,7 @@ ACTOR Future<Void> logRouter(TLogInterface interf,
                              Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
+ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 ACTOR Future<Void> blobManager(BlobManagerInterface bmi, Reference<AsyncVar<ServerDBInfo> const> db, int64_t epoch);
 ACTOR Future<Void> storageCacheServer(StorageServerInterface interf,
                                       uint16_t id,
@@ -1217,7 +1240,9 @@ Future<T> ioTimeoutError(Future<T> what, double time) {
 	}
 	Future<Void> end = lowPriorityDelay(time);
 	choose {
-		when(T t = wait(what)) { return t; }
+		when(T t = wait(what)) {
+			return t;
+		}
 		when(wait(end)) {
 			Error err = io_timeout();
 			if (g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable()) {
@@ -1245,7 +1270,9 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 	if (degradedTime < errTime) {
 		Future<Void> degradedEnd = lowPriorityDelay(degradedTime);
 		choose {
-			when(T t = wait(what)) { return t; }
+			when(T t = wait(what)) {
+				return t;
+			}
 			when(wait(degradedEnd)) {
 				CODE_PROBE(true, "TLog degraded", probe::func::deduplicate);
 				TraceEvent(SevWarnAlways, "IoDegraded").log();
@@ -1256,7 +1283,9 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 
 	Future<Void> end = lowPriorityDelay(errTime - degradedTime);
 	choose {
-		when(T t = wait(what)) { return t; }
+		when(T t = wait(what)) {
+			return t;
+		}
 		when(wait(end)) {
 			Error err = io_timeout();
 			if (g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable()) {
