@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "flow/BlobCipher.h"
+#include "fdbclient/BlobCipher.h"
 
 #include "flow/Arena.h"
 #include "flow/EncryptUtils.h"

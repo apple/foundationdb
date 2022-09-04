@@ -18,8 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ClientBooleanParams.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleFiles.h"
+#include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
@@ -44,7 +45,6 @@
 #include "fdbserver/WaitFailure.h"
 
 #include "flow/Arena.h"
-#include "flow/BlobCipher.h"
 #include "flow/CompressionUtils.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"

@@ -20,6 +20,7 @@
 
 #include "fdbclient/BlobGranuleFiles.h"
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/ClientKnobs.h"
 #include "fdbclient/CommitTransaction.h"
@@ -27,7 +28,6 @@
 #include "fdbclient/SystemData.h" // for allKeys unit test - could remove
 
 #include "flow/Arena.h"
-#include "flow/BlobCipher.h"
 #include "flow/CompressionUtils.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IRandom.h"

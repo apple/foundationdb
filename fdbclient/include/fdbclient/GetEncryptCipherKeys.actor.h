@@ -24,9 +24,9 @@
 #elif !defined(FDBCLIENT_GETCIPHERKEYS_ACTOR_H)
 #define FDBCLIENT_GETCIPHERKEYS_ACTOR_H
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbrpc/Stats.h"
-#include "flow/BlobCipher.h"
 #include "flow/Knobs.h"
 #include "flow/IRandom.h"
 

@@ -19,6 +19,7 @@
  */
 #ifndef FLOW_BLOB_CIPHER_H
 #define FLOW_BLOB_CIPHER_H
+#include "flow/Platform.h"
 #pragma once
 
 #include "flow/Arena.h"
@@ -458,6 +459,11 @@ public:
 	size_t getSize() const { return size; }
 
 	static Reference<BlobCipherKeyCache> getInstance() {
+		static bool cleanupRegistered = false;
+		if (!cleanupRegistered) {
+			registerCrashHandlerCallback(BlobCipherKeyCache::cleanup);
+			cleanupRegistered = true;
+		}
 		if (g_network->isSimulated()) {
 			return FlowSingleton<BlobCipherKeyCache>::getInstance(
 			    []() { return makeReference<BlobCipherKeyCache>(g_network->isSimulated()); });
