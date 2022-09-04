@@ -20,6 +20,7 @@
 
 #include "fdbclient/BlobCipher.h"
 
+#include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Knobs.h"
@@ -27,6 +28,7 @@
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/ITrace.h"
+#include "flow/Platform.h"
 #include "flow/flow.h"
 #include "flow/network.h"
 #include "flow/Trace.h"
@@ -53,6 +55,42 @@ bool isEncryptHeaderAuthTokenModeValid(const EncryptAuthTokenMode mode) {
 	return mode >= ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE && mode < ENCRYPT_HEADER_AUTH_TOKEN_LAST;
 }
 } // namespace
+
+// BlobCipherMetrics methods
+
+BlobCipherMetrics::CounterSet::CounterSet(CounterCollection& cc, std::string name)
+  : encryptCPUTimeNS(name + "EncryptCPUTimeNS", cc), decryptCPUTimeNS(name + "DecryptCPUTimeNS", cc),
+    getCipherKeysLatency(name + "GetCipherKeysLatency",
+                         UID(),
+                         FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
+                         FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SAMPLE_SIZE),
+    getLatestCipherKeysLatency(name + "GetLatestCipherKeysLatency",
+                               UID(),
+                               FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
+                               FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SAMPLE_SIZE) {}
+
+BlobCipherMetrics::BlobCipherMetrics()
+  : cc("BlobCipher"), cipherKeyCacheHit("CipherKeyCacheHit", cc), cipherKeyCacheMiss("CipherKeyCacheMiss", cc),
+    cipherKeyCacheExpired("CipherKeyCacheExpired", cc), latestCipherKeyCacheHit("LatestCipherKeyCacheHit", cc),
+    latestCipherKeyCacheMiss("LatestCipherKeyCacheMiss", cc),
+    latestCipherKeyCacheNeedsRefresh("LatestCipherKeyCacheNeedsRefresh", cc),
+    getCipherKeysLatency("GetCipherKeysLatency",
+                         UID(),
+                         FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
+                         FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SAMPLE_SIZE),
+    getLatestCipherKeysLatency("GetLatestCipherKeysLatency",
+                               UID(),
+                               FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
+                               FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SAMPLE_SIZE),
+    counterSets({ CounterSet(cc, "Unknown"),
+                  CounterSet(cc, "TLog"),
+                  CounterSet(cc, "KVMemory"),
+                  CounterSet(cc, "KVRedwood"),
+                  CounterSet(cc, "BlobGranule"),
+                  CounterSet(cc, "Backup") }) {
+	specialCounter(cc, "CacheSize", []() { return BlobCipherKeyCache::getInstance()->getSize(); });
+	traceFuture = traceCounters("BlobCipherMetrics", UID(), FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL, &cc);
+}
 
 // BlobCipherKey class methods
 
@@ -391,15 +429,20 @@ Reference<BlobCipherKey> BlobCipherKeyCache::getLatestCipherKey(const EncryptCip
 	Reference<BlobCipherKey> cipherKey = keyIdCache->getLatestCipherKey();
 
 	// Ensure 'freshness' guarantees for the latestCipher
-	if (cipherKey.isValid() && cipherKey->needsRefresh()) {
+	if (cipherKey.isValid()) {
+		if (cipherKey->needsRefresh()) {
 #if BLOB_CIPHER_DEBUG
-		TraceEvent("SevDebug, BlobCipher.GetLatestNeedsRefresh")
-		    .detail("DomainId", domainId)
-		    .detail("Now", now())
-		    .detail("RefreshAt", cipherKey->getRefreshAtTS());
+			TraceEvent("SevDebug, BlobCipher.GetLatestNeedsRefresh")
+			    .detail("DomainId", domainId)
+			    .detail("Now", now())
+			    .detail("RefreshAt", cipherKey->getRefreshAtTS());
 #endif
-
-		return Reference<BlobCipherKey>();
+			++BlobCipherMetrics::getInstance()->latestCipherKeyCacheNeedsRefresh;
+			return Reference<BlobCipherKey>();
+		}
+		++BlobCipherMetrics::getInstance()->latestCipherKeyCacheHit;
+	} else {
+		++BlobCipherMetrics::getInstance()->latestCipherKeyCacheMiss;
 	}
 
 	return cipherKey;
@@ -417,16 +460,23 @@ Reference<BlobCipherKey> BlobCipherKeyCache::getCipherKey(const EncryptCipherDom
 	Reference<BlobCipherKey> cipherKey = keyIdCache->getCipherByBaseCipherId(baseCipherId, salt);
 
 	// Ensure 'liveness' guarantees for the cipher
-	if (cipherKey.isValid() && cipherKey->isExpired()) {
+	if (cipherKey.isValid()) {
+		if (cipherKey->isExpired()) {
 #if BLOB_CIPHER_DEBUG
-		TraceEvent(SevDebug, "BlobCipher.GetCipherExpired")
-		    .detail("DomainId", domainId)
-		    .detail("BaseCipherId", baseCipherId)
-		    .detail("Now", now())
-		    .detail("ExpireAt", cipherKey->getExpireAtTS());
+			TraceEvent(SevDebug, "BlobCipher.GetCipherExpired")
+			    .detail("DomainId", domainId)
+			    .detail("BaseCipherId", baseCipherId)
+			    .detail("Now", now())
+			    .detail("ExpireAt", cipherKey->getExpireAtTS());
 #endif
-
-		return Reference<BlobCipherKey>();
+			++BlobCipherMetrics::getInstance()->cipherKeyCacheExpired;
+			return Reference<BlobCipherKey>();
+		}
+		++BlobCipherMetrics::getInstance()->cipherKeyCacheHit;
+	} else {
+		++BlobCipherMetrics::getInstance()->cipherKeyCacheMiss;
+	}
+	if (cipherKey.isValid() && cipherKey->isExpired()) {
 	}
 
 	return cipherKey;
@@ -476,8 +526,10 @@ EncryptBlobCipherAes265Ctr::EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> 
                                                        Reference<BlobCipherKey> hCipherKey,
                                                        const uint8_t* cipherIV,
                                                        const int ivLen,
-                                                       const EncryptAuthTokenMode mode)
-  : ctx(EVP_CIPHER_CTX_new()), textCipherKey(tCipherKey), headerCipherKey(hCipherKey), authTokenMode(mode) {
+                                                       const EncryptAuthTokenMode mode,
+                                                       BlobCipherMetrics::UsageType usageType)
+  : ctx(EVP_CIPHER_CTX_new()), textCipherKey(tCipherKey), headerCipherKey(hCipherKey), authTokenMode(mode),
+    usageType(usageType) {
 	ASSERT(isEncryptHeaderAuthTokenModeValid(mode));
 	ASSERT_EQ(ivLen, AES_256_IV_LENGTH);
 	memcpy(&iv[0], cipherIV, ivLen);
@@ -486,8 +538,10 @@ EncryptBlobCipherAes265Ctr::EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> 
 
 EncryptBlobCipherAes265Ctr::EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
                                                        Reference<BlobCipherKey> hCipherKey,
-                                                       const EncryptAuthTokenMode mode)
-  : ctx(EVP_CIPHER_CTX_new()), textCipherKey(tCipherKey), headerCipherKey(hCipherKey), authTokenMode(mode) {
+                                                       const EncryptAuthTokenMode mode,
+                                                       BlobCipherMetrics::UsageType usageType)
+  : ctx(EVP_CIPHER_CTX_new()), textCipherKey(tCipherKey), headerCipherKey(hCipherKey), authTokenMode(mode),
+    usageType(usageType) {
 	ASSERT(isEncryptHeaderAuthTokenModeValid(mode));
 	deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
 	init();
@@ -509,6 +563,10 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
                                                           const int plaintextLen,
                                                           BlobCipherEncryptHeader* header,
                                                           Arena& arena) {
+	double startTime = 0.0;
+	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
+		startTime = timer_monotonic();
+	}
 	CODE_PROBE(true, "Encrypting data with BlobCipher");
 
 	memset(reinterpret_cast<uint8_t*>(header), 0, sizeof(BlobCipherEncryptHeader));
@@ -598,11 +656,18 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 	}
 
 	encryptBuf->setLogicalSize(plaintextLen);
+	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
+		BlobCipherMetrics::counters(usageType).encryptCPUTimeNS += int64_t((timer_monotonic() - startTime) * 1e9);
+	}
 	return encryptBuf;
 }
 
 Standalone<StringRef> EncryptBlobCipherAes265Ctr::encryptBlobGranuleChunk(const uint8_t* plaintext,
                                                                           const int plaintextLen) {
+	double startTime = 0.0;
+	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
+		startTime = timer_monotonic();
+	}
 	Standalone<StringRef> encrypted = makeString(plaintextLen);
 	uint8_t* ciphertext = mutateString(encrypted);
 	int bytes{ 0 };
@@ -626,6 +691,9 @@ Standalone<StringRef> EncryptBlobCipherAes265Ctr::encryptBlobGranuleChunk(const 
 		    .detail("EncryptedBufLen", bytes + finalBytes);
 		throw encrypt_ops_error();
 	}
+	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
+		BlobCipherMetrics::counters(usageType).encryptCPUTimeNS += int64_t((timer_monotonic() - startTime) * 1e9);
+	}
 	return encrypted;
 }
 
@@ -639,9 +707,10 @@ EncryptBlobCipherAes265Ctr::~EncryptBlobCipherAes265Ctr() {
 
 DecryptBlobCipherAes256Ctr::DecryptBlobCipherAes256Ctr(Reference<BlobCipherKey> tCipherKey,
                                                        Reference<BlobCipherKey> hCipherKey,
-                                                       const uint8_t* iv)
+                                                       const uint8_t* iv,
+                                                       BlobCipherMetrics::UsageType usageType)
   : ctx(EVP_CIPHER_CTX_new()), textCipherKey(tCipherKey), headerCipherKey(hCipherKey),
-    headerAuthTokenValidationDone(false), authTokensValidationDone(false) {
+    headerAuthTokenValidationDone(false), authTokensValidationDone(false), usageType(usageType) {
 	if (ctx == nullptr) {
 		throw encrypt_ops_error();
 	}
@@ -775,6 +844,11 @@ Reference<EncryptBuf> DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphert
                                                           Arena& arena) {
 	CODE_PROBE(true, "Decrypting data with BlobCipher");
 
+	double startTime = 0.0;
+	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
+		startTime = timer_monotonic();
+	}
+
 	verifyEncryptHeaderMetadata(header);
 
 	if (header.flags.authTokenMode != ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE && !headerCipherKey.isValid()) {
@@ -818,6 +892,9 @@ Reference<EncryptBuf> DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphert
 	}
 
 	decrypted->setLogicalSize(ciphertextLen);
+	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
+		BlobCipherMetrics::counters(usageType).decryptCPUTimeNS += int64_t((timer_monotonic() - startTime) * 1e9);
+	}
 	return decrypted;
 }
 

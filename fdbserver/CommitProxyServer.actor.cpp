@@ -656,7 +656,6 @@ struct CommitBatchContext {
 
 	// Cipher keys to be used to encrypt mutations
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
-	double encryptionCPUTime = 0.0;
 
 	CommitBatchContext(ProxyCommitData*, const std::vector<CommitTransactionRequest>*, const int);
 
@@ -922,7 +921,6 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME },
 			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
 		};
-		state double getCipherKeysStartTime = now();
 		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> encryptDomains = defaultDomains;
 		for (int t = 0; t < trs.size(); t++) {
 			TenantInfo const& tenantInfo = trs[t].tenantInfo;
@@ -934,9 +932,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 				encryptDomains[tenantId] = tenantName.get();
 			}
 		}
-		getCipherKeys = getLatestEncryptCipherKeys(pProxyCommitData->db, encryptDomains);
-		self->pProxyCommitData->stats.commitBatchGetEncryptCipherKeyLatency.addMeasurement(now() -
-		                                                                                   getCipherKeysStartTime);
+		getCipherKeys = getLatestEncryptCipherKeys(pProxyCommitData->db, encryptDomains, BlobCipherMetrics::TLOG);
 	}
 
 	self->releaseFuture = releaseResolvingAfter(pProxyCommitData, self->releaseDelay, self->localBatchNumber);
@@ -1008,7 +1004,6 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				                       self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations,
 				                       /* pToCommit= */ nullptr,
 				                       /* pCipherKeys= */ nullptr,
-				                       /* encryptionCPUTime= */ nullptr,
 				                       self->forceRecovery,
 				                       /* version= */ self->commitVersion,
 				                       /* popVersion= */ 0,
@@ -1109,7 +1104,6 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 				                       trs[t].transaction.mutations,
 				                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
 				                       pProxyCommitData->isEncryptionEnabled ? &self->cipherKeys : nullptr,
-				                       &self->encryptionCPUTime,
 				                       self->forceRecovery,
 				                       self->commitVersion,
 				                       self->commitVersion + 1,
@@ -1174,7 +1168,7 @@ void writeMutation(CommitBatchContext* self, int64_t tenantId, const MutationRef
 	} else {
 		Arena arena;
 		self->toCommit.writeTypedMessage(
-		    mutation.encrypt(self->cipherKeys, tenantId /*domainId*/, arena, &self->encryptionCPUTime));
+		    mutation.encrypt(self->cipherKeys, tenantId /*domainId*/, arena, BlobCipherMetrics::TLOG));
 	}
 }
 
@@ -1772,9 +1766,6 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	ASSERT_ABORT(pProxyCommitData->commitBatchesMemBytesCount >= 0);
 	wait(self->releaseFuture);
 	pProxyCommitData->stats.replyCommitDist->sampleSeconds(now() - replyStart);
-	if (pProxyCommitData->isEncryptionEnabled) {
-		pProxyCommitData->stats.commitBatchEncryptionCPUTime.addMeasurement(self->encryptionCPUTime);
-	}
 	return Void();
 }
 
@@ -2388,7 +2379,6 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		                       mutations,
 		                       /* pToCommit= */ nullptr,
 		                       /* pCipherKeys= */ nullptr,
-		                       /* encryptionCPUTime= */ nullptr,
 		                       confChanges,
 		                       /* version= */ 0,
 		                       /* popVersion= */ 0,

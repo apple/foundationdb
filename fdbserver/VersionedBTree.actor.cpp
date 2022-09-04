@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbserver/WorkerInterface.actor.h"
 #include "fmt/format.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
@@ -1117,12 +1116,7 @@ public:
 	void operator=(const FIFOQueue& rhs) = delete;
 
 	// Create a new queue at newPageID
-	void create(IPager2* p,
-	            PhysicalPageID newPageID,
-	            std::string queueName,
-	            QueueID id,
-	            Reference<IEncryptionKeyProvider> kp,
-	            bool extent) {
+	void create(IPager2* p, PhysicalPageID newPageID, std::string queueName, QueueID id, bool extent) {
 		debug_printf("FIFOQueue(%s) create from page %s. usesExtents %d\n",
 		             queueName.c_str(),
 		             toString(newPageID).c_str(),
@@ -1141,16 +1135,11 @@ public:
 		tailWriter.init(this, Cursor::WRITE, newPageID, true, true);
 		headWriter.init(this, Cursor::WRITE);
 		newTailPage = invalidPhysicalPageID;
-		keyProvider = kp;
 		debug_printf("FIFOQueue(%s) created\n", queueName.c_str());
 	}
 
 	// Load an existing queue from its queue state
-	void recover(IPager2* p,
-	             const QueueState& qs,
-	             std::string queueName,
-	             Reference<IEncryptionKeyProvider> kp,
-	             bool loadExtents = true) {
+	void recover(IPager2* p, const QueueState& qs, std::string queueName, bool loadExtents = true) {
 		debug_printf("FIFOQueue(%s) recover from queue state %s\n", queueName.c_str(), qs.toString().c_str());
 		pager = p;
 		pagerError = pager->getError();
@@ -1173,7 +1162,6 @@ public:
 		                qs.prevExtentEndPageID);
 		headWriter.init(this, Cursor::WRITE);
 		newTailPage = invalidPhysicalPageID;
-		keyProvider = kp;
 		debug_printf("FIFOQueue(%s) recovered\n", queueName.c_str());
 	}
 
@@ -1227,7 +1215,7 @@ public:
 				try {
 					page->postReadHeader(c.pageID);
 					// These pages are not encrypted
-					page->postReadPayload(c.pageID, &self->keyProvider->stats.decryptionCPUTime);
+					page->postReadPayload(c.pageID);
 				} catch (Error& e) {
 					TraceEvent(SevError, "RedwoodChecksumFailed")
 					    .error(e)
@@ -1545,8 +1533,6 @@ public:
 
 	Future<PhysicalPageID> newTailPage;
 
-	Reference<IEncryptionKeyProvider> keyProvider;
-
 	// For debugging
 	std::string name;
 
@@ -1668,8 +1654,6 @@ struct RedwoodMetrics {
 		unsigned int pagerEvictFail;
 		unsigned int btreeLeafPreload;
 		unsigned int btreeLeafPreloadExt;
-		double encryptionCPUTime;
-		double decryptionCPUTime;
 	};
 
 	RedwoodMetrics() {
@@ -2377,14 +2361,11 @@ public:
 
 			self->setExtentSize(self->header.extentSize);
 
-			self->freeList.recover(self, self->header.freeList, "FreeListRecovered", self->keyProvider);
-			self->extentFreeList.recover(
-			    self, self->header.extentFreeList, "ExtentFreeListRecovered", self->keyProvider);
-			self->delayedFreeList.recover(
-			    self, self->header.delayedFreeList, "DelayedFreeListRecovered", self->keyProvider);
-			self->extentUsedList.recover(
-			    self, self->header.extentUsedList, "ExtentUsedListRecovered", self->keyProvider);
-			self->remapQueue.recover(self, self->header.remapQueue, "RemapQueueRecovered", self->keyProvider);
+			self->freeList.recover(self, self->header.freeList, "FreeListRecovered");
+			self->extentFreeList.recover(self, self->header.extentFreeList, "ExtentFreeListRecovered");
+			self->delayedFreeList.recover(self, self->header.delayedFreeList, "DelayedFreeListRecovered");
+			self->extentUsedList.recover(self, self->header.extentUsedList, "ExtentUsedListRecovered");
+			self->remapQueue.recover(self, self->header.remapQueue, "RemapQueueRecovered");
 
 			debug_printf("DWALPager(%s) Queue recovery complete.\n", self->filename.c_str());
 
@@ -2490,16 +2471,12 @@ public:
 
 			// Create queues
 			self->header.queueCount = 0;
-			self->freeList.create(
-			    self, self->newLastPageID(), "FreeList", self->newLastQueueID(), self->keyProvider, false);
-			self->delayedFreeList.create(
-			    self, self->newLastPageID(), "DelayedFreeList", self->newLastQueueID(), self->keyProvider, false);
-			self->extentFreeList.create(
-			    self, self->newLastPageID(), "ExtentFreeList", self->newLastQueueID(), self->keyProvider, false);
-			self->extentUsedList.create(
-			    self, self->newLastPageID(), "ExtentUsedList", self->newLastQueueID(), self->keyProvider, false);
+			self->freeList.create(self, self->newLastPageID(), "FreeList", self->newLastQueueID(), false);
+			self->delayedFreeList.create(self, self->newLastPageID(), "DelayedFreeList", self->newLastQueueID(), false);
+			self->extentFreeList.create(self, self->newLastPageID(), "ExtentFreeList", self->newLastQueueID(), false);
+			self->extentUsedList.create(self, self->newLastPageID(), "ExtentUsedList", self->newLastQueueID(), false);
 			LogicalPageID extID = self->newLastExtentID();
-			self->remapQueue.create(self, extID, "RemapQueue", self->newLastQueueID(), self->keyProvider, true);
+			self->remapQueue.create(self, extID, "RemapQueue", self->newLastQueueID(), true);
 			self->extentUsedList.pushBack({ self->remapQueue.queueID, extID });
 
 			// The first commit() below will flush the queues and update the queue states in the header,
@@ -2757,7 +2734,7 @@ public:
 			page = page->clone();
 		}
 
-		page->preWrite(pageIDs.front(), &keyProvider->stats.encryptionCPUTime);
+		page->preWrite(pageIDs.front());
 
 		int blockSize = header ? smallestPhysicalBlock : physicalPageSize;
 		Future<Void> f;
@@ -3000,7 +2977,7 @@ public:
 				EncryptionKey k = wait(self->keyProvider->getSecrets(page->encryptionKey));
 				page->encryptionKey = k;
 			}
-			page->postReadPayload(pageID, &self->keyProvider->stats.decryptionCPUTime);
+			page->postReadPayload(pageID);
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p\n",
 			             self->filename.c_str(),
 			             toString(pageID).c_str(),
@@ -3068,7 +3045,7 @@ public:
 				EncryptionKey k = wait(self->keyProvider->getSecrets(page->encryptionKey));
 				page->encryptionKey = k;
 			}
-			page->postReadPayload(pageIDs.front(), &self->keyProvider->stats.decryptionCPUTime);
+			page->postReadPayload(pageIDs.front());
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p bytes=%d\n",
 			             self->filename.c_str(),
 			             toString(pageIDs).c_str(),
@@ -5239,12 +5216,8 @@ public:
 			self->m_pager->updatePage(PagerEventReasons::MetaData, nonBtreeLevel, self->m_header.root, page);
 
 			LogicalPageID newQueuePage = wait(self->m_pager->newPageID());
-			self->m_lazyClearQueue.create(self->m_pager,
-			                              newQueuePage,
-			                              "LazyClearQueue",
-			                              self->m_pager->newLastQueueID(),
-			                              self->m_keyProvider,
-			                              false);
+			self->m_lazyClearQueue.create(
+			    self->m_pager, newQueuePage, "LazyClearQueue", self->m_pager->newLastQueueID(), false);
 			self->m_header.lazyDeleteQueue = self->m_lazyClearQueue.getState();
 
 			debug_printf("BTree created (but not committed)\n");
@@ -5260,8 +5233,7 @@ public:
 				throw e;
 			}
 
-			self->m_lazyClearQueue.recover(
-			    self->m_pager, self->m_header.lazyDeleteQueue, "LazyClearQueueRecovered", self->m_keyProvider);
+			self->m_lazyClearQueue.recover(self->m_pager, self->m_header.lazyDeleteQueue, "LazyClearQueueRecovered");
 			debug_printf("BTree recovered.\n");
 
 			if (ArenaPage::isEncodingTypeEncrypted(self->m_header.encodingType) &&
@@ -10319,11 +10291,8 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	printf("cacheSizeBytes: %" PRId64 "\n", cacheSizeBytes);
 	printf("remapCleanupWindowBytes: %" PRId64 "\n", remapCleanupWindowBytes);
 
-	state Reference<IEncryptionKeyProvider> keyProvider = makeReference<NullKeyProvider>();
-
 	// Do random pushes into the queue and commit periodically
 	if (reload) {
-
 		pager = new DWALPager(pageSize,
 		                      extentSize,
 		                      fileName,
@@ -10331,12 +10300,12 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 		                      remapCleanupWindowBytes,
 		                      concurrentExtentReads,
 		                      false,
-		                      keyProvider);
+		                      Reference<IEncryptionKeyProvider>());
 
 		wait(success(pager->init()));
 
 		LogicalPageID extID = pager->newLastExtentID();
-		m_extentQueue.create(pager, extID, "ExtentQueue", pager->newLastQueueID(), keyProvider, true);
+		m_extentQueue.create(pager, extID, "ExtentQueue", pager->newLastQueueID(), true);
 		pager->pushExtentUsedList(m_extentQueue.queueID, extID);
 
 		state int v;
@@ -10389,7 +10358,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	                      remapCleanupWindowBytes,
 	                      concurrentExtentReads,
 	                      false,
-	                      keyProvider);
+	                      Reference<IEncryptionKeyProvider>());
 	wait(success(pager->init()));
 
 	printf("Starting ExtentQueue FastPath Recovery from Disk.\n");
@@ -10397,7 +10366,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	// reopen the pager from disk
 	extentQueueState = ObjectReader::fromStringRef<ExtentQueueT::QueueState>(pager->getCommitRecord(), Unversioned());
 	printf("Recovered ExtentQueue getState(): %s\n", extentQueueState.toString().c_str());
-	m_extentQueue.recover(pager, extentQueueState, "ExtentQueueRecovered", keyProvider);
+	m_extentQueue.recover(pager, extentQueueState, "ExtentQueueRecovered");
 
 	state double intervalStart = timer();
 	state double start = intervalStart;

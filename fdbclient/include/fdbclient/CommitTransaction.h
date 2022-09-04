@@ -20,7 +20,6 @@
 
 #ifndef FLOW_FDBCLIENT_COMMITTRANSACTION_H
 #define FLOW_FDBCLIENT_COMMITTRANSACTION_H
-#include "flow/Platform.h"
 #pragma once
 
 #include "fdbclient/BlobCipher.h"
@@ -143,12 +142,8 @@ struct MutationRef {
 	MutationRef encrypt(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
 	                    const EncryptCipherDomainId& domainId,
 	                    Arena& arena,
-	                    double* elapsed = nullptr) const {
+	                    BlobCipherMetrics::UsageType usageType = BlobCipherMetrics::UNKNOWN) const {
 		ASSERT_NE(domainId, ENCRYPT_INVALID_DOMAIN_ID);
-		double startTime = 0.0;
-		if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING && elapsed != nullptr) {
-			startTime = timer_monotonic();
-		}
 		auto textCipherItr = cipherKeys.find(domainId);
 		auto headerCipherItr = cipherKeys.find(ENCRYPT_HEADER_DOMAIN_ID);
 		ASSERT(textCipherItr != cipherKeys.end() && textCipherItr->second.isValid());
@@ -161,37 +156,31 @@ struct MutationRef {
 		                                  headerCipherItr->second,
 		                                  iv,
 		                                  AES_256_IV_LENGTH,
-		                                  ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+		                                  ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+		                                  usageType);
 		BlobCipherEncryptHeader* header = new (arena) BlobCipherEncryptHeader;
 		StringRef headerRef(reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader));
 		StringRef payload =
 		    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), header, arena)->toStringRef();
-		if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING && elapsed != nullptr) {
-			*elapsed += timer_monotonic() - startTime;
-		}
 		return MutationRef(Encrypted, headerRef, payload);
 	}
 
 	MutationRef encryptMetadata(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
 	                            Arena& arena,
-	                            double* elapsed = nullptr) const {
-		return encrypt(cipherKeys, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, arena, elapsed);
+	                            BlobCipherMetrics::UsageType usageType = BlobCipherMetrics::UNKNOWN) const {
+		return encrypt(cipherKeys, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, arena, usageType);
 	}
 
 	MutationRef decrypt(const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys,
 	                    Arena& arena,
-	                    StringRef* buf = nullptr,
-	                    double* elapsed = nullptr) const {
-		double startTime = 0.0;
-		if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING && elapsed != nullptr) {
-			startTime = timer_monotonic();
-		}
+	                    BlobCipherMetrics::UsageType usageType = BlobCipherMetrics::UNKNOWN,
+	                    StringRef* buf = nullptr) const {
 		const BlobCipherEncryptHeader* header = encryptionHeader();
 		auto textCipherItr = cipherKeys.find(header->cipherTextDetails);
 		auto headerCipherItr = cipherKeys.find(header->cipherHeaderDetails);
 		ASSERT(textCipherItr != cipherKeys.end() && textCipherItr->second.isValid());
 		ASSERT(headerCipherItr != cipherKeys.end() && headerCipherItr->second.isValid());
-		DecryptBlobCipherAes256Ctr cipher(textCipherItr->second, headerCipherItr->second, header->iv);
+		DecryptBlobCipherAes256Ctr cipher(textCipherItr->second, headerCipherItr->second, header->iv, usageType);
 		StringRef plaintext = cipher.decrypt(param2.begin(), param2.size(), *header, arena)->toStringRef();
 		if (buf != nullptr) {
 			*buf = plaintext;
@@ -199,9 +188,6 @@ struct MutationRef {
 		ArenaReader reader(arena, plaintext, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 		MutationRef mutation;
 		reader >> mutation;
-		if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING && elapsed != nullptr) {
-			*elapsed += timer_monotonic() - startTime;
-		}
 		return mutation;
 	}
 

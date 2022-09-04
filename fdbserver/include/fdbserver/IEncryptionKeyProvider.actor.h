@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BlobCipher.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_IENCRYPTIONKEYPROVIDER_ACTOR_G_H)
 #define FDBSERVER_IENCRYPTIONKEYPROVIDER_ACTOR_G_H
 #include "fdbserver/IEncryptionKeyProvider.actor.g.h"
@@ -80,15 +81,6 @@ public:
 	virtual void setTenantPrefixIndex(Reference<TenantPrefixIndex> tenantPrefixIndex) {}
 
 	virtual bool shouldEnableEncryption() const = 0;
-
-	struct Stats {
-		int64_t getEncryptCipherKeysReqs = 0;
-		int64_t getLatestEncryptCipherKeysReqs = 0;
-		double getEncryptCipherKeysTime = 0.0;
-		double getLatestEncryptCipherKeysTime = 0.0;
-		double encryptionCPUTime = 0.0;
-		double decryptionCPUTime = 0.0;
-	} stats;
 };
 
 // The null key provider is useful to simplify page decoding.
@@ -216,26 +208,22 @@ public:
 			TraceEvent("TenantAwareEncryptionKeyProvider_CipherHeaderMissing");
 			throw encrypt_ops_error();
 		}
-		state double startTime = now();
-		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(self->db, key.cipherHeader.get()));
+		TextAndHeaderCipherKeys cipherKeys =
+		    wait(getEncryptCipherKeys(self->db, key.cipherHeader.get(), BlobCipherMetrics::KV_REDWOOD));
 		EncryptionKey s = key;
 		s.cipherKeys = cipherKeys;
-		++self->stats.getEncryptCipherKeysReqs;
-		self->stats.getEncryptCipherKeysTime += now() - startTime;
 		return s;
 	}
 
 	Future<EncryptionKey> getSecrets(const EncryptionKeyRef& key) override { return getSecrets(this, key); }
 
 	ACTOR static Future<EncryptionKey> getByRange(TenantAwareEncryptionKeyProvider* self, KeyRef begin, KeyRef end) {
-		state double startTime = now();
 		EncryptCipherDomainNameRef domainName;
 		EncryptCipherDomainId domainId = self->getEncryptionDomainId(begin, end, &domainName);
-		TextAndHeaderCipherKeys cipherKeys = wait(getLatestEncryptCipherKeysForDomain(self->db, domainId, domainName));
+		TextAndHeaderCipherKeys cipherKeys =
+		    wait(getLatestEncryptCipherKeysForDomain(self->db, domainId, domainName, BlobCipherMetrics::KV_REDWOOD));
 		EncryptionKey s;
 		s.cipherKeys = cipherKeys;
-		++self->stats.getLatestEncryptCipherKeysReqs;
-		self->stats.getLatestEncryptCipherKeysTime += now() - startTime;
 		return s;
 	}
 

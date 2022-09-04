@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleFiles.h"
-#include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
@@ -354,27 +354,24 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
                                                                   Arena* arena) {
 	state BlobGranuleCipherKeysCtx cipherKeysCtx;
 	state Reference<GranuleTenantData> tenantData = bwData->tenantData.getDataForGranule(keyRange);
-	state double startTime = now();
 
 	ASSERT(tenantData.isValid());
 
 	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains;
 	domains.emplace(tenantData->entry.id, StringRef(*arena, tenantData->name));
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> domainKeyMap =
-	    wait(getLatestEncryptCipherKeys(bwData->dbInfo, domains));
+	    wait(getLatestEncryptCipherKeys(bwData->dbInfo, domains, BlobCipherMetrics::BLOB_GRANULE));
 
 	auto domainKeyItr = domainKeyMap.find(tenantData->entry.id);
 	ASSERT(domainKeyItr != domainKeyMap.end());
 	cipherKeysCtx.textCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(domainKeyItr->second, *arena);
 
-	TextAndHeaderCipherKeys systemCipherKeys = wait(getLatestSystemEncryptCipherKeys(bwData->dbInfo));
+	TextAndHeaderCipherKeys systemCipherKeys =
+	    wait(getLatestSystemEncryptCipherKeys(bwData->dbInfo, BlobCipherMetrics::BLOB_GRANULE));
 	cipherKeysCtx.headerCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(systemCipherKeys.cipherHeaderKey, *arena);
 
 	cipherKeysCtx.ivRef = makeString(AES_256_IV_LENGTH, *arena);
 	deterministicRandom()->randomBytes(mutateString(cipherKeysCtx.ivRef), AES_256_IV_LENGTH);
-
-	++bwData->stats.getLatestEncryptCipherKeysReqs;
-	bwData->stats.getLatestEncryptCipherKeysMS += int((now() - startTime) * 1000);
 
 	if (BG_ENCRYPT_COMPRESS_DEBUG) {
 		TraceEvent(SevDebug, "GetLatestGranuleCipherKey")
@@ -393,13 +390,10 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 ACTOR Future<BlobGranuleCipherKey> lookupCipherKey(Reference<BlobWorkerData> bwData,
                                                    BlobCipherDetails cipherDetails,
                                                    Arena* arena) {
-	state double startTime = now();
 	std::unordered_set<BlobCipherDetails> cipherDetailsSet;
 	cipherDetailsSet.emplace(cipherDetails);
-	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeyMap =
-	    wait(getEncryptCipherKeys(bwData->dbInfo, cipherDetailsSet));
-	++bwData->stats.getEncryptCipherKeysReqs;
-	bwData->stats.getEncryptCipherKeysMS += int((now() - startTime) * 1000);
+	state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeyMap =
+	    wait(getEncryptCipherKeys(bwData->dbInfo, cipherDetailsSet, BlobCipherMetrics::BLOB_GRANULE));
 
 	ASSERT(cipherKeyMap.size() == 1);
 

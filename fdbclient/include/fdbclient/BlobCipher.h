@@ -22,6 +22,7 @@
 #include "flow/Platform.h"
 #pragma once
 
+#include "fdbrpc/Stats.h"
 #include "flow/Arena.h"
 #include "flow/EncryptUtils.h"
 #include "flow/FastRef.h"
@@ -50,6 +51,55 @@
 
 #define AES_256_KEY_LENGTH 32
 #define AES_256_IV_LENGTH 16
+
+class BlobCipherMetrics {
+public:
+	static BlobCipherMetrics* getInstance() {
+		static BlobCipherMetrics* instance = nullptr;
+		if (instance == nullptr) {
+			instance = new BlobCipherMetrics;
+		}
+		return instance;
+	}
+
+	enum UsageType : int {
+		UNKNOWN = 0,
+		TLOG,
+		KV_MEMORY,
+		KV_REDWOOD,
+		BLOB_GRANULE,
+		BACKUP,
+		MAX,
+	};
+
+	struct CounterSet {
+		Counter encryptCPUTimeNS;
+		Counter decryptCPUTimeNS;
+		LatencySample getCipherKeysLatency;
+		LatencySample getLatestCipherKeysLatency;
+
+		CounterSet(CounterCollection& cc, std::string name);
+	};
+
+	static CounterSet& counters(UsageType t) { return getInstance()->counterSets[int(t)]; }
+
+private:
+	BlobCipherMetrics();
+
+	CounterCollection cc;
+	Future<Void> traceFuture;
+
+public:
+	Counter cipherKeyCacheHit;
+	Counter cipherKeyCacheMiss;
+	Counter cipherKeyCacheExpired;
+	Counter latestCipherKeyCacheHit;
+	Counter latestCipherKeyCacheMiss;
+	Counter latestCipherKeyCacheNeedsRefresh;
+	LatencySample getCipherKeysLatency;
+	LatencySample getLatestCipherKeysLatency;
+	std::array<CounterSet, int(UsageType::MAX)> counterSets;
+};
 
 // Encryption operations buffer management
 // Approach limits number of copies needed during encryption or decryption operations.
@@ -497,10 +547,12 @@ public:
 	                           Reference<BlobCipherKey> hCipherKey,
 	                           const uint8_t* iv,
 	                           const int ivLen,
-	                           const EncryptAuthTokenMode mode);
+	                           const EncryptAuthTokenMode mode,
+	                           BlobCipherMetrics::UsageType usageType = BlobCipherMetrics::UNKNOWN);
 	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
 	                           Reference<BlobCipherKey> hCipherKey,
-	                           const EncryptAuthTokenMode mode);
+	                           const EncryptAuthTokenMode mode,
+	                           BlobCipherMetrics::UsageType usageType = BlobCipherMetrics::UNKNOWN);
 	~EncryptBlobCipherAes265Ctr();
 
 	Reference<EncryptBuf> encrypt(const uint8_t* plaintext,
@@ -515,6 +567,7 @@ private:
 	Reference<BlobCipherKey> headerCipherKey;
 	EncryptAuthTokenMode authTokenMode;
 	uint8_t iv[AES_256_IV_LENGTH];
+	BlobCipherMetrics::UsageType usageType;
 
 	void init();
 };
@@ -526,7 +579,8 @@ class DecryptBlobCipherAes256Ctr final : NonCopyable, public ReferenceCounted<De
 public:
 	DecryptBlobCipherAes256Ctr(Reference<BlobCipherKey> tCipherKey,
 	                           Reference<BlobCipherKey> hCipherKey,
-	                           const uint8_t* iv);
+	                           const uint8_t* iv,
+	                           BlobCipherMetrics::UsageType usageType = BlobCipherMetrics::UNKNOWN);
 	~DecryptBlobCipherAes256Ctr();
 
 	Reference<EncryptBuf> decrypt(const uint8_t* ciphertext,
@@ -545,6 +599,7 @@ private:
 	Reference<BlobCipherKey> headerCipherKey;
 	bool headerAuthTokenValidationDone;
 	bool authTokensValidationDone;
+	BlobCipherMetrics::UsageType usageType;
 
 	void verifyEncryptHeaderMetadata(const BlobCipherEncryptHeader& header);
 	void verifyAuthTokens(const uint8_t* ciphertext,

@@ -19,7 +19,7 @@
  */
 #pragma once
 
-#include "flow/Platform.h"
+#include "fdbclient/BlobCipher.h"
 #ifndef FDBSERVER_IPAGER_H
 #define FDBSERVER_IPAGER_H
 #include <cstddef>
@@ -342,8 +342,10 @@ public:
 		BlobCipherEncryptHeader header;
 
 		void encode(const TextAndHeaderCipherKeys& cipherKeys, uint8_t* payload, int len) {
-			EncryptBlobCipherAes265Ctr cipher(
-			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+			EncryptBlobCipherAes265Ctr cipher(cipherKeys.cipherTextKey,
+			                                  cipherKeys.cipherHeaderKey,
+			                                  ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+			                                  BlobCipherMetrics::KV_REDWOOD);
 			Arena arena;
 			StringRef ciphertext = cipher.encrypt(payload, len, &header, arena)->toStringRef();
 			ASSERT_EQ(len, ciphertext.size());
@@ -351,7 +353,8 @@ public:
 		}
 
 		void decode(const TextAndHeaderCipherKeys& cipherKeys, uint8_t* payload, int len) {
-			DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.iv);
+			DecryptBlobCipherAes256Ctr cipher(
+			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.iv, BlobCipherMetrics::KV_REDWOOD);
 			Arena arena;
 			StringRef plaintext = cipher.decrypt(payload, len, header, arena)->toStringRef();
 			ASSERT_EQ(len, plaintext.size());
@@ -466,7 +469,7 @@ public:
 	//        Secret is set if needed
 	// Post:  Main and Encoding subheaders are updated
 	//        Payload is possibly encrypted
-	void preWrite(PhysicalPageID pageID, double* elapsed) const {
+	void preWrite(PhysicalPageID pageID) const {
 		// Explicitly check payload definedness to make the source of valgrind errors more clear.
 		// Without this check, calculating a checksum on a payload with undefined bytes does not
 		// cause a valgrind error but the resulting checksum is undefined which causes errors later.
@@ -481,9 +484,7 @@ public:
 			xh->encode(encryptionKey.secret[0], pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::AESEncryptionV1) {
 			AESEncryptionV1Encoder* eh = page->getEncodingHeader<AESEncryptionV1Encoder>();
-			double startTime = timer_monotonic();
 			eh->encode(encryptionKey.cipherKeys, pPayload, payloadSize);
-			*elapsed += timer_monotonic() - startTime;
 		} else {
 			throw page_encoding_not_supported();
 		}
@@ -529,7 +530,7 @@ public:
 
 	// Pre:   postReadHeader has been called, encoding-specific parameters (such as the encryption secret) have been set
 	// Post:  Payload has been verified and decrypted if necessary
-	void postReadPayload(PhysicalPageID pageID, double* elapsed) {
+	void postReadPayload(PhysicalPageID pageID) {
 		if (page->encodingType == EncodingType::XXHash64) {
 			page->getEncodingHeader<XXHashEncoder>()->decode(pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::XOREncryption_TestOnly) {
@@ -537,9 +538,7 @@ public:
 			page->getEncodingHeader<XOREncryptionEncoder>()->decode(
 			    encryptionKey.secret[0], pPayload, payloadSize, pageID);
 		} else if (page->encodingType == EncodingType::AESEncryptionV1) {
-			double startTime = timer_monotonic();
 			page->getEncodingHeader<AESEncryptionV1Encoder>()->decode(encryptionKey.cipherKeys, pPayload, payloadSize);
-			*elapsed += timer_monotonic() - startTime;
 		} else {
 			throw page_encoding_not_supported();
 		}

@@ -76,9 +76,6 @@ struct ProxyStats {
 
 	LatencySample computeLatency;
 
-	LatencySample commitBatchGetEncryptCipherKeyLatency;
-	LatencySample commitBatchEncryptionCPUTime;
-
 	Future<Void> logger;
 
 	int64_t maxComputeNS;
@@ -137,14 +134,6 @@ struct ProxyStats {
 	                   id,
 	                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                   SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-	    commitBatchGetEncryptCipherKeyLatency("CommitBatchGetEncryptCipherKeyLatency",
-	                                          id,
-	                                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                                          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-	    commitBatchEncryptionCPUTime("CommitBatchEncryptionCPUTime",
-	                                 id,
-	                                 SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                                 SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    maxComputeNS(0), minComputeNS(1e12),
 	    commitBatchQueuingDist(Histogram::getHistogram(LiteralStringRef("CommitProxy"),
 	                                                   LiteralStringRef("CommitBatchQueuing"),
