@@ -2404,7 +2404,7 @@ int main(int argc, char* argv[]) {
 				flushAndExit(FDB_EXIT_SUCCESS);
 #elif defined(__FreeBSD__)
 			const int sig = SIGTERM;
-			procctl(P_PID, 0, PROC_PDEATHSIG_CTL, (void *)&sig);
+			procctl(P_PID, 0, PROC_PDEATHSIG_CTL, (void*)&sig);
 			if (getppid() == 1) /* parent already died before procctl */
 				flushAndExit(FDB_EXIT_SUCCESS);
 #endif
