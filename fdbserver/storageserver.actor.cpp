@@ -24,6 +24,7 @@
 #include <unordered_map>
 
 #include "fmt/format.h"
+#include "fdbclient/Audit.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"

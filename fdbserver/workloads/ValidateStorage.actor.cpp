@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Audit.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/simulator.h"
@@ -77,7 +78,7 @@ struct ValidateStorage : TestWorkload {
 
 		Version _ = wait(self->populateData(self, cx, &kvs));
 
-        std::cout << "TestValueWritten" << std::endl;
+		std::cout << "TestValueWritten" << std::endl;
 
 		TraceEvent("TestValueWritten");
 
@@ -115,14 +116,14 @@ struct ValidateStorage : TestWorkload {
 	}
 
 	ACTOR Future<Void> validateData(ValidateStorage* self, Database cx, KeyRange range) {
-        std::cout << "0" << std::endl;
+		std::cout << "0" << std::endl;
 		state Transaction tr(cx);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 		loop {
 			try {
-                std::cout << "1" << std::endl;
+				std::cout << "1" << std::endl;
 				state RangeResult shards =
 				    wait(krmGetRanges(&tr, keyServersPrefix, range, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!shards.empty() && !shards.more);
@@ -133,7 +134,7 @@ struct ValidateStorage : TestWorkload {
 				state int i = 0;
 				for (i = 0; i < shards.size() - 1; ++i) {
 
-                    std::cout << "2" << std::endl;
+					std::cout << "2" << std::endl;
 					std::vector<UID> src;
 					std::vector<UID> dest;
 					UID srcId, destId;
@@ -144,10 +145,11 @@ struct ValidateStorage : TestWorkload {
 					ASSERT(serverListValue.present());
 					const StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
 					AuditStorageRequest req(deterministicRandom()->randomUniqueID(),
-					                           KeyRangeRef(shards[i].key, shards[i + 1].key));
-					ValidateStorageResult vResult = wait(ssi.auditStorage.getReply(req));
+					                        KeyRangeRef(shards[i].key, shards[i + 1].key),
+					                        AuditType::ValidateHA);
+					AuditStorageState vResult = wait(ssi.auditStorage.getReply(req));
 
-                    std::cout << "3" << std::endl;
+					std::cout << "3" << std::endl;
 				}
 				break;
 			} catch (Error& e) {

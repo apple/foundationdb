@@ -91,6 +91,59 @@ class DDTxnProcessorImpl {
 		return IDDTxnProcessor::SourceServers{ std::vector<UID>(servers.begin(), servers.end()), completeSources };
 	}
 
+	ACTOR static Future<IDDTxnProcessor::SourceServers> getSourceServerInterfacesForRange(Database cx,
+	                                                                                      KeyRangeRef range) {
+		state std::vector<IDDTxnProcessor::StorageServersForRange> res;
+		state Transaction tr(self->cx);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+		loop {
+			res.clear();
+			try {
+				state RangeResult shards = wait(krmGetRanges(&tr,
+				                                             keyServersPrefix,
+				                                             range,
+				                                             SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+				                                             SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
+				ASSERT(!shards.empty());
+
+				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+
+				state int i = 0;
+				for (i = 0; i < shards.size() - 1; ++i) {
+					std::vector<UID> src;
+					std::vector<UID> dest;
+					UID srcId, destId;
+					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
+
+					state StorageServersForRange current(KeyRangeRef(shards[i].key, shards[i + 1].key));
+					state int j = 0;
+					for (j = 0; j < src.size(); ++j) {
+						Optional<Value> serverListValue = wait(tr.get(serverListKeyFor(ssId)));
+						KeyRangeRef currentRange(shards[i].key, shards[i + 1].key);
+						if (!serverListValue.present()) {
+							TraceEvent(SevWarnAlways, "ScheduleAuditForRangeMissingServer", auditId)
+							    .detail("StorageServer", ssId)
+							    .detail("Range", currentRange);
+							continue;
+						}
+						const StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
+						current.servers.push_back(ssi);
+					}
+					res.push_back(current);
+				}
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevWarnAlways, "TestValidateStorageError").errorUnsuppressed(e).detail("Range", range);
+				wait(tr.onError(e));
+			}
+		}
+
+		return res;
+	}
+
 	// set the system key space
 	ACTOR static Future<Void> updateReplicaKeys(Database cx,
 	                                            std::vector<Optional<Key>> primaryDcId,
@@ -399,6 +452,11 @@ class DDTxnProcessorImpl {
 
 Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(const KeyRangeRef range) {
 	return DDTxnProcessorImpl::getSourceServersForRange(cx, range);
+}
+
+Future<IDDTxnProcessor::StorageServersForRange> DDTxnProcessor::getSourceServerInterfacesForRange(
+    const KeyRangeRef range) {
+	return DDTxnProcessorImpl::getSourceServerInterfacesForRange(cx, range);
 }
 
 Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> DDTxnProcessor::getServerListAndProcessClasses() {

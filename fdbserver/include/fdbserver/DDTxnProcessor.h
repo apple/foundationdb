@@ -36,8 +36,18 @@ public:
 	struct SourceServers {
 		std::vector<UID> srcServers, completeSources; // the same as RelocateData.src, RelocateData.completeSources;
 	};
+
+	struct StorageServersForRange {
+		StorageServersForRange(KeyRangeRef range) : range(range) {}
+
+		std::vector<StorageServerInterface> servers;
+		KeyRange range;
+	};
+
 	// get the source server list and complete source server list for range
 	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) = 0;
+
+	virtual Future<StorageServersForRange> getSourceServerInterfacesForRange(const KeyRangeRef range) = 0;
 
 	// get the storage server list and Process class
 	virtual Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() = 0;

@@ -23,6 +23,7 @@
 #pragma once
 
 #include <ostream>
+#include "fdbclient/Audit.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbclient/StorageServerShard.h"

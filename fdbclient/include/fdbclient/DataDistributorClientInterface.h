@@ -31,7 +31,7 @@
 
 struct DataDistributorClientInterface {
 	constexpr static FileIdentifier file_identifier = 15988863;
-	RequestStream<struct > openDatabase;
+	RequestStream<struct> openDatabase;
 	RequestStream<struct FailureMonitoringRequest> failureMonitoring;
 	RequestStream<struct StatusRequest> databaseStatus;
 	RequestStream<ReplyPromise<Void>> ping;

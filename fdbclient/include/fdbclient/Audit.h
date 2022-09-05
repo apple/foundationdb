@@ -23,16 +23,26 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbrpc/fdbrpc.h"
 
-enum class AuditPhase { Invalid = 0; Running = 1; Complete = 2; Error = 3; Failed = 4; };
+enum class AuditPhase : uint8_t {
+	Invalid = 0,
+	Running = 1,
+	Complete = 2,
+	Error = 3,
+	Failed = 4,
+};
 
-enum class AuditType { Invalid = 0; ValidateHA = 1 };
+enum class AuditType : uint8_t {
+	Invalid = 0,
+	ValidateHA = 1,
+};
 
 struct AuditStorageState {
 	constexpr static FileIdentifier file_identifier = 13804340;
 
-	ValidateStorageResult() = default;
-	ValidateStorageResult(UID id, AuditType type) : id(id), type(type), validatedKeys(0) {}
+	AuditStorageState() = default;
+	AuditStorageState(UID id, AuditType type) : id(id), type(static_cast<uint8_t>(type)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -63,7 +73,7 @@ struct AuditStorageRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, range, actions, reply);
+		serializer(ar, id, range, type, reply);
 	}
 
 	UID id;
@@ -79,7 +89,7 @@ struct TriggerAuditRequest {
 	constexpr static FileIdentifier file_identifier = 1384445;
 
 	TriggerAuditRequest() = default;
-	SplitShardRequest(AuditType type, KeyRange range) : type(type), range(range), force(false) {}
+	TriggerAuditRequest(AuditType type, KeyRange range) : type(static_cast<uint8_t>(type)), range(range), force(false) {}
 
 	void setType(AuditType type) { this->type = static_cast<uint8_t>(this->type); }
 	AuditType getType() const { return static_cast<AuditType>(this->type); }
