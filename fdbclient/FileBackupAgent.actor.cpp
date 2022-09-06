@@ -1000,35 +1000,6 @@ private:
 	Key lastValue;
 };
 
-void getCipherKeys(SnapshotFileBackupEncryptionKeys& eKeys, Arena& arena) {
-	// TODO (Nim): Get the actual keys from EKP here (currently a dummy method)
-	uint8_t buf[AES_256_KEY_LENGTH];
-	for (int i = 0; i < AES_256_KEY_LENGTH; i++) {
-		buf[i] = 1;
-	}
-	int64_t domainId = 2;
-	int64_t baseCipherId = 3;
-	int64_t salt = 4;
-
-	uint8_t iv[AES_256_IV_LENGTH];
-	for (int i = 0; i < AES_256_IV_LENGTH; i++) {
-		iv[i] = 2;
-	}
-
-	Reference<BlobCipherKey> cipherKey = makeReference<BlobCipherKey>(domainId,
-	                                                                  baseCipherId,
-	                                                                  buf,
-	                                                                  AES_256_KEY_LENGTH,
-	                                                                  salt,
-	                                                                  std::numeric_limits<int64_t>::max(),
-	                                                                  std::numeric_limits<int64_t>::max());
-
-	eKeys.headerCipherKey = cipherKey;
-	eKeys.textCipherKey = cipherKey;
-	eKeys.ivRef = makeString(AES_256_IV_LENGTH, arena);
-	memcpy(mutateString(eKeys.ivRef), iv, AES_256_IV_LENGTH);
-}
-
 ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
                                         Standalone<VectorRef<KeyValueRef>>* results,
                                         bool encryptedBlock,
@@ -1109,9 +1080,6 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 			CODE_PROBE(true, "decoding encrypted block");
 			ASSERT(cx.present());
-			// Get cipher keys
-			SnapshotFileBackupEncryptionKeys eKeys;
-			getCipherKeys(eKeys, arena);
 			// decode options struct
 			uint32_t optionsLen = reader.consumeNetworkUInt32();
 			const uint8_t* o = reader.consume(optionsLen);
