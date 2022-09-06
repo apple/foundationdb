@@ -683,6 +683,13 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				                                    &normalDDQueueErrors()));
 			}
 
+			if (ddIsTenantAware) {
+				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorTenantMap(),
+				                                    "DDTenantCacheMonitor",
+				                                    self->ddId,
+				                                    &normalDDQueueErrors()));
+			}
+
 			std::vector<DDTeamCollection*> teamCollectionsPtrs;
 			primaryTeamCollection = makeReference<DDTeamCollection>(
 			    cx,
