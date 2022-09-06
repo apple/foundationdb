@@ -171,7 +171,7 @@ ThreadFuture<bool> ThreadSafeDatabase::unblobbifyRange(const KeyRangeRef& keyRan
 	KeyRange range = keyRange;
 	return onMainThread([=]() -> Future<bool> {
 		db->checkDeferredError();
-		return db->blobbifyRange(range);
+		return db->unblobbifyRange(range);
 	});
 }
 
