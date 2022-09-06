@@ -584,12 +584,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 		try {
 			wait(DataDistributor::init(self));
 
-			state Reference<TenantCache> ddTenantCache;
-			if (ddIsTenantAware) {
-				ddTenantCache = makeReference<TenantCache>(cx, self->ddId);
-				wait(ddTenantCache->build(cx));
-			}
-
 			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
 			ASSERT(self->configuration.storageTeamSize > 0);
 
@@ -600,6 +594,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 			state Promise<Void> readyToStart;
+
+			state Optional<Reference<TenantCache>> ddTenantCache;
+			if (ddIsTenantAware) {
+				ddTenantCache = makeReference<TenantCache>(cx, self->ddId);
+				wait(ddTenantCache.get()->build());
+			}
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 			self->physicalShardCollection = makeReference<PhysicalShardCollection>();
@@ -624,10 +624,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			} else {
 				anyZeroHealthyTeams = zeroHealthyTeams[0];
 			}
-			if (ddIsTenantAware) {
-				actors.push_back(reportErrorsExcept(
-				    ddTenantCache->monitorTenantMap(), "DDTenantCacheMonitor", self->ddId, &normalDDQueueErrors()));
-			}
 
 			actors.push_back(self->pollMoveKeysLock());
 			actors.push_back(reportErrorsExcept(dataDistributionTracker(self->initData,
@@ -643,7 +639,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                                            anyZeroHealthyTeams,
 			                                                            self->ddId,
 			                                                            &shards,
-			                                                            &trackerCancelled),
+			                                                            &trackerCancelled,
+			                                                            ddTenantCache),
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
@@ -672,6 +669,13 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    "StorageQuotaTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
+
+			if (ddIsTenantAware) {
+				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorTenantMap(),
+				                                    "DDTenantCacheMonitor",
+				                                    self->ddId,
+				                                    &normalDDQueueErrors()));
+			}
 
 			std::vector<DDTeamCollection*> teamCollectionsPtrs;
 			primaryTeamCollection = makeReference<DDTeamCollection>(
