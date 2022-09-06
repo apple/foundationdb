@@ -17,9 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef FLOW_BLOB_CIPHER_H
-#define FLOW_BLOB_CIPHER_H
-#include "flow/Platform.h"
+#ifndef FDBCLIENT_BLOB_CIPHER_H
+#define FDBCLIENT_BLOB_CIPHER_H
 #pragma once
 
 #include "fdbrpc/Stats.h"
@@ -30,6 +29,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/Knobs.h"
 #include "flow/network.h"
+#include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/serialize.h"
 
@@ -52,7 +52,7 @@
 #define AES_256_KEY_LENGTH 32
 #define AES_256_IV_LENGTH 16
 
-class BlobCipherMetrics {
+class BlobCipherMetrics : public NonCopyable {
 public:
 	static BlobCipherMetrics* getInstance() {
 		static BlobCipherMetrics* instance = nullptr;
@@ -636,4 +636,4 @@ StringRef computeAuthToken(const uint8_t* payload,
                            const int keyLen,
                            Arena& arena);
 
-#endif // FLOW_BLOB_CIPHER_H
+#endif // FDBCLIENT_BLOB_CIPHER_H
