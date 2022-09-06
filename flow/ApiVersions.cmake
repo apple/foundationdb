@@ -1,6 +1,5 @@
 # API Versions
 set(FDB_AV_LATEST_VERSION                   "720")
-set(FDB_AV_FUTURE_VERSION                   "730")
 
 # Features
 set(FDB_AV_SNAPSHOT_RYW                     "300")
