@@ -141,6 +141,7 @@ public:
 	virtual ~ITransactionExecutor() {}
 	virtual void init(IScheduler* sched, const char* clusterFile, const std::string& bgBasePath) = 0;
 	virtual void execute(std::shared_ptr<ITransactionActor> tx, TTaskFct cont) = 0;
+	virtual fdb::Database selectDatabase() = 0;
 };
 
 // Create a transaction executor for the given options

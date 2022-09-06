@@ -123,6 +123,9 @@ protected:
 		execTransaction(std::make_shared<TransactionFct>(start), cont, failOnError);
 	}
 
+	// Select one of the database instances
+	fdb::Database selectDatabase();
+
 	// Log an error message, increase error counter
 	void error(const std::string& msg);
 

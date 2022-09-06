@@ -545,9 +545,8 @@ public:
 		this->bgBasePath = bgBasePath;
 	}
 
-protected:
-	// Execute the transaction on the given database instance
-	void executeOnDatabase(fdb::Database db, std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) {
+	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) override {
+		fdb::Database db = selectDatabase();
 		try {
 			fdb::Transaction tx = db.createTransaction();
 			std::shared_ptr<ITransactionContext> ctx;
@@ -590,14 +589,14 @@ public:
 		}
 	}
 
-	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) override {
+	fdb::Database selectDatabase() override {
 		int idx = Random::get().randomInt(0, options.numDatabases - 1);
-		executeOnDatabase(databases[idx], txActor, cont);
+		return databases[idx];
 	}
 
+private:
 	void release() { databases.clear(); }
 
-private:
 	std::vector<fdb::Database> databases;
 };
 
@@ -608,10 +607,7 @@ class DBPerTransactionExecutor : public TransactionExecutorBase {
 public:
 	DBPerTransactionExecutor(const TransactionExecutorOptions& options) : TransactionExecutorBase(options) {}
 
-	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) override {
-		fdb::Database db(clusterFile.c_str());
-		executeOnDatabase(db, txActor, cont);
-	}
+	fdb::Database selectDatabase() override { return fdb::Database(clusterFile.c_str()); }
 };
 
 std::unique_ptr<ITransactionExecutor> createTransactionExecutor(const TransactionExecutorOptions& options) {
