@@ -156,6 +156,11 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 	// never being called if KeySelector is already normalized
 	ASSERT(ks->offset != 1);
 
+	// Throw error if module doesn't support tenants and we have a tenant
+	if (ryw->getTenant().present() && !skrImpl->supportsTenants()) {
+		throw illegal_tenant_access();
+	}
+
 	state Key startKey(skrImpl->getKeyRange().begin);
 	state Key endKey(skrImpl->getKeyRange().end);
 	state RangeResult result;

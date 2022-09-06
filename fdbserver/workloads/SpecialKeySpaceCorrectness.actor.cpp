@@ -300,8 +300,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	ACTOR Future<Void> testSpecialKeySpaceErrors(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
 		Database cx = cx_->clone();
 		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
-		state Reference<ReadYourWritesTransaction> tenantTx =
-		    makeReference<ReadYourWritesTransaction>(cx, TenantName("foobar"_sr));
+		state Reference<ReadYourWritesTransaction> tenantTx = makeReference<ReadYourWritesTransaction>(cx);
+		state Reference<ReadYourWritesTransaction> tenantTx2 = makeReference<ReadYourWritesTransaction>(cx);
 		// tenant transaction accessing modules that do not support tenants
 		// tenant getRange
 		try {
@@ -337,14 +337,67 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			ASSERT(e.code() == error_code_illegal_tenant_access);
 			tenantTx->reset();
 		}
-		// tenant pass
+		// tenant check that conflict ranges stay the same after commit
+		// and depending on if RYW is disabled
 		try {
-			tenantTx->addReadConflictRange(singleKeyRange(LiteralStringRef("testKey")));
-			wait(success(tenantTx->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
+			state RangeResult readresult1;
+			state RangeResult readresult2;
+			try {
+				tenantTx->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+				tenantTx->addReadConflictRange(singleKeyRange(LiteralStringRef("testKeylll")));
+				tenantTx->addWriteConflictRange(singleKeyRange(LiteralStringRef("testKeylll")));
+				wait(store(readresult1, tenantTx->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
+				wait(tenantTx->commit());
+				CODE_PROBE(true, "conflict range tenant commit succeeded");
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled)
+					throw;
+				CODE_PROBE(true, "conflict range tenant commit error thrown");
+			}
+			wait(store(readresult2, tenantTx->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(readresult1 == readresult2);
+			tenantTx->reset();
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled)
-				throw;
-			ASSERT(false);
+			throw;
+		}
+		// proper conflict ranges
+		loop {
+			try {
+				tenantTx->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+				tenantTx2->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+				wait(success(tenantTx->getReadVersion()));
+				wait(success(tenantTx2->getReadVersion()));
+				tenantTx->addReadConflictRange(singleKeyRange(LiteralStringRef("foo")));
+				tenantTx->addWriteConflictRange(singleKeyRange(LiteralStringRef("foo")));
+				tenantTx2->addWriteConflictRange(singleKeyRange(LiteralStringRef("foo")));
+				wait(tenantTx2->commit());
+				try {
+					wait(tenantTx->commit());
+					ASSERT(false);
+				} catch (Error& e) {
+					if (e.code() != error_code_not_committed) {
+						wait(tenantTx->onError(e));
+						continue;
+					}
+					// Read conflict ranges of tenantTx and check for "foo" with no tenant prefix
+					state RangeResult readConflictRange =
+					    wait(tenantTx->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY));
+					state RangeResult writeConflictRange =
+					    wait(tenantTx->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY));
+
+					std::string readExpected = "foo"_sr.withPrefix(readConflictRangeKeysRange.begin).toString();
+					std::string writeExpected = "foo"_sr.withPrefix(writeConflictRangeKeysRange.begin).toString();
+					ASSERT(readConflictRange.begin()->key.toString().find(readExpected) != std::string::npos);
+					ASSERT(writeConflictRange.begin()->key.toString().find(writeExpected) != std::string::npos);
+					tenantTx->reset();
+					tenantTx2->reset();
+					break;
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled)
+					throw;
+				wait(tenantTx2->onError(e));
+			}
 		}
 		// begin key outside module range
 		try {

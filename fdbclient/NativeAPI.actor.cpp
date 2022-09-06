@@ -6114,30 +6114,43 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Referen
 // TODO: send the prefix as part of the commit request and ship it all the way
 // through to the storage servers
 void applyTenantPrefix(CommitTransactionRequest& req, Key tenantPrefix) {
+	VectorRef<MutationRef> updatedMutations;
 	for (auto& m : req.transaction.mutations) {
+		StringRef param1 = m.param1;
+		StringRef param2 = m.param2;
 		if (m.param1 != metadataVersionKey) {
-			m.param1 = m.param1.withPrefix(tenantPrefix, req.arena);
+			param1 = m.param1.withPrefix(tenantPrefix, req.arena);
 			if (m.type == MutationRef::ClearRange) {
-				m.param2 = m.param2.withPrefix(tenantPrefix, req.arena);
+				param2 = m.param2.withPrefix(tenantPrefix, req.arena);
 			} else if (m.type == MutationRef::SetVersionstampedKey) {
-				uint8_t* key = mutateString(m.param1);
-				int* offset = reinterpret_cast<int*>(&key[m.param1.size() - 4]);
+				uint8_t* key = mutateString(param1);
+				int* offset = reinterpret_cast<int*>(&key[param1.size() - 4]);
 				*offset += tenantPrefix.size();
 			}
 		}
+		updatedMutations.push_back(req.arena, MutationRef(MutationRef::Type(m.type), param1, param2));
 	}
+	req.transaction.mutations = updatedMutations;
 
-	for (auto& rc : req.transaction.read_conflict_ranges) {
+	VectorRef<KeyRangeRef> updatedReadConflictRanges;
+	for (auto const& rc : req.transaction.read_conflict_ranges) {
 		if (rc.begin != metadataVersionKey) {
-			rc = rc.withPrefix(tenantPrefix, req.arena);
+			updatedReadConflictRanges.push_back(req.arena, rc.withPrefix(tenantPrefix, req.arena));
+		} else {
+			updatedReadConflictRanges.push_back(req.arena, rc);
 		}
 	}
+	req.transaction.read_conflict_ranges = updatedReadConflictRanges;
 
+	VectorRef<KeyRangeRef> updatedWriteConflictRanges;
 	for (auto& wc : req.transaction.write_conflict_ranges) {
 		if (wc.begin != metadataVersionKey) {
-			wc = wc.withPrefix(tenantPrefix, req.arena);
+			updatedWriteConflictRanges.push_back(req.arena, wc.withPrefix(tenantPrefix, req.arena));
+		} else {
+			updatedWriteConflictRanges.push_back(req.arena, wc);
 		}
 	}
+	req.transaction.write_conflict_ranges = updatedWriteConflictRanges;
 }
 
 ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,

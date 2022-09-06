@@ -879,8 +879,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible),
 				std::make_pair(error_code_tenant_not_found,
 				               ExceptionContract::possibleIf(!workload->canUseTenant(tr->getTenant()))),
-				std::make_pair(error_code_invalid_option,
-				               ExceptionContract::possibleIf(tr->getTenant().present() && isSpecialKeyRange)),
 				std::make_pair(error_code_illegal_tenant_access,
 				               ExceptionContract::possibleIf(tr->getTenant().present() && isSpecialKeyRange))
 			};
