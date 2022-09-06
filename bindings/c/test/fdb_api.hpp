@@ -62,6 +62,22 @@ struct KeyRange {
 	Key beginKey;
 	Key endKey;
 };
+struct GranuleSummary {
+	KeyRange keyRange;
+	int64_t snapshotVersion;
+	int64_t snapshotSize;
+	int64_t deltaVersion;
+	int64_t deltaSize;
+
+	GranuleSummary(const native::FDBGranuleSummary& nativeSummary) {
+		keyRange.beginKey = fdb::Key(nativeSummary.key_range.begin_key, nativeSummary.key_range.begin_key_length);
+		keyRange.endKey = fdb::Key(nativeSummary.key_range.end_key, nativeSummary.key_range.end_key_length);
+		snapshotVersion = nativeSummary.snapshot_version;
+		snapshotSize = nativeSummary.snapshot_size;
+		deltaVersion = nativeSummary.delta_version;
+		deltaSize = nativeSummary.delta_size;
+	}
+};
 
 inline uint8_t const* toBytePtr(char const* ptr) noexcept {
 	return reinterpret_cast<uint8_t const*>(ptr);
@@ -196,6 +212,27 @@ struct KeyRangeRefArray {
 		auto& [out_ranges, out_count] = out;
 		auto err = native::fdb_future_get_keyrange_array(
 		    f, reinterpret_cast<const native::FDBKeyRange**>(&out_ranges), &out_count);
+		return Error(err);
+	}
+};
+
+struct GranuleSummaryRef : native::FDBGranuleSummary {
+	fdb::KeyRef beginKey() const noexcept {
+		return fdb::KeyRef(native::FDBGranuleSummary::key_range.begin_key,
+		                   native::FDBGranuleSummary::key_range.begin_key_length);
+	}
+	fdb::KeyRef endKey() const noexcept {
+		return fdb::KeyRef(native::FDBGranuleSummary::key_range.end_key,
+		                   native::FDBGranuleSummary::key_range.end_key_length);
+	}
+};
+
+struct GranuleSummaryRefArray {
+	using Type = std::tuple<GranuleSummaryRef const*, int>;
+	static Error extract(native::FDBFuture* f, Type& out) noexcept {
+		auto& [out_summaries, out_count] = out;
+		auto err = native::fdb_future_get_granule_summary_array(
+		    f, reinterpret_cast<const native::FDBGranuleSummary**>(&out_summaries), &out_count);
 		return Error(err);
 	}
 };
@@ -571,6 +608,14 @@ public:
 	                        native::FDBReadBlobGranuleContext context) {
 		return Result(native::fdb_transaction_read_blob_granules(
 		    tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), begin_version, read_version, context));
+	}
+
+	TypedFuture<future_var::GranuleSummaryRefArray> summarizeBlobGranules(KeyRef begin,
+	                                                                      KeyRef end,
+	                                                                      int64_t summaryVersion,
+	                                                                      int rangeLimit) {
+		return native::fdb_transaction_summarize_blob_granules(
+		    tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), summaryVersion, rangeLimit);
 	}
 
 	TypedFuture<future_var::None> watch(KeyRef key) {
