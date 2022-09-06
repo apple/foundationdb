@@ -1,7 +1,13 @@
 module Flow {
+  // Swift runtime hooks
   header "swift.h"
   header "swift_hooks.h"
+
+  // Swift/FDB Future compat
+  header "swift_future_compat.h"
+
+  // Flow headers
   header "network.h"
-  header "TLSConfig.actor.h"
+  header "TLSConfig.actor.h" // Though has removed Actor funcs
   header "AsioReactor.h"
 }

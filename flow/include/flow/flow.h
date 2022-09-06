@@ -648,12 +648,18 @@ public:
 
 	template <class U>
 	void send(U&& value) {
+		printf("[c++][%s:%d] send, ...\n", __FILE_NAME__, __LINE__, Callback<T>::next);
 		ASSERT(canBeSet());
 		new (&value_storage) T(std::forward<U>(value));
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
+
+		printf("[c++][%s:%d] send, next: %p\n", __FILE_NAME__, __LINE__, Callback<T>::next);
 		while (Callback<T>::next != this) {
+			printf("[c++][%s:%d] send, fire! next:%p\n", __FILE_NAME__, __LINE__, Callback<T>::next);
 			Callback<T>::next->fire(this->value());
+			return;
 		}
+		printf("[c++][%s:%d] send ..., done\n", __FILE_NAME__, __LINE__);
 	}
 
 	void send(Never) {
@@ -783,7 +789,7 @@ template <class T>
 class Promise;
 
 template <class T>
-class Future {
+class SWIFT_CXX_REF_IMMORTAL SWIFT_SENDABLE Future {
 public:
 	T const& get() const { return sav->get(); }
 	T getValue() const { return get(); }
@@ -847,11 +853,13 @@ public:
 	}
 
 	void addCallbackAndClear(Callback<T>* cb) {
+		printf("[c++][%s:%d] %s %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
 		sav->addCallbackAndDelFutureRef(cb);
 		sav = 0;
 	}
 
 	void addYieldedCallbackAndClear(Callback<T>* cb) {
+		printf("[c++][%s:%d] %s %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
 		sav->addYieldedCallbackAndDelFutureRef(cb);
 		sav = 0;
 	}
@@ -883,7 +891,7 @@ private:
 // Future<T> result = wait(x); // This is legal if wait() generates Futures, but it's probably wrong. It's a compilation
 // error if wait() generates StrictFutures.
 template <class T>
-class StrictFuture : public Future<T> {
+class SWIFT_CXX_REF_IMMORTAL SWIFT_SENDABLE StrictFuture : public Future<T> {
 public:
 	inline StrictFuture(Future<T> const& f) : Future<T>(f) {}
 	inline StrictFuture(Never n) : Future<T>(n) {}
@@ -894,7 +902,7 @@ private:
 };
 
 template <class T>
-class Promise final {
+class SWIFT_CXX_REF_IMMORTAL SWIFT_SENDABLE Promise final {
 public:
 	template <class U>
 	void send(U&& value) const {
@@ -908,6 +916,11 @@ public:
 	Future<T> getFuture() const {
 		sav->addFutureRef();
 		return Future<T>(sav);
+	}
+
+	Future<T>* _Nonnull _swiftGetFuture() const {
+		sav->addFutureRef();
+		return new Future<T>(sav);
 	}
 	bool isSet() const { return sav->isSet(); }
 	bool canBeSet() const { return sav->canBeSet(); }

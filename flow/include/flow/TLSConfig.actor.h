@@ -119,8 +119,7 @@ private:
 	friend class LoadAsyncActorState;
 };
 
-class SWIFT_CXX_REF_IMMORTAL
-TLSConfig {
+class SWIFT_CXX_REF_IMMORTAL TLSConfig {
 public:
 	enum {
 		OPT_TLS = 100000,
