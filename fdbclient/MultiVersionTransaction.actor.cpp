@@ -2579,7 +2579,7 @@ void MultiVersionApi::setupNetwork() {
 		});
 
 		std::string baseTraceFileId;
-		if (apiVersion >= 630) {
+		if (apiVersion.hasTraceFileIdentifier()) {
 			// TRACE_FILE_IDENTIFIER option is supported since 6.3
 			baseTraceFileId = traceFileIdentifier.empty() ? format("%d", getpid()) : traceFileIdentifier;
 		}
