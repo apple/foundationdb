@@ -776,17 +776,22 @@ struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 	IClientApi* api;
 	bool failed;
 	std::atomic_bool initialized;
+	int threadIndex;
 	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 
 	ClientInfo()
-	  : ClientDesc(std::string(), false, false), protocolVersion(0), api(nullptr), failed(true), initialized(false) {}
+	  : ClientDesc(std::string(), false, false), protocolVersion(0), api(nullptr), failed(true), initialized(false),
+	    threadIndex(0) {}
 	ClientInfo(IClientApi* api)
-	  : ClientDesc("internal", false, false), protocolVersion(0), api(api), failed(false), initialized(false) {}
-	ClientInfo(IClientApi* api, std::string libPath, bool useFutureVersion)
-	  : ClientDesc(libPath, true, useFutureVersion), protocolVersion(0), api(api), failed(false), initialized(false) {}
+	  : ClientDesc("internal", false, false), protocolVersion(0), api(api), failed(false), initialized(false),
+	    threadIndex(0) {}
+	ClientInfo(IClientApi* api, std::string libPath, bool useFutureVersion, int threadIndex)
+	  : ClientDesc(libPath, true, useFutureVersion), protocolVersion(0), api(api), failed(false), initialized(false),
+	    threadIndex(threadIndex) {}
 
 	void loadVersion();
 	bool canReplace(Reference<ClientInfo> other) const;
+	std::string getTraceFileIdentifier(const std::string& baseIdentifier);
 };
 
 class MultiVersionApi;
@@ -1106,6 +1111,8 @@ private:
 	int nextThread = 0;
 	int threadCount;
 	std::string tmpDir;
+	bool traceShareBaseNameAmongThreads;
+	std::string traceFileIdentifier;
 
 	Mutex lock;
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;
