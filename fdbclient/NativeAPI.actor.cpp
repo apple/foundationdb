@@ -5544,7 +5544,7 @@ Future<RangeResult> Transaction::getRange(const KeySelector& begin,
 
 // A method for streaming data from the storage server that is more efficient than getRange when reading large amounts
 // of data
-Future<Void> Transaction::getRangeStream(const PromiseStream<RangeResult>& results,
+Future<Void> Transaction::getRangeStream(PromiseStream<RangeResult>& results,
                                          const KeySelector& begin,
                                          const KeySelector& end,
                                          GetRangeLimits limits,
@@ -5583,7 +5583,7 @@ Future<Void> Transaction::getRangeStream(const PromiseStream<RangeResult>& resul
 	    ::getRangeStream(trState, results, getReadVersion(), b, e, limits, conflictRange, snapshot, reverse), results);
 }
 
-Future<Void> Transaction::getRangeStream(const PromiseStream<RangeResult>& results,
+Future<Void> Transaction::getRangeStream(PromiseStream<RangeResult>& results,
                                          const KeySelector& begin,
                                          const KeySelector& end,
                                          int limit,
