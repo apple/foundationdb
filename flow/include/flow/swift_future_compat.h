@@ -114,13 +114,17 @@ public:
 
 	// TODO: virtual is an issue
 	void fire(int const& value) {
-		printf("[c++][%s:%d](%s) \n", __FILE_NAME__, __LINE__, __FUNCTION__);
+		printf("[c++][%s:%d](%s) cb:%p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
+		Callback<int>::remove();
+		Callback<int>::next = 0;
 		resumeWithValue(continuationBox, value);
 	}
 
 	// TODO: virtual is an issue
 	void error(Error error) {
 		printf("[c++][%s:%d](%s) \n", __FILE_NAME__, __LINE__, __FUNCTION__);
+		Callback<int>::remove();
+		Callback<int>::next = 0;
 		resumeWithError(continuationBox, error);
 	}
 	void unwait() {
