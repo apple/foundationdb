@@ -55,6 +55,7 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
 #include <unordered_map>
+#include <utility>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -631,7 +632,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	ACTOR static Future<Void> updateEncryptionKeys(EncryptedRangeFileWriter* self,
 	                                               KeyRef key,
 	                                               Reference<TenantEntryCache<Void>> cache) {
-		state int64_t curTenantId = wait(getTenantId(key, cache));
+		state std::pair<int64_t, TenantName> curTenantInfo = wait(getTenantIdName(key, cache));
 		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 		// Get and Set Header Cipher Key
 		TextAndHeaderCipherKeys systemCipherKeys = wait(getLatestSystemEncryptCipherKeys(dbInfo));
@@ -639,13 +640,12 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 		// Get text cipher key
 		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
-		// TODO (Nim): Get actual tenant name for given tenant id
-		domains.emplace(curTenantId, StringRef(std::to_string(curTenantId)));
+		domains.emplace(curTenantInfo.first, curTenantInfo.second);
 		// Get the latest write encryption key for the given tenant
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> textCipherKeys =
 		    wait(getLatestEncryptCipherKeys(dbInfo, domains));
-		ASSERT(textCipherKeys.find(curTenantId) != textCipherKeys.end());
-		self->cipherKeys.textCipherKey = textCipherKeys.at(curTenantId);
+		ASSERT(textCipherKeys.find(curTenantInfo.first) != textCipherKeys.end());
+		self->cipherKeys.textCipherKey = textCipherKeys.at(curTenantInfo.first);
 
 		// Set ivRef
 		self->cipherKeys.ivRef = makeString(AES_256_IV_LENGTH, *self->arena);
@@ -677,26 +677,29 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	static bool isSystemKey(KeyRef key) { return key.size() && key[0] == systemKeys.begin[0]; }
 
-	ACTOR static Future<int64_t> getTenantIdImpl(KeyRef key, Reference<TenantEntryCache<Void>> tenantCache) {
+	ACTOR static Future<std::pair<int64_t, TenantName>> getTenantIdNameImpl(
+	    KeyRef key,
+	    Reference<TenantEntryCache<Void>> tenantCache) {
 		if (isSystemKey(key)) {
-			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
+			return std::make_pair(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
 		}
 		// TODO (Nim): Replace with custom encryption domain
 		if (key.size() < 8) {
-			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
+			return std::make_pair(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
 		}
 		KeyRef tenantPrefix = KeyRef(key.begin(), 8);
 		state int64_t tenantId = TenantMapEntry::prefixToId(tenantPrefix);
 		Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getById(tenantId));
 		if (payload.present()) {
-			return tenantId;
+			return std::make_pair(tenantId, payload.get().name);
 		}
 		// TODO (Nim): Replace with custom encryption domain
-		return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
+		return std::make_pair(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
 	}
 
-	static Future<int64_t> getTenantId(KeyRef key, Reference<TenantEntryCache<Void>> tenantCache) {
-		return getTenantIdImpl(key, tenantCache);
+	static Future<std::pair<int64_t, TenantName>> getTenantIdName(KeyRef key,
+	                                                              Reference<TenantEntryCache<Void>> tenantCache) {
+		return getTenantIdNameImpl(key, tenantCache);
 	}
 
 	// Handles the first block and internal blocks.  Ends current block if needed.
@@ -786,18 +789,18 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (self->lastKey.size() == 0 || k.size() == 0) {
 			return false;
 		}
-		state int64_t curKeyTenantId = wait(getTenantId(k, self->tenantCache));
-		state int64_t prevKeyTenantId = wait(getTenantId(self->lastKey, self->tenantCache));
+		state std::pair<int64_t, TenantName> curKeyTenantInfo = wait(getTenantIdName(k, self->tenantCache));
+		state std::pair<int64_t, TenantName> prevKeyTenantInfo =
+		    wait(getTenantIdName(self->lastKey, self->tenantCache));
 		// crossing tenant boundaries so finish the current block using only the tenant prefix of the new key
-		if (curKeyTenantId != prevKeyTenantId) {
+		if (curKeyTenantInfo.first != prevKeyTenantInfo.first) {
 			CODE_PROBE(true, "crossed tenant boundaries");
 			state KeyRef endKey = k;
 			// If we are crossing a boundary with a key that has a tenant prefix then truncate it
-			if (curKeyTenantId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
+			if (curKeyTenantInfo.first != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
 				endKey = StringRef(k.begin(), 8);
 			}
 			state ValueRef newValue = StringRef();
-			// int64_t newTenantId = wait(getTenantId(endKey, self->tenantCache));
 			self->lastKey = k;
 			self->lastValue = v;
 			appendStringRefWithLenToBuffer(self, &endKey);
@@ -1021,11 +1024,13 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 		// unless its the last key in which case it can be a truncated (different) tenant prefix
 		if (encryptedBlock && g_network && g_network->isSimulated()) {
 			state KeyRef curKey = KeyRef(k, kLen);
-			state int64_t prevTenantId = wait(EncryptedRangeFileWriter::getTenantId(prevKey, tenantCache));
-			int64_t curTenantId = wait(EncryptedRangeFileWriter::getTenantId(curKey, tenantCache));
-			if (curKey.size() > 0 && prevKey.size() > 0 && prevTenantId != curTenantId) {
+			state std::pair<int64_t, TenantName> prevTenantInfo =
+			    wait(EncryptedRangeFileWriter::getTenantIdName(prevKey, tenantCache));
+			std::pair<int64_t, TenantName> curTenantInfo =
+			    wait(EncryptedRangeFileWriter::getTenantIdName(curKey, tenantCache));
+			if (curKey.size() > 0 && prevKey.size() > 0 && prevTenantInfo.first != curTenantInfo.first) {
 				ASSERT(!done);
-				if (curTenantId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
+				if (curTenantInfo.first != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
 					ASSERT(curKey.size() == 8);
 				}
 				done = true;
@@ -1793,7 +1798,6 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 			if (values.first.size() != 0) {
 				state size_t i = 0;
 				for (; i < values.first.size(); ++i) {
-					// TODO (Nim): Support backing up system keys
 					wait(rangeFile->writeKV(values.first[i].key, values.first[i].value));
 				}
 				lastKey = values.first.back().key;
