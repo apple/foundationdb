@@ -80,8 +80,8 @@ public:
 	                       std::string bgBasePath)
 	  : executor(executor), txActor(txActor), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
 	    txState(TxState::IN_PROGRESS), commitCalled(false), bgBasePath(bgBasePath) {
-		databaseCreateErrorInjected =
-		    executor->getOptions().buggify && Random::get().randomBool(executor->getOptions().databaseCreateErrorRatio);
+		databaseCreateErrorInjected = executor->getOptions().injectDatabaseCreateErrors &&
+		                              Random::get().randomBool(executor->getOptions().databaseCreateErrorRatio);
 		fdb::Database db;
 		if (databaseCreateErrorInjected) {
 			db = fdb::Database("not_existing_file");

@@ -124,8 +124,8 @@ struct TransactionExecutorOptions {
 	// Create each transaction in a separate database instance
 	bool databasePerTransaction = false;
 
-	// Failure injection enabled
-	bool buggify = false;
+	// Enable injection of database create errors
+	bool injectDatabaseCreateErrors = false;
 
 	// The probability of injected database create errors
 	// Used if buggify = true
