@@ -126,8 +126,10 @@ double ThreadSafeDatabase::getMainThreadBusyness() {
 // Note: this will never return if the server is running a protocol from FDB 5.0 or older
 ThreadFuture<ProtocolVersion> ThreadSafeDatabase::getServerProtocol(Optional<ProtocolVersion> expectedVersion) {
 	DatabaseContext* db = this->db;
-	return onMainThread(
-	    [db, expectedVersion]() -> Future<ProtocolVersion> { return db->getClusterProtocol(expectedVersion); });
+	return onMainThread([db, expectedVersion]() -> Future<ProtocolVersion> {
+		db->checkDeferredError();
+		return db->getClusterProtocol(expectedVersion);
+	});
 }
 
 ThreadFuture<Key> ThreadSafeDatabase::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
