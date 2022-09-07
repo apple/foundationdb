@@ -6115,6 +6115,7 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Referen
 // through to the storage servers
 void applyTenantPrefix(CommitTransactionRequest& req, Key tenantPrefix) {
 	VectorRef<MutationRef> updatedMutations;
+	updatedMutations.reserve(req.arena, req.transaction.mutations.size());
 	for (auto& m : req.transaction.mutations) {
 		StringRef param1 = m.param1;
 		StringRef param2 = m.param2;
@@ -6133,6 +6134,7 @@ void applyTenantPrefix(CommitTransactionRequest& req, Key tenantPrefix) {
 	req.transaction.mutations = updatedMutations;
 
 	VectorRef<KeyRangeRef> updatedReadConflictRanges;
+	updatedReadConflictRanges.reserve(req.arena, req.transaction.read_conflict_ranges.size());
 	for (auto const& rc : req.transaction.read_conflict_ranges) {
 		if (rc.begin != metadataVersionKey) {
 			updatedReadConflictRanges.push_back(req.arena, rc.withPrefix(tenantPrefix, req.arena));
@@ -6143,6 +6145,7 @@ void applyTenantPrefix(CommitTransactionRequest& req, Key tenantPrefix) {
 	req.transaction.read_conflict_ranges = updatedReadConflictRanges;
 
 	VectorRef<KeyRangeRef> updatedWriteConflictRanges;
+	updatedWriteConflictRanges.reserve(req.arena, req.transaction.write_conflict_ranges.size());
 	for (auto& wc : req.transaction.write_conflict_ranges) {
 		if (wc.begin != metadataVersionKey) {
 			updatedWriteConflictRanges.push_back(req.arena, wc.withPrefix(tenantPrefix, req.arena));
