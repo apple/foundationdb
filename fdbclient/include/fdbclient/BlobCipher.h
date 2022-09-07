@@ -62,13 +62,14 @@ public:
 		return instance;
 	}
 
+	// Order of this enum has to match initializer of counterSets.
 	enum UsageType : int {
-		UNKNOWN = 0,
-		TLOG,
+		TLOG = 0,
 		KV_MEMORY,
 		KV_REDWOOD,
 		BLOB_GRANULE,
 		BACKUP,
+		TEST,
 		MAX,
 	};
 
@@ -375,8 +376,7 @@ using BlobCipherKeyIdCacheMapCItr =
 
 struct BlobCipherKeyIdCache : ReferenceCounted<BlobCipherKeyIdCache> {
 public:
-	BlobCipherKeyIdCache();
-	explicit BlobCipherKeyIdCache(EncryptCipherDomainId dId);
+	explicit BlobCipherKeyIdCache(EncryptCipherDomainId dId, size_t* sizeStat);
 
 	BlobCipherKeyIdCacheKey getCacheKey(const EncryptCipherBaseKeyId& baseCipherId,
 	                                    const EncryptCipherRandomSalt& salt);
@@ -404,8 +404,7 @@ public:
 	                                             const uint8_t* baseCipher,
 	                                             int baseCipherLen,
 	                                             const int64_t refreshAt,
-	                                             const int64_t expireAt,
-	                                             bool* newCipherKeyCreated);
+	                                             const int64_t expireAt);
 
 	// API enables inserting base encryption cipher details to the BlobCipherKeyIdCache
 	// Given cipherKeys are immutable, attempting to re-insert same 'identical' cipherKey
@@ -422,8 +421,7 @@ public:
 	                                             int baseCipherLen,
 	                                             const EncryptCipherRandomSalt& salt,
 	                                             const int64_t refreshAt,
-	                                             const int64_t expireAt,
-	                                             bool* newCipherKeyCreated);
+	                                             const int64_t expireAt);
 
 	// API cleanup the cache by dropping all cached cipherKeys
 	void cleanup();
@@ -439,6 +437,7 @@ private:
 	BlobCipherKeyIdCacheMap keyIdCache;
 	Optional<EncryptCipherBaseKeyId> latestBaseCipherKeyId;
 	Optional<EncryptCipherRandomSalt> latestRandomSalt;
+	size_t* sizeStat; // pointer to the outer BlobCipherKeyCache size count.
 };
 
 using BlobCipherDomainCacheMap = std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKeyIdCache>>;
@@ -511,6 +510,8 @@ public:
 	static Reference<BlobCipherKeyCache> getInstance() {
 		static bool cleanupRegistered = false;
 		if (!cleanupRegistered) {
+			// We try to avoid cipher keys appear in core dumps, so we clean them up before crash.
+			// TODO(yiwu): use of MADV_DONTDUMP instead of the crash handler.
 			registerCrashHandlerCallback(BlobCipherKeyCache::cleanup);
 			cleanupRegistered = true;
 		}
@@ -548,11 +549,11 @@ public:
 	                           const uint8_t* iv,
 	                           const int ivLen,
 	                           const EncryptAuthTokenMode mode,
-	                           BlobCipherMetrics::UsageType usageType = BlobCipherMetrics::UNKNOWN);
+	                           BlobCipherMetrics::UsageType usageType);
 	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
 	                           Reference<BlobCipherKey> hCipherKey,
 	                           const EncryptAuthTokenMode mode,
-	                           BlobCipherMetrics::UsageType usageType = BlobCipherMetrics::UNKNOWN);
+	                           BlobCipherMetrics::UsageType usageType);
 	~EncryptBlobCipherAes265Ctr();
 
 	Reference<EncryptBuf> encrypt(const uint8_t* plaintext,
@@ -580,7 +581,7 @@ public:
 	DecryptBlobCipherAes256Ctr(Reference<BlobCipherKey> tCipherKey,
 	                           Reference<BlobCipherKey> hCipherKey,
 	                           const uint8_t* iv,
-	                           BlobCipherMetrics::UsageType usageType = BlobCipherMetrics::UNKNOWN);
+	                           BlobCipherMetrics::UsageType usageType);
 	~DecryptBlobCipherAes256Ctr();
 
 	Reference<EncryptBuf> decrypt(const uint8_t* ciphertext,

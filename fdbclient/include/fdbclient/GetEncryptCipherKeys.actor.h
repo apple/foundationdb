@@ -91,7 +91,7 @@ ACTOR template <class T>
 Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getLatestEncryptCipherKeys(
     Reference<AsyncVar<T> const> db,
     std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains,
-    BlobCipherMetrics::UsageType usageType = BlobCipherMetrics::UNKNOWN) {
+    BlobCipherMetrics::UsageType usageType) {
 	state Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
 	state EKPGetLatestBaseCipherKeysRequest request;
@@ -186,7 +186,7 @@ ACTOR template <class T>
 Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncryptCipherKeys(
     Reference<AsyncVar<T> const> db,
     std::unordered_set<BlobCipherDetails> cipherDetails,
-    BlobCipherMetrics::UsageType usageType = BlobCipherMetrics::UNKNOWN) {
+    BlobCipherMetrics::UsageType usageType) {
 	state Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 	state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys;
 	state std::unordered_set<BaseCipherIndex, boost::hash<BaseCipherIndex>> uncachedBaseCipherIds;
@@ -263,11 +263,10 @@ struct TextAndHeaderCipherKeys {
 };
 
 ACTOR template <class T>
-Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(
-    Reference<AsyncVar<T> const> db,
-    EncryptCipherDomainId domainId,
-    EncryptCipherDomainNameRef domainName,
-    BlobCipherMetrics::UsageType usageType = BlobCipherMetrics::UNKNOWN) {
+Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(Reference<AsyncVar<T> const> db,
+                                                                    EncryptCipherDomainId domainId,
+                                                                    EncryptCipherDomainNameRef domainName,
+                                                                    BlobCipherMetrics::UsageType usageType) {
 	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains;
 	domains[domainId] = domainName;
 	domains[ENCRYPT_HEADER_DOMAIN_ID] = FDB_DEFAULT_ENCRYPT_DOMAIN_NAME;
@@ -282,18 +281,16 @@ Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(
 }
 
 template <class T>
-Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(
-    const Reference<AsyncVar<T> const>& db,
-    BlobCipherMetrics::UsageType usageType = BlobCipherMetrics::UNKNOWN) {
+Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(const Reference<AsyncVar<T> const>& db,
+                                                                 BlobCipherMetrics::UsageType usageType) {
 	return getLatestEncryptCipherKeysForDomain(
 	    db, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME, usageType);
 }
 
 ACTOR template <class T>
-Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(
-    Reference<AsyncVar<T> const> db,
-    BlobCipherEncryptHeader header,
-    BlobCipherMetrics::UsageType usageType = BlobCipherMetrics::UNKNOWN) {
+Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
+                                                     BlobCipherEncryptHeader header,
+                                                     BlobCipherMetrics::UsageType usageType) {
 	std::unordered_set<BlobCipherDetails> cipherDetails{ header.cipherTextDetails, header.cipherHeaderDetails };
 	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys =
 	    wait(getEncryptCipherKeys(db, cipherDetails, usageType));

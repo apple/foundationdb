@@ -142,7 +142,7 @@ struct MutationRef {
 	MutationRef encrypt(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
 	                    const EncryptCipherDomainId& domainId,
 	                    Arena& arena,
-	                    BlobCipherMetrics::UsageType usageType = BlobCipherMetrics::UNKNOWN) const {
+	                    BlobCipherMetrics::UsageType usageType) const {
 		ASSERT_NE(domainId, ENCRYPT_INVALID_DOMAIN_ID);
 		auto textCipherItr = cipherKeys.find(domainId);
 		auto headerCipherItr = cipherKeys.find(ENCRYPT_HEADER_DOMAIN_ID);
@@ -167,13 +167,13 @@ struct MutationRef {
 
 	MutationRef encryptMetadata(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
 	                            Arena& arena,
-	                            BlobCipherMetrics::UsageType usageType = BlobCipherMetrics::UNKNOWN) const {
+	                            BlobCipherMetrics::UsageType usageType) const {
 		return encrypt(cipherKeys, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, arena, usageType);
 	}
 
 	MutationRef decrypt(const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys,
 	                    Arena& arena,
-	                    BlobCipherMetrics::UsageType usageType = BlobCipherMetrics::UNKNOWN,
+	                    BlobCipherMetrics::UsageType usageType,
 	                    StringRef* buf = nullptr) const {
 		const BlobCipherEncryptHeader* header = encryptionHeader();
 		auto textCipherItr = cipherKeys.find(header->cipherTextDetails);

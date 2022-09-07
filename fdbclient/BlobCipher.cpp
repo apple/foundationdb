@@ -82,12 +82,12 @@ BlobCipherMetrics::BlobCipherMetrics()
                                UID(),
                                FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
                                FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SAMPLE_SIZE),
-    counterSets({ CounterSet(cc, "Unknown"),
-                  CounterSet(cc, "TLog"),
+    counterSets({ CounterSet(cc, "TLog"),
                   CounterSet(cc, "KVMemory"),
                   CounterSet(cc, "KVRedwood"),
                   CounterSet(cc, "BlobGranule"),
-                  CounterSet(cc, "Backup") }) {
+                  CounterSet(cc, "Backup"),
+                  CounterSet(cc, "Test") }) {
 	specialCounter(cc, "CacheSize", []() { return BlobCipherKeyCache::getInstance()->getSize(); });
 	traceFuture = traceCounters("BlobCipherMetrics", UID(), FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL, &cc);
 }
@@ -182,11 +182,9 @@ void BlobCipherKey::reset() {
 
 // BlobKeyIdCache class methods
 
-BlobCipherKeyIdCache::BlobCipherKeyIdCache()
-  : domainId(ENCRYPT_INVALID_DOMAIN_ID), latestBaseCipherKeyId(), latestRandomSalt() {}
-
-BlobCipherKeyIdCache::BlobCipherKeyIdCache(EncryptCipherDomainId dId)
-  : domainId(dId), latestBaseCipherKeyId(), latestRandomSalt() {
+BlobCipherKeyIdCache::BlobCipherKeyIdCache(EncryptCipherDomainId dId, size_t* sizeStat)
+  : domainId(dId), latestBaseCipherKeyId(), latestRandomSalt(), sizeStat(sizeStat) {
+	ASSERT(sizeStat != nullptr);
 	TraceEvent(SevInfo, "BlobCipher.KeyIdCacheInit").detail("DomainId", domainId);
 }
 
@@ -222,11 +220,8 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::insertBaseCipherKey(const Encrypt
                                                                    const uint8_t* baseCipher,
                                                                    int baseCipherLen,
                                                                    const int64_t refreshAt,
-                                                                   const int64_t expireAt,
-                                                                   bool* newCipherKeyCreated) {
+                                                                   const int64_t expireAt) {
 	ASSERT_GT(baseCipherId, ENCRYPT_INVALID_CIPHER_KEY_ID);
-	ASSERT(newCipherKeyCreated != nullptr);
-	*newCipherKeyCreated = false;
 
 	// BaseCipherKeys are immutable, given the routine invocation updates 'latestCipher',
 	// ensure no key-tampering is done
@@ -264,7 +259,7 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::insertBaseCipherKey(const Encrypt
 	latestBaseCipherKeyId = baseCipherId;
 	latestRandomSalt = cipherKey->getSalt();
 
-	*newCipherKeyCreated = true;
+	(*sizeStat)++;
 	return cipherKey;
 }
 
@@ -273,12 +268,9 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::insertBaseCipherKey(const Encrypt
                                                                    int baseCipherLen,
                                                                    const EncryptCipherRandomSalt& salt,
                                                                    const int64_t refreshAt,
-                                                                   const int64_t expireAt,
-                                                                   bool* newCipherKeyCreated) {
+                                                                   const int64_t expireAt) {
 	ASSERT_NE(baseCipherId, ENCRYPT_INVALID_CIPHER_KEY_ID);
 	ASSERT_NE(salt, ENCRYPT_INVALID_RANDOM_SALT);
-	ASSERT(newCipherKeyCreated != nullptr);
-	*newCipherKeyCreated = false;
 
 	BlobCipherKeyIdCacheKey cacheKey = getCacheKey(baseCipherId, salt);
 
@@ -312,7 +304,7 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::insertBaseCipherKey(const Encrypt
 	Reference<BlobCipherKey> cipherKey =
 	    makeReference<BlobCipherKey>(domainId, baseCipherId, baseCipher, baseCipherLen, salt, refreshAt, expireAt);
 	keyIdCache.emplace(cacheKey, cipherKey);
-	*newCipherKeyCreated = true;
+	(*sizeStat)++;
 	return cipherKey;
 }
 
@@ -345,30 +337,24 @@ Reference<BlobCipherKey> BlobCipherKeyCache::insertCipherKey(const EncryptCipher
 	}
 
 	Reference<BlobCipherKey> cipherKey;
-	bool newCipherKeyCreated = false;
 
 	try {
 		auto domainItr = domainCacheMap.find(domainId);
 		if (domainItr == domainCacheMap.end()) {
 			// Add mapping to track new encryption domain
-			Reference<BlobCipherKeyIdCache> keyIdCache = makeReference<BlobCipherKeyIdCache>(domainId);
-			cipherKey = keyIdCache->insertBaseCipherKey(
-			    baseCipherId, baseCipher, baseCipherLen, refreshAt, expireAt, &newCipherKeyCreated);
+			Reference<BlobCipherKeyIdCache> keyIdCache = makeReference<BlobCipherKeyIdCache>(domainId, &size);
+			cipherKey = keyIdCache->insertBaseCipherKey(baseCipherId, baseCipher, baseCipherLen, refreshAt, expireAt);
 			domainCacheMap.emplace(domainId, keyIdCache);
 		} else {
 			// Track new baseCipher keys
 			Reference<BlobCipherKeyIdCache> keyIdCache = domainItr->second;
-			cipherKey = keyIdCache->insertBaseCipherKey(
-			    baseCipherId, baseCipher, baseCipherLen, refreshAt, expireAt, &newCipherKeyCreated);
+			cipherKey = keyIdCache->insertBaseCipherKey(baseCipherId, baseCipher, baseCipherLen, refreshAt, expireAt);
 		}
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "BlobCipher.InsertCipherKeyFailed")
 		    .detail("BaseCipherKeyId", baseCipherId)
 		    .detail("DomainId", domainId);
 		throw;
-	}
-	if (newCipherKeyCreated) {
-		size++;
 	}
 	return cipherKey;
 }
@@ -386,20 +372,19 @@ Reference<BlobCipherKey> BlobCipherKeyCache::insertCipherKey(const EncryptCipher
 	}
 
 	Reference<BlobCipherKey> cipherKey;
-	bool newCipherKeyCreated = false;
 	try {
 		auto domainItr = domainCacheMap.find(domainId);
 		if (domainItr == domainCacheMap.end()) {
 			// Add mapping to track new encryption domain
-			Reference<BlobCipherKeyIdCache> keyIdCache = makeReference<BlobCipherKeyIdCache>(domainId);
-			cipherKey = keyIdCache->insertBaseCipherKey(
-			    baseCipherId, baseCipher, baseCipherLen, salt, refreshAt, expireAt, &newCipherKeyCreated);
+			Reference<BlobCipherKeyIdCache> keyIdCache = makeReference<BlobCipherKeyIdCache>(domainId, &size);
+			cipherKey =
+			    keyIdCache->insertBaseCipherKey(baseCipherId, baseCipher, baseCipherLen, salt, refreshAt, expireAt);
 			domainCacheMap.emplace(domainId, keyIdCache);
 		} else {
 			// Track new baseCipher keys
 			Reference<BlobCipherKeyIdCache> keyIdCache = domainItr->second;
-			cipherKey = keyIdCache->insertBaseCipherKey(
-			    baseCipherId, baseCipher, baseCipherLen, salt, refreshAt, expireAt, &newCipherKeyCreated);
+			cipherKey =
+			    keyIdCache->insertBaseCipherKey(baseCipherId, baseCipher, baseCipherLen, salt, refreshAt, expireAt);
 		}
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "BlobCipher.InsertCipherKey_Failed")
@@ -407,9 +392,6 @@ Reference<BlobCipherKey> BlobCipherKeyCache::insertCipherKey(const EncryptCipher
 		    .detail("DomainId", domainId)
 		    .detail("Salt", salt);
 		throw;
-	}
-	if (newCipherKeyCreated) {
-		size++;
 	}
 	return cipherKey;
 }
@@ -1115,8 +1097,12 @@ TEST_CASE("flow/BlobCipher") {
 	{
 		TraceEvent("NoneAuthMode.Start").log();
 
-		EncryptBlobCipherAes265Ctr encryptor(
-		    cipherKey, Reference<BlobCipherKey>(), iv, AES_256_IV_LENGTH, ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE);
+		EncryptBlobCipherAes265Ctr encryptor(cipherKey,
+		                                     Reference<BlobCipherKey>(),
+		                                     iv,
+		                                     AES_256_IV_LENGTH,
+		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
+		                                     BlobCipherMetrics::TEST);
 		BlobCipherEncryptHeader header;
 		Reference<EncryptBuf> encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
 
@@ -1136,7 +1122,8 @@ TEST_CASE("flow/BlobCipher") {
 		                                                                      header.cipherTextDetails.baseCipherId,
 		                                                                      header.cipherTextDetails.salt);
 		ASSERT(tCipherKeyKey->isEqual(cipherKey));
-		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, Reference<BlobCipherKey>(), &header.iv[0]);
+		DecryptBlobCipherAes256Ctr decryptor(
+		    tCipherKeyKey, Reference<BlobCipherKey>(), &header.iv[0], BlobCipherMetrics::TEST);
 		Reference<EncryptBuf> decrypted = decryptor.decrypt(encrypted->begin(), bufLen, header, arena);
 
 		ASSERT_EQ(decrypted->getLogicalSize(), bufLen);
@@ -1151,7 +1138,8 @@ TEST_CASE("flow/BlobCipher") {
 		headerCopy.flags.headerVersion += 1;
 		try {
 			encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, Reference<BlobCipherKey>(), header.iv);
+			DecryptBlobCipherAes256Ctr decryptor(
+			    tCipherKeyKey, Reference<BlobCipherKey>(), header.iv, BlobCipherMetrics::TEST);
 			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
 			ASSERT(false); // error expected
 		} catch (Error& e) {
@@ -1167,7 +1155,8 @@ TEST_CASE("flow/BlobCipher") {
 		headerCopy.flags.encryptMode += 1;
 		try {
 			encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, Reference<BlobCipherKey>(), header.iv);
+			DecryptBlobCipherAes256Ctr decryptor(
+			    tCipherKeyKey, Reference<BlobCipherKey>(), header.iv, BlobCipherMetrics::TEST);
 			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
 			ASSERT(false); // error expected
 		} catch (Error& e) {
@@ -1183,7 +1172,8 @@ TEST_CASE("flow/BlobCipher") {
 			memcpy(encrypted->begin(), &temp[0], bufLen);
 			int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
 			temp[tIdx] += 1;
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, Reference<BlobCipherKey>(), header.iv);
+			DecryptBlobCipherAes256Ctr decryptor(
+			    tCipherKeyKey, Reference<BlobCipherKey>(), header.iv, BlobCipherMetrics::TEST);
 			decrypted = decryptor.decrypt(&temp[0], bufLen, header, arena);
 		} catch (Error& e) {
 			// No authToken, hence, no corruption detection supported
@@ -1197,8 +1187,12 @@ TEST_CASE("flow/BlobCipher") {
 	{
 		TraceEvent("SingleAuthMode.Start").log();
 
-		EncryptBlobCipherAes265Ctr encryptor(
-		    cipherKey, headerCipherKey, iv, AES_256_IV_LENGTH, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+		EncryptBlobCipherAes265Ctr encryptor(cipherKey,
+		                                     headerCipherKey,
+		                                     iv,
+		                                     AES_256_IV_LENGTH,
+		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+		                                     BlobCipherMetrics::TEST);
 		BlobCipherEncryptHeader header;
 		Reference<EncryptBuf> encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
 
@@ -1223,7 +1217,7 @@ TEST_CASE("flow/BlobCipher") {
 		                                                                   header.cipherHeaderDetails.baseCipherId,
 		                                                                   header.cipherHeaderDetails.salt);
 		ASSERT(tCipherKeyKey->isEqual(cipherKey));
-		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, header.iv);
+		DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
 		Reference<EncryptBuf> decrypted = decryptor.decrypt(encrypted->begin(), bufLen, header, arena);
 
 		ASSERT_EQ(decrypted->getLogicalSize(), bufLen);
@@ -1238,7 +1232,7 @@ TEST_CASE("flow/BlobCipher") {
 		       sizeof(BlobCipherEncryptHeader));
 		headerCopy.flags.headerVersion += 1;
 		try {
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, header.iv);
+			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
 			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
 			ASSERT(false); // error expected
 		} catch (Error& e) {
@@ -1254,7 +1248,7 @@ TEST_CASE("flow/BlobCipher") {
 		       sizeof(BlobCipherEncryptHeader));
 		headerCopy.flags.encryptMode += 1;
 		try {
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, header.iv);
+			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
 			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
 			ASSERT(false); // error expected
 		} catch (Error& e) {
@@ -1271,7 +1265,7 @@ TEST_CASE("flow/BlobCipher") {
 		int hIdx = deterministicRandom()->randomInt(0, AUTH_TOKEN_SIZE - 1);
 		headerCopy.singleAuthToken.authToken[hIdx] += 1;
 		try {
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, header.iv);
+			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
 			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
 			ASSERT(false); // error expected
 		} catch (Error& e) {
@@ -1287,7 +1281,7 @@ TEST_CASE("flow/BlobCipher") {
 			memcpy(encrypted->begin(), &temp[0], bufLen);
 			int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
 			temp[tIdx] += 1;
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, header.iv);
+			DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
 			decrypted = decryptor.decrypt(&temp[0], bufLen, header, arena);
 		} catch (Error& e) {
 			if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
@@ -1302,8 +1296,12 @@ TEST_CASE("flow/BlobCipher") {
 	{
 		TraceEvent("MultiAuthMode.Start").log();
 
-		EncryptBlobCipherAes265Ctr encryptor(
-		    cipherKey, headerCipherKey, iv, AES_256_IV_LENGTH, ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI);
+		EncryptBlobCipherAes265Ctr encryptor(cipherKey,
+		                                     headerCipherKey,
+		                                     iv,
+		                                     AES_256_IV_LENGTH,
+		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI,
+		                                     BlobCipherMetrics::TEST);
 		BlobCipherEncryptHeader header;
 		Reference<EncryptBuf> encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
 
@@ -1329,7 +1327,7 @@ TEST_CASE("flow/BlobCipher") {
 		                                                                   header.cipherHeaderDetails.salt);
 
 		ASSERT(tCipherKey->isEqual(cipherKey));
-		DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv);
+		DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
 		Reference<EncryptBuf> decrypted = decryptor.decrypt(encrypted->begin(), bufLen, header, arena);
 
 		ASSERT_EQ(decrypted->getLogicalSize(), bufLen);
@@ -1344,7 +1342,7 @@ TEST_CASE("flow/BlobCipher") {
 		       sizeof(BlobCipherEncryptHeader));
 		headerCopy.flags.headerVersion += 1;
 		try {
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv);
+			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
 			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
 			ASSERT(false); // error expected
 		} catch (Error& e) {
@@ -1360,7 +1358,7 @@ TEST_CASE("flow/BlobCipher") {
 		       sizeof(BlobCipherEncryptHeader));
 		headerCopy.flags.encryptMode += 1;
 		try {
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv);
+			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
 			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
 			ASSERT(false); // error expected
 		} catch (Error& e) {
@@ -1377,7 +1375,7 @@ TEST_CASE("flow/BlobCipher") {
 		int hIdx = deterministicRandom()->randomInt(0, AUTH_TOKEN_SIZE - 1);
 		headerCopy.multiAuthTokens.cipherTextAuthToken[hIdx] += 1;
 		try {
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv);
+			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
 			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
 			ASSERT(false); // error expected
 		} catch (Error& e) {
@@ -1394,7 +1392,7 @@ TEST_CASE("flow/BlobCipher") {
 		hIdx = deterministicRandom()->randomInt(0, AUTH_TOKEN_SIZE - 1);
 		headerCopy.multiAuthTokens.headerAuthToken[hIdx] += 1;
 		try {
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv);
+			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
 			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
 			ASSERT(false); // error expected
 		} catch (Error& e) {
@@ -1409,7 +1407,7 @@ TEST_CASE("flow/BlobCipher") {
 			memcpy(encrypted->begin(), &temp[0], bufLen);
 			int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
 			temp[tIdx] += 1;
-			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv);
+			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
 			decrypted = decryptor.decrypt(&temp[0], bufLen, header, arena);
 		} catch (Error& e) {
 			if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
