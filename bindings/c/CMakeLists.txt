@@ -484,7 +484,7 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT USE_SANITIZER) # Linux Only, non-santizer
       --outdir ${SHIM_LIB_OUTPUT_DIR}
       --dlopen-callback=fdb_shim_dlopen_callback
       $<TARGET_FILE:fdb_c>
-    DEPENDS ${IMPLIBSO_SRC}
+    DEPENDS ${IMPLIBSO_SRC} fdb_c
     COMMENT "Generating source code for C shim library")
 
   add_library(fdb_c_shim STATIC ${SHIM_LIB_GEN_SRC} foundationdb/fdb_c_shim.h fdb_c_shim.cpp)

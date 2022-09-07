@@ -76,7 +76,7 @@ private:
 		    wait(TenantAPI::listTenantsTransaction(&ryw->getTransaction(), kr.begin, kr.end, limitsHint.rows));
 
 		for (auto tenant : tenants) {
-			std::string jsonString = tenant.second.toJson(ryw->getDatabase()->apiVersion);
+			std::string jsonString = tenant.second.toJson(ryw->getDatabase()->apiVersion.version());
 			ValueRef tenantEntryBytes(results->arena(), jsonString);
 			results->push_back(results->arena(),
 			                   KeyValueRef(withTenantMapPrefix(tenant.first, results->arena()), tenantEntryBytes));
