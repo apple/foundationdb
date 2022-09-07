@@ -161,6 +161,18 @@ private:
 	KeyRangeArrayFuture(FDBFuture* f) : Future(f) {}
 };
 
+class GranuleSummaryArrayFuture : public Future {
+public:
+	// Call this function instead of fdb_future_get_granule_summary_array when using
+	// the GranuleSummaryArrayFuture type. It's behavior is identical to
+	// fdb_future_get_granule_summary_array.
+	fdb_error_t get(const FDBGranuleSummary** out_summaries, int* out_count);
+
+private:
+	friend class Transaction;
+	GranuleSummaryArrayFuture(FDBFuture* f) : Future(f) {}
+};
+
 class EmptyFuture : public Future {
 private:
 	friend class Transaction;
@@ -354,6 +366,10 @@ public:
 	                                       int64_t beginVersion,
 	                                       int64_t endVersion,
 	                                       FDBReadBlobGranuleContext granule_context);
+	GranuleSummaryArrayFuture summarize_blob_granules(std::string_view begin_key,
+	                                                  std::string_view end_key,
+	                                                  int64_t summaryVersion,
+	                                                  int rangeLimit);
 
 private:
 	FDBTransaction* tr_;

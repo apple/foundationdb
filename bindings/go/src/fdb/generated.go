@@ -102,6 +102,11 @@ func (o NetworkOptions) SetTraceFileIdentifier(param string) error {
 	return o.setOpt(36, []byte(param))
 }
 
+// Use the same base trace file name for all client threads as it did before version 7.2. The current default behavior is to use distinct trace file names for client threads by including their version and thread index.
+func (o NetworkOptions) SetTraceShareAmongClientThreads() error {
+	return o.setOpt(37, nil)
+}
+
 // Set file suffix for partially written log files.
 //
 // Parameter: Append this suffix to partially written log files. When a log file is complete, it is renamed to remove the suffix. No separator is added between the file and the suffix. If you want to add a file extension, you should include the separator - e.g. '.tmp' instead of 'tmp' to add the 'tmp' extension.

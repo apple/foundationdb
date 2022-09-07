@@ -24,6 +24,7 @@
 #include <unordered_map>
 
 #include "fdbclient/BlobGranuleCommon.h"
+#include "flow/ApiVersion.h"
 #include "fmt/format.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
@@ -1265,8 +1266,7 @@ public:
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
-		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
-		    (SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE || storage->shardAware())) {
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && storage->shardAware()) {
 			addShard(ShardInfo::newShard(this, StorageServerShard::notAssigned(allKeys)));
 		} else {
 			addShard(ShardInfo::newNotAssigned(allKeys));
@@ -10359,7 +10359,7 @@ ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<IClusterC
 	}
 
 	// create a temp client connect to DB
-	Database cx = Database::createDatabase(connRecord, Database::API_VERSION_LATEST);
+	Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 	state int noCanRemoveCount = 0;
@@ -10595,8 +10595,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  std::string folder,
                                  Reference<IEncryptionKeyProvider> encryptionKeyProvider) {
 	state StorageServer self(persistentData, db, ssi, encryptionKeyProvider);
-	self.shardAware = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
-	                  (SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE || persistentData->shardAware());
+	self.shardAware = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && persistentData->shardAware();
 	state Future<Void> ssCore;
 	self.clusterId.send(clusterId);
 	self.initialClusterVersion = startVersion;
