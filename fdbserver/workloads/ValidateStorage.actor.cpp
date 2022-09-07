@@ -150,7 +150,13 @@ struct ValidateStorage : TestWorkload {
 				break;
 			} catch (Error& e) {
 				TraceEvent(SevWarnAlways, "TestValidateStorageError").errorUnsuppressed(e).detail("Range", range);
-				wait(tr.onError(e));
+				try {
+					wait(tr.onError(e));
+				} catch (Error& e) {
+					if (e.code() != error_code_audit_storage_failed) {
+						throw e;
+					}
+				}
 			}
 		}
 
