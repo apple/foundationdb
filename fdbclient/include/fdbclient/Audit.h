@@ -89,19 +89,21 @@ struct TriggerAuditRequest {
 	constexpr static FileIdentifier file_identifier = 1384445;
 
 	TriggerAuditRequest() = default;
-	TriggerAuditRequest(AuditType type, KeyRange range) : type(static_cast<uint8_t>(type)), range(range), force(false) {}
+	TriggerAuditRequest(AuditType type, KeyRange range)
+	  : type(static_cast<uint8_t>(type)), range(range), force(false), async(false) {}
 
 	void setType(AuditType type) { this->type = static_cast<uint8_t>(this->type); }
 	AuditType getType() const { return static_cast<AuditType>(this->type); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, type, range, force, reply);
+		serializer(ar, type, range, force, async, reply);
 	}
 
 	uint8_t type;
 	KeyRange range;
 	bool force;
+	bool async;
 	ReplyPromise<UID> reply;
 };
 #endif

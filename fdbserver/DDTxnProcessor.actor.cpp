@@ -91,10 +91,11 @@ class DDTxnProcessorImpl {
 		return IDDTxnProcessor::SourceServers{ std::vector<UID>(servers.begin(), servers.end()), completeSources };
 	}
 
-	ACTOR static Future<IDDTxnProcessor::SourceServers> getSourceServerInterfacesForRange(Database cx,
-	                                                                                      KeyRangeRef range) {
+	ACTOR static Future<std::vector<IDDTxnProcessor::StorageServersForRange>> getSourceServerInterfacesForRange(
+	    Database cx,
+	    KeyRangeRef range) {
 		state std::vector<IDDTxnProcessor::StorageServersForRange> res;
-		state Transaction tr(self->cx);
+		state Transaction tr(cx);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
@@ -113,19 +114,20 @@ class DDTxnProcessorImpl {
 
 				state int i = 0;
 				for (i = 0; i < shards.size() - 1; ++i) {
-					std::vector<UID> src;
+					state std::vector<UID> src;
 					std::vector<UID> dest;
 					UID srcId, destId;
 					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
 
-					state StorageServersForRange current(KeyRangeRef(shards[i].key, shards[i + 1].key));
+					state IDDTxnProcessor::StorageServersForRange current(
+					    KeyRangeRef(shards[i].key, shards[i + 1].key));
 					state int j = 0;
 					for (j = 0; j < src.size(); ++j) {
-						Optional<Value> serverListValue = wait(tr.get(serverListKeyFor(ssId)));
+						Optional<Value> serverListValue = wait(tr.get(serverListKeyFor(src[j])));
 						KeyRangeRef currentRange(shards[i].key, shards[i + 1].key);
 						if (!serverListValue.present()) {
-							TraceEvent(SevWarnAlways, "ScheduleAuditForRangeMissingServer", auditId)
-							    .detail("StorageServer", ssId)
+							TraceEvent(SevWarnAlways, "GetSourceServerInterfacesMissing")
+							    .detail("StorageServer", src[j])
 							    .detail("Range", currentRange);
 							continue;
 						}
@@ -136,7 +138,7 @@ class DDTxnProcessorImpl {
 				}
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevWarnAlways, "TestValidateStorageError").errorUnsuppressed(e).detail("Range", range);
+				TraceEvent(SevWarnAlways, "GetSourceServerInterfacesError").errorUnsuppressed(e).detail("Range", range);
 				wait(tr.onError(e));
 			}
 		}
@@ -454,7 +456,7 @@ Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(
 	return DDTxnProcessorImpl::getSourceServersForRange(cx, range);
 }
 
-Future<IDDTxnProcessor::StorageServersForRange> DDTxnProcessor::getSourceServerInterfacesForRange(
+Future<std::vector<IDDTxnProcessor::StorageServersForRange>> DDTxnProcessor::getSourceServerInterfacesForRange(
     const KeyRangeRef range) {
 	return DDTxnProcessorImpl::getSourceServerInterfacesForRange(cx, range);
 }

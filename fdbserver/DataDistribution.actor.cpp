@@ -1298,7 +1298,8 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
                                          UID auditId,
                                          KeyRange range,
                                          AuditType type);
-ACTOR Future<Void> doAuditStorage(std::shared_ptr<ActorCollection> actors,
+ACTOR Future<Void> doAuditStorage(Reference<DataDistributor> self,
+                                  std::shared_ptr<ActorCollection> actors,
                                   std::shared_ptr<KeyRangeMap<AuditPhase>> auditMap,
                                   StorageServerInterface ssi,
                                   AuditStorageRequest req);
@@ -1310,19 +1311,18 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 	state std::shared_ptr<ActorCollection> actors = std::make_shared<ActorCollection>(true);
 	state UID auditId = deterministicRandom()->randomUniqueID();
 
-	auto f = auditMap->intersectingRanges(req.range);
-	for (auto it = f.begin(); it != f.end(); ++it) {
-		if (it->value() == AuditPhase::Invalid || it->value() == AuditPhase::Error) {
-			actors->add(scheduleAuditForRange(
-			    self, actors, auditMap, self, auditId, KeyRangeRef(it->range().begin, it->range().end), req.getType()));
-		}
-	}
+	actors->add(scheduleAuditForRange(self, actors, auditMap, auditId, req.range, req.getType()));
 
-	req.reply.send(auditId);
+	if (req.async) {
+		req.reply.send(auditId);
+	}
 
 	try {
 		wait(actors->getResult());
 		// TODO(heliu): Set the audit result, and clear auditId.
+		if (!req.async) {
+			req.reply.send(auditId);
+		}
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "DDAuditStorageOperationError", auditId)
 		    .errorUnsuppressed(e)
@@ -1339,32 +1339,50 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
                                          UID auditId,
                                          KeyRange range,
                                          AuditType type) {
-	// TODO(heliu): Load the audit map, or make auditStorage a streaming call, to skip audited ranges.
+	// TODO(heliu): Load the audit map for `range`.
+	state Key begin = range.begin;
+	state KeyRange currentRange = range;
 
 	while (begin < range.end) {
+		currentRange = KeyRangeRef(begin, range.end);
+
+		// Find the first keyrange that hasn't been validated.
+		auto f = auditMap->intersectingRanges(currentRange);
+		for (auto it = f.begin(); it != f.end(); ++it) {
+			if (it->value() != AuditPhase::Invalid && it->value() != AuditPhase::Failed) {
+				begin = it->range().end;
+				currentRange = KeyRangeRef(it->range().end, currentRange.end);
+			} else {
+				currentRange = KeyRangeRef(it->range().begin, it->range().end);
+				break;
+			}
+		}
 
 		try {
-			state IDDTxnProcessor::StorageServersForRange rangeLocations =
-			    self->getSourceServerInterfacesForRange(KeyRangeRef(begin, range.end));
+			state std::vector<IDDTxnProcessor::StorageServersForRange> rangeLocations =
+			    wait(self->txnProcessor->getSourceServerInterfacesForRange(currentRange));
 
 			state int i = 0;
 			for (i = 0; i < rangeLocations.size(); ++i) {
 				const AuditStorageRequest req(auditId, rangeLocations[i].range, type);
 				const int idx = deterministicRandom()->randomInt(0, rangeLocations[i].servers.size());
-				actors->add(doAuditStorage(actors, auditMap, rangeLocations[i].servers[idx], req));
+				actors->add(doAuditStorage(self, actors, auditMap, rangeLocations[i].servers[idx], req));
 				begin = rangeLocations[i].range.end;
 				wait(delay(0.01));
 			}
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "TestValidateStorageError").errorUnsuppressed(e).detail("Range", range);
-			wait(tr.onError(e));
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
 		}
 	}
 
 	return Void();
 }
 
-ACTOR Future<Void> doAuditStorage(std::shared_ptr<ActorCollection> actors,
+ACTOR Future<Void> doAuditStorage(Reference<DataDistributor> self,
+                                  std::shared_ptr<ActorCollection> actors,
                                   std::shared_ptr<KeyRangeMap<AuditPhase>> auditMap,
                                   StorageServerInterface ssi,
                                   AuditStorageRequest req) {
@@ -1389,7 +1407,7 @@ ACTOR Future<Void> doAuditStorage(std::shared_ptr<ActorCollection> actors,
 		    .detail("StorageServer", ssi.toString());
 		if (e.code() != error_code_actor_cancelled) {
 			auditMap->insert(req.range, AuditPhase::Failed);
-			actors->add(ScheduleAuditForRange(actors, auditMap, req.id, req.range, req.getType()));
+			actors->add(scheduleAuditForRange(self, actors, auditMap, req.id, req.range, req.getType()));
 		}
 	}
 

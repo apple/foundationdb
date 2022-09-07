@@ -3496,231 +3496,6 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 	return result;
 }
 
-ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
-                                              KeyRange range,
-                                              Version version,
-                                              StorageServerInterface remoteServer) {
-	TraceEvent(SevDebug, "ServeValidateRangeAgainstServerBegin", data->thisServerID)
-	    .detail("Range", range)
-	    .detail("Version", version)
-	    .detail("Servers", remoteServer.toString());
-
-	state int validatedKeys = 0;
-	loop {
-		try {
-			state int limit = 1e4;
-			state int limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-			state GetKeyValuesRequest req;
-			state GetKeyValuesRequest localReq;
-			req.begin = firstGreaterOrEqual(range.begin);
-			req.end = firstGreaterOrEqual(range.end);
-			req.limit = limit;
-			req.limitBytes = limitBytes;
-			req.version = version;
-			req.tags = TagSet();
-			localReq.begin = firstGreaterOrEqual(range.begin);
-			localReq.end = firstGreaterOrEqual(range.end);
-			localReq.limit = limit;
-			localReq.limitBytes = limitBytes;
-			localReq.version = version;
-			localReq.tags = TagSet();
-
-			// Try getting the entries in the specified range
-			state Future<ErrorOr<GetKeyValuesReply>> remoteKeyValueFuture =
-			    remoteServer.getKeyValues.getReplyUnlessFailedFor(req, 2, 0);
-			data->actors.add(getKeyValuesQ(data, localReq));
-			state ErrorOr<GetKeyValuesReply> remoteResult = wait(remoteKeyValueFuture);
-			GetKeyValuesReply local = wait(localReq.reply.getFuture());
-			Key lastKey = range.begin;
-			state std::string error;
-
-			// Compare the results with other storage servers
-			if (remoteResult.isError()) {
-				throw remoteResult.getError();
-			}
-
-			state GetKeyValuesReply remote = remoteResult.get();
-			// Loop indeces
-			const int end = std::min(local.data.size(), remote.data.size());
-			int i = 0;
-			for (; i < end; ++i) {
-				KeyValueRef remoteKV = remote.data[i];
-				KeyValueRef localKV = local.data[i];
-
-				if (remoteKV.key != localKV.key) {
-					error = format("Key Mismatch: local server (%lld): %s, remote server(%lld) %s",
-					               data->thisServerID.first(),
-					               Traceable<StringRef>::toString(localKV.key),
-					               remoteServer.uniqueID.first(),
-					               Traceable<StringRef>::toString(remoteKV.key));
-				} else if (remoteKV.value != localKV.value) {
-					error = format("Value Mismatch for Key %s: local server (%lld): %s, remote server(%lld) %s",
-					               Traceable<StringRef>::toString(localKV.key),
-					               data->thisServerID.first(),
-					               Traceable<StringRef>::toString(localKV.value),
-					               remoteServer.uniqueID.first(),
-					               Traceable<StringRef>::toString(remoteKV.value));
-				} else {
-					TraceEvent(SevDebug, "ValidatedKey", data->thisServerID).detail("Key", localKV.key);
-					++validatedKeys;
-				}
-
-				lastKey = localKV.key;
-			}
-
-			if (!error.empty()) {
-				break;
-			}
-
-			if (!local.more && !remote.more && local.data.size() == remote.data.size()) {
-				break;
-			} else if (i >= local.data.size() && !local.more && i < remote.data.size()) {
-				error = format("Missing key(s) form local server (%lld), next remote server(%lld) key: %s",
-				               data->thisServerID.first(),
-				               remoteServer.uniqueID.first(),
-				               Traceable<StringRef>::toString(remote.data[i].key));
-				break;
-			} else if (i >= remote.data.size() && !remote.more && i < local.data.size()) {
-				error = format("Missing key(s) form remote server (%lld), next local server(%lld) key: %s",
-				               remoteServer.uniqueID.first(),
-				               data->thisServerID.first(),
-				               Traceable<StringRef>::toString(local.data[i].key));
-				break;
-			}
-
-			range = KeyRangeRef(keyAfter(lastKey), range.end);
-		} catch (Error& e) {
-			TraceEvent(SevWarnAlways, "ValidateRangeAgainstServerError", data->thisServerID)
-			    .errorUnsuppressed(e)
-			    .detail("RemoteServer", remoteServer.toString())
-			    .detail("Range", range)
-			    .detail("Version", version);
-			throw e;
-		}
-	}
-
-	if (!error.empty()) {
-		TraceEvent(SevWarnAlways, "ValidateRangeAgainstServerError", data->thisServerID)
-		    .detail("Range", range)
-		    .detail("Version", version)
-		    .detail("ErrorMessage", error)
-		    .detail("RemoteServer", remoteServer.toString());
-	}
-
-	TraceEvent(SevDebug, "ServeValidateRangeAgainstServerEnd", data->thisServerID)
-	    .detail("Range", range)
-	    .detail("Version", version)
-	    .detail("ValidatedKeys", validatedKeys)
-	    .detail("Servers", remoteServer.toString());
-
-	return Void();
-}
-
-ACTOR Future<Void> validateRangeShard(StorageServer* data, KeyRange range, std::vector<UID> candidates) {
-	TraceEvent(SevDebug, "ServeValidateRangeShardBegin", data->thisServerID)
-	    .detail("Range", range)
-	    .detail("Servers", describe(candidates));
-
-	state Version version;
-	state std::vector<Optional<Value>> serverListValues;
-	state Transaction tr(data->cx);
-	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-	loop {
-		try {
-			std::vector<Future<Optional<Value>>> serverListEntries;
-			for (const UID& id : candidates) {
-				serverListEntries.push_back(tr.get(serverListKeyFor(id)));
-			}
-
-			std::vector<Optional<Value>> serverListValues_ = wait(getAll(serverListEntries));
-			serverListValues = serverListValues_;
-			Version version_ = wait(tr.getReadVersion());
-			version = version_;
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-
-	std::unordered_map<std::string, std::vector<StorageServerInterface>> ssis;
-	std::string thisDcId;
-	for (const auto& v : serverListValues) {
-		const StorageServerInterface ssi = decodeServerListValue(v.get());
-		if (ssi.uniqueID == data->thisServerID) {
-			thisDcId = ssi.locality.describeDcId();
-		}
-		ssis[ssi.locality.describeDcId()].push_back(ssi);
-	}
-
-	StorageServerInterface* remoteServer = nullptr;
-	for (auto& [dcId, ssiList] : ssis) {
-		if (dcId != thisDcId) {
-			if (ssiList.empty()) {
-				break;
-			}
-			const int idx = deterministicRandom()->randomInt(0, ssiList.size());
-			remoteServer = &ssiList[idx];
-			break;
-		}
-	}
-
-	if (remoteServer != nullptr) {
-		wait(validateRangeAgainstServer(data, range, version, *remoteServer));
-	}
-
-	return Void();
-}
-
-ACTOR Future<Void> auditStorageQ(StorageServer* self, AuditStorageRequest req) {
-	wait(self->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
-	state FlowLock::Releaser holder(self->serveAuditStorageParallelismLock);
-
-	TraceEvent("ServeAuditStorageBegin", self->thisServerID)
-	    .detail("RequestID", req.id)
-	    .detail("Range", req.range)
-	    .detail("Type", req.type);
-
-	state Transaction tr(self->cx);
-	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-	try {
-		loop {
-			try {
-				state RangeResult shards = wait(krmGetRanges(&tr,
-				                                             keyServersPrefix,
-				                                             req.range,
-				                                             SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
-				                                             SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
-				ASSERT(!shards.empty() && !shards.more);
-
-				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-
-				std::vector<Future<Void>> fs;
-				for (int i = 0; i < shards.size() - 1; ++i) {
-					std::vector<UID> src;
-					std::vector<UID> dest;
-					UID srcId, destId;
-					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
-					fs.push_back(validateRangeShard(self, KeyRangeRef(shards[i].key, shards[i + 1].key), src));
-				}
-
-				wait(waitForAll(fs));
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	} catch (Error& e) {
-		req.reply.sendError(audit_storage_failed());
-	}
-
-	return Void();
-}
-
 KeyRangeRef StorageServer::clampRangeToTenant(KeyRangeRef range, Optional<TenantMapEntry> tenantEntry, Arena& arena) {
 	if (tenantEntry.present()) {
 		return KeyRangeRef(range.begin.startsWith(tenantEntry.get().prefix) ? range.begin : tenantEntry.get().prefix,
@@ -4274,6 +4049,243 @@ Key constructMappedKey(KeyValueRef* keyValue,
 	}
 
 	return mappedKeyTuple.pack();
+}
+
+ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
+                                              KeyRange range,
+                                              Version version,
+                                              StorageServerInterface remoteServer) {
+	TraceEvent(SevDebug, "ServeValidateRangeAgainstServerBegin", data->thisServerID)
+	    .detail("Range", range)
+	    .detail("Version", version)
+	    .detail("Servers", remoteServer.toString());
+
+	state int validatedKeys = 0;
+	loop {
+		try {
+			state int limit = 1e4;
+			state int limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+			state GetKeyValuesRequest req;
+			state GetKeyValuesRequest localReq;
+			req.begin = firstGreaterOrEqual(range.begin);
+			req.end = firstGreaterOrEqual(range.end);
+			req.limit = limit;
+			req.limitBytes = limitBytes;
+			req.version = version;
+			req.tags = TagSet();
+			localReq.begin = firstGreaterOrEqual(range.begin);
+			localReq.end = firstGreaterOrEqual(range.end);
+			localReq.limit = limit;
+			localReq.limitBytes = limitBytes;
+			localReq.version = version;
+			localReq.tags = TagSet();
+
+			// Try getting the entries in the specified range
+			state Future<ErrorOr<GetKeyValuesReply>> remoteKeyValueFuture =
+			    remoteServer.getKeyValues.getReplyUnlessFailedFor(req, 2, 0);
+			data->actors.add(getKeyValuesQ(data, localReq));
+			state ErrorOr<GetKeyValuesReply> remoteResult = wait(remoteKeyValueFuture);
+			try {
+				state GetKeyValuesReply local = wait(localReq.reply.getFuture());
+			} catch (Error& e) {
+				TraceEvent(SevDebug, "ValidateRangeGetLocalKeyValuesError", data->thisServerID)
+				    .errorUnsuppressed(e)
+				    .detail("Range", range);
+			}
+			Key lastKey = range.begin;
+			state std::string error;
+
+			// Compare the results with other storage servers
+			if (remoteResult.isError()) {
+				TraceEvent(SevDebug, "ValidateRangeGetRemoteKeyValuesError", data->thisServerID)
+				    .errorUnsuppressed(remoteResult.getError())
+				    .detail("Range", range);
+				throw remoteResult.getError();
+			}
+
+			state GetKeyValuesReply remote = remoteResult.get();
+			// Loop indeces
+			const int end = std::min(local.data.size(), remote.data.size());
+			int i = 0;
+			for (; i < end; ++i) {
+				KeyValueRef remoteKV = remote.data[i];
+				KeyValueRef localKV = local.data[i];
+
+				if (remoteKV.key != localKV.key) {
+					error = format("Key Mismatch: local server (%lld): %s, remote server(%lld) %s",
+					               data->thisServerID.first(),
+					               Traceable<StringRef>::toString(localKV.key),
+					               remoteServer.uniqueID.first(),
+					               Traceable<StringRef>::toString(remoteKV.key));
+				} else if (remoteKV.value != localKV.value) {
+					error = format("Value Mismatch for Key %s: local server (%lld): %s, remote server(%lld) %s",
+					               Traceable<StringRef>::toString(localKV.key),
+					               data->thisServerID.first(),
+					               Traceable<StringRef>::toString(localKV.value),
+					               remoteServer.uniqueID.first(),
+					               Traceable<StringRef>::toString(remoteKV.value));
+				} else {
+					TraceEvent(SevDebug, "ValidatedKey", data->thisServerID).detail("Key", localKV.key);
+					++validatedKeys;
+				}
+
+				lastKey = localKV.key;
+			}
+
+			if (!error.empty()) {
+				break;
+			}
+
+			if (!local.more && !remote.more && local.data.size() == remote.data.size()) {
+				break;
+			} else if (i >= local.data.size() && !local.more && i < remote.data.size()) {
+				error = format("Missing key(s) form local server (%lld), next remote server(%lld) key: %s",
+				               data->thisServerID.first(),
+				               remoteServer.uniqueID.first(),
+				               Traceable<StringRef>::toString(remote.data[i].key));
+				break;
+			} else if (i >= remote.data.size() && !remote.more && i < local.data.size()) {
+				error = format("Missing key(s) form remote server (%lld), next local server(%lld) key: %s",
+				               remoteServer.uniqueID.first(),
+				               data->thisServerID.first(),
+				               Traceable<StringRef>::toString(local.data[i].key));
+				break;
+			}
+
+			range = KeyRangeRef(keyAfter(lastKey), range.end);
+		} catch (Error& e) {
+			TraceEvent(SevWarnAlways, "ValidateRangeAgainstServerError", data->thisServerID)
+			    .errorUnsuppressed(e)
+			    .detail("RemoteServer", remoteServer.toString())
+			    .detail("Range", range)
+			    .detail("Version", version);
+			throw e;
+		}
+	}
+
+	if (!error.empty()) {
+		TraceEvent(SevError, "ValidateRangeAgainstServerError", data->thisServerID)
+		    .detail("Range", range)
+		    .detail("Version", version)
+		    .detail("ErrorMessage", error)
+		    .detail("RemoteServer", remoteServer.toString());
+	}
+
+	TraceEvent(SevDebug, "ServeValidateRangeAgainstServerEnd", data->thisServerID)
+	    .detail("Range", range)
+	    .detail("Version", version)
+	    .detail("ValidatedKeys", validatedKeys)
+	    .detail("Servers", remoteServer.toString());
+
+	return Void();
+}
+
+ACTOR Future<Void> validateRangeShard(StorageServer* data, KeyRange range, std::vector<UID> candidates) {
+	TraceEvent(SevDebug, "ServeValidateRangeShardBegin", data->thisServerID)
+	    .detail("Range", range)
+	    .detail("Servers", describe(candidates));
+
+	state Version version;
+	state std::vector<Optional<Value>> serverListValues;
+	state Transaction tr(data->cx);
+	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+	loop {
+		try {
+			std::vector<Future<Optional<Value>>> serverListEntries;
+			for (const UID& id : candidates) {
+				serverListEntries.push_back(tr.get(serverListKeyFor(id)));
+			}
+
+			std::vector<Optional<Value>> serverListValues_ = wait(getAll(serverListEntries));
+			serverListValues = serverListValues_;
+			Version version_ = wait(tr.getReadVersion());
+			version = version_;
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	std::unordered_map<std::string, std::vector<StorageServerInterface>> ssis;
+	std::string thisDcId;
+	for (const auto& v : serverListValues) {
+		const StorageServerInterface ssi = decodeServerListValue(v.get());
+		if (ssi.uniqueID == data->thisServerID) {
+			thisDcId = ssi.locality.describeDcId();
+		}
+		ssis[ssi.locality.describeDcId()].push_back(ssi);
+	}
+
+	StorageServerInterface* remoteServer = nullptr;
+	for (auto& [dcId, ssiList] : ssis) {
+		if (dcId != thisDcId) {
+			if (ssiList.empty()) {
+				break;
+			}
+			const int idx = deterministicRandom()->randomInt(0, ssiList.size());
+			remoteServer = &ssiList[idx];
+			break;
+		}
+	}
+
+	if (remoteServer != nullptr) {
+		wait(validateRangeAgainstServer(data, range, version, *remoteServer));
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> auditStorageQ(StorageServer* self, AuditStorageRequest req) {
+	wait(self->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
+	state FlowLock::Releaser holder(self->serveAuditStorageParallelismLock);
+
+	TraceEvent("ServeAuditStorageBegin", self->thisServerID)
+	    .detail("RequestID", req.id)
+	    .detail("Range", req.range)
+	    .detail("AuditType", req.type);
+
+	state Transaction tr(self->cx);
+	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+	try {
+		loop {
+			try {
+				state RangeResult shards = wait(krmGetRanges(&tr,
+				                                             keyServersPrefix,
+				                                             req.range,
+				                                             SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+				                                             SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
+				ASSERT(!shards.empty() && !shards.more);
+
+				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+
+				std::vector<Future<Void>> fs;
+				for (int i = 0; i < shards.size() - 1; ++i) {
+					std::vector<UID> src;
+					std::vector<UID> dest;
+					UID srcId, destId;
+					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
+					fs.push_back(validateRangeShard(self, KeyRangeRef(shards[i].key, shards[i + 1].key), src));
+				}
+
+				wait(waitForAll(fs));
+				AuditStorageState res(req.id, req.getType());
+				res.setPhase(AuditPhase::Complete);
+				req.reply.send(res);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	} catch (Error& e) {
+		req.reply.sendError(audit_storage_failed());
+	}
+
+	return Void();
 }
 
 TEST_CASE("/fdbserver/storageserver/constructMappedKey") {

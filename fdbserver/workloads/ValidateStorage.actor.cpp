@@ -116,14 +116,12 @@ struct ValidateStorage : TestWorkload {
 	}
 
 	ACTOR Future<Void> validateData(ValidateStorage* self, Database cx, KeyRange range) {
-		std::cout << "0" << std::endl;
 		state Transaction tr(cx);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 		loop {
 			try {
-				std::cout << "1" << std::endl;
 				state RangeResult shards =
 				    wait(krmGetRanges(&tr, keyServersPrefix, range, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!shards.empty() && !shards.more);
@@ -148,8 +146,6 @@ struct ValidateStorage : TestWorkload {
 					                        KeyRangeRef(shards[i].key, shards[i + 1].key),
 					                        AuditType::ValidateHA);
 					AuditStorageState vResult = wait(ssi.auditStorage.getReply(req));
-
-					std::cout << "3" << std::endl;
 				}
 				break;
 			} catch (Error& e) {

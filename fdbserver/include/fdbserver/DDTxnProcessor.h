@@ -38,6 +38,7 @@ public:
 	};
 
 	struct StorageServersForRange {
+		StorageServersForRange() = default;
 		StorageServersForRange(KeyRangeRef range) : range(range) {}
 
 		std::vector<StorageServerInterface> servers;
@@ -47,7 +48,8 @@ public:
 	// get the source server list and complete source server list for range
 	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) = 0;
 
-	virtual Future<StorageServersForRange> getSourceServerInterfacesForRange(const KeyRangeRef range) = 0;
+	virtual Future<std::vector<IDDTxnProcessor::StorageServersForRange>> getSourceServerInterfacesForRange(
+	    const KeyRangeRef range) = 0;
 
 	// get the storage server list and Process class
 	virtual Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() = 0;
@@ -85,6 +87,9 @@ public:
 	explicit DDTxnProcessor(Database cx) : cx(cx) {}
 
 	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
+
+	Future<std::vector<IDDTxnProcessor::StorageServersForRange>> getSourceServerInterfacesForRange(
+	    const KeyRangeRef range) override;
 
 	// Call NativeAPI implementation directly
 	Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() override;
