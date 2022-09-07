@@ -140,7 +140,7 @@ struct WorkerDetails {
 	bool degraded;
 	bool recoveredDiskFiles;
 
-	WorkerDetails() : degraded(false) {}
+	WorkerDetails() : degraded(false), recoveredDiskFiles(false) {}
 	WorkerDetails(const WorkerInterface& interf, ProcessClass processClass, bool degraded, bool recoveredDiskFiles)
 	  : interf(interf), processClass(processClass), degraded(degraded), recoveredDiskFiles(recoveredDiskFiles) {}
 
@@ -148,7 +148,7 @@ struct WorkerDetails {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, interf, processClass, degraded);
+		serializer(ar, interf, processClass, degraded, recoveredDiskFiles);
 	}
 };
 
