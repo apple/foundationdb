@@ -82,8 +82,6 @@ struct NetworkOptions {
 
 class Database {
 public:
-	enum { API_VERSION_LATEST = -1 };
-
 	// Creates a database object that represents a connection to a cluster
 	// This constructor uses a preallocated DatabaseContext that may have been created
 	// on another thread
@@ -242,8 +240,8 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	Optional<Standalone<StringRef>> authToken;
 	Reference<TransactionLogInfo> trLogInfo;
 	TransactionOptions options;
+	Optional<ReadOptions> readOptions;
 
-	Optional<UID> debugID;
 	TaskPriority taskID;
 	SpanContext spanContext;
 	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
@@ -365,19 +363,19 @@ private:
 public:
 	// A method for streaming data from the storage server that is more efficient than getRange when reading large
 	// amounts of data
-	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
 	                                          const KeySelector& begin,
 	                                          const KeySelector& end,
 	                                          int limit,
 	                                          Snapshot = Snapshot::False,
 	                                          Reverse = Reverse::False);
-	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
 	                                          const KeySelector& begin,
 	                                          const KeySelector& end,
 	                                          GetRangeLimits limits,
 	                                          Snapshot = Snapshot::False,
 	                                          Reverse = Reverse::False);
-	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
 	                                          const KeyRange& keys,
 	                                          int limit,
 	                                          Snapshot snapshot = Snapshot::False,
@@ -389,7 +387,7 @@ public:
 		                      snapshot,
 		                      reverse);
 	}
-	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
 	                                          const KeyRange& keys,
 	                                          GetRangeLimits limits,
 	                                          Snapshot snapshot = Snapshot::False,
@@ -420,6 +418,10 @@ public:
 	                                                                    Version begin,
 	                                                                    Optional<Version> readVersion,
 	                                                                    Version* readVersionOut = nullptr);
+
+	Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRange& range,
+	                                                                           Optional<Version> summaryVersion,
+	                                                                           int rangeLimit);
 
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set(const KeyRef& key, const ValueRef& value, AddConflictRange = AddConflictRange::True);
@@ -455,7 +457,13 @@ public:
 	void fullReset();
 	double getBackoff(int errCode);
 
-	void debugTransaction(UID dID) { trState->debugID = dID; }
+	void debugTransaction(UID dID) {
+		if (trState->readOptions.present()) {
+			trState->readOptions.get().debugID = dID;
+		} else {
+			trState->readOptions = ReadOptions(dID);
+		}
+	}
 	VersionVector getVersionVector() const;
 	SpanContext getSpanContext() const { return trState->spanContext; }
 

@@ -296,6 +296,8 @@ Future<Void> testExpectedError(Future<Void> test,
                                Optional<Error> throwOnError = Optional<Error>(),
                                UID id = UID());
 
+std::string getTestEncryptionFileName();
+
 #include "flow/unactorcompiler.h"
 
 #endif

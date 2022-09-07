@@ -78,6 +78,7 @@ public:
 	int64_t CHANGE_FEED_CACHE_SIZE;
 	double CHANGE_FEED_POP_TIMEOUT;
 	int64_t CHANGE_FEED_STREAM_MIN_BYTES;
+	double CHANGE_FEED_START_INTERVAL;
 
 	int MAX_BATCH_SIZE;
 	double GRV_BATCH_TIMEOUT;
@@ -283,6 +284,7 @@ public:
 	int METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK;
 	double METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY;
 	double METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT;
+	int TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantEntryCache is refreshed
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

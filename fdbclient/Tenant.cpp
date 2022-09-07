@@ -22,15 +22,16 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 #include "libb64/encode.h"
+#include "flow/ApiVersion.h"
 #include "flow/UnitTest.h"
 
 Key TenantMapEntry::idToPrefix(int64_t id) {
 	int64_t swapped = bigEndian64(id);
-	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), 8);
+	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), TENANT_PREFIX_SIZE);
 }
 
 int64_t TenantMapEntry::prefixToId(KeyRef prefix) {
-	ASSERT(prefix.size() == 8);
+	ASSERT(prefix.size() == TENANT_PREFIX_SIZE);
 	int64_t id = *reinterpret_cast<const int64_t*>(prefix.begin());
 	id = bigEndian64(id);
 	ASSERT(id >= 0);
@@ -78,6 +79,31 @@ TenantState TenantMapEntry::stringToTenantState(std::string stateStr) {
 	UNREACHABLE();
 }
 
+std::string TenantMapEntry::tenantLockStateToString(TenantLockState tenantState) {
+	switch (tenantState) {
+	case TenantLockState::UNLOCKED:
+		return "unlocked";
+	case TenantLockState::READ_ONLY:
+		return "read only";
+	case TenantLockState::LOCKED:
+		return "locked";
+	default:
+		UNREACHABLE();
+	}
+}
+
+TenantLockState TenantMapEntry::stringToTenantLockState(std::string stateStr) {
+	if (stateStr == "unlocked") {
+		return TenantLockState::UNLOCKED;
+	} else if (stateStr == "read only") {
+		return TenantLockState::READ_ONLY;
+	} else if (stateStr == "locked") {
+		return TenantLockState::LOCKED;
+	}
+
+	UNREACHABLE();
+}
+
 TenantMapEntry::TenantMapEntry() {}
 TenantMapEntry::TenantMapEntry(int64_t id, TenantState tenantState, bool encrypted)
   : tenantState(tenantState), encrypted(encrypted) {
@@ -102,7 +128,7 @@ std::string TenantMapEntry::toJson(int apiVersion) const {
 	tenantEntry["id"] = id;
 	tenantEntry["encrypted"] = encrypted;
 
-	if (apiVersion >= 720 || apiVersion == Database::API_VERSION_LATEST) {
+	if (apiVersion >= ApiVersion::withTenantsV2().version()) {
 		json_spirit::mObject prefixObject;
 		std::string encodedPrefix = base64::encoder::from_string(prefix.toString());
 		// Remove trailing newline

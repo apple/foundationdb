@@ -1649,7 +1649,8 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 				}
 			}
 
-			StringRef deltaData[files[chunkIdx].deltaFiles.size()];
+			// +1 to avoid UBSAN variable length array of size zero
+			StringRef deltaData[files[chunkIdx].deltaFiles.size() + 1];
 			for (int i = 0; i < files[chunkIdx].deltaFiles.size(); i++) {
 				deltaData[i] =
 				    StringRef(granuleContext.get_load_f(loadIds[chunkIdx].deltaIds[i], granuleContext.userContext),
@@ -2664,7 +2665,11 @@ TEST_CASE("/blobgranule/files/granuleReadUnitTest") {
 	                 serializedDeltaFiles,
 	                 inMemoryDeltas);
 
-	for (int i = 0; i < std::min(100, 5 + snapshotData.size() * deltaData.size()); i++) {
+	// prevent overflow by doing min before multiply
+	int maxRuns = 100;
+	int snapshotAndDeltaSize = 5 + std::min(maxRuns, snapshotData.size()) * std::min(maxRuns, deltaData.size());
+	int lim = std::min(maxRuns, snapshotAndDeltaSize);
+	for (int i = 0; i < lim; i++) {
 		auto params = randomizeKeyAndVersions(kvGen, deltaData);
 		fmt::print("Partial test {0}: [{1} - {2}) @ {3} - {4}\n",
 		           i,

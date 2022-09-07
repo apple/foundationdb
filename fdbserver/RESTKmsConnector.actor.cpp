@@ -276,7 +276,7 @@ ACTOR Future<Void> discoverKmsUrls(Reference<RESTKmsConnectorCtx> ctx, bool refr
 void parseKmsResponse(Reference<RESTKmsConnectorCtx> ctx,
                       Reference<HTTP::Response> resp,
                       Arena* arena,
-                      VectorRef<EncryptCipherKeyDetails>* outCipherKeyDetails) {
+                      VectorRef<EncryptCipherKeyDetailsRef>* outCipherKeyDetails) {
 	// Acceptable response payload json format:
 	//
 	// response_json_payload {
@@ -542,7 +542,7 @@ ACTOR
 Future<Void> fetchEncryptionKeys_impl(Reference<RESTKmsConnectorCtx> ctx,
                                       StringRef requestBodyRef,
                                       Arena* arena,
-                                      VectorRef<EncryptCipherKeyDetails>* outCipherKeyDetails) {
+                                      VectorRef<EncryptCipherKeyDetailsRef>* outCipherKeyDetails) {
 	state Reference<HTTP::Response> resp;
 
 	// Follow 2-phase scheme:
@@ -1096,15 +1096,15 @@ void validateKmsUrls(Reference<RESTKmsConnectorCtx> ctx) {
 	ASSERT_EQ(urlCtx->url.compare(KMS_URL_NAME_TEST), 0);
 }
 
-void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, Arena arena) {
+void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, Arena& arena) {
 	KmsConnLookupEKsByKeyIdsReq req;
 	std::unordered_map<EncryptCipherBaseKeyId, EncryptCipherDomainId> keyMap;
 	const int nKeys = deterministicRandom()->randomInt(7, 8);
 	for (int i = 1; i < nKeys; i++) {
 		EncryptCipherDomainId domainId = getRandomDomainId();
-		EncryptCipherDomainName domainName = domainId < 0
-		                                         ? StringRef(arena, std::string(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME))
-		                                         : StringRef(arena, std::to_string(domainId));
+		EncryptCipherDomainNameRef domainName = domainId < 0
+		                                            ? StringRef(arena, std::string(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME))
+		                                            : StringRef(arena, std::to_string(domainId));
 		req.encryptKeyInfos.emplace_back_deep(req.arena, domainId, i, domainName);
 		keyMap[i] = domainId;
 	}
@@ -1121,7 +1121,7 @@ void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, A
 	getFakeKmsResponse(requestBodyRef, true, httpResp);
 	TraceEvent("FetchKeysByKeyIds", ctx->uid).setMaxFieldLength(100000).detail("HttpRespStr", httpResp->content);
 
-	VectorRef<EncryptCipherKeyDetails> cipherDetails;
+	VectorRef<EncryptCipherKeyDetailsRef> cipherDetails;
 	parseKmsResponse(ctx, httpResp, &arena, &cipherDetails);
 	ASSERT_EQ(cipherDetails.size(), keyMap.size());
 	for (const auto& detail : cipherDetails) {
@@ -1135,16 +1135,16 @@ void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, A
 	}
 }
 
-void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, Arena arena) {
+void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, Arena& arena) {
 	KmsConnLookupEKsByDomainIdsReq req;
-	std::unordered_map<EncryptCipherDomainId, KmsConnLookupDomainIdsReqInfo> domainInfoMap;
+	std::unordered_map<EncryptCipherDomainId, KmsConnLookupDomainIdsReqInfoRef> domainInfoMap;
 	const int nKeys = deterministicRandom()->randomInt(7, 25);
 	for (int i = 1; i < nKeys; i++) {
 		EncryptCipherDomainId domainId = getRandomDomainId();
-		EncryptCipherDomainName domainName = domainId < 0
-		                                         ? StringRef(arena, std::string(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME))
-		                                         : StringRef(arena, std::to_string(domainId));
-		KmsConnLookupDomainIdsReqInfo reqInfo(req.arena, domainId, domainName);
+		EncryptCipherDomainNameRef domainName = domainId < 0
+		                                            ? StringRef(arena, std::string(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME))
+		                                            : StringRef(arena, std::to_string(domainId));
+		KmsConnLookupDomainIdsReqInfoRef reqInfo(req.arena, domainId, domainName);
 		if (domainInfoMap.insert({ domainId, reqInfo }).second) {
 			req.encryptDomainInfos.push_back(req.arena, reqInfo);
 		}
@@ -1159,7 +1159,7 @@ void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx
 	getFakeKmsResponse(jsonReqRef, false, httpResp);
 	TraceEvent("FetchKeysByDomainIds", ctx->uid).detail("HttpRespStr", httpResp->content);
 
-	VectorRef<EncryptCipherKeyDetails> cipherDetails;
+	VectorRef<EncryptCipherKeyDetailsRef> cipherDetails;
 	parseKmsResponse(ctx, httpResp, &arena, &cipherDetails);
 	ASSERT_EQ(domainInfoMap.size(), cipherDetails.size());
 	for (const auto& detail : cipherDetails) {
@@ -1174,7 +1174,7 @@ void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx
 
 void testMissingCipherDetailsTag(Reference<RESTKmsConnectorCtx> ctx) {
 	Arena arena;
-	VectorRef<EncryptCipherKeyDetails> cipherDetails;
+	VectorRef<EncryptCipherKeyDetailsRef> cipherDetails;
 
 	rapidjson::Document doc;
 	doc.SetObject();
@@ -1201,7 +1201,7 @@ void testMissingCipherDetailsTag(Reference<RESTKmsConnectorCtx> ctx) {
 
 void testMalformedCipherDetails(Reference<RESTKmsConnectorCtx> ctx) {
 	Arena arena;
-	VectorRef<EncryptCipherKeyDetails> cipherDetails;
+	VectorRef<EncryptCipherKeyDetailsRef> cipherDetails;
 
 	rapidjson::Document doc;
 	doc.SetObject();
@@ -1228,7 +1228,7 @@ void testMalformedCipherDetails(Reference<RESTKmsConnectorCtx> ctx) {
 
 void testMalfromedCipherDetailObj(Reference<RESTKmsConnectorCtx> ctx) {
 	Arena arena;
-	VectorRef<EncryptCipherKeyDetails> cipherDetails;
+	VectorRef<EncryptCipherKeyDetailsRef> cipherDetails;
 
 	rapidjson::Document doc;
 	doc.SetObject();
@@ -1260,7 +1260,7 @@ void testMalfromedCipherDetailObj(Reference<RESTKmsConnectorCtx> ctx) {
 
 void testKMSErrorResponse(Reference<RESTKmsConnectorCtx> ctx) {
 	Arena arena;
-	VectorRef<EncryptCipherKeyDetails> cipherDetails;
+	VectorRef<EncryptCipherKeyDetailsRef> cipherDetails;
 
 	rapidjson::Document doc;
 	doc.SetObject();

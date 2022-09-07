@@ -30,7 +30,7 @@ struct BlobWorkerStats {
 	Counter deltaBytesWritten, snapshotBytesWritten;
 	Counter bytesReadFromFDBForInitialSnapshot;
 	Counter bytesReadFromS3ForCompaction;
-	Counter rangeAssignmentRequests, readRequests;
+	Counter rangeAssignmentRequests, readRequests, summaryReads;
 	Counter wrongShardServer;
 	Counter changeFeedInputBytes;
 	Counter readReqTotalFilesReturned;
@@ -75,8 +75,8 @@ struct BlobWorkerStats {
 	    bytesReadFromFDBForInitialSnapshot("BytesReadFromFDBForInitialSnapshot", cc),
 	    bytesReadFromS3ForCompaction("BytesReadFromS3ForCompaction", cc),
 	    rangeAssignmentRequests("RangeAssignmentRequests", cc), readRequests("ReadRequests", cc),
-	    wrongShardServer("WrongShardServer", cc), changeFeedInputBytes("ChangeFeedInputBytes", cc),
-	    readReqTotalFilesReturned("ReadReqTotalFilesReturned", cc),
+	    summaryReads("SummaryReads", cc), wrongShardServer("WrongShardServer", cc),
+	    changeFeedInputBytes("ChangeFeedInputBytes", cc), readReqTotalFilesReturned("ReadReqTotalFilesReturned", cc),
 	    readReqDeltaBytesReturned("ReadReqDeltaBytesReturned", cc), commitVersionChecks("CommitVersionChecks", cc),
 	    granuleUpdateErrors("GranuleUpdateErrors", cc), granuleRequestTimeouts("GranuleRequestTimeouts", cc),
 	    readRequestsWithBegin("ReadRequestsWithBegin", cc), readRequestsCollapsed("ReadRequestsCollapsed", cc),

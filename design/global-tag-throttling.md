@@ -125,20 +125,3 @@ In each test, the `GlobalTagThrottlerTesting::monitor` function is used to perio
 On the ratekeeper, every `SERVER_KNOBS->TAG_THROTTLE_PUSH_INTERVAL` seconds, the ratekeeper will call `GlobalTagThrottler::getClientRates`. At the end of the rate calculation for each tag, a trace event of type `GlobalTagThrottler_GotClientRate` is produced. This trace event reports the relevant inputs that went in to the rate calculation, and can be used for debugging.
 
 On storage servers, every `SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL` seconds, there are `BusyReadTag` events for every tag that has sufficient read cost to be reported to the ratekeeper. Both cost and fractional busyness are reported.
-
-### Status
-For each storage server, the busiest read tag is reported in the full status output, along with its cost and fractional busyness. 
-
-At path `.cluster.qos.global_tag_throttler`, throttling limitations for each tag are reported:
-
-```
-{
-  "<tagName>": {
-    "desired_tps": <number>,
-    "reserved_tps": <number>,
-    "limiting_tps": [<number>|"unset"],
-    "target_tps": <number>
-  },
-  ...
-}
-```

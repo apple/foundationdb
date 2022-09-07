@@ -201,6 +201,20 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			}
 			out[p + key] = format("%d", tenantMode);
 		}
+
+		if (key == "encryption_at_rest_mode") {
+			EncryptionAtRestMode mode;
+			if (value == "disabled") {
+				mode = EncryptionAtRestMode::DISABLED;
+			} else if (value == "aes_256_ctr") {
+				mode = EncryptionAtRestMode::AES_256_CTR;
+			} else {
+				printf("Error: Only disabled|aes_256_ctr are valid for encryption_at_rest_mode.\n");
+				return out;
+			}
+			out[p + key] = format("%d", mode);
+		}
+
 		return out;
 	}
 
