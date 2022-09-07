@@ -22,6 +22,7 @@
 #include "flow/Arena.h"
 #include "flow/BlobCipher.h"
 #include "flow/CodeProbe.h"
+#include "flow/EncryptUtils.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
@@ -639,7 +640,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		self->cipherKeys.headerCipherKey = systemCipherKeys.cipherHeaderKey;
 
 		// Get text cipher key
-		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
+		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains;
 		domains.emplace(curTenantInfo.first, curTenantInfo.second);
 		// Get the latest write encryption key for the given tenant
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> textCipherKeys =
