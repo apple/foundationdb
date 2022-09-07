@@ -358,6 +358,7 @@ bool runWorkloads(TesterOptions& options) {
 		txExecOptions.blockOnFutures = options.testSpec.blockOnFutures;
 		txExecOptions.numDatabases = options.numDatabases;
 		txExecOptions.databasePerTransaction = options.testSpec.databasePerTransaction;
+		txExecOptions.buggify = options.testSpec.buggify;
 		txExecOptions.transactionRetryLimit = options.transactionRetryLimit;
 
 		std::vector<std::shared_ptr<IWorkload>> workloads;

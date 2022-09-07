@@ -132,11 +132,6 @@ void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskF
 	});
 }
 
-// Select one of the database instances
-fdb::Database WorkloadBase::selectDatabase() {
-	return manager->txExecutor->selectDatabase();
-}
-
 void WorkloadBase::info(const std::string& msg) {
 	fmt::print(stderr, "[{}] {}\n", workloadId, msg);
 }
