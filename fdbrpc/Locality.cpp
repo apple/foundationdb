@@ -152,6 +152,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		case ProcessClass::CoordinatorClass:
 		case ProcessClass::TesterClass:
 		case ProcessClass::StorageCacheClass:
+		case ProcessClass::BlobWorkerClass:
 			return ProcessClass::NeverAssign;
 		default:
 			return ProcessClass::WorstFit;

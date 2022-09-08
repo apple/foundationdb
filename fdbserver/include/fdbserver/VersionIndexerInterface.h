@@ -29,16 +29,24 @@
 struct VersionIndexerInterface {
 	constexpr static FileIdentifier file_identifier = 6865162;
 
-	UID uniqueID = deterministicRandom()->randomUniqueID();
 	LocalityData locality;
-	UID id() const { return uniqueID; }
-	std::string toString() const { return id().shortString(); }
-	RequestStream<ReplyPromise<Void>> waitFailure;
+	UID uniqueID;
 	RequestStream<struct VersionIndexerCommitRequest> commit;
 	RequestStream<struct VersionIndexerPeekRequest> peek;
 
+	RequestStream<ReplyPromise<Void>> waitFailure;
+
+	VersionIndexerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
+	UID id() const { return uniqueID; }
+	std::string toString() const { return id().shortString(); }
+
 	bool operator==(const VersionIndexerInterface& other) const { return id() == other.id(); }
 	bool operator!=(const VersionIndexerInterface& other) const { return id() != other.id(); }
+
+	NetworkAddress address() const { return commit.getEndpoint().getPrimaryAddress(); }
+	NetworkAddressList addresses() const { return commit.getEndpoint().addresses; }
+
+	void initEndpoints() { waitFailure.getEndpoint(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

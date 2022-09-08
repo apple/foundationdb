@@ -288,11 +288,12 @@ void printStatus(StatusObjectReader statusObj,
 							if (name == "recruiting_transaction_servers") {
 								description +=
 								    format("\nNeed at least %d log servers across unique zones, %d commit proxies, "
-								           "%d GRV proxies and %d resolvers.",
+								           "%d GRV proxies, %d resolvers and %d version indexers.",
 								           recoveryState["required_logs"].get_int(),
 								           recoveryState["required_commit_proxies"].get_int(),
 								           recoveryState["required_grv_proxies"].get_int(),
-								           recoveryState["required_resolvers"].get_int());
+								           recoveryState["required_resolvers"].get_int(),
+								           recoveryState["required_version_indexers"].get_int());
 								if (statusObjCluster.has("machines") && statusObjCluster.has("processes")) {
 									auto numOfNonExcludedProcessesAndZones =
 									    getNumOfNonExcludedProcessAndZones(statusObjCluster);
@@ -456,37 +457,40 @@ void printStatus(StatusObjectReader statusObj,
 					outputString += "unknown";
 
 				if (excludedServersArr.size()) {
-					outputString += format("\n  Exclusions             - %d (type `exclude' for details)",
+					outputString += format("\n  Exclusions               - %d (type `exclude' for details)",
 					                       excludedServersArr.size());
 				}
 
 				if (statusObjConfig.get("commit_proxies", intVal))
-					outputString += format("\n  Desired Commit Proxies - %d", intVal);
+					outputString += format("\n  Desired Commit Proxies   - %d", intVal);
 
 				if (statusObjConfig.get("grv_proxies", intVal))
-					outputString += format("\n  Desired GRV Proxies    - %d", intVal);
+					outputString += format("\n  Desired GRV Proxies      - %d", intVal);
 
 				if (statusObjConfig.get("resolvers", intVal))
-					outputString += format("\n  Desired Resolvers      - %d", intVal);
+					outputString += format("\n  Desired Resolvers        - %d", intVal);
+
+				if (statusObjConfig.get("version_indexers", intVal))
+					outputString += format("\n  Desired Version Indexers - %d", intVal);
 
 				if (statusObjConfig.get("logs", intVal))
-					outputString += format("\n  Desired Logs           - %d", intVal);
+					outputString += format("\n  Desired Logs             - %d", intVal);
 
 				if (statusObjConfig.get("remote_logs", intVal))
-					outputString += format("\n  Desired Remote Logs    - %d", intVal);
+					outputString += format("\n  Desired Remote Logs      - %d", intVal);
 
 				if (statusObjConfig.get("log_routers", intVal))
-					outputString += format("\n  Desired Log Routers    - %d", intVal);
+					outputString += format("\n  Desired Log Routers      - %d", intVal);
 
 				if (statusObjConfig.get("tss_count", intVal) && intVal > 0) {
 					int activeTss = 0;
 					if (statusObjCluster.has("active_tss_count")) {
 						statusObjCluster.get("active_tss_count", activeTss);
 					}
-					outputString += format("\n  TSS                    - %d/%d", activeTss, intVal);
+					outputString += format("\n  TSS                      - %d/%d", activeTss, intVal);
 
 					if (statusObjConfig.get("tss_storage_engine", strVal))
-						outputString += format("\n  TSS Storage Engine     - %s", strVal.c_str());
+						outputString += format("\n  TSS Storage Engine       - %s", strVal.c_str());
 				}
 
 				outputString += "\n  Usable Regions         - ";

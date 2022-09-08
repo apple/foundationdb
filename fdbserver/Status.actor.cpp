@@ -876,6 +876,13 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		wait(yield());
 	}
 
+	state std::vector<VersionIndexerInterface>::const_iterator vi;
+	state std::vector<VersionIndexerInterface> versionIndexers = db->get().versionIndexers;
+	for (vi = versionIndexers.begin(); vi != versionIndexers.end(); ++vi) {
+		roles.addRole("version_indexer", *vi);
+		wait(yield());
+	}
+
 	if (configuration.present() && configuration.get().blobGranulesEnabled) {
 		for (auto blobWorker : blobWorkers) {
 			roles.addRole("blob_worker", blobWorker);
@@ -1200,6 +1207,7 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
 			int requiredCommitProxies = atoi(md.getValue("RequiredCommitProxies").c_str());
 			int requiredGrvProxies = atoi(md.getValue("RequiredGrvProxies").c_str());
 			int requiredResolvers = atoi(md.getValue("RequiredResolvers").c_str());
+			int requiredVersionIndexers = atoi(md.getValue("RequiredVersionIndexers").c_str());
 			// int requiredProcesses = std::max(requiredLogs, std::max(requiredResolvers, requiredCommitProxies));
 			// int requiredMachines = std::max(requiredLogs, 1);
 
@@ -1207,6 +1215,7 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
 			message["required_commit_proxies"] = requiredCommitProxies;
 			message["required_grv_proxies"] = requiredGrvProxies;
 			message["required_resolvers"] = requiredResolvers;
+			message["required_version_indexers"] = requiredVersionIndexers;
 		} else if (mStatusCode == RecoveryStatus::locking_old_transaction_servers) {
 			message["missing_logs"] = md.getValue("MissingIDs").c_str();
 		}

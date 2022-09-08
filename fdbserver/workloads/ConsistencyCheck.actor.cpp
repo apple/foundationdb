@@ -2316,6 +2316,25 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			}
 		}
 
+		// Check version indexer
+		ProcessClass::Fitness bestVersionIndexerFitness =
+		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::VersionIndexer);
+		for (const auto& versionIndexer : db.versionIndexers) {
+			if (!nonExcludedWorkerProcessMap.count(versionIndexer.address()) ||
+			    nonExcludedWorkerProcessMap[versionIndexer.address()].processClass.machineClassFitness(
+			        ProcessClass::VersionIndexer) != bestVersionIndexerFitness) {
+				TraceEvent("ConsistencyCheck_VersionIndexerNotBest", self->id)
+				    .detail("BestVersionIndexerFitness", bestVersionIndexerFitness)
+				    .detail(
+				        "ExistingVersionIndexerFitness",
+				        nonExcludedWorkerProcessMap.count(versionIndexer.address())
+				            ? nonExcludedWorkerProcessMap[versionIndexer.address()].processClass.machineClassFitness(
+				                  ProcessClass::VersionIndexer)
+				            : -1);
+				return false;
+			}
+		}
+
 		// Check LogRouter
 		if (g_network->isSimulated() && config.usableRegions > 1 && g_simulator.primaryDcId.present() &&
 		    !g_simulator.datacenterDead(g_simulator.primaryDcId) &&

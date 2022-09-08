@@ -130,7 +130,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 		}
 
 		if ((key == "logs" || key == "commit_proxies" || key == "grv_proxies" || key == "resolvers" ||
-		     key == "remote_logs" || key == "log_routers" || key == "usable_regions" ||
+		     key == "version_indexers" || key == "remote_logs" || key == "log_routers" || key == "usable_regions" ||
 		     key == "repopulate_anti_quorum" || key == "count") &&
 		    isInteger(value)) {
 			out[p + key] = value;

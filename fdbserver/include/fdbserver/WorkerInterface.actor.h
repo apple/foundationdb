@@ -1047,6 +1047,8 @@ struct Role {
 			return BACKUP;
 		case ProcessClass::EncryptKeyProxy:
 			return ENCRYPT_KEY_PROXY;
+		case ProcessClass::VersionIndexer:
+			return VERSION_INDEXER;
 		case ProcessClass::Worker:
 			return WORKER;
 		case ProcessClass::NoRole:

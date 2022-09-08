@@ -115,11 +115,11 @@ struct ConfigureAutoResult {
 	int32_t desired_logs;
 
 	ConfigureAutoResult()
-	  : processes(-1), machines(-1), old_commit_proxies(-1), old_grv_proxies(-1), old_resolvers(-1), old_logs(-1),
-	    old_processes_with_transaction(-1), old_machines_with_transaction(-1), auto_commit_proxies(-1),
-	    auto_grv_proxies(-1), auto_resolvers(-1), auto_logs(-1), auto_processes_with_transaction(-1),
-	    auto_machines_with_transaction(-1), desired_commit_proxies(-1), desired_grv_proxies(-1), desired_resolvers(-1),
-	    desired_logs(-1) {}
+	  : processes(-1), machines(-1), old_commit_proxies(-1), old_grv_proxies(-1), old_resolvers(-1),
+	    old_version_indexers(-1), old_logs(-1), old_processes_with_transaction(-1), old_machines_with_transaction(-1),
+	    auto_commit_proxies(-1), auto_grv_proxies(-1), auto_resolvers(-1), auto_version_indexers(-1), auto_logs(-1),
+	    auto_processes_with_transaction(-1), auto_machines_with_transaction(-1), desired_commit_proxies(-1),
+	    desired_grv_proxies(-1), desired_resolvers(-1), desired_version_indexers(-1), desired_logs(-1) {}
 
 	bool isValid() const { return processes != -1; }
 };
@@ -612,6 +612,10 @@ Future<ConfigurationResult> autoConfig(Reference<DB> db, ConfigureAutoResult con
 
 			if (conf.auto_resolvers != conf.old_resolvers)
 				tr->set(configKeysPrefix.toString() + "auto_resolvers", format("%d", conf.auto_resolvers));
+
+			if (conf.auto_version_indexers != conf.old_version_indexers)
+				tr->set(configKeysPrefix.toString() + "auto_version_indexers",
+				        format("%d", conf.auto_version_indexers));
 
 			if (conf.auto_replication != conf.old_replication) {
 				std::vector<StringRef> modes;

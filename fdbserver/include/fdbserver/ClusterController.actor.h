@@ -541,7 +541,7 @@ public:
 		}
 	}
 
-	// Log the reason why the worker is considered as unavailable.
+	// Log the reason why the worker is considered as unavailable as a tlog.
 	void logWorkerUnavailable(const Severity severity,
 	                          const UID& id,
 	                          const std::string& method,
@@ -1477,10 +1477,33 @@ public:
 		throw no_more_servers();
 	}
 
+	// Log the reason why the worker is considered as unavailable for the role.
+	void logWorkerUnavailableForRole(const Severity severity,
+	                                 const UID& id,
+	                                 const ProcessClass::ClusterRole role,
+	                                 const std::string& reason,
+	                                 const WorkerDetails& details,
+	                                 const ProcessClass::Fitness fitness) {
+		TraceEvent(severity, "WorkerUnavailableForRole", id)
+		    .detail("Role", to_string(role))
+		    .detail("Reason", reason)
+		    .detail("WorkerID", details.interf.id())
+		    .detail("WorkerDC", details.interf.locality.dcId())
+		    .detail("Address", details.interf.address().toString())
+		    .detail("Fitness", fitness);
+	}
+
+	// Recruit workers for a specific role.
+	// Prefer workers with
+	//     1. better fitness
+	//     2. not previously used
+	//     3. not a long-lived stateless process
+	//     4. something about preferred sharing.
 	std::vector<WorkerDetails> getWorkersForRoleInDatacenter(
 	    Optional<Standalone<StringRef>> const& dcId,
 	    ProcessClass::ClusterRole role,
 	    int amount,
+	    ProcessClass::Fitness unacceptableFitness,
 	    DatabaseConfiguration const& conf,
 	    std::map<Optional<Standalone<StringRef>>, int>& id_used,
 	    std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
@@ -1495,26 +1518,81 @@ public:
 			return results;
 		}
 
-		for (auto& it : id_worker) {
-			auto fitness = it.second.details.processClass.machineClassFitness(role);
-			if (workerAvailable(it.second, checkStable) &&
-			    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
-			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
-			    it.second.details.interf.locality.dcId() == dcId &&
-			    (!minWorker.present() ||
-			     (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
-			      (fitness < minWorker.get().fitness ||
-			       (fitness == minWorker.get().fitness && id_used[it.first] <= minWorker.get().used))))) {
-				auto sharing = preferredSharing.find(it.first);
-				fitness_workers[std::make_tuple(fitness,
-				                                id_used[it.first],
-				                                isLongLivedStateless(it.first),
-				                                sharing != preferredSharing.end() ? sharing->second : 1e6)]
-				    .push_back(it.second.details);
+		for (const auto& [worker_process_id, worker_info] : id_worker) {
+			const WorkerDetails& worker_details = worker_info.details;
+			auto fitness = worker_details.processClass.machineClassFitness(role);
+			auto sharing = preferredSharing.find(worker_process_id);
+			bool long_lived_stateless = isLongLivedStateless(worker_process_id);
+
+			if (minWorker.present() && worker_details.interf.id() == minWorker.get().worker.interf.id()) {
+				// Worker has already been assigned to role.
+				continue;
 			}
+			if (worker_details.interf.locality.dcId() != dcId) {
+				// Worker is not in the target datacenter.
+				continue;
+			}
+			if (fitness >= unacceptableFitness) {
+				//logWorkerUnavailableForRole(
+				//    SevDebug, id, role, "Worker's fitness is unacceptable", worker_details, fitness);
+				continue;
+			}
+			if (!workerAvailable(worker_info, checkStable)) {
+				//logWorkerUnavailableForRole(SevDebug, id, role, "Worker is unavailable", worker_details, fitness);
+				continue;
+			}
+			if (conf.isExcludedServer(worker_details.interf.addresses())) {
+				//logWorkerUnavailableForRole(
+				//    SevDebug, id, role, "Worker is excluded from the cluster", worker_details, fitness);
+				continue;
+			}
+			if (isExcludedDegradedServer(worker_details.interf.addresses())) {
+				//logWorkerUnavailableForRole(SevDebug,
+				//                            id,
+				//                            role,
+				//                            "Worker is excluded from the cluster due to degradation",
+				//                            worker_details,
+				//                            fitness);
+				continue;
+			}
+			if (minWorker.present()) {
+				//if (fitness > minWorker.get().fitness) {
+				//	logWorkerUnavailableForRole(SevDebug, id, role, "Worker has worse fitness than minWorker",
+				//				    worker_details, fitness);
+				//	continue;
+				//}
+				//if (fitness == minWorker.get().fitness && id_used[worker_process_id] > minWorker.get().used) {
+				//	logWorkerUnavailableForRole(SevDebug, id, role, "Worker is more used than minWorker",
+				//				    worker_details, fitness);
+				//	continue;
+				//}
+			}
+			//TraceEvent(SevDebug, "WorkerAvailableForRole", id)
+			//    .detail("Role", to_string(role))
+			//    .detail("WorkerID", worker_details.interf.id())
+			//    .detail("WorkerDC", worker_details.interf.locality.dcId())
+			//    .detail("Address", worker_details.interf.address().toString())
+			//    .detail("Fitness", fitness)
+			//    .detail("Used", id_used[worker_process_id])
+			//    .detail("LongLivedStateless", long_lived_stateless)
+			//    .detail("Sharing", sharing != preferredSharing.end() ? sharing->second : 1e6);
+
+			fitness_workers[std::make_tuple(fitness,
+			                                id_used[worker_process_id],
+			                                long_lived_stateless,
+			                                sharing != preferredSharing.end() ? sharing->second : 1e6)]
+			    .push_back(worker_details);
 		}
 
 		for (auto& it : fitness_workers) {
+			//TraceEvent("GetWorkersForRole")
+			//    .detail("Role", to_string(role))
+			//    .detail("Fitness", std::get<0>(it.first))
+			//    .detail("Used", std::get<1>(it.first))
+			//    .detail("LongLivedStateless", std::get<2>(it.first))
+			//    .detail("Sharing", std::get<3>(it.first))
+			//    .detail("WorkersAvailable", it.second.size())
+			//    .detail("WorkersNeeded", amount - results.size());
 			deterministicRandom()->randomShuffle(it.second);
 			for (int i = 0; i < it.second.size(); i++) {
 				results.push_back(it.second[i]);
@@ -1675,8 +1753,12 @@ public:
 			result.remoteTLogs.push_back(remoteLogs[i].interf);
 		}
 
-		auto logRouters = getWorkersForRoleInDatacenter(
-		    req.dcId, ProcessClass::LogRouter, req.logRouterCount, req.configuration, id_used);
+		auto logRouters = getWorkersForRoleInDatacenter(req.dcId,
+		                                                ProcessClass::LogRouter,
+		                                                req.logRouterCount,
+		                                                ProcessClass::ExcludeFit,
+		                                                req.configuration,
+		                                                id_used);
 		for (int i = 0; i < logRouters.size(); i++) {
 			result.logRouters.push_back(logRouters[i].interf);
 		}
@@ -1783,6 +1865,7 @@ public:
 		auto commit_proxies = getWorkersForRoleInDatacenter(dcId,
 		                                                    ProcessClass::CommitProxy,
 		                                                    req.configuration.getDesiredCommitProxies(),
+		                                                    ProcessClass::ExcludeFit,
 		                                                    req.configuration,
 		                                                    id_used,
 		                                                    preferredSharing,
@@ -1790,6 +1873,7 @@ public:
 		auto grv_proxies = getWorkersForRoleInDatacenter(dcId,
 		                                                 ProcessClass::GrvProxy,
 		                                                 req.configuration.getDesiredGrvProxies(),
+		                                                 ProcessClass::ExcludeFit,
 		                                                 req.configuration,
 		                                                 id_used,
 		                                                 preferredSharing,
@@ -1797,6 +1881,7 @@ public:
 		auto resolvers = getWorkersForRoleInDatacenter(dcId,
 		                                               ProcessClass::Resolver,
 		                                               req.configuration.getDesiredResolvers(),
+		                                               ProcessClass::ExcludeFit,
 		                                               req.configuration,
 		                                               id_used,
 		                                               preferredSharing,
@@ -1804,10 +1889,16 @@ public:
 		auto version_indexers = getWorkersForRoleInDatacenter(dcId,
 		                                                      ProcessClass::VersionIndexer,
 		                                                      req.configuration.getDesiredVersionIndexers(),
+		                                                      ProcessClass::ExcludeFit,
 		                                                      req.configuration,
 		                                                      id_used,
 		                                                      preferredSharing,
 		                                                      first_version_indexer);
+		//TraceEvent("GotWorkers")
+		//    .detail("CommitProxies", commit_proxies.size())
+		//    .detail("GRVProxies", grv_proxies.size())
+		//    .detail("Resolvers", resolvers.size())
+		//    .detail("VersionIndexers", version_indexers.size());
 		for (int i = 0; i < commit_proxies.size(); i++)
 			result.commitProxies.push_back(commit_proxies[i].interf);
 		for (int i = 0; i < grv_proxies.size(); i++)
@@ -1833,8 +1924,8 @@ public:
 			const int nBackup = std::max<int>(
 			    (req.configuration.desiredLogRouterCount > 0 ? req.configuration.desiredLogRouterCount : tlogs.size()),
 			    req.maxOldLogRouters);
-			auto backupWorkers =
-			    getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, nBackup, req.configuration, id_used);
+			auto backupWorkers = getWorkersForRoleInDatacenter(
+			    dcId, ProcessClass::Backup, nBackup, ProcessClass::ExcludeFit, req.configuration, id_used);
 			std::transform(backupWorkers.begin(),
 			               backupWorkers.end(),
 			               std::back_inserter(result.backupWorkers),
@@ -2050,6 +2141,7 @@ public:
 					auto commit_proxies = getWorkersForRoleInDatacenter(dcId,
 					                                                    ProcessClass::CommitProxy,
 					                                                    req.configuration.getDesiredCommitProxies(),
+					                                                    ProcessClass::ExcludeFit,
 					                                                    req.configuration,
 					                                                    used,
 					                                                    preferredSharing,
@@ -2058,6 +2150,7 @@ public:
 					auto grv_proxies = getWorkersForRoleInDatacenter(dcId,
 					                                                 ProcessClass::GrvProxy,
 					                                                 req.configuration.getDesiredGrvProxies(),
+					                                                 ProcessClass::ExcludeFit,
 					                                                 req.configuration,
 					                                                 used,
 					                                                 preferredSharing,
@@ -2066,6 +2159,7 @@ public:
 					auto resolvers = getWorkersForRoleInDatacenter(dcId,
 					                                               ProcessClass::Resolver,
 					                                               req.configuration.getDesiredResolvers(),
+					                                               ProcessClass::ExcludeFit,
 					                                               req.configuration,
 					                                               used,
 					                                               preferredSharing,
@@ -2074,6 +2168,7 @@ public:
 					auto version_indexers = getWorkersForRoleInDatacenter(dcId,
 					                                                      ProcessClass::VersionIndexer,
 					                                                      req.configuration.getDesiredVersionIndexers(),
+					                                                      ProcessClass::ExcludeFit,
 					                                                      req.configuration,
 					                                                      used,
 					                                                      preferredSharing,
@@ -2103,7 +2198,7 @@ public:
 						if (req.configuration.backupWorkerEnabled) {
 							const int nBackup = std::max<int>(tlogs.size(), req.maxOldLogRouters);
 							auto backupWorkers = getWorkersForRoleInDatacenter(
-							    dcId, ProcessClass::Backup, nBackup, req.configuration, used);
+							    dcId, ProcessClass::Backup, nBackup, ProcessClass::ExcludeFit, req.configuration, used);
 							std::transform(backupWorkers.begin(),
 							               backupWorkers.end(),
 							               std::back_inserter(result.backupWorkers),
@@ -2215,12 +2310,14 @@ public:
 			TraceEvent(SevError, "NonDeterministicRecruitment")
 			    .detail("FirstFitness", firstFitness.toString())
 			    .detail("SecondFitness", secondFitness.toString())
-			    .detail("ClusterRole", to_string(role));
+			    .detail("ClusterRole", to_string(role))
+			    .detail("DesiredResolvers", conf.getDesiredResolvers())
+			    .detail("DesiredVersionIndexers", conf.getDesiredVersionIndexers());
 		}
 	}
 
 	RecruitFromConfigurationReply findWorkersForConfiguration(RecruitFromConfigurationRequest const& req) {
-		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req, true);
+		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req, /*checkGoodRecruitment*/ true);
 		if (g_network->isSimulated()) {
 			try {
 				// FIXME: The logic to pick a satellite in a remote region is not
@@ -2238,7 +2335,8 @@ public:
 					}
 				}
 				if (!remoteDCUsedAsSatellite) {
-					RecruitFromConfigurationReply compare = findWorkersForConfigurationDispatch(req, false);
+					RecruitFromConfigurationReply compare =
+					    findWorkersForConfigurationDispatch(req, /*checkGoodRecruitment*/ false);
 
 					std::map<Optional<Standalone<StringRef>>, int> firstUsed;
 					std::map<Optional<Standalone<StringRef>>, int> secondUsed;
@@ -2353,11 +2451,13 @@ public:
 			}
 
 			getWorkerForRoleInDatacenter(
-			    regions[0].dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
-			getWorkerForRoleInDatacenter(
 			    regions[0].dcId, ProcessClass::CommitProxy, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
 			getWorkerForRoleInDatacenter(
 			    regions[0].dcId, ProcessClass::GrvProxy, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
+			getWorkerForRoleInDatacenter(
+			    regions[0].dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
+			getWorkerForRoleInDatacenter(
+			    regions[0].dcId, ProcessClass::VersionIndexer, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
 
 			std::vector<Optional<Key>> dcPriority;
 			dcPriority.push_back(regions[0].dcId);
@@ -2752,6 +2852,7 @@ public:
 			newLogRoutersFit = RoleFitness(getWorkersForRoleInDatacenter(*remoteDC.begin(),
 			                                                             ProcessClass::LogRouter,
 			                                                             newRouterCount,
+			                                                             ProcessClass::ExcludeFit,
 			                                                             db.config,
 			                                                             id_used,
 			                                                             {},
@@ -2820,6 +2921,7 @@ public:
 		auto commit_proxies = getWorkersForRoleInDatacenter(clusterControllerDcId,
 		                                                    ProcessClass::CommitProxy,
 		                                                    db.config.getDesiredCommitProxies(),
+		                                                    ProcessClass::ExcludeFit,
 		                                                    db.config,
 		                                                    id_used,
 		                                                    preferredSharing,
@@ -2828,6 +2930,7 @@ public:
 		auto grv_proxies = getWorkersForRoleInDatacenter(clusterControllerDcId,
 		                                                 ProcessClass::GrvProxy,
 		                                                 db.config.getDesiredGrvProxies(),
+		                                                 ProcessClass::ExcludeFit,
 		                                                 db.config,
 		                                                 id_used,
 		                                                 preferredSharing,
@@ -2836,6 +2939,7 @@ public:
 		auto resolvers = getWorkersForRoleInDatacenter(clusterControllerDcId,
 		                                               ProcessClass::Resolver,
 		                                               db.config.getDesiredResolvers(),
+		                                               ProcessClass::ExcludeFit,
 		                                               db.config,
 		                                               id_used,
 		                                               preferredSharing,
@@ -2844,6 +2948,7 @@ public:
 		auto version_indexers = getWorkersForRoleInDatacenter(clusterControllerDcId,
 		                                                      ProcessClass::VersionIndexer,
 		                                                      db.config.getDesiredVersionIndexers(),
+		                                                      ProcessClass::ExcludeFit,
 		                                                      db.config,
 		                                                      id_used,
 		                                                      preferredSharing,
@@ -2862,6 +2967,7 @@ public:
 		RoleFitness newBackupWorkersFit(getWorkersForRoleInDatacenter(clusterControllerDcId,
 		                                                              ProcessClass::Backup,
 		                                                              nBackup,
+		                                                              ProcessClass::ExcludeFit,
 		                                                              db.config,
 		                                                              id_used,
 		                                                              {},
@@ -2970,6 +3076,10 @@ public:
 			if (interf.locality.processId() == processId)
 				return true;
 		}
+		for (const VersionIndexerInterface& interf : dbInfo.versionIndexers) {
+			if (interf.locality.processId() == processId)
+				return true;
+		}
 		if (processId == clusterControllerProcessId)
 			return true;
 
@@ -3013,6 +3123,10 @@ public:
 			idUsed[interf.processId]++;
 		}
 		for (const ResolverInterface& interf : dbInfo.resolvers) {
+			ASSERT(interf.locality.processId().present());
+			idUsed[interf.locality.processId()]++;
+		}
+		for (const VersionIndexerInterface& interf : dbInfo.versionIndexers) {
 			ASSERT(interf.locality.processId().present());
 			idUsed[interf.locality.processId()]++;
 		}
@@ -3192,6 +3306,12 @@ public:
 
 			for (auto& resolver : dbi.resolvers) {
 				if (resolver.addresses().contains(excludedServer)) {
+					return true;
+				}
+			}
+
+			for (auto& versionIndexer : dbi.versionIndexers) {
+				if (versionIndexer.addresses().contains(excludedServer)) {
 					return true;
 				}
 			}

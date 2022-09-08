@@ -706,6 +706,12 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 		}
 	}
 
+	for (const auto& versionIndexer : dbi.versionIndexers) {
+		if (versionIndexer.address() == address) {
+			return true;
+		}
+	}
+
 	for (const auto& grvProxy : dbi.client.grvProxies) {
 		if (grvProxy.addresses().contains(address)) {
 			return true;
@@ -1704,6 +1710,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		DUMPTOKEN(recruited.commitProxy);
 		DUMPTOKEN(recruited.grvProxy);
 		DUMPTOKEN(recruited.resolver);
+		DUMPTOKEN(recruited.versionIndexer);
 		DUMPTOKEN(recruited.storage);
 		DUMPTOKEN(recruited.debugPing);
 		DUMPTOKEN(recruited.coordinationPing);
@@ -2132,15 +2139,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
 				req.reply.send(recruited);
 			}
-			when(InitializeVersionIndexerRequest req = waitNext(interf.versionIndexer.getFuture())) {
-				VersionIndexerInterface recruited;
-				recruited.locality = locality;
-				startRole(Role::VERSION_INDEXER, recruited.id(), interf.id());
-				DUMPTOKEN(recruited.waitFailure);
-				errorForwarders.add(versionIndexer(recruited, req, dbInfo));
-				TraceEvent("VersionIndexer_InitRequest", req.reqId).detail("VersionIndexerId", recruited.id());
-				req.reply.send(recruited);
-			}
 			when(InitializeBlobManagerRequest req = waitNext(interf.blobManager.getFuture())) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobManager;
@@ -2501,6 +2499,20 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 				errorForwarders.add(zombie(
 				    recruited, forwardError(errors, Role::RESOLVER, recruited.id(), resolver(recruited, req, dbInfo))));
+				req.reply.send(recruited);
+			}
+			when(InitializeVersionIndexerRequest req = waitNext(interf.versionIndexer.getFuture())) {
+				LocalLineage _;
+				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::VersionIndexer;
+				VersionIndexerInterface recruited;
+				recruited.locality = locality;
+				recruited.initEndpoints();
+				startRole(Role::VERSION_INDEXER, recruited.id(), interf.id());
+				DUMPTOKEN(recruited.waitFailure);
+				errorForwarders.add(
+				    zombie(recruited,
+				           forwardError(
+				               errors, Role::VERSION_INDEXER, recruited.id(), versionIndexer(recruited, req, dbInfo))));
 				req.reply.send(recruited);
 			}
 			when(InitializeLogRouterRequest req = waitNext(interf.logRouter.getFuture())) {

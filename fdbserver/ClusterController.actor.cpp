@@ -3022,7 +3022,8 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	NetworkAddress backup(IPAddress(0x06060606), 1);
 	NetworkAddress proxy(IPAddress(0x07070707), 1);
 	NetworkAddress resolver(IPAddress(0x08080808), 1);
-	NetworkAddress clusterController(IPAddress(0x09090909), 1);
+	NetworkAddress versionIndexer(IPAddress(0x09090909), 1);
+	NetworkAddress clusterController(IPAddress(0x10101010), 1);
 	UID testUID(1, 2);
 
 	// Create a ServerDBInfo using above addresses.
@@ -3071,6 +3072,11 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	resolverInterf.resolve = RequestStream<struct ResolveTransactionBatchRequest>(Endpoint({ resolver }, testUID));
 	testDbInfo.resolvers.push_back(resolverInterf);
 
+	VersionIndexerInterface versionIndexerInterf;
+	versionIndexerInterf.commit =
+	    RequestStream<struct VersionIndexerCommitRequest>(Endpoint({ versionIndexer }, testUID));
+	testDbInfo.versionIndexers.push_back(versionIndexerInterf);
+
 	testDbInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
 
 	// No recovery when no degraded servers.
@@ -3116,6 +3122,10 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	data.degradationInfo.degradedServers.insert(resolver);
 	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
 
+	// Trigger recovery when version indexers is degraded.
+	data.degradationInfo.degradedServers.insert(versionIndexer);
+	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
+
 	return Void();
 }
 
@@ -3134,6 +3144,7 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServer
 	NetworkAddress proxy(IPAddress(0x07070707), 1);
 	NetworkAddress proxy2(IPAddress(0x08080808), 1);
 	NetworkAddress resolver(IPAddress(0x09090909), 1);
+	NetworkAddress versionIndexer(IPAddress(0x09090909), 1);
 	NetworkAddress clusterController(IPAddress(0x10101010), 1);
 	UID testUID(1, 2);
 
@@ -3184,6 +3195,11 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServer
 	ResolverInterface resolverInterf;
 	resolverInterf.resolve = RequestStream<struct ResolveTransactionBatchRequest>(Endpoint({ resolver }, testUID));
 	testDbInfo.resolvers.push_back(resolverInterf);
+
+	VersionIndexerInterface versionIndexerInterf;
+	versionIndexerInterf.commit =
+	    RequestStream<struct VersionIndexerCommitRequest>(Endpoint({ versionIndexer }, testUID));
+	testDbInfo.versionIndexers.push_back(versionIndexerInterf);
 
 	testDbInfo.recoveryState = RecoveryState::ACCEPTING_COMMITS;
 

@@ -131,6 +131,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "log",
                         "storage",
                         "resolver",
+                        "version_indexer",
                         "cluster_controller",
                         "data_distributor",
                         "ratekeeper",
@@ -604,6 +605,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "recovery_state":{
          "seconds_since_last_recovered":1,
          "required_resolvers":1,
+         "required_version_indexers":1,
          "required_commit_proxies":1,
          "required_grv_proxies":1,
          "name":{
@@ -830,6 +832,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "auto_commit_proxies":3,
          "auto_grv_proxies":1,
          "auto_resolvers":1,
+         "auto_version_indexers":1,
          "auto_logs":3,
          "commit_proxies":5,
          "grv_proxies":1,
@@ -1060,6 +1063,7 @@ const KeyRef JSONSchemas::clusterConfigurationSchema = LiteralStringRef(R"config
     "auto_commit_proxies":3,
     "auto_grv_proxies":1,
     "auto_resolvers":1,
+    "auto_version_indexers":1,
     "auto_logs":3,
     "commit_proxies":5,
     "grv_proxies":1
