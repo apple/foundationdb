@@ -277,7 +277,7 @@ double timer_monotonic(); // Returns a high precision monotonic clock which is a
                           // at startup, but might not be a globally accurate time.
 uint64_t timer_int(); // Return timer as uint64_t representing epoch nanoseconds
 
-void getLocalTime(const time_t* timep, struct tm* result);
+void getLocalTime(const std::time_t* timep, struct tm* result);
 
 // get GMT time string from an epoch seconds double
 std::string epochsToGMTString(double epochs);

@@ -24,6 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "flow/TDMetric.actor.h"
+#include <queue>
 
 template <class T>
 struct IsMetricHandle : std::false_type {};
