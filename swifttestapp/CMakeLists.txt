@@ -45,4 +45,4 @@ endfunction()
 set(FLOW_BINARY_DIR "${CMAKE_BINARY_DIR}/flow")
 generate_modulemap("${CMAKE_BINARY_DIR}/flow/include" "Flow" flow
   OMIT
-    sse2neon.h)
+    sse2neon.h ppc-asm.h)
