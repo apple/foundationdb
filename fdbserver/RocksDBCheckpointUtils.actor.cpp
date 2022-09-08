@@ -109,9 +109,9 @@ public:
 
 	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit) override;
 
-	Future<Standalone<StringRef>> nextChunk(const int byteLimit) { throw not_implemented(); }
+	Future<Standalone<StringRef>> nextChunk(const int byteLimit) override { throw not_implemented(); }
 
-	Future<Void> close() { return doClose(this); }
+	Future<Void> close() override { return doClose(this); }
 
 private:
 	struct Reader : IThreadPoolReceiver {
