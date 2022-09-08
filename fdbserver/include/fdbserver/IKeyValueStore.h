@@ -204,7 +204,8 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 	case KeyValueStoreType::SSD_REDWOOD_V1:
 		return keyValueStoreRedwoodV1(filename, logID, encryptionKeyProvider);
 	case KeyValueStoreType::SSD_ROCKSDB_V1:
-		return keyValueStoreRocksDB(filename, logID, storeType);
+		// return keyValueStoreRocksDB(filename, logID, storeType);
+		return keyValueStoreShardedRocksDB(filename, logID, storeType, checkChecksums, checkIntegrity);
 	case KeyValueStoreType::SSD_SHARDED_ROCKSDB:
 		return keyValueStoreShardedRocksDB(filename, logID, storeType, checkChecksums, checkIntegrity);
 	case KeyValueStoreType::MEMORY_RADIXTREE:
