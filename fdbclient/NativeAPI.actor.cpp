@@ -1501,32 +1501,6 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 	globalConfig = std::make_unique<GlobalConfig>(this);
 
-	if (apiVersion.hasTenantsV2()) {
-		registerSpecialKeysImpl(
-		    SpecialKeySpace::MODULE::CLUSTERID,
-		    SpecialKeySpace::IMPLTYPE::READONLY,
-		    std::make_unique<SingleSpecialKeyImpl>(
-		        LiteralStringRef("\xff\xff/cluster_id"), [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
-			        try {
-				        if (ryw->getDatabase().getPtr()) {
-					        return map(getClusterId(ryw->getDatabase()),
-					                   [](UID id) { return Optional<Value>(StringRef(id.toString())); });
-				        }
-			        } catch (Error& e) {
-				        return e;
-			        }
-			        return Optional<Value>();
-		        }));
-		registerSpecialKeysImpl(
-		    SpecialKeySpace::MODULE::MANAGEMENT,
-		    SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<TenantRangeImpl<true>>(SpecialKeySpace::getManagementApiCommandRange("tenant")));
-	} else if (apiVersion.hasTenantsV1()) {
-		registerSpecialKeysImpl(
-		    SpecialKeySpace::MODULE::MANAGEMENT,
-		    SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<TenantRangeImpl<false>>(SpecialKeySpace::getManagementApiCommandRange("tenantmap")));
-	}
 	if (apiVersion.version() >= 700) {
 		registerSpecialKeysImpl(SpecialKeySpace::MODULE::ERRORMSG,
 		                        SpecialKeySpace::IMPLTYPE::READONLY,
@@ -1720,6 +1694,26 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 			        }
 			        return Optional<Value>();
 		        }));
+		registerSpecialKeysImpl(
+		    SpecialKeySpace::MODULE::CLUSTERID,
+		    SpecialKeySpace::IMPLTYPE::READONLY,
+		    std::make_unique<SingleSpecialKeyImpl>(
+		        LiteralStringRef("\xff\xff/cluster_id"), [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+			        try {
+				        if (ryw->getDatabase().getPtr()) {
+					        return map(getClusterId(ryw->getDatabase()),
+					                   [](UID id) { return Optional<Value>(StringRef(id.toString())); });
+				        }
+			        } catch (Error& e) {
+				        return e;
+			        }
+			        return Optional<Value>();
+		        }));
+
+		registerSpecialKeysImpl(
+		    SpecialKeySpace::MODULE::MANAGEMENT,
+		    SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<TenantRangeImpl>(SpecialKeySpace::getManagementApiCommandRange("tenant")));
 	}
 	throttleExpirer = recurring([this]() { expireThrottles(); }, CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
 
@@ -1761,7 +1755,7 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     transactionCommitVersionNotFoundForSS("CommitVersionNotFoundForSS", cc), latencies(1000), readLatencies(1000),
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), bgLatencies(1000),
-    bgGranulesPerRequest(1000), transactionTracingSample(false),
+    bgGranulesPerRequest(1000), sharedStatePtr(nullptr), transactionTracingSample(false),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {}
 
@@ -6776,10 +6770,12 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 			if (e.code() != error_code_broken_promise && e.code() != error_code_batch_transaction_throttled &&
 			    e.code() != error_code_grv_proxy_memory_limit_exceeded)
 				TraceEvent(SevError, "GetConsistentReadVersionError").error(e);
-			if ((e.code() == error_code_batch_transaction_throttled ||
-			     e.code() == error_code_grv_proxy_memory_limit_exceeded) &&
-			    !cx->apiVersionAtLeast(630)) {
+			if (e.code() == error_code_batch_transaction_throttled && !cx->apiVersionAtLeast(630)) {
 				wait(delayJittered(5.0));
+			} else if (e.code() == error_code_grv_proxy_memory_limit_exceeded) {
+				// FIXME(xwang): the better way is to let this error broadcast to transaction.onError(e), otherwise the
+				// txn->cx counter doesn't make sense
+				wait(delayJittered(CLIENT_KNOBS->GRV_ERROR_RETRY_DELAY));
 			} else {
 				throw;
 			}
@@ -6816,7 +6812,6 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 
 	// dynamic batching
 	state PromiseStream<double> replyTimes;
-	state PromiseStream<Error> _errorStream;
 	state double batchTime = 0;
 	state Span span("NAPI:readVersionBatcher"_loc);
 	loop {
@@ -9985,31 +9980,32 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx, KeyRange ran
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 
 	state Value value = active ? blobRangeActive : blobRangeInactive;
-
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			state Standalone<VectorRef<KeyRangeRef>> startBlobRanges = wait(getBlobRanges(tr, range, 10));
-			state Standalone<VectorRef<KeyRangeRef>> endBlobRanges =
-			    wait(getBlobRanges(tr, KeyRangeRef(range.end, keyAfter(range.end)), 10));
+			Standalone<VectorRef<KeyRangeRef>> startBlobRanges = wait(getBlobRanges(tr, range, 1));
 
 			if (active) {
 				// Idempotent request.
-				if (!startBlobRanges.empty() && !endBlobRanges.empty()) {
-					return startBlobRanges.front().begin == range.begin && endBlobRanges.front().end == range.end;
+				if (!startBlobRanges.empty()) {
+					return startBlobRanges.front().begin == range.begin && startBlobRanges.front().end == range.end;
 				}
 			} else {
 				// An unblobbify request must be aligned to boundaries.
 				// It is okay to unblobbify multiple regions all at once.
-				if (startBlobRanges.empty() && endBlobRanges.empty()) {
+				if (startBlobRanges.empty()) {
+					// already unblobbified
 					return true;
+				} else if (startBlobRanges.front().begin != range.begin) {
+					// If there is a blob at the beginning of the range and it isn't aligned
+					return false;
 				}
-				// If there is a blob at the beginning of the range and it isn't aligned,
-				// or there is a blob range that begins before the end of the range, then fail.
-				if ((!startBlobRanges.empty() && startBlobRanges.front().begin != range.begin) ||
-				    (!endBlobRanges.empty() && endBlobRanges.front().begin < range.end)) {
+				// if blob range does start at the specified, key, we need to make sure the end of also a boundary of a
+				// blob range
+				Optional<Value> endPresent = wait(tr->get(range.end.withPrefix(blobRangeKeys.begin)));
+				if (!endPresent.present()) {
 					return false;
 				}
 			}
@@ -10018,10 +10014,6 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx, KeyRange ran
 			// This is not coalescing because we want to keep each range logically separate.
 			wait(krmSetRange(tr, blobRangeKeys.begin, range, value));
 			wait(tr->commit());
-			printf("Successfully updated blob range [%s - %s) to %s\n",
-			       range.begin.printable().c_str(),
-			       range.end.printable().c_str(),
-			       value.printable().c_str());
 			return true;
 		} catch (Error& e) {
 			wait(tr->onError(e));

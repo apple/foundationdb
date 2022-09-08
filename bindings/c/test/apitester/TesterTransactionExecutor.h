@@ -124,6 +124,13 @@ struct TransactionExecutorOptions {
 	// Create each transaction in a separate database instance
 	bool databasePerTransaction = false;
 
+	// Enable injection of database create errors
+	bool injectDatabaseCreateErrors = false;
+
+	// The probability of injected database create errors
+	// Used if buggify = true
+	double databaseCreateErrorRatio = 0.1;
+
 	// The size of the database instance pool
 	int numDatabases = 1;
 
@@ -141,6 +148,8 @@ public:
 	virtual ~ITransactionExecutor() {}
 	virtual void init(IScheduler* sched, const char* clusterFile, const std::string& bgBasePath) = 0;
 	virtual void execute(std::shared_ptr<ITransactionActor> tx, TTaskFct cont) = 0;
+	virtual fdb::Database selectDatabase() = 0;
+	virtual const TransactionExecutorOptions& getOptions() = 0;
 };
 
 // Create a transaction executor for the given options
