@@ -59,7 +59,8 @@ struct DataDistributorInterface {
 		           distributorExclCheckReq,
 		           dataDistributorMetrics,
 		           distributorSplitRange,
-		           storageWigglerState);
+		           storageWigglerState,
+		           triggerAudit);
 	}
 };
 

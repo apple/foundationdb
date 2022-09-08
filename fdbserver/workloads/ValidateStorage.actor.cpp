@@ -85,6 +85,10 @@ struct ValidateStorage : TestWorkload {
 		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
 		TraceEvent("TestValueVerified");
 
+		UID auditId = wait(auditStorage(
+		    cx->getConnectionRecord(), KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr), AuditType::ValidateHA));
+		TraceEvent("TestValidateEnd").detail("AuditID", auditId);
+
 		int ignore = wait(setDDMode(cx, 1));
 		return Void();
 	}

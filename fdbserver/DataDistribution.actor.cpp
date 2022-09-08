@@ -1310,24 +1310,29 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 	    std::make_shared<KeyRangeMap<AuditPhase>>(AuditPhase::Invalid, allKeys.end);
 	state std::shared_ptr<ActorCollection> actors = std::make_shared<ActorCollection>(true);
 	state UID auditId = deterministicRandom()->randomUniqueID();
+	TraceEvent(SevDebug, "DDAuditStorageBegin", auditId).detail("Range", req.range).detail("AuditType", req.type);
 
 	actors->add(scheduleAuditForRange(self, actors, auditMap, auditId, req.range, req.getType()));
 
-	if (req.async) {
+	if (req.async && !req.reply.isSet()) {
 		req.reply.send(auditId);
 	}
 
 	try {
 		wait(actors->getResult());
+		TraceEvent(SevDebug, "DDAuditStorageEnd", auditId).detail("Range", req.range).detail("AuditType", req.type);
 		// TODO(heliu): Set the audit result, and clear auditId.
-		if (!req.async) {
+		if (!req.async && !req.reply.isSet()) {
+			TraceEvent(SevDebug, "DDAuditStorageReply", auditId)
+			    .detail("Range", req.range)
+			    .detail("AuditType", req.type);
 			req.reply.send(auditId);
 		}
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "DDAuditStorageOperationError", auditId)
 		    .errorUnsuppressed(e)
 		    .detail("Range", req.range)
-		    .detail("Type", req.type);
+		    .detail("AuditType", req.type);
 	}
 
 	return Void();
@@ -1339,6 +1344,7 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
                                          UID auditId,
                                          KeyRange range,
                                          AuditType type) {
+	TraceEvent(SevDebug, "DDScheduleAuditBegin", auditId).detail("Range", range).detail("AuditType", type);
 	// TODO(heliu): Load the audit map for `range`.
 	state Key begin = range.begin;
 	state KeyRange currentRange = range;
@@ -1353,7 +1359,7 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
 				begin = it->range().end;
 				currentRange = KeyRangeRef(it->range().end, currentRange.end);
 			} else {
-				currentRange = KeyRangeRef(it->range().begin, it->range().end);
+				currentRange = KeyRangeRef(it->range().begin, it->range().end) & currentRange;
 				break;
 			}
 		}
@@ -1371,7 +1377,7 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
 				wait(delay(0.01));
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarnAlways, "TestValidateStorageError").errorUnsuppressed(e).detail("Range", range);
+			TraceEvent(SevWarnAlways, "DDScheduleAuditRangeError").errorUnsuppressed(e).detail("Range", range);
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
@@ -1388,7 +1394,7 @@ ACTOR Future<Void> doAuditStorage(Reference<DataDistributor> self,
                                   AuditStorageRequest req) {
 	TraceEvent(SevDebug, "DDAuditStorageBegin", req.id)
 	    .detail("Range", req.range)
-	    .detail("Type", req.type)
+	    .detail("AuditType", req.type)
 	    .detail("StorageServer", ssi.toString());
 
 	try {
