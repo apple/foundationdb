@@ -128,7 +128,7 @@ struct TransactionExecutorOptions {
 	bool injectDatabaseCreateErrors = false;
 
 	// The probability of injected database create errors
-	// Used if buggify = true
+	// Used if injectDatabaseCreateErrors = true
 	double databaseCreateErrorRatio = 0.1;
 
 	// The size of the database instance pool
@@ -136,6 +136,9 @@ struct TransactionExecutorOptions {
 
 	// Maximum number of retries per transaction (0 - unlimited)
 	int transactionRetryLimit = 0;
+
+	// Temporary directory
+	std::string tmpDir;
 };
 
 /**
@@ -149,6 +152,7 @@ public:
 	virtual void init(IScheduler* sched, const char* clusterFile, const std::string& bgBasePath) = 0;
 	virtual void execute(std::shared_ptr<ITransactionActor> tx, TTaskFct cont) = 0;
 	virtual fdb::Database selectDatabase() = 0;
+	virtual std::string getClusterFileForErrorInjection() = 0;
 	virtual const TransactionExecutorOptions& getOptions() = 0;
 };
 

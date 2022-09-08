@@ -361,6 +361,7 @@ bool runWorkloads(TesterOptions& options) {
 		// 7.1 and older releases crash on database create errors
 		txExecOptions.injectDatabaseCreateErrors = options.testSpec.buggify && options.apiVersion > 710;
 		txExecOptions.transactionRetryLimit = options.transactionRetryLimit;
+		txExecOptions.tmpDir = options.tmpDir.empty() ? std::string("/tmp") : options.tmpDir;
 
 		std::vector<std::shared_ptr<IWorkload>> workloads;
 		workloads.reserve(options.testSpec.workloads.size() * options.numClients);
