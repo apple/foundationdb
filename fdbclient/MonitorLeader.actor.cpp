@@ -881,7 +881,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			bool upToDate = wait(connRecord->upToDate(storedConnectionString));
 			if (upToDate) {
 				incorrectTime = Optional<double>();
-			} else if (allConnectionsFailed) {
+			} else if (allConnectionsFailed && storedConnectionString.getNumberOfCoordinators() > 0) {
 				// Failed to connect to all coordinators from the current connection string,
 				// so it is not possible to get any new updates from the cluster. It can be that
 				// all the coordinators have changed, but the client missed that, because it had
@@ -892,7 +892,6 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 				    .detail("StoredConnectionString", storedConnectionString.toString())
 				    .detail("CurrentConnectionString", connRecord->getConnectionString().toString());
 				wait(connRecord->setAndPersistConnectionString(storedConnectionString));
-				ASSERT(connRecord->getConnectionString().getNumberOfCoordinators() > 0);
 				info.intermediateConnRecord = connRecord;
 				return info;
 			} else {
