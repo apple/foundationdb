@@ -616,10 +616,10 @@ std::vector<RangeToSplit> findTenantShardBoundaries(KeyRangeMap<ShardTrackedData
 				                                      tenantKeys.begin,
 				                                      tenantKeys.end);
 				result.emplace_back(shardContainingTenantStart, faultLines);
+			} else {
+				CODE_PROBE(true,
+				           "Shard that contains complete tenant key range not split since shard stats are unavailable");
 			}
-		} else {
-			CODE_PROBE(true,
-			           "Shard that contains complete tenant key range not split since shard stats are unavailable");
 		}
 	} else {
 		auto startShardSize = shardContainingTenantStart->value().stats;
