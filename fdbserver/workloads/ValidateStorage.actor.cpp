@@ -69,6 +69,7 @@ struct ValidateStorage : TestWorkload {
 
 	ACTOR Future<Void> _start(ValidateStorage* self, Database cx) {
 		// int ignore = wait(setDDMode(cx, 0));
+		TraceEvent("ValidateStorageTestBegin");
 		state std::map<Key, Value> kvs({ { "TestKeyA"_sr, "TestValueA"_sr },
 		                                 { "TestKeyB"_sr, "TestValueB"_sr },
 		                                 { "TestKeyC"_sr, "TestValueC"_sr },
@@ -78,18 +79,24 @@ struct ValidateStorage : TestWorkload {
 
 		Version _ = wait(self->populateData(self, cx, &kvs));
 
-		std::cout << "TestValueWritten" << std::endl;
-
 		TraceEvent("TestValueWritten");
 
 		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
 		TraceEvent("TestValueVerified");
 
-		UID auditId = wait(auditStorage(
-		    cx->getConnectionRecord(), KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr), AuditType::ValidateHA));
-		TraceEvent("TestValidateEnd").detail("AuditID", auditId);
+		loop {
+			try {
+				UID auditId = wait(auditStorage(
+				    cx->getConnectionRecord(), KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr), AuditType::ValidateHA));
+				TraceEvent("TestValidateEnd").detail("AuditID", auditId);
+				break;
+			} catch (Error& e) {
+				TraceEvent("AuditStorageError").errorUnsuppressed(e);
+				wait(delay(1));
+			}
+		}
 
-		int ignore = wait(setDDMode(cx, 1));
+		// int ignore = wait(setDDMode(cx, 1));
 		return Void();
 	}
 
@@ -135,8 +142,6 @@ struct ValidateStorage : TestWorkload {
 
 				state int i = 0;
 				for (i = 0; i < shards.size() - 1; ++i) {
-
-					std::cout << "2" << std::endl;
 					std::vector<UID> src;
 					std::vector<UID> dest;
 					UID srcId, destId;

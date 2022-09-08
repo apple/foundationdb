@@ -4058,7 +4058,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 	TraceEvent(SevDebug, "ServeValidateRangeAgainstServerBegin", data->thisServerID)
 	    .detail("Range", range)
 	    .detail("Version", version)
-	    .detail("Servers", remoteServer.toString());
+	    .detail("RemoteServer", remoteServer.toString());
 
 	state int validatedKeys = 0;
 	loop {
@@ -4087,10 +4087,17 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 			state ErrorOr<GetKeyValuesReply> remoteResult = wait(remoteKeyValueFuture);
 			try {
 				state GetKeyValuesReply local = wait(localReq.reply.getFuture());
+				if (local.error.present()) {
+					throw local.error.get();
+				}
+				TraceEvent(SevDebug, "ValidateRangeGetLocalKeyValuesResult", data->thisServerID)
+				    .detail("Range", range)
+				    .detail("RemoteResultSize", local.data.size());
 			} catch (Error& e) {
 				TraceEvent(SevDebug, "ValidateRangeGetLocalKeyValuesError", data->thisServerID)
 				    .errorUnsuppressed(e)
 				    .detail("Range", range);
+				throw e;
 			}
 			Key lastKey = range.begin;
 			state std::string error;
@@ -4104,21 +4111,35 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 			}
 
 			state GetKeyValuesReply remote = remoteResult.get();
+			if (remote.error.present()) {
+				throw remote.error.get();
+			}
+			TraceEvent(SevDebug, "ValidateRangeGetRemoteKeyValuesResult", data->thisServerID)
+			    .detail("Range", range)
+			    .detail("RemoteResultSize", remote.data.size());
 			// Loop indeces
 			const int end = std::min(local.data.size(), remote.data.size());
 			int i = 0;
 			for (; i < end; ++i) {
 				KeyValueRef remoteKV = remote.data[i];
 				KeyValueRef localKV = local.data[i];
+				if (!range.contains(remoteKV.key) || !range.contains(localKV.key)) {
+					TraceEvent(SevDebug, "SSValidateRangeKeyOutOfRange", data->thisServerID)
+					    .detail("Range", range)
+					    .detail("RemoteServer", remoteServer.toString())
+					    .detail("LocalKey", Traceable<StringRef>::toString(localKV.key))
+					    .detail("RemoteKey", Traceable<StringRef>::toString(remoteKV.key));
+					throw wrong_shard_server();
+				}
 
 				if (remoteKV.key != localKV.key) {
-					error = format("Key Mismatch: local server (%lld): %s, remote server(%lld) %s",
+					error = format("Key Mismatch: local server (%016llx): %s, remote server(%016llx) %s",
 					               data->thisServerID.first(),
 					               Traceable<StringRef>::toString(localKV.key),
 					               remoteServer.uniqueID.first(),
 					               Traceable<StringRef>::toString(remoteKV.key));
 				} else if (remoteKV.value != localKV.value) {
-					error = format("Value Mismatch for Key %s: local server (%lld): %s, remote server(%lld) %s",
+					error = format("Value Mismatch for Key %s: local server (%016llx): %s, remote server(%016llx) %s",
 					               Traceable<StringRef>::toString(localKV.key),
 					               data->thisServerID.first(),
 					               Traceable<StringRef>::toString(localKV.value),
@@ -4139,13 +4160,13 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 			if (!local.more && !remote.more && local.data.size() == remote.data.size()) {
 				break;
 			} else if (i >= local.data.size() && !local.more && i < remote.data.size()) {
-				error = format("Missing key(s) form local server (%lld), next remote server(%lld) key: %s",
+				error = format("Missing key(s) form local server (%lld), next remote server(%016llx) key: %s",
 				               data->thisServerID.first(),
 				               remoteServer.uniqueID.first(),
 				               Traceable<StringRef>::toString(remote.data[i].key));
 				break;
 			} else if (i >= remote.data.size() && !remote.more && i < local.data.size()) {
-				error = format("Missing key(s) form remote server (%lld), next local server(%lld) key: %s",
+				error = format("Missing key(s) form remote server (%lld), next local server(%016llx) key: %s",
 				               remoteServer.uniqueID.first(),
 				               data->thisServerID.first(),
 				               Traceable<StringRef>::toString(local.data[i].key));
@@ -4251,9 +4272,9 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 
 	try {
 		while (begin < req.range.end) {
-		state Transaction tr(data->cx);
-		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			state Transaction tr(data->cx);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
 				state RangeResult shards = wait(krmGetRanges(&tr,
 				                                             keyServersPrefix,
@@ -4276,12 +4297,11 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
-
-			wait(waitForAll(fs));
-			AuditStorageState res(req.id, req.getType());
-			res.setPhase(AuditPhase::Complete);
-			req.reply.send(res);
 		}
+		wait(waitForAll(fs));
+		AuditStorageState res(req.id, req.getType());
+		res.setPhase(AuditPhase::Complete);
+		req.reply.send(res);
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "ServeAuditStorageError", data->thisServerID)
 		    .errorUnsuppressed(e)

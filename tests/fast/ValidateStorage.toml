@@ -1,8 +1,13 @@
 [configuration]
 config = 'triple'
+storageEngineType = 5
 generateFearless = true
 allowDefaultTenant = false
-machineCount = 15
+machineCount = 45
+
+[[knobs]]
+shard_encode_location_metadata = true
+storage_server_shard_aware = true
 
 [[test]]
 testTitle = 'ValidateStorageWorkload'
