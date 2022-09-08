@@ -1873,6 +1873,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 	state int pendingSnapshots = 0;
 	state Version lastForceFlushVersion = invalidVersion;
 	state std::deque<Version> forceFlushVersions;
+	state Future<Void> nextForceFlush = metadata->forceFlushVersion.whenAtLeast(1);
 
 	state std::deque<std::pair<Version, Version>> rollbacksInProgress;
 	state std::deque<std::pair<Version, Version>> rollbacksCompleted;
@@ -2113,7 +2114,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						}
 					}
 					when(wait(inFlightFiles.empty() ? Never() : success(inFlightFiles.front().future))) {}
-					when(wait(metadata->forceFlushVersion.whenAtLeast(lastForceFlushVersion + 1))) {
+					when(wait(nextForceFlush)) {
 						if (forceFlushVersions.empty() ||
 						    forceFlushVersions.back() < metadata->forceFlushVersion.get()) {
 							forceFlushVersions.push_back(metadata->forceFlushVersion.get());
@@ -2121,6 +2122,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						if (metadata->forceFlushVersion.get() > lastForceFlushVersion) {
 							lastForceFlushVersion = metadata->forceFlushVersion.get();
 						}
+						nextForceFlush = metadata->forceFlushVersion.whenAtLeast(lastForceFlushVersion + 1);
 					}
 				}
 			} catch (Error& e) {
@@ -2255,6 +2257,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									forceFlushVersions.clear();
 									lastForceFlushVersion = 0;
 									metadata->forceFlushVersion = NotifiedVersion();
+									nextForceFlush = metadata->forceFlushVersion.whenAtLeast(1);
 
 									Reference<ChangeFeedData> cfData =
 									    makeReference<ChangeFeedData>(bwData->db.getPtr());
