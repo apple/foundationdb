@@ -49,6 +49,7 @@ enum EMkCertOpt : int {
 	OPT_PRINT_SERVER_CERT,
 	OPT_PRINT_CLIENT_CERT,
 	OPT_PRINT_ARGUMENTS,
+	OPT_ENABLE_TRACE,
 };
 
 CSimpleOpt::SOption gOptions[] = { { OPT_HELP, "--help", SO_NONE },
@@ -68,6 +69,7 @@ CSimpleOpt::SOption gOptions[] = { { OPT_HELP, "--help", SO_NONE },
 	                               { OPT_PRINT_SERVER_CERT, "--print-server-cert", SO_NONE },
 	                               { OPT_PRINT_CLIENT_CERT, "--print-client-cert", SO_NONE },
 	                               { OPT_PRINT_ARGUMENTS, "--print-args", SO_NONE },
+	                               { OPT_ENABLE_TRACE, "--trace", SO_NONE },
 	                               SO_END_OF_OPTIONS };
 
 template <size_t Len>
@@ -191,6 +193,7 @@ int main(int argc, char** argv) {
 	auto printServerCert = false;
 	auto printClientCert = false;
 	auto printArguments = false;
+	auto enableTrace = false;
 	auto args = CSimpleOpt(argc, argv, gOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 	while (args.Next()) {
 		if (auto err = args.LastError()) {
@@ -266,6 +269,8 @@ int main(int argc, char** argv) {
 			case OPT_PRINT_ARGUMENTS:
 				printArguments = true;
 				break;
+			case OPT_ENABLE_TRACE:
+				enableTrace = true;
 			default:
 				fmt::print(stderr, "ERROR: Unknown option {}\n", args.OptionText());
 				return FDB_EXIT_ERROR;
@@ -277,12 +282,14 @@ int main(int argc, char** argv) {
 		platformInit();
 		Error::init();
 		g_network = newNet2(TLSConfig());
-		openTraceFile(NetworkAddress(), 10 << 20, 10 << 20, ".", "mkcert");
+		if (enableTrace)
+			openTraceFile(NetworkAddress(), 10 << 20, 10 << 20, ".", "mkcert");
 		auto thread = std::thread([]() { g_network->run(); });
-		auto cleanUpGuard = ScopeExit([&thread]() {
+		auto cleanUpGuard = ScopeExit([&thread, enableTrace]() {
 			g_network->stop();
 			thread.join();
-			closeTraceFile();
+			if (enableTrace)
+				closeTraceFile();
 		});
 
 		serverArgs.transformPathToAbs();

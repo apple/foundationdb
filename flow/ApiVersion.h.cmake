@@ -1,5 +1,5 @@
 /*
- * ProtocolVersion.h
+ * ApiVersion.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,15 +18,18 @@
  * limitations under the License.
  */
 
+#ifndef FLOW_CODE_API_VERSION_H
+#define FLOW_CODE_API_VERSION_H
+
 #pragma once
 #include "flow/Trace.h"
 #include <cstdint>
 
 constexpr int noBackwardsCompatibility = 13;
 
-// The first check second expression version doesn't need to change because it's just for earlier protocol versions.
+// The first check second expression version doesn't need to change because it's just for earlier API versions.
 #define API_VERSION_FEATURE(v, x)                                                                                      \
-	static_assert(v <= @FDB_AV_LATEST_VERSION@, "Feature protocol version too large");                                   \
+	static_assert(v <= @FDB_AV_LATEST_VERSION@, "Feature API version too large");                                   \
 	struct x {                                                                                                         \
 		static constexpr uint64_t apiVersion = v;                                                                      \
 	};                                                                                                                 \
@@ -39,7 +42,6 @@ class ApiVersion {
 public:
 	// Statics.
 	constexpr static int LATEST_VERSION = @FDB_AV_LATEST_VERSION@;
-	constexpr static int FUTURE_VERSION = @FDB_AV_FUTURE_VERSION@;
 
 	constexpr explicit ApiVersion(int version) : _version(version) {}
 	constexpr ApiVersion() : _version(0) {}
@@ -61,12 +63,15 @@ public:
 public: // introduced features
     API_VERSION_FEATURE(@FDB_AV_SNAPSHOT_RYW@, SnapshotRYW);
     API_VERSION_FEATURE(@FDB_AV_INLINE_UPDATE_DATABASE@, InlineUpdateDatabase);
-	API_VERSION_FEATURE(@FDB_AV_PERSISTENT_OPTIONS@, PersistentOptions);
+    API_VERSION_FEATURE(@FDB_AV_PERSISTENT_OPTIONS@, PersistentOptions);
+    API_VERSION_FEATURE(@FDB_AV_TRACE_FILE_IDENTIFIER@, TraceFileIdentifier);
     API_VERSION_FEATURE(@FDB_AV_CLUSTER_SHARED_STATE_MAP@, ClusterSharedStateMap);
-	API_VERSION_FEATURE(@FDB_AV_TENANTS_V1@, TenantsV1);
+    API_VERSION_FEATURE(@FDB_AV_TENANTS_V1@, TenantsV1);
     API_VERSION_FEATURE(@FDB_AV_BLOB_RANGE_API@, BlobRangeApi);
     API_VERSION_FEATURE(@FDB_AV_CREATE_DB_FROM_CONN_STRING@, CreateDBFromConnString);
     API_VERSION_FEATURE(@FDB_AV_FUTURE_GET_BOOL@, FutureGetBool);
     API_VERSION_FEATURE(@FDB_AV_FUTURE_PROTOCOL_VERSION_API@, FutureProtocolVersionApi);
-	API_VERSION_FEATURE(@FDB_AV_TENANTS_V2@, TenantsV2);
+    API_VERSION_FEATURE(@FDB_AV_TENANTS_V2@, TenantsV2);
 };
+
+#endif // FLOW_CODE_API_VERSION_H
