@@ -31,6 +31,7 @@
 #define FLOW_THREAD_SAFE 0
 
 #include <stdlib.h>
+#include <ctime>
 
 #define FDB_EXIT_SUCCESS 0
 #define FDB_EXIT_ERROR 1
