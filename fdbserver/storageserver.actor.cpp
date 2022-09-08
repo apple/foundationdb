@@ -1255,7 +1255,7 @@ public:
 	    fetchKeysParallelismFullLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_FULL),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
-	    ssLock(FLOW_KNOBS->MAX_OUTSTANDING,
+	    ssLock(FLOW_KNOBS->MAX_OUTSTANDING * 2,
 	           SERVER_KNOBS->STORAGESERVER_MAX_RANK,
 	           SERVER_KNOBS->STORAGESERVER_READ_PRIORITIES),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
@@ -3724,6 +3724,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	if (!SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && type == ReadType::FETCH) {
 		type = ReadType::NORMAL;
 	}
+
 	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[(int)type]));
 
 	try {
@@ -4472,6 +4473,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	if (!SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && type == ReadType::FETCH) {
 		type = ReadType::NORMAL;
 	}
+
 	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[(int)type]));
 
 	try {
@@ -4683,6 +4685,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	if (!SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && type == ReadType::FETCH) {
 		type = ReadType::NORMAL;
 	}
+
 	state int readPriority = data->readPriorityRanks[(int)type];
 	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(readPriority));
 

@@ -778,7 +778,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGE_SERVER_SHARD_AWARE,                           true );
 	init( STORAGESERVER_MAX_RANK,                                  2 );
 	init( STORAGESERVER_READ_RANKS,                      "0,2,1,1,1" );
-	init( STORAGESERVER_READ_PRIORITIES,                   "32,24,6" );
+	init( STORAGESERVER_READ_PRIORITIES,                   "48,32,8" );
 
 	//Wait Failure
 	init( MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS,                 250 ); if( randomize && BUGGIFY ) MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS = 2;
