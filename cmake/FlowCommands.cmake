@@ -241,6 +241,10 @@ function(add_flow_target)
         set(out_file "${in_file}")
       endif()
 
+      if(hdr)
+        list(APPEND HEADER_LIST ${out_file})
+      endif()
+
       list(APPEND sources ${out_file})
       set(actor_compiler_flags "")
       if(is_actor_file)
@@ -305,6 +309,7 @@ function(add_flow_target)
     endforeach()
 
     set_property(TARGET ${AFT_NAME} PROPERTY SOURCE_FILES ${AFT_SRCS})
+    set_property(TARGET ${AFT_NAME} PROPERTY HEADER_FILES ${HEADER_LIST})
     set_property(TARGET ${AFT_NAME} PROPERTY COVERAGE_FILTERS ${AFT_SRCS})
 
     add_custom_target(${AFT_NAME}_actors DEPENDS ${generated_files})

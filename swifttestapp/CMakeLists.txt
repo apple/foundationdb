@@ -24,3 +24,25 @@ target_link_directories(swifttestapp PRIVATE
 
 # TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?
 target_compile_options(swifttestapp PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++17 -enable-experimental-cxx-interop -Xfrontend -validate-tbd-against-ir=none>")
+
+# Generate flow modulemap
+
+function(generate_modulemap out module target)
+  cmake_parse_arguments(ARG "" "" "OMIT" ${ARGN})
+
+  set(MODULE_NAME "${module}")
+  get_target_property(MODULE_HEADERS ${target} HEADER_FILES)
+  foreach(header ${MODULE_HEADERS})
+    get_filename_component(fname ${header} NAME)
+    if(NOT ${fname} IN_LIST ARG_OMIT)
+      set(header_list "${header_list}    header \"${header}\"\n")
+    endif()
+  endforeach()
+  set(MODULE_HEADERS "${header_list}")
+  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/empty.modulemap" "${out}/module.modulemap" @ONLY)
+endfunction()
+
+set(FLOW_BINARY_DIR "${CMAKE_BINARY_DIR}/flow")
+generate_modulemap("${CMAKE_BINARY_DIR}/flow/include" "Flow" flow
+  OMIT
+    sse2neon.h)
