@@ -31,6 +31,7 @@
 #include <chrono>
 #include <thread>
 #include <fmt/format.h>
+#include <filesystem>
 
 namespace FdbApiTester {
 
@@ -576,6 +577,12 @@ class TransactionExecutorBase : public ITransactionExecutor {
 public:
 	TransactionExecutorBase(const TransactionExecutorOptions& options) : options(options), scheduler(nullptr) {}
 
+	~TransactionExecutorBase() {
+		if (tamperClusterFileThread.joinable()) {
+			tamperClusterFileThread.join();
+		}
+	}
+
 	void init(IScheduler* scheduler, const char* clusterFile, const std::string& bgBasePath) override {
 		this->scheduler = scheduler;
 		this->clusterFile = clusterFile;
@@ -590,6 +597,33 @@ public:
 		emptyListClusterFile.write(fmt::format("{}:{}@",
 		                                       Random().get().randomStringLowerCase<std::string>(3, 8),
 		                                       Random().get().randomStringLowerCase<std::string>(1, 100)));
+
+		if (options.tamperClusterFile) {
+			tamperedClusterFile.create(options.tmpDir, "fdb.cluster");
+			originalClusterFile = clusterFile;
+			this->clusterFile = tamperedClusterFile.getFileName();
+
+			// begin with a valid cluster file, but with non existing address
+			tamperedClusterFile.write(fmt::format("{}:{}@192.168.{}.{}:{}",
+			                                      Random().get().randomStringLowerCase<std::string>(3, 8),
+			                                      Random().get().randomStringLowerCase<std::string>(1, 100),
+			                                      Random().get().randomInt(1, 254),
+			                                      Random().get().randomInt(1, 254),
+			                                      Random().get().randomInt(2000, 10000)));
+
+			tamperClusterFileThread = std::thread([this]() {
+				std::this_thread::sleep_for(std::chrono::seconds(2));
+				// now write an invalid connection string
+				tamperedClusterFile.write(fmt::format("{}:{}@",
+				                                      Random().get().randomStringLowerCase<std::string>(3, 8),
+				                                      Random().get().randomStringLowerCase<std::string>(1, 100)));
+				std::this_thread::sleep_for(std::chrono::seconds(2));
+				// finally use correct cluster file contents
+				std::filesystem::copy_file(std::filesystem::path(originalClusterFile),
+				                           std::filesystem::path(tamperedClusterFile.getFileName()),
+				                           std::filesystem::copy_options::overwrite_existing);
+			});
+		}
 	}
 
 	const TransactionExecutorOptions& getOptions() override { return options; }
@@ -633,6 +667,9 @@ protected:
 	TmpFile emptyClusterFile;
 	TmpFile invalidClusterFile;
 	TmpFile emptyListClusterFile;
+	TmpFile tamperedClusterFile;
+	std::thread tamperClusterFileThread;
+	std::string originalClusterFile;
 };
 
 /**
@@ -647,7 +684,7 @@ public:
 	void init(IScheduler* scheduler, const char* clusterFile, const std::string& bgBasePath) override {
 		TransactionExecutorBase::init(scheduler, clusterFile, bgBasePath);
 		for (int i = 0; i < options.numDatabases; i++) {
-			fdb::Database db(clusterFile);
+			fdb::Database db(this->clusterFile);
 			databases.push_back(db);
 		}
 	}

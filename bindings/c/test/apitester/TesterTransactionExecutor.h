@@ -127,6 +127,9 @@ struct TransactionExecutorOptions {
 	// Enable injection of database create errors
 	bool injectDatabaseCreateErrors = false;
 
+	// Test tampering cluster file contents
+	bool tamperClusterFile = false;
+
 	// The probability of injected database create errors
 	// Used if injectDatabaseCreateErrors = true
 	double databaseCreateErrorRatio = 0.1;
