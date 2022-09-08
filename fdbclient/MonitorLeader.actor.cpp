@@ -861,6 +861,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 	for (const auto& c : cs.coords) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(c));
 	}
+	ASSERT(clientLeaderServers.size() > 0);
 
 	deterministicRandom()->randomShuffle(clientLeaderServers);
 
@@ -891,6 +892,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 				    .detail("StoredConnectionString", storedConnectionString.toString())
 				    .detail("CurrentConnectionString", connRecord->getConnectionString().toString());
 				wait(connRecord->setAndPersistConnectionString(storedConnectionString));
+				ASSERT(connRecord->getConnectionString().getNumberOfCoordinators() > 0);
 				info.intermediateConnRecord = connRecord;
 				return info;
 			} else {
@@ -938,6 +940,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 				    .detail("OldConnStr", info.intermediateConnRecord->getConnectionString().toString());
 				info.intermediateConnRecord = connRecord->makeIntermediateRecord(
 				    ClusterConnectionString(rep.get().read().forward.get().toString()));
+				ASSERT(info.intermediateConnRecord->getConnectionString().getNumberOfCoordinators() > 0);
 				return info;
 			}
 			if (connRecord != info.intermediateConnRecord) {
@@ -984,6 +987,7 @@ ACTOR Future<Void> monitorProxies(
     Key traceLogGroup) {
 	state MonitorLeaderInfo info(connRecord->get());
 	loop {
+		ASSERT(connRecord->get().isValid());
 		choose {
 			when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(
 			         connRecord->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup))) {
