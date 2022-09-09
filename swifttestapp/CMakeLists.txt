@@ -46,3 +46,10 @@ set(FLOW_BINARY_DIR "${CMAKE_BINARY_DIR}/flow")
 generate_modulemap("${CMAKE_BINARY_DIR}/flow/include" "Flow" flow
   OMIT
     sse2neon.h ppc-asm.h)
+
+set(FDBSERVER_BINARY_DIR "${CMAKE_BINARY_DIR}/fdbserver")
+generate_modulemap("${CMAKE_BINARY_DIR}/fdbserver/include" "Fdbserver" fdbserver
+  OMIT
+  ArtMutationBuffer.h # actually a textual include
+  art_impl.h # actually a textual include
+)
