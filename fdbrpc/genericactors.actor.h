@@ -34,17 +34,23 @@
 
 struct DestroySignal {
 	Promise<Void> destroyed;
-	virtual ~DestroySignal() {
-		destroyed.send(Void());
-	}
+	virtual ~DestroySignal() { destroyed.send(Void()); }
 };
 
-template<typename T>
+template <typename T>
 struct SafeAccessor {
-	T* self;
+private:
+	T* self = nullptr;
 	Promise<Void> destroyed;
+public:
+	SafeAccessor() = default;
 	SafeAccessor(T* self) : self(self), destroyed(self->destroyed) {}
 	T* operator->() const {
+		ASSERT(!destroyed.isSet());
+		return self;
+	}
+
+	T* getPtr() {
 		ASSERT(!destroyed.isSet());
 		return self;
 	}

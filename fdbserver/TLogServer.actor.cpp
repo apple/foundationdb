@@ -391,7 +391,6 @@ struct TLogData : NonCopyable, DestroySignal {
 	                                                                  Histogram::Unit::microseconds)) {
 		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
-
 };
 
 struct LogData : NonCopyable, public ReferenceCounted<LogData> {
@@ -1410,9 +1409,7 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 ACTOR Future<Void> updateStorageLoop(TLogData* self) {
 	wait(delay(0, TaskPriority::UpdateStorage));
 
-	loop {
-		wait(updateStorage(self));
-	}
+	loop { wait(updateStorage(self)); }
 }
 
 void commitMessages(TLogData* self,
@@ -2315,7 +2312,7 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 	state FlowLock::Releaser commitLockReleaser(self->persistentDataCommitLock);
 
 	// PERSIST: Initial setup of persistentData for a brand new tLog for a new database
-	state IKeyValueStore* storage = self->persistentData.self;
+	state SafeAccessor<IKeyValueStore> storage(self->persistentData.getPtr());
 	wait(ioTimeoutError(storage->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
 	storage->set(persistFormat);
 	storage->set(
@@ -2758,9 +2755,7 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 	while (!endVersion.present() || logData->version.get() < endVersion.get()) {
 		loop {
 			choose {
-				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
-					break;
-				}
+				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) { break; }
 				when(wait(dbInfoChange)) {
 					if (logData->logSystem->get()) {
 						r = logData->logSystem->get()->peek(logData->logId, tagAt, endVersion, tags, true);
@@ -3236,9 +3231,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 
 								choose {
 									when(wait(updateStorage(self))) {}
-									when(wait(allRemoved)) {
-										throw worker_removed();
-									}
+									when(wait(allRemoved)) { throw worker_removed(); }
 								}
 							}
 						} else {
@@ -3249,9 +3242,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 						}
 					}
 				}
-				when(wait(allRemoved)) {
-					throw worker_removed();
-				}
+				when(wait(allRemoved)) { throw worker_removed(); }
 			}
 		}
 	} catch (Error& e) {
@@ -3600,9 +3591,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 							forwardPromise(req.reply, self.tlogCache.get(req.recruitmentID));
 						}
 					}
-					when(wait(error)) {
-						throw internal_error();
-					}
+					when(wait(error)) { throw internal_error(); }
 					when(wait(activeSharedChange)) {
 						if (activeSharedTLog->get() == tlogId) {
 							TraceEvent("SharedTLogNowActive", self.dbgid).detail("NowActive", activeSharedTLog->get());
@@ -3664,7 +3653,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 			}
 		}
 
-		if (tlogTerminated(&self, persistentData, self.persistentQueue.self, e)) {
+		if (tlogTerminated(&self, persistentData, self.persistentQueue.getPtr(), e)) {
 			return Void();
 		} else {
 			throw;
