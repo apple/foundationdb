@@ -127,7 +127,10 @@ ACTOR Future<RangeResult> krmGetRangesUnaligned(Transaction* tr,
 
 	state GetRangeLimits limits(limit, limitBytes);
 	limits.minRows = 2;
-	RangeResult kv = wait(tr->getRange(lastLessOrEqual(withPrefix.begin), firstGreaterThan(withPrefix.end), limits));
+	// wait to include the next highest row >= keys.end in the result, so since end is exclusive, we need +2 and
+	// !orEqual
+	RangeResult kv =
+	    wait(tr->getRange(lastLessOrEqual(withPrefix.begin), KeySelectorRef(withPrefix.end, false, +2), limits));
 
 	return krmDecodeRanges(mapPrefix, keys, kv, false);
 }
@@ -142,7 +145,10 @@ ACTOR Future<RangeResult> krmGetRangesUnaligned(Reference<ReadYourWritesTransact
 
 	state GetRangeLimits limits(limit, limitBytes);
 	limits.minRows = 2;
-	RangeResult kv = wait(tr->getRange(lastLessOrEqual(withPrefix.begin), firstGreaterThan(withPrefix.end), limits));
+	// wait to include the next highest row >= keys.end in the result, so since end is exclusive, we need +2 and
+	// !orEqual
+	RangeResult kv =
+	    wait(tr->getRange(lastLessOrEqual(withPrefix.begin), KeySelectorRef(withPrefix.end, false, +2), limits));
 
 	return krmDecodeRanges(mapPrefix, keys, kv, false);
 }
@@ -323,17 +329,27 @@ TEST_CASE("/keyrangemap/decoderange/aligned") {
 	StringRef keyD = StringRef(arena, LiteralStringRef("d"));
 	StringRef keyE = StringRef(arena, LiteralStringRef("e"));
 	StringRef keyAB = StringRef(arena, LiteralStringRef("ab"));
+	StringRef keyAC = StringRef(arena, LiteralStringRef("ac"));
 	StringRef keyCD = StringRef(arena, LiteralStringRef("cd"));
 
 	// Fake getRange() call.
 	RangeResult kv;
 	kv.push_back(arena, KeyValueRef(fullKeyA, keyA));
 	kv.push_back(arena, KeyValueRef(fullKeyB, keyB));
+
+	// [A, AB(start), AC(start), B]
+	RangeResult decodedRanges = krmDecodeRanges(prefix, KeyRangeRef(keyAB, keyAC), kv);
+	ASSERT(decodedRanges.size() == 2);
+	ASSERT(decodedRanges.front().key == keyAB);
+	ASSERT(decodedRanges.front().value == keyA);
+	ASSERT(decodedRanges.back().key == keyAC);
+	ASSERT(decodedRanges.back().value == keyA);
+
 	kv.push_back(arena, KeyValueRef(fullKeyC, keyC));
 	kv.push_back(arena, KeyValueRef(fullKeyD, keyD));
 
 	// [A, AB(start), B, C, CD(end), D]
-	RangeResult decodedRanges = krmDecodeRanges(prefix, KeyRangeRef(keyAB, keyCD), kv);
+	decodedRanges = krmDecodeRanges(prefix, KeyRangeRef(keyAB, keyCD), kv);
 	ASSERT(decodedRanges.size() == 4);
 	ASSERT(decodedRanges.front().key == keyAB);
 	ASSERT(decodedRanges.front().value == keyA);
@@ -365,17 +381,27 @@ TEST_CASE("/keyrangemap/decoderange/unaligned") {
 	StringRef keyD = StringRef(arena, LiteralStringRef("d"));
 	StringRef keyE = StringRef(arena, LiteralStringRef("e"));
 	StringRef keyAB = StringRef(arena, LiteralStringRef("ab"));
+	StringRef keyAC = StringRef(arena, LiteralStringRef("ac"));
 	StringRef keyCD = StringRef(arena, LiteralStringRef("cd"));
 
 	// Fake getRange() call.
 	RangeResult kv;
 	kv.push_back(arena, KeyValueRef(fullKeyA, keyA));
 	kv.push_back(arena, KeyValueRef(fullKeyB, keyB));
+
+	// [A, AB(start), AC(start), B]
+	RangeResult decodedRanges = krmDecodeRanges(prefix, KeyRangeRef(keyAB, keyAC), kv, false);
+	ASSERT(decodedRanges.size() == 2);
+	ASSERT(decodedRanges.front().key == keyA);
+	ASSERT(decodedRanges.front().value == keyA);
+	ASSERT(decodedRanges.back().key == keyB);
+	ASSERT(decodedRanges.back().value == keyB);
+
 	kv.push_back(arena, KeyValueRef(fullKeyC, keyC));
 	kv.push_back(arena, KeyValueRef(fullKeyD, keyD));
 
 	// [A, AB(start), B, C, CD(end), D]
-	RangeResult decodedRanges = krmDecodeRanges(prefix, KeyRangeRef(keyAB, keyCD), kv, false);
+	decodedRanges = krmDecodeRanges(prefix, KeyRangeRef(keyAB, keyCD), kv, false);
 	ASSERT(decodedRanges.size() == 4);
 	ASSERT(decodedRanges.front().key == keyA);
 	ASSERT(decodedRanges.front().value == keyA);

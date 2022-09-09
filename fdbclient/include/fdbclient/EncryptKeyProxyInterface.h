@@ -132,7 +132,7 @@ struct EKPGetBaseCipherKeysByIdsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, baseCipherDetails, numHits, error);
+		serializer(ar, baseCipherDetails, numHits, error, arena);
 	}
 };
 

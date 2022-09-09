@@ -358,6 +358,8 @@ bool runWorkloads(TesterOptions& options) {
 		txExecOptions.blockOnFutures = options.testSpec.blockOnFutures;
 		txExecOptions.numDatabases = options.numDatabases;
 		txExecOptions.databasePerTransaction = options.testSpec.databasePerTransaction;
+		// 7.1 and older releases crash on database create errors
+		txExecOptions.injectDatabaseCreateErrors = options.testSpec.buggify && options.apiVersion > 710;
 		txExecOptions.transactionRetryLimit = options.transactionRetryLimit;
 
 		std::vector<std::shared_ptr<IWorkload>> workloads;

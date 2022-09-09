@@ -164,6 +164,12 @@ protected:
 
 	// Number of completed transactions
 	std::atomic<int> numTxCompleted;
+
+	// Number of started transactions
+	std::atomic<int> numTxStarted;
+
+	// Workload is in progress (intialized, but not completed)
+	std::atomic<bool> inProgress;
 };
 
 // Workload manager

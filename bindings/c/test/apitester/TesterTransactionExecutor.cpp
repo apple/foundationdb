@@ -72,14 +72,26 @@ void ITransactionContext::continueAfterAll(std::vector<fdb::Future> futures, TTa
  */
 class TransactionContextBase : public ITransactionContext {
 public:
-	TransactionContextBase(fdb::Transaction tx,
+	TransactionContextBase(ITransactionExecutor* executor,
 	                       std::shared_ptr<ITransactionActor> txActor,
 	                       TTaskFct cont,
 	                       IScheduler* scheduler,
 	                       int retryLimit,
 	                       std::string bgBasePath)
-	  : fdbTx(tx), txActor(txActor), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
-	    txState(TxState::IN_PROGRESS), commitCalled(false), bgBasePath(bgBasePath) {}
+	  : executor(executor), txActor(txActor), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
+	    txState(TxState::IN_PROGRESS), commitCalled(false), bgBasePath(bgBasePath) {
+		databaseCreateErrorInjected = executor->getOptions().injectDatabaseCreateErrors &&
+		                              Random::get().randomBool(executor->getOptions().databaseCreateErrorRatio);
+		fdb::Database db;
+		if (databaseCreateErrorInjected) {
+			db = fdb::Database("not_existing_file");
+		} else {
+			db = executor->selectDatabase();
+		}
+		fdbTx = db.createTransaction();
+	}
+
+	virtual ~TransactionContextBase() { ASSERT(txState == TxState::DONE); }
 
 	// A state machine:
 	// IN_PROGRESS -> (ON_ERROR -> IN_PROGRESS)* [-> ON_ERROR] -> DONE
@@ -114,6 +126,10 @@ public:
 		}
 		txState = TxState::DONE;
 		lock.unlock();
+
+		// No need for lock from here on, because only one thread
+		// can enter DONE state and handle it
+
 		if (retriedErrors.size() >= LARGE_NUMBER_OF_RETRIES) {
 			fmt::print("Transaction succeeded after {} retries on errors: {}\n",
 			           retriedErrors.size(),
@@ -124,13 +140,50 @@ public:
 		fdbTx.cancel();
 		txActor->complete(fdb::Error::success());
 		cleanUp();
+		ASSERT(txState == TxState::DONE);
 		contAfterDone();
 	}
 
 	std::string getBGBasePath() override { return bgBasePath; }
 
+	virtual void onError(fdb::Error err) override {
+		std::unique_lock<std::mutex> lock(mutex);
+		if (txState != TxState::IN_PROGRESS) {
+			// Ignore further errors, if the transaction is in the error handing mode or completed
+			return;
+		}
+		txState = TxState::ON_ERROR;
+		lock.unlock();
+
+		// No need to hold the lock from here on, because ON_ERROR state is handled sequentially, and
+		// other callbacks are simply ignored while it stays in this state
+
+		if (!canRetry(err)) {
+			return;
+		}
+
+		ASSERT(!onErrorFuture);
+
+		if (databaseCreateErrorInjected) {
+			// Failed to create a database because of failure injection
+			// Restart by recreating the transaction in a valid database
+			scheduler->schedule([this]() {
+				databaseCreateErrorInjected = false;
+				fdb::Database db = executor->selectDatabase();
+				fdbTx = db.createTransaction();
+				restartTransaction();
+			});
+		} else {
+			onErrorArg = err;
+			onErrorFuture = tx().onError(err);
+			handleOnErrorFuture();
+		}
+	}
+
 protected:
 	virtual void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) = 0;
+
+	virtual void handleOnErrorFuture() = 0;
 
 	// Clean up transaction state after completing the transaction
 	// Note that the object may live longer, because it is referenced
@@ -150,6 +203,10 @@ protected:
 		}
 		txState = TxState::DONE;
 		lock.unlock();
+
+		// No need for lock from here on, because only one thread
+		// can enter DONE state and handle it
+
 		txActor->complete(err);
 		cleanUp();
 		contAfterDone();
@@ -163,12 +220,17 @@ protected:
 		if (err) {
 			transactionFailed(err);
 		} else {
-			std::unique_lock<std::mutex> lock(mutex);
-			txState = TxState::IN_PROGRESS;
-			commitCalled = false;
-			lock.unlock();
-			txActor->start();
+			restartTransaction();
 		}
+	}
+
+	void restartTransaction() {
+		std::unique_lock<std::mutex> lock(mutex);
+		ASSERT(txState == TxState::ON_ERROR);
+		txState = TxState::IN_PROGRESS;
+		commitCalled = false;
+		lock.unlock();
+		txActor->start();
 	}
 
 	// Checks if a transaction can be retried. Fails the transaction if the check fails
@@ -196,44 +258,67 @@ protected:
 		return retriedErrorCodes;
 	}
 
+	// Pointer to the transaction executor interface
+	// Set in contructor, stays immutable
+	ITransactionExecutor* const executor;
+
 	// FDB transaction
+	// Provides a thread safe interface by itself (no need for mutex)
 	fdb::Transaction fdbTx;
 
 	// Actor implementing the transaction worklflow
+	// Set in constructor and reset on cleanup (no need for mutex)
 	std::shared_ptr<ITransactionActor> txActor;
 
 	// Mutex protecting access to shared mutable state
+	// Only the state that is accessible unter IN_PROGRESS state
+	// must be protected by mutex
 	std::mutex mutex;
 
 	// Continuation to be called after completion of the transaction
-	TTaskFct contAfterDone;
+	// Set in contructor, stays immutable
+	const TTaskFct contAfterDone;
 
 	// Reference to the scheduler
-	IScheduler* scheduler;
+	// Set in contructor, stays immutable
+	// Cannot be accessed in DONE state, workloads can be completed and the scheduler deleted
+	IScheduler* const scheduler;
 
 	// Retry limit
-	int retryLimit;
+	// Set in contructor, stays immutable
+	const int retryLimit;
 
 	// Transaction execution state
+	// Must be accessed under mutex
 	TxState txState;
 
-	// onError future used in ON_ERROR state
+	// onError future
+	// used only in ON_ERROR state (no need for mutex)
 	fdb::Future onErrorFuture;
 
 	// The error code on which onError was called
+	// used only in ON_ERROR state (no need for mutex)
 	fdb::Error onErrorArg;
 
 	// The time point of calling onError
+	// used only in ON_ERROR state (no need for mutex)
 	TimePoint onErrorCallTimePoint;
 
 	// Transaction is committed or being committed
+	// Must be accessed under mutex
 	bool commitCalled;
 
 	// A history of errors on which the transaction was retried
+	// used only in ON_ERROR and DONE states (no need for mutex)
 	std::vector<fdb::Error> retriedErrors;
 
 	// blob granule base path
-	std::string bgBasePath;
+	// Set in contructor, stays immutable
+	const std::string bgBasePath;
+
+	// Indicates if the database error was injected
+	// Accessed on initialization and in ON_ERROR state only (no need for mutex)
+	bool databaseCreateErrorInjected;
 };
 
 /**
@@ -241,13 +326,13 @@ protected:
  */
 class BlockingTransactionContext : public TransactionContextBase {
 public:
-	BlockingTransactionContext(fdb::Transaction tx,
+	BlockingTransactionContext(ITransactionExecutor* executor,
 	                           std::shared_ptr<ITransactionActor> txActor,
 	                           TTaskFct cont,
 	                           IScheduler* scheduler,
 	                           int retryLimit,
 	                           std::string bgBasePath)
-	  : TransactionContextBase(tx, txActor, cont, scheduler, retryLimit, bgBasePath) {}
+	  : TransactionContextBase(executor, txActor, cont, scheduler, retryLimit, bgBasePath) {}
 
 protected:
 	void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
@@ -288,22 +373,8 @@ protected:
 		onError(err);
 	}
 
-	virtual void onError(fdb::Error err) override {
-		std::unique_lock<std::mutex> lock(mutex);
-		if (txState != TxState::IN_PROGRESS) {
-			// Ignore further errors, if the transaction is in the error handing mode or completed
-			return;
-		}
-		txState = TxState::ON_ERROR;
-		lock.unlock();
-
-		if (!canRetry(err)) {
-			return;
-		}
-
-		ASSERT(!onErrorFuture);
-		onErrorFuture = fdbTx.onError(err);
-		onErrorArg = err;
+	virtual void handleOnErrorFuture() override {
+		ASSERT(txState == TxState::ON_ERROR);
 
 		auto start = timeNow();
 		fdb::Error err2 = onErrorFuture.blockUntilReady();
@@ -330,13 +401,13 @@ protected:
  */
 class AsyncTransactionContext : public TransactionContextBase {
 public:
-	AsyncTransactionContext(fdb::Transaction tx,
+	AsyncTransactionContext(ITransactionExecutor* executor,
 	                        std::shared_ptr<ITransactionActor> txActor,
 	                        TTaskFct cont,
 	                        IScheduler* scheduler,
 	                        int retryLimit,
 	                        std::string bgBasePath)
-	  : TransactionContextBase(tx, txActor, cont, scheduler, retryLimit, bgBasePath) {}
+	  : TransactionContextBase(executor, txActor, cont, scheduler, retryLimit, bgBasePath) {}
 
 protected:
 	void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
@@ -383,7 +454,6 @@ protected:
 		if (txState != TxState::IN_PROGRESS) {
 			return;
 		}
-		lock.unlock();
 		fdb::Error err = f.error();
 		auto waitTimeUs = timeElapsedInUs(cbInfo.startTime, endTime);
 		if (waitTimeUs > LONG_WAIT_TIME_US) {
@@ -399,25 +469,16 @@ protected:
 			scheduler->schedule(cbInfo.cont);
 			return;
 		}
+		// We keep lock until here to prevent transitions from the IN_PROGRESS state
+		// which could possibly lead to completion of the workload and destruction
+		// of the scheduler
+		lock.unlock();
 		onError(err);
 	}
 
-	virtual void onError(fdb::Error err) override {
-		std::unique_lock<std::mutex> lock(mutex);
-		if (txState != TxState::IN_PROGRESS) {
-			// Ignore further errors, if the transaction is in the error handing mode or completed
-			return;
-		}
-		txState = TxState::ON_ERROR;
-		lock.unlock();
+	virtual void handleOnErrorFuture() override {
+		ASSERT(txState == TxState::ON_ERROR);
 
-		if (!canRetry(err)) {
-			return;
-		}
-
-		ASSERT(!onErrorFuture);
-		onErrorArg = err;
-		onErrorFuture = tx().onError(err);
 		onErrorCallTimePoint = timeNow();
 		onErrorThisRef = std::static_pointer_cast<AsyncTransactionContext>(shared_from_this());
 		try {
@@ -490,9 +551,12 @@ protected:
 	};
 
 	// Map for keeping track of future waits and holding necessary object references
+	// It can be accessed at any time when callbacks are triggered, so it mus always
+	// be mutex protected
 	std::unordered_map<fdb::Future, CallbackInfo> callbackMap;
 
 	// Holding reference to this for onError future C callback
+	// Accessed only in ON_ERROR state (no need for mutex)
 	std::shared_ptr<AsyncTransactionContext> onErrorThisRef;
 };
 
@@ -509,18 +573,17 @@ public:
 		this->bgBasePath = bgBasePath;
 	}
 
-protected:
-	// Execute the transaction on the given database instance
-	void executeOnDatabase(fdb::Database db, std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) {
+	const TransactionExecutorOptions& getOptions() override { return options; }
+
+	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) override {
 		try {
-			fdb::Transaction tx = db.createTransaction();
 			std::shared_ptr<ITransactionContext> ctx;
 			if (options.blockOnFutures) {
 				ctx = std::make_shared<BlockingTransactionContext>(
-				    tx, txActor, cont, scheduler, options.transactionRetryLimit, bgBasePath);
+				    this, txActor, cont, scheduler, options.transactionRetryLimit, bgBasePath);
 			} else {
 				ctx = std::make_shared<AsyncTransactionContext>(
-				    tx, txActor, cont, scheduler, options.transactionRetryLimit, bgBasePath);
+				    this, txActor, cont, scheduler, options.transactionRetryLimit, bgBasePath);
 			}
 			txActor->init(ctx);
 			txActor->start();
@@ -554,14 +617,14 @@ public:
 		}
 	}
 
-	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) override {
+	fdb::Database selectDatabase() override {
 		int idx = Random::get().randomInt(0, options.numDatabases - 1);
-		executeOnDatabase(databases[idx], txActor, cont);
+		return databases[idx];
 	}
 
+private:
 	void release() { databases.clear(); }
 
-private:
 	std::vector<fdb::Database> databases;
 };
 
@@ -572,10 +635,7 @@ class DBPerTransactionExecutor : public TransactionExecutorBase {
 public:
 	DBPerTransactionExecutor(const TransactionExecutorOptions& options) : TransactionExecutorBase(options) {}
 
-	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) override {
-		fdb::Database db(clusterFile.c_str());
-		executeOnDatabase(db, txActor, cont);
-	}
+	fdb::Database selectDatabase() override { return fdb::Database(clusterFile.c_str()); }
 };
 
 std::unique_ptr<ITransactionExecutor> createTransactionExecutor(const TransactionExecutorOptions& options) {
