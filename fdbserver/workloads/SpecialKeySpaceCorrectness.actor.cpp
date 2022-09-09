@@ -396,9 +396,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					ASSERT(false);
 				} catch (Error& e) {
 					state Error err = e;
-					if (e.code() != error_code_not_committed) {
-						wait(defaultTx1->onError(e));
-						wait(defaultTx2->onError(e));
+					if (err.code() != error_code_not_committed) {
+						wait(defaultTx1->onError(err));
+						wait(defaultTx2->onError(err));
 						continue;
 					}
 					// Read conflict ranges of defaultTx1 and check for "foo" with no tenant prefix
