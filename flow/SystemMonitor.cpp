@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <fstream>
+
 #include "flow/flow.h"
 #include "flow/Histogram.h"
 #include "flow/Platform.h"
@@ -54,6 +56,61 @@ SystemStatistics getSystemStatistics() {
 	return getSystemStatistics(
 	    machineState.folder.present() ? machineState.folder.get() : "", &ipAddr, &statState.systemState, false);
 }
+
+namespace {
+
+std::string capitalizeCgroupKey(const std::string& key) {
+	bool wordStart = true;
+	std::string result;
+	result.reserve(key.size());
+
+	for (const char ch : key) {
+		if (std::isalnum(ch)) {
+			if (wordStart) {
+				result.push_back(std::toupper(ch));
+				wordStart = false;
+			} else {
+				result.push_back(ch);
+			}
+		} else {
+			// Skip non-alnum characters
+			wordStart = true;
+		}
+	}
+
+	return result;
+}
+
+// Collects the /sys/fs/cgroup/cpu,cpuacct/cpu.stat information
+// For more information about cpu,cpuacct, check manpages for cgroup
+void reportCpuCpuAcctCpuStat(BaseTraceEvent& traceEvent) {
+	// Default path to the cpu,cpuacct
+	// See manpages for cgroup
+	static const std::string PATH_TO_CPU_CPUACCT = "/sys/fs/cgroup/cpu,cpuacct/cpu.stat";
+
+	// readFileBytes is not usable since the file is not seekable
+	std::ifstream ifs(PATH_TO_CPU_CPUACCT);
+	if (!ifs.is_open()) {
+		traceEvent.detail("NoCpuStatFile", true);
+		return;
+	}
+
+	std::string line;
+	while (std::getline(ifs, line)) {
+		int splitPos = line.find(' ');
+		if (!splitPos) {
+			TraceEvent(SevInfo, "CpuStatFileParseError").detail("RawLine", line);
+			traceEvent.detail("CpuStatFleParseError", true);
+			return;
+		}
+		std::string key(std::begin(line), std::begin(line) + splitPos);
+		std::string capitalizedKey = capitalizeCgroupKey(key);
+		std::string value(std::begin(line) + splitPos + 1, std::end(line));
+		traceEvent.detail(capitalizedKey.c_str(), value);
+	}
+}
+
+} // anonymous namespace
 
 #define TRACEALLOCATOR(size)                                                                                           \
 	TraceEvent("MemSample")                                                                                            \
@@ -284,8 +341,8 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 		}
 
 		if (machineMetrics) {
-			TraceEvent("MachineMetrics")
-			    .detail("Elapsed", currentStats.elapsed)
+			auto traceEvent = TraceEvent("MachineMetrics");
+			traceEvent.detail("Elapsed", currentStats.elapsed)
 			    .detail("MbpsSent", currentStats.machineMegabitsSent / currentStats.elapsed)
 			    .detail("MbpsReceived", currentStats.machineMegabitsReceived / currentStats.elapsed)
 			    .detail("OutSegs", currentStats.machineOutSegs)
@@ -298,6 +355,7 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			    .detail("ZoneID", machineState.zoneId)
 			    .detail("MachineID", machineState.machineId)
 			    .trackLatest("MachineMetrics");
+			reportCpuCpuAcctCpuStat(traceEvent);
 		}
 	}
 

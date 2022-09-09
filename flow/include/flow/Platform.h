@@ -316,6 +316,7 @@ void renameFile(std::string const& fromPath, std::string const& toPath);
 void atomicReplace(std::string const& path, std::string const& content, bool textmode = true);
 
 // Read a file into memory
+// This requires the file to be seekable
 std::string readFileBytes(std::string const& filename, int maxSize);
 
 // Read a file into memory supplied by the caller
