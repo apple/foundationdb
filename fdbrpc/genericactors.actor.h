@@ -42,6 +42,7 @@ struct SafeAccessor {
 private:
 	T* self = nullptr;
 	Promise<Void> destroyed;
+
 public:
 	SafeAccessor() = default;
 	SafeAccessor(T* self) : self(self), destroyed(self->destroyed) {}
