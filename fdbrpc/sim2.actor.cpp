@@ -907,7 +907,7 @@ public:
 		return delay(seconds, taskID, currentProcess, true);
 	}
 	void _swiftEnqueue(void *task) override {
-		exit(-1);
+		ASSERT(false && "not implemented yet"); // TODO: implement enqueues onto the sim2 loop
 	}
 	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine, bool ordered = false) {
 		ASSERT(seconds >= -0.0001);

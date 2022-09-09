@@ -19,6 +19,18 @@ func swiftAsyncFunc() async {
         assertOnNet2EventLoop()
     }.value
     assertOnNet2EventLoop()
+
+    // Note that we can assign Flow priorities to tasks explicitly:
+    print("[swift][tid:\(_tid())] Parent task priority: \(Task.currentPriority)")
+    print("[swift][tid:\(_tid())] Execute task with priority: \(_Concurrency.TaskPriority.Worker)")
+    precondition(_Concurrency.TaskPriority.Worker.rawValue == 60, "WAS: \(_Concurrency.TaskPriority.Worker.rawValue) wanted: 60")
+    await Task(priority: .Worker) {
+        print("[swift][tid:\(_tid())] Task executed, with priority: \(Task.currentPriority)")
+        precondition(Task.currentPriority == .Worker)
+        assertOnNet2EventLoop()
+    }.value
+    assertOnNet2EventLoop()
+
     print("[swift][tid:\(_tid())] Properly resumed...")
 }
 
@@ -66,10 +78,10 @@ func swiftFlowFutureAwait() async {
 let task = Task { // task execution will be intercepted
     assertOnNet2EventLoop()
 
-//    print("[swift] await test -------------------------------------------------")
-//    print("[swift][tid:\(_tid())] Started a task...")
-//    await swiftAsyncFunc()
-//    print("[swift] ==== done ---------------------------------------------------")
+    print("[swift] await test -------------------------------------------------")
+    print("[swift][tid:\(_tid())] Started a task...")
+    await swiftAsyncFunc()
+    print("[swift] ==== done ---------------------------------------------------")
 
     print("[swift] futures test -----------------------------------------------")
     print("[swift] returned from 'await swiftAsyncFunc()'")
@@ -87,3 +99,4 @@ globalNetworkRun()
 
 func test(_ p: ResolutionBalancer) {
 }
+

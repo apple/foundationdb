@@ -21,22 +21,13 @@
 #ifndef FLOW_SWIFT_H
 #define FLOW_SWIFT_H
 
+#include "swift/ABI/Task.h"
 #include "flow/ProtocolVersion.h"
 #pragma once
 
 #include <array>
-#include <regex>
-#include <string>
-#include <stdint.h>
 #include <variant>
 #include <atomic>
-#include "boost/asio.hpp"
-#include "flow/Arena.h"
-#include "flow/BooleanParam.h"
-#include "flow/IRandom.h"
-#include "flow/Trace.h"
-#include "flow/WriteOnlySet.h"
-
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 
@@ -47,33 +38,6 @@
 
 /// A count in nanoseconds.
 using JobDelay = unsigned long long;
-
-class Job {
-public:
-    bool isAsyncTask() const {
-        return false;
-    }
-
-    int getPriority() const {
-        return 0;
-    }
-
-    /// Given that we've fully established the job context in the current
-    /// thread, actually start running this job.  To establish the context
-    /// correctly, call swift_job_run or runJobInExecutorContext.
-    void runInFullyEstablishedContext();
-
-    /// Given that we've fully established the job context in the
-    /// current thread, and that the job is a simple (non-task) job,
-    /// actually start running this job.
-    void runSimpleInFullyEstablishedContext() {
-        // FIXME: return RunJob(this); // 'return' forces tail call
-    }
-};
-
-class AsyncSwiftTask: public Job {
-
-};
 
 class ExecutorRef {
 	void* Identity;

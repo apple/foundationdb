@@ -648,7 +648,7 @@ public:
 
 	template <class U>
 	void send(U&& value) {
-		printf("[c++][%s:%d] send, ...\n", __FILE_NAME__, __LINE__, Callback<T>::next);
+		printf("[c++][%s:%d] send, ...\n", __FILE_NAME__, __LINE__);
 		ASSERT(canBeSet());
 		new (&value_storage) T(std::forward<U>(value));
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
