@@ -310,6 +310,9 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(tr->commit());
 		} else {
 			ASSERT(tenantsToCreate.size() == 1);
+			if (deterministicRandom()->coinflip()) {
+				tenantsToCreate.begin()->second.assignedCluster = self->dataClusterName;
+			}
 			wait(MetaclusterAPI::createTenant(
 			    self->mvDb, tenantsToCreate.begin()->first, tenantsToCreate.begin()->second));
 		}
