@@ -140,6 +140,9 @@ struct ChangeConfigWorkload : TestWorkload {
 		if (autoChange) { // if auto, we first get the desired addresses by read \xff\xff/management/auto_coordinators
 			loop {
 				try {
+					// Set RAW_ACCESS to explicitly avoid using tenants because
+					// access to management keys is denied for tenant transactions
+					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 					Optional<Value> newCoordinatorsKey = wait(tr.get(
 					    LiteralStringRef("auto_coordinators")
 					        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
