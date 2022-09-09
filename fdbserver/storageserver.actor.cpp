@@ -10240,11 +10240,11 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 				prevVersion = reply.versions[i + j].first;
 			}
 			if (updatedVersion != invalidVersion) {
-				TraceEvent("SetNextVersionWithNoData", self->thisServerID)
-				    .detail("Version", updatedVersion)
-				    .detail("Previous", self->nextVersionWithNoData.get())
-				    .detail("DataVersion", self->version.get())
-				    .detail("MyTag", self->tag);
+				//TraceEvent("SetNextVersionWithNoData", self->thisServerID)
+				//    .detail("Version", updatedVersion)
+				//    .detail("Previous", self->nextVersionWithNoData.get())
+				//    .detail("DataVersion", self->version.get())
+				//    .detail("MyTag", self->tag);
 				self->nextVersionWithNoData.set(updatedVersion);
 			}
 			if (j > 0) {

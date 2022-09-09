@@ -1556,16 +1556,16 @@ public:
 				continue;
 			}
 			if (minWorker.present()) {
-				//if (fitness > minWorker.get().fitness) {
+				if (fitness > minWorker.get().fitness) {
 				//	logWorkerUnavailableForRole(SevDebug, id, role, "Worker has worse fitness than minWorker",
 				//				    worker_details, fitness);
-				//	continue;
-				//}
-				//if (fitness == minWorker.get().fitness && id_used[worker_process_id] > minWorker.get().used) {
-				//	logWorkerUnavailableForRole(SevDebug, id, role, "Worker is more used than minWorker",
-				//				    worker_details, fitness);
-				//	continue;
-				//}
+					continue;
+				}
+				if (fitness == minWorker.get().fitness && id_used[worker_process_id] > minWorker.get().used) {
+					logWorkerUnavailableForRole(SevDebug, id, role, "Worker is more used than minWorker",
+								    worker_details, fitness);
+					continue;
+				}
 			}
 			//TraceEvent(SevDebug, "WorkerAvailableForRole", id)
 			//    .detail("Role", to_string(role))
