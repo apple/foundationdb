@@ -458,8 +458,6 @@ Reference<BlobCipherKey> BlobCipherKeyCache::getCipherKey(const EncryptCipherDom
 	} else {
 		++BlobCipherMetrics::getInstance()->cipherKeyCacheMiss;
 	}
-	if (cipherKey.isValid() && cipherKey->isExpired()) {
-	}
 
 	return cipherKey;
 }

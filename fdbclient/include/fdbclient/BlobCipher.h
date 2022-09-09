@@ -82,7 +82,10 @@ public:
 		CounterSet(CounterCollection& cc, std::string name);
 	};
 
-	static CounterSet& counters(UsageType t) { return getInstance()->counterSets[int(t)]; }
+	static CounterSet& counters(UsageType t) {
+		ASSERT(t < UsageType::MAX);
+		return getInstance()->counterSets[int(t)];
+	}
 
 private:
 	BlobCipherMetrics();
