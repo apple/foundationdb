@@ -1875,14 +1875,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 				}
 
 				if (tokencmp(tokens[0], "createtenant")) {
-					bool _result = wait(makeInterruptable(createTenantCommandActor(db, tokens, opt.apiVersion)));
+					bool _result = wait(makeInterruptable(createTenantCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "deletetenant")) {
-					bool _result = wait(makeInterruptable(deleteTenantCommandActor(db, tokens, opt.apiVersion)));
+					bool _result = wait(makeInterruptable(deleteTenantCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					else if (tenantName.present() && tokens[1] == tenantName.get()) {
@@ -1894,26 +1894,20 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 				}
 
 				if (tokencmp(tokens[0], "listtenants")) {
-					bool _result = wait(makeInterruptable(listTenantsCommandActor(db, tokens, opt.apiVersion)));
+					bool _result = wait(makeInterruptable(listTenantsCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "gettenant")) {
-					bool _result = wait(makeInterruptable(getTenantCommandActor(db, tokens, opt.apiVersion)));
+					bool _result = wait(makeInterruptable(getTenantCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "configuretenant")) {
-					if (opt.apiVersion < 720) {
-						fmt::print(stderr, "ERROR: tenants cannot be configured before API version 720.\n");
-						is_error = true;
-						continue;
-					}
-
 					bool _result = wait(makeInterruptable(configureTenantCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
@@ -1921,13 +1915,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 				}
 
 				if (tokencmp(tokens[0], "renametenant")) {
-					if (opt.apiVersion < 720) {
-						fmt::print(stderr, "ERROR: tenants cannot be renamed before API version 720.\n");
-						is_error = true;
-						continue;
-					}
-
-					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens, opt.apiVersion)));
+					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
