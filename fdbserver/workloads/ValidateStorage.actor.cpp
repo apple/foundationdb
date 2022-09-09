@@ -127,6 +127,7 @@ struct ValidateStorage : TestWorkload {
 	}
 
 	ACTOR Future<Void> validateData(ValidateStorage* self, Database cx, KeyRange range) {
+		TraceEvent("TestValidateStorageBegin").detail("Range", range);
 		state Transaction tr(cx);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -151,10 +152,16 @@ struct ValidateStorage : TestWorkload {
 					Optional<Value> serverListValue = wait(tr.get(serverListKeyFor(src[idx])));
 					ASSERT(serverListValue.present());
 					const StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
+					TraceEvent("TestValidateStorageSendingRequest")
+					    .detail("Range", range)
+					    .detail("StorageServer", ssi.toString());
 					AuditStorageRequest req(deterministicRandom()->randomUniqueID(),
 					                        KeyRangeRef(shards[i].key, shards[i + 1].key),
 					                        AuditType::ValidateHA);
-					AuditStorageState vResult = wait(ssi.auditStorage.getReply(req));
+					Optional<AuditStorageState> vResult = wait(timeout<AuditStorageState>(ssi.auditStorage.getReply(req), 5));
+					if (!vResult.present()) {
+						throw audit_storage_failed();
+					}
 				}
 				break;
 			} catch (Error& e) {

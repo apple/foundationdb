@@ -1399,12 +1399,15 @@ ACTOR Future<Void> doAuditStorage(Reference<DataDistributor> self,
 
 	try {
 		auditMap->insert(req.range, AuditPhase::Running);
-		AuditStorageState vResult = wait(ssi.auditStorage.getReply(req));
-		TraceEvent e(vResult.error.empty() ? SevInfo : SevWarnAlways, "DDAuditStorageState", req.id);
+		ErrorOr<AuditStorageState> vResult = wait(ssi.auditStorage.getReplyUnlessFailedFor(req, 2, 0));
+		if (vResult.isError()) {
+			throw vResult.getError();
+		}
+		TraceEvent e(vResult.get().error.empty() ? SevInfo : SevWarnAlways, "DDAuditStorageState", req.id);
 		e.detail("Range", req.range);
 		e.detail("StorageServer", ssi.toString());
-		if (!vResult.error.empty()) {
-			e.detail("ErrorMessage", vResult.error);
+		if (!vResult.get().error.empty()) {
+			e.detail("ErrorMessage", vResult.get().error);
 		}
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "DDValidateStorageError", req.id)

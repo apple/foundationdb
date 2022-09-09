@@ -1,5 +1,5 @@
 [configuration]
-config = 'triple'
+config = 'double'
 storageEngineType = 5
 generateFearless = true
 allowDefaultTenant = false

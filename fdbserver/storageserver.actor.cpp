@@ -4232,11 +4232,21 @@ ACTOR Future<Void> validateRangeShard(StorageServer* data, KeyRange range, std::
 	std::unordered_map<std::string, std::vector<StorageServerInterface>> ssis;
 	std::string thisDcId;
 	for (const auto& v : serverListValues) {
+		if (!v.present()) {
+			continue;
+		}
 		const StorageServerInterface ssi = decodeServerListValue(v.get());
 		if (ssi.uniqueID == data->thisServerID) {
 			thisDcId = ssi.locality.describeDcId();
 		}
 		ssis[ssi.locality.describeDcId()].push_back(ssi);
+	}
+
+	if (ssis.size() < 2) {
+		TraceEvent(SevWarn, "ServeValidateRangeShardNotHAConfig", data->thisServerID)
+		    .detail("Range", range)
+		    .detail("Servers", describe(candidates));
+		return Void();
 	}
 
 	StorageServerInterface* remoteServer = nullptr;
@@ -4253,6 +4263,11 @@ ACTOR Future<Void> validateRangeShard(StorageServer* data, KeyRange range, std::
 
 	if (remoteServer != nullptr) {
 		wait(validateRangeAgainstServer(data, range, version, *remoteServer));
+	} else {
+		TraceEvent(SevWarn, "ServeValidateRangeShardRemoteNotFound", data->thisServerID)
+		    .detail("Range", range)
+		    .detail("Servers", describe(candidates));
+		throw audit_storage_failed();
 	}
 
 	return Void();
