@@ -37,13 +37,18 @@
 
 #define SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID -2
 #define ENCRYPT_HEADER_DOMAIN_ID -3
-
-const std::string FDB_DEFAULT_ENCRYPT_DOMAIN_NAME = "FdbDefaultEncryptDomain";
+#define FDB_DEFAULT_ENCRYPT_DOMAIN_ID -4
 
 using EncryptCipherDomainId = int64_t;
 using EncryptCipherDomainNameRef = StringRef;
+using EncryptCipherDomainName = Standalone<EncryptCipherDomainNameRef>;
 using EncryptCipherBaseKeyId = uint64_t;
 using EncryptCipherRandomSalt = uint64_t;
+
+const EncryptCipherDomainNameRef FDB_DEFAULT_ENCRYPT_DOMAIN_NAME_REF =
+    EncryptCipherDomainNameRef(std::string("FdbDefaultEncryptDomain"));
+const EncryptCipherDomainName FDB_DEFAULT_ENCRYPT_DOMAIN_NAME =
+    EncryptCipherDomainName(std::string("FdbDefaultEncryptDomain"));
 
 typedef enum {
 	ENCRYPT_CIPHER_MODE_NONE = 0,

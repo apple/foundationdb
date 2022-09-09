@@ -31,6 +31,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TransactionLineage.h"
+#include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
@@ -51,6 +52,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
+#include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
@@ -874,6 +876,104 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	return Void();
 }
 
+namespace {
+ErrorOr<Optional<std::pair<TenantName, int64_t>>> getTenantDetails(ProxyCommitData* commitData,
+                                                                   Optional<int64_t> tenantId,
+                                                                   bool logOnFailure) {
+	if (tenantId.present() && tenantId.get() != TenantInfo::INVALID_TENANT) {
+		auto itr = commitData->tenantIdNameMap.find(tenantId.get());
+		if (itr == commitData->tenantIdNameMap.end()) {
+			if (logOnFailure) {
+				TraceEvent(SevWarn, "CommitProxyUnknownTenant", commitData->dbgid).detail("Tenant", tenantId.get());
+			}
+
+			return unknown_tenant();
+		}
+
+		return ErrorOr<Optional<std::pair<TenantName, int64_t>>>(std::make_pair(itr->second, itr->first));
+	}
+
+	return Optional<std::pair<TenantName, int64_t>>();
+}
+
+std::pair<EncryptCipherDomainName, int64_t> getEncryptDetailsFromMutationRef(ProxyCommitData* commitData,
+                                                                             MutationRef m) {
+	std::pair<EncryptCipherDomainName, int64_t> details(EncryptCipherDomainName(), TenantInfo::INVALID_TENANT);
+
+	// Possible scenarios:
+	// 1. Encryption domain (Tenant details) weren't explicitly provided, extract Tenant details using
+	// TenantPrefix (first 8 bytes of FDBKey)
+	// 2. Encryption domain isn't available, leverage 'default encrypiton domain'
+	bool useDefaultEncryptionDomain = true;
+	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+		if (isSystemKey(m.param1)) {
+			// Encryption domain == FDB SystemKeyspace encryption domain
+			details.first = EncryptCipherDomainName(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
+			details.second = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
+		} else if ((MutationRef::Type)m.type == MutationRef::Type::ClearRange) {
+			// FIXME: Handle Clear-range transaction, actions needed:
+			// 1. Transaction range can spawn multiple encryption domains (tenants)
+			// 2. Transaction can be a multi-key transaction spawning multiple tenants
+			// For now fallback to 'default encryption domain'
+			ASSERT(useDefaultEncryptionDomain);
+
+			CODE_PROBE(true, "SingleKey ClearRange mutation encryption");
+		} else if (m.param1.size() >= TENANT_PREFIX_SIZE) {
+			// Parse mutation key to determine mutation encryption domain
+			StringRef prefix = m.param1.substr(0, TENANT_PREFIX_SIZE);
+			int64_t tenantId = TenantMapEntry::prefixToId(prefix, false /* enforceValidTenantId */);
+
+			if (tenantId != TenantInfo::INVALID_TENANT) {
+				ErrorOr<Optional<std::pair<TenantName, int64_t>>> result =
+				    getTenantDetails(commitData, tenantId, false);
+				if (!result.isError() && result.get().present()) {
+					details.first = result.get().get().first;
+					details.second = result.get().get().second;
+					useDefaultEncryptionDomain = false;
+				}
+			} else if (commitData->db->get().client.tenantMode == TenantMode::REQUIRED) {
+				// Disallow non-tenant non-clearrange transaction if cluster is configured with 'TenantMode::Required'
+				TraceEvent(SevError, "InvalidMutation", commitData->dbgid)
+				    .detail("MutationType", (MutationRef::Type)m.type);
+				throw encrypt_invalid_transaction();
+			} else {
+				// Leverage 'default encryption domain'
+			}
+		}
+	} else {
+		// ClearRange is the 'only' MultiKey transaction allowed
+		if (m.type != MutationRef::Type::ClearRange) {
+			TraceEvent(SevError, "InvalidMutation", commitData->dbgid)
+			    .detail("MutationType", (MutationRef::Type)m.type);
+			throw encrypt_invalid_transaction();
+		}
+
+		// FIXME: Handle Clear-range transaction, actions needed:
+		// 1. Transaction range can spawn multiple encryption domains (tenants)
+		// 2. Transaction can be a multi-key transaction spawning multiple tenants
+		// For now fallback to 'default encryption domain'
+		ASSERT(useDefaultEncryptionDomain);
+
+		CODE_PROBE(true, "MultiKey ClearRange mutation encryption");
+	}
+
+	ASSERT(details.second != TenantInfo::INVALID_TENANT || useDefaultEncryptionDomain);
+
+	// Unknown tenant, fallback to fdb default encryption domain
+	if (useDefaultEncryptionDomain) {
+		details.first = EncryptCipherDomainName(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
+		details.second = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
+
+		CODE_PROBE(true, "Default tenant mutation encryption");
+	}
+
+	ASSERT_GT(details.first.size(), 0);
+
+	return details;
+}
+
+} // namespace
+
 ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	state double resolutionStart = now();
 	// Sending these requests is the fuzzy border between phase 1 and phase 2; it could conceivably overlap with
@@ -918,18 +1018,23 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	state Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getCipherKeys;
 	if (pProxyCommitData->isEncryptionEnabled) {
 		static std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> defaultDomains = {
-			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME },
-			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
+			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME_REF },
+			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME_REF }
 		};
 		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> encryptDomains = defaultDomains;
 		for (int t = 0; t < trs.size(); t++) {
 			TenantInfo const& tenantInfo = trs[t].tenantInfo;
 			int64_t tenantId = tenantInfo.tenantId;
 			Optional<TenantNameRef> const& tenantName = tenantInfo.name;
-			// TODO(yiwu): In raw access mode, use tenant prefix to figure out tenant id for user data
 			if (tenantId != TenantInfo::INVALID_TENANT) {
 				ASSERT(tenantName.present());
 				encryptDomains[tenantId] = tenantName.get();
+			} else {
+				for (auto m : trs[t].transaction.mutations) {
+					std::pair<EncryptCipherDomainName, int64_t> details =
+					    getEncryptDetailsFromMutationRef(pProxyCommitData, m);
+					encryptDomains[details.second] = details.first;
+				}
 			}
 		}
 		getCipherKeys = getLatestEncryptCipherKeys(pProxyCommitData->db, encryptDomains, BlobCipherMetrics::TLOG);
@@ -1158,17 +1263,22 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 
 void writeMutation(CommitBatchContext* self, int64_t tenantId, const MutationRef& mutation) {
 	static_assert(TenantInfo::INVALID_TENANT == ENCRYPT_INVALID_DOMAIN_ID);
-	if (!self->pProxyCommitData->isEncryptionEnabled || tenantId == TenantInfo::INVALID_TENANT) {
-		// TODO(yiwu): In raw access mode, use tenant prefix to figure out tenant id for user data
-		bool isRawAccess = tenantId == TenantInfo::INVALID_TENANT && !isSystemKey(mutation.param1) &&
-		                   !(mutation.type == MutationRef::ClearRange && isSystemKey(mutation.param2)) &&
-		                   self->pProxyCommitData->db->get().client.tenantMode == TenantMode::REQUIRED;
-		CODE_PROBE(isRawAccess, "Raw access to tenant key space");
-		self->toCommit.writeTypedMessage(mutation);
-	} else {
+
+	if (self->pProxyCommitData->isEncryptionEnabled) {
+		if (tenantId == TenantInfo::INVALID_TENANT) {
+			std::pair<EncryptCipherDomainName, int64_t> p =
+			    getEncryptDetailsFromMutationRef(self->pProxyCommitData, mutation);
+			CODE_PROBE(true, "Raw access to tenant key space");
+			tenantId = p.second;
+		}
+
+		ASSERT_NE(tenantId, TenantInfo::INVALID_TENANT);
+
 		Arena arena;
 		self->toCommit.writeTypedMessage(
 		    mutation.encrypt(self->cipherKeys, tenantId /*domainId*/, arena, BlobCipherMetrics::TLOG));
+	} else {
+		self->toCommit.writeTypedMessage(mutation);
 	}
 }
 

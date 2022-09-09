@@ -83,8 +83,9 @@ public:
 	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
-	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap), initialCommit(initialCommit_),
-	    dbInfo(proxyCommitData_.db) {}
+	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
+	    tenantIdNameMap(&proxyCommitData_.tenantIdNameMap), initialCommit(initialCommit_), dbInfo(proxyCommitData_.db) {
+	}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           ResolverData& resolverData_,
@@ -134,6 +135,7 @@ private:
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
 	std::map<TenantName, TenantMapEntry>* tenantMap = nullptr;
+	std::map<int64_t, TenantName>* tenantIdNameMap = nullptr;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
 	bool initialCommit = false;
@@ -657,13 +659,23 @@ private:
 	void checkSetTenantMapPrefix(MutationRef m) {
 		KeyRef prefix = TenantMetadata::tenantMap().subspace.begin;
 		if (m.param1.startsWith(prefix)) {
+			TenantName tenantName = m.param1.removePrefix(prefix);
+			TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
+
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
-				TenantName tenantName = m.param1.removePrefix(prefix);
-				TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
 
-				TraceEvent("CommitProxyInsertTenant", dbgid).detail("Tenant", tenantName).detail("Version", version);
+				TraceEvent("CommitProxyInsertTenant", dbgid)
+				    .detail("Tenant", tenantName)
+				    .detail("Id", tenantEntry.id)
+				    .detail("Version", version);
 				(*tenantMap)[tenantName] = tenantEntry;
+			}
+
+			if (tenantIdNameMap) {
+				ASSERT(version != invalidVersion);
+
+				(*tenantIdNameMap)[tenantEntry.id] = tenantName;
 			}
 
 			if (!initialCommit) {
@@ -1070,6 +1082,17 @@ private:
 
 				auto startItr = tenantMap->lower_bound(startTenant);
 				auto endItr = tenantMap->lower_bound(endTenant);
+
+				if (tenantIdNameMap) {
+					// Iterate over iterator-range and remove entries from TenantIdName map
+					// TODO: O(n) operation, optimize cpu
+					auto itr = startItr;
+					while (itr != endItr) {
+						tenantIdNameMap->erase(itr->second.id);
+						itr++;
+					}
+				}
+
 				tenantMap->erase(startItr, endItr);
 			}
 

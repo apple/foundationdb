@@ -21,6 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
+#include "fdbrpc/TenantInfo.h"
 #include "libb64/encode.h"
 #include "flow/ApiVersion.h"
 #include "flow/UnitTest.h"
@@ -30,11 +31,15 @@ Key TenantMapEntry::idToPrefix(int64_t id) {
 	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), TENANT_PREFIX_SIZE);
 }
 
-int64_t TenantMapEntry::prefixToId(KeyRef prefix) {
+int64_t TenantMapEntry::prefixToId(KeyRef prefix, bool enforceValidTenantId) {
 	ASSERT(prefix.size() == TENANT_PREFIX_SIZE);
 	int64_t id = *reinterpret_cast<const int64_t*>(prefix.begin());
 	id = bigEndian64(id);
-	ASSERT(id >= 0);
+	if (enforceValidTenantId) {
+		ASSERT(id >= 0);
+	} else if (id < 0) {
+		return TenantInfo::INVALID_TENANT;
+	}
 	return id;
 }
 

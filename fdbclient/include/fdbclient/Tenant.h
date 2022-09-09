@@ -68,7 +68,7 @@ struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
 
 	static Key idToPrefix(int64_t id);
-	static int64_t prefixToId(KeyRef prefix);
+	static int64_t prefixToId(KeyRef prefix, bool enforceValidTenantId = true);
 
 	static std::string tenantStateToString(TenantState tenantState);
 	static TenantState stringToTenantState(std::string stateStr);
