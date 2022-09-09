@@ -118,7 +118,7 @@ public:
 
 	// Before calling push, pop, or commit, the user must call readNext() until it throws
 	//    end_of_stream(). It may not be called again thereafter.
-	Future<TLogQueueEntry> readNext(TLogData* tLog) { return readNext(this, tLog); }
+	Future<TLogQueueEntry> readNext(TLogData* tLog) { return readNext(SafeAccessor(this), SafeAccessor(tLog)); }
 
 	Future<bool> initializeRecovery(IDiskQueue::location recoverAt) { return queue->initializeRecovery(recoverAt); }
 
@@ -141,15 +141,15 @@ public:
 	}
 
 private:
-	IDiskQueue* queue;
+	SafeAccessor<IDiskQueue> queue;
 	UID dbgid;
 
 	void updateVersionSizes(const TLogQueueEntry& result,
-	                        TLogData* tLog,
+	                        SafeAccessor<TLogData> tLog,
 	                        IDiskQueue::location start,
 	                        IDiskQueue::location end);
 
-	ACTOR static Future<TLogQueueEntry> readNext(TLogQueue* self, TLogData* tLog) {
+	ACTOR static Future<TLogQueueEntry> readNext(SafeAccessor<TLogQueue> self, SafeAccessor<TLogData> tLog) {
 		state TLogQueueEntry result;
 		state int zeroFillSize = 0;
 
@@ -774,7 +774,7 @@ void TLogQueue::pop(IDiskQueue::location upToLocation) {
 }
 
 void TLogQueue::updateVersionSizes(const TLogQueueEntry& result,
-                                   TLogData* tLog,
+                                   SafeAccessor<TLogData> tLog,
                                    IDiskQueue::location start,
                                    IDiskQueue::location end) {
 	auto it = tLog->id_data.find(result.id);
@@ -1853,6 +1853,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 						if (sd.version >= reqBegin) {
 							firstVersion = std::min(firstVersion, sd.version);
 							const IDiskQueue::location end = sd.start.lo + sd.length;
+							ASSERT(end > sd.start); // DEBUG ASSERTION
 							commitLocations.emplace_back(sd.start, end);
 							// This isn't perfect, because we aren't accounting for page boundaries, but should be
 							// close enough.
@@ -1869,6 +1870,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				state std::vector<Future<Standalone<StringRef>>> messageReads;
 				messageReads.reserve(commitLocations.size());
 				for (const auto& pair : commitLocations) {
+					ASSERT(pair.second > pair.first); // DEBUG ASSERTION
 					messageReads.push_back(self->rawPersistentQueue->read(pair.first, pair.second, CheckHashes::True));
 				}
 				commitLocations.clear();

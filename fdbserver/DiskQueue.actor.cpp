@@ -339,6 +339,7 @@ public:
 	ACTOR static Future<Future<Void>> push(RawDiskQueue_TwoFiles* self,
 	                                       StringRef pageData,
 	                                       std::vector<Reference<SyncQueue>>* toSync) {
+		state TrackMe trackMe(self);
 		// Write the given data (pageData) to the queue files, swapping or extending them if necessary.
 		// Don't do any syncs, but push the modified file(s) onto toSync.
 		ASSERT(self->readingFile == 2);
@@ -438,6 +439,7 @@ public:
 	                                                      StringRef pageData,
 	                                                      StringBuffer* pageMem,
 	                                                      uint64_t poppedPages) {
+		state TrackMe trackMe(self);
 		state Promise<Void> pushing, committed;
 		state Promise<Void> errorPromise = self->error;
 		state std::string filename = self->files[0].dbgFilename;
@@ -517,6 +519,7 @@ public:
 
 	// Set the starting point of the ring buffer, i.e., the first useful page to be read (and poped)
 	ACTOR static Future<Void> setPoppedPage(RawDiskQueue_TwoFiles* self, int file, int64_t page, int64_t debugSeq) {
+		state TrackMe trackMe(self);
 		self->files[file].popped = page * sizeof(Page);
 		if (file)
 			self->files[0].popped = self->files[0].size;
@@ -535,6 +538,7 @@ public:
 	}
 
 	ACTOR static Future<Void> openFiles(RawDiskQueue_TwoFiles* self) {
+		state TrackMe trackMe(self);
 		state std::vector<Future<Reference<IAsyncFile>>> fs;
 		fs.reserve(2);
 		for (int i = 0; i < 2; i++)
@@ -834,6 +838,7 @@ public:
 	}
 
 	ACTOR static Future<Void> truncateBeforeLastReadPage(RawDiskQueue_TwoFiles* self) {
+		state TrackMe trackMe(self);
 		try {
 			state int file = self->readingFile;
 			state int64_t pos = (self->readingPage - self->readingBuffer.size() / sizeof(Page) - 1) * sizeof(Page);
@@ -1332,6 +1337,7 @@ private:
 	}
 
 	ACTOR static Future<Standalone<StringRef>> readNext(DiskQueue* self, int bytes) {
+		state TrackMe trackMe(self);
 		state StringBuffer result(self->dbgid);
 		ASSERT(bytes >= 0);
 		result.clearReserve(bytes);
@@ -1422,6 +1428,8 @@ private:
 	// This allows log to read only a small portion of the most recent data from a large (e.g., 10GB) disk file.
 	// This is particularly useful for logSpilling feature.
 	ACTOR static Future<bool> initializeRecovery(DiskQueue* self, location recoverAt) {
+		state TrackMe trackMe(self);
+
 		if (self->initialized) {
 			return self->recovered;
 		}
