@@ -76,6 +76,8 @@ parseTenantConfiguration(std::vector<StringRef> const& tokens, int startIndex, b
 
 		if (tokencmp(param, "tenant_group")) {
 			configParams[param] = value;
+		} else if (tokencmp(param, "assigned_cluster")) {
+			configParams[param] = value;
 		} else {
 			fmt::print(stderr, "ERROR: unrecognized configuration parameter `{}'.\n", param.toString().c_str());
 			return {};
@@ -103,7 +105,7 @@ void applyConfigurationToSpecialKeys(Reference<ITransaction> tr,
 
 // createtenant command
 ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() < 2 || tokens.size() > 3) {
+	if (tokens.size() < 2 || tokens.size() > 4) {
 		printUsage(tokens[0]);
 		return false;
 	}
@@ -164,7 +166,7 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 
 CommandFactory createTenantFactory(
     "createtenant",
-    CommandHelp("createtenant <TENANT_NAME> [tenant_group=<TENANT_GROUP>]",
+    CommandHelp("createtenant <TENANT_NAME> [tenant_group=<TENANT_GROUP>] [assigned_cluster=<CLUSTER_NAME>]",
                 "creates a new tenant in the cluster",
                 "Creates a new tenant in the cluster with the specified name. An optional group can be specified"
                 "that will require this tenant to be placed on the same cluster as other tenants in the same group."));
