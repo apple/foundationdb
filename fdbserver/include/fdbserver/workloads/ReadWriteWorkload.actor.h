@@ -28,6 +28,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include <boost/lexical_cast.hpp>
 DESCR struct TransactionSuccessMetric {
 	int64_t totalLatency; // ns
 	int64_t startLatency; // ns
