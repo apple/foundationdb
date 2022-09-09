@@ -8,7 +8,16 @@ target_link_libraries(swifttestapp flow)
 target_include_directories(swifttestapp PUBLIC
     "${CMAKE_SOURCE_DIR}/flow/include"
     "${CMAKE_BINARY_DIR}/flow/include"
+    "${CMAKE_SOURCE_DIR}/fdbclient/include"
+    "${CMAKE_BINARY_DIR}/fdbclient/include"
+    "${CMAKE_SOURCE_DIR}/fdbserver/include"
+    "${CMAKE_BINARY_DIR}/fdbserver/include"
+    "${CMAKE_SOURCE_DIR}/fdbrpc/include"
+    "${CMAKE_BINARY_DIR}/fdbrpc/include"
     "${CMAKE_SOURCE_DIR}/contrib/fmt-8.1.1/include"
+    "${CMAKE_SOURCE_DIR}/contrib/sqlite"
+    "${CMAKE_BINARY_DIR}/boost_install/include"
+    "${CMAKE_BINARY_DIR}/msgpackProject-prefix/src/msgpackProject/include"
 )
 
 # TODO: We need a platform-agnostic way to find the C++ stdlib searchpaths
@@ -23,7 +32,7 @@ target_link_directories(swifttestapp PRIVATE
 )
 
 # TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?
-target_compile_options(swifttestapp PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++17 -enable-experimental-cxx-interop -Xfrontend -validate-tbd-against-ir=none> -Xcc -DNO_INTELLISENSE")
+target_compile_options(swifttestapp PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++17 -enable-experimental-cxx-interop -Xfrontend -validate-tbd-against-ir=none> -Xcc -DNO_INTELLISENSE -Xcc -DSWIFT_HACK")
 
 # Generate flow modulemap
 

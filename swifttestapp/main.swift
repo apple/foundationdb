@@ -1,4 +1,5 @@
 import Flow
+import Fdbserver
 //import std
 
 print("[swift] start")
@@ -83,3 +84,6 @@ let task = Task { // task execution will be intercepted
 
 print("[swift][tid:\(_tid())] run network @ thread:\(_tid())")
 globalNetworkRun()
+
+func test(_ p: ResolutionBalancer) {
+}
