@@ -153,7 +153,7 @@ NetworkOptions::NetworkOptions()
   : traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
     traceFormat("xml"), traceClockSource("now"),
     supportedVersions(new ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>()), runLoopProfilingEnabled(false),
-    primaryClient(true) {}
+    primaryClient(true), disableBypass(false) {}
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
@@ -2496,6 +2496,9 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		}
 		break;
 	}
+	case FDBNetworkOptions::DISABLE_CLIENT_BYPASS:
+		networkOptions.disableBypass = true;
+		break;
 	case FDBNetworkOptions::EXTERNAL_CLIENT:
 		networkOptions.primaryClient = false;
 		break;
@@ -8765,6 +8768,7 @@ void sharedStateDelRef(DatabaseSharedState* ssPtr) {
 }
 
 Future<DatabaseSharedState*> DatabaseContext::initSharedState() {
+	ASSERT(networkOptions.disableBypass);
 	ASSERT(!sharedStatePtr); // Don't re-initialize shared state if a pointer already exists
 	DatabaseSharedState* newState = new DatabaseSharedState();
 	// Increment refcount by 1 on creation to account for the one held in MultiVersionApi map
@@ -8776,6 +8780,7 @@ Future<DatabaseSharedState*> DatabaseContext::initSharedState() {
 }
 
 void DatabaseContext::setSharedState(DatabaseSharedState* p) {
+	ASSERT(networkOptions.disableBypass);
 	ASSERT(p->protocolVersion == currentProtocolVersion());
 	sharedStatePtr = p;
 	sharedStatePtr->refCount++;

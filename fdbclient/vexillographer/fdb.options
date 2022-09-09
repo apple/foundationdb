@@ -126,6 +126,8 @@ description is not currently required but encouraged.
             description="Deprecated" />
     <Option name="enable_run_loop_profiling" code="71"
             description="Enables debugging feature to perform run loop profiling. Requires trace logging to be enabled. WARNING: this feature is not recommended for use in production." />
+    <Option name="disable_client_bypass" code="72"
+            description="This option makes it so that the multi-version API cannot be bypassed on the primary client."/>
     <Option name="client_buggify_enable" code="80"
             description="Enable client buggify - will make requests randomly fail (intended for client testing)" />
     <Option name="client_buggify_disable" code="81"
