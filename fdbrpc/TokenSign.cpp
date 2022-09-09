@@ -545,7 +545,8 @@ TEST_CASE("/fdbrpc/TokenSign/FlatBuffer") {
 		const auto verifyExpectOk = authz::flatbuffers::verifyToken(signedToken, privateKey.toPublic());
 		ASSERT(verifyExpectOk);
 		// try tampering with signed token by adding one more tenant
-		tokenSpec.tenants.push_back(arena, genRandomAlphanumStringRef(arena, rng, MinTenantNameLen, MaxTenantNameLenPlus1));
+		tokenSpec.tenants.push_back(arena,
+		                            genRandomAlphanumStringRef(arena, rng, MinTenantNameLen, MaxTenantNameLenPlus1));
 		auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
 		writer.serialize(tokenSpec);
 		signedToken.token = writer.toStringRef();
@@ -589,7 +590,8 @@ TEST_CASE("/fdbrpc/TokenSign/JWT") {
 			ASSERT(optSig.get() == parsedToken.signature);
 		}
 		// try tampering with signed token by adding one more tenant
-		tokenSpec.tenants.get().push_back(arena, genRandomAlphanumStringRef(arena, rng, MinTenantNameLen, MaxTenantNameLenPlus1));
+		tokenSpec.tenants.get().push_back(
+		    arena, genRandomAlphanumStringRef(arena, rng, MinTenantNameLen, MaxTenantNameLenPlus1));
 		auto tamperedTokenPart = makeTokenPart(arena, tokenSpec);
 		auto tamperedTokenString = fmt::format("{}.{}", tamperedTokenPart.toString(), signaturePart.toString());
 		const auto verifyExpectFail = authz::jwt::verifyToken(StringRef(tamperedTokenString), privateKey.toPublic());

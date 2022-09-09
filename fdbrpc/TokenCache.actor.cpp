@@ -293,10 +293,10 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 		},
 		{
 		    [](Arena& arena, IRandom&, authz::jwt::TokenRef& token) {
-				StringRef* newTenants = new (arena) StringRef[1];
-				*newTenants = token.tenants.get()[0].substr(1);
-				token.tenants = VectorRef<StringRef>(newTenants, 1);
-			},
+		        StringRef* newTenants = new (arena) StringRef[1];
+		        *newTenants = token.tenants.get()[0].substr(1);
+		        token.tenants = VectorRef<StringRef>(newTenants, 1);
+		    },
 		    "UnmatchedTenant",
 		},
 	};
@@ -321,8 +321,8 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 				signedToken = authz::jwt::signToken(tmpArena, mutatedTokenSpec, privateKey);
 				if (TokenCache::instance().validate(validTokenSpec.tenants.get()[0], signedToken)) {
 					fmt::print("Unexpected successful validation at mutation {}, token spec: {}\n",
-							   mutationDesc,
-							   mutatedTokenSpec.toStringRef(tmpArena).toStringView());
+					           mutationDesc,
+					           mutatedTokenSpec.toStringRef(tmpArena).toStringView());
 					ASSERT(false);
 				}
 			} else {
