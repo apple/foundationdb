@@ -32,6 +32,24 @@
 #include "flow/Hostname.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+struct DestroySignal {
+	Promise<Void> destroyed;
+	virtual ~DestroySignal() {
+		destroyed.send(Void());
+	}
+};
+
+template<typename T>
+struct SafeAccessor {
+	T* self;
+	Promise<Void> destroyed;
+	SafeAccessor(T* self) : self(self), destroyed(self->destroyed) {}
+	T* operator->() const {
+		ASSERT(!destroyed.isSet());
+		return self;
+	}
+};
+
 ACTOR template <class Req>
 Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req> to, Req request) {
 	// Like to.getReply(request), except that a broken_promise exception results in retrying request immediately.

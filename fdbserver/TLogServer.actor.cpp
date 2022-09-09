@@ -100,7 +100,7 @@ typedef Standalone<TLogQueueEntryRef> TLogQueueEntry;
 struct LogData;
 struct TLogData;
 
-struct TLogQueue final : public IClosable {
+struct TLogQueue final : public IClosable, public DestroySignal {
 public:
 	TLogQueue(IDiskQueue* queue, UID dbgid) : queue(queue), dbgid(dbgid) {}
 
@@ -293,8 +293,7 @@ struct SpilledData {
 	uint32_t mutationBytes = 0;
 };
 
-struct TLogData : NonCopyable {
-	Promise<Void> destroyed;
+struct TLogData : NonCopyable, DestroySignal {
 	AsyncTrigger newLogData;
 	// A process has only 1 SharedTLog, which holds data for multiple logs, so that it obeys its assigned memory limit.
 	// A process has only 1 active log and multiple non-active log from old generations.
@@ -326,10 +325,11 @@ struct TLogData : NonCopyable {
 	UID dbgid;
 	UID workerID;
 
-	IKeyValueStore* persistentData; // Durable data on disk that were spilled.
-	IDiskQueue* rawPersistentQueue; // The physical queue the persistentQueue below stores its data. Ideally, log
-	                                // interface should work without directly accessing rawPersistentQueue
-	TLogQueue* persistentQueue; // Logical queue the log operates on and persist its data.
+	SafeAccessor<IKeyValueStore> persistentData; // Durable data on disk that were spilled.
+	SafeAccessor<IDiskQueue>
+	    rawPersistentQueue; // The physical queue the persistentQueue below stores its data. Ideally, log
+	                        // interface should work without directly accessing rawPersistentQueue
+	SafeAccessor<TLogQueue> persistentQueue; // Logical queue the log operates on and persist its data.
 
 	int64_t diskQueueCommitBytes;
 	AsyncVar<bool>
@@ -372,16 +372,6 @@ struct TLogData : NonCopyable {
 
 	Reference<Histogram> commitLatencyDist;
 
-	struct SafeAccessor {
-		TLogData* self;
-		Promise<Void> destroyed;
-		SafeAccessor(TLogData* self) : self(self), destroyed(self->destroyed) {}
-		TLogData* operator->() const {
-			ASSERT(!destroyed.isSet());
-			return self;
-		}
-	};
-
 	TLogData(UID dbgid,
 	         UID workerID,
 	         IKeyValueStore* persistentData,
@@ -402,7 +392,6 @@ struct TLogData : NonCopyable {
 		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 
-	~TLogData() { destroyed.send(Void()); }
 };
 
 struct LogData : NonCopyable, public ReferenceCounted<LogData> {
@@ -1421,7 +1410,9 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 ACTOR Future<Void> updateStorageLoop(TLogData* self) {
 	wait(delay(0, TaskPriority::UpdateStorage));
 
-	loop { wait(updateStorage(self)); }
+	loop {
+		wait(updateStorage(self));
+	}
 }
 
 void commitMessages(TLogData* self,
@@ -2050,7 +2041,7 @@ struct ErrorCounter {
 ErrorCounter g_errorCounter("TlogDebugErrorCounter");
 
 // This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
-ACTOR Future<Void> tLogPeekStream(TLogData::SafeAccessor self, TLogPeekStreamRequest req, Reference<LogData> logData) {
+ACTOR Future<Void> tLogPeekStream(SafeAccessor<TLogData> self, TLogPeekStreamRequest req, Reference<LogData> logData) {
 	self->activePeekStreams++;
 
 	state Version begin = req.begin;
@@ -2062,7 +2053,7 @@ ACTOR Future<Void> tLogPeekStream(TLogData::SafeAccessor self, TLogPeekStreamReq
 		state Future<TLogPeekReply> future(promise.getFuture());
 		try {
 			wait(req.reply.onReady() && store(reply.rep, future) &&
-			     tLogPeekMessages<Promise<TLogPeekReply>, TLogData::SafeAccessor>(
+			     tLogPeekMessages<Promise<TLogPeekReply>, SafeAccessor<TLogData>>(
 			         promise, self, logData, begin, req.tag, req.returnIfBlocked, onlySpilled));
 
 			reply.rep.begin = begin;
@@ -2322,7 +2313,7 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 	state FlowLock::Releaser commitLockReleaser(self->persistentDataCommitLock);
 
 	// PERSIST: Initial setup of persistentData for a brand new tLog for a new database
-	state IKeyValueStore* storage = self->persistentData;
+	state IKeyValueStore* storage = self->persistentData.self;
 	wait(ioTimeoutError(storage->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
 	storage->set(persistFormat);
 	storage->set(
@@ -2653,7 +2644,7 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
 			TraceEvent(SevDebug, "TLogPeekStream", logData->logId)
 			    .detail("Token", tli.peekStreamMessages.getEndpoint().token);
-			logData->addActor.send(tLogPeekStream(TLogData::SafeAccessor(self), req, logData));
+			logData->addActor.send(tLogPeekStream(SafeAccessor(self), req, logData));
 		}
 		when(TLogPeekRequest req = waitNext(tli.peekMessages.getFuture())) {
 			logData->addActor.send(tLogPeekMessages(
@@ -2765,7 +2756,9 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 	while (!endVersion.present() || logData->version.get() < endVersion.get()) {
 		loop {
 			choose {
-				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) { break; }
+				when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
+					break;
+				}
 				when(wait(dbInfoChange)) {
 					if (logData->logSystem->get()) {
 						r = logData->logSystem->get()->peek(logData->logId, tagAt, endVersion, tags, true);
@@ -2992,14 +2985,13 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
                                           Promise<Void> oldLog,
                                           Promise<Void> recovered,
                                           PromiseStream<InitializeTLogRequest> tlogRequests) {
+	state SafeAccessor<IKeyValueStore> storage(self->persistentData);
 	state double startt = now();
 	state Reference<LogData> logData;
 	state KeyRange tagKeys;
 	// PERSIST: Read basic state from persistentData; replay persistentQueue but don't erase it
 
 	TraceEvent("TLogRestorePersistentState", self->dbgid).log();
-
-	state IKeyValueStore* storage = self->persistentData;
 	wait(storage->init());
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
 	state Future<Optional<Value>> fRecoveryLocation = storage->readValue(persistRecoveryLocationKey);
@@ -3242,7 +3234,9 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 
 								choose {
 									when(wait(updateStorage(self))) {}
-									when(wait(allRemoved)) { throw worker_removed(); }
+									when(wait(allRemoved)) {
+										throw worker_removed();
+									}
 								}
 							}
 						} else {
@@ -3253,7 +3247,9 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 						}
 					}
 				}
-				when(wait(allRemoved)) { throw worker_removed(); }
+				when(wait(allRemoved)) {
+					throw worker_removed();
+				}
 			}
 		}
 	} catch (Error& e) {
@@ -3602,7 +3598,9 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 							forwardPromise(req.reply, self.tlogCache.get(req.recruitmentID));
 						}
 					}
-					when(wait(error)) { throw internal_error(); }
+					when(wait(error)) {
+						throw internal_error();
+					}
 					when(wait(activeSharedChange)) {
 						if (activeSharedTLog->get() == tlogId) {
 							TraceEvent("SharedTLogNowActive", self.dbgid).detail("NowActive", activeSharedTLog->get());
@@ -3664,7 +3662,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 			}
 		}
 
-		if (tlogTerminated(&self, persistentData, self.persistentQueue, e)) {
+		if (tlogTerminated(&self, persistentData, self.persistentQueue.self, e)) {
 			return Void();
 		} else {
 			throw;

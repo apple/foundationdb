@@ -57,7 +57,7 @@ public:
 	                          // may not take effect in the background.
 };
 
-class IKeyValueStore : public IClosable {
+class IKeyValueStore : public IClosable, public DestroySignal {
 public:
 	virtual KeyValueStoreType getType() const = 0;
 	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) = 0;

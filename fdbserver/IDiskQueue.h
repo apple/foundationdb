@@ -28,7 +28,7 @@
 
 FDB_DECLARE_BOOLEAN_PARAM(CheckHashes);
 
-class IDiskQueue : public IClosable {
+class IDiskQueue : public IClosable, public DestroySignal {
 public:
 	struct location {
 		// location is same with seq., specifying the index of the virtualy infinite queue.
