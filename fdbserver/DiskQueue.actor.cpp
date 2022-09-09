@@ -167,7 +167,7 @@ private:
 // operations.
 //    To increase the ring buffer size, it creates a ring buffer in the other file.
 //    After finish reading the current file, it switch to use the other file as the ring buffer.
-class RawDiskQueue_TwoFiles : public Tracked<RawDiskQueue_TwoFiles> {
+class RawDiskQueue_TwoFiles : public Tracked<RawDiskQueue_TwoFiles>, public DestroySignal {
 public:
 	RawDiskQueue_TwoFiles(std::string basename, std::string fileExtension, UID dbgid, int64_t fileSizeWarningLimit)
 	  : basename(basename), fileExtension(fileExtension), dbgid(dbgid), dbg_file0BeginSeq(0),
@@ -336,10 +336,10 @@ public:
 		return push(this, pageData, toSync);
 	}
 
-	ACTOR static Future<Future<Void>> push(RawDiskQueue_TwoFiles* self,
+	ACTOR static Future<Future<Void>> push(RawDiskQueue_TwoFiles* _self,
 	                                       StringRef pageData,
 	                                       std::vector<Reference<SyncQueue>>* toSync) {
-		state TrackMe trackMe(self);
+		state SafeAccessor<RawDiskQueue_TwoFiles> self(_self);
 		// Write the given data (pageData) to the queue files, swapping or extending them if necessary.
 		// Don't do any syncs, but push the modified file(s) onto toSync.
 		ASSERT(self->readingFile == 2);
@@ -435,11 +435,11 @@ public:
 
 	// Write the given data (pageData) to the queue files of self, sync data to disk, and delete the memory (pageMem)
 	// that hold the pageData
-	ACTOR static UNCANCELLABLE Future<Void> pushAndCommit(RawDiskQueue_TwoFiles* self,
+	ACTOR static UNCANCELLABLE Future<Void> pushAndCommit(RawDiskQueue_TwoFiles* _self,
 	                                                      StringRef pageData,
 	                                                      StringBuffer* pageMem,
 	                                                      uint64_t poppedPages) {
-		state TrackMe trackMe(self);
+		state SafeAccessor<RawDiskQueue_TwoFiles> self(_self);
 		state Promise<Void> pushing, committed;
 		state Promise<Void> errorPromise = self->error;
 		state std::string filename = self->files[0].dbgFilename;
@@ -518,8 +518,8 @@ public:
 	}
 
 	// Set the starting point of the ring buffer, i.e., the first useful page to be read (and poped)
-	ACTOR static Future<Void> setPoppedPage(RawDiskQueue_TwoFiles* self, int file, int64_t page, int64_t debugSeq) {
-		state TrackMe trackMe(self);
+	ACTOR static Future<Void> setPoppedPage(RawDiskQueue_TwoFiles* _self, int file, int64_t page, int64_t debugSeq) {
+		state SafeAccessor<RawDiskQueue_TwoFiles> self(_self);
 		self->files[file].popped = page * sizeof(Page);
 		if (file)
 			self->files[0].popped = self->files[0].size;
@@ -532,13 +532,13 @@ public:
 		//  be sequenced before file 1, when in fact it contains many pages that follow file 1.  These ok pages may be
 		//  incorrectly read if the machine dies after overwritting the first page of file 0 and is then recovered
 		if (file == 1)
-			wait(self->truncateFile(self, 0, 0));
+			wait(truncateFile(self.getPtr(), 0, 0));
 
 		return Void();
 	}
 
-	ACTOR static Future<Void> openFiles(RawDiskQueue_TwoFiles* self) {
-		state TrackMe trackMe(self);
+	ACTOR static Future<Void> openFiles(RawDiskQueue_TwoFiles* _self) {
+		state SafeAccessor<RawDiskQueue_TwoFiles> self(_self);
 		state std::vector<Future<Reference<IAsyncFile>>> fs;
 		fs.reserve(2);
 		for (int i = 0; i < 2; i++)
@@ -837,8 +837,8 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> truncateBeforeLastReadPage(RawDiskQueue_TwoFiles* self) {
-		state TrackMe trackMe(self);
+	ACTOR static Future<Void> truncateBeforeLastReadPage(RawDiskQueue_TwoFiles* _self) {
+		state SafeAccessor<RawDiskQueue_TwoFiles> self(_self);
 		try {
 			state int file = self->readingFile;
 			state int64_t pos = (self->readingPage - self->readingBuffer.size() / sizeof(Page) - 1) * sizeof(Page);
@@ -853,7 +853,7 @@ public:
 			self->writingPos = pos;
 
 			while (file < 2) {
-				commits.push_back(self->truncateFile(self, file, pos));
+				commits.push_back(truncateFile(self.getPtr(), file, pos));
 				file++;
 				pos = 0;
 			}
@@ -1336,8 +1336,8 @@ private:
 		nextReadLocation += len;
 	}
 
-	ACTOR static Future<Standalone<StringRef>> readNext(DiskQueue* self, int bytes) {
-		state TrackMe trackMe(self);
+	ACTOR static Future<Standalone<StringRef>> readNext(DiskQueue* _self, int bytes) {
+		state SafeAccessor<DiskQueue> self(_self);
 		state StringBuffer result(self->dbgid);
 		ASSERT(bytes >= 0);
 		result.clearReserve(bytes);
@@ -1345,7 +1345,7 @@ private:
 		ASSERT(!self->recovered);
 
 		if (!self->initialized) {
-			bool recoveryComplete = wait(initializeRecovery(self, 0));
+			bool recoveryComplete = wait(initializeRecovery(self.getPtr(), 0));
 
 			if (recoveryComplete) {
 				ASSERT(self->poppedSeq <= self->endLocation());
@@ -1427,8 +1427,8 @@ private:
 	// recoverAt is the minimum position in the disk queue file that needs to be read to restore log's states.
 	// This allows log to read only a small portion of the most recent data from a large (e.g., 10GB) disk file.
 	// This is particularly useful for logSpilling feature.
-	ACTOR static Future<bool> initializeRecovery(DiskQueue* self, location recoverAt) {
-		state TrackMe trackMe(self);
+	ACTOR static Future<bool> initializeRecovery(DiskQueue* _self, location recoverAt) {
+		state SafeAccessor<DiskQueue> self(_self);
 
 		if (self->initialized) {
 			return self->recovered;
@@ -1537,7 +1537,7 @@ private:
 		return p2->checkHash() && (p2->seq >= p1->seq || !p1->checkHash());
 	}
 
-	RawDiskQueue_TwoFiles* rawQueue;
+	SafeAccessor<RawDiskQueue_TwoFiles> rawQueue;
 	UID dbgid;
 	DiskQueueVersion diskQueueVersion;
 
@@ -1645,7 +1645,7 @@ public:
 	StorageBytes getStorageBytes() const override { return queue->getStorageBytes(); }
 
 private:
-	DiskQueue* queue;
+	SafeAccessor<DiskQueue> queue;
 	location pushed;
 	location popped;
 	location committed;
