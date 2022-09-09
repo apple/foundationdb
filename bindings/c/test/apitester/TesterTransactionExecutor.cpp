@@ -773,9 +773,7 @@ public:
 };
 
 std::unique_ptr<ITransactionExecutor> createTransactionExecutor(const TransactionExecutorOptions& options) {
-	if (options.multiTenant) {
-		return std::make_unique<MultiTenantDBTransactionExecutor>(options);
-	} else if (options.databasePerTransaction) {
+	if (options.databasePerTransaction) {
 		return std::make_unique<DBPerTransactionExecutor>(options);
 	} else {
 		return std::make_unique<DBPoolTransactionExecutor>(options);

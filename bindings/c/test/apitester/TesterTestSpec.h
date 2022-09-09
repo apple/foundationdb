@@ -58,12 +58,15 @@ struct TestSpec {
 	// Execute each transaction in a separate database instance
 	bool databasePerTransaction = false;
 
+<<<<<<< HEAD
 	// Test tampering the cluster file
 	bool tamperClusterFile = false;
 
 	// Enable multi-tenant database, if true
 	bool multiTenant = false;
 
+=======
+>>>>>>> Some refactoring of tenants in the API tester. This mainly changes it so that tenants are stored on the ApiWorkload and any subclasses can use them. Update the setup phase to work across tenants.
 	// Size of the FDB client thread pool (a random number in the [min,max] range)
 	int minFdbThreads = 1;
 	int maxFdbThreads = 1;
@@ -83,7 +86,7 @@ struct TestSpec {
 
 	// Number of tenants (a random number in the [min,max] range)
 	int minTenants = 0;
-	int maxTenants = 10;
+	int maxTenants = 0;
 
 	// List of workloads with their options
 	std::vector<WorkloadSpec> workloads;

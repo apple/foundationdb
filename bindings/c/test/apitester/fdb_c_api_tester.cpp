@@ -350,7 +350,10 @@ void randomizeOptions(TesterOptions& options) {
 	options.numClientThreads = random.randomInt(options.testSpec.minClientThreads, options.testSpec.maxClientThreads);
 	options.numDatabases = random.randomInt(options.testSpec.minDatabases, options.testSpec.maxDatabases);
 	options.numClients = random.randomInt(options.testSpec.minClients, options.testSpec.maxClients);
-	if (options.testSpec.multiTenant) {
+
+	// Choose a random number of tenants. If a test is configured to allow 0 tenants, then use 0 tenants half the time.
+	if (options.testSpec.maxTenants >= options.testSpec.minTenants &&
+	    (options.testSpec.minTenants > 0 || random.randomBool(0.5))) {
 		options.numTenants = random.randomInt(options.testSpec.minTenants, options.testSpec.maxTenants);
 	}
 }
@@ -364,9 +367,12 @@ bool runWorkloads(TesterOptions& options) {
 		// 7.1 and older releases crash on database create errors
 		txExecOptions.injectDatabaseCreateErrors = options.testSpec.buggify && options.apiVersion > 710;
 		txExecOptions.transactionRetryLimit = options.transactionRetryLimit;
+<<<<<<< HEAD
 		txExecOptions.tmpDir = options.tmpDir.empty() ? std::string("/tmp") : options.tmpDir;
 		txExecOptions.tamperClusterFile = options.testSpec.tamperClusterFile;
 		txExecOptions.multiTenant = options.testSpec.multiTenant;
+=======
+>>>>>>> Some refactoring of tenants in the API tester. This mainly changes it so that tenants are stored on the ApiWorkload and any subclasses can use them. Update the setup phase to work across tenants.
 		txExecOptions.numTenants = options.numTenants;
 
 		std::vector<std::shared_ptr<IWorkload>> workloads;

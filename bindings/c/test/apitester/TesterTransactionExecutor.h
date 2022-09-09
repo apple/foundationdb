@@ -124,6 +124,7 @@ struct TransactionExecutorOptions {
 	// Create each transaction in a separate database instance
 	bool databasePerTransaction = false;
 
+<<<<<<< HEAD
 	// Enable injection of database create errors
 	bool injectDatabaseCreateErrors = false;
 
@@ -137,9 +138,12 @@ struct TransactionExecutorOptions {
 	// Create tenant-aware transactions
 	bool multiTenant = false;
 
+=======
+>>>>>>> Some refactoring of tenants in the API tester. This mainly changes it so that tenants are stored on the ApiWorkload and any subclasses can use them. Update the setup phase to work across tenants.
 	// The size of the database instance pool
 	int numDatabases = 1;
 
+	// The number of tenants to create in the cluster. If 0, no tenants are used.
 	int numTenants = 0;
 
 	// Maximum number of retries per transaction (0 - unlimited)
@@ -158,10 +162,16 @@ class ITransactionExecutor {
 public:
 	virtual ~ITransactionExecutor() {}
 	virtual void init(IScheduler* sched, const char* clusterFile, const std::string& bgBasePath) = 0;
+<<<<<<< HEAD
 	virtual void execute(std::shared_ptr<ITransactionActor> tx, TTaskFct cont, fdb::Tenant* tenant = nullptr) = 0;
 	virtual fdb::Database selectDatabase() = 0;
 	virtual std::string getClusterFileForErrorInjection() = 0;
 	virtual const TransactionExecutorOptions& getOptions() = 0;
+=======
+	virtual void execute(std::shared_ptr<ITransactionActor> tx,
+	                     TTaskFct cont,
+	                     std::optional<fdb::BytesRef> tenant = std::optional<fdb::BytesRef>()) = 0;
+>>>>>>> Some refactoring of tenants in the API tester. This mainly changes it so that tenants are stored on the ApiWorkload and any subclasses can use them. Update the setup phase to work across tenants.
 };
 
 // Create a transaction executor for the given options

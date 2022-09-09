@@ -1,17 +1,16 @@
 [[test]]
-title = 'Multi-tenant API Correctness Single Threaded'
+title = 'Multi-tenant API Correctness Multi Threaded'
 multiThreaded = true
 buggify = true
 minFdbThreads = 2
 maxFdbThreads = 8
 minClients = 2
 maxClients = 8
-multiTenant = true
 minTenants = 2
 maxTenants = 5
 
     [[test.workload]]
-    name = 'MultiTenantCorrectness'
+    name = 'Correctness'
     minKeyLength = 1
 	maxKeyLength = 64
 	minValueLength = 1

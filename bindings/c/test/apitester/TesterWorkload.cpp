@@ -108,7 +108,7 @@ void WorkloadBase::schedule(TTaskFct task) {
 
 void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx,
                                    TTaskFct cont,
-                                   int tenantId,
+                                   std::optional<fdb::BytesRef> tenant,
                                    bool failOnError) {
 	ASSERT(inProgress);
 	if (failed) {
@@ -134,7 +134,7 @@ void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx,
 		    }
 		    scheduledTaskDone();
 	    },
-	    tenantId);
+	    tenant);
 }
 
 void WorkloadBase::info(const std::string& msg) {
