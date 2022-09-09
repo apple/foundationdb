@@ -300,12 +300,19 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	ACTOR Future<Void> testSpecialKeySpaceErrors(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
 		state Database cx = cx_->clone();
-		wait(success(TenantAPI::createTenant(cx.getReference(), TenantName("foo"_sr))));
+		try {
+			wait(success(TenantAPI::createTenant(cx.getReference(), TenantName("foo"_sr))));
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_tenant_already_exists || e.code() == error_code_actor_cancelled);
+		}
 		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
 		state Reference<ReadYourWritesTransaction> tenantTx =
 		    makeReference<ReadYourWritesTransaction>(cx, TenantName("foo"_sr));
+		// Use new transactions that may use default tenant rather than re-use tx
+		// This is because tx will reject raw access for later tests if default tenant is set
 		state Reference<ReadYourWritesTransaction> defaultTx1 = makeReference<ReadYourWritesTransaction>(cx);
 		state Reference<ReadYourWritesTransaction> defaultTx2 = makeReference<ReadYourWritesTransaction>(cx);
+		state bool disableRyw = deterministicRandom()->coinflip();
 		// tenant transaction accessing modules that do not support tenants
 		// tenant getRange
 		try {
@@ -349,7 +356,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			state RangeResult writeResult1;
 			state RangeResult writeResult2;
 			try {
-				if (deterministicRandom()->coinflip()) {
+				if (disableRyw) {
 					defaultTx1->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
 				}
 				defaultTx1->addReadConflictRange(singleKeyRange(LiteralStringRef("testKeylll")));
@@ -372,7 +379,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// proper conflict ranges
 		loop {
 			try {
-				if (deterministicRandom()->coinflip()) {
+				if (disableRyw) {
 					defaultTx1->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
 					defaultTx2->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
 				}
@@ -386,10 +393,12 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				wait(defaultTx2->commit());
 				try {
 					wait(defaultTx1->commit());
-					ASSERT(!defaultTx1->getTenant().present());
+					ASSERT(false);
 				} catch (Error& e) {
+					state Error err = e;
 					if (e.code() != error_code_not_committed) {
 						wait(defaultTx1->onError(e));
+						wait(defaultTx2->onError(e));
 						continue;
 					}
 					// Read conflict ranges of defaultTx1 and check for "foo" with no tenant prefix
