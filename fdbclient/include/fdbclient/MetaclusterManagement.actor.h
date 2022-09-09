@@ -1074,8 +1074,8 @@ struct CreateTenantImpl {
 	// Parameter set if tenant creation permanently fails on the data cluster
 	Optional<int64_t> replaceExistingTenantId;
 
-	CreateTenantImpl(Reference<DB> managementDb, TenantName tenantName, TenantMapEntry tenantEntry)
-	  : ctx(managementDb), preferAssignedCluster(false), tenantName(tenantName), tenantEntry(tenantEntry) {}
+	CreateTenantImpl(Reference<DB> managementDb, bool preferAssignedCluster, TenantName tenantName, TenantMapEntry tenantEntry)
+	  : ctx(managementDb), preferAssignedCluster(preferAssignedCluster), tenantName(tenantName), tenantEntry(tenantEntry) {}
 
 	ACTOR static Future<ClusterName> checkClusterAvailability(Reference<IDatabase> dataClusterDb,
 	                                                          ClusterName clusterName) {

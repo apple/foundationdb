@@ -95,6 +95,9 @@ void applyConfigurationToSpecialKeys(Reference<ITransaction> tr,
                                      TenantNameRef tenantName,
                                      std::map<Standalone<StringRef>, Optional<Value>> configuration) {
 	for (auto [configName, value] : configuration) {
+		if (configName == "assigned_cluster"_sr) {
+			throw invalid_option();
+		}
 		if (value.present()) {
 			tr->set(makeConfigKey(tenantName, configName), value.get());
 		} else {
