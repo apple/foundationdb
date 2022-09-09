@@ -1850,7 +1850,13 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 						if (sd.version >= reqBegin) {
 							firstVersion = std::min(firstVersion, sd.version);
 							const IDiskQueue::location end = sd.start.lo + sd.length;
-							ASSERT(end > sd.start); // DEBUG ASSERTION
+							if (end <= sd.start) {
+								TraceEvent(SevError, "TLogPeekLocationError")
+								    .detail("Start", std::string(sd.start))
+								    .detail("Length", sd.length)
+								    .detail("End", std::string(end));
+								ASSERT(false); // DEBUG ASSERTION
+							}
 							commitLocations.emplace_back(sd.start, end);
 							// This isn't perfect, because we aren't accounting for page boundaries, but should be
 							// close enough.
@@ -1867,7 +1873,12 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				state std::vector<Future<Standalone<StringRef>>> messageReads;
 				messageReads.reserve(commitLocations.size());
 				for (const auto& pair : commitLocations) {
-					ASSERT(pair.second > pair.first); // DEBUG ASSERTION
+					if (pair.second <= pair.first) {
+						TraceEvent(SevError, "TLogPeekLocationError")
+						    .detail("Start", std::string(pair.first))
+						    .detail("End", std::string(pair.second));
+						ASSERT(false); // DEBUG ASSERTION
+					}
 					messageReads.push_back(self->rawPersistentQueue->read(pair.first, pair.second, CheckHashes::True));
 				}
 				commitLocations.clear();
