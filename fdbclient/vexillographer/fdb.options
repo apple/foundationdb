@@ -306,9 +306,8 @@ description is not currently required but encouraged.
             description="Specifically instruct this transaction to NOT use cached GRV. Primarily used for the read version cache's background updater to avoid attempting to read a cached entry in specific situations."
             hidden="true"/>
     <Option name="authorization_token" code="2000"
-            description="Add a given authorization token to the network thread so that future requests are authorized"
-            paramType="String" paramDescription="A signed token serialized using flatbuffers"
-            hidden="true" />
+            description="Attach given authorization token to the transaction such that subsequent tenant-aware requests are authorized"
+            paramType="String" paramDescription="A JSON Web Token authorized to access data belonging to one or more tenants, indicated by 'tenants' claim of the token's payload."/>
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

@@ -152,7 +152,8 @@ void GranuleFiles::getFiles(Version beginVersion,
                             bool canCollapse,
                             BlobGranuleChunkRef& chunk,
                             Arena& replyArena,
-                            int64_t& deltaBytesCounter) const {
+                            int64_t& deltaBytesCounter,
+                            bool summarize) const {
 	BlobFileIndex dummyIndex; // for searching
 
 	// if beginVersion == 0 or we can collapse, find the latest snapshot <= readVersion
@@ -202,12 +203,13 @@ void GranuleFiles::getFiles(Version beginVersion,
 	Version lastIncluded = invalidVersion;
 	if (snapshotF != snapshotFiles.end()) {
 		chunk.snapshotVersion = snapshotF->version;
-		chunk.snapshotFile = BlobFilePointerRef(replyArena,
-		                                        snapshotF->filename,
-		                                        snapshotF->offset,
-		                                        snapshotF->length,
-		                                        snapshotF->fullFileLength,
-		                                        snapshotF->cipherKeysMeta);
+		chunk.snapshotFile =
+		    BlobFilePointerRef(replyArena,
+		                       summarize ? "" : snapshotF->filename,
+		                       snapshotF->offset,
+		                       snapshotF->length,
+		                       snapshotF->fullFileLength,
+		                       summarize ? Optional<BlobGranuleCipherKeysMeta>() : snapshotF->cipherKeysMeta);
 		lastIncluded = chunk.snapshotVersion;
 	} else {
 		chunk.snapshotVersion = invalidVersion;
@@ -215,18 +217,19 @@ void GranuleFiles::getFiles(Version beginVersion,
 
 	while (deltaF != deltaFiles.end() && deltaF->version < readVersion) {
 		chunk.deltaFiles.emplace_back_deep(replyArena,
-		                                   deltaF->filename,
+		                                   summarize ? "" : deltaF->filename,
 		                                   deltaF->offset,
 		                                   deltaF->length,
 		                                   deltaF->fullFileLength,
-		                                   deltaF->cipherKeysMeta);
+		                                   summarize ? Optional<BlobGranuleCipherKeysMeta>() : deltaF->cipherKeysMeta);
 		deltaBytesCounter += deltaF->length;
 		ASSERT(lastIncluded < deltaF->version);
 		lastIncluded = deltaF->version;
 		deltaF++;
 	}
 	// include last delta file that passes readVersion, if it exists
-	if (deltaF != deltaFiles.end() && lastIncluded < readVersion) {
+	if (deltaF != deltaFiles.end() &&
+	    ((!summarize && lastIncluded < readVersion) || (summarize && deltaF->version == readVersion))) {
 		chunk.deltaFiles.emplace_back_deep(replyArena,
 		                                   deltaF->filename,
 		                                   deltaF->offset,
@@ -236,6 +239,7 @@ void GranuleFiles::getFiles(Version beginVersion,
 		deltaBytesCounter += deltaF->length;
 		lastIncluded = deltaF->version;
 	}
+	chunk.includedVersion = lastIncluded;
 }
 
 static std::string makeTestFileName(Version v) {
@@ -259,7 +263,7 @@ static void checkFiles(const GranuleFiles& f,
 	Arena a;
 	BlobGranuleChunkRef chunk;
 	int64_t deltaBytes = 0;
-	f.getFiles(beginVersion, readVersion, canCollapse, chunk, a, deltaBytes);
+	f.getFiles(beginVersion, readVersion, canCollapse, chunk, a, deltaBytes, false);
 	fmt::print("results({0}, {1}, {2}):\nEXPECTED:\n    snapshot={3}\n    deltas ({4}):\n",
 	           beginVersion,
 	           readVersion,
@@ -399,6 +403,49 @@ TEST_CASE("/blobgranule/server/common/granulefiles") {
 	checkFiles(files, 251, 400, true, Optional<int>(), { 300, 350 });
 	checkFiles(files, 301, 400, true, Optional<int>(), { 350 });
 	checkFiles(files, 351, 400, true, Optional<int>(), {});
+
+	return Void();
+}
+
+static void checkSummary(const GranuleFiles& f,
+                         Version summaryVersion,
+                         Version expectedSnapshotVersion,
+                         int64_t expectedSnapshotSize,
+                         Version expectedDeltaVersion,
+                         Version expectedDeltaSize) {
+	Arena fileArena, summaryArena;
+	BlobGranuleChunkRef chunk;
+	int64_t deltaBytes = 0;
+	f.getFiles(0, summaryVersion, true, chunk, fileArena, deltaBytes, true);
+
+	BlobGranuleSummaryRef summary = summarizeGranuleChunk(summaryArena, chunk);
+
+	ASSERT(expectedSnapshotVersion == summary.snapshotVersion);
+	ASSERT(expectedSnapshotSize == summary.snapshotSize);
+	ASSERT(expectedDeltaVersion == summary.deltaVersion);
+	ASSERT(expectedDeltaSize == summary.deltaSize);
+	ASSERT(deltaBytes == expectedDeltaSize);
+}
+
+/*
+ * This should technically be in client unit tests but we don't have a unit test there
+ * Files:
+ * S @ 100 (10 bytes)
+ * D @ 150 (5 bytes)
+ * D @ 200 (6 bytes)
+ */
+TEST_CASE("/blobgranule/server/common/granulesummary") {
+	GranuleFiles files;
+	files.snapshotFiles.push_back(makeTestFile(100, 10));
+	files.deltaFiles.push_back(makeTestFile(150, 5));
+	files.deltaFiles.push_back(makeTestFile(200, 6));
+
+	checkSummary(files, 100, 100, 10, 100, 0);
+	checkSummary(files, 149, 100, 10, 100, 0);
+	checkSummary(files, 150, 100, 10, 150, 5);
+	checkSummary(files, 199, 100, 10, 150, 5);
+	checkSummary(files, 200, 100, 10, 200, 11);
+	checkSummary(files, 700, 100, 10, 200, 11);
 
 	return Void();
 }

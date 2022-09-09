@@ -77,6 +77,7 @@ public:
 	constexpr ProtocolVersion normalizedVersion() const {
 		return ProtocolVersion(_version & compatibleProtocolVersionMask);
 	}
+
 	constexpr bool isValid() const {
 		return (version() >= minValidProtocolVersion &&
 				(version() <= minIncompatibleSFCWindow || version() >= maxIncompatibleSFCWindow));

@@ -2174,16 +2174,9 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 		    timeoutError(rkWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("RkUpdate"))), 1.0);
 		state Future<TraceEventFields> f2 = timeoutError(
 		    rkWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("RkUpdateBatch"))), 1.0);
-		state Future<GlobalTagThrottlerStatusReply> f3 =
-		    SERVER_KNOBS->GLOBAL_TAG_THROTTLING
-		        ? timeoutError(db->get().ratekeeper.get().getGlobalTagThrottlerStatus.getReply(
-		                           GlobalTagThrottlerStatusRequest{}),
-		                       1.0)
-		        : Future<GlobalTagThrottlerStatusReply>(GlobalTagThrottlerStatusReply{});
-		wait(success(f1) && success(f2) && success(f3));
+		wait(success(f1) && success(f2));
 		TraceEventFields ratekeeper = f1.get();
 		TraceEventFields batchRatekeeper = f2.get();
-		auto const globalTagThrottlerStatus = f3.get();
 
 		bool autoThrottlingEnabled = ratekeeper.getInt("AutoThrottlingEnabled");
 		double tpsLimit = ratekeeper.getDouble("TPSLimit");
@@ -2244,23 +2237,6 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 		throttledTagsObj["manual"] = manualThrottledTagsObj;
 
 		(*qos)["throttled_tags"] = throttledTagsObj;
-
-		if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
-			JsonBuilderObject globalTagThrottlerObj;
-			for (const auto& [tag, tagStats] : globalTagThrottlerStatus.status) {
-				JsonBuilderObject tagStatsObj;
-				tagStatsObj["desired_tps"] = tagStats.desiredTps;
-				tagStatsObj["reserved_tps"] = tagStats.reservedTps;
-				if (tagStats.limitingTps.present()) {
-					tagStatsObj["limiting_tps"] = tagStats.limitingTps.get();
-				} else {
-					tagStatsObj["limiting_tps"] = "<unset>"_sr;
-				}
-				tagStatsObj["target_tps"] = tagStats.targetTps;
-				globalTagThrottlerObj[printable(tag)] = tagStatsObj;
-			}
-			(*qos)["global_tag_throttler"] = globalTagThrottlerObj;
-		}
 
 		JsonBuilderObject perfLimit = getPerfLimit(ratekeeper, transPerSec, tpsLimit);
 		if (!perfLimit.empty()) {

@@ -465,7 +465,7 @@ ACTOR Future<Void> runBackup(Reference<IClusterConnectionRecord> connRecord) {
 	}
 
 	if (g_simulator.backupAgents == ISimulator::BackupAgentType::BackupToFile) {
-		Database cx = Database::createDatabase(connRecord, -1);
+		Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
 		state FileBackupAgent fileAgent;
 		agentFutures.push_back(fileAgent.run(
@@ -493,11 +493,11 @@ ACTOR Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 
 	if (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
 		ASSERT(g_simulator.extraDatabases.size() == 1);
-		Database cx = Database::createDatabase(connRecord, -1);
+		Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
 		auto extraFile =
 		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
-		state Database drDatabase = Database::createDatabase(extraFile, -1);
+		state Database drDatabase = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 
 		TraceEvent("StartingDrAgents")
 		    .detail("ConnectionString", connRecord->getConnectionString().toString())

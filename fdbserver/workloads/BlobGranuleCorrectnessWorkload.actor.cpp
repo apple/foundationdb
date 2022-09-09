@@ -91,6 +91,9 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 	Promise<Void> firstWriteSuccessful;
 	Version minSuccessfulReadVersion = MAX_VERSION;
 
+	Future<Void> summaryClient;
+	Promise<Void> triggerSummaryComplete;
+
 	// stats
 	int64_t errors = 0;
 	int64_t mismatches = 0;
@@ -143,7 +146,17 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 			} catch (Error& e) {
 				// Ignore being unable to parse lastKey as it may be a dummy key.
 			}
+
 			if (t2.size() > 0 && t.getInt(0) != t2.getInt(0)) {
+				if (t.size() > BGW_TUPLE_KEY_SIZE - SERVER_KNOBS->BG_KEY_TUPLE_TRUNCATE_OFFSET) {
+					fmt::print("Tenant: {0}, K={1}, E={2}, LK={3}. {4} != {5}\n",
+					           tenant.prefix.printable(),
+					           k.printable(),
+					           e.printable(),
+					           lastKey.printable(),
+					           t.getInt(0),
+					           t2.getInt(0));
+				}
 				ASSERT(t.size() <= BGW_TUPLE_KEY_SIZE - SERVER_KNOBS->BG_KEY_TUPLE_TRUNCATE_OFFSET);
 			}
 		}
@@ -230,27 +243,6 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> setUpBlobRange(Database cx, KeyRange keyRange) {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->set(blobRangeChangeKey, deterministicRandom()->randomUniqueID().toString());
-				wait(krmSetRange(tr, blobRangeKeys.begin, keyRange, LiteralStringRef("1")));
-				wait(tr->commit());
-				if (BGW_DEBUG) {
-					fmt::print("Successfully set up blob granule range for tenant range [{0} - {1})\n",
-					           keyRange.begin.printable(),
-					           keyRange.end.printable());
-				}
-				return Void();
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
-	}
-
 	ACTOR Future<TenantMapEntry> setUpTenant(Database cx, TenantName name) {
 		if (BGW_DEBUG) {
 			fmt::print("Setting up blob granule range for tenant {0}\n", name.printable());
@@ -291,7 +283,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			self->directories[directoryIdx]->directoryRange =
 			    KeyRangeRef(tenantEntry.prefix, tenantEntry.prefix.withSuffix(normalKeys.end));
 			tenants.push_back({ self->directories[directoryIdx]->tenantName, tenantEntry });
-			wait(self->setUpBlobRange(cx, self->directories[directoryIdx]->directoryRange));
+			bool _success = wait(cx->blobbifyRange(self->directories[directoryIdx]->directoryRange));
+			ASSERT(_success);
 		}
 		tenantData.addTenants(tenants);
 
@@ -896,6 +889,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		for (auto& it : directories) {
 			// Wait for blob worker to initialize snapshot before starting test for that range
 			Future<Void> start = waitFirstSnapshot(this, cx, it, true);
+			it->summaryClient = validateGranuleSummaries(cx, normalKeys, it->tenantName, it->triggerSummaryComplete);
 			clients.push_back(timeout(writeWorker(this, start, cx, it), testDuration, Void()));
 			clients.push_back(timeout(readWorker(this, start, cx, it), testDuration, Void()));
 		}
@@ -911,8 +905,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		loop {
 			state Transaction tr(cx, threadData->tenantName);
 			try {
-				Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(normalKeys));
-				ASSERT(ranges.size() >= 1);
+				Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(normalKeys, 1000000));
+				ASSERT(ranges.size() >= 1 && ranges.size() < 1000000);
 				ASSERT(ranges.front().begin == normalKeys.begin);
 				ASSERT(ranges.back().end == normalKeys.end);
 				for (int i = 0; i < ranges.size() - 1; i++) {
@@ -929,6 +923,9 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 	                                  BlobGranuleCorrectnessWorkload* self,
 	                                  Reference<ThreadData> threadData) {
 
+		if (threadData->triggerSummaryComplete.canBeSet()) {
+			threadData->triggerSummaryComplete.send(Void());
+		}
 		state bool result = true;
 		state int finalRowsValidated;
 		if (threadData->writeVersions.empty()) {
@@ -994,6 +991,9 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			CODE_PROBE(true, "BGCorrectness clearing database and awaiting merge");
 			wait(clearAndAwaitMerge(cx, threadData->directoryRange));
 		}
+
+		// validate that summary completes without error
+		wait(threadData->summaryClient);
 
 		return result;
 	}

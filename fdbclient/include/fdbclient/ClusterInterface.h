@@ -120,7 +120,7 @@ struct OpenDatabaseRequest {
 	//   info changes.  Returns immediately if the current client info id is different from
 	//   knownClientInfoID; otherwise returns when it next changes (or perhaps after a long interval)
 
-	int clientCount;
+	int clientCount = 0;
 	std::vector<ItemWithExamples<Key>> issues;
 	std::vector<ItemWithExamples<Standalone<ClientVersionRef>>> supportedVersions;
 	std::vector<ItemWithExamples<Key>> maxProtocolSupported;
