@@ -98,7 +98,7 @@ public:
 	// IN_PROGRESS -> (ON_ERROR -> IN_PROGRESS)* [-> ON_ERROR] -> DONE
 	enum class TxState { IN_PROGRESS, ON_ERROR, DONE };
 
-	fdb::Transaction tx() override { return fdbTx; }
+	fdb::Transaction tx() override { return fdbTx.atomic_load(); }
 
 	// Set a continuation to be executed when a future gets ready
 	void continueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
@@ -172,7 +172,7 @@ public:
 			// Restart by recreating the transaction in a valid database
 			scheduler->schedule([this]() {
 				fdb::Database db = executor->selectDatabase();
-				fdbTx = db.createTransaction();
+				fdbTx.atomic_store(db.createTransaction());
 				restartTransaction();
 			});
 		} else {
@@ -538,6 +538,7 @@ protected:
 			futures.push_back(iter.second.future);
 		}
 		lock.unlock();
+
 		for (auto& f : futures) {
 			f.cancel();
 		}
