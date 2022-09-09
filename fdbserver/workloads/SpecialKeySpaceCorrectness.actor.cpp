@@ -409,12 +409,13 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					state RangeResult conflictKeys =
 					    wait(defaultTx1->getRange(conflictingKeysRange, CLIENT_KNOBS->TOO_MANY));
 
-					std::string readExpected = "foo"_sr.withPrefix(readConflictRangeKeysRange.begin).toString();
-					std::string writeExpected = "foo"_sr.withPrefix(writeConflictRangeKeysRange.begin).toString();
-					std::string conflictExpected = "foo"_sr.withPrefix(conflictingKeysRange.begin).toString();
-					ASSERT(readConflictRange.begin()->key.toString() == readExpected);
-					ASSERT(writeConflictRange.begin()->key.toString() == writeExpected);
-					ASSERT(conflictKeys.begin()->key.toString() == conflictExpected);
+					// size is 2 because singleKeyRange includes the key after
+					ASSERT(readConflictRange.size() == 2 &&
+					       readConflictRange.begin()->key == readConflictRangeKeysRange.begin.withSuffix("foo"_sr));
+					ASSERT(writeConflictRange.size() == 2 &&
+					       writeConflictRange.begin()->key == writeConflictRangeKeysRange.begin.withSuffix("foo"_sr));
+					ASSERT(conflictKeys.size() == 2 &&
+					       conflictKeys.begin()->key == conflictingKeysRange.begin.withSuffix("foo"_sr));
 					defaultTx1->reset();
 					defaultTx2->reset();
 					break;
