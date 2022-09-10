@@ -11117,15 +11117,23 @@ TEST_CASE(":/redwood/performance/randomRangeScans") {
 	return Void();
 }
 
-TEST_CASE(":/redwood/performance/histogramThroughput") {
-	std::default_random_engine generator;
-	std::uniform_int_distribution<uint32_t> distribution(0, UINT32_MAX);
-	state size_t inputSize = pow(10, 8);
-	state std::vector<uint32_t> uniform;
-	for (int i = 0; i < inputSize; i++) {
-		uniform.push_back(distribution(generator));
+std::vector<double> generateDoubles(int size, double max) {
+	std::vector<double> result;
+	while (result.size() < size) {
+		result.push_back(deterministicRandom()->random01() * max);
 	}
-	std::cout << "size of input: " << uniform.size() << std::endl;
+	return result;
+}
+
+std::vector<uint32_t> generateInts(int size) {
+	std::vector<uint32_t> result;
+	while (result.size() < size) {
+		result.push_back(deterministicRandom()->randomUInt32());
+	}
+	return result;
+}
+
+TEST_CASE(":/redwood/performance/samplers") {
 	{
 		// Time needed to log 33 histograms.
 		std::vector<Reference<Histogram>> histograms;
@@ -11147,62 +11155,107 @@ TEST_CASE(":/redwood/performance/histogramThroughput") {
 		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
 		std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
 	}
-	{
-		std::cout << "Histogram Unit bytes" << std::endl;
-		auto t_start = std::chrono::high_resolution_clock::now();
-		Reference<Histogram> h = Histogram::getHistogram(
-		    LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::bytes);
-		ASSERT(uniform.size() == inputSize);
-		for (size_t i = 0; i < uniform.size(); i++) {
-			h->sample(uniform[i]);
-		}
-		auto t_end = std::chrono::high_resolution_clock::now();
-		std::cout << h->drawHistogram();
-		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
 
-		Reference<Histogram> hCopy = Histogram::getHistogram(
-		    LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::bytes);
-		std::cout << hCopy->drawHistogram();
-		GetHistogramRegistry().logReport();
-	}
 	{
-		std::cout << "Histogram Unit percentage: " << std::endl;
-		auto t_start = std::chrono::high_resolution_clock::now();
+		std::vector<uint32_t> data = generateInts(1e8);
+		std::cout << "Adding " << data.size() << " samples to Histogram, Unit::bytes" << std::endl;
 		Reference<Histogram> h = Histogram::getHistogram(
-		    LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::percentageLinear);
-		ASSERT(uniform.size() == inputSize);
-		for (size_t i = 0; i < uniform.size(); i++) {
-			h->samplePercentage((double)uniform[i] / UINT32_MAX);
+		    LiteralStringRef("histogramTest"), LiteralStringRef("bytes"), Histogram::Unit::bytes);
+
+		auto t_start = std::chrono::high_resolution_clock::now();
+		for (auto d : data) {
+			h->sample(d);
 		}
 		auto t_end = std::chrono::high_resolution_clock::now();
-		std::cout << h->drawHistogram();
-		GetHistogramRegistry().logReport();
+
 		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
 		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
-	}
-	return Void();
-}
-TEST_CASE(":/redwood/performance/continuousSmapleThroughput") {
-	std::default_random_engine generator;
-	std::uniform_int_distribution<uint32_t> distribution(0, UINT32_MAX);
-	state size_t inputSize = pow(10, 8);
-	state std::vector<uint32_t> uniform;
-	for (int i = 0; i < inputSize; i++) {
-		uniform.push_back(distribution(generator));
+		// std::cout << h->drawHistogram();
+		GetHistogramRegistry().logReport();
 	}
 
 	{
-		ContinuousSample<uint32_t> s = ContinuousSample<uint32_t>(pow(10, 3));
+		std::vector<double> data = generateDoubles(1e8, 1);
+		std::cout << "Adding " << data.size() << " samples to Histogram, Unit::percentageLinear" << std::endl;
+		Reference<Histogram> h = Histogram::getHistogram(
+		    LiteralStringRef("histogramTest"), LiteralStringRef("percentage"), Histogram::Unit::percentageLinear);
+
 		auto t_start = std::chrono::high_resolution_clock::now();
-		ASSERT(uniform.size() == inputSize);
-		for (size_t i = 0; i < uniform.size(); i++) {
-			s.addSample(uniform[i]);
+		for (auto d : data) {
+			h->samplePercentage(d);
 		}
 		auto t_end = std::chrono::high_resolution_clock::now();
+
 		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-		std::cout << "size of input: " << uniform.size() << std::endl;
+		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
+		// std::cout << h->drawHistogram();
+		GetHistogramRegistry().logReport();
+	}
+
+	{
+		std::vector<double> data = generateDoubles(1e8, 5);
+		std::cout << "Adding " << data.size() << " samples to Histogram, Unit::microseconds" << std::endl;
+		Reference<Histogram> h = Histogram::getHistogram(
+		    LiteralStringRef("histogramTest"), LiteralStringRef("latency"), Histogram::Unit::microseconds);
+
+		auto t_start = std::chrono::high_resolution_clock::now();
+		for (auto d : data) {
+			h->sampleSeconds(d);
+		}
+		auto t_end = std::chrono::high_resolution_clock::now();
+
+		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
+		// std::cout << h->drawHistogram();
+		GetHistogramRegistry().logReport();
+	}
+
+	{
+		std::vector<uint32_t> data = generateInts(1e8);
+		std::cout << "Adding " << data.size() << " samples to ContinuousSample<uint32_t>" << std::endl;
+		ContinuousSample<uint32_t> s(1e3);
+
+		auto t_start = std::chrono::high_resolution_clock::now();
+		for (auto d : data) {
+			s.addSample(d);
+		}
+		auto t_end = std::chrono::high_resolution_clock::now();
+
+		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
 		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
 	}
+
+	{
+		std::vector<double> data = generateDoubles(1e8, 5);
+		std::cout << "Adding " << data.size() << " samples to ContinuousSample<double>" << std::endl;
+		ContinuousSample<double> s(1e3);
+
+		auto t_start = std::chrono::high_resolution_clock::now();
+		for (auto d : data) {
+			s.addSample(d);
+		}
+		auto t_end = std::chrono::high_resolution_clock::now();
+
+		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
+	}
+
+	/*
+	{
+	    std::vector<double> data = generateDoubles(1e8, 5);
+	    std::cout << "Adding " << data.size() << " samples to DDSketch<double>" << std::endl;
+	    DDSketch<double> s;
+
+	    auto t_start = std::chrono::high_resolution_clock::now();
+	    for (auto d : data) {
+	        s.addSample(d);
+	    }
+	    auto t_end = std::chrono::high_resolution_clock::now();
+
+	    double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+	    std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
+	}
+	*/
+
 	return Void();
 }
