@@ -23,6 +23,7 @@
 #include <type_traits>
 #include <unordered_map>
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "flow/ApiVersion.h"
 #include "fmt/format.h"
@@ -8218,7 +8219,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 							cipherDetails.insert(header->cipherHeaderDetails);
 							collectingCipherKeys = true;
 						} else {
-							msg = msg.decrypt(cipherKeys.get(), eager.arena);
+							msg = msg.decrypt(cipherKeys.get(), eager.arena, BlobCipherMetrics::TLOG);
 						}
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
@@ -8241,7 +8242,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			if (collectingCipherKeys) {
 				std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-				    wait(getEncryptCipherKeys(data->db, cipherDetails));
+				    wait(getEncryptCipherKeys(data->db, cipherDetails, BlobCipherMetrics::TLOG));
 				cipherKeys = getCipherKeysResult;
 				collectingCipherKeys = false;
 				eager = UpdateEagerReadInfo();
@@ -8366,7 +8367,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				rd >> msg;
 				if (msg.isEncrypted()) {
 					ASSERT(cipherKeys.present());
-					msg = msg.decrypt(cipherKeys.get(), rd.arena());
+					msg = msg.decrypt(cipherKeys.get(), rd.arena(), BlobCipherMetrics::TLOG);
 				}
 
 				Span span("SS:update"_loc, spanContext);

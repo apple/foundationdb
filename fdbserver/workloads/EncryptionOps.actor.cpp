@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
-#include "flow/BlobCipher.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/flow.h"
 #include "flow/ITrace.h"
@@ -274,7 +274,8 @@ struct EncryptionOpsWorkload : TestWorkload {
 	                                   BlobCipherEncryptHeader* header) {
 		uint8_t iv[AES_256_IV_LENGTH];
 		deterministicRandom()->randomBytes(&iv[0], AES_256_IV_LENGTH);
-		EncryptBlobCipherAes265Ctr encryptor(textCipherKey, headerCipherKey, &iv[0], AES_256_IV_LENGTH, authMode);
+		EncryptBlobCipherAes265Ctr encryptor(
+		    textCipherKey, headerCipherKey, &iv[0], AES_256_IV_LENGTH, authMode, BlobCipherMetrics::TEST);
 
 		auto start = std::chrono::high_resolution_clock::now();
 		Reference<EncryptBuf> encrypted = encryptor.encrypt(payload, len, header, arena);
@@ -306,7 +307,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		ASSERT(cipherKey.isValid());
 		ASSERT(cipherKey->isEqual(orgCipherKey));
 
-		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, header.iv);
+		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, header.iv, BlobCipherMetrics::TEST);
 		const bool validateHeaderAuthToken = deterministicRandom()->randomInt(0, 100) < 65;
 
 		auto start = std::chrono::high_resolution_clock::now();
