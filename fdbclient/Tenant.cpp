@@ -22,16 +22,19 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 #include "fdbrpc/TenantInfo.h"
+#include "flow/BooleanParam.h"
 #include "libb64/encode.h"
 #include "flow/ApiVersion.h"
 #include "flow/UnitTest.h"
+
+FDB_DEFINE_BOOLEAN_PARAM(EnforceValidTenantId);
 
 Key TenantMapEntry::idToPrefix(int64_t id) {
 	int64_t swapped = bigEndian64(id);
 	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), TENANT_PREFIX_SIZE);
 }
 
-int64_t TenantMapEntry::prefixToId(KeyRef prefix, bool enforceValidTenantId) {
+int64_t TenantMapEntry::prefixToId(KeyRef prefix, EnforceValidTenantId enforceValidTenantId) {
 	ASSERT(prefix.size() == TENANT_PREFIX_SIZE);
 	int64_t id = *reinterpret_cast<const int64_t*>(prefix.begin());
 	id = bigEndian64(id);

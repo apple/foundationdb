@@ -29,15 +29,7 @@
 #include <string>
 #include <string_view>
 
-#define ENCRYPT_INVALID_DOMAIN_ID -1
-#define ENCRYPT_INVALID_CIPHER_KEY_ID 0
-#define ENCRYPT_INVALID_RANDOM_SALT 0
-
 #define AUTH_TOKEN_SIZE 32
-
-#define SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID -2
-#define ENCRYPT_HEADER_DOMAIN_ID -3
-#define FDB_DEFAULT_ENCRYPT_DOMAIN_ID -4
 
 using EncryptCipherDomainId = int64_t;
 using EncryptCipherDomainNameRef = StringRef;
@@ -45,10 +37,18 @@ using EncryptCipherDomainName = Standalone<EncryptCipherDomainNameRef>;
 using EncryptCipherBaseKeyId = uint64_t;
 using EncryptCipherRandomSalt = uint64_t;
 
-const EncryptCipherDomainNameRef FDB_DEFAULT_ENCRYPT_DOMAIN_NAME_REF =
-    EncryptCipherDomainNameRef(std::string("FdbDefaultEncryptDomain"));
-const EncryptCipherDomainName FDB_DEFAULT_ENCRYPT_DOMAIN_NAME =
-    EncryptCipherDomainName(std::string("FdbDefaultEncryptDomain"));
+constexpr const EncryptCipherDomainId INVALID_ENCRYPT_DOMAIN_ID = -1;
+constexpr const EncryptCipherDomainId SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID = -2;
+constexpr const EncryptCipherDomainId ENCRYPT_HEADER_DOMAIN_ID = -3;
+constexpr const EncryptCipherDomainId FDB_DEFAULT_ENCRYPT_DOMAIN_ID = -4;
+
+constexpr const EncryptCipherBaseKeyId INVALID_ENCRYPT_CIPHER_KEY_ID = 0;
+
+constexpr const EncryptCipherRandomSalt INVALID_ENCRYPT_RANDOM_SALT = 0;
+
+const EncryptCipherDomainNameRef FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME = "FdbSystemKeyspaceEncryptDomain"_sr;
+const EncryptCipherDomainNameRef FDB_DEFAULT_ENCRYPT_DOMAIN_NAME = "FdbDefaultEncryptDomain"_sr;
+const EncryptCipherDomainNameRef FDB_ENCRYPT_HEADER_DOMAIN_NAME = "FdbEncryptHeaderDomain"_sr;
 
 typedef enum {
 	ENCRYPT_CIPHER_MODE_NONE = 0,

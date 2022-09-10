@@ -84,8 +84,7 @@ public:
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
 	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
-	    tenantIdNameMap(&proxyCommitData_.tenantIdNameMap), initialCommit(initialCommit_), dbInfo(proxyCommitData_.db) {
-	}
+	    tenantIdIndex(&proxyCommitData_.tenantIdIndex), initialCommit(initialCommit_), dbInfo(proxyCommitData_.db) {}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           ResolverData& resolverData_,
@@ -135,7 +134,7 @@ private:
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
 	std::map<TenantName, TenantMapEntry>* tenantMap = nullptr;
-	std::map<int64_t, TenantName>* tenantIdNameMap = nullptr;
+	std::unordered_map<int64_t, TenantName>* tenantIdIndex = nullptr;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
 	bool initialCommit = false;
@@ -669,13 +668,11 @@ private:
 				    .detail("Tenant", tenantName)
 				    .detail("Id", tenantEntry.id)
 				    .detail("Version", version);
+
 				(*tenantMap)[tenantName] = tenantEntry;
-			}
-
-			if (tenantIdNameMap) {
-				ASSERT(version != invalidVersion);
-
-				(*tenantIdNameMap)[tenantEntry.id] = tenantName;
+				if (tenantIdIndex) {
+					(*tenantIdIndex)[tenantEntry.id] = tenantName;
+				}
 			}
 
 			if (!initialCommit) {
@@ -1083,12 +1080,12 @@ private:
 				auto startItr = tenantMap->lower_bound(startTenant);
 				auto endItr = tenantMap->lower_bound(endTenant);
 
-				if (tenantIdNameMap) {
+				if (tenantIdIndex) {
 					// Iterate over iterator-range and remove entries from TenantIdName map
 					// TODO: O(n) operation, optimize cpu
 					auto itr = startItr;
 					while (itr != endItr) {
-						tenantIdNameMap->erase(itr->second.id);
+						tenantIdIndex->erase(itr->second.id);
 						itr++;
 					}
 				}
