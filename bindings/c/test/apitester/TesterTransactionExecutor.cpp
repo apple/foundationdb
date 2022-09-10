@@ -31,6 +31,7 @@
 #include <chrono>
 #include <thread>
 #include <fmt/format.h>
+#include <filesystem>
 
 namespace FdbApiTester {
 
@@ -84,7 +85,7 @@ public:
 		                              Random::get().randomBool(executor->getOptions().databaseCreateErrorRatio);
 		fdb::Database db;
 		if (databaseCreateErrorInjected) {
-			db = fdb::Database("not_existing_file");
+			db = fdb::Database(executor->getClusterFileForErrorInjection());
 		} else {
 			db = executor->selectDatabase();
 		}
@@ -97,7 +98,7 @@ public:
 	// IN_PROGRESS -> (ON_ERROR -> IN_PROGRESS)* [-> ON_ERROR] -> DONE
 	enum class TxState { IN_PROGRESS, ON_ERROR, DONE };
 
-	fdb::Transaction tx() override { return fdbTx; }
+	fdb::Transaction tx() override { return fdbTx.atomic_load(); }
 
 	// Set a continuation to be executed when a future gets ready
 	void continueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
@@ -135,9 +136,11 @@ public:
 			           retriedErrors.size(),
 			           fmt::join(retriedErrorCodes(), ", "));
 		}
+
 		// cancel transaction so that any pending operations on it
 		// fail gracefully
 		fdbTx.cancel();
+
 		txActor->complete(fdb::Error::success());
 		cleanUp();
 		ASSERT(txState == TxState::DONE);
@@ -164,13 +167,12 @@ public:
 
 		ASSERT(!onErrorFuture);
 
-		if (databaseCreateErrorInjected) {
+		if (databaseCreateErrorInjected && canBeInjectedDatabaseCreateError(err.code())) {
 			// Failed to create a database because of failure injection
 			// Restart by recreating the transaction in a valid database
 			scheduler->schedule([this]() {
-				databaseCreateErrorInjected = false;
 				fdb::Database db = executor->selectDatabase();
-				fdbTx = db.createTransaction();
+				fdbTx.atomic_store(db.createTransaction());
 				restartTransaction();
 			});
 		} else {
@@ -188,10 +190,17 @@ protected:
 	// Clean up transaction state after completing the transaction
 	// Note that the object may live longer, because it is referenced
 	// by not yet triggered callbacks
-	virtual void cleanUp() {
+	void cleanUp() {
 		ASSERT(txState == TxState::DONE);
 		ASSERT(!onErrorFuture);
 		txActor = {};
+		cancelPendingFutures();
+	}
+
+	virtual void cancelPendingFutures() {}
+
+	bool canBeInjectedDatabaseCreateError(fdb::Error::CodeType errCode) {
+		return errCode == error_code_no_cluster_file_found || errCode == error_code_connection_string_invalid;
 	}
 
 	// Complete the transaction with an (unretriable) error
@@ -225,8 +234,9 @@ protected:
 	}
 
 	void restartTransaction() {
-		std::unique_lock<std::mutex> lock(mutex);
 		ASSERT(txState == TxState::ON_ERROR);
+		cancelPendingFutures();
+		std::unique_lock<std::mutex> lock(mutex);
 		txState = TxState::IN_PROGRESS;
 		commitCalled = false;
 		lock.unlock();
@@ -415,7 +425,7 @@ protected:
 		if (txState != TxState::IN_PROGRESS) {
 			return;
 		}
-		callbackMap[f] = CallbackInfo{ f, cont, shared_from_this(), retryOnError, timeNow() };
+		callbackMap[f] = CallbackInfo{ f, cont, shared_from_this(), retryOnError, timeNow(), false };
 		lock.unlock();
 		try {
 			f.then([this](fdb::Future f) { futureReadyCallback(f, this); });
@@ -462,7 +472,7 @@ protected:
 			           err.code(),
 			           err.what());
 		}
-		if (err.code() == error_code_transaction_cancelled) {
+		if (err.code() == error_code_transaction_cancelled || cbInfo.cancelled) {
 			return;
 		}
 		if (err.code() == error_code_success || !cbInfo.retryOnError) {
@@ -518,17 +528,17 @@ protected:
 		scheduler->schedule([thisRef]() { thisRef->handleOnErrorResult(); });
 	}
 
-	void cleanUp() override {
-		TransactionContextBase::cleanUp();
-
+	void cancelPendingFutures() override {
 		// Cancel all pending operations
 		// Note that the callbacks of the cancelled futures will still be called
 		std::unique_lock<std::mutex> lock(mutex);
 		std::vector<fdb::Future> futures;
 		for (auto& iter : callbackMap) {
+			iter.second.cancelled = true;
 			futures.push_back(iter.second.future);
 		}
 		lock.unlock();
+
 		for (auto& f : futures) {
 			f.cancel();
 		}
@@ -548,6 +558,7 @@ protected:
 		std::shared_ptr<ITransactionContext> thisRef;
 		bool retryOnError;
 		TimePoint startTime;
+		bool cancelled;
 	};
 
 	// Map for keeping track of future waits and holding necessary object references
@@ -567,10 +578,53 @@ class TransactionExecutorBase : public ITransactionExecutor {
 public:
 	TransactionExecutorBase(const TransactionExecutorOptions& options) : options(options), scheduler(nullptr) {}
 
+	~TransactionExecutorBase() {
+		if (tamperClusterFileThread.joinable()) {
+			tamperClusterFileThread.join();
+		}
+	}
+
 	void init(IScheduler* scheduler, const char* clusterFile, const std::string& bgBasePath) override {
 		this->scheduler = scheduler;
 		this->clusterFile = clusterFile;
 		this->bgBasePath = bgBasePath;
+
+		ASSERT(!options.tmpDir.empty());
+		emptyClusterFile.create(options.tmpDir, "fdbempty.cluster");
+		invalidClusterFile.create(options.tmpDir, "fdbinvalid.cluster");
+		invalidClusterFile.write(Random().get().randomStringLowerCase<std::string>(1, 100));
+
+		emptyListClusterFile.create(options.tmpDir, "fdbemptylist.cluster");
+		emptyListClusterFile.write(fmt::format("{}:{}@",
+		                                       Random().get().randomStringLowerCase<std::string>(3, 8),
+		                                       Random().get().randomStringLowerCase<std::string>(1, 100)));
+
+		if (options.tamperClusterFile) {
+			tamperedClusterFile.create(options.tmpDir, "fdb.cluster");
+			originalClusterFile = clusterFile;
+			this->clusterFile = tamperedClusterFile.getFileName();
+
+			// begin with a valid cluster file, but with non existing address
+			tamperedClusterFile.write(fmt::format("{}:{}@192.168.{}.{}:{}",
+			                                      Random().get().randomStringLowerCase<std::string>(3, 8),
+			                                      Random().get().randomStringLowerCase<std::string>(1, 100),
+			                                      Random().get().randomInt(1, 254),
+			                                      Random().get().randomInt(1, 254),
+			                                      Random().get().randomInt(2000, 10000)));
+
+			tamperClusterFileThread = std::thread([this]() {
+				std::this_thread::sleep_for(std::chrono::seconds(2));
+				// now write an invalid connection string
+				tamperedClusterFile.write(fmt::format("{}:{}@",
+				                                      Random().get().randomStringLowerCase<std::string>(3, 8),
+				                                      Random().get().randomStringLowerCase<std::string>(1, 100)));
+				std::this_thread::sleep_for(std::chrono::seconds(2));
+				// finally use correct cluster file contents
+				std::filesystem::copy_file(std::filesystem::path(originalClusterFile),
+				                           std::filesystem::path(tamperedClusterFile.getFileName()),
+				                           std::filesystem::copy_options::overwrite_existing);
+			});
+		}
 	}
 
 	const TransactionExecutorOptions& getOptions() override { return options; }
@@ -593,11 +647,30 @@ public:
 		}
 	}
 
+	std::string getClusterFileForErrorInjection() override {
+		switch (Random::get().randomInt(0, 3)) {
+		case 0:
+			return fmt::format("{}{}", "not-existing-file", Random::get().randomStringLowerCase<std::string>(0, 2));
+		case 1:
+			return emptyClusterFile.getFileName();
+		case 2:
+			return invalidClusterFile.getFileName();
+		default: // case 3
+			return emptyListClusterFile.getFileName();
+		}
+	}
+
 protected:
 	TransactionExecutorOptions options;
 	std::string bgBasePath;
 	std::string clusterFile;
 	IScheduler* scheduler;
+	TmpFile emptyClusterFile;
+	TmpFile invalidClusterFile;
+	TmpFile emptyListClusterFile;
+	TmpFile tamperedClusterFile;
+	std::thread tamperClusterFileThread;
+	std::string originalClusterFile;
 };
 
 /**
@@ -612,7 +685,7 @@ public:
 	void init(IScheduler* scheduler, const char* clusterFile, const std::string& bgBasePath) override {
 		TransactionExecutorBase::init(scheduler, clusterFile, bgBasePath);
 		for (int i = 0; i < options.numDatabases; i++) {
-			fdb::Database db(clusterFile);
+			fdb::Database db(this->clusterFile);
 			databases.push_back(db);
 		}
 	}
