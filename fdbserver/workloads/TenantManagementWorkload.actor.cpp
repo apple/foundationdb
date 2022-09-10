@@ -73,14 +73,14 @@ struct TenantManagementWorkload : TestWorkload {
 	TenantName localTenantGroupNamePrefix;
 
 	const Key specialKeysTenantMapPrefix = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT)
-	                                           .begin.withSuffix(TenantRangeImpl<true>::submoduleRange.begin)
-	                                           .withSuffix(TenantRangeImpl<true>::mapSubRange.begin);
+	                                           .begin.withSuffix(TenantRangeImpl::submoduleRange.begin)
+	                                           .withSuffix(TenantRangeImpl::mapSubRange.begin);
 	const Key specialKeysTenantConfigPrefix = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT)
-	                                              .begin.withSuffix(TenantRangeImpl<true>::submoduleRange.begin)
-	                                              .withSuffix(TenantRangeImpl<true>::configureSubRange.begin);
+	                                              .begin.withSuffix(TenantRangeImpl::submoduleRange.begin)
+	                                              .withSuffix(TenantRangeImpl::configureSubRange.begin);
 	const Key specialKeysTenantRenamePrefix = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT)
-	                                              .begin.withSuffix(TenantRangeImpl<true>::submoduleRange.begin)
-	                                              .withSuffix(TenantRangeImpl<true>::renameSubRange.begin);
+	                                              .begin.withSuffix(TenantRangeImpl::submoduleRange.begin)
+	                                              .withSuffix(TenantRangeImpl::renameSubRange.begin);
 
 	int maxTenants;
 	int maxTenantGroups;

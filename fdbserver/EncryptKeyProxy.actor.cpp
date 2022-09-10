@@ -21,7 +21,6 @@
 #include "fdbclient/EncryptKeyProxyInterface.h"
 
 #include "fdbrpc/Locality.h"
-#include "fdbrpc/Stats.h"
 #include "fdbserver/KmsConnector.h"
 #include "fdbserver/KmsConnectorInterface.h"
 #include "fdbserver/Knobs.h"
@@ -223,6 +222,10 @@ public:
 	Counter blobMetadataRefreshed;
 	Counter numBlobMetadataRefreshErrors;
 
+	LatencySample kmsLookupByIdsReqLatency;
+	LatencySample kmsLookupByDomainIdsReqLatency;
+	LatencySample kmsBlobMetadataReqLatency;
+
 	explicit EncryptKeyProxyData(UID id)
 	  : myId(id), ekpCacheMetrics("EKPMetrics", myId.toString()),
 	    baseCipherKeyIdCacheMisses("EKPCipherIdCacheMisses", ekpCacheMetrics),
@@ -235,7 +238,19 @@ public:
 	    blobMetadataCacheHits("EKPBlobMetadataCacheHits", ekpCacheMetrics),
 	    blobMetadataCacheMisses("EKPBlobMetadataCacheMisses", ekpCacheMetrics),
 	    blobMetadataRefreshed("EKPBlobMetadataRefreshed", ekpCacheMetrics),
-	    numBlobMetadataRefreshErrors("EKPBlobMetadataRefreshErrors", ekpCacheMetrics) {}
+	    numBlobMetadataRefreshErrors("EKPBlobMetadataRefreshErrors", ekpCacheMetrics),
+	    kmsLookupByIdsReqLatency("EKPKmsLookupByIdsReqLatency",
+	                             id,
+	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    kmsLookupByDomainIdsReqLatency("EKPKmsLookupByDomainIdsReqLatency",
+	                                   id,
+	                                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                                   SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    kmsBlobMetadataReqLatency("EKPKmsBlobMetadataReqLatency",
+	                              id,
+	                              SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                              SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {}
 
 	EncryptBaseCipherDomainIdKeyIdCacheKey getBaseCipherDomainIdKeyIdCacheKey(
 	    const EncryptCipherDomainId domainId,
@@ -375,7 +390,9 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 				    keysByIdsReq.arena, item.second.domainId, item.second.baseCipherId, item.second.domainName);
 			}
 			keysByIdsReq.debugId = keysByIds.debugId;
+			state double startTime = now();
 			KmsConnLookupEKsByKeyIdsRep keysByIdsRep = wait(kmsConnectorInf.ekLookupByIds.getReply(keysByIdsReq));
+			ekpProxyData->kmsLookupByIdsReqLatency.addMeasurement(now() - startTime);
 
 			for (const auto& item : keysByIdsRep.cipherKeyDetails) {
 				keyIdsReply.baseCipherDetails.emplace_back(
@@ -511,8 +528,10 @@ ACTOR Future<Void> getLatestCipherKeys(Reference<EncryptKeyProxyData> ekpProxyDa
 			}
 			keysByDomainIdReq.debugId = latestKeysReq.debugId;
 
+			state double startTime = now();
 			KmsConnLookupEKsByDomainIdsRep keysByDomainIdRep =
 			    wait(kmsConnectorInf.ekLookupByDomainIds.getReply(keysByDomainIdReq));
+			ekpProxyData->kmsLookupByDomainIdsReqLatency.addMeasurement(now() - startTime);
 
 			for (auto& item : keysByDomainIdRep.cipherKeyDetails) {
 				CipherKeyValidityTS validityTS = getCipherKeyValidityTS(item.refreshAfterSec, item.expireAfterSec);
@@ -609,7 +628,9 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
 			}
 		}
 
+		state double startTime = now();
 		KmsConnLookupEKsByDomainIdsRep rep = wait(kmsConnectorInf.ekLookupByDomainIds.getReply(req));
+		ekpProxyData->kmsLookupByDomainIdsReqLatency.addMeasurement(now() - startTime);
 		for (const auto& item : rep.cipherKeyDetails) {
 			const auto itr = ekpProxyData->baseCipherDomainIdCache.find(item.encryptDomainId);
 			if (itr == ekpProxyData->baseCipherDomainIdCache.end()) {
@@ -707,7 +728,9 @@ ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxy
 	if (!lookupDomains.empty()) {
 		try {
 			KmsConnBlobMetadataReq kmsReq(lookupDomains, req.debugId);
+			state double startTime = now();
 			KmsConnBlobMetadataRep kmsRep = wait(kmsConnectorInf.blobMetadataReq.getReply(kmsReq));
+			ekpProxyData->kmsBlobMetadataReqLatency.addMeasurement(now() - startTime);
 			metadataDetails.arena().dependsOn(kmsRep.metadataDetails.arena());
 
 			for (auto& item : kmsRep.metadataDetails) {
@@ -753,7 +776,9 @@ ACTOR Future<Void> refreshBlobMetadataCore(Reference<EncryptKeyProxyData> ekpPro
 		for (auto& item : ekpProxyData->blobMetadataDomainIdCache) {
 			req.domainIds.emplace_back(item.first);
 		}
+		state double startTime = now();
 		KmsConnBlobMetadataRep rep = wait(kmsConnectorInf.blobMetadataReq.getReply(req));
+		ekpProxyData->kmsBlobMetadataReqLatency.addMeasurement(now() - startTime);
 		for (auto& item : rep.metadataDetails) {
 			ekpProxyData->insertIntoBlobMetadataCache(item.domainId, item);
 			t.detail("BM" + std::to_string(item.domainId), "");
