@@ -623,69 +623,73 @@ TEST_CASE("/fdbrpc/TokenSign/JWT/ToStringRef") {
 	return Void();
 }
 
+// This unit test takes too long to run in RandomUnitTests.toml
+// FIXME: Move this to benchmark to flowbench
+/*
 TEST_CASE("/fdbrpc/TokenSign/bench") {
-	auto keyTypes = std::array<StringRef, 2>{ "EC"_sr, "RSA"_sr };
-	for (auto kty : keyTypes) {
-		constexpr auto repeat = 5;
-		constexpr auto numSamples = 10000;
-		fmt::print("=== {} keys case\n", kty.toString());
-		auto key = kty == "EC"_sr ? mkcert::makeEcP256() : mkcert::makeRsa4096Bit();
-		auto pubKey = key.toPublic();
-		auto& rng = *deterministicRandom();
-		auto arena = Arena();
-		auto jwtSpecs = new (arena) authz::jwt::TokenRef[numSamples];
-		auto fbSpecs = new (arena) authz::flatbuffers::TokenRef[numSamples];
-		auto jwts = new (arena) StringRef[numSamples];
-		auto fbs = new (arena) StringRef[numSamples];
-		for (auto i = 0; i < numSamples; i++) {
-			jwtSpecs[i] = authz::jwt::makeRandomTokenSpec(
-			    arena, rng, kty == "EC"_sr ? authz::Algorithm::ES256 : authz::Algorithm::RS256);
-			fbSpecs[i] = authz::flatbuffers::makeRandomTokenSpec(arena, rng);
-		}
-		{
-			auto const jwtSignBegin = timer_monotonic();
-			for (auto i = 0; i < numSamples; i++) {
-				jwts[i] = authz::jwt::signToken(arena, jwtSpecs[i], key);
-			}
-			auto const jwtSignEnd = timer_monotonic();
-			fmt::print("JWT Sign   :         {:.2f} OPS\n", numSamples / (jwtSignEnd - jwtSignBegin));
-		}
-		{
-			auto const jwtVerifyBegin = timer_monotonic();
-			for (auto rep = 0; rep < repeat; rep++) {
-				for (auto i = 0; i < numSamples; i++) {
-					auto verifyOk = authz::jwt::verifyToken(jwts[i], pubKey);
-					ASSERT(verifyOk);
-				}
-			}
-			auto const jwtVerifyEnd = timer_monotonic();
-			fmt::print("JWT Verify :         {:.2f} OPS\n", repeat * numSamples / (jwtVerifyEnd - jwtVerifyBegin));
-		}
-		{
-			auto tmpArena = Arena();
-			auto const fbSignBegin = timer_monotonic();
-			for (auto i = 0; i < numSamples; i++) {
-				auto fbToken = authz::flatbuffers::signToken(tmpArena, fbSpecs[i], "defaultKey"_sr, key);
-				auto wr = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, Unversioned());
-				wr.serialize(fbToken);
-				fbs[i] = wr.toStringRef();
-			}
-			auto const fbSignEnd = timer_monotonic();
-			fmt::print("FlatBuffers Sign   : {:.2f} OPS\n", numSamples / (fbSignEnd - fbSignBegin));
-		}
-		{
-			auto const fbVerifyBegin = timer_monotonic();
-			for (auto rep = 0; rep < repeat; rep++) {
-				for (auto i = 0; i < numSamples; i++) {
-					auto signedToken = ObjectReader::fromStringRef<Standalone<authz::flatbuffers::SignedTokenRef>>(
-					    fbs[i], Unversioned());
-					auto verifyOk = authz::flatbuffers::verifyToken(signedToken, pubKey);
-					ASSERT(verifyOk);
-				}
-			}
-			auto const fbVerifyEnd = timer_monotonic();
-			fmt::print("FlatBuffers Verify : {:.2f} OPS\n", repeat * numSamples / (fbVerifyEnd - fbVerifyBegin));
-		}
-	}
-	return Void();
+    auto keyTypes = std::array<StringRef, 2>{ "EC"_sr, "RSA"_sr };
+    for (auto kty : keyTypes) {
+        constexpr auto repeat = 5;
+        constexpr auto numSamples = 10000;
+        fmt::print("=== {} keys case\n", kty.toString());
+        auto key = kty == "EC"_sr ? mkcert::makeEcP256() : mkcert::makeRsa4096Bit();
+        auto pubKey = key.toPublic();
+        auto& rng = *deterministicRandom();
+        auto arena = Arena();
+        auto jwtSpecs = new (arena) authz::jwt::TokenRef[numSamples];
+        auto fbSpecs = new (arena) authz::flatbuffers::TokenRef[numSamples];
+        auto jwts = new (arena) StringRef[numSamples];
+        auto fbs = new (arena) StringRef[numSamples];
+        for (auto i = 0; i < numSamples; i++) {
+            jwtSpecs[i] = authz::jwt::makeRandomTokenSpec(
+                arena, rng, kty == "EC"_sr ? authz::Algorithm::ES256 : authz::Algorithm::RS256);
+            fbSpecs[i] = authz::flatbuffers::makeRandomTokenSpec(arena, rng);
+        }
+        {
+            auto const jwtSignBegin = timer_monotonic();
+            for (auto i = 0; i < numSamples; i++) {
+                jwts[i] = authz::jwt::signToken(arena, jwtSpecs[i], key);
+            }
+            auto const jwtSignEnd = timer_monotonic();
+            fmt::print("JWT Sign   :         {:.2f} OPS\n", numSamples / (jwtSignEnd - jwtSignBegin));
+        }
+        {
+            auto const jwtVerifyBegin = timer_monotonic();
+            for (auto rep = 0; rep < repeat; rep++) {
+                for (auto i = 0; i < numSamples; i++) {
+                    auto verifyOk = authz::jwt::verifyToken(jwts[i], pubKey);
+                    ASSERT(verifyOk);
+                }
+            }
+            auto const jwtVerifyEnd = timer_monotonic();
+            fmt::print("JWT Verify :         {:.2f} OPS\n", repeat * numSamples / (jwtVerifyEnd - jwtVerifyBegin));
+        }
+        {
+            auto tmpArena = Arena();
+            auto const fbSignBegin = timer_monotonic();
+            for (auto i = 0; i < numSamples; i++) {
+                auto fbToken = authz::flatbuffers::signToken(tmpArena, fbSpecs[i], "defaultKey"_sr, key);
+                auto wr = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, Unversioned());
+                wr.serialize(fbToken);
+                fbs[i] = wr.toStringRef();
+            }
+            auto const fbSignEnd = timer_monotonic();
+            fmt::print("FlatBuffers Sign   : {:.2f} OPS\n", numSamples / (fbSignEnd - fbSignBegin));
+        }
+        {
+            auto const fbVerifyBegin = timer_monotonic();
+            for (auto rep = 0; rep < repeat; rep++) {
+                for (auto i = 0; i < numSamples; i++) {
+                    auto signedToken = ObjectReader::fromStringRef<Standalone<authz::flatbuffers::SignedTokenRef>>(
+                        fbs[i], Unversioned());
+                    auto verifyOk = authz::flatbuffers::verifyToken(signedToken, pubKey);
+                    ASSERT(verifyOk);
+                }
+            }
+            auto const fbVerifyEnd = timer_monotonic();
+            fmt::print("FlatBuffers Verify : {:.2f} OPS\n", repeat * numSamples / (fbVerifyEnd - fbVerifyBegin));
+        }
+    }
+    return Void();
 }
+*/
