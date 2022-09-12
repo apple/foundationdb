@@ -4273,6 +4273,53 @@ ACTOR Future<Void> validateRangeShard(StorageServer* data, KeyRange range, std::
 	return Void();
 }
 
+ACTOR Future<Void> validateRangeShardAgainstServers(StorageServer* data, KeyRange range, std::vector<UID> candidates) {
+	TraceEvent(SevDebug, "ServeValidateRangeShardAgainstServersBegin", data->thisServerID)
+	    .detail("Range", range)
+	    .detail("TargetServers", describe(candidates));
+
+	state Version version;
+	state std::vector<Optional<Value>> serverListValues;
+	state Transaction tr(data->cx);
+	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+	loop {
+		try {
+			std::vector<Future<Optional<Value>>> serverListEntries;
+			for (const UID& id : candidates) {
+				if (id != data->thisServerID) {
+					serverListEntries.push_back(tr.get(serverListKeyFor(id)));
+				}
+			}
+
+			std::vector<Optional<Value>> serverListValues_ = wait(getAll(serverListEntries));
+			serverListValues = serverListValues_;
+			Version version_ = wait(tr.getReadVersion());
+			version = version_;
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	std::vector<StorageServerInterface> ssis;
+	for (const auto& v : serverListValues) {
+		ssis.push_back(decodeServerListValue(v.get()));
+	}
+
+	if (!ssis.empty()) {
+		wait(validateRangeAgainstServer(data, range, version, ssis[0]));
+	} else {
+		TraceEvent(SevWarn, "ServeValidateRangeShardRemoteNotFound", data->thisServerID)
+		    .detail("Range", range)
+		    .detail("Servers", describe(candidates));
+		throw audit_storage_failed();
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
@@ -4280,38 +4327,43 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 	TraceEvent(SevInfo, "ServeAuditStorageBegin", data->thisServerID)
 	    .detail("RequestID", req.id)
 	    .detail("Range", req.range)
-	    .detail("AuditType", req.type);
+	    .detail("AuditType", req.type)
+	    .detail("TargetServers", describe(req.targetServers));
 
 	state Key begin = req.range.begin;
 	state std::vector<Future<Void>> fs;
 
 	try {
-		while (begin < req.range.end) {
-			state Transaction tr(data->cx);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			try {
-				state RangeResult shards = wait(krmGetRanges(&tr,
-				                                             keyServersPrefix,
-				                                             req.range,
-				                                             SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
-				                                             SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
-				ASSERT(!shards.empty());
+		if (req.targetServers.empty()) {
+			while (begin < req.range.end) {
+				state Transaction tr(data->cx);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				try {
+					state RangeResult shards = wait(krmGetRanges(&tr,
+					                                             keyServersPrefix,
+					                                             req.range,
+					                                             SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+					                                             SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
+					ASSERT(!shards.empty());
 
-				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
-				for (int i = 0; i < shards.size() - 1; ++i) {
-					std::vector<UID> src;
-					std::vector<UID> dest;
-					UID srcId, destId;
-					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
-					fs.push_back(validateRangeShard(data, KeyRangeRef(shards[i].key, shards[i + 1].key), src));
-					begin = shards[i + 1].key;
+					for (int i = 0; i < shards.size() - 1; ++i) {
+						std::vector<UID> src;
+						std::vector<UID> dest;
+						UID srcId, destId;
+						decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
+						fs.push_back(validateRangeShard(data, KeyRangeRef(shards[i].key, shards[i + 1].key), src));
+						begin = shards[i + 1].key;
+					}
+				} catch (Error& e) {
+					wait(tr.onError(e));
 				}
-			} catch (Error& e) {
-				wait(tr.onError(e));
 			}
+		} else {
+			fs.push_back(validateRangeShardAgainstServers(data, req.range, req.targetServers));
 		}
 		wait(waitForAll(fs));
 		AuditStorageState res(req.id, req.getType());
