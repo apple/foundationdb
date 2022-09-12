@@ -83,13 +83,20 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		}
 	};
 
-	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
+	Future<Void> setup(Database const& cx) override {
+		if (clientId == 0 && g_network->isSimulated() && BUGGIFY) {
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob(
+			    "max_tenants_per_cluster", KnobValueRef::create(int{ deterministicRandom()->randomInt(20, 100) }));
+		}
+
+		return _setup(cx, this);
+	}
 	ACTOR static Future<Void> _setup(Database cx, TenantManagementConcurrencyWorkload* self) {
 		state ClusterConnectionString connectionString(g_simulator.extraDatabases[0]);
 		Reference<IDatabase> threadSafeHandle =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
 
-		MultiVersionApi::api->selectApiVersion(cx->apiVersion);
+		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 		self->mvDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
 		if (self->useMetacluster && self->clientId == 0) {
@@ -136,7 +143,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		if (self->useMetacluster) {
 			ASSERT(g_simulator.extraDatabases.size() == 1);
 			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(connectionString);
-			self->dataDb = Database::createDatabase(extraFile, -1);
+			self->dataDb = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 		} else {
 			self->dataDb = cx;
 		}
@@ -251,15 +258,45 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 				Optional<Void> result = wait(timeout(configureImpl(self, tenant, configParams), 30));
 
 				if (result.present()) {
-					fmt::print("Delete tenant success: {}\n", printable(tenant));
 					break;
 				}
 			}
 
 			return Void();
 		} catch (Error& e) {
-			if (e.code() != error_code_tenant_not_found) {
+			if (e.code() != error_code_tenant_not_found && e.code() != error_code_invalid_tenant_state) {
 				TraceEvent(SevError, "ConfigureTenantFailure").error(e).detail("TenantName", tenant);
+			}
+			return Void();
+		}
+	}
+
+	ACTOR static Future<Void> renameTenant(TenantManagementConcurrencyWorkload* self) {
+		state TenantName oldTenant = self->chooseTenantName();
+		state TenantName newTenant = self->chooseTenantName();
+
+		try {
+			loop {
+				Future<Void> renameFuture =
+				    self->useMetacluster ? MetaclusterAPI::renameTenant(self->mvDb, oldTenant, newTenant)
+				                         : TenantAPI::renameTenant(self->dataDb.getReference(), oldTenant, newTenant);
+				Optional<Void> result = wait(timeout(renameFuture, 30));
+
+				if (result.present()) {
+					break;
+				}
+			}
+
+			return Void();
+		} catch (Error& e) {
+			if (e.code() == error_code_invalid_tenant_state || e.code() == error_code_tenant_removed ||
+			    e.code() == error_code_cluster_no_capacity) {
+				ASSERT(self->useMetacluster);
+			} else if (e.code() != error_code_tenant_not_found && e.code() != error_code_tenant_already_exists) {
+				TraceEvent(SevError, "RenameTenantFailure")
+				    .error(e)
+				    .detail("OldTenant", oldTenant)
+				    .detail("NewTenant", newTenant);
 			}
 			return Void();
 		}
@@ -271,13 +308,15 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 		// Run a random sequence of tenant management operations for the duration of the test
 		while (now() < start + self->testDuration) {
-			state int operation = deterministicRandom()->randomInt(0, 2);
+			state int operation = deterministicRandom()->randomInt(0, 4);
 			if (operation == 0) {
 				wait(createTenant(self));
 			} else if (operation == 1) {
 				wait(deleteTenant(self));
 			} else if (operation == 2) {
 				wait(configureTenant(self));
+			} else if (operation == 3) {
+				wait(renameTenant(self));
 			}
 		}
 

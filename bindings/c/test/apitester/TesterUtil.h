@@ -66,7 +66,20 @@ public:
 
 	int randomInt(int min, int max);
 
-	fdb::ByteString randomStringLowerCase(int minLength, int maxLength);
+	template <class StringType>
+	StringType randomStringLowerCase(int minLength, int maxLength) {
+		int length = randomInt(minLength, maxLength);
+		StringType str;
+		str.reserve(length);
+		for (int i = 0; i < length; i++) {
+			str += (char)randomInt('a', 'z');
+		}
+		return str;
+	}
+
+	fdb::ByteString randomByteStringLowerCase(int minLength, int maxLength) {
+		return randomStringLowerCase<fdb::ByteString>(minLength, maxLength);
+	}
 
 	bool randomBool(double trueRatio);
 
@@ -120,6 +133,9 @@ KeyValueArray copyKeyValueArray(fdb::future_var::KeyValueRefArray::Type array);
 using KeyRangeArray = std::vector<fdb::KeyRange>;
 KeyRangeArray copyKeyRangeArray(fdb::future_var::KeyRangeRefArray::Type array);
 
+using GranuleSummaryArray = std::vector<fdb::GranuleSummary>;
+GranuleSummaryArray copyGranuleSummaryArray(fdb::future_var::GranuleSummaryRefArray::Type array);
+
 static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "Do not support non-little-endian systems");
 
 // Converts a little-endian encoded number into an integral type.
@@ -138,6 +154,19 @@ static fdb::ByteString toByteString(T value) {
 	memcpy(output.data(), (const uint8_t*)&value, sizeof(value));
 	return output;
 }
+
+// Creates a temporary file; file gets destroyed/deleted along with object destruction.
+struct TmpFile {
+public:
+	~TmpFile();
+	void create(std::string_view dir, std::string_view prefix);
+	void write(std::string_view data);
+	void remove();
+	const std::string& getFileName() const { return filename; }
+
+private:
+	std::string filename;
+};
 
 } // namespace FdbApiTester
 

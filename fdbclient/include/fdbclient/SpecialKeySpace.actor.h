@@ -60,6 +60,8 @@ public:
 	// TODO : give this function a more descriptive name
 	virtual bool isAsync() const { return false; }
 
+	virtual bool supportsTenants() const { return false; }
+
 	virtual ~SpecialKeyRangeReadImpl() {}
 
 protected:
@@ -301,6 +303,7 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
+	bool supportsTenants() const override { return true; };
 };
 
 class ReadConflictRangeImpl : public SpecialKeyRangeReadImpl {
@@ -309,6 +312,7 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
+	bool supportsTenants() const override { return true; };
 };
 
 class WriteConflictRangeImpl : public SpecialKeyRangeReadImpl {
@@ -317,6 +321,7 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
+	bool supportsTenants() const override { return true; };
 };
 
 class DDStatsRangeImpl : public SpecialKeyRangeAsyncImpl {
@@ -546,6 +551,15 @@ public:
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
+class WorkerInterfacesSpecialKeyImpl : public SpecialKeyRangeReadImpl {
+public:
+	explicit WorkerInterfacesSpecialKeyImpl(KeyRangeRef kr);
+
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	                             KeyRangeRef kr,
+	                             GetRangeLimits limitsHint) const override;
 };
 
 // If the underlying set of key-value pairs of a key space is not changing, then we expect repeating a read to give the

@@ -17,21 +17,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef FLOW_BLOB_CIPHER_H
-#define FLOW_BLOB_CIPHER_H
-#include "flow/ProtocolVersion.h"
-#include "flow/serialize.h"
+#ifndef FDBCLIENT_BLOB_CIPHER_H
+#define FDBCLIENT_BLOB_CIPHER_H
 #pragma once
 
+#include "fdbrpc/Stats.h"
 #include "flow/Arena.h"
 #include "flow/EncryptUtils.h"
 #include "flow/FastRef.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
+#include "flow/Knobs.h"
 #include "flow/network.h"
+#include "flow/Platform.h"
+#include "flow/ProtocolVersion.h"
+#include "flow/serialize.h"
 
 #include <boost/functional/hash.hpp>
 #include <cinttypes>
+#include <limits>
 #include <memory>
 #include <openssl/aes.h>
 #include <openssl/engine.h>
@@ -47,6 +51,59 @@
 
 #define AES_256_KEY_LENGTH 32
 #define AES_256_IV_LENGTH 16
+
+class BlobCipherMetrics : public NonCopyable {
+public:
+	static BlobCipherMetrics* getInstance() {
+		static BlobCipherMetrics* instance = nullptr;
+		if (instance == nullptr) {
+			instance = new BlobCipherMetrics;
+		}
+		return instance;
+	}
+
+	// Order of this enum has to match initializer of counterSets.
+	enum UsageType : int {
+		TLOG = 0,
+		KV_MEMORY,
+		KV_REDWOOD,
+		BLOB_GRANULE,
+		BACKUP,
+		TEST,
+		MAX,
+	};
+
+	struct CounterSet {
+		Counter encryptCPUTimeNS;
+		Counter decryptCPUTimeNS;
+		LatencySample getCipherKeysLatency;
+		LatencySample getLatestCipherKeysLatency;
+
+		CounterSet(CounterCollection& cc, std::string name);
+	};
+
+	static CounterSet& counters(UsageType t) {
+		ASSERT(t < UsageType::MAX);
+		return getInstance()->counterSets[int(t)];
+	}
+
+private:
+	BlobCipherMetrics();
+
+	CounterCollection cc;
+	Future<Void> traceFuture;
+
+public:
+	Counter cipherKeyCacheHit;
+	Counter cipherKeyCacheMiss;
+	Counter cipherKeyCacheExpired;
+	Counter latestCipherKeyCacheHit;
+	Counter latestCipherKeyCacheMiss;
+	Counter latestCipherKeyCacheNeedsRefresh;
+	LatencySample getCipherKeysLatency;
+	LatencySample getLatestCipherKeysLatency;
+	std::array<CounterSet, int(UsageType::MAX)> counterSets;
+};
 
 // Encryption operations buffer management
 // Approach limits number of copies needed during encryption or decryption operations.
@@ -216,15 +273,20 @@ public:
 	BlobCipherKey(const EncryptCipherDomainId& domainId,
 	              const EncryptCipherBaseKeyId& baseCiphId,
 	              const uint8_t* baseCiph,
-	              int baseCiphLen);
+	              int baseCiphLen,
+	              const int64_t refreshAt,
+	              int64_t expireAt);
 	BlobCipherKey(const EncryptCipherDomainId& domainId,
 	              const EncryptCipherBaseKeyId& baseCiphId,
 	              const uint8_t* baseCiph,
 	              int baseCiphLen,
-	              const EncryptCipherRandomSalt& salt);
+	              const EncryptCipherRandomSalt& salt,
+	              const int64_t refreshAt,
+	              const int64_t expireAt);
 
 	uint8_t* data() const { return cipher.get(); }
-	uint64_t getCreationTime() const { return creationTime; }
+	uint64_t getRefreshAtTS() const { return refreshAtTS; }
+	uint64_t getExpireAtTS() const { return expireAtTS; }
 	EncryptCipherDomainId getDomainId() const { return encryptDomainId; }
 	EncryptCipherRandomSalt getSalt() const { return randomSalt; }
 	EncryptCipherBaseKeyId getBaseCipherId() const { return baseCipherId; }
@@ -243,6 +305,20 @@ public:
 		       randomSalt == details.salt;
 	}
 
+	inline bool needsRefresh() {
+		if (refreshAtTS == std::numeric_limits<int64_t>::max()) {
+			return false;
+		}
+		return now() >= refreshAtTS ? true : false;
+	}
+
+	inline bool isExpired() {
+		if (expireAtTS == std::numeric_limits<int64_t>::max()) {
+			return false;
+		}
+		return now() >= expireAtTS ? true : false;
+	}
+
 	void reset();
 
 private:
@@ -254,16 +330,20 @@ private:
 	EncryptCipherBaseKeyId baseCipherId;
 	// Random salt used for encryption cipher key derivation
 	EncryptCipherRandomSalt randomSalt;
-	// Creation timestamp for the derived encryption cipher key
-	uint64_t creationTime;
 	// Derived encryption cipher key
 	std::unique_ptr<uint8_t[]> cipher;
+	// CipherKey needs refreshAt
+	int64_t refreshAtTS;
+	// CipherKey is valid until
+	int64_t expireAtTS;
 
 	void initKey(const EncryptCipherDomainId& domainId,
 	             const uint8_t* baseCiph,
 	             int baseCiphLen,
 	             const EncryptCipherBaseKeyId& baseCiphId,
-	             const EncryptCipherRandomSalt& salt);
+	             const EncryptCipherRandomSalt& salt,
+	             const int64_t refreshAt,
+	             const int64_t expireAt);
 	void applyHmacSha256Derivation();
 };
 
@@ -299,8 +379,7 @@ using BlobCipherKeyIdCacheMapCItr =
 
 struct BlobCipherKeyIdCache : ReferenceCounted<BlobCipherKeyIdCache> {
 public:
-	BlobCipherKeyIdCache();
-	explicit BlobCipherKeyIdCache(EncryptCipherDomainId dId);
+	explicit BlobCipherKeyIdCache(EncryptCipherDomainId dId, size_t* sizeStat);
 
 	BlobCipherKeyIdCacheKey getCacheKey(const EncryptCipherBaseKeyId& baseCipherId,
 	                                    const EncryptCipherRandomSalt& salt);
@@ -326,7 +405,9 @@ public:
 
 	Reference<BlobCipherKey> insertBaseCipherKey(const EncryptCipherBaseKeyId& baseCipherId,
 	                                             const uint8_t* baseCipher,
-	                                             int baseCipherLen);
+	                                             int baseCipherLen,
+	                                             const int64_t refreshAt,
+	                                             const int64_t expireAt);
 
 	// API enables inserting base encryption cipher details to the BlobCipherKeyIdCache
 	// Given cipherKeys are immutable, attempting to re-insert same 'identical' cipherKey
@@ -341,7 +422,9 @@ public:
 	Reference<BlobCipherKey> insertBaseCipherKey(const EncryptCipherBaseKeyId& baseCipherId,
 	                                             const uint8_t* baseCipher,
 	                                             int baseCipherLen,
-	                                             const EncryptCipherRandomSalt& salt);
+	                                             const EncryptCipherRandomSalt& salt,
+	                                             const int64_t refreshAt,
+	                                             const int64_t expireAt);
 
 	// API cleanup the cache by dropping all cached cipherKeys
 	void cleanup();
@@ -349,11 +432,15 @@ public:
 	// API returns list of all 'cached' cipherKeys
 	std::vector<Reference<BlobCipherKey>> getAllCipherKeys();
 
+	// Return number of cipher keys in the cahce.
+	size_t getSize() const { return keyIdCache.size(); }
+
 private:
 	EncryptCipherDomainId domainId;
 	BlobCipherKeyIdCacheMap keyIdCache;
 	Optional<EncryptCipherBaseKeyId> latestBaseCipherKeyId;
 	Optional<EncryptCipherRandomSalt> latestRandomSalt;
+	size_t* sizeStat; // pointer to the outer BlobCipherKeyCache size count.
 };
 
 using BlobCipherDomainCacheMap = std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKeyIdCache>>;
@@ -377,7 +464,9 @@ public:
 	Reference<BlobCipherKey> insertCipherKey(const EncryptCipherDomainId& domainId,
 	                                         const EncryptCipherBaseKeyId& baseCipherId,
 	                                         const uint8_t* baseCipher,
-	                                         int baseCipherLen);
+	                                         int baseCipherLen,
+	                                         const int64_t refreshAt,
+	                                         const int64_t expireAt);
 
 	// Enable clients to insert base encryption cipher details to the BlobCipherKeyCache.
 	// The cipherKeys are indexed using 'baseCipherId', given cipherKeys are immutable,
@@ -394,7 +483,9 @@ public:
 	                                         const EncryptCipherBaseKeyId& baseCipherId,
 	                                         const uint8_t* baseCipher,
 	                                         int baseCipherLen,
-	                                         const EncryptCipherRandomSalt& salt);
+	                                         const EncryptCipherRandomSalt& salt,
+	                                         const int64_t refreshAt,
+	                                         const int64_t expireAt);
 
 	// API returns the last insert cipherKey for a given encryption domain Id.
 	// If domain Id is invalid, it would throw 'encrypt_invalid_id' exception,
@@ -414,10 +505,19 @@ public:
 
 	// API enables dropping all 'cached' cipherKeys for a given encryption domain Id.
 	// Useful to cleanup cache if an encryption domain gets removed/destroyed etc.
-
 	void resetEncryptDomainId(const EncryptCipherDomainId domainId);
 
+	// Total number of cipher keys in the cache.
+	size_t getSize() const { return size; }
+
 	static Reference<BlobCipherKeyCache> getInstance() {
+		static bool cleanupRegistered = false;
+		if (!cleanupRegistered) {
+			// We try to avoid cipher keys appear in core dumps, so we clean them up before crash.
+			// TODO(yiwu): use of MADV_DONTDUMP instead of the crash handler.
+			registerCrashHandlerCallback(BlobCipherKeyCache::cleanup);
+			cleanupRegistered = true;
+		}
 		if (g_network->isSimulated()) {
 			return FlowSingleton<BlobCipherKeyCache>::getInstance(
 			    []() { return makeReference<BlobCipherKeyCache>(g_network->isSimulated()); });
@@ -433,6 +533,7 @@ public:
 
 private:
 	BlobCipherDomainCacheMap domainCacheMap;
+	size_t size = 0;
 
 	BlobCipherKeyCache() {}
 };
@@ -450,10 +551,12 @@ public:
 	                           Reference<BlobCipherKey> hCipherKey,
 	                           const uint8_t* iv,
 	                           const int ivLen,
-	                           const EncryptAuthTokenMode mode);
+	                           const EncryptAuthTokenMode mode,
+	                           BlobCipherMetrics::UsageType usageType);
 	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
 	                           Reference<BlobCipherKey> hCipherKey,
-	                           const EncryptAuthTokenMode mode);
+	                           const EncryptAuthTokenMode mode,
+	                           BlobCipherMetrics::UsageType usageType);
 	~EncryptBlobCipherAes265Ctr();
 
 	Reference<EncryptBuf> encrypt(const uint8_t* plaintext,
@@ -468,6 +571,7 @@ private:
 	Reference<BlobCipherKey> headerCipherKey;
 	EncryptAuthTokenMode authTokenMode;
 	uint8_t iv[AES_256_IV_LENGTH];
+	BlobCipherMetrics::UsageType usageType;
 
 	void init();
 };
@@ -479,7 +583,8 @@ class DecryptBlobCipherAes256Ctr final : NonCopyable, public ReferenceCounted<De
 public:
 	DecryptBlobCipherAes256Ctr(Reference<BlobCipherKey> tCipherKey,
 	                           Reference<BlobCipherKey> hCipherKey,
-	                           const uint8_t* iv);
+	                           const uint8_t* iv,
+	                           BlobCipherMetrics::UsageType usageType);
 	~DecryptBlobCipherAes256Ctr();
 
 	Reference<EncryptBuf> decrypt(const uint8_t* ciphertext,
@@ -498,6 +603,7 @@ private:
 	Reference<BlobCipherKey> headerCipherKey;
 	bool headerAuthTokenValidationDone;
 	bool authTokensValidationDone;
+	BlobCipherMetrics::UsageType usageType;
 
 	void verifyEncryptHeaderMetadata(const BlobCipherEncryptHeader& header);
 	void verifyAuthTokens(const uint8_t* ciphertext,
@@ -534,4 +640,4 @@ StringRef computeAuthToken(const uint8_t* payload,
                            const int keyLen,
                            Arena& arena);
 
-#endif // FLOW_BLOB_CIPHER_H
+#endif // FDBCLIENT_BLOB_CIPHER_H

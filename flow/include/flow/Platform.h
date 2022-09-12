@@ -282,6 +282,10 @@ void getLocalTime(const time_t* timep, struct tm* result);
 // get GMT time string from an epoch seconds double
 std::string epochsToGMTString(double epochs);
 
+#define ENVIRONMENT_KNOB_OPTION_PREFIX "FDB_KNOB_"
+// returns list of environment variables with prefix ENVIRONMENT_KNOB_OPTION_PREFIX
+std::vector<std::string> getEnvironmentKnobOptions();
+
 void setMemoryQuota(size_t limit);
 
 void* allocate(size_t length, bool allowLargePages, bool includeGuardPages);
@@ -316,7 +320,7 @@ std::string readFileBytes(std::string const& filename, int maxSize);
 
 // Read a file into memory supplied by the caller
 // If 'len' is greater than file size, then read the filesize bytes.
-void readFileBytes(std::string const& filename, uint8_t* buff, int64_t len);
+size_t readFileBytes(std::string const& filename, uint8_t* buff, int64_t len);
 
 // Write data buffer into file
 void writeFileBytes(std::string const& filename, const char* data, size_t count);
@@ -790,7 +794,14 @@ EXTERNC void flushAndExit(int exitCode);
 // Initilization code that's run at the beginning of every entry point (except fdbmonitor)
 void platformInit();
 
+// Register a callback which will run as part of the crash handler. Use in conjunction with registerCrashHandler.
+// The callback being added should be simple and unlikely to fail, otherwise it will fail the crash handler,
+// preventing necessary logging being printed. Also, the crash handler may not be comprehensive in handling all
+// failure cases.
+void registerCrashHandlerCallback(void (*f)());
+
 void registerCrashHandler();
+
 void setupRunLoopProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
 

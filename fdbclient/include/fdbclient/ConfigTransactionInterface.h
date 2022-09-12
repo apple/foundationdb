@@ -124,7 +124,7 @@ struct ConfigTransactionCommitRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, generation, mutations, annotation, reply);
+		serializer(ar, generation, mutations, annotation, reply, arena);
 	}
 };
 

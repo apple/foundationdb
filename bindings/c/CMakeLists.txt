@@ -129,7 +129,7 @@ if(NOT WIN32)
   add_library(fdb_cpp INTERFACE test/fdb_api.hpp)
   target_sources(fdb_cpp INTERFACE )
   target_include_directories(fdb_cpp INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/test)
-  target_link_libraries(fdb_cpp INTERFACE fmt::fmt)
+  target_link_libraries(fdb_cpp INTERFACE fdb_c fmt::fmt)
 
   set(API_TESTER_SRCS
     test/apitester/fdb_c_api_tester.cpp
@@ -139,8 +139,12 @@ if(NOT WIN32)
     test/apitester/TesterTestSpec.cpp
     test/apitester/TesterTestSpec.h
     test/apitester/TesterBlobGranuleCorrectnessWorkload.cpp
+    test/apitester/TesterBlobGranuleErrorsWorkload.cpp
+    test/apitester/TesterBlobGranuleUtil.cpp
+    test/apitester/TesterBlobGranuleUtil.h
     test/apitester/TesterCancelTransactionWorkload.cpp
     test/apitester/TesterCorrectnessWorkload.cpp
+    test/apitester/TesterExampleWorkload.cpp
     test/apitester/TesterKeyValueStore.cpp
     test/apitester/TesterKeyValueStore.h
     test/apitester/TesterOptions.h
@@ -194,7 +198,7 @@ if(NOT WIN32)
   target_link_libraries(fdb_c_client_memory_test PRIVATE fdb_c Threads::Threads)
 
   target_include_directories(fdb_c_api_tester_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include ${CMAKE_BINARY_DIR}/flow/include)
-  target_link_libraries(fdb_c_api_tester_impl PRIVATE fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target)
+  target_link_libraries(fdb_c_api_tester_impl PRIVATE fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target stdc++fs)
   target_link_libraries(fdb_c_api_tester_impl PRIVATE SimpleOpt)
 
   target_include_directories(fdb_c_unit_tests_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
@@ -332,6 +336,24 @@ if(NOT WIN32)
             @SERVER_CA_FILE@
             )
 
+  add_test(NAME fdb_c_upgrade_to_future_version
+    COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "7.2.0" "7.3.0" "7.2.0"
+        --process-number 3
+      )
+  set_tests_properties("fdb_c_upgrade_to_future_version" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
+
+  add_test(NAME fdb_c_upgrade_to_future_version_blob_granules
+    COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/ApiBlobGranulesCorrectness.toml
+        --upgrade-path "7.2.0" "7.3.0" "7.2.0"
+        --blob-granules-enabled
+        --process-number 3
+      )
+
   if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
     add_test(NAME fdb_c_upgrade_single_threaded_630api
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
@@ -439,7 +461,7 @@ if (OPEN_FOR_IDE)
   target_link_libraries(fdb_c_shim_lib_tester PRIVATE fdb_c_shim SimpleOpt fdb_cpp Threads::Threads)
   target_include_directories(fdb_c_shim_lib_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include)
 
-elseif(NOT WIN32 AND NOT APPLE AND NOT USE_UBSAN) # Linux Only, non-ubsan only
+elseif(NOT WIN32 AND NOT APPLE AND NOT USE_SANITIZER) # Linux Only, non-santizer only
 
   set(SHIM_LIB_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
@@ -462,10 +484,10 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT USE_UBSAN) # Linux Only, non-ubsan only
       --outdir ${SHIM_LIB_OUTPUT_DIR}
       --dlopen-callback=fdb_shim_dlopen_callback
       $<TARGET_FILE:fdb_c>
-    DEPENDS ${IMPLIBSO_SRC}
+    DEPENDS ${IMPLIBSO_SRC} fdb_c
     COMMENT "Generating source code for C shim library")
 
-  add_library(fdb_c_shim SHARED ${SHIM_LIB_GEN_SRC} foundationdb/fdb_c_shim.h fdb_c_shim.cpp)
+  add_library(fdb_c_shim STATIC ${SHIM_LIB_GEN_SRC} foundationdb/fdb_c_shim.h fdb_c_shim.cpp)
   target_link_options(fdb_c_shim PRIVATE "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.map,-z,nodelete,-z,noexecstack")
   target_link_libraries(fdb_c_shim PUBLIC dl)
   target_include_directories(fdb_c_shim PUBLIC
@@ -492,7 +514,7 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT USE_UBSAN) # Linux Only, non-ubsan only
           --api-test-dir ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
           )
 
-endif() # End Linux only, non-ubsan only
+endif() # End Linux only, non-sanitizer only
 
 # TODO: re-enable once the old vcxproj-based build system is removed.
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
@@ -537,7 +559,7 @@ fdb_install(
   DESTINATION_SUFFIX "/cmake/${targets_export_name}"
   COMPONENT clients)
 
-if(NOT WIN32 AND NOT APPLE AND NOT USE_UBSAN) # Linux Only, non-ubsan only
+if(NOT WIN32 AND NOT APPLE AND NOT USE_SANITIZER) # Linux Only, non-sanitizer only
 
 fdb_install(
   FILES foundationdb/fdb_c_shim.h

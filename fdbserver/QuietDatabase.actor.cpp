@@ -235,7 +235,9 @@ ACTOR Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
 }
 
 // Returns a vector of blob worker interfaces which have been persisted under the system key space
-ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx, bool use_system_priority = false) {
+ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx,
+                                                              bool use_system_priority = false,
+                                                              Version* grv = nullptr) {
 	state Transaction tr(cx);
 	loop {
 		if (use_system_priority) {
@@ -251,6 +253,9 @@ ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx, bool 
 			blobWorkers.reserve(blobWorkersList.size());
 			for (int i = 0; i < blobWorkersList.size(); i++) {
 				blobWorkers.push_back(decodeBlobWorkerListValue(blobWorkersList[i].value));
+			}
+			if (grv) {
+				*grv = tr.getReadVersion().get();
 			}
 			return blobWorkers;
 		} catch (Error& e) {
@@ -763,7 +768,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
                                         int64_t maxDataDistributionQueueSize = 0,
                                         int64_t maxPoppedVersionLag = 30e6,
                                         int64_t maxVersionOffset = 1e6) {
-	state QuietDatabaseChecker checker(isBuggifyEnabled(BuggifyType::General) ? 3600.0 : 1000.0);
+	state QuietDatabaseChecker checker(isBuggifyEnabled(BuggifyType::General) ? 4000.0 : 1000.0);
 	state Future<Void> reconfig =
 	    reconfigureAfter(cx, 100 + (deterministicRandom()->random01() * 100), dbInfo, "QuietDatabase");
 	state Future<int64_t> dataInFlight;

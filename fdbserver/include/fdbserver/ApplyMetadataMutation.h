@@ -25,6 +25,7 @@
 #include <cstddef>
 
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -33,7 +34,6 @@
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/ProxyCommitData.actor.h"
-#include "flow/BlobCipher.h"
 #include "flow/FastRef.h"
 
 // Resolver's data for applyMetadataMutations() calls.
@@ -103,7 +103,8 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             const UID& dbgid,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,
-                            IKeyValueStore* txnStateStore);
+                            IKeyValueStore* txnStateStore,
+                            Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 
 inline bool isSystemKey(KeyRef key) {
 	return key.size() && key[0] == systemKeys.begin[0];
@@ -144,6 +145,7 @@ inline bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 // Resolver's version
 void applyMetadataMutations(SpanContext const& spanContext,
                             ResolverData& resolverData,
-                            const VectorRef<MutationRef>& mutations);
+                            const VectorRef<MutationRef>& mutations,
+                            Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 
 #endif

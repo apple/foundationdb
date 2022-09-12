@@ -83,6 +83,10 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
+			if (g_network->isSimulated() && BUGGIFY) {
+				IKnobCollection::getMutableGlobalKnobCollection().setKnob(
+				    "max_tenants_per_cluster", KnobValueRef::create(int{ deterministicRandom()->randomInt(20, 100) }));
+			}
 			return _setup(cx, this);
 		} else {
 			return Void();
@@ -92,7 +96,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		Reference<IDatabase> threadSafeHandle =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
 
-		MultiVersionApi::api->selectApiVersion(cx->apiVersion);
+		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 		self->managementDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
 		ASSERT(g_simulator.extraDatabases.size() > 0);
@@ -100,7 +104,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			ClusterConnectionString ccs(connectionString);
 			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(ccs);
 			self->dataDbIndex.push_back(ClusterName(format("cluster_%08d", self->dataDbs.size())));
-			self->dataDbs[self->dataDbIndex.back()] = DataClusterData(Database::createDatabase(extraFile, -1));
+			self->dataDbs[self->dataDbIndex.back()] =
+			    DataClusterData(Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION));
 		}
 
 		wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
@@ -255,7 +260,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			for (auto localItr = self->dataDbs.find(clusterName1);
 			     localItr != self->dataDbs.find(clusterName2) && count < limit;
 			     ++localItr) {
-				fmt::print("Checking cluster {} {}\n", printable(localItr->first), localItr->second.registered);
 				if (localItr->second.registered) {
 					ASSERT(resultItr != clusterList.end());
 					ASSERT(resultItr->first == localItr->first);
@@ -538,7 +542,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				wait(
 				    store(metaclusterRegistration,
-				          MetaclusterMetadata::metaclusterRegistration.get(clusterData.db.getReference())) &&
+				          MetaclusterMetadata::metaclusterRegistration().get(clusterData.db.getReference())) &&
 				    store(tenants,
 				          TenantAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, clusterData.tenants.size() + 1)));
 				break;
@@ -559,6 +563,42 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			ASSERT(clusterData.tenants.count(tenantName));
 			ASSERT(self->createdTenants[tenantName].cluster == clusterName);
 		}
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> decommissionMetacluster(MetaclusterManagementWorkload* self) {
+		state Reference<ITransaction> tr = self->managementDb->createTransaction();
+
+		state bool deleteTenants = deterministicRandom()->coinflip();
+
+		if (deleteTenants) {
+			state std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
+			    wait(MetaclusterAPI::listTenants(self->managementDb, ""_sr, "\xff\xff"_sr, 10e6));
+
+			state std::vector<Future<Void>> deleteTenantFutures;
+			for (auto [tenantName, tenantMapEntry] : tenants) {
+				deleteTenantFutures.push_back(MetaclusterAPI::deleteTenant(self->managementDb, tenantName));
+			}
+
+			wait(waitForAll(deleteTenantFutures));
+		}
+
+		state std::map<ClusterName, DataClusterMetadata> dataClusters = wait(
+		    MetaclusterAPI::listClusters(self->managementDb, ""_sr, "\xff\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
+
+		std::vector<Future<Void>> removeClusterFutures;
+		for (auto [clusterName, clusterMetadata] : dataClusters) {
+			removeClusterFutures.push_back(
+			    MetaclusterAPI::removeCluster(self->managementDb, clusterName, !deleteTenants));
+		}
+
+		wait(waitForAll(removeClusterFutures));
+		wait(MetaclusterAPI::decommissionMetacluster(self->managementDb));
+
+		Optional<MetaclusterRegistrationEntry> entry =
+		    wait(MetaclusterMetadata::metaclusterRegistration().get(self->managementDb));
+		ASSERT(!entry.present());
 
 		return Void();
 	}
@@ -592,6 +632,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			dataClusterChecks.push_back(checkDataCluster(self, clusterName, dataClusterData));
 		}
 		wait(waitForAll(dataClusterChecks));
+
+		wait(decommissionMetacluster(self));
 
 		return true;
 	}

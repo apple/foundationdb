@@ -120,6 +120,7 @@ extern const KeyRangeRef processClassSourceSpecialKeyRange;
 extern const KeyRangeRef processClassTypeSpecialKeyRange;
 // Other special keys
 inline const KeyRef errorMsgSpecialKey = LiteralStringRef("\xff\xff/error_message");
+inline const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/management/options/worker_interfaces/verify"_sr;
 // help functions (Copied from fdbcli.actor.cpp)
 
 // get all workers' info
@@ -132,13 +133,14 @@ void printUsage(StringRef command);
 // Pre: tr failed with special_keys_api_failure error
 // Read the error message special key and return the message
 ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
-// Using \xff\xff/worker_interfaces/ special key, get all worker interfaces
+// Using \xff\xff/worker_interfaces/ special key, get all worker interfaces.
+// A worker list will be returned from CC.
+// If verify, we will try to establish connections to all workers returned.
+// In particular, it will deserialize \xff\xff/worker_interfaces/<address>:=<ClientInterface> kv pairs and issue RPC
+// calls, then only return interfaces(kv pairs) the client can talk to
 ACTOR Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
-                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
-// Deserialize \xff\xff/worker_interfaces/<address>:=<ClientInterface> k-v pair and verify by a RPC call
-ACTOR Future<Void> verifyAndAddInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
-                                         Reference<FlowLock> connectLock,
-                                         KeyValue kv);
+                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
+                                       bool verify = false);
 // print cluster status info
 void printStatus(StatusObjectReader statusObj,
                  StatusClient::StatusLevel level,
@@ -166,11 +168,11 @@ ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
 // coordinators command
 ACTOR Future<bool> coordinatorsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // createtenant command
-ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion);
+ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // datadistribution command
 ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // deletetenant command
-ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion);
+ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // exclude command
 ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, Future<Void> warn);
 // expensive_data_check command
@@ -187,7 +189,7 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // gettenant command
-ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion);
+ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // include command
 ACTOR Future<bool> includeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // kill command
@@ -196,7 +198,7 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
                                     std::vector<StringRef> tokens,
                                     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
 // listtenants command
-ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion);
+ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // lock/unlock command
 ACTOR Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
@@ -225,7 +227,7 @@ ACTOR Future<bool> profileCommandActor(Database db,
                                        std::vector<StringRef> tokens,
                                        bool intrans);
 // renametenant command
-ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion);
+ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // quota command
 ACTOR Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // setclass command

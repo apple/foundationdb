@@ -86,6 +86,8 @@ public:
 	std::vector<NetworkAddress> coords;
 	std::vector<Hostname> hostnames;
 
+	size_t getNumberOfCoordinators() const { return coords.size() + hostnames.size(); }
+
 	bool operator==(const ClusterConnectionString& other) const noexcept {
 		return key == other.key && keyDesc == other.keyDesc && coords == other.coords && hostnames == other.hostnames;
 	}

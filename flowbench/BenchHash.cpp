@@ -58,7 +58,7 @@ template <HashType hashType>
 static void bench_hash(benchmark::State& state) {
 	auto length = 1 << state.range(0);
 	auto key = getKey(length);
-	while (state.KeepRunning()) {
+	for (auto _ : state) {
 		hash<hashType>(key, length);
 	}
 	state.SetItemsProcessed(static_cast<long>(state.iterations()));

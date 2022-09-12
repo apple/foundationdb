@@ -112,8 +112,8 @@ enum {
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
-	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS, OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT,
-	OPT_NEW_CLUSTER_KEY
+	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONNECTOR_TYPE, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,
+	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -128,8 +128,8 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_LISTEN,                "-l",                          SO_REQ_SEP },
 	{ OPT_LISTEN,                "--listen-address",            SO_REQ_SEP },
 #ifdef __linux__
-	{ OPT_FILESYSTEM,           "--data-filesystem",           SO_REQ_SEP },
-	{ OPT_PROFILER_RSS_SIZE,    "--rsssize",                   SO_REQ_SEP },
+	{ OPT_FILESYSTEM,           "--data-filesystem",            SO_REQ_SEP },
+	{ OPT_PROFILER_RSS_SIZE,    "--rsssize",                    SO_REQ_SEP },
 #endif
 	{ OPT_DATAFOLDER,            "-d",                          SO_REQ_SEP },
 	{ OPT_DATAFOLDER,            "--datadir",                   SO_REQ_SEP },
@@ -208,10 +208,12 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_FLOW_PROCESS_ENDPOINT, "--process-endpoint",          SO_REQ_SEP },
 	{ OPT_IP_TRUSTED_MASK,       "--trusted-subnet-",           SO_REQ_SEP },
 	{ OPT_NEW_CLUSTER_KEY,       "--new-cluster-key",           SO_REQ_SEP },
-	{ OPT_KMS_CONN_DISCOVERY_URL_FILE,           "--discover-kms-conn-url-file",            SO_REQ_SEP},
-	{ OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,     "--kms-conn-validation-token-details",     SO_REQ_SEP},
-	{ OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-encryption-keys-endpoint", SO_REQ_SEP},
-	
+	{ OPT_AUTHZ_PUBLIC_KEY_FILE, "--authorization-public-key-file", SO_REQ_SEP },
+	{ OPT_KMS_CONN_DISCOVERY_URL_FILE,           "--discover-kms-conn-url-file",            SO_REQ_SEP },
+	{ OPT_KMS_CONNECTOR_TYPE,    "--kms-connector-type",        SO_REQ_SEP },
+	{ OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,     "--kms-conn-validation-token-details",     SO_REQ_SEP },
+	{ OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-encryption-keys-endpoint", SO_REQ_SEP },
+	{ OPT_USE_FUTURE_PROTOCOL_VERSION, 			 "--use-future-protocol-version",			SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -539,7 +541,7 @@ static void printBuildInformation() {
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getSourceVersion());
-	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion().version());
 }
 
 static void printHelpTeaser(const char* name) {
@@ -732,6 +734,9 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("--io-trust-warn-only",
 		                 " Instead of failing when an I/O operation exceeds io_trust_seconds, just"
 		                 " log a warning to the trace log. Has no effect if io_trust_seconds is unspecified.");
+		printOptionUsage("--use-future-protocol-version [true,false]",
+		                 " Run the process with a simulated future protocol version."
+		                 " This option can be used testing purposes only!");
 		printf("\n"
 		       "The 'kvfiledump' role dump all key-values from kvfile to stdout in binary format:\n"
 		       "{key length}{key binary}{value length}{value binary}, length is 4 bytes int\n"
@@ -750,6 +755,7 @@ static void printUsage(const char* name, bool devhelp) {
 		    "The given cluster file passed in by '-C, --cluster-file' is considered to contain the old cluster key.\n"
 		    "It is used before restoring a snapshotted cluster to let the cluster have a different cluster key.\n"
 		    "Please make sure run it on every host in the cluster with the same '--new-cluster-key'.\n");
+
 	} else {
 		printOptionUsage("--dev-help", "Display developer-specific help and exit.");
 	}
@@ -1017,8 +1023,8 @@ enum class ServerRole {
 };
 struct CLIOptions {
 	std::string commandLine;
-	std::string fileSystemPath, dataFolder, connFile, seedConnFile, seedConnString, logFolder = ".", metricsConnFile,
-	                                                                                metricsPrefix, newClusterKey;
+	std::string fileSystemPath, dataFolder, connFile, seedConnFile, seedConnString,
+	    logFolder = ".", metricsConnFile, metricsPrefix, newClusterKey, authzPublicKeyFile;
 	std::string logGroup = "default";
 	uint64_t rollsize = TRACE_DEFAULT_ROLL_SIZE;
 	uint64_t maxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
@@ -1078,6 +1084,7 @@ struct CLIOptions {
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
 		opts.parseArgsInternal(argc, argv);
+		opts.parseEnvInternal();
 		return opts;
 	}
 
@@ -1106,6 +1113,25 @@ struct CLIOptions {
 
 private:
 	CLIOptions() = default;
+
+	void parseEnvInternal() {
+		for (const std::string& knob : getEnvironmentKnobOptions()) {
+			auto pos = knob.find_first_of("=");
+			if (pos == std::string::npos) {
+				fprintf(stderr,
+				        "Error: malformed environment knob option: %s%s\n",
+				        ENVIRONMENT_KNOB_OPTION_PREFIX,
+				        knob.c_str());
+				TraceEvent(SevWarnAlways, "MalformedEnvironmentVariableKnob")
+				    .detail("Key", ENVIRONMENT_KNOB_OPTION_PREFIX + knob);
+			} else {
+				std::string k = knob.substr(0, pos);
+				std::string v = knob.substr(pos + 1, knob.length());
+				knobs.emplace_back(k, v);
+				manualKnobOverrides[k] = v;
+			}
+		}
+	}
 
 	void parseArgsInternal(int argc, char* argv[]) {
 		for (int a = 0; a < argc; a++) {
@@ -1663,6 +1689,10 @@ private:
 				knobs.emplace_back("rest_kms_connector_kms_discovery_url_file", args.OptionArg());
 				break;
 			}
+			case OPT_KMS_CONNECTOR_TYPE: {
+				knobs.emplace_back("kms_connector_type", args.OptionArg());
+				break;
+			}
 			case OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS: {
 				knobs.emplace_back("rest_kms_connector_validation_token_details", args.OptionArg());
 				break;
@@ -1681,6 +1711,16 @@ private:
 					std::cerr << "Invalid cluster key(description:id) '" << newClusterKey << "' from --new-cluster-key"
 					          << std::endl;
 					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
+			}
+			case OPT_AUTHZ_PUBLIC_KEY_FILE: {
+				authzPublicKeyFile = args.OptionArg();
+				break;
+			}
+			case OPT_USE_FUTURE_PROTOCOL_VERSION: {
+				if (!strcmp(args.OptionArg(), "true")) {
+					::useFutureProtocolVersion();
 				}
 				break;
 			}
@@ -1826,6 +1866,30 @@ private:
 			localities.set(LocalityData::keyDcId, dcId);
 	}
 };
+
+// Returns true iff validation is successful
+bool validateSimulationDataFiles(std::string const& dataFolder, bool isRestarting) {
+	std::vector<std::string> files = platform::listFiles(dataFolder);
+	if (!isRestarting) {
+		for (const auto& file : files) {
+			if (file != "restartInfo.ini" && file != getTestEncryptionFileName()) {
+				TraceEvent(SevError, "IncompatibleFileFound").detail("DataFolder", dataFolder).detail("FileName", file);
+				fprintf(stderr,
+				        "ERROR: Data folder `%s' is non-empty; please use clean, fdb-only folder\n",
+				        dataFolder.c_str());
+				return false;
+			}
+		}
+	} else if (isRestarting && files.empty()) {
+		TraceEvent(SevWarnAlways, "FileNotFound").detail("DataFolder", dataFolder);
+		printf("ERROR: Data folder `%s' is empty, but restarting option selected. Run Phase 1 test first\n",
+		       dataFolder.c_str());
+		return false;
+	}
+
+	return true;
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -1970,6 +2034,16 @@ int main(int argc, char* argv[]) {
 			openTraceFile(
 			    opts.publicAddresses.address, opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			g_network->initTLS();
+			if (!opts.authzPublicKeyFile.empty()) {
+				try {
+					FlowTransport::transport().loadPublicKeyFile(opts.authzPublicKeyFile);
+				} catch (Error& e) {
+					TraceEvent("AuthzPublicKeySetLoadError").error(e);
+				}
+				FlowTransport::transport().watchPublicKeyFile(opts.authzPublicKeyFile);
+			} else {
+				TraceEvent(SevInfo, "AuthzPublicKeyFileNotSet");
+			}
 
 			if (expectsPublicAddress) {
 				for (int ii = 0; ii < (opts.publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {
@@ -2014,6 +2088,14 @@ int main(int argc, char* argv[]) {
 				throw;
 		}
 
+		std::string environmentKnobOptions;
+		for (const std::string& knobOption : getEnvironmentKnobOptions()) {
+			environmentKnobOptions += knobOption + " ";
+		}
+		if (environmentKnobOptions.length()) {
+			environmentKnobOptions.pop_back();
+		}
+
 		TraceEvent("ProgramStart")
 		    .setMaxEventLength(12000)
 		    .detail("RandomSeed", opts.randomSeed)
@@ -2028,12 +2110,14 @@ int main(int argc, char* argv[]) {
 		            opts.connectionFile ? opts.connectionFile->getConnectionString().toString() : "")
 		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 		    .setMaxFieldLength(10000)
+		    .detail("EnvironmentKnobOptions", environmentKnobOptions.length() ? environmentKnobOptions : "none")
 		    .detail("CommandLine", opts.commandLine)
 		    .setMaxFieldLength(0)
 		    .detail("BuggifyEnabled", opts.buggifyEnabled)
 		    .detail("FaultInjectionEnabled", opts.faultInjectionEnabled)
 		    .detail("MemoryLimit", opts.memLimit)
 		    .detail("VirtualMemoryLimit", opts.virtualMemLimit)
+		    .detail("ProtocolVersion", currentProtocolVersion())
 		    .trackLatest("ProgramStart");
 
 		Error::init();
@@ -2071,17 +2155,8 @@ int main(int argc, char* argv[]) {
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 			}
-			std::vector<std::string> files = platform::listFiles(dataFolder);
-			if ((files.size() > 1 || (files.size() == 1 && files[0] != "restartInfo.ini")) && !opts.restarting) {
-				TraceEvent(SevError, "IncompatibleFileFound").detail("DataFolder", dataFolder);
-				fprintf(stderr,
-				        "ERROR: Data folder `%s' is non-empty; please use clean, fdb-only folder\n",
-				        dataFolder.c_str());
-				flushAndExit(FDB_EXIT_ERROR);
-			} else if (files.empty() && opts.restarting) {
-				TraceEvent(SevWarnAlways, "FileNotFound").detail("DataFolder", dataFolder);
-				printf("ERROR: Data folder `%s' is empty, but restarting option selected. Run Phase 1 test first\n",
-				       dataFolder.c_str());
+
+			if (!validateSimulationDataFiles(dataFolder, opts.restarting)) {
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 
@@ -2178,6 +2253,8 @@ int main(int argc, char* argv[]) {
 				                KnobValue::create(ini.GetBoolValue("META", "enableEncryption", false)));
 				g_knobs.setKnob("enable_tlog_encryption",
 				                KnobValue::create(ini.GetBoolValue("META", "enableTLogEncryption", false)));
+				g_knobs.setKnob("enable_storage_server_encryption",
+				                KnobValue::create(ini.GetBoolValue("META", "enableStorageServerEncryption", false)));
 				g_knobs.setKnob("enable_blob_granule_encryption",
 				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
 				g_knobs.setKnob("enable_blob_granule_compression",
@@ -2305,7 +2382,18 @@ int main(int argc, char* argv[]) {
 
 			f = result;
 		} else if (role == ServerRole::FlowProcess) {
-			TraceEvent(SevDebug, "StartingFlowProcess").detail("From", "fdbserver");
+			std::string traceFormat = getTraceFormatExtension();
+			// close and reopen trace file with the correct process listen address to name the file
+			closeTraceFile();
+			// writer is not shutdown immediately, addref on it
+			disposeTraceFileWriter();
+			// use the same trace format as before
+			selectTraceFormatter(traceFormat);
+			// create the trace file with the correct process address
+			openTraceFile(
+			    g_network->getLocalAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
+			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
+			TraceEvent(SevDebug, "StartingFlowProcess").detail("FlowProcessName", opts.flowProcessName);
 #if defined(__linux__) || defined(__FreeBSD__)
 			prctl(PR_SET_PDEATHSIG, SIGTERM);
 			if (getppid() == 1) /* parent already died before prctl */

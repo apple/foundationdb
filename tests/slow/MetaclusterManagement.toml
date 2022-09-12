@@ -3,7 +3,7 @@ allowDefaultTenant = false
 allowDisablingTenants = false
 allowCreatingTenants = false
 extraDatabaseMode = 'Multiple'
-extraDatabaseCount = 10
+extraDatabaseCount = 5
 
 [[test]]
 testTitle = 'MetaclusterManagementTest'
