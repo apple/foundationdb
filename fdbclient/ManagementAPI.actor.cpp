@@ -1355,6 +1355,7 @@ ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> ser
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				ryw.set(
 				    SpecialKeySpace::getManagementApiCommandOptionSpecialKey(failed ? "failed" : "excluded", "force"),
@@ -1417,6 +1418,7 @@ ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				ryw.set(SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
 				            failed ? "failed_locality" : "excluded_locality", "force"),
@@ -1459,6 +1461,7 @@ ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> ser
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				for (auto& s : servers) {
 					if (!s.isValid()) {
@@ -1562,6 +1565,7 @@ ACTOR Future<Void> includeLocalities(Database cx, std::vector<std::string> local
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				if (includeAll) {
 					if (failed) {

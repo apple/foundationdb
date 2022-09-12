@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/OTELSpanContextMessage.h"
 #include "flow/Arena.h"
@@ -1925,7 +1926,7 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 								cipherDetails.insert(header->cipherHeaderDetails);
 								collectingCipherKeys = true;
 							} else {
-								msg = msg.decrypt(cipherKeys.get(), cloneReader.arena());
+								msg = msg.decrypt(cipherKeys.get(), cloneReader.arena(), BlobCipherMetrics::TLOG);
 							}
 						}
 						if (!collectingCipherKeys) {
@@ -1946,7 +1947,7 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 
 				if (collectingCipherKeys) {
 					std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> result =
-					    wait(getEncryptCipherKeys(data->db, cipherDetails));
+					    wait(getEncryptCipherKeys(data->db, cipherDetails, BlobCipherMetrics::TLOG));
 					cipherKeys = result;
 					collectingCipherKeys = false;
 				} else {
@@ -2021,7 +2022,7 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 					MutationRef msg;
 					reader >> msg;
 					if (msg.isEncrypted()) {
-						msg = msg.decrypt(cipherKeys.get(), reader.arena());
+						msg = msg.decrypt(cipherKeys.get(), reader.arena(), BlobCipherMetrics::TLOG);
 					}
 
 					if (ver != invalidVersion) // This change belongs to a version < minVersion

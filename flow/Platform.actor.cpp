@@ -32,7 +32,6 @@
 #include "flow/Arena.h"
 
 #include "flow/StreamCipher.h"
-#include "flow/BlobCipher.h"
 #include "flow/ScopeExit.h"
 #include "flow/Trace.h"
 #include "flow/Error.h"
@@ -3623,6 +3622,12 @@ void platformInit() {
 #endif
 }
 
+std::vector<std::function<void()>> g_crashHandlerCallbacks;
+
+void registerCrashHandlerCallback(void (*f)()) {
+	g_crashHandlerCallbacks.push_back(f);
+}
+
 // The crashHandler function is registered to handle signals before the process terminates.
 // Basic information about the crash is printed/traced, and stdout and trace events are flushed.
 void crashHandler(int sig) {
@@ -3635,7 +3640,10 @@ void crashHandler(int sig) {
 
 	StreamCipherKey::cleanup();
 	StreamCipher::cleanup();
-	BlobCipherKeyCache::cleanup();
+
+	for (auto& f : g_crashHandlerCallbacks) {
+		f();
+	}
 
 	fprintf(error ? stderr : stdout, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
 	if (error) {

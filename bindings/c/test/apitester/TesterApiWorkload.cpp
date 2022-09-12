@@ -107,11 +107,11 @@ void ApiWorkload::randomOperation(TTaskFct cont) {
 }
 
 fdb::Key ApiWorkload::randomKeyName() {
-	return keyPrefix + Random::get().randomStringLowerCase(minKeyLength, maxKeyLength);
+	return keyPrefix + Random::get().randomByteStringLowerCase(minKeyLength, maxKeyLength);
 }
 
 fdb::Value ApiWorkload::randomValue() {
-	return Random::get().randomStringLowerCase(minValueLength, maxValueLength);
+	return Random::get().randomByteStringLowerCase(minValueLength, maxValueLength);
 }
 
 fdb::Key ApiWorkload::randomNotExistingKey() {

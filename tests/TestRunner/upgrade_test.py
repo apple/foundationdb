@@ -20,6 +20,7 @@ PROGRESS_CHECK_TIMEOUT_SEC = 30
 TESTER_STATS_INTERVAL_SEC = 5
 TRANSACTION_RETRY_LIMIT = 100
 RUN_WITH_GDB = False
+CLEANUP_ON_EXIT = True
 
 
 def version_from_str(ver_str):
@@ -166,7 +167,8 @@ class UpgradeTest:
 
     def __exit__(self, xc_type, exc_value, traceback):
         self.cluster.stop_cluster()
-        shutil.rmtree(self.tmp_dir)
+        if CLEANUP_ON_EXIT:
+            shutil.rmtree(self.tmp_dir)
 
     # Determine FDB API version matching the upgrade path
     def determine_api_version(self):
@@ -425,6 +427,11 @@ if __name__ == "__main__":
         help="Do not dump cluster log on error",
         action="store_true",
     )
+    parser.add_argument(
+        "--no-cleanup-on-error",
+        help="In case of an error do not remove any of the generated files",
+        action="store_true",
+    )
     parser.add_argument("--blob-granules-enabled", help="Enable blob granules", action="store_true")
     parser.add_argument("--run-with-gdb", help="Execute the tester binary from gdb", action="store_true")
     args = parser.parse_args()
@@ -450,5 +457,7 @@ if __name__ == "__main__":
         test.dump_warnings_in_logs()
         if errcode != 0 and not args.disable_log_dump:
             test.dump_cluster_logs()
+        if errcode != 0 and args.no_cleanup_on_error:
+            CLEANUP_ON_EXIT = False
 
     sys.exit(errcode)

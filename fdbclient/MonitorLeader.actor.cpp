@@ -861,6 +861,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 	for (const auto& c : cs.coords) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(c));
 	}
+	ASSERT(clientLeaderServers.size() > 0);
 
 	deterministicRandom()->randomShuffle(clientLeaderServers);
 
@@ -880,7 +881,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			bool upToDate = wait(connRecord->upToDate(storedConnectionString));
 			if (upToDate) {
 				incorrectTime = Optional<double>();
-			} else if (allConnectionsFailed) {
+			} else if (allConnectionsFailed && storedConnectionString.getNumberOfCoordinators() > 0) {
 				// Failed to connect to all coordinators from the current connection string,
 				// so it is not possible to get any new updates from the cluster. It can be that
 				// all the coordinators have changed, but the client missed that, because it had
@@ -938,6 +939,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 				    .detail("OldConnStr", info.intermediateConnRecord->getConnectionString().toString());
 				info.intermediateConnRecord = connRecord->makeIntermediateRecord(
 				    ClusterConnectionString(rep.get().read().forward.get().toString()));
+				ASSERT(info.intermediateConnRecord->getConnectionString().getNumberOfCoordinators() > 0);
 				return info;
 			}
 			if (connRecord != info.intermediateConnRecord) {
@@ -984,6 +986,7 @@ ACTOR Future<Void> monitorProxies(
     Key traceLogGroup) {
 	state MonitorLeaderInfo info(connRecord->get());
 	loop {
+		ASSERT(connRecord->get().isValid());
 		choose {
 			when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(
 			         connRecord->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup))) {

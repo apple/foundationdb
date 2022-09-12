@@ -286,6 +286,9 @@ public:
 	double METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT;
 	int TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantEntryCache is refreshed
 
+	// Encryption-at-rest
+	bool ENABLE_ENCRYPTION_CPU_TIME_LOGGING;
+
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
 };
