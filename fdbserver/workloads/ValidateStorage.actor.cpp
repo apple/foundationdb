@@ -86,8 +86,7 @@ struct ValidateStorage : TestWorkload {
 
 		loop {
 			try {
-				UID auditId = wait(auditStorage(
-				    cx->getConnectionRecord(), KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr), AuditType::ValidateHA));
+				UID auditId = wait(auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA));
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId);
 				break;
 			} catch (Error& e) {
@@ -158,7 +157,8 @@ struct ValidateStorage : TestWorkload {
 					AuditStorageRequest req(deterministicRandom()->randomUniqueID(),
 					                        KeyRangeRef(shards[i].key, shards[i + 1].key),
 					                        AuditType::ValidateHA);
-					Optional<AuditStorageState> vResult = wait(timeout<AuditStorageState>(ssi.auditStorage.getReply(req), 5));
+					Optional<AuditStorageState> vResult =
+					    wait(timeout<AuditStorageState>(ssi.auditStorage.getReply(req), 5));
 					if (!vResult.present()) {
 						throw audit_storage_failed();
 					}
