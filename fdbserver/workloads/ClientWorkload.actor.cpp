@@ -24,6 +24,7 @@
 
 #include <fmt/format.h>
 
+#include "flow/ApiVersion.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 class WorkloadProcessState {
@@ -130,7 +131,7 @@ struct WorkloadProcess {
 		try {
 			child = childCreator(wcx);
 			TraceEvent("ClientWorkloadOpenDatabase", id).detail("ClusterFileLocation", child->ccr->getLocation());
-			cx = Database::createDatabase(child->ccr, -1);
+			cx = Database::createDatabase(child->ccr, ApiVersion::LATEST_VERSION);
 			desc = child->description();
 		} catch (Error&) {
 			throw;

@@ -139,6 +139,9 @@ if(NOT WIN32)
     test/apitester/TesterTestSpec.cpp
     test/apitester/TesterTestSpec.h
     test/apitester/TesterBlobGranuleCorrectnessWorkload.cpp
+    test/apitester/TesterBlobGranuleErrorsWorkload.cpp
+    test/apitester/TesterBlobGranuleUtil.cpp
+    test/apitester/TesterBlobGranuleUtil.h
     test/apitester/TesterCancelTransactionWorkload.cpp
     test/apitester/TesterCorrectnessWorkload.cpp
     test/apitester/TesterExampleWorkload.cpp
@@ -195,7 +198,7 @@ if(NOT WIN32)
   target_link_libraries(fdb_c_client_memory_test PRIVATE fdb_c Threads::Threads)
 
   target_include_directories(fdb_c_api_tester_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include ${CMAKE_BINARY_DIR}/flow/include)
-  target_link_libraries(fdb_c_api_tester_impl PRIVATE fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target)
+  target_link_libraries(fdb_c_api_tester_impl PRIVATE fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target stdc++fs)
   target_link_libraries(fdb_c_api_tester_impl PRIVATE SimpleOpt)
 
   target_include_directories(fdb_c_unit_tests_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
@@ -342,7 +345,6 @@ if(NOT WIN32)
       )
   set_tests_properties("fdb_c_upgrade_to_future_version" PROPERTIES ENVIRONMENT "${SANITIZER_OPTIONS}")
 
-if (0) # reenable after stabilizing the test
   add_test(NAME fdb_c_upgrade_to_future_version_blob_granules
     COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
         --build-dir ${CMAKE_BINARY_DIR}
@@ -351,7 +353,6 @@ if (0) # reenable after stabilizing the test
         --blob-granules-enabled
         --process-number 3
       )
-endif()
 
 #  if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
 #    add_test(NAME fdb_c_upgrade_single_threaded_630api
@@ -483,7 +484,7 @@ elseif(NOT WIN32 AND NOT APPLE AND NOT USE_SANITIZER) # Linux Only, non-santizer
       --outdir ${SHIM_LIB_OUTPUT_DIR}
       --dlopen-callback=fdb_shim_dlopen_callback
       $<TARGET_FILE:fdb_c>
-    DEPENDS ${IMPLIBSO_SRC}
+    DEPENDS ${IMPLIBSO_SRC} fdb_c
     COMMENT "Generating source code for C shim library")
 
   add_library(fdb_c_shim SHARED ${SHIM_LIB_GEN_SRC} foundationdb/fdb_c_shim.h fdb_c_shim.cpp)

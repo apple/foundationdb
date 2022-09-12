@@ -58,6 +58,9 @@ struct TestSpec {
 	// Execute each transaction in a separate database instance
 	bool databasePerTransaction = false;
 
+	// Test tampering the cluster file
+	bool tamperClusterFile = false;
+
 	// Size of the FDB client thread pool (a random number in the [min,max] range)
 	int minFdbThreads = 1;
 	int maxFdbThreads = 1;

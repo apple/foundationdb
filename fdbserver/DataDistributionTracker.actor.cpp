@@ -590,8 +590,10 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 			++nextIter;
 			newMetrics = nextIter->value().stats->get();
 
-			// If going forward, give up when the next shard's stats are not yet present.
-			if (!newMetrics.present() || shardCount + newMetrics.get().shardCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT) {
+			// If going forward, give up when the next shard's stats are not yet present, or if the
+			// the shard is already over the merge bounds.
+			if (!newMetrics.present() || shardCount + newMetrics.get().shardCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT ||
+			    (endingStats.bytes + newMetrics.get().metrics.bytes > maxShardSize)) {
 				--nextIter;
 				forwardComplete = true;
 				continue;
@@ -603,7 +605,8 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 			// If going backward, stop when the stats are not present or if the shard is already over the merge
 			//  bounds. If this check triggers right away (if we have not merged anything) then return a trigger
 			//  on the previous shard changing "size".
-			if (!newMetrics.present() || shardCount + newMetrics.get().shardCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT) {
+			if (!newMetrics.present() || shardCount + newMetrics.get().shardCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT ||
+			    (endingStats.bytes + newMetrics.get().metrics.bytes > maxShardSize)) {
 				if (shardsMerged == 1) {
 					CODE_PROBE(true, "shardMerger cannot merge anything");
 					return brokenPromiseToReady(prevIter->value().stats->onChange());
@@ -875,17 +878,18 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 			}
 			// FIXME(xwang): Do we need to track slow task here?
 			if (!onChange.isValid()) {
-				if (req.topK >= returnMetrics.size())
+				if (req.getTopK() >= returnMetrics.size())
 					req.reply.send(GetTopKMetricsReply(returnMetrics, minReadLoad, maxReadLoad));
 				else {
 					std::nth_element(returnMetrics.begin(),
-					                 returnMetrics.begin() + req.topK - 1,
+					                 returnMetrics.begin() + req.getTopK() - 1,
 					                 returnMetrics.end(),
 					                 GetTopKMetricsRequest::compare);
-					req.reply.send(GetTopKMetricsReply(std::vector<GetTopKMetricsReply::KeyRangeStorageMetrics>(
-					                                       returnMetrics.begin(), returnMetrics.begin() + req.topK),
-					                                   minReadLoad,
-					                                   maxReadLoad));
+					req.reply.send(
+					    GetTopKMetricsReply(std::vector<GetTopKMetricsReply::KeyRangeStorageMetrics>(
+					                            returnMetrics.begin(), returnMetrics.begin() + req.getTopK()),
+					                        minReadLoad,
+					                        maxReadLoad));
 				}
 				return Void();
 			}
