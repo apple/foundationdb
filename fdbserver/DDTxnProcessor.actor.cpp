@@ -132,7 +132,7 @@ class DDTxnProcessorImpl {
 							continue;
 						}
 						const StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
-						current.servers.push_back(ssi);
+						current.servers[ssi.locality.describeDcId()].push_back(ssi);
 					}
 					res.push_back(current);
 				}

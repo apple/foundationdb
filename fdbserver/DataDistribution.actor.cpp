@@ -1344,7 +1344,7 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
                                          UID auditId,
                                          KeyRange range,
                                          AuditType type) {
-	TraceEvent(SevDebug, "DDScheduleAuditBegin", auditId).detail("Range", range).detail("AuditType", type);
+	TraceEvent(SevDebug, "DDScheduleAuditForRangeBegin", auditId).detail("Range", range).detail("AuditType", type);
 	// TODO(heliu): Load the audit map for `range`.
 	state Key begin = range.begin;
 	state KeyRange currentRange = range;
@@ -1370,9 +1370,18 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
 
 			state int i = 0;
 			for (i = 0; i < rangeLocations.size(); ++i) {
-				const AuditStorageRequest req(auditId, rangeLocations[i].range, type);
-				const int idx = deterministicRandom()->randomInt(0, rangeLocations[i].servers.size());
-				actors->add(doAuditStorage(self, actors, auditMap, rangeLocations[i].servers[idx], req));
+				AuditStorageRequest req(auditId, rangeLocations[i].range, type);
+				if (type == AuditType::ValidateHA && rangeLocations[i].servers.size() >= 2) {
+					auto it = rangeLocations[i].servers.begin();
+					const int idx = deterministicRandom()->randomInt(0, it->second.size());
+					StorageServerInterface& targetServer = it->second[idx];
+					++it;
+					for (; it != rangeLocations[i].servers.end(); ++it) {
+						const int idx = deterministicRandom()->randomInt(0, it->second.size());
+						req.targetServers.push_back(it->second[idx].id());
+					}
+					actors->add(doAuditStorage(self, actors, auditMap, targetServer, req));
+				}
 				begin = rangeLocations[i].range.end;
 				wait(delay(0.01));
 			}
@@ -1395,7 +1404,8 @@ ACTOR Future<Void> doAuditStorage(Reference<DataDistributor> self,
 	TraceEvent(SevDebug, "DDAuditStorageBegin", req.id)
 	    .detail("Range", req.range)
 	    .detail("AuditType", req.type)
-	    .detail("StorageServer", ssi.toString());
+	    .detail("StorageServer", ssi.toString())
+	    .detail("TargetServers", describe(req.targetServers));
 
 	try {
 		auditMap->insert(req.range, AuditPhase::Running);

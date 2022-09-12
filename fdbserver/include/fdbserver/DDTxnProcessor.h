@@ -41,7 +41,8 @@ public:
 		StorageServersForRange() = default;
 		StorageServersForRange(KeyRangeRef range) : range(range) {}
 
-		std::vector<StorageServerInterface> servers;
+		// A map of dcId : list of servers
+		std::map<std::string, std::vector<StorageServerInterface>> servers;
 		KeyRange range;
 	};
 

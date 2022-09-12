@@ -73,12 +73,13 @@ struct AuditStorageRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, range, type, reply);
+		serializer(ar, id, range, type, targetServers, reply);
 	}
 
 	UID id;
 	KeyRange range;
 	uint8_t type;
+	std::vector<UID> targetServers;
 	ReplyPromise<AuditStorageState> reply;
 };
 
