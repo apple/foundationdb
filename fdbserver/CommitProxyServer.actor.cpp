@@ -59,7 +59,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-    ACTOR Future < Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply) {
+ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply) {
 	state ReplyPromise<Void> reply = req.reply;
 	resetReply(req);
 	std::vector<Future<Void>> replies;
@@ -1357,8 +1357,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 						    encryptedM.present()) {
 							backupMutation = encryptedM.get();
 						} else {
-							backupMutation =
-							    backupMutation.encrypt(self->cipherKeys, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, arena, BlobCipherMetrics::BACKUP);
+							backupMutation = backupMutation.encrypt(
+							    self->cipherKeys, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, arena, BlobCipherMetrics::BACKUP);
 						}
 					}
 
