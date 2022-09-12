@@ -20,6 +20,7 @@
 
 #include "fdbclient/BlobGranuleFiles.h"
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/ClientKnobs.h"
 #include "fdbclient/CommitTransaction.h"
@@ -27,7 +28,6 @@
 #include "fdbclient/SystemData.h" // for allKeys unit test - could remove
 
 #include "flow/Arena.h"
-#include "flow/BlobCipher.h"
 #include "flow/CompressionUtils.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IRandom.h"
@@ -304,7 +304,8 @@ struct IndexBlockRef {
 		                                     eKeys.headerCipherKey,
 		                                     cipherKeysCtx.ivRef.begin(),
 		                                     AES_256_IV_LENGTH,
-		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+		                                     BlobCipherMetrics::BLOB_GRANULE);
 		Value serializedBuff = ObjectWriter::toValue(block, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 		BlobCipherEncryptHeader header;
 		buffer = encryptor.encrypt(serializedBuff.contents().begin(), serializedBuff.contents().size(), &header, arena)
@@ -332,7 +333,8 @@ struct IndexBlockRef {
 
 		validateEncryptionHeaderDetails(eKeys, header, cipherKeysCtx.ivRef);
 
-		DecryptBlobCipherAes256Ctr decryptor(eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin());
+		DecryptBlobCipherAes256Ctr decryptor(
+		    eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin(), BlobCipherMetrics::BLOB_GRANULE);
 		StringRef decrypted =
 		    decryptor.decrypt(idxRef.buffer.begin(), idxRef.buffer.size(), header, arena)->toStringRef();
 
@@ -425,7 +427,8 @@ struct IndexBlobGranuleFileChunkRef {
 		                                     eKeys.headerCipherKey,
 		                                     cipherKeysCtx.ivRef.begin(),
 		                                     AES_256_IV_LENGTH,
-		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+		                                     BlobCipherMetrics::BLOB_GRANULE);
 		BlobCipherEncryptHeader header;
 		chunkRef.buffer =
 		    encryptor.encrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), &header, arena)->toStringRef();
@@ -454,7 +457,8 @@ struct IndexBlobGranuleFileChunkRef {
 
 		validateEncryptionHeaderDetails(eKeys, header, cipherKeysCtx.ivRef);
 
-		DecryptBlobCipherAes256Ctr decryptor(eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin());
+		DecryptBlobCipherAes256Ctr decryptor(
+		    eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin(), BlobCipherMetrics::BLOB_GRANULE);
 		StringRef decrypted =
 		    decryptor.decrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), header, arena)->toStringRef();
 

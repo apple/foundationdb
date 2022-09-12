@@ -23,6 +23,9 @@
 #include <algorithm>
 #include <ctype.h>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <string>
 
 namespace FdbApiTester {
 
@@ -44,16 +47,6 @@ int Random::randomInt(int min, int max) {
 Random& Random::get() {
 	static thread_local Random random;
 	return random;
-}
-
-fdb::ByteString Random::randomStringLowerCase(int minLength, int maxLength) {
-	int length = randomInt(minLength, maxLength);
-	fdb::ByteString str;
-	str.reserve(length);
-	for (int i = 0; i < length; i++) {
-		str += (char)randomInt('a', 'z');
-	}
-	return str;
 }
 
 bool Random::randomBool(double trueRatio) {
@@ -105,5 +98,53 @@ KeyRangeArray copyKeyRangeArray(fdb::future_var::KeyRangeRefArray::Type array) {
 	}
 	return out;
 };
+
+GranuleSummaryArray copyGranuleSummaryArray(fdb::future_var::GranuleSummaryRefArray::Type array) {
+	auto& [in_summaries, in_count] = array;
+
+	GranuleSummaryArray out;
+
+	for (int i = 0; i < in_count; ++i) {
+		fdb::native::FDBGranuleSummary nativeSummary = *in_summaries++;
+		fdb::GranuleSummary summary(nativeSummary);
+		out.push_back(summary);
+	}
+	return out;
+};
+
+TmpFile::~TmpFile() {
+	if (!filename.empty()) {
+		remove();
+	}
+}
+
+void TmpFile::create(std::string_view dir, std::string_view prefix) {
+	while (true) {
+		filename = fmt::format("{}/{}-{}", dir, prefix, Random::get().randomStringLowerCase<std::string>(6, 6));
+		if (!std::filesystem::exists(std::filesystem::path(filename))) {
+			break;
+		}
+	}
+
+	// Create an empty tmp file
+	std::fstream tmpFile(filename, std::fstream::out);
+	if (!tmpFile.good()) {
+		throw TesterError(fmt::format("Failed to create temporary file {}\n", filename));
+	}
+}
+
+void TmpFile::write(std::string_view data) {
+	std::ofstream ofs(filename, std::fstream::out | std::fstream::binary);
+	if (!ofs.good()) {
+		throw TesterError(fmt::format("Failed to write to the temporary file {}\n", filename));
+	}
+	ofs.write(data.data(), data.size());
+}
+
+void TmpFile::remove() {
+	if (!std::filesystem::remove(std::filesystem::path(filename))) {
+		fmt::print(stderr, "Failed to remove file {}\n", filename);
+	}
+}
 
 } // namespace FdbApiTester

@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
@@ -488,8 +489,10 @@ private:
 
 			ASSERT(cipherKeys.cipherTextKey.isValid());
 			ASSERT(cipherKeys.cipherHeaderKey.isValid());
-			EncryptBlobCipherAes265Ctr cipher(
-			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+			EncryptBlobCipherAes265Ctr cipher(cipherKeys.cipherTextKey,
+			                                  cipherKeys.cipherHeaderKey,
+			                                  ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+			                                  BlobCipherMetrics::KV_MEMORY);
 			BlobCipherEncryptHeader cipherHeader;
 			Arena arena;
 			StringRef ciphertext =
@@ -527,8 +530,10 @@ private:
 			return data;
 		}
 		state BlobCipherEncryptHeader cipherHeader = *(BlobCipherEncryptHeader*)data.begin();
-		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(self->db, cipherHeader));
-		DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, cipherHeader.iv);
+		TextAndHeaderCipherKeys cipherKeys =
+		    wait(getEncryptCipherKeys(self->db, cipherHeader, BlobCipherMetrics::KV_MEMORY));
+		DecryptBlobCipherAes256Ctr cipher(
+		    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, cipherHeader.iv, BlobCipherMetrics::KV_MEMORY);
 		Arena arena;
 		StringRef plaintext = cipher
 		                          .decrypt(data.begin() + BlobCipherEncryptHeader::headerSize,
@@ -961,7 +966,8 @@ private:
 	}
 
 	ACTOR static Future<Void> updateCipherKeys(KeyValueStoreMemory* self) {
-		TextAndHeaderCipherKeys cipherKeys = wait(getLatestSystemEncryptCipherKeys(self->db));
+		TextAndHeaderCipherKeys cipherKeys =
+		    wait(getLatestSystemEncryptCipherKeys(self->db, BlobCipherMetrics::KV_MEMORY));
 		self->cipherKeys = cipherKeys;
 		return Void();
 	}

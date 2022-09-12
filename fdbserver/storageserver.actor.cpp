@@ -23,7 +23,9 @@
 #include <type_traits>
 #include <unordered_map>
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleCommon.h"
+#include "flow/ApiVersion.h"
 #include "fmt/format.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
@@ -939,6 +941,8 @@ public:
 	std::unordered_map<NetworkAddress, std::map<UID, Version>> changeFeedClientVersions;
 	std::unordered_map<Key, Version> changeFeedCleanupDurable;
 	int64_t activeFeedQueries = 0;
+	int64_t changeFeedMemoryBytes = 0;
+	std::deque<std::pair<Version, int64_t>> feedMemoryBytesByVersion;
 
 	// newestAvailableVersion[k]
 	//   == invalidVersion -> k is unavailable at all versions
@@ -1200,6 +1204,7 @@ public:
 			specialCounter(cc, "KvstoreInlineKey", [self]() { return std::get<2>(self->storage.getSize()); });
 			specialCounter(cc, "ActiveChangeFeeds", [self]() { return self->uidChangeFeed.size(); });
 			specialCounter(cc, "ActiveChangeFeedQueries", [self]() { return self->activeFeedQueries; });
+			specialCounter(cc, "ChangeFeedMemoryBytes", [self]() { return self->changeFeedMemoryBytes; });
 		}
 	} counters;
 
@@ -1265,8 +1270,7 @@ public:
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
-		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
-		    (SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE || storage->shardAware())) {
+		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && storage->shardAware()) {
 			addShard(ShardInfo::newShard(this, StorageServerShard::notAssigned(allKeys)));
 		} else {
 			addShard(ShardInfo::newNotAssigned(allKeys));
@@ -1438,6 +1442,20 @@ public:
 			minVersion = std::min(minVersion, it.second);
 		}
 		return minVersion;
+	}
+
+	// count in-memory change feed bytes towards storage queue size, for the purposes of memory management and
+	// throttling
+	void addFeedBytesAtVersion(int64_t bytes, Version version) {
+		if (feedMemoryBytesByVersion.empty() || version != feedMemoryBytesByVersion.back().first) {
+			ASSERT(feedMemoryBytesByVersion.empty() || version >= feedMemoryBytesByVersion.back().first);
+			feedMemoryBytesByVersion.push_back({ version, 0 });
+		}
+		feedMemoryBytesByVersion.back().second += bytes;
+		changeFeedMemoryBytes += bytes;
+		if (SERVER_KNOBS->STORAGE_INCLUDE_FEED_STORAGE_QUEUE) {
+			counters.bytesInput += bytes;
+		}
 	}
 
 	void getSplitPoints(SplitRangeRequest const& req) {
@@ -5076,6 +5094,17 @@ bool changeDurableVersion(StorageServer* data, Version desiredDurableVersion) {
 		data->counters.bytesDurable += bytesDurable;
 	}
 
+	int64_t feedBytesDurable = 0;
+	while (!data->feedMemoryBytesByVersion.empty() &&
+	       data->feedMemoryBytesByVersion.front().first <= desiredDurableVersion) {
+		feedBytesDurable += data->feedMemoryBytesByVersion.front().second;
+		data->feedMemoryBytesByVersion.pop_front();
+	}
+	data->changeFeedMemoryBytes -= feedBytesDurable;
+	if (SERVER_KNOBS->STORAGE_INCLUDE_FEED_STORAGE_QUEUE) {
+		data->counters.bytesDurable += feedBytesDurable;
+	}
+
 	if (EXPENSIVE_VALIDATION) {
 		// Check that the above loop did its job
 		auto view = data->data().atLatest();
@@ -5261,6 +5290,7 @@ void applyChangeFeedMutation(StorageServer* self, MutationRef const& m, Version 
 				}
 				it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
 				self->currentChangeFeeds.insert(it->id);
+				self->addFeedBytesAtVersion(m.totalSize(), version);
 
 				DEBUG_MUTATION("ChangeFeedWriteSet", version, m, self->thisServerID)
 				    .detail("Range", it->range)
@@ -5289,6 +5319,8 @@ void applyChangeFeedMutation(StorageServer* self, MutationRef const& m, Version 
 					}
 					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
 					self->currentChangeFeeds.insert(it->id);
+					self->addFeedBytesAtVersion(m.totalSize(), version);
+
 					DEBUG_MUTATION("ChangeFeedWriteClear", version, m, self->thisServerID)
 					    .detail("Range", it->range)
 					    .detail("ChangeFeedID", it->id);
@@ -8187,7 +8219,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 							cipherDetails.insert(header->cipherHeaderDetails);
 							collectingCipherKeys = true;
 						} else {
-							msg = msg.decrypt(cipherKeys.get(), eager.arena);
+							msg = msg.decrypt(cipherKeys.get(), eager.arena, BlobCipherMetrics::TLOG);
 						}
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
@@ -8210,7 +8242,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			if (collectingCipherKeys) {
 				std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-				    wait(getEncryptCipherKeys(data->db, cipherDetails));
+				    wait(getEncryptCipherKeys(data->db, cipherDetails, BlobCipherMetrics::TLOG));
 				cipherKeys = getCipherKeysResult;
 				collectingCipherKeys = false;
 				eager = UpdateEagerReadInfo();
@@ -8335,7 +8367,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				rd >> msg;
 				if (msg.isEncrypted()) {
 					ASSERT(cipherKeys.present());
-					msg = msg.decrypt(cipherKeys.get(), rd.arena());
+					msg = msg.decrypt(cipherKeys.get(), rd.arena(), BlobCipherMetrics::TLOG);
 				}
 
 				Span span("SS:update"_loc, spanContext);
@@ -10359,7 +10391,7 @@ ACTOR Future<Void> memoryStoreRecover(IKeyValueStore* store, Reference<IClusterC
 	}
 
 	// create a temp client connect to DB
-	Database cx = Database::createDatabase(connRecord, Database::API_VERSION_LATEST);
+	Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 	state int noCanRemoveCount = 0;
@@ -10595,8 +10627,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  std::string folder,
                                  Reference<IEncryptionKeyProvider> encryptionKeyProvider) {
 	state StorageServer self(persistentData, db, ssi, encryptionKeyProvider);
-	self.shardAware = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA &&
-	                  (SERVER_KNOBS->STORAGE_SERVER_SHARD_AWARE || persistentData->shardAware());
+	self.shardAware = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && persistentData->shardAware();
 	state Future<Void> ssCore;
 	self.clusterId.send(clusterId);
 	self.initialClusterVersion = startVersion;

@@ -22,6 +22,7 @@
 #include <tuple>
 
 #include "fdbclient/Atomic.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
@@ -50,7 +51,6 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
-#include "flow/BlobCipher.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
@@ -917,11 +917,11 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	// Fetch cipher keys if needed.
 	state Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getCipherKeys;
 	if (pProxyCommitData->isEncryptionEnabled) {
-		static std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> defaultDomains = {
+		static std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> defaultDomains = {
 			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME },
 			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
 		};
-		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> encryptDomains = defaultDomains;
+		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> encryptDomains = defaultDomains;
 		for (int t = 0; t < trs.size(); t++) {
 			TenantInfo const& tenantInfo = trs[t].tenantInfo;
 			int64_t tenantId = tenantInfo.tenantId;
@@ -932,7 +932,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 				encryptDomains[tenantId] = tenantName.get();
 			}
 		}
-		getCipherKeys = getLatestEncryptCipherKeys(pProxyCommitData->db, encryptDomains);
+		getCipherKeys = getLatestEncryptCipherKeys(pProxyCommitData->db, encryptDomains, BlobCipherMetrics::TLOG);
 	}
 
 	self->releaseFuture = releaseResolvingAfter(pProxyCommitData, self->releaseDelay, self->localBatchNumber);
@@ -1167,7 +1167,8 @@ void writeMutation(CommitBatchContext* self, int64_t tenantId, const MutationRef
 		self->toCommit.writeTypedMessage(mutation);
 	} else {
 		Arena arena;
-		self->toCommit.writeTypedMessage(mutation.encrypt(self->cipherKeys, tenantId /*domainId*/, arena));
+		self->toCommit.writeTypedMessage(
+		    mutation.encrypt(self->cipherKeys, tenantId /*domainId*/, arena, BlobCipherMetrics::TLOG));
 	}
 }
 

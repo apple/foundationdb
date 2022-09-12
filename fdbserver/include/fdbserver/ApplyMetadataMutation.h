@@ -25,6 +25,7 @@
 #include <cstddef>
 
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -33,7 +34,6 @@
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/ProxyCommitData.actor.h"
-#include "flow/BlobCipher.h"
 #include "flow/FastRef.h"
 
 // Resolver's data for applyMetadataMutations() calls.

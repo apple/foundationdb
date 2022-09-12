@@ -26,6 +26,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/Schemas.h"
+#include "flow/ApiVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct ChangeConfigWorkload : TestWorkload {
@@ -85,7 +86,7 @@ struct ChangeConfigWorkload : TestWorkload {
 		if (g_network->isSimulated()) {
 			for (auto extraDatabase : g_simulator.extraDatabases) {
 				auto extraFile = makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(extraDatabase));
-				Database db = Database::createDatabase(extraFile, -1);
+				Database db = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 				futures.push_back(configureExtraDatabase(self, db));
 			}
 		}
@@ -139,6 +140,9 @@ struct ChangeConfigWorkload : TestWorkload {
 		if (autoChange) { // if auto, we first get the desired addresses by read \xff\xff/management/auto_coordinators
 			loop {
 				try {
+					// Set RAW_ACCESS to explicitly avoid using tenants because
+					// access to management keys is denied for tenant transactions
+					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 					Optional<Value> newCoordinatorsKey = wait(tr.get(
 					    LiteralStringRef("auto_coordinators")
 					        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));

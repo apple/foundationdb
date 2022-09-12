@@ -24,6 +24,7 @@
 #include <sstream>
 #include <string_view>
 #include <toml.hpp>
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/IPAllowList.h"
@@ -412,7 +413,6 @@ public:
 		    .add("allowDisablingTenants", &allowDisablingTenants)
 		    .add("allowCreatingTenants", &allowCreatingTenants)
 		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
-		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
 		    .add("injectTargetedSSRestart", &injectTargetedSSRestart)
 		    .add("injectSSDelay", &injectSSDelay);
 		try {
@@ -475,7 +475,7 @@ ACTOR Future<Void> runBackup(Reference<IClusterConnectionRecord> connRecord) {
 	}
 
 	if (g_simulator.backupAgents == ISimulator::BackupAgentType::BackupToFile) {
-		Database cx = Database::createDatabase(connRecord, -1);
+		Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
 		state FileBackupAgent fileAgent;
 		agentFutures.push_back(fileAgent.run(
@@ -503,11 +503,11 @@ ACTOR Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 
 	if (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
 		ASSERT(g_simulator.extraDatabases.size() == 1);
-		Database cx = Database::createDatabase(connRecord, -1);
+		Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
 		auto extraFile =
 		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
-		state Database drDatabase = Database::createDatabase(extraFile, -1);
+		state Database drDatabase = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 
 		TraceEvent("StartingDrAgents")
 		    .detail("ConnectionString", connRecord->getConnectionString().toString())
@@ -1918,6 +1918,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	}
 
 	simconfig.db.tenantMode = tenantMode;
+	simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
 
 	StatusObject startingConfigJSON = simconfig.db.toJSON(true);
 	std::string startingConfigString = "new";
@@ -1952,7 +1953,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		if (kv.second.type() == json_spirit::int_type) {
 			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int());
 		} else if (kv.second.type() == json_spirit::str_type) {
-			if ("storage_migration_type" == kv.first || "tenant_mode" == kv.first) {
+			if ("storage_migration_type" == kv.first || "tenant_mode" == kv.first ||
+			    "encryption_at_rest_mode" == kv.first) {
 				startingConfigString += kv.first + "=" + kv.second.get_str();
 			} else {
 				startingConfigString += kv.second.get_str();

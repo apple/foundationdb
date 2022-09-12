@@ -139,7 +139,8 @@ public:
 		pair_type endPair(endKey, Val());
 		map.insert(endPair, true, mf(endPair));
 	}
-	Val const& operator[](const Key& k) { return rangeContaining(k).value(); }
+	Val const& operator[](const Key& k) const { return rangeContaining(k).value(); }
+	Val& operator[](const Key& k) { return rangeContaining(k).value(); }
 
 	Ranges ranges() { return Ranges(iterator(map.begin()), iterator(map.lastItem())); }
 	ConstRanges ranges() const { return ConstRanges(const_iterator(map.begin()), const_iterator(map.lastItem())); }

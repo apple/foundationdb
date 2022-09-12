@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_THREADSAFETRANSACTION_H
 #define FDBCLIENT_THREADSAFETRANSACTION_H
+#include "flow/ApiVersion.h"
 #include "flow/ProtocolVersion.h"
 #pragma once
 
@@ -176,6 +177,10 @@ public:
 	    Version readVersion,
 	    ReadBlobGranuleContext granuleContext) override;
 
+	ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRangeRef& keyRange,
+	                                                                                 Optional<Version> summaryVersion,
+	                                                                                 int rangeLimit) override;
+
 	void addReadConflictRange(const KeyRangeRef& keys) override;
 	void makeSelfConflicting();
 
@@ -242,7 +247,7 @@ private:
 	friend IClientApi* getLocalClientAPI();
 	ThreadSafeApi();
 
-	int apiVersion;
+	ApiVersion apiVersion;
 	std::string clientVersion;
 	uint64_t transportId;
 

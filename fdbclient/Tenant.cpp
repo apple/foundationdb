@@ -22,6 +22,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 #include "libb64/encode.h"
+#include "flow/ApiVersion.h"
 #include "flow/UnitTest.h"
 
 Key TenantMapEntry::idToPrefix(int64_t id) {
@@ -122,24 +123,19 @@ void TenantMapEntry::setId(int64_t id) {
 	prefix = idToPrefix(id);
 }
 
-std::string TenantMapEntry::toJson(int apiVersion) const {
+std::string TenantMapEntry::toJson() const {
 	json_spirit::mObject tenantEntry;
 	tenantEntry["id"] = id;
 	tenantEntry["encrypted"] = encrypted;
 
-	if (apiVersion >= 720 || apiVersion == Database::API_VERSION_LATEST) {
-		json_spirit::mObject prefixObject;
-		std::string encodedPrefix = base64::encoder::from_string(prefix.toString());
-		// Remove trailing newline
-		encodedPrefix.resize(encodedPrefix.size() - 1);
+	json_spirit::mObject prefixObject;
+	std::string encodedPrefix = base64::encoder::from_string(prefix.toString());
+	// Remove trailing newline
+	encodedPrefix.resize(encodedPrefix.size() - 1);
 
-		prefixObject["base64"] = encodedPrefix;
-		prefixObject["printable"] = printable(prefix);
-		tenantEntry["prefix"] = prefixObject;
-	} else {
-		// This is not a standard encoding in JSON, and some libraries may not be able to easily decode it
-		tenantEntry["prefix"] = prefix.toString();
-	}
+	prefixObject["base64"] = encodedPrefix;
+	prefixObject["printable"] = printable(prefix);
+	tenantEntry["prefix"] = prefixObject;
 
 	tenantEntry["tenant_state"] = TenantMapEntry::tenantStateToString(tenantState);
 	if (assignedCluster.present()) {

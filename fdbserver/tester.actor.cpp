@@ -684,7 +684,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 		startRole(Role::TESTER, workIface.id(), UID(), details);
 
 		if (work.useDatabase) {
-			cx = Database::createDatabase(ccr, -1, IsInternal::True, locality);
+			cx = Database::createDatabase(ccr, ApiVersion::LATEST_VERSION, IsInternal::True, locality);
 			cx->defaultTenant = work.defaultTenant.castTo<TenantName>();
 			wait(delay(1.0));
 		}
@@ -1417,6 +1417,9 @@ KnobKeyValuePairs getOverriddenKnobKeyValues(const toml::value& context) {
 				ParsedKnobValue parsedValue = CLIENT_KNOBS->parseKnobValue(key, value);
 				if (std::get_if<NoKnobFound>(&parsedValue)) {
 					parsedValue = SERVER_KNOBS->parseKnobValue(key, value);
+				}
+				if (std::get_if<NoKnobFound>(&parsedValue)) {
+					parsedValue = FLOW_KNOBS->parseKnobValue(key, value);
 				}
 				if (std::get_if<NoKnobFound>(&parsedValue)) {
 					TraceEvent(SevError, "TestSpecUnrecognizedKnob")

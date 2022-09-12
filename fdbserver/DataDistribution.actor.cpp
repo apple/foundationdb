@@ -572,23 +572,17 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 	// FIXME: wrap the bootstrap process into class DataDistributor
 	state Reference<DDTeamCollection> primaryTeamCollection;
 	state Reference<DDTeamCollection> remoteTeamCollection;
-	state std::shared_ptr<bool> trackerCancelled(new bool(false));
+	state bool trackerCancelled;
 	state bool ddIsTenantAware = SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED;
 	loop {
-		*trackerCancelled = false;
+		trackerCancelled = false;
 
 		// Stored outside of data distribution tracker to avoid slow tasks
 		// when tracker is cancelled
-		state std::shared_ptr<KeyRangeMap<ShardTrackedData>> shards(new KeyRangeMap<ShardTrackedData>);
+		state KeyRangeMap<ShardTrackedData> shards;
 		state Promise<UID> removeFailedServer;
 		try {
 			wait(DataDistributor::init(self));
-
-			state Reference<TenantCache> ddTenantCache;
-			if (ddIsTenantAware) {
-				ddTenantCache = makeReference<TenantCache>(cx, self->ddId);
-				wait(ddTenantCache->build(cx));
-			}
 
 			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
 			ASSERT(self->configuration.storageTeamSize > 0);
@@ -600,6 +594,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			state Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 			state Promise<Void> readyToStart;
+
+			state Optional<Reference<TenantCache>> ddTenantCache;
+			if (ddIsTenantAware) {
+				ddTenantCache = makeReference<TenantCache>(cx, self->ddId);
+				wait(ddTenantCache.get()->build());
+			}
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 			self->physicalShardCollection = makeReference<PhysicalShardCollection>();
@@ -624,10 +624,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			} else {
 				anyZeroHealthyTeams = zeroHealthyTeams[0];
 			}
-			if (ddIsTenantAware) {
-				actors.push_back(reportErrorsExcept(
-				    ddTenantCache->monitorTenantMap(), "DDTenantCacheMonitor", self->ddId, &normalDDQueueErrors()));
-			}
 
 			actors.push_back(self->pollMoveKeysLock());
 			actors.push_back(reportErrorsExcept(dataDistributionTracker(self->initData,
@@ -642,8 +638,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                                            readyToStart,
 			                                                            anyZeroHealthyTeams,
 			                                                            self->ddId,
-			                                                            shards.get(),
-			                                                            trackerCancelled.get()),
+			                                                            &shards,
+			                                                            &trackerCancelled,
+			                                                            ddTenantCache),
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
@@ -672,6 +669,13 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    "StorageQuotaTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
+
+			if (ddIsTenantAware) {
+				actors.push_back(reportErrorsExcept(ddTenantCache.get()->monitorTenantMap(),
+				                                    "DDTenantCacheMonitor",
+				                                    self->ddId,
+				                                    &normalDDQueueErrors()));
+			}
 
 			std::vector<DDTeamCollection*> teamCollectionsPtrs;
 			primaryTeamCollection = makeReference<DDTeamCollection>(
@@ -744,7 +748,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			wait(waitForAll(actors));
 			return Void();
 		} catch (Error& e) {
-			*trackerCancelled = true;
+			trackerCancelled = true;
 			state Error err = e;
 			TraceEvent("DataDistributorDestroyTeamCollections").error(e);
 			state std::vector<UID> teamForDroppedRange;
@@ -768,10 +772,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				if (!g_network->isSimulated()) {
 					TraceEvent(SevWarnAlways, "DataDistributorCancelled");
 				}
-				shards->clear();
+				shards.clear();
 				throw e;
 			} else {
-				wait(shards->clearAsync());
+				wait(shards.clearAsync());
 			}
 			TraceEvent("DataDistributorTeamCollectionsDestroyed").error(err);
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {

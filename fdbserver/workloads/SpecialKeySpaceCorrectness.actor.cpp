@@ -28,6 +28,7 @@
 #include "fdbclient/Schemas.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbserver/Knobs.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/IRandom.h"
@@ -298,8 +299,133 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> testSpecialKeySpaceErrors(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
-		Database cx = cx_->clone();
+		state Database cx = cx_->clone();
+		try {
+			wait(success(TenantAPI::createTenant(cx.getReference(), TenantName("foo"_sr))));
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_tenant_already_exists || e.code() == error_code_actor_cancelled);
+		}
 		state Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
+		state Reference<ReadYourWritesTransaction> tenantTx =
+		    makeReference<ReadYourWritesTransaction>(cx, TenantName("foo"_sr));
+		// Use new transactions that may use default tenant rather than re-use tx
+		// This is because tx will reject raw access for later tests if default tenant is set
+		state Reference<ReadYourWritesTransaction> defaultTx1 = makeReference<ReadYourWritesTransaction>(cx);
+		state Reference<ReadYourWritesTransaction> defaultTx2 = makeReference<ReadYourWritesTransaction>(cx);
+		state bool disableRyw = deterministicRandom()->coinflip();
+		// tenant transaction accessing modules that do not support tenants
+		// tenant getRange
+		try {
+			wait(success(tenantTx->getRange(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT),
+			                                CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			ASSERT(e.code() == error_code_illegal_tenant_access);
+			tenantTx->reset();
+		}
+		// tenant set + commit
+		try {
+			tenantTx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tenantTx->set(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck"), ValueRef());
+			wait(tenantTx->commit());
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			ASSERT(e.code() == error_code_illegal_tenant_access);
+			tenantTx->reset();
+		}
+		// tenant clear
+		try {
+			tenantTx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tenantTx->clear(SpecialKeySpace::getManagementApiCommandRange("exclude"));
+			ASSERT(false);
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			ASSERT(e.code() == error_code_illegal_tenant_access);
+			tenantTx->reset();
+		}
+		// tenant check that conflict ranges stay the same after commit
+		// and depending on if RYW is disabled
+		{
+			state RangeResult readresult1;
+			state RangeResult readresult2;
+			state RangeResult writeResult1;
+			state RangeResult writeResult2;
+			try {
+				if (disableRyw) {
+					defaultTx1->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+				}
+				defaultTx1->addReadConflictRange(singleKeyRange(LiteralStringRef("testKeylll")));
+				defaultTx1->addWriteConflictRange(singleKeyRange(LiteralStringRef("testKeylll")));
+				wait(store(readresult1, defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
+				wait(store(writeResult1, defaultTx1->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
+				wait(defaultTx1->commit());
+				CODE_PROBE(true, "conflict range tenant commit succeeded");
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled)
+					throw;
+				CODE_PROBE(true, "conflict range tenant commit error thrown");
+			}
+			wait(store(readresult2, defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
+			wait(store(writeResult2, defaultTx1->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY)));
+			ASSERT(readresult1 == readresult2);
+			ASSERT(writeResult1 == writeResult2);
+			defaultTx1->reset();
+		}
+		// proper conflict ranges
+		loop {
+			try {
+				if (disableRyw) {
+					defaultTx1->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+					defaultTx2->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+				}
+				defaultTx1->setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
+				defaultTx2->setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
+				wait(success(defaultTx1->getReadVersion()));
+				wait(success(defaultTx2->getReadVersion()));
+				defaultTx1->addReadConflictRange(singleKeyRange(LiteralStringRef("foo")));
+				defaultTx1->addWriteConflictRange(singleKeyRange(LiteralStringRef("foo")));
+				defaultTx2->addWriteConflictRange(singleKeyRange(LiteralStringRef("foo")));
+				wait(defaultTx2->commit());
+				try {
+					wait(defaultTx1->commit());
+					ASSERT(false);
+				} catch (Error& e) {
+					state Error err = e;
+					if (err.code() != error_code_not_committed) {
+						wait(defaultTx1->onError(err));
+						wait(defaultTx2->onError(err));
+						continue;
+					}
+					// Read conflict ranges of defaultTx1 and check for "foo" with no tenant prefix
+					state RangeResult readConflictRange =
+					    wait(defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY));
+					state RangeResult writeConflictRange =
+					    wait(defaultTx1->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY));
+					state RangeResult conflictKeys =
+					    wait(defaultTx1->getRange(conflictingKeysRange, CLIENT_KNOBS->TOO_MANY));
+
+					// size is 2 because singleKeyRange includes the key after
+					ASSERT(readConflictRange.size() == 2 &&
+					       readConflictRange.begin()->key == readConflictRangeKeysRange.begin.withSuffix("foo"_sr));
+					ASSERT(writeConflictRange.size() == 2 &&
+					       writeConflictRange.begin()->key == writeConflictRangeKeysRange.begin.withSuffix("foo"_sr));
+					ASSERT(conflictKeys.size() == 2 &&
+					       conflictKeys.begin()->key == conflictingKeysRange.begin.withSuffix("foo"_sr));
+					defaultTx1->reset();
+					defaultTx2->reset();
+					break;
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled)
+					throw;
+				wait(defaultTx2->onError(e));
+			}
+		}
 		// begin key outside module range
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);

@@ -96,7 +96,7 @@ struct TenantMapEntry {
 	TenantMapEntry(int64_t id, TenantState tenantState, Optional<TenantGroupName> tenantGroup, bool encrypted);
 
 	void setId(int64_t id);
-	std::string toJson(int apiVersion) const;
+	std::string toJson() const;
 
 	bool matchesConfiguration(TenantMapEntry const& other) const;
 	void configure(Standalone<StringRef> parameter, Optional<Value> value);

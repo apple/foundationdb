@@ -36,6 +36,7 @@
 #include "fdbserver/workloads/TenantConsistency.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
+#include "flow/ApiVersion.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
@@ -72,14 +73,14 @@ struct TenantManagementWorkload : TestWorkload {
 	TenantName localTenantGroupNamePrefix;
 
 	const Key specialKeysTenantMapPrefix = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT)
-	                                           .begin.withSuffix(TenantRangeImpl<true>::submoduleRange.begin)
-	                                           .withSuffix(TenantRangeImpl<true>::mapSubRange.begin);
+	                                           .begin.withSuffix(TenantRangeImpl::submoduleRange.begin)
+	                                           .withSuffix(TenantRangeImpl::mapSubRange.begin);
 	const Key specialKeysTenantConfigPrefix = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT)
-	                                              .begin.withSuffix(TenantRangeImpl<true>::submoduleRange.begin)
-	                                              .withSuffix(TenantRangeImpl<true>::configureSubRange.begin);
+	                                              .begin.withSuffix(TenantRangeImpl::submoduleRange.begin)
+	                                              .withSuffix(TenantRangeImpl::configureSubRange.begin);
 	const Key specialKeysTenantRenamePrefix = SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT)
-	                                              .begin.withSuffix(TenantRangeImpl<true>::submoduleRange.begin)
-	                                              .withSuffix(TenantRangeImpl<true>::renameSubRange.begin);
+	                                              .begin.withSuffix(TenantRangeImpl::submoduleRange.begin)
+	                                              .withSuffix(TenantRangeImpl::renameSubRange.begin);
 
 	int maxTenants;
 	int maxTenantGroups;
@@ -171,7 +172,7 @@ struct TenantManagementWorkload : TestWorkload {
 		Reference<IDatabase> threadSafeHandle =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
 
-		MultiVersionApi::api->selectApiVersion(cx->apiVersion);
+		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 		self->mvDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
 		if (self->useMetacluster && self->clientId == 0) {
@@ -219,7 +220,7 @@ struct TenantManagementWorkload : TestWorkload {
 		if (self->useMetacluster) {
 			ASSERT(g_simulator.extraDatabases.size() == 1);
 			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(g_simulator.extraDatabases[0]);
-			self->dataDb = Database::createDatabase(extraFile, -1);
+			self->dataDb = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 		} else {
 			self->dataDb = cx;
 		}

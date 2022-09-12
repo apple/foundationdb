@@ -2015,7 +2015,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 		return false;
 	}
 	// randomly choose topK shards
-	int topK = std::min(int(0.1 * shards.size()), SERVER_KNOBS->READ_REBALANCE_SHARD_TOPK);
+	int topK = std::max(1, std::min(int(0.1 * shards.size()), SERVER_KNOBS->READ_REBALANCE_SHARD_TOPK));
 	state Future<HealthMetrics> healthMetrics = self->cx->getHealthMetrics(true);
 	state GetTopKMetricsRequest req(
 	    shards, topK, (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC, srcLoad / shards.size());

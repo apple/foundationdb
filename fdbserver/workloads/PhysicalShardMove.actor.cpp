@@ -107,8 +107,9 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		                                                    teamSize,
 		                                                    includes,
 		                                                    excludes));
-		includes.insert(teamA.begin(), teamA.end());
+
 		// Move range [TestKeyB, TestKeyC) to sh1, on the same server.
+		includes.insert(teamA.begin(), teamA.end());
 		state std::vector<UID> teamB = wait(self->moveShard(self,
 		                                                    cx,
 		                                                    UID(sh1, deterministicRandom()->randomUInt64()),
