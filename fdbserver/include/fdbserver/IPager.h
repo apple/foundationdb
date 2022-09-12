@@ -19,15 +19,16 @@
  */
 #pragma once
 
+#include "fdbclient/BlobCipher.h"
 #ifndef FDBSERVER_IPAGER_H
 #define FDBSERVER_IPAGER_H
 #include <cstddef>
 #include <stdint.h>
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"
 #include "fdbserver/IEncryptionKeyProvider.actor.h"
 #include "fdbserver/IKeyValueStore.h"
-#include "flow/BlobCipher.h"
 #include "flow/Error.h"
 #include "flow/FastAlloc.h"
 #include "flow/flow.h"
@@ -341,8 +342,10 @@ public:
 		BlobCipherEncryptHeader header;
 
 		void encode(const TextAndHeaderCipherKeys& cipherKeys, uint8_t* payload, int len) {
-			EncryptBlobCipherAes265Ctr cipher(
-			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+			EncryptBlobCipherAes265Ctr cipher(cipherKeys.cipherTextKey,
+			                                  cipherKeys.cipherHeaderKey,
+			                                  ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+			                                  BlobCipherMetrics::KV_REDWOOD);
 			Arena arena;
 			StringRef ciphertext = cipher.encrypt(payload, len, &header, arena)->toStringRef();
 			ASSERT_EQ(len, ciphertext.size());
@@ -350,7 +353,8 @@ public:
 		}
 
 		void decode(const TextAndHeaderCipherKeys& cipherKeys, uint8_t* payload, int len) {
-			DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.iv);
+			DecryptBlobCipherAes256Ctr cipher(
+			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.iv, BlobCipherMetrics::KV_REDWOOD);
 			Arena arena;
 			StringRef plaintext = cipher.decrypt(payload, len, header, arena)->toStringRef();
 			ASSERT_EQ(len, plaintext.size());
