@@ -81,12 +81,9 @@ private:
 	}
 
 	void randomOperation(TTaskFct cont) override {
-		std::optional<int> tenantId;
-		if (tenants.size() > 0) {
-			tenantId = Random::get().randomInt(0, tenants.size() - 1);
-		}
-
+		std::optional<int> tenantId = randomTenant();
 		OpType txType = (OpType)Random::get().randomInt(0, OP_LAST);
+
 		switch (txType) {
 		case OP_CANCEL_GET:
 			randomCancelGetTx(cont, tenantId);

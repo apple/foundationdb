@@ -269,11 +269,7 @@ private:
 	}
 
 	void randomOperation(TTaskFct cont) {
-		std::optional<int> tenantId;
-		if (tenants.size() > 0) {
-			tenantId = Random::get().randomInt(0, tenants.size() - 1);
-		}
-
+		std::optional<int> tenantId = randomTenant();
 		OpType txType = (stores[tenantId].size() == 0) ? OP_INSERT : (OpType)Random::get().randomInt(0, OP_LAST);
 
 		switch (txType) {

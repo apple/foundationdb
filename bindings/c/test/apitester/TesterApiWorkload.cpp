@@ -149,6 +149,14 @@ fdb::Key ApiWorkload::randomKey(double existingKeyRatio, std::optional<int> tena
 	}
 }
 
+std::optional<int> ApiWorkload::randomTenant() {
+	if (tenants.size() > 0) {
+		return Random::get().randomInt(0, tenants.size() - 1);
+	} else {
+		return {};
+	}
+}
+
 void ApiWorkload::populateDataTx(TTaskFct cont, std::optional<int> tenantId) {
 	int numKeys = maxKeysPerTransaction;
 	auto kvPairs = std::make_shared<std::vector<fdb::KeyValue>>();

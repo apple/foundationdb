@@ -115,6 +115,7 @@ void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx,
 		return;
 	}
 	tasksScheduled++;
+	numTxStarted++;
 	manager->txExecutor->execute(
 	    tx,
 	    [this, tx, cont, failOnError]() {
