@@ -43,7 +43,6 @@
 #include "fmt/format.h"
 
 #include "flow/Arena.h"
-#include "flow/BlobCipher.h"
 #include "flow/Error.h"
 #include "flow/FaultInjection.h"
 #include "flow/Knobs.h"
