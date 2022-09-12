@@ -701,7 +701,7 @@ Future<Void> monitor(GlobalTagThrottler* globalTagThrottler, Check check) {
 }
 
 bool isNear(double a, double b) {
-	return abs(a - b) < 1.0;
+	return abs(a - b) < 3.0;
 }
 
 bool isNear(Optional<double> a, Optional<double> b) {
