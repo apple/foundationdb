@@ -2979,7 +2979,7 @@ int main(int argc, char** argv) {
 		          << std::endl;
 		return 1;
 	}
-	fdb_check(fdb_select_api_version(720));
+	fdb_check(fdb_select_api_version(FDB_API_VERSION));
 	if (argc >= 4) {
 		std::string externalClientLibrary = argv[3];
 		if (externalClientLibrary.substr(0, 2) != "--") {

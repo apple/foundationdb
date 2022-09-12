@@ -128,7 +128,7 @@ func APIVersion(version int) error {
 		return errAPIVersionAlreadySet
 	}
 
-	if version < 200 || version > 720 {
+	if version < 200 || version > headerVersion {
 		return errAPIVersionNotSupported
 	}
 
