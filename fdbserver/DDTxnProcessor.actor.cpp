@@ -568,28 +568,14 @@ Future<Reference<InitialDataDistribution>> DDMockTxnProcessor::getInitialDataDis
 	return res;
 }
 
-// Remove the server from shardMapping and set serverKeysFalse to the server's serverKeys list.
-// Changes to keyServer and serverKey must happen symmetrically in this function.
-// If serverID is the last source server for a shard, the shard will be erased, and then be assigned
-// to teamForDroppedRange.
 Future<Void> DDMockTxnProcessor::removeKeysFromFailedServer(const UID& serverID,
                                                             const std::vector<UID>& teamForDroppedRange,
                                                             const MoveKeysLock& lock,
                                                             const DDEnabledState* ddEnabledState) const {
 
-	auto& mss = mgs->allServers.at(serverID);
-	auto allRange = mss.getAllRanges();
-	for (auto it = allRange.begin(); it != allRange.end(); ++it) {
-		KeyRangeRef curRange = it->range();
-		mgs->shardMapping->removeFailedServerForRange(curRange, serverID);
-		// TODO: check whether source is empty
-		// emptySource => found available dest
-		// emptysource && empty dest => assign to teamForDroppedRange, mark lost
-	}
-
-	// teams.erase(std::remove_if(teams.begin(), teams.end(), [](const auto& team) { return team.servers.empty(); }),
-	//             teams.end());
-	return Void();
+	// This function only takes effect when user exclude failed IP:PORT in the fdbcli. In the first version , the mock
+	// class won’t support this.
+	UNREACHABLE();
 }
 
 Future<Void> DDMockTxnProcessor::removeStorageServer(const UID& serverID,
