@@ -65,17 +65,10 @@ std::unordered_map<std::string, std::function<void(const std::string& value, Tes
 	  [](const std::string& value, TestSpec* spec) { //
 	      spec->databasePerTransaction = (value == "true");
 	  } },
-<<<<<<< HEAD
 	{ "tamperClusterFile",
 	  [](const std::string& value, TestSpec* spec) { //
 	      spec->tamperClusterFile = (value == "true");
 	  } },
-	{ "multiTenant",
-	  [](const std::string& value, TestSpec* spec) { //
-	      spec->multiTenant = (value == "true");
-	  } },
-=======
->>>>>>> Some refactoring of tenants in the API tester. This mainly changes it so that tenants are stored on the ApiWorkload and any subclasses can use them. Update the setup phase to work across tenants.
 	{ "minFdbThreads",
 	  [](const std::string& value, TestSpec* spec) { //
 	      processIntOption(value, "minFdbThreads", spec->minFdbThreads, 1, 1000);

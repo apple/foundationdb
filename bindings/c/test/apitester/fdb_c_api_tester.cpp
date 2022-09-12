@@ -367,12 +367,8 @@ bool runWorkloads(TesterOptions& options) {
 		// 7.1 and older releases crash on database create errors
 		txExecOptions.injectDatabaseCreateErrors = options.testSpec.buggify && options.apiVersion > 710;
 		txExecOptions.transactionRetryLimit = options.transactionRetryLimit;
-<<<<<<< HEAD
 		txExecOptions.tmpDir = options.tmpDir.empty() ? std::string("/tmp") : options.tmpDir;
 		txExecOptions.tamperClusterFile = options.testSpec.tamperClusterFile;
-		txExecOptions.multiTenant = options.testSpec.multiTenant;
-=======
->>>>>>> Some refactoring of tenants in the API tester. This mainly changes it so that tenants are stored on the ApiWorkload and any subclasses can use them. Update the setup phase to work across tenants.
 		txExecOptions.numTenants = options.numTenants;
 
 		std::vector<std::shared_ptr<IWorkload>> workloads;

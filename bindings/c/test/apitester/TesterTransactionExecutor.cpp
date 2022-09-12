@@ -80,9 +80,10 @@ public:
 	                       TTaskFct cont,
 	                       IScheduler* scheduler,
 	                       int retryLimit,
-	                       std::string bgBasePath)
+	                       std::string bgBasePath,
+	                       std::optional<fdb::BytesRef> tenantName)
 	  : executor(executor), txActor(txActor), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
-	    txState(TxState::IN_PROGRESS), commitCalled(false), bgBasePath(bgBasePath) {
+	    txState(TxState::IN_PROGRESS), commitCalled(false), bgBasePath(bgBasePath), tenantName(tenantName) {
 		databaseCreateErrorInjected = executor->getOptions().injectDatabaseCreateErrors &&
 		                              Random::get().randomBool(executor->getOptions().databaseCreateErrorRatio);
 		fdb::Database db;
@@ -91,7 +92,13 @@ public:
 		} else {
 			db = executor->selectDatabase();
 		}
-		fdbTx = db.createTransaction();
+
+		if (tenantName) {
+			fdb::Tenant tenant = db.openTenant(*tenantName);
+			fdbTx = tenant.createTransaction();
+		} else {
+			fdbTx = db.createTransaction();
+		}
 	}
 
 	virtual ~TransactionContextBase() { ASSERT(txState == TxState::DONE); }
@@ -174,7 +181,12 @@ public:
 			// Restart by recreating the transaction in a valid database
 			scheduler->schedule([this]() {
 				fdb::Database db = executor->selectDatabase();
-				fdbTx.atomic_store(db.createTransaction());
+				if (tenantName) {
+					fdb::Tenant tenant = db.openTenant(*tenantName);
+					fdbTx.atomic_store(tenant.createTransaction());
+				} else {
+					fdbTx.atomic_store(db.createTransaction());
+				}
 				restartTransaction();
 			});
 		} else {
@@ -331,6 +343,9 @@ protected:
 	// Indicates if the database error was injected
 	// Accessed on initialization and in ON_ERROR state only (no need for mutex)
 	bool databaseCreateErrorInjected;
+
+	// The tenant that we will run this transaction in
+	const std::optional<fdb::BytesRef> tenantName;
 };
 
 /**
@@ -343,8 +358,9 @@ public:
 	                           TTaskFct cont,
 	                           IScheduler* scheduler,
 	                           int retryLimit,
-	                           std::string bgBasePath)
-	  : TransactionContextBase(executor, txActor, cont, scheduler, retryLimit, bgBasePath) {}
+	                           std::string bgBasePath,
+	                           std::optional<fdb::BytesRef> tenantName)
+	  : TransactionContextBase(executor, txActor, cont, scheduler, retryLimit, bgBasePath, tenantName) {}
 
 protected:
 	void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
@@ -418,8 +434,9 @@ public:
 	                        TTaskFct cont,
 	                        IScheduler* scheduler,
 	                        int retryLimit,
-	                        std::string bgBasePath)
-	  : TransactionContextBase(executor, txActor, cont, scheduler, retryLimit, bgBasePath) {}
+	                        std::string bgBasePath,
+	                        std::optional<fdb::BytesRef> tenantName)
+	  : TransactionContextBase(executor, txActor, cont, scheduler, retryLimit, bgBasePath, tenantName) {}
 
 protected:
 	void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
@@ -631,15 +648,17 @@ public:
 
 	const TransactionExecutorOptions& getOptions() override { return options; }
 
-	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont, fdb::Tenant* tenant = nullptr) override {
+	void execute(std::shared_ptr<ITransactionActor> txActor,
+	             TTaskFct cont,
+	             std::optional<fdb::BytesRef> tenantName = {}) override {
 		try {
 			std::shared_ptr<ITransactionContext> ctx;
 			if (options.blockOnFutures) {
 				ctx = std::make_shared<BlockingTransactionContext>(
-				    this, txActor, cont, scheduler, options.transactionRetryLimit, bgBasePath);
+				    this, txActor, cont, scheduler, options.transactionRetryLimit, bgBasePath, tenantName);
 			} else {
 				ctx = std::make_shared<AsyncTransactionContext>(
-				    this, txActor, cont, scheduler, options.transactionRetryLimit, bgBasePath);
+				    this, txActor, cont, scheduler, options.transactionRetryLimit, bgBasePath, tenantName);
 			}
 			txActor->init(ctx);
 			txActor->start();
@@ -700,65 +719,6 @@ public:
 	void release() { databases.clear(); }
 
 private:
-	std::vector<fdb::Database> databases;
-};
-
-class MultiTenantDBTransactionExecutor : public TransactionExecutorBase {
-public:
-	MultiTenantDBTransactionExecutor(const TransactionExecutorOptions& options) : TransactionExecutorBase(options) {}
-
-	~MultiTenantDBTransactionExecutor() override { release(); }
-
-	void init(IScheduler* scheduler, const char* clusterFile, const std::string& bgBasePath) override {
-		ASSERT(options.multiTenant == true);
-		ASSERT(options.numTenants >= 1);
-
-		TransactionExecutorBase::init(scheduler, clusterFile, bgBasePath);
-		for (int i = 0; i < options.numDatabases; i++) {
-			fdb::Database db(this->clusterFile);
-			databases.push_back(db);
-		}
-	}
-
-	fdb::Transaction createNewTransaction(fdb::Database db, fdb::Tenant* tenant = nullptr) {
-		if (tenant) {
-			return tenant->createTransaction();
-		}
-
-		return db.createTransaction();
-	}
-
-	// Execute the transaction on the given database/tenant instance
-	void executeOnDatabase(fdb::Database db,
-	                       std::shared_ptr<ITransactionActor> txActor,
-	                       TTaskFct cont,
-	                       fdb::Tenant* tenant = nullptr) {
-		try {
-			fdb::Transaction tx = createNewTransaction(db, tenant);
-			std::shared_ptr<ITransactionContext> ctx;
-			if (options.blockOnFutures) {
-				ctx = std::make_shared<BlockingTransactionContext>(
-				    tx, txActor, cont, scheduler, options.transactionRetryLimit, bgBasePath);
-			} else {
-				ctx = std::make_shared<AsyncTransactionContext>(
-				    tx, txActor, cont, scheduler, options.transactionRetryLimit, bgBasePath);
-			}
-			txActor->init(ctx);
-			txActor->start();
-		} catch (...) {
-			txActor->complete(fdb::Error(error_code_operation_failed));
-			cont();
-		}
-	}
-
-	fdb::Database selectDatabase() override {
-		int idx = Random::get().randomInt(0, options.numDatabases - 1);
-		return databases[idx];
-	}
-
-private:
-	void release() { databases.clear(); }
-
 	std::vector<fdb::Database> databases;
 };
 
