@@ -65,6 +65,11 @@
 #include <pdh.h>
 #include <pdhmsg.h>
 #include <processenv.h>
+#include <psapi.h>
+#include <stdlib.h>
+#include <windows.h>
+#include <winioctl.h>
+
 #pragma comment(lib, "pdh.lib")
 
 // for SHGetFolderPath
