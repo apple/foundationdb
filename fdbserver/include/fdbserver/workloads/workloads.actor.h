@@ -100,7 +100,8 @@ struct NoOptions {};
 struct FailureInjectionWorkload : TestWorkload {
 	FailureInjectionWorkload(WorkloadContext const&);
 	virtual ~FailureInjectionWorkload() {}
-	virtual bool add(DeterministicRandom& random, WorkloadRequest const work, CompoundWorkload const& workload) = 0;
+	virtual bool add(DeterministicRandom& random, WorkloadRequest const work, CompoundWorkload const& workload);
+	virtual void initFailureInjectionMode(DeterministicRandom& random, unsigned count);
 
 	Future<Void> setupInjectionWorkload(Database const& cx, Future<Void> done);
 	Future<Void> startInjectionWorkload(Database const& cx, Future<Void> done);

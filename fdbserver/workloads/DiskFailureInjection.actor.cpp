@@ -28,19 +28,19 @@
 #include "fdbserver/Status.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct DiskFailureInjectionWorkload : TestWorkload {
+struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 	bool enabled;
-	double testDuration;
-	double startDelay;
-	bool throttleDisk;
-	int workersToThrottle;
-	double stallInterval;
-	double stallPeriod;
-	double throttlePeriod;
-	bool corruptFile;
-	int workersToCorrupt;
-	double percentBitFlips;
-	double periodicBroadcastInterval;
+	double testDuration = 60.0;
+	double startDelay = 0.0;
+	bool throttleDisk = false;
+	int workersToThrottle = 3;
+	double stallInterval = 0.0;
+	double stallPeriod = 60.0;
+	double throttlePeriod = 60.0;
+	bool corruptFile = false;
+	int workersToCorrupt = 1;
+	double percentBitFlips = 10;
+	double periodicBroadcastInterval = 5.0;
 	std::vector<NetworkAddress> chosenWorkers;
 	std::vector<Future<Void>> clients;
 	// Verification Mode: We run the workload indefinitely in this mode.
@@ -48,21 +48,26 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 	// that we haven't lost the chaos event. testDuration is ignored in this mode
 	bool verificationMode;
 
-	DiskFailureInjectionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	DiskFailureInjectionWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {}
+
+	DiskFailureInjectionWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		startDelay = getOption(options, LiteralStringRef("startDelay"), 0.0);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 60.0);
-		verificationMode = getOption(options, LiteralStringRef("verificationMode"), false);
-		throttleDisk = getOption(options, LiteralStringRef("throttleDisk"), false);
-		workersToThrottle = getOption(options, LiteralStringRef("workersToThrottle"), 3);
-		stallInterval = getOption(options, LiteralStringRef("stallInterval"), 0.0);
-		stallPeriod = getOption(options, LiteralStringRef("stallPeriod"), 60.0);
-		throttlePeriod = getOption(options, LiteralStringRef("throttlePeriod"), 60.0);
-		corruptFile = getOption(options, LiteralStringRef("corruptFile"), false);
-		workersToCorrupt = getOption(options, LiteralStringRef("workersToCorrupt"), 1);
-		percentBitFlips = getOption(options, LiteralStringRef("percentBitFlips"), 10.0);
-		periodicBroadcastInterval = getOption(options, LiteralStringRef("periodicBroadcastInterval"), 5.0);
+		startDelay = getOption(options, LiteralStringRef("startDelay"), startDelay);
+		testDuration = getOption(options, LiteralStringRef("testDuration"), testDuration);
+		verificationMode = getOption(options, LiteralStringRef("verificationMode"), verificationMode);
+		throttleDisk = getOption(options, LiteralStringRef("throttleDisk"), throttleDisk);
+		workersToThrottle = getOption(options, LiteralStringRef("workersToThrottle"), workersToThrottle);
+		stallInterval = getOption(options, LiteralStringRef("stallInterval"), stallInterval);
+		stallPeriod = getOption(options, LiteralStringRef("stallPeriod"), stallPeriod);
+		throttlePeriod = getOption(options, LiteralStringRef("throttlePeriod"), throttlePeriod);
+		corruptFile = getOption(options, LiteralStringRef("corruptFile"), corruptFile);
+		workersToCorrupt = getOption(options, LiteralStringRef("workersToCorrupt"), workersToCorrupt);
+		percentBitFlips = getOption(options, LiteralStringRef("percentBitFlips"), percentBitFlips);
+		periodicBroadcastInterval =
+		    getOption(options, LiteralStringRef("periodicBroadcastInterval"), periodicBroadcastInterval);
 	}
+
+	void initFailureInjectionMode(DeterministicRandom& random, unsigned count) override { enabled = clientId == 0; }
 
 	std::string description() const override {
 		if (&g_simulator == g_network)
@@ -275,3 +280,4 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 	}
 };
 WorkloadFactory<DiskFailureInjectionWorkload> DiskFailureInjectionWorkloadFactory("DiskFailureInjection");
+FailureInjectorFactory<DiskFailureInjectionWorkload> DiskFailureInjectionWorkloadFailureInjectionFactory;

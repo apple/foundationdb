@@ -425,6 +425,25 @@ void CompoundWorkload::getMetrics(std::vector<PerfMetric>&) {
 
 FailureInjectionWorkload::FailureInjectionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
+bool FailureInjectionWorkload::add(DeterministicRandom& random,
+                                   const WorkloadRequest work,
+                                   const CompoundWorkload& workload) {
+	auto desc = description();
+	unsigned alreadyAdded = std::count_if(workload.workloads.begin(), workload.workloads.end(), [&desc](auto const& w) {
+		return w->description() == desc;
+	});
+	alreadyAdded += std::count_if(workload.failureInjection.begin(),
+	                              workload.failureInjection.end(),
+	                              [&desc](auto const& w) { return w->description() == desc; });
+	bool willAdd = work.useDatabase && 0.1 / (1 + alreadyAdded) > random.random01();
+	if (willAdd) {
+		initFailureInjectionMode(random);
+	}
+	return willAdd;
+}
+
+void FailureInjectionWorkload::initFailureInjectionMode(DeterministicRandom& random, unsigned count) {}
+
 Future<Void> FailureInjectionWorkload::setupInjectionWorkload(const Database& cx, Future<Void> done) {
 	return holdWhile(this->setup(cx), done);
 }
