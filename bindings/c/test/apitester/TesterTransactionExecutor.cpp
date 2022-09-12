@@ -706,7 +706,7 @@ public:
 	void init(IScheduler* scheduler, const char* clusterFile, const std::string& bgBasePath) override {
 		TransactionExecutorBase::init(scheduler, clusterFile, bgBasePath);
 		for (int i = 0; i < options.numDatabases; i++) {
-			fdb::Database db(clusterFile);
+			fdb::Database db(this->clusterFile);
 			databases.push_back(db);
 		}
 	}
@@ -716,9 +716,9 @@ public:
 		return databases[idx];
 	}
 
+private:
 	void release() { databases.clear(); }
 
-private:
 	std::vector<fdb::Database> databases;
 };
 
