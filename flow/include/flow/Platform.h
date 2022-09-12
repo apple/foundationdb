@@ -794,7 +794,14 @@ EXTERNC void flushAndExit(int exitCode);
 // Initilization code that's run at the beginning of every entry point (except fdbmonitor)
 void platformInit();
 
+// Register a callback which will run as part of the crash handler. Use in conjunction with registerCrashHandler.
+// The callback being added should be simple and unlikely to fail, otherwise it will fail the crash handler,
+// preventing necessary logging being printed. Also, the crash handler may not be comprehensive in handling all
+// failure cases.
+void registerCrashHandlerCallback(void (*f)());
+
 void registerCrashHandler();
+
 void setupRunLoopProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
 

@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BlobCipher.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_IENCRYPTIONKEYPROVIDER_ACTOR_G_H)
 #define FDBSERVER_IENCRYPTIONKEYPROVIDER_ACTOR_G_H
 #include "fdbserver/IEncryptionKeyProvider.actor.g.h"
@@ -207,7 +208,8 @@ public:
 			TraceEvent("TenantAwareEncryptionKeyProvider_CipherHeaderMissing");
 			throw encrypt_ops_error();
 		}
-		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(self->db, key.cipherHeader.get()));
+		TextAndHeaderCipherKeys cipherKeys =
+		    wait(getEncryptCipherKeys(self->db, key.cipherHeader.get(), BlobCipherMetrics::KV_REDWOOD));
 		EncryptionKey s = key;
 		s.cipherKeys = cipherKeys;
 		return s;
@@ -218,7 +220,8 @@ public:
 	ACTOR static Future<EncryptionKey> getByRange(TenantAwareEncryptionKeyProvider* self, KeyRef begin, KeyRef end) {
 		EncryptCipherDomainNameRef domainName;
 		EncryptCipherDomainId domainId = self->getEncryptionDomainId(begin, end, &domainName);
-		TextAndHeaderCipherKeys cipherKeys = wait(getLatestEncryptCipherKeysForDomain(self->db, domainId, domainName));
+		TextAndHeaderCipherKeys cipherKeys =
+		    wait(getLatestEncryptCipherKeysForDomain(self->db, domainId, domainName, BlobCipherMetrics::KV_REDWOOD));
 		EncryptionKey s;
 		s.cipherKeys = cipherKeys;
 		return s;

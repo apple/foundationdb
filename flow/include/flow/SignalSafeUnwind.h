@@ -1,5 +1,5 @@
 /*
- * BenchTimer.cpp
+ * SignalSafeUnwind.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,23 +18,13 @@
  * limitations under the License.
  */
 
-#include "benchmark/benchmark.h"
+#ifndef FLOW_SIGNAL_SAFE_UNWIND
+#define FLOW_SIGNAL_SAFE_UNWIND
+#pragma once
 
 #include "flow/Platform.h"
 
-static void bench_timer(benchmark::State& state) {
-	for (auto _ : state) {
-		benchmark::DoNotOptimize(timer());
-	}
-	state.SetItemsProcessed(static_cast<long>(state.iterations()));
-}
+// This can be used by tests to measure the number of calls to dl_iterate_phdr intercepted
+extern int64_t dl_iterate_phdr_calls;
 
-static void bench_timer_monotonic(benchmark::State& state) {
-	for (auto _ : state) {
-		benchmark::DoNotOptimize(timer_monotonic());
-	}
-	state.SetItemsProcessed(static_cast<long>(state.iterations()));
-}
-
-BENCHMARK(bench_timer)->ReportAggregatesOnly(true);
-BENCHMARK(bench_timer_monotonic)->ReportAggregatesOnly(true);
+#endif

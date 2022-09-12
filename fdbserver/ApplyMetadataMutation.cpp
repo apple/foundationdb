@@ -168,7 +168,7 @@ private:
 		} else {
 			ASSERT(cipherKeys != nullptr);
 			Arena arena;
-			toCommit->writeTypedMessage(m.encryptMetadata(*cipherKeys, arena));
+			toCommit->writeTypedMessage(m.encryptMetadata(*cipherKeys, arena, BlobCipherMetrics::TLOG));
 		}
 	}
 
