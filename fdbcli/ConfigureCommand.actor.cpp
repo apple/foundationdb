@@ -259,7 +259,6 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		fprintf(stderr,
 		        "Type `configure perpetual_storage_wiggle=1' to enable the perpetual wiggle, or `configure "
 		        "storage_migration_type=gradual' to set the gradual migration type.\n");
-		ret = false;
 		break;
 	case ConfigurationResult::SUCCESS_WARN_ROCKSDB_EXPERIMENTAL:
 		printf("Configuration changed\n");

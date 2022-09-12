@@ -20,6 +20,7 @@
 
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SystemData.h"
@@ -79,7 +80,7 @@ struct VersionedMessage {
 			// In case the mutation is encrypted, get the decrypted mutation and also update message to point to
 			// the decrypted mutation.
 			// We use dedicated arena for decrypt buffer, as the other arena is used to count towards backup lock bytes.
-			*m = m->decrypt(cipherKeys, decryptArena, &message);
+			*m = m->decrypt(cipherKeys, decryptArena, BlobCipherMetrics::BACKUP, &message);
 		}
 		return normalKeys.contains(m->param1) || m->param1 == metadataVersionKey;
 	}
@@ -780,7 +781,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self,
 	// Fetch cipher keys if any of the messages are encrypted.
 	if (!cipherDetails.empty()) {
 		std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-		    wait(getEncryptCipherKeys(self->db, cipherDetails));
+		    wait(getEncryptCipherKeys(self->db, cipherDetails, BlobCipherMetrics::BLOB_GRANULE));
 		cipherKeys = getCipherKeysResult;
 	}
 

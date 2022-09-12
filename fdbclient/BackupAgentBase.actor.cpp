@@ -22,6 +22,7 @@
 #include <time.h>
 
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/simulator.h"
@@ -319,8 +320,8 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 				cipherDetails.insert(header->cipherHeaderDetails);
 				cipherDetails.insert(header->cipherTextDetails);
 				std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-				    wait(getEncryptCipherKeys(dbInfo, cipherDetails));
-				logValue = logValue.decrypt(getCipherKeysResult, tempArena);
+				    wait(getEncryptCipherKeys(dbInfo, cipherDetails, BlobCipherMetrics::BACKUP));
+				logValue = logValue.decrypt(getCipherKeysResult, tempArena, BlobCipherMetrics::BACKUP);
 			}
 
 			if (logValue.type == MutationRef::ClearRange) {

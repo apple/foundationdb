@@ -21,6 +21,7 @@
 // This file implements the functions and actors used by the RestoreLoader role.
 // The RestoreLoader role starts with the restoreLoaderCore actor
 
+#include "fdbclient/BlobCipher.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupAgent.actor.h"
@@ -374,8 +375,8 @@ ACTOR static Future<MutationRef> _decryptMutation(MutationRef mutation, Database
 	cipherDetails.insert(header->cipherHeaderDetails);
 	cipherDetails.insert(header->cipherTextDetails);
 	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-	    wait(getEncryptCipherKeys(dbInfo, cipherDetails));
-	return mutation.decrypt(getCipherKeysResult, *arena);
+	    wait(getEncryptCipherKeys(dbInfo, cipherDetails, BlobCipherMetrics::BACKUP));
+	return mutation.decrypt(getCipherKeysResult, *arena, BlobCipherMetrics::BACKUP);
 }
 
 // Parse a data block in a partitioned mutation log file and store mutations

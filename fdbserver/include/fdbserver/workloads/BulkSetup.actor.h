@@ -43,7 +43,7 @@ template <class T>
 struct sfinae_true : std::true_type {};
 
 template <class T>
-auto testAuthToken(int) -> sfinae_true<decltype(std::declval<T>().getAuthToken())>;
+auto testAuthToken(int) -> sfinae_true<decltype(std::declval<T>().setAuthToken(std::declval<Transaction&>()))>;
 template <class>
 auto testAuthToken(long) -> std::false_type;
 
@@ -53,7 +53,7 @@ struct hasAuthToken : decltype(testAuthToken<T>(0)) {};
 template <class T>
 void setAuthToken(T const& self, Transaction& tr) {
 	if constexpr (hasAuthToken<T>::value) {
-		tr.setOption(FDBTransactionOptions::AUTHORIZATION_TOKEN, self.getAuthToken());
+		self.setAuthToken(tr);
 	}
 }
 

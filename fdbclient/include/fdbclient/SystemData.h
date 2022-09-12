@@ -28,7 +28,7 @@
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this depdendency
 #include "fdbclient/StorageServerInterface.h"
-#include "Tenant.h"
+#include "fdbclient/Tenant.h"
 
 // Don't warn on constants being defined in this file.
 #pragma clang diagnostic push

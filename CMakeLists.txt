@@ -22,6 +22,11 @@ else()
   cmake_minimum_required(VERSION 3.13)
 endif()
 
+# silence deprecation warnings in newer versions of cmake
+if(POLICY CMP0135)
+  cmake_policy(SET CMP0135 NEW)
+endif()
+
 project(foundationdb
   VERSION 7.2.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."

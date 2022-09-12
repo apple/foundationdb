@@ -131,6 +131,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( NETWORK_TEST_SCRIPT_MODE,                          false );
 
 	//Authorization
+	init( ALLOW_TOKENLESS_TENANT_ACCESS,                     false );
 	init( PUBLIC_KEY_FILE_MAX_SIZE,                    1024 * 1024 );
 	init( PUBLIC_KEY_FILE_REFRESH_INTERVAL_SECONDS,             30 );
 	init( MAX_CACHED_EXPIRED_TOKENS,                          1024 );
@@ -295,6 +296,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( ENCRYPT_KEY_REFRESH_INTERVAL,   isSimulated ? 60 : 8 * 60 );
 	if ( randomize && BUGGIFY) { ENCRYPT_KEY_REFRESH_INTERVAL = deterministicRandom()->randomInt(2, 10); }
 	init( TOKEN_CACHE_SIZE,                                    100 );
+	init( ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,                  5.0 );
+	init( ENCRYPT_KEY_CACHE_LOGGING_SAMPLE_SIZE,              1000 );
 
 	// REST Client
 	init( RESTCLIENT_MAX_CONNECTIONPOOL_SIZE,                   10 );

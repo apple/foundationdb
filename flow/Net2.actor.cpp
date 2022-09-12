@@ -90,6 +90,10 @@ void initProfiling() {
 	net2backtraces = new volatile void*[net2backtraces_max];
 	other_backtraces = new volatile void*[net2backtraces_max];
 
+	// According to folk wisdom, calling this once before setting up the signal handler makes
+	// it async signal safe in practice :-/
+	backtrace(const_cast<void**>(other_backtraces), net2backtraces_max);
+
 	sigemptyset(&sigprof_set);
 	sigaddset(&sigprof_set, SIGPROF);
 }

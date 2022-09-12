@@ -91,6 +91,8 @@ inline typename Archive::READER& operator>>(Archive& ar, Item& item) {
 
 template <class Archive, class Item, class... Items>
 typename Archive::WRITER& serializer(Archive& ar, const Item& item, const Items&... items) {
+	static_assert(fb_appears_last_property(pack<Item, Items...>{}),
+	              "An argument to a serializer call that must appear last (Arena?) does not appear last");
 	save(ar, item);
 	if constexpr (sizeof...(Items) > 0) {
 		serializer(ar, items...);
@@ -100,6 +102,8 @@ typename Archive::WRITER& serializer(Archive& ar, const Item& item, const Items&
 
 template <class Archive, class Item, class... Items>
 typename Archive::READER& serializer(Archive& ar, Item& item, Items&... items) {
+	static_assert(fb_appears_last_property(pack<Item, Items...>{}),
+	              "An argument to a serializer call that must appear last (Arena?) does not appear last");
 	load(ar, item);
 	if constexpr (sizeof...(Items) > 0) {
 		serializer(ar, items...);

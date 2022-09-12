@@ -24,8 +24,10 @@
 #elif !defined(FDBCLIENT_GETCIPHERKEYS_ACTOR_H)
 #define FDBCLIENT_GETCIPHERKEYS_ACTOR_H
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/EncryptKeyProxyInterface.h"
-#include "flow/BlobCipher.h"
+#include "fdbrpc/Stats.h"
+#include "flow/Knobs.h"
 #include "flow/IRandom.h"
 
 #include <unordered_map>
@@ -88,7 +90,8 @@ Future<EKPGetLatestBaseCipherKeysReply> getUncachedLatestEncryptCipherKeys(Refer
 ACTOR template <class T>
 Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getLatestEncryptCipherKeys(
     Reference<AsyncVar<T> const> db,
-    std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains) {
+    std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains,
+    BlobCipherMetrics::UsageType usageType) {
 	state Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
 	state EKPGetLatestBaseCipherKeysRequest request;
@@ -112,6 +115,7 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getL
 		return cipherKeys;
 	}
 	// Fetch any uncached cipher keys.
+	state double startTime = now();
 	loop choose {
 		when(EKPGetLatestBaseCipherKeysReply reply = wait(getUncachedLatestEncryptCipherKeys(db, request))) {
 			// Insert base cipher keys into cache and construct result.
@@ -140,6 +144,9 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getL
 		// In case encryptKeyProxy has changed, retry the request.
 		when(wait(onEncryptKeyProxyChange(db))) {}
 	}
+	double elapsed = now() - startTime;
+	BlobCipherMetrics::getInstance()->getLatestCipherKeysLatency.addMeasurement(elapsed);
+	BlobCipherMetrics::counters(usageType).getLatestCipherKeysLatency.addMeasurement(elapsed);
 	return cipherKeys;
 }
 
@@ -178,7 +185,8 @@ using BaseCipherIndex = std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>
 ACTOR template <class T>
 Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncryptCipherKeys(
     Reference<AsyncVar<T> const> db,
-    std::unordered_set<BlobCipherDetails> cipherDetails) {
+    std::unordered_set<BlobCipherDetails> cipherDetails,
+    BlobCipherMetrics::UsageType usageType) {
 	state Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 	state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys;
 	state std::unordered_set<BaseCipherIndex, boost::hash<BaseCipherIndex>> uncachedBaseCipherIds;
@@ -207,6 +215,7 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncry
 		    id.first /*domainId*/, id.second /*baseCipherId*/, StringRef() /*domainName*/, request.arena);
 	}
 	// Fetch any uncached cipher keys.
+	state double startTime = now();
 	loop choose {
 		when(EKPGetBaseCipherKeysByIdsReply reply = wait(getUncachedEncryptCipherKeys(db, request))) {
 			std::unordered_map<BaseCipherIndex, EKPBaseCipherDetails, boost::hash<BaseCipherIndex>> baseCipherKeys;
@@ -242,6 +251,9 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncry
 		// In case encryptKeyProxy has changed, retry the request.
 		when(wait(onEncryptKeyProxyChange(db))) {}
 	}
+	double elapsed = now() - startTime;
+	BlobCipherMetrics::getInstance()->getCipherKeysLatency.addMeasurement(elapsed);
+	BlobCipherMetrics::counters(usageType).getCipherKeysLatency.addMeasurement(elapsed);
 	return cipherKeys;
 }
 
@@ -253,12 +265,13 @@ struct TextAndHeaderCipherKeys {
 ACTOR template <class T>
 Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(Reference<AsyncVar<T> const> db,
                                                                     EncryptCipherDomainId domainId,
-                                                                    EncryptCipherDomainNameRef domainName) {
+                                                                    EncryptCipherDomainNameRef domainName,
+                                                                    BlobCipherMetrics::UsageType usageType) {
 	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains;
 	domains[domainId] = domainName;
 	domains[ENCRYPT_HEADER_DOMAIN_ID] = FDB_DEFAULT_ENCRYPT_DOMAIN_NAME;
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys =
-	    wait(getLatestEncryptCipherKeys(db, domains));
+	    wait(getLatestEncryptCipherKeys(db, domains, usageType));
 	ASSERT(cipherKeys.count(domainId) > 0);
 	ASSERT(cipherKeys.count(ENCRYPT_HEADER_DOMAIN_ID) > 0);
 	TextAndHeaderCipherKeys result{ cipherKeys.at(domainId), cipherKeys.at(ENCRYPT_HEADER_DOMAIN_ID) };
@@ -268,15 +281,19 @@ Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(Reference<As
 }
 
 template <class T>
-Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(const Reference<AsyncVar<T> const>& db) {
-	return getLatestEncryptCipherKeysForDomain(db, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
+Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(const Reference<AsyncVar<T> const>& db,
+                                                                 BlobCipherMetrics::UsageType usageType) {
+	return getLatestEncryptCipherKeysForDomain(
+	    db, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME, usageType);
 }
 
 ACTOR template <class T>
-Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db, BlobCipherEncryptHeader header) {
+Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
+                                                     BlobCipherEncryptHeader header,
+                                                     BlobCipherMetrics::UsageType usageType) {
 	std::unordered_set<BlobCipherDetails> cipherDetails{ header.cipherTextDetails, header.cipherHeaderDetails };
 	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys =
-	    wait(getEncryptCipherKeys(db, cipherDetails));
+	    wait(getEncryptCipherKeys(db, cipherDetails, usageType));
 	ASSERT(cipherKeys.count(header.cipherTextDetails) > 0);
 	ASSERT(cipherKeys.count(header.cipherHeaderDetails) > 0);
 	TextAndHeaderCipherKeys result{ cipherKeys.at(header.cipherTextDetails),

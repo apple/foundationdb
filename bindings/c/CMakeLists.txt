@@ -129,7 +129,7 @@ if(NOT WIN32)
   add_library(fdb_cpp INTERFACE test/fdb_api.hpp)
   target_sources(fdb_cpp INTERFACE )
   target_include_directories(fdb_cpp INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/test)
-  target_link_libraries(fdb_cpp INTERFACE fmt::fmt)
+  target_link_libraries(fdb_cpp INTERFACE fdb_c fmt::fmt)
 
   set(API_TESTER_SRCS
     test/apitester/fdb_c_api_tester.cpp
@@ -198,7 +198,7 @@ if(NOT WIN32)
   target_link_libraries(fdb_c_client_memory_test PRIVATE fdb_c Threads::Threads)
 
   target_include_directories(fdb_c_api_tester_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include ${CMAKE_BINARY_DIR}/flow/include)
-  target_link_libraries(fdb_c_api_tester_impl PRIVATE fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target)
+  target_link_libraries(fdb_c_api_tester_impl PRIVATE fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target stdc++fs)
   target_link_libraries(fdb_c_api_tester_impl PRIVATE SimpleOpt)
 
   target_include_directories(fdb_c_unit_tests_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)

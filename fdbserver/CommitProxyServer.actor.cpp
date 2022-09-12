@@ -22,6 +22,7 @@
 #include <tuple>
 
 #include "fdbclient/Atomic.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
@@ -50,8 +51,6 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
-#include "flow/BlobCipher.h"
-#include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
@@ -60,7 +59,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply) {
+    ACTOR Future < Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply) {
 	state ReplyPromise<Void> reply = req.reply;
 	resetReply(req);
 	std::vector<Future<Void>> replies;
@@ -933,7 +932,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 				encryptDomains[tenantId] = tenantName.get();
 			}
 		}
-		getCipherKeys = getLatestEncryptCipherKeys(pProxyCommitData->db, encryptDomains);
+		getCipherKeys = getLatestEncryptCipherKeys(pProxyCommitData->db, encryptDomains, BlobCipherMetrics::TLOG);
 	}
 
 	self->releaseFuture = releaseResolvingAfter(pProxyCommitData, self->releaseDelay, self->localBatchNumber);
@@ -1178,7 +1177,8 @@ MutationRef writeMutation(CommitBatchContext* self,
 			ASSERT(encryptedMutation.isEncrypted());
 			encryptedMutation = encryptedMutationOpt.get();
 		} else {
-			encryptedMutation = mutation.encrypt(self->cipherKeys, tenantId /*domainId*/, arena);
+			encryptedMutation =
+			    mutation.encrypt(self->cipherKeys, tenantId /*domainId*/, arena, BlobCipherMetrics::TLOG);
 		}
 		self->toCommit.writeTypedMessage(encryptedMutation);
 		return encryptedMutation;
@@ -1358,7 +1358,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 							backupMutation = encryptedM.get();
 						} else {
 							backupMutation =
-							    backupMutation.encrypt(self->cipherKeys, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, arena);
+							    backupMutation.encrypt(self->cipherKeys, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, arena, BlobCipherMetrics::BACKUP);
 						}
 					}
 
