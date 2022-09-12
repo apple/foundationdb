@@ -11117,145 +11117,26 @@ TEST_CASE(":/redwood/performance/randomRangeScans") {
 	return Void();
 }
 
-std::vector<double> generateDoubles(int size, double max) {
-	std::vector<double> result;
-	while (result.size() < size) {
-		result.push_back(deterministicRandom()->random01() * max);
+TEST_CASE(":/redwood/performance/histograms") {
+	// Time needed to log 33 histograms.
+	std::vector<Reference<Histogram>> histograms;
+	for (int i = 0; i < 33; i++) {
+		std::string levelString = "L" + std::to_string(i);
+		histograms.push_back(Histogram::getHistogram(
+		    LiteralStringRef("histogramTest"), LiteralStringRef("levelString"), Histogram::Unit::bytes));
 	}
-	return result;
-}
-
-std::vector<uint32_t> generateInts(int size) {
-	std::vector<uint32_t> result;
-	while (result.size() < size) {
-		result.push_back(deterministicRandom()->randomUInt32());
-	}
-	return result;
-}
-
-TEST_CASE(":/redwood/performance/samplers") {
-	{
-		// Time needed to log 33 histograms.
-		std::vector<Reference<Histogram>> histograms;
-		for (int i = 0; i < 33; i++) {
-			std::string levelString = "L" + std::to_string(i);
-			histograms.push_back(Histogram::getHistogram(
-			    LiteralStringRef("histogramTest"), LiteralStringRef("levelString"), Histogram::Unit::bytes));
+	for (int i = 0; i < 33; i++) {
+		for (int j = 0; j < 32; j++) {
+			histograms[i]->sample(std::pow(2, j));
 		}
-		for (int i = 0; i < 33; i++) {
-			for (int j = 0; j < 32; j++) {
-				histograms[i]->sample(std::pow(2, j));
-			}
-		}
-		auto t_start = std::chrono::high_resolution_clock::now();
-		for (int i = 0; i < 33; i++) {
-			histograms[i]->writeToLog(30.0);
-		}
-		auto t_end = std::chrono::high_resolution_clock::now();
-		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-		std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
 	}
-
-	{
-		std::vector<uint32_t> data = generateInts(1e8);
-		std::cout << "Adding " << data.size() << " samples to Histogram, Unit::bytes" << std::endl;
-		Reference<Histogram> h = Histogram::getHistogram(
-		    LiteralStringRef("histogramTest"), LiteralStringRef("bytes"), Histogram::Unit::bytes);
-
-		auto t_start = std::chrono::high_resolution_clock::now();
-		for (auto d : data) {
-			h->sample(d);
-		}
-		auto t_end = std::chrono::high_resolution_clock::now();
-
-		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
-		// std::cout << h->drawHistogram();
-		GetHistogramRegistry().logReport();
+	auto t_start = std::chrono::high_resolution_clock::now();
+	for (int i = 0; i < 33; i++) {
+		histograms[i]->writeToLog(30.0);
 	}
-
-	{
-		std::vector<double> data = generateDoubles(1e8, 1);
-		std::cout << "Adding " << data.size() << " samples to Histogram, Unit::percentageLinear" << std::endl;
-		Reference<Histogram> h = Histogram::getHistogram(
-		    LiteralStringRef("histogramTest"), LiteralStringRef("percentage"), Histogram::Unit::percentageLinear);
-
-		auto t_start = std::chrono::high_resolution_clock::now();
-		for (auto d : data) {
-			h->samplePercentage(d);
-		}
-		auto t_end = std::chrono::high_resolution_clock::now();
-
-		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
-		// std::cout << h->drawHistogram();
-		GetHistogramRegistry().logReport();
-	}
-
-	{
-		std::vector<double> data = generateDoubles(1e8, 5);
-		std::cout << "Adding " << data.size() << " samples to Histogram, Unit::microseconds" << std::endl;
-		Reference<Histogram> h = Histogram::getHistogram(
-		    LiteralStringRef("histogramTest"), LiteralStringRef("latency"), Histogram::Unit::microseconds);
-
-		auto t_start = std::chrono::high_resolution_clock::now();
-		for (auto d : data) {
-			h->sampleSeconds(d);
-		}
-		auto t_end = std::chrono::high_resolution_clock::now();
-
-		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
-		// std::cout << h->drawHistogram();
-		GetHistogramRegistry().logReport();
-	}
-
-	{
-		std::vector<uint32_t> data = generateInts(1e8);
-		std::cout << "Adding " << data.size() << " samples to ContinuousSample<uint32_t>" << std::endl;
-		ContinuousSample<uint32_t> s(1e3);
-
-		auto t_start = std::chrono::high_resolution_clock::now();
-		for (auto d : data) {
-			s.addSample(d);
-		}
-		auto t_end = std::chrono::high_resolution_clock::now();
-
-		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
-	}
-
-	{
-		std::vector<double> data = generateDoubles(1e8, 5);
-		std::cout << "Adding " << data.size() << " samples to ContinuousSample<double>" << std::endl;
-		ContinuousSample<double> s(1e3);
-
-		auto t_start = std::chrono::high_resolution_clock::now();
-		for (auto d : data) {
-			s.addSample(d);
-		}
-		auto t_end = std::chrono::high_resolution_clock::now();
-
-		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
-	}
-
-	/*
-	{
-	    std::vector<double> data = generateDoubles(1e8, 5);
-	    std::cout << "Adding " << data.size() << " samples to DDSketch<double>" << std::endl;
-	    DDSketch<double> s;
-
-	    auto t_start = std::chrono::high_resolution_clock::now();
-	    for (auto d : data) {
-	        s.addSample(d);
-	    }
-	    auto t_end = std::chrono::high_resolution_clock::now();
-
-	    double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-	    std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
-	}
-	*/
+	auto t_end = std::chrono::high_resolution_clock::now();
+	double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+	std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
 
 	return Void();
 }
