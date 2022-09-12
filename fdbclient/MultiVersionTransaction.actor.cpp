@@ -2740,7 +2740,6 @@ ACTOR Future<std::string> updateClusterSharedStateMapImpl(MultiVersionApi* self,
 		state Reference<ITransaction> tr = db->createTransaction();
 		loop {
 			try {
-				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
 				state ThreadFuture<Optional<Value>> clusterIdFuture = tr->get("\xff\xff/cluster_id"_sr);
 				Optional<Value> clusterIdVal = wait(safeThreadFutureToFuture(clusterIdFuture));
 				ASSERT(clusterIdVal.present());
