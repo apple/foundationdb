@@ -20,7 +20,7 @@
 #ifndef FOUNDATIONDB_DDRELOCATIONQUEUE_H
 #define FOUNDATIONDB_DDRELOCATIONQUEUE_H
 
-#include "DataDistribution.actor.h"
+#include "fdbserver/DataDistribution.actor.h"
 // send request/signal to DDRelocationQueue through interface
 // call synchronous method from components outside DDRelocationQueue
 struct IDDRelocationQueue {
