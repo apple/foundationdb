@@ -143,6 +143,7 @@ inline static T& makeDependent(T& value) {
 	return value;
 }
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -243,6 +244,16 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 double getProcessorTimeThread();
 
 double getProcessorTimeProcess();
+
+#ifdef __linux__
+namespace linux_os {
+
+// Collects the /sys/fs/cgroup/cpu,cpuacct/cpu.stat information and returns the content
+// For more information about cpu,cpuacct, check manpages for cgroup
+std::map<std::string, int64_t> reportCGroupCpuStat();
+
+} // namespace linux_os
+#endif // __linux__
 
 uint64_t getMemoryUsage();
 
@@ -773,7 +784,7 @@ int64_t getNumProfilesDeferred();
 int64_t getNumProfilesOverflowed();
 int64_t getNumProfilesCaptured();
 
-#else
+#else // __cplusplus
 #define EXTERNC
 #endif // __cplusplus
 

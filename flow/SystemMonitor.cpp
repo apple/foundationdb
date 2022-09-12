@@ -57,8 +57,22 @@ SystemStatistics getSystemStatistics() {
 	    machineState.folder.present() ? machineState.folder.get() : "", &ipAddr, &statState.systemState, false);
 }
 
+#define TRACEALLOCATOR(size)                                                                                           \
+	TraceEvent("MemSample")                                                                                            \
+	    .detail("Count", FastAllocator<size>::getApproximateMemoryUnused() / size)                                     \
+	    .detail("TotalSize", FastAllocator<size>::getApproximateMemoryUnused())                                        \
+	    .detail("SampleCount", 1)                                                                                      \
+	    .detail("Hash", "FastAllocatedUnused" #size)                                                                   \
+	    .detail("Bt", "na")
+#define DETAILALLOCATORMEMUSAGE(size)                                                                                  \
+	detail("TotalMemory" #size, FastAllocator<size>::getTotalMemory())                                                 \
+	    .detail("ApproximateUnusedMemory" #size, FastAllocator<size>::getApproximateMemoryUnused())                    \
+	    .detail("ActiveThreads" #size, FastAllocator<size>::getActiveThreads())
+
 namespace {
 
+#ifdef __linux__
+// Converts cgroup key, e.g. nr_periods, to NrPeriods
 std::string capitalizeCgroupKey(const std::string& key) {
 	bool wordStart = true;
 	std::string result;
@@ -80,49 +94,9 @@ std::string capitalizeCgroupKey(const std::string& key) {
 
 	return result;
 }
-
-// Collects the /sys/fs/cgroup/cpu,cpuacct/cpu.stat information
-// For more information about cpu,cpuacct, check manpages for cgroup
-void reportCpuCpuAcctCpuStat(BaseTraceEvent& traceEvent) {
-	// Default path to the cpu,cpuacct
-	// See manpages for cgroup
-	static const std::string PATH_TO_CPU_CPUACCT = "/sys/fs/cgroup/cpu,cpuacct/cpu.stat";
-
-	// readFileBytes is not usable since the file is not seekable
-	std::ifstream ifs(PATH_TO_CPU_CPUACCT);
-	if (!ifs.is_open()) {
-		traceEvent.detail("NoCpuStatFile", true);
-		return;
-	}
-
-	std::string line;
-	while (std::getline(ifs, line)) {
-		int splitPos = line.find(' ');
-		if (!splitPos) {
-			TraceEvent(SevInfo, "CpuStatFileParseError").detail("RawLine", line);
-			traceEvent.detail("CpuStatFleParseError", true);
-			return;
-		}
-		std::string key(std::begin(line), std::begin(line) + splitPos);
-		std::string capitalizedKey = capitalizeCgroupKey(key);
-		std::string value(std::begin(line) + splitPos + 1, std::end(line));
-		traceEvent.detail(capitalizedKey.c_str(), value);
-	}
-}
+#endif // __linux__
 
 } // anonymous namespace
-
-#define TRACEALLOCATOR(size)                                                                                           \
-	TraceEvent("MemSample")                                                                                            \
-	    .detail("Count", FastAllocator<size>::getApproximateMemoryUnused() / size)                                     \
-	    .detail("TotalSize", FastAllocator<size>::getApproximateMemoryUnused())                                        \
-	    .detail("SampleCount", 1)                                                                                      \
-	    .detail("Hash", "FastAllocatedUnused" #size)                                                                   \
-	    .detail("Bt", "na")
-#define DETAILALLOCATORMEMUSAGE(size)                                                                                  \
-	detail("TotalMemory" #size, FastAllocator<size>::getTotalMemory())                                                 \
-	    .detail("ApproximateUnusedMemory" #size, FastAllocator<size>::getApproximateMemoryUnused())                    \
-	    .detail("ActiveThreads" #size, FastAllocator<size>::getActiveThreads())
 
 SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsState* statState, bool machineMetrics) {
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
@@ -355,7 +329,11 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			    .detail("ZoneID", machineState.zoneId)
 			    .detail("MachineID", machineState.machineId)
 			    .trackLatest("MachineMetrics");
-			reportCpuCpuAcctCpuStat(traceEvent);
+#ifdef __linux__
+			for (const auto& [k, v] : linux_os::reportCGroupCpuStat()) {
+				traceEvent.detail(capitalizeCgroupKey(k).c_str(), v);
+			}
+#endif // __linux__
 		}
 	}
 
