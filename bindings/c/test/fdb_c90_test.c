@@ -1,4 +1,4 @@
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 710200
 #include <foundationdb/fdb_c.h>
 
 int main(int argc, char* argv[]) {

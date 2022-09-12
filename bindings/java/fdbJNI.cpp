@@ -35,7 +35,7 @@
 #include "com_apple_foundationdb_FutureStrings.h"
 #include "com_apple_foundationdb_NativeFuture.h"
 
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 710200
 
 #include <foundationdb/fdb_c.h>
 

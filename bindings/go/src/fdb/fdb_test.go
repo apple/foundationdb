@@ -29,7 +29,7 @@ import (
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 )
 
-const API_VERSION int = 720
+const API_VERSION int = 710200
 
 func ExampleOpenDefault() {
 	var e error
