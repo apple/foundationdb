@@ -1482,7 +1482,7 @@ public:
 	bool maybeInjectDelay() {
 		if (g_network->isSimulated() && !g_simulator.speedUpSimulation && now() > g_simulator.injectSSDelayTime) {
 			CODE_PROBE(true, "Injecting SS targeted delay");
-			TraceEvent("SimSSInjectDelay", thisServerID);
+			TraceEvent("SimSSInjectDelay", thisServerID).log();
 			g_simulator.injectSSDelayTime = std::numeric_limits<double>::max();
 			return true;
 		}
@@ -2245,8 +2245,9 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 		return Void();
 	}
 
+	state ICheckpointReader* reader;
 	try {
-		state ICheckpointReader* reader = newCheckpointReader(it->second, self->thisServerID);
+		reader = newCheckpointReader(it->second, self->thisServerID);
 		wait(reader->init(BinaryWriter::toValue(req.range, IncludeVersion())));
 
 		loop {
@@ -6830,8 +6831,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		    .detail("Version", feedTransferredVersion)
 		    .detail("StorageVersion", data->storageVersion());
 
+		state StorageServerShard newShard;
 		if (data->shardAware) {
-			state StorageServerShard newShard = data->shards[keys.begin]->toStorageServerShard();
+			newShard = data->shards[keys.begin]->toStorageServerShard();
 			ASSERT(newShard.range == keys);
 			ASSERT(newShard.getShardState() == StorageServerShard::ReadWritePending);
 			updateStorageShard(data, newShard);
