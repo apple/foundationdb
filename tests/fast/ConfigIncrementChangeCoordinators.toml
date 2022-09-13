@@ -1,15 +1,18 @@
+# Similar to the ConfigIncrement workload, but with a larger amount of time
+# between transactions to allow a coordinator change to take place in between
+# transactions.
 [configuration]
-configDB = 'random'
+configDB = 'paxos'
 
 [[test]]
-testTitle = 'ConfigIncrement'
+testTitle = 'ConfigIncrementChangeCoordinators'
 
   [[test.workload]]
   testName = 'ConfigIncrement'
   incrementActors = 2
   incrementsPerActor = 10
   meanSleepWithinTransactions = 0.01
-  meanSleepBetweenTransactions = 0.1
+  meanSleepBetweenTransactions = 10
 
   [[test.workload]]
   testName = 'Attrition'
@@ -22,3 +25,4 @@ testTitle = 'ConfigIncrement'
   testName = 'ChangeConfig'
   maxDelayBeforeChange = 120.0
   coordinators = 'auto'
+  coordinatorChanges = 2

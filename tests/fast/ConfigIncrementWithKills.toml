@@ -2,7 +2,7 @@
 configDB = 'paxos'
 
 [[test]]
-testTitle = 'ConfigIncrement'
+testTitle = 'ConfigIncrementWithKills'
 
   [[test.workload]]
   testName = 'ConfigIncrement'
