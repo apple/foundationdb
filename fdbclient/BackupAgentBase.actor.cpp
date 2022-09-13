@@ -315,14 +315,11 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			if (logValue.isEncrypted()) {
 				encryptedLogValue = logValue;
 				Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
-				state const BlobCipherEncryptHeader* header = logValue.encryptionHeader();
-				std::unordered_set<BlobCipherDetails> cipherDetails;
-				cipherDetails.insert(header->cipherHeaderDetails);
-				cipherDetails.insert(header->cipherTextDetails);
-				std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-				    wait(getEncryptCipherKeys(dbInfo, cipherDetails, BlobCipherMetrics::BACKUP));
-				logValue = logValue.decrypt(getCipherKeysResult, tempArena, BlobCipherMetrics::BACKUP);
+				TextAndHeaderCipherKeys cipherKeys =
+				    wait(getEncryptCipherKeys(dbInfo, *logValue.encryptionHeader(), BlobCipherMetrics::BACKUP));
+				logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::BACKUP);
 			}
+			MutationRef originalLogValue = logValue;
 
 			if (logValue.type == MutationRef::ClearRange) {
 				KeyRangeRef range(logValue.param1, logValue.param2);
@@ -330,7 +327,6 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 				for (auto r : ranges) {
 					if (version > r.value() && r.value() != invalidVersion) {
 						KeyRef minKey = std::min(r.range().end, range.end);
-						MutationRef originalLogValue = logValue;
 						if (minKey == (removePrefix == StringRef() ? normalKeys.end : strinc(removePrefix))) {
 							logValue.param1 = std::max(r.range().begin, range.begin);
 							if (removePrefix.size()) {
@@ -365,22 +361,19 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 				}
 			} else {
 				Version ver = key_version->rangeContaining(logValue.param1).value();
-				bool modified = false;
 				//TraceEvent("ApplyMutation").detail("LogValue", logValue).detail("Version", version).detail("Ver", ver).detail("Apply", version > ver && ver != invalidVersion);
 				if (version > ver && ver != invalidVersion) {
 					if (removePrefix.size()) {
 						logValue.param1 = logValue.param1.removePrefix(removePrefix);
-						modified = true;
 					}
 					if (addPrefix.size()) {
 						logValue.param1 = logValue.param1.withPrefix(addPrefix, tempArena);
-						modified = true;
 					}
 					result->push_back_deep(*arena, logValue);
 					*mutationSize += logValue.expectedSize();
 					// If we did not remove/add prefixes to the mutation then keep the original encrypted mutation so we
 					// do not have to re-encrypt unnecessarily
-					if (!modified) {
+					if (originalLogValue.param1 == logValue.param1 && originalLogValue.param2 == logValue.param2) {
 						encryptedResult->push_back_deep(*arena, encryptedLogValue);
 					} else {
 						encryptedResult->push_back_deep(*arena, Optional<MutationRef>());

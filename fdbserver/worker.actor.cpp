@@ -1984,9 +1984,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						            localInfo.blobManager.present() ? localInfo.blobManager.get().id() : UID())
 						    .detail("EncryptKeyProxyID",
 						            localInfo.encryptKeyProxy.present() ? localInfo.encryptKeyProxy.get().id() : UID());
-						if (localInfo.client.encryptKeyProxy != localInfo.encryptKeyProxy) {
-							localInfo.client.encryptKeyProxy = localInfo.encryptKeyProxy;
-						}
 
 						dbInfo->set(localInfo);
 					}
