@@ -35,7 +35,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 	std::shared_ptr<IDDTxnProcessor> real;
 	std::shared_ptr<MockGlobalState> mgs;
-	std::shared_ptr<IDDTxnProcessor> mock;
+	std::shared_ptr<DDMockTxnProcessor> mock;
 
 	Reference<InitialDataDistribution> realInitDD;
 
@@ -45,7 +45,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 	}
 
 	std::string description() const override { return desc; }
-	Future<Void> setup(Database const& cx) override { return enabled ? _setup(cx, this): Void();}
+	Future<Void> setup(Database const& cx) override { return enabled ? _setup(cx, this) : Void(); }
 	Future<Void> start(Database const& cx) override { return enabled ? _start(cx, this) : Void(); }
 
 	ACTOR Future<Void> _setup(Database cx, IDDTxnProcessorApiWorkload* self) {
@@ -54,15 +54,17 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		wait(store(self->ddContext.configuration, self->real->getDatabaseConfiguration()));
 		ASSERT(self->ddContext.configuration.storageTeamSize > 0);
 		// FIXME: add support for generating random teams across DCs
-		ASSERT_EQ(self->ddContext.usableRegions() , 1);
+		ASSERT_EQ(self->ddContext.usableRegions(), 1);
 
 		// This will kill the DD but it doesn't matter
 		wait(store(self->ddContext.lock, self->real->takeMoveKeysLock(self->ddContext.id())));
 
 		// read real InitialDataDistribution
-		wait(store(self->realInitDD, self->real->getInitialDataDistribution(
-		    self->ddContext.id(), self->ddContext.lock, {}, self->ddContext.ddEnabledState.get())));
-		std::cout << "Finish read real InitialDataDistribution: server size " << self->realInitDD->allServers.size() << std::endl;
+		wait(store(self->realInitDD,
+		           self->real->getInitialDataDistribution(
+		               self->ddContext.id(), self->ddContext.lock, {}, self->ddContext.ddEnabledState.get())));
+		std::cout << "Finish read real InitialDataDistribution: server size " << self->realInitDD->allServers.size()
+		          << std::endl;
 
 		return Void();
 	}
@@ -70,6 +72,16 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 	ACTOR Future<Void> _start(Database cx, IDDTxnProcessorApiWorkload* self) {
 		state int oldMode = wait(setDDMode(cx, 0));
 		TraceEvent("RMKStartModeSetting").log();
+		self->mgs = std::make_shared<MockGlobalState>();
+		self->mgs->configuration = self->ddContext.configuration;
+		self->mock = std::make_shared<DDMockTxnProcessor>(self->mgs);
+		self->mock->setupMockGlobalState(self->realInitDD);
+
+		Reference<InitialDataDistribution> mockInitData =
+		    self->mock
+		        ->getInitialDataDistribution(
+		            self->ddContext.id(), self->ddContext.lock, {}, self->ddContext.ddEnabledState.get())
+		        .get();
 
 		wait(timeout(reportErrors(self->worker(cx, self), "MoveKeysWorkloadWorkerError"), self->testDuration, Void()));
 
@@ -80,9 +92,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> worker(Database cx, IDDTxnProcessorApiWorkload* self) {
-		return Void();
-	}
+	ACTOR Future<Void> worker(Database cx, IDDTxnProcessorApiWorkload* self) { return Void(); }
 
 	Future<bool> check(Database const& cx) override {
 		return tag(delay(testDuration / 2), true);

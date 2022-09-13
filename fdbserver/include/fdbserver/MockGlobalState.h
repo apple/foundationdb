@@ -91,8 +91,8 @@ public:
 	MockGlobalState() : shardMapping(new ShardsAffectedByTeamFailure) {}
 
 	static UID indexToUID(uint64_t a) { return UID(a, a); }
-	void initialAsEmptyDatabaseMGS(const DatabaseConfiguration& conf,
-	                               uint64_t defaultDiskSpace = MockStorageServer::DEFAULT_DISK_SPACE);
+	void initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf,
+	                                  uint64_t defaultDiskSpace = MockStorageServer::DEFAULT_DISK_SPACE);
 
 	void addStorageServer(StorageServerInterface server, uint64_t diskSpace = MockStorageServer::DEFAULT_DISK_SPACE);
 

@@ -31,7 +31,7 @@ bool MockStorageServer::allShardStatusEqual(KeyRangeRef range, MockShardStatus s
 	return true;
 }
 
-void MockGlobalState::initialAsEmptyDatabaseMGS(const DatabaseConfiguration& conf, uint64_t defaultDiskSpace) {
+void MockGlobalState::initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf, uint64_t defaultDiskSpace) {
 	ASSERT(conf.storageTeamSize > 0);
 	configuration = conf;
 	std::vector<UID> serverIds;
@@ -90,7 +90,7 @@ bool MockGlobalState::allShardRemovedFromServer(const UID& serverId) {
 	return allServers.count(serverId) && shardMapping->getNumberOfShards(serverId) == 0;
 }
 
-TEST_CASE("/MockGlobalState/initialAsEmptyDatabaseMGS/SimpleThree") {
+TEST_CASE("/MockGlobalState/initializeAsEmptyDatabaseMGS/SimpleThree") {
 	BasicTestConfig testConfig;
 	testConfig.simpleConfig = true;
 	testConfig.minimumReplication = 3;
@@ -99,7 +99,7 @@ TEST_CASE("/MockGlobalState/initialAsEmptyDatabaseMGS/SimpleThree") {
 	TraceEvent("UnitTestDbConfig").detail("Config", dbConfig.toString());
 
 	auto mgs = std::make_shared<MockGlobalState>();
-	mgs->initialAsEmptyDatabaseMGS(dbConfig);
+	mgs->initializeAsEmptyDatabaseMGS(dbConfig);
 	for (int i = 1; i <= dbConfig.storageTeamSize; ++i) {
 		auto id = MockGlobalState::indexToUID(i);
 		std::cout << "Check server " << i << "\n";

@@ -533,7 +533,7 @@ std::vector<DDShardInfo> DDMockTxnProcessor::getDDShardInfos() const {
 	std::vector<DDShardInfo> res;
 	res.reserve(mgs->shardMapping->getNumberOfShards());
 	auto allRange = mgs->shardMapping->getAllRanges();
-	ASSERT(allRange.end().end() == allKeys.end);
+	ASSERT(allRange.end().begin() == allKeys.end);
 	for (auto it = allRange.begin(); it != allRange.end(); ++it) {
 		// FIXME: now just use anonymousShardId
 		KeyRangeRef curRange = it->range();
@@ -549,6 +549,7 @@ std::vector<DDShardInfo> DDMockTxnProcessor::getDDShardInfos() const {
 		}
 	}
 	res.emplace_back(allKeys.end);
+
 	return res;
 }
 
@@ -585,4 +586,34 @@ Future<Void> DDMockTxnProcessor::removeStorageServer(const UID& serverID,
 	ASSERT(mgs->allShardRemovedFromServer(serverID));
 	mgs->allServers.erase(serverID);
 	return Void();
+}
+
+void DDMockTxnProcessor::setupMockGlobalState(Reference<InitialDataDistribution> initData) {
+	for (auto& [ssi, pInfo] : initData->allServers) {
+		mgs->addStorageServer(ssi);
+	}
+	mgs->shardMapping->setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceNoCheck);
+
+	for (int i = 0; i < initData->shards.size() - 1; ++i) {
+		// insert to keyServers
+		auto& shardInfo = initData->shards[i];
+		ASSERT(shardInfo.remoteSrc.empty() && shardInfo.remoteDest.empty());
+
+		uint64_t shardBytes =
+		    deterministicRandom()->randomInt(SERVER_KNOBS->MIN_SHARD_BYTES, SERVER_KNOBS->MAX_SHARD_BYTES);
+		KeyRangeRef keys(shardInfo.key, initData->shards[i + 1].key);
+		mgs->shardMapping->assignRangeToTeams(keys, { { shardInfo.primarySrc, true } });
+		if (shardInfo.hasDest) {
+			mgs->shardMapping->moveShard(keys, { { shardInfo.primaryDest, true } });
+		}
+		// insert to serverKeys
+		for (auto& id : shardInfo.primarySrc) {
+			mgs->allServers[id].serverKeys.insert(keys, { MockShardStatus::COMPLETED, shardBytes });
+		}
+		for (auto& id : shardInfo.primaryDest) {
+			mgs->allServers[id].serverKeys.insert(keys, { MockShardStatus::INFLIGHT, shardBytes });
+		}
+	}
+
+	mgs->shardMapping->setCheckMode(ShardsAffectedByTeamFailure::CheckMode::Normal);
 }

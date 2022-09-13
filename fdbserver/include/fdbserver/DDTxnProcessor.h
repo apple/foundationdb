@@ -167,6 +167,9 @@ public:
 	                                 const Optional<UID>& tssPairID,
 	                                 const MoveKeysLock& lock,
 	                                 const DDEnabledState* ddEnabledState) const override;
+
+	// test only
+	void setupMockGlobalState(Reference<InitialDataDistribution> initData);
 };
 
 #endif // FOUNDATIONDB_DDTXNPROCESSOR_H
