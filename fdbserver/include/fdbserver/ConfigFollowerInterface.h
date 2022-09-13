@@ -211,11 +211,11 @@ struct ConfigFollowerGetCommittedVersionRequest {
 
 struct ConfigFollowerLockRequest {
 	static constexpr FileIdentifier file_identifier = 1867800;
-	size_t coordinatorsHash{ 0 };
+	CoordinatorsHash coordinatorsHash{ 0 };
 	ReplyPromise<Void> reply;
 
 	ConfigFollowerLockRequest() = default;
-	explicit ConfigFollowerLockRequest(size_t coordinatorsHash) : coordinatorsHash(coordinatorsHash) {}
+	explicit ConfigFollowerLockRequest(CoordinatorsHash coordinatorsHash) : coordinatorsHash(coordinatorsHash) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

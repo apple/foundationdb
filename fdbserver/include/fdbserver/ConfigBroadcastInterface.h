@@ -156,14 +156,14 @@ struct ConfigBroadcastReadyReply {
 
 struct ConfigBroadcastReadyRequest {
 	static constexpr FileIdentifier file_identifier = 7402862;
-	size_t coordinatorsHash{ 0 };
+	CoordinatorsHash coordinatorsHash{ 0 };
 	std::map<ConfigKey, KnobValue> snapshot;
 	Version snapshotVersion{ 0 };
 	Version liveVersion{ 0 };
 	ReplyPromise<ConfigBroadcastReadyReply> reply;
 
 	ConfigBroadcastReadyRequest() = default;
-	ConfigBroadcastReadyRequest(size_t coordinatorsHash,
+	ConfigBroadcastReadyRequest(CoordinatorsHash coordinatorsHash,
 	                            std::map<ConfigKey, KnobValue> const& snapshot,
 	                            Version snapshotVersion,
 	                            Version liveVersion)

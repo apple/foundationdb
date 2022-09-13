@@ -80,7 +80,7 @@ class ConfigBroadcasterImpl {
 	Version lastCompactedVersion;
 	Version largestLiveVersion;
 	Version mostRecentVersion;
-	size_t coordinatorsHash;
+	CoordinatorsHash coordinatorsHash;
 	std::unique_ptr<IConfigConsumer> consumer;
 	Future<Void> consumerFuture;
 	ActorCollection actors{ false };
@@ -717,7 +717,7 @@ ACTOR static Future<Void> lockConfigNodesImpl(ServerCoordinators coordinators) {
 		return Void();
 	}
 
-	size_t coordinatorsHash = std::hash<std::string>()(coordinators.ccr->getConnectionString().toString());
+	CoordinatorsHash coordinatorsHash = std::hash<std::string>()(coordinators.ccr->getConnectionString().toString());
 
 	std::vector<Future<Void>> lockRequests;
 	lockRequests.reserve(coordinators.configServers.size());

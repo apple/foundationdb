@@ -135,11 +135,11 @@ class ConfigNodeImpl {
 	Counter getGenerationRequests;
 	Future<Void> logger;
 
-	ACTOR static Future<size_t> getCoordinatorsHash(ConfigNodeImpl* self) {
-		state size_t coordinatorsHash = 0;
+	ACTOR static Future<CoordinatorsHash> getCoordinatorsHash(ConfigNodeImpl* self) {
+		state CoordinatorsHash coordinatorsHash = 0;
 		Optional<Value> value = wait(self->kvStore->readValue(coordinatorsHashKey));
 		if (value.present()) {
-			coordinatorsHash = BinaryReader::fromStringRef<size_t>(value.get(), IncludeVersion());
+			coordinatorsHash = BinaryReader::fromStringRef<CoordinatorsHash>(value.get(), IncludeVersion());
 		} else {
 			self->kvStore->set(
 			    KeyValueRef(coordinatorsHashKey, BinaryWriter::toValue(coordinatorsHash, IncludeVersion())));
@@ -148,14 +148,12 @@ class ConfigNodeImpl {
 		return coordinatorsHash;
 	}
 
-	// The returned value is a hash of the nodes current idea of the
-	// coordinators.
-	ACTOR static Future<Optional<size_t>> getLocked(ConfigNodeImpl* self) {
+	ACTOR static Future<Optional<CoordinatorsHash>> getLocked(ConfigNodeImpl* self) {
 		Optional<Value> value = wait(self->kvStore->readValue(lockedKey));
 		if (!value.present()) {
-			return Optional<size_t>();
+			return Optional<CoordinatorsHash>();
 		}
-		return BinaryReader::fromStringRef<Optional<size_t>>(value.get(), IncludeVersion());
+		return BinaryReader::fromStringRef<Optional<CoordinatorsHash>>(value.get(), IncludeVersion());
 	}
 
 	ACTOR static Future<ConfigGeneration> getGeneration(ConfigNodeImpl* self) {
@@ -254,7 +252,7 @@ class ConfigNodeImpl {
 	// New transactions increment the database's current live version. This effectively serves as a lock, providing
 	// serializability
 	ACTOR static Future<Void> getNewGeneration(ConfigNodeImpl* self, ConfigTransactionGetGenerationRequest req) {
-		state size_t coordinatorsHash = wait(getCoordinatorsHash(self));
+		state CoordinatorsHash coordinatorsHash = wait(getCoordinatorsHash(self));
 		if (req.coordinatorsHash != coordinatorsHash) {
 			req.reply.sendError(coordinators_changed());
 			return Void();
@@ -273,13 +271,13 @@ class ConfigNodeImpl {
 	}
 
 	ACTOR static Future<Void> get(ConfigNodeImpl* self, ConfigTransactionGetRequest req) {
-		state Optional<size_t> locked = wait(getLocked(self));
+		state Optional<CoordinatorsHash> locked = wait(getLocked(self));
 		if (locked.present()) {
 			CODE_PROBE(true, "attempting to read from a locked ConfigNode");
 			req.reply.sendError(coordinators_changed());
 			return Void();
 		}
-		state size_t coordinatorsHash = wait(getCoordinatorsHash(self));
+		state CoordinatorsHash coordinatorsHash = wait(getCoordinatorsHash(self));
 		if (req.coordinatorsHash != coordinatorsHash) {
 			req.reply.sendError(coordinators_changed());
 			return Void();
@@ -316,13 +314,13 @@ class ConfigNodeImpl {
 	// TODO: Currently it is possible that extra configuration classes may be returned, we
 	// may want to fix this to clean up the contract
 	ACTOR static Future<Void> getConfigClasses(ConfigNodeImpl* self, ConfigTransactionGetConfigClassesRequest req) {
-		state Optional<size_t> locked = wait(getLocked(self));
+		state Optional<CoordinatorsHash> locked = wait(getLocked(self));
 		if (locked.present()) {
 			CODE_PROBE(true, "attempting to read config classes from locked ConfigNode");
 			req.reply.sendError(coordinators_changed());
 			return Void();
 		}
-		state size_t coordinatorsHash = wait(getCoordinatorsHash(self));
+		state CoordinatorsHash coordinatorsHash = wait(getCoordinatorsHash(self));
 		if (req.coordinatorsHash != coordinatorsHash) {
 			req.reply.sendError(coordinators_changed());
 			return Void();
@@ -360,13 +358,13 @@ class ConfigNodeImpl {
 
 	// Retrieve all knobs explicitly defined for the specified configuration class
 	ACTOR static Future<Void> getKnobs(ConfigNodeImpl* self, ConfigTransactionGetKnobsRequest req) {
-		state Optional<size_t> locked = wait(getLocked(self));
+		state Optional<CoordinatorsHash> locked = wait(getLocked(self));
 		if (locked.present()) {
 			CODE_PROBE(true, "attempting to read knobs from locked ConfigNode");
 			req.reply.sendError(coordinators_changed());
 			return Void();
 		}
-		state size_t coordinatorsHash = wait(getCoordinatorsHash(self));
+		state CoordinatorsHash coordinatorsHash = wait(getCoordinatorsHash(self));
 		if (req.coordinatorsHash != coordinatorsHash) {
 			req.reply.sendError(coordinators_changed());
 			return Void();
@@ -453,13 +451,13 @@ class ConfigNodeImpl {
 	}
 
 	ACTOR static Future<Void> commit(ConfigNodeImpl* self, ConfigTransactionCommitRequest req) {
-		state Optional<size_t> locked = wait(getLocked(self));
+		state Optional<CoordinatorsHash> locked = wait(getLocked(self));
 		if (locked.present()) {
 			CODE_PROBE(true, "attempting to write to locked ConfigNode");
 			req.reply.sendError(coordinators_changed());
 			return Void();
 		}
-		state size_t coordinatorsHash = wait(getCoordinatorsHash(self));
+		state CoordinatorsHash coordinatorsHash = wait(getCoordinatorsHash(self));
 		if (req.coordinatorsHash != coordinatorsHash) {
 			req.reply.sendError(coordinators_changed());
 			return Void();
@@ -675,7 +673,7 @@ class ConfigNodeImpl {
 					req.reply.send(ConfigBroadcastRegisteredReply{ isRegistered, generation.committedVersion });
 				}
 				when(state ConfigBroadcastReadyRequest readyReq = waitNext(cbi->ready.getFuture())) {
-					state Optional<size_t> locked = wait(getLocked(self));
+					state Optional<CoordinatorsHash> locked = wait(getLocked(self));
 
 					// New ConfigNodes with no previous state should always
 					// apply snapshots from the ConfigBroadcaster. Otherwise,
@@ -715,8 +713,8 @@ class ConfigNodeImpl {
 						// Make sure freshly up to date ConfigNode isn't
 						// locked! This is possible if it was a coordinator in
 						// a previous generation.
-						self->kvStore->set(
-						    KeyValueRef(lockedKey, BinaryWriter::toValue(Optional<size_t>(), IncludeVersion())));
+						self->kvStore->set(KeyValueRef(
+						    lockedKey, BinaryWriter::toValue(Optional<CoordinatorsHash>(), IncludeVersion())));
 					}
 					self->kvStore->set(KeyValueRef(coordinatorsHashKey,
 					                               BinaryWriter::toValue(readyReq.coordinatorsHash, IncludeVersion())));
@@ -768,13 +766,13 @@ class ConfigNodeImpl {
 				}
 				when(state ConfigFollowerLockRequest req = waitNext(cfi->lock.getFuture())) {
 					++self->lockRequests;
-					size_t coordinatorsHash = wait(getCoordinatorsHash(self));
+					CoordinatorsHash coordinatorsHash = wait(getCoordinatorsHash(self));
 					if (coordinatorsHash == 0 || coordinatorsHash == req.coordinatorsHash) {
 						TraceEvent("ConfigNodeLocking", self->id).log();
 						self->kvStore->set(KeyValueRef(registeredKey, BinaryWriter::toValue(false, IncludeVersion())));
 						self->kvStore->set(KeyValueRef(
 						    lockedKey,
-						    BinaryWriter::toValue(Optional<size_t>(req.coordinatorsHash), IncludeVersion())));
+						    BinaryWriter::toValue(Optional<CoordinatorsHash>(req.coordinatorsHash), IncludeVersion())));
 						wait(self->kvStore->commit());
 					}
 					req.reply.send(Void());
