@@ -1563,15 +1563,27 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	loop {
 		Reference<ILogSystem> oldLogSystem = oldLogSystems->get();
 		if (oldLogSystem) {
+			TraceEvent("RecoveryInternal", self->dbgid)
+				.detail("Status", "HaveOldLogSystem");
 			logChanges = triggerUpdates(self, oldLogSystem);
+			TraceEvent("RecoveryInternal", self->dbgid)
+				.detail("Status", "UpdatesTriggered");
 			if (!minRecoveryDuration.isValid()) {
+				TraceEvent("RecoveryInternal", self->dbgid)
+					.detail("Status", "DelayingRecovery");
 				minRecoveryDuration = delay(SERVER_KNOBS->ENFORCED_MIN_RECOVERY_DURATION);
 				poppedTxsVersion = oldLogSystem->getTxsPoppedVersion();
+				TraceEvent("RecoveryInternal", self->dbgid)
+					.detail("Status", "TxsPoppedVersion");
 			}
 		}
 
+		TraceEvent("RecoveryInternal", self->dbgid)
+			.detail("Status", "UpdatingRegistration");
 		state Future<Void> reg = oldLogSystem ? updateRegistration(self, oldLogSystem) : Never();
 		self->registrationTrigger.trigger();
+		TraceEvent("RecoveryInternal", self->dbgid)
+			.detail("Status", "RegistrationUpdated");
 
 		choose {
 			when(wait(oldLogSystem ? recoverFrom(self,

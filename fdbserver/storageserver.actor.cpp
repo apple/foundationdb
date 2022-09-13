@@ -10806,6 +10806,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		TraceEvent("StorageServerRebootStart", self.thisServerID).log();
 
 		wait(self.storage.init());
+		TraceEvent("StorageServerInitDone", self.thisServerID);
 		choose {
 			// after a rollback there might be uncommitted changes.
 			// for memory storage engine type, wait until recovery is done before commit
@@ -10818,7 +10819,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		}
 		++self.counters.kvCommits;
 
+		TraceEvent("StorageServerCommitDone", self.thisServerID);
 		bool ok = wait(self.storage.restoreDurableState());
+		TraceEvent("StorageServerDurableStoreRestored", self.thisServerID);
 		if (!ok) {
 			if (recovered.canBeSet())
 				recovered.send(Void());
@@ -10895,6 +10898,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		throw internal_error();
 	} catch (Error& e) {
+		TraceEvent("StorageServerRestoreError", self.thisServerID)
+			.errorUnsuppressed(e);
 		if (self.byteSampleRecovery.isValid()) {
 			self.byteSampleRecovery.cancel();
 		}
