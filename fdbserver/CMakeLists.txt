@@ -23,6 +23,21 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
 add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 
+include(FindSwiftLibs)
+
+add_library(fdbserver_swift OBJECT
+        SwiftUtils.swift
+        )
+add_dependencies(fdbserver_swift fdbserver_actors)
+# This does not work! (see rdar://99107402)
+# target_link_libraries(fdbserver PRIVATE fdbserver_swift)
+add_dependencies(fdbserver fdbserver_swift)
+add_custom_target(show_fdbserver_swift_objs COMMAND ${CMAKE_COMMAND} -E echo "$<TARGET_OBJECTS:fdbserver_swift>")
+target_link_options(fdbserver PRIVATE "$<TARGET_OBJECTS:fdbserver_swift>")
+swift_get_linker_search_paths(SWIFT_LINK_PATHS)
+target_link_directories(fdbserver PRIVATE "${SWIFT_LINK_PATHS}")
+target_link_options(fdbserver PRIVATE "-lswiftCore")
+
 target_include_directories(fdbserver PRIVATE
   ${CMAKE_SOURCE_DIR}/bindings/c
   ${CMAKE_BINARY_DIR}/bindings/c

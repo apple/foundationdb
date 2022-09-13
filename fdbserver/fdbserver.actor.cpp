@@ -102,6 +102,9 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// FIXME: remove.
+extern "C" void testSwiftInFDB();
+
 using namespace std::literals;
 
 // clang-format off
@@ -2007,6 +2010,11 @@ int main(int argc, char* argv[]) {
 		TraceEvent::setNetworkThread();
 
 		std::vector<Future<Void>> listenErrors;
+        
+        if (getenv("FDBSWIFTTEST")) {
+            testSwiftInFDB();
+            flushAndExit(FDB_EXIT_SUCCESS);
+        }
 
 		if (role == ServerRole::Simulation || role == ServerRole::CreateTemplateDatabase) {
 			// startOldSimulator();
