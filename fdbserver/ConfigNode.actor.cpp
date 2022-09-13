@@ -148,6 +148,8 @@ class ConfigNodeImpl {
 		return coordinatorsHash;
 	}
 
+	// The returned value is a hash of the nodes current idea of the
+	// coordinators.
 	ACTOR static Future<Optional<size_t>> getLocked(ConfigNodeImpl* self) {
 		Optional<Value> value = wait(self->kvStore->readValue(lockedKey));
 		if (!value.present()) {
@@ -732,12 +734,9 @@ class ConfigNodeImpl {
 
 	ACTOR static Future<Void> serveRegistered(ConfigNodeImpl* self, ConfigFollowerInterface const* cfi) {
 		loop {
-			choose {
-				when(ConfigFollowerCompactRequest req = waitNext(cfi->compact.getFuture())) {
-					++self->compactRequests;
-					wait(compact(self, req));
-				}
-			}
+			ConfigFollowerCompactRequest req = waitNext(cfi->compact.getFuture());
+			++self->compactRequests;
+			wait(compact(self, req));
 		}
 	}
 

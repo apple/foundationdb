@@ -42,6 +42,9 @@ struct ChangeConfigWorkload : TestWorkload {
 		configMode = getOption(options, LiteralStringRef("configMode"), StringRef()).toString();
 		networkAddresses = getOption(options, LiteralStringRef("coordinators"), StringRef()).toString();
 		coordinatorChanges = getOption(options, LiteralStringRef("coordinatorChanges"), 1);
+		if (networkAddresses != "auto") {
+			coordinatorChanges = 1;
+		}
 	}
 
 	std::string description() const override { return "ChangeConfig"; }
@@ -121,18 +124,12 @@ struct ChangeConfigWorkload : TestWorkload {
 		}
 		if (g_simulator.configDBType != ConfigDBType::SIMPLE) {
 			if (self->networkAddresses.size()) {
-				if (self->networkAddresses == "auto")
-					wait(CoordinatorsChangeActor(cx, self, true));
-				else
-					wait(CoordinatorsChangeActor(cx, self));
-			}
-
-			// Run additional coordinator changes if specified.
-			if (self->networkAddresses.size() && self->networkAddresses == "auto") {
 				state int i;
-				for (i = 1; i < self->coordinatorChanges; ++i) {
-					wait(delay(20));
-					wait(CoordinatorsChangeActor(cx, self, true));
+				for (i = 0; i < self->coordinatorChanges; ++i) {
+					if (i > 0) {
+						wait(delay(20));
+					}
+					wait(CoordinatorsChangeActor(cx, self, self->networkAddresses == "auto"));
 				}
 			}
 		}
