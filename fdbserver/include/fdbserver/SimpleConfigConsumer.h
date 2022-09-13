@@ -39,7 +39,7 @@ public:
 	~SimpleConfigConsumer();
 	Future<Void> readSnapshot(ConfigBroadcaster& broadcaster) override;
 	Future<Void> consume(ConfigBroadcaster& broadcaster) override;
-	void allowSpecialCaseRollforward() override;
+	void allowSpecialCaseRollforward() override { ASSERT(false); }
 	UID getID() const override;
 
 public: // Testing

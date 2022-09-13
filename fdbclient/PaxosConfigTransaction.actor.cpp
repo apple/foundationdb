@@ -416,12 +416,9 @@ class PaxosConfigTransactionImpl {
 		state std::string connectionString = cx->getConnectionRecord()->getConnectionString().toString();
 
 		loop {
-			choose {
-				when(wait(cx->statusClusterInterface->onChange())) {
-					if (cx->getConnectionRecord()->getConnectionString().toString() != connectionString) {
-						return Void();
-					}
-				}
+			wait(cx->statusClusterInterface->onChange());
+			if (cx->getConnectionRecord()->getConnectionString().toString() != connectionString) {
+				return Void();
 			}
 		}
 	}

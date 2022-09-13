@@ -196,10 +196,6 @@ Future<Void> SimpleConfigConsumer::consume(ConfigBroadcaster& broadcaster) {
 	return impl->consume(broadcaster);
 }
 
-void SimpleConfigConsumer::allowSpecialCaseRollforward() {
-	ASSERT(false);
-}
-
 SimpleConfigConsumer::~SimpleConfigConsumer() = default;
 
 UID SimpleConfigConsumer::getID() const {
