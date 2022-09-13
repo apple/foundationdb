@@ -78,6 +78,10 @@ struct TestSpec {
 	int minClients = 1;
 	int maxClients = 10;
 
+	// Number of tenants (a random number in the [min,max] range)
+	int minTenants = 0;
+	int maxTenants = 0;
+
 	// List of workloads with their options
 	std::vector<WorkloadSpec> workloads;
 };
