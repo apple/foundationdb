@@ -437,7 +437,7 @@ bool FailureInjectionWorkload::add(DeterministicRandom& random,
 	                              [&desc](auto const& w) { return w->description() == desc; });
 	bool willAdd = work.useDatabase && 0.1 / (1 + alreadyAdded) > random.random01();
 	if (willAdd) {
-		initFailureInjectionMode(random);
+		initFailureInjectionMode(random, alreadyAdded);
 	}
 	return willAdd;
 }

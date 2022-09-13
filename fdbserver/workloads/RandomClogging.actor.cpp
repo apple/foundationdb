@@ -151,4 +151,4 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 };
 
 WorkloadFactory<RandomCloggingWorkload> RandomCloggingWorkloadFactory("RandomClogging");
-FailureInjectorFactory<RandomCloggingWorkload> MachineAttritionFailureWorkloadFactory;
+FailureInjectorFactory<RandomCloggingWorkload> RandomCloggingFailureInjectionFactory;
