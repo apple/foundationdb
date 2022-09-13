@@ -34,17 +34,3 @@ target_link_directories(swifttestapp PRIVATE
 
 # TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?
 target_compile_options(swifttestapp PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++17 -enable-experimental-cxx-interop -Xfrontend -validate-tbd-against-ir=none> -Xcc -DNO_INTELLISENSE -Xcc -DSWIFT_HACK")
-
-include(GenerateModulemap)
-
-set(FLOW_BINARY_DIR "${CMAKE_BINARY_DIR}/flow")
-generate_modulemap("${CMAKE_BINARY_DIR}/flow/include" "Flow" flow
-  OMIT
-    sse2neon.h ppc-asm.h)
-
-set(FDBSERVER_BINARY_DIR "${CMAKE_BINARY_DIR}/fdbserver")
-generate_modulemap("${CMAKE_BINARY_DIR}/fdbserver/include" "Fdbserver" fdbserver
-  OMIT
-  ArtMutationBuffer.h # actually a textual include
-  art_impl.h # actually a textual include
-)

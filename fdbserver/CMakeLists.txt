@@ -40,6 +40,15 @@ target_link_options(fdbserver PRIVATE "-lswiftCore")
 # This dependency ensures that fdbserver depends on fdbserver_swift at link time.
 set_source_files_properties(IConfigConsumer.cpp PROPERTIES OBJECT_DEPENDS "${CMAKE_BINARY_DIR}/lib/libfdbserver_swift.a")
 
+# Generate the module map for FDBServer.
+include(GenerateModulemap)
+set(FDBSERVER_BINARY_DIR "${CMAKE_BINARY_DIR}/fdbserver")
+generate_modulemap("${CMAKE_BINARY_DIR}/fdbserver/include" "FDBServer" fdbserver
+   OMIT
+   ArtMutationBuffer.h # actually a textual include
+   art_impl.h # actually a textual include
+)
+
 target_include_directories(fdbserver PRIVATE
   ${CMAKE_SOURCE_DIR}/bindings/c
   ${CMAKE_BINARY_DIR}/bindings/c

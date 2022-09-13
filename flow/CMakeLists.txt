@@ -91,3 +91,18 @@ endif()
 
 add_executable(mkcert MkCertCli.cpp)
 target_link_libraries(mkcert PUBLIC flow)
+
+add_executable(mtls_unittest TLSTest.cpp)
+target_link_libraries(mtls_unittest PUBLIC flow)
+add_test(NAME mutual_tls_unittest
+         COMMAND $<TARGET_FILE:mtls_unittest>)
+
+
+include(GenerateModulemap)
+
+set(FLOW_BINARY_DIR "${CMAKE_BINARY_DIR}/flow")
+generate_modulemap("${CMAKE_BINARY_DIR}/flow/include" "Flow" flow
+  OMIT
+  sse2neon.h
+  ppc-asm.h
+)
