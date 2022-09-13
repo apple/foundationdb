@@ -1944,7 +1944,9 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 }
 
 ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAuditRequest req) {
-	TraceEvent(SevInfo, "CCTriggerAuditStorageBegin", self->id).detail("Range", req.range).detail("AuditType", req.type);
+	TraceEvent(SevInfo, "CCTriggerAuditStorageBegin", self->id)
+	    .detail("Range", req.range)
+	    .detail("AuditType", req.type);
 	try {
 		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
 		       !self->db.serverInfo->get().distributor.present()) {

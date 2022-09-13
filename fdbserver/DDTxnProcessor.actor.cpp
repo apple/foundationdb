@@ -119,8 +119,7 @@ class DDTxnProcessorImpl {
 					UID srcId, destId;
 					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
 
-					state IDDTxnProcessor::DDRangeLocations current(
-					    KeyRangeRef(shards[i].key, shards[i + 1].key));
+					state IDDTxnProcessor::DDRangeLocations current(KeyRangeRef(shards[i].key, shards[i + 1].key));
 					state int j = 0;
 					for (j = 0; j < src.size(); ++j) {
 						Optional<Value> serverListValue = wait(tr.get(serverListKeyFor(src[j])));

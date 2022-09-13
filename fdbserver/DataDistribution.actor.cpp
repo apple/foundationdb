@@ -1317,9 +1317,6 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 	// TODO(heliu): Load running audit, and create one if no audit is running.
 	state UID auditId = deterministicRandom()->randomUniqueID();
 	state std::shared_ptr<DDAuditStorage> audit = std::make_shared<DDAuditStorage>(auditId, req.getType());
-	// state std::shared_ptr<KeyRangeMap<AuditPhase>> auditMap =
-	//     std::make_shared<KeyRangeMap<AuditPhase>>(AuditPhase::Invalid, allKeys.end);
-	// state std::shared_ptr<ActorCollection> actors = std::make_shared<ActorCollection>(true);
 	TraceEvent(SevDebug, "DDAuditStorageBegin", auditId).detail("Range", req.range).detail("AuditType", req.type);
 
 	audit->actors.add(scheduleAuditForRange(self, audit, req.range));
