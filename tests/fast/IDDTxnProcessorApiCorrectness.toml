@@ -1,0 +1,8 @@
+[configuration]
+generateFearless = false
+
+[[test]]
+testTitle = 'IDDTxnProcessorApiCorrectness'
+    [[test.workload]]
+    testName = 'IDDTxnProcessorApiCorrectness'
+    testDuration = 10.0

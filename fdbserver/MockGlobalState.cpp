@@ -44,6 +44,10 @@ void MockGlobalState::initialAsEmptyDatabaseMGS(const DatabaseConfiguration& con
 	shardMapping->assignRangeToTeams(allKeys, { Team(serverIds, true) });
 }
 
+void MockGlobalState::addStorageServer(StorageServerInterface server, uint64_t diskSpace) {
+	allServers[server.id()] = MockStorageServer(server, diskSpace);
+}
+
 bool MockGlobalState::serverIsSourceForShard(const UID& serverId, KeyRangeRef shard, bool inFlightShard) {
 	if (!allServers.count(serverId))
 		return false;

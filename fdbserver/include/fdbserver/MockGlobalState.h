@@ -44,8 +44,11 @@ public:
 		MockShardStatus status;
 		uint64_t shardSize;
 	};
+
+	static constexpr uint64_t DEFAULT_DISK_SPACE = 1000LL * 1024 * 1024 * 1024;
+
 	// control plane statistics associated with a real storage server
-	uint64_t usedDiskSpace = 0, availableDiskSpace;
+	uint64_t usedDiskSpace = 0, availableDiskSpace = DEFAULT_DISK_SPACE;
 
 	// In-memory counterpart of the `serverKeys` in system keyspace
 	// the value ShardStatus is [InFlight, Completed, Empty] and metrics uint64_t is the shard size
@@ -60,10 +63,12 @@ public:
 	bool primary = true; // Only support single region MGS for now
 
 	MockStorageServer() = default;
+
+	MockStorageServer(StorageServerInterface ssi, uint64_t availableDiskSpace, uint64_t usedDiskSpace = 0)
+	  : usedDiskSpace(usedDiskSpace), availableDiskSpace(availableDiskSpace), ssi(ssi), id(ssi.id()) {}
+
 	MockStorageServer(const UID& id, uint64_t availableDiskSpace, uint64_t usedDiskSpace = 0)
-	  : usedDiskSpace(usedDiskSpace), availableDiskSpace(availableDiskSpace), id(id) {
-		ssi.uniqueID = id;
-	}
+	  : MockStorageServer(StorageServerInterface(id), availableDiskSpace, usedDiskSpace) {}
 
 	decltype(serverKeys)::Ranges getAllRanges() { return serverKeys.ranges(); }
 
@@ -87,7 +92,9 @@ public:
 
 	static UID indexToUID(uint64_t a) { return UID(a, a); }
 	void initialAsEmptyDatabaseMGS(const DatabaseConfiguration& conf,
-	                               uint64_t defaultDiskSpace = 1000LL * 1024 * 1024 * 1024);
+	                               uint64_t defaultDiskSpace = MockStorageServer::DEFAULT_DISK_SPACE);
+
+	void addStorageServer(StorageServerInterface server, uint64_t diskSpace = MockStorageServer::DEFAULT_DISK_SPACE);
 
 	// check methods
 	/* Shard status contract:
