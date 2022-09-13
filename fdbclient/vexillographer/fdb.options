@@ -57,6 +57,8 @@ description is not currently required but encouraged.
     <Option name="trace_file_identifier" code="36"
             paramType="String" paramDescription="The identifier that will be part of all trace file names"
             description="Once provided, this string will be used to replace the port/PID in the log file names." />
+    <Option name="trace_share_among_client_threads" code="37"
+            description="Use the same base trace file name for all client threads as it did before version 7.2. The current default behavior is to use distinct trace file names for client threads by including their version and thread index." />
     <Option name="trace_partial_file_suffix" code="39"
             paramType="String" paramDescription="Append this suffix to partially written log files. When a log file is complete, it is renamed to remove the suffix. No separator is added between the file and the suffix. If you want to add a file extension, you should include the separator - e.g. '.tmp' instead of 'tmp' to add the 'tmp' extension."
             description="Set file suffix for partially written log files." />
@@ -115,6 +117,9 @@ description is not currently required but encouraged.
     <Option name="client_threads_per_version" code="65"
             paramType="Int" paramDescription="Number of client threads to be spawned.  Each cluster will be serviced by a single client thread."
             description="Spawns multiple worker threads for each version of the client that is loaded.  Setting this to a number greater than one implies disable_local_client." />
+    <Option name="future_version_client_library" code="66"
+            paramType="String" paramDescription="path to client library"
+            description="Adds an external client library to be used with a future version protocol. This option can be used testing purposes only!" />
     <Option name="disable_client_statistics_logging" code="70"
             description="Disables logging of client statistics, such as sampled transaction activity." />
     <Option name="enable_slow_task_profiling" code="71"
@@ -303,9 +308,8 @@ description is not currently required but encouraged.
             description="Specifically instruct this transaction to NOT use cached GRV. Primarily used for the read version cache's background updater to avoid attempting to read a cached entry in specific situations."
             hidden="true"/>
     <Option name="authorization_token" code="2000"
-            description="Add a given authorization token to the network thread so that future requests are authorized"
-            paramType="String" paramDescription="A signed token serialized using flatbuffers"
-            hidden="true" />
+            description="Attach given authorization token to the transaction such that subsequent tenant-aware requests are authorized"
+            paramType="String" paramDescription="A JSON Web Token authorized to access data belonging to one or more tenants, indicated by 'tenants' claim of the token's payload."/>
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

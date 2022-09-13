@@ -18,8 +18,11 @@
  * limitations under the License.
  */
 
+#include "fdbclient/SystemData.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/TenantCache.h"
+#include "flow/flow.h"
 #include <limits>
 #include <string>
 #include "flow/actorcompiler.h"
@@ -32,7 +35,7 @@ class TenantCacheImpl {
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
 		KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenantList =
-		    wait(TenantMetadata::tenantMap.getRange(
+		    wait(TenantMetadata::tenantMap().getRange(
 		        tr, Optional<TenantName>(), Optional<TenantName>(), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 		ASSERT(tenantList.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantList.more);
 
@@ -87,6 +90,8 @@ public:
 				for (int i = 0; i < tenantList.size(); i++) {
 					if (tenantCache->update(tenantList[i].first, tenantList[i].second)) {
 						tenantListUpdated = true;
+						TenantCacheTenantCreated req(tenantList[i].second.prefix);
+						tenantCache->tenantCreationSignal.send(req);
 					}
 				}
 
@@ -174,7 +179,7 @@ std::string TenantCache::desc() const {
 			s += ", ";
 		}
 
-		s += "Name: " + tenant->name().toString() + " Prefix: " + tenantPrefix.printable();
+		s += "Name: " + tenant->name().toString() + " Prefix: " + tenantPrefix.toString();
 		count++;
 	}
 
@@ -194,8 +199,21 @@ bool TenantCache::isTenantKey(KeyRef key) const {
 	return true;
 }
 
-Future<Void> TenantCache::build(Database cx) {
+Future<Void> TenantCache::build() {
 	return TenantCacheImpl::build(this);
+}
+
+Optional<Reference<TCTenantInfo>> TenantCache::tenantOwning(KeyRef key) const {
+	auto it = tenantCache.lastLessOrEqual(key);
+	if (it == tenantCache.end()) {
+		return {};
+	}
+
+	if (!key.startsWith(it->key)) {
+		return {};
+	}
+
+	return it->value;
 }
 
 Future<Void> TenantCache::monitorTenantMap() {

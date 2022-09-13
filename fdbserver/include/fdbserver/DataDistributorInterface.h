@@ -122,7 +122,7 @@ struct DistributorSnapRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, snapPayload, snapUID, reply, arena, debugID);
+		serializer(ar, snapPayload, snapUID, reply, debugID, arena);
 	}
 };
 

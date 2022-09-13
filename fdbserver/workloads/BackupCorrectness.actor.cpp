@@ -73,7 +73,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		restorePrefixesToInclude = getOption(options, "restorePrefixesToInclude"_sr, std::vector<std::string>());
 		shouldSkipRestoreRanges = deterministicRandom()->random01() < 0.3 ? true : false;
 		if (getOption(options, "encrypted"_sr, deterministicRandom()->random01() < 0.1)) {
-			encryptionKeyFileName = "simfdb/test_encryption_key_file";
+			encryptionKeyFileName = "simfdb/" + getTestEncryptionFileName();
 		}
 
 		TraceEvent("BARW_ClientId").detail("Id", wcx.clientId);
@@ -220,6 +220,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	ACTOR static Future<Void> statusLoop(Database cx, std::string tag) {
 		state FileBackupAgent agent;
 		loop {
+			bool active = wait(agent.checkActive(cx));
+			TraceEvent("BARW_AgentActivityCheck").detail("IsActive", active);
 			std::string status = wait(agent.getStatus(cx, ShowErrors::True, tag));
 			puts(status.c_str());
 			std::string statusJSON = wait(agent.getStatusJSON(cx, tag));
@@ -882,6 +884,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 };
 
 int BackupAndRestoreCorrectnessWorkload::backupAgentRequests = 0;
+
+std::string getTestEncryptionFileName() {
+	return "test_encryption_key_file";
+}
 
 WorkloadFactory<BackupAndRestoreCorrectnessWorkload> BackupAndRestoreCorrectnessWorkloadFactory(
     "BackupAndRestoreCorrectness");

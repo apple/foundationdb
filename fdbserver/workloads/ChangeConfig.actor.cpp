@@ -26,6 +26,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/Schemas.h"
+#include "flow/ApiVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct ChangeConfigWorkload : TestWorkload {
@@ -53,35 +54,43 @@ struct ChangeConfigWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	// When simulated two clusters for DR tests, this actor sets the starting configuration
-	// for the extra cluster.
-	ACTOR Future<Void> extraDatabaseConfigure(ChangeConfigWorkload* self) {
-		if (g_network->isSimulated() && g_simulator.extraDB) {
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
-			state Database extraDB = Database::createDatabase(extraFile, -1);
-
-			wait(delay(5 * deterministicRandom()->random01()));
-			if (self->configMode.size()) {
-				if (g_simulator.startingDisabledConfiguration != "") {
-					// It is not safe to allow automatic failover to a region which is not fully replicated,
-					// so wait for both regions to be fully replicated before enabling failover
-					wait(success(ManagementAPI::changeConfig(
-					    extraDB.getReference(), g_simulator.startingDisabledConfiguration, true)));
-					TraceEvent("WaitForReplicasExtra").log();
-					wait(waitForFullReplication(extraDB));
-					TraceEvent("WaitForReplicasExtraEnd").log();
-				}
-				wait(success(ManagementAPI::changeConfig(extraDB.getReference(), self->configMode, true)));
+	ACTOR Future<Void> configureExtraDatabase(ChangeConfigWorkload* self, Database db) {
+		wait(delay(5 * deterministicRandom()->random01()));
+		if (self->configMode.size()) {
+			if (g_simulator.startingDisabledConfiguration != "") {
+				// It is not safe to allow automatic failover to a region which is not fully replicated,
+				// so wait for both regions to be fully replicated before enabling failover
+				wait(success(
+				    ManagementAPI::changeConfig(db.getReference(), g_simulator.startingDisabledConfiguration, true)));
+				TraceEvent("WaitForReplicasExtra").log();
+				wait(waitForFullReplication(db));
+				TraceEvent("WaitForReplicasExtraEnd").log();
 			}
-			if (self->networkAddresses.size()) {
-				if (self->networkAddresses == "auto")
-					wait(CoordinatorsChangeActor(extraDB, self, true));
-				else
-					wait(CoordinatorsChangeActor(extraDB, self));
-			}
-			wait(delay(5 * deterministicRandom()->random01()));
+			wait(success(ManagementAPI::changeConfig(db.getReference(), self->configMode, true)));
 		}
+		if (self->networkAddresses.size()) {
+			if (self->networkAddresses == "auto")
+				wait(CoordinatorsChangeActor(db, self, true));
+			else
+				wait(CoordinatorsChangeActor(db, self));
+		}
+
+		wait(delay(5 * deterministicRandom()->random01()));
 		return Void();
+	}
+
+	// When simulating multiple clusters, this actor sets the starting configuration
+	// for the extra clusters.
+	Future<Void> configureExtraDatabases(ChangeConfigWorkload* self) {
+		std::vector<Future<Void>> futures;
+		if (g_network->isSimulated()) {
+			for (auto extraDatabase : g_simulator.extraDatabases) {
+				auto extraFile = makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(extraDatabase));
+				Database db = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
+				futures.push_back(configureExtraDatabase(self, db));
+			}
+		}
+		return waitForAll(futures);
 	}
 
 	// Either changes the database configuration, or changes the coordinators based on the parameters
@@ -93,7 +102,7 @@ struct ChangeConfigWorkload : TestWorkload {
 		state bool extraConfigureBefore = deterministicRandom()->random01() < 0.5;
 
 		if (extraConfigureBefore) {
-			wait(self->extraDatabaseConfigure(self));
+			wait(self->configureExtraDatabases(self));
 		}
 
 		if (self->configMode.size()) {
@@ -116,7 +125,7 @@ struct ChangeConfigWorkload : TestWorkload {
 		}
 
 		if (!extraConfigureBefore) {
-			wait(self->extraDatabaseConfigure(self));
+			wait(self->configureExtraDatabases(self));
 		}
 
 		return Void();
@@ -131,6 +140,9 @@ struct ChangeConfigWorkload : TestWorkload {
 		if (autoChange) { // if auto, we first get the desired addresses by read \xff\xff/management/auto_coordinators
 			loop {
 				try {
+					// Set RAW_ACCESS to explicitly avoid using tenants because
+					// access to management keys is denied for tenant transactions
+					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 					Optional<Value> newCoordinatorsKey = wait(tr.get(
 					    LiteralStringRef("auto_coordinators")
 					        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));

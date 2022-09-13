@@ -262,7 +262,7 @@ public class TenantManagement {
 			this.begin = ByteArrayUtil.join(TENANT_MAP_PREFIX, begin);
 			this.end = ByteArrayUtil.join(TENANT_MAP_PREFIX, end);
 
-			tr.options().setReadSystemKeys();
+			tr.options().setRawAccess();
 			tr.options().setLockAware();
 
 			firstGet = tr.getRange(this.begin, this.end, limit);

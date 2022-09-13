@@ -42,10 +42,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( FAILURE_MAX_DELAY,                       5.0 );
 	init( FAILURE_MIN_DELAY,                       4.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 1.0;
-	init( FAILURE_TIMEOUT_DELAY,     FAILURE_MIN_DELAY );
-	init( CLIENT_FAILURE_TIMEOUT_DELAY, FAILURE_MIN_DELAY );
-	init( FAILURE_EMERGENCY_DELAY,                30.0 );
-	init( FAILURE_MAX_GENERATIONS,                  10 );
 	init( RECOVERY_DELAY_START_GENERATION,          70 );
 	init( RECOVERY_DELAY_SECONDS_PER_GENERATION,  60.0 );
 	init( MAX_GENERATIONS,                         100 );
@@ -64,6 +60,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( WRONG_SHARD_SERVER_DELAY,                .01 ); if( randomize && BUGGIFY ) WRONG_SHARD_SERVER_DELAY = deterministicRandom()->random01(); // FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
 	init( FUTURE_VERSION_RETRY_DELAY,              .01 ); if( randomize && BUGGIFY ) FUTURE_VERSION_RETRY_DELAY = deterministicRandom()->random01();// FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY;
+	init( GRV_ERROR_RETRY_DELAY,                   5.0 ); if( randomize && BUGGIFY ) GRV_ERROR_RETRY_DELAY = 0.01 + 5 * deterministicRandom()->random01();
 	init( UNKNOWN_TENANT_RETRY_DELAY,              0.0 ); if( randomize && BUGGIFY ) UNKNOWN_TENANT_RETRY_DELAY = deterministicRandom()->random01();
 	init( REPLY_BYTE_LIMIT,                      80000 );
 	init( DEFAULT_BACKOFF,                         .01 ); if( randomize && BUGGIFY ) DEFAULT_BACKOFF = deterministicRandom()->random01();
@@ -84,6 +81,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CHANGE_FEED_CACHE_SIZE,               100000 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_SIZE = 1;
 	init( CHANGE_FEED_POP_TIMEOUT,                10.0 );
 	init( CHANGE_FEED_STREAM_MIN_BYTES,            1e4 ); if( randomize && BUGGIFY ) CHANGE_FEED_STREAM_MIN_BYTES = 1;
+	init( CHANGE_FEED_START_INTERVAL,             10.0 );
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1;
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && BUGGIFY ) GRV_BATCH_TIMEOUT = 0.1;
@@ -159,8 +157,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BACKUP_AGGREGATE_POLL_RATE_UPDATE_INTERVAL, 60);
 	init( BACKUP_AGGREGATE_POLL_RATE,              2.0 ); // polls per second target for all agents on the cluster
 	init( BACKUP_LOG_WRITE_BATCH_MAX_SIZE,         1e6 ); //Must be much smaller than TRANSACTION_SIZE_LIMIT
-	init( BACKUP_LOG_ATOMIC_OPS_SIZE,			  1000 );
-	init( BACKUP_OPERATION_COST_OVERHEAD,		    50 );
 	init( BACKUP_MAX_LOG_RANGES,                    21 ); if( randomize && BUGGIFY ) BACKUP_MAX_LOG_RANGES = 4;
 	init( BACKUP_SIM_COPY_LOG_RANGES,              100 );
 	init( BACKUP_VERSION_DELAY,           5*CORE_VERSIONSPERSECOND );
@@ -279,19 +275,24 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );
 	init( BUSYNESS_SPIKE_SATURATED_THRESHOLD,     0.500 );
 
-	// multi-version client control
-	init( MVC_CLIENTLIB_CHUNK_SIZE,              8*1024 );
-	init( MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION,      32 );
-
 	// Blob granules
 	init( BG_MAX_GRANULE_PARALLELISM,                10 );
+	init( BG_TOO_MANY_GRANULES,                   10000 );
 
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_TIMES,        3 );
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_DELAY,      2.0 );
 
 	// Tenants and Metacluster
-	init( MAX_TENANTS_PER_CLUSTER,                  1e6 ); if ( randomize && BUGGIFY ) MAX_TENANTS_PER_CLUSTER = deterministicRandom()->randomInt(20, 100);
+	init( MAX_TENANTS_PER_CLUSTER,                  1e6 );
+	init( TENANT_TOMBSTONE_CLEANUP_INTERVAL,         60 ); if ( randomize && BUGGIFY ) TENANT_TOMBSTONE_CLEANUP_INTERVAL = deterministicRandom()->random01() * 30;
+	init( MAX_DATA_CLUSTERS,                        1e5 );
+	init( REMOVE_CLUSTER_TENANT_BATCH_SIZE,         1e4 ); if ( randomize && BUGGIFY ) REMOVE_CLUSTER_TENANT_BATCH_SIZE = 1;
+	init( METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK,   5 ); if ( randomize && BUGGIFY ) METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK = 1;
+	init( METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY, 1.0 ); if ( randomize && BUGGIFY ) METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY = deterministicRandom()->random01() * 60;
+	init( METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT, 10.0 ); if ( randomize && BUGGIFY ) METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT = 1 + deterministicRandom()->random01() * 59;
+	init( TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL,  2 ); if( randomize && BUGGIFY ) TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL = deterministicRandom()->randomInt(1, 10);
 
+	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,     false );
 	// clang-format on
 }
 

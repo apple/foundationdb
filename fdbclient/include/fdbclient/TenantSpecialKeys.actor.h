@@ -36,11 +36,8 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-template <bool HasSubRanges>
 class TenantRangeImpl : public SpecialKeyRangeRWImpl {
 private:
-	static bool subRangeIntersects(KeyRangeRef subRange, KeyRangeRef range);
-
 	static KeyRangeRef removePrefix(KeyRangeRef range, KeyRef prefix, KeyRef defaultEnd) {
 		KeyRef begin = range.begin.removePrefix(prefix);
 		KeyRef end;
@@ -76,7 +73,7 @@ private:
 		    wait(TenantAPI::listTenantsTransaction(&ryw->getTransaction(), kr.begin, kr.end, limitsHint.rows));
 
 		for (auto tenant : tenants) {
-			std::string jsonString = tenant.second.toJson(ryw->getDatabase()->apiVersion);
+			std::string jsonString = tenant.second.toJson();
 			ValueRef tenantEntryBytes(results->arena(), jsonString);
 			results->push_back(results->arena(),
 			                   KeyValueRef(withTenantMapPrefix(tenant.first, results->arena()), tenantEntryBytes));
@@ -85,21 +82,20 @@ private:
 		return Void();
 	}
 
-	ACTOR template <bool B>
-	static Future<RangeResult> getTenantRange(ReadYourWritesTransaction* ryw,
-	                                          KeyRangeRef kr,
-	                                          GetRangeLimits limitsHint) {
+	ACTOR static Future<RangeResult> getTenantRange(ReadYourWritesTransaction* ryw,
+	                                                KeyRangeRef kr,
+	                                                GetRangeLimits limitsHint) {
 		state RangeResult results;
 
 		kr = kr.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
-		         .removePrefix(TenantRangeImpl<B>::submoduleRange.begin);
+		         .removePrefix(TenantRangeImpl::submoduleRange.begin);
 
-		if (kr.intersects(TenantRangeImpl<B>::mapSubRange)) {
+		if (kr.intersects(TenantRangeImpl::mapSubRange)) {
 			GetRangeLimits limits = limitsHint;
 			limits.decrement(results);
 			wait(getTenantList(
 			    ryw,
-			    removePrefix(kr & TenantRangeImpl<B>::mapSubRange, TenantRangeImpl<B>::mapSubRange.begin, "\xff"_sr),
+			    removePrefix(kr & TenantRangeImpl::mapSubRange, TenantRangeImpl::mapSubRange.begin, "\xff"_sr),
 			    &results,
 			    limits));
 		}
@@ -137,7 +133,7 @@ private:
 	    std::map<TenantName, std::vector<std::pair<Standalone<StringRef>, Optional<Value>>>> tenants,
 	    std::map<TenantGroupName, int>* tenantGroupNetTenantDelta) {
 		state Future<int64_t> tenantCountFuture =
-		    TenantMetadata::tenantCount.getD(&ryw->getTransaction(), Snapshot::False, 0);
+		    TenantMetadata::tenantCount().getD(&ryw->getTransaction(), Snapshot::False, 0);
 		int64_t _nextId = wait(TenantAPI::getNextTenantId(&ryw->getTransaction()));
 		state int64_t nextId = _nextId;
 
@@ -146,7 +142,7 @@ private:
 			createFutures.push_back(createTenant(ryw, tenant, config, nextId++, tenantGroupNetTenantDelta));
 		}
 
-		TenantMetadata::lastTenantId.set(&ryw->getTransaction(), nextId - 1);
+		TenantMetadata::lastTenantId().set(&ryw->getTransaction(), nextId - 1);
 		wait(waitForAll(createFutures));
 
 		state int numCreatedTenants = 0;
@@ -240,25 +236,22 @@ private:
 		ASSERT(tenantDelta < 0);
 		state int removedTenants = -tenantDelta;
 		KeyBackedSet<Tuple>::RangeResultType tenantsInGroup =
-		    wait(TenantMetadata::tenantGroupTenantIndex.getRange(&ryw->getTransaction(),
-		                                                         Tuple::makeTuple(tenantGroup),
-		                                                         Tuple::makeTuple(keyAfter(tenantGroup)),
-		                                                         removedTenants + 1));
+		    wait(TenantMetadata::tenantGroupTenantIndex().getRange(&ryw->getTransaction(),
+		                                                           Tuple::makeTuple(tenantGroup),
+		                                                           Tuple::makeTuple(keyAfter(tenantGroup)),
+		                                                           removedTenants + 1));
 
 		ASSERT(tenantsInGroup.results.size() >= removedTenants);
 		if (tenantsInGroup.results.size() == removedTenants) {
-			TenantMetadata::tenantGroupMap.erase(&ryw->getTransaction(), tenantGroup);
+			TenantMetadata::tenantGroupMap().erase(&ryw->getTransaction(), tenantGroup);
 		}
 
 		return Void();
 	}
 
 public:
-	// These ranges vary based on the template parameter
-	const static KeyRangeRef submoduleRange;
-	const static KeyRangeRef mapSubRange;
-
-	// These sub-ranges should only be used if HasSubRanges=true
+	const inline static KeyRangeRef submoduleRange = KeyRangeRef("tenant/"_sr, "tenant0"_sr);
+	const inline static KeyRangeRef mapSubRange = KeyRangeRef("map/"_sr, "map0"_sr);
 	const inline static KeyRangeRef configureSubRange = KeyRangeRef("configure/"_sr, "configure0"_sr);
 	const inline static KeyRangeRef renameSubRange = KeyRangeRef("rename/"_sr, "rename0"_sr);
 
@@ -267,7 +260,7 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override {
-		return getTenantRange<HasSubRanges>(ryw, kr, limitsHint);
+		return getTenantRange(ryw, kr, limitsHint);
 	}
 
 	ACTOR static Future<Optional<std::string>> commitImpl(TenantRangeImpl* self, ReadYourWritesTransaction* ryw) {
@@ -289,7 +282,7 @@ public:
 		state std::set<TenantName> renameSet;
 		state std::vector<std::pair<TenantName, TenantName>> renameMutations;
 
-		tenantManagementFutures.push_back(TenantAPI::checkTenantMode(&ryw->getTransaction()));
+		tenantManagementFutures.push_back(TenantAPI::checkTenantMode(&ryw->getTransaction(), ClusterType::STANDALONE));
 
 		for (auto range : ranges) {
 			if (!range.value().first) {
@@ -301,11 +294,11 @@ public:
 			        .removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
 			        .removePrefix(submoduleRange.begin);
 
-			if (subRangeIntersects(mapSubRange, adjustedRange)) {
+			if (mapSubRange.intersects(adjustedRange)) {
 				adjustedRange = mapSubRange & adjustedRange;
 				adjustedRange = removePrefix(adjustedRange, mapSubRange.begin, "\xff"_sr);
 				mapMutations.push_back(std::make_pair(adjustedRange, range.value().second));
-			} else if (subRangeIntersects(configureSubRange, adjustedRange) && adjustedRange.singleKeyRange()) {
+			} else if (configureSubRange.intersects(adjustedRange) && adjustedRange.singleKeyRange()) {
 				StringRef configTupleStr = adjustedRange.begin.removePrefix(configureSubRange.begin);
 				try {
 					Tuple tuple = Tuple::unpack(configTupleStr);
@@ -320,7 +313,7 @@ public:
 					    false, "configure tenant", "invalid tenant configuration key"));
 					throw special_keys_api_failure();
 				}
-			} else if (subRangeIntersects(renameSubRange, adjustedRange)) {
+			} else if (renameSubRange.intersects(adjustedRange)) {
 				StringRef oldName = adjustedRange.begin.removePrefix(renameSubRange.begin);
 				StringRef newName = range.value().second.get();
 				// Do not allow overlapping renames in the same commit

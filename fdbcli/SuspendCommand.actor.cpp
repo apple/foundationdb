@@ -43,7 +43,7 @@ ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
 	if (tokens.size() == 1) {
 		// initialize worker interfaces
 		address_interface->clear();
-		wait(getWorkerInterfaces(tr, address_interface));
+		wait(getWorkerInterfaces(tr, address_interface, true));
 		if (address_interface->size() == 0) {
 			printf("\nNo addresses can be suspended.\n");
 		} else if (address_interface->size() == 1) {

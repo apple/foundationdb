@@ -23,6 +23,7 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
+#include "flow/ApiVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // A workload which test the correctness of backup and restore process. The
@@ -128,8 +129,10 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			}
 		}
 
-		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
-		extraDB = Database::createDatabase(extraFile, -1);
+		ASSERT(g_simulator.extraDatabases.size() == 1);
+		auto extraFile =
+		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
+		extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 
 		TraceEvent("BARW_Start").detail("Locked", locked);
 	}

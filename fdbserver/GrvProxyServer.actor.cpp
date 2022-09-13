@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ClientKnobs.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
@@ -31,6 +32,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbrpc/sim_validation.h"
+#include "flow/IRandom.h"
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -168,7 +170,7 @@ struct GrvTransactionRateInfo {
 	Smoother smoothRate;
 	Smoother smoothReleased;
 
-	GrvTransactionRateInfo(double rate)
+	GrvTransactionRateInfo(double rate = 0.0)
 	  : rate(rate), limit(0), budget(0), disabled(true), smoothRate(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW),
 	    smoothReleased(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW) {}
 
@@ -185,7 +187,7 @@ struct GrvTransactionRateInfo {
 		limit = SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW * releaseRate;
 	}
 
-	bool canStart(int64_t numAlreadyStarted, int64_t count) {
+	bool canStart(int64_t numAlreadyStarted, int64_t count) const {
 		return numAlreadyStarted + count <=
 		       std::min(limit + budget, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
 	}
@@ -254,6 +256,7 @@ struct GrvProxyData {
 	int updateCommitRequests;
 	NotifiedDouble lastCommitTime;
 
+	Version version;
 	Version minKnownCommittedVersion; // we should ask master for this version.
 
 	// Cache of the latest commit versions of storage servers.
@@ -286,7 +289,7 @@ struct GrvProxyData {
 	                                dbgid,
 	                                SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                                SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-	    updateCommitRequests(0), lastCommitTime(0), minKnownCommittedVersion(invalidVersion) {}
+	    updateCommitRequests(0), lastCommitTime(0), version(0), minKnownCommittedVersion(invalidVersion) {}
 };
 
 ACTOR Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
@@ -435,8 +438,10 @@ ACTOR Future<Void> getRate(UID myID,
                            GetHealthMetricsReply* healthMetricsReply,
                            GetHealthMetricsReply* detailedHealthMetricsReply,
                            TransactionTagMap<uint64_t>* transactionTagCounter,
-                           PrioritizedTransactionTagMap<ClientTagThrottleLimits>* throttledTags,
-                           GrvProxyStats* stats) {
+                           PrioritizedTransactionTagMap<ClientTagThrottleLimits>* clientThrottledTags,
+                           PrioritizedTransactionTagMap<GrvTransactionRateInfo>* perTagRateInfo,
+                           GrvProxyStats* stats,
+                           GrvProxyData* proxyData) {
 	state Future<Void> nextRequestTimer = Never();
 	state Future<Void> leaseTimeout = Never();
 	state Future<GetRateInfoReply> reply = Never();
@@ -461,14 +466,13 @@ ACTOR Future<Void> getRate(UID myID,
 			nextRequestTimer = Never();
 			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
 
-			TransactionTagMap<uint64_t> tagCounts;
-			for (auto itr : *throttledTags) {
-				for (auto priorityThrottles : itr.second) {
-					tagCounts[priorityThrottles.first] = (*transactionTagCounter)[priorityThrottles.first];
-				}
-			}
-			reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(GetRateInfoRequest(
-			    myID, *inTransactionCount, *inBatchTransactionCount, *transactionTagCounter, detailed)));
+			reply = brokenPromiseToNever(
+			    db->get().ratekeeper.get().getRateInfo.getReply(GetRateInfoRequest(myID,
+			                                                                       *inTransactionCount,
+			                                                                       *inBatchTransactionCount,
+			                                                                       proxyData->version,
+			                                                                       *transactionTagCounter,
+			                                                                       detailed)));
 			transactionTagCounter->clear();
 			expectingDetailedReply = detailed;
 		}
@@ -492,8 +496,16 @@ ACTOR Future<Void> getRate(UID myID,
 
 			// Replace our throttles with what was sent by ratekeeper. Because we do this,
 			// we are not required to expire tags out of the map
-			if (rep.throttledTags.present()) {
-				*throttledTags = std::move(rep.throttledTags.get());
+			if (rep.clientThrottledTags.present()) {
+				*clientThrottledTags = std::move(rep.clientThrottledTags.get());
+			}
+			if (rep.proxyThrottledTags.present()) {
+				perTagRateInfo->clear();
+				for (const auto& [priority, tagToRate] : rep.proxyThrottledTags.get()) {
+					for (const auto& [tag, rate] : tagToRate) {
+						(*perTagRateInfo)[priority][tag].setRate(rate);
+					}
+				}
 			}
 		}
 		when(wait(leaseTimeout)) {
@@ -510,7 +522,7 @@ ACTOR Future<Void> getRate(UID myID,
 // Respond with an error to the GetReadVersion request when the GRV limit is hit.
 void proxyGRVThresholdExceeded(const GetReadVersionRequest* req, GrvProxyStats* stats) {
 	++stats->txnRequestErrors;
-	req->reply.sendError(proxy_memory_limit_exceeded());
+	req->reply.sendError(grv_proxy_memory_limit_exceeded());
 	if (req->priority == TransactionPriority::IMMEDIATE) {
 		TraceEvent(SevWarnAlways, "ProxyGRVThresholdExceededSystem").suppressFor(60);
 	} else if (req->priority == TransactionPriority::DEFAULT) {
@@ -527,18 +539,20 @@ void dropRequestFromQueue(Deque<GetReadVersionRequest>* queue, GrvProxyStats* st
 }
 
 // Put a GetReadVersion request into the queue corresponding to its priority.
-ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const> db,
-                                               SpannedDeque<GetReadVersionRequest>* systemQueue,
-                                               SpannedDeque<GetReadVersionRequest>* defaultQueue,
-                                               SpannedDeque<GetReadVersionRequest>* batchQueue,
-                                               FutureStream<GetReadVersionRequest> readVersionRequests,
-                                               PromiseStream<Void> GRVTimer,
-                                               double* lastGRVTime,
-                                               double* GRVBatchTime,
-                                               FutureStream<double> normalGRVLatency,
-                                               GrvProxyStats* stats,
-                                               GrvTransactionRateInfo* batchRateInfo,
-                                               TransactionTagMap<uint64_t>* transactionTagCounter) {
+ACTOR Future<Void> queueGetReadVersionRequests(
+    Reference<AsyncVar<ServerDBInfo> const> db,
+    SpannedDeque<GetReadVersionRequest>* systemQueue,
+    SpannedDeque<GetReadVersionRequest>* defaultQueue,
+    SpannedDeque<GetReadVersionRequest>* batchQueue,
+    FutureStream<GetReadVersionRequest> readVersionRequests,
+    PromiseStream<Void> GRVTimer,
+    double* lastGRVTime,
+    double* GRVBatchTime,
+    FutureStream<double> normalGRVLatency,
+    GrvProxyStats* stats,
+    GrvTransactionRateInfo* batchRateInfo,
+    TransactionTagMap<uint64_t>* transactionTagCounter,
+    PrioritizedTransactionTagMap<GrvTransactionRateInfo> const* perClientRateInfo) {
 	getCurrentLineage()->modify(&TransactionLineage::operation) =
 	    TransactionLineage::Operation::GetConsistentReadVersion;
 	loop choose {
@@ -548,7 +562,9 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> 
 			// WARNING: this code is run at a high priority, so it needs to do as little work as possible
 			bool canBeQueued = true;
 			if (stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() >
-			    SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE) {
+			        SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE ||
+			    (g_network->isSimulated() && !g_simulator.speedUpSimulation &&
+			     deterministicRandom()->random01() < 0.01)) {
 				// When the limit is hit, try to drop requests from the lower priority queues.
 				if (req.priority == TransactionPriority::BATCH) {
 					canBeQueued = false;
@@ -702,6 +718,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanContext parentSpan
 	}
 
 	GetRawCommittedVersionReply repFromMaster = wait(replyFromMasterFuture);
+	grvProxyData->version = std::max(grvProxyData->version, repFromMaster.version);
 	grvProxyData->minKnownCommittedVersion =
 	    std::max(grvProxyData->minKnownCommittedVersion, repFromMaster.minKnownCommittedVersion);
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
@@ -742,7 +759,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
                                   GrvProxyData* grvProxyData,
                                   GrvProxyStats* stats,
                                   Version minKnownCommittedVersion,
-                                  PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags,
+                                  PrioritizedTransactionTagMap<ClientTagThrottleLimits> clientThrottledTags,
                                   int64_t midShardSize = 0) {
 	GetReadVersionReply _reply = wait(replyFuture);
 	GetReadVersionReply reply = _reply;
@@ -778,7 +795,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		reply.proxyId = grvProxyData->dbgid;
 
 		if (!request.tags.empty()) {
-			auto& priorityThrottledTags = throttledTags[request.priority];
+			auto& priorityThrottledTags = clientThrottledTags[request.priority];
 			for (auto tag : request.tags) {
 				auto tagItr = priorityThrottledTags.find(tag.first);
 				if (tagItr != priorityThrottledTags.end()) {
@@ -880,13 +897,14 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	state int64_t batchTransactionCount = 0;
 	state GrvTransactionRateInfo normalRateInfo(10);
 	state GrvTransactionRateInfo batchRateInfo(0);
+	state PrioritizedTransactionTagMap<GrvTransactionRateInfo> perTagRateInfo;
 
 	state SpannedDeque<GetReadVersionRequest> systemQueue("GP:transactionStarterSystemQueue"_loc);
 	state SpannedDeque<GetReadVersionRequest> defaultQueue("GP:transactionStarterDefaultQueue"_loc);
 	state SpannedDeque<GetReadVersionRequest> batchQueue("GP:transactionStarterBatchQueue"_loc);
 
 	state TransactionTagMap<uint64_t> transactionTagCounter;
-	state PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags;
+	state PrioritizedTransactionTagMap<ClientTagThrottleLimits> clientThrottledTags;
 
 	state PromiseStream<double> normalGRVLatency;
 	// state Span span;
@@ -905,8 +923,10 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	                      healthMetricsReply,
 	                      detailedHealthMetricsReply,
 	                      &transactionTagCounter,
-	                      &throttledTags,
-	                      &grvProxyData->stats));
+	                      &clientThrottledTags,
+	                      &perTagRateInfo,
+	                      &grvProxyData->stats,
+	                      grvProxyData));
 	addActor.send(queueGetReadVersionRequests(db,
 	                                          &systemQueue,
 	                                          &defaultQueue,
@@ -918,7 +938,8 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	                                          normalGRVLatency.getFuture(),
 	                                          &grvProxyData->stats,
 	                                          &batchRateInfo,
-	                                          &transactionTagCounter));
+	                                          &transactionTagCounter,
+	                                          &perTagRateInfo));
 
 	while (std::find(db->get().client.grvProxies.begin(), db->get().client.grvProxies.end(), proxy) ==
 	       db->get().client.grvProxies.end()) {
@@ -1081,7 +1102,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 				                             grvProxyData,
 				                             &grvProxyData->stats,
 				                             grvProxyData->minKnownCommittedVersion,
-				                             throttledTags,
+				                             clientThrottledTags,
 				                             midShardSize));
 
 				// Use normal priority transaction's GRV latency to dynamically calculate transaction batching interval.

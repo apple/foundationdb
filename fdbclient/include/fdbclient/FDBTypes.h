@@ -331,6 +331,22 @@ struct KeyRangeRef {
 	bool empty() const { return begin == end; }
 	bool singleKeyRange() const { return equalsKeyAfter(begin, end); }
 
+	// Return true if it's fully covered by given range list. Note that ranges should be sorted
+	bool isCovered(std::vector<KeyRangeRef>& ranges) {
+		ASSERT(std::is_sorted(ranges.begin(), ranges.end(), KeyRangeRef::ArbitraryOrder()));
+		KeyRangeRef clone(begin, end);
+		for (auto r : ranges) {
+			if (begin < r.begin)
+				return false; // uncovered gap between clone.begin and r.begin
+			if (end <= r.end)
+				return true; // range is fully covered
+			if (end > r.begin)
+				// {clone.begin, r.end} is covered. need to check coverage for {r.end, clone.end}
+				clone = KeyRangeRef(r.end, clone.end);
+		}
+		return false;
+	}
+
 	Standalone<KeyRangeRef> withPrefix(const StringRef& prefix) const {
 		return KeyRangeRef(begin.withPrefix(prefix), end.withPrefix(prefix));
 	}
@@ -1392,6 +1408,60 @@ struct TenantMode {
 	uint32_t mode;
 };
 
+struct EncryptionAtRestMode {
+	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
+	// just before END.
+	enum Mode { DISABLED = 0, AES_256_CTR = 1, END = 2 };
+
+	EncryptionAtRestMode() : mode(DISABLED) {}
+	EncryptionAtRestMode(Mode mode) : mode(mode) {
+		if ((uint32_t)mode >= END) {
+			this->mode = DISABLED;
+		}
+	}
+	operator Mode() const { return Mode(mode); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mode);
+	}
+
+	std::string toString() const {
+		switch (mode) {
+		case DISABLED:
+			return "disabled";
+		case AES_256_CTR:
+			return "aes_256_ctr";
+		default:
+			ASSERT(false);
+		}
+		return "";
+	}
+
+	Value toValue() const { return ValueRef(format("%d", (int)mode)); }
+
+	static EncryptionAtRestMode fromValue(Optional<ValueRef> val) {
+		if (!val.present()) {
+			return DISABLED;
+		}
+
+		// A failed parsing returns 0 (DISABLED)
+		int num = atoi(val.get().toString().c_str());
+		if (num < 0 || num >= END) {
+			return DISABLED;
+		}
+
+		return static_cast<Mode>(num);
+	}
+
+	uint32_t mode;
+};
+
+typedef StringRef ClusterNameRef;
+typedef Standalone<ClusterNameRef> ClusterName;
+
+enum class ClusterType { STANDALONE, METACLUSTER_MANAGEMENT, METACLUSTER_DATA };
+
 struct GRVCacheSpace {
 	Version cachedReadVersion;
 	double lastGrvTime;
@@ -1413,7 +1483,7 @@ struct DatabaseSharedState {
 	std::atomic<int> refCount;
 
 	DatabaseSharedState()
-	  : protocolVersion(currentProtocolVersion), mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
+	  : protocolVersion(currentProtocolVersion()), mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
 };
 
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
@@ -1460,7 +1530,7 @@ struct StorageMetadataType {
 	bool wrongConfigured = false;
 
 	StorageMetadataType() : createdTime(0) {}
-	StorageMetadataType(uint64_t t, KeyValueStoreType storeType = KeyValueStoreType::END, bool wrongConfigured = false)
+	StorageMetadataType(double t, KeyValueStoreType storeType = KeyValueStoreType::END, bool wrongConfigured = false)
 	  : createdTime(t), storeType(storeType), wrongConfigured(wrongConfigured) {}
 
 	static double currentTime() { return g_network->timer(); }
@@ -1507,6 +1577,42 @@ struct StorageWiggleValue {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, id);
+	}
+};
+
+enum class ReadType {
+	EAGER,
+	FETCH,
+	LOW,
+	NORMAL,
+	HIGH,
+};
+
+FDB_DECLARE_BOOLEAN_PARAM(CacheResult);
+
+// store options for storage engine read
+// ReadType describes the usage and priority of the read
+// cacheResult determines whether the storage engine cache for this read
+// consistencyCheckStartVersion indicates the consistency check which began at this version
+// debugID helps to trace the path of the read
+struct ReadOptions {
+	ReadType type;
+	// Once CacheResult is serializable, change type from bool to CacheResult
+	bool cacheResult;
+	Optional<UID> debugID;
+	Optional<Version> consistencyCheckStartVersion;
+
+	ReadOptions() : type(ReadType::NORMAL), cacheResult(CacheResult::True){};
+
+	ReadOptions(Optional<UID> debugID,
+	            ReadType type = ReadType::NORMAL,
+	            CacheResult cache = CacheResult::False,
+	            Optional<Version> version = Optional<Version>())
+	  : type(type), cacheResult(cache), debugID(debugID), consistencyCheckStartVersion(version){};
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, type, cacheResult, debugID, consistencyCheckStartVersion);
 	}
 };
 

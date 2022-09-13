@@ -24,6 +24,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "flow/ApiVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // A workload which test the correctness of upgrading DR from 5.1 to 5.2
@@ -76,8 +77,10 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 		}
 
-		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
-		extraDB = Database::createDatabase(extraFile, -1);
+		ASSERT(g_simulator.extraDatabases.size() == 1);
+		auto extraFile =
+		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
+		extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 
 		TraceEvent("DRU_Start").log();
 	}

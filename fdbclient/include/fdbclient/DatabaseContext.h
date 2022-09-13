@@ -21,10 +21,12 @@
 #ifndef DatabaseContext_h
 #define DatabaseContext_h
 #include "fdbclient/Notified.h"
+#include "flow/ApiVersion.h"
 #include "flow/FastAlloc.h"
 #include "flow/FastRef.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
 #include <vector>
 #include <unordered_map>
@@ -167,10 +169,11 @@ struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
 	Future<Void> updater;
 	NotifiedVersion version;
 	NotifiedVersion desired;
-	Promise<Void> destroyed;
 	UID interfToken;
+	DatabaseContext* context;
+	double created;
 
-	~ChangeFeedStorageData() { destroyed.send(Void()); }
+	~ChangeFeedStorageData();
 };
 
 struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
@@ -180,6 +183,8 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	Version getVersion();
 	Future<Void> whenAtLeast(Version version);
 
+	UID dbgid;
+	DatabaseContext* context;
 	NotifiedVersion lastReturnedVersion;
 	std::vector<Reference<ChangeFeedStorageData>> storageData;
 	AsyncVar<int> notAtLatest;
@@ -188,8 +193,10 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	Version endVersion = invalidVersion;
 	Version popVersion =
 	    invalidVersion; // like TLog pop version, set by SS and client can check it to see if they missed data
+	double created = 0;
 
-	ChangeFeedData() : notAtLatest(1) {}
+	explicit ChangeFeedData(DatabaseContext* context = nullptr);
+	~ChangeFeedData();
 };
 
 struct EndpointFailureInfo {
@@ -231,7 +238,7 @@ public:
 	                       EnableLocalityLoadBalance,
 	                       TaskPriority taskID = TaskPriority::DefaultEndpoint,
 	                       LockAware = LockAware::False,
-	                       int apiVersion = Database::API_VERSION_LATEST,
+	                       int _apiVersion = ApiVersion::LATEST_VERSION,
 	                       IsSwitchable = IsSwitchable::False);
 
 	~DatabaseContext();
@@ -247,7 +254,7 @@ public:
 		                                           enableLocalityLoadBalance,
 		                                           lockAware,
 		                                           internal,
-		                                           apiVersion,
+		                                           apiVersion.version(),
 		                                           switchable,
 		                                           defaultTenant));
 		cx->globalConfig->init(Reference<AsyncVar<ClientDBInfo> const>(cx->clientInfo),
@@ -338,7 +345,7 @@ public:
 		}
 	}
 
-	int apiVersionAtLeast(int minVersion) const { return apiVersion < 0 || apiVersion >= minVersion; }
+	int apiVersionAtLeast(int minVersion) const { return apiVersion.version() >= minVersion; }
 
 	Future<Void> onConnected(); // Returns after a majority of coordination servers are available and have reported a
 	                            // leader. The cluster file therefore is valid, but the database might be unavailable.
@@ -374,11 +381,17 @@ public:
 	Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
 
+	// BlobGranule API.
 	Future<Key> purgeBlobGranules(KeyRange keyRange,
 	                              Version purgeVersion,
 	                              Optional<TenantName> tenant,
 	                              bool force = false);
 	Future<Void> waitPurgeGranulesComplete(Key purgeKey);
+
+	Future<bool> blobbifyRange(KeyRange range);
+	Future<bool> unblobbifyRange(KeyRange range);
+	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range, int rangeLimit);
+	Future<Version> verifyBlobRange(const KeyRange& range, Optional<Version> version);
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
@@ -390,7 +403,7 @@ public:
 	                         EnableLocalityLoadBalance,
 	                         LockAware,
 	                         IsInternal = IsInternal::True,
-	                         int apiVersion = Database::API_VERSION_LATEST,
+	                         int _apiVersion = ApiVersion::LATEST_VERSION,
 	                         IsSwitchable = IsSwitchable::False,
 	                         Optional<TenantName> defaultTenant = Optional<TenantName>());
 
@@ -467,9 +480,12 @@ public:
 	std::unordered_map<UID, Reference<TSSMetrics>> tssMetrics;
 	// map from changeFeedId -> changeFeedRange
 	std::unordered_map<Key, KeyRange> changeFeedCache;
-	std::unordered_map<UID, Reference<ChangeFeedStorageData>> changeFeedUpdaters;
+	std::unordered_map<UID, ChangeFeedStorageData*> changeFeedUpdaters;
+	std::map<UID, ChangeFeedData*> notAtLatestChangeFeeds;
 
 	Reference<ChangeFeedStorageData> getStorageData(StorageServerInterface interf);
+	Version getMinimumChangeFeedVersion();
+	void setDesiredChangeFeedVersion(Version v);
 
 	// map from ssid -> ss tag
 	// @note this map allows the client to identify the latest commit versions
@@ -580,7 +596,7 @@ public:
 	Future<Void> statusLeaderMon;
 	double lastStatusFetch;
 
-	int apiVersion;
+	ApiVersion apiVersion;
 
 	int mvCacheInsertLocation;
 	std::vector<std::pair<Version, Optional<Value>>> metadataVersionCache;

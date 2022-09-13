@@ -11,6 +11,12 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
 endif()
 
 make_directory(${CMAKE_CURRENT_BINARY_DIR}/include/flow)
+set(FDB_API_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/ApiVersions.cmake" CACHE STRING "Api version cmake file." FORCE)
+include(${FDB_API_VERSION_FILE})
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ApiVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/flow/ApiVersion.h)
+set(FDB_PROTOCOL_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/ProtocolVersions.cmake" CACHE STRING "Protocol version cmake file." FORCE)
+include(${FDB_PROTOCOL_VERSION_FILE})
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ProtocolVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/flow/ProtocolVersion.h)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/SourceVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/flow/SourceVersion.h)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/flow/config.h)
 
@@ -85,8 +91,3 @@ endif()
 
 add_executable(mkcert MkCertCli.cpp)
 target_link_libraries(mkcert PUBLIC flow)
-
-add_executable(mtls_unittest TLSTest.cpp)
-target_link_libraries(mtls_unittest PUBLIC flow)
-add_test(NAME mutual_tls_unittest
-         COMMAND $<TARGET_FILE:mtls_unittest>)

@@ -201,6 +201,20 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			}
 			out[p + key] = format("%d", tenantMode);
 		}
+
+		if (key == "encryption_at_rest_mode") {
+			EncryptionAtRestMode mode;
+			if (value == "disabled") {
+				mode = EncryptionAtRestMode::DISABLED;
+			} else if (value == "aes_256_ctr") {
+				mode = EncryptionAtRestMode::AES_256_CTR;
+			} else {
+				printf("Error: Only disabled|aes_256_ctr are valid for encryption_at_rest_mode.\n");
+				return out;
+			}
+			out[p + key] = format("%d", mode);
+		}
+
 		return out;
 	}
 
@@ -1341,6 +1355,7 @@ ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> ser
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				ryw.set(
 				    SpecialKeySpace::getManagementApiCommandOptionSpecialKey(failed ? "failed" : "excluded", "force"),
@@ -1403,6 +1418,7 @@ ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				ryw.set(SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
 				            failed ? "failed_locality" : "excluded_locality", "force"),
@@ -1445,6 +1461,7 @@ ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> ser
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				for (auto& s : servers) {
 					if (!s.isValid()) {
@@ -1548,6 +1565,7 @@ ACTOR Future<Void> includeLocalities(Database cx, std::vector<std::string> local
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				if (includeAll) {
 					if (failed) {
@@ -2574,7 +2592,7 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 			                       ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
 			                       "",
 			                       "",
-			                       currentProtocolVersion);
+			                       currentProtocolVersion());
 		}
 
 		workers.push_back(data);
