@@ -28,6 +28,32 @@ include(FindSwiftLibs)
 add_library(fdbserver_swift STATIC
         SwiftUtils.swift
         )
+
+target_include_directories(fdbserver_swift PUBLIC
+    "${CMAKE_SOURCE_DIR}/flow/include"
+    "${CMAKE_BINARY_DIR}/flow/include"
+    "${CMAKE_SOURCE_DIR}/fdbclient/include"
+    "${CMAKE_BINARY_DIR}/fdbclient/include"
+    "${CMAKE_SOURCE_DIR}/fdbserver/include"
+    "${CMAKE_BINARY_DIR}/fdbserver/include"
+    "${CMAKE_SOURCE_DIR}/fdbrpc/include"
+    "${CMAKE_BINARY_DIR}/fdbrpc/include"
+    "${CMAKE_SOURCE_DIR}/contrib/fmt-8.1.1/include"
+    "${CMAKE_SOURCE_DIR}/contrib/sqlite"
+    "${CMAKE_BINARY_DIR}/boost_install/include"
+    "${CMAKE_BINARY_DIR}/msgpackProject-prefix/src/msgpackProject/include"
+)
+
+# TODO: We need a platform-agnostic way to find the C++ stdlib searchpaths
+target_include_directories(fdbserver_swift PRIVATE
+    "/opt/boost_1_78_0_clang"
+    "/opt/rh/devtoolset-8/root/usr/include/c++/8/x86_64-redhat-linux/"
+    "/opt/rh/devtoolset-8/root/usr/lib/gcc/x86_64-redhat-linux/8/../../../../include/c++/8"
+)
+
+# TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?
+target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++17 -enable-experimental-cxx-interop -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -DSWIFT_HACK>")
+
 add_dependencies(fdbserver_swift fdbserver_actors)
 # This does not work! (see rdar://99107402)
 # target_link_libraries(fdbserver PRIVATE fdbserver_swift)
@@ -48,6 +74,8 @@ generate_modulemap("${CMAKE_BINARY_DIR}/fdbserver/include" "FDBServer" fdbserver
    ArtMutationBuffer.h # actually a textual include
    art_impl.h # actually a textual include
 )
+
+target_link_libraries(fdbserver PRIVATE flow)
 
 target_include_directories(fdbserver PRIVATE
   ${CMAKE_SOURCE_DIR}/bindings/c
