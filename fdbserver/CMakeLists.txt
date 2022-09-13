@@ -23,9 +23,9 @@ file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
 add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 
+# Setup the Swift sources in FDBServer.
 include(FindSwiftLibs)
-
-add_library(fdbserver_swift OBJECT
+add_library(fdbserver_swift STATIC
         SwiftUtils.swift
         )
 add_dependencies(fdbserver_swift fdbserver_actors)
@@ -37,6 +37,8 @@ target_link_options(fdbserver PRIVATE "$<TARGET_OBJECTS:fdbserver_swift>")
 swift_get_linker_search_paths(SWIFT_LINK_PATHS)
 target_link_directories(fdbserver PRIVATE "${SWIFT_LINK_PATHS}")
 target_link_options(fdbserver PRIVATE "-lswiftCore")
+# This dependency ensures that fdbserver depends on fdbserver_swift at link time.
+set_source_files_properties(IConfigConsumer.cpp PROPERTIES OBJECT_DEPENDS "${CMAKE_BINARY_DIR}/lib/libfdbserver_swift.a")
 
 target_include_directories(fdbserver PRIVATE
   ${CMAKE_SOURCE_DIR}/bindings/c
