@@ -3324,7 +3324,7 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 	state Reference<LocalConfiguration> localConfig;
 	if (configDBType != ConfigDBType::DISABLED) {
 		localConfig = makeReference<LocalConfiguration>(
-		    dataFolder, configPath, manualKnobOverrides, g_network->isSimulated() ? IsTest::True : IsTest::False);
+		    dataFolder, configPath, manualKnobOverrides, IsTest(g_network->isSimulated()));
 	}
 	// setupStackSignal();
 	getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::Worker;
