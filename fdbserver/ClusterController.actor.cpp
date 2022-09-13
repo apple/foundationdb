@@ -1944,7 +1944,7 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 }
 
 ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAuditRequest req) {
-	TraceEvent(SevInfo, "TriggerAuditStorageBegin", self->id).detail("Range", req.range).detail("AuditType", req.type);
+	TraceEvent(SevInfo, "CCTriggerAuditStorageBegin", self->id).detail("Range", req.range).detail("AuditType", req.type);
 	try {
 		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
 		       !self->db.serverInfo->get().distributor.present()) {
@@ -1953,19 +1953,15 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 
 		TriggerAuditRequest fReq(req.getType(), req.range);
 		state UID auditId = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
-		TraceEvent(SevDebug, "TriggerAuditStorageResult", self->id)
+		TraceEvent(SevDebug, "CCTriggerAuditStorageEnd", self->id)
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)
 		    .detail("AuditType", req.type);
 		if (!req.reply.isSet()) {
-			TraceEvent(SevDebug, "TriggerAuditStorageReply", self->id)
-			    .detail("AuditID", auditId)
-			    .detail("Range", req.range)
-			    .detail("AuditType", req.type);
 			req.reply.send(auditId);
 		}
 	} catch (Error& e) {
-		TraceEvent(SevDebug, "TriggerAuditStorageError", self->id)
+		TraceEvent(SevDebug, "CCTriggerAuditStorageError", self->id)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)

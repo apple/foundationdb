@@ -91,10 +91,10 @@ class DDTxnProcessorImpl {
 		return IDDTxnProcessor::SourceServers{ std::vector<UID>(servers.begin(), servers.end()), completeSources };
 	}
 
-	ACTOR static Future<std::vector<IDDTxnProcessor::StorageServersForRange>> getSourceServerInterfacesForRange(
+	ACTOR static Future<std::vector<IDDTxnProcessor::DDRangeLocations>> getSourceServerInterfacesForRange(
 	    Database cx,
 	    KeyRangeRef range) {
-		state std::vector<IDDTxnProcessor::StorageServersForRange> res;
+		state std::vector<IDDTxnProcessor::DDRangeLocations> res;
 		state Transaction tr(cx);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -119,7 +119,7 @@ class DDTxnProcessorImpl {
 					UID srcId, destId;
 					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
 
-					state IDDTxnProcessor::StorageServersForRange current(
+					state IDDTxnProcessor::DDRangeLocations current(
 					    KeyRangeRef(shards[i].key, shards[i + 1].key));
 					state int j = 0;
 					for (j = 0; j < src.size(); ++j) {
@@ -456,7 +456,7 @@ Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(
 	return DDTxnProcessorImpl::getSourceServersForRange(cx, range);
 }
 
-Future<std::vector<IDDTxnProcessor::StorageServersForRange>> DDTxnProcessor::getSourceServerInterfacesForRange(
+Future<std::vector<IDDTxnProcessor::DDRangeLocations>> DDTxnProcessor::getSourceServerInterfacesForRange(
     const KeyRangeRef range) {
 	return DDTxnProcessorImpl::getSourceServerInterfacesForRange(cx, range);
 }

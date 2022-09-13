@@ -2301,7 +2301,7 @@ ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile, 
 		}
 
 		UID auditId = wait(clusterInterface->get().get().triggerAudit.getReply(TriggerAuditRequest(type, range)));
-		TraceEvent("ManagementAPIAuditStorageEnd").detail("AuditID", auditId);
+		TraceEvent(SevDebug, "ManagementAPIAuditStorageEnd").detail("AuditID", auditId);
 		return auditId;
 	}
 }

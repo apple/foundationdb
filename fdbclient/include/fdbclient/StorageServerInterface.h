@@ -1146,4 +1146,5 @@ struct StorageQueuingMetricsRequest {
 		serializer(ar, reply);
 	}
 };
+
 #endif

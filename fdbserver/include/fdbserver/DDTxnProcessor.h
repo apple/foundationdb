@@ -37,9 +37,9 @@ public:
 		std::vector<UID> srcServers, completeSources; // the same as RelocateData.src, RelocateData.completeSources;
 	};
 
-	struct StorageServersForRange {
-		StorageServersForRange() = default;
-		StorageServersForRange(KeyRangeRef range) : range(range) {}
+	struct DDRangeLocations {
+		DDRangeLocations() = default;
+		DDRangeLocations(KeyRangeRef range) : range(range) {}
 
 		// A map of dcId : list of servers
 		std::map<std::string, std::vector<StorageServerInterface>> servers;
@@ -49,7 +49,7 @@ public:
 	// get the source server list and complete source server list for range
 	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) = 0;
 
-	virtual Future<std::vector<IDDTxnProcessor::StorageServersForRange>> getSourceServerInterfacesForRange(
+	virtual Future<std::vector<IDDTxnProcessor::DDRangeLocations>> getSourceServerInterfacesForRange(
 	    const KeyRangeRef range) = 0;
 
 	// get the storage server list and Process class
@@ -89,7 +89,7 @@ public:
 
 	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
 
-	Future<std::vector<IDDTxnProcessor::StorageServersForRange>> getSourceServerInterfacesForRange(
+	Future<std::vector<IDDTxnProcessor::DDRangeLocations>> getSourceServerInterfacesForRange(
 	    const KeyRangeRef range) override;
 
 	// Call NativeAPI implementation directly

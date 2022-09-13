@@ -1365,7 +1365,7 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
 		}
 
 		try {
-			state std::vector<IDDTxnProcessor::StorageServersForRange> rangeLocations =
+			state std::vector<IDDTxnProcessor::DDRangeLocations> rangeLocations =
 			    wait(self->txnProcessor->getSourceServerInterfacesForRange(currentRange));
 
 			state int i = 0;
