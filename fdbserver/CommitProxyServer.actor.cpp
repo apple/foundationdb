@@ -1184,8 +1184,7 @@ ACTOR Future<MutationRef> writeMutation(CommitBatchContext* self,
 				state const BlobCipherEncryptHeader* header = encryptedMutation.encryptionHeader();
 				TextAndHeaderCipherKeys cipherKeys =
 				    wait(getEncryptCipherKeys(dbInfo, *header, BlobCipherMetrics::TLOG));
-				MutationRef decryptedMutation =
-				    encryptedMutation.decrypt(cipherKeys, *arena, BlobCipherMetrics::TLOG);
+				MutationRef decryptedMutation = encryptedMutation.decrypt(cipherKeys, *arena, BlobCipherMetrics::TLOG);
 				ASSERT(decryptedMutation.param1 == mutation->param1 && decryptedMutation.param2 == mutation->param2 &&
 				       decryptedMutation.type == mutation->type);
 			}
