@@ -901,16 +901,16 @@ std::pair<EncryptCipherDomainName, EncryptCipherDomainId> getEncryptDetailsFromM
 	// TenantPrefix (first 8 bytes of FDBKey)
 	// 2. Encryption domain isn't available, leverage 'default encryption domain'
 
-	if (commitData->tenantMap.empty()) {
+	if (isSystemKey(m.param1)) {
+		// Encryption domain == FDB SystemKeyspace encryption domain
+		details.first = EncryptCipherDomainName(FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME);
+		details.second = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
+	} else if (commitData->tenantMap.empty()) {
 		// Cluster serves no-tenants; use 'default encryption domain'
 	} else if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 		ASSERT_NE((MutationRef::Type)m.type, MutationRef::Type::ClearRange);
 
-		if (isSystemKey(m.param1)) {
-			// Encryption domain == FDB SystemKeyspace encryption domain
-			details.first = EncryptCipherDomainName(FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME);
-			details.second = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
-		} else if (m.param1.size() >= TENANT_PREFIX_SIZE) {
+		if (m.param1.size() >= TENANT_PREFIX_SIZE) {
 			// Parse mutation key to determine mutation encryption domain
 			StringRef prefix = m.param1.substr(0, TENANT_PREFIX_SIZE);
 			int64_t tenantId = TenantMapEntry::prefixToId(prefix, EnforceValidTenantId::False);
