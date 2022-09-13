@@ -1139,7 +1139,6 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 	if (info == self->id_worker.end()) {
 		TraceEvent("ClusterControllerActualWorkers", self->id)
 		    .detail("WorkerId", w.id())
-		    .detail("Address", w.address())
 		    .detail("ProcessId", w.locality.processId())
 		    .detail("ZoneId", w.locality.zoneId())
 		    .detail("DataHall", w.locality.dataHallId())
@@ -1152,7 +1151,6 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		TraceEvent("ClusterControllerWorkerAlreadyRegistered", self->id)
 		    .suppressFor(1.0)
 		    .detail("WorkerId", w.id())
-		    .detail("Address", w.address())
 		    .detail("ProcessId", w.locality.processId())
 		    .detail("ZoneId", w.locality.zoneId())
 		    .detail("DataHall", w.locality.dataHallId())
@@ -2173,15 +2171,10 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, double wait
 			while (!self->masterProcessId.present() ||
 			       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
 			       self->db.serverInfo->get().recoveryState < RecoveryState::LOCKING_CSTATE) {
-				TraceEvent("CCEKP_Waiting", self->id)
-					.detail("MasterProcess", self->masterProcessId)
-					.detail("RecoveryState", self->db.serverInfo->get().recoveryState);
 				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
-				TraceEvent("CCEKP_WaitOver", self->id);
 			}
 			if (noEncryptKeyServer && self->db.serverInfo->get().encryptKeyProxy.present()) {
 				// Existing encryptKeyServer registers while waiting, so skip.
-				TraceEvent("CCEKP_KeyServerAlreadyExists", self->id);
 				return Void();
 			}
 
@@ -2190,7 +2183,6 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, double wait
 			// on the same process as the CluserController.
 			state std::map<Optional<Standalone<StringRef>>, int> id_used;
 			self->updateKnownIds(&id_used);
-			TraceEvent("CCEKP_RecruitingServer", self->id);
 			state WorkerFitnessInfo ekpWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
 			                                                                       ProcessClass::EncryptKeyProxy,
 			                                                                       ProcessClass::NeverAssign,

@@ -54,7 +54,7 @@
 #define REDWOOD_DEBUG 0
 
 // Only print debug info for a specific address
-static NetworkAddress g_debugAddress = NetworkAddress::parse("2.0.1.1:1");
+static NetworkAddress g_debugAddress = NetworkAddress::parse("0.0.0.0:0");
 // Only print debug info after a specific time
 static double g_debugStart = 0;
 // Debug output stream
@@ -7794,12 +7794,10 @@ public:
 	Future<Void> onClosed() const override { return m_closed.getFuture(); }
 
 	Future<Void> commit(bool sequential = false) override {
-		TraceEvent(SevInfo, "RedwoodCommit");
 		m_lastCommit = catchError(m_tree->commit(m_nextCommitVersion));
 		// Currently not keeping history
 		m_tree->setOldestReadableVersion(m_nextCommitVersion);
 		++m_nextCommitVersion;
-		TraceEvent(SevInfo, "RedwoodCommitDone");
 		return m_lastCommit;
 	}
 

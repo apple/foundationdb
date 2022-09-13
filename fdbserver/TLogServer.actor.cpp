@@ -2433,7 +2433,6 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
                                            Promise<Void> stoppedPromise,
                                            Future<Void> registerWithCC,
                                            bool isPrimary) {
-	try {
 	state LifetimeToken lastMasterLifetime;
 	loop {
 		auto const& inf = self->dbInfo->get();
@@ -2482,9 +2481,6 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 		}
 
 		if (registerWithCC.isReady()) {
-			TraceEvent("TLogRejoiningCCIsReady", tli.id())
-				.detail("DbInfoMasterLifeTime", self->dbInfo->get().masterLifetime.toString())
-				.detail("LastMasterLifetime", lastMasterLifetime.toString());
 			if (!lastMasterLifetime.isEqual(self->dbInfo->get().masterLifetime)) {
 				// The TLogRejoinRequest is needed to establish communications with a new master, which doesn't have our
 				// TLogInterface
@@ -2502,19 +2498,11 @@ ACTOR Future<Void> rejoinClusterController(TLogData* self,
 					when(wait(self->dbInfo->onChange())) {}
 				}
 			} else {
-				TraceEvent("TLogRejoiningWaitingForDBInfo2", tli.id());
 				wait(self->dbInfo->onChange());
-				TraceEvent("TLogRejoiningWaitingForDBInfoDone2", tli.id());
 			}
 		} else {
-			TraceEvent("TLogRejoiningWaitingForDBInfo", tli.id());
 			wait(registerWithCC || self->dbInfo->onChange());
-			TraceEvent("TLogRejoiningWaitingForDBInfoDone", tli.id());
 		}
-	}
-	} catch (Error &e) {
-		TraceEvent("TLogRejoiningError", tli.id()).errorUnsuppressed(e);
-		throw;
 	}
 }
 

@@ -1912,7 +1912,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		startRole(Role::WORKER, interf.id(), interf.id(), details);
 		errorForwarders.add(traceRole(Role::WORKER, interf.id()));
 
-		// We want to avoid the worker being recruited as storage or TLog before recovering its' local files,
+		// We want to avoid the worker being recruited as storage or TLog before recoverying it is local files,
 		// to make sure:
 		//   (1) the worker can start serving requests once it is recruited as storage or TLog server, and
 		//   (2) a slow recovering worker server wouldn't been recruited as TLog and make recovery slow.
@@ -3251,9 +3251,7 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
 	state Future<Void> monitor = monitorLeaderWithDelayedCandidacyImpl(connRecord, currentCC);
 	state Future<Void> timeout;
 
-	TraceEvent("MonitorLeader_WaitingForRecoveredDiskFiles");
 	wait(recoveredDiskFiles);
-	TraceEvent("MonitorLeader_WaitingForRecoveredDiskFilesDone");
 
 	loop {
 		if (currentCC->get().present() && dbInfo->get().clusterInterface == currentCC->get().get() &&
@@ -3275,7 +3273,6 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
 			                                     : Never())) {}
 			when(wait(timeout.isValid() ? timeout : Never())) {
 				monitor.cancel();
-				TraceEvent("MonitorLeader_JoiningAfterTimeout");
 				wait(clusterController(
 				    connRecord, currentCC, asyncPriorityInfo, recoveredDiskFiles, locality, configDBType));
 				return Void();
@@ -3372,8 +3369,7 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		    .detail("MachineId", localities.machineId())
 		    .detail("DiskPath", dataFolder)
 		    .detail("CoordPath", coordFolder)
-		    .detail("WhiteListBinPath", whitelistBinPaths)
-		    .detail("ConnRecord", connRecord->toString());
+		    .detail("WhiteListBinPath", whitelistBinPaths);
 
 		state ConfigBroadcastInterface configBroadcastInterface;
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
@@ -3406,11 +3402,9 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
 		                              "MonitorAndWriteCCPriorityInfo"));
 		if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::NeverAssign) {
-			TraceEvent("FDBDNeverAssign");
 			actors.push_back(reportErrors(monitorLeader(connRecord, cc), "ClusterController"));
 		} else if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::WorstFit &&
 		           SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS > 0) {
-			TraceEvent("FDBDWorstFit");
 			actors.push_back(reportErrors(monitorLeaderWithDelayedCandidacy(connRecord,
 			                                                                cc,
 			                                                                asyncPriorityInfo,
@@ -3420,7 +3414,6 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 			                                                                configDBType),
 			                              "ClusterController"));
 		} else {
-			TraceEvent("FDBDOtherFit");
 			actors.push_back(reportErrors(
 			    clusterController(
 			        connRecord, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, configDBType),
