@@ -35,7 +35,8 @@ class CommitQuorum {
 	Standalone<VectorRef<ConfigMutationRef>> mutations;
 	ConfigCommitAnnotation annotation;
 
-	ConfigTransactionCommitRequest getCommitRequest(ConfigGeneration generation, size_t coordinatorsHash) const {
+	ConfigTransactionCommitRequest getCommitRequest(ConfigGeneration generation,
+	                                                CoordinatorsHash coordinatorsHash) const {
 		return ConfigTransactionCommitRequest(coordinatorsHash, generation, mutations, annotation);
 	}
 
@@ -63,7 +64,7 @@ class CommitQuorum {
 
 	ACTOR static Future<Void> addRequestActor(CommitQuorum* self,
 	                                          ConfigGeneration generation,
-	                                          size_t coordinatorsHash,
+	                                          CoordinatorsHash coordinatorsHash,
 	                                          ConfigTransactionInterface cti) {
 		try {
 			if (cti.hostname.present()) {
@@ -112,7 +113,7 @@ public:
 	}
 	void setTimestamp() { annotation.timestamp = now(); }
 	size_t expectedSize() const { return annotation.expectedSize() + mutations.expectedSize(); }
-	Future<Void> commit(ConfigGeneration generation, size_t coordinatorsHash) {
+	Future<Void> commit(ConfigGeneration generation, CoordinatorsHash coordinatorsHash) {
 		// Send commit message to all replicas, even those that did not return the used replica.
 		// This way, slow replicas are kept up date.
 		for (const auto& cti : ctis) {
@@ -125,7 +126,7 @@ public:
 
 class GetGenerationQuorum {
 	ActorCollection actors{ false };
-	size_t coordinatorsHash{ 0 };
+	CoordinatorsHash coordinatorsHash{ 0 };
 	std::vector<ConfigTransactionInterface> ctis;
 	std::map<ConfigGeneration, std::vector<ConfigTransactionInterface>> seenGenerations;
 	Promise<ConfigGeneration> result;
@@ -241,7 +242,7 @@ class GetGenerationQuorum {
 
 public:
 	GetGenerationQuorum() = default;
-	explicit GetGenerationQuorum(size_t coordinatorsHash,
+	explicit GetGenerationQuorum(CoordinatorsHash coordinatorsHash,
 	                             std::vector<ConfigTransactionInterface> const& ctis,
 	                             Future<Void> coordinatorsChangedFuture,
 	                             Optional<Version> const& lastSeenLiveVersion = {})
@@ -267,7 +268,7 @@ public:
 };
 
 class PaxosConfigTransactionImpl {
-	size_t coordinatorsHash{ 0 };
+	CoordinatorsHash coordinatorsHash{ 0 };
 	std::vector<ConfigTransactionInterface> ctis;
 	GetGenerationQuorum getGenerationQuorum;
 	CommitQuorum commitQuorum;
