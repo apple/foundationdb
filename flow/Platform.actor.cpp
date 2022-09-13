@@ -18,6 +18,11 @@
  * limitations under the License.
  */
 
+#ifdef _WIN32
+// This has to come as the first include on Win32 for rand_s() to be found
+#define _CRT_RAND_S
+#endif // _WIN32
+
 #include "flow/Platform.h"
 
 #include <algorithm>
@@ -55,8 +60,6 @@
 #include "flow/Util.h"
 
 #ifdef _WIN32
-// This has to come as the first include on Win32 for rand_s() to be found
-#define _CRT_RAND_S
 
 #include <conio.h>
 #include <direct.h>
