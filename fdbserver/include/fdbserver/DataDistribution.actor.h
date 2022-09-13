@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Tenant.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_DATA_DISTRIBUTION_ACTOR_G_H)
 #define FDBSERVER_DATA_DISTRIBUTION_ACTOR_G_H
 #include "fdbserver/DataDistribution.actor.g.h"
@@ -429,6 +430,58 @@ struct DDShardInfo {
 	DDShardInfo(Key key, UID srcId, UID destId) : key(key), hasDest(false), srcId(srcId), destId(destId) {}
 };
 
+// Each TenantGroup maps to exactly one TeamSet
+// Multiple TenantGroups may map to the same TeamSet
+struct DDTeamSetInfo;
+struct DDTenantGroupInfo : ReferenceCounted<DDTenantGroupInfo> {
+	Optional<TenantGroupName> name;
+	Reference<DDTeamSetInfo> primaryTeamSet;
+
+	// DDTenantGroupInfo(DDTenantGroupInfo& info) : name(info.name), primaryTeamSet(info.primaryTeamSet) {}
+	DDTenantGroupInfo(Optional<TenantGroupName> name = {}) : name(name) {}
+
+	bool hasPrimaryTeamSet() const { return primaryTeamSet.isValid(); }
+
+	std::string toString() const {
+		std::string summary;
+		summary += name.present() ? name.get().toString() : " - ";
+		summary += hasPrimaryTeamSet() ? " (HasTeamSet)" : ("NoTeamSet");
+
+		return summary;
+	}
+};
+
+struct DDTeamSetInfo : ReferenceCounted<DDTeamSetInfo> {
+	std::vector<Reference<DDTenantGroupInfo>> groupsSharingTeamSet;
+	std::vector<std::vector<UID>> teams;
+
+	DDTeamSetInfo(Reference<DDTenantGroupInfo> tenantGroup) { addTenantGroup(tenantGroup); }
+
+	void addTeam(std::vector<UID> team) { teams.push_back(team); }
+	void addTenantGroup(Reference<DDTenantGroupInfo> tenantGroup) { groupsSharingTeamSet.push_back(tenantGroup); }
+
+	std::string toString() const {
+		std::string summary = "[";
+
+		for (auto& team : teams) {
+			summary += "(";
+			for (auto& uid : team) {
+				summary += uid.shortString() + ", ";
+			}
+			summary += ") ";
+		}
+
+		summary += "]";
+		return summary;
+	}
+
+	void merge(Reference<DDTeamSetInfo> teamSet) {
+		for (auto& team : teamSet->teams) {
+			teams.push_back(team);
+		}
+	}
+};
+
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	InitialDataDistribution() : dataMoveMap(std::make_shared<DataMove>()) {}
 
@@ -439,6 +492,11 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	std::set<std::vector<UID>> primaryTeams;
 	std::set<std::vector<UID>> remoteTeams;
 	std::vector<DDShardInfo> shards;
+	std::vector<Reference<TCTenantInfo>> initialTenants;
+	std::map<TenantGroupName, Reference<DDTenantGroupInfo>> initialTenantGroups;
+	Optional<Reference<DDTenantGroupInfo>> defaultTenantGroup;
+	std::vector<DDTeamSetInfo> initialTeamSets;
+	Optional<Reference<TenantCache>> ddTenantCache;
 	Optional<Key> initHealthyZoneValue; // set for maintenance mode
 	KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
 };

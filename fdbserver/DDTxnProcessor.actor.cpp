@@ -22,6 +22,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class DDTxnProcessorImpl {
@@ -126,6 +127,35 @@ class DDTxnProcessorImpl {
 		return Void();
 	}
 
+	static Reference<DDTenantGroupInfo> defaultTenantGroup(Reference<InitialDataDistribution> initialDD) {
+		if (!initialDD->defaultTenantGroup.present()) {
+			initialDD->defaultTenantGroup = makeReference<DDTenantGroupInfo>();
+		}
+
+		return initialDD->defaultTenantGroup.get();
+	}
+
+	static Reference<DDTenantGroupInfo> mapKeyToTenantGroup(Reference<InitialDataDistribution> initialDD, KeyRef key) {
+		// if (!SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED) {
+		// 	return {};
+		// }
+
+		auto tenant = initialDD->ddTenantCache.get()->tenantOwning(key);
+		if (!tenant.present() || !tenant.get()->group().present()) {
+			return defaultTenantGroup(initialDD);
+		}
+
+		TraceEvent(SevInfo, "GetInitialDDFoundTenantKey").detail("Key", key).detail("Group", tenant.get()->groupName());
+		initialDD->initialTenants.push_back(tenant.get());
+
+		auto tenantGroupEnt = initialDD->initialTenantGroups.find(tenant.get()->group().get());
+		if (tenantGroupEnt == initialDD->initialTenantGroups.end()) {
+			initialDD->initialTenantGroups.insert(
+			    { tenant.get()->group().get(), makeReference<DDTenantGroupInfo>(tenant.get()->group().get()) });
+		}
+		return initialDD->initialTenantGroups.find(tenant.get()->group().get())->second;
+	}
+
 	// Read keyservers, return unique set of teams
 	ACTOR static Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
 	    Database cx,
@@ -144,6 +174,7 @@ class DDTxnProcessorImpl {
 		state std::map<std::vector<UID>, std::pair<std::vector<UID>, std::vector<UID>>> team_cache;
 		state std::vector<std::pair<StorageServerInterface, ProcessClass>> tss_servers;
 		state int numDataMoves = 0;
+		state bool ddIsTenantAware = SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED;
 
 		// Get the server list in its own try/catch block since it modifies result.  We don't want a subsequent failure
 		// causing entries to be duplicated
@@ -202,6 +233,11 @@ class DDTxnProcessorImpl {
 					}
 				}
 
+				if (ddIsTenantAware) {
+					result->ddTenantCache = makeReference<TenantCache>(cx, distributorId);
+					wait(result->ddTenantCache.get()->build());
+				}
+
 				RangeResult dms = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!dms.more && dms.size() < CLIENT_KNOBS->TOO_MANY);
 				for (int i = 0; i < dms.size(); ++i) {
@@ -247,6 +283,9 @@ class DDTxnProcessorImpl {
 			}
 		}
 
+		state Reference<DDTenantGroupInfo> tenantGroup;
+		state std::map<std::vector<UID>, Reference<DDTeamSetInfo>> teamSetMap;
+
 		// If keyServers is too large to read in a single transaction, then we will have to break this process up into
 		// multiple transactions. In that case, each iteration should begin where the previous left off
 		while (beginKey < allKeys.end) {
@@ -272,6 +311,14 @@ class DDTxnProcessorImpl {
 					for (int i = 0; i < keyServers.size() - 1; i++) {
 						decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest, srcId, destId);
 						DDShardInfo info(keyServers[i].key, srcId, destId);
+
+						if (ddIsTenantAware) {
+							tenantGroup = mapKeyToTenantGroup(result, info.key);
+							TraceEvent(SevInfo, "KeyToTenantGroupMap")
+							    .detail("Key", info.key)
+							    .detail("TenantGroup", tenantGroup->toString());
+						}
+
 						if (remoteDcIds.size()) {
 							auto srcIter = team_cache.find(src);
 							if (srcIter == team_cache.end()) {
@@ -311,6 +358,7 @@ class DDTxnProcessorImpl {
 									info.remoteDest = destIter->second.second;
 								}
 							}
+
 						} else {
 							info.primarySrc = src;
 							auto srcIter = team_cache.find(src);
@@ -328,6 +376,72 @@ class DDTxnProcessorImpl {
 								}
 							}
 						}
+
+						if (ddIsTenantAware) {
+							ASSERT(tenantGroup.isValid());
+
+							// Two  possibilities
+							// (1) We are seeing this team for the first time. Then, it wouldn't be in the
+							// teamSetMap.
+							//     We add it to the teamSetMap and the teamSet associated with the tenantGroup
+							// (2) This team is already in the teamSetMap; this may be the first shard associated
+							//     with this tenantGroup that we are coming up on. The tenantGroup may not be linked
+							//     to this a teamSet as yet.
+							//
+
+							if (!tenantGroup->hasPrimaryTeamSet()) {
+								// std::string srcstr = "(";
+								// for (auto& uid : info.primarySrc) {
+								// 	srcstr += uid.shortString() + ", ";
+								// }
+								// srcstr += ") ";
+								// TraceEvent(SevInfo, "TeamSetMapTeamSetFor").detail("PrimarySource", srcstr);
+
+								if (teamSetMap.find(info.primarySrc) == teamSetMap.end()) {
+									tenantGroup->primaryTeamSet = makeReference<DDTeamSetInfo>(tenantGroup);
+									tenantGroup->primaryTeamSet->addTeam(info.primarySrc);
+									teamSetMap[info.primarySrc] = tenantGroup->primaryTeamSet;
+									ASSERT(tenantGroup->hasPrimaryTeamSet());
+									// TraceEvent(SevInfo, "TenantGroupNewPrimaryTeamSet")
+									//     .detail("Teams", tenantGroup->primaryTeamSet->toString());
+								} else {
+									tenantGroup->primaryTeamSet = teamSetMap[info.primarySrc];
+									tenantGroup->primaryTeamSet->addTenantGroup(tenantGroup);
+									// TraceEvent(SevInfo, "TenantGroupSetPrimaryTeamSet")
+									//     .detail("Teams", tenantGroup->primaryTeamSet->toString());
+								}
+							} else {
+								// TraceEvent(SevInfo, "TenantGroupPrimaryTeamSet")
+								//     .detail("Teams", tenantGroup->primaryTeamSet->toString());
+
+								// 		if (teamSetMap.find(info.primarySrc) != teamSetMap.end()) {
+								// 			std::string srcstr = "(";
+								// 			for (auto& uid : info.primarySrc) {
+								// 				srcstr += uid.shortString() + ", ";
+								// 			}
+								// 			srcstr += ") ";
+								// 			TraceEvent(SevInfo, "TeamSetMapTeamSet")
+								// 			    .detail("PrimarySource", srcstr)
+								// 			    .detail("Teams", teamSetMap.find(info.primarySrc)->second->toString());
+								// 		}
+
+								if ((teamSetMap.find(info.primarySrc) != teamSetMap.end()) &&
+								    (teamSetMap.find(info.primarySrc)->second != tenantGroup->primaryTeamSet)) {
+									teamSetMap.find(info.primarySrc)->second->merge(tenantGroup->primaryTeamSet);
+									for (auto& team : tenantGroup->primaryTeamSet->teams) {
+										teamSetMap[team] = teamSetMap.find(info.primarySrc)->second;
+									}
+									tenantGroup->primaryTeamSet = teamSetMap.find(info.primarySrc)->second;
+								}
+
+								ASSERT((teamSetMap.find(info.primarySrc) == teamSetMap.end()) ||
+								       (teamSetMap.find(info.primarySrc)->second == tenantGroup->primaryTeamSet));
+								if (teamSetMap.find(info.primarySrc) == teamSetMap.end()) {
+									tenantGroup->primaryTeamSet->addTeam(info.primarySrc);
+									teamSetMap[info.primarySrc] = tenantGroup->primaryTeamSet;
+								}
+							}
+						}
 						result->shards.push_back(info);
 					}
 
@@ -338,8 +452,8 @@ class DDTxnProcessorImpl {
 					TraceEvent("GetInitialTeamsKeyServersRetry", distributorId).error(e);
 
 					wait(tr.onError(e));
-					ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in this
-					                    // loop
+					ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in
+					                    // this loop
 				}
 			}
 

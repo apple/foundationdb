@@ -251,21 +251,25 @@ private:
 
 class TCTenantInfo : public ReferenceCounted<TCTenantInfo> {
 private:
-	TenantInfo m_tenantInfo;
-	Key m_prefix;
-	std::vector<Reference<TCTeamInfo>> m_tenantTeams;
-	int64_t m_cacheGeneration;
+	TenantInfo tenantInfo_;
+	Key prefix_;
+	std::vector<Reference<TCTeamInfo>> tenantTeams_;
+	Optional<TenantGroupName> tenantGroup_;
+	int64_t cacheGeneration_;
 
 public:
-	TCTenantInfo() { m_prefix = allKeys.end; }
-	TCTenantInfo(TenantInfo tinfo, Key prefix) : m_tenantInfo(tinfo), m_prefix(prefix) {}
-	std::vector<Reference<TCTeamInfo>>& teams() { return m_tenantTeams; }
+	TCTenantInfo() { prefix_ = allKeys.end; }
+	TCTenantInfo(TenantInfo tinfo, Key prefix, Optional<TenantGroupName> group)
+	  : tenantInfo_(tinfo), prefix_(prefix), tenantGroup_(group) {}
+	std::vector<Reference<TCTeamInfo>>& teams() { return tenantTeams_; }
 
-	TenantName name() const { return m_tenantInfo.name.get(); }
-	std::string prefixDesc() const { return m_prefix.printable(); }
+	TenantName name() const { return tenantInfo_.name.get(); }
+	std::string groupName() const { return tenantGroup_.present() ? tenantGroup_.get().toString() : "-"; };
+	Optional<TenantGroupName> group() const { return tenantGroup_; };
+	std::string prefixDesc() const { return prefix_.printable(); }
 
 	void addTeam(TCTeamInfo team);
 	void removeTeam(TCTeamInfo team);
-	void updateCacheGeneration(int64_t generation) { m_cacheGeneration = generation; }
-	int64_t cacheGeneration() const { return m_cacheGeneration; }
+	void updateCacheGeneration(int64_t generation) { cacheGeneration_ = generation; }
+	int64_t cacheGeneration() const { return cacheGeneration_; }
 };

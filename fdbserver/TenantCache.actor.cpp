@@ -123,7 +123,7 @@ void TenantCache::insert(TenantName& tenantName, TenantMapEntry& tenant) {
 	ASSERT(tenantCache.find(tenantPrefix) == tenantCache.end());
 
 	TenantInfo tenantInfo(tenantName, Optional<Standalone<StringRef>>(), tenant.id);
-	tenantCache[tenantPrefix] = makeReference<TCTenantInfo>(tenantInfo, tenant.prefix);
+	tenantCache[tenantPrefix] = makeReference<TCTenantInfo>(tenantInfo, tenant.prefix, tenant.tenantGroup);
 	tenantCache[tenantPrefix]->updateCacheGeneration(generation);
 }
 
@@ -179,7 +179,8 @@ std::string TenantCache::desc() const {
 			s += ", ";
 		}
 
-		s += "Name: " + tenant->name().toString() + " Prefix: " + tenantPrefix.toString();
+		s += "Name: " + tenant->name().toString() + " Prefix: " + tenantPrefix.toString() +
+		     " Group: " + tenant->groupName();
 		count++;
 	}
 
