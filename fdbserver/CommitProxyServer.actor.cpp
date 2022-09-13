@@ -901,7 +901,6 @@ std::pair<EncryptCipherDomainName, EncryptCipherDomainId> getEncryptDetailsFromM
 	// TenantPrefix (first 8 bytes of FDBKey)
 	// 2. Encryption domain isn't available, leverage 'default encryption domain'
 
-	bool useDefaultEncryptionDomain = true;
 	if (commitData->tenantMap.empty()) {
 		// Cluster serves no-tenants; use 'default encryption domain'
 	} else if (isSingleKeyMutation((MutationRef::Type)m.type)) {
@@ -920,8 +919,6 @@ std::pair<EncryptCipherDomainName, EncryptCipherDomainId> getEncryptDetailsFromM
 				if (tenantName.present()) {
 					details.first = tenantName.get();
 					details.second = tenantId;
-
-					useDefaultEncryptionDomain = false;
 				}
 			} else {
 				// Leverage 'default encryption domain'
@@ -929,26 +926,19 @@ std::pair<EncryptCipherDomainName, EncryptCipherDomainId> getEncryptDetailsFromM
 		}
 	} else {
 		// ClearRange is the 'only' MultiKey transaction allowed
-		if (m.type != MutationRef::Type::ClearRange) {
-			TraceEvent(SevError, "InvalidMutation", commitData->dbgid)
-			    .detail("MutationType", (MutationRef::Type)m.type);
-
-			throw encrypt_invalid_transaction();
-		}
+		ASSERT_EQ((MutationRef::Type)m.type, MutationRef::Type::ClearRange);
 
 		// FIXME: Handle Clear-range transaction, actions needed:
 		// 1. Transaction range can spawn multiple encryption domains (tenants)
 		// 2. Transaction can be a multi-key transaction spawning multiple tenants
 		// For now fallback to 'default encryption domain'
-		ASSERT(useDefaultEncryptionDomain);
 
 		CODE_PROBE(true, "ClearRange mutation encryption");
 	}
 
-	ASSERT(details.second != INVALID_ENCRYPT_DOMAIN_ID || useDefaultEncryptionDomain);
-
 	// Unknown tenant, fallback to fdb default encryption domain
-	if (useDefaultEncryptionDomain) {
+	if (details.second == INVALID_ENCRYPT_DOMAIN_ID) {
+		ASSERT_EQ(details.first.size(), 0);
 		details.first = EncryptCipherDomainName(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
 		details.second = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
 
