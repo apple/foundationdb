@@ -22,10 +22,10 @@
 #define FDBCLIENT_BLOBGRANULECOMMON_H
 #pragma once
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 
-#include "flow/BlobCipher.h"
 #include "flow/EncryptUtils.h"
 #include "flow/IRandom.h"
 #include "flow/serialize.h"
@@ -35,7 +35,6 @@
 #define BG_ENCRYPT_COMPRESS_DEBUG false
 
 // file format of actual blob files
-// FIXME: use VecSerStrategy::String serialization for this
 struct GranuleSnapshot : VectorRef<KeyValueRef> {
 
 	constexpr static FileIdentifier file_identifier = 1300395;
@@ -233,6 +232,22 @@ struct BlobGranuleChunkRef {
 		serializer(ar, keyRange, includedVersion, snapshotVersion, snapshotFile, deltaFiles, newDeltas, tenantPrefix);
 	}
 };
+
+struct BlobGranuleSummaryRef {
+	constexpr static FileIdentifier file_identifier = 9774587;
+	KeyRangeRef keyRange;
+	Version snapshotVersion;
+	int64_t snapshotSize;
+	Version deltaVersion;
+	int64_t deltaSize;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keyRange, snapshotVersion, snapshotSize, deltaVersion, deltaSize);
+	}
+};
+
+BlobGranuleSummaryRef summarizeGranuleChunk(Arena& ar, const BlobGranuleChunkRef& chunk);
 
 enum BlobGranuleSplitState { Unknown = 0, Initialized = 1, Assigned = 2, Done = 3 };
 

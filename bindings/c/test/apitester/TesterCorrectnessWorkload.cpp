@@ -41,11 +41,11 @@ private:
 		OP_LAST = OP_COMMIT_READ
 	};
 
-	void randomCommitReadOp(TTaskFct cont) {
+	void randomCommitReadOp(TTaskFct cont, std::optional<int> tenantId) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
 		auto kvPairs = std::make_shared<std::vector<fdb::KeyValue>>();
 		for (int i = 0; i < numKeys; i++) {
-			kvPairs->push_back(fdb::KeyValue{ randomKey(readExistingKeysRatio), randomValue() });
+			kvPairs->push_back(fdb::KeyValue{ randomKey(readExistingKeysRatio, tenantId), randomValue() });
 		}
 		execTransaction(
 		    [kvPairs](auto ctx) {
@@ -54,9 +54,9 @@ private:
 			    }
 			    ctx->commit();
 		    },
-		    [this, kvPairs, cont]() {
+		    [this, kvPairs, cont, tenantId]() {
 			    for (const fdb::KeyValue& kv : *kvPairs) {
-				    store.set(kv.key, kv.value);
+				    stores[tenantId].set(kv.key, kv.value);
 			    }
 			    auto results = std::make_shared<std::vector<std::optional<fdb::Value>>>();
 			    execTransaction(
@@ -78,10 +78,10 @@ private:
 					        ctx->done();
 				        });
 			        },
-			        [this, kvPairs, results, cont]() {
+			        [this, kvPairs, results, cont, tenantId]() {
 				        ASSERT(results->size() == kvPairs->size());
 				        for (int i = 0; i < kvPairs->size(); i++) {
-					        auto expected = store.get((*kvPairs)[i].key);
+					        auto expected = stores[tenantId].get((*kvPairs)[i].key);
 					        auto actual = (*results)[i];
 					        if (actual != expected) {
 						        error(
@@ -93,16 +93,18 @@ private:
 					        }
 				        }
 				        schedule(cont);
-			        });
-		    });
+			        },
+			        getTenant(tenantId));
+		    },
+		    getTenant(tenantId));
 	}
 
-	void randomGetOp(TTaskFct cont) {
+	void randomGetOp(TTaskFct cont, std::optional<int> tenantId) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
 		auto keys = std::make_shared<std::vector<fdb::Key>>();
 		auto results = std::make_shared<std::vector<std::optional<fdb::Value>>>();
 		for (int i = 0; i < numKeys; i++) {
-			keys->push_back(randomKey(readExistingKeysRatio));
+			keys->push_back(randomKey(readExistingKeysRatio, tenantId));
 		}
 		execTransaction(
 		    [keys, results](auto ctx) {
@@ -119,10 +121,10 @@ private:
 				    ctx->done();
 			    });
 		    },
-		    [this, keys, results, cont]() {
+		    [this, keys, results, cont, tenantId]() {
 			    ASSERT(results->size() == keys->size());
 			    for (int i = 0; i < keys->size(); i++) {
-				    auto expected = store.get((*keys)[i]);
+				    auto expected = stores[tenantId].get((*keys)[i]);
 				    if ((*results)[i] != expected) {
 					    error(fmt::format("randomGetOp mismatch. key: {} expected: {:.80} actual: {:.80}",
 					                      fdb::toCharsRef((*keys)[i]),
@@ -131,16 +133,17 @@ private:
 				    }
 			    }
 			    schedule(cont);
-		    });
+		    },
+		    getTenant(tenantId));
 	}
 
-	void randomGetKeyOp(TTaskFct cont) {
+	void randomGetKeyOp(TTaskFct cont, std::optional<int> tenantId) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
 		auto keysWithSelectors = std::make_shared<std::vector<std::pair<fdb::Key, fdb::KeySelector>>>();
 		auto results = std::make_shared<std::vector<fdb::Key>>();
 		keysWithSelectors->reserve(numKeys);
 		for (int i = 0; i < numKeys; i++) {
-			auto key = randomKey(readExistingKeysRatio);
+			auto key = randomKey(readExistingKeysRatio, tenantId);
 			fdb::KeySelector selector;
 			selector.keyLength = key.size();
 			selector.orEqual = Random::get().randomBool(0.5);
@@ -169,20 +172,20 @@ private:
 				    ctx->done();
 			    });
 		    },
-		    [this, keysWithSelectors, results, cont]() {
+		    [this, keysWithSelectors, results, cont, tenantId]() {
 			    ASSERT(results->size() == keysWithSelectors->size());
 			    for (int i = 0; i < keysWithSelectors->size(); i++) {
 				    auto const& key = (*keysWithSelectors)[i].first;
 				    auto const& selector = (*keysWithSelectors)[i].second;
-				    auto expected = store.getKey(key, selector.orEqual, selector.offset);
+				    auto expected = stores[tenantId].getKey(key, selector.orEqual, selector.offset);
 				    auto actual = (*results)[i];
 				    // Local store only contains data for the current client, while fdb contains data from multiple
 				    // clients. If getKey returned a key outside of the range for the current client, adjust the result
 				    // to match what would be expected in the local store.
 				    if (actual.substr(0, keyPrefix.size()) < keyPrefix) {
-					    actual = store.startKey();
+					    actual = stores[tenantId].startKey();
 				    } else if ((*results)[i].substr(0, keyPrefix.size()) > keyPrefix) {
-					    actual = store.endKey();
+					    actual = stores[tenantId].endKey();
 				    }
 				    if (actual != expected) {
 					    error(fmt::format("randomGetKeyOp mismatch. key: {}, orEqual: {}, offset: {}, expected: {} "
@@ -195,7 +198,8 @@ private:
 				    }
 			    }
 			    schedule(cont);
-		    });
+		    },
+		    getTenant(tenantId));
 	}
 
 	void getRangeLoop(std::shared_ptr<ITransactionContext> ctx,
@@ -223,9 +227,9 @@ private:
 		});
 	}
 
-	void randomGetRangeOp(TTaskFct cont) {
-		auto begin = randomKey(readExistingKeysRatio);
-		auto end = randomKey(readExistingKeysRatio);
+	void randomGetRangeOp(TTaskFct cont, std::optional<int> tenantId) {
+		auto begin = randomKey(readExistingKeysRatio, tenantId);
+		auto end = randomKey(readExistingKeysRatio, tenantId);
 		auto results = std::make_shared<std::vector<fdb::KeyValue>>();
 
 		execTransaction(
@@ -238,8 +242,8 @@ private:
 			                 fdb::key_select::firstGreaterOrEqual(end),
 			                 results);
 		    },
-		    [this, begin, end, results, cont]() {
-			    auto expected = store.getRange(begin, end, results->size() + 10, false);
+		    [this, begin, end, results, cont, tenantId]() {
+			    auto expected = stores[tenantId].getRange(begin, end, results->size() + 10, false);
 			    if (results->size() != expected.size()) {
 				    error(fmt::format("randomGetRangeOp mismatch. expected {} keys, actual {} keys",
 				                      expected.size(),
@@ -260,32 +264,35 @@ private:
 				    }
 			    }
 			    schedule(cont);
-		    });
+		    },
+		    getTenant(tenantId));
 	}
 
 	void randomOperation(TTaskFct cont) {
-		OpType txType = (store.size() == 0) ? OP_INSERT : (OpType)Random::get().randomInt(0, OP_LAST);
+		std::optional<int> tenantId = randomTenant();
+		OpType txType = (stores[tenantId].size() == 0) ? OP_INSERT : (OpType)Random::get().randomInt(0, OP_LAST);
+
 		switch (txType) {
 		case OP_INSERT:
-			randomInsertOp(cont);
+			randomInsertOp(cont, tenantId);
 			break;
 		case OP_GET:
-			randomGetOp(cont);
+			randomGetOp(cont, tenantId);
 			break;
 		case OP_GET_KEY:
-			randomGetKeyOp(cont);
+			randomGetKeyOp(cont, tenantId);
 			break;
 		case OP_CLEAR:
-			randomClearOp(cont);
+			randomClearOp(cont, tenantId);
 			break;
 		case OP_GET_RANGE:
-			randomGetRangeOp(cont);
+			randomGetRangeOp(cont, tenantId);
 			break;
 		case OP_CLEAR_RANGE:
-			randomClearRangeOp(cont);
+			randomClearRangeOp(cont, tenantId);
 			break;
 		case OP_COMMIT_READ:
-			randomCommitReadOp(cont);
+			randomCommitReadOp(cont, tenantId);
 			break;
 		}
 	}

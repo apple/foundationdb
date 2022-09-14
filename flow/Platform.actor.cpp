@@ -32,20 +32,24 @@
 #include "flow/Arena.h"
 
 #include "flow/StreamCipher.h"
-#include "flow/BlobCipher.h"
+#include "flow/ScopeExit.h"
 #include "flow/Trace.h"
 #include "flow/Error.h"
 
 #include "flow/Knobs.h"
 
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <cstring>
-#include <algorithm>
+#include <string>
+#include <string_view>
+#include <vector>
 #include <boost/format.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/operations.hpp>
+#include <boost/algorithm/string.hpp>
 
 #include <sys/types.h>
 #include <time.h>
@@ -64,6 +68,7 @@
 #include <direct.h>
 #include <pdh.h>
 #include <pdhmsg.h>
+#include <processenv.h>
 #pragma comment(lib, "pdh.lib")
 
 // for SHGetFolderPath
@@ -147,6 +152,9 @@
 #endif
 
 #ifdef __APPLE__
+/* Needed for cross-platform 'environ' */
+#include <crt_externs.h>
+
 #include <sys/uio.h>
 #include <sys/syslimits.h>
 #include <mach/mach.h>
@@ -1933,6 +1941,39 @@ std::string epochsToGMTString(double epochs) {
 	return timeString;
 }
 
+std::vector<std::string> getEnvironmentKnobOptions() {
+	constexpr const size_t ENVKNOB_PREFIX_LEN = sizeof(ENVIRONMENT_KNOB_OPTION_PREFIX) - 1;
+	std::vector<std::string> knobOptions;
+#if defined(_WIN32)
+	auto e = GetEnvironmentStrings();
+	if (e == nullptr)
+		return {};
+	auto cleanup = ScopeExit([e]() { FreeEnvironmentStrings(e); });
+	while (*e) {
+		auto candidate = std::string_view(e);
+		if (boost::starts_with(candidate, ENVIRONMENT_KNOB_OPTION_PREFIX))
+			knobOptions.emplace_back(candidate.substr(ENVKNOB_PREFIX_LEN));
+		e += (candidate.size() + 1);
+	}
+#else
+	char** e = nullptr;
+#ifdef __linux__
+	e = environ;
+#elif defined(__APPLE__)
+	e = *_NSGetEnviron();
+#else
+#error Port me!
+#endif
+	for (; e && *e; e++) {
+		std::string_view envOption(*e);
+		if (boost::starts_with(envOption, ENVIRONMENT_KNOB_OPTION_PREFIX)) {
+			knobOptions.emplace_back(envOption.substr(ENVKNOB_PREFIX_LEN));
+		}
+	}
+#endif
+	return knobOptions;
+}
+
 void setMemoryQuota(size_t limit) {
 	if (limit == 0) {
 		return;
@@ -3207,10 +3248,10 @@ void outOfMemory() {
 }
 
 // Because the lambda used with nftw below cannot capture
-int __eraseDirectoryRecurseiveCount;
+int __eraseDirectoryRecursiveCount;
 
 int eraseDirectoryRecursive(std::string const& dir) {
-	__eraseDirectoryRecurseiveCount = 0;
+	__eraseDirectoryRecursiveCount = 0;
 #ifdef _WIN32
 	system(("rd /s /q \"" + dir + "\"").c_str());
 #elif defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
@@ -3219,7 +3260,7 @@ int eraseDirectoryRecursive(std::string const& dir) {
 	    [](const char* fpath, const struct stat* sb, int typeflag, struct FTW* ftwbuf) -> int {
 		    int r = remove(fpath);
 		    if (r == 0)
-			    ++__eraseDirectoryRecurseiveCount;
+			    ++__eraseDirectoryRecursiveCount;
 		    return r;
 	    },
 	    64,
@@ -3236,7 +3277,7 @@ int eraseDirectoryRecursive(std::string const& dir) {
 #error Port me!
 #endif
 	// INJECT_FAULT( platform_error, "eraseDirectoryRecursive" );
-	return __eraseDirectoryRecurseiveCount;
+	return __eraseDirectoryRecursiveCount;
 }
 
 TmpFile::TmpFile() : filename("") {
@@ -3581,6 +3622,12 @@ void platformInit() {
 #endif
 }
 
+std::vector<std::function<void()>> g_crashHandlerCallbacks;
+
+void registerCrashHandlerCallback(void (*f)()) {
+	g_crashHandlerCallbacks.push_back(f);
+}
+
 // The crashHandler function is registered to handle signals before the process terminates.
 // Basic information about the crash is printed/traced, and stdout and trace events are flushed.
 void crashHandler(int sig) {
@@ -3593,7 +3640,10 @@ void crashHandler(int sig) {
 
 	StreamCipherKey::cleanup();
 	StreamCipher::cleanup();
-	BlobCipherKeyCache::cleanup();
+
+	for (auto& f : g_crashHandlerCallbacks) {
+		f();
+	}
 
 	fprintf(error ? stderr : stdout, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
 	if (error) {
@@ -3723,7 +3773,7 @@ void profileHandler(int sig) {
 	ps->timestamp = checkThreadTime.is_lock_free() ? checkThreadTime.load() : 0;
 
 	// SOMEDAY: should we limit the maximum number of frames from backtrace beyond just available space?
-	size_t size = platform::raw_backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
+	size_t size = backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
 
 	ps->length = size;
 

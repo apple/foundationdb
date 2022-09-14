@@ -156,9 +156,14 @@ public:
 	int PRIORITY_TEAM_FAILED; // Priority when a server in the team is excluded as failed
 	int PRIORITY_TEAM_0_LEFT;
 	int PRIORITY_SPLIT_SHARD;
+	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD; // Priority when a physical shard is oversize or anonymous
 
 	// Data distribution
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
+	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
+	int64_t MAX_PHYSICAL_SHARD_BYTES;
+	double PHYSICAL_SHARD_METRICS_DELAY;
+	double ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME;
 
 	double READ_REBALANCE_CPU_THRESHOLD; // read rebalance only happens if the source servers' CPU > threshold
 	int READ_REBALANCE_SRC_PARALLELISM; // the max count a server become a source server within a certain interval
@@ -251,9 +256,8 @@ public:
 
 	// Run storage enginee on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;
-	// A delay to avoid race on file resources if the new kv store process started immediately after the previous kv
-	// store process died
-	double REMOTE_KV_STORE_INIT_DELAY;
+	// A delay to avoid race on file resources after seeing lock_file_failure
+	double REBOOT_KV_STORE_DELAY;
 	// max waiting time for the remote kv store to initialize
 	double REMOTE_KV_STORE_MAX_INIT_DURATION;
 
@@ -298,6 +302,7 @@ public:
 	int64_t REPLACE_CONTENTS_BYTES;
 
 	// KeyValueStoreRocksDB
+	int ROCKSDB_READ_RANGE_ROW_LIMIT;
 	int ROCKSDB_BACKGROUND_PARALLELISM;
 	int ROCKSDB_READ_PARALLELISM;
 	int64_t ROCKSDB_MEMTABLE_BYTES;
@@ -335,8 +340,11 @@ public:
 	int64_t ROCKSDB_BLOCK_SIZE;
 	bool ENABLE_SHARDED_ROCKSDB;
 	int64_t ROCKSDB_WRITE_BUFFER_SIZE;
+	int64_t ROCKSDB_CF_WRITE_BUFFER_SIZE;
 	int64_t ROCKSDB_MAX_TOTAL_WAL_SIZE;
 	int64_t ROCKSDB_MAX_BACKGROUND_JOBS;
+	int64_t ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD;
+	double ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -550,6 +558,8 @@ public:
 	bool RATEKEEPER_PRINT_LIMIT_REASON;
 	double RATEKEEPER_MIN_RATE;
 	double RATEKEEPER_MAX_RATE;
+	double RATEKEEPER_BATCH_MIN_RATE;
+	double RATEKEEPER_BATCH_MAX_RATE;
 
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER;
 	int64_t SPRING_BYTES_STORAGE_SERVER;
@@ -558,9 +568,12 @@ public:
 	int64_t SPRING_BYTES_STORAGE_SERVER_BATCH;
 	int64_t STORAGE_HARD_LIMIT_BYTES;
 	int64_t STORAGE_HARD_LIMIT_BYTES_OVERAGE;
+	int64_t STORAGE_HARD_LIMIT_BYTES_SPEED_UP_SIM;
+	int64_t STORAGE_HARD_LIMIT_BYTES_OVERAGE_SPEED_UP_SIM;
 	int64_t STORAGE_HARD_LIMIT_VERSION_OVERAGE;
 	int64_t STORAGE_DURABILITY_LAG_HARD_MAX;
 	int64_t STORAGE_DURABILITY_LAG_SOFT_MAX;
+	bool STORAGE_INCLUDE_FEED_STORAGE_QUEUE;
 
 	int64_t LOW_PRIORITY_STORAGE_QUEUE_BYTES;
 	int64_t LOW_PRIORITY_DURABILITY_LAG;
@@ -633,6 +646,8 @@ public:
 	double BW_LAG_DECREASE_AMOUNT;
 	double BW_FETCH_WORKERS_INTERVAL;
 	double BW_RW_LOGGING_INTERVAL;
+	double BW_MAX_BLOCKED_INTERVAL;
+	double BW_RK_SIM_QUIESCE_DELAY;
 
 	// disk snapshot
 	int64_t MAX_FORKED_PROCESS_OUTPUT;
@@ -671,6 +686,7 @@ public:
 	int STORAGE_LIMIT_BYTES;
 	int BUGGIFY_LIMIT_BYTES;
 	bool FETCH_USING_STREAMING;
+	bool FETCH_USING_BLOB;
 	int FETCH_BLOCK_BYTES;
 	int FETCH_KEYS_PARALLELISM_BYTES;
 	int FETCH_KEYS_PARALLELISM;
@@ -715,7 +731,6 @@ public:
 	int CHECKPOINT_TRANSFER_BLOCK_BYTES;
 	int QUICK_GET_KEY_VALUES_LIMIT;
 	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
-	bool STORAGE_SERVER_SHARD_AWARE;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -870,6 +885,7 @@ public:
 	int SIM_KMS_MAX_KEYS;
 	int ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH;
 	bool ENABLE_TLOG_ENCRYPTION;
+	bool ENABLE_STORAGE_SERVER_ENCRYPTION; // Currently only Redwood engine supports encryption
 	bool ENABLE_BLOB_GRANULE_ENCRYPTION;
 
 	// Compression

@@ -22,15 +22,16 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 #include "libb64/encode.h"
+#include "flow/ApiVersion.h"
 #include "flow/UnitTest.h"
 
 Key TenantMapEntry::idToPrefix(int64_t id) {
 	int64_t swapped = bigEndian64(id);
-	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), 8);
+	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), TENANT_PREFIX_SIZE);
 }
 
 int64_t TenantMapEntry::prefixToId(KeyRef prefix) {
-	ASSERT(prefix.size() == 8);
+	ASSERT(prefix.size() == TENANT_PREFIX_SIZE);
 	int64_t id = *reinterpret_cast<const int64_t*>(prefix.begin());
 	id = bigEndian64(id);
 	ASSERT(id >= 0);
@@ -78,6 +79,31 @@ TenantState TenantMapEntry::stringToTenantState(std::string stateStr) {
 	UNREACHABLE();
 }
 
+std::string TenantMapEntry::tenantLockStateToString(TenantLockState tenantState) {
+	switch (tenantState) {
+	case TenantLockState::UNLOCKED:
+		return "unlocked";
+	case TenantLockState::READ_ONLY:
+		return "read only";
+	case TenantLockState::LOCKED:
+		return "locked";
+	default:
+		UNREACHABLE();
+	}
+}
+
+TenantLockState TenantMapEntry::stringToTenantLockState(std::string stateStr) {
+	if (stateStr == "unlocked") {
+		return TenantLockState::UNLOCKED;
+	} else if (stateStr == "read only") {
+		return TenantLockState::READ_ONLY;
+	} else if (stateStr == "locked") {
+		return TenantLockState::LOCKED;
+	}
+
+	UNREACHABLE();
+}
+
 TenantMapEntry::TenantMapEntry() {}
 TenantMapEntry::TenantMapEntry(int64_t id, TenantState tenantState, bool encrypted)
   : tenantState(tenantState), encrypted(encrypted) {
@@ -97,24 +123,19 @@ void TenantMapEntry::setId(int64_t id) {
 	prefix = idToPrefix(id);
 }
 
-std::string TenantMapEntry::toJson(int apiVersion) const {
+std::string TenantMapEntry::toJson() const {
 	json_spirit::mObject tenantEntry;
 	tenantEntry["id"] = id;
 	tenantEntry["encrypted"] = encrypted;
 
-	if (apiVersion >= 720 || apiVersion == Database::API_VERSION_LATEST) {
-		json_spirit::mObject prefixObject;
-		std::string encodedPrefix = base64::encoder::from_string(prefix.toString());
-		// Remove trailing newline
-		encodedPrefix.resize(encodedPrefix.size() - 1);
+	json_spirit::mObject prefixObject;
+	std::string encodedPrefix = base64::encoder::from_string(prefix.toString());
+	// Remove trailing newline
+	encodedPrefix.resize(encodedPrefix.size() - 1);
 
-		prefixObject["base64"] = encodedPrefix;
-		prefixObject["printable"] = printable(prefix);
-		tenantEntry["prefix"] = prefixObject;
-	} else {
-		// This is not a standard encoding in JSON, and some libraries may not be able to easily decode it
-		tenantEntry["prefix"] = prefix.toString();
-	}
+	prefixObject["base64"] = encodedPrefix;
+	prefixObject["printable"] = printable(prefix);
+	tenantEntry["prefix"] = prefixObject;
 
 	tenantEntry["tenant_state"] = TenantMapEntry::tenantStateToString(tenantState);
 	if (assignedCluster.present()) {

@@ -27,7 +27,7 @@
 
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
-#include "fdbserver/EncryptKeyProxyInterface.h"
+#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/RatekeeperInterface.h"
@@ -140,7 +140,7 @@ struct WorkerDetails {
 	bool degraded;
 	bool recoveredDiskFiles;
 
-	WorkerDetails() : degraded(false) {}
+	WorkerDetails() : degraded(false), recoveredDiskFiles(false) {}
 	WorkerDetails(const WorkerInterface& interf, ProcessClass processClass, bool degraded, bool recoveredDiskFiles)
 	  : interf(interf), processClass(processClass), degraded(degraded), recoveredDiskFiles(recoveredDiskFiles) {}
 
@@ -148,7 +148,7 @@ struct WorkerDetails {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, interf, processClass, degraded);
+		serializer(ar, interf, processClass, degraded, recoveredDiskFiles);
 	}
 };
 
@@ -1092,6 +1092,7 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei, Reference<
 class IKeyValueStore;
 class ServerCoordinators;
 class IDiskQueue;
+class IEncryptionKeyProvider;
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
@@ -1100,7 +1101,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder);
+                                 std::string folder,
+                                 Reference<IEncryptionKeyProvider> encryptionKeyProvider);
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,
@@ -1108,7 +1110,8 @@ ACTOR Future<Void> storageServer(
     std::string folder,
     Promise<Void> recovered,
     Reference<IClusterConnectionRecord>
-        connRecord); // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
+        connRecord, // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
+    Reference<IEncryptionKeyProvider> encryptionKeyProvider);
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,

@@ -852,6 +852,8 @@ const KeyRef perpetualStorageWiggleStatsPrefix(
 
 const KeyRef triggerDDTeamInfoPrintKey(LiteralStringRef("\xff/triggerDDTeamInfoPrint"));
 
+const KeyRef encryptionAtRestModeConfKey(LiteralStringRef("\xff/conf/encryption_at_rest_mode"));
+
 const KeyRangeRef excludedServersKeys(LiteralStringRef("\xff/conf/excluded/"), LiteralStringRef("\xff/conf/excluded0"));
 const KeyRef excludedServersPrefix = excludedServersKeys.begin;
 const KeyRef excludedServersVersionKey = LiteralStringRef("\xff/conf/excluded");
@@ -1331,6 +1333,9 @@ int64_t decodeBlobManagerEpochValue(ValueRef const& value) {
 }
 
 // blob granule data
+const KeyRef blobRangeActive = LiteralStringRef("1");
+const KeyRef blobRangeInactive = StringRef();
+
 const KeyRangeRef blobGranuleFileKeys(LiteralStringRef("\xff\x02/bgf/"), LiteralStringRef("\xff\x02/bgf0"));
 const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff\x02/bgm/"), LiteralStringRef("\xff\x02/bgm0"));
 const KeyRangeRef blobGranuleLockKeys(LiteralStringRef("\xff\x02/bgl/"), LiteralStringRef("\xff\x02/bgl0"));

@@ -28,7 +28,7 @@
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this depdendency
 #include "fdbclient/StorageServerInterface.h"
-#include "Tenant.h"
+#include "fdbclient/Tenant.h"
 
 // Don't warn on constants being defined in this file.
 #pragma clang diagnostic push
@@ -272,6 +272,9 @@ extern const KeyRef perpetualStorageWiggleStatsPrefix;
 
 // Change the value of this key to anything and that will trigger detailed data distribution team info log.
 extern const KeyRef triggerDDTeamInfoPrintKey;
+
+// Encryption data at-rest config key
+extern const KeyRef encryptionAtRestModeConfKey;
 
 //	The differences between excluded and failed can be found in "command-line-interface.rst"
 //	and in the help message of the fdbcli command "exclude".
@@ -594,6 +597,8 @@ const Value blobManagerEpochValueFor(int64_t epoch);
 int64_t decodeBlobManagerEpochValue(ValueRef const& value);
 
 // blob granule keys
+extern const StringRef blobRangeActive;
+extern const StringRef blobRangeInactive;
 
 extern const uint8_t BG_FILE_TYPE_DELTA;
 extern const uint8_t BG_FILE_TYPE_SNAPSHOT;

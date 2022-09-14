@@ -50,6 +50,7 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/SendBufferIterator.h"
 #include "flow/TLSConfig.actor.h"
+#include "flow/WatchFile.actor.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Util.h"
 #include "flow/UnitTest.h"
@@ -88,6 +89,10 @@ sigset_t sigprof_set;
 void initProfiling() {
 	net2backtraces = new volatile void*[net2backtraces_max];
 	other_backtraces = new volatile void*[net2backtraces_max];
+
+	// According to folk wisdom, calling this once before setting up the signal handler makes
+	// it async signal safe in practice :-/
+	backtrace(const_cast<void**>(other_backtraces), net2backtraces_max);
 
 	sigemptyset(&sigprof_set);
 	sigaddset(&sigprof_set, SIGPROF);
@@ -238,6 +243,7 @@ public:
 	int sslHandshakerThreadsStarted;
 	int sslPoolHandshakesInProgress;
 	TLSConfig tlsConfig;
+	Reference<TLSPolicy> activeTlsPolicy;
 	Future<Void> backgroundCertRefresh;
 	ETLSInitState tlsInitializedState;
 
@@ -506,6 +512,8 @@ public:
 	}
 
 	NetworkAddress getPeerAddress() const override { return peer_address; }
+
+	bool hasTrustedPeer() const override { return true; }
 
 	UID getDebugID() const override { return id; }
 
@@ -839,7 +847,7 @@ public:
 	explicit SSLConnection(boost::asio::io_service& io_service,
 	                       Reference<ReferencedObject<boost::asio::ssl::context>> context)
 	  : id(nondeterministicRandom()->randomUniqueID()), socket(io_service), ssl_sock(socket, context->mutate()),
-	    sslContext(context) {}
+	    sslContext(context), has_trusted_peer(false) {}
 
 	explicit SSLConnection(Reference<ReferencedObject<boost::asio::ssl::context>> context, tcp::socket* existingSocket)
 	  : id(nondeterministicRandom()->randomUniqueID()), socket(std::move(*existingSocket)),
@@ -900,6 +908,9 @@ public:
 
 		try {
 			Future<Void> onHandshook;
+			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [this](bool verifyOk) {
+				self->has_trusted_peer = verifyOk;
+			});
 
 			// If the background handshakers are not all busy, use one
 			if (N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
@@ -975,6 +986,10 @@ public:
 
 		try {
 			Future<Void> onHandshook;
+			ConfigureSSLStream(N2::g_net2->activeTlsPolicy, self->ssl_sock, [this](bool verifyOk) {
+				self->has_trusted_peer = verifyOk;
+			});
+
 			// If the background handshakers are not all busy, use one
 			if (N2::g_net2->sslPoolHandshakesInProgress < N2::g_net2->sslHandshakerThreadsStarted) {
 				holder = Hold(&N2::g_net2->sslPoolHandshakesInProgress);
@@ -1108,6 +1123,8 @@ public:
 
 	NetworkAddress getPeerAddress() const override { return peer_address; }
 
+	bool hasTrustedPeer() const override { return has_trusted_peer; }
+
 	UID getDebugID() const override { return id; }
 
 	tcp::socket& getSocket() override { return socket; }
@@ -1120,6 +1137,7 @@ private:
 	ssl_socket ssl_sock;
 	NetworkAddress peer_address;
 	Reference<ReferencedObject<boost::asio::ssl::context>> sslContext;
+	bool has_trusted_peer;
 
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
@@ -1165,6 +1183,16 @@ public:
 	            NetworkAddress listenAddress)
 	  : io_service(io_service), listenAddress(listenAddress), acceptor(io_service, tcpEndpoint(listenAddress)),
 	    contextVar(contextVar) {
+		// when port 0 is passed in, a random port will be opened
+		// set listenAddress as the address with the actual port opened instead of port 0
+		if (listenAddress.port == 0) {
+			this->listenAddress = NetworkAddress::parse(acceptor.local_endpoint()
+			                                                .address()
+			                                                .to_string()
+			                                                .append(":")
+			                                                .append(std::to_string(acceptor.local_endpoint().port()))
+			                                                .append(listenAddress.isTLS() ? ":tls" : ""));
+		}
 		platform::setCloseOnExec(acceptor.native_handle());
 	}
 
@@ -1240,45 +1268,11 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	updateNow();
 }
 
-ACTOR static Future<Void> watchFileForChanges(std::string filename, AsyncTrigger* fileChanged) {
-	if (filename == "") {
-		return Never();
-	}
-	state bool firstRun = true;
-	state bool statError = false;
-	state std::time_t lastModTime = 0;
-	loop {
-		try {
-			std::time_t modtime = wait(IAsyncFileSystem::filesystem()->lastWriteTime(filename));
-			if (firstRun) {
-				lastModTime = modtime;
-				firstRun = false;
-			}
-			if (lastModTime != modtime || statError) {
-				lastModTime = modtime;
-				statError = false;
-				fileChanged->trigger();
-			}
-		} catch (Error& e) {
-			if (e.code() == error_code_io_error) {
-				// EACCES, ELOOP, ENOENT all come out as io_error(), but are more of a system
-				// configuration issue than an FDB problem.  If we managed to load valid
-				// certificates, then there's no point in crashing, but we should complain
-				// loudly.  IAsyncFile will log the error, but not necessarily as a warning.
-				TraceEvent(SevWarnAlways, "TLSCertificateRefreshStatError").detail("File", filename);
-				statError = true;
-			} else {
-				throw;
-			}
-		}
-		wait(delay(FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS));
-	}
-}
-
 ACTOR static Future<Void> reloadCertificatesOnChange(
     TLSConfig config,
     std::function<void()> onPolicyFailure,
-    AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>>* contextVar) {
+    AsyncVar<Reference<ReferencedObject<boost::asio::ssl::context>>>* contextVar,
+    Reference<TLSPolicy>* policy) {
 	if (FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS <= 0) {
 		return Void();
 	}
@@ -1292,9 +1286,13 @@ ACTOR static Future<Void> reloadCertificatesOnChange(
 	state int mismatches = 0;
 	state AsyncTrigger fileChanged;
 	state std::vector<Future<Void>> lifetimes;
-	lifetimes.push_back(watchFileForChanges(config.getCertificatePathSync(), &fileChanged));
-	lifetimes.push_back(watchFileForChanges(config.getKeyPathSync(), &fileChanged));
-	lifetimes.push_back(watchFileForChanges(config.getCAPathSync(), &fileChanged));
+	const int& intervalSeconds = FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS;
+	lifetimes.push_back(watchFileForChanges(
+	    config.getCertificatePathSync(), &fileChanged, &intervalSeconds, "TLSCertificateRefreshStatError"));
+	lifetimes.push_back(
+	    watchFileForChanges(config.getKeyPathSync(), &fileChanged, &intervalSeconds, "TLSKeyRefreshStatError"));
+	lifetimes.push_back(
+	    watchFileForChanges(config.getCAPathSync(), &fileChanged, &intervalSeconds, "TLSCARefreshStatError"));
 	loop {
 		wait(fileChanged.onTrigger());
 		TraceEvent("TLSCertificateRefreshBegin").log();
@@ -1302,7 +1300,8 @@ ACTOR static Future<Void> reloadCertificatesOnChange(
 		try {
 			LoadedTLSConfig loaded = wait(config.loadAsync());
 			boost::asio::ssl::context context(boost::asio::ssl::context::tls);
-			ConfigureSSLContext(loaded, &context, onPolicyFailure);
+			ConfigureSSLContext(loaded, context);
+			*policy = makeReference<TLSPolicy>(loaded, onPolicyFailure);
 			TraceEvent(SevInfo, "TLSCertificateRefreshSucceeded").log();
 			mismatches = 0;
 			contextVar->set(ReferencedObject<boost::asio::ssl::context>::from(std::move(context)));
@@ -1334,12 +1333,15 @@ void Net2::initTLS(ETLSInitState targetState) {
 			    .detail("KeyPath", tlsConfig.getKeyPathSync())
 			    .detail("HasPassword", !loaded.getPassword().empty())
 			    .detail("VerifyPeers", boost::algorithm::join(loaded.getVerifyPeers(), "|"));
-			ConfigureSSLContext(tlsConfig.loadSync(), &newContext, onPolicyFailure);
+			auto loadedTlsConfig = tlsConfig.loadSync();
+			ConfigureSSLContext(loadedTlsConfig, newContext);
+			activeTlsPolicy = makeReference<TLSPolicy>(loadedTlsConfig, onPolicyFailure);
 			sslContextVar.set(ReferencedObject<boost::asio::ssl::context>::from(std::move(newContext)));
 		} catch (Error& e) {
 			TraceEvent("Net2TLSInitError").error(e);
 		}
-		backgroundCertRefresh = reloadCertificatesOnChange(tlsConfig, onPolicyFailure, &sslContextVar);
+		backgroundCertRefresh =
+		    reloadCertificatesOnChange(tlsConfig, onPolicyFailure, &sslContextVar, &activeTlsPolicy);
 	}
 
 	// If a TLS connection is actually going to be used then start background threads if configured
@@ -2128,7 +2130,7 @@ struct TestGVR {
 };
 
 template <class F>
-void startThreadF(F&& func) {
+THREAD_HANDLE startThreadF(F&& func) {
 	struct Thing {
 		F f;
 		Thing(F&& f) : f(std::move(f)) {}
@@ -2140,10 +2142,10 @@ void startThreadF(F&& func) {
 		}
 	};
 	Thing* t = new Thing(std::move(func));
-	g_network->startThread(Thing::start, t);
+	return g_network->startThread(Thing::start, t);
 }
 
-TEST_CASE("/flow/Net2/ThreadSafeQueue/Interface") {
+TEST_CASE("flow/Net2/ThreadSafeQueue/Interface") {
 	ThreadSafeQueue<int> tq;
 	ASSERT(!tq.pop().present());
 	ASSERT(tq.canSleep());
@@ -2168,6 +2170,7 @@ TEST_CASE("/flow/Net2/ThreadSafeQueue/Interface") {
 struct QueueTestThreadState {
 	QueueTestThreadState(int threadId, int toProduce) : threadId(threadId), toProduce(toProduce) {}
 	int threadId;
+	THREAD_HANDLE handle;
 	int toProduce;
 	int produced = 0;
 	Promise<Void> doneProducing;
@@ -2183,9 +2186,11 @@ struct QueueTestThreadState {
 	}
 };
 
-TEST_CASE("/flow/Net2/ThreadSafeQueue/Threaded") {
+TEST_CASE("flow/Net2/ThreadSafeQueue/Threaded") {
 	// Uses ThreadSafeQueue from multiple threads. Verifies that all pushed elements are popped, maintaining the
 	// ordering within a thread.
+	noUnseed = true; // multi-threading inherently non-deterministic
+
 	ThreadSafeQueue<int> queue;
 	state std::vector<QueueTestThreadState> perThread = { QueueTestThreadState(0, 1000000),
 		                                                  QueueTestThreadState(1, 100000),
@@ -2197,7 +2202,7 @@ TEST_CASE("/flow/Net2/ThreadSafeQueue/Threaded") {
 		auto& s = perThread[t];
 		doneProducing.push_back(s.doneProducing.getFuture());
 		total += s.toProduce;
-		startThreadF([&queue, &s]() {
+		s.handle = startThreadF([&queue, &s]() {
 			printf("Thread%d\n", s.threadId);
 			int nextYield = 0;
 			while (s.produced < s.toProduce) {
@@ -2228,7 +2233,14 @@ TEST_CASE("/flow/Net2/ThreadSafeQueue/Threaded") {
 
 	wait(waitForAll(doneProducing));
 
-	for (int t = 0; t < std::size(perThread); ++t) {
+	// Make sure we continue on the main thread.
+	Promise<Void> signal;
+	state Future<Void> doneConsuming = signal.getFuture();
+	g_network->onMainThread(std::move(signal), TaskPriority::DefaultOnMainThread);
+	wait(doneConsuming);
+
+	for (int t = 0; t < perThread.size(); ++t) {
+		waitThread(perThread[t].handle);
 		perThread[t].checkDone();
 	}
 	return Void();
@@ -2238,6 +2250,7 @@ TEST_CASE("/flow/Net2/ThreadSafeQueue/Threaded") {
 // satisfy this requirement yet.
 TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 	// Verifies that signals processed by onMainThread() are executed in order.
+	noUnseed = true; // multi-threading inherently non-deterministic
 
 	state std::vector<QueueTestThreadState> perThread = { QueueTestThreadState(0, 1000000),
 		                                                  QueueTestThreadState(1, 100000),
@@ -2246,7 +2259,7 @@ TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 	for (int t = 0; t < perThread.size(); ++t) {
 		auto& s = perThread[t];
 		doneProducing.push_back(s.doneProducing.getFuture());
-		startThreadF([&s]() {
+		s.handle = startThreadF([&s]() {
 			int nextYield = 0;
 			while (s.produced < s.toProduce) {
 				if (nextYield-- == 0) {
@@ -2267,7 +2280,8 @@ TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 	g_network->onMainThread(std::move(signal), TaskPriority::DefaultOnMainThread);
 	wait(doneConsuming);
 
-	for (int t = 0; t < std::size(perThread); ++t) {
+	for (int t = 0; t < perThread.size(); ++t) {
+		waitThread(perThread[t].handle);
 		perThread[t].checkDone();
 	}
 	return Void();

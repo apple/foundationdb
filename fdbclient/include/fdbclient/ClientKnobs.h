@@ -57,6 +57,7 @@ public:
 	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is
 	                                 // mostly wrong (e.g. dumping the database after a test)
 	double FUTURE_VERSION_RETRY_DELAY;
+	double GRV_ERROR_RETRY_DELAY;
 	double UNKNOWN_TENANT_RETRY_DELAY;
 	int REPLY_BYTE_LIMIT;
 	double DEFAULT_BACKOFF;
@@ -77,6 +78,7 @@ public:
 	int64_t CHANGE_FEED_CACHE_SIZE;
 	double CHANGE_FEED_POP_TIMEOUT;
 	int64_t CHANGE_FEED_STREAM_MIN_BYTES;
+	double CHANGE_FEED_START_INTERVAL;
 
 	int MAX_BATCH_SIZE;
 	double GRV_BATCH_TIMEOUT;
@@ -282,6 +284,10 @@ public:
 	int METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK;
 	double METACLUSTER_ASSIGNMENT_FIRST_CHOICE_DELAY;
 	double METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT;
+	int TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantEntryCache is refreshed
+
+	// Encryption-at-rest
+	bool ENABLE_ENCRYPTION_CPU_TIME_LOGGING;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

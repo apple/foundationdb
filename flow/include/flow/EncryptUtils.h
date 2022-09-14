@@ -41,7 +41,7 @@
 const std::string FDB_DEFAULT_ENCRYPT_DOMAIN_NAME = "FdbDefaultEncryptDomain";
 
 using EncryptCipherDomainId = int64_t;
-using EncryptCipherDomainName = StringRef;
+using EncryptCipherDomainNameRef = StringRef;
 using EncryptCipherBaseKeyId = uint64_t;
 using EncryptCipherRandomSalt = uint64_t;
 
