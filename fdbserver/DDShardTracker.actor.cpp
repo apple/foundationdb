@@ -150,7 +150,7 @@ struct DataDistributionTracker : public IDDShardTracker {
 	    anyZeroHealthyTeams(anyZeroHealthyTeams), trackerCancelled(trackerCancelled), ddTenantCache(ddTenantCache) {}
 
 	~DataDistributionTracker() override {
-		if(trackerCancelled) {
+		if (trackerCancelled) {
 			*trackerCancelled = true;
 		}
 		// Cancel all actors so they aren't waiting on sizeChanged broken promise
@@ -2089,22 +2089,22 @@ void PhysicalShardCollection::logPhysicalShardCollection() {
 /*
  * FIXME: enable this test in the future
 TEST_CASE("/DataDistributor/Tracker/FetchTopK") {
-	state DataDistributionTracker self;
-	state std::vector<KeyRange> ranges;
-	for (int i = 1; i <= 10; i += 2) {
-		ranges.emplace_back(KeyRangeRef(doubleToTestKey(i), doubleToTestKey(i + 2)));
-		std::cout << "add range: " << ranges.back().begin.toString() << "\n";
-	}
-	state GetTopKMetricsRequest req(ranges, 3, 1000, 100000);
+    state DataDistributionTracker self;
+    state std::vector<KeyRange> ranges;
+    for (int i = 1; i <= 10; i += 2) {
+        ranges.emplace_back(KeyRangeRef(doubleToTestKey(i), doubleToTestKey(i + 2)));
+        std::cout << "add range: " << ranges.back().begin.toString() << "\n";
+    }
+    state GetTopKMetricsRequest req(ranges, 3, 1000, 100000);
 
-	double targetDensities[10] = { 2, 1, 3, 5, 4, 10, 6, 8, 7, 0 };
-	for (int i = 0; i <= 5; ++i) {
-	}
-	wait(fetchTopKShardMetrics_impl(&self, req));
-	auto& reply = req.reply.getFuture().get();
-	ASSERT(reply.shardMetrics.empty());
-	ASSERT(reply.maxReadLoad == -1);
-	ASSERT(reply.minReadLoad == -1);
+    double targetDensities[10] = { 2, 1, 3, 5, 4, 10, 6, 8, 7, 0 };
+    for (int i = 0; i <= 5; ++i) {
+    }
+    wait(fetchTopKShardMetrics_impl(&self, req));
+    auto& reply = req.reply.getFuture().get();
+    ASSERT(reply.shardMetrics.empty());
+    ASSERT(reply.maxReadLoad == -1);
+    ASSERT(reply.minReadLoad == -1);
 
-	return Void();
+    return Void();
 } */
