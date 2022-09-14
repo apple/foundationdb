@@ -1,8 +1,8 @@
 [configuration]
-configDB = 'random'
+configDB = 'paxos'
 
 [[test]]
-testTitle = 'ConfigIncrement'
+testTitle = 'ConfigIncrementWithKills'
 
   [[test.workload]]
   testName = 'ConfigIncrement'
@@ -13,7 +13,10 @@ testTitle = 'ConfigIncrement'
 
   [[test.workload]]
   testName = 'Attrition'
-  machinesToKill = 10
-  machinesToLeave = 3
-  reboot = true
-  testDuration = 10.0
+  reboot = false
+
+  [[test.workload]]
+  testName = 'ChangeConfig'
+  maxDelayBeforeChange = 120.0
+  coordinators = 'auto'
+  coordinatorChanges = 2

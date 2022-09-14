@@ -23,7 +23,6 @@
 """Documentation for this API can be found at
 https://apple.github.io/foundationdb/api-python.html"""
 
-import fdb
 from fdb import impl as _impl
 
 _tenant_map_prefix = b'\xff\xff/management/tenant/map/'
@@ -53,9 +52,6 @@ def _check_tenant_existence(tr, key, existence_check_marker, force_maybe_commite
 # If the existence_check_marker is a non-empty list, then the existence check is skipped.
 @_impl.transactional
 def _create_tenant_impl(tr, tenant_name, existence_check_marker, force_existence_check_maybe_committed=False):
-    if fdb._version < 720:
-        tr.options.set_special_key_space_relaxed()
-
     tr.options.set_special_key_space_enable_writes()
     key = b'%s%s' % (_tenant_map_prefix, tenant_name)
 
@@ -74,9 +70,6 @@ def _create_tenant_impl(tr, tenant_name, existence_check_marker, force_existence
 # If the existence_check_marker is a non-empty list, then the existence check is skipped.
 @_impl.transactional
 def _delete_tenant_impl(tr, tenant_name, existence_check_marker, force_existence_check_maybe_committed=False):
-    if fdb._version < 720:
-        tr.options.set_special_key_space_relaxed()
-
     tr.options.set_special_key_space_enable_writes()
     key = b'%s%s' % (_tenant_map_prefix, tenant_name)
 
@@ -110,9 +103,6 @@ class FDBTenantList(object):
 # JSON strings of the tenant metadata
 @_impl.transactional
 def _list_tenants_impl(tr, begin, end, limit):
-    if fdb._version < 720:
-        tr.options.set_special_key_space_relaxed()
-
     tr.options.set_raw_access()
     begin_key = b'%s%s' % (_tenant_map_prefix, begin)
     end_key = b'%s%s' % (_tenant_map_prefix, end)

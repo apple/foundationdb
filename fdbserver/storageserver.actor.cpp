@@ -2245,7 +2245,7 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 		return Void();
 	}
 
-	state ICheckpointReader* reader;
+	state ICheckpointReader* reader = nullptr;
 	try {
 		reader = newCheckpointReader(it->second, self->thisServerID);
 		wait(reader->init(BinaryWriter::toValue(req.range, IncludeVersion())));

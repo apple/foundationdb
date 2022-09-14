@@ -327,7 +327,8 @@ private:
 	}
 
 	void checkSetConfigKeys(MutationRef m) {
-		if (!m.param1.startsWith(configKeysPrefix) && m.param1 != coordinatorsKey) {
+		if (!m.param1.startsWith(configKeysPrefix) && m.param1 != coordinatorsKey &&
+		    m.param1 != previousCoordinatorsKey) {
 			return;
 		}
 		if (Optional<StringRef>(m.param2) !=
@@ -343,7 +344,8 @@ private:
 				TraceEvent("MutationRequiresRestart", dbgid)
 				    .detail("M", m)
 				    .detail("PrevValue", t.orDefault("(none)"_sr))
-				    .detail("ToCommit", toCommit != nullptr);
+				    .detail("ToCommit", toCommit != nullptr)
+				    .detail("InitialCommit", initialCommit);
 				confChange = true;
 			}
 		}
@@ -1115,6 +1117,9 @@ private:
 	void checkClearMiscRangeKeys(KeyRangeRef range) {
 		if (initialCommit) {
 			return;
+		}
+		if (range.contains(previousCoordinatorsKey)) {
+			txnStateStore->clear(singleKeyRange(previousCoordinatorsKey));
 		}
 		if (range.contains(coordinatorsKey)) {
 			txnStateStore->clear(singleKeyRange(coordinatorsKey));

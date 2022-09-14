@@ -29,6 +29,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
+#include "flow/CodeProbe.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -605,6 +606,8 @@ std::vector<RangeToSplit> findTenantShardBoundaries(KeyRangeMap<ShardTrackedData
 		if (shardContainingTenantStart.begin() != tenantKeys.begin ||
 		    shardContainingTenantStart.end() != tenantKeys.end) {
 
+			CODE_PROBE(true, "Splitting a shard that contains complete tenant key range");
+
 			auto startShardSize = shardContainingTenantStart->value().stats;
 
 			if (startShardSize->get().present()) {
@@ -613,11 +616,16 @@ std::vector<RangeToSplit> findTenantShardBoundaries(KeyRangeMap<ShardTrackedData
 				                                      tenantKeys.begin,
 				                                      tenantKeys.end);
 				result.emplace_back(shardContainingTenantStart, faultLines);
+			} else {
+				CODE_PROBE(true,
+				           "Shard that contains complete tenant key range not split since shard stats are unavailable");
 			}
 		}
 	} else {
 		auto startShardSize = shardContainingTenantStart->value().stats;
 		auto endShardSize = shardContainingTenantEnd->value().stats;
+
+		CODE_PROBE(true, "Splitting multiple shards that a tenant key range straddles");
 
 		if (startShardSize->get().present() && endShardSize->get().present()) {
 			if (shardContainingTenantStart->begin() != tenantKeys.begin) {
@@ -635,6 +643,8 @@ std::vector<RangeToSplit> findTenantShardBoundaries(KeyRangeMap<ShardTrackedData
 				                                      tenantKeys.end);
 				result.emplace_back(shardContainingTenantEnd, faultLines);
 			}
+		} else {
+			CODE_PROBE(true, "Shards that contain tenant key range not split since shard stats are unavailable");
 		}
 	}
 
