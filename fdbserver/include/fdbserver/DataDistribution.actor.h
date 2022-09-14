@@ -417,6 +417,7 @@ private:
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer
 struct DDShardInfo {
 	Key key;
+	// all UID are sorted
 	std::vector<UID> primarySrc;
 	std::vector<UID> remoteSrc;
 	std::vector<UID> primaryDest;
@@ -427,6 +428,21 @@ struct DDShardInfo {
 
 	explicit DDShardInfo(Key key) : key(key), hasDest(false) {}
 	DDShardInfo(Key key, UID srcId, UID destId) : key(key), hasDest(false), srcId(srcId), destId(destId) {}
+
+	bool operator==(const DDShardInfo& other) const {
+		//		std::cout << key.toHexString() << " | " << other.key.toHexString() << "\n";
+		//		std::cout << hasDest << " | " << other.hasDest << "\n";
+		//		std::cout << srcId.toString() << " | " << other.srcId.toString() << "\n";
+		//		std::cout << destId.toString() << " | " << other.destId.toString() << "\n";
+		//		std::cout << describe(primarySrc) << " | " << describe(other.primarySrc) << "\n";
+		//		std::cout << describe(primaryDest) << " | " << describe(other.primaryDest) << "\n";
+		//		std::cout << describe(remoteSrc) << " | " << describe(other.remoteSrc) << "\n";
+		//		std::cout << describe(remoteSrc) << " | " << describe(other.remoteSrc) << "\n";
+
+		return key == other.key && hasDest == other.hasDest && srcId == other.srcId && destId == other.destId &&
+		       primaryDest == other.primaryDest && primarySrc == other.primarySrc && remoteSrc == other.remoteSrc &&
+		       remoteDest == other.remoteDest;
+	}
 };
 
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {

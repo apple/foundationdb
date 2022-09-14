@@ -537,16 +537,25 @@ std::vector<DDShardInfo> DDMockTxnProcessor::getDDShardInfos() const {
 	for (auto it = allRange.begin(); it != allRange.end(); ++it) {
 		// FIXME: now just use anonymousShardId
 		KeyRangeRef curRange = it->range();
-		DDShardInfo info(curRange.begin, anonymousShardId, anonymousShardId);
+		DDShardInfo info(curRange.begin);
+
 		auto teams = mgs->shardMapping->getTeamsFor(curRange);
-		if (!teams.second.empty()) {
-			// in-flight shard
+		if (!teams.first.empty() && !teams.second.empty()) {
+			CODE_PROBE(true, "Mock InitialDataDistribution In-Flight shard");
 			info.hasDest = true;
+			info.destId = anonymousShardId;
+			info.srcId = anonymousShardId;
 			transformTeamsToServerIds(teams.second, info.primarySrc, info.remoteSrc);
 			transformTeamsToServerIds(teams.first, info.primaryDest, info.remoteDest);
-		} else {
+		} else if (!teams.first.empty()) {
+			CODE_PROBE(true, "Mock InitialDataDistribution Static shard");
+			info.srcId = anonymousShardId;
 			transformTeamsToServerIds(teams.first, info.primarySrc, info.remoteSrc);
+		} else {
+			ASSERT(false);
 		}
+
+		res.push_back(std::move(info));
 	}
 	res.emplace_back(allKeys.end);
 

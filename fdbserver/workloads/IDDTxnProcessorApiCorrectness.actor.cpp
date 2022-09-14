@@ -26,6 +26,18 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+void verifyInitDataEqual(Reference<InitialDataDistribution> real, Reference<InitialDataDistribution> mock) {
+	ASSERT_EQ(real->mode, mock->mode);
+	ASSERT(real->initHealthyZoneValue == mock->initHealthyZoneValue);
+	ASSERT_EQ(real->allServers.size(), mock->allServers.size());
+
+	ASSERT(real->primaryTeams == mock->primaryTeams);
+	ASSERT(real->remoteTeams == mock->remoteTeams);
+	ASSERT_EQ(real->dataMoveMap.size(), mock->dataMoveMap.size());
+	ASSERT_EQ(real->shards.size(), mock->shards.size());
+	ASSERT(std::equal(real->shards.begin(), real->shards.end(), mock->shards.begin(), mock->shards.end()));
+}
+
 // Verify that all IDDTxnProcessor API implementations has consistent result
 struct IDDTxnProcessorApiWorkload : TestWorkload {
 	static const char* desc;
@@ -64,7 +76,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		           self->real->getInitialDataDistribution(
 		               self->ddContext.id(), self->ddContext.lock, {}, self->ddContext.ddEnabledState.get())));
 		std::cout << "Finish read real InitialDataDistribution: server size " << self->realInitDD->allServers.size()
-		          << std::endl;
+		          << ", shard size: " << self->realInitDD->shards.size() << std::endl;
 
 		return Void();
 	}
@@ -83,7 +95,10 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		            self->ddContext.id(), self->ddContext.lock, {}, self->ddContext.ddEnabledState.get())
 		        .get();
 
-		wait(timeout(reportErrors(self->worker(cx, self), "MoveKeysWorkloadWorkerError"), self->testDuration, Void()));
+		verifyInitDataEqual(self->realInitDD, mockInitData);
+
+		// wait(timeout(reportErrors(self->worker(cx, self), "IDDTxnProcessorApiWorkload"), self->testDuration,
+		// Void()));
 
 		// Always set the DD mode back, even if we die with an error
 		TraceEvent("RMKDoneMoving").log();
@@ -92,7 +107,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> worker(Database cx, IDDTxnProcessorApiWorkload* self) { return Void(); }
+	// ACTOR Future<Void> worker(Database cx, IDDTxnProcessorApiWorkload* self) { return Void(); }
 
 	Future<bool> check(Database const& cx) override {
 		return tag(delay(testDuration / 2), true);

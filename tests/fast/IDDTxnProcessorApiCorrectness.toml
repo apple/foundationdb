@@ -1,5 +1,6 @@
 [configuration]
 generateFearless = false
+disableTss = true
 
 [[test]]
 testTitle = 'IDDTxnProcessorApiCorrectness'
