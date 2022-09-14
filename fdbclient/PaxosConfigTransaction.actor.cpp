@@ -218,8 +218,8 @@ class GetGenerationQuorum {
 					if (self->coordinatorsChangedFuture.isReady()) {
 						throw coordinators_changed();
 					}
-					wait(delayJittered(
-					    std::clamp(0.005 * (1 << retries), 0.0, CLIENT_KNOBS->TIMEOUT_RETRY_UPPER_BOUND)));
+					wait(delayJittered(std::clamp(
+					    0.005 * (1 << std::min(retries, 30)), 0.0, CLIENT_KNOBS->TIMEOUT_RETRY_UPPER_BOUND)));
 					if (deterministicRandom()->random01() < 0.05) {
 						// Randomly inject a delay of at least the generation
 						// reply timeout, to try to prevent contention between
