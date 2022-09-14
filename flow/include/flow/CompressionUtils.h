@@ -29,6 +29,7 @@ enum class CompressionFilter {
 #ifdef ZLIB_LIB_SUPPORTED
 	GZIP,
 #endif
+	ZSTD,
 	LAST // Always the last member
 };
 
@@ -46,7 +47,9 @@ struct CompressionUtils {
 			return CompressionFilter::GZIP;
 		}
 #endif
-		else {
+		else if (filter == "ZSTD") {
+			return CompressionFilter::ZSTD;
+		} else {
 			throw not_implemented();
 		}
 	}
@@ -60,7 +63,9 @@ struct CompressionUtils {
 			return "GZP";
 		}
 #endif
-		else {
+		else if (filter == CompressionFilter::ZSTD) {
+			return "ZSTD";
+		} else {
 			throw not_implemented();
 		}
 	}

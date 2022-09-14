@@ -29,6 +29,7 @@
 #include <boost/iostreams/filter/gzip.hpp>
 #endif
 #include <boost/iostreams/filtering_streambuf.hpp>
+#include <boost/iostreams/filter/zstd.hpp>
 #include <sstream>
 
 StringRef CompressionUtils::compress(const CompressionFilter filter, const StringRef& data, Arena& arena) {
@@ -42,6 +43,9 @@ StringRef CompressionUtils::compress(const CompressionFilter filter, const Strin
 		return CompressionUtils::compress(filter, data, bio::gzip::default_compression, arena);
 	}
 #endif
+	if (filter == CompressionFilter::ZSTD) {
+		return CompressionUtils::compress(filter, data, bio::zstd::default_compression, arena);
+	}
 	throw not_implemented();
 }
 
@@ -62,6 +66,9 @@ StringRef CompressionUtils::compress(const CompressionFilter filter, const Strin
 		out.push(bio::gzip_compressor(bio::gzip_params(level)));
 	}
 #endif
+	if (filter == CompressionFilter::ZSTD) {
+		out.push(bio::zstd_compressor(bio::zstd_params(level)));
+	}
 	out.push(decomStream);
 	bio::copy(out, compStream);
 
@@ -85,6 +92,9 @@ StringRef CompressionUtils::decompress(const CompressionFilter filter, const Str
 		out.push(bio::gzip_decompressor());
 	}
 #endif
+	if (filter == CompressionFilter::ZSTD) {
+		out.push(bio::zstd_decompressor());
+	}
 	out.push(compStream);
 	bio::copy(out, decompStream);
 
@@ -93,6 +103,39 @@ StringRef CompressionUtils::decompress(const CompressionFilter filter, const Str
 
 // Only used to link unit tests
 void forceLinkCompressionUtilsTest() {}
+
+namespace {
+void testCompression(CompressionFilter filter) {
+	Arena arena;
+	const int size = deterministicRandom()->randomInt(512, 1024);
+	Standalone<StringRef> uncompressed = makeString(size);
+	deterministicRandom()->randomBytes(mutateString(uncompressed), size);
+
+	Standalone<StringRef> compressed = CompressionUtils::compress(filter, uncompressed, arena);
+	ASSERT_NE(compressed.compare(uncompressed), 0);
+
+	StringRef verify = CompressionUtils::decompress(filter, compressed, arena);
+	ASSERT_EQ(verify.compare(uncompressed), 0);
+}
+
+void testCompression2(CompressionFilter filter) {
+	Arena arena;
+	const int size = deterministicRandom()->randomInt(512, 1024);
+	std::string s(size, 'x');
+	Standalone<StringRef> uncompressed = Standalone<StringRef>(StringRef(s));
+	printf("Size before: %d\n", (int)uncompressed.size());
+
+	Standalone<StringRef> compressed = CompressionUtils::compress(filter, uncompressed, arena);
+	ASSERT_NE(compressed.compare(uncompressed), 0);
+	printf("Size after: %d\n", (int)compressed.size());
+	// Assert compressed size is less than half.
+	ASSERT(compressed.size() * 2 < uncompressed.size());
+
+	StringRef verify = CompressionUtils::decompress(filter, compressed, arena);
+	ASSERT_EQ(verify.compare(uncompressed), 0);
+}
+
+} // namespace
 
 TEST_CASE("/CompressionUtils/noCompression") {
 	Arena arena;
@@ -106,47 +149,37 @@ TEST_CASE("/CompressionUtils/noCompression") {
 	StringRef verify = CompressionUtils::decompress(CompressionFilter::NONE, compressed, arena);
 	ASSERT_EQ(verify.compare(uncompressed), 0);
 
-	TraceEvent("NoCompression_Done").log();
+	TraceEvent("NoCompressionDone");
 
 	return Void();
 }
 
 #ifdef ZLIB_LIB_SUPPORTED
 TEST_CASE("/CompressionUtils/gzipCompression") {
-	Arena arena;
-	const int size = deterministicRandom()->randomInt(512, 1024);
-	Standalone<StringRef> uncompressed = makeString(size);
-	deterministicRandom()->randomBytes(mutateString(uncompressed), size);
-
-	Standalone<StringRef> compressed = CompressionUtils::compress(CompressionFilter::GZIP, uncompressed, arena);
-	ASSERT_NE(compressed.compare(uncompressed), 0);
-
-	StringRef verify = CompressionUtils::decompress(CompressionFilter::GZIP, compressed, arena);
-	ASSERT_EQ(verify.compare(uncompressed), 0);
-
-	TraceEvent("GzipCompression_Done").log();
+	testCompression(CompressionFilter::GZIP);
+	TraceEvent("GzipCompressionDone");
 
 	return Void();
 }
 
 TEST_CASE("/CompressionUtils/gzipCompression2") {
-	Arena arena;
-	const int size = deterministicRandom()->randomInt(512, 1024);
-	std::string s(size, 'x');
-	Standalone<StringRef> uncompressed = Standalone<StringRef>(StringRef(s));
-	printf("Size before: %d\n", (int)uncompressed.size());
-
-	Standalone<StringRef> compressed = CompressionUtils::compress(CompressionFilter::GZIP, uncompressed, arena);
-	ASSERT_NE(compressed.compare(uncompressed), 0);
-	printf("Size after: %d\n", (int)compressed.size());
-	// Assert compressed size is less than half.
-	ASSERT(compressed.size() * 2 < uncompressed.size());
-
-	StringRef verify = CompressionUtils::decompress(CompressionFilter::GZIP, compressed, arena);
-	ASSERT_EQ(verify.compare(uncompressed), 0);
-
-	TraceEvent("GzipCompression_Done").log();
+	testCompression2(CompressionFilter::GZIP);
+	TraceEvent("GzipCompression2Done");
 
 	return Void();
 }
 #endif
+
+TEST_CASE("/CompressionUtils/zstdCompression") {
+	testCompression(CompressionFilter::ZSTD);
+	TraceEvent("ZstdCompressionDone");
+
+	return Void();
+}
+
+TEST_CASE("/CompressionUtils/gzipCompression2") {
+	testCompression2(CompressionFilter::ZSTD);
+	TraceEvent("ZstdCompression2Done");
+
+	return Void();
+}
