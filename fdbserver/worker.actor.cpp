@@ -263,7 +263,9 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 			if (err.error.code() == error_code_please_reboot ||
 			    err.error.code() == error_code_please_reboot_remote_kv_store ||
 			    (err.role == Role::SHARED_TRANSACTION_LOG &&
-			     (err.error.code() == error_code_io_error || err.error.code() == error_code_io_timeout)))
+			     (err.error.code() == error_code_io_error || err.error.code() == error_code_io_timeout)) ||
+			    (SERVER_KNOBS->STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT && err.role == Role::STORAGE_SERVER &&
+			     err.error.code() == error_code_io_timeout))
 				throw err.error;
 		}
 	}
