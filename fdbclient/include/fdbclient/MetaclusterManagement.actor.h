@@ -1074,8 +1074,12 @@ struct CreateTenantImpl {
 	// Parameter set if tenant creation permanently fails on the data cluster
 	Optional<int64_t> replaceExistingTenantId;
 
-	CreateTenantImpl(Reference<DB> managementDb, bool preferAssignedCluster, TenantName tenantName, TenantMapEntry tenantEntry)
-	  : ctx(managementDb), preferAssignedCluster(preferAssignedCluster), tenantName(tenantName), tenantEntry(tenantEntry) {}
+	CreateTenantImpl(Reference<DB> managementDb,
+	                 bool preferAssignedCluster,
+	                 TenantName tenantName,
+	                 TenantMapEntry tenantEntry)
+	  : ctx(managementDb), preferAssignedCluster(preferAssignedCluster), tenantName(tenantName),
+	    tenantEntry(tenantEntry) {}
 
 	ACTOR static Future<ClusterName> checkClusterAvailability(Reference<IDatabase> dataClusterDb,
 	                                                          ClusterName clusterName) {
@@ -1153,46 +1157,43 @@ struct CreateTenantImpl {
 
 			if (groupEntry.present()) {
 				ASSERT(groupEntry.get().assignedCluster.present());
-				if (self->preferAssignedCluster) {
-					ASSERT(groupEntry.get().assignedCluster.get() == self->tenantEntry.assignedCluster.get());
+				if (self->preferAssignedCluster &&
+				    groupEntry.get().assignedCluster.get() != self->tenantEntry.assignedCluster.get()) {
+					throw invalid_tenant_configuration();
 				}
 				return std::make_pair(groupEntry.get().assignedCluster.get(), true);
 			}
 		}
 
+		state std::vector<Future<Reference<IDatabase>>> dataClusterDbs;
+		state std::vector<ClusterName> dataClusterNames;
+		state std::vector<Future<ClusterName>> clusterAvailabilityChecks;
 		// Get a set of the most full clusters that still have capacity
 		// If preferred cluster is specified, look for that one.
-		state std::vector<Future<Reference<IDatabase>>> dataClusterDbs;
-		state std::vector<Future<ClusterName>> clusterAvailabilityChecks;
-		if (self->preferAssignedCluster) {
-			dataClusterDbs.push_back(getAndOpenDatabase(tr, self->tenantEntry.assignedCluster.get()));
-			wait(waitForAll(dataClusterDbs));
-			clusterAvailabilityChecks.push_back(
-			    checkClusterAvailability(dataClusterDbs[0].get(), self->tenantEntry.assignedCluster.get()));
-		} else {
-			state KeyBackedSet<Tuple>::RangeResultType availableClusters =
-			    wait(ManagementClusterMetadata::clusterCapacityIndex.getRange(
-			        tr,
-			        {},
-			        {},
-			        CLIENT_KNOBS->METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK,
-			        Snapshot::False,
-			        Reverse::True));
+		state KeyBackedSet<Tuple>::RangeResultType availableClusters =
+		    wait(ManagementClusterMetadata::clusterCapacityIndex.getRange(
+		        tr, {}, {}, CLIENT_KNOBS->METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK, Snapshot::False, Reverse::True));
+		if (availableClusters.results.empty()) {
+			throw metacluster_no_capacity();
+		}
 
-			if (availableClusters.results.empty()) {
-				throw metacluster_no_capacity();
+		bool preferredClusterPresent = false;
+		for (auto clusterTuple : availableClusters.results) {
+			if (self->preferAssignedCluster && self->tenantEntry.assignedCluster.get() != clusterTuple.getString(1)) {
+				continue;
 			}
+			preferredClusterPresent = true;
+			dataClusterDbs.push_back(getAndOpenDatabase(tr, clusterTuple.getString(1)));
+			dataClusterNames.push_back(clusterTuple.getString(1));
+		}
+		if (self->preferAssignedCluster && !preferredClusterPresent) {
+			throw metacluster_no_capacity();
+		}
+		wait(waitForAll(dataClusterDbs));
 
-			for (auto clusterTuple : availableClusters.results) {
-				dataClusterDbs.push_back(getAndOpenDatabase(tr, clusterTuple.getString(1)));
-			}
-			wait(waitForAll(dataClusterDbs));
-
-			// Check the availability of our set of clusters
-			for (int i = 0; i < availableClusters.results.size(); ++i) {
-				clusterAvailabilityChecks.push_back(
-				    checkClusterAvailability(dataClusterDbs[i].get(), availableClusters.results[i].getString(1)));
-			}
+		// Check the availability of our set of clusters
+		for (int i = 0; i < dataClusterDbs.size(); ++i) {
+			clusterAvailabilityChecks.push_back(checkClusterAvailability(dataClusterDbs[i].get(), dataClusterNames[i]));
 		}
 
 		// Wait for a successful availability check from some cluster. We prefer the most full cluster, but if it

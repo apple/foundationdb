@@ -96,7 +96,8 @@ void applyConfigurationToSpecialKeys(Reference<ITransaction> tr,
                                      std::map<Standalone<StringRef>, Optional<Value>> configuration) {
 	for (auto [configName, value] : configuration) {
 		if (configName == "assigned_cluster"_sr) {
-			throw invalid_option();
+			fmt::print(stderr, "ERROR: assigned_cluster is only valid in metacluster configuration.\n");
+			throw invalid_tenant_configuration();
 		}
 		if (value.present()) {
 			tr->set(makeConfigKey(tenantName, configName), value.get());
