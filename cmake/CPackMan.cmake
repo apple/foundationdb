@@ -1,7 +1,7 @@
 set(CPACKMAN_BINARY_DIR "${CMAKE_BINARY_DIR}")
 
-function(cpackman_provide_dependency)
-  if(NOT ARGV0 STREQUAL "FIND_PACKAGE")
+macro(cpackman_provide_dependency)
+  if(NOT "${ARGV0}" STREQUAL "FIND_PACKAGE")
     message(FATAL_ERROR "Method ${ARGV0} is not supported by CPackMan")
   endif()
   if(NOT Python3_Interpreter_FOUND)
@@ -38,6 +38,6 @@ function(cpackman_provide_dependency)
     file(READ "${CPACKMAN_BINARY_DIR}/cpackman_out.cmake" cpackman_output)
     cmake_language(EVAL CODE "${cpackman_output}")
   endif()
-endfunction()
+endmacro()
 
 cmake_language(SET_DEPENDENCY_PROVIDER cpackman_provide_dependency SUPPORTED_METHODS FIND_PACKAGE)

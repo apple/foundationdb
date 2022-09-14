@@ -18,7 +18,7 @@ class OpenSSLBuild(Build):
             self.env['CC'] = config.c_compiler
         super().__init__(source)
 
-    def configure(self) -> None:
+    def run_configure(self) -> None:
         source_folder = self.fetch_source.get_source()
         openssl_dir = self.install_folder / 'ssl'
         configure_command = ['{}/config'.format(str(source_folder.absolute())),
@@ -32,14 +32,11 @@ class OpenSSLBuild(Build):
             configure_command += 'enable-ubsan'
         run_command(configure_command, env=self.env, cwd=self.build_folder)
 
-    def build(self) -> None:
-        self.configure()
+    def run_build(self) -> None:
         run_command(['make', '-j{}'.format(multiprocessing.cpu_count())], env=self.env, cwd=self.build_folder)
 
-    def install(self) -> Path:
-        self.build()
+    def run_install(self) -> None:
         run_command(['make', 'install_sw'], env=self.env, cwd=self.build_folder)
-        return self.install_folder
 
     def print_target(self, out: TextIO):
         install_path = self.install()
@@ -54,7 +51,15 @@ class OpenSSLBuild(Build):
                            include_dirs=[include_path],
                            library_path=crypto_path,
                            link_language='C')
-        print('set(OpenSSL_FOUND ON PARENT_SCOPE)', file=out)
+        print('set(OPENSSL_FOUND ON)', file=out)
+        print('set(OPENSSL_VERSION, "{}")'.format(self.fetch_source.version_string()), file=out)
+        print('set(OPENSSL_INCLUDE_DIR "{}")'.format(str(include_path.absolute())), file=out)
+        print('set(OPENSSL_CRYPTO_LIBRARY "{}")'.format(str(crypto_path.absolute())), file=out)
+        print('set(OPENSSL_CRYPTO_LIBRARIES "{}")'.format(str(crypto_path.absolute())), file=out)
+        print('set(OPENSSL_SSL_LIBRARY "{}")'.format(str(ssl_path.absolute())), file=out)
+        print('set(OPENSSL_SSL_LIBRARIES "{}")'.format(str(ssl_path.absolute())), file=out)
+        print('set(OPENSSL_LIBRARIES "{}")'.format(';'.join([str(ssl_path.absolute()), str(crypto_path.absolute())])),
+              file=out)
 
 
 def provide_module(out: TextIO, args: List[str]):

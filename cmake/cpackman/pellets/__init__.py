@@ -127,12 +127,41 @@ class Build:
         return m.hexdigest()
 
     def configure(self) -> None:
-        raise NotImplemented()
+        configure_done_file = self.build_folder / '.cpackman_configure_done'
+        if configure_done_file.exists():
+            return
+        else:
+            self.run_configure()
+            with open(configure_done_file, 'w'):
+                pass
 
     def build(self) -> None:
-        raise NotImplemented()
+        build_done_file = self.build_folder / '.cpackman_build_done'
+        if build_done_file.exists():
+            return
+        else:
+            self.run_build()
+            with open(build_done_file, 'w'):
+                pass
 
     def install(self) -> Path:
+        install_done_file = self.install_folder / '.cpackman_install_done'
+        if install_done_file.exists():
+            return self.install_folder
+        else:
+            self.configure()
+            self.build()
+            self.run_install()
+            with open(install_done_file, 'w'):
+                return self.install_folder
+
+    def run_configure(self) -> None:
+        raise NotImplemented()
+
+    def run_build(self) -> None:
+        raise NotImplemented()
+
+    def run_install(self) -> None:
         raise NotImplemented()
 
     def print_target(self, out: TextIO):
@@ -146,8 +175,8 @@ def add_static_library(out: TextIO, target: str, include_dirs: List[Path], libra
         include_list.append(str(include.absolute()))
     include_cmake_list = ';'.join(include_list)
     print('add_library({} STATIC IMPORTED)'.format(target), file=out)
-    print('set_target_properties({} PROPERTIES'
-          '  INTERFACE_INCLUDE_DIRECTORIES {}'
-          '  IMPORTED_LINK_INTERFACE_LANGUAGES "{}"'
+    print('set_target_properties({} PROPERTIES\n'
+          '  INTERFACE_INCLUDE_DIRECTORIES {}\n'
+          '  IMPORTED_LINK_INTERFACE_LANGUAGES "{}"\n'
           '  IMPORTED_LOCATION "{}")'.format(target, include_cmake_list, link_language, str(library_path.absolute())),
           file=out)
