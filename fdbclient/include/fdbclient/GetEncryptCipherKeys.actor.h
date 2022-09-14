@@ -269,7 +269,7 @@ Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(Reference<As
                                                                     BlobCipherMetrics::UsageType usageType) {
 	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains;
 	domains[domainId] = domainName;
-	domains[ENCRYPT_HEADER_DOMAIN_ID] = FDB_DEFAULT_ENCRYPT_DOMAIN_NAME;
+	domains[ENCRYPT_HEADER_DOMAIN_ID] = FDB_ENCRYPT_HEADER_DOMAIN_NAME;
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys =
 	    wait(getLatestEncryptCipherKeys(db, domains, usageType));
 	ASSERT(cipherKeys.count(domainId) > 0);

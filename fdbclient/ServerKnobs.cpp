@@ -803,6 +803,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD,         0.1 );
 	init( PEER_DEGRADATION_CONNECTION_FAILURE_COUNT,               1 );
 	init( WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER,           true );
+	init( STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT,                 false ); if ( randomize && BUGGIFY ) STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT = true;
 
 	// Test harness
 	init( WORKER_POLL_DELAY,                                     1.0 );
@@ -815,6 +816,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	// Dynamic Knobs (implementation)
 	init( COMPACTION_INTERVAL,             isSimulated ? 5.0 : 300.0 );
+	init( BROADCASTER_SELF_UPDATE_DELAY,                         1.0 );
 	init( GET_COMMITTED_VERSION_TIMEOUT,                         3.0 );
 	init( GET_SNAPSHOT_AND_CHANGES_TIMEOUT,                      3.0 );
 	init( FETCH_CHANGES_TIMEOUT,                                 3.0 );

@@ -14,6 +14,8 @@ import time
 from binary_download import FdbBinaryDownloader, SUPPORTED_VERSIONS, CURRENT_VERSION, FUTURE_VERSION
 from local_cluster import LocalCluster, random_secret_string
 
+TENANT_API_VERSION = 720
+
 CLUSTER_ACTIONS = ["wiggle"]
 HEALTH_CHECK_TIMEOUT_SEC = 5
 PROGRESS_CHECK_TIMEOUT_SEC = 30
@@ -162,7 +164,7 @@ class UpgradeTest:
     def __enter__(self):
         print("Starting cluster version {}".format(self.cluster_version))
         self.cluster.start_cluster()
-        self.cluster.create_database(enable_tenants=(self.api_version >= 720))
+        self.cluster.create_database(enable_tenants=(self.api_version >= TENANT_API_VERSION))
         return self
 
     def __exit__(self, xc_type, exc_value, traceback):

@@ -32,12 +32,14 @@ import com.apple.foundationdb.tuple.Tuple;
 import com.apple.foundationdb.tuple.Versionstamp;
 
 public class TupleTest {
+	public static final int API_VERSION = 720;
+
 	private static final byte FF = (byte)0xff;
 
 	public static void main(String[] args) throws NoSuchFieldException {
 		final int reps = 1000;
 		try {
-			FDB fdb = FDB.selectAPIVersion(720);
+			FDB fdb = FDB.selectAPIVersion(API_VERSION);
 			try(Database db = fdb.open()) {
 				runTests(reps, db);
 			}
