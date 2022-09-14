@@ -39,7 +39,7 @@
 
 #pragma once
 
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 710200
 #include <foundationdb/fdb_c.h>
 
 #include <string>
