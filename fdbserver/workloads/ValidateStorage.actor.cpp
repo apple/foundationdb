@@ -68,7 +68,6 @@ struct ValidateStorage : TestWorkload {
 	}
 
 	ACTOR Future<Void> _start(ValidateStorage* self, Database cx) {
-		// int ignore = wait(setDDMode(cx, 0));
 		TraceEvent("ValidateStorageTestBegin");
 		state std::map<Key, Value> kvs({ { "TestKeyA"_sr, "TestValueA"_sr },
 		                                 { "TestKeyB"_sr, "TestValueB"_sr },
@@ -95,7 +94,6 @@ struct ValidateStorage : TestWorkload {
 			}
 		}
 
-		// int ignore = wait(setDDMode(cx, 1));
 		return Void();
 	}
 
@@ -212,7 +210,6 @@ struct ValidateStorage : TestWorkload {
 	}
 
 	ACTOR Future<Version> writeAndVerify(ValidateStorage* self, Database cx, Key key, Optional<Value> value) {
-		// state Transaction tr(cx);
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		state Version version;
 		loop {

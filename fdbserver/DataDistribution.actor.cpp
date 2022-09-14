@@ -592,6 +592,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 	state bool ddIsTenantAware = SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED;
 	loop {
 		trackerCancelled = false;
+		self->initialized = Promise<Void>();
 
 		// Stored outside of data distribution tracker to avoid slow tasks
 		// when tracker is cancelled
