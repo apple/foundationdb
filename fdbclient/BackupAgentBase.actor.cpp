@@ -319,6 +319,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 				    wait(getEncryptCipherKeys(dbInfo, *logValue.encryptionHeader(), BlobCipherMetrics::BACKUP));
 				logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::BACKUP);
 			}
+			ASSERT(!logValue.isEncrypted());
 			MutationRef originalLogValue = logValue;
 
 			if (logValue.type == MutationRef::ClearRange) {

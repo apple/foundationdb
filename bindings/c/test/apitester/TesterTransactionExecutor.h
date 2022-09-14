@@ -137,6 +137,9 @@ struct TransactionExecutorOptions {
 	// The size of the database instance pool
 	int numDatabases = 1;
 
+	// The number of tenants to create in the cluster. If 0, no tenants are used.
+	int numTenants = 0;
+
 	// Maximum number of retries per transaction (0 - unlimited)
 	int transactionRetryLimit = 0;
 
@@ -153,7 +156,9 @@ class ITransactionExecutor {
 public:
 	virtual ~ITransactionExecutor() {}
 	virtual void init(IScheduler* sched, const char* clusterFile, const std::string& bgBasePath) = 0;
-	virtual void execute(std::shared_ptr<ITransactionActor> tx, TTaskFct cont) = 0;
+	virtual void execute(std::shared_ptr<ITransactionActor> tx,
+	                     TTaskFct cont,
+	                     std::optional<fdb::BytesRef> tenantName = {}) = 0;
 	virtual fdb::Database selectDatabase() = 0;
 	virtual std::string getClusterFileForErrorInjection() = 0;
 	virtual const TransactionExecutorOptions& getOptions() = 0;

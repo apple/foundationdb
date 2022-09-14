@@ -27,10 +27,12 @@
 
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/Tenant.h"
+
 #include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "flow/Arena.h"
 
+#include "flow/Arena.h"
+#include "flow/EncryptUtils.h"
 #define XXH_INLINE_ALL
 #include "flow/xxhash.h"
 
@@ -241,8 +243,8 @@ private:
 	                                            const KeyRef& end,
 	                                            EncryptCipherDomainNameRef* domainName) {
 		int64_t domainId = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
-		int64_t beginTenantId = getTenant(begin, true /*inclusive*/);
-		int64_t endTenantId = getTenant(end, false /*inclusive*/);
+		int64_t beginTenantId = getTenantId(begin, true /*inclusive*/);
+		int64_t endTenantId = getTenantId(end, false /*inclusive*/);
 		if (beginTenantId == endTenantId && beginTenantId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
 			ASSERT(tenantPrefixIndex.isValid());
 			Key tenantPrefix = TenantMapEntry::idToPrefix(beginTenantId);
@@ -256,22 +258,31 @@ private:
 			}
 		}
 		if (domainId == SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
-			*domainName = FDB_DEFAULT_ENCRYPT_DOMAIN_NAME;
+			*domainName = FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME;
 		}
 		return domainId;
 	}
 
-	int64_t getTenant(const KeyRef& key, bool inclusive) {
+	int64_t getTenantId(const KeyRef& key, bool inclusive) {
 		// A valid tenant id is always a valid encrypt domain id.
-		static_assert(ENCRYPT_INVALID_DOMAIN_ID < 0);
-		if (key.size() < TENANT_PREFIX_SIZE || key >= systemKeys.begin) {
+		static_assert(INVALID_ENCRYPT_DOMAIN_ID == -1);
+
+		if (key.size() && key >= systemKeys.begin) {
 			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 		}
-		// TODO(yiwu): Use TenantMapEntry::prefixToId() instead.
-		int64_t tenantId = bigEndian64(*reinterpret_cast<const int64_t*>(key.begin()));
-		if (tenantId < 0) {
-			return SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
+
+		if (key.size() < TENANT_PREFIX_SIZE) {
+			// Encryption domain information not available, leverage 'default encryption domain'
+			return FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
 		}
+
+		StringRef prefix = key.substr(0, TENANT_PREFIX_SIZE);
+		int64_t tenantId = TenantMapEntry::prefixToId(prefix, EnforceValidTenantId::False);
+		if (tenantId == TenantInfo::INVALID_TENANT) {
+			// Encryption domain information not available, leverage 'default encryption domain'
+			return FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
+		}
+
 		if (!inclusive && key.size() == TENANT_PREFIX_SIZE) {
 			tenantId = tenantId - 1;
 		}

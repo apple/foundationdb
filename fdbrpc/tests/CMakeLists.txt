@@ -4,5 +4,6 @@ if(NOT WIN32)
   if(NOT OPEN_FOR_IDE)
     add_test(NAME authorization_tls_unittest
       COMMAND $<TARGET_FILE:authz_tls_unittest>)
+    set_tests_properties(authorization_tls_unittest PROPERTIES TIMEOUT 120)
   endif()
 endif()

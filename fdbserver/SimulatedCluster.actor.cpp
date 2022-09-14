@@ -279,7 +279,7 @@ class TestConfig {
 			}
 			if (attrib == "configDBType") {
 				if (value == "random") {
-					configDBType = deterministicRandom()->coinflip() ? ConfigDBType::SIMPLE : ConfigDBType::PAXOS;
+					configDBType = deterministicRandom()->random01() < 0.1 ? ConfigDBType::SIMPLE : ConfigDBType::PAXOS;
 				} else {
 					configDBType = configDBTypeFromString(value);
 				}

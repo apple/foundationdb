@@ -132,7 +132,7 @@ struct KmsConnLookupKeyIdsReqInfoRef {
 	EncryptCipherDomainNameRef domainName;
 
 	KmsConnLookupKeyIdsReqInfoRef()
-	  : domainId(ENCRYPT_INVALID_DOMAIN_ID), baseCipherId(ENCRYPT_INVALID_CIPHER_KEY_ID) {}
+	  : domainId(INVALID_ENCRYPT_DOMAIN_ID), baseCipherId(INVALID_ENCRYPT_CIPHER_KEY_ID) {}
 	explicit KmsConnLookupKeyIdsReqInfoRef(Arena& arena,
 	                                       const EncryptCipherDomainId dId,
 	                                       const EncryptCipherBaseKeyId bCId,
@@ -185,7 +185,7 @@ struct KmsConnLookupDomainIdsReqInfoRef {
 	EncryptCipherDomainId domainId;
 	EncryptCipherDomainNameRef domainName;
 
-	KmsConnLookupDomainIdsReqInfoRef() : domainId(ENCRYPT_INVALID_DOMAIN_ID) {}
+	KmsConnLookupDomainIdsReqInfoRef() : domainId(INVALID_ENCRYPT_DOMAIN_ID) {}
 	explicit KmsConnLookupDomainIdsReqInfoRef(Arena& arena, const EncryptCipherDomainId dId, StringRef name)
 	  : domainId(dId), domainName(StringRef(arena, name)) {}
 	explicit KmsConnLookupDomainIdsReqInfoRef(const EncryptCipherDomainId dId, StringRef name)

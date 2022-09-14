@@ -20,6 +20,7 @@
 
 #pragma once
 #include "fdbserver/EncryptionOpsUtils.h"
+#include <unordered_map>
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H)
 #define FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H
 #include "fdbserver/ProxyCommitData.actor.g.h"
@@ -173,6 +174,7 @@ struct ProxyCommitData {
 	UID dbgid;
 	int64_t commitBatchesMemBytesCount;
 	std::map<TenantName, TenantMapEntry> tenantMap;
+	std::unordered_map<int64_t, TenantName> tenantIdIndex;
 	ProxyStats stats;
 	MasterInterface master;
 	std::vector<ResolverInterface> resolvers;
