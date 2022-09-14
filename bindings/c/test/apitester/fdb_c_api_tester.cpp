@@ -36,6 +36,8 @@ namespace FdbApiTester {
 
 namespace {
 
+#define API_VERSION_CLIENT_TMP_DIR 720
+
 enum TesterOptionId {
 	OPT_CONNFILE,
 	OPT_HELP,
@@ -286,7 +288,7 @@ void fdb_check(fdb::Error e) {
 }
 
 void applyNetworkOptions(TesterOptions& options) {
-	if (!options.tmpDir.empty() && options.apiVersion >= 720) {
+	if (!options.tmpDir.empty() && options.apiVersion >= API_VERSION_CLIENT_TMP_DIR) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_TMP_DIR, options.tmpDir);
 	}
 	if (!options.externalClientLibrary.empty()) {
