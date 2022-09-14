@@ -1259,7 +1259,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
                                                  IKeyValueStore* store,
                                                  bool validateDataFiles,
                                                  Promise<Void>* rebootKVStore,
-                                                 Reference<IEncryptionKeyProvider> encryptionKeyProvider) {
+                                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider) {
 	state TrackRunningStorage _(id, storeType, runningStorages);
 	loop {
 		ErrorOr<Void> e = wait(errorOr(prevStorageServer));
@@ -1728,7 +1728,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			if (s.storedComponent == DiskStore::Storage) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
-				Reference<IEncryptionKeyProvider> encryptionKeyProvider =
+				Reference<IPageEncryptionKeyProvider> encryptionKeyProvider =
 				    makeReference<TenantAwareEncryptionKeyProvider>(dbInfo);
 				IKeyValueStore* kv = openKVStore(
 				    s.storeType,
@@ -2345,7 +2345,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                   folder,
 					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
-					Reference<IEncryptionKeyProvider> encryptionKeyProvider =
+					Reference<IPageEncryptionKeyProvider> encryptionKeyProvider =
 					    makeReference<TenantAwareEncryptionKeyProvider>(dbInfo);
 					IKeyValueStore* data = openKVStore(
 					    req.storeType,
