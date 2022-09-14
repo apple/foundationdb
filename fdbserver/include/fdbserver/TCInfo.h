@@ -33,6 +33,7 @@ class TCTenantInfo;
 class TCMachineInfo;
 class TCMachineTeamInfo;
 class DDTeamCollection;
+class TCTeamSet;
 
 class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	friend class TCServerInfoImpl;
@@ -179,6 +180,7 @@ class TCTeamInfo final : public ReferenceCounted<TCTeamInfo>, public IDataDistri
 	bool wrongConfiguration; // True if any of the servers in the team have the wrong configuration
 	int priority;
 	UID id;
+	Reference<TCTeamSet> m_teamSet;
 
 public:
 	Reference<TCMachineTeamInfo> machineTeam;
@@ -241,12 +243,45 @@ public:
 
 	void addServers(const std::vector<UID>& servers) override;
 
+	void addToTeamSet(const Reference<TCTeamSet>& teamSet);
+	void removeFromTeamSet();
+	Reference<TCTeamSet> teamSet() { return m_teamSet; }
+
 private:
-	// Calculate an "average" of the metrics replies that we received.  Penalize teams from which we did not receive all
-	// replies.
+	// Calculate an "average" of the metrics replies that we received.  Penalize teams from which we did not receive
+	// all replies.
 	int64_t getLoadAverage() const;
 
 	bool allServersHaveHealthyAvailableSpace() const;
+};
+
+class TCTeamSet : public ReferenceCounted<TCTeamSet> {
+private:
+	std::vector<Reference<TCTeamInfo>> m_teams;
+
+public:
+	TCTeamSet() {}
+
+	size_t teamCount() const { return m_teams.size(); }
+
+	bool removeTeam(Reference<TCTeamInfo> team) {
+		bool found = false;
+
+		for (int t = 0; t < m_teams.size(); t++) {
+			if (m_teams[t] == team) {
+				m_teams[t] = m_teams.back();
+				m_teams.pop_back();
+				found = true;
+				break;
+			}
+		}
+
+		return found;
+	}
+
+	void addTeam(Reference<TCTeamInfo> team) { m_teams.push_back(team); }
+
+	std::vector<Reference<TCTeamInfo>> teams() const { return m_teams; }
 };
 
 class TCTenantInfo : public ReferenceCounted<TCTenantInfo> {

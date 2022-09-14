@@ -186,6 +186,8 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	enum class Status { NONE = 0, WIGGLING = 1, EXCLUDED = 2, FAILED = 3 };
 
+	std::vector<Reference<TCTeamSet>> m_teamSets;
+
 	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
 	// addActor is used to create the actorCollection when the dataDistributionTeamCollection is created
 	PromiseStream<Future<Void>> addActor;
@@ -322,6 +324,8 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	void traceConfigInfo() const;
 
 	void traceServerInfo() const;
+
+	void traceTeamSetInfo(const Reference<TCTeamSet>& teamSet) const;
 
 	void traceServerTeamInfo() const;
 
@@ -562,7 +566,8 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	// Sanity check the property of teams in unit test
 	// Return true if all server teams belong to machine teams
-	bool sanityCheckTeams() const;
+	bool teamSetIsSane(const Reference<TCTeamSet>& teamSet) const;
+	bool teamsAreSane() const;
 
 	void disableBuildingTeams() { doBuildTeams = false; }
 
@@ -577,7 +582,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	// isIntialTeam : False when the team is added by addTeamsBestOf(); True otherwise, e.g.,
 	// when the team added at init() when we recreate teams by looking up DB
 	template <class InputIt>
-	void addTeam(InputIt begin, InputIt end, IsInitialTeam isInitialTeam) {
+	void addTeam(Reference<TCTeamSet> teamSet, InputIt begin, InputIt end, IsInitialTeam isInitialTeam) {
 		std::vector<Reference<TCServerInfo>> newTeamServers;
 		for (auto i = begin; i != end; ++i) {
 			if (server_info.find(*i) != server_info.end()) {
@@ -585,16 +590,34 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 			}
 		}
 
-		addTeam(newTeamServers, isInitialTeam);
+		addTeam(teamSet, newTeamServers, isInitialTeam);
+	}
+
+	template <class InputIt>
+	void addTeam(InputIt begin, InputIt end, IsInitialTeam isInitialTeam) {
+		addTeam(m_teamSets[0], begin, end, isInitialTeam);
 	}
 
 	void addTeam(const std::vector<Reference<TCServerInfo>>& newTeamServers,
+	             IsInitialTeam isInitialTeam,
+	             IsRedundantTeam isRedundantTeam = IsRedundantTeam::False) {
+		addTeam(m_teamSets[0], newTeamServers, isInitialTeam, isRedundantTeam);
+	}
+
+	void addTeam(Reference<TCTeamSet> teamSet, std::set<UID> const& team, IsInitialTeam isInitialTeam) {
+		addTeam(teamSet, team.begin(), team.end(), isInitialTeam);
+	}
+
+	void addTeam(std::set<UID> const& team, IsInitialTeam isInitialTeam) {
+		addTeam(m_teamSets[0], team, isInitialTeam);
+	}
+
+	void addTeam(Reference<TCTeamSet> teamset,
+	             const std::vector<Reference<TCServerInfo>>& newTeamServers,
 	             IsInitialTeam,
 	             IsRedundantTeam = IsRedundantTeam::False);
 
-	void addTeam(std::set<UID> const& team, IsInitialTeam isInitialTeam) {
-		addTeam(team.begin(), team.end(), isInitialTeam);
-	}
+	Reference<TCTeamSet> selectTeamSetToAddNewTeamTo();
 
 	// Create server teams based on machine teams
 	// Before the number of machine teams reaches the threshold, build a machine team for each server team
@@ -614,8 +637,6 @@ public:
 	std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
 	std::vector<Reference<TCMachineTeamInfo>> machineTeams; // all machine teams
 
-	std::vector<Reference<TCTeamInfo>> teams;
-
 	std::vector<DDTeamCollection*> teamCollections;
 	AsyncTrigger printDetailedTeamsInfo;
 	Reference<LocalitySet> storageServerSet;
@@ -628,6 +649,7 @@ public:
 	                 DatabaseConfiguration configuration,
 	                 std::vector<Optional<Key>> includedDCs,
 	                 Optional<std::vector<Optional<Key>>> otherTrackedDCs,
+	                 int teamSetCount,
 	                 Future<Void> readyToStart,
 	                 Reference<AsyncVar<bool>> zeroHealthyTeams,
 	                 IsPrimary primary,
@@ -638,6 +660,16 @@ public:
 	                 PromiseStream<Promise<int>> getUnhealthyRelocationCount);
 
 	~DDTeamCollection();
+
+	size_t teamCount() const {
+		size_t count = 0;
+		for (auto& teamSet : m_teamSets) {
+			count += teamSet->teamCount();
+		}
+		return count;
+	}
+
+	Reference<TCTeamSet> pickTeamSetForNewTeam();
 
 	void addLaggingStorageServer(Key zoneId);
 
