@@ -395,16 +395,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				try {
 					TenantMapEntry entry;
 					if (preferAssignedCluster) {
-						loop {
-							ClusterName clusterName = self->chooseClusterName();
-							DataClusterData* dataDb = &self->dataDbs[clusterName];
-							// Choose a registered cluster
-							// Still possible that the chosen cluster has no capacity.
-							if (dataDb->registered) {
-								entry.assignedCluster = clusterName;
-								break;
-							}
-						}
+						entry.assignedCluster = self->chooseClusterName();
 					}
 					Future<Void> createFuture = MetaclusterAPI::createTenant(self->managementDb, tenant, entry);
 					Optional<Void> result = wait(timeout(createFuture, deterministicRandom()->randomInt(1, 30)));
@@ -444,7 +435,13 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				ASSERT(exists);
 				return Void();
 			} else if (e.code() == error_code_metacluster_no_capacity) {
-				ASSERT((!hasCapacity && !exists) || preferAssignedCluster);
+				ASSERT(!hasCapacity && !exists);
+				return Void();
+			} else if (e.code() == error_code_cluster_no_capacity) {
+				ASSERT(preferAssignedCluster);
+				return Void();
+			} else if (e.code() == error_code_cluster_not_found) {
+				ASSERT(preferAssignedCluster);
 				return Void();
 			}
 
