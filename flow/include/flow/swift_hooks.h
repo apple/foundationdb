@@ -49,26 +49,23 @@
 #if __has_feature(nullability)
 // Provide macros to temporarily suppress warning about the use of
 // _Nullable and _Nonnull.
-# define SWIFT_BEGIN_NULLABILITY_ANNOTATIONS                        \
-  _Pragma("clang diagnostic push")                                  \
-  _Pragma("clang diagnostic ignored \"-Wnullability-extension\"")
-# define SWIFT_END_NULLABILITY_ANNOTATIONS                          \
-  _Pragma("clang diagnostic pop")
+#define SWIFT_BEGIN_NULLABILITY_ANNOTATIONS                                                                            \
+	_Pragma("clang diagnostic push") _Pragma("clang diagnostic ignored \"-Wnullability-extension\"")
+#define SWIFT_END_NULLABILITY_ANNOTATIONS _Pragma("clang diagnostic pop")
 
 #else
 // #define _Nullable and _Nonnull to nothing if we're not being built
 // with a compiler that supports them.
-# define _Nullable
-# define _Nonnull
-# define SWIFT_BEGIN_NULLABILITY_ANNOTATIONS
-# define SWIFT_END_NULLABILITY_ANNOTATIONS
+#define _Nullable
+#define _Nonnull
+#define SWIFT_BEGIN_NULLABILITY_ANNOTATIONS
+#define SWIFT_END_NULLABILITY_ANNOTATIONS
 #endif
 
-#define SWIFT_MACRO_CONCAT(A, B) A ## B
+#define SWIFT_MACRO_CONCAT(A, B) A##B
 #define SWIFT_MACRO_IF_0(IF_TRUE, IF_FALSE) IF_FALSE
 #define SWIFT_MACRO_IF_1(IF_TRUE, IF_FALSE) IF_TRUE
-#define SWIFT_MACRO_IF(COND, IF_TRUE, IF_FALSE) \
-  SWIFT_MACRO_CONCAT(SWIFT_MACRO_IF_, COND)(IF_TRUE, IF_FALSE)
+#define SWIFT_MACRO_IF(COND, IF_TRUE, IF_FALSE) SWIFT_MACRO_CONCAT(SWIFT_MACRO_IF_, COND)(IF_TRUE, IF_FALSE)
 
 #if __has_attribute(pure)
 #define SWIFT_READONLY __attribute__((__pure__))
@@ -144,8 +141,8 @@
 // targets don't support protected visibility but because they don't
 // need it: symbols are not interposable outside the current image
 // by default.
-# define SWIFT_ATTRIBUTE_FOR_EXPORTS __attribute__((__visibility__("default")))
-# define SWIFT_ATTRIBUTE_FOR_IMPORTS __attribute__((__visibility__("default")))
+#define SWIFT_ATTRIBUTE_FOR_EXPORTS __attribute__((__visibility__("default")))
+#define SWIFT_ATTRIBUTE_FOR_IMPORTS __attribute__((__visibility__("default")))
 
 #elif defined(__ELF__)
 
@@ -159,21 +156,21 @@
 // The compiler does assume that the runtime and standard library can
 // refer to each other's symbols as DSO-local, so it's important that
 // we get this right or we can get linker errors.
-# define SWIFT_ATTRIBUTE_FOR_EXPORTS __attribute__((__visibility__("protected")))
-# define SWIFT_ATTRIBUTE_FOR_IMPORTS __attribute__((__visibility__("default")))
+#define SWIFT_ATTRIBUTE_FOR_EXPORTS __attribute__((__visibility__("protected")))
+#define SWIFT_ATTRIBUTE_FOR_IMPORTS __attribute__((__visibility__("default")))
 
 #elif defined(__CYGWIN__)
 
 // For now, we ignore all this on Cygwin.
-# define SWIFT_ATTRIBUTE_FOR_EXPORTS
-# define SWIFT_ATTRIBUTE_FOR_IMPORTS
+#define SWIFT_ATTRIBUTE_FOR_EXPORTS
+#define SWIFT_ATTRIBUTE_FOR_IMPORTS
 
 // FIXME: this #else should be some sort of #elif Windows
 #else // !__MACH__ && !__ELF__
 
 // On PE/COFF, we use dllimport and dllexport.
-# define SWIFT_ATTRIBUTE_FOR_EXPORTS __declspec(dllexport)
-# define SWIFT_ATTRIBUTE_FOR_IMPORTS __declspec(dllimport)
+#define SWIFT_ATTRIBUTE_FOR_EXPORTS __declspec(dllexport)
+#define SWIFT_ATTRIBUTE_FOR_IMPORTS __declspec(dllimport)
 
 #endif
 
@@ -207,10 +204,8 @@
 #define SWIFT_IMAGE_EXPORTS_swift_Differentiation 0
 #endif
 
-#define SWIFT_EXPORT_FROM_ATTRIBUTE(LIBRARY)                          \
-  SWIFT_MACRO_IF(SWIFT_IMAGE_EXPORTS_##LIBRARY,                       \
-                 SWIFT_ATTRIBUTE_FOR_EXPORTS,                         \
-                 SWIFT_ATTRIBUTE_FOR_IMPORTS)
+#define SWIFT_EXPORT_FROM_ATTRIBUTE(LIBRARY)                                                                           \
+	SWIFT_MACRO_IF(SWIFT_IMAGE_EXPORTS_##LIBRARY, SWIFT_ATTRIBUTE_FOR_EXPORTS, SWIFT_ATTRIBUTE_FOR_IMPORTS)
 
 // SWIFT_EXPORT_FROM(LIBRARY) declares something to be a C-linkage
 // entity exported by the given library.
@@ -255,61 +250,57 @@
 #define SWIFT_INDIRECT_RESULT
 #endif
 
-//typedef struct _Job* JobRef;
+// typedef struct _Job* JobRef;
 
 /// A hook to take over global enqueuing.
-typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobal_original)(swift::Job *job);
-SWIFT_EXPORT_FROM(swift_Concurrency) SWIFT_CC(swift)
-void (* _Nullable swift_task_enqueueGlobal_hook)(
-        swift::Job *job,
-        swift_task_enqueueGlobal_original _Nonnull original);
-
+typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobal_original)(swift::Job* job);
+SWIFT_EXPORT_FROM(swift_Concurrency)
+SWIFT_CC(swift) void (*_Nullable swift_task_enqueueGlobal_hook)(swift::Job* job,
+                                                                swift_task_enqueueGlobal_original _Nonnull original);
 
 /// A hook to take over global enqueuing with delay.
-typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDelay_original)(
-        unsigned long long delay, swift::Job *job);
-SWIFT_EXPORT_FROM(swift_Concurrency) SWIFT_CC(swift)
-void (*swift_task_enqueueGlobalWithDelay_hook)(
-        unsigned long long delay, swift::Job *job,
-        swift_task_enqueueGlobalWithDelay_original original);
+typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDelay_original)(unsigned long long delay, swift::Job* job);
+SWIFT_EXPORT_FROM(swift_Concurrency)
+SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDelay_hook)(unsigned long long delay,
+                                                               swift::Job* job,
+                                                               swift_task_enqueueGlobalWithDelay_original original);
 
-typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDeadline_original)(
-        long long sec,
-        long long nsec,
-        long long tsec,
-        long long tnsec,
-        int clock, swift::Job *job);
-SWIFT_EXPORT_FROM(swift_Concurrency) SWIFT_CC(swift)
-void (*swift_task_enqueueGlobalWithDeadline_hook)(
-        long long sec,
-        long long nsec,
-        long long tsec,
-        long long tnsec,
-        int clock, swift::Job *job,
-        swift_task_enqueueGlobalWithDeadline_original original);
+typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDeadline_original)(long long sec,
+                                                                              long long nsec,
+                                                                              long long tsec,
+                                                                              long long tnsec,
+                                                                              int clock,
+                                                                              swift::Job* job);
+SWIFT_EXPORT_FROM(swift_Concurrency)
+SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDeadline_hook)(
+    long long sec,
+    long long nsec,
+    long long tsec,
+    long long tnsec,
+    int clock,
+    swift::Job* job,
+    swift_task_enqueueGlobalWithDeadline_original original);
 
 /// A hook to take over main executor enqueueing.
-typedef SWIFT_CC(swift) void (*swift_task_enqueueMainExecutor_original)(
-    swift::Job *job);
-SWIFT_EXPORT_FROM(swift_Concurrency) SWIFT_CC(swift)
-void (*swift_task_enqueueMainExecutor_hook)(
-    swift::Job *job, swift_task_enqueueMainExecutor_original original);
+typedef SWIFT_CC(swift) void (*swift_task_enqueueMainExecutor_original)(swift::Job* job);
+SWIFT_EXPORT_FROM(swift_Concurrency)
+SWIFT_CC(swift) void (*swift_task_enqueueMainExecutor_hook)(swift::Job* job,
+                                                            swift_task_enqueueMainExecutor_original original);
 
-SWIFT_EXPORT_FROM(swift_Concurrency) SWIFT_CC(swift)
-void swift_job_run(swift::Job *job, ExecutorRef executor);
-
+SWIFT_EXPORT_FROM(swift_Concurrency) SWIFT_CC(swift) void swift_job_run(swift::Job* job, ExecutorRef executor);
 
 // FIXME: why is adding this function causing TDB issues, even if it is not a Swift declared thing?
-//    <unknown>:0: error: symbol '_Z17s_job_run_genericP3Job' (_Z17s_job_run_genericP3Job) is in generated IR file, but not in TBD file
-//    <unknown>:0: error: please submit a bug report (https://swift.org/contributing/#reporting-bugs) and include the project, and add '-Xfrontend -validate-tbd-against-ir=none' to squash the errors
-//    WORKAROUND: skipping TBD validation
+//    <unknown>:0: error: symbol '_Z17s_job_run_genericP3Job' (_Z17s_job_run_genericP3Job) is in generated IR file, but
+//    not in TBD file <unknown>:0: error: please submit a bug report (https://swift.org/contributing/#reporting-bugs)
+//    and include the project, and add '-Xfrontend -validate-tbd-against-ir=none' to squash the errors WORKAROUND:
+//    skipping TBD validation
 // This function exists so we can get the generic executor, and don't have to do that from Swift.
-void swift_job_run_generic(swift::Job *job);
+void swift_job_run_generic(swift::Job* job);
 
 SWIFT_CC(swift)
 void net2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job,
-//                              swift_task_enqueueGlobal_original _Nonnull original) {
-                              void (* _Nonnull)(swift::Job *) __attribute__((swiftcall)));
+                                  //                              swift_task_enqueueGlobal_original _Nonnull original) {
+                                  void (*_Nonnull)(swift::Job*) __attribute__((swiftcall)));
 
 // TODO: have this hook up a concrete event loop, not just pretend to do so; it'd take a Net2 instance
 inline void installGlobalSwiftConcurrencyHooks() {
@@ -317,10 +308,10 @@ inline void installGlobalSwiftConcurrencyHooks() {
 	g_network = _swift_newNet2(tls, false, false);
 	printf("[c++] net        = %p\n", g_network);
 	printf("[c++] N2::g_net2 = %p\n", N2::g_net2);
-//	if (net != N2::g_net2) {
-//		printf("[c++] Failed to initialize the global network var: N2::g_net2\n");
-//		exit(-1);
-//	}
+	//	if (net != N2::g_net2) {
+	//		printf("[c++] Failed to initialize the global network var: N2::g_net2\n");
+	//		exit(-1);
+	//	}
 
 	swift_task_enqueueGlobal_hook = &net2_enqueueGlobal_hook_impl;
 	printf("[c++] configured: swift_task_enqueueGlobal_hook\n");
@@ -330,6 +321,4 @@ inline void globalNetworkRun() {
 	g_network->run(); // BLOCKS; dedicates this thread to the runloop
 }
 
-
 #endif
-

@@ -38,14 +38,14 @@ using FlowPromiseString = Callback<std::string>;
 // ==== ----------------------------------------------------------------------------------------------------------------
 
 FlowPromiseInt* _Nonnull makePromiseInt() {
-	 return new Promise<int>();
+	return new Promise<int>();
 }
 
 FlowFutureInt* _Nonnull getFutureOfPromise(FlowPromiseInt* _Nonnull p) {
 	return p->_swiftGetFuture();
 }
 
-void sendPromiseInt(FlowPromiseInt *p, int value) {
+void sendPromiseInt(FlowPromiseInt* p, int value) {
 	printf("[c++] send %d\n", value);
 	p->send(value);
 	printf("[c++] sent %d\n", p->getFuture().get());
@@ -54,63 +54,46 @@ void sendPromiseInt(FlowPromiseInt *p, int value) {
 // ==== ----------------------------------------------------------------------------------------------------------------
 // MARK: Callback types
 
-
 struct SWIFT_CXX_REF_IMMORTAL CCResume_Int {
 	void* cc;
-	void (*resumeWithValue) (void*, int);
+	void (*resumeWithValue)(void*, int);
 
-	explicit CCResume_Int(void* cc, void (*resumeWithValue) (void*, int))
-	  : cc(cc), resumeWithValue(resumeWithValue) {}
+	explicit CCResume_Int(void* cc, void (*resumeWithValue)(void*, int)) : cc(cc), resumeWithValue(resumeWithValue) {}
 
-	void resume(int value) {
-		resumeWithValue(this->cc, value);
-	}
+	void resume(int value) { resumeWithValue(this->cc, value); }
 };
 
 pthread_t _tid() {
 	return pthread_self();
 }
 
-
-struct SWIFT_CXX_REF_IMMORTAL SwiftContinuationCallbackInt: Callback<int> {
+struct SWIFT_CXX_REF_IMMORTAL SwiftContinuationCallbackInt : Callback<int> {
 private:
 	void* continuationBox;
-	void (*resumeWithValue) (void* _Nonnull/*context*/, /*value*/int);
-	void (*resumeWithError) (void* _Nonnull/*context*/, /*value*/Error);
+	void (*resumeWithValue)(void* _Nonnull /*context*/, /*value*/ int);
+	void (*resumeWithError)(void* _Nonnull /*context*/, /*value*/ Error);
 
-	SwiftContinuationCallbackInt(
-	    void* continuationBox,
-	    void (* _Nonnull returning) (void*, int),
-	    void (* _Nonnull throwing) (void*, Error)
-	        )
-	  : continuationBox(continuationBox),
-	    resumeWithValue(returning),
-	    resumeWithError(throwing)
-	{}
+	SwiftContinuationCallbackInt(void* continuationBox,
+	                             void (*_Nonnull returning)(void*, int),
+	                             void (*_Nonnull throwing)(void*, Error))
+	  : continuationBox(continuationBox), resumeWithValue(returning), resumeWithError(throwing) {}
 
 public:
-
-	static SwiftContinuationCallbackInt* _Nonnull make(
-	    void* continuationBox,
-	    void (* _Nonnull returning) (void*, int),
-	    void (* _Nonnull throwing) (void*, Error)) {
-		return new SwiftContinuationCallbackInt(
-		    continuationBox, returning, throwing);
+	static SwiftContinuationCallbackInt* _Nonnull make(void* continuationBox,
+	                                                   void (*_Nonnull returning)(void*, int),
+	                                                   void (*_Nonnull throwing)(void*, Error)) {
+		return new SwiftContinuationCallbackInt(continuationBox, returning, throwing);
 	}
 
-	FlowCallbackInt * _Nonnull cast() {
-		return this;
-	}
+	FlowCallbackInt* _Nonnull cast() { return this; }
 
-	void addCallbackAndClearTo(FlowFutureInt* _Nonnull f) {
-		f->addCallbackAndClear(this);
-	}
-//	void addCallbackAndClearTo(FlowPromiseInt* _Nonnull p) {
-//		auto f = p->getFuture();
-//		printf("[c++][%s:%d] future\n", __FILE_NAME__, __LINE__);
-//
-//		f.addCallbackAndClear(this);
-//	}
+	void addCallbackAndClearTo(FlowFutureInt* _Nonnull f) { f->addCallbackAndClear(this); }
+	//	void addCallbackAndClearTo(FlowPromiseInt* _Nonnull p) {
+	//		auto f = p->getFuture();
+	//		printf("[c++][%s:%d] future\n", __FILE_NAME__, __LINE__);
+	//
+	//		f.addCallbackAndClear(this);
+	//	}
 
 	// TODO: virtual is an issue
 	void fire(int const& value) {

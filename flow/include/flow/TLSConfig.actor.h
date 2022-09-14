@@ -134,10 +134,7 @@ public:
 	TLSConfig() = default;
 	explicit TLSConfig(TLSEndpointType endpointType) : endpointType(endpointType) {}
 
-
-	static TLSConfig* make() {
-		return new TLSConfig();
-	}
+	static TLSConfig* make() { return new TLSConfig(); }
 
 	void setCertificatePath(const std::string& path) {
 		tlsCertPath = path;

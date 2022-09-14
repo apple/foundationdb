@@ -31,8 +31,10 @@
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 
-# define SWIFT_CXX_REF_IMMORTAL __attribute__((swift_attr("import_as_ref"))) __attribute__((swift_attr("retain:immortal"))) __attribute__((swift_attr("release:immortal")))
-# define SWIFT_SENDABLE __attribute__((swift_attr("@Sendable")))
+#define SWIFT_CXX_REF_IMMORTAL                                                                                         \
+	__attribute__((swift_attr("import_as_ref"))) __attribute__((swift_attr("retain:immortal")))                        \
+	__attribute__((swift_attr("release:immortal")))
+#define SWIFT_SENDABLE __attribute__((swift_attr("@Sendable")))
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 
@@ -43,13 +45,11 @@ class ExecutorRef {
 	void* Identity;
 	uintptr_t Implementation;
 
-	constexpr ExecutorRef(void *identity, uintptr_t implementation)
+	constexpr ExecutorRef(void* identity, uintptr_t implementation)
 	  : Identity(identity), Implementation(implementation) {}
 
 public:
-	constexpr static ExecutorRef generic() {
-		return ExecutorRef(nullptr, 0);
-	}
+	constexpr static ExecutorRef generic() { return ExecutorRef(nullptr, 0); }
 };
 
 #endif
