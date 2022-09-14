@@ -26,16 +26,26 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-void verifyInitDataEqual(Reference<InitialDataDistribution> real, Reference<InitialDataDistribution> mock) {
-	ASSERT_EQ(real->mode, mock->mode);
-	ASSERT(real->initHealthyZoneValue == mock->initHealthyZoneValue);
-	ASSERT_EQ(real->allServers.size(), mock->allServers.size());
-	std::cout << describe(real->primaryTeams) << " | " << describe(mock->primaryTeams) << "\n";
-	ASSERT(std::equal(real->shards.begin(), real->shards.end(), mock->shards.begin(), mock->shards.end()));
+bool compareShardInfo(const DDShardInfo& a, const DDShardInfo& other) {
+	std::cout << a.key.toHexString() << " | " << other.key.toHexString() << "\n";
+	std::cout << a.hasDest << " | " << other.hasDest << "\n";
+	std::cout << describe(a.primarySrc) << " | " << describe(other.primarySrc) << "\n";
+	std::cout << describe(a.primaryDest) << " | " << describe(other.primaryDest) << "\n";
+	std::cout << describe(a.remoteSrc) << " | " << describe(other.remoteSrc) << "\n";
+	std::cout << describe(a.remoteSrc) << " | " << describe(other.remoteSrc) << "\n";
 
+	// Mock DD just care about the server<->key mapping in DDShardInfo
+	return a.key == other.key && a.hasDest == other.hasDest && a.primaryDest == other.primaryDest &&
+	       a.primarySrc == other.primarySrc && a.remoteSrc == other.remoteSrc && a.remoteDest == other.remoteDest;
+}
+
+void verifyInitDataEqual(Reference<InitialDataDistribution> real, Reference<InitialDataDistribution> mock) {
+	// Mock DD just care about the team list and server<->key mapping are consistent with the real cluster
+	ASSERT(std::equal(
+	    real->shards.begin(), real->shards.end(), mock->shards.begin(), mock->shards.end(), compareShardInfo));
+	std::cout << describe(real->primaryTeams) << " | " << describe(mock->primaryTeams) << "\n";
 	ASSERT(real->primaryTeams == mock->primaryTeams);
 	ASSERT(real->remoteTeams == mock->remoteTeams);
-	ASSERT_EQ(real->dataMoveMap.size(), mock->dataMoveMap.size());
 	ASSERT_EQ(real->shards.size(), mock->shards.size());
 }
 
