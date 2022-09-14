@@ -337,7 +337,7 @@ void net2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job,
 	int64_t priority = swift_priority_to_net2(swiftPriority); // default to lowest "Min"
 	printf("[c++][%s:%d](%s) net2_enqueueGlobal_hook_impl - swift task priority: %d -> %d\n", __FILE_NAME__, __LINE__, __FUNCTION__, static_cast<std::underlying_type<TaskPriority>::type>(swiftPriority), static_cast<std::underlying_type<TaskPriority>::type>(priority));
 
-	TaskPriority taskID; // FIXME: how to determine
+	TaskPriority taskID = TaskPriority::DefaultOnMainThread; // FIXME: how to determine
 
 	SwiftJobTask *jobTask = new SwiftJobTask(job);
 	N2::OrderedTask *orderedTask = new N2::OrderedTask(priority, taskID, jobTask);

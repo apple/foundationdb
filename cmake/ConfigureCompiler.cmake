@@ -344,15 +344,18 @@ else()
       $<${is_cxx_compile}:-Wno-delete-non-abstract-non-virtual-dtor>
       $<${is_cxx_compile}:-Wno-range-loop-construct>
       $<${is_cxx_compile}:-Wno-reorder-ctor>
+      $<${is_cxx_compile}:-Wno-unused-function>
     )
     # Needed for clang 13 (todo: Update above logic so that it figures out when to pass in -static-libstdc++ and when it will be ignored)
     # When you remove this, you might need to move it back to the USE_CCACHE stanza.  It was (only) there before I moved it here.
     add_compile_options(
       $<${is_cxx_compile}:-Wno-unused-command-line-argument>
+      $<${is_cxx_compile}:-Wno-unused-private-field>
+      $<${is_cxx_compile}:-Wno-nullability-completeness>
     )
     if (USE_CCACHE)
       add_compile_options(
-        $<$${is_cxx_compile}:-Wno-register>
+        $<${is_cxx_compile}:-Wno-register>
       )
     endif()
     if (PROFILE_INSTR_GENERATE)
