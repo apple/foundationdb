@@ -161,13 +161,17 @@ public:
 	static void getTeamByServers(DDTeamCollection* self, GetTeamRequest req) {
 		const std::string servers = TCTeamInfo::serversToString(req.src);
 		Optional<Reference<IDataDistributionTeam>> res;
+		bool found = false;
 		for (const auto& teamSet : self->m_teamSets) {
 			for (const auto& team : teamSet->teams()) {
 				if (team->getServerIDsStr() == servers) {
 					res = team;
+					found = true;
 					break;
 				}
 			}
+			if (found)
+				break;
 		}
 		req.reply.send(std::make_pair(res, false));
 	}
