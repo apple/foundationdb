@@ -143,7 +143,7 @@ struct MutationRef {
 	                    const EncryptCipherDomainId& domainId,
 	                    Arena& arena,
 	                    BlobCipherMetrics::UsageType usageType) const {
-		ASSERT_NE(domainId, ENCRYPT_INVALID_DOMAIN_ID);
+		ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
 		auto textCipherItr = cipherKeys.find(domainId);
 		auto headerCipherItr = cipherKeys.find(ENCRYPT_HEADER_DOMAIN_ID);
 		ASSERT(textCipherItr != cipherKeys.end() && textCipherItr->second.isValid());

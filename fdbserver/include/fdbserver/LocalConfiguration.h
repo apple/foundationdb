@@ -64,7 +64,8 @@ public:
 
 public: // Testing
 	Future<Void> addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
-	                        Version mostRecentVersion);
+	                        Version mostRecentVersion,
+	                        double restartDelay);
 	void close();
 	Future<Void> onClosed();
 };

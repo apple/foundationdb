@@ -1873,7 +1873,7 @@ ACTOR void _test_versionstamp() {
 	try {
 		g_network = newNet2(TLSConfig());
 
-		API* fdb = FDB::API::selectAPIVersion(720);
+		API* fdb = FDB::API::selectAPIVersion(FDB_API_VERSION);
 
 		fdb->setupNetwork();
 		startThread(networkThread, fdb);
