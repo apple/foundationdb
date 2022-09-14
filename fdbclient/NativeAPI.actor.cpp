@@ -2496,11 +2496,12 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		}
 		break;
 	}
-	case FDBNetworkOptions::DISABLE_CLIENT_BYPASS:
-		networkOptions.disableBypass = true;
-		break;
 	case FDBNetworkOptions::EXTERNAL_CLIENT:
 		networkOptions.primaryClient = false;
+		break;
+	case FDBNetworkOptions::DISABLE_CLIENT_BYPASS:
+		validateOptionValueNotPresent(value);
+		networkOptions.disableBypass = true;
 		break;
 	default:
 		break;
@@ -6671,6 +6672,9 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 
 	case FDBTransactionOptions::USE_GRV_CACHE:
 		validateOptionValueNotPresent(value);
+		if (apiVersionAtLeast(720) && !networkOptions.disableBypass) {
+			throw invalid_option();
+		}
 		if (trState->numErrors == 0) {
 			trState->options.useGrvCache = true;
 		}
@@ -8768,7 +8772,6 @@ void sharedStateDelRef(DatabaseSharedState* ssPtr) {
 }
 
 Future<DatabaseSharedState*> DatabaseContext::initSharedState() {
-	ASSERT(networkOptions.disableBypass);
 	ASSERT(!sharedStatePtr); // Don't re-initialize shared state if a pointer already exists
 	DatabaseSharedState* newState = new DatabaseSharedState();
 	// Increment refcount by 1 on creation to account for the one held in MultiVersionApi map
@@ -8780,7 +8783,6 @@ Future<DatabaseSharedState*> DatabaseContext::initSharedState() {
 }
 
 void DatabaseContext::setSharedState(DatabaseSharedState* p) {
-	ASSERT(networkOptions.disableBypass);
 	ASSERT(p->protocolVersion == currentProtocolVersion());
 	sharedStatePtr = p;
 	sharedStatePtr->refCount++;

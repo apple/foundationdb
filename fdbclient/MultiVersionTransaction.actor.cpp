@@ -2456,6 +2456,9 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 	} else if (option == FDBNetworkOptions::DISABLE_CLIENT_BYPASS) {
 		MutexHolder holder(lock);
 		ASSERT(!value.present() && !networkStartSetup);
+		if (bypassMultiClientApi) {
+			throw invalid_option();
+		}
 		disableBypass = true;
 		bypassMultiClientApi = false;
 		forwardOption = true;
