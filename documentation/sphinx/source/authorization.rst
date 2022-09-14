@@ -23,7 +23,7 @@ Trusted clients are authorized to perform any operation that pre-authorization F
 Untrusted clients may only request what is necessary to access tenant keyspaces for which they are authorized.
 Untrusted clients are blocked from accessing anything in the system keyspace or issuing management operations that modifies the cluster in any way.
 
-In order to be considered a trusted client, a client needs to be :ref:`configured with a valid chain of X.509 certificates and keys <configuring-tls>`,
+In order to be considered a trusted client, a client needs to be :ref:`configured with a valid chain of X.509 certificates and a private key matching the leaf certificate <configuring-tls>`,
 and its certificate chain must be trusted by the server.
 If the server was configured with trusted IP subnets, i.e. run with one or more ``--trusted-subnet-SUBNET_NAME`` followed by a CIDR block describing the subnet,
 then the client's IP as seen from the server must additionally belong to one of the subnets.
