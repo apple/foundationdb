@@ -939,6 +939,7 @@ public:
 		Counter kvCommits;
 
 		LatencySample readLatencySample;
+		LatencySample readKeyLatencySample;
 		LatencySample readValueLatencySample;
 		LatencySample readRangeLatencySample;
 		LatencySample readVersionWaitSample;
@@ -979,6 +980,10 @@ public:
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    readKeyLatencySample("ReadKeyLatencyMetrics",
+		                         self->thisServerID,
+		                         SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                         SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 		    readValueLatencySample("ReadValueLatencyMetrics",
 		                           self->thisServerID,
 		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -4389,6 +4394,8 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 
 	double duration = g_network->timer() - req.requestTime();
 	data->counters.readLatencySample.addMeasurement(duration);
+	data->counters.readKeyLatencySample.addMeasurement(duration);
+
 	if (data->latencyBandConfig.present()) {
 		int maxReadBytes =
 		    data->latencyBandConfig.get().readConfig.maxReadBytes.orDefault(std::numeric_limits<int>::max());
