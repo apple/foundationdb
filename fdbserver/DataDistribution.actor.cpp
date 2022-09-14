@@ -597,8 +597,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			state Optional<Reference<TenantCache>> ddTenantCache;
 			if (ddIsTenantAware) {
-				ddTenantCache = makeReference<TenantCache>(cx, self->ddId);
-				wait(ddTenantCache.get()->build());
+				ddTenantCache = self->initData->ddTenantCache;
 			}
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
