@@ -25,12 +25,19 @@ function(cpackman_provide_dependency)
       C_COMPILER_VERSION=${CMAKE_C_COMPILER_VERSION}
       CXX_COMPILER_ID=${CMAKE_CXX_COMPILER_ID}
       CXX_COMPILER_VERSION=${CMAKE_CXX_COMPILER_VERSION}
-      CXX_STDLIB=${}
+      CXX_STDLIB=${cxx_stdlib}
+      USE_ASAN=${USE_ASAN}
+      USE_TSAN=${USE_ASAN}
+      USE_MSAN=${USE_ASAN}
+      USE_UBSAN=${USE_ASAN}
       --
       "${Python3_EXECUTABLE}" -m cpackman ${ARGV}
     WORKING_DIRECTORY "${CPACKMAN_BINARY_DIR}"
-    OUTPUT_VARIABLE cpackman_output)
-  cmake_language(EVAL CODE "${cpackman_output}")
+    RESULT_VARIABLE res)
+  if(res EQUAL "0")
+    file(READ "${CPACKMAN_BINARY_DIR}/cpackman_out.cmake" cpackman_output)
+    cmake_language(EVAL CODE "${cpackman_output}")
+  endif()
 endfunction()
 
 cmake_language(SET_DEPENDENCY_PROVIDER cpackman_provide_dependency SUPPORTED_METHODS FIND_PACKAGE)

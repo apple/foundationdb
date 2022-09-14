@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
+import subprocess
 import sys
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Set
+from typing import Set, List, TextIO
 
 from cpackman import config, eprint
+
+
+def run_command(cmd: List[str], env=os.environ, cwd=None):
+    with subprocess.Popen(cmd, stdout=None, stderr=None, env=env, cwd=cwd) as process:
+        process.wait()
+        if process.returncode != 0:
+            raise RuntimeError('Command Failed')
 
 
 class FetchSource:
@@ -105,6 +114,7 @@ class Build:
         self.build_folder = Path('cpackman') / 'build' / fetch_source.name / self.build_id()
         self.install_folder = Path('cpackman') / 'install' / fetch_source.name / self.build_id()
         self.build_folder.mkdir(0o777, parents=True, exist_ok=True)
+        self.install_folder.mkdir(0o777, parents=True, exist_ok=True)
 
     def build_id(self) -> str:
         m = hashlib.sha1()
@@ -116,5 +126,28 @@ class Build:
         m.update(self.fetch_source.version_string().encode())
         return m.hexdigest()
 
+    def configure(self) -> None:
+        raise NotImplemented()
+
     def build(self) -> None:
         raise NotImplemented()
+
+    def install(self) -> Path:
+        raise NotImplemented()
+
+    def print_target(self, out: TextIO):
+        raise NotImplemented()
+
+
+def add_static_library(out: TextIO, target: str, include_dirs: List[Path], library_path: Path, link_language: str):
+    assert link_language in ['C', 'CXX']
+    include_list: List[str] = []
+    for include in include_dirs:
+        include_list.append(str(include.absolute()))
+    include_cmake_list = ';'.join(include_list)
+    print('add_library({} STATIC IMPORTED)'.format(target), file=out)
+    print('set_target_properties({} PROPERTIES'
+          '  INTERFACE_INCLUDE_DIRECTORIES {}'
+          '  IMPORTED_LINK_INTERFACE_LANGUAGES "{}"'
+          '  IMPORTED_LOCATION "{}")'.format(target, include_cmake_list, link_language, str(library_path.absolute())),
+          file=out)
