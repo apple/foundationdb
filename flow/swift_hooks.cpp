@@ -26,7 +26,7 @@
 // ==== ----------------------------------------------------------------------------------------------------------------
 
 // TODO: Bridge the scheduled task from Swift into DelayedTask
-//struct SwiftDelayedOrderedTask : OrderedTask {
+// struct SwiftDelayedOrderedTask : OrderedTask {
 //    double at;
 //    SwiftJobTask(double at, int64_t priority, TaskPriority taskID, Task* task)
 //            : OrderedTask(priority, taskID, task), at(at) {}
@@ -39,10 +39,8 @@
 //};
 
 struct SwiftJobTask final : public N2::Task, public FastAllocated<SwiftJobTask> {
-	swift::Job *job;
-	explicit SwiftJobTask(swift::Job* job) noexcept : job(job) {
-		printf("[c++][job:%p] prepare job\n", job);
-	}
+	swift::Job* job;
+	explicit SwiftJobTask(swift::Job* job) noexcept : job(job) { printf("[c++][job:%p] prepare job\n", job); }
 
 	void operator()() override {
 		printf("[c++][job:%p] run job (priority: %zu)\n", job, job->getPriority());
@@ -54,9 +52,9 @@ struct SwiftJobTask final : public N2::Task, public FastAllocated<SwiftJobTask> 
 
 // FIXME: surely there must be some more automatic way to maintain the mappings with Swift/C++ interop.
 int64_t swift_priority_to_net2(swift::JobPriority p) {
-  printf("[c++][%s:%d](%s) converting a priority (priority: %zu)\n", __FILE_NAME__, __LINE__, __FUNCTION__, p);
+	printf("[c++][%s:%d](%s) converting a priority (priority: %zu)\n", __FILE_NAME__, __LINE__, __FUNCTION__, p);
 
-  TaskPriority fp = TaskPriority::Zero;
+	TaskPriority fp = TaskPriority::Zero;
 	switch (static_cast<std::underlying_type<swift::JobPriority>::type>(p)) {
 	case 255:
 		fp = TaskPriority::Max;
@@ -290,25 +288,35 @@ int64_t swift_priority_to_net2(swift::JobPriority p) {
 		fp = TaskPriority::Zero;
 		break;
 	default: {
-    assert(false && "Unknown swift priority!");
+		assert(false && "Unknown swift priority!");
 	}
 	}
 	return static_cast<std::underlying_type<TaskPriority>::type>(fp);
 }
 
-void net2_swift_task_enqueueGlobal(swift::Job *job,
-                                   swift_task_enqueueGlobal_original _Nonnull original) {
-	N2::Net2 *net = N2::g_net2;
+void net2_swift_task_enqueueGlobal(swift::Job* job, swift_task_enqueueGlobal_original _Nonnull original) {
+	N2::Net2* net = N2::g_net2;
 	ASSERT(net);
-  printf("[c++][%s:%d](%s) intercepted job enqueue: %p to g_network (%p)\n", __FILE_NAME__, __LINE__, __FUNCTION__, job, net);
+	printf("[c++][%s:%d](%s) intercepted job enqueue: %p to g_network (%p)\n",
+	       __FILE_NAME__,
+	       __LINE__,
+	       __FUNCTION__,
+	       job,
+	       net);
 	assert(false && "just mocking out APIs");
 }
 
-void net2_swift_task_enqueueGlobalWithDelay(JobDelay delay, swift::Job *job) {
-	auto net = g_network; // TODO: can't access Net2 since it's incomplete here, would be nicer to not expose API on INetwork I suppose
+void net2_swift_task_enqueueGlobalWithDelay(JobDelay delay, swift::Job* job) {
+	auto net = g_network; // TODO: can't access Net2 since it's incomplete here, would be nicer to not expose API on
+	                      // INetwork I suppose
 	ASSERT(net);
-  printf("[c++][%s:%d](%s) intercepted job enqueue: %p to g_network (%p)\n", __FILE_NAME__, __LINE__, __FUNCTION__, job, net);
-  assert(false && "just mocking out APIs");
+	printf("[c++][%s:%d](%s) intercepted job enqueue: %p to g_network (%p)\n",
+	       __FILE_NAME__,
+	       __LINE__,
+	       __FUNCTION__,
+	       job,
+	       net);
+	assert(false && "just mocking out APIs");
 
 	//    N2::Task *taskPtr;
 	//
@@ -324,28 +332,43 @@ void net2_swift_task_enqueueGlobalWithDelay(JobDelay delay, swift::Job *job) {
 
 SWIFT_CC(swift)
 void net2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job,
-//                              swift_task_enqueueGlobal_original _Nonnull original) {
-                                  void (* _Nonnull)(swift::Job *) __attribute__((swiftcall))) {
-	// auto net = N2::g_net2; // TODO: can't access Net2 since it's incomplete here, would be nicer to not expose API on INetwork I suppose
-	auto net = g_network; // TODO: can't access Net2 since it's incomplete here, would be nicer to not expose API on INetwork I suppose
+                                  //                              swift_task_enqueueGlobal_original _Nonnull original) {
+                                  void (*_Nonnull)(swift::Job*) __attribute__((swiftcall))) {
+	// auto net = N2::g_net2; // TODO: can't access Net2 since it's incomplete here, would be nicer to not expose API on
+	// INetwork I suppose
+	auto net = g_network; // TODO: can't access Net2 since it's incomplete here, would be nicer to not expose API on
+	                      // INetwork I suppose
 	ASSERT(net);
 
-	printf("[c++][%s:%d](%s) intercepted job enqueue: %p to g_network (%p)\n", __FILE_NAME__, __LINE__, __FUNCTION__, job, net);
+	printf("[c++][%s:%d](%s) intercepted job enqueue: %p to g_network (%p)\n",
+	       __FILE_NAME__,
+	       __LINE__,
+	       __FUNCTION__,
+	       job,
+	       net);
 
 	auto swiftPriority = job->getPriority();
-	printf("[c++][%s:%d](%s) net2_enqueueGlobal_hook_impl - swift task priority: %d\n", __FILE_NAME__, __LINE__, __FUNCTION__, static_cast<std::underlying_type<TaskPriority>::type>(swiftPriority));
+	printf("[c++][%s:%d](%s) net2_enqueueGlobal_hook_impl - swift task priority: %d\n",
+	       __FILE_NAME__,
+	       __LINE__,
+	       __FUNCTION__,
+	       static_cast<std::underlying_type<TaskPriority>::type>(swiftPriority));
 	int64_t priority = swift_priority_to_net2(swiftPriority); // default to lowest "Min"
-	printf("[c++][%s:%d](%s) net2_enqueueGlobal_hook_impl - swift task priority: %d -> %d\n", __FILE_NAME__, __LINE__, __FUNCTION__, static_cast<std::underlying_type<TaskPriority>::type>(swiftPriority), static_cast<std::underlying_type<TaskPriority>::type>(priority));
+	printf("[c++][%s:%d](%s) net2_enqueueGlobal_hook_impl - swift task priority: %d -> %d\n",
+	       __FILE_NAME__,
+	       __LINE__,
+	       __FUNCTION__,
+	       static_cast<std::underlying_type<TaskPriority>::type>(swiftPriority),
+	       static_cast<std::underlying_type<TaskPriority>::type>(priority));
 
 	TaskPriority taskID = TaskPriority::DefaultOnMainThread; // FIXME: how to determine
 
-	SwiftJobTask *jobTask = new SwiftJobTask(job);
-	N2::OrderedTask *orderedTask = new N2::OrderedTask(priority, taskID, jobTask);
+	SwiftJobTask* jobTask = new SwiftJobTask(job);
+	N2::OrderedTask* orderedTask = new N2::OrderedTask(priority, taskID, jobTask);
 
 	net->_swiftEnqueue(orderedTask);
 }
 
-void swift_job_run_generic(swift::Job *job) {
+void swift_job_run_generic(swift::Job* job) {
 	swift_job_run(job, ExecutorRef::generic());
 }
-

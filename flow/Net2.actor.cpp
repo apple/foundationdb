@@ -174,7 +174,7 @@ public:
 	double timer_monotonic() override { return ::timer_monotonic(); };
 	Future<Void> delay(double seconds, TaskPriority taskId) override;
 	Future<Void> orderedDelay(double seconds, TaskPriority taskId) override;
-	void _swiftEnqueue(void *task) override;
+	void _swiftEnqueue(void* task) override;
 	Future<class Void> yield(TaskPriority taskID) override;
 	bool check_yield(TaskPriority taskId) override;
 	TaskPriority getCurrentTask() const override { return currentTaskID; }
@@ -264,7 +264,7 @@ public:
 	ReadyQueue<OrderedTask> ready;
 	ThreadSafeQueue<OrderedTask> threadReady; // "thread-safe ready", they get flushed into the ready queue
 
-    // TODO: Bridge the scheduled task from Swift into DelayedTask
+	// TODO: Bridge the scheduled task from Swift into DelayedTask
 	struct DelayedTask : OrderedTask {
 		double at;
 		DelayedTask(double at, int64_t priority, TaskPriority taskID, Task* task)
@@ -1467,11 +1467,11 @@ void Net2::run() {
 		if (b) {
 			b = threadReady.canSleep();
 			if (!b) {
-                ++countCantSleep;
-            }
+				++countCantSleep;
+			}
 		} else {
-            ++countWontSleep;
-        }
+			++countWontSleep;
+		}
 		if (b) {
 			sleepTime = 1e99;
 			double sleepStart = timer_monotonic();
@@ -1808,13 +1808,12 @@ Future<Void> Net2::orderedDelay(double seconds, TaskPriority taskId) {
 	return delay(seconds, taskId);
 }
 
-void Net2::_swiftEnqueue(void *task) {
+void Net2::_swiftEnqueue(void* task) {
 	printf("[c++][net2:%p] ready.push task: %p\n", this, task);
 
-	OrderedTask *orderedTask = (OrderedTask*) task;
+	OrderedTask* orderedTask = (OrderedTask*)task;
 	this->ready.push(*orderedTask);
 }
-
 
 void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
 	if (stopped)
@@ -2117,9 +2116,9 @@ INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetric
 	return N2::g_net2;
 }
 
-//INetwork* _swift_newNet2(TLSConfig* tlsConfig, bool useThreadPool, bool useMetrics) {
+// INetwork* _swift_newNet2(TLSConfig* tlsConfig, bool useThreadPool, bool useMetrics) {
 //	return newNet2(*tlsConfig, useThreadPool, useMetrics);
-//}
+// }
 
 struct TestGVR {
 	Standalone<StringRef> key;
@@ -2354,8 +2353,9 @@ void net2_test(){
 };
 
 //
-//// ==== ----------------------------------------------------------------------------------------------------------------
-//// ==== ----------------------------------------------------------------------------------------------------------------
+//// ====
+///---------------------------------------------------------------------------------------------------------------- /
+///==== ----------------------------------------------------------------------------------------------------------------
 //
 //
 //// TODO: Bridge the scheduled task from Swift into DelayedTask
@@ -2371,7 +2371,7 @@ void net2_test(){
 ////    bool operator<(DelayedTask const& rhs) const { return at > rhs.at; } // Ordering is reversed for priority_queue
 ////};
 //
-//struct SwiftJobTask final : public N2::Task, public FastAllocated<SwiftJobTask> {
+// struct SwiftJobTask final : public N2::Task, public FastAllocated<SwiftJobTask> {
 //    Job *job;
 //    explicit SwiftJobTask(Job* job) noexcept : job(job) {}
 //
@@ -2391,7 +2391,7 @@ void net2_test(){
 //// AKA
 //// void (Job *, void (* _Nonnull)(Job *) __attribute__((swiftcall)))
 //
-//void net2_swift_task_enqueueGlobal(Job *job,
+// void net2_swift_task_enqueueGlobal(Job *job,
 //                                   swift_task_enqueueGlobal_original _Nonnull original) {
 //    N2::Net2 *net = N2::g_net2;
 //    ASSERT(net);
@@ -2409,7 +2409,7 @@ void net2_test(){
 //    assert(false && "just mocking out APIs");
 //}
 //
-//void net2_swift_task_enqueueGlobalWithDelay(JobDelay delay, Job *job) {
+// void net2_swift_task_enqueueGlobalWithDelay(JobDelay delay, Job *job) {
 //    N2::Net2 *net2 = N2::g_net2;
 //    ASSERT(net2);
 ////
@@ -2427,6 +2427,6 @@ void net2_test(){
 //    ASSERT(false && "just mocking out APIs");
 //}
 //
-//void N2::Net2::installSwiftConcurrencyHooks() {
+// void N2::Net2::installSwiftConcurrencyHooks() {
 //    // swift_task_enqueueGlobal_hook = net2_swift_task_enqueueGlobal; // FIXME: slight type issues still
 //}
