@@ -196,14 +196,6 @@ void ShardsAffectedByTeamFailure::check() const {
 	}
 }
 
-std::set<ShardsAffectedByTeamFailure::Team> ShardsAffectedByTeamFailure::getAllTeams() const {
-	std::set<ShardsAffectedByTeamFailure::Team> res;
-	for (const auto& teamKeys : team_shards) {
-		res.insert(res.end(), teamKeys.first);
-	}
-	return res;
-}
-
 size_t ShardsAffectedByTeamFailure::getNumberOfShards() const {
 	return shard_teams.size();
 }

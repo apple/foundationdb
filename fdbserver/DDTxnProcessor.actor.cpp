@@ -504,16 +504,20 @@ DDMockTxnProcessor::getServerListAndProcessClasses() {
 	return res;
 }
 
-// reconstruct team combination from shardMapping
-std::set<std::vector<UID>> DDMockTxnProcessor::getAllTeamsInRegion(bool primary) const {
-	auto teams = mgs->shardMapping->getAllTeams();
-	std::set<std::vector<UID>> res;
-	for (auto& team : teams) {
-		if (primary == team.primary) {
-			res.emplace(team.servers);
-		}
+std::pair<std::set<std::vector<UID>>, std::set<std::vector<UID>>> getAllTeamsInRegion(
+    const std::vector<DDShardInfo>& shards) {
+	std::set<std::vector<UID>> primary, remote;
+	for (auto& info : shards) {
+		if (!info.primarySrc.empty())
+			primary.emplace(info.primarySrc);
+		if (!info.primaryDest.empty())
+			primary.emplace(info.primaryDest);
+		if (!info.remoteSrc.empty())
+			remote.emplace(info.remoteSrc);
+		if (!info.remoteDest.empty())
+			remote.emplace(info.remoteDest);
 	}
-	return res;
+	return { primary, remote };
 }
 
 inline void transformTeamsToServerIds(std::vector<ShardsAffectedByTeamFailure::Team>& teams,
@@ -573,8 +577,7 @@ Future<Reference<InitialDataDistribution>> DDMockTxnProcessor::getInitialDataDis
 	res->mode = 1;
 	res->allServers = getServerListAndProcessClasses().get();
 	res->shards = getDDShardInfos();
-	res->primaryTeams = getAllTeamsInRegion(true);
-	res->remoteTeams = getAllTeamsInRegion(false);
+	std::tie(res->primaryTeams, res->remoteTeams) = getAllTeamsInRegion(res->shards);
 	return res;
 }
 

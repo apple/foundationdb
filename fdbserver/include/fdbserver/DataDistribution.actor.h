@@ -430,14 +430,14 @@ struct DDShardInfo {
 	DDShardInfo(Key key, UID srcId, UID destId) : key(key), hasDest(false), srcId(srcId), destId(destId) {}
 
 	bool operator==(const DDShardInfo& other) const {
-		//		std::cout << key.toHexString() << " | " << other.key.toHexString() << "\n";
-		//		std::cout << hasDest << " | " << other.hasDest << "\n";
-		//		std::cout << srcId.toString() << " | " << other.srcId.toString() << "\n";
-		//		std::cout << destId.toString() << " | " << other.destId.toString() << "\n";
-		//		std::cout << describe(primarySrc) << " | " << describe(other.primarySrc) << "\n";
-		//		std::cout << describe(primaryDest) << " | " << describe(other.primaryDest) << "\n";
-		//		std::cout << describe(remoteSrc) << " | " << describe(other.remoteSrc) << "\n";
-		//		std::cout << describe(remoteSrc) << " | " << describe(other.remoteSrc) << "\n";
+				std::cout << key.toHexString() << " | " << other.key.toHexString() << "\n";
+				std::cout << hasDest << " | " << other.hasDest << "\n";
+				std::cout << srcId.toString() << " | " << other.srcId.toString() << "\n";
+				std::cout << destId.toString() << " | " << other.destId.toString() << "\n";
+				std::cout << describe(primarySrc) << " | " << describe(other.primarySrc) << "\n";
+				std::cout << describe(primaryDest) << " | " << describe(other.primaryDest) << "\n";
+				std::cout << describe(remoteSrc) << " | " << describe(other.remoteSrc) << "\n";
+				std::cout << describe(remoteSrc) << " | " << describe(other.remoteSrc) << "\n";
 
 		return key == other.key && hasDest == other.hasDest && srcId == other.srcId && destId == other.destId &&
 		       primaryDest == other.primaryDest && primarySrc == other.primarySrc && remoteSrc == other.remoteSrc &&

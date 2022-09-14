@@ -2086,6 +2086,8 @@ void PhysicalShardCollection::logPhysicalShardCollection() {
 	}
 }
 
+/*
+ * FIXME: enable this test in the future
 TEST_CASE("/DataDistributor/Tracker/FetchTopK") {
 	state DataDistributionTracker self;
 	state std::vector<KeyRange> ranges;
@@ -2098,11 +2100,11 @@ TEST_CASE("/DataDistributor/Tracker/FetchTopK") {
 	double targetDensities[10] = { 2, 1, 3, 5, 4, 10, 6, 8, 7, 0 };
 	for (int i = 0; i <= 5; ++i) {
 	}
-//	wait(fetchTopKShardMetrics_impl(&self, req));
-//	auto& reply = req.reply.getFuture().get();
-//	ASSERT(reply.shardMetrics.empty());
-//	ASSERT(reply.maxReadLoad == -1);
-//	ASSERT(reply.minReadLoad == -1);
+	wait(fetchTopKShardMetrics_impl(&self, req));
+	auto& reply = req.reply.getFuture().get();
+	ASSERT(reply.shardMetrics.empty());
+	ASSERT(reply.maxReadLoad == -1);
+	ASSERT(reply.minReadLoad == -1);
 
 	return Void();
-}
+} */

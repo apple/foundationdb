@@ -30,12 +30,13 @@ void verifyInitDataEqual(Reference<InitialDataDistribution> real, Reference<Init
 	ASSERT_EQ(real->mode, mock->mode);
 	ASSERT(real->initHealthyZoneValue == mock->initHealthyZoneValue);
 	ASSERT_EQ(real->allServers.size(), mock->allServers.size());
+	std::cout << describe(real->primaryTeams) << " | " << describe(mock->primaryTeams) << "\n";
+	ASSERT(std::equal(real->shards.begin(), real->shards.end(), mock->shards.begin(), mock->shards.end()));
 
 	ASSERT(real->primaryTeams == mock->primaryTeams);
 	ASSERT(real->remoteTeams == mock->remoteTeams);
 	ASSERT_EQ(real->dataMoveMap.size(), mock->dataMoveMap.size());
 	ASSERT_EQ(real->shards.size(), mock->shards.size());
-	ASSERT(std::equal(real->shards.begin(), real->shards.end(), mock->shards.begin(), mock->shards.end()));
 }
 
 // Verify that all IDDTxnProcessor API implementations has consistent result

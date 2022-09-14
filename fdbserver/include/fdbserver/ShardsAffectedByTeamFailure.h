@@ -75,7 +75,6 @@ public:
 	//       no longer in the map), the servers will be set for all contained shards and added to all
 	//       intersecting shards.
 
-	std::set<Team> getAllTeams() const;
 	int getNumberOfShards(UID ssID) const;
 	std::vector<KeyRange> getShardsFor(Team team) const;
 	bool hasShards(Team team) const;
