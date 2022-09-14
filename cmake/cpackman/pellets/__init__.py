@@ -181,9 +181,29 @@ class ConfigureMake(Build):
                  additional_make_args: List[str] | None = None,
                  additional_install_args: List[str] | None = None):
         super().__init__(fetch_source)
-        self.additional_configure_args = additional_configure_args
-        self.additional_make_args = additional_make_args
-        self.additional_install_args = additional_install_args
+        self.additional_configure_args: List[str] = []
+        if additional_configure_args is not None:
+            self.additional_configure_args = additional_configure_args
+        self.additional_make_args: List[str] = []
+        if additional_make_args is not None:
+            self.additional_make_args = additional_make_args
+        self.additional_install_args: List[str] = []
+        if additional_install_args is not None:
+            self.additional_install_args = additional_install_args
+
+    def build_id(self) -> str:
+        res = super().build_id()
+        m = hashlib.sha1()
+        m.update(res)
+        # we could add all args to the checksum which would be simpler. But we want to make sure that if an argument is
+        # moved from one build step to another that they will be distinct builds
+        for arg in self.additional_configure_args:
+            m.update("config-arg: {}".format(arg).encode())
+        for arg in self.additional_make_args:
+            m.update("make-arg: {}".format(arg).encode())
+        for arg in self.additional_install_args:
+            m.update("install-arg: {}".format(arg).encode())
+        return m.hexdigest()
 
     def run_configure(self) -> None:
         cmd = ["{}/configure".format(self.fetch_source.get_source().absolute()),

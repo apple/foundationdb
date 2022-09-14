@@ -1,3 +1,4 @@
+import hashlib
 import multiprocessing
 import os
 from copy import copy
@@ -14,6 +15,15 @@ class OpenSSLBuild(Build):
                             url='https://www.openssl.org/source/openssl-1.1.1q.tar.gz',
                             checksum='79511a8f46f267c533efd32f22ad3bf89a92d8e5')
         super().__init__(source)
+
+    def build_id(self) -> str:
+        m = hashlib.sha1()
+        m.update(super().build_id().encode())
+        if config.use_asan:
+            m.update('enable-asan')
+        if config.use_ubsan:
+            m.update('enable-ubsan')
+        return m.hexdigest()
 
     def run_configure(self) -> None:
         source_folder = self.fetch_source.get_source()
