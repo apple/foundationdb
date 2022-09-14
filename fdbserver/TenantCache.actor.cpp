@@ -76,43 +76,44 @@ public:
 		state double lastTenantListFetchTime = now();
 
 		loop {
-			try {
-				if (now() - lastTenantListFetchTime > (2 * SERVER_KNOBS->TENANT_CACHE_LIST_REFRESH_INTERVAL)) {
-					TraceEvent(SevWarn, "TenantListRefreshDelay", tenantCache->id()).log();
-				}
+			choose {
+				when(wait(delay(SERVER_KNOBS->TENANT_CACHE_LIST_REFRESH_INTERVAL))) {
+					try {
+						if (now() - lastTenantListFetchTime > (2 * SERVER_KNOBS->TENANT_CACHE_LIST_REFRESH_INTERVAL)) {
+							TraceEvent(SevWarn, "TenantListRefreshDelay", tenantCache->id()).log();
+						}
 
-				state std::vector<std::pair<TenantName, TenantMapEntry>> tenantList =
-				    wait(getTenantList(tenantCache, &tr));
+						state std::vector<std::pair<TenantName, TenantMapEntry>> tenantList =
+						    wait(getTenantList(tenantCache, &tr));
 
-				tenantCache->startRefresh();
-				bool tenantListUpdated = false;
+						tenantCache->startRefresh();
+						bool tenantListUpdated = false;
 
-				for (int i = 0; i < tenantList.size(); i++) {
-					if (tenantCache->update(tenantList[i].first, tenantList[i].second)) {
-						tenantListUpdated = true;
-						TenantCacheTenantCreated req(tenantList[i].second.prefix);
-						tenantCache->tenantCreationSignal.send(req);
+						for (int i = 0; i < tenantList.size(); i++) {
+							if (tenantCache->update(tenantList[i].first, tenantList[i].second)) {
+								tenantListUpdated = true;
+							}
+						}
+
+						if (tenantCache->cleanup()) {
+							tenantListUpdated = true;
+						}
+
+						if (tenantListUpdated) {
+							TraceEvent(SevInfo, "TenantCache", tenantCache->id()).detail("List", tenantCache->desc());
+						}
+
+						lastTenantListFetchTime = now();
+						tr.reset();
+					} catch (Error& e) {
+						if (e.code() != error_code_actor_cancelled) {
+							TraceEvent("TenantCacheGetTenantListError", tenantCache->id())
+							    .errorUnsuppressed(e)
+							    .suppressFor(1.0);
+						}
+						wait(tr.onError(e));
 					}
 				}
-
-				if (tenantCache->cleanup()) {
-					tenantListUpdated = true;
-				}
-
-				if (tenantListUpdated) {
-					TraceEvent(SevInfo, "TenantCache", tenantCache->id()).detail("List", tenantCache->desc());
-				}
-
-				lastTenantListFetchTime = now();
-				tr.reset();
-				wait(delay(SERVER_KNOBS->TENANT_CACHE_LIST_REFRESH_INTERVAL));
-			} catch (Error& e) {
-				if (e.code() != error_code_actor_cancelled) {
-					TraceEvent("TenantCacheGetTenantListError", tenantCache->id())
-					    .errorUnsuppressed(e)
-					    .suppressFor(1.0);
-				}
-				wait(tr.onError(e));
 			}
 		}
 	}
@@ -141,14 +142,23 @@ void TenantCache::keep(TenantName& tenantName, TenantMapEntry& tenant) {
 
 bool TenantCache::update(TenantName& tenantName, TenantMapEntry& tenant) {
 	KeyRef tenantPrefix(tenant.prefix.begin(), tenant.prefix.size());
+	bool inserted;
 
 	if (tenantCache.find(tenantPrefix) != tenantCache.end()) {
 		keep(tenantName, tenant);
-		return false;
+		inserted = false;
+	} else {
+		insert(tenantName, tenant);
+		inserted = true;
 	}
 
-	insert(tenantName, tenant);
-	return true;
+	if (!tenantCache[tenantPrefix]->tenantCreationSignalled()) {
+		TenantCacheTenantCreated req(tenantPrefix);
+		tenantCreationSignal.send(req);
+		tenantCache[tenantPrefix]->setTenantCreationSignalled();
+	}
+
+	return inserted;
 }
 
 int TenantCache::cleanup() {

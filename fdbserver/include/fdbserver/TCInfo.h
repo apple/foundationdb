@@ -256,11 +256,13 @@ private:
 	std::vector<Reference<TCTeamInfo>> tenantTeams_;
 	Optional<TenantGroupName> tenantGroup_;
 	int64_t cacheGeneration_;
+	bool tenantCreationSignalled_;
 
 public:
 	TCTenantInfo() { prefix_ = allKeys.end; }
 	TCTenantInfo(TenantInfo tinfo, Key prefix, Optional<TenantGroupName> group)
-	  : tenantInfo_(tinfo), prefix_(prefix), tenantGroup_(group) {}
+	  : tenantInfo_(tinfo), prefix_(prefix), tenantGroup_(group), cacheGeneration_(0), tenantCreationSignalled_(false) {
+	}
 	std::vector<Reference<TCTeamInfo>>& teams() { return tenantTeams_; }
 
 	TenantName name() const { return tenantInfo_.name.get(); }
@@ -272,4 +274,6 @@ public:
 	void removeTeam(TCTeamInfo team);
 	void updateCacheGeneration(int64_t generation) { cacheGeneration_ = generation; }
 	int64_t cacheGeneration() const { return cacheGeneration_; }
+	bool tenantCreationSignalled() const { return tenantCreationSignalled_; }
+	void setTenantCreationSignalled() { tenantCreationSignalled_ = true; }
 };
