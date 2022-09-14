@@ -173,6 +173,8 @@ public:
 
 	// test only
 	void setupMockGlobalState(Reference<InitialDataDistribution> initData);
+
+	Future<Void> moveKeys(const MoveKeysParams& params) const override;
 };
 
 #endif // FOUNDATIONDB_DDTXNPROCESSOR_H

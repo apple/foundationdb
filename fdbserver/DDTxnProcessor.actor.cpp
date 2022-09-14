@@ -629,3 +629,8 @@ void DDMockTxnProcessor::setupMockGlobalState(Reference<InitialDataDistribution>
 
 	mgs->shardMapping->setCheckMode(ShardsAffectedByTeamFailure::CheckMode::Normal);
 }
+
+// FIXME: finish moveKeys implementation
+Future<Void> DDMockTxnProcessor::moveKeys(const MoveKeysParams& params) const {
+	UNREACHABLE();
+}
