@@ -22,6 +22,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/DDSharedContext.h"
 #include "fdbserver/DDTxnProcessor.h"
+#include "fdbserver/MoveKeys.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -79,16 +80,22 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		// FIXME: add support for generating random teams across DCs
 		ASSERT_EQ(self->ddContext.usableRegions(), 1);
 
-		// This will kill the DD but it doesn't matter
-		wait(store(self->ddContext.lock, self->real->takeMoveKeysLock(self->ddContext.id())));
-
-		// read real InitialDataDistribution
-		wait(store(self->realInitDD,
-		           self->real->getInitialDataDistribution(
-		               self->ddContext.id(), self->ddContext.lock, {}, self->ddContext.ddEnabledState.get())));
-		std::cout << "Finish read real InitialDataDistribution: server size " << self->realInitDD->allServers.size()
-		          << ", shard size: " << self->realInitDD->shards.size() << std::endl;
-
+		loop {
+			wait(store(self->ddContext.lock, ::readMoveKeysLock(cx)));
+			// read real InitialDataDistribution
+			try {
+				wait(store(self->realInitDD,
+				           self->real->getInitialDataDistribution(
+				               self->ddContext.id(), self->ddContext.lock, {}, self->ddContext.ddEnabledState.get())));
+				std::cout << "Finish read real InitialDataDistribution: server size "
+				          << self->realInitDD->allServers.size() << ", shard size: " << self->realInitDD->shards.size()
+				          << std::endl;
+				break;
+			} catch (Error& e) {
+				if (e.code() != error_code_movekeys_conflict)
+					throw;
+			}
+		}
 		return Void();
 	}
 
