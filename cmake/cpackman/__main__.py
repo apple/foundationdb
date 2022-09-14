@@ -1,0 +1,22 @@
+import os
+import sys
+import importlib.util
+
+from . import eprint
+
+
+if os.name == 'nt':
+    # CPackMan is not supported on Windows
+    sys.exit(0)
+assert len(sys.argv) >= 3
+assert sys.argv[1] == 'FIND_PACKAGE'
+package_name = sys.argv[2]
+module_name = 'cpackman.pellets.{}'.format(package_name.lower())
+spec = importlib.util.find_spec(module_name)
+if spec is not None:
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    module.provide_module(sys.argv)
+else:
+    eprint('{} not found'.format(module_name))

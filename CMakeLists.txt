@@ -16,16 +16,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-if(WIN32)
-  cmake_minimum_required(VERSION 3.15)
-else()
-  cmake_minimum_required(VERSION 3.13)
-endif()
+cmake_minimum_required(VERSION 3.24)
+
+################################################################################
+# CPackMan
+################################################################################
+
+set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES "${CMAKE_PROJECT_TOP_LEVEL_INCLUDES};${CMAKE_CURRENT_SOURCE_DIR}/cmake/CPackMan.cmake")
 
 # silence deprecation warnings in newer versions of cmake
 if(POLICY CMP0135)
   cmake_policy(SET CMP0135 NEW)
 endif()
+
 
 project(foundationdb
   VERSION 7.2.0
@@ -34,6 +37,7 @@ project(foundationdb
   LANGUAGES C CXX ASM)
 
 set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH};${PROJECT_SOURCE_DIR}/cmake")
+
 message (STATUS "${PROJECT_SOURCE_DIR} ${PROJECT_BINARY_DIR}")
 if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
   message(FATAL_ERROR "In-source builds are forbidden")
