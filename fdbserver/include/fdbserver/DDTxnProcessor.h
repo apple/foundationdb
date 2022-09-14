@@ -85,6 +85,8 @@ public:
 	                                         const Optional<UID>& tssPairID,
 	                                         const MoveKeysLock& lock,
 	                                         const DDEnabledState* ddEnabledState) const = 0;
+
+	virtual Future<Void> moveKeys(const MoveKeysParams& params) const = 0;
 };
 
 class DDTxnProcessorImpl;
@@ -136,6 +138,8 @@ public:
 	                                 const DDEnabledState* ddEnabledState) const override {
 		return ::removeStorageServer(cx, serverID, tssPairID, lock, ddEnabledState);
 	}
+
+	Future<Void> moveKeys(const MoveKeysParams& params) const override { return ::moveKeys(cx, params); }
 };
 
 // A mock transaction implementation for test usage.

@@ -221,6 +221,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 			cipherKeyCache->resetEncryptDomainId(id);
 		}
 
+		cipherKeyCache->resetEncryptDomainId(FDB_DEFAULT_ENCRYPT_DOMAIN_ID);
 		cipherKeyCache->resetEncryptDomainId(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID);
 		cipherKeyCache->resetEncryptDomainId(ENCRYPT_HEADER_DOMAIN_ID);
 

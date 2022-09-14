@@ -41,6 +41,10 @@ ApiWorkload::ApiWorkload(const WorkloadConfig& config) : WorkloadBase(config) {
 	stopReceived = false;
 	checkingProgress = false;
 	apiVersion = config.apiVersion;
+
+	for (int i = 0; i < config.numTenants; ++i) {
+		tenants.push_back(fdb::ByteString(fdb::toBytesRef("tenant" + std::to_string(i))));
+	}
 }
 
 IWorkloadControlIfc* ApiWorkload::getControlIfc() {
@@ -114,42 +118,50 @@ fdb::Value ApiWorkload::randomValue() {
 	return Random::get().randomByteStringLowerCase(minValueLength, maxValueLength);
 }
 
-fdb::Key ApiWorkload::randomNotExistingKey() {
+fdb::Key ApiWorkload::randomNotExistingKey(std::optional<int> tenantId) {
 	while (true) {
 		fdb::Key key = randomKeyName();
-		if (!store.exists(key)) {
+		if (!stores[tenantId].exists(key)) {
 			return key;
 		}
 	}
 }
 
-fdb::Key ApiWorkload::randomExistingKey() {
+fdb::Key ApiWorkload::randomExistingKey(std::optional<int> tenantId) {
 	fdb::Key genKey = randomKeyName();
-	fdb::Key key = store.getKey(genKey, true, 1);
-	if (key != store.endKey()) {
+	fdb::Key key = stores[tenantId].getKey(genKey, true, 1);
+	if (key != stores[tenantId].endKey()) {
 		return key;
 	}
-	key = store.getKey(genKey, true, 0);
-	if (key != store.startKey()) {
+	key = stores[tenantId].getKey(genKey, true, 0);
+	if (key != stores[tenantId].startKey()) {
 		return key;
 	}
 	info("No existing key found, using a new random key.");
 	return genKey;
 }
 
-fdb::Key ApiWorkload::randomKey(double existingKeyRatio) {
+fdb::Key ApiWorkload::randomKey(double existingKeyRatio, std::optional<int> tenantId) {
 	if (Random::get().randomBool(existingKeyRatio)) {
-		return randomExistingKey();
+		return randomExistingKey(tenantId);
 	} else {
-		return randomNotExistingKey();
+		return randomNotExistingKey(tenantId);
 	}
 }
 
-void ApiWorkload::populateDataTx(TTaskFct cont) {
+std::optional<int> ApiWorkload::randomTenant() {
+	if (tenants.size() > 0) {
+		return Random::get().randomInt(0, tenants.size() - 1);
+	} else {
+		return {};
+	}
+}
+
+void ApiWorkload::populateDataTx(TTaskFct cont, std::optional<int> tenantId) {
 	int numKeys = maxKeysPerTransaction;
 	auto kvPairs = std::make_shared<std::vector<fdb::KeyValue>>();
 	for (int i = 0; i < numKeys; i++) {
-		kvPairs->push_back(fdb::KeyValue{ randomNotExistingKey(), randomValue() });
+		kvPairs->push_back(fdb::KeyValue{ randomNotExistingKey(tenantId), randomValue() });
 	}
 	execTransaction(
 	    [kvPairs](auto ctx) {
@@ -158,12 +170,29 @@ void ApiWorkload::populateDataTx(TTaskFct cont) {
 		    }
 		    ctx->commit();
 	    },
-	    [this, kvPairs, cont]() {
+	    [this, tenantId, kvPairs, cont]() {
 		    for (const fdb::KeyValue& kv : *kvPairs) {
-			    store.set(kv.key, kv.value);
+			    stores[tenantId].set(kv.key, kv.value);
 		    }
 		    schedule(cont);
-	    });
+	    },
+	    getTenant(tenantId));
+}
+
+void ApiWorkload::clearTenantData(TTaskFct cont, std::optional<int> tenantId) {
+	execTransaction(
+	    [this](auto ctx) {
+		    ctx->tx().clearRange(keyPrefix, keyPrefix + fdb::Key(1, '\xff'));
+		    ctx->commit();
+	    },
+	    [this, tenantId, cont]() {
+		    if (tenantId && tenantId.value() < tenants.size() - 1) {
+			    clearTenantData(cont, tenantId.value() + 1);
+		    } else {
+			    schedule(cont);
+		    }
+	    },
+	    getTenant(tenantId));
 }
 
 void ApiWorkload::clearData(TTaskFct cont) {
@@ -175,20 +204,51 @@ void ApiWorkload::clearData(TTaskFct cont) {
 	    [this, cont]() { schedule(cont); });
 }
 
-void ApiWorkload::populateData(TTaskFct cont) {
-	if (store.size() < initialSize) {
-		populateDataTx([this, cont]() { populateData(cont); });
-	} else {
+void ApiWorkload::populateTenantData(TTaskFct cont, std::optional<int> tenantId) {
+	while (stores[tenantId].size() >= initialSize && tenantId && tenantId.value() < tenants.size()) {
+		++tenantId.value();
+	}
+
+	if (tenantId >= tenants.size() || stores[tenantId].size() >= initialSize) {
 		info("Data population completed");
 		schedule(cont);
+	} else {
+		populateDataTx([this, cont, tenantId]() { populateTenantData(cont, tenantId); }, tenantId);
 	}
 }
 
-void ApiWorkload::randomInsertOp(TTaskFct cont) {
+void ApiWorkload::createTenants(TTaskFct cont) {
+	execTransaction(
+	    [this](auto ctx) {
+		    auto futures = std::make_shared<std::vector<fdb::Future>>();
+		    for (auto tenant : tenants) {
+			    futures->push_back(fdb::Tenant::getTenant(ctx->tx(), tenant));
+		    }
+		    ctx->continueAfterAll(*futures, [this, ctx, futures]() {
+			    for (int i = 0; i < futures->size(); ++i) {
+				    if (!(*futures)[i].get<fdb::future_var::ValueRef>()) {
+					    fdb::Tenant::createTenant(ctx->tx(), tenants[i]);
+				    }
+			    }
+			    ctx->commit();
+		    });
+	    },
+	    [this, cont]() { schedule(cont); });
+}
+
+void ApiWorkload::populateData(TTaskFct cont) {
+	if (tenants.size() > 0) {
+		createTenants([this, cont]() { populateTenantData(cont, std::make_optional(0)); });
+	} else {
+		populateTenantData(cont, {});
+	}
+}
+
+void ApiWorkload::randomInsertOp(TTaskFct cont, std::optional<int> tenantId) {
 	int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
 	auto kvPairs = std::make_shared<std::vector<fdb::KeyValue>>();
 	for (int i = 0; i < numKeys; i++) {
-		kvPairs->push_back(fdb::KeyValue{ randomNotExistingKey(), randomValue() });
+		kvPairs->push_back(fdb::KeyValue{ randomNotExistingKey(tenantId), randomValue() });
 	}
 	execTransaction(
 	    [kvPairs](auto ctx) {
@@ -197,19 +257,20 @@ void ApiWorkload::randomInsertOp(TTaskFct cont) {
 		    }
 		    ctx->commit();
 	    },
-	    [this, kvPairs, cont]() {
+	    [this, kvPairs, cont, tenantId]() {
 		    for (const fdb::KeyValue& kv : *kvPairs) {
-			    store.set(kv.key, kv.value);
+			    stores[tenantId].set(kv.key, kv.value);
 		    }
 		    schedule(cont);
-	    });
+	    },
+	    getTenant(tenantId));
 }
 
-void ApiWorkload::randomClearOp(TTaskFct cont) {
+void ApiWorkload::randomClearOp(TTaskFct cont, std::optional<int> tenantId) {
 	int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
 	auto keys = std::make_shared<std::vector<fdb::Key>>();
 	for (int i = 0; i < numKeys; i++) {
-		keys->push_back(randomExistingKey());
+		keys->push_back(randomExistingKey(tenantId));
 	}
 	execTransaction(
 	    [keys](auto ctx) {
@@ -218,15 +279,16 @@ void ApiWorkload::randomClearOp(TTaskFct cont) {
 		    }
 		    ctx->commit();
 	    },
-	    [this, keys, cont]() {
+	    [this, keys, cont, tenantId]() {
 		    for (const auto& key : *keys) {
-			    store.clear(key);
+			    stores[tenantId].clear(key);
 		    }
 		    schedule(cont);
-	    });
+	    },
+	    getTenant(tenantId));
 }
 
-void ApiWorkload::randomClearRangeOp(TTaskFct cont) {
+void ApiWorkload::randomClearRangeOp(TTaskFct cont, std::optional<int> tenantId) {
 	fdb::Key begin = randomKeyName();
 	fdb::Key end = randomKeyName();
 	if (begin > end) {
@@ -237,10 +299,19 @@ void ApiWorkload::randomClearRangeOp(TTaskFct cont) {
 		    ctx->tx().clearRange(begin, end);
 		    ctx->commit();
 	    },
-	    [this, begin, end, cont]() {
-		    store.clear(begin, end);
+	    [this, begin, end, cont, tenantId]() {
+		    stores[tenantId].clear(begin, end);
 		    schedule(cont);
-	    });
+	    },
+	    getTenant(tenantId));
+}
+
+std::optional<fdb::BytesRef> ApiWorkload::getTenant(std::optional<int> tenantId) {
+	if (tenantId) {
+		return tenants[*tenantId];
+	} else {
+		return {};
+	}
 }
 
 } // namespace FdbApiTester

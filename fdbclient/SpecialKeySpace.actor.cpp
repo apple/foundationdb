@@ -1778,11 +1778,15 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		}
 	}
 
+	auto configDBEntry = ryw->getSpecialKeySpaceWriteMap()[LiteralStringRef("config_db").withPrefix(kr.begin)];
+
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsStart")
 	    .detail("NewConnectionString", conn.toString())
-	    .detail("Description", entry.first ? entry.second.get().toString() : "");
+	    .detail("Description", entry.first ? entry.second.get().toString() : "")
+	    .detail("ConfigDBDisabled", configDBEntry.first);
 
-	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), &conn, newName));
+	Optional<CoordinatorsResult> r =
+	    wait(changeQuorumChecker(&ryw->getTransaction(), &conn, newName, configDBEntry.first));
 
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsFinish")
 	    .detail("Result", r.present() ? static_cast<int>(r.get()) : -1); // -1 means success

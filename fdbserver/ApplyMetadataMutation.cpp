@@ -83,8 +83,8 @@ public:
 	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
-	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap), initialCommit(initialCommit_),
-	    dbInfo(proxyCommitData_.db) {}
+	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
+	    tenantIdIndex(&proxyCommitData_.tenantIdIndex), initialCommit(initialCommit_), dbInfo(proxyCommitData_.db) {}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           ResolverData& resolverData_,
@@ -134,6 +134,7 @@ private:
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
 	std::map<TenantName, TenantMapEntry>* tenantMap = nullptr;
+	std::unordered_map<int64_t, TenantName>* tenantIdIndex = nullptr;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
 	bool initialCommit = false;
@@ -327,7 +328,8 @@ private:
 	}
 
 	void checkSetConfigKeys(MutationRef m) {
-		if (!m.param1.startsWith(configKeysPrefix) && m.param1 != coordinatorsKey) {
+		if (!m.param1.startsWith(configKeysPrefix) && m.param1 != coordinatorsKey &&
+		    m.param1 != previousCoordinatorsKey) {
 			return;
 		}
 		if (Optional<StringRef>(m.param2) !=
@@ -343,7 +345,8 @@ private:
 				TraceEvent("MutationRequiresRestart", dbgid)
 				    .detail("M", m)
 				    .detail("PrevValue", t.orDefault("(none)"_sr))
-				    .detail("ToCommit", toCommit != nullptr);
+				    .detail("ToCommit", toCommit != nullptr)
+				    .detail("InitialCommit", initialCommit);
 				confChange = true;
 			}
 		}
@@ -657,13 +660,21 @@ private:
 	void checkSetTenantMapPrefix(MutationRef m) {
 		KeyRef prefix = TenantMetadata::tenantMap().subspace.begin;
 		if (m.param1.startsWith(prefix)) {
+			TenantName tenantName = m.param1.removePrefix(prefix);
+			TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
+
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
-				TenantName tenantName = m.param1.removePrefix(prefix);
-				TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
 
-				TraceEvent("CommitProxyInsertTenant", dbgid).detail("Tenant", tenantName).detail("Version", version);
+				TraceEvent("CommitProxyInsertTenant", dbgid)
+				    .detail("Tenant", tenantName)
+				    .detail("Id", tenantEntry.id)
+				    .detail("Version", version);
+
 				(*tenantMap)[tenantName] = tenantEntry;
+				if (tenantIdIndex) {
+					(*tenantIdIndex)[tenantEntry.id] = tenantName;
+				}
 			}
 
 			if (!initialCommit) {
@@ -1070,6 +1081,17 @@ private:
 
 				auto startItr = tenantMap->lower_bound(startTenant);
 				auto endItr = tenantMap->lower_bound(endTenant);
+
+				if (tenantIdIndex) {
+					// Iterate over iterator-range and remove entries from TenantIdName map
+					// TODO: O(n) operation, optimize cpu
+					auto itr = startItr;
+					while (itr != endItr) {
+						tenantIdIndex->erase(itr->second.id);
+						itr++;
+					}
+				}
+
 				tenantMap->erase(startItr, endItr);
 			}
 
@@ -1115,6 +1137,9 @@ private:
 	void checkClearMiscRangeKeys(KeyRangeRef range) {
 		if (initialCommit) {
 			return;
+		}
+		if (range.contains(previousCoordinatorsKey)) {
+			txnStateStore->clear(singleKeyRange(previousCoordinatorsKey));
 		}
 		if (range.contains(coordinatorsKey)) {
 			txnStateStore->clear(singleKeyRange(coordinatorsKey));

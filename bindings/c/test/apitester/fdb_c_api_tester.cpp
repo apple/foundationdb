@@ -36,6 +36,8 @@ namespace FdbApiTester {
 
 namespace {
 
+#define API_VERSION_CLIENT_TMP_DIR 720
+
 enum TesterOptionId {
 	OPT_CONNFILE,
 	OPT_HELP,
@@ -285,7 +287,7 @@ void fdb_check(fdb::Error e) {
 }
 
 void applyNetworkOptions(TesterOptions& options) {
-	if (!options.tmpDir.empty() && options.apiVersion >= 720) {
+	if (!options.tmpDir.empty() && options.apiVersion >= API_VERSION_CLIENT_TMP_DIR) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_TMP_DIR, options.tmpDir);
 	}
 	if (!options.externalClientLibrary.empty()) {
@@ -350,6 +352,12 @@ void randomizeOptions(TesterOptions& options) {
 	options.numClientThreads = random.randomInt(options.testSpec.minClientThreads, options.testSpec.maxClientThreads);
 	options.numDatabases = random.randomInt(options.testSpec.minDatabases, options.testSpec.maxDatabases);
 	options.numClients = random.randomInt(options.testSpec.minClients, options.testSpec.maxClients);
+
+	// Choose a random number of tenants. If a test is configured to allow 0 tenants, then use 0 tenants half the time.
+	if (options.testSpec.maxTenants >= options.testSpec.minTenants &&
+	    (options.testSpec.minTenants > 0 || random.randomBool(0.5))) {
+		options.numTenants = random.randomInt(options.testSpec.minTenants, options.testSpec.maxTenants);
+	}
 }
 
 bool runWorkloads(TesterOptions& options) {
@@ -363,6 +371,7 @@ bool runWorkloads(TesterOptions& options) {
 		txExecOptions.transactionRetryLimit = options.transactionRetryLimit;
 		txExecOptions.tmpDir = options.tmpDir.empty() ? std::string("/tmp") : options.tmpDir;
 		txExecOptions.tamperClusterFile = options.testSpec.tamperClusterFile;
+		txExecOptions.numTenants = options.numTenants;
 
 		std::vector<std::shared_ptr<IWorkload>> workloads;
 		workloads.reserve(options.testSpec.workloads.size() * options.numClients);
@@ -374,6 +383,7 @@ bool runWorkloads(TesterOptions& options) {
 				config.options = workloadSpec.options;
 				config.clientId = i;
 				config.numClients = options.numClients;
+				config.numTenants = options.numTenants;
 				config.apiVersion = options.apiVersion;
 				std::shared_ptr<IWorkload> workload = IWorkloadFactory::create(workloadSpec.name, config);
 				if (!workload) {

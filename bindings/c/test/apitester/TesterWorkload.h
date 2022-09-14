@@ -82,6 +82,9 @@ struct WorkloadConfig {
 	// Total number of clients
 	int numClients;
 
+	// Number of Tenants
+	int numTenants;
+
 	// Selected FDB API version
 	int apiVersion;
 
@@ -116,11 +119,17 @@ protected:
 	void schedule(TTaskFct task);
 
 	// Execute a transaction within the workload
-	void execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskFct cont, bool failOnError = true);
+	void execTransaction(std::shared_ptr<ITransactionActor> tx,
+	                     TTaskFct cont,
+	                     std::optional<fdb::BytesRef> tenant = std::optional<fdb::BytesRef>(),
+	                     bool failOnError = true);
 
 	// Execute a transaction within the workload, a convenience method for a tranasaction defined by a lambda function
-	void execTransaction(TTxStartFct start, TTaskFct cont, bool failOnError = true) {
-		execTransaction(std::make_shared<TransactionFct>(start), cont, failOnError);
+	void execTransaction(TTxStartFct start,
+	                     TTaskFct cont,
+	                     std::optional<fdb::BytesRef> tenant = std::optional<fdb::BytesRef>(),
+	                     bool failOnError = true) {
+		execTransaction(std::make_shared<TransactionFct>(start), cont, tenant, failOnError);
 	}
 
 	// Log an error message, increase error counter

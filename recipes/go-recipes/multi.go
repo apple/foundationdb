@@ -30,6 +30,8 @@ import (
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
 
+const API_VERSION int = 720
+
 func clear_subspace(db fdb.Transactor, ss subspace.Subspace) {
 	db.Transact(func(tr fdb.Transaction) (interface{}, error) {
 		tr.ClearRange(ss)
@@ -131,8 +133,7 @@ func (multi MultiMap) MultiIsElement(trtr fdb.Transactor, index, value interface
 }
 
 func main() {
-
-	fdb.MustAPIVersion(720)
+	fdb.MustAPIVersion(API_VERSION)
 
 	db := fdb.MustOpenDefault()
 

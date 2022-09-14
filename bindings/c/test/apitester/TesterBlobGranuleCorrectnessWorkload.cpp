@@ -43,7 +43,7 @@ private:
 	// FIXME: should still guarantee a read succeeds eventually somehow
 	bool seenReadSuccess = false;
 
-	void randomReadOp(TTaskFct cont) {
+	void randomReadOp(TTaskFct cont, std::optional<int> tenantId) {
 		fdb::Key begin = randomKeyName();
 		fdb::Key end = randomKeyName();
 		if (begin > end) {
@@ -82,9 +82,10 @@ private:
 				    ctx->done();
 			    }
 		    },
-		    [this, begin, end, results, tooOld, cont]() {
+		    [this, begin, end, results, tooOld, cont, tenantId]() {
 			    if (!*tooOld) {
-				    std::vector<fdb::KeyValue> expected = store.getRange(begin, end, store.size(), false);
+				    std::vector<fdb::KeyValue> expected =
+				        stores[tenantId].getRange(begin, end, stores[tenantId].size(), false);
 				    if (results->size() != expected.size()) {
 					    error(fmt::format("randomReadOp result size mismatch. expected: {} actual: {}",
 					                      expected.size(),
@@ -115,10 +116,11 @@ private:
 				    }
 			    }
 			    schedule(cont);
-		    });
+		    },
+		    getTenant(tenantId));
 	}
 
-	void randomGetRangesOp(TTaskFct cont) {
+	void randomGetRangesOp(TTaskFct cont, std::optional<int> tenantId) {
 		fdb::Key begin = randomKeyName();
 		fdb::Key end = randomKeyName();
 		if (begin > end) {
@@ -169,10 +171,11 @@ private:
 			    }
 
 			    schedule(cont);
-		    });
+		    },
+		    getTenant(tenantId));
 	}
 
-	void randomSummarizeOp(TTaskFct cont) {
+	void randomSummarizeOp(TTaskFct cont, std::optional<int> tenantId) {
 		fdb::Key begin = randomKeyName();
 		fdb::Key end = randomKeyName();
 		if (begin > end) {
@@ -211,32 +214,36 @@ private:
 			    }
 
 			    schedule(cont);
-		    });
+		    },
+		    getTenant(tenantId));
 	}
 
 	void randomOperation(TTaskFct cont) {
-		OpType txType = (store.size() == 0) ? OP_INSERT : (OpType)Random::get().randomInt(0, OP_LAST);
+		std::optional<int> tenantId = randomTenant();
+
+		OpType txType = (stores[tenantId].size() == 0) ? OP_INSERT : (OpType)Random::get().randomInt(0, OP_LAST);
 		while (std::count(excludedOpTypes.begin(), excludedOpTypes.end(), txType)) {
 			txType = (OpType)Random::get().randomInt(0, OP_LAST);
 		}
+
 		switch (txType) {
 		case OP_INSERT:
-			randomInsertOp(cont);
+			randomInsertOp(cont, tenantId);
 			break;
 		case OP_CLEAR:
-			randomClearOp(cont);
+			randomClearOp(cont, tenantId);
 			break;
 		case OP_CLEAR_RANGE:
-			randomClearRangeOp(cont);
+			randomClearRangeOp(cont, tenantId);
 			break;
 		case OP_READ:
-			randomReadOp(cont);
+			randomReadOp(cont, tenantId);
 			break;
 		case OP_GET_RANGES:
-			randomGetRangesOp(cont);
+			randomGetRangesOp(cont, tenantId);
 			break;
 		case OP_SUMMARIZE:
-			randomSummarizeOp(cont);
+			randomSummarizeOp(cont, tenantId);
 			break;
 		}
 	}
