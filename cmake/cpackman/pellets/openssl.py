@@ -13,9 +13,6 @@ class OpenSSLBuild(Build):
                             version_str='1.1.1q',
                             url='https://www.openssl.org/source/openssl-1.1.1q.tar.gz',
                             checksum='79511a8f46f267c533efd32f22ad3bf89a92d8e5')
-        self.env = copy(os.environ)
-        if config.c_compiler is not None:
-            self.env['CC'] = config.c_compiler
         super().__init__(source)
 
     def run_configure(self) -> None:

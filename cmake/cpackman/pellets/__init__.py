@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import multiprocessing
 import os
 import shutil
 import subprocess
 import sys
 import urllib.parse
 import urllib.request
+from copy import copy
 from pathlib import Path
 from typing import Set, List, TextIO
 
@@ -115,6 +117,11 @@ class Build:
         self.install_folder = Path('cpackman') / 'install' / fetch_source.name / self.build_id()
         self.build_folder.mkdir(0o777, parents=True, exist_ok=True)
         self.install_folder.mkdir(0o777, parents=True, exist_ok=True)
+        self.env = copy(os.environ)
+        if config.c_compiler is not None:
+            self.env['CC'] = config.c_compiler
+        if config.cxx_compiler is not None:
+            self.env['CXX'] = config.cxx_compiler
 
     def build_id(self) -> str:
         m = hashlib.sha1()
@@ -166,6 +173,33 @@ class Build:
 
     def print_target(self, out: TextIO):
         raise NotImplemented()
+
+
+class ConfigureMake(Build):
+    def __init__(self, fetch_source: FetchSource,
+                 additional_configure_args: List[str] | None = None,
+                 additional_make_args: List[str] | None = None,
+                 additional_install_args: List[str] | None = None):
+        super().__init__(fetch_source)
+        self.additional_configure_args = additional_configure_args
+        self.additional_make_args = additional_make_args
+        self.additional_install_args = additional_install_args
+
+    def run_configure(self) -> None:
+        cmd = ["{}/configure".format(self.fetch_source.get_source().absolute()),
+               '--prefix={}'.format(self.install_folder.absolute())]
+        cmd += self.additional_configure_args if self.additional_configure_args is not None else []
+        run_command(cmd, env=self.env, cwd=self.build_folder)
+
+    def run_build(self) -> None:
+        cmd = ['make', '-j{}'.format(multiprocessing.cpu_count())]
+        cmd += self.additional_make_args if self.additional_make_args is not None else []
+        run_command(cmd, env=self.env, cwd=self.build_folder)
+
+    def run_install(self) -> None:
+        cmd = ['make', 'install']
+        cmd += self.additional_install_args if self.additional_install_args is not None else []
+        run_command(cmd, env=self.env, cwd=self.build_folder)
 
 
 def add_static_library(out: TextIO, target: str, include_dirs: List[Path], library_path: Path, link_language: str):

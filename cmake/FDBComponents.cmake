@@ -4,7 +4,7 @@ set(FORCE_ALL_COMPONENTS OFF CACHE BOOL "Fails cmake if not all dependencies are
 # jemalloc
 ################################################################################
 
-include(Jemalloc)
+find_package(jemalloc REQUIRED)
 
 ################################################################################
 # Valgrind
