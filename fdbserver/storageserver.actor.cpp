@@ -3598,14 +3598,12 @@ void preprocessMappedKey(Tuple& mappedKeyFormatTuple, std::vector<Optional<Tuple
 	}
 }
 
-Key constructMappedKey(KeyValueRef* keyValue,
-                       std::vector<Optional<Tuple>>& vec,
-                       Tuple& mappedKeyTuple,
-                       Tuple& mappedKeyFormatTuple) {
+Key constructMappedKey(KeyValueRef* keyValue, std::vector<Optional<Tuple>>& vec, Tuple& mappedKeyFormatTuple) {
 	// Lazily parse key and/or value to tuple because they may not need to be a tuple if not used.
 	Optional<Tuple> keyTuple;
 	Optional<Tuple> valueTuple;
-	mappedKeyTuple.clear();
+	Tuple mappedKeyTuple;
+
 	mappedKeyTuple.reserve(vec.size());
 
 	for (int i = 0; i < vec.size(); i++) {
@@ -3656,12 +3654,11 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		                                 .append("{V[0]}"_sr)
 		                                 .append("{...}"_sr);
 
-		Tuple mappedKeyTuple;
 		std::vector<Optional<Tuple>> vt;
 		bool isRangeQuery = false;
 		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 
-		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, mappedKeyFormatTuple);
+		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
 
 		Key expectedMappedKey = Tuple()
 		                            .append("normal"_sr)
@@ -3677,11 +3674,10 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 	{
 		Tuple mappedKeyFormatTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
 
-		Tuple mappedKeyTuple;
 		std::vector<Optional<Tuple>> vt;
 		bool isRangeQuery = false;
 		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, mappedKeyFormatTuple);
+		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
 
 		Key expectedMappedKey = Tuple().append("{{}"_sr).append("}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
@@ -3691,11 +3687,10 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 	{
 		Tuple mappedKeyFormatTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
 
-		Tuple mappedKeyTuple;
 		std::vector<Optional<Tuple>> vt;
 		bool isRangeQuery = false;
 		preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
-		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, mappedKeyFormatTuple);
+		Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
 
 		Key expectedMappedKey = Tuple().append("{{}"_sr).append("}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
@@ -3706,12 +3701,11 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		Tuple mappedKeyFormatTuple = Tuple().append("{K[100]}"_sr);
 		state bool throwException = false;
 		try {
-			Tuple mappedKeyTuple;
 			std::vector<Optional<Tuple>> vt;
 			bool isRangeQuery = false;
 			preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 
-			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, mappedKeyFormatTuple);
+			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_index);
 			throwException = true;
@@ -3722,12 +3716,11 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		Tuple mappedKeyFormatTuple = Tuple().append("{...}"_sr).append("last-element"_sr);
 		state bool throwException2 = false;
 		try {
-			Tuple mappedKeyTuple;
 			std::vector<Optional<Tuple>> vt;
 			bool isRangeQuery = false;
 			preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 
-			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, mappedKeyFormatTuple);
+			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_range_decriptor);
 			throwException2 = true;
@@ -3738,12 +3731,11 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		Tuple mappedKeyFormatTuple = Tuple().append("{K[not-a-number]}"_sr);
 		state bool throwException3 = false;
 		try {
-			Tuple mappedKeyTuple;
 			std::vector<Optional<Tuple>> vt;
 			bool isRangeQuery = false;
 			preprocessMappedKey(mappedKeyFormatTuple, vt, isRangeQuery);
 
-			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyTuple, mappedKeyFormatTuple);
+			Key mappedKey = constructMappedKey(&kvr, vt, mappedKeyFormatTuple);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_index);
 			throwException3 = true;
@@ -3790,7 +3782,6 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		g_traceBatch.addEvent(
 		    "TransactionDebug", pOriginalReq->debugID.get().first(), "storageserver.mapKeyValues.Start");
 	state Tuple mappedKeyFormatTuple;
-	state Tuple mappedKeyTuple;
 
 	try {
 		mappedKeyFormatTuple = Tuple::unpack(mapper);
@@ -3818,7 +3809,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			kvm->key = it->key;
 			kvm->value = it->value;
 
-			Key mappedKey = constructMappedKey(it, vt, mappedKeyTuple, mappedKeyFormatTuple);
+			Key mappedKey = constructMappedKey(it, vt, mappedKeyFormatTuple);
 			// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
 			result.arena.dependsOn(mappedKey.arena());
 
