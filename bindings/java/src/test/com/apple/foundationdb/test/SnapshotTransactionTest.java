@@ -35,11 +35,13 @@ import com.apple.foundationdb.tuple.Tuple;
  * Some tests regarding conflict ranges to make sure they do what we expect.
  */
 public class SnapshotTransactionTest {
+	public static final int API_VERSION = 720;
+
 	private static final int CONFLICT_CODE = 1020;
 	private static final Subspace SUBSPACE = new Subspace(Tuple.from("test", "conflict_ranges"));
 
 	public static void main(String[] args) {
-		FDB fdb = FDB.selectAPIVersion(720);
+		FDB fdb = FDB.selectAPIVersion(API_VERSION);
 		try(Database db = fdb.open()) {
 			snapshotReadShouldNotConflict(db);
 			snapshotShouldNotAddConflictRange(db);

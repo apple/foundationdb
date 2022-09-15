@@ -694,6 +694,7 @@ public:
 	int FETCH_KEYS_LOWER_PRIORITY;
 	int SERVE_FETCH_CHECKPOINT_PARALLELISM;
 	int SERVE_AUDIT_STORAGE_PARALLELISM;
+	int CHANGE_FEED_DISK_READS_PARALLELISM;
 	int BUGGIFY_BLOCK_BYTES;
 	int64_t STORAGE_RECOVERY_VERSION_LAG_LIMIT;
 	double STORAGE_DURABILITY_LAG_REJECT_THRESHOLD;
@@ -732,6 +733,7 @@ public:
 	int CHECKPOINT_TRANSFER_BLOCK_BYTES;
 	int QUICK_GET_KEY_VALUES_LIMIT;
 	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
+	int STORAGE_FEED_QUERY_HARD_LIMIT;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -765,6 +767,12 @@ public:
 	bool WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER; // When enabled, the worker's health monitor also report any recent
 	                                                 // destroyed peers who are part of the transaction system to
 	                                                 // cluster controller.
+	bool STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT; // When enabled, storage server's worker will crash on io_timeout error;
+	                                          // this allows fdbmonitor to restart the worker and recreate the same SS.
+	                                          // When SS can be temporarily throttled by infrastructure, e.g, k8s,
+	                                          // Enabling this can reduce toil of manually restarting the SS.
+	                                          // Enable with caution: If io_timeout is caused by disk failure, we won't
+	                                          // want to restart the SS, which increases risk of data corruption.
 
 	// Test harness
 	double WORKER_POLL_DELAY;
@@ -778,6 +786,7 @@ public:
 
 	// Dynamic Knobs (implementation)
 	double COMPACTION_INTERVAL;
+	double BROADCASTER_SELF_UPDATE_DELAY;
 	double GET_COMMITTED_VERSION_TIMEOUT;
 	double GET_SNAPSHOT_AND_CHANGES_TIMEOUT;
 	double FETCH_CHANGES_TIMEOUT;

@@ -131,10 +131,10 @@ inline bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 			    (serverTagKeys.intersects(range)) || (serverTagHistoryKeys.intersects(range)) ||
 			    (range.intersects(applyMutationsEndRange)) || (range.intersects(applyMutationsKeyVersionMapRange)) ||
 			    (range.intersects(logRangesRange)) || (tssMappingKeys.intersects(range)) ||
-			    (tssQuarantineKeys.intersects(range)) || (range.contains(coordinatorsKey)) ||
-			    (range.contains(databaseLockedKey)) || (range.contains(metadataVersionKey)) ||
-			    (range.contains(mustContainSystemMutationsKey)) || (range.contains(writeRecoveryKey)) ||
-			    (range.intersects(testOnlyTxnStateStorePrefixRange))) {
+			    (tssQuarantineKeys.intersects(range)) || (range.contains(previousCoordinatorsKey)) ||
+			    (range.contains(coordinatorsKey)) || (range.contains(databaseLockedKey)) ||
+			    (range.contains(metadataVersionKey)) || (range.contains(mustContainSystemMutationsKey)) ||
+			    (range.contains(writeRecoveryKey)) || (range.intersects(testOnlyTxnStateStorePrefixRange))) {
 				return true;
 			}
 		}

@@ -95,6 +95,7 @@ extern const KeyRef advanceVersionSpecialKey;
 extern const KeyRef consistencyCheckSpecialKey;
 // coordinators
 extern const KeyRef clusterDescriptionSpecialKey;
+extern const KeyRef configDBSpecialKey;
 extern const KeyRef coordinatorsAutoSpecialKey;
 extern const KeyRef coordinatorsProcessSpecialKey;
 // datadistribution
