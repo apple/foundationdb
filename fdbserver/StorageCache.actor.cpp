@@ -1802,7 +1802,7 @@ ACTOR Future<Void> compactCache(StorageCacheData* data) {
 	loop {
 		// TODO understand this, should we add delay here?
 		// if (g_network->isSimulated()) {
-		//	double endTime = g_simulator.checkDisabled(format("%s/compactCache",
+		//	double endTime = g_simulator->checkDisabled(format("%s/compactCache",
 		// data->thisServerID.toString().c_str())); 	if(endTime > now()) { 		wait(delay(endTime - now(),
 		// TaskPriority::CompactCache));
 		//	}

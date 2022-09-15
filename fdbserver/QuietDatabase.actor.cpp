@@ -657,9 +657,9 @@ ACTOR Future<int64_t> getVersionOffset(Database cx,
 ACTOR Future<Void> repairDeadDatacenter(Database cx,
                                         Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                         std::string context) {
-	if (g_network->isSimulated() && g_simulator.usableRegions > 1) {
-		bool primaryDead = g_simulator.datacenterDead(g_simulator.primaryDcId);
-		bool remoteDead = g_simulator.datacenterDead(g_simulator.remoteDcId);
+	if (g_network->isSimulated() && g_simulator->usableRegions > 1) {
+		bool primaryDead = g_simulator->datacenterDead(g_simulator->primaryDcId);
+		bool remoteDead = g_simulator->datacenterDead(g_simulator->remoteDcId);
 
 		// FIXME: the primary and remote can both be considered dead because excludes are not handled properly by the
 		// datacenterDead function
@@ -673,10 +673,10 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
 			    .detail("Stage", "Repopulate")
 			    .detail("RemoteDead", remoteDead)
 			    .detail("PrimaryDead", primaryDead);
-			g_simulator.usableRegions = 1;
+			g_simulator->usableRegions = 1;
 			wait(success(ManagementAPI::changeConfig(
 			    cx.getReference(),
-			    (primaryDead ? g_simulator.disablePrimary : g_simulator.disableRemote) + " repopulate_anti_quorum=1",
+			    (primaryDead ? g_simulator->disablePrimary : g_simulator->disableRemote) + " repopulate_anti_quorum=1",
 			    true)));
 			while (dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED) {
 				wait(dbInfo->onChange());

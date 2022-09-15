@@ -3077,7 +3077,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 
 	// Don't force failure of recovery if it took us a long time to recover. This avoids multiple long running
 	// recoveries causing tests to timeout
-	if (BUGGIFY && now() - startTime < 300 && g_network->isSimulated() && g_simulator.speedUpSimulation)
+	if (BUGGIFY && now() - startTime < 300 && g_network->isSimulated() && g_simulator->speedUpSimulation)
 		throw cluster_recovery_failed();
 
 	for (int i = 0; i < logSystem->tLogs[0]->logServers.size(); i++)

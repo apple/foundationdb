@@ -127,7 +127,7 @@ struct TenantManagementWorkload : TestWorkload {
 		localTenantGroupNamePrefix = format("%stenantgroup_%d_", tenantNamePrefix.toString().c_str(), clientId);
 
 		bool defaultUseMetacluster = false;
-		if (clientId == 0 && g_network->isSimulated() && !g_simulator.extraDatabases.empty()) {
+		if (clientId == 0 && g_network->isSimulated() && !g_simulator->extraDatabases.empty()) {
 			defaultUseMetacluster = deterministicRandom()->coinflip();
 		}
 
@@ -181,7 +181,7 @@ struct TenantManagementWorkload : TestWorkload {
 			DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;
 			wait(MetaclusterAPI::registerCluster(
-			    self->mvDb, self->dataClusterName, g_simulator.extraDatabases[0], entry));
+			    self->mvDb, self->dataClusterName, g_simulator->extraDatabases[0], entry));
 		}
 
 		state Transaction tr(cx);
@@ -218,8 +218,8 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 
 		if (self->useMetacluster) {
-			ASSERT(g_simulator.extraDatabases.size() == 1);
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(g_simulator.extraDatabases[0]);
+			ASSERT(g_simulator->extraDatabases.size() == 1);
+			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(g_simulator->extraDatabases[0]);
 			self->dataDb = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 		} else {
 			self->dataDb = cx;

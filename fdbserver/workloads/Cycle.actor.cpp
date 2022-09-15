@@ -69,7 +69,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		if constexpr (MultiTenancy) {
 			ASSERT(g_network->isSimulated());
 			this->useToken = getOption(options, "useToken"_sr, true);
-			auto k = g_simulator.authKeys.begin();
+			auto k = g_simulator->authKeys.begin();
 			this->tenant = getOption(options, "tenant"_sr, "CycleTenant"_sr);
 			// make it comfortably longer than the timeout of the workload
 			auto currentTime = uint64_t(lround(g_network->timer()));
@@ -327,7 +327,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 					if (g_network->isSimulated() && retryCount > 50) {
 						CODE_PROBE(true, "Cycle check enable speedUpSimulation because too many transaction_too_old()");
 						// try to make the read window back to normal size (5 * version_per_sec)
-						g_simulator.speedUpSimulation = true;
+						g_simulator->speedUpSimulation = true;
 					}
 					wait(tr.onError(e));
 				}

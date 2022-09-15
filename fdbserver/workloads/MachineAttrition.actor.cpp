@@ -108,7 +108,7 @@ struct MachineAttritionWorkload : TestWorkload {
 
 	static std::vector<ISimulator::ProcessInfo*> getServers() {
 		std::vector<ISimulator::ProcessInfo*> machines;
-		std::vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
+		std::vector<ISimulator::ProcessInfo*> all = g_simulator->getAllProcesses();
 		for (int i = 0; i < all.size(); i++)
 			if (!all[i]->failed && all[i]->name == std::string("Server") &&
 			    all[i]->startingClass != ProcessClass::TesterClass)
@@ -301,7 +301,7 @@ struct MachineAttritionWorkload : TestWorkload {
 			    .detail("Reboot", self->reboot)
 			    .detail("KillType", kt);
 
-			g_simulator.killDataCenter(target, kt);
+			g_simulator->killDataCenter(target, kt);
 		} else if (self->killDatahall) {
 			delayBeforeKill = deterministicRandom()->random01() * meanDelay;
 			wait(delay(delayBeforeKill));
@@ -313,7 +313,7 @@ struct MachineAttritionWorkload : TestWorkload {
 			auto kt = ISimulator::KillInstantly;
 			TraceEvent("Assassination").detail("TargetDataHall", target).detail("KillType", kt);
 
-			g_simulator.killDataHall(target, kt);
+			g_simulator->killDataHall(target, kt);
 		} else {
 			state int killedMachines = 0;
 			while (killedMachines < self->machinesToKill && self->machines.size() > self->machinesToLeave) {
@@ -366,9 +366,9 @@ struct MachineAttritionWorkload : TestWorkload {
 
 				if (self->reboot) {
 					if (deterministicRandom()->random01() > 0.5) {
-						g_simulator.rebootProcess(targetMachine.zoneId(), deterministicRandom()->random01() > 0.5);
+						g_simulator->rebootProcess(targetMachine.zoneId(), deterministicRandom()->random01() > 0.5);
 					} else {
-						g_simulator.killZone(targetMachine.zoneId(), ISimulator::Reboot);
+						g_simulator->killZone(targetMachine.zoneId(), ISimulator::Reboot);
 					}
 				} else {
 					auto randomDouble = deterministicRandom()->random01();
@@ -377,7 +377,7 @@ struct MachineAttritionWorkload : TestWorkload {
 					    .detail("RandomValue", randomDouble);
 					if (randomDouble < 0.33) {
 						TraceEvent("RebootAndDelete").detail("TargetMachine", targetMachine.toString());
-						g_simulator.killZone(targetMachine.zoneId(), ISimulator::RebootAndDelete);
+						g_simulator->killZone(targetMachine.zoneId(), ISimulator::RebootAndDelete);
 					} else {
 						auto kt = ISimulator::KillInstantly;
 						if (self->allowFaultInjection) {
@@ -393,7 +393,7 @@ struct MachineAttritionWorkload : TestWorkload {
 							}
 							*/
 						}
-						g_simulator.killZone(targetMachine.zoneId(), kt);
+						g_simulator->killZone(targetMachine.zoneId(), kt);
 					}
 				}
 

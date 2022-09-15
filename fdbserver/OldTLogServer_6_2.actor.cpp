@@ -1905,7 +1905,7 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 }
 
 ACTOR Future<Void> watchDegraded(TLogData* self) {
-	if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
+	if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
 		return Void();
 	}
 
@@ -1932,7 +1932,7 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 
 	state Future<Void> degraded = watchDegraded(self);
 	wait(c);
-	if (g_network->isSimulated() && !g_simulator.speedUpSimulation && BUGGIFY_WITH_PROB(0.0001)) {
+	if (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.0001)) {
 		wait(delay(6.0));
 	}
 	degraded.cancel();

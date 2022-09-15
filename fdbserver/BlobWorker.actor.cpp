@@ -253,7 +253,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 			return false;
 		}
 		if (g_network->isSimulated()) {
-			if (g_simulator.speedUpSimulation) {
+			if (g_simulator->speedUpSimulation) {
 				return false;
 			}
 			return buggifyFull;
@@ -4706,7 +4706,7 @@ ACTOR Future<Void> simForceFileWriteContention(Reference<BlobWorkerData> bwData)
 			}
 			// check for speed up sim
 			when(wait(delay(5.0))) {
-				if (g_simulator.speedUpSimulation) {
+				if (g_simulator->speedUpSimulation) {
 					if (BW_DEBUG) {
 						fmt::print("BW {0} releasing {1} file writes b/c speed up simulation\n",
 						           bwData->id.toString().substr(0, 5),
@@ -4723,7 +4723,7 @@ ACTOR Future<Void> simForceFullMemory(Reference<BlobWorkerData> bwData) {
 	// instead of randomly rejecting each request or not, simulate periods in which BW is full
 	loop {
 		wait(delayJittered(deterministicRandom()->randomInt(5, 20)));
-		if (g_simulator.speedUpSimulation) {
+		if (g_simulator->speedUpSimulation) {
 			bwData->buggifyFull = false;
 			if (BW_DEBUG) {
 				fmt::print("BW {0}: ForceFullMemory exiting\n", bwData->id.toString().substr(0, 6));

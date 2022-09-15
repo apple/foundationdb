@@ -67,7 +67,7 @@ ACTOR Future<Void> PipelinedReader::getNext_impl(PipelinedReader* self, Database
 	state Transaction tr(cx);
 
 	state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
-	                            (g_network->isSimulated() && !g_simulator.speedUpSimulation)
+	                            (g_network->isSimulated() && !g_simulator->speedUpSimulation)
 	                                ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
 	                                : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 

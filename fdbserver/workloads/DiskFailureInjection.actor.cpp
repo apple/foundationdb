@@ -65,7 +65,7 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 	}
 
 	std::string description() const override {
-		if (&g_simulator == g_network)
+		if (g_simulator == g_network)
 			return "DiskFailureInjection";
 		else
 			return "NoSimDiskFailureInjection";
@@ -177,8 +177,8 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 			if (self->throttleDisk && (throttledWorkers++ < self->workersToThrottle))
 				self->injectDiskDelays(machine, self->stallInterval, self->stallPeriod, self->throttlePeriod);
 			if (self->corruptFile && (corruptedWorkers++ < self->workersToCorrupt)) {
-				if (&g_simulator == g_network)
-					g_simulator.corruptWorkerMap[machine.address()] = true;
+				if (g_simulator == g_network)
+					g_simulator->corruptWorkerMap[machine.address()] = true;
 				self->injectBitFlips(machine, self->percentBitFlips);
 			}
 		}
@@ -200,8 +200,8 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 				if (self->throttleDisk && (throttledWorkers++ < self->workersToThrottle))
 					self->injectDiskDelays(itr->second, self->stallInterval, self->stallPeriod, self->throttlePeriod);
 				if (self->corruptFile && (corruptedWorkers++ < self->workersToCorrupt)) {
-					if (&g_simulator == g_network)
-						g_simulator.corruptWorkerMap[workerAddress] = true;
+					if (g_simulator == g_network)
+						g_simulator->corruptWorkerMap[workerAddress] = true;
 					self->injectBitFlips(itr->second, self->percentBitFlips);
 				}
 			}

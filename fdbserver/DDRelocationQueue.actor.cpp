@@ -1981,7 +1981,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
                                      Reference<IDataDistributionTeam> destTeam,
                                      bool primary,
                                      TraceEvent* traceEvent) {
-	if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
+	if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
 		traceEvent->detail("CancelingDueToSimulationSpeedup", true);
 		return false;
 	}
@@ -2067,7 +2067,7 @@ ACTOR static Future<bool> rebalanceTeams(DDQueue* self,
                                          Reference<IDataDistributionTeam const> destTeam,
                                          bool primary,
                                          TraceEvent* traceEvent) {
-	if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
+	if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
 		traceEvent->detail("CancelingDueToSimulationSpeedup", true);
 		return false;
 	}

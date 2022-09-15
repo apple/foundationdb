@@ -47,7 +47,7 @@ struct RollbackWorkload : TestWorkload {
 	std::string description() const override { return "RollbackWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
-		if (&g_simulator == g_network && enabled)
+		if (g_simulator == g_network && enabled)
 			return timeout(reportErrors(rollbackFailureWorker(cx, this, meanDelay), "RollbackFailureWorkerError"),
 			               testDuration,
 			               Void());
@@ -83,8 +83,8 @@ struct RollbackWorkload : TestWorkload {
 
 		for (int t = 0; t < tlogs.size(); t++) {
 			if (t != utIndex) {
-				g_simulator.clogPair(proxy.address().ip, tlogs[t].address().ip, self->clogDuration);
-				// g_simulator.clogInterface( g_simulator.getProcess( system.tlogs[t].commit.getEndpoint() ),
+				g_simulator->clogPair(proxy.address().ip, tlogs[t].address().ip, self->clogDuration);
+				// g_simulator->clogInterface( g_simulator->getProcess( system.tlogs[t].commit.getEndpoint() ),
 				// self->clogDuration, ClogAll );
 			}
 		}
@@ -95,11 +95,11 @@ struct RollbackWorkload : TestWorkload {
 
 		// Kill the proxy and clog the unclogged tlog
 		if (self->enableFailures) {
-			g_simulator.killProcess(g_simulator.getProcessByAddress(proxy.address()), ISimulator::KillInstantly);
-			g_simulator.clogInterface(uncloggedTLog.ip, self->clogDuration, ClogAll);
+			g_simulator->killProcess(g_simulator->getProcessByAddress(proxy.address()), ISimulator::KillInstantly);
+			g_simulator->clogInterface(uncloggedTLog.ip, self->clogDuration, ClogAll);
 		} else {
-			g_simulator.clogInterface(proxy.address().ip, self->clogDuration, ClogAll);
-			g_simulator.clogInterface(uncloggedTLog.ip, self->clogDuration, ClogAll);
+			g_simulator->clogInterface(proxy.address().ip, self->clogDuration, ClogAll);
+			g_simulator->clogInterface(uncloggedTLog.ip, self->clogDuration, ClogAll);
 		}
 		return Void();
 	}
