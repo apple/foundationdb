@@ -4686,7 +4686,7 @@ static Future<Void> tssStreamComparison(Request request,
 			if ((!ssEndOfStream || !tssEndOfStream) && !TSS_doCompare(ssReply.get(), tssReply.get())) {
 				CODE_PROBE(true, "TSS mismatch in stream comparison");
 				TraceEvent mismatchEvent(
-				    (g_network->isSimulated() && g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations)
+				    (g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
 				        ? SevWarnAlways
 				        : SevError,
 				    TSS_mismatchTraceName(request));
@@ -4708,7 +4708,7 @@ static Future<Void> tssStreamComparison(Request request,
 
 						// record a summarized trace event instead
 						TraceEvent summaryEvent((g_network->isSimulated() &&
-						                         g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations)
+						                         g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
 						                            ? SevWarnAlways
 						                            : SevError,
 						                        TSS_mismatchTraceName(request));
@@ -8423,7 +8423,7 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 		    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY);
 		if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) &&
 		    deterministicRandom()->random01() < clientSamplingProbability &&
-		    (!g_network->isSimulated() || !g_simulator.speedUpSimulation)) {
+		    (!g_network->isSimulated() || !g_simulator->speedUpSimulation)) {
 			return makeReference<TransactionLogInfo>(TransactionLogInfo::DATABASE);
 		}
 	}
@@ -9586,7 +9586,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				if (useIdx >= 0) {
 					chosenLocations[loc] = useIdx;
 					loc++;
-					if (g_network->isSimulated() && !g_simulator.speedUpSimulation && BUGGIFY_WITH_PROB(0.01)) {
+					if (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01)) {
 						// simulate as if we had to wait for all alternatives delayed, before the next one
 						wait(delay(deterministicRandom()->random01()));
 					}

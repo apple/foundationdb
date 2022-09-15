@@ -36,7 +36,7 @@ struct KillRegionWorkload : TestWorkload {
 		enabled =
 		    !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		g_simulator.usableRegions = 1;
+		g_simulator->usableRegions = 1;
 	}
 
 	std::string description() const override { return "KillRegionWorkload"; }
@@ -57,7 +57,7 @@ struct KillRegionWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _setup(KillRegionWorkload* self, Database cx) {
 		TraceEvent("ForceRecovery_DisablePrimaryBegin").log();
-		wait(success(ManagementAPI::changeConfig(cx.getReference(), g_simulator.disablePrimary, true)));
+		wait(success(ManagementAPI::changeConfig(cx.getReference(), g_simulator->disablePrimary, true)));
 		TraceEvent("ForceRecovery_WaitForRemote").log();
 		wait(waitForPrimaryDC(cx, LiteralStringRef("1")));
 		TraceEvent("ForceRecovery_DisablePrimaryComplete").log();
@@ -75,29 +75,29 @@ struct KillRegionWorkload : TestWorkload {
 		ASSERT(g_network->isSimulated());
 		if (deterministicRandom()->random01() < 0.5) {
 			TraceEvent("ForceRecovery_DisableRemoteBegin").log();
-			wait(success(ManagementAPI::changeConfig(cx.getReference(), g_simulator.disableRemote, true)));
+			wait(success(ManagementAPI::changeConfig(cx.getReference(), g_simulator->disableRemote, true)));
 			TraceEvent("ForceRecovery_WaitForPrimary").log();
 			wait(waitForPrimaryDC(cx, LiteralStringRef("0")));
 			TraceEvent("ForceRecovery_DisableRemoteComplete").log();
-			wait(success(ManagementAPI::changeConfig(cx.getReference(), g_simulator.originalRegions, true)));
+			wait(success(ManagementAPI::changeConfig(cx.getReference(), g_simulator->originalRegions, true)));
 		}
 		TraceEvent("ForceRecovery_Wait").log();
 		wait(delay(deterministicRandom()->random01() * self->testDuration));
 
 		// FIXME: killDataCenter breaks simulation if forceKill=false, since some processes can survive and
 		// partially complete a recovery
-		g_simulator.killDataCenter(LiteralStringRef("0"),
-		                           deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
-		                                                                   : ISimulator::RebootAndDelete,
-		                           true);
-		g_simulator.killDataCenter(LiteralStringRef("2"),
-		                           deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
-		                                                                   : ISimulator::RebootAndDelete,
-		                           true);
-		g_simulator.killDataCenter(LiteralStringRef("4"),
-		                           deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
-		                                                                   : ISimulator::RebootAndDelete,
-		                           true);
+		g_simulator->killDataCenter(LiteralStringRef("0"),
+		                            deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
+		                                                                    : ISimulator::RebootAndDelete,
+		                            true);
+		g_simulator->killDataCenter(LiteralStringRef("2"),
+		                            deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
+		                                                                    : ISimulator::RebootAndDelete,
+		                            true);
+		g_simulator->killDataCenter(LiteralStringRef("4"),
+		                            deterministicRandom()->random01() < 0.5 ? ISimulator::KillInstantly
+		                                                                    : ISimulator::RebootAndDelete,
+		                            true);
 
 		TraceEvent("ForceRecovery_Begin").log();
 
@@ -116,7 +116,7 @@ struct KillRegionWorkload : TestWorkload {
 			loop {
 				// only needed if force recovery was unnecessary and we killed the secondary
 				wait(success(ManagementAPI::changeConfig(
-				    cx.getReference(), g_simulator.disablePrimary + " repopulate_anti_quorum=1", true)));
+				    cx.getReference(), g_simulator->disablePrimary + " repopulate_anti_quorum=1", true)));
 				choose {
 					when(wait(waitForStorageRecovered(self))) { break; }
 					when(wait(delay(300.0))) {}

@@ -900,11 +900,11 @@ public:
 		// Set up tss fault injection here, only if we are in simulated mode and with fault injection.
 		// With fault injection enabled, the tss will start acting normal for a bit, then after the specified delay
 		// start behaving incorrectly.
-		if (g_network->isSimulated() && !g_simulator.speedUpSimulation &&
-		    g_simulator.tssMode >= ISimulator::TSSMode::EnabledAddDelay) {
+		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
+		    g_simulator->tssMode >= ISimulator::TSSMode::EnabledAddDelay) {
 			tssFaultInjectTime = now() + deterministicRandom()->randomInt(60, 300);
 			TraceEvent(SevWarnAlways, "TSSInjectFaultEnabled", thisServerID)
-			    .detail("Mode", g_simulator.tssMode)
+			    .detail("Mode", g_simulator->tssMode)
 			    .detail("At", tssFaultInjectTime.get());
 		}
 	}
@@ -1501,21 +1501,21 @@ public:
 
 	void maybeInjectTargetedRestart(Version v) {
 		// inject an SS restart at most once per test
-		if (g_network->isSimulated() && !g_simulator.speedUpSimulation &&
-		    now() > g_simulator.injectTargetedSSRestartTime &&
+		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
+		    now() > g_simulator->injectTargetedSSRestartTime &&
 		    rebootAfterDurableVersion == std::numeric_limits<Version>::max()) {
 			CODE_PROBE(true, "Injecting SS targeted restart");
 			TraceEvent("SimSSInjectTargetedRestart", thisServerID).detail("Version", v);
 			rebootAfterDurableVersion = v;
-			g_simulator.injectTargetedSSRestartTime = std::numeric_limits<double>::max();
+			g_simulator->injectTargetedSSRestartTime = std::numeric_limits<double>::max();
 		}
 	}
 
 	bool maybeInjectDelay() {
-		if (g_network->isSimulated() && !g_simulator.speedUpSimulation && now() > g_simulator.injectSSDelayTime) {
+		if (g_network->isSimulated() && !g_simulator->speedUpSimulation && now() > g_simulator->injectSSDelayTime) {
 			CODE_PROBE(true, "Injecting SS targeted delay");
 			TraceEvent("SimSSInjectDelay", thisServerID).log();
-			g_simulator.injectSSDelayTime = std::numeric_limits<double>::max();
+			g_simulator->injectSSDelayTime = std::numeric_limits<double>::max();
 			return true;
 		}
 		return false;
@@ -3655,7 +3655,7 @@ ACTOR Future<Key> findKey(StorageServer* data,
 	if (sel.offset <= 1 && sel.offset >= 0)
 		maxBytes = std::numeric_limits<int>::max();
 	else
-		maxBytes = (g_network->isSimulated() && g_simulator.tssMode == ISimulator::TSSMode::Disabled && BUGGIFY)
+		maxBytes = (g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::Disabled && BUGGIFY)
 		               ? SERVER_KNOBS->BUGGIFY_LIMIT_BYTES
 		               : SERVER_KNOBS->STORAGE_LIMIT_BYTES;
 
@@ -4848,7 +4848,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 				// Even if TSS mode is Disabled, this may be the second test in a restarting test where the first run
 				// had it enabled.
-				state int byteLimit = (BUGGIFY && g_simulator.tssMode == ISimulator::TSSMode::Disabled &&
+				state int byteLimit = (BUGGIFY && g_simulator->tssMode == ISimulator::TSSMode::Disabled &&
 				                       !data->isTss() && !data->isSSWithTSSPair())
 				                          ? 1
 				                          : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
@@ -6109,7 +6109,7 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 			    .detail("Version", cleanupVersion);
 
 			if (g_network->isSimulated()) {
-				ASSERT(g_simulator.validationData.allDestroyedChangeFeedIDs.count(changeFeedInfo->id.toString()));
+				ASSERT(g_simulator->validationData.allDestroyedChangeFeedIDs.count(changeFeedInfo->id.toString()));
 			}
 
 			Key beginClearKey = changeFeedInfo->id.withPrefix(persistChangeFeedKeys.begin);
@@ -6339,7 +6339,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 
 		if (g_network->isSimulated()) {
 			// verify that the feed was actually destroyed and it's not an error in this inference logic
-			ASSERT(g_simulator.validationData.allDestroyedChangeFeedIDs.count(feed.first.toString()));
+			ASSERT(g_simulator->validationData.allDestroyedChangeFeedIDs.count(feed.first.toString()));
 		}
 
 		Key beginClearKey = feed.first.withPrefix(persistChangeFeedKeys.begin);
@@ -8134,7 +8134,7 @@ void StorageServer::clearTenants(TenantNameRef startTenant, TenantNameRef endTen
 ACTOR Future<Void> tssDelayForever() {
 	loop {
 		wait(delay(5.0));
-		if (g_simulator.speedUpSimulation) {
+		if (g_simulator->speedUpSimulation) {
 			return Void();
 		}
 	}
@@ -8153,7 +8153,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		// a very small value.
 		state int64_t hardLimit = SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES;
 		state int64_t hardLimitOverage = SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES_OVERAGE;
-		if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
+		if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
 			hardLimit = SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES_SPEED_UP_SIM;
 			hardLimitOverage = SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES_OVERAGE_SPEED_UP_SIM;
 		}
@@ -8182,8 +8182,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			data->lastDurableVersionEBrake = data->durableVersion.get();
 		}
 
-		if (g_network->isSimulated() && data->isTss() && g_simulator.tssMode == ISimulator::TSSMode::EnabledAddDelay &&
-		    !g_simulator.speedUpSimulation && data->tssFaultInjectTime.present() &&
+		if (g_network->isSimulated() && data->isTss() && g_simulator->tssMode == ISimulator::TSSMode::EnabledAddDelay &&
+		    !g_simulator->speedUpSimulation && data->tssFaultInjectTime.present() &&
 		    data->tssFaultInjectTime.get() < now()) {
 			if (deterministicRandom()->random01() < 0.01) {
 				TraceEvent(SevWarnAlways, "TSSInjectDelayForever", data->thisServerID).log();
@@ -8448,8 +8448,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 				// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS in
 				// quarantine.
-				if (g_network->isSimulated() && data->isTss() && !g_simulator.speedUpSimulation &&
-				    g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations &&
+				if (g_network->isSimulated() && data->isTss() && !g_simulator->speedUpSimulation &&
+				    g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations &&
 				    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now() &&
 				    (msg.type == MutationRef::SetValue || msg.type == MutationRef::ClearRange) &&
 				    (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff) &&
@@ -8567,7 +8567,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				data->otherError.getFuture().get();
 
 			Version maxVersionsInMemory =
-			    (g_network->isSimulated() && g_simulator.speedUpSimulation)
+			    (g_network->isSimulated() && g_simulator->speedUpSimulation)
 			        ? std::max(5 * SERVER_KNOBS->VERSIONS_PER_SECOND, SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)
 			        : SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
 			for (int i = 0; i < data->recoveryVersionSkips.size(); i++) {
@@ -8687,7 +8687,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		ASSERT(data->durableVersion.get() == data->storageVersion());
 		if (g_network->isSimulated()) {
 			double endTime =
-			    g_simulator.checkDisabled(format("%s/updateStorage", data->thisServerID.toString().c_str()));
+			    g_simulator->checkDisabled(format("%s/updateStorage", data->thisServerID.toString().c_str()));
 			if (endTime > now()) {
 				wait(delay(endTime - now(), TaskPriority::UpdateStorage));
 			}

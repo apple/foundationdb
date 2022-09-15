@@ -1212,7 +1212,7 @@ ACTOR template <class T>
 Future<T> ioTimeoutError(Future<T> what, double time) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
-	if (g_network->isSimulated() && !g_simulator.speedUpSimulation) {
+	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
 		time += std::max(0.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
 	}
 	Future<Void> end = lowPriorityDelay(time);
@@ -1220,7 +1220,7 @@ Future<T> ioTimeoutError(Future<T> what, double time) {
 		when(T t = wait(what)) { return t; }
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (g_network->isSimulated() && !g_simulator.getCurrentProcess()->isReliable()) {
+			if (g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable()) {
 				err = err.asInjectedFault();
 			}
 			TraceEvent(SevError, "IoTimeoutError").error(err);
@@ -1236,7 +1236,7 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
                                    double degradedTime) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
-	if (g_network->isSimulated() && !g_simulator.speedUpSimulation) {
+	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
 		double timeShift = std::max(0.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
 		errTime += timeShift;
 		degradedTime += timeShift;
@@ -1259,7 +1259,7 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 		when(T t = wait(what)) { return t; }
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (g_network->isSimulated() && !g_simulator.getCurrentProcess()->isReliable()) {
+			if (g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable()) {
 				err = err.asInjectedFault();
 			}
 			TraceEvent(SevError, "IoTimeoutError").error(err);

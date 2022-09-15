@@ -92,7 +92,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		return _setup(cx, this);
 	}
 	ACTOR static Future<Void> _setup(Database cx, TenantManagementConcurrencyWorkload* self) {
-		state ClusterConnectionString connectionString(g_simulator.extraDatabases[0]);
+		state ClusterConnectionString connectionString(g_simulator->extraDatabases[0]);
 		Reference<IDatabase> threadSafeHandle =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
 
@@ -141,7 +141,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		}
 
 		if (self->useMetacluster) {
-			ASSERT(g_simulator.extraDatabases.size() == 1);
+			ASSERT(g_simulator->extraDatabases.size() == 1);
 			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(connectionString);
 			self->dataDb = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 		} else {

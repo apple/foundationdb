@@ -191,7 +191,7 @@ Error checkIOTimeout(Error const& e) {
 	// In simulation, have to check global timed out flag for both this process and the machine process on which IO is
 	// done
 	if (g_network->isSimulated() && !timeoutOccurred)
-		timeoutOccurred = g_pSimulator->getCurrentProcess()->machine->machineProcess->global(INetwork::enASIOTimedOut);
+		timeoutOccurred = g_simulator->getCurrentProcess()->machine->machineProcess->global(INetwork::enASIOTimedOut);
 
 	if (timeoutOccurred) {
 		CODE_PROBE(true, "Timeout occurred");
@@ -1416,7 +1416,7 @@ void startRole(const Role& role,
 	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
 	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
 	if (g_network->isSimulated())
-		g_simulator.addRole(g_network->getLocalAddress(), role.roleName);
+		g_simulator->addRole(g_network->getLocalAddress(), role.roleName);
 }
 
 void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
@@ -1446,7 +1446,7 @@ void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
 	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
 	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
 	if (g_network->isSimulated())
-		g_simulator.removeRole(g_network->getLocalAddress(), role.roleName);
+		g_simulator->removeRole(g_network->getLocalAddress(), role.roleName);
 
 	if (role.includeInTraceRoles) {
 		removeTraceRole(role.abbreviation);

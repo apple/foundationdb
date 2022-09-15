@@ -2611,7 +2611,7 @@ ACTOR Future<Void> granuleMergeChecker(Reference<BlobManagerData> bmData) {
 
 		double sleepTime = SERVER_KNOBS->BG_MERGE_CANDIDATE_DELAY_SECONDS;
 		// Check more frequently if speedUpSimulation is set. This may
-		if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
+		if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
 			sleepTime = std::min(5.0, sleepTime);
 		}
 		// start delay at the start of the loop, to account for time spend in calculation
@@ -3766,7 +3766,7 @@ ACTOR Future<Void> chaosRangeMover(Reference<BlobManagerData> bmData) {
 	loop {
 		wait(delay(30.0));
 
-		if (g_simulator.speedUpSimulation) {
+		if (g_simulator->speedUpSimulation) {
 			if (BM_DEBUG) {
 				printf("Range mover stopping\n");
 			}
@@ -5055,7 +5055,7 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 	}
 
 	loop {
-		if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
+		if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
 			if (BM_DEBUG) {
 				printf("BGCC stopping\n");
 			}
