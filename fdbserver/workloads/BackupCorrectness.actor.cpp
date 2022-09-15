@@ -223,6 +223,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	ACTOR static Future<Void> statusLoop(Database cx, std::string tag) {
 		state FileBackupAgent agent;
 		loop {
+			bool active = wait(agent.checkActive(cx));
+			TraceEvent("BARW_AgentActivityCheck").detail("IsActive", active);
 			std::string status = wait(agent.getStatus(cx, ShowErrors::True, tag));
 			puts(status.c_str());
 			std::string statusJSON = wait(agent.getStatusJSON(cx, tag));

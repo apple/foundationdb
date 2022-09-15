@@ -1419,6 +1419,9 @@ KnobKeyValuePairs getOverriddenKnobKeyValues(const toml::value& context) {
 					parsedValue = SERVER_KNOBS->parseKnobValue(key, value);
 				}
 				if (std::get_if<NoKnobFound>(&parsedValue)) {
+					parsedValue = FLOW_KNOBS->parseKnobValue(key, value);
+				}
+				if (std::get_if<NoKnobFound>(&parsedValue)) {
 					TraceEvent(SevError, "TestSpecUnrecognizedKnob")
 					    .detail("KnobName", key)
 					    .detail("OverrideValue", value);

@@ -20,7 +20,6 @@
 
 #include "fdbclient/Tenant.h"
 #include "flow/Arena.h"
-#include "flow/BlobCipher.h"
 #include "flow/CodeProbe.h"
 #include "flow/EncryptUtils.h"
 #include "flow/ObjectSerializer.h"
@@ -29,6 +28,7 @@
 #include "flow/network.h"
 #include "flow/serialize.h"
 #include "fmt/format.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
@@ -594,10 +594,11 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                                           Arena* arena) {
 		Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
 		state BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(headerS);
-		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, header));
+		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, header, BlobCipherMetrics::BACKUP));
 		ASSERT(cipherKeys.cipherHeaderKey.isValid() && cipherKeys.cipherTextKey.isValid());
 		validateEncryptionHeader(cipherKeys.cipherHeaderKey, cipherKeys.cipherTextKey, header);
-		DecryptBlobCipherAes256Ctr decryptor(cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.iv);
+		DecryptBlobCipherAes256Ctr decryptor(
+		    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.iv, BlobCipherMetrics::BACKUP);
 		return decryptor.decrypt(dataP, dataLen, header, *arena)->toStringRef();
 	}
 
@@ -615,7 +616,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		                                     cipherKeys.headerCipherKey,
 		                                     cipherKeys.ivRef.begin(),
 		                                     AES_256_IV_LENGTH,
-		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+		                                     BlobCipherMetrics::BACKUP);
 		BlobCipherEncryptHeader header;
 		Arena arena;
 		int64_t payloadSize = wPtr - (encryptHeaderP + BlobCipherEncryptHeader::headerSize);
@@ -636,7 +638,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		state std::pair<int64_t, TenantName> curTenantInfo = wait(getTenantIdName(key, cache));
 		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 		// Get and Set Header Cipher Key
-		TextAndHeaderCipherKeys systemCipherKeys = wait(getLatestSystemEncryptCipherKeys(dbInfo));
+		TextAndHeaderCipherKeys systemCipherKeys =
+		    wait(getLatestSystemEncryptCipherKeys(dbInfo, BlobCipherMetrics::BACKUP));
 		self->cipherKeys.headerCipherKey = systemCipherKeys.cipherHeaderKey;
 
 		// Get text cipher key
@@ -644,7 +647,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		domains.emplace(curTenantInfo.first, curTenantInfo.second);
 		// Get the latest write encryption key for the given tenant
 		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> textCipherKeys =
-		    wait(getLatestEncryptCipherKeys(dbInfo, domains));
+		    wait(getLatestEncryptCipherKeys(dbInfo, domains, BlobCipherMetrics::BACKUP));
 		ASSERT(textCipherKeys.find(curTenantInfo.first) != textCipherKeys.end());
 		self->cipherKeys.textCipherKey = textCipherKeys.at(curTenantInfo.first);
 
@@ -682,11 +685,10 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	    KeyRef key,
 	    Reference<TenantEntryCache<Void>> tenantCache) {
 		if (isSystemKey(key)) {
-			return std::make_pair(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
+			return std::make_pair(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME);
 		}
-		// TODO (Nim): Replace with custom encryption domain
 		if (key.size() < 8) {
-			return std::make_pair(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
+			return std::make_pair(FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
 		}
 		KeyRef tenantPrefix = KeyRef(key.begin(), 8);
 		state int64_t tenantId = TenantMapEntry::prefixToId(tenantPrefix);
@@ -694,8 +696,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (payload.present()) {
 			return std::make_pair(tenantId, payload.get().name);
 		}
-		// TODO (Nim): Replace with custom encryption domain
-		return std::make_pair(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
+		return std::make_pair(FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
 	}
 
 	static Future<std::pair<int64_t, TenantName>> getTenantIdName(KeyRef key,

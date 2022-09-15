@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/ClientBooleanParams.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -44,7 +45,6 @@
 #include "fdbserver/WaitFailure.h"
 
 #include "flow/Arena.h"
-#include "flow/BlobCipher.h"
 #include "flow/CompressionUtils.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"
@@ -360,13 +360,14 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains;
 	domains.emplace(tenantData->entry.id, StringRef(*arena, tenantData->name));
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> domainKeyMap =
-	    wait(getLatestEncryptCipherKeys(bwData->dbInfo, domains));
+	    wait(getLatestEncryptCipherKeys(bwData->dbInfo, domains, BlobCipherMetrics::BLOB_GRANULE));
 
 	auto domainKeyItr = domainKeyMap.find(tenantData->entry.id);
 	ASSERT(domainKeyItr != domainKeyMap.end());
 	cipherKeysCtx.textCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(domainKeyItr->second, *arena);
 
-	TextAndHeaderCipherKeys systemCipherKeys = wait(getLatestSystemEncryptCipherKeys(bwData->dbInfo));
+	TextAndHeaderCipherKeys systemCipherKeys =
+	    wait(getLatestSystemEncryptCipherKeys(bwData->dbInfo, BlobCipherMetrics::BLOB_GRANULE));
 	cipherKeysCtx.headerCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(systemCipherKeys.cipherHeaderKey, *arena);
 
 	cipherKeysCtx.ivRef = makeString(AES_256_IV_LENGTH, *arena);
@@ -392,7 +393,7 @@ ACTOR Future<BlobGranuleCipherKey> lookupCipherKey(Reference<BlobWorkerData> bwD
 	std::unordered_set<BlobCipherDetails> cipherDetailsSet;
 	cipherDetailsSet.emplace(cipherDetails);
 	state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeyMap =
-	    wait(getEncryptCipherKeys(bwData->dbInfo, cipherDetailsSet));
+	    wait(getEncryptCipherKeys(bwData->dbInfo, cipherDetailsSet, BlobCipherMetrics::BLOB_GRANULE));
 
 	ASSERT(cipherKeyMap.size() == 1);
 
@@ -1873,6 +1874,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 	state int pendingSnapshots = 0;
 	state Version lastForceFlushVersion = invalidVersion;
 	state std::deque<Version> forceFlushVersions;
+	state Future<Void> nextForceFlush = metadata->forceFlushVersion.whenAtLeast(1);
 
 	state std::deque<std::pair<Version, Version>> rollbacksInProgress;
 	state std::deque<std::pair<Version, Version>> rollbacksCompleted;
@@ -2113,7 +2115,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						}
 					}
 					when(wait(inFlightFiles.empty() ? Never() : success(inFlightFiles.front().future))) {}
-					when(wait(metadata->forceFlushVersion.whenAtLeast(lastForceFlushVersion + 1))) {
+					when(wait(nextForceFlush)) {
 						if (forceFlushVersions.empty() ||
 						    forceFlushVersions.back() < metadata->forceFlushVersion.get()) {
 							forceFlushVersions.push_back(metadata->forceFlushVersion.get());
@@ -2121,6 +2123,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						if (metadata->forceFlushVersion.get() > lastForceFlushVersion) {
 							lastForceFlushVersion = metadata->forceFlushVersion.get();
 						}
+						nextForceFlush = metadata->forceFlushVersion.whenAtLeast(lastForceFlushVersion + 1);
 					}
 				}
 			} catch (Error& e) {
@@ -2255,6 +2258,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									forceFlushVersions.clear();
 									lastForceFlushVersion = 0;
 									metadata->forceFlushVersion = NotifiedVersion();
+									nextForceFlush = metadata->forceFlushVersion.whenAtLeast(1);
 
 									Reference<ChangeFeedData> cfData =
 									    makeReference<ChangeFeedData>(bwData->db.getPtr());

@@ -20,7 +20,7 @@
 
 #ifndef FDBCLIENT_METACLUSTER_H
 #define FDBCLIENT_METACLUSTER_H
-#include "CoordinationInterface.h"
+#include "fdbclient/CoordinationInterface.h"
 #include "json_spirit/json_spirit_value.h"
 #pragma once
 

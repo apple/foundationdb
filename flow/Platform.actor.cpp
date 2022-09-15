@@ -32,7 +32,6 @@
 #include "flow/Arena.h"
 
 #include "flow/StreamCipher.h"
-#include "flow/BlobCipher.h"
 #include "flow/ScopeExit.h"
 #include "flow/Trace.h"
 #include "flow/Error.h"
@@ -3249,10 +3248,10 @@ void outOfMemory() {
 }
 
 // Because the lambda used with nftw below cannot capture
-int __eraseDirectoryRecurseiveCount;
+int __eraseDirectoryRecursiveCount;
 
 int eraseDirectoryRecursive(std::string const& dir) {
-	__eraseDirectoryRecurseiveCount = 0;
+	__eraseDirectoryRecursiveCount = 0;
 #ifdef _WIN32
 	system(("rd /s /q \"" + dir + "\"").c_str());
 #elif defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
@@ -3261,7 +3260,7 @@ int eraseDirectoryRecursive(std::string const& dir) {
 	    [](const char* fpath, const struct stat* sb, int typeflag, struct FTW* ftwbuf) -> int {
 		    int r = remove(fpath);
 		    if (r == 0)
-			    ++__eraseDirectoryRecurseiveCount;
+			    ++__eraseDirectoryRecursiveCount;
 		    return r;
 	    },
 	    64,
@@ -3278,7 +3277,7 @@ int eraseDirectoryRecursive(std::string const& dir) {
 #error Port me!
 #endif
 	// INJECT_FAULT( platform_error, "eraseDirectoryRecursive" );
-	return __eraseDirectoryRecurseiveCount;
+	return __eraseDirectoryRecursiveCount;
 }
 
 TmpFile::TmpFile() : filename("") {
@@ -3623,6 +3622,12 @@ void platformInit() {
 #endif
 }
 
+std::vector<std::function<void()>> g_crashHandlerCallbacks;
+
+void registerCrashHandlerCallback(void (*f)()) {
+	g_crashHandlerCallbacks.push_back(f);
+}
+
 // The crashHandler function is registered to handle signals before the process terminates.
 // Basic information about the crash is printed/traced, and stdout and trace events are flushed.
 void crashHandler(int sig) {
@@ -3635,7 +3640,10 @@ void crashHandler(int sig) {
 
 	StreamCipherKey::cleanup();
 	StreamCipher::cleanup();
-	BlobCipherKeyCache::cleanup();
+
+	for (auto& f : g_crashHandlerCallbacks) {
+		f();
+	}
 
 	fprintf(error ? stderr : stdout, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
 	if (error) {
@@ -3765,7 +3773,7 @@ void profileHandler(int sig) {
 	ps->timestamp = checkThreadTime.is_lock_free() ? checkThreadTime.load() : 0;
 
 	// SOMEDAY: should we limit the maximum number of frames from backtrace beyond just available space?
-	size_t size = platform::raw_backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
+	size_t size = backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
 
 	ps->length = size;
 

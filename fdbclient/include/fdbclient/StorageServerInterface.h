@@ -416,8 +416,8 @@ struct GetKeyValuesRequest : TimedRequest {
 		           spanContext,
 		           tenantInfo,
 		           options,
-		           arena,
-		           ssLatestCommitVersions);
+		           ssLatestCommitVersions,
+		           arena);
 	}
 };
 
@@ -474,9 +474,9 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 		           spanContext,
 		           tenantInfo,
 		           options,
-		           arena,
 		           ssLatestCommitVersions,
-		           matchIndex);
+		           matchIndex,
+		           arena);
 	}
 };
 
@@ -539,8 +539,8 @@ struct GetKeyValuesStreamRequest {
 		           spanContext,
 		           tenantInfo,
 		           options,
-		           arena,
-		           ssLatestCommitVersions);
+		           ssLatestCommitVersions,
+		           arena);
 	}
 };
 
@@ -588,7 +588,7 @@ struct GetKeyRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sel, version, tags, reply, spanContext, tenantInfo, options, arena, ssLatestCommitVersions);
+		serializer(ar, sel, version, tags, reply, spanContext, tenantInfo, options, ssLatestCommitVersions, arena);
 	}
 };
 
@@ -758,7 +758,7 @@ struct SplitMetricsRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, limits, used, estimated, isLastShard, reply, arena, minSplitBytes);
+		serializer(ar, keys, limits, used, estimated, isLastShard, reply, minSplitBytes, arena);
 	}
 };
 
@@ -1038,7 +1038,7 @@ struct OverlappingChangeFeedsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, feeds, arena, feedMetadataVersion);
+		serializer(ar, feeds, feedMetadataVersion, arena);
 	}
 };
 

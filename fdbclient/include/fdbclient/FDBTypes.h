@@ -41,6 +41,7 @@ typedef StringRef KeyRef;
 typedef StringRef ValueRef;
 typedef int64_t Generation;
 typedef UID SpanID;
+typedef uint64_t CoordinatorsHash;
 
 enum {
 	tagLocalitySpecial = -1, // tag with this locality means it is invalidTag (id=0), txsTag (id=1), or cacheTag (id=2)

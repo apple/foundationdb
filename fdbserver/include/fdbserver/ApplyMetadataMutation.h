@@ -25,6 +25,7 @@
 #include <cstddef>
 
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -33,7 +34,6 @@
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/ProxyCommitData.actor.h"
-#include "flow/BlobCipher.h"
 #include "flow/FastRef.h"
 
 // Resolver's data for applyMetadataMutations() calls.
@@ -131,10 +131,10 @@ inline bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
 			    (serverTagKeys.intersects(range)) || (serverTagHistoryKeys.intersects(range)) ||
 			    (range.intersects(applyMutationsEndRange)) || (range.intersects(applyMutationsKeyVersionMapRange)) ||
 			    (range.intersects(logRangesRange)) || (tssMappingKeys.intersects(range)) ||
-			    (tssQuarantineKeys.intersects(range)) || (range.contains(coordinatorsKey)) ||
-			    (range.contains(databaseLockedKey)) || (range.contains(metadataVersionKey)) ||
-			    (range.contains(mustContainSystemMutationsKey)) || (range.contains(writeRecoveryKey)) ||
-			    (range.intersects(testOnlyTxnStateStorePrefixRange))) {
+			    (tssQuarantineKeys.intersects(range)) || (range.contains(previousCoordinatorsKey)) ||
+			    (range.contains(coordinatorsKey)) || (range.contains(databaseLockedKey)) ||
+			    (range.contains(metadataVersionKey)) || (range.contains(mustContainSystemMutationsKey)) ||
+			    (range.contains(writeRecoveryKey)) || (range.intersects(testOnlyTxnStateStorePrefixRange))) {
 				return true;
 			}
 		}

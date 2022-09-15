@@ -652,7 +652,7 @@ ThreadFuture<bool> DLDatabase::blobbifyRange(const KeyRangeRef& keyRange) {
 	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
 
 	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		bool ret = false;
+		FdbCApi::fdb_bool_t ret = false;
 		ASSERT(!api->futureGetBool(f, &ret));
 		return ret;
 	});
@@ -667,7 +667,7 @@ ThreadFuture<bool> DLDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {
 	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
 
 	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		bool ret = false;
+		FdbCApi::fdb_bool_t ret = false;
 		ASSERT(!api->futureGetBool(f, &ret));
 		return ret;
 	});
@@ -2756,9 +2756,9 @@ ACTOR Future<std::string> updateClusterSharedStateMapImpl(MultiVersionApi* self,
                                                           ProtocolVersion dbProtocolVersion,
                                                           Reference<IDatabase> db) {
 	// The cluster ID will be the connection record string (either a filename or the connection string itself)
-	// in API versions before we could read the cluster ID.
+	// in versions before we could read the cluster ID.
 	state std::string clusterId = connectionRecord.toString();
-	if (MultiVersionApi::api->getApiVersion().hasCreateDBFromConnString()) {
+	if (dbProtocolVersion.hasClusterIdSpecialKey()) {
 		state Reference<ITransaction> tr = db->createTransaction();
 		loop {
 			try {
@@ -3261,7 +3261,7 @@ struct AbortableTest {
 	}
 };
 
-TEST_CASE("/fdbclient/multiversionclient/AbortableSingleAssignmentVar") {
+TEST_CASE("fdbclient/multiversionclient/AbortableSingleAssignmentVar") {
 	state volatile bool done = false;
 	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<AbortableTest>, (void*)&done);
 
@@ -3338,7 +3338,7 @@ struct DLTest {
 	}
 };
 
-TEST_CASE("/fdbclient/multiversionclient/DLSingleAssignmentVar") {
+TEST_CASE("fdbclient/multiversionclient/DLSingleAssignmentVar") {
 	state volatile bool done = false;
 
 	MultiVersionApi::api->callbackOnMainThread = true;
@@ -3382,7 +3382,7 @@ struct MapTest {
 	}
 };
 
-TEST_CASE("/fdbclient/multiversionclient/MapSingleAssignmentVar") {
+TEST_CASE("fdbclient/multiversionclient/MapSingleAssignmentVar") {
 	state volatile bool done = false;
 	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<MapTest>, (void*)&done);
 
@@ -3421,7 +3421,7 @@ struct FlatMapTest {
 	}
 };
 
-TEST_CASE("/fdbclient/multiversionclient/FlatMapSingleAssignmentVar") {
+TEST_CASE("fdbclient/multiversionclient/FlatMapSingleAssignmentVar") {
 	state volatile bool done = false;
 	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<FlatMapTest>, (void*)&done);
 

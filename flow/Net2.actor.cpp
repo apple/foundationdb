@@ -90,6 +90,10 @@ void initProfiling() {
 	net2backtraces = new volatile void*[net2backtraces_max];
 	other_backtraces = new volatile void*[net2backtraces_max];
 
+	// According to folk wisdom, calling this once before setting up the signal handler makes
+	// it async signal safe in practice :-/
+	backtrace(const_cast<void**>(other_backtraces), net2backtraces_max);
+
 	sigemptyset(&sigprof_set);
 	sigaddset(&sigprof_set, SIGPROF);
 }
@@ -2141,7 +2145,7 @@ THREAD_HANDLE startThreadF(F&& func) {
 	return g_network->startThread(Thing::start, t);
 }
 
-TEST_CASE("/flow/Net2/ThreadSafeQueue/Interface") {
+TEST_CASE("flow/Net2/ThreadSafeQueue/Interface") {
 	ThreadSafeQueue<int> tq;
 	ASSERT(!tq.pop().present());
 	ASSERT(tq.canSleep());
@@ -2182,7 +2186,7 @@ struct QueueTestThreadState {
 	}
 };
 
-TEST_CASE("/flow/Net2/ThreadSafeQueue/Threaded") {
+TEST_CASE("flow/Net2/ThreadSafeQueue/Threaded") {
 	// Uses ThreadSafeQueue from multiple threads. Verifies that all pushed elements are popped, maintaining the
 	// ordering within a thread.
 	noUnseed = true; // multi-threading inherently non-deterministic

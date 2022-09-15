@@ -279,7 +279,7 @@ class TestConfig {
 			}
 			if (attrib == "configDBType") {
 				if (value == "random") {
-					configDBType = deterministicRandom()->coinflip() ? ConfigDBType::SIMPLE : ConfigDBType::PAXOS;
+					configDBType = deterministicRandom()->random01() < 0.1 ? ConfigDBType::SIMPLE : ConfigDBType::PAXOS;
 				} else {
 					configDBType = configDBTypeFromString(value);
 				}
@@ -413,7 +413,6 @@ public:
 		    .add("allowDefaultTenant", &allowDefaultTenant)
 		    .add("allowDisablingTenants", &allowDisablingTenants)
 		    .add("allowCreatingTenants", &allowCreatingTenants)
-		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
 		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
 		    .add("injectTargetedSSRestart", &injectTargetedSSRestart)
 		    .add("injectSSDelay", &injectSSDelay);

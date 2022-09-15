@@ -844,7 +844,7 @@ ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromSt
 			// equal to one of the previously issued requests, there is a bug
 			// and we are breaking the promises we make with
 			// commit_unknown_result (the transaction must no longer be in
-			// progress when receiving this error).
+			// progress when receiving commit_unknown_result).
 			int n = connectionStrings.size() > 0 ? connectionStrings.size() - 1 : 0; // avoid underflow
 			for (int i = 0; i < n; ++i) {
 				ASSERT(currentKey.get() != connectionStrings.at(i));
@@ -872,12 +872,59 @@ ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromSt
 	}
 }
 
+ACTOR Future<Void> verifyConfigurationDatabaseAlive(Database cx) {
+	state Backoff backoff;
+	loop {
+		try {
+			// Attempt to read a random value from the configuration
+			// database to make sure it is online.
+			state Reference<ISingleThreadTransaction> configTr =
+			    ISingleThreadTransaction::create(ISingleThreadTransaction::Type::PAXOS_CONFIG, cx);
+			Tuple tuple;
+			tuple.appendNull(); // config class
+			tuple << "test"_sr;
+			Optional<Value> serializedValue = wait(configTr->get(tuple.pack()));
+			TraceEvent("ChangeQuorumCheckerNewCoordinatorsOnline").log();
+			return Void();
+		} catch (Error& e) {
+			TraceEvent("ChangeQuorumCheckerNewCoordinatorsError").error(e);
+			if (e.code() == error_code_coordinators_changed) {
+				wait(backoff.onError());
+				configTr->reset();
+			} else {
+				wait(configTr->onError(e));
+			}
+		}
+	}
+}
+
+ACTOR Future<Void> resetPreviousCoordinatorsKey(Database cx) {
+	loop {
+		// When the change coordinators transaction succeeds, it uses the
+		// special key space error message to return a message to the client.
+		// This causes the underlying transaction to not be committed. In order
+		// to make sure we clear the previous coordinators key, we have to use
+		// a new transaction here.
+		state Reference<ISingleThreadTransaction> clearTr =
+		    ISingleThreadTransaction::create(ISingleThreadTransaction::Type::RYW, cx);
+		try {
+			clearTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			clearTr->clear(previousCoordinatorsKey);
+			wait(clearTr->commit());
+			return Void();
+		} catch (Error& e2) {
+			wait(clearTr->onError(e2));
+		}
+	}
+}
+
 } // namespace
 
 ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
                                                                ClusterConnectionString* conn,
-                                                               std::string newName) {
-
+                                                               std::string newName,
+                                                               bool disableConfigDB) {
+	TraceEvent("ChangeQuorumCheckerStart").detail("NewConnectionString", conn->toString());
 	state Optional<ClusterConnectionString> clusterConnectionStringOptional =
 	    wait(getClusterConnectionStringFromStorageServer(tr));
 
@@ -892,7 +939,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		conn->hostnames = old.hostnames;
 		conn->coords = old.coords;
 	}
-	std::vector<NetworkAddress> desiredCoordinators = wait(conn->tryResolveHostnames());
+	state std::vector<NetworkAddress> desiredCoordinators = wait(conn->tryResolveHostnames());
 	if (desiredCoordinators.size() != conn->hostnames.size() + conn->coords.size()) {
 		TraceEvent("ChangeQuorumCheckerEarlyTermination")
 		    .detail("Reason", "One or more hostnames are unresolvable")
@@ -909,6 +956,13 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	std::sort(old.coords.begin(), old.coords.end());
 	if (conn->hostnames == old.hostnames && conn->coords == old.coords && old.clusterKeyName() == newName) {
 		connectionStrings.clear();
+		if (g_network->isSimulated() && g_simulator.configDBType == ConfigDBType::DISABLED) {
+			disableConfigDB = true;
+		}
+		if (!disableConfigDB) {
+			wait(verifyConfigurationDatabaseAlive(tr->getDatabase()));
+		}
+		wait(resetPreviousCoordinatorsKey(tr->getDatabase()));
 		return CoordinatorsResult::SAME_NETWORK_ADDRESSES;
 	}
 
@@ -958,6 +1012,9 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		when(wait(waitForAll(leaderServers))) {}
 		when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
 	}
+	TraceEvent("ChangeQuorumCheckerSetCoordinatorsKey")
+	    .detail("CurrentCoordinators", old.toString())
+	    .detail("NewCoordinators", conn->toString());
 	tr->set(coordinatorsKey, conn->toString());
 	return Optional<CoordinatorsResult>();
 }
@@ -1355,6 +1412,7 @@ ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> ser
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				ryw.set(
 				    SpecialKeySpace::getManagementApiCommandOptionSpecialKey(failed ? "failed" : "excluded", "force"),
@@ -1417,6 +1475,7 @@ ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				ryw.set(SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
 				            failed ? "failed_locality" : "excluded_locality", "force"),
@@ -1459,6 +1518,7 @@ ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> ser
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				for (auto& s : servers) {
 					if (!s.isValid()) {
@@ -1562,6 +1622,7 @@ ACTOR Future<Void> includeLocalities(Database cx, std::vector<std::string> local
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				if (includeAll) {
 					if (failed) {
