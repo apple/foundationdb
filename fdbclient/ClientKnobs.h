@@ -217,10 +217,6 @@ public:
 	int64_t CSI_SIZE_LIMIT;
 	double CSI_STATUS_DELAY;
 
-	int HTTP_SEND_SIZE;
-	int HTTP_READ_SIZE;
-	int HTTP_VERBOSE_LEVEL;
-	std::string HTTP_REQUEST_ID_HEADER;
 	bool HTTP_REQUEST_AWS_V4_HEADER; // setting this knob to true will enable AWS V4 style header.
 	std::string BLOBSTORE_ENCRYPTION_TYPE;
 	int BLOBSTORE_CONNECT_TRIES;

@@ -15,6 +15,7 @@ set(FDBRPC_SRCS
   genericactors.actor.h
   genericactors.actor.cpp
   HealthMonitor.actor.cpp
+  HTTP.actor.cpp
   IAsyncFile.actor.cpp
   LoadBalance.actor.cpp
   LoadBalance.actor.h
@@ -35,7 +36,10 @@ set(FDBRPC_SRCS
   sim_validation.cpp
   TimedRequest.h
   TraceFileIO.cpp
-  TSSComparison.h)
+  TSSComparison.h
+  libb64/cdecode.c
+  libb64/cencode.c
+  md5/md5.c)
 
 if(WITH_TLS)
   set(FDBRPC_SRCS

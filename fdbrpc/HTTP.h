@@ -21,7 +21,6 @@
 #include "flow/flow.h"
 #include "flow/Net2Packet.h"
 #include "fdbrpc/IRateControl.h"
-#include "fdbclient/Knobs.h"
 
 namespace HTTP {
 struct is_iless {

@@ -65,7 +65,6 @@ set(FDBCLIENT_SRCS
   GlobalConfig.actor.cpp
   GrvProxyInterface.h
   HighContentionPrefixAllocator.actor.h
-  HTTP.actor.cpp
   IClientApi.h
   IConfigTransaction.cpp
   IConfigTransaction.h
@@ -160,9 +159,6 @@ set(FDBCLIENT_SRCS
   json_spirit/json_spirit_value.h
   json_spirit/json_spirit_writer_options.h
   json_spirit/json_spirit_writer_template.h
-  libb64/cdecode.c
-  libb64/cencode.c
-  md5/md5.c
   sha1/SHA1.cpp
   zipf.c
   zipf.h)
