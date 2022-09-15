@@ -103,16 +103,19 @@ void IKnobCollection::setupKnobs(const std::vector<std::pair<std::string, std::s
 			g_knobs.setKnob(knobName, knobValue);
 		} catch (Error& e) {
 			if (e.code() == error_code_invalid_option_value) {
-				std::cerr << "WARNING: Invalid value '" << knobValueString << "' for knob option '" << knobName
-				          << "'\n";
-				TraceEvent(SevWarnAlways, "InvalidKnobValue")
+				std::cerr << "ERROR: Invalid value '" << knobValueString << "' for knob option '" << knobName << "'\n";
+				TraceEvent(SevError, "InvalidKnobValue")
+				    .errorUnsuppressed(e)
 				    .detail("Knob", printable(knobName))
 				    .detail("Value", printable(knobValueString));
+				throw e;
 			} else if (e.code() == error_code_invalid_option) {
-				std::cerr << "WARNING: Invalid knob option '" << knobName << "'\n";
-				TraceEvent(SevWarnAlways, "InvalidKnobName")
+				std::cerr << "ERROR: Invalid knob option '" << knobName << "'\n";
+				TraceEvent(SevError, "InvalidKnobName")
+				    .errorUnsuppressed(e)
 				    .detail("Knob", printable(knobName))
 				    .detail("Value", printable(knobValueString));
+				throw e;
 			} else {
 				std::cerr << "ERROR: Failed to set knob option '" << knobName << "': " << e.what() << "\n";
 				TraceEvent(SevError, "FailedToSetKnob")
