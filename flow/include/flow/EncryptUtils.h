@@ -46,9 +46,9 @@ constexpr const EncryptCipherBaseKeyId INVALID_ENCRYPT_CIPHER_KEY_ID = 0;
 
 constexpr const EncryptCipherRandomSalt INVALID_ENCRYPT_RANDOM_SALT = 0;
 
-const EncryptCipherDomainNameRef FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME = "FdbSystemKeyspaceEncryptDomain"_sr;
-const EncryptCipherDomainNameRef FDB_DEFAULT_ENCRYPT_DOMAIN_NAME = "FdbDefaultEncryptDomain"_sr;
-const EncryptCipherDomainNameRef FDB_ENCRYPT_HEADER_DOMAIN_NAME = "FdbEncryptHeaderDomain"_sr;
+extern const EncryptCipherDomainName FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME;
+extern const EncryptCipherDomainName FDB_DEFAULT_ENCRYPT_DOMAIN_NAME;
+extern const EncryptCipherDomainName FDB_ENCRYPT_HEADER_DOMAIN_NAME;
 
 typedef enum {
 	ENCRYPT_CIPHER_MODE_NONE = 0,

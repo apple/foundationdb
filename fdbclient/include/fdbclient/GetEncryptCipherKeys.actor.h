@@ -90,7 +90,7 @@ Future<EKPGetLatestBaseCipherKeysReply> getUncachedLatestEncryptCipherKeys(Refer
 ACTOR template <class T>
 Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getLatestEncryptCipherKeys(
     Reference<AsyncVar<T> const> db,
-    std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains,
+    std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains,
     BlobCipherMetrics::UsageType usageType) {
 	state Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
@@ -265,9 +265,9 @@ struct TextAndHeaderCipherKeys {
 ACTOR template <class T>
 Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(Reference<AsyncVar<T> const> db,
                                                                     EncryptCipherDomainId domainId,
-                                                                    EncryptCipherDomainNameRef domainName,
+                                                                    EncryptCipherDomainName domainName,
                                                                     BlobCipherMetrics::UsageType usageType) {
-	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains;
+	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
 	domains[domainId] = domainName;
 	domains[ENCRYPT_HEADER_DOMAIN_ID] = FDB_ENCRYPT_HEADER_DOMAIN_NAME;
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys =

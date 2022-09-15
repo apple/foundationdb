@@ -995,19 +995,19 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	// Fetch cipher keys if needed.
 	state Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getCipherKeys;
 	if (pProxyCommitData->isEncryptionEnabled) {
-		static std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> defaultDomains = {
+		static std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> defaultDomains = {
 			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME },
 			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_ENCRYPT_HEADER_DOMAIN_NAME },
 			{ FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
 		};
-		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> encryptDomains = defaultDomains;
+		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> encryptDomains = defaultDomains;
 		for (int t = 0; t < trs.size(); t++) {
 			TenantInfo const& tenantInfo = trs[t].tenantInfo;
 			int64_t tenantId = tenantInfo.tenantId;
 			Optional<TenantNameRef> const& tenantName = tenantInfo.name;
 			if (tenantId != TenantInfo::INVALID_TENANT) {
 				ASSERT(tenantName.present());
-				encryptDomains[tenantId] = tenantName.get();
+				encryptDomains[tenantId] = Standalone(tenantName.get(), tenantInfo.arena);
 			} else {
 				for (auto m : trs[t].transaction.mutations) {
 					std::pair<EncryptCipherDomainName, int64_t> details =
