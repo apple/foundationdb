@@ -159,7 +159,8 @@ Future<Version> getVersion(Database const& cx);
 Future<bool> getKeyServers(
     Database const& cx,
     Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> const& keyServersPromise,
-    KeyRangeRef const& kr);
+    KeyRangeRef const& kr,
+    bool const& performQuiescentChecks);
 Future<bool> getKeyLocations(Database const& cx,
                              std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> const& shards,
                              Promise<Standalone<VectorRef<KeyValueRef>>> const& keyLocationPromise,

@@ -93,7 +93,8 @@ void testFailure(std::string message, bool performQuiescentChecks, bool isError)
 ACTOR Future<bool> getKeyServers(
     Database cx,
     Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise,
-    KeyRangeRef kr) {
+    KeyRangeRef kr,
+    bool performQuiescentChecks) {
 	state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers;
 
 	// Try getting key server locations from the master proxies
@@ -124,13 +125,24 @@ ACTOR Future<bool> getKeyServers(
 				for (int i = 0; i < keyServerLocationFutures.size(); i++) {
 					ErrorOr<GetKeyServerLocationsReply> shards = keyServerLocationFutures[i].get();
 
+					// If performing quiescent check, then all master proxies should be reachable.  Otherwise, only
+					// one needs to be reachable
+					if (performQuiescentChecks && !shards.present()) {
+						TraceEvent("ConsistencyCheck_CommitProxyUnavailable")
+						    .detail("CommitProxyID", commitProxyInfo->getId(i));
+						testFailure("Commit proxy unavailable", performQuiescentChecks, true);
+						return false;
+					}
+
 					// Get the list of shards if one was returned.  If not doing a quiescent check, we can break if
 					// it is. If we are doing a quiescent check, then we only need to do this for the first shard.
 					if (shards.present() && !keyServersInsertedForThisIteration) {
 						keyServers.insert(keyServers.end(), shards.get().results.begin(), shards.get().results.end());
 						keyServersInsertedForThisIteration = true;
 						begin = shards.get().results.back().first.end;
-						break;
+
+						if (!performQuiescentChecks)
+							break;
 					}
 				} // End of For
 			}
@@ -945,7 +957,7 @@ ACTOR Future<Void> runDataValidationCheck(ConsistencyScanData* self) {
 		// Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
 		state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
 		state std::map<UID, StorageServerInterface> tssMapping;
-		bool keyServerResult = wait(getKeyServers(self->db, keyServerPromise, keyServersKeys));
+		bool keyServerResult = wait(getKeyServers(self->db, keyServerPromise, keyServersKeys, false));
 		if (keyServerResult) {
 			state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
 			    keyServerPromise.getFuture().get();

@@ -321,7 +321,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 				// Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
 				state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
-				bool keyServerResult = wait(getKeyServers(cx, keyServerPromise, keyServersKeys));
+				bool keyServerResult =
+				    wait(getKeyServers(cx, keyServerPromise, keyServersKeys, self->performQuiescentChecks));
 				if (keyServerResult) {
 					state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
 					    keyServerPromise.getFuture().get();
@@ -766,7 +767,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	                                        bool removePrefix) {
 		// get shards paired with corresponding storage servers
 		state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
-		bool keyServerResult = wait(getKeyServers(cx, keyServerPromise, range));
+		bool keyServerResult = wait(getKeyServers(cx, keyServerPromise, range, self->performQuiescentChecks));
 		if (!keyServerResult)
 			return false;
 		state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> shards =
