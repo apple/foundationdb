@@ -43,25 +43,6 @@
 #define __has_cpp_attribute(attribute) 0
 #endif
 
-// TODO: These macro definitions are duplicated in BridgedSwiftObject.h. Move
-// them to a single file if we find a location that both Visibility.h and
-// BridgedSwiftObject.h can import.
-#if __has_feature(nullability)
-// Provide macros to temporarily suppress warning about the use of
-// _Nullable and _Nonnull.
-#define SWIFT_BEGIN_NULLABILITY_ANNOTATIONS                                                                            \
-	_Pragma("clang diagnostic push") _Pragma("clang diagnostic ignored \"-Wnullability-extension\"")
-#define SWIFT_END_NULLABILITY_ANNOTATIONS _Pragma("clang diagnostic pop")
-
-#else
-// #define _Nullable and _Nonnull to nothing if we're not being built
-// with a compiler that supports them.
-#define _Nullable
-#define _Nonnull
-#define SWIFT_BEGIN_NULLABILITY_ANNOTATIONS
-#define SWIFT_END_NULLABILITY_ANNOTATIONS
-#endif
-
 #define SWIFT_MACRO_CONCAT(A, B) A##B
 #define SWIFT_MACRO_IF_0(IF_TRUE, IF_FALSE) IF_FALSE
 #define SWIFT_MACRO_IF_1(IF_TRUE, IF_FALSE) IF_TRUE
@@ -262,7 +243,7 @@ SWIFT_CC(swift) void (*_Nullable swift_task_enqueueGlobal_hook)(swift::Job* job,
 typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDelay_original)(unsigned long long delay, swift::Job* job);
 SWIFT_EXPORT_FROM(swift_Concurrency)
 SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDelay_hook)(unsigned long long delay,
-                                                               swift::Job* job,
+                                                               swift::Job* _Nonnull job,
                                                                swift_task_enqueueGlobalWithDelay_original original);
 
 typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDeadline_original)(long long sec,
@@ -270,7 +251,7 @@ typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDeadline_original)(lo
                                                                               long long tsec,
                                                                               long long tnsec,
                                                                               int clock,
-                                                                              swift::Job* job);
+                                                                              swift::Job* _Nonnull job);
 SWIFT_EXPORT_FROM(swift_Concurrency)
 SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDeadline_hook)(
     long long sec,
@@ -284,7 +265,7 @@ SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDeadline_hook)(
 /// A hook to take over main executor enqueueing.
 typedef SWIFT_CC(swift) void (*swift_task_enqueueMainExecutor_original)(swift::Job* job);
 SWIFT_EXPORT_FROM(swift_Concurrency)
-SWIFT_CC(swift) void (*swift_task_enqueueMainExecutor_hook)(swift::Job* job,
+SWIFT_CC(swift) void (*swift_task_enqueueMainExecutor_hook)(swift::Job* _Nonnull job,
                                                             swift_task_enqueueMainExecutor_original original);
 
 SWIFT_EXPORT_FROM(swift_Concurrency) SWIFT_CC(swift) void swift_job_run(swift::Job* job, ExecutorRef executor);

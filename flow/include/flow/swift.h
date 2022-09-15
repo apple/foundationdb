@@ -38,17 +38,40 @@
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 
+#if __has_feature(nullability)
+// Provide macros to temporarily suppress warning about the use of
+// _Nullable and _Nonnull.
+# define SWIFT_BEGIN_NULLABILITY_ANNOTATIONS                                   \
+  _Pragma("clang diagnostic push")                                             \
+  _Pragma("clang diagnostic ignored \"-Wnullability-extension\"")              \
+  _Pragma("clang assume_nonnull begin")
+# define SWIFT_END_NULLABILITY_ANNOTATIONS                                     \
+  _Pragma("clang diagnostic pop")                                              \
+  _Pragma("clang assume_nonnull end")
+
+#else
+// #define _Nullable and _Nonnull to nothing if we're not being built
+// with a compiler that supports them.
+# define _Nullable
+# define _Nonnull
+# define _Null_unspecified
+# define SWIFT_BEGIN_NULLABILITY_ANNOTATIONS
+# define SWIFT_END_NULLABILITY_ANNOTATIONS
+#endif
+
+// ==== ----------------------------------------------------------------------------------------------------------------
+
 /// A count in nanoseconds.
 using JobDelay = unsigned long long;
 
 class ExecutorRef {
+public:
 	void* Identity;
 	uintptr_t Implementation;
 
 	constexpr ExecutorRef(void* identity, uintptr_t implementation)
 	  : Identity(identity), Implementation(implementation) {}
 
-public:
 	constexpr static ExecutorRef generic() { return ExecutorRef(nullptr, 0); }
 };
 

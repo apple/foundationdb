@@ -369,6 +369,6 @@ void net2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job,
 	net->_swiftEnqueue(orderedTask);
 }
 
-void swift_job_run_generic(swift::Job* job) {
+void swift_job_run_generic(swift::Job* _Nonnull job) {
 	swift_job_run(job, ExecutorRef::generic());
 }
