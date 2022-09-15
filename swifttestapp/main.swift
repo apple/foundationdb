@@ -75,6 +75,28 @@ func swiftFlowFutureAwait() async {
     assertOnNet2EventLoop()
 }
 
+actor Greeter {
+    let phrase: String
+    init(phrase: String) {
+        self.phrase = phrase
+    }
+
+    func greet(name: String) -> String {
+        assertOnNet2EventLoop()
+        return "\(phrase) \(name)!"
+    }
+}
+
+func actorTest() async {
+    let ga = Greeter(phrase: "Hello,")
+
+    assertOnNet2EventLoop()
+    let greeting = await ga.greet(name: "Caplin")
+    print("[swift][\(#fileID):\(#line)](\(#function)) Greeting: \(greeting)")
+    assertOnNet2EventLoop()
+}
+
+
 let task = Task { // task execution will be intercepted
     assertOnNet2EventLoop()
 
@@ -87,6 +109,10 @@ let task = Task { // task execution will be intercepted
     print("[swift] returned from 'await swiftAsyncFunc()'")
     await swiftFlowFutureAwait()
     print("[swift] returned from 'await swiftFlowFutureAwait()'")
+    print("[swift] ==== done ---------------------------------------------------")
+
+    print("[swift] actors test -------------------------------------------------")
+    await actorTest()
     print("[swift] ==== done ---------------------------------------------------")
 
     exit(0)
