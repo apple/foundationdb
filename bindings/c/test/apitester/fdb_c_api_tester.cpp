@@ -435,6 +435,9 @@ int main(int argc, char** argv) {
 
 		fdb::selectApiVersionCapped(options.apiVersion);
 		applyNetworkOptions(options);
+		if (options.apiVersion >= 720) {
+			fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_CLIENT_BYPASS);
+		}
 		fdb::network::setup();
 
 		std::thread network_thread{ &fdb::network::run };
