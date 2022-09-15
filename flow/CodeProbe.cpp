@@ -288,6 +288,14 @@ bool SimOnly::operator()(ICodeProbe* self) const {
 	return g_network->isSimulated();
 }
 
+bool RocksDB::operator()(ICodeProbe* self) const {
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
+	return true;
+#else
+	return false;
+#endif
+}
+
 } // namespace assert
 
 } // namespace probe

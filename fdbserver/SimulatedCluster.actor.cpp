@@ -1461,7 +1461,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		break;
 	}
 	case 4: {
-		CODE_PROBE(true, "Simulated cluster using RocksDB storage engine");
+		CODE_PROBE(true, "Simulated cluster using RocksDB storage engine", probe::assert::rocksDB);
 		set_config("ssd-rocksdb-v1");
 		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
 		// background threads.
@@ -1471,7 +1471,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		break;
 	}
 	case 5: {
-		CODE_PROBE(true, "Simulated cluster using Sharded RocksDB storage engine");
+		CODE_PROBE(true, "Simulated cluster using Sharded RocksDB storage engine", probe::assert::rocksDB);
 		set_config("ssd-sharded-rocksdb");
 		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
 		// background threads.
