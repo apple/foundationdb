@@ -122,7 +122,7 @@ struct ChangeConfigWorkload : TestWorkload {
 			}
 			wait(success(ManagementAPI::changeConfig(cx.getReference(), self->configMode, true)));
 		}
-		if (g_network->isSimulated() && g_simulator->configDBType != ConfigDBType::SIMPLE ||
+		if ((g_network->isSimulated() && g_simulator->configDBType != ConfigDBType::SIMPLE) ||
 		    !g_network->isSimulated()) {
 			if (self->networkAddresses.size()) {
 				state int i;
