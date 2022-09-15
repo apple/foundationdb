@@ -185,6 +185,7 @@ public:
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
 			newInfo.encryptKeyProxy = interf;
+			newInfo.client.encryptKeyProxy = interf;
 			serverInfo->set(newInfo);
 			auto newClientInfo = clientInfo->get();
 			newClientInfo.id = deterministicRandom()->randomUniqueID();
@@ -206,6 +207,7 @@ public:
 				newInfo.blobManager = Optional<BlobManagerInterface>();
 			} else if (t == ProcessClass::EncryptKeyProxyClass) {
 				newInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
+				newInfo.client.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 				newClientInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 			}
 			serverInfo->set(newInfo);
