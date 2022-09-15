@@ -567,7 +567,7 @@ void updateClusterMetadata(Transaction tr,
 		if (previousMetadata.entry.clusterState == DataClusterState::REMOVING) {
 			throw cluster_removed();
 		} else if (previousMetadata.entry.clusterState == DataClusterState::RESTORING) {
-			throw cluster_restored();
+			throw cluster_restoring();
 		}
 		ManagementClusterMetadata::dataClusters().set(tr, name, updatedEntry.get());
 		updateClusterCapacityIndex(tr, name, previousMetadata.entry, updatedEntry.get());
@@ -1344,7 +1344,7 @@ struct RestoreClusterImpl {
 		} catch (Error& e) {
 			// If the transaction retries after success or if we are trying a second time to restore the cluster, it
 			// will throw an error indicating that the restore has already started
-			if (e.code() == error_code_cluster_restored) {
+			if (e.code() == error_code_cluster_restoring) {
 				clusterIsRestoring = true;
 			} else {
 				throw;
@@ -1639,7 +1639,7 @@ struct CreateTenantImpl {
 		if (self->ctx.dataClusterMetadata.get().entry.clusterState == DataClusterState::REMOVING) {
 			throw cluster_removed();
 		} else if (self->ctx.dataClusterMetadata.get().entry.clusterState == DataClusterState::RESTORING) {
-			throw cluster_restored();
+			throw cluster_restoring();
 		}
 
 		managementClusterAddTenantToGroup(
