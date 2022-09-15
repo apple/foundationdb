@@ -799,7 +799,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 			CODE_PROBE(true, "crossed tenant boundaries");
 			state KeyRef endKey = k;
 			// If we are crossing a boundary with a key that has a tenant prefix then truncate it
-			if (curKeyTenantInfo.first != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
+			if (curKeyTenantInfo.first != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID &&
+			    curKeyTenantInfo.first != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
 				endKey = StringRef(k.begin(), 8);
 			}
 			state ValueRef newValue = StringRef();
@@ -1032,7 +1033,8 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 			    wait(EncryptedRangeFileWriter::getTenantIdName(curKey, tenantCache));
 			if (curKey.size() > 0 && prevKey.size() > 0 && prevTenantInfo.first != curTenantInfo.first) {
 				ASSERT(!done);
-				if (curTenantInfo.first != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
+				if (curTenantInfo.first != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID &&
+				    curTenantInfo.first != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
 					ASSERT(curKey.size() == 8);
 				}
 				done = true;
