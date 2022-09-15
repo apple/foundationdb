@@ -1482,7 +1482,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 										                : "False");
 
 										if ((g_network->isSimulated() &&
-										     g_simulator.tssMode != ISimulator::TSSMode::EnabledDropMutations) ||
+										     g_simulator->tssMode != ISimulator::TSSMode::EnabledDropMutations) ||
 										    (!storageServerInterfaces[j].isTss() &&
 										     !storageServerInterfaces[firstValidServer].isTss())) {
 											self->testFailure("Data inconsistent", true);
@@ -1624,7 +1624,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 							break;
 						} else if (estimatedBytes[j] < 0 &&
 						           ((g_network->isSimulated() &&
-						             g_simulator.tssMode <= ISimulator::TSSMode::EnabledNormal) ||
+						             g_simulator->tssMode <= ISimulator::TSSMode::EnabledNormal) ||
 						            !storageServerInterfaces[j].isTss())) {
 							// Ignore a non-responding TSS outside of simulation, or if tss fault injection is enabled
 							hasValidEstimate = false;
@@ -1928,7 +1928,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					// FIXME: this is hiding the fact that we can recruit a new storage server on a location the has
 					// files left behind by a previous failure
 					// this means that the process is wasting disk space until the process is rebooting
-					ISimulator::ProcessInfo* p = g_simulator.getProcessByAddress(itr->interf.address());
+					ISimulator::ProcessInfo* p = g_simulator->getProcessByAddress(itr->interf.address());
 					// Note: itr->interf.address() may not equal to p->address() because role's endpoint's primary
 					// addr can be swapped by choosePrimaryAddress() based on its peer's tls config.
 					TraceEvent("ConsistencyCheck_RebootProcess")
@@ -1937,14 +1937,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("ProcessPrimaryAddress", p->address)
 					    .detail("ProcessAddresses", p->addresses.toString())
 					    .detail("DataStoreID", id)
-					    .detail("Protected", g_simulator.protectedAddresses.count(itr->interf.address()))
+					    .detail("Protected", g_simulator->protectedAddresses.count(itr->interf.address()))
 					    .detail("Reliable", p->isReliable())
 					    .detail("ReliableInfo", p->getReliableInfo())
 					    .detail("KillOrRebootProcess", p->address);
 					if (p->isReliable()) {
-						g_simulator.rebootProcess(p, ISimulator::RebootProcess);
+						g_simulator->rebootProcess(p, ISimulator::RebootProcess);
 					} else {
-						g_simulator.killProcess(p, ISimulator::KillInstantly);
+						g_simulator->killProcess(p, ISimulator::KillInstantly);
 					}
 				}
 
@@ -2034,7 +2034,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> checkWorkerList(Database cx, ConsistencyCheckWorkload* self) {
-		if (!g_simulator.extraDatabases.empty()) {
+		if (!g_simulator->extraDatabases.empty()) {
 			return true;
 		}
 
@@ -2043,7 +2043,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 		for (const auto& it : workers) {
 			NetworkAddress addr = it.interf.tLog.getEndpoint().addresses.getTLSAddress();
-			ISimulator::ProcessInfo* info = g_simulator.getProcessByAddress(addr);
+			ISimulator::ProcessInfo* info = g_simulator->getProcessByAddress(addr);
 			if (!info || info->failed) {
 				TraceEvent("ConsistencyCheck_FailedWorkerInList").detail("Addr", it.interf.address());
 				return false;
@@ -2051,7 +2051,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			workerAddresses.insert(NetworkAddress(addr.ip, addr.port, true, addr.isTLS()));
 		}
 
-		std::vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
+		std::vector<ISimulator::ProcessInfo*> all = g_simulator->getAllProcesses();
 		for (int i = 0; i < all.size(); i++) {
 			if (all[i]->isReliable() && all[i]->name == std::string("Server") &&
 			    all[i]->startingClass != ProcessClass::TesterClass &&
@@ -2181,10 +2181,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 		// Check if master and cluster controller are in the desired DC for fearless cluster when running under
 		// simulation
-		// FIXME: g_simulator.datacenterDead could return false positives. Relaxing checks until it is fixed.
-		if (g_network->isSimulated() && config.usableRegions > 1 && g_simulator.primaryDcId.present() &&
-		    !g_simulator.datacenterDead(g_simulator.primaryDcId) &&
-		    !g_simulator.datacenterDead(g_simulator.remoteDcId)) {
+		// FIXME: g_simulator->datacenterDead could return false positives. Relaxing checks until it is fixed.
+		if (g_network->isSimulated() && config.usableRegions > 1 && g_simulator->primaryDcId.present() &&
+		    !g_simulator->datacenterDead(g_simulator->primaryDcId) &&
+		    !g_simulator->datacenterDead(g_simulator->remoteDcId)) {
 			expectedPrimaryDcId = config.regions[0].dcId;
 			expectedRemoteDcId = config.regions[1].dcId;
 			// If the priorities are equal, either could be the primary
@@ -2303,9 +2303,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check LogRouter
-		if (g_network->isSimulated() && config.usableRegions > 1 && g_simulator.primaryDcId.present() &&
-		    !g_simulator.datacenterDead(g_simulator.primaryDcId) &&
-		    !g_simulator.datacenterDead(g_simulator.remoteDcId)) {
+		if (g_network->isSimulated() && config.usableRegions > 1 && g_simulator->primaryDcId.present() &&
+		    !g_simulator->datacenterDead(g_simulator->primaryDcId) &&
+		    !g_simulator->datacenterDead(g_simulator->remoteDcId)) {
 			for (auto& tlogSet : db.logSystemConfig.tLogs) {
 				if (!tlogSet.isLocal && tlogSet.logRouters.size()) {
 					for (auto& logRouter : tlogSet.logRouters) {

@@ -52,9 +52,9 @@ static const char* backupTypes[] = { "backup_worker_enabled:=0", "backup_worker_
 
 std::string generateRegions() {
 	std::string result;
-	if (g_simulator.physicalDatacenters == 1 ||
-	    (g_simulator.physicalDatacenters == 2 && deterministicRandom()->random01() < 0.25) ||
-	    g_simulator.physicalDatacenters == 3) {
+	if (g_simulator->physicalDatacenters == 1 ||
+	    (g_simulator->physicalDatacenters == 2 && deterministicRandom()->random01() < 0.25) ||
+	    g_simulator->physicalDatacenters == 3) {
 		return " usable_regions=1 regions=\"\"";
 	}
 
@@ -87,7 +87,7 @@ std::string generateRegions() {
 	StatusArray remoteDcArr;
 	remoteDcArr.push_back(remoteDcObj);
 
-	if (g_simulator.physicalDatacenters > 3 && deterministicRandom()->random01() < 0.5) {
+	if (g_simulator->physicalDatacenters > 3 && deterministicRandom()->random01() < 0.5) {
 		StatusObject primarySatelliteObj;
 		primarySatelliteObj["id"] = "2";
 		primarySatelliteObj["priority"] = 1;
@@ -104,7 +104,7 @@ std::string generateRegions() {
 			remoteSatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
 		remoteDcArr.push_back(remoteSatelliteObj);
 
-		if (g_simulator.physicalDatacenters > 5 && deterministicRandom()->random01() < 0.5) {
+		if (g_simulator->physicalDatacenters > 5 && deterministicRandom()->random01() < 0.5) {
 			StatusObject primarySatelliteObjB;
 			primarySatelliteObjB["id"] = "4";
 			primarySatelliteObjB["priority"] = 1;
@@ -239,11 +239,11 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		allowDescriptorChange =
 		    getOption(options, LiteralStringRef("allowDescriptorChange"), SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
 		allowTestStorageMigration =
-		    getOption(options, "allowTestStorageMigration"_sr, false) && g_simulator.allowStorageMigrationTypeChange;
+		    getOption(options, "allowTestStorageMigration"_sr, false) && g_simulator->allowStorageMigrationTypeChange;
 		storageMigrationCompatibleConf = getOption(options, "storageMigrationCompatibleConf"_sr, false);
 		waitStoreTypeCheck = getOption(options, "waitStoreTypeCheck"_sr, false);
 		downgradeTest1 = getOption(options, "downgradeTest1"_sr, false);
-		g_simulator.usableRegions = 1;
+		g_simulator->usableRegions = 1;
 	}
 
 	std::string description() const override { return "DestroyDatabaseWorkload"; }
@@ -347,7 +347,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	ACTOR Future<Void> singleDB(ConfigureDatabaseWorkload* self, Database cx) {
 		state Transaction tr;
 		loop {
-			if (g_simulator.speedUpSimulation) {
+			if (g_simulator->speedUpSimulation) {
 				return Void();
 			}
 			state int randomChoice;
@@ -373,14 +373,14 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			} else if (randomChoice == 3) {
 				//TraceEvent("ConfigureTestConfigureBegin").detail("NewConfig", newConfig);
 				int maxRedundancies = sizeof(redundancies) / sizeof(redundancies[0]);
-				if (g_simulator.physicalDatacenters == 2 || g_simulator.physicalDatacenters > 3) {
+				if (g_simulator->physicalDatacenters == 2 || g_simulator->physicalDatacenters > 3) {
 					maxRedundancies--; // There are not enough machines for triple replication in fearless
 					                   // configurations
 				}
 				int redundancy = deterministicRandom()->randomInt(0, maxRedundancies);
 				std::string config = redundancies[redundancy];
 
-				if (config == "triple" && g_simulator.physicalDatacenters == 3) {
+				if (config == "triple" && g_simulator->physicalDatacenters == 3) {
 					config = "three_data_hall ";
 				}
 

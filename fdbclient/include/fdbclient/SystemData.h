@@ -377,6 +377,12 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 // 1 = Send a signal to pause/already paused.
 extern const KeyRef backupPausedKey;
 
+//	"\xff/previousCoordinators" = "[[ClusterConnectionString]]"
+//	Set to the encoded structure of the cluster's previous set of coordinators.
+//	Changed when performing quorumChange.
+//	See "CoordinationInterface.h" struct ClusterConnectionString for more details
+extern const KeyRef previousCoordinatorsKey;
+
 //	"\xff/coordinators" = "[[ClusterConnectionString]]"
 //	Set to the encoded structure of the cluster's current set of coordinators.
 //	Changed when performing quorumChange.

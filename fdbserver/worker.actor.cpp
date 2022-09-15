@@ -191,7 +191,7 @@ Error checkIOTimeout(Error const& e) {
 	// In simulation, have to check global timed out flag for both this process and the machine process on which IO is
 	// done
 	if (g_network->isSimulated() && !timeoutOccurred)
-		timeoutOccurred = g_pSimulator->getCurrentProcess()->machine->machineProcess->global(INetwork::enASIOTimedOut);
+		timeoutOccurred = g_simulator->getCurrentProcess()->machine->machineProcess->global(INetwork::enASIOTimedOut);
 
 	if (timeoutOccurred) {
 		CODE_PROBE(true, "Timeout occurred");
@@ -271,7 +271,9 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 
 			if (err.error.code() == error_code_please_reboot ||
 			    (err.role == Role::SHARED_TRANSACTION_LOG &&
-			     (err.error.code() == error_code_io_error || err.error.code() == error_code_io_timeout)))
+			     (err.error.code() == error_code_io_error || err.error.code() == error_code_io_timeout)) ||
+			    (SERVER_KNOBS->STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT && err.role == Role::STORAGE_SERVER &&
+			     err.error.code() == error_code_io_timeout))
 				throw err.error;
 		}
 	}
@@ -565,6 +567,7 @@ ACTOR Future<Void> registrationClient(
     Reference<AsyncVar<std::set<std::string>> const> issues,
     Reference<ConfigNode> configNode,
     Reference<LocalConfiguration> localConfig,
+    ConfigBroadcastInterface configBroadcastInterface,
     Reference<AsyncVar<ServerDBInfo>> dbInfo,
     Promise<Void> recoveredDiskFiles) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
@@ -589,20 +592,21 @@ ACTOR Future<Void> registrationClient(
 			incorrectTime = Optional<double>();
 		}
 
-		RegisterWorkerRequest request(interf,
-		                              initialClass,
-		                              processClass,
-		                              asyncPriorityInfo->get(),
-		                              requestGeneration++,
-		                              ddInterf->get(),
-		                              rkInterf->get(),
-		                              bmInterf->get().present() ? bmInterf->get().get().second
-		                                                        : Optional<BlobManagerInterface>(),
-		                              ekpInterf->get(),
-		                              degraded->get(),
-		                              localConfig->lastSeenVersion(),
-		                              localConfig->configClassSet(),
-		                              recoveredDiskFiles.isSet());
+		RegisterWorkerRequest request(
+		    interf,
+		    initialClass,
+		    processClass,
+		    asyncPriorityInfo->get(),
+		    requestGeneration++,
+		    ddInterf->get(),
+		    rkInterf->get(),
+		    bmInterf->get().present() ? bmInterf->get().get().second : Optional<BlobManagerInterface>(),
+		    ekpInterf->get(),
+		    degraded->get(),
+		    localConfig.isValid() ? localConfig->lastSeenVersion() : Optional<Version>(),
+		    localConfig.isValid() ? localConfig->configClassSet() : Optional<ConfigClassSet>(),
+		    recoveredDiskFiles.isSet(),
+		    configBroadcastInterface);
 
 		for (auto const& i : issues->get()) {
 			request.issues.push_back_deep(request.issues.arena(), i);
@@ -1412,7 +1416,7 @@ void startRole(const Role& role,
 	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
 	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
 	if (g_network->isSimulated())
-		g_simulator.addRole(g_network->getLocalAddress(), role.roleName);
+		g_simulator->addRole(g_network->getLocalAddress(), role.roleName);
 }
 
 void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
@@ -1442,7 +1446,7 @@ void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
 	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
 	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
 	if (g_network->isSimulated())
-		g_simulator.removeRole(g_network->getLocalAddress(), role.roleName);
+		g_simulator->removeRole(g_network->getLocalAddress(), role.roleName);
 
 	if (role.includeInTraceRoles) {
 		removeTraceRole(role.abbreviation);
@@ -1647,7 +1651,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state std::string coordFolder = abspath(_coordFolder);
 
 	state WorkerInterface interf(locality);
-	interf.configBroadcastInterface = configBroadcastInterface;
 	state std::set<std::pair<UID, KeyValueStoreType>> runningStorages;
 	interf.initEndpoints();
 
@@ -1944,11 +1947,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       issues,
 		                                       configNode,
 		                                       localConfig,
+		                                       configBroadcastInterface,
 		                                       dbInfo,
 		                                       recoveredDiskFiles));
 
 		if (configNode.isValid()) {
-			errorForwarders.add(localConfig->consume(interf.configBroadcastInterface));
+			errorForwarders.add(brokenPromiseToNever(localConfig->consume(configBroadcastInterface)));
 		}
 
 		if (SERVER_KNOBS->ENABLE_WORKER_HEALTH_MONITOR) {
@@ -3319,8 +3323,11 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 	state std::vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
 	state Reference<ConfigNode> configNode;
-	state Reference<LocalConfiguration> localConfig =
-	    makeReference<LocalConfiguration>(dataFolder, configPath, manualKnobOverrides);
+	state Reference<LocalConfiguration> localConfig;
+	if (configDBType != ConfigDBType::DISABLED) {
+		localConfig = makeReference<LocalConfiguration>(
+		    dataFolder, configPath, manualKnobOverrides, IsTest(g_network->isSimulated()));
+	}
 	// setupStackSignal();
 	getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::Worker;
 
@@ -3328,18 +3335,11 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		configNode = makeReference<ConfigNode>(dataFolder);
 	}
 
-	// FIXME: Initializing here causes simulation issues, these must be fixed
-	/*
-	if (configDBType != ConfigDBType::DISABLED) {
-	    wait(localConfig->initialize());
-	}
-	*/
-
 	actors.push_back(serveProtocolInfo());
 	actors.push_back(serveProcess());
 
 	try {
-		ServerCoordinators coordinators(connRecord);
+		ServerCoordinators coordinators(connRecord, configDBType);
 		if (g_network->isSimulated()) {
 			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
 		}
@@ -3348,7 +3348,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		    .detail("MachineId", localities.machineId())
 		    .detail("DiskPath", dataFolder)
 		    .detail("CoordPath", coordFolder)
-		    .detail("WhiteListBinPath", whitelistBinPaths);
+		    .detail("WhiteListBinPath", whitelistBinPaths)
+		    .detail("ConfigDBType", configDBType);
 
 		state ConfigBroadcastInterface configBroadcastInterface;
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
@@ -3366,6 +3367,10 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		// Only one process can execute on a dataFolder from this point onwards
 
 		wait(testAndUpdateSoftwareVersionCompatibility(dataFolder, processIDUid));
+
+		if (configDBType != ConfigDBType::DISABLED) {
+			wait(localConfig->initialize());
+		}
 
 		std::string fitnessFilePath = joinPath(dataFolder, "fitness");
 		auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();

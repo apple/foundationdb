@@ -156,9 +156,9 @@ struct VersionStampWorkload : TestWorkload {
 
 	ACTOR Future<bool> _check(Database cx, VersionStampWorkload* self) {
 		if (self->validateExtraDB) {
-			ASSERT(g_simulator.extraDatabases.size() == 1);
+			ASSERT(g_simulator->extraDatabases.size() == 1);
 			auto extraFile =
-			    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
+			    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator->extraDatabases[0]));
 			cx = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 		}
 		state ReadYourWritesTransaction tr(cx);
@@ -315,10 +315,10 @@ struct VersionStampWorkload : TestWorkload {
 		state double lastTime = now();
 		state Database extraDB;
 
-		if (!g_simulator.extraDatabases.empty()) {
-			ASSERT(g_simulator.extraDatabases.size() == 1);
+		if (!g_simulator->extraDatabases.empty()) {
+			ASSERT(g_simulator->extraDatabases.size() == 1);
 			auto extraFile =
-			    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
+			    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator->extraDatabases[0]));
 			extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 		}
 
@@ -385,7 +385,7 @@ struct VersionStampWorkload : TestWorkload {
 
 				} catch (Error& e) {
 					err = e;
-					if (err.code() == error_code_database_locked && !g_simulator.extraDatabases.empty()) {
+					if (err.code() == error_code_database_locked && !g_simulator->extraDatabases.empty()) {
 						//TraceEvent("VST_CommitDatabaseLocked");
 						cx_is_primary = !cx_is_primary;
 						tr = ReadYourWritesTransaction(cx_is_primary ? cx : extraDB);

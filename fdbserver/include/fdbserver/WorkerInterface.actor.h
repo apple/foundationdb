@@ -74,7 +74,6 @@ struct WorkerInterface {
 	RequestStream<struct WorkerSnapRequest> workerSnapReq;
 	RequestStream<struct UpdateServerDBInfoRequest> updateServerDBInfo;
 
-	ConfigBroadcastInterface configBroadcastInterface;
 	TesterInterface testerInterface;
 
 	UID id() const { return tLog.getEndpoint().token; }
@@ -128,8 +127,7 @@ struct WorkerInterface {
 		           workerSnapReq,
 		           backup,
 		           encryptKeyProxy,
-		           updateServerDBInfo,
-		           configBroadcastInterface);
+		           updateServerDBInfo);
 	}
 };
 
@@ -434,10 +432,11 @@ struct RegisterWorkerRequest {
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise<RegisterWorkerReply> reply;
 	bool degraded;
-	Version lastSeenKnobVersion;
-	ConfigClassSet knobConfigClassSet;
+	Optional<Version> lastSeenKnobVersion;
+	Optional<ConfigClassSet> knobConfigClassSet;
 	bool requestDbInfo;
 	bool recoveredDiskFiles;
+	ConfigBroadcastInterface configBroadcastInterface;
 
 	RegisterWorkerRequest()
 	  : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
@@ -451,13 +450,15 @@ struct RegisterWorkerRequest {
 	                      Optional<BlobManagerInterface> bmInterf,
 	                      Optional<EncryptKeyProxyInterface> ekpInterf,
 	                      bool degraded,
-	                      Version lastSeenKnobVersion,
-	                      ConfigClassSet knobConfigClassSet,
-	                      bool recoveredDiskFiles)
+	                      Optional<Version> lastSeenKnobVersion,
+	                      Optional<ConfigClassSet> knobConfigClassSet,
+	                      bool recoveredDiskFiles,
+	                      ConfigBroadcastInterface configBroadcastInterface)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), blobManagerInterf(bmInterf),
 	    encryptKeyProxyInterf(ekpInterf), degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion),
-	    knobConfigClassSet(knobConfigClassSet), requestDbInfo(false), recoveredDiskFiles(recoveredDiskFiles) {}
+	    knobConfigClassSet(knobConfigClassSet), requestDbInfo(false), recoveredDiskFiles(recoveredDiskFiles),
+	    configBroadcastInterface(configBroadcastInterface) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -478,7 +479,8 @@ struct RegisterWorkerRequest {
 		           lastSeenKnobVersion,
 		           knobConfigClassSet,
 		           requestDbInfo,
-		           recoveredDiskFiles);
+		           recoveredDiskFiles,
+		           configBroadcastInterface);
 	}
 };
 
@@ -1210,7 +1212,7 @@ ACTOR template <class T>
 Future<T> ioTimeoutError(Future<T> what, double time) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
-	if (g_network->isSimulated() && !g_simulator.speedUpSimulation) {
+	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
 		time += std::max(0.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
 	}
 	Future<Void> end = lowPriorityDelay(time);
@@ -1218,7 +1220,7 @@ Future<T> ioTimeoutError(Future<T> what, double time) {
 		when(T t = wait(what)) { return t; }
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (g_network->isSimulated() && !g_simulator.getCurrentProcess()->isReliable()) {
+			if (g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable()) {
 				err = err.asInjectedFault();
 			}
 			TraceEvent(SevError, "IoTimeoutError").error(err);
@@ -1234,7 +1236,7 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
                                    double degradedTime) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
-	if (g_network->isSimulated() && !g_simulator.speedUpSimulation) {
+	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
 		double timeShift = std::max(0.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
 		errTime += timeShift;
 		degradedTime += timeShift;
@@ -1257,7 +1259,7 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 		when(T t = wait(what)) { return t; }
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (g_network->isSimulated() && !g_simulator.getCurrentProcess()->isReliable()) {
+			if (g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable()) {
 				err = err.asInjectedFault();
 			}
 			TraceEvent(SevError, "IoTimeoutError").error(err);

@@ -97,17 +97,22 @@ LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local) : Client
 	forward.makeWellKnownEndpoint(WLTOKEN_LEADERELECTIONREG_FORWARD, TaskPriority::Coordination);
 }
 
-ServerCoordinators::ServerCoordinators(Reference<IClusterConnectionRecord> ccr) : ClientCoordinators(ccr) {
+ServerCoordinators::ServerCoordinators(Reference<IClusterConnectionRecord> ccr, ConfigDBType configDBType)
+  : ClientCoordinators(ccr) {
 	ClusterConnectionString cs = ccr->getConnectionString();
 	for (auto h : cs.hostnames) {
 		leaderElectionServers.emplace_back(h);
 		stateServers.emplace_back(h);
-		configServers.emplace_back(h);
+		if (configDBType != ConfigDBType::DISABLED) {
+			configServers.emplace_back(h);
+		}
 	}
 	for (auto s : cs.coords) {
 		leaderElectionServers.emplace_back(s);
 		stateServers.emplace_back(s);
-		configServers.emplace_back(s);
+		if (configDBType != ConfigDBType::DISABLED) {
+			configServers.emplace_back(s);
+		}
 	}
 }
 
@@ -725,9 +730,9 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 		}
 		when(ForwardRequest req = waitNext(interf.forward.getFuture())) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
-			if (forward.present())
+			if (forward.present()) {
 				req.reply.send(Void());
-			else {
+			} else {
 				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevWarn, "CCRMismatch")
@@ -761,12 +766,14 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 	state Future<Void> configDatabaseServer = Never();
 	TraceEvent("CoordinationServer", myID)
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())
-	    .detail("Folder", dataFolder);
+	    .detail("Folder", dataFolder)
+	    .detail("ConfigNodeValid", configNode.isValid());
 
 	if (configNode.isValid()) {
 		configTransactionInterface.setupWellKnownEndpoints();
 		configFollowerInterface.setupWellKnownEndpoints();
-		configDatabaseServer = configNode->serve(cbi, configTransactionInterface, configFollowerInterface);
+		configDatabaseServer =
+		    brokenPromiseToNever(configNode->serve(cbi, configTransactionInterface, configFollowerInterface));
 	}
 
 	try {

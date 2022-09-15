@@ -3248,10 +3248,10 @@ void outOfMemory() {
 }
 
 // Because the lambda used with nftw below cannot capture
-int __eraseDirectoryRecurseiveCount;
+int __eraseDirectoryRecursiveCount;
 
 int eraseDirectoryRecursive(std::string const& dir) {
-	__eraseDirectoryRecurseiveCount = 0;
+	__eraseDirectoryRecursiveCount = 0;
 #ifdef _WIN32
 	system(("rd /s /q \"" + dir + "\"").c_str());
 #elif defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
@@ -3260,7 +3260,7 @@ int eraseDirectoryRecursive(std::string const& dir) {
 	    [](const char* fpath, const struct stat* sb, int typeflag, struct FTW* ftwbuf) -> int {
 		    int r = remove(fpath);
 		    if (r == 0)
-			    ++__eraseDirectoryRecurseiveCount;
+			    ++__eraseDirectoryRecursiveCount;
 		    return r;
 	    },
 	    64,
@@ -3277,7 +3277,7 @@ int eraseDirectoryRecursive(std::string const& dir) {
 #error Port me!
 #endif
 	// INJECT_FAULT( platform_error, "eraseDirectoryRecursive" );
-	return __eraseDirectoryRecurseiveCount;
+	return __eraseDirectoryRecursiveCount;
 }
 
 TmpFile::TmpFile() : filename("") {

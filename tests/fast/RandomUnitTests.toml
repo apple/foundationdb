@@ -5,5 +5,8 @@ startDelay = 0
 
     [[test.workload]]
     testName = 'UnitTests'
-    maxTestCases = 1
+    maxTestCases = 10
     testsMatching = '/'
+    # ConfigDB tests persist state, so running these tests
+    # sequentially can cause issues
+    testsIgnored = '/fdbserver/ConfigDB/'

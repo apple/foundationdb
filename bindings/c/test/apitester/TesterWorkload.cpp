@@ -106,30 +106,36 @@ void WorkloadBase::schedule(TTaskFct task) {
 	});
 }
 
-void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskFct cont, bool failOnError) {
+void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx,
+                                   TTaskFct cont,
+                                   std::optional<fdb::BytesRef> tenant,
+                                   bool failOnError) {
 	ASSERT(inProgress);
 	if (failed) {
 		return;
 	}
 	tasksScheduled++;
 	numTxStarted++;
-	manager->txExecutor->execute(tx, [this, tx, cont, failOnError]() {
-		numTxCompleted++;
-		fdb::Error err = tx->getError();
-		if (err.code() == error_code_success) {
-			cont();
-		} else {
-			std::string msg = fmt::format("Transaction failed with error: {} ({})", err.code(), err.what());
-			if (failOnError) {
-				error(msg);
-				failed = true;
-			} else {
-				info(msg);
-				cont();
-			}
-		}
-		scheduledTaskDone();
-	});
+	manager->txExecutor->execute(
+	    tx,
+	    [this, tx, cont, failOnError]() {
+		    numTxCompleted++;
+		    fdb::Error err = tx->getError();
+		    if (err.code() == error_code_success) {
+			    cont();
+		    } else {
+			    std::string msg = fmt::format("Transaction failed with error: {} ({})", err.code(), err.what());
+			    if (failOnError) {
+				    error(msg);
+				    failed = true;
+			    } else {
+				    info(msg);
+				    cont();
+			    }
+		    }
+		    scheduledTaskDone();
+	    },
+	    tenant);
 }
 
 void WorkloadBase::info(const std::string& msg) {

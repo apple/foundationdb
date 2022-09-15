@@ -844,7 +844,7 @@ ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromSt
 			// equal to one of the previously issued requests, there is a bug
 			// and we are breaking the promises we make with
 			// commit_unknown_result (the transaction must no longer be in
-			// progress when receiving this error).
+			// progress when receiving commit_unknown_result).
 			int n = connectionStrings.size() > 0 ? connectionStrings.size() - 1 : 0; // avoid underflow
 			for (int i = 0; i < n; ++i) {
 				ASSERT(currentKey.get() != connectionStrings.at(i));
@@ -872,12 +872,59 @@ ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromSt
 	}
 }
 
+ACTOR Future<Void> verifyConfigurationDatabaseAlive(Database cx) {
+	state Backoff backoff;
+	loop {
+		try {
+			// Attempt to read a random value from the configuration
+			// database to make sure it is online.
+			state Reference<ISingleThreadTransaction> configTr =
+			    ISingleThreadTransaction::create(ISingleThreadTransaction::Type::PAXOS_CONFIG, cx);
+			Tuple tuple;
+			tuple.appendNull(); // config class
+			tuple << "test"_sr;
+			Optional<Value> serializedValue = wait(configTr->get(tuple.pack()));
+			TraceEvent("ChangeQuorumCheckerNewCoordinatorsOnline").log();
+			return Void();
+		} catch (Error& e) {
+			TraceEvent("ChangeQuorumCheckerNewCoordinatorsError").error(e);
+			if (e.code() == error_code_coordinators_changed) {
+				wait(backoff.onError());
+				configTr->reset();
+			} else {
+				wait(configTr->onError(e));
+			}
+		}
+	}
+}
+
+ACTOR Future<Void> resetPreviousCoordinatorsKey(Database cx) {
+	loop {
+		// When the change coordinators transaction succeeds, it uses the
+		// special key space error message to return a message to the client.
+		// This causes the underlying transaction to not be committed. In order
+		// to make sure we clear the previous coordinators key, we have to use
+		// a new transaction here.
+		state Reference<ISingleThreadTransaction> clearTr =
+		    ISingleThreadTransaction::create(ISingleThreadTransaction::Type::RYW, cx);
+		try {
+			clearTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			clearTr->clear(previousCoordinatorsKey);
+			wait(clearTr->commit());
+			return Void();
+		} catch (Error& e2) {
+			wait(clearTr->onError(e2));
+		}
+	}
+}
+
 } // namespace
 
 ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
                                                                ClusterConnectionString* conn,
-                                                               std::string newName) {
-
+                                                               std::string newName,
+                                                               bool disableConfigDB) {
+	TraceEvent("ChangeQuorumCheckerStart").detail("NewConnectionString", conn->toString());
 	state Optional<ClusterConnectionString> clusterConnectionStringOptional =
 	    wait(getClusterConnectionStringFromStorageServer(tr));
 
@@ -892,7 +939,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		conn->hostnames = old.hostnames;
 		conn->coords = old.coords;
 	}
-	std::vector<NetworkAddress> desiredCoordinators = wait(conn->tryResolveHostnames());
+	state std::vector<NetworkAddress> desiredCoordinators = wait(conn->tryResolveHostnames());
 	if (desiredCoordinators.size() != conn->hostnames.size() + conn->coords.size()) {
 		TraceEvent("ChangeQuorumCheckerEarlyTermination")
 		    .detail("Reason", "One or more hostnames are unresolvable")
@@ -909,6 +956,13 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	std::sort(old.coords.begin(), old.coords.end());
 	if (conn->hostnames == old.hostnames && conn->coords == old.coords && old.clusterKeyName() == newName) {
 		connectionStrings.clear();
+		if (g_network->isSimulated() && g_simulator->configDBType == ConfigDBType::DISABLED) {
+			disableConfigDB = true;
+		}
+		if (!disableConfigDB) {
+			wait(verifyConfigurationDatabaseAlive(tr->getDatabase()));
+		}
+		wait(resetPreviousCoordinatorsKey(tr->getDatabase()));
 		return CoordinatorsResult::SAME_NETWORK_ADDRESSES;
 	}
 
@@ -919,7 +973,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		int i = 0;
 		int protectedCount = 0;
 		while ((protectedCount < ((desiredCoordinators.size() / 2) + 1)) && (i < desiredCoordinators.size())) {
-			auto process = g_simulator.getProcessByAddress(desiredCoordinators[i]);
+			auto process = g_simulator->getProcessByAddress(desiredCoordinators[i]);
 			auto addresses = process->addresses;
 
 			if (!process->isReliable()) {
@@ -927,9 +981,9 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 				continue;
 			}
 
-			g_simulator.protectedAddresses.insert(process->addresses.address);
+			g_simulator->protectedAddresses.insert(process->addresses.address);
 			if (addresses.secondaryAddress.present()) {
-				g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
+				g_simulator->protectedAddresses.insert(process->addresses.secondaryAddress.get());
 			}
 			TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
 			protectedCount++;
@@ -958,6 +1012,9 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		when(wait(waitForAll(leaderServers))) {}
 		when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
 	}
+	TraceEvent("ChangeQuorumCheckerSetCoordinatorsKey")
+	    .detail("CurrentCoordinators", old.toString())
+	    .detail("NewCoordinators", conn->toString());
 	tr->set(coordinatorsKey, conn->toString());
 	return Optional<CoordinatorsResult>();
 }
@@ -1020,12 +1077,12 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 
 			if (g_network->isSimulated()) {
 				for (int i = 0; i < (desiredCoordinators.size() / 2) + 1; i++) {
-					auto process = g_simulator.getProcessByAddress(desiredCoordinators[i]);
+					auto process = g_simulator->getProcessByAddress(desiredCoordinators[i]);
 					ASSERT(process->isReliable() || process->rebooting);
 
-					g_simulator.protectedAddresses.insert(process->addresses.address);
+					g_simulator->protectedAddresses.insert(process->addresses.address);
 					if (process->addresses.secondaryAddress.present()) {
-						g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
+						g_simulator->protectedAddresses.insert(process->addresses.secondaryAddress.get());
 					}
 					TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
 				}
@@ -1284,7 +1341,7 @@ struct AutoQuorumChange final : IQuorumChange {
 					continue;
 				}
 				// Exclude faulty node due to machine assassination
-				if (g_network->isSimulated() && !g_simulator.getProcessByAddress(worker->address)->isReliable()) {
+				if (g_network->isSimulated() && !g_simulator->getProcessByAddress(worker->address)->isReliable()) {
 					TraceEvent("AutoSelectCoordinators").detail("SkipUnreliableWorker", worker->address.toString());
 					continue;
 				}
@@ -2209,7 +2266,7 @@ ACTOR Future<Void> updateChangeFeed(Transaction* tr, Key rangeID, ChangeFeedStat
 	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 		if (val.present()) {
 			if (g_network->isSimulated()) {
-				g_simulator.validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
+				g_simulator->validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
 			}
 			tr->set(rangeIDKey,
 			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
@@ -2247,7 +2304,7 @@ ACTOR Future<Void> updateChangeFeed(Reference<ReadYourWritesTransaction> tr,
 	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 		if (val.present()) {
 			if (g_network->isSimulated()) {
-				g_simulator.validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
+				g_simulator->validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
 			}
 			tr->set(rangeIDKey,
 			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
@@ -2568,16 +2625,16 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 		data.address.ip = IPAddress(i);
 
 		if (g_network->isSimulated()) {
-			g_simulator.newProcess("TestCoordinator",
-			                       data.address.ip,
-			                       data.address.port,
-			                       false,
-			                       1,
-			                       data.locality,
-			                       ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
-			                       "",
-			                       "",
-			                       currentProtocolVersion());
+			g_simulator->newProcess("TestCoordinator",
+			                        data.address.ip,
+			                        data.address.port,
+			                        false,
+			                        1,
+			                        data.locality,
+			                        ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
+			                        "",
+			                        "",
+			                        currentProtocolVersion());
 		}
 
 		workers.push_back(data);
