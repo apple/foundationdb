@@ -21,15 +21,16 @@ making TLS configuration a prerequisite for enabling authorization.
 There are only two privilege levels: *trusted* versus *untrusted* clients.
 Trusted clients are authorized to perform any operation that pre-authorization FoundationDB clients used to perform, including those accessing the system keyspace.
 Untrusted clients may only request what is necessary to access tenant keyspaces for which they are authorized.
-Untrusted clients are blocked from accessing anything in the system keyspace or issuing management operations that modifies the cluster in any way.
+Untrusted clients are blocked from accessing anything in the system keyspace or issuing management operations that modify the cluster in any way.
 
 In order to be considered a trusted client, a client needs to be :ref:`configured with a valid chain of X.509 certificates and a private key <configuring-tls>`,
-and its certificate chain must be trusted by the server.
-If the server was configured with trusted IP subnets, i.e. run with one or more ``--trusted-subnet-SUBNET_NAME`` followed by a CIDR block describing the subnet,
-then the client's IP as seen from the server must additionally belong to one of the subnets.
+and its certificate chain must be trusted by the server. In other words, a client must successfully complete a mutual TLS authentication.
+Additionally, if the server was configured with trusted IP subnets, i.e. run with one or more ``--trusted-subnet-SUBNET_NAME`` followed by a CIDR block describing the subnet,
+then the client's IP as seen from the server must belong to at least one of the subnets.
 
-Choosing to respond with an empty certificate chain during `client authentication <https://www.rfc-editor.org/rfc/rfc5246#section-7.4.6>`_,
-or not belonging to one of the trusted subnets marks the client as untrusted.
+Choosing to respond with an empty certificate chain during `client authentication <https://www.rfc-editor.org/rfc/rfc5246#section-7.4.6>`_ marks the client as untrusted.
+If the server specifies a list of trusted subnets and the client's server-facing IP is not part of any of the subnets,
+then the client is untrusted even if it successfully completes a mutual TLS authentication.
 
 .. note:: Presenting a bad or untrusted certificate chain causes the server to break the client connection and eventually throttle the client.
           It does not let the client connect untrusted.
@@ -91,8 +92,12 @@ In order to use an untrusted client with an authorization token, a client must b
 but must not be configured to use the client's own certificates and keys.
 More concretely, the client's ``TLS_CA_FILE`` must include the server's root CA certificate,
 but the client must not be configured with its own ``TLS_CERTIFICATE_FILE`` or ``TLS_KEY_FILE``, neither programmatically nor by environment variable.
-Before performing a tenant data read or update, a client must set transaction option ``AUTHORIZATION_TOKEN`` with the token string as argument.
+Before performing a tenant data read or update, a client must set ``AUTHORIZATION_TOKEN`` transaction option with the token string as argument.
 It is the client's responsibility to keep the token up-to-date, by timely assigning a new token to the transaction object.
+
+.. note:: The TLS authentication mode of an untrusted client is similar to how typical web browsers connect to TLS-enabled web services.
+          They authenticate the server using their bundle of trusted root CA certificates,
+          but they do not authenticate themselves to the server.
 
 Public Key Rotation
 ===================
