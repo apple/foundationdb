@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbserver/WorkerInterface.actor.h"
 #include "fmt/format.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
@@ -4769,6 +4770,8 @@ struct DecodeBoundaryVerifier {
 	struct DecodeBoundaries {
 		Key lower;
 		Key upper;
+		unsigned int height;
+		Optional<int64_t> domainId;
 		bool empty() const { return lower.empty() && upper.empty(); }
 	};
 
@@ -4777,6 +4780,9 @@ struct DecodeBoundaryVerifier {
 	std::vector<Key> boundarySamples;
 	int boundarySampleSize = 1000;
 	int boundaryPopulation = 0;
+	Reference<IPageEncryptionKeyProvider> keyProvider;
+	double domainPrefixScanProbability = 0.01;
+	uint64_t domainPrefixScanCount = 0;
 
 	static DecodeBoundaryVerifier* getVerifier(std::string name) {
 		static std::map<std::string, DecodeBoundaryVerifier> verifiers;
@@ -4786,6 +4792,8 @@ struct DecodeBoundaryVerifier {
 		}
 		return nullptr;
 	}
+
+	void setKeyProvider(Reference<IPageEncryptionKeyProvider> kp) { keyProvider = kp; }
 
 	void sampleBoundary(Key b) {
 		if (boundaryPopulation <= boundarySampleSize) {
@@ -4803,21 +4811,48 @@ struct DecodeBoundaryVerifier {
 		return boundarySamples[deterministicRandom()->randomInt(0, boundarySamples.size())];
 	}
 
-	void update(BTreeNodeLinkRef id, Version v, Key lowerBound, Key upperBound) {
+	bool update(BTreeNodeLinkRef id,
+	            Version v,
+	            Key lowerBound,
+	            Key upperBound,
+	            unsigned int height,
+	            Optional<int64_t> domainId) {
 		sampleBoundary(lowerBound);
 		sampleBoundary(upperBound);
-		debug_printf("decodeBoundariesUpdate %s %s '%s' to '%s'\n",
+		debug_printf("decodeBoundariesUpdate %s %s '%s' to '%s', %u, %s\n",
 		             ::toString(id).c_str(),
 		             ::toString(v).c_str(),
 		             lowerBound.printable().c_str(),
-		             upperBound.printable().c_str());
+		             upperBound.printable().c_str(),
+		             height,
+		             Traceable<decltype(domainId)>::toString(domainId).c_str());
+
+		if (domainId.present()) {
+			ASSERT(keyProvider && keyProvider->enableEncryptionDomain());
+			if (domainId.get() != keyProvider->getDefaultEncryptionDomainId() &&
+			    !keyProvider->keyFitsInDomain(domainId.get(), lowerBound, false)) {
+				fprintf(stderr,
+				        "Page lower bound not in domain: %s %s, domain id %s, lower bound '%s'\n",
+				        ::toString(id).c_str(),
+				        ::toString(v).c_str(),
+				        ::toString(domainId).c_str(),
+				        lowerBound.printable().c_str());
+				return false;
+			}
+		}
 
 		auto& b = boundariesByPageID[id.front()][v];
 		ASSERT(b.empty());
-		b = { lowerBound, upperBound };
+		b = { lowerBound, upperBound, height, domainId };
+		return true;
 	}
 
-	bool verify(LogicalPageID id, Version v, Key lowerBound, Key upperBound) {
+	bool verify(LogicalPageID id,
+	            Version v,
+	            Key lowerBound,
+	            Key upperBound,
+	            Optional<int64_t> domainId,
+	            BTreePage::BinaryTree::Cursor& cursor) {
 		auto i = boundariesByPageID.find(id);
 		ASSERT(i != boundariesByPageID.end());
 		ASSERT(!i->second.empty());
@@ -4836,10 +4871,43 @@ struct DecodeBoundaryVerifier {
 			        b->second.upper.printable().c_str());
 			return false;
 		}
+
+		if (!b->second.domainId.present()) {
+			ASSERT(!keyProvider || !keyProvider->enableEncryptionDomain());
+			ASSERT(!domainId.present());
+		} else {
+			ASSERT(keyProvider->enableEncryptionDomain());
+			if (b->second.domainId != domainId) {
+				fprintf(stderr,
+				        "Page encrypted with incorrect domain: %s %s, using %s, written %s\n",
+				        ::toString(id).c_str(),
+				        ::toString(v).c_str(),
+				        ::toString(domainId).c_str(),
+				        ::toString(b->second.domainId).c_str());
+				return false;
+			}
+			if (deterministicRandom()->random01() < domainPrefixScanProbability) {
+				cursor.moveFirst();
+				while (cursor.valid()) {
+					if (!keyProvider->keyFitsInDomain(domainId.get(), cursor.get().key, b->second.height > 1)) {
+						fprintf(stderr,
+						        "Encryption domain mismatch on %s, %s, domain: %s, key %s\n",
+						        ::toString(id).c_str(),
+						        ::toString(v).c_str(),
+						        ::toString(domainId).c_str(),
+						        cursor.get().key.printable().c_str());
+						return false;
+					}
+					cursor.moveNext();
+				}
+				domainPrefixScanCount++;
+			}
+		}
+
 		return true;
 	}
 
-	void update(Version v, LogicalPageID oldID, LogicalPageID newID) {
+	void updatePageId(Version v, LogicalPageID oldID, LogicalPageID newID) {
 		auto& old = boundariesByPageID[oldID];
 		ASSERT(!old.empty());
 		auto i = old.end();
@@ -5054,6 +5122,10 @@ public:
 		}
 
 		m_pBoundaryVerifier = DecodeBoundaryVerifier::getVerifier(name);
+		if (m_pBoundaryVerifier != nullptr) {
+			m_pBoundaryVerifier->setKeyProvider(m_keyProvider);
+		}
+
 		m_pDecodeCacheMemory = m_pager->getPageCachePenaltySource();
 		m_lazyClearActor = 0;
 		m_init = init_impl(this);
@@ -5596,6 +5668,14 @@ private:
 		int blockCount; // The number of blocks in pageSize
 		int kvBytes; // The amount of user key/value bytes added to the page
 
+		Optional<int64_t> domainId = Optional<int64_t>();
+		size_t domainPrefixLength = 0;
+		bool canUseDefaultDomain = false;
+
+		// encryption domain prefix for the current page.
+		// Empty if the page contain only domain prefixes.
+		KeyRef encryptionDomainPrefix;
+
 		// Number of bytes used by the generated/serialized BTreePage, including all headers
 		int usedBytes() const { return pageSize - bytesLeft; }
 
@@ -5615,17 +5695,18 @@ private:
 		int endIndex() const { return startIndex + count; }
 
 		std::string toString() const {
-			return format(
-			    "{start=%d count=%d used %d/%d bytes (%.2f%% slack) kvBytes=%d blocks=%d blockSize=%d large=%d}",
-			    startIndex,
-			    count,
-			    usedBytes(),
-			    pageSize,
-			    slackFraction() * 100,
-			    kvBytes,
-			    blockCount,
-			    blockSize,
-			    largeDeltaTree);
+			return format("{start=%d count=%d used %d/%d bytes (%.2f%% slack) kvBytes=%d blocks=%d blockSize=%d "
+			              "large=%d, domain=%s}",
+			              startIndex,
+			              count,
+			              usedBytes(),
+			              pageSize,
+			              slackFraction() * 100,
+			              kvBytes,
+			              blockCount,
+			              blockSize,
+			              largeDeltaTree,
+			              ::toString(domainId).c_str());
 		}
 
 		// Move an item from a to b if a has 2 or more items and the item fits in b
@@ -5657,12 +5738,66 @@ private:
 		// Try to add a record of the given delta size to the page.
 		// If force is true, the page will be expanded to make the record fit if needed.
 		// Return value is whether or not the record was added to the page.
-		bool addRecord(const RedwoodRecordRef& rec, int deltaSize, bool force) {
+		bool addRecord(const RedwoodRecordRef& rec,
+		               int deltaSize,
+		               bool force,
+		               unsigned int height,
+		               IPageEncryptionKeyProvider* keyProvider,
+		               bool useEncryptionDomain,
+		               bool splitByDomain,
+		               const RedwoodRecordRef& next) {
+
 			int nodeSize = deltaSize + BTreePage::BinaryTree::Node::headerSize(largeDeltaTree);
 
 			// If the record doesn't fit and the page can't be expanded then return false
 			if (nodeSize > bytesLeft && !force) {
 				return false;
+			}
+
+			if (useEncryptionDomain) {
+				int64_t defaultDomainId = keyProvider->getDefaultEncryptionDomainId();
+				int64_t currentDomainId;
+				size_t prefixLength;
+				if (count == 0 || (splitByDomain && count > 0)) {
+					std::tie(currentDomainId, prefixLength) = keyProvider->getEncryptionDomain(rec.key, domainId);
+				}
+				if (count == 0) {
+					domainId = currentDomainId;
+					domainPrefixLength = prefixLength;
+					canUseDefaultDomain =
+					    (height > 1 && (currentDomainId == defaultDomainId || prefixLength == rec.key.size()));
+				} else if (splitByDomain) {
+					ASSERT(domainId.present());
+					if (domainId == currentDomainId) {
+						// The new record falls in the same domain as the rest of the page.
+						// Since this is not the first record, the key must contain a non-prefix portion,
+						// so we cannot use the default domain the encrypt the page (unless domainId is the default
+						// domain).
+						if (domainId != defaultDomainId) {
+							ASSERT(prefixLength < rec.key.size());
+							canUseDefaultDomain = false;
+						}
+					} else if (canUseDefaultDomain &&
+					           (currentDomainId == defaultDomainId ||
+					            (prefixLength == rec.key.size() &&
+					             (next.key.empty() || !next.key.startsWith(rec.key.substr(0, prefixLength)))))) {
+						// The new record meets one of the following conditions:
+						//   1. it falls in the default domain, or
+						//   2. its key contain only the domain prefix, and
+						//     2a. the following record doesn't fall in the same domain.
+						// In this case switch to use the default domain to encrypt the page.
+						// Condition 2a is needed, because if there are multiple records from the same domain,
+						// they need to form their own page(s).
+						domainId = defaultDomainId;
+						domainPrefixLength = 0;
+					} else {
+						// The new record doesn't fit in the same domain as the existing page.
+						return false;
+					}
+				} else {
+					ASSERT(domainPrefixLength < rec.key.size());
+					canUseDefaultDomain = false;
+				}
 			}
 
 			++count;
@@ -5687,6 +5822,12 @@ private:
 			}
 			return true;
 		}
+
+		void finish(IPageEncryptionKeyProvider* keyProvider, bool useEncryptionDomain) {
+			if (useEncryptionDomain && canUseDefaultDomain) {
+				domainId = keyProvider->getDefaultEncryptionDomainId();
+			}
+		}
 	};
 
 	// Scans a vector of records and decides on page split points, returning a vector of 1+ pages to build
@@ -5706,7 +5847,24 @@ private:
 		// Leaves can have just one record if it's large, but internal pages should have at least 4
 		int minRecords = height == 1 ? 1 : 4;
 		double maxSlack = SERVER_KNOBS->REDWOOD_PAGE_REBUILD_MAX_SLACK;
+		RedwoodRecordRef emptyRecord;
 		std::vector<PageToBuild> pages;
+
+		// Whether encryption is used and we need to set encryption domain for a page.
+		bool useEncryptionDomain =
+		    ArenaPage::isEncodingTypeEncrypted(m_encodingType) && m_keyProvider->enableEncryptionDomain();
+		// Whether we may need to split by encryption domain. It is mean to be an optimization to avoid
+		// unnecessary domain check and may not be exhaust all cases.
+		bool splitByDomain = false;
+		if (useEncryptionDomain && records.size() > 1) {
+			int64_t firstDomain = std::get<0>(m_keyProvider->getEncryptionDomain(records[0].key));
+			int64_t lastDomain = std::get<0>(m_keyProvider->getEncryptionDomain(records[records.size() - 1].key));
+			// If the two record falls in the same non-default domain, we know all the records fall in the
+			// same domain. Otherwise we may need to split pages by domain.
+			if (firstDomain != lastDomain || firstDomain == m_keyProvider->getDefaultEncryptionDomainId()) {
+				splitByDomain = true;
+			}
+		}
 
 		// deltaSizes contains pair-wise delta sizes for [lowerBound, records..., upperBound]
 		std::vector<int> deltaSizes(records.size() + 1);
@@ -5717,27 +5875,42 @@ private:
 		}
 
 		PageToBuild p(0, m_blockSize, m_encodingType);
+		bool beforeAddNewRecord = true;
 
-		for (int i = 0; i < records.size(); ++i) {
+		for (int i = 0; i < records.size();) {
 			bool force = p.count < minRecords || p.slackFraction() > maxSlack;
-			debug_printf(
-			    "  before addRecord  i=%d  records=%d  deltaSize=%d  kvSize=%d  force=%d  pageToBuild=%s  record=%s",
-			    i,
-			    records.size(),
-			    deltaSizes[i],
-			    records[i].kvBytes(),
-			    force,
-			    p.toString().c_str(),
-			    records[i].toString(height == 1).c_str());
+			if (beforeAddNewRecord) {
+				debug_printf("  before addRecord  i=%d  records=%d  deltaSize=%d  kvSize=%d  force=%d  pageToBuild=%s  "
+				             "record=%s",
+				             i,
+				             records.size(),
+				             deltaSizes[i],
+				             records[i].kvBytes(),
+				             force,
+				             p.toString().c_str(),
+				             records[i].toString(height == 1).c_str());
+			}
 
-			if (!p.addRecord(records[i], deltaSizes[i], force)) {
+			if (!p.addRecord(records[i],
+			                 deltaSizes[i],
+			                 force,
+			                 height,
+			                 m_keyProvider.getPtr(),
+			                 useEncryptionDomain,
+			                 splitByDomain,
+			                 i + 1 < records.size() ? records[i + 1] : emptyRecord)) {
+				p.finish(m_keyProvider.getPtr(), useEncryptionDomain);
 				pages.push_back(p);
 				p = p.next(m_encodingType);
-				p.addRecord(records[i], deltaSizes[i], true);
+				beforeAddNewRecord = false;
+			} else {
+				beforeAddNewRecord = true;
+				i++;
 			}
 		}
 
 		if (p.count > 0) {
+			p.finish(m_keyProvider.getPtr(), useEncryptionDomain);
 			pages.push_back(p);
 		}
 
@@ -5750,15 +5923,20 @@ private:
 			PageToBuild& a = pages[pages.size() - 2];
 			PageToBuild& b = pages.back();
 
-			// While the last page page has too much slack and the second to last page
-			// has more than the minimum record count, shift a record from the second
-			// to last page to the last page.
-			while (b.slackFraction() > maxSlack && a.count > minRecords) {
-				int i = a.lastIndex();
-				if (!PageToBuild::shiftItem(a, b, deltaSizes[i], records[i].kvBytes())) {
-					break;
+			// We can rebalance the two pages only if they are in the same encryption domain.
+			ASSERT(!useEncryptionDomain || (a.domainId.present() && b.domainId.present()));
+			if (!useEncryptionDomain || a.domainId.get() == b.domainId.get()) {
+
+				// While the last page page has too much slack and the second to last page
+				// has more than the minimum record count, shift a record from the second
+				// to last page to the last page.
+				while (b.slackFraction() > maxSlack && a.count > minRecords) {
+					int i = a.lastIndex();
+					if (!PageToBuild::shiftItem(a, b, deltaSizes[i], records[i].kvBytes())) {
+						break;
+					}
+					debug_printf("  After shifting i=%d: a=%s b=%s\n", i, a.toString().c_str(), b.toString().c_str());
 				}
-				debug_printf("  After shifting i=%d: a=%s b=%s\n", i, a.toString().c_str(), b.toString().c_str());
 			}
 		}
 
@@ -5781,8 +5959,13 @@ private:
 		// All records share the prefix shared by the lower and upper boundaries
 		state int prefixLen = lowerBound->getCommonPrefixLen(*upperBound);
 
+		// Whether encryption is used and we need to set encryption domain for a page.
+		state bool useEncryptionDomain =
+		    ArenaPage::isEncodingTypeEncrypted(self->m_encodingType) && self->m_keyProvider->enableEncryptionDomain();
+
 		state std::vector<PageToBuild> pagesToBuild =
 		    self->splitPages(lowerBound, upperBound, prefixLen, entries, height);
+		ASSERT(pagesToBuild.size() > 0);
 		debug_printf("splitPages returning %s\n", toString(pagesToBuild).c_str());
 
 		// Lower bound of the page being added to
@@ -5792,12 +5975,48 @@ private:
 
 		state int pageIndex;
 
+		if (useEncryptionDomain) {
+			ASSERT(pagesToBuild[0].domainId.present());
+			int64_t domainId = pagesToBuild[0].domainId.get();
+			// We need to make sure we use the domain prefix as the page lower bound, for the first page
+			// of a non-default domain on a level. That way when ensure that pages for a domain form a full subtree
+			// (i.e. have a single root) in the B-tree.
+			if (domainId != self->m_keyProvider->getDefaultEncryptionDomainId() &&
+			    !self->m_keyProvider->keyFitsInDomain(domainId, pageLowerBound.key, false)) {
+				pageLowerBound = RedwoodRecordRef(entries[0].key.substr(0, pagesToBuild[0].domainPrefixLength));
+			}
+		}
+
 		for (pageIndex = 0; pageIndex < pagesToBuild.size(); ++pageIndex) {
 			debug_printf("building page %d of %zu %s\n",
 			             pageIndex + 1,
 			             pagesToBuild.size(),
 			             pagesToBuild[pageIndex].toString().c_str());
 			ASSERT(pagesToBuild[pageIndex].count != 0);
+
+			// Use the next entry as the upper bound, or upperBound if there are no more entries beyond this page
+			int endIndex = pagesToBuild[pageIndex].endIndex();
+			bool lastPage = endIndex == entries.size();
+			pageUpperBound = lastPage ? upperBound->withoutValue() : entries[endIndex].withoutValue();
+
+			if (!lastPage) {
+				PageToBuild& p = pagesToBuild[pageIndex];
+				PageToBuild& nextPage = pagesToBuild[pageIndex + 1];
+				if (height == 1) {
+					// If this is a leaf page, and not the last one to be written, shorten the upper boundary)
+					int commonPrefix = pageUpperBound.getCommonPrefixLen(entries[endIndex - 1], prefixLen);
+					pageUpperBound.truncate(commonPrefix + 1);
+				}
+				if (useEncryptionDomain) {
+					ASSERT(p.domainId.present());
+					ASSERT(nextPage.domainId.present());
+					if (p.domainId.get() != nextPage.domainId.get() &&
+					    nextPage.domainId.get() != self->m_keyProvider->getDefaultEncryptionDomainId()) {
+						pageUpperBound =
+						    RedwoodRecordRef(entries[nextPage.startIndex].key.substr(0, nextPage.domainPrefixLength));
+					}
+				}
+			}
 
 			// For internal pages, skip first entry if child link is null.  Such links only exist
 			// to maintain a borrow-able prefix for the previous subtree after a subtree deletion.
@@ -5819,22 +6038,14 @@ private:
 				// replacing.  Put another way, the upper boundary of the rightmost page of the page set that was just
 				// built does not match the upper boundary of the original page that the page set is replacing, so
 				// adding the extra null link fixes this.
+				// TODO(yiwu): update the above comment to reflect that when encryption domain is in use,
+				// internal page can have only 1 item. So what we are seeing is not necessary the last page.
 				if (p.count == 0) {
-					ASSERT(pageIndex == pagesToBuild.size() - 1);
-					records.push_back_deep(records.arena(), pageUpperBound);
-					break;
+					ASSERT(useEncryptionDomain || lastPage);
+					records.push_back_deep(records.arena(), pageLowerBound);
+					pageLowerBound = pageUpperBound;
+					continue;
 				}
-			}
-
-			// Use the next entry as the upper bound, or upperBound if there are no more entries beyond this page
-			int endIndex = pagesToBuild[pageIndex].endIndex();
-			bool lastPage = endIndex == entries.size();
-			pageUpperBound = lastPage ? upperBound->withoutValue() : entries[endIndex].withoutValue();
-
-			// If this is a leaf page, and not the last one to be written, shorten the upper boundary
-			if (!lastPage && height == 1) {
-				int commonPrefix = pageUpperBound.getCommonPrefixLen(entries[endIndex - 1], prefixLen);
-				pageUpperBound.truncate(commonPrefix + 1);
 			}
 
 			// Create and init page here otherwise many variables must become state vars
@@ -5843,7 +6054,10 @@ private:
 			           (pagesToBuild[pageIndex].blockCount == 1) ? PageType::BTreeNode : PageType::BTreeSuperNode,
 			           height);
 			if (page->isEncrypted()) {
-				ArenaPage::EncryptionKey k = wait(self->m_keyProvider->getLatestDefaultEncryptionKey());
+				ArenaPage::EncryptionKey k =
+				    wait(useEncryptionDomain
+				             ? self->m_keyProvider->getLatestEncryptionKey(pagesToBuild[pageIndex].domainId.get())
+				             : self->m_keyProvider->getLatestDefaultEncryptionKey());
 				page->encryptionKey = k;
 			}
 
@@ -5936,7 +6150,8 @@ private:
 			}
 
 			if (self->m_pBoundaryVerifier != nullptr) {
-				self->m_pBoundaryVerifier->update(childPageID, v, pageLowerBound.key, pageUpperBound.key);
+				ASSERT(self->m_pBoundaryVerifier->update(
+				    childPageID, v, pageLowerBound.key, pageUpperBound.key, height, pagesToBuild[pageIndex].domainId));
 			}
 
 			if (++sinceYield > 100) {
@@ -5986,8 +6201,12 @@ private:
 		// Root pointer size is limited because the pager commit header is limited to smallestPhysicalBlock in
 		// size.
 		while (records.size() > 1 ||
-		       records.front().getChildPage().size() > (BUGGIFY ? 1 : BTreeCommitHeader::maxRootPointerSize)) {
+		       records.front().getChildPage().size() > (BUGGIFY ? 1 : BTreeCommitHeader::maxRootPointerSize) ||
+		       records[0].key != dbBegin.key) {
 			CODE_PROBE(records.size() == 1, "Writing a new root because the current root pointer would be too large");
+			CODE_PROBE(records[0].key != dbBegin.key,
+			           "Writing a new root because the current root is encrypted with non-default encryption domain "
+			           "cipher key");
 			self->m_header.height = ++height;
 			ASSERT(height < std::numeric_limits<int8_t>::max());
 			Standalone<VectorRef<RedwoodRecordRef>> newRecords = wait(
@@ -6166,7 +6385,7 @@ private:
 		self->m_pager->updatePage(PagerEventReasons::Commit, height, newID, page);
 
 		if (self->m_pBoundaryVerifier != nullptr) {
-			self->m_pBoundaryVerifier->update(writeVersion, oldID.front(), newID.front());
+			self->m_pBoundaryVerifier->updatePageId(writeVersion, oldID.front(), newID.front());
 		}
 
 		self->freeBTreePage(height, oldID, writeVersion);
@@ -6328,8 +6547,14 @@ private:
 
 	struct InternalPageModifier {
 		InternalPageModifier() {}
-		InternalPageModifier(Reference<const ArenaPage> p, bool alreadyCloned, bool updating, ParentInfo* parentInfo)
-		  : updating(updating), page(p), clonedPage(alreadyCloned), changesMade(false), parentInfo(parentInfo) {}
+		InternalPageModifier(Reference<const ArenaPage> p,
+		                     bool alreadyCloned,
+		                     bool updating,
+		                     ParentInfo* parentInfo,
+		                     Reference<IPageEncryptionKeyProvider> keyProvider,
+		                     Optional<int64_t> pageDomainId)
+		  : updating(updating), page(p), clonedPage(alreadyCloned), changesMade(false), parentInfo(parentInfo),
+		    keyProvider(keyProvider), pageDomainId(pageDomainId) {}
 
 		// Whether updating the existing page is allowed
 		bool updating;
@@ -6343,6 +6568,9 @@ private:
 		// Whether there are any changes to the page, either made in place or staged in rebuild
 		bool changesMade;
 		ParentInfo* parentInfo;
+
+		Reference<IPageEncryptionKeyProvider> keyProvider;
+		Optional<int64_t> pageDomainId;
 
 		BTreePage* btPage() const { return (BTreePage*)page->mutateData(); }
 
@@ -6374,7 +6602,18 @@ private:
 					const RedwoodRecordRef& rec = recs[i];
 					debug_printf("internal page (updating) insert: %s\n", rec.toString(false).c_str());
 
-					if (!end.insert(rec)) {
+					// Fail if the inserted record does not belong to the same encryption domain as the existing page
+					// data.
+					bool canInsert = true;
+					if (page->isEncrypted() && keyProvider->enableEncryptionDomain()) {
+						ASSERT(keyProvider && pageDomainId.present());
+						canInsert = keyProvider->keyFitsInDomain(pageDomainId.get(), rec.key, true);
+					}
+					if (canInsert) {
+						canInsert = end.insert(rec);
+					}
+
+					if (!canInsert) {
 						debug_printf("internal page: failed to insert %s, switching to rebuild\n",
 						             rec.toString(false).c_str());
 
@@ -6433,14 +6672,12 @@ private:
 
 			// If the children changed, replace [cBegin, cEnd) with newLinks
 			if (u.childrenChanged) {
+				// TODO(yiwu): do we need to clone in all cases?
+				cloneForUpdate();
 				if (updating) {
 					auto c = u.cBegin;
-
-					if (c != u.cEnd) {
-						cloneForUpdate();
-						// must point c to the tree to erase from
-						c.switchTree(btPage()->tree());
-					}
+					// must point c to the tree to erase from
+					c.switchTree(btPage()->tree());
 
 					while (c != u.cEnd) {
 						debug_printf("applyUpdate (updating) erasing: %s\n", c.get().toString(false).c_str());
@@ -6489,6 +6726,55 @@ private:
 			}
 		}
 	};
+
+	ACTOR static Future<Void> buildNewSubtree(VersionedBTree* self,
+	                                          Version version,
+	                                          LogicalPageID parentID,
+	                                          unsigned int height,
+	                                          MutationBuffer::const_iterator mBegin,
+	                                          MutationBuffer::const_iterator mEnd,
+	                                          InternalPageSliceUpdate* update) {
+		ASSERT(height > 1);
+		debug_printf(
+		    "buildNewSubtree start version %" PRId64 ", height %u, %s\n'", version, height, update->toString().c_str());
+		state Standalone<VectorRef<RedwoodRecordRef>> records;
+		while (mBegin != mEnd && mBegin.key() < update->subtreeLowerBound.key) {
+			++mBegin;
+		}
+		while (mBegin != mEnd) {
+			if (mBegin.mutation().boundarySet()) {
+				RedwoodRecordRef rec(mBegin.key(), mBegin.mutation().boundaryValue.get());
+				records.push_back_deep(records.arena(), rec);
+				if (REDWOOD_DEBUG) {
+					debug_printf("      Added %s", rec.toString().c_str());
+				}
+			}
+			++mBegin;
+		}
+		if (records.empty()) {
+			update->cleared();
+		} else {
+			state unsigned int h = 1;
+			debug_printf("buildNewSubtree at level %u\n", h);
+			while (h < height) {
+				// Only the parentID at the root is known as we are building the subtree bottom-up.
+				// We use the parentID for all levels, since the parentID is currently used for
+				// debug use only.
+				Standalone<VectorRef<RedwoodRecordRef>> newRecords = wait(writePages(self,
+				                                                                     &update->subtreeLowerBound,
+				                                                                     &update->subtreeUpperBound,
+				                                                                     records,
+				                                                                     h,
+				                                                                     version,
+				                                                                     BTreeNodeLinkRef(),
+				                                                                     parentID));
+				records = newRecords;
+				h++;
+			}
+			update->rebuilt(records);
+		}
+		return Void();
+	}
 
 	ACTOR static Future<Void> commitSubtree(
 	    VersionedBTree* self,
@@ -6546,6 +6832,12 @@ private:
 		// TryToUpdate indicates insert and erase operations should be tried on the existing page first
 		state bool tryToUpdate = btPage->tree()->numItems > 0 && update->boundariesNormal();
 
+		state bool useEncryptionDomain = page->isEncrypted() && self->m_keyProvider->enableEncryptionDomain();
+		state Optional<int64_t> pageDomainId;
+		if (useEncryptionDomain) {
+			pageDomainId = page->getEncryptionDomainId();
+		}
+
 		debug_printf("%s tryToUpdate=%d\n", context.c_str(), tryToUpdate);
 		debug_print(addPrefix(context,
 		                      btPage->toString("commitSubtreeStart",
@@ -6563,7 +6855,9 @@ private:
 				ASSERT(self->m_pBoundaryVerifier->verify(rootID.front(),
 				                                         batch->snapshot->getVersion(),
 				                                         update->cBegin.get().key,
-				                                         update->cBegin.next().getOrUpperBound().key));
+				                                         update->cBegin.next().getOrUpperBound().key,
+				                                         pageDomainId,
+				                                         cursor));
 			}
 		}
 
@@ -6662,8 +6956,16 @@ private:
 
 						// If updating, first try to add the record to the page
 						if (updatingDeltaTree) {
-							copyForUpdate();
-							if (cursor.insert(rec, update->skipLen, maxHeightAllowed)) {
+							bool canInsert = true;
+							if (useEncryptionDomain) {
+								ASSERT(pageDomainId.present());
+								canInsert = self->m_keyProvider->keyFitsInDomain(pageDomainId.get(), rec.key, false);
+							}
+							if (canInsert) {
+								copyForUpdate();
+								canInsert = cursor.insert(rec, update->skipLen, maxHeightAllowed);
+							}
+							if (canInsert) {
 								btPage->kvBytes += rec.kvBytes();
 								debug_printf("%s Inserted %s [mutation, boundary start]\n",
 								             context.c_str(),
@@ -6882,6 +7184,25 @@ private:
 
 			bool first = true;
 
+			if (useEncryptionDomain && cursor.valid() && update->subtreeLowerBound.key < cursor.get().key) {
+				mEnd = batch->mutations->lower_bound(cursor.get().key);
+				first = false;
+				if (mBegin != mEnd) {
+					slices.emplace_back(new InternalPageSliceUpdate());
+					InternalPageSliceUpdate& u = *slices.back();
+					u.cBegin = cursor;
+					u.cEnd = cursor;
+					u.subtreeLowerBound = update->subtreeLowerBound;
+					u.decodeLowerBound = u.subtreeLowerBound;
+					u.subtreeUpperBound = cursor.get();
+					u.decodeUpperBound = u.subtreeUpperBound;
+					u.expectedUpperBound = u.subtreeUpperBound;
+					u.skipLen = 0;
+					recursions.push_back(
+					    self->buildNewSubtree(self, batch->writeVersion, parentID, height, mBegin, mEnd, &u));
+				}
+			}
+
 			while (cursor.valid()) {
 				slices.emplace_back(new InternalPageSliceUpdate());
 				InternalPageSliceUpdate& u = *slices.back();
@@ -7064,7 +7385,8 @@ private:
 			// which to build new page(s) if modification is not possible or not allowed.
 			// If pageCopy is already set it was initialized to page above so the modifier doesn't need
 			// to copy it
-			state InternalPageModifier modifier(page, pageCopy.isValid(), tryToUpdate, parentInfo);
+			state InternalPageModifier modifier(
+			    page, pageCopy.isValid(), tryToUpdate, parentInfo, self->m_keyProvider, pageDomainId);
 
 			// Apply the possible changes for each subtree range recursed to, except the last one.
 			// For each range, the expected next record, if any, is checked against the first boundary
@@ -7083,8 +7405,11 @@ private:
 			             modifier.changesMade);
 			debug_print(addPrefix(context, update->toString()));
 
+			// TODO(yiwu): check whether we can pass decodeUpperBound as nextBoundary when the last slice
+			// have childenChanged=true.
 			modifier.applyUpdate(*slices.back(),
-			                     modifier.changesMade ? &update->subtreeUpperBound : &update->decodeUpperBound);
+			                     modifier.changesMade || slices.back()->childrenChanged ? &update->subtreeUpperBound
+			                                                                            : &update->decodeUpperBound);
 
 			state bool detachChildren = (parentInfo->count > 2);
 			state bool forceUpdate = false;
@@ -7147,7 +7472,8 @@ private:
 											if (newID != invalidPhysicalPageID) {
 												debug_printf("%s Detach updated %u -> %u\n", context.c_str(), p, newID);
 												if (self->m_pBoundaryVerifier != nullptr) {
-													self->m_pBoundaryVerifier->update(batch->writeVersion, p, newID);
+													self->m_pBoundaryVerifier->updatePageId(
+													    batch->writeVersion, p, newID);
 												}
 												p = newID;
 												++stats.metrics.detachChild;
@@ -7213,7 +7539,8 @@ private:
 												rec.setChildPage(newPages);
 												debug_printf("%s Detach updated %u -> %u\n", context.c_str(), p, newID);
 												if (self->m_pBoundaryVerifier != nullptr) {
-													self->m_pBoundaryVerifier->update(batch->writeVersion, p, newID);
+													self->m_pBoundaryVerifier->updatePageId(
+													    batch->writeVersion, p, newID);
 												}
 												++stats.metrics.detachChild;
 											}
@@ -7223,7 +7550,6 @@ private:
 							}
 							parentInfo->clear();
 						}
-
 						Standalone<VectorRef<RedwoodRecordRef>> newChildEntries =
 						    wait(writePages(self,
 						                    &update->subtreeLowerBound,
@@ -7431,17 +7757,24 @@ public:
 			                    false,
 			                    !options.present() || options.get().cacheResult || path.back().btPage()->height != 2),
 			           [=](Reference<const ArenaPage> p) {
+				           BTreePage::BinaryTree::Cursor cursor = btree->getCursor(p.getPtr(), link);
 #if REDWOOD_DEBUG
-				           path.push_back({ p, btree->getCursor(p.getPtr(), link), link.get().getChildPage() });
+				           path.push_back({ p, cursor, link.get().getChildPage() });
 #else
-							path.push_back({ p, btree->getCursor(p.getPtr(), link) });
+							path.push_back({ p, cursor });
 #endif
 
 				           if (btree->m_pBoundaryVerifier != nullptr) {
+					           Optional<int64_t> domainId;
+					           if (p->isEncrypted() && btree->m_keyProvider->enableEncryptionDomain()) {
+						           domainId = p->getEncryptionDomainId();
+					           }
 					           ASSERT(btree->m_pBoundaryVerifier->verify(link.get().getChildPage().front(),
 					                                                     pager->getVersion(),
 					                                                     link.get().key,
-					                                                     link.next().getOrUpperBound().key));
+					                                                     link.next().getOrUpperBound().key,
+					                                                     domainId,
+					                                                     cursor));
 				           }
 				           return Void();
 			           });
@@ -7724,6 +8057,7 @@ public:
 		// TODO(yiwu): When the cluster encryption config is available later, fail if the cluster is configured to
 		// enable encryption, but the Redwood instance is unencrypted.
 		if (encryptionKeyProvider && encryptionKeyProvider->enableEncryption()) {
+			ASSERT(encryptionKeyProvider->expectedEncodingType() == EncodingType::AESEncryptionV1);
 			encodingType = EncodingType::AESEncryptionV1;
 			m_keyProvider = encryptionKeyProvider;
 		}
@@ -9753,6 +10087,11 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state bool serialTest = params.getInt("serialTest").orDefault(deterministicRandom()->random01() < 0.25);
 	state bool shortTest = params.getInt("shortTest").orDefault(deterministicRandom()->random01() < 0.25);
 
+	state int encoding =
+	    params.getInt("encodingType").orDefault(deterministicRandom()->randomInt(0, EncodingType::MAX_ENCODING_TYPE));
+	state unsigned int encryptionDomainMode =
+	    params.getInt("domainMode")
+	        .orDefault(deterministicRandom()->randomInt(0, RandomEncryptionKeyProvider::EncryptionDomainMode::MAX));
 	state int pageSize =
 	    shortTest ? 250 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(250, 400));
 	state int extentSize =
@@ -9803,24 +10142,25 @@ TEST_CASE("Lredwood/correctness/btree") {
 	// Max number of records in the BTree or the versioned written map to visit
 	state int64_t maxRecordsRead = params.getInt("maxRecordsRead").orDefault(300e6);
 
-	state EncodingType encodingType =
-	    static_cast<EncodingType>(deterministicRandom()->randomInt(0, EncodingType::MAX_ENCODING_TYPE));
+	state EncodingType encodingType = static_cast<EncodingType>(encoding);
 	state Reference<IPageEncryptionKeyProvider> keyProvider;
 	if (encodingType == EncodingType::AESEncryptionV1) {
-		keyProvider = makeReference<RandomEncryptionKeyProvider>();
+		keyProvider = makeReference<RandomEncryptionKeyProvider>(
+		    RandomEncryptionKeyProvider::EncryptionDomainMode(encryptionDomainMode));
 	} else if (encodingType == EncodingType::XOREncryption_TestOnly) {
 		keyProvider = makeReference<XOREncryptionKeyProvider_TestOnly>(file);
 	}
 
 	printf("\n");
 	printf("file: %s\n", file.c_str());
-	printf("encodingType: %d\n", encodingType);
 	printf("maxPageOps: %" PRId64 "\n", maxPageOps);
 	printf("maxVerificationMapEntries: %d\n", maxVerificationMapEntries);
 	printf("maxRecordsRead: %" PRId64 "\n", maxRecordsRead);
 	printf("pagerMemoryOnly: %d\n", pagerMemoryOnly);
 	printf("serialTest: %d\n", serialTest);
 	printf("shortTest: %d\n", shortTest);
+	printf("encodingType: %d\n", encodingType);
+	printf("domainMode: %d\n", encryptionDomainMode);
 	printf("pageSize: %d\n", pageSize);
 	printf("extentSize: %d\n", extentSize);
 	printf("maxKeySize: %d\n", maxKeySize);
@@ -11128,5 +11468,17 @@ TEST_CASE(":/redwood/performance/histograms") {
 	double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
 	std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
 
+	{
+		ContinuousSample<uint32_t> s = ContinuousSample<uint32_t>(pow(10, 3));
+		auto t_start = std::chrono::high_resolution_clock::now();
+		ASSERT(uniform.size() == inputSize);
+		for (size_t i = 0; i < uniform.size(); i++) {
+			s.addSample(uniform[i]);
+		}
+		auto t_end = std::chrono::high_resolution_clock::now();
+		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+		std::cout << "size of input: " << uniform.size() << std::endl;
+		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
+	}
 	return Void();
 }
