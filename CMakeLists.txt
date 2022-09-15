@@ -176,7 +176,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
   include_directories(/usr/local/include)
 endif()
 
-include(CompileBoost)
+find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem CONFIG PATHS ${BOOST_HINT_PATHS})
 include(GetMsgpack)
 add_subdirectory(contrib)
 add_subdirectory(flow)

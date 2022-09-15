@@ -20,9 +20,9 @@ class OpenSSLBuild(Build):
         m = hashlib.sha1()
         m.update(super().build_id().encode())
         if config.use_asan:
-            m.update('enable-asan')
+            m.update('enable-asan'.encode())
         if config.use_ubsan:
-            m.update('enable-ubsan')
+            m.update('enable-ubsan'.encode())
         return m.hexdigest()
 
     def run_configure(self) -> None:

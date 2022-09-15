@@ -37,7 +37,7 @@ class FetchSource:
         return self.version_str
 
     def get_source(self) -> Path:
-        raise NotImplemented()
+        raise NotImplementedError()
 
 
 class GitSource(FetchSource):
@@ -87,21 +87,22 @@ class HTTPSource(FetchSource):
     def unpack(self) -> Path:
         dirname_file = Path('{}.dn'.format(self.get_filepath()))
         if dirname_file.exists():
-            with open(dirname_file, 'r') as f:
-                return Path(f.read())
+            with open(dirname_file, 'r') as file:
+                return Path(file.read())
         self.verify_checksum()
         dirs: Set[Path] = set()
-        for f in self.source_folders.iterdir():
-            if f.is_dir():
-                dirs.add(f)
+        for path in self.source_folders.iterdir():
+            if path.is_dir():
+                dirs.add(path)
         shutil.unpack_archive(self.get_filepath(), self.source_folders)
         res: Path | None = None
-        for f in self.source_folders.iterdir():
-            if f.is_dir() and f not in dirs:
+        for path in self.source_folders.iterdir():
+            if path.is_dir() and path not in dirs:
                 assert res is None
-                res = f
-        with open(dirname_file, 'w') as f:
-            f.write(str(res))
+                res = path
+        with open(dirname_file, 'w') as file:
+            file.write(str(res))
+        assert res is not None
         return res
 
     def get_source(self) -> Path:
@@ -163,16 +164,16 @@ class Build:
                 return self.install_folder
 
     def run_configure(self) -> None:
-        raise NotImplemented()
+        raise NotImplementedError()
 
     def run_build(self) -> None:
-        raise NotImplemented()
+        raise NotImplementedError()
 
     def run_install(self) -> None:
-        raise NotImplemented()
+        raise NotImplementedError()
 
     def print_target(self, out: TextIO):
-        raise NotImplemented()
+        raise NotImplementedError()
 
 
 class ConfigureMake(Build):
@@ -194,7 +195,7 @@ class ConfigureMake(Build):
     def build_id(self) -> str:
         res = super().build_id()
         m = hashlib.sha1()
-        m.update(res)
+        m.update(res.encode())
         # we could add all args to the checksum which would be simpler. But we want to make sure that if an argument is
         # moved from one build step to another that they will be distinct builds
         for arg in self.additional_configure_args:
@@ -222,15 +223,18 @@ class ConfigureMake(Build):
         run_command(cmd, env=self.env, cwd=self.build_folder)
 
 
-def add_static_library(out: TextIO, target: str, include_dirs: List[Path], library_path: Path, link_language: str):
+def add_static_library(out: TextIO, target: str,
+                       include_dirs: List[Path] | None,
+                       library_path: Path,
+                       link_language: str):
     assert link_language in ['C', 'CXX']
-    include_list: List[str] = []
-    for include in include_dirs:
-        include_list.append(str(include.absolute()))
-    include_cmake_list = ';'.join(include_list)
+    includes = ''
+    if include_dirs is not None:
+        includes = 'IMPORTED_LINK_INTERFACE_LANGUAGES {}\n'.format(' '.join(map(lambda x: str(x.absolute()),
+                                                                                include_dirs)))
     print('add_library({} STATIC IMPORTED)'.format(target), file=out)
     print('set_target_properties({} PROPERTIES\n'
           '  INTERFACE_INCLUDE_DIRECTORIES {}\n'
-          '  IMPORTED_LINK_INTERFACE_LANGUAGES "{}"\n'
-          '  IMPORTED_LOCATION "{}")'.format(target, include_cmake_list, link_language, str(library_path.absolute())),
+          '{}'
+          '  IMPORTED_LOCATION "{}")'.format(target, includes, link_language, str(library_path.absolute())),
           file=out)
