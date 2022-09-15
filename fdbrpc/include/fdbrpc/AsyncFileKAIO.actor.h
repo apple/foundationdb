@@ -38,7 +38,7 @@
 #include <sys/syscall.h>
 #include "fdbrpc/linux_kaio.h"
 #include "flow/Knobs.h"
-#include "flow/Histogram.h"
+#include "fdbrpc/Stats.h"
 #include "flow/UnitTest.h"
 #include "crc32/crc32c.h"
 #include "flow/genericactors.actor.h"
@@ -47,14 +47,6 @@
 // Set this to true to enable detailed KAIO request logging, which currently is written to a hardcoded location
 // /data/v7/fdb/
 #define KAIO_LOGGING 0
-
-struct AsyncFileKAIOMetrics {
-	Reference<Histogram> readLatencyDist;
-	Reference<Histogram> writeLatencyDist;
-	Reference<Histogram> syncLatencyDist;
-} g_asyncFileKAIOMetrics;
-
-Future<Void> g_asyncFileKAIOHistogramLogger;
 
 DESCR struct SlowAioSubmit {
 	int64_t submitDuration; // ns
@@ -66,6 +58,25 @@ DESCR struct SlowAioSubmit {
 
 class AsyncFileKAIO final : public IAsyncFile, public ReferenceCounted<AsyncFileKAIO> {
 public:
+	struct AsyncFileKAIOMetrics {
+		LatencySample readLatencySample = { "AsyncFileKAIOReadLatency",
+			                                UID(),
+			                                FLOW_KNOBS->KAIO_LATENCY_LOGGING_INTERVAL,
+			                                FLOW_KNOBS->KAIO_LATENCY_SAMPLE_SIZE };
+		LatencySample writeLatencySample = { "AsyncFileKAIOWriteLatency",
+			                                 UID(),
+			                                 FLOW_KNOBS->KAIO_LATENCY_LOGGING_INTERVAL,
+			                                 FLOW_KNOBS->KAIO_LATENCY_SAMPLE_SIZE };
+		LatencySample syncLatencySample = { "AsyncFileKAIOSyncLatency",
+			                                UID(),
+			                                FLOW_KNOBS->KAIO_LATENCY_LOGGING_INTERVAL,
+			                                FLOW_KNOBS->KAIO_LATENCY_SAMPLE_SIZE };
+	};
+
+	static AsyncFileKAIOMetrics& getMetrics() {
+		static AsyncFileKAIOMetrics metrics;
+		return metrics;
+	}
 
 #if KAIO_LOGGING
 private:
@@ -365,7 +376,7 @@ public:
 
 		fsync = map(fsync, [=](Void r) mutable {
 			KAIOLogEvent(logFile, id, OpLogEntry::SYNC, OpLogEntry::COMPLETE);
-			g_asyncFileKAIOMetrics.syncLatencyDist->sampleSeconds(now() - start_time);
+			getMetrics().syncLatencySample.addMeasurement(now() - start_time);
 			return r;
 		});
 
@@ -640,16 +651,6 @@ private:
 			countFileLogicalReads.init(LiteralStringRef("AsyncFile.CountFileLogicalReads"), filename);
 			countLogicalWrites.init(LiteralStringRef("AsyncFile.CountLogicalWrites"));
 			countLogicalReads.init(LiteralStringRef("AsyncFile.CountLogicalReads"));
-			if (!g_asyncFileKAIOHistogramLogger.isValid()) {
-				auto& metrics = g_asyncFileKAIOMetrics;
-				metrics.readLatencyDist = Reference<Histogram>(new Histogram(
-				    Reference<HistogramRegistry>(), "AsyncFileKAIO", "ReadLatency", Histogram::Unit::microseconds));
-				metrics.writeLatencyDist = Reference<Histogram>(new Histogram(
-				    Reference<HistogramRegistry>(), "AsyncFileKAIO", "WriteLatency", Histogram::Unit::microseconds));
-				metrics.syncLatencyDist = Reference<Histogram>(new Histogram(
-				    Reference<HistogramRegistry>(), "AsyncFileKAIO", "SyncLatency", Histogram::Unit::microseconds));
-				g_asyncFileKAIOHistogramLogger = histogramLogger(FLOW_KNOBS->DISK_METRIC_LOGGING_INTERVAL);
-			}
 		}
 
 #if KAIO_LOGGING
@@ -769,31 +770,17 @@ private:
 					ctx.removeFromRequestList(iob);
 				}
 
-				auto& metrics = g_asyncFileKAIOMetrics;
 				switch (iob->aio_lio_opcode) {
 				case IO_CMD_PREAD:
-					metrics.readLatencyDist->sampleSeconds(now() - iob->startTime);
+					getMetrics().readLatencySample.addMeasurement(now() - iob->startTime);
 					break;
 				case IO_CMD_PWRITE:
-					metrics.writeLatencyDist->sampleSeconds(now() - iob->startTime);
+					getMetrics().writeLatencySample.addMeasurement(now() - iob->startTime);
 					break;
 				}
 
 				iob->setResult(ev[i].result);
 			}
-		}
-	}
-
-	ACTOR static Future<Void> histogramLogger(double interval) {
-		state double currentTime;
-		loop {
-			currentTime = now();
-			wait(delay(interval));
-			double elapsed = now() - currentTime;
-			auto& metrics = g_asyncFileKAIOMetrics;
-			metrics.readLatencyDist->writeToLog(elapsed);
-			metrics.writeLatencyDist->writeToLog(elapsed);
-			metrics.syncLatencyDist->writeToLog(elapsed);
 		}
 	}
 };
