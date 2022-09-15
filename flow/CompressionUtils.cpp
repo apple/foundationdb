@@ -177,7 +177,7 @@ TEST_CASE("/CompressionUtils/zstdCompression") {
 	return Void();
 }
 
-TEST_CASE("/CompressionUtils/gzipCompression2") {
+TEST_CASE("/CompressionUtils/zstdCompression2") {
 	testCompression2(CompressionFilter::ZSTD);
 	TraceEvent("ZstdCompression2Done");
 
