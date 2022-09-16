@@ -128,6 +128,7 @@ struct SidebandSingleWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> checker(SidebandSingleWorkload* self, Database cx) {
+		cx->initSharedState();
 		loop {
 			// Pair represents <Key, commitVersion>
 			state std::pair<uint64_t, Version> message = waitNext(self->interf.getFuture());

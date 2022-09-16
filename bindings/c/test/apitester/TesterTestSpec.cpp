@@ -96,6 +96,10 @@ std::unordered_map<std::string, std::function<void(const std::string& value, Tes
 	{ "maxClients",
 	  [](const std::string& value, TestSpec* spec) { //
 	      processIntOption(value, "maxClients", spec->maxClients, 1, 1000);
+	  } },
+	{ "disableClientBypass",
+	  [](const std::string& value, TestSpec* spec) { //
+	      spec->disableClientBypass = (value == "true");
 	  } }
 };
 

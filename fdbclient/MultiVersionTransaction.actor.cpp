@@ -2461,7 +2461,6 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		}
 		disableBypass = true;
 		bypassMultiClientApi = false;
-		forwardOption = true;
 	} else if (option == FDBNetworkOptions::CLIENT_THREADS_PER_VERSION) {
 		MutexHolder holder(lock);
 		validateOption(value, true, false, false);
@@ -2596,13 +2595,7 @@ void MultiVersionApi::setupNetwork() {
 		MutexHolder holder(lock);
 		runOnExternalClientsAllThreads([this, transportId, baseTraceFileId](Reference<ClientInfo> client) {
 			for (auto option : options) {
-				try {
-					client->api->setNetworkOption(option.first, option.second.castTo<StringRef>());
-				} catch (Error& e) {
-					if (e.code() == error_code_invalid_option) {
-						continue;
-					}
-				}
+				client->api->setNetworkOption(option.first, option.second.castTo<StringRef>());
 			}
 			client->api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT_TRANSPORT_ID, std::to_string(transportId));
 			if (!baseTraceFileId.empty()) {

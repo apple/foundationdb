@@ -75,6 +75,10 @@ struct TestSpec {
 	int minClients = 1;
 	int maxClients = 10;
 
+	// Disable the ability to bypass the MVC API, for
+	// cases when there are no external clients
+	bool disableClientBypass = false;
+
 	// List of workloads with their options
 	std::vector<WorkloadSpec> workloads;
 };

@@ -5,6 +5,7 @@ maxClients = 3
 minDatabases = 1
 maxDatabases = 3
 multiThreaded = false
+disableClientBypass = true
 
     [[test.workload]]
     name = 'ApiCorrectness'

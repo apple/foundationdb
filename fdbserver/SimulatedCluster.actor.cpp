@@ -337,7 +337,7 @@ public:
 	// Set the maximum TLog version that can be selected for a test
 	// Refer to FDBTypes.h::TLogVersion. Defaults to the maximum supported version.
 	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
-	// Disable bypassing multi-version client API. Required for use_grv_cache
+	// Disable bypassing multi-version client API.
 	bool disableClientBypass = false;
 	// Set true to simplify simulation configs for easier debugging
 	bool simpleConfig = false;
