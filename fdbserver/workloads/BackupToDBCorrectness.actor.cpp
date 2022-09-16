@@ -129,9 +129,9 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			}
 		}
 
-		ASSERT(g_simulator.extraDatabases.size() == 1);
+		ASSERT(g_simulator->extraDatabases.size() == 1);
 		auto extraFile =
-		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
+		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator->extraDatabases[0]));
 		extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 
 		TraceEvent("BARW_Start").detail("Locked", locked);
@@ -737,9 +737,9 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			}
 
 			// SOMEDAY: Remove after backup agents can exist quiescently
-			if ((g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) &&
+			if ((g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) &&
 			    (!BackupToDBCorrectnessWorkload::drAgentRequests)) {
-				g_simulator.drAgents = ISimulator::BackupAgentType::NoBackupAgents;
+				g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupAndRestoreCorrectness").error(e);

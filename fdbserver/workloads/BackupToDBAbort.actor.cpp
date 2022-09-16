@@ -37,9 +37,9 @@ struct BackupToDBAbort : TestWorkload {
 
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 
-		ASSERT(g_simulator.extraDatabases.size() == 1);
+		ASSERT(g_simulator->extraDatabases.size() == 1);
 		auto extraFile =
-		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
+		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator->extraDatabases[0]));
 		extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 
 		lockid = UID(0xbeeffeed, 0xdecaf00d);
@@ -94,8 +94,8 @@ struct BackupToDBAbort : TestWorkload {
 		TraceEvent("BDBA_End").log();
 
 		// SOMEDAY: Remove after backup agents can exist quiescently
-		if (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
-			g_simulator.drAgents = ISimulator::BackupAgentType::NoBackupAgents;
+		if (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
+			g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
 		}
 
 		return Void();

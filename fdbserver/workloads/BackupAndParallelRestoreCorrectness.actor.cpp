@@ -777,9 +777,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			}
 
 			// SOMEDAY: Remove after backup agents can exist quiescently
-			if ((g_simulator.backupAgents == ISimulator::BackupAgentType::BackupToFile) &&
+			if ((g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) &&
 			    (!BackupAndParallelRestoreCorrectnessWorkload::backupAgentRequests)) {
-				g_simulator.backupAgents = ISimulator::BackupAgentType::NoBackupAgents;
+				g_simulator->backupAgents = ISimulator::BackupAgentType::NoBackupAgents;
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupAndParallelRestoreCorrectness").error(e).GetLastError();

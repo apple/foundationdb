@@ -62,11 +62,11 @@ struct ChangeConfigWorkload : TestWorkload {
 	ACTOR Future<Void> configureExtraDatabase(ChangeConfigWorkload* self, Database db) {
 		wait(delay(5 * deterministicRandom()->random01()));
 		if (self->configMode.size()) {
-			if (g_simulator.startingDisabledConfiguration != "") {
+			if (g_simulator->startingDisabledConfiguration != "") {
 				// It is not safe to allow automatic failover to a region which is not fully replicated,
 				// so wait for both regions to be fully replicated before enabling failover
 				wait(success(
-				    ManagementAPI::changeConfig(db.getReference(), g_simulator.startingDisabledConfiguration, true)));
+				    ManagementAPI::changeConfig(db.getReference(), g_simulator->startingDisabledConfiguration, true)));
 				TraceEvent("WaitForReplicasExtra").log();
 				wait(waitForFullReplication(db));
 				TraceEvent("WaitForReplicasExtraEnd").log();
@@ -89,7 +89,7 @@ struct ChangeConfigWorkload : TestWorkload {
 	Future<Void> configureExtraDatabases(ChangeConfigWorkload* self) {
 		std::vector<Future<Void>> futures;
 		if (g_network->isSimulated()) {
-			for (auto extraDatabase : g_simulator.extraDatabases) {
+			for (auto extraDatabase : g_simulator->extraDatabases) {
 				auto extraFile = makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(extraDatabase));
 				Database db = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 				futures.push_back(configureExtraDatabase(self, db));
@@ -111,18 +111,19 @@ struct ChangeConfigWorkload : TestWorkload {
 		}
 
 		if (self->configMode.size()) {
-			if (g_network->isSimulated() && g_simulator.startingDisabledConfiguration != "") {
+			if (g_network->isSimulated() && g_simulator->startingDisabledConfiguration != "") {
 				// It is not safe to allow automatic failover to a region which is not fully replicated,
 				// so wait for both regions to be fully replicated before enabling failover
 				wait(success(
-				    ManagementAPI::changeConfig(cx.getReference(), g_simulator.startingDisabledConfiguration, true)));
+				    ManagementAPI::changeConfig(cx.getReference(), g_simulator->startingDisabledConfiguration, true)));
 				TraceEvent("WaitForReplicas").log();
 				wait(waitForFullReplication(cx));
 				TraceEvent("WaitForReplicasEnd").log();
 			}
 			wait(success(ManagementAPI::changeConfig(cx.getReference(), self->configMode, true)));
 		}
-		if (g_network->isSimulated() && g_simulator.configDBType != ConfigDBType::SIMPLE || !g_network->isSimulated()) {
+		if ((g_network->isSimulated() && g_simulator->configDBType != ConfigDBType::SIMPLE) ||
+		    !g_network->isSimulated()) {
 			if (self->networkAddresses.size()) {
 				state int i;
 				for (i = 0; i < self->coordinatorChanges; ++i) {

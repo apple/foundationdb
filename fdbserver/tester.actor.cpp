@@ -451,7 +451,7 @@ void printSimulatedTopology() {
 	if (!g_network->isSimulated()) {
 		return;
 	}
-	auto processes = g_simulator.getAllProcesses();
+	auto processes = g_simulator->getAllProcesses();
 	std::sort(processes.begin(), processes.end(), [](ISimulator::ProcessInfo* lhs, ISimulator::ProcessInfo* rhs) {
 		auto l = lhs->locality;
 		auto r = rhs->locality;
@@ -1001,9 +1001,9 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	state double connectionFailures;
 	if (g_network->isSimulated()) {
 		// NOTE: the value will be reset after consistency check
-		connectionFailures = g_simulator.connectionFailuresDisableDuration;
-		g_simulator.connectionFailuresDisableDuration = 1e6;
-		g_simulator.speedUpSimulation = true;
+		connectionFailures = g_simulator->connectionFailuresDisableDuration;
+		g_simulator->connectionFailuresDisableDuration = 1e6;
+		g_simulator->speedUpSimulation = true;
 	}
 
 	Standalone<VectorRef<KeyValueRef>> options;
@@ -1040,7 +1040,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 		DistributedTestResults testResults = wait(runWorkload(cx, testers, spec, Optional<TenantName>()));
 		if (testResults.ok() || lastRun) {
 			if (g_network->isSimulated()) {
-				g_simulator.connectionFailuresDisableDuration = connectionFailures;
+				g_simulator->connectionFailuresDisableDuration = connectionFailures;
 			}
 			return Void();
 		}
@@ -1289,7 +1289,7 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	      ASSERT(connectionFailuresDisableDuration >= 0);
 	      spec->simConnectionFailuresDisableDuration = connectionFailuresDisableDuration;
 	      if (g_network->isSimulated())
-		      g_simulator.connectionFailuresDisableDuration = spec->simConnectionFailuresDisableDuration;
+		      g_simulator->connectionFailuresDisableDuration = spec->simConnectionFailuresDisableDuration;
 	      TraceEvent("TestParserTest")
 	          .detail("ParsedSimConnectionFailuresDisableDuration", spec->simConnectionFailuresDisableDuration);
 	  } },
@@ -1604,8 +1604,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	}
 
 	if (g_network->isSimulated()) {
-		g_simulator.backupAgents = simBackupAgents;
-		g_simulator.drAgents = simDrAgents;
+		g_simulator->backupAgents = simBackupAgents;
+		g_simulator->drAgents = simDrAgents;
 	}
 
 	// turn off the database ping functionality if the suite of tests are not going to be using the database

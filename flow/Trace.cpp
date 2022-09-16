@@ -600,7 +600,7 @@ public:
 NetworkAddress getAddressIndex() {
 	// ahm
 	//	if( g_network->isSimulated() )
-	//		return g_simulator.getCurrentProcess()->address;
+	//		return g_simulator->getCurrentProcess()->address;
 	//	else
 	return g_network->getLocalAddress();
 }

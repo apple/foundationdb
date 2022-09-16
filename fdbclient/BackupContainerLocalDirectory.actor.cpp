@@ -227,10 +227,10 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 			throw file_not_found();
 		}
 
-		if (g_simulator.getCurrentProcess()->uid == UID()) {
+		if (g_simulator->getCurrentProcess()->uid == UID()) {
 			TraceEvent(SevError, "BackupContainerReadFileOnUnsetProcessID").log();
 		}
-		std::string uniquePath = fullPath + "." + g_simulator.getCurrentProcess()->uid.toString() + ".lnk";
+		std::string uniquePath = fullPath + "." + g_simulator->getCurrentProcess()->uid.toString() + ".lnk";
 		unlink(uniquePath.c_str());
 		ASSERT(symlink(basename(path).c_str(), uniquePath.c_str()) == 0);
 		fullPath = uniquePath;

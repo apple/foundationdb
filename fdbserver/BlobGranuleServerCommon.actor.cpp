@@ -155,7 +155,7 @@ void GranuleFiles::getFiles(Version beginVersion,
                             int64_t& deltaBytesCounter,
                             bool summarize) const {
 	BlobFileIndex dummyIndex; // for searching
-
+	ASSERT(!snapshotFiles.empty());
 	// if beginVersion == 0 or we can collapse, find the latest snapshot <= readVersion
 	auto snapshotF = snapshotFiles.end();
 	if (beginVersion == 0 || canCollapse) {
