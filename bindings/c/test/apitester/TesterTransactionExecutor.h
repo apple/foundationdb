@@ -38,6 +38,9 @@ class ITransactionContext : public std::enable_shared_from_this<ITransactionCont
 public:
 	virtual ~ITransactionContext() {}
 
+	// Current FDB database
+	virtual fdb::Database db() = 0;
+
 	// Current FDB transaction
 	virtual fdb::Transaction tx() = 0;
 
@@ -62,11 +65,11 @@ public:
 	virtual void continueAfterAll(std::vector<fdb::Future> futures, TTaskFct cont);
 };
 
-// Type of the lambda functions implementing a transaction
-using TTxStartFct = std::function<void(std::shared_ptr<ITransactionContext>)>;
+// Type of the lambda functions implementing a database operation
+using TOpStartFct = std::function<void(std::shared_ptr<ITransactionContext>)>;
 
-// Type of the lambda functions implementing a transaction
-using TTxContFct = std::function<void(fdb::Error)>;
+// Type of the lambda functions implementing a database operation
+using TOpContFct = std::function<void(fdb::Error)>;
 
 /**
  * Configuration of transaction execution mode
@@ -110,7 +113,10 @@ class ITransactionExecutor {
 public:
 	virtual ~ITransactionExecutor() {}
 	virtual void init(IScheduler* sched, const char* clusterFile, const std::string& bgBasePath) = 0;
-	virtual void execute(TTxStartFct start, TTxContFct cont, std::optional<fdb::BytesRef> tenantName = {}) = 0;
+	virtual void execute(TOpStartFct start,
+	                     TOpContFct cont,
+	                     std::optional<fdb::BytesRef> tenantName,
+	                     bool transactional) = 0;
 	virtual fdb::Database selectDatabase() = 0;
 	virtual std::string getClusterFileForErrorInjection() = 0;
 	virtual const TransactionExecutorOptions& getOptions() = 0;

@@ -718,6 +718,14 @@ public:
 	}
 	Database() noexcept : db(nullptr) {}
 
+	void atomic_store(Database other) { std::atomic_store(&db, other.db); }
+
+	Database atomic_load() {
+		Database retVal;
+		retVal.db = std::atomic_load(&db);
+		return retVal;
+	}
+
 	Error setOptionNothrow(FDBDatabaseOption option, int64_t value) noexcept {
 		return Error(native::fdb_database_set_option(
 		    db.get(), option, reinterpret_cast<const uint8_t*>(&value), static_cast<int>(sizeof(value))));
