@@ -618,7 +618,7 @@ struct CommitBatchContext {
 	bool isMyFirstBatch;
 	bool firstStateMutations;
 
-	Optional<Value> oldCoordinators;
+	Optional<Value> previousCoordinators;
 
 	StoreCommit_t storeCommits;
 
@@ -1146,7 +1146,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	ASSERT(self->commitVersion);
 
 	if (!self->isMyFirstBatch &&
-	    pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get() != self->oldCoordinators.get()) {
+	    pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get() != self->previousCoordinators.get()) {
 		wait(brokenPromiseToNever(pProxyCommitData->db->get().clusterInterface.changeCoordinators.getReply(
 		    ChangeCoordinatorsRequest(pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get(),
 		                              self->pProxyCommitData->master.id()))));
@@ -1374,7 +1374,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	}
 
 	self->isMyFirstBatch = !pProxyCommitData->version.get();
-	self->oldCoordinators = pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get();
+	self->previousCoordinators = pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get();
 
 	assertResolutionStateMutationsSizeConsistent(self->resolution);
 

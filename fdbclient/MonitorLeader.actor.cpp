@@ -501,6 +501,7 @@ ACTOR Future<Void> monitorNominee(Key key,
                                   Optional<LeaderInfo>* info) {
 	loop {
 		state Optional<LeaderInfo> li;
+		wait(Future<Void>(Void())); // Make sure we weren't cancelled
 		if (coord.hostname.present()) {
 			wait(store(li,
 			           retryGetReplyFromHostname(GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),

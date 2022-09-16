@@ -30,6 +30,8 @@ import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 
 public class ConcurrentGetSetGet {
+	public static final int API_VERSION = 720;
+
 	public static final Charset UTF8 = Charset.forName("UTF-8");
 
 	final Semaphore semaphore = new Semaphore(CONCURRENCY);
@@ -48,7 +50,7 @@ public class ConcurrentGetSetGet {
 	}
 
 	public static void main(String[] args) {
-		try(Database database = FDB.selectAPIVersion(720).open()) {
+		try(Database database = FDB.selectAPIVersion(API_VERSION).open()) {
 			new ConcurrentGetSetGet().apply(database);
 		}
 	}
