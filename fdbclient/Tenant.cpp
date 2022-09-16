@@ -23,6 +23,8 @@
 #include "fdbclient/Tenant.h"
 #include "fdbrpc/TenantInfo.h"
 #include "flow/BooleanParam.h"
+#include "flow/IRandom.h"
+#include "libb64/decode.h"
 #include "libb64/encode.h"
 #include "flow/ApiVersion.h"
 #include "flow/UnitTest.h"
@@ -184,6 +186,24 @@ TenantMetadataSpecification& TenantMetadata::instance() {
 Key TenantMetadata::tenantMapPrivatePrefix() {
 	static Key _prefix = "\xff"_sr.withSuffix(tenantMap().subspace.begin);
 	return _prefix;
+}
+
+TEST_CASE("/fdbclient/libb64/base64decoder") {
+	Standalone<StringRef> buf = makeString(100);
+	for (int i = 0; i < 1000; ++i) {
+		int length = deterministicRandom()->randomInt(0, 100);
+		deterministicRandom()->randomBytes(mutateString(buf), length);
+
+		StringRef str = buf.substr(0, length);
+		std::string encodedStr = base64::encoder::from_string(str.toString());
+		// Remove trailing newline
+		encodedStr.resize(encodedStr.size() - 1);
+
+		std::string decodedStr = base64::decoder::from_string(encodedStr);
+		ASSERT(decodedStr == str.toString());
+	}
+
+	return Void();
 }
 
 TEST_CASE("/fdbclient/TenantMapEntry/Serialization") {
