@@ -323,8 +323,10 @@ namespace SummarizeTest
                         oldBinaryVersionLowerBound = "0.0.0";
                     }
                     string[] currentBinary = { fdbserverName };
-                    IEnumerable<string> oldBinaries = Array.FindAll(
-                                                         Directory.GetFiles(oldBinaryFolder),
+                    var snowflakePath = Path.Combine("/app", "deploy", "global_data", "snowflakeBinaries");
+                    string[] candidateBinaries = Directory.Exists(snowflakePath) ? Directory.GetFiles(snowflakePath) : Directory.GetFiles(oldBinaryFolder);
+
+                    IEnumerable<string> oldBinaries = Array.FindAll(candidateBinaries,
                                                          x => versionGreaterThanOrEqual(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionLowerBound)
                                                            && versionLessThan(Path.GetFileName(x).Split('-').Last(), oldBinaryVersionUpperBound));
                     if (!lastFolderName.Contains("until_")) {

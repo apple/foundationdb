@@ -2058,27 +2058,6 @@ struct ErrorCounter {
 };
 ErrorCounter g_errorCounter("TlogDebugErrorCounter");
 
-ACTOR Future<Void> updateDurableClusterID(TLogData* self) {
-	loop {
-		// Persist cluster ID once cluster has recovered.
-		if (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED) {
-			ASSERT(!self->durableClusterId.isValid());
-			state UID ccClusterId = self->dbInfo->get().clusterId;
-			self->durableClusterId = ccClusterId;
-			ASSERT(ccClusterId.isValid());
-
-			wait(self->persistentDataCommitLock.take());
-			state FlowLock::Releaser commitLockReleaser(self->persistentDataCommitLock);
-			self->persistentData->set(
-			    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(ccClusterId, Unversioned())));
-			wait(self->persistentData->commit());
-
-			return Void();
-		}
-		wait(self->dbInfo->onChange());
-	}
-}
-
 // This actor keep pushing TLogPeekStreamReply until it's removed from the cluster or should recover
 ACTOR Future<Void> tLogPeekStream(SafeAccessor<TLogData> self, TLogPeekStreamRequest req, Reference<LogData> logData) {
 	self->activePeekStreams++;
@@ -2634,6 +2613,27 @@ ACTOR Future<Void> tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData*
 	return Void();
 }
 
+ACTOR Future<Void> updateDurableClusterID(TLogData* self) {
+	loop {
+		// Persist cluster ID once cluster has recovered.
+		if (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED) {
+			ASSERT(!self->durableClusterId.isValid());
+			state UID ccClusterId = self->dbInfo->get().clusterId;
+			self->durableClusterId = ccClusterId;
+			ASSERT(ccClusterId.isValid());
+
+			wait(self->persistentDataCommitLock.take());
+			state FlowLock::Releaser commitLockReleaser(self->persistentDataCommitLock);
+			self->persistentData->set(
+			    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(ccClusterId, Unversioned())));
+			wait(self->persistentData->commit());
+
+			return Void();
+		}
+		wait(self->dbInfo->onChange());
+	}
+}
+
 ACTOR Future<Void> serveTLogInterface(TLogData* self,
                                       TLogInterface tli,
                                       Reference<LogData> logData,
@@ -2668,7 +2668,6 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			} else {
 				logData->logSystem->set(Reference<ILogSystem>());
 			}
-
 		}
 		when(TLogPeekStreamRequest req = waitNext(tli.peekStreamMessages.getFuture())) {
 			TraceEvent(SevDebug, "TLogPeekStream", logData->logId)
@@ -3601,7 +3600,6 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 			loop {
 				choose {
 					when(state InitializeTLogRequest req = waitNext(tlogRequests.getFuture())) {
-
 						if (!self.tlogCache.exists(req.recruitmentID)) {
 							self.tlogCache.set(req.recruitmentID, req.reply.getFuture());
 							self.sharedActors.send(
