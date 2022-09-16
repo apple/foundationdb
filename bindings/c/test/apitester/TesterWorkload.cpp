@@ -106,7 +106,7 @@ void WorkloadBase::schedule(TTaskFct task) {
 	});
 }
 
-void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx,
+void WorkloadBase::execTransaction(TTxStartFct startFct,
                                    TTaskFct cont,
                                    std::optional<fdb::BytesRef> tenant,
                                    bool failOnError) {
@@ -117,10 +117,9 @@ void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx,
 	tasksScheduled++;
 	numTxStarted++;
 	manager->txExecutor->execute(
-	    tx,
-	    [this, tx, cont, failOnError]() {
+	    startFct,
+	    [this, startFct, cont, failOnError](fdb::Error err) {
 		    numTxCompleted++;
-		    fdb::Error err = tx->getError();
 		    if (err.code() == error_code_success) {
 			    cont();
 		    } else {

@@ -40,11 +40,6 @@ namespace FdbApiTester {
 constexpr int LONG_WAIT_TIME_US = 2000000;
 constexpr int LARGE_NUMBER_OF_RETRIES = 10;
 
-void TransactionActorBase::complete(fdb::Error err) {
-	error = err;
-	context = {};
-}
-
 void ITransactionContext::continueAfterAll(std::vector<fdb::Future> futures, TTaskFct cont) {
 	auto counter = std::make_shared<std::atomic<int>>(futures.size());
 	auto errorCode = std::make_shared<std::atomic<fdb::Error>>(fdb::Error::success());
@@ -76,13 +71,13 @@ void ITransactionContext::continueAfterAll(std::vector<fdb::Future> futures, TTa
 class TransactionContextBase : public ITransactionContext {
 public:
 	TransactionContextBase(ITransactionExecutor* executor,
-	                       std::shared_ptr<ITransactionActor> txActor,
-	                       TTaskFct cont,
+	                       TTxStartFct startFct,
+	                       TTxContFct cont,
 	                       IScheduler* scheduler,
 	                       int retryLimit,
 	                       std::string bgBasePath,
 	                       std::optional<fdb::BytesRef> tenantName)
-	  : executor(executor), txActor(txActor), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
+	  : executor(executor), startFct(startFct), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
 	    txState(TxState::IN_PROGRESS), commitCalled(false), bgBasePath(bgBasePath), tenantName(tenantName) {
 		databaseCreateErrorInjected = executor->getOptions().injectDatabaseCreateErrors &&
 		                              Random::get().randomBool(executor->getOptions().databaseCreateErrorRatio);
@@ -149,11 +144,9 @@ public:
 		// cancel transaction so that any pending operations on it
 		// fail gracefully
 		fdbTx.cancel();
-
-		txActor->complete(fdb::Error::success());
 		cleanUp();
 		ASSERT(txState == TxState::DONE);
-		contAfterDone();
+		contAfterDone(fdb::Error::success());
 	}
 
 	std::string getBGBasePath() override { return bgBasePath; }
@@ -179,15 +172,16 @@ public:
 		if (databaseCreateErrorInjected && canBeInjectedDatabaseCreateError(err.code())) {
 			// Failed to create a database because of failure injection
 			// Restart by recreating the transaction in a valid database
-			scheduler->schedule([this]() {
-				fdb::Database db = executor->selectDatabase();
-				if (tenantName) {
-					fdb::Tenant tenant = db.openTenant(*tenantName);
-					fdbTx.atomic_store(tenant.createTransaction());
+			auto thisRef = std::static_pointer_cast<TransactionContextBase>(shared_from_this());
+			scheduler->schedule([thisRef]() {
+				fdb::Database db = thisRef->executor->selectDatabase();
+				if (thisRef->tenantName) {
+					fdb::Tenant tenant = db.openTenant(*thisRef->tenantName);
+					thisRef->fdbTx.atomic_store(tenant.createTransaction());
 				} else {
-					fdbTx.atomic_store(db.createTransaction());
+					thisRef->fdbTx.atomic_store(db.createTransaction());
 				}
-				restartTransaction();
+				thisRef->restartTransaction();
 			});
 		} else {
 			onErrorArg = err;
@@ -207,7 +201,6 @@ protected:
 	void cleanUp() {
 		ASSERT(txState == TxState::DONE);
 		ASSERT(!onErrorFuture);
-		txActor = {};
 		cancelPendingFutures();
 	}
 
@@ -230,9 +223,8 @@ protected:
 		// No need for lock from here on, because only one thread
 		// can enter DONE state and handle it
 
-		txActor->complete(err);
 		cleanUp();
-		contAfterDone();
+		contAfterDone(err);
 	}
 
 	// Handle result of an a transaction onError call
@@ -254,7 +246,7 @@ protected:
 		txState = TxState::IN_PROGRESS;
 		commitCalled = false;
 		lock.unlock();
-		txActor->start();
+		startFct(shared_from_this());
 	}
 
 	// Checks if a transaction can be retried. Fails the transaction if the check fails
@@ -290,9 +282,9 @@ protected:
 	// Provides a thread safe interface by itself (no need for mutex)
 	fdb::Transaction fdbTx;
 
-	// Actor implementing the transaction worklflow
+	// The function implementing the starting point of the transaction
 	// Set in constructor and reset on cleanup (no need for mutex)
-	std::shared_ptr<ITransactionActor> txActor;
+	TTxStartFct startFct;
 
 	// Mutex protecting access to shared mutable state
 	// Only the state that is accessible unter IN_PROGRESS state
@@ -301,7 +293,7 @@ protected:
 
 	// Continuation to be called after completion of the transaction
 	// Set in contructor, stays immutable
-	const TTaskFct contAfterDone;
+	const TTxContFct contAfterDone;
 
 	// Reference to the scheduler
 	// Set in contructor, stays immutable
@@ -346,6 +338,10 @@ protected:
 
 	// The tenant that we will run this transaction in
 	const std::optional<fdb::BytesRef> tenantName;
+
+	// The final error code of the transaction
+	// Accessed only in DONE state (no need for mutex)
+	fdb::Error finalError;
 };
 
 /**
@@ -354,13 +350,13 @@ protected:
 class BlockingTransactionContext : public TransactionContextBase {
 public:
 	BlockingTransactionContext(ITransactionExecutor* executor,
-	                           std::shared_ptr<ITransactionActor> txActor,
-	                           TTaskFct cont,
+	                           TTxStartFct startFct,
+	                           TTxContFct cont,
 	                           IScheduler* scheduler,
 	                           int retryLimit,
 	                           std::string bgBasePath,
 	                           std::optional<fdb::BytesRef> tenantName)
-	  : TransactionContextBase(executor, txActor, cont, scheduler, retryLimit, bgBasePath, tenantName) {}
+	  : TransactionContextBase(executor, startFct, cont, scheduler, retryLimit, bgBasePath, tenantName) {}
 
 protected:
 	void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
@@ -430,13 +426,13 @@ protected:
 class AsyncTransactionContext : public TransactionContextBase {
 public:
 	AsyncTransactionContext(ITransactionExecutor* executor,
-	                        std::shared_ptr<ITransactionActor> txActor,
-	                        TTaskFct cont,
+	                        TTxStartFct startFct,
+	                        TTxContFct cont,
 	                        IScheduler* scheduler,
 	                        int retryLimit,
 	                        std::string bgBasePath,
 	                        std::optional<fdb::BytesRef> tenantName)
-	  : TransactionContextBase(executor, txActor, cont, scheduler, retryLimit, bgBasePath, tenantName) {}
+	  : TransactionContextBase(executor, startFct, cont, scheduler, retryLimit, bgBasePath, tenantName) {}
 
 protected:
 	void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
@@ -648,23 +644,19 @@ public:
 
 	const TransactionExecutorOptions& getOptions() override { return options; }
 
-	void execute(std::shared_ptr<ITransactionActor> txActor,
-	             TTaskFct cont,
-	             std::optional<fdb::BytesRef> tenantName = {}) override {
+	void execute(TTxStartFct startFct, TTxContFct cont, std::optional<fdb::BytesRef> tenantName = {}) override {
 		try {
 			std::shared_ptr<ITransactionContext> ctx;
 			if (options.blockOnFutures) {
 				ctx = std::make_shared<BlockingTransactionContext>(
-				    this, txActor, cont, scheduler, options.transactionRetryLimit, bgBasePath, tenantName);
+				    this, startFct, cont, scheduler, options.transactionRetryLimit, bgBasePath, tenantName);
 			} else {
 				ctx = std::make_shared<AsyncTransactionContext>(
-				    this, txActor, cont, scheduler, options.transactionRetryLimit, bgBasePath, tenantName);
+				    this, startFct, cont, scheduler, options.transactionRetryLimit, bgBasePath, tenantName);
 			}
-			txActor->init(ctx);
-			txActor->start();
+			startFct(ctx);
 		} catch (...) {
-			txActor->complete(fdb::Error(error_code_operation_failed));
-			cont();
+			cont(fdb::Error(error_code_operation_failed));
 		}
 	}
 
