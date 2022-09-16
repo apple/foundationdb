@@ -133,7 +133,7 @@ if(WIN32)
   return()
 endif()
 
-find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem CONFIG PATHS ${BOOST_HINT_PATHS})
+find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem iostreams CONFIG PATHS ${BOOST_HINT_PATHS})
 set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
 
 if(Boost_FOUND AND Boost_filesystem_FOUND AND Boost_context_FOUND AND Boost_iostreams_FOUND AND NOT FORCE_BOOST_BUILD)
