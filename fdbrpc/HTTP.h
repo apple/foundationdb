@@ -21,7 +21,6 @@
 #include "flow/flow.h"
 #include "flow/Net2Packet.h"
 #include "fdbrpc/IRateControl.h"
-#include "fdbclient/Knobs.h"
 
 namespace HTTP {
 struct is_iless {
@@ -63,4 +62,11 @@ Future<Reference<Response>> doRequest(Reference<IConnection> const& conn,
                                       int64_t* const& pSent,
                                       Reference<IRateControl> const& recvRate,
                                       const std::string& requestHeader = std::string());
+
+// Connect to proxy, send CONNECT command, and connect to the remote host.
+Future<Reference<IConnection>> proxyConnect(const std::string& remoteHost,
+                                            const std::string& remoteService,
+                                            const std::string& proxyHost,
+                                            const std::string& proxyService);
+
 } // namespace HTTP

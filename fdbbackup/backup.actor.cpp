@@ -646,6 +646,7 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 #endif
 	{ OPT_BASEURL, "-b", SO_REQ_SEP },
 	{ OPT_BASEURL, "--base-url", SO_REQ_SEP },
+	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
 	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
@@ -3390,6 +3391,10 @@ int main(int argc, char* argv[]) {
 		}
 
 		Optional<std::string> proxy;
+		std::string p;
+		if (platform::getEnvironmentVar("HTTP_PROXY", p) || platform::getEnvironmentVar("HTTPS_PROXY", p)) {
+			proxy = p;
+		}
 		std::string destinationContainer;
 		bool describeDeep = false;
 		bool describeTimestamps = false;

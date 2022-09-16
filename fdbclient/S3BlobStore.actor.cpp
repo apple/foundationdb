@@ -20,8 +20,8 @@
 
 #include "fdbclient/S3BlobStore.h"
 
-#include "fdbclient/md5/md5.h"
-#include "fdbclient/libb64/encode.h"
+#include "fdbrpc/md5/md5.h"
+#include "fdbrpc/libb64/encode.h"
 #include "fdbclient/sha1/SHA1.h"
 #include <time.h>
 #include <iomanip>
@@ -179,11 +179,20 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 
 		Optional<std::string> proxyHost, proxyPort;
 		if (proxy.present()) {
-			if (!Hostname::isHostname(proxy.get()) && !NetworkAddress::parseOptional(proxy.get()).present()) {
-				throw format("'%s' is not a valid value for proxy. Format should be either IP:port or host:port.",
-				             proxy.get().c_str());
+			StringRef proxyRef(proxy.get());
+			if (proxy.get().find("://") != std::string::npos) {
+				StringRef proxyPrefix = proxyRef.eat("://");
+				if (proxyPrefix != "http"_sr) {
+					throw format("Invalid proxy URL prefix '%s'. Either don't use a prefix, or use http://",
+					             proxyPrefix.toString().c_str());
+				}
 			}
-			StringRef p(proxy.get());
+			std::string proxyBody = proxyRef.eat().toString();
+			if (!Hostname::isHostname(proxyBody) && !NetworkAddress::parseOptional(proxyBody).present()) {
+				throw format("'%s' is not a valid value for proxy. Format should be either IP:port or host:port.",
+				             proxyBody.c_str());
+			}
+			StringRef p(proxyBody);
 			proxyHost = p.eat(":").toString();
 			proxyPort = p.eat().toString();
 		}
@@ -639,10 +648,29 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 		}
 	}
 	std::string host = b->host, service = b->service;
-	if (service.empty())
+	if (service.empty()) {
+		if (b->useProxy) {
+			fprintf(stderr, "ERROR: Port can't be empty when using HTTP proxy.\n");
+			throw connection_failed();
+		}
 		service = b->knobs.secure_connection ? "https" : "http";
-	state Reference<IConnection> conn =
-	    wait(INetworkConnections::net()->connect(host, service, b->knobs.secure_connection ? true : false));
+	}
+	bool isTLS = b->knobs.secure_connection == 1;
+	state Reference<IConnection> conn;
+	if (b->useProxy) {
+		if (isTLS) {
+			Reference<IConnection> _conn =
+			    wait(HTTP::proxyConnect(host, service, b->proxyHost.get(), b->proxyPort.get()));
+			conn = _conn;
+		} else {
+			host = b->proxyHost.get();
+			service = b->proxyPort.get();
+			Reference<IConnection> _conn = wait(INetworkConnections::net()->connect(host, service, false));
+			conn = _conn;
+		}
+	} else {
+		wait(store(conn, INetworkConnections::net()->connect(host, service, isTLS)));
+	}
 	wait(conn->connectHandshake());
 
 	TraceEvent("S3BlobStoreEndpointNewConnection")
@@ -746,6 +774,10 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 				bstore->setAuthHeaders(verb, resource, headers);
 			}
 
+			if (bstore->useProxy && bstore->knobs.secure_connection == 0) {
+				// Has to be in absolute-form.
+				resource = "http://" + bstore->host + ":" + bstore->service + resource;
+			}
 			remoteAddress = rconn.conn->getPeerAddress();
 			wait(bstore->requestRate->getAllowance(1));
 			Reference<HTTP::Response> _r = wait(timeoutError(HTTP::doRequest(rconn.conn,
