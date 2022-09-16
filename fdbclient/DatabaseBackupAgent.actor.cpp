@@ -3060,6 +3060,9 @@ public:
 
 		loop {
 			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
 				wait(success(tr->getReadVersion())); // get the read version before getting a version from the source
 				                                     // database to prevent the time differential from going negative
 
@@ -3070,9 +3073,6 @@ public:
 				statusText = "";
 
 				state UID logUid = wait(backupAgent->getLogUid(tr, tagName));
-
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				state Future<Optional<Value>> fPaused = tr->get(backupAgent->taskBucket->getPauseKey());
 				state Future<RangeResult> fErrorValues =
