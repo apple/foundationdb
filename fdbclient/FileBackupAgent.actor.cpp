@@ -816,8 +816,6 @@ struct AbortFiveZeroBackupTask : TaskFuncBase {
 		state FileBackupAgent backupAgent;
 		state std::string tagName = task->params[BackupAgentBase::keyConfigBackupTag].toString();
 
-		CODE_PROBE(true, "Canceling old backup task");
-
 		TraceEvent(SevInfo, "FileBackupCancelOldTask")
 		    .detail("Task", task->params[Task::reservedTaskParamKeyType])
 		    .detail("TagName", tagName);
@@ -901,8 +899,6 @@ struct AbortFiveOneBackupTask : TaskFuncBase {
 		state FileBackupAgent backupAgent;
 		state BackupConfig config(task);
 		state std::string tagName = wait(config.tag().getOrThrow(tr));
-
-		CODE_PROBE(true, "Canceling 5.1 backup task");
 
 		TraceEvent(SevInfo, "FileBackupCancelFiveOneTask")
 		    .detail("Task", task->params[Task::reservedTaskParamKeyType])

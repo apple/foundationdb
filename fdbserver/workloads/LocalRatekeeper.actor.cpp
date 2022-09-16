@@ -128,7 +128,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(LocalRatekeeperWorkload* self, Database cx) {
 		wait(delay(self->startAfter));
 		state StorageServerInterface ssi = wait(getRandomStorage(cx));
-		g_simulator.disableFor(format("%s/updateStorage", ssi.id().toString().c_str()), now() + self->blockWritesFor);
+		g_simulator->disableFor(format("%s/updateStorage", ssi.id().toString().c_str()), now() + self->blockWritesFor);
 		state Future<Void> done = delay(self->blockWritesFor);
 		// not much will happen until the storage goes over the soft limit
 		wait(delay(double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX / 1e6)));

@@ -61,8 +61,8 @@ struct TargetedKillWorkload : TestWorkload {
 	                          NetworkAddress address,
 	                          Database cx,
 	                          TargetedKillWorkload* self) {
-		if (&g_simulator == g_network) {
-			g_simulator.killInterface(address, ISimulator::KillInstantly);
+		if (g_simulator == g_network) {
+			g_simulator->killInterface(address, ISimulator::KillInstantly);
 			return Void();
 		}
 

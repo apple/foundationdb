@@ -276,4 +276,15 @@ struct BlobGranuleHistoryValue {
 	}
 };
 
+// A manifest to assist full fdb restore from blob granule files
+struct BlobManifest {
+	constexpr static FileIdentifier file_identifier = 298872;
+	VectorRef<KeyValueRef> rows;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rows);
+	}
+};
+
 #endif

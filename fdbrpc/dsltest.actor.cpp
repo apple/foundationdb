@@ -1200,8 +1200,8 @@ void dsltest() {
 	actorTest1(true);
 	actorTest2(true);
 	actorTest3(true);
-	// if (g_network == &g_simulator)
-	// g_simulator.run( actorTest4(true) );
+	// if (g_network == g_simulator)
+	// g_simulator->run( actorTest4(true) );
 	actorTest5();
 	actorTest6();
 	actorTest7();
