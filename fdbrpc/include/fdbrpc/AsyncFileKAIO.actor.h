@@ -364,7 +364,7 @@ public:
 #endif
 
 		KAIOLogEvent(logFile, id, OpLogEntry::SYNC, OpLogEntry::START);
-		double start_time = now();
+		double start_time = timer();
 
 		Future<Void> fsync = throwErrorIfFailed(
 		    Reference<AsyncFileKAIO>::addRef(this),
@@ -376,7 +376,7 @@ public:
 
 		fsync = map(fsync, [=](Void r) mutable {
 			KAIOLogEvent(logFile, id, OpLogEntry::SYNC, OpLogEntry::COMPLETE);
-			getMetrics().syncLatencySample.addMeasurement(now() - start_time);
+			getMetrics().syncLatencySample.addMeasurement(timer() - start_time);
 			return r;
 		});
 
@@ -415,6 +415,7 @@ public:
 			int64_t previousTruncateBytes = ctx.preSubmitTruncateBytes;
 			int64_t largestTruncate = 0;
 
+			double start = timer();
 			for (int i = 0; i < n; i++) {
 				auto io = ctx.queue.top();
 
@@ -422,7 +423,7 @@ public:
 
 				ctx.queue.pop();
 				toStart[i] = io;
-				io->startTime = now();
+				io->startTime = start;
 
 				if (ctx.ioTimeout > 0) {
 					ctx.appendToRequestList(io);
@@ -736,6 +737,8 @@ private:
 					break;
 			}
 
+			double currentTime = timer();
+
 			++ctx.countAIOCollect;
 			// printf("io_getevents: collected %d/%d in %f us (%d queued)\n", n, ctx.outstanding, (timer()-before)*1e6,
 			// ctx.queue.size());
@@ -754,7 +757,6 @@ private:
 			ctx.outstanding -= n;
 
 			if (ctx.ioTimeout > 0) {
-				double currentTime = now();
 				while (ctx.submittedRequestList && currentTime - ctx.submittedRequestList->startTime > ctx.ioTimeout) {
 					ctx.submittedRequestList->timeout(ctx.timeoutWarnOnly);
 					ctx.removeFromRequestList(ctx.submittedRequestList);
@@ -772,10 +774,10 @@ private:
 
 				switch (iob->aio_lio_opcode) {
 				case IO_CMD_PREAD:
-					getMetrics().readLatencySample.addMeasurement(now() - iob->startTime);
+					getMetrics().readLatencySample.addMeasurement(currentTime - iob->startTime);
 					break;
 				case IO_CMD_PWRITE:
-					getMetrics().writeLatencySample.addMeasurement(now() - iob->startTime);
+					getMetrics().writeLatencySample.addMeasurement(currentTime - iob->startTime);
 					break;
 				}
 
