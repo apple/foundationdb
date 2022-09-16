@@ -1,7 +1,8 @@
 [configuration]
 blobGranulesEnabled = true
+allowDefaultTenant = false
 # FIXME: re-enable rocks at some point
-storageEngineExcludeTypes = [4]
+storageEngineExcludeTypes = [4, 5]
 
 [[test]]
 testTitle = 'BlobGranuleVerifyBalanceClean'
@@ -20,3 +21,4 @@ testTitle = 'BlobGranuleVerifyBalanceClean'
     [[test.workload]]
     testName = 'BlobGranuleVerifier'
     testDuration = 120.0
+    enablePurging = false

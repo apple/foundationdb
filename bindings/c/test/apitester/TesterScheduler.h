@@ -33,6 +33,16 @@ using TTaskFct = std::function<void(void)>;
 extern const TTaskFct NO_OP_TASK;
 
 /**
+ * Handle to a scheduled timer
+ */
+class ITimer {
+public:
+	virtual ~ITimer() {}
+
+	virtual void cancel() = 0;
+};
+
+/**
  * Scheduler for asynchronous execution of tasks on a pool of threads
  */
 class IScheduler {
@@ -44,6 +54,9 @@ public:
 
 	// Schedule a task for asynchronous execution
 	virtual void schedule(TTaskFct task) = 0;
+
+	// Schedule a task to be executed with a given delay
+	virtual std::unique_ptr<ITimer> scheduleWithDelay(int delayMs, TTaskFct task) = 0;
 
 	// Gracefully stop the scheduler. Waits for already running tasks to be finish
 	virtual void stop() = 0;

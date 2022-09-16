@@ -96,12 +96,19 @@ public:
 				    .detail("HasMessage", self->cursor->hasMessage())
 				    .detail("Version", self->cursor->version().version);
 
-				if (self->cursor->popped() != 0 || (!self->hasDiscardedData && BUGGIFY_WITH_PROB(0.01))) {
-					TEST(true); // disk adapter reset
-					TraceEvent(SevWarnAlways, "DiskQueueAdapterReset").detail("Version", self->cursor->popped());
+				bool buggify = !self->hasDiscardedData && BUGGIFY_WITH_PROB(0.01);
+				if (self->cursor->popped() != 0 || buggify) {
+					TraceEvent(SevWarnAlways, "DiskQueueAdapterReset")
+					    .detail("Version", self->cursor->popped())
+					    .detail("PeekTypeSwitch", self->peekTypeSwitches % 3);
+					CODE_PROBE(true, "disk adapter reset");
+					if (self->cursor->popped() != 0) {
+						self->recoveryLoc = self->cursor->popped();
+					} else {
+						self->recoveryLoc = self->startLoc;
+					}
 					self->recoveryQueue.clear();
 					self->recoveryQueueDataSize = 0;
-					self->recoveryLoc = self->cursor->popped();
 					self->recoveryQueueLoc = self->recoveryLoc;
 					self->totalRecoveredBytes = 0;
 					if (self->peekTypeSwitches % 3 == 1) {

@@ -7,6 +7,7 @@ import subprocess
 import logging
 import functools
 import json
+import tempfile
 import time
 import random
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
@@ -216,6 +217,26 @@ def kill(logger):
 
 
 @enable_logging()
+def killall(logger):
+    # test is designed to make sure 'kill all' sends all requests simultaneously
+    old_generation = get_value_from_status_json(False, 'cluster', 'generation')
+    # This is currently an issue with fdbcli,
+    # where you need to first run 'kill' to initialize processes' list
+    # and then specify the certain process to kill
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
+    output, error = process.communicate(input='kill; kill all; sleep 1\n'.encode())
+    logger.debug(output)
+    # wait for a second for the cluster recovery
+    time.sleep(1)
+    new_generation = get_value_from_status_json(True, 'cluster', 'generation')
+    logger.debug("Old generation: {}, New generation: {}".format(old_generation, new_generation))
+    # Make sure the kill is not happening sequentially
+    # Pre: each recovery will increase the generated number by 2
+    # Relax the condition to allow one additional recovery happening when we fetched the old generation
+    assert new_generation <= (old_generation + 4)
+
+
+@enable_logging()
 def suspend(logger):
     if not shutil.which("pidof"):
         logger.debug("Skipping suspend test. Pidof not available")
@@ -260,43 +281,31 @@ def suspend(logger):
     assert get_value_from_status_json(False, 'client', 'database_status', 'available')
 
 
-def extract_version_epoch(cli_output):
-    return int(cli_output.split("\n")[-1].split(" ")[-1])
-
-
 @enable_logging()
-def targetversion(logger):
-    version1 = run_fdbcli_command('targetversion getepoch')
+def versionepoch(logger):
+    version1 = run_fdbcli_command('versionepoch')
     assert version1 == "Version epoch is unset"
-    version2 = int(run_fdbcli_command('getversion'))
-    logger.debug("read version: {}".format(version2))
-    assert version2 >= 0
-    # set the version epoch to the default value
-    logger.debug("setting version epoch to default")
-    run_fdbcli_command('targetversion add 0')
-    # get the version epoch
-    versionepoch1 = extract_version_epoch(run_fdbcli_command('targetversion getepoch'))
-    logger.debug("version epoch: {}".format(versionepoch1))
-    # make sure the version increased
-    version3 = int(run_fdbcli_command('getversion'))
-    logger.debug("read version: {}".format(version3))
-    assert version3 >= version2
-    # slightly increase the version epoch
-    versionepoch2 = extract_version_epoch(run_fdbcli_command("targetversion setepoch {}".format(versionepoch1 + 1000000)))
-    logger.debug("version epoch: {}".format(versionepoch2))
-    assert versionepoch2 == versionepoch1 + 1000000
-    # slightly decrease the version epoch
-    versionepoch3 = extract_version_epoch(run_fdbcli_command("targetversion add {}".format(-1000000)))
-    logger.debug("version epoch: {}".format(versionepoch3))
-    assert versionepoch3 == versionepoch2 - 1000000 == versionepoch1
-    # the versions should still be increasing
-    version4 = int(run_fdbcli_command('getversion'))
-    logger.debug("read version: {}".format(version4))
-    assert version4 >= version3
-    # clear the version epoch and make sure it is now unset
-    run_fdbcli_command("targetversion clearepoch")
-    version5 = run_fdbcli_command('targetversion getepoch')
-    assert version5 == "Version epoch is unset"
+    version2 = run_fdbcli_command('versionepoch get')
+    assert version2 == "Version epoch is unset"
+    version3 = run_fdbcli_command('versionepoch commit')
+    assert version3 == "Must set the version epoch before committing it (see `versionepoch enable`)"
+    version4 = run_fdbcli_command('versionepoch enable')
+    assert version4 == "Version epoch enabled. Run `versionepoch commit` to irreversibly jump to the target version"
+    version5 = run_fdbcli_command('versionepoch get')
+    assert version5 == "Current version epoch is 0"
+    version6 = run_fdbcli_command('versionepoch set 10')
+    assert version6 == "Version epoch enabled. Run `versionepoch commit` to irreversibly jump to the target version"
+    version7 = run_fdbcli_command('versionepoch get')
+    assert version7 == "Current version epoch is 10"
+    run_fdbcli_command('versionepoch disable')
+    version8 = run_fdbcli_command('versionepoch get')
+    assert version8 == "Version epoch is unset"
+    version9 = run_fdbcli_command('versionepoch enable')
+    assert version9 == "Version epoch enabled. Run `versionepoch commit` to irreversibly jump to the target version"
+    version10 = run_fdbcli_command('versionepoch get')
+    assert version10 == "Current version epoch is 0"
+    version11 = run_fdbcli_command('versionepoch commit')
+    assert version11.startswith("Current read version is ")
 
 
 def get_value_from_status_json(retry, *args):
@@ -553,6 +562,7 @@ def profile(logger):
     assert output2 == default_profile_client_get_output
     # set rate and size limit
     run_fdbcli_command('profile', 'client', 'set', '0.5', '1GB')
+    time.sleep(1) # global config can take some time to sync
     output3 = run_fdbcli_command('profile', 'client', 'get')
     logger.debug(output3)
     output3_list = output3.split(' ')
@@ -561,6 +571,7 @@ def profile(logger):
     assert output3_list[-1] == '1000000000.'
     # change back to default value and check
     run_fdbcli_command('profile', 'client', 'set', 'default', 'default')
+    time.sleep(1) # global config can take some time to sync
     assert run_fdbcli_command('profile', 'client', 'get') == default_profile_client_get_output
 
 
@@ -582,6 +593,7 @@ def triggerddteaminfolog(logger):
     output = run_fdbcli_command('triggerddteaminfolog')
     assert output == 'Triggered team info logging in data distribution.'
 
+
 @enable_logging()
 def tenants(logger):
     output = run_fdbcli_command('listtenants')
@@ -590,7 +602,7 @@ def tenants(logger):
     output = run_fdbcli_command('createtenant tenant')
     assert output == 'The tenant `tenant\' has been created'
 
-    output = run_fdbcli_command('createtenant tenant2')
+    output = run_fdbcli_command('createtenant tenant2 tenant_group=tenant_group2')
     assert output == 'The tenant `tenant2\' has been created'
 
     output = run_fdbcli_command('listtenants')
@@ -607,10 +619,78 @@ def tenants(logger):
 
     output = run_fdbcli_command('gettenant tenant')
     lines = output.split('\n')
-    assert len(lines) == 2
+    assert len(lines) == 3
     assert lines[0].strip().startswith('id: ')
     assert lines[1].strip().startswith('prefix: ')
-    
+    assert lines[2].strip() == 'tenant state: ready'
+
+    output = run_fdbcli_command('gettenant tenant JSON')
+    json_output = json.loads(output, strict=False)
+    assert(len(json_output) == 2)
+    assert('tenant' in json_output)
+    assert(json_output['type'] == 'success')
+    assert(len(json_output['tenant']) == 4)
+    assert('id' in json_output['tenant'])
+    assert('encrypted' in json_output['tenant'])
+    assert('prefix' in json_output['tenant'])
+    assert(len(json_output['tenant']['prefix']) == 2)
+    assert('base64' in json_output['tenant']['prefix'])
+    assert('printable' in json_output['tenant']['prefix'])
+    assert(json_output['tenant']['tenant_state'] == 'ready')
+
+    output = run_fdbcli_command('gettenant tenant2')
+    lines = output.split('\n')
+    assert len(lines) == 4
+    assert lines[0].strip().startswith('id: ')
+    assert lines[1].strip().startswith('prefix: ')
+    assert lines[2].strip() == 'tenant state: ready'
+    assert lines[3].strip() == 'tenant group: tenant_group2'
+
+    output = run_fdbcli_command('gettenant tenant2 JSON')
+    json_output = json.loads(output, strict=False)
+    assert(len(json_output) == 2)
+    assert('tenant' in json_output)
+    assert(json_output['type'] == 'success')
+    assert(len(json_output['tenant']) == 5)
+    assert('id' in json_output['tenant'])
+    assert('encrypted' in json_output['tenant'])
+    assert('prefix' in json_output['tenant'])
+    assert(json_output['tenant']['tenant_state'] == 'ready')
+    assert('tenant_group' in json_output['tenant'])
+    assert(len(json_output['tenant']['tenant_group']) == 2)
+    assert('base64' in json_output['tenant']['tenant_group'])
+    assert(json_output['tenant']['tenant_group']['printable'] == 'tenant_group2')
+
+    output = run_fdbcli_command('configuretenant tenant tenant_group=tenant_group1')
+    assert output == 'The configuration for tenant `tenant\' has been updated'
+
+    output = run_fdbcli_command('gettenant tenant')
+    lines = output.split('\n')
+    assert len(lines) == 4
+    assert lines[3].strip() == 'tenant group: tenant_group1'
+
+    output = run_fdbcli_command('configuretenant tenant unset tenant_group')
+    assert output == 'The configuration for tenant `tenant\' has been updated'
+
+    output = run_fdbcli_command('gettenant tenant')
+    lines = output.split('\n')
+    assert len(lines) == 3
+
+    output = run_fdbcli_command_and_get_error('configuretenant tenant tenant_group=tenant_group1 tenant_group=tenant_group2')
+    assert output == 'ERROR: configuration parameter `tenant_group\' specified more than once.'
+
+    output = run_fdbcli_command_and_get_error('configuretenant tenant unset')
+    assert output == 'ERROR: `unset\' specified without a configuration parameter.'
+
+    output = run_fdbcli_command_and_get_error('configuretenant tenant unset tenant_group=tenant_group1')
+    assert output == 'ERROR: unrecognized configuration parameter `tenant_group=tenant_group1\'.'
+
+    output = run_fdbcli_command_and_get_error('configuretenant tenant tenant_group')
+    assert output == 'ERROR: invalid configuration string `tenant_group\'. String must specify a value using `=\'.'
+
+    output = run_fdbcli_command_and_get_error('configuretenant tenant3 tenant_group=tenant_group1')
+    assert output == 'ERROR: Tenant does not exist (2131)'
+
     output = run_fdbcli_command('usetenant')
     assert output == 'Using the default tenant'
 
@@ -652,7 +732,8 @@ def tenants(logger):
     assert lines[3] == '`tenant_test\' is `default_tenant\''
 
     process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env)
-    cmd_sequence = ['writemode on', 'usetenant tenant', 'clear tenant_test', 'deletetenant tenant', 'get tenant_test', 'defaulttenant', 'usetenant tenant']
+    cmd_sequence = ['writemode on', 'usetenant tenant', 'clear tenant_test',
+                    'deletetenant tenant', 'get tenant_test', 'defaulttenant', 'usetenant tenant']
     output, error_output = process.communicate(input='\n'.join(cmd_sequence).encode())
 
     lines = output.decode().strip().split('\n')[-7:]
@@ -679,6 +760,78 @@ def tenants(logger):
     assert lines[3] == 'The tenant `tenant2\' has been deleted'
 
     run_fdbcli_command('writemode on; clear tenant_test')
+
+def integer_options():
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env)
+    cmd_sequence = ['option on TIMEOUT 1000', 'writemode on', 'clear foo']
+    output, error_output = process.communicate(input='\n'.join(cmd_sequence).encode())
+
+    lines = output.decode().strip().split('\n')[-2:]
+    assert lines[0] == 'Option enabled for all transactions'
+    assert lines[1].startswith('Committed')
+    assert error_output == b''
+
+def tls_address_suffix():
+    # fdbcli shall prevent a non-TLS fdbcli run from connecting to an all-TLS cluster, and vice versa
+    preamble = 'eNW1yf1M:eNW1yf1M@'
+    def make_addr(port: int, tls: bool = False):
+        return "127.0.0.1:{}{}".format(port, ":tls" if tls else "")
+    testcases = [
+        # IsServerTLS, NumServerAddrs
+        (True, 1),
+        (False, 1),
+        (True, 3),
+        (False, 3),
+    ]
+    err_output_server_no_tls = "ERROR: fdbcli is configured with TLS, but none of the coordinators have TLS addresses."
+    err_output_server_tls = "ERROR: fdbcli is not configured with TLS, but all of the coordinators have TLS addresses."
+
+    # technically the contents of the certs and key files are not evaluated
+    # before tls-suffix check against tls configuration takes place,
+    # but we generate the certs and keys anyway to avoid
+    # imposing nuanced TLSConfig evaluation ordering requirement on the testcase
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cert_file = tmpdir + "/client-cert.pem"
+        key_file = tmpdir + "/client-key.pem"
+        ca_file = tmpdir + "/server-ca.pem"
+        mkcert_process = subprocess.run([
+                args.build_dir + "/bin/mkcert",
+                "--server-chain-length", "1",
+                "--client-chain-length", "1",
+                "--server-cert-file", tmpdir + "/server-cert.pem",
+                "--client-cert-file", tmpdir + "/client-cert.pem",
+                "--server-key-file", tmpdir + "/server-key.pem",
+                "--client-key-file", tmpdir + "/client-key.pem",
+                "--server-ca-file", tmpdir + "/server-ca.pem",
+                "--client-ca-file", tmpdir + "/client-ca.pem",
+            ],
+            capture_output=True)
+        if mkcert_process.returncode != 0:
+            print("mkcert returned with code {}".format(mkcert_process.returncode))
+            print("Output:\n{}{}\n".format(
+                        mkcert_process.stdout.decode("utf8").strip(),
+                        mkcert_process.stderr.decode("utf8").strip()))
+            assert False
+        cluster_fn = tmpdir + "/fdb.cluster"
+        for testcase in testcases:
+            is_server_tls, num_server_addrs = testcase
+            with open(cluster_fn, "w") as fp:
+                fp.write(preamble + ",".join(
+                    [make_addr(port=4000 + addr_idx, tls=is_server_tls) for addr_idx in range(num_server_addrs)]))
+                fp.close()
+                tls_args = ["--tls-certificate-file",
+                            cert_file,
+                            "--tls-key-file",
+                            key_file,
+                            "--tls-ca-file",
+                            ca_file] if not is_server_tls else []
+                fdbcli_process = subprocess.run(command_template[:2] + [cluster_fn] + tls_args, capture_output=True)
+                assert fdbcli_process.returncode != 0
+                err_out = fdbcli_process.stderr.decode("utf8").strip()
+                if is_server_tls:
+                    assert err_out == err_output_server_tls, f"unexpected output: {err_out}"
+                else:
+                    assert err_out == err_output_server_no_tls, f"unexpected output: {err_out}"
 
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter,
@@ -724,12 +877,13 @@ if __name__ == '__main__':
         throttle()
         triggerddteaminfolog()
         tenants()
-        # TODO: similar to advanceversion, this seems to cause some issues, so disable for now
-        # This must go last, otherwise the version advancement can mess with the other tests
-        # targetversion()
+        versionepoch()
+        integer_options()
+        tls_address_suffix()
     else:
         assert args.process_number > 1, "Process number should be positive"
         coordinators()
         exclude()
+        killall()
         # TODO: fix the failure where one process is not available after setclass call
-        #setclass()
+        # setclass()

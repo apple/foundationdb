@@ -20,8 +20,9 @@
 
 #include "fdbrpc/HTTP.h"
 
-#include "fdbclient/md5/md5.h"
-#include "fdbclient/libb64/encode.h"
+#include "md5/md5.h"
+#include "libb64/encode.h"
+#include "flow/Knobs.h"
 #include <cctype>
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -151,7 +152,7 @@ ACTOR Future<size_t> read_delimited_into_string(Reference<IConnection> conn,
 		// Next search will start at the current end of the buffer - delim size + 1
 		if (sPos >= lookBack)
 			sPos -= lookBack;
-		wait(success(read_into_string(conn, buf, CLIENT_KNOBS->HTTP_READ_SIZE)));
+		wait(success(read_into_string(conn, buf, FLOW_KNOBS->HTTP_READ_SIZE)));
 	}
 }
 
@@ -159,7 +160,7 @@ ACTOR Future<size_t> read_delimited_into_string(Reference<IConnection> conn,
 ACTOR Future<Void> read_fixed_into_string(Reference<IConnection> conn, int len, std::string* buf, size_t pos) {
 	state int stop_size = pos + len;
 	while (buf->size() < stop_size)
-		wait(success(read_into_string(conn, buf, CLIENT_KNOBS->HTTP_READ_SIZE)));
+		wait(success(read_into_string(conn, buf, FLOW_KNOBS->HTTP_READ_SIZE)));
 	return Void();
 }
 
@@ -181,6 +182,8 @@ ACTOR Future<Void> read_http_response_headers(Reference<IConnection> conn,
 		int nameEnd = -1, valueStart = -1, valueEnd = -1;
 		int len = -1;
 
+		std::string name, value;
+
 		// Read header of the form "Name: Value\n"
 		// Note that multi line header values are not supported here.
 		// Format string breaks down as follows:
@@ -190,20 +193,28 @@ ACTOR Future<Void> read_http_response_headers(Reference<IConnection> conn,
 		//   %*1[\r]       Exactly one \r
 		//   %*1[\n]       Exactly one \n
 		//   %n            Save final end position
-		if (sscanf(buf->c_str() + *pos,
-		           "%*[^:]%n:%*[ \t]%n%*[^\r]%n%*1[\r]%*1[\n]%n",
-		           &nameEnd,
-		           &valueStart,
-		           &valueEnd,
-		           &len) >= 0 &&
-		    len > 0) {
-			const std::string name(buf->substr(*pos, nameEnd));
-			const std::string value(buf->substr(*pos + valueStart, valueEnd - valueStart));
-			(*headers)[name] = value;
-			*pos += len;
-			len = -1;
-		} else // Malformed header line (at least according to this simple parsing)
+		if (sscanf(buf->c_str() + *pos, "%*[^:]%n:%*[ \t]%n", &nameEnd, &valueStart) >= 0 && valueStart > 0) {
+			// found a header name
+			name = std::string(buf->substr(*pos, nameEnd));
+			*pos += valueStart;
+		} else {
+			// Malformed header line (at least according to this simple parsing)
 			throw http_bad_response();
+		}
+
+		if (sscanf(buf->c_str() + *pos, "%*[^\r]%n%*1[\r]%*1[\n]%n", &valueEnd, &len) >= 0 && len > 0) {
+			// found a header value
+			value = std::string(buf->substr(*pos, valueEnd));
+			*pos += len;
+		} else if (sscanf(buf->c_str() + *pos, "%*1[\r]%*1[\n]%n", &len) >= 0 && len > 0) {
+			// empty header value
+			*pos += len;
+		} else {
+			// Malformed header line (at least according to this simple parsing)
+			throw http_bad_response();
+		}
+
+		(*headers)[name] = value;
 	}
 }
 
@@ -214,7 +225,7 @@ ACTOR Future<Void> read_http_response(Reference<HTTP::Response> r, Reference<ICo
 	state std::string buf;
 	state size_t pos = 0;
 
-	// Read HTTP reponse code and version line
+	// Read HTTP response code and version line
 	size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &buf, pos));
 
 	int reachedEnd = -1;
@@ -316,9 +327,15 @@ ACTOR Future<Void> read_http_response(Reference<HTTP::Response> r, Reference<ICo
 	}
 
 	// If there is actual response content, check the MD5 sum against the Content-MD5 response header
-	if (r->content.size() > 0)
-		if (!r->verifyMD5(false)) // false arg means do not fail if the Content-MD5 header is missing.
+	if (r->content.size() > 0) {
+		if (r->code == 206 && FLOW_KNOBS->HTTP_RESPONSE_SKIP_VERIFY_CHECKSUM_FOR_PARTIAL_CONTENT) {
+			return Void();
+		}
+
+		if (!r->verifyMD5(false)) { // false arg means do not fail if the Content-MD5 header is missing.
 			throw http_bad_response();
+		}
+	}
 
 	return Void();
 }
@@ -350,7 +367,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 	// There is no standard http request id header field, so either a global default can be set via a knob
 	// or it can be set per-request with the requestIDHeader argument (which overrides the default)
 	if (requestIDHeader.empty()) {
-		requestIDHeader = CLIENT_KNOBS->HTTP_REQUEST_ID_HEADER;
+		requestIDHeader = FLOW_KNOBS->HTTP_REQUEST_ID_HEADER;
 	}
 
 	state bool earlyResponse = false;
@@ -382,19 +399,19 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 		// Prepend headers to content packer buffer chain
 		pContent->prependWriteBuffer(pFirst, pLast);
 
-		if (CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 1)
+		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 1)
 			printf("[%s] HTTP starting %s %s ContentLen:%d\n",
 			       conn->getDebugID().toString().c_str(),
 			       verb.c_str(),
 			       resource.c_str(),
 			       contentLen);
-		if (CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
+		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
 			for (auto h : headers)
 				printf("Request Header: %s: %s\n", h.first.c_str(), h.second.c_str());
 		}
 
 		state Reference<HTTP::Response> r(new HTTP::Response());
-		state Future<Void> responseReading = r->read(conn, verb == "HEAD" || verb == "DELETE");
+		state Future<Void> responseReading = r->read(conn, verb == "HEAD" || verb == "DELETE" || verb == "CONNECT");
 
 		send_start = timer();
 
@@ -409,7 +426,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 				break;
 			}
 
-			state int trySend = CLIENT_KNOBS->HTTP_SEND_SIZE;
+			state int trySend = FLOW_KNOBS->HTTP_SEND_SIZE;
 			wait(sendRate->getAllowance(trySend));
 			int len = conn->write(pContent->getUnsent(), trySend);
 			if (pSent != nullptr)
@@ -463,7 +480,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 			}
 		}
 
-		if (CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0) {
+		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 0) {
 			printf("[%s] HTTP %scode=%d early=%d, time=%fs %s %s contentLen=%d [%d out, response content len %d]\n",
 			       conn->getDebugID().toString().c_str(),
 			       (err.present() ? format("*ERROR*=%s ", err.get().name()).c_str() : ""),
@@ -476,7 +493,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 			       total_sent,
 			       (int)r->contentLen);
 		}
-		if (CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
+		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
 			printf("[%s] HTTP RESPONSE:  %s %s\n%s\n",
 			       conn->getDebugID().toString().c_str(),
 			       verb.c_str(),
@@ -492,7 +509,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 	} catch (Error& e) {
 		double elapsed = timer() - send_start;
 		// A bad_request_id error would have already been logged in verbose mode before err is thrown above.
-		if (CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0 && e.code() != error_code_http_bad_request_id) {
+		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 0 && e.code() != error_code_http_bad_request_id) {
 			printf("[%s] HTTP *ERROR*=%s early=%d, time=%fs %s %s contentLen=%d [%d out]\n",
 			       conn->getDebugID().toString().c_str(),
 			       e.name(),
@@ -506,6 +523,137 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 		event.errorUnsuppressed(e);
 		throw;
 	}
+}
+
+ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
+                                           std::string remoteHost,
+                                           std::string remoteService) {
+	state Headers headers;
+	headers["Host"] = remoteHost + ":" + remoteService;
+	headers["Accept"] = "application/xml";
+	headers["Proxy-Connection"] = "Keep-Alive";
+	state int requestTimeout = 60;
+	state int maxTries = FLOW_KNOBS->RESTCLIENT_CONNECT_TRIES;
+	state int thisTry = 1;
+	state double nextRetryDelay = 2.0;
+	state Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
+	state int64_t bytes_sent = 0;
+
+	loop {
+		state Optional<Error> err;
+		state Reference<Response> r;
+
+		try {
+			Reference<Response> _r = wait(timeoutError(doRequest(conn,
+			                                                     "CONNECT",
+			                                                     remoteHost + ":" + remoteService,
+			                                                     headers,
+			                                                     nullptr,
+			                                                     0,
+			                                                     sendReceiveRate,
+			                                                     &bytes_sent,
+			                                                     sendReceiveRate),
+			                                           requestTimeout));
+			r = _r;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			err = e;
+		}
+
+		// If err is not present then r is valid.
+		// If r->code is in successCodes then record the successful request and return r.
+		if (!err.present() && r->code == 200) {
+			return Void();
+		}
+
+		// All errors in err are potentially retryable as well as certain HTTP response codes...
+		bool retryable = err.present() || r->code == 500 || r->code == 502 || r->code == 503 || r->code == 429;
+
+		// But only if our previous attempt was not the last allowable try.
+		retryable = retryable && (thisTry < maxTries);
+
+		TraceEvent event(SevWarn, retryable ? "ProxyConnectCommandFailedRetryable" : "ProxyConnectCommandFailed");
+
+		// Attach err to trace event if present, otherwise extract some stuff from the response
+		if (err.present()) {
+			event.errorUnsuppressed(err.get());
+		}
+		event.suppressFor(60);
+		if (!err.present()) {
+			event.detail("ResponseCode", r->code);
+		}
+
+		event.detail("ThisTry", thisTry);
+
+		// If r is not valid or not code 429 then increment the try count.  429's will not count against the attempt
+		// limit.
+		if (!r || r->code != 429)
+			++thisTry;
+
+		// We will wait delay seconds before the next retry, start with nextRetryDelay.
+		double delay = nextRetryDelay;
+		// Double but limit the *next* nextRetryDelay.
+		nextRetryDelay = std::min(nextRetryDelay * 2, 60.0);
+
+		if (retryable) {
+			// If r is valid then obey the Retry-After response header if present.
+			if (r) {
+				auto iRetryAfter = r->headers.find("Retry-After");
+				if (iRetryAfter != r->headers.end()) {
+					event.detail("RetryAfterHeader", iRetryAfter->second);
+					char* pEnd;
+					double retryAfter = strtod(iRetryAfter->second.c_str(), &pEnd);
+					if (*pEnd) // If there were other characters then don't trust the parsed value, use a probably safe
+					           // value of 5 minutes.
+						retryAfter = 300;
+					// Update delay
+					delay = std::max(delay, retryAfter);
+				}
+			}
+
+			// Log the delay then wait.
+			event.detail("RetryDelay", delay);
+			wait(::delay(delay));
+		} else {
+			// We can't retry, so throw something.
+
+			// This error code means the authentication header was not accepted, likely the account or key is wrong.
+			if (r && r->code == 406)
+				throw http_not_accepted();
+
+			if (r && r->code == 401)
+				throw http_auth_failed();
+
+			throw connection_failed();
+		}
+	}
+}
+
+ACTOR Future<Reference<IConnection>> proxyConnectImpl(std::string remoteHost,
+                                                      std::string remoteService,
+                                                      std::string proxyHost,
+                                                      std::string proxyService) {
+	state NetworkAddress remoteEndpoint =
+	    wait(map(INetworkConnections::net()->resolveTCPEndpoint(remoteHost, remoteService),
+	             [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
+		             NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
+		             addr.fromHostname = true;
+		             addr.flags = NetworkAddress::FLAG_TLS;
+		             return addr;
+	             }));
+	state Reference<IConnection> connection = wait(INetworkConnections::net()->connect(proxyHost, proxyService));
+	wait(sendProxyConnectRequest(connection, remoteHost, remoteService));
+	boost::asio::ip::tcp::socket socket = std::move(connection->getSocket());
+	Reference<IConnection> remoteConnection = wait(INetworkConnections::net()->connect(remoteEndpoint, &socket));
+	return remoteConnection;
+}
+
+Future<Reference<IConnection>> proxyConnect(const std::string& remoteHost,
+                                            const std::string& remoteService,
+                                            const std::string& proxyHost,
+                                            const std::string& proxyService) {
+	return proxyConnectImpl(remoteHost, remoteService, proxyHost, proxyService);
 }
 
 } // namespace HTTP

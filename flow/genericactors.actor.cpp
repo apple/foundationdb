@@ -68,6 +68,24 @@ ACTOR Future<Void> timeoutWarningCollector(FutureStream<Void> input, double logD
 	}
 }
 
+ACTOR Future<Void> waitForMost(std::vector<Future<ErrorOr<Void>>> futures,
+                               int faultTolerance,
+                               Error e,
+                               double waitMultiplierForSlowFutures) {
+	state std::vector<Future<bool>> successFutures;
+	state double startTime = now();
+	successFutures.reserve(futures.size());
+	for (const auto& future : futures) {
+		successFutures.push_back(fmap([](auto const& result) { return result.present(); }, future));
+	}
+	bool success = wait(quorumEqualsTrue(successFutures, successFutures.size() - faultTolerance));
+	if (!success) {
+		throw e;
+	}
+	wait(delay((now() - startTime) * waitMultiplierForSlowFutures) || waitForAll(successFutures));
+	return Void();
+}
+
 ACTOR Future<bool> quorumEqualsTrue(std::vector<Future<bool>> futures, int required) {
 	state std::vector<Future<Void>> true_futures;
 	state std::vector<Future<Void>> false_futures;
@@ -168,6 +186,14 @@ ACTOR Future<Void> testSubscriber(Reference<IAsyncListener<int>> output, Optiona
 	}
 }
 
+static Future<ErrorOr<Void>> goodTestFuture(double duration) {
+	return tag(delay(duration), ErrorOr<Void>(Void()));
+}
+
+static Future<ErrorOr<Void>> badTestFuture(double duration, Error e) {
+	return tag(delay(duration), ErrorOr<Void>(e));
+}
+
 } // namespace
 
 TEST_CASE("/flow/genericactors/AsyncListener") {
@@ -180,3 +206,55 @@ TEST_CASE("/flow/genericactors/AsyncListener") {
 	ASSERT(!subscriber2.isReady());
 	return Void();
 }
+
+TEST_CASE("/flow/genericactors/WaitForMost") {
+	state std::vector<Future<ErrorOr<Void>>> futures;
+	{
+		futures = { goodTestFuture(1), goodTestFuture(2), goodTestFuture(3) };
+		wait(waitForMost(futures, 1, operation_failed(), 0.0)); // Don't wait for slowest future
+		ASSERT(!futures[2].isReady());
+	}
+	{
+		futures = { goodTestFuture(1), goodTestFuture(2), goodTestFuture(3) };
+		wait(waitForMost(futures, 0, operation_failed(), 0.0)); // Wait for all futures
+		ASSERT(futures[2].isReady());
+	}
+	{
+		futures = { goodTestFuture(1), goodTestFuture(2), goodTestFuture(3) };
+		wait(waitForMost(futures, 1, operation_failed(), 1.0)); // Wait for slowest future
+		ASSERT(futures[2].isReady());
+	}
+	{
+		futures = { goodTestFuture(1), goodTestFuture(2), badTestFuture(1, success()) };
+		wait(waitForMost(futures, 1, operation_failed(), 1.0)); // Error ignored
+	}
+	{
+		futures = { goodTestFuture(1), goodTestFuture(2), badTestFuture(1, success()) };
+		try {
+			wait(waitForMost(futures, 0, operation_failed(), 1.0));
+			ASSERT(false);
+		} catch (Error& e) {
+			ASSERT_EQ(e.code(), error_code_operation_failed);
+		}
+	}
+	return Void();
+}
+
+#if false
+TEST_CASE("/flow/genericactors/generic/storeTuple") {
+	state std::vector<UID> resA;
+	state int resB;
+	state double resC;
+
+	state Promise<std::tuple<std::vector<UID>, int, double>> promise;
+
+	auto future = storeTuple(promise.getFuture(), resA, resB, resC);
+
+	promise.send(std::make_tuple(std::vector<UID>(10), 15, 2.0));
+	wait(ready(future));
+	ASSERT(resA.size() == 10);
+	ASSERT(resB == 15);
+	ASSERT(resC == 2.0);
+	return Void();
+}
+#endif

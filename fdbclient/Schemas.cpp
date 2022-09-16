@@ -25,9 +25,13 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
       "storage_wiggler": {
+         "error": "some error description",
          "wiggle_server_ids":["0ccb4e0feddb55"],
          "wiggle_server_addresses": ["127.0.0.1"],
          "primary": {
+            "state": {"$enum":["running", "paused", "unknown"]},
+            "last_state_change_datetime": "2022-04-02 00:05:05.123 +0000",
+            "last_state_change_timestamp": 1648857905.123,
             "last_round_start_datetime": "2022-04-02 00:05:05.123 +0000",
             "last_round_start_timestamp": 1648857905.123,
             "last_round_finish_datetime": "1970-01-01 00:00:00.000 +0000",
@@ -42,6 +46,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "finished_wiggle": 1
          },
          "remote": {
+            "state": {"$enum":["running", "paused", "unknown"]},
+            "last_state_change_datetime": "2022-04-02 00:05:05.123 +0000",
+            "last_state_change_timestamp": 1648857905.123,
             "last_round_start_datetime": "2022-04-02 00:05:05.123 +0000",
             "last_round_start_timestamp": 1648857905.123,
             "last_round_finish_datetime": "1970-01-01 00:00:00.000 +0000",
@@ -138,7 +145,21 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   },
                   "storage_metadata":{
                      "created_time_datetime":"1970-01-01 00:00:00.000 +0000",
-                     "created_time_timestamp": 0
+                     "created_time_timestamp": 0,
+                     "storage_engine":{
+                     "$enum":[
+                     "ssd",
+                     "ssd-1",
+                     "ssd-2",
+                     "ssd-redwood-1-experimental",
+                     "ssd-rocksdb-v1",
+                     "ssd-sharded-rocksdb",
+                     "memory",
+                     "memory-1",
+                     "memory-2",
+                     "memory-radixtree-beta",
+                     "unknown"
+                     ]}
                   },
                   "data_version":12341234,
                   "durable_version":12341234,
@@ -288,7 +309,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "available_bytes":0,
                "limit_bytes":0,
                "unused_allocated_memory":0,
-               "used_bytes":0
+               "used_bytes":0,
+               "rss_bytes":0
             },
             "messages":[
                {
@@ -406,7 +428,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "log_server_min_free_space",
                   "log_server_min_free_space_ratio",
                   "storage_server_durability_lag",
-                  "storage_server_list_fetch_failed"
+                  "storage_server_list_fetch_failed",
+                  "blob_worker_lag",
+                  "blob_worker_missing"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -427,7 +451,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "log_server_min_free_space",
                   "log_server_min_free_space_ratio",
                   "storage_server_durability_lag",
-                  "storage_server_list_fetch_failed"
+                  "storage_server_list_fetch_failed",
+                  "blob_worker_lag",
+                  "blob_worker_missing"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -555,7 +581,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "duplicate_mutation_streams",
                   "duplicate_mutation_fetch_timeout",
                   "primary_dc_missing",
-                  "fetch_primary_dc_timeout"
+                  "fetch_primary_dc_timeout",
+                  "fetch_storage_wiggler_stats_timeout"
                ]
             },
             "issues":[
@@ -705,6 +732,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       "maintenance_seconds_remaining":1.0,
       "data_distribution_disabled_for_ss_failures":true,
       "data_distribution_disabled_for_rebalance":true,
+      "data_distribution_disabled_hex": "1",
       "data_distribution_disabled":true,
       "active_primary_dc":"pv",
       "bounce_impact":{
@@ -822,6 +850,11 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "disabled",
              "optional_experimental",
              "required_experimental"
+         ]},
+         "encryption_at_rest_mode": {
+             "$enum":[
+             "disabled",
+             "aes_256_ctr"
          ]}
       },
       "consistency_scan_info":{
@@ -928,6 +961,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                "logical_core_utilization":0.4
             }
          }
+      },
+      "tenants":{
+         "num_tenants":0
       }
    },
    "client":{

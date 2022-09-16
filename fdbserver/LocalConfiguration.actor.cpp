@@ -65,7 +65,7 @@ class LocalConfigurationImpl {
 					configClassToKnobToValue[configPath.back()] = {};
 				}
 			} else {
-				TEST(true); // Invalid configuration path
+				CODE_PROBE(true, "Invalid configuration path");
 				if (!g_network->isSimulated()) {
 					fprintf(stderr, "WARNING: Invalid configuration path: `%s'\n", paramString.c_str());
 				}
@@ -88,7 +88,7 @@ class LocalConfigurationImpl {
 					knobCollection.setKnob(knobName.toString(), knobValue);
 				} catch (Error& e) {
 					if (e.code() == error_code_invalid_option_value) {
-						TEST(true); // invalid knob in configuration database
+						CODE_PROBE(true, "invalid knob in configuration database");
 						TraceEvent(SevWarnAlways, "InvalidKnobOptionValue")
 						    .detail("KnobName", knobName)
 						    .detail("KnobValue", knobValue.toString());
@@ -126,19 +126,10 @@ class LocalConfigurationImpl {
 					this->overrides[stringToKeyRef(knobName)] = knobValue;
 				} catch (Error& e) {
 					if (e.code() == error_code_invalid_option) {
-						TEST(true); // Attempted to manually set invalid knob option
-						if (!g_network->isSimulated()) {
-							fprintf(stderr, "WARNING: Unrecognized knob option '%s'\n", knobName.c_str());
-						}
+						CODE_PROBE(true, "Attempted to manually set invalid knob option");
 						TraceEvent(SevWarnAlways, "UnrecognizedKnobOption").detail("Knob", printable(knobName));
 					} else if (e.code() == error_code_invalid_option_value) {
-						TEST(true); // Invalid manually set knob value
-						if (!g_network->isSimulated()) {
-							fprintf(stderr,
-							        "WARNING: Invalid value '%s' for knob option '%s'\n",
-							        knobValueString.c_str(),
-							        knobName.c_str());
-						}
+						CODE_PROBE(true, "Invalid manually set knob value");
 						TraceEvent(SevWarnAlways, "InvalidKnobValue")
 						    .detail("Knob", printable(knobName))
 						    .detail("Value", printable(knobValueString));
@@ -207,7 +198,7 @@ class LocalConfigurationImpl {
 		state ConfigKnobOverrides storedConfigPath =
 		    BinaryReader::fromStringRef<ConfigKnobOverrides>(storedConfigPathValue.get(), IncludeVersion());
 		if (!storedConfigPath.hasSameConfigPath(self->configKnobOverrides)) {
-			TEST(true); // All local information is outdated
+			CODE_PROBE(true, "All local information is outdated");
 			wait(clearKVStore(self));
 			wait(saveConfigPath(self));
 			self->updateInMemoryState(lastSeenVersion);
@@ -237,7 +228,8 @@ class LocalConfigurationImpl {
 
 	ACTOR static Future<Void> setSnapshot(LocalConfigurationImpl* self,
 	                                      std::map<ConfigKey, KnobValue> snapshot,
-	                                      Version snapshotVersion) {
+	                                      Version snapshotVersion,
+	                                      double restartDelay) {
 		if (snapshotVersion <= self->lastSeenVersion) {
 			TraceEvent(SevWarnAlways, "LocalConfigGotOldSnapshot", self->id)
 			    .detail("NewSnapshotVersion", snapshotVersion)
@@ -258,6 +250,9 @@ class LocalConfigurationImpl {
 		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(snapshotVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
 		if (restartRequired) {
+			if (restartDelay > 0) {
+				wait(delay(restartDelay));
+			}
 			throw local_config_changed();
 		}
 		self->updateInMemoryState(snapshotVersion);
@@ -266,7 +261,8 @@ class LocalConfigurationImpl {
 
 	ACTOR static Future<Void> addChanges(LocalConfigurationImpl* self,
 	                                     Standalone<VectorRef<VersionedConfigMutationRef>> changes,
-	                                     Version mostRecentVersion) {
+	                                     Version mostRecentVersion,
+	                                     double restartDelay) {
 		// TODO: Concurrency control?
 		++self->changeRequestsFetched;
 		state bool restartRequired = false;
@@ -280,7 +276,7 @@ class LocalConfigurationImpl {
 			++self->mutations;
 			const auto& mutation = versionedMutation.mutation;
 			{
-				TraceEvent te(SevDebug, "LocalConfigAddingChange", self->id);
+				TraceEvent te(SevInfo, "LocalConfigAddingChange", self->id);
 				te.detail("ConfigClass", mutation.getConfigClass())
 				    .detail("Version", versionedMutation.version)
 				    .detail("KnobName", mutation.getKnobName());
@@ -302,6 +298,9 @@ class LocalConfigurationImpl {
 		self->kvStore->set(KeyValueRef(lastSeenVersionKey, BinaryWriter::toValue(mostRecentVersion, IncludeVersion())));
 		wait(self->kvStore->commit());
 		if (restartRequired) {
+			if (restartDelay > 0) {
+				wait(delay(restartDelay));
+			}
 			throw local_config_changed();
 		}
 		self->updateInMemoryState(mostRecentVersion);
@@ -313,11 +312,12 @@ class LocalConfigurationImpl {
 		loop {
 			choose {
 				when(state ConfigBroadcastSnapshotRequest snapshotReq = waitNext(broadcaster.snapshot.getFuture())) {
-					wait(setSnapshot(self, std::move(snapshotReq.snapshot), snapshotReq.version));
+					wait(setSnapshot(
+					    self, std::move(snapshotReq.snapshot), snapshotReq.version, snapshotReq.restartDelay));
 					snapshotReq.reply.send(ConfigBroadcastSnapshotReply{});
 				}
 				when(state ConfigBroadcastChangesRequest req = waitNext(broadcaster.changes.getFuture())) {
-					wait(self->addChanges(req.changes, req.mostRecentVersion));
+					wait(self->addChanges(req.changes, req.mostRecentVersion, req.restartDelay));
 					req.reply.send(ConfigBroadcastChangesReply{});
 				}
 			}
@@ -351,8 +351,10 @@ public:
 		    "LocalConfigurationMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "LocalConfigurationMetrics");
 	}
 
-	Future<Void> addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> changes, Version mostRecentVersion) {
-		return addChanges(this, changes, mostRecentVersion);
+	Future<Void> addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> changes,
+	                        Version mostRecentVersion,
+	                        double restartDelay) {
+		return addChanges(this, changes, mostRecentVersion, restartDelay);
 	}
 
 	FlowKnobs const& getFlowKnobs() const { return getKnobs().getFlowKnobs(); }
@@ -456,8 +458,9 @@ Future<Void> LocalConfiguration::consume(ConfigBroadcastInterface const& broadca
 }
 
 Future<Void> LocalConfiguration::addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> changes,
-                                            Version mostRecentVersion) {
-	return impl->addChanges(changes, mostRecentVersion);
+                                            Version mostRecentVersion,
+                                            double restartDelay) {
+	return impl->addChanges(changes, mostRecentVersion, restartDelay);
 }
 
 void LocalConfiguration::close() {

@@ -28,23 +28,26 @@ void forceLinkFlowTests();
 void forceLinkVersionedMapTests();
 void forceLinkMemcpyTests();
 void forceLinkMemcpyPerfTests();
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 void forceLinkStreamCipherTests();
 void forceLinkBlobCipherTests();
-#endif
 void forceLinkParallelStreamTests();
 void forceLinkSimExternalConnectionTests();
 void forceLinkMutationLogReaderTests();
 void forceLinkSimKmsConnectorTests();
 void forceLinkIThreadPoolTests();
 void forceLinkTokenSignTests();
+void forceLinkJsonWebKeySetTests();
 void forceLinkVersionVectorTests();
 void forceLinkRESTClientTests();
 void forceLinkRESTUtilsTests();
+void forceLinkRESTKmsConnectorTest();
+void forceLinkCompressionUtilsTest();
+void forceLinkAtomicTests();
 
 struct UnitTestWorkload : TestWorkload {
 	bool enabled;
 	std::string testPattern;
+	Optional<std::string> testsIgnored;
 	int testRunLimit;
 	UnitTestParameters testParams;
 	bool cleanupAfterTests;
@@ -58,6 +61,9 @@ struct UnitTestWorkload : TestWorkload {
 	    totalSimTime("Total flow time (s)") {
 		enabled = !clientId; // only do this on the "first" client
 		testPattern = getOption(options, "testsMatching"_sr, Value()).toString();
+		if (hasOption(options, "testsIgnored"_sr)) {
+			testsIgnored = getOption(options, "testsIgnored"_sr, Value()).toString();
+		}
 		testRunLimit = getOption(options, "maxTestCases"_sr, -1);
 		if (g_network->isSimulated()) {
 			testParams.setDataDir(getOption(options, "dataDir"_sr, "simfdb/unittests/"_sr).toString());
@@ -79,19 +85,21 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkVersionedMapTests();
 		forceLinkMemcpyTests();
 		forceLinkMemcpyPerfTests();
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
 		forceLinkStreamCipherTests();
-		void forceLinkBlobCipherTests();
-#endif
+		forceLinkBlobCipherTests();
 		forceLinkParallelStreamTests();
 		forceLinkSimExternalConnectionTests();
 		forceLinkMutationLogReaderTests();
 		forceLinkSimKmsConnectorTests();
 		forceLinkIThreadPoolTests();
 		forceLinkTokenSignTests();
+		forceLinkJsonWebKeySetTests();
 		forceLinkVersionVectorTests();
 		forceLinkRESTClientTests();
 		forceLinkRESTUtilsTests();
+		forceLinkRESTKmsConnectorTest();
+		forceLinkCompressionUtilsTest();
+		forceLinkAtomicTests();
 	}
 
 	std::string description() const override { return "UnitTests"; }
@@ -113,20 +121,31 @@ struct UnitTestWorkload : TestWorkload {
 		m.push_back(totalSimTime.getMetric());
 	}
 
+	bool testMatched(std::string const& testName) const {
+		return StringRef(testName).startsWith(testPattern) &&
+		       (!testsIgnored.present() || !StringRef(testName).startsWith(testsIgnored.get()));
+	}
+
 	ACTOR static Future<Void> runUnitTests(UnitTestWorkload* self) {
 		state std::vector<UnitTest*> tests;
 
 		for (auto test = g_unittests.tests; test != nullptr; test = test->next) {
-			if (StringRef(test->name).startsWith(self->testPattern)) {
+			if (self->testMatched(test->name)) {
 				++self->testsAvailable;
 				tests.push_back(test);
 			}
 		}
 
+		std::sort(tests.begin(), tests.end(), [](auto lhs, auto rhs) {
+			return std::string_view(lhs->name) < std::string_view(rhs->name);
+		});
+
 		fprintf(stdout, "Found %zu tests\n", tests.size());
 
 		if (tests.size() == 0) {
-			TraceEvent(SevError, "NoMatchingUnitTests").detail("TestPattern", self->testPattern);
+			TraceEvent(SevError, "NoMatchingUnitTests")
+			    .detail("TestPattern", self->testPattern)
+			    .detail("TestsIgnored", self->testsIgnored);
 			++self->testsFailed;
 			return Void();
 		}
@@ -139,6 +158,11 @@ struct UnitTestWorkload : TestWorkload {
 		for (t = tests.begin(); t != tests.end(); ++t) {
 			state UnitTest* test = *t;
 			printf("Testing %s\n", test->name);
+
+			TraceEvent(SevInfo, "RunningUnitTest")
+			    .detail("Name", test->name)
+			    .detail("File", test->file)
+			    .detail("Line", test->line);
 
 			state Error result = success();
 			state double start_now = now();

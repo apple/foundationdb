@@ -22,11 +22,12 @@
 #include "boost/lexical_cast.hpp"
 
 #include "flow/IRandom.h"
-#include "flow/Tracing.h"
+#include "fdbclient/Tracing.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbrpc/IRateControl.h"
+#include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/StorageMetrics.h"
@@ -147,10 +148,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		return _start(cx, this);
 	}
 
-	Future<bool> check(Database const& cx) override {
-		TraceEvent("ConsistencyCheckCheck").log();
-		return success;
-	}
+	Future<bool> check(Database const& cx) override { return success; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
@@ -193,6 +191,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				TraceEvent("ConsistencyCheck_Suspended").log();
 				wait(self->suspendConsistencyCheck.onChange());
 			}
+			TraceEvent("ConsistencyCheck_StartingOrResuming").log();
 			choose {
 				when(wait(self->runCheck(cx, self))) {
 					if (!self->indefinite)
@@ -207,8 +206,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> runCheck(Database cx, ConsistencyCheckWorkload* self) {
-		TEST(self->performQuiescentChecks); // Quiescent consistency check
-		TEST(!self->performQuiescentChecks); // Non-quiescent consistency check
+		CODE_PROBE(self->performQuiescentChecks, "Quiescent consistency check");
+		CODE_PROBE(!self->performQuiescentChecks, "Non-quiescent consistency check");
 
 		if (self->firstClient || self->distributed) {
 			try {
@@ -275,7 +274,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 					// Check that nothing is in the storage server queues
 					try {
-						int64_t maxStorageServerQueueSize = wait(getMaxStorageServerQueueSize(cx, self->dbInfo));
+						int64_t maxStorageServerQueueSize =
+						    wait(getMaxStorageServerQueueSize(cx, self->dbInfo, invalidVersion));
 						if (maxStorageServerQueueSize > 0) {
 							TraceEvent("ConsistencyCheck_ExceedStorageServerQueueLimit")
 							    .detail("MaxQueueSize", maxStorageServerQueueSize);
@@ -321,7 +321,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 				// Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
 				state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
-				bool keyServerResult = wait(getKeyServers(cx, keyServerPromise, keyServersKeys));
+				bool keyServerResult =
+				    wait(getKeyServers(cx, keyServerPromise, keyServersKeys, self->performQuiescentChecks));
 				if (keyServerResult) {
 					state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
 					    keyServerPromise.getFuture().get();
@@ -364,11 +365,12 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			} catch (Error& e) {
 				if (e.code() == error_code_transaction_too_old || e.code() == error_code_future_version ||
 				    e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-				    e.code() == error_code_process_behind || e.code() == error_code_actor_cancelled)
+				    e.code() == error_code_process_behind || e.code() == error_code_actor_cancelled) {
 					TraceEvent("ConsistencyCheck_Retry")
 					    .error(e); // FIXME: consistency check does not retry in this case
-				else
+				} else {
 					self->testFailure(format("Error %d - %s", e.code(), e.name()));
+				}
 			}
 		}
 
@@ -765,7 +767,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	                                        bool removePrefix) {
 		// get shards paired with corresponding storage servers
 		state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
-		bool keyServerResult = wait(getKeyServers(cx, keyServerPromise, range));
+		bool keyServerResult = wait(getKeyServers(cx, keyServerPromise, range, self->performQuiescentChecks));
 		if (!keyServerResult)
 			return false;
 		state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> shards =
@@ -1082,7 +1084,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					// FIXME: this is hiding the fact that we can recruit a new storage server on a location the has
 					// files left behind by a previous failure
 					// this means that the process is wasting disk space until the process is rebooting
-					ISimulator::ProcessInfo* p = g_simulator.getProcessByAddress(itr->interf.address());
+					ISimulator::ProcessInfo* p = g_simulator->getProcessByAddress(itr->interf.address());
 					// Note: itr->interf.address() may not equal to p->address() because role's endpoint's primary
 					// addr can be swapped by choosePrimaryAddress() based on its peer's tls config.
 					TraceEvent("ConsistencyCheck_RebootProcess")
@@ -1091,14 +1093,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					    .detail("ProcessPrimaryAddress", p->address)
 					    .detail("ProcessAddresses", p->addresses.toString())
 					    .detail("DataStoreID", id)
-					    .detail("Protected", g_simulator.protectedAddresses.count(itr->interf.address()))
+					    .detail("Protected", g_simulator->protectedAddresses.count(itr->interf.address()))
 					    .detail("Reliable", p->isReliable())
 					    .detail("ReliableInfo", p->getReliableInfo())
 					    .detail("KillOrRebootProcess", p->address);
 					if (p->isReliable()) {
-						g_simulator.rebootProcess(p, ISimulator::RebootProcess);
+						g_simulator->rebootProcess(p, ISimulator::RebootProcess);
 					} else {
-						g_simulator.killProcess(p, ISimulator::KillInstantly);
+						g_simulator->killProcess(p, ISimulator::KillInstantly);
 					}
 				}
 
@@ -1188,15 +1190,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> checkWorkerList(Database cx, ConsistencyCheckWorkload* self) {
-		if (g_simulator.extraDB)
+		if (!g_simulator->extraDatabases.empty()) {
 			return true;
+		}
 
 		std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		std::set<NetworkAddress> workerAddresses;
 
 		for (const auto& it : workers) {
 			NetworkAddress addr = it.interf.tLog.getEndpoint().addresses.getTLSAddress();
-			ISimulator::ProcessInfo* info = g_simulator.getProcessByAddress(addr);
+			ISimulator::ProcessInfo* info = g_simulator->getProcessByAddress(addr);
 			if (!info || info->failed) {
 				TraceEvent("ConsistencyCheck_FailedWorkerInList").detail("Addr", it.interf.address());
 				return false;
@@ -1204,7 +1207,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			workerAddresses.insert(NetworkAddress(addr.ip, addr.port, true, addr.isTLS()));
 		}
 
-		std::vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
+		std::vector<ISimulator::ProcessInfo*> all = g_simulator->getAllProcesses();
 		for (int i = 0; i < all.size(); i++) {
 			if (all[i]->isReliable() && all[i]->name == std::string("Server") &&
 			    all[i]->startingClass != ProcessClass::TesterClass &&
@@ -1334,10 +1337,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 		// Check if master and cluster controller are in the desired DC for fearless cluster when running under
 		// simulation
-		// FIXME: g_simulator.datacenterDead could return false positives. Relaxing checks until it is fixed.
-		if (g_network->isSimulated() && config.usableRegions > 1 && g_simulator.primaryDcId.present() &&
-		    !g_simulator.datacenterDead(g_simulator.primaryDcId) &&
-		    !g_simulator.datacenterDead(g_simulator.remoteDcId)) {
+		// FIXME: g_simulator->datacenterDead could return false positives. Relaxing checks until it is fixed.
+		if (g_network->isSimulated() && config.usableRegions > 1 && g_simulator->primaryDcId.present() &&
+		    !g_simulator->datacenterDead(g_simulator->primaryDcId) &&
+		    !g_simulator->datacenterDead(g_simulator->remoteDcId)) {
 			expectedPrimaryDcId = config.regions[0].dcId;
 			expectedRemoteDcId = config.regions[1].dcId;
 			// If the priorities are equal, either could be the primary
@@ -1456,9 +1459,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check LogRouter
-		if (g_network->isSimulated() && config.usableRegions > 1 && g_simulator.primaryDcId.present() &&
-		    !g_simulator.datacenterDead(g_simulator.primaryDcId) &&
-		    !g_simulator.datacenterDead(g_simulator.remoteDcId)) {
+		if (g_network->isSimulated() && config.usableRegions > 1 && g_simulator->primaryDcId.present() &&
+		    !g_simulator->datacenterDead(g_simulator->primaryDcId) &&
+		    !g_simulator->datacenterDead(g_simulator->remoteDcId)) {
 			for (auto& tlogSet : db.logSystemConfig.tLogs) {
 				if (!tlogSet.isLocal && tlogSet.logRouters.size()) {
 					for (auto& logRouter : tlogSet.logRouters) {

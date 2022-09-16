@@ -1,6 +1,6 @@
 <img alt="FoundationDB logo" src="documentation/FDB_logo.png?raw=true" width="400">
 
-![Build Status](https://codebuild.us-west-2.amazonaws.com/badges?uuid=eyJlbmNyeXB0ZWREYXRhIjoiZ1FhRlNwU0JXeHVpZkt0a0k0QlNJK3BEUkplTGVRYnk3azBoT1FOazBQbGlIeDgrYmRJZVhuSUI4RTd3RWJWcjVMT3ZPTzV0NXlCTWpPTGlPVlMzckJJPSIsIml2UGFyYW1ldGVyU3BlYyI6IlB0TWVCM0VYdU5PQWtMUFYiLCJtYXRlcmlhbFNldFNlcmlhbCI6MX0%3D&branch=master)
+![Build Status](https://codebuild.us-west-2.amazonaws.com/badges?uuid=eyJlbmNyeXB0ZWREYXRhIjoiVjVzb1RQNUZTaGxGNm9iUnk4OUZ1d09GdTMzZnVOT1YzaUU1RU1xR2o2TENRWFZjb3ZrTHJEcngrZVdnNE40bXJJVDErOGVwendIL3lFWFY3Y3oxQmdjPSIsIml2UGFyYW1ldGVyU3BlYyI6IlJUbWhnaUlJVXRORUNJTjQiLCJtYXRlcmlhbFNldFNlcmlhbCI6MX0%3D&branch=main)
 
 FoundationDB is a distributed database designed to handle large volumes of structured data across clusters of commodity servers. It organizes data as an ordered key-value store and employs ACID transactions for all operations. It is especially well-suited for read/write workloads but also has excellent performance for write-intensive workloads. Users interact with the database using API language binding.
 
@@ -126,7 +126,6 @@ You should create a second build-directory which you will use for building and d
     mkdir .build && cd .build
     cmake -G Ninja \
         -DUSE_CCACHE=on \
-        -DDISABLE_TLS=off \
         -DUSE_DTRACE=off \
         ..
     ninja -j 10

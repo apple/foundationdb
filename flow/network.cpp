@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "Arena.h"
+#include "flow/Arena.h"
 #include "boost/asio.hpp"
 
 #include "flow/network.h"
@@ -279,7 +279,7 @@ Future<Reference<IConnection>> INetworkConnections::connect(const std::string& h
 	// Use map to create an actor that returns an endpoint or throws
 	Future<NetworkAddress> pickEndpoint =
 	    map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
-		    NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
+		    NetworkAddress addr = INetworkConnections::pickOneAddress(addresses);
 		    addr.fromHostname = true;
 		    if (isTLS) {
 			    addr.flags = NetworkAddress::FLAG_TLS;
@@ -293,7 +293,7 @@ Future<Reference<IConnection>> INetworkConnections::connect(const std::string& h
 	                std::function<Future<Reference<IConnection>>(NetworkAddress const&)>,
 	                Reference<IConnection>>(
 	    pickEndpoint,
-	    [=](NetworkAddress const& addr) -> Future<Reference<IConnection>> { return connectExternal(addr, host); });
+	    [=](NetworkAddress const& addr) -> Future<Reference<IConnection>> { return connectExternal(addr); });
 }
 
 IUDPSocket::~IUDPSocket() {}
@@ -343,6 +343,24 @@ TEST_CASE("/flow/network/ipaddress") {
 		auto addrParsed = IPAddress::parse(addr);
 		ASSERT(!addrParsed.present());
 	}
+
+	return Void();
+}
+
+TEST_CASE("/flow/network/ipV6Preferred") {
+	std::vector<NetworkAddress> addresses;
+	for (int i = 0; i < 50; ++i) {
+		std::string s = fmt::format("{}.{}.{}.{}:{}", i, i, i, i, i);
+		addresses.push_back(NetworkAddress::parse(s));
+	}
+	std::string ipv6 = "[2001:db8:85a3::8a2e:370:7334]:4800";
+	addresses.push_back(NetworkAddress::parse(ipv6));
+	for (int i = 50; i < 100; ++i) {
+		std::string s = fmt::format("{}.{}.{}.{}:{}", i, i, i, i, i);
+		addresses.push_back(NetworkAddress::parse(s));
+	}
+	// Confirm IPv6 is always preferred.
+	ASSERT(INetworkConnections::pickOneAddress(addresses).toString() == ipv6);
 
 	return Void();
 }

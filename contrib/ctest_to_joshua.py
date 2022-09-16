@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from argparse import ArgumentParser
 import glob
 import io
@@ -31,11 +33,15 @@ class JoshuaBuilder:
         if os.path.exists(arg):
             if not os.path.relpath(arg, self.build_dir).startswith(".."):
                 relpath = "build/" + os.path.relpath(arg, self.build_dir)
-                self.files[arg] = relpath
+                # Avoid packaging the full build directory.
+                if relpath != "build/.":
+                    self.files[arg] = relpath
                 return relpath
             elif not os.path.relpath(arg, self.src_dir).startswith(".."):
                 relpath = "src/" + os.path.relpath(arg, self.src_dir)
-                self.files[arg] = relpath
+                # Avoid packaging the full source directory.
+                if relpath != "src/.":
+                    self.files[arg] = relpath
                 return relpath
             elif os.access(arg, os.X_OK):
                 # Hope it's on the path
@@ -61,8 +67,7 @@ class JoshuaBuilder:
     def write_tarball(self, output, joshua_test):
         with tarfile.open(output, "w:gz") as tar:
             for file, arcfile in self.files.items():
-                if not os.path.isdir(file):
-                    self._add_file(tar, file, arcfile)
+                self._add_file(tar, file, arcfile)
             tarinfo = tarfile.TarInfo("joshua_test")
             tarinfo.mode = 0o755
             joshua_bytes = joshua_test.encode("utf-8")
@@ -114,6 +119,7 @@ Unknown arguments are forwarded to ctest, so you may use -R to filter tests e.g.
     joshua_builder.add_arg(os.path.join(args.build_dir, "bin/fdbcli"))
     joshua_builder.add_arg(os.path.join(args.build_dir, "bin/fdbmonitor"))
     joshua_builder.add_arg(os.path.join(args.build_dir, "bin/fdbserver"))
+    joshua_builder.add_arg(os.path.join(args.build_dir, "bin/mkcert"))
     if platform.system() == "Darwin":
         joshua_builder.add_arg(os.path.join(args.build_dir, "lib/libfdb_c.dylib"))
     else:

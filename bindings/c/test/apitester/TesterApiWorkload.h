@@ -94,19 +94,25 @@ protected:
 	std::atomic<int> numRandomOpLeft;
 
 	// Key prefix
-	std::string keyPrefix;
+	fdb::Key keyPrefix;
+
+	// The number of tenants to configure in the cluster
+	std::vector<fdb::ByteString> tenants;
 
 	// In-memory store maintaining expected database state
-	KeyValueStore store;
+	std::unordered_map<std::optional<int>, KeyValueStore> stores;
 
 	ApiWorkload(const WorkloadConfig& config);
 
 	// Methods for generating random keys and values
-	std::string randomKeyName();
-	std::string randomValue();
-	std::string randomNotExistingKey();
-	std::string randomExistingKey();
-	std::string randomKey(double existingKeyRatio);
+	fdb::Key randomKeyName();
+	fdb::Value randomValue();
+	fdb::Key randomNotExistingKey(std::optional<int> tenantId);
+	fdb::Key randomExistingKey(std::optional<int> tenantId);
+	fdb::Key randomKey(double existingKeyRatio, std::optional<int> tenantId);
+
+	// Chooses a random tenant from the available tenants (or an empty optional if tenants aren't used in the test)
+	std::optional<int> randomTenant();
 
 	// Generate initial random data for the workload
 	void populateData(TTaskFct cont);
@@ -115,12 +121,18 @@ protected:
 	void clearData(TTaskFct cont);
 
 	// common operations
-	void randomInsertOp(TTaskFct cont);
-	void randomClearOp(TTaskFct cont);
-	void randomClearRangeOp(TTaskFct cont);
+	void randomInsertOp(TTaskFct cont, std::optional<int> tenantId);
+	void randomClearOp(TTaskFct cont, std::optional<int> tenantId);
+	void randomClearRangeOp(TTaskFct cont, std::optional<int> tenantId);
+
+	std::optional<fdb::BytesRef> getTenant(std::optional<int> tenantId);
 
 private:
-	void populateDataTx(TTaskFct cont);
+	void populateDataTx(TTaskFct cont, std::optional<int> tenantId);
+	void populateTenantData(TTaskFct cont, std::optional<int> tenantId);
+	void createTenants(TTaskFct cont);
+
+	void clearTenantData(TTaskFct cont, std::optional<int> tenantId);
 
 	void randomOperations();
 };

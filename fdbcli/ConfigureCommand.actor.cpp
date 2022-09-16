@@ -259,7 +259,6 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		fprintf(stderr,
 		        "Type `configure perpetual_storage_wiggle=1' to enable the perpetual wiggle, or `configure "
 		        "storage_migration_type=gradual' to set the gradual migration type.\n");
-		ret = false;
 		break;
 	case ConfigurationResult::SUCCESS_WARN_ROCKSDB_EXPERIMENTAL:
 		printf("Configuration changed\n");
@@ -272,11 +271,50 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		    stderr,
 		    "WARN: Sharded RocksDB storage engine type is still in experimental stage, not yet production tested.\n");
 		break;
+	case ConfigurationResult::DATABASE_IS_REGISTERED:
+		fprintf(stderr, "ERROR: A cluster cannot change its tenant mode while part of a metacluster.\n");
+		ret = false;
+		break;
+	case ConfigurationResult::ENCRYPTION_AT_REST_MODE_ALREADY_SET:
+		fprintf(stderr, "ERROR: A cluster cannot change its encryption_at_rest state after database creation.\n");
+		ret = false;
+		break;
 	default:
 		ASSERT(false);
 		ret = false;
 	};
 	return ret;
+}
+
+void configureGenerator(const char* text,
+                        const char* line,
+                        std::vector<std::string>& lc,
+                        std::vector<StringRef> const& tokens) {
+	const char* opts[] = { "new",
+		                   "single",
+		                   "double",
+		                   "triple",
+		                   "three_data_hall",
+		                   "three_datacenter",
+		                   "ssd",
+		                   "ssd-1",
+		                   "ssd-2",
+		                   "memory",
+		                   "memory-1",
+		                   "memory-2",
+		                   "memory-radixtree-beta",
+		                   "commit_proxies=",
+		                   "grv_proxies=",
+		                   "logs=",
+		                   "resolvers=",
+		                   "perpetual_storage_wiggle=",
+		                   "perpetual_storage_wiggle_locality=",
+		                   "storage_migration_type=",
+		                   "tenant_mode=",
+		                   "blob_granules_enabled=",
+		                   "encryption_at_rest_mode=",
+		                   nullptr };
+	arrayGenerator(text, line, opts, lc);
 }
 
 CommandFactory configureFactory(
@@ -287,7 +325,8 @@ CommandFactory configureFactory(
         "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
         "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|perpetual_storage_wiggle_locality="
         "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|storage_migration_type={disabled|gradual|aggressive}"
-        "|tenant_mode={disabled|optional_experimental|required_experimental}|blob_granules_enabled={0|1}",
+        "|tenant_mode={disabled|optional_experimental|required_experimental}|blob_granules_enabled={0|1}"
+        "|encryption_at_rest_mode={disabled|aes_256_ctr}",
         "change the database configuration",
         "The `new' option, if present, initializes a new database with the given configuration rather than changing "
         "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
@@ -321,6 +360,11 @@ CommandFactory configureFactory(
         "tenant_mode=<disabled|optional_experimental|required_experimental>: Sets the tenant mode for the cluster. If "
         "optional, then transactions can be run with or without specifying tenants. If required, all data must be "
         "accessed using tenants.\n\n"
-        "See the FoundationDB Administration Guide for more information."));
+        "encryption_at_rest_mode=<disabled|aes_256_ctr>: Sets the cluster encryption data at-rest support for the "
+        "database. The configuration can be updated ONLY at the time of database creation and once set can't be "
+        "updated for the lifetime of the database.\n\n"
+
+        "See the FoundationDB Administration Guide for more information."),
+    &configureGenerator);
 
 } // namespace fdb_cli

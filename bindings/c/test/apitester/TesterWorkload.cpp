@@ -66,7 +66,7 @@ bool WorkloadConfig::getBoolOption(const std::string& name, bool defaultVal) con
 	if (iter == options.end()) {
 		return defaultVal;
 	} else {
-		std::string val = lowerCase(iter->second);
+		std::string val(fdb::toCharsRef(lowerCase(fdb::toBytesRef(iter->second))));
 		if (val == "true") {
 			return true;
 		} else if (val == "false") {
@@ -80,16 +80,22 @@ bool WorkloadConfig::getBoolOption(const std::string& name, bool defaultVal) con
 
 WorkloadBase::WorkloadBase(const WorkloadConfig& config)
   : manager(nullptr), tasksScheduled(0), numErrors(0), clientId(config.clientId), numClients(config.numClients),
-    failed(false) {
+    failed(false), numTxCompleted(0), numTxStarted(0), inProgress(false) {
 	maxErrors = config.getIntOption("maxErrors", 10);
 	workloadId = fmt::format("{}{}", config.name, clientId);
 }
 
 void WorkloadBase::init(WorkloadManager* manager) {
 	this->manager = manager;
+	inProgress = true;
+}
+
+void WorkloadBase::printStats() {
+	info(fmt::format("{} transactions completed", numTxCompleted.load()));
 }
 
 void WorkloadBase::schedule(TTaskFct task) {
+	ASSERT(inProgress);
 	if (failed) {
 		return;
 	}
@@ -100,27 +106,36 @@ void WorkloadBase::schedule(TTaskFct task) {
 	});
 }
 
-void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskFct cont, bool failOnError) {
+void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx,
+                                   TTaskFct cont,
+                                   std::optional<fdb::BytesRef> tenant,
+                                   bool failOnError) {
+	ASSERT(inProgress);
 	if (failed) {
 		return;
 	}
 	tasksScheduled++;
-	manager->txExecutor->execute(tx, [this, tx, cont, failOnError]() {
-		fdb_error_t err = tx->getErrorCode();
-		if (tx->getErrorCode() == error_code_success) {
-			cont();
-		} else {
-			std::string msg = fmt::format("Transaction failed with error: {} ({})", err, fdb_get_error(err));
-			if (failOnError) {
-				error(msg);
-				failed = true;
-			} else {
-				info(msg);
-				cont();
-			}
-		}
-		scheduledTaskDone();
-	});
+	numTxStarted++;
+	manager->txExecutor->execute(
+	    tx,
+	    [this, tx, cont, failOnError]() {
+		    numTxCompleted++;
+		    fdb::Error err = tx->getError();
+		    if (err.code() == error_code_success) {
+			    cont();
+		    } else {
+			    std::string msg = fmt::format("Transaction failed with error: {} ({})", err.code(), err.what());
+			    if (failOnError) {
+				    error(msg);
+				    failed = true;
+			    } else {
+				    info(msg);
+				    cont();
+			    }
+		    }
+		    scheduledTaskDone();
+	    },
+	    tenant);
 }
 
 void WorkloadBase::info(const std::string& msg) {
@@ -138,11 +153,13 @@ void WorkloadBase::error(const std::string& msg) {
 
 void WorkloadBase::scheduledTaskDone() {
 	if (--tasksScheduled == 0) {
+		inProgress = false;
 		if (numErrors > 0) {
 			error(fmt::format("Workload failed with {} errors", numErrors.load()));
 		} else {
 			info("Workload successfully completed");
 		}
+		ASSERT(numTxStarted == numTxCompleted);
 		manager->workloadDone(this, numErrors > 0);
 	}
 }
@@ -160,8 +177,11 @@ void WorkloadManager::add(std::shared_ptr<IWorkload> workload, TTaskFct cont) {
 
 void WorkloadManager::run() {
 	std::vector<std::shared_ptr<IWorkload>> initialWorkloads;
-	for (auto iter : workloads) {
-		initialWorkloads.push_back(iter.second.ref);
+	{
+		std::unique_lock<std::mutex> lock(mutex);
+		for (auto iter : workloads) {
+			initialWorkloads.push_back(iter.second.ref);
+		}
 	}
 	for (auto iter : initialWorkloads) {
 		iter->init(this);
@@ -198,6 +218,9 @@ void WorkloadManager::workloadDone(IWorkload* workload, bool failed) {
 	bool done = workloads.empty();
 	lock.unlock();
 	if (done) {
+		if (statsTimer) {
+			statsTimer->cancel();
+		}
 		scheduler->stop();
 	}
 }
@@ -239,6 +262,24 @@ void WorkloadManager::readControlInput(std::string pipeName) {
 		}
 		line.clear();
 	}
+}
+
+void WorkloadManager::schedulePrintStatistics(int timeIntervalMs) {
+	statsTimer = scheduler->scheduleWithDelay(timeIntervalMs, [this, timeIntervalMs]() {
+		for (auto workload : getActiveWorkloads()) {
+			workload->printStats();
+		}
+		this->schedulePrintStatistics(timeIntervalMs);
+	});
+}
+
+std::vector<std::shared_ptr<IWorkload>> WorkloadManager::getActiveWorkloads() {
+	std::unique_lock<std::mutex> lock(mutex);
+	std::vector<std::shared_ptr<IWorkload>> res;
+	for (auto iter : workloads) {
+		res.push_back(iter.second.ref);
+	}
+	return res;
 }
 
 void WorkloadManager::handleStopCommand() {

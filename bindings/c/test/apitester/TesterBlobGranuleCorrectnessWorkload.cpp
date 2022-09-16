@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 #include "TesterApiWorkload.h"
+#include "TesterBlobGranuleUtil.h"
 #include "TesterUtil.h"
 #include <memory>
 #include <fmt/format.h>
@@ -34,36 +35,46 @@ public:
 	}
 
 private:
-	enum OpType { OP_INSERT, OP_CLEAR, OP_CLEAR_RANGE, OP_READ, OP_GET_RANGES, OP_LAST = OP_GET_RANGES };
+	// FIXME: use other new blob granule apis!
+	enum OpType { OP_INSERT, OP_CLEAR, OP_CLEAR_RANGE, OP_READ, OP_GET_RANGES, OP_SUMMARIZE, OP_LAST = OP_SUMMARIZE };
 	std::vector<OpType> excludedOpTypes;
 
 	// Allow reads at the start to get blob_granule_transaction_too_old if BG data isn't initialized yet
 	// FIXME: should still guarantee a read succeeds eventually somehow
 	bool seenReadSuccess = false;
 
-	void randomReadOp(TTaskFct cont) {
-		std::string begin = randomKeyName();
-		std::string end = randomKeyName();
-		auto results = std::make_shared<std::vector<KeyValue>>();
-		auto tooOld = std::make_shared<bool>(false);
+	void randomReadOp(TTaskFct cont, std::optional<int> tenantId) {
+		fdb::Key begin = randomKeyName();
+		fdb::Key end = randomKeyName();
 		if (begin > end) {
 			std::swap(begin, end);
 		}
+
+		auto results = std::make_shared<std::vector<fdb::KeyValue>>();
+		auto tooOld = std::make_shared<bool>(false);
+
 		execTransaction(
 		    [this, begin, end, results, tooOld](auto ctx) {
-			    ctx->tx()->setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
-			    KeyValuesResult res = ctx->tx()->readBlobGranules(begin, end, ctx->getBGBasePath());
-			    bool more;
-			    (*results) = res.getKeyValues(&more);
-			    ASSERT(!more);
-			    if (res.getError() == error_code_blob_granule_transaction_too_old) {
+			    ctx->tx().setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
+			    TesterGranuleContext testerContext(ctx->getBGBasePath());
+			    fdb::native::FDBReadBlobGranuleContext granuleContext = createGranuleContext(&testerContext);
+
+			    fdb::Result res = ctx->tx().readBlobGranules(
+			        begin, end, 0 /* beginVersion */, -2 /* latest read version */, granuleContext);
+			    auto out = fdb::Result::KeyValueRefArray{};
+			    fdb::Error err = res.getKeyValueArrayNothrow(out);
+			    if (err.code() == error_code_blob_granule_transaction_too_old) {
 				    info("BlobGranuleCorrectness::randomReadOp bg too old\n");
 				    ASSERT(!seenReadSuccess);
 				    *tooOld = true;
 				    ctx->done();
-			    } else if (res.getError() != error_code_success) {
-				    ctx->onError(res.getError());
+			    } else if (err.code() != error_code_success) {
+				    ctx->onError(err);
 			    } else {
+				    auto resCopy = copyKeyValueArray(out);
+				    auto& [resVector, out_more] = resCopy;
+				    ASSERT(!out_more);
+				    results.get()->assign(resVector.begin(), resVector.end());
 				    if (!seenReadSuccess) {
 					    info("BlobGranuleCorrectness::randomReadOp first success\n");
 				    }
@@ -71,9 +82,10 @@ private:
 				    ctx->done();
 			    }
 		    },
-		    [this, begin, end, results, tooOld, cont]() {
+		    [this, begin, end, results, tooOld, cont, tenantId]() {
 			    if (!*tooOld) {
-				    std::vector<KeyValue> expected = store.getRange(begin, end, store.size(), false);
+				    std::vector<fdb::KeyValue> expected =
+				        stores[tenantId].getRange(begin, end, stores[tenantId].size(), false);
 				    if (results->size() != expected.size()) {
 					    error(fmt::format("randomReadOp result size mismatch. expected: {} actual: {}",
 					                      expected.size(),
@@ -86,8 +98,8 @@ private:
 						    error(fmt::format("randomReadOp key mismatch at {}/{}. expected: {} actual: {}",
 						                      i,
 						                      results->size(),
-						                      expected[i].key,
-						                      (*results)[i].key));
+						                      fdb::toCharsRef(expected[i].key),
+						                      fdb::toCharsRef((*results)[i].key)));
 					    }
 					    ASSERT((*results)[i].key == expected[i].key);
 
@@ -96,31 +108,33 @@ private:
 						        "randomReadOp value mismatch at {}/{}. key: {} expected: {:.80} actual: {:.80}",
 						        i,
 						        results->size(),
-						        expected[i].key,
-						        expected[i].value,
-						        (*results)[i].value));
+						        fdb::toCharsRef(expected[i].key),
+						        fdb::toCharsRef(expected[i].value),
+						        fdb::toCharsRef((*results)[i].value)));
 					    }
 					    ASSERT((*results)[i].value == expected[i].value);
 				    }
 			    }
 			    schedule(cont);
-		    });
+		    },
+		    getTenant(tenantId));
 	}
 
-	void randomGetRangesOp(TTaskFct cont) {
-		std::string begin = randomKeyName();
-		std::string end = randomKeyName();
-		auto results = std::make_shared<std::vector<KeyValue>>();
+	void randomGetRangesOp(TTaskFct cont, std::optional<int> tenantId) {
+		fdb::Key begin = randomKeyName();
+		fdb::Key end = randomKeyName();
 		if (begin > end) {
 			std::swap(begin, end);
 		}
+		auto results = std::make_shared<std::vector<fdb::KeyRange>>();
+
 		execTransaction(
 		    [begin, end, results](auto ctx) {
-			    KeyRangesFuture f = ctx->tx()->getBlobGranuleRanges(begin, end);
+			    fdb::Future f = ctx->tx().getBlobGranuleRanges(begin, end, 1000).eraseType();
 			    ctx->continueAfter(
 			        f,
 			        [ctx, f, results]() {
-				        (*results) = f.getKeyRanges();
+				        *results = copyKeyRangeArray(f.get<fdb::future_var::KeyRangeRefArray>());
 				        ctx->done();
 			        },
 			        true);
@@ -128,44 +142,108 @@ private:
 		    [this, begin, end, results, cont]() {
 			    if (seenReadSuccess) {
 				    ASSERT(results->size() > 0);
-				    ASSERT(results->front().key <= begin);
-				    ASSERT(results->back().value >= end);
+				    ASSERT(results->front().beginKey <= begin);
+				    ASSERT(results->back().endKey >= end);
 			    }
 
 			    for (int i = 0; i < results->size(); i++) {
 				    // no empty or inverted ranges
-				    ASSERT((*results)[i].key < (*results)[i].value);
+				    if ((*results)[i].beginKey >= (*results)[i].endKey) {
+					    error(fmt::format("Empty/inverted range [{0} - {1}) for getBlobGranuleRanges({2} - {3})",
+					                      fdb::toCharsRef((*results)[i].beginKey),
+					                      fdb::toCharsRef((*results)[i].endKey),
+					                      fdb::toCharsRef(begin),
+					                      fdb::toCharsRef(end)));
+				    }
+				    ASSERT((*results)[i].beginKey < (*results)[i].endKey);
 			    }
 
 			    for (int i = 1; i < results->size(); i++) {
 				    // ranges contain entire requested key range
-				    ASSERT((*results)[i].key == (*results)[i - 1].value);
+				    if ((*results)[i].beginKey != (*results)[i].endKey) {
+					    error(fmt::format("Non-contiguous range [{0} - {1}) for getBlobGranuleRanges({2} - {3})",
+					                      fdb::toCharsRef((*results)[i].beginKey),
+					                      fdb::toCharsRef((*results)[i].endKey),
+					                      fdb::toCharsRef(begin),
+					                      fdb::toCharsRef(end)));
+				    }
+				    ASSERT((*results)[i].beginKey == (*results)[i - 1].endKey);
 			    }
 
 			    schedule(cont);
-		    });
+		    },
+		    getTenant(tenantId));
+	}
+
+	void randomSummarizeOp(TTaskFct cont, std::optional<int> tenantId) {
+		fdb::Key begin = randomKeyName();
+		fdb::Key end = randomKeyName();
+		if (begin > end) {
+			std::swap(begin, end);
+		}
+		auto results = std::make_shared<std::vector<fdb::GranuleSummary>>();
+		execTransaction(
+		    [begin, end, results](auto ctx) {
+			    fdb::Future f = ctx->tx().summarizeBlobGranules(begin, end, -2 /*latest version*/, 1000).eraseType();
+			    ctx->continueAfter(
+			        f,
+			        [ctx, f, results]() {
+				        *results = copyGranuleSummaryArray(f.get<fdb::future_var::GranuleSummaryRefArray>());
+				        ctx->done();
+			        },
+			        true);
+		    },
+		    [this, begin, end, results, cont]() {
+			    if (seenReadSuccess) {
+				    ASSERT(results->size() > 0);
+				    ASSERT(results->front().keyRange.beginKey <= begin);
+				    ASSERT(results->back().keyRange.endKey >= end);
+			    }
+
+			    for (int i = 0; i < results->size(); i++) {
+				    // TODO: could do validation of subsequent calls and ensure snapshot version never decreases
+				    ASSERT((*results)[i].keyRange.beginKey < (*results)[i].keyRange.endKey);
+				    ASSERT((*results)[i].snapshotVersion <= (*results)[i].deltaVersion);
+				    ASSERT((*results)[i].snapshotSize > 0);
+				    ASSERT((*results)[i].deltaSize >= 0);
+			    }
+
+			    for (int i = 1; i < results->size(); i++) {
+				    // ranges contain entire requested key range
+				    ASSERT((*results)[i].keyRange.beginKey == (*results)[i - 1].keyRange.endKey);
+			    }
+
+			    schedule(cont);
+		    },
+		    getTenant(tenantId));
 	}
 
 	void randomOperation(TTaskFct cont) {
-		OpType txType = (store.size() == 0) ? OP_INSERT : (OpType)Random::get().randomInt(0, OP_LAST);
+		std::optional<int> tenantId = randomTenant();
+
+		OpType txType = (stores[tenantId].size() == 0) ? OP_INSERT : (OpType)Random::get().randomInt(0, OP_LAST);
 		while (std::count(excludedOpTypes.begin(), excludedOpTypes.end(), txType)) {
 			txType = (OpType)Random::get().randomInt(0, OP_LAST);
 		}
+
 		switch (txType) {
 		case OP_INSERT:
-			randomInsertOp(cont);
+			randomInsertOp(cont, tenantId);
 			break;
 		case OP_CLEAR:
-			randomClearOp(cont);
+			randomClearOp(cont, tenantId);
 			break;
 		case OP_CLEAR_RANGE:
-			randomClearRangeOp(cont);
+			randomClearRangeOp(cont, tenantId);
 			break;
 		case OP_READ:
-			randomReadOp(cont);
+			randomReadOp(cont, tenantId);
 			break;
 		case OP_GET_RANGES:
-			randomGetRangesOp(cont);
+			randomGetRangesOp(cont, tenantId);
+			break;
+		case OP_SUMMARIZE:
+			randomSummarizeOp(cont, tenantId);
 			break;
 		}
 	}

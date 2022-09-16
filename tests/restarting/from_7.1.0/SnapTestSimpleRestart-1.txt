@@ -1,4 +1,5 @@
-storageEngineExcludeTypes=3
+testClass=SnapshotTest
+storageEngineExcludeTypes=[3, 4, 5]
 
 ;write 1000 Keys ending with even number
 testTitle=SnapSimplePre

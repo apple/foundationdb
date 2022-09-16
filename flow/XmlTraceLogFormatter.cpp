@@ -20,7 +20,6 @@
 
 #include "flow/flow.h"
 #include "flow/XmlTraceLogFormatter.h"
-#include "flow/actorcompiler.h"
 
 void XmlTraceLogFormatter::addref() {
 	ReferenceCounted<XmlTraceLogFormatter>::addref();
@@ -43,7 +42,7 @@ const char* XmlTraceLogFormatter::getFooter() const {
 }
 
 void XmlTraceLogFormatter::escape(std::ostringstream& oss, std::string source) const {
-	loop {
+	for (;;) {
 		int index = source.find_first_of(std::string({ '&', '"', '<', '>', '\r', '\n', '\0' }));
 		if (index == source.npos) {
 			break;
@@ -86,6 +85,6 @@ std::string XmlTraceLogFormatter::formatEvent(const TraceEventFields& fields) co
 		oss << "\" ";
 	}
 
-	oss << "/>\r\n";
+	oss << "/>\n";
 	return std::move(oss).str();
 }

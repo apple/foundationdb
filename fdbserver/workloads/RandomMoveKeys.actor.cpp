@@ -143,16 +143,18 @@ struct MoveKeysWorkload : TestWorkload {
 			state Promise<Void> signal;
 			state DDEnabledState ddEnabledState;
 			wait(moveKeys(cx,
-			              keys,
-			              destinationTeamIDs,
-			              destinationTeamIDs,
-			              lock,
-			              signal,
-			              &fl1,
-			              &fl2,
-			              false,
-			              relocateShardInterval.pairID,
-			              &ddEnabledState));
+			              MoveKeysParams{ deterministicRandom()->randomUniqueID(),
+			                              keys,
+			                              destinationTeamIDs,
+			                              destinationTeamIDs,
+			                              lock,
+			                              signal,
+			                              &fl1,
+			                              &fl2,
+			                              false,
+			                              relocateShardInterval.pairID,
+			                              &ddEnabledState,
+			                              CancelConflictingDataMoves::True }));
 			TraceEvent(relocateShardInterval.end()).detail("Result", "Success");
 			return Void();
 		} catch (Error& e) {
@@ -179,7 +181,7 @@ struct MoveKeysWorkload : TestWorkload {
 	ACTOR Future<Void> forceMasterFailure(Database cx, MoveKeysWorkload* self) {
 		ASSERT(g_network->isSimulated());
 		loop {
-			if (g_simulator.killZone(self->dbInfo->get().master.locality.zoneId(), ISimulator::Reboot, true))
+			if (g_simulator->killZone(self->dbInfo->get().master.locality.zoneId(), ISimulator::Reboot, true))
 				return Void();
 			wait(delay(1.0));
 		}

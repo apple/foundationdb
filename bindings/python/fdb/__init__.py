@@ -100,7 +100,7 @@ def api_version(ver):
 
     _add_symbols(fdb.impl, list)
 
-    if ver >= 710:
+    if ver >= 630:
         import fdb.tenant_management
 
     if ver < 610:

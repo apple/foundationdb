@@ -1,0 +1,22 @@
+[configuration]
+configDB = 'paxos'
+
+[[test]]
+testTitle = 'ConfigIncrementWithKills'
+
+  [[test.workload]]
+  testName = 'ConfigIncrement'
+  incrementActors = 2
+  incrementsPerActor = 10
+  meanSleepWithinTransactions = 0.01
+  meanSleepBetweenTransactions = 0.1
+
+  [[test.workload]]
+  testName = 'Attrition'
+  reboot = false
+
+  [[test.workload]]
+  testName = 'ChangeConfig'
+  maxDelayBeforeChange = 120.0
+  coordinators = 'auto'
+  coordinatorChanges = 2

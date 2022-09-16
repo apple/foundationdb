@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbrpc/TenantInfo.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
@@ -35,6 +36,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Core of the data consistency checking (checkDataConsistency) and many of the supporting functions are shared between
@@ -76,7 +78,7 @@ ACTOR Future<Version> getVersion(Database cx) {
 }
 
 void testFailure(std::string message, bool performQuiescentChecks, bool isError) {
-	TraceEvent failEvent((isError ? SevError : SevWarn, "TestFailure"));
+	TraceEvent failEvent(isError ? SevError : SevWarn, "TestFailure");
 	if (performQuiescentChecks)
 		failEvent.detail("Workload", "QuiescentCheck");
 	else
@@ -91,7 +93,8 @@ void testFailure(std::string message, bool performQuiescentChecks, bool isError)
 ACTOR Future<bool> getKeyServers(
     Database cx,
     Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise,
-    KeyRangeRef kr) {
+    KeyRangeRef kr,
+    bool performQuiescentChecks) {
 	state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers;
 
 	// Try getting key server locations from the master proxies
@@ -109,16 +112,11 @@ ACTOR Future<bool> getKeyServers(
 		for (int i = 0; i < commitProxyInfo->size(); i++)
 			keyServerLocationFutures.push_back(
 			    commitProxyInfo->get(i, &CommitProxyInterface::getKeyServersLocations)
-			        .getReplyUnlessFailedFor(GetKeyServerLocationsRequest(span.context,
-			                                                              Optional<TenantNameRef>(),
-			                                                              begin,
-			                                                              end,
-			                                                              limitKeyServers,
-			                                                              false,
-			                                                              latestVersion,
-			                                                              Arena()),
-			                                 2,
-			                                 0));
+			        .getReplyUnlessFailedFor(
+			            GetKeyServerLocationsRequest(
+			                span.context, TenantInfo(), begin, end, limitKeyServers, false, latestVersion, Arena()),
+			            2,
+			            0));
 
 		state bool keyServersInsertedForThisIteration = false;
 		choose {
@@ -127,13 +125,24 @@ ACTOR Future<bool> getKeyServers(
 				for (int i = 0; i < keyServerLocationFutures.size(); i++) {
 					ErrorOr<GetKeyServerLocationsReply> shards = keyServerLocationFutures[i].get();
 
+					// If performing quiescent check, then all master proxies should be reachable.  Otherwise, only
+					// one needs to be reachable
+					if (performQuiescentChecks && !shards.present()) {
+						TraceEvent("ConsistencyCheck_CommitProxyUnavailable")
+						    .detail("CommitProxyID", commitProxyInfo->getId(i));
+						testFailure("Commit proxy unavailable", performQuiescentChecks, true);
+						return false;
+					}
+
 					// Get the list of shards if one was returned.  If not doing a quiescent check, we can break if
 					// it is. If we are doing a quiescent check, then we only need to do this for the first shard.
 					if (shards.present() && !keyServersInsertedForThisIteration) {
 						keyServers.insert(keyServers.end(), shards.get().results.begin(), shards.get().results.end());
 						keyServersInsertedForThisIteration = true;
 						begin = shards.get().results.back().first.end;
-						break;
+
+						if (!performQuiescentChecks)
+							break;
 					}
 				} // End of For
 			}
@@ -480,7 +489,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 			for (int i = 0; i < initialSize; i++) {
 				auto tssPair = tssMapping.find(storageServers[i]);
 				if (tssPair != tssMapping.end()) {
-					TEST(true); // TSS checked in consistency check
+					CODE_PROBE(true, "TSS checked in consistency check");
 					storageServers.push_back(tssPair->second.id());
 					storageServerInterfaces.push_back(tssPair->second);
 				}
@@ -690,7 +699,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 									                : "False");
 
 									if ((g_network->isSimulated() &&
-									     g_simulator.tssMode != ISimulator::TSSMode::EnabledDropMutations) ||
+									     g_simulator->tssMode != ISimulator::TSSMode::EnabledDropMutations) ||
 									    (!storageServerInterfaces[j].isTss() &&
 									     !storageServerInterfaces[firstValidServer].isTss())) {
 										testFailure("Data inconsistent", performQuiescentChecks, true);
@@ -862,7 +871,7 @@ ACTOR Future<bool> checkDataConsistency(Database cx,
 
 						break;
 					} else if (estimatedBytes[j] < 0 && ((g_network->isSimulated() &&
-					                                      g_simulator.tssMode <= ISimulator::TSSMode::EnabledNormal) ||
+					                                      g_simulator->tssMode <= ISimulator::TSSMode::EnabledNormal) ||
 					                                     !storageServerInterfaces[j].isTss())) {
 						// Ignore a non-responding TSS outside of simulation, or if tss fault injection is enabled
 						break;
@@ -948,7 +957,7 @@ ACTOR Future<Void> runDataValidationCheck(ConsistencyScanData* self) {
 		// Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
 		state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
 		state std::map<UID, StorageServerInterface> tssMapping;
-		bool keyServerResult = wait(getKeyServers(self->db, keyServerPromise, keyServersKeys));
+		bool keyServerResult = wait(getKeyServers(self->db, keyServerPromise, keyServersKeys, false));
 		if (keyServerResult) {
 			state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
 			    keyServerPromise.getFuture().get();

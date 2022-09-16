@@ -84,6 +84,12 @@ void Future::cancel() {
 	return fdb_future_get_keyrange_array(future_, out_keyranges, out_count);
 }
 
+// GranuleSummaryArrayFuture
+
+[[nodiscard]] fdb_error_t GranuleSummaryArrayFuture::get(const FDBGranuleSummary** out_summaries, int* out_count) {
+	return fdb_future_get_granule_summary_array(future_, out_summaries, out_count);
+}
+
 // KeyValueArrayFuture
 
 [[nodiscard]] fdb_error_t KeyValueArrayFuture::get(const FDBKeyValue** out_kv, int* out_count, fdb_bool_t* out_more) {
@@ -155,6 +161,25 @@ Tenant::Tenant(FDBDatabase* db, const uint8_t* name, int name_length) {
 		std::cerr << fdb_get_error(err) << std::endl;
 		std::abort();
 	}
+}
+
+KeyFuture Tenant::purge_blob_granules(FDBTenant* tenant,
+                                      std::string_view begin_key,
+                                      std::string_view end_key,
+                                      int64_t purge_version,
+                                      fdb_bool_t force) {
+	return KeyFuture(fdb_tenant_purge_blob_granules(tenant,
+	                                                (const uint8_t*)begin_key.data(),
+	                                                begin_key.size(),
+	                                                (const uint8_t*)end_key.data(),
+	                                                end_key.size(),
+	                                                purge_version,
+	                                                force));
+}
+
+EmptyFuture Tenant::wait_purge_granules_complete(FDBTenant* tenant, std::string_view purge_key) {
+	return EmptyFuture(
+	    fdb_tenant_wait_purge_granules_complete(tenant, (const uint8_t*)purge_key.data(), purge_key.size()));
 }
 
 Tenant::~Tenant() {
@@ -271,6 +296,7 @@ MappedKeyValueArrayFuture Transaction::get_mapped_range(const uint8_t* begin_key
                                                         int target_bytes,
                                                         FDBStreamingMode mode,
                                                         int iteration,
+                                                        int matchIndex,
                                                         fdb_bool_t snapshot,
                                                         fdb_bool_t reverse) {
 	return MappedKeyValueArrayFuture(fdb_transaction_get_mapped_range(tr_,
@@ -288,6 +314,7 @@ MappedKeyValueArrayFuture Transaction::get_mapped_range(const uint8_t* begin_key
 	                                                                  target_bytes,
 	                                                                  mode,
 	                                                                  iteration,
+	                                                                  matchIndex,
 	                                                                  snapshot,
 	                                                                  reverse));
 }
@@ -335,10 +362,17 @@ fdb_error_t Transaction::add_conflict_range(std::string_view begin_key,
 	    tr_, (const uint8_t*)begin_key.data(), begin_key.size(), (const uint8_t*)end_key.data(), end_key.size(), type);
 }
 
-KeyRangeArrayFuture Transaction::get_blob_granule_ranges(std::string_view begin_key, std::string_view end_key) {
-	return KeyRangeArrayFuture(fdb_transaction_get_blob_granule_ranges(
-	    tr_, (const uint8_t*)begin_key.data(), begin_key.size(), (const uint8_t*)end_key.data(), end_key.size()));
+KeyRangeArrayFuture Transaction::get_blob_granule_ranges(std::string_view begin_key,
+                                                         std::string_view end_key,
+                                                         int rangeLimit) {
+	return KeyRangeArrayFuture(fdb_transaction_get_blob_granule_ranges(tr_,
+	                                                                   (const uint8_t*)begin_key.data(),
+	                                                                   begin_key.size(),
+	                                                                   (const uint8_t*)end_key.data(),
+	                                                                   end_key.size(),
+	                                                                   rangeLimit));
 }
+
 KeyValueArrayResult Transaction::read_blob_granules(std::string_view begin_key,
                                                     std::string_view end_key,
                                                     int64_t beginVersion,
@@ -352,6 +386,19 @@ KeyValueArrayResult Transaction::read_blob_granules(std::string_view begin_key,
 	                                                              beginVersion,
 	                                                              readVersion,
 	                                                              granuleContext));
+}
+
+GranuleSummaryArrayFuture Transaction::summarize_blob_granules(std::string_view begin_key,
+                                                               std::string_view end_key,
+                                                               int64_t summary_version,
+                                                               int rangeLimit) {
+	return GranuleSummaryArrayFuture(fdb_transaction_summarize_blob_granules(tr_,
+	                                                                         (const uint8_t*)begin_key.data(),
+	                                                                         begin_key.size(),
+	                                                                         (const uint8_t*)end_key.data(),
+	                                                                         end_key.size(),
+	                                                                         summary_version,
+	                                                                         rangeLimit));
 }
 
 } // namespace fdb

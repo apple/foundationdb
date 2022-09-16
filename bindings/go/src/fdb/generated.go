@@ -102,6 +102,11 @@ func (o NetworkOptions) SetTraceFileIdentifier(param string) error {
 	return o.setOpt(36, []byte(param))
 }
 
+// Use the same base trace file name for all client threads as it did before version 7.2. The current default behavior is to use distinct trace file names for client threads by including their version and thread index.
+func (o NetworkOptions) SetTraceShareAmongClientThreads() error {
+	return o.setOpt(37, nil)
+}
+
 // Set file suffix for partially written log files.
 //
 // Parameter: Append this suffix to partially written log files. When a log file is complete, it is renamed to remove the suffix. No separator is added between the file and the suffix. If you want to add a file extension, you should include the separator - e.g. '.tmp' instead of 'tmp' to add the 'tmp' extension.
@@ -239,6 +244,13 @@ func (o NetworkOptions) SetClientThreadsPerVersion(param int64) error {
 	return o.setOpt(65, int64ToBytes(param))
 }
 
+// Adds an external client library to be used with a future version protocol. This option can be used testing purposes only!
+//
+// Parameter: path to client library
+func (o NetworkOptions) SetFutureVersionClientLibrary(param string) error {
+	return o.setOpt(66, []byte(param))
+}
+
 // Disables logging of client statistics, such as sampled transaction activity.
 func (o NetworkOptions) SetDisableClientStatisticsLogging() error {
 	return o.setOpt(70, nil)
@@ -289,7 +301,7 @@ func (o NetworkOptions) SetDistributedClientTracer(param string) error {
 //
 // Parameter: Client directory for temporary files. 
 func (o NetworkOptions) SetClientTmpDir(param string) error {
-	return o.setOpt(90, []byte(param))
+	return o.setOpt(91, []byte(param))
 }
 
 // Set the size of the client location cache. Raising this value can boost performance in very large databases where clients access data in a near-random pattern. Defaults to 100000.
@@ -613,6 +625,13 @@ func (o TransactionOptions) SetBypassUnreadable() error {
 // Allows this transaction to use cached GRV from the database context. Defaults to off. Upon first usage, starts a background updater to periodically update the cache to avoid stale read versions.
 func (o TransactionOptions) SetUseGrvCache() error {
 	return o.setOpt(1101, nil)
+}
+
+// Attach given authorization token to the transaction such that subsequent tenant-aware requests are authorized
+//
+// Parameter: A JSON Web Token authorized to access data belonging to one or more tenants, indicated by 'tenants' claim of the token's payload.
+func (o TransactionOptions) SetAuthorizationToken(param string) error {
+	return o.setOpt(2000, []byte(param))
 }
 
 type StreamingMode int

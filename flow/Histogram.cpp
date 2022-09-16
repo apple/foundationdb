@@ -27,37 +27,20 @@
 // scoped to the right "machine".
 // either we pull g_simulator into flow, or flow (and the I/O path) will be unable to log performance
 // metrics.
-#include <fdbrpc/simulator.h>
 #include <limits>
-
-// pull in some global pointers too:  These types are implemented in fdbrpc/sim2.actor.cpp, which is not available here.
-// Yuck. If you're not using the simulator, these will remain null, and all should be well.
-
-// TODO: create a execution context abstraction that allows independent flow instances within a process.
-// The simulator would be the main user of it, and histogram would be the only other user (for now).
-ISimulator* g_pSimulator = nullptr;
-thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
-
-// Fallback registry when we're not in simulation -- if we had execution contexts we wouldn't need to check if
-// we have a simulated contex here; we'd just use the current context regardless.
-static HistogramRegistry* globalHistograms = nullptr;
 
 #pragma region HistogramRegistry
 
 HistogramRegistry& GetHistogramRegistry() {
-	ISimulator::ProcessInfo* info = g_network && g_network->isSimulated() ? g_simulator.getCurrentProcess() : nullptr;
+	auto h = g_network->global(INetwork::enHistogram);
 
-	if (info) {
-		// in simulator; scope histograms to simulated process
-		return info->histograms;
+	if (h) {
+		return *reinterpret_cast<HistogramRegistry*>(h);
+	} else {
+		auto res = new HistogramRegistry();
+		g_network->setGlobal(INetwork::enHistogram, res);
+		return *res;
 	}
-	// avoid link order issues where the registry hasn't been initialized, but we're
-	// instantiating a histogram
-	if (globalHistograms == nullptr) {
-		// Note:  This will show up as a leak on shutdown, but we're OK with that.
-		globalHistograms = new HistogramRegistry();
-	}
-	return *globalHistograms;
 }
 
 void HistogramRegistry::registerHistogram(Histogram* h) {

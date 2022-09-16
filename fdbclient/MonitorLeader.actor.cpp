@@ -250,7 +250,7 @@ TEST_CASE("/fdbclient/MonitorLeader/ConnectionString/hostname") {
 
 		ClusterConnectionString cs(hostnames, LiteralStringRef("TestCluster:0"));
 		ASSERT(cs.hostnames.size() == 2);
-		ASSERT(cs.coordinators().size() == 0);
+		ASSERT(cs.coords.size() == 0);
 		ASSERT(cs.toString() == connectionString);
 	}
 
@@ -270,6 +270,9 @@ TEST_CASE("/fdbclient/MonitorLeader/ConnectionString/hostname") {
 
 ACTOR Future<std::vector<NetworkAddress>> tryResolveHostnamesImpl(ClusterConnectionString* self) {
 	state std::set<NetworkAddress> allCoordinatorsSet;
+	for (const auto& coord : self->coords) {
+		allCoordinatorsSet.insert(coord);
+	}
 	std::vector<Future<Void>> fs;
 	for (auto& hostname : self->hostnames) {
 		fs.push_back(map(hostname.resolve(), [&](Optional<NetworkAddress> const& addr) -> Void {
@@ -280,9 +283,6 @@ ACTOR Future<std::vector<NetworkAddress>> tryResolveHostnamesImpl(ClusterConnect
 		}));
 	}
 	wait(waitForAll(fs));
-	for (const auto& coord : self->coords) {
-		allCoordinatorsSet.insert(coord);
-	}
 	std::vector<NetworkAddress> allCoordinators(allCoordinatorsSet.begin(), allCoordinatorsSet.end());
 	std::sort(allCoordinators.begin(), allCoordinators.end());
 	return allCoordinators;
@@ -300,8 +300,8 @@ TEST_CASE("/fdbclient/MonitorLeader/PartialResolve") {
 
 	INetworkConnections::net()->addMockTCPEndpoint(hn, port, { address });
 
-	state ClusterConnectionString cs(connectionString);
-	state std::vector<NetworkAddress> allCoordinators = wait(cs.tryResolveHostnames());
+	ClusterConnectionString cs(connectionString);
+	std::vector<NetworkAddress> allCoordinators = wait(cs.tryResolveHostnames());
 	ASSERT(allCoordinators.size() == 1 &&
 	       std::find(allCoordinators.begin(), allCoordinators.end(), address) != allCoordinators.end());
 
@@ -460,7 +460,7 @@ ClientCoordinators::ClientCoordinators(Reference<IClusterConnectionRecord> ccr) 
 	for (auto h : cs.hostnames) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(h));
 	}
-	for (auto s : cs.coordinators()) {
+	for (auto s : cs.coords) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(s));
 	}
 }
@@ -485,6 +485,14 @@ ClientLeaderRegInterface::ClientLeaderRegInterface(INetwork* local) {
 	                                             TaskPriority::Coordination);
 }
 
+std::string ClientLeaderRegInterface::getAddressString() const {
+	if (hostname.present()) {
+		return hostname.get().toString();
+	} else {
+		return getLeader.getEndpoint().getPrimaryAddress().toString();
+	}
+}
+
 // Nominee is the worker among all workers that are considered as leader by one coordinator
 // This function contacts a coordinator coord to ask who is its nominee.
 ACTOR Future<Void> monitorNominee(Key key,
@@ -493,6 +501,7 @@ ACTOR Future<Void> monitorNominee(Key key,
                                   Optional<LeaderInfo>* info) {
 	loop {
 		state Optional<LeaderInfo> li;
+		wait(Future<Void>(Void())); // Make sure we weren't cancelled
 		if (coord.hostname.present()) {
 			wait(store(li,
 			           retryGetReplyFromHostname(GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
@@ -510,9 +519,7 @@ ACTOR Future<Void> monitorNominee(Key key,
 
 		TraceEvent("GetLeaderReply")
 		    .suppressFor(1.0)
-		    .detail("Coordinator",
-		            coord.hostname.present() ? coord.hostname.get().toString()
-		                                     : coord.getLeader.getEndpoint().getPrimaryAddress().toString())
+		    .detail("Coordinator", coord.getAddressString())
 		    .detail("Nominee", li.present() ? li.get().changeID : UID())
 		    .detail("ClusterKey", key.printable());
 
@@ -552,7 +559,7 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<Leade
 	          maskedNominees.end(),
 	          [](const std::pair<UID, int>& l, const std::pair<UID, int>& r) { return l.first < r.first; });
 
-	int bestCount = 0;
+	int bestCount = 1;
 	int bestIdx = 0;
 	int currentIdx = 0;
 	int curCount = 1;
@@ -560,17 +567,13 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<Leade
 		if (maskedNominees[currentIdx].first == maskedNominees[i].first) {
 			curCount++;
 		} else {
-			if (curCount > bestCount) {
-				bestIdx = currentIdx;
-				bestCount = curCount;
-			}
 			currentIdx = i;
 			curCount = 1;
 		}
-	}
-	if (curCount > bestCount) {
-		bestIdx = currentIdx;
-		bestCount = curCount;
+		if (curCount > bestCount) {
+			bestIdx = currentIdx;
+			bestCount = curCount;
+		}
 	}
 
 	bool majority = bestCount >= nominees.size() / 2 + 1;
@@ -585,6 +588,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterCon
 	state AsyncTrigger nomineeChange;
 	state std::vector<Optional<LeaderInfo>> nominees;
 	state Future<Void> allActors;
+	state Optional<std::pair<LeaderInfo, bool>> leader;
 
 	nominees.resize(coordinators.clientLeaderServers.size());
 
@@ -598,7 +602,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterCon
 	allActors = waitForAll(actors);
 
 	loop {
-		Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees);
+		leader = getLeader(nominees);
 		TraceEvent("MonitorLeaderChange")
 		    .detail("NewLeader", leader.present() ? leader.get().first.changeID : UID(1, 1));
 		if (leader.present()) {
@@ -619,7 +623,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterCon
 					    .detail("CurrentConnectionString",
 					            info.intermediateConnRecord->getConnectionString().toString());
 				}
-				connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString());
+				wait(connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString()));
 				info.intermediateConnRecord = connRecord;
 			}
 
@@ -660,69 +664,43 @@ ACTOR Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> s
 	}
 }
 
-struct ClientStatusStats {
-	int count;
-	std::vector<std::pair<NetworkAddress, Key>> examples;
+namespace {
 
-	ClientStatusStats() : count(0) { examples.reserve(CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT); }
-};
+void tryInsertIntoSamples(OpenDatabaseRequest::Samples& samples,
+                          const NetworkAddress& networkAddress,
+                          const Key& traceLogGroup) {
+	++samples.count;
+	if (samples.samples.size() < static_cast<size_t>(CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT)) {
+		samples.samples.insert({ networkAddress, traceLogGroup });
+	}
+}
+
+} // namespace
 
 OpenDatabaseRequest ClientData::getRequest() {
 	OpenDatabaseRequest req;
 
-	std::map<StringRef, ClientStatusStats> issueMap;
-	std::map<ClientVersionRef, ClientStatusStats> versionMap;
-	std::map<StringRef, ClientStatusStats> maxProtocolMap;
-	int clientCount = 0;
-
-	// SOMEDAY: add a yield in this loop
 	for (auto& ci : clientStatusInfoMap) {
-		for (auto& it : ci.second.issues) {
-			auto& entry = issueMap[it];
-			entry.count++;
-			if (entry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
-				entry.examples.emplace_back(ci.first, ci.second.traceLogGroup);
-			}
-		}
-		if (ci.second.versions.size()) {
-			clientCount++;
-			StringRef maxProtocol;
-			for (auto& it : ci.second.versions) {
-				maxProtocol = std::max(maxProtocol, it.protocolVersion);
-				auto& entry = versionMap[it];
-				entry.count++;
-				if (entry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
-					entry.examples.emplace_back(ci.first, ci.second.traceLogGroup);
-				}
-			}
-			auto& maxEntry = maxProtocolMap[maxProtocol];
-			maxEntry.count++;
-			if (maxEntry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
-				maxEntry.examples.emplace_back(ci.first, ci.second.traceLogGroup);
-			}
-		} else {
-			auto& entry = versionMap[ClientVersionRef()];
-			entry.count++;
-			if (entry.examples.size() < CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT) {
-				entry.examples.emplace_back(ci.first, ci.second.traceLogGroup);
-			}
-		}
-	}
+		const auto& networkAddress = ci.first;
+		const auto& traceLogGroup = ci.second.traceLogGroup;
 
-	req.issues.reserve(issueMap.size());
-	for (auto& it : issueMap) {
-		req.issues.push_back(ItemWithExamples<Key>(it.first, it.second.count, it.second.examples));
+		for (auto& issue : ci.second.issues) {
+			tryInsertIntoSamples(req.issues[issue], networkAddress, traceLogGroup);
+		}
+
+		if (!ci.second.versions.size()) {
+			tryInsertIntoSamples(req.supportedVersions[ClientVersionRef()], networkAddress, traceLogGroup);
+			continue;
+		}
+
+		++req.clientCount;
+		StringRef maxProtocol;
+		for (auto& it : ci.second.versions) {
+			maxProtocol = std::max(maxProtocol, it.protocolVersion);
+			tryInsertIntoSamples(req.supportedVersions[it], networkAddress, traceLogGroup);
+		}
+		tryInsertIntoSamples(req.maxProtocolSupported[maxProtocol], networkAddress, traceLogGroup);
 	}
-	req.supportedVersions.reserve(versionMap.size());
-	for (auto& it : versionMap) {
-		req.supportedVersions.push_back(
-		    ItemWithExamples<Standalone<ClientVersionRef>>(it.first, it.second.count, it.second.examples));
-	}
-	req.maxProtocolSupported.reserve(maxProtocolMap.size());
-	for (auto& it : maxProtocolMap) {
-		req.maxProtocolSupported.push_back(ItemWithExamples<Key>(it.first, it.second.count, it.second.examples));
-	}
-	req.clientCount = clientCount;
 
 	return req;
 }
@@ -866,7 +844,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
     Key traceLogGroup) {
 	state ClusterConnectionString cs = info.intermediateConnRecord->getConnectionString();
-	state int coordinatorsSize = cs.hostnames.size() + cs.coordinators().size();
+	state int coordinatorsSize = cs.hostnames.size() + cs.coords.size();
 	state int index = 0;
 	state int successIndex = 0;
 	state Optional<double> incorrectTime;
@@ -875,14 +853,16 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 	state std::vector<UID> lastGrvProxyUIDs;
 	state std::vector<GrvProxyInterface> lastGrvProxies;
 	state std::vector<ClientLeaderRegInterface> clientLeaderServers;
+	state bool allConnectionsFailed = false;
 
 	clientLeaderServers.reserve(coordinatorsSize);
 	for (const auto& h : cs.hostnames) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(h));
 	}
-	for (const auto& c : cs.coordinators()) {
+	for (const auto& c : cs.coords) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(c));
 	}
+	ASSERT(clientLeaderServers.size() > 0);
 
 	deterministicRandom()->randomShuffle(clientLeaderServers);
 
@@ -890,11 +870,9 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 		state ClientLeaderRegInterface clientLeaderServer = clientLeaderServers[index];
 		state OpenDatabaseCoordRequest req;
 
-		coordinator->set(clientLeaderServer);
-
 		req.clusterKey = cs.clusterKey();
 		req.hostnames = cs.hostnames;
-		req.coordinators = cs.coordinators();
+		req.coordinators = cs.coords;
 		req.knownClientInfoID = clientInfo->get().id;
 		req.supportedVersions = supportedVersions->get();
 		req.traceLogGroup = traceLogGroup;
@@ -902,7 +880,22 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 		state ClusterConnectionString storedConnectionString;
 		if (connRecord) {
 			bool upToDate = wait(connRecord->upToDate(storedConnectionString));
-			if (!upToDate) {
+			if (upToDate) {
+				incorrectTime = Optional<double>();
+			} else if (allConnectionsFailed && storedConnectionString.getNumberOfCoordinators() > 0) {
+				// Failed to connect to all coordinators from the current connection string,
+				// so it is not possible to get any new updates from the cluster. It can be that
+				// all the coordinators have changed, but the client missed that, because it had
+				// an incompatible protocol version. Since the cluster file is different,
+				// it may have been updated by other clients.
+				TraceEvent("UpdatingConnectionStringFromFile")
+				    .detail("ClusterFile", connRecord->toString())
+				    .detail("StoredConnectionString", storedConnectionString.toString())
+				    .detail("CurrentConnectionString", connRecord->getConnectionString().toString());
+				wait(connRecord->setAndPersistConnectionString(storedConnectionString));
+				info.intermediateConnRecord = connRecord;
+				return info;
+			} else {
 				req.issues.push_back_deep(req.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
 				std::string connectionString = connRecord->getConnectionString().toString();
 				if (!incorrectTime.present()) {
@@ -915,23 +908,31 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 				    .detail("ClusterFile", connRecord->toString())
 				    .detail("StoredConnectionString", storedConnectionString.toString())
 				    .detail("CurrentConnectionString", connectionString);
-			} else {
-				incorrectTime = Optional<double>();
 			}
 		} else {
 			incorrectTime = Optional<double>();
 		}
 
-		state ErrorOr<CachedSerialization<ClientDBInfo>> rep;
+		state Future<ErrorOr<CachedSerialization<ClientDBInfo>>> repFuture;
 		if (clientLeaderServer.hostname.present()) {
-			wait(store(rep,
-			           tryGetReplyFromHostname(req,
-			                                   clientLeaderServer.hostname.get(),
-			                                   WLTOKEN_CLIENTLEADERREG_OPENDATABASE,
-			                                   TaskPriority::CoordinationReply)));
+			repFuture = tryGetReplyFromHostname(req,
+			                                    clientLeaderServer.hostname.get(),
+			                                    WLTOKEN_CLIENTLEADERREG_OPENDATABASE,
+			                                    TaskPriority::CoordinationReply);
 		} else {
-			wait(store(rep, clientLeaderServer.openDatabase.tryGetReply(req, TaskPriority::CoordinationReply)));
+			repFuture = clientLeaderServer.openDatabase.tryGetReply(req, TaskPriority::CoordinationReply);
 		}
+
+		// We need to update the coordinator even if it hasn't changed in case we are establishing a new connection in
+		// FlowTransport. If so, setting the coordinator here forces protocol version monitoring to restart with the new
+		// peer object.
+		//
+		// Both the tryGetReply call and the creation of the ClientLeaderRegInterface above should result in the Peer
+		// object being created in FlowTransport. Having this peer is a prerequisite to us signaling the AsyncVar.
+		coordinator->setUnconditional(clientLeaderServer);
+
+		state ErrorOr<CachedSerialization<ClientDBInfo>> rep = wait(repFuture);
+
 		if (rep.present()) {
 			if (rep.get().read().forward.present()) {
 				TraceEvent("MonitorProxiesForwarding")
@@ -939,6 +940,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 				    .detail("OldConnStr", info.intermediateConnRecord->getConnectionString().toString());
 				info.intermediateConnRecord = connRecord->makeIntermediateRecord(
 				    ClusterConnectionString(rep.get().read().forward.get().toString()));
+				ASSERT(info.intermediateConnRecord->getConnectionString().getNumberOfCoordinators() > 0);
 				return info;
 			}
 			if (connRecord != info.intermediateConnRecord) {
@@ -949,7 +951,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 					    .detail("CurrentConnectionString",
 					            info.intermediateConnRecord->getConnectionString().toString());
 				}
-				connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString());
+				wait(connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString()));
 				info.intermediateConnRecord = connRecord;
 			}
 
@@ -960,11 +962,16 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			shrinkProxyList(ni, lastCommitProxyUIDs, lastCommitProxies, lastGrvProxyUIDs, lastGrvProxies);
 			clientInfo->setUnconditional(ni);
 			successIndex = index;
+			allConnectionsFailed = false;
 		} else {
-			TEST(rep.getError().code() == error_code_failed_to_progress); // Coordinator cant talk to cluster controller
-			TEST(rep.getError().code() == error_code_lookup_failed); // Coordinator hostname resolving failure
+			CODE_PROBE(rep.getError().code() == error_code_failed_to_progress,
+			           "Coordinator cant talk to cluster controller");
+			TraceEvent("MonitorProxiesConnectFailed")
+			    .detail("Error", rep.getError().name())
+			    .detail("Coordinator", clientLeaderServer.getAddressString());
 			index = (index + 1) % coordinatorsSize;
 			if (index == successIndex) {
+				allConnectionsFailed = true;
 				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));
 			}
 		}
@@ -979,6 +986,7 @@ ACTOR Future<Void> monitorProxies(
     Key traceLogGroup) {
 	state MonitorLeaderInfo info(connRecord->get());
 	loop {
+		ASSERT(connRecord->get().isValid());
 		choose {
 			when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(
 			         connRecord->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup))) {

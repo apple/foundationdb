@@ -260,7 +260,8 @@
                "available_bytes":0, // an estimate of the process' fair share of the memory available to fdbservers
                "limit_bytes":0, // memory limit per process
                "unused_allocated_memory":0,
-               "used_bytes":0 // virtual memory size of the process
+               "used_bytes":0, // virtual memory size of the process
+               "rss_bytes":0 // resident memory size of the process
             },
             "messages":[
                {
@@ -378,7 +379,9 @@
                   "log_server_min_free_space",
                   "log_server_min_free_space_ratio",
                   "storage_server_durability_lag",
-                  "storage_server_list_fetch_failed"
+                  "storage_server_list_fetch_failed",
+                  "blob_worker_lag",
+                  "blob_worker_missing"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -399,7 +402,9 @@
                   "log_server_min_free_space",
                   "log_server_min_free_space_ratio",
                   "storage_server_durability_lag",
-                  "storage_server_list_fetch_failed"
+                  "storage_server_list_fetch_failed",
+                  "blob_worker_lag",
+                  "blob_worker_missing"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -522,7 +527,8 @@
                   "duplicate_mutation_streams",
                   "duplicate_mutation_fetch_timeout",
                   "primary_dc_missing",
-                  "fetch_primary_dc_timeout"
+                  "fetch_primary_dc_timeout",
+                  "fetch_storage_wiggler_stats_timeout"
                ]
             },
             "issues":[
@@ -597,7 +603,7 @@
                "counter":0,
                "roughness":0.0
             },
-            "memory_errors":{ // measures number of proxy_memory_limit_exceeded errors
+            "memory_errors":{ // measures number of (commit/grv)_proxy_memory_limit_exceeded errors
                "hz":0.0,
                "counter":0,
                "roughness":0.0
@@ -784,6 +790,11 @@
              "disabled",
              "optional_experimental",
              "required_experimental"
+         ]},
+         "encryption_at_rest_mode": {
+             "$enum":[
+             "disabled",
+             "aes_256_ctr"
          ]}
       },
       "data":{
@@ -877,6 +888,9 @@
                "logical_core_utilization":0.4 // computed as cpu_seconds / elapsed_seconds; value may be capped at 0.5 due to hyper-threading
             }
          }
+      },
+      "tenants":{
+         "num_tenants":0
       }
    },
    "client":{
