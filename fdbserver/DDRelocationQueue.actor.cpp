@@ -2599,6 +2599,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					    .detail("HighestPriority", highestPriorityRelocation)
 					    .detail("BytesWritten", self.bytesWritten)
 					    .detail("PriorityRecoverMove", self.priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
+					    .detail("PriorityOversizePhysicalShard",
+					            self.priority_relocations[SERVER_KNOBS->PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD])
 					    .detail("PriorityRebalanceUnderutilizedTeam",
 					            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM])
 					    .detail("PriorityRebalanceOverutilizedTeam",

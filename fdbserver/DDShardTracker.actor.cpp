@@ -1302,6 +1302,9 @@ InOverSizePhysicalShard PhysicalShardCollection::isInOverSizePhysicalShard(KeyRa
 			continue;
 		}
 		if (checkPhysicalShardAvailable(physicalShardID, StorageMetrics())) {
+			if (physicalShardInstances[physicalShardID].metrics.bytes <=
+			    SERVER_KNOBS->MAX_PHYSICAL_SHARD_BYTES * 3 / 2) {
+			}
 			continue;
 		}
 		if (!whetherPhysicalShardHasMoreThanKeyRange(physicalShardID, keyRange)) {

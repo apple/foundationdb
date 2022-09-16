@@ -230,7 +230,7 @@ Error statusToError(const rocksdb::Status& s) {
 
 rocksdb::ColumnFamilyOptions getCFOptions() {
 	rocksdb::ColumnFamilyOptions options;
-	options.level_compaction_dynamic_level_bytes = true;
+	options.level_compaction_dynamic_level_bytes = SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
 	options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
 	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
 		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
@@ -286,6 +286,8 @@ rocksdb::Options getOptions() {
 	options.max_total_wal_size = SERVER_KNOBS->ROCKSDB_MAX_TOTAL_WAL_SIZE;
 	options.max_subcompactions = SERVER_KNOBS->ROCKSDB_MAX_SUBCOMPACTIONS;
 	options.max_background_jobs = SERVER_KNOBS->ROCKSDB_MAX_BACKGROUND_JOBS;
+	// options.target_file_size_base = SERVER_KNOBS->ROCKSDB_TARGET_FILE_SIZE_BASE;
+	// options.target_file_size_multiplier = SERVER_KNOBS->ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
 
 	options.db_write_buffer_size = SERVER_KNOBS->ROCKSDB_WRITE_BUFFER_SIZE;
 	options.write_buffer_size = SERVER_KNOBS->ROCKSDB_CF_WRITE_BUFFER_SIZE;
@@ -410,19 +412,6 @@ private:
 	uint64_t index;
 	uint64_t iteratorsReuseCount;
 };
-
-ACTOR Future<Void> flowLockLogger(const FlowLock* readLock, const FlowLock* fetchLock) {
-	loop {
-		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
-		TraceEvent e("ShardedRocksDBFlowLock");
-		e.detail("ReadAvailable", readLock->available());
-		e.detail("ReadActivePermits", readLock->activePermits());
-		e.detail("ReadWaiters", readLock->waiters());
-		e.detail("FetchAvailable", fetchLock->available());
-		e.detail("FetchActivePermits", fetchLock->activePermits());
-		e.detail("FetchWaiters", fetchLock->waiters());
-	}
-}
 
 // DataShard represents a key range (logical shard) in FDB. A DataShard is assigned to a specific physical shard.
 struct DataShard {
@@ -1114,6 +1103,9 @@ public:
 	Reference<Histogram> getReadRangeNewIteratorHistogram(int index);
 	Reference<Histogram> getReadValueGetHistogram(int index);
 	Reference<Histogram> getReadPrefixGetHistogram(int index);
+	std::shared_ptr<LatencySample> getReadLatencySample(const int index);
+	std::shared_ptr<LatencySample> getScanLatencySample(const int index);
+	std::shared_ptr<LatencySample> getReadQueueLatencySample(const int index);
 	// For Writer
 	Reference<Histogram> getCommitLatencyHistogram();
 	Reference<Histogram> getCommitActionHistogram();
@@ -1147,6 +1139,9 @@ private:
 	std::vector<Reference<Histogram>> readRangeNewIteratorHistograms; // Zhe: haven't used?
 	std::vector<Reference<Histogram>> readValueGetHistograms;
 	std::vector<Reference<Histogram>> readPrefixGetHistograms;
+	std::vector<std::shared_ptr<LatencySample>> readLatency;
+	std::vector<std::shared_ptr<LatencySample>> scanLatency;
+	std::vector<std::shared_ptr<LatencySample>> readQueueLatency;
 	// Writer Histogram
 	Reference<Histogram> commitLatencyHistogram;
 	Reference<Histogram> commitActionHistogram;
@@ -1194,6 +1189,15 @@ Reference<Histogram> RocksDBMetrics::getReadValueGetHistogram(int index) {
 }
 Reference<Histogram> RocksDBMetrics::getReadPrefixGetHistogram(int index) {
 	return readPrefixGetHistograms[index];
+}
+std::shared_ptr<LatencySample> RocksDBMetrics::getReadLatencySample(const int index) {
+	return this->readLatency[index];
+}
+std::shared_ptr<LatencySample> RocksDBMetrics::getScanLatencySample(const int index) {
+	return this->scanLatency[index];
+}
+std::shared_ptr<LatencySample> RocksDBMetrics::getReadQueueLatencySample(const int index) {
+	return this->readQueueLatency[index];
 }
 Reference<Histogram> RocksDBMetrics::getCommitLatencyHistogram() {
 	return commitLatencyHistogram;
@@ -1382,6 +1386,18 @@ RocksDBMetrics::RocksDBMetrics(UID debugID, std::shared_ptr<rocksdb::Statistics>
 		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READVALUE_GET_HISTOGRAM, Histogram::Unit::microseconds));
 		readPrefixGetHistograms.push_back(Histogram::getHistogram(
 		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READPREFIX_GET_HISTOGRAM, Histogram::Unit::microseconds));
+		readLatency.push_back(std::make_shared<LatencySample>("ShardedRocksReadLatency",
+		                                                      debugID,
+		                                                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE));
+		scanLatency.push_back(std::make_shared<LatencySample>("ShardedRocksScanLatency",
+		                                                      debugID,
+		                                                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE));
+		readQueueLatency.push_back(std::make_shared<LatencySample>("ShardedRocksReadQueueLatency",
+		                                                           debugID,
+		                                                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                                                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE));
 	}
 	commitLatencyHistogram = Histogram::getHistogram(
 	    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_COMMIT_LATENCY_HISTOGRAM, Histogram::Unit::microseconds);
@@ -1619,6 +1635,33 @@ ACTOR Future<Void> rocksDBAggregatedMetricsLogger(std::shared_ptr<ShardedRocksDB
 	return Void();
 }
 
+ACTOR Future<Void> flowLockLogger(std::shared_ptr<ShardedRocksDBState> rState,
+                                  Future<Void> openFuture,
+                                  const FlowLock* readLock,
+                                  const FlowLock* fetchLock) {
+	try {
+		wait(openFuture);
+		loop {
+			wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
+			if (rState->closing) {
+				break;
+			}
+			TraceEvent e("ShardedRocksDBFlowLock");
+			e.detail("ReadAvailable", readLock->available());
+			e.detail("ReadActivePermits", readLock->activePermits());
+			e.detail("ReadWaiters", readLock->waiters());
+			e.detail("FetchAvailable", fetchLock->available());
+			e.detail("FetchActivePermits", fetchLock->activePermits());
+			e.detail("FetchWaiters", fetchLock->waiters());
+		}
+	} catch (Error& e) {
+		if (e.code() != error_code_actor_cancelled) {
+			TraceEvent(SevError, "ShardedRocksDBMetricsError").errorUnsuppressed(e);
+		}
+	}
+	return Void();
+}
+
 struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	using CF = rocksdb::ColumnFamilyHandle*;
 
@@ -1698,6 +1741,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			Optional<Future<Void>>& metrics;
 			const FlowLock* readLock;
 			const FlowLock* fetchLock;
+
 			std::shared_ptr<RocksDBErrorListener> errorListener;
 
 			OpenAction(ShardManager* shardManager,
@@ -1943,17 +1987,21 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			ReadValueAction(KeyRef key, PhysicalShard* shard, Optional<UID> debugID)
 			  : key(key), shard(shard), debugID(debugID), startTime(timer_monotonic()),
 			    getHistograms(
-			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false) {
-			}
+			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
+			    result(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY > 0
+			               ? ThreadReturnPromise<Optional<Value>>(
+			                     static_cast<TaskPriority>(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY))
+			               : ThreadReturnPromise<Optional<Value>>()) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 
 		void action(ReadValueAction& a) {
-			double readBeginTime = timer_monotonic();
+			const double readBeginTime = timer_monotonic();
 			if (a.getHistograms) {
 				rocksDBMetrics->getReadValueQueueWaitHistogram(threadIndex)->sampleSeconds(readBeginTime - a.startTime);
 			}
+			rocksDBMetrics->getReadQueueLatencySample(threadIndex)->addMeasurement(readBeginTime - a.startTime);
 			Optional<TraceBatch> traceBatch;
 			if (a.debugID.present()) {
 				traceBatch = { TraceBatch{} };
@@ -1983,6 +2031,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				rocksDBMetrics->getReadValueGetHistogram(threadIndex)
 				    ->sampleSeconds(timer_monotonic() - dbGetBeginTime);
 			}
+			rocksDBMetrics->getReadLatencySample(threadIndex)->addMeasurement(timer_monotonic() - readBeginTime);
 
 			if (a.debugID.present()) {
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.After");
@@ -2018,9 +2067,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			ReadValuePrefixAction(Key key, int maxLength, PhysicalShard* shard, Optional<UID> debugID)
 			  : key(key), maxLength(maxLength), shard(shard), debugID(debugID), startTime(timer_monotonic()),
-			    getHistograms((deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE)
-			                      ? true
-			                      : false){};
+			    getHistograms(
+			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
+			    result(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY > 0
+			               ? ThreadReturnPromise<Optional<Value>>(
+			                     static_cast<TaskPriority>(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY))
+			               : ThreadReturnPromise<Optional<Value>>())
+
+			        {};
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 
@@ -2030,6 +2084,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				rocksDBMetrics->getReadPrefixQueueWaitHistogram(threadIndex)
 				    ->sampleSeconds(readBeginTime - a.startTime);
 			}
+			rocksDBMetrics->getReadQueueLatencySample(threadIndex)->addMeasurement(readBeginTime - a.startTime);
 			Optional<TraceBatch> traceBatch;
 			if (a.debugID.present()) {
 				traceBatch = { TraceBatch{} };
@@ -2062,6 +2117,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				    ->sampleSeconds(timer_monotonic() - dbGetBeginTime);
 			}
 
+			rocksDBMetrics->getReadLatencySample(threadIndex)->addMeasurement(timer_monotonic() - readBeginTime);
 			if (a.debugID.present()) {
 				traceBatch.get().addEvent("GetValuePrefixDebug",
 				                          a.debugID.get().first(),
@@ -2097,7 +2153,11 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			ReadRangeAction(KeyRange keys, std::vector<DataShard*> shards, int rowLimit, int byteLimit)
 			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), startTime(timer_monotonic()),
 			    getHistograms(
-			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false) {
+			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
+			    result(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY > 0
+			               ? ThreadReturnPromise<RangeResult>(
+			                     static_cast<TaskPriority>(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY))
+			               : ThreadReturnPromise<RangeResult>()) {
 				for (const DataShard* shard : shards) {
 					if (shard != nullptr) {
 						shardRanges.emplace_back(shard->physicalShard, keys & shard->range);
@@ -2112,14 +2172,15 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			if (a.getHistograms) {
 				rocksDBMetrics->getReadRangeQueueWaitHistogram(threadIndex)->sampleSeconds(readBeginTime - a.startTime);
 			}
-			if (readBeginTime - a.startTime > readRangeTimeout) {
-				TraceEvent(SevWarn, "ShardedRocksKVSReadTimeout")
-				    .detail("Error", "Read range request timedout")
-				    .detail("Method", "ReadRangeAction")
-				    .detail("Timeout value", readRangeTimeout);
-				a.result.sendError(transaction_too_old());
-				return;
-			}
+			rocksDBMetrics->getReadQueueLatencySample(threadIndex)->addMeasurement(readBeginTime - a.startTime);
+			// if (readBeginTime - a.startTime > readRangeTimeout) {
+			// 	TraceEvent(SevWarn, "ShardedRocksKVSReadTimeout")
+			// 	    .detail("Error", "Read range request timedout")
+			// 	    .detail("Method", "ReadRangeAction")
+			// 	    .detail("Timeout value", readRangeTimeout);
+			// 	a.result.sendError(transaction_too_old());
+			// 	return;
+			// }
 
 			int rowLimit = a.rowLimit;
 			int byteLimit = a.byteLimit;
@@ -2171,6 +2232,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				rocksDBMetrics->getReadRangeActionHistogram(threadIndex)->sampleSeconds(currTime - readBeginTime);
 				rocksDBMetrics->getReadRangeLatencyHistogram(threadIndex)->sampleSeconds(currTime - a.startTime);
 			}
+			rocksDBMetrics->getScanLatencySample(threadIndex)->addMeasurement(timer_monotonic() - readBeginTime);
 
 			sample();
 		}
@@ -2207,11 +2269,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		// TODO: Adapt the simulation framework to not advance time quickly when background reads/writes are
 		// occurring.
 		if (g_network->isSimulated()) {
-			writeThread = CoroThreadPool::createThreadPool();
-			readThreads = CoroThreadPool::createThreadPool();
+			// writeThread = CoroThreadPool::createThreadPool();
+			// readThreads = CoroThreadPool::createThreadPool();
+			writeThread = createGenericThreadPool(0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
+			readThreads = createGenericThreadPool(0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY);
 		} else {
-			writeThread = createGenericThreadPool();
-			readThreads = createGenericThreadPool();
+			writeThread = createGenericThreadPool(0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
+			readThreads = createGenericThreadPool(0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY);
 		}
 		writeThread->addThread(new Writer(id, 0, shardManager.getColumnFamilyMap(), rocksDBMetrics), "fdb-rocksdb-wr");
 		TraceEvent("ShardedRocksDBReadThreads", id)
@@ -2262,7 +2326,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			    &shardManager, dbOptions, metrics, &readSemaphore, &fetchSemaphore, errorListener);
 			openFuture = a->done.getFuture();
 			this->metrics = ShardManager::shardMetricsLogger(this->rState, openFuture, &shardManager) &&
-			                rocksDBAggregatedMetricsLogger(this->rState, openFuture, rocksDBMetrics, &shardManager);
+			                rocksDBAggregatedMetricsLogger(this->rState, openFuture, rocksDBMetrics, &shardManager) &&
+			                flowLockLogger(this->rState, openFuture, &readSemaphore, &fetchSemaphore);
 			this->refreshHolder = refreshReadIteratorPools(this->rState, openFuture, shardManager.getAllShards());
 			this->cleanUpJob = emptyShardCleaner(this->rState, openFuture, &shardManager, writeThread);
 			writeThread->post(a.release());

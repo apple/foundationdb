@@ -1119,6 +1119,8 @@ public:
 		Counter changeFeedDiskReads;
 
 		LatencySample readLatencySample;
+		LatencySample kvScanLatencySample;
+		LatencySample kvReadLatencySample;
 		LatencyBands readLatencyBands;
 		LatencySample mappedRangeSample; // Samples getMappedRange latency
 		LatencySample mappedRangeRemoteSample; // Samples getMappedRange remote subquery latency
@@ -1156,6 +1158,14 @@ public:
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 		                      SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    kvScanLatencySample("KVScanLatencyMetrics",
+		                        self->thisServerID,
+		                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    kvReadLatencySample("KVReadLatencyMetrics",
+		                        self->thisServerID,
+		                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 		    readLatencyBands("ReadLatencyBands", self->thisServerID, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
 		    mappedRangeSample("GetMappedRangeMetrics",
 		                      self->thisServerID,
@@ -1848,7 +1858,9 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			path = 1;
 		} else if (!i || !i->isClearTo() || i->getEndKey() <= req.key) {
 			path = 2;
+			state double readStartTime = timer_monotonic();
 			Optional<Value> vv = wait(data->storage.readValue(req.key, IKeyValueStore::ReadType::NORMAL, req.debugID));
+			data->counters.kvReadLatencySample.addMeasurement(timer_monotonic() - readStartTime);
 			data->counters.kvGetBytes += vv.expectedSize();
 			// Validate that while we were reading the data we didn't lose the version or shard
 			if (version < data->storageVersion()) {
@@ -2595,11 +2607,13 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			// To let update storage finish
 			wait(delay(0));
 		}
+		state double readStartTime = timer_monotonic();
 		RangeResult res = wait(
 		    data->storage.readRange(KeyRangeRef(changeFeedDurableKey(req.rangeID, std::max(req.begin, emptyVersion)),
 		                                        changeFeedDurableKey(req.rangeID, req.end)),
 		                            1 << 30,
 		                            remainingDurableBytes));
+		data->counters.kvScanLatencySample.addMeasurement(timer_monotonic() - readStartTime);
 
 		data->counters.kvScanBytes += res.logicalSize();
 		++data->counters.changeFeedDiskReads;
@@ -3379,9 +3393,11 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 
 			// Read the data on disk up to vCurrent (or the end of the range)
 			readEnd = vCurrent ? std::min(vCurrent.key(), range.end) : range.end;
+			state double readStartTime = timer_monotonic();
 			RangeResult atStorageVersion =
 			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type));
 			data->counters.kvScanBytes += atStorageVersion.logicalSize();
+			data->counters.kvScanLatencySample.addMeasurement(timer_monotonic() - readStartTime);
 
 			ASSERT(atStorageVersion.size() <= limit);
 			if (data->storageVersion() > version) {
@@ -3474,8 +3490,10 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 
 			readBegin = vCurrent ? std::max(vCurrent->isClearTo() ? vCurrent->getEndKey() : vCurrent.key(), range.begin)
 			                     : range.begin;
+			readStartTime = timer_monotonic();
 			RangeResult atStorageVersion =
 			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type));
+			data->counters.kvScanLatencySample.addMeasurement(timer_monotonic() - readStartTime);
 			data->counters.kvScanBytes += atStorageVersion.logicalSize();
 
 			ASSERT(atStorageVersion.size() <= -limit);

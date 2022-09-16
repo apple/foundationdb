@@ -25,6 +25,7 @@
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #include "boost/asio.hpp"
+#include <boost/thread.hpp>
 
 class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool> {
 	struct Thread {
@@ -40,8 +41,9 @@ class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool>
 			threadUserObject = userObject;
 			try {
 				userObject->init();
-				while (pool->ios.run_one() && (pool->mode == Mode::Run))
-					;
+				// while (pool->ios.run_one() && (pool->mode == Mode::Run))
+				// 	;
+				pool->ios.run();
 			} catch (Error& e) {
 				TraceEvent(SevError, "ThreadPoolError").error(e);
 			}
@@ -56,6 +58,7 @@ class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool>
 	}
 
 	std::vector<Thread*> threads;
+	// boost::thread_group bThreas;
 	boost::asio::io_service ios;
 	boost::asio::io_service::work dontstop;
 	enum Mode { Run = 0, Shutdown = 2 };

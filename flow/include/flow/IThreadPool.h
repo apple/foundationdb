@@ -82,7 +82,8 @@ public:
 template <class T>
 class ThreadReturnPromise : NonCopyable {
 public:
-	ThreadReturnPromise() {}
+	ThreadReturnPromise() : priority(TaskPriority::DefaultOnMainThread) {}
+	ThreadReturnPromise(TaskPriority priority) : priority(priority) {}
 	~ThreadReturnPromise() {
 		if (promise.isValid())
 			sendError(broken_promise());
@@ -98,18 +99,19 @@ public:
 		tagAndForward(&promise, t, signal.getFuture());
 		g_network->onMainThread(std::move(signal),
 		                        g_network->isOnMainThread() ? incrementPriorityIfEven(g_network->getCurrentTask())
-		                                                    : TaskPriority::DefaultOnMainThread);
+		                                                    : this->priority);
 	}
 	void sendError(Error e) { // Can be called safely from another thread.  Call send or sendError at most once.
 		Promise<Void> signal;
 		tagAndForwardError(&promise, e, signal.getFuture());
 		g_network->onMainThread(std::move(signal),
 		                        g_network->isOnMainThread() ? incrementPriorityIfEven(g_network->getCurrentTask())
-		                                                    : TaskPriority::DefaultOnMainThread);
+		                                                    : this->priority);
 	}
 	bool isValid() { return promise.isValid(); }
 
 private:
+	TaskPriority priority;
 	Promise<T> promise;
 };
 
