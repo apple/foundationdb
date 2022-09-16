@@ -1084,14 +1084,6 @@ struct RestoreClusterImpl {
 	AddNewTenants addNewTenants;
 	RemoveMissingTenants removeMissingTenants;
 
-	// Variables to track state during restore
-	TenantName lastTenantName;
-	ClusterName lastClusterName;
-	uint64_t tenantId;
-	uint64_t lastTenantId;
-	TenantName tenantName;
-	TenantName tenantNewName;
-
 	// Tenant list from data and management clusters.
 	std::unordered_map<TenantName, TenantMapEntry> dataClusterTenantMap;
 	std::unordered_map<uint64_t, TenantName> dataClusterTenantIdIndex;
@@ -1147,21 +1139,21 @@ struct RestoreClusterImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> markManagementTenantAsError(RestoreClusterImpl* self,
-	                                                      Reference<typename DB::TransactionT> tr) {
-		state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
+	ACTOR static Future<Void> markManagementTenantAsError(Reference<typename DB::TransactionT> tr,
+	                                                      TenantName tenantName) {
+		state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, tenantName));
 
 		if (!tenantEntry.present()) {
 			return Void();
 		}
 
 		tenantEntry.get().tenantState = TenantState::ERROR;
-		ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, self->tenantName, tenantEntry.get());
+		ManagementClusterMetadata::tenantMetadata().tenantMap.set(tr, tenantName, tenantEntry.get());
 		return Void();
 	}
 
 	ACTOR static Future<bool> getTenantsFromDataCluster(RestoreClusterImpl* self, Reference<ITransaction> tr) {
-		TenantNameRef begin = self->lastTenantName;
+		TenantNameRef begin = self->clusterName;
 		TenantNameRef end = "\xff\xff"_sr;
 		state Future<KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>>> tenantsFuture =
 		    TenantMetadata::tenantMap().getRange(tr, begin, end, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
@@ -1170,7 +1162,6 @@ struct RestoreClusterImpl {
 		if (!tenants.results.empty()) {
 			for (auto t : tenants.results) {
 				self->dataClusterTenantMap.emplace(t.first, t.second);
-				self->lastTenantName = t.first;
 			}
 		}
 
@@ -1179,7 +1170,7 @@ struct RestoreClusterImpl {
 
 	ACTOR static Future<bool> getTenantIdNameIndexFromDataCluster(RestoreClusterImpl* self,
 	                                                              Reference<ITransaction> tr) {
-		uint64_t begin = self->lastTenantId;
+		uint64_t begin = 0;
 		uint64_t end = std::numeric_limits<uint64_t>::max();
 		state Future<KeyBackedRangeResult<std::pair<int64_t, TenantName>>> tenantsFuture =
 		    TenantMetadata::tenantIdIndex().getRange(tr, begin, end, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
@@ -1188,37 +1179,28 @@ struct RestoreClusterImpl {
 		if (!tenants.results.empty()) {
 			for (auto t : tenants.results) {
 				self->dataClusterTenantIdIndex.emplace(t.first, t.second);
-				self->lastTenantId = t.first;
 			}
 		}
 
 		return !tenants.more;
 	}
 
-	ACTOR static Future<Void> getAllTenantsFromDataCluster(RestoreClusterImpl* self) {
-		loop {
-			bool gotAllTenants = wait(self->ctx.runDataClusterTransaction(
-			    [self = self](Reference<ITransaction> tr) { return getTenantsFromDataCluster(self, tr); }));
+	ACTOR static Future<bool> getAllTenantsFromDataCluster(RestoreClusterImpl* self) {
+		bool gotAllTenants = wait(self->ctx.runDataClusterTransaction(
+		    [self = self](Reference<ITransaction> tr) { return getTenantsFromDataCluster(self, tr); }));
 
-			if (gotAllTenants) {
-				break;
-			}
+		if (!gotAllTenants) {
+			return false;
 		}
 
-		loop {
-			bool gotAllTenants = wait(self->ctx.runDataClusterTransaction(
-			    [self = self](Reference<ITransaction> tr) { return getTenantIdNameIndexFromDataCluster(self, tr); }));
+		bool gotAllTenants = wait(self->ctx.runDataClusterTransaction(
+		    [self = self](Reference<ITransaction> tr) { return getTenantIdNameIndexFromDataCluster(self, tr); }));
 
-			if (gotAllTenants) {
-				break;
-			}
-		}
-
-		return Void();
+		return gotAllTenants;
 	}
 
 	ACTOR static Future<bool> getTenantsFromManagementCluster(RestoreClusterImpl* self, Reference<ITransaction> tr) {
-		TenantNameRef begin = self->lastTenantName;
+		TenantNameRef begin = ""_sr;
 		TenantNameRef end = "\xff\xff"_sr;
 		state Future<KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>>> tenantsFuture =
 		    ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(
@@ -1228,7 +1210,6 @@ struct RestoreClusterImpl {
 		if (!tenants.results.empty()) {
 			for (auto t : tenants.results) {
 				self->mgmtClusterTenantMap.emplace(t.first, t.second);
-				self->lastTenantName = t.first;
 			}
 		}
 
@@ -1237,7 +1218,7 @@ struct RestoreClusterImpl {
 
 	ACTOR static Future<bool> getTenantIdNameIndexFromManagementCluster(RestoreClusterImpl* self,
 	                                                                    Reference<ITransaction> tr) {
-		uint64_t begin = self->lastTenantId;
+		uint64_t begin = 0;
 		uint64_t end = std::numeric_limits<uint64_t>::max();
 		state Future<KeyBackedRangeResult<std::pair<int64_t, TenantName>>> tenantsFuture =
 		    ManagementClusterMetadata::tenantMetadata().tenantIdIndex.getRange(
@@ -1247,7 +1228,6 @@ struct RestoreClusterImpl {
 		if (!tenants.results.empty()) {
 			for (auto t : tenants.results) {
 				self->mgmtClusterTenantIdIndex.emplace(t.first, t.second);
-				self->lastTenantId = t.first;
 			}
 		}
 
@@ -1257,7 +1237,7 @@ struct RestoreClusterImpl {
 	ACTOR static Future<bool> getTenantsFromManagementClusterForCurrentDataCluster(RestoreClusterImpl* self,
 	                                                                               Reference<ITransaction> tr) {
 		std::pair<Tuple, Tuple> clusterTupleRange =
-		    std::make_pair(Tuple::makeTuple(self->lastClusterName), Tuple::makeTuple(keyAfter(self->clusterName)));
+		    std::make_pair(Tuple::makeTuple(self->clusterName), Tuple::makeTuple(keyAfter(self->clusterName)));
 		state Future<KeyBackedRangeResult<Tuple>> tenantEntriesFuture =
 		    ManagementClusterMetadata::clusterTenantIndex.getRange(
 		        tr, clusterTupleRange.first, clusterTupleRange.second, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
@@ -1267,69 +1247,39 @@ struct RestoreClusterImpl {
 			for (auto t : tenantEntries.results) {
 				ASSERT(t.getString(0) == self->clusterName);
 				self->mgmtTenantSet.insert(t.getString(1));
-				// fix this ... not correct
-				self->lastClusterName = t.getString(0);
 			}
 		}
 
 		return !tenantEntries.more;
 	}
 
-	ACTOR static Future<Void> getAllTenantsFromManagementCluster(RestoreClusterImpl* self) {
+	ACTOR static Future<bool> getAllTenantsFromManagementCluster(RestoreClusterImpl* self) {
 		// get all tenants across all data clusters
-		self->lastClusterName = self->clusterName;
-		loop {
-			bool gotAllTenants =
-			    wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
-				    return getTenantsFromManagementCluster(self, tr);
-			    }));
+		bool gotAllTenants =
+		    wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+			    return getTenantsFromManagementCluster(self, tr);
+		    }));
 
-			if (gotAllTenants) {
-				break;
-			}
+		if (!gotAllTenants) {
+			return false;
 		}
 
-		loop {
-			bool gotAllTenants =
-			    wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
-				    return getTenantIdNameIndexFromManagementCluster(self, tr);
-			    }));
+		bool gotAllTenants =
+		    wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+			    return getTenantIdNameIndexFromManagementCluster(self, tr);
+		    }));
 
-			if (gotAllTenants) {
-				break;
-			}
+		if (!gotAllTenants) {
+			return false;
 		}
 
 		// get tenants for the specific data cluster
-		loop {
-			bool gotAllTenants =
-			    wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
-				    return getTenantsFromManagementClusterForCurrentDataCluster(self, tr);
-			    }));
+		bool gotAllTenants =
+		    wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+			    return getTenantsFromManagementClusterForCurrentDataCluster(self, tr);
+		    }));
 
-			if (gotAllTenants) {
-				break;
-			}
-		}
-
-		return Void();
-	}
-
-	ACTOR static Future<Void> renameTenantOnDataCluster(RestoreClusterImpl* self) {
-		ASSERT(self->tenantId != -1);
-		wait(self->ctx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
-			return TenantAPI::renameTenantTransaction(
-			    tr, self->tenantName, self->tenantNewName, self->tenantId, ClusterType::METACLUSTER_DATA);
-		}));
-		return Void();
-	}
-
-	ACTOR static Future<Void> removeTenantFromDataCluster(RestoreClusterImpl* self) {
-		wait(self->ctx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
-			return TenantAPI::deleteTenantTransaction(
-			    tr, self->tenantName, self->tenantId, ClusterType::METACLUSTER_DATA);
-		}));
-		return Void();
+		return gotAllTenants;
 	}
 
 	// This only supports the restore of an already registered data cluster, for now.
@@ -1353,27 +1303,32 @@ struct RestoreClusterImpl {
 
 		if (!clusterIsRestoring) {
 			// get all the tenant information from the newly registered data cluster
-			wait(getAllTenantsFromDataCluster(self));
+			bool gotAllTenants = wait(getAllTenantsFromDataCluster(self));
 			// get all the tenant information for this data cluster from manangement cluster
-			wait(getAllTenantsFromManagementCluster(self));
+			bool gotAllTenants = wait(getAllTenantsFromManagementCluster(self));
 
 			state std::unordered_map<TenantName, TenantMapEntry>::iterator itr = self->dataClusterTenantMap.begin();
 			while (itr != self->dataClusterTenantMap.end()) {
-
-				state TenantName tenantNameOnDataCluster = itr->first;
-				state uint64_t tenantId = (itr->second).id;
-				self->tenantId = tenantId;
-				self->tenantName = tenantNameOnDataCluster;
+				uint64_t tenantId = (itr->second).id;
+				TenantName tenantName = itr->first;
 
 				auto tenantNameOnMgmtCluster = self->mgmtClusterTenantIdIndex.find(tenantId);
 				if (tenantNameOnMgmtCluster == self->mgmtClusterTenantIdIndex.end()) {
+					// Delete
 					if (self->removeMissingTenants) {
-						wait(removeTenantFromDataCluster(self));
+						wait(self->ctx.runDataClusterTransaction([tenantName, tenantId](Reference<ITransaction> tr) {
+							return TenantAPI::deleteTenantTransaction(
+							    tr, tenantName, tenantId, ClusterType::METACLUSTER_DATA);
+						}));
 					}
-				} else if (tenantNameOnDataCluster.compare(self->mgmtClusterTenantIdIndex[tenantId]) != 0) {
-					// renamed
-					self->tenantNewName = self->mgmtClusterTenantIdIndex[tenantId];
-					wait(renameTenantOnDataCluster(self));
+				} else if (tenantName.compare(self->mgmtClusterTenantIdIndex[tenantId]) != 0) {
+					// Rename
+					TenantName tenantNewName = self->mgmtClusterTenantIdIndex[tenantId];
+					wait(self->ctx.runDataClusterTransaction(
+					    [tenantName, tenantNewName, tenantId](Reference<ITransaction> tr) {
+						    return TenantAPI::renameTenantTransaction(
+						        tr, tenantName, tenantNewName, tenantId, ClusterType::METACLUSTER_DATA);
+					    }));
 				}
 
 				++itr;
@@ -1381,12 +1336,13 @@ struct RestoreClusterImpl {
 
 			state std::unordered_set<TenantNameRef>::iterator setItr = self->mgmtTenantSet.begin();
 			while (setItr != self->mgmtTenantSet.end()) {
-				self->tenantId = self->mgmtClusterTenantMap[*setItr].id;
+				TenantName tenantName = *setItr;
+				uint64_t tenantId = self->mgmtClusterTenantMap[tenantName].id;
 
-				if (self->dataClusterTenantIdIndex.find(self->tenantId) == self->dataClusterTenantIdIndex.end()) {
+				if (self->dataClusterTenantIdIndex.find(tenantId) == self->dataClusterTenantIdIndex.end()) {
 					// Set Tenant in ERROR state
-					wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
-						return markManagementTenantAsError(self, tr);
+					wait(self->ctx.runManagementTransaction([tenantName](Reference<typename DB::TransactionT> tr) {
+						return markManagementTenantAsError(tr, tenantName);
 					}));
 				}
 				++setItr;
