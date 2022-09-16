@@ -108,7 +108,7 @@ and then added to your classpath.<br>
 <h1>Getting started</h1>
 To start using FoundationDB from Java, create an instance of the 
 <a href="com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb"><code>FoundationDB API interface</code></a> with the version of the
-API that you want to use (this release of the FoundationDB Java API supports versions between <code>510</code> and <code>630</code>).
+API that you want to use (this release of the FoundationDB Java API supports versions between <code>510</code> and <code>710</code>).
 With this API object you can then open <a href="com/apple/foundationdb/Cluster.html" title="class in com.apple.foundationdb"><code>Cluster</code></a>s and
 <a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb"><code>Database</code></a>s and start using
 <a href="com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb"><code>Transaction</code></a>s.
@@ -124,7 +124,7 @@ import com.apple.foundationdb.tuple.Tuple;
 
 public class Example {
   public static void main(String[] args) {
-    FDB fdb = FDB.selectAPIVersion(630);
+    FDB fdb = FDB.selectAPIVersion(710);
 
     try(Database db = fdb.open()) {
       // Run an operation on the database

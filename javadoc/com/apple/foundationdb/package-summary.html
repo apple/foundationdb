@@ -158,12 +158,22 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 </td>
 </tr>
 <tr class="altColor">
+<th class="colFirst" scope="row"><a href="Tenant.html" title="interface in com.apple.foundationdb">Tenant</a></th>
+<td class="colLast">
+<div class="block">A tenant represents a named key-space within a database that can be interacted with
+ transactionally.<br>
+ <br>
+ The simplest correct programs using tenants will make use of the methods defined
+  in the <a href="TransactionContext.html" title="interface in com.apple.foundationdb"><code>TransactionContext</code></a> interface.</div>
+</td>
+</tr>
+<tr class="rowColor">
 <th class="colFirst" scope="row"><a href="Transaction.html" title="interface in com.apple.foundationdb">Transaction</a></th>
 <td class="colLast">
 <div class="block">A Transaction represents a FoundationDB database transaction.</div>
 </td>
 </tr>
-<tr class="rowColor">
+<tr class="altColor">
 <th class="colFirst" scope="row"><a href="TransactionContext.html" title="interface in com.apple.foundationdb">TransactionContext</a></th>
 <td class="colLast">
 <div class="block">A context in which a <code>Transaction</code> is available for database operations.</div>
@@ -203,6 +213,16 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 </td>
 </tr>
 <tr class="altColor">
+<th class="colFirst" scope="row"><a href="JNIUtil.html" title="class in com.apple.foundationdb">JNIUtil</a></th>
+<td class="colLast">
+<div class="block">Utility for loading a dynamic library from the classpath.</div>
+</td>
+</tr>
+<tr class="rowColor">
+<th class="colFirst" scope="row"><a href="KeyArrayResult.html" title="class in com.apple.foundationdb">KeyArrayResult</a></th>
+<td class="colLast">&nbsp;</td>
+</tr>
+<tr class="altColor">
 <th class="colFirst" scope="row"><a href="KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a></th>
 <td class="colLast">
 <div class="block">A <code>KeySelector</code> identifies a particular key in the database.</div>
@@ -228,15 +248,25 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 </td>
 </tr>
 <tr class="altColor">
+<th class="colFirst" scope="row"><a href="MappedKeyValue.html" title="class in com.apple.foundationdb">MappedKeyValue</a></th>
+<td class="colLast">&nbsp;</td>
+</tr>
+<tr class="rowColor">
 <th class="colFirst" scope="row"><a href="NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></th>
 <td class="colLast">
 <div class="block">A set of options that can be set globally for the <a href="FDB.html" title="class in com.apple.foundationdb"><code>FoundationDB API</code></a>.</div>
 </td>
 </tr>
-<tr class="rowColor">
+<tr class="altColor">
 <th class="colFirst" scope="row"><a href="Range.html" title="class in com.apple.foundationdb">Range</a></th>
 <td class="colLast">
 <div class="block">A simple description of an exact range of keyspace, specified by a begin and end key.</div>
+</td>
+</tr>
+<tr class="rowColor">
+<th class="colFirst" scope="row"><a href="TenantManagement.html" title="class in com.apple.foundationdb">TenantManagement</a></th>
+<td class="colLast">
+<div class="block">The FoundationDB API includes function to manage the set of tenants in a cluster.</div>
 </td>
 </tr>
 <tr class="altColor">

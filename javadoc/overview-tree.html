@@ -116,8 +116,14 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <li class="circle">com.apple.foundationdb.directory.<a href="com/apple/foundationdb/directory/DirectoryLayer.html" title="class in com.apple.foundationdb.directory"><span class="typeNameLink">DirectoryLayer</span></a> (implements com.apple.foundationdb.directory.<a href="com/apple/foundationdb/directory/Directory.html" title="interface in com.apple.foundationdb.directory">Directory</a>)</li>
 <li class="circle">com.apple.foundationdb.<a href="com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb"><span class="typeNameLink">FDB</span></a></li>
 <li class="circle">com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/IterableComparator.html" title="class in com.apple.foundationdb.tuple"><span class="typeNameLink">IterableComparator</span></a> (implements java.util.Comparator&lt;T&gt;)</li>
+<li class="circle">com.apple.foundationdb.<a href="com/apple/foundationdb/JNIUtil.html" title="class in com.apple.foundationdb"><span class="typeNameLink">JNIUtil</span></a></li>
+<li class="circle">com.apple.foundationdb.<a href="com/apple/foundationdb/KeyArrayResult.html" title="class in com.apple.foundationdb"><span class="typeNameLink">KeyArrayResult</span></a></li>
 <li class="circle">com.apple.foundationdb.<a href="com/apple/foundationdb/KeySelector.html" title="class in com.apple.foundationdb"><span class="typeNameLink">KeySelector</span></a></li>
-<li class="circle">com.apple.foundationdb.<a href="com/apple/foundationdb/KeyValue.html" title="class in com.apple.foundationdb"><span class="typeNameLink">KeyValue</span></a></li>
+<li class="circle">com.apple.foundationdb.<a href="com/apple/foundationdb/KeyValue.html" title="class in com.apple.foundationdb"><span class="typeNameLink">KeyValue</span></a>
+<ul>
+<li class="circle">com.apple.foundationdb.<a href="com/apple/foundationdb/MappedKeyValue.html" title="class in com.apple.foundationdb"><span class="typeNameLink">MappedKeyValue</span></a></li>
+</ul>
+</li>
 <li class="circle">com.apple.foundationdb.<a href="com/apple/foundationdb/LocalityUtil.html" title="class in com.apple.foundationdb"><span class="typeNameLink">LocalityUtil</span></a></li>
 <li class="circle">com.apple.foundationdb.<a href="com/apple/foundationdb/MapEventKeeper.html" title="class in com.apple.foundationdb"><span class="typeNameLink">MapEventKeeper</span></a> (implements com.apple.foundationdb.<a href="com/apple/foundationdb/EventKeeper.html" title="interface in com.apple.foundationdb">EventKeeper</a>)</li>
 <li class="circle">com.apple.foundationdb.<a href="com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb"><span class="typeNameLink">NetworkOptions</span></a></li>
@@ -128,6 +134,7 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <li class="circle">com.apple.foundationdb.directory.<a href="com/apple/foundationdb/directory/DirectorySubspace.html" title="class in com.apple.foundationdb.directory"><span class="typeNameLink">DirectorySubspace</span></a> (implements com.apple.foundationdb.directory.<a href="com/apple/foundationdb/directory/Directory.html" title="interface in com.apple.foundationdb.directory">Directory</a>)</li>
 </ul>
 </li>
+<li class="circle">com.apple.foundationdb.<a href="com/apple/foundationdb/TenantManagement.html" title="class in com.apple.foundationdb"><span class="typeNameLink">TenantManagement</span></a></li>
 <li class="circle">java.lang.Throwable (implements java.io.Serializable)
 <ul>
 <li class="circle">java.lang.Exception
@@ -164,6 +171,7 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <ul>
 <li class="circle">com.apple.foundationdb.async.<a href="com/apple/foundationdb/async/CloseableAsyncIterator.html" title="interface in com.apple.foundationdb.async"><span class="typeNameLink">CloseableAsyncIterator</span></a>&lt;T&gt; (also extends com.apple.foundationdb.async.<a href="com/apple/foundationdb/async/AsyncIterator.html" title="interface in com.apple.foundationdb.async">AsyncIterator</a>&lt;T&gt;)</li>
 <li class="circle">com.apple.foundationdb.<a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb"><span class="typeNameLink">Database</span></a> (also extends com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionContext.html" title="interface in com.apple.foundationdb">TransactionContext</a>)</li>
+<li class="circle">com.apple.foundationdb.<a href="com/apple/foundationdb/Tenant.html" title="interface in com.apple.foundationdb"><span class="typeNameLink">Tenant</span></a> (also extends com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionContext.html" title="interface in com.apple.foundationdb">TransactionContext</a>)</li>
 <li class="circle">com.apple.foundationdb.<a href="com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb"><span class="typeNameLink">Transaction</span></a> (also extends com.apple.foundationdb.<a href="com/apple/foundationdb/ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a>, com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionContext.html" title="interface in com.apple.foundationdb">TransactionContext</a>)</li>
 </ul>
 </li>
@@ -197,6 +205,7 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <li class="circle">com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionContext.html" title="interface in com.apple.foundationdb"><span class="typeNameLink">TransactionContext</span></a>
 <ul>
 <li class="circle">com.apple.foundationdb.<a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb"><span class="typeNameLink">Database</span></a> (also extends java.lang.AutoCloseable)</li>
+<li class="circle">com.apple.foundationdb.<a href="com/apple/foundationdb/Tenant.html" title="interface in com.apple.foundationdb"><span class="typeNameLink">Tenant</span></a> (also extends java.lang.AutoCloseable)</li>
 <li class="circle">com.apple.foundationdb.<a href="com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb"><span class="typeNameLink">Transaction</span></a> (also extends java.lang.AutoCloseable, com.apple.foundationdb.<a href="com/apple/foundationdb/ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a>)</li>
 </ul>
 </li>

@@ -321,6 +321,10 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dd>
 <div class="block">Close the <code>Database</code> object and release any associated resources.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Tenant.html#close()">close()</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Tenant.html" title="interface in com.apple.foundationdb">Tenant</a></dt>
+<dd>
+<div class="block">Close the <code>Tenant</code> object and release any associated resources.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Transaction.html#close()">close()</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb">Transaction</a></dt>
 <dd>
 <div class="block">Close the <code>Transaction</code> object and release any associated resources.</div>
@@ -511,9 +515,29 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/directory/DirectorySubspace.html#createOrOpen(com.apple.foundationdb.TransactionContext,java.util.List,byte%5B%5D)">createOrOpen(TransactionContext, List&lt;String&gt;, byte[])</a></span> - Method in class com.apple.foundationdb.directory.<a href="com/apple/foundationdb/directory/DirectorySubspace.html" title="class in com.apple.foundationdb.directory">DirectorySubspace</a></dt>
 <dd>&nbsp;</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TenantManagement.html#createTenant(com.apple.foundationdb.Database,byte%5B%5D)">createTenant(Database, byte[])</a></span> - Static method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TenantManagement.html" title="class in com.apple.foundationdb">TenantManagement</a></dt>
+<dd>
+<div class="block">Creates a new tenant in the cluster using a transaction created on the specified <code>Database</code>.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TenantManagement.html#createTenant(com.apple.foundationdb.Database,com.apple.foundationdb.tuple.Tuple)">createTenant(Database, Tuple)</a></span> - Static method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TenantManagement.html" title="class in com.apple.foundationdb">TenantManagement</a></dt>
+<dd>
+<div class="block">Creates a new tenant in the cluster using a transaction created on the specified <code>Database</code>.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TenantManagement.html#createTenant(com.apple.foundationdb.Transaction,byte%5B%5D)">createTenant(Transaction, byte[])</a></span> - Static method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TenantManagement.html" title="class in com.apple.foundationdb">TenantManagement</a></dt>
+<dd>
+<div class="block">Creates a new tenant in the cluster.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TenantManagement.html#createTenant(com.apple.foundationdb.Transaction,com.apple.foundationdb.tuple.Tuple)">createTenant(Transaction, Tuple)</a></span> - Static method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TenantManagement.html" title="class in com.apple.foundationdb">TenantManagement</a></dt>
+<dd>
+<div class="block">Creates a new tenant in the cluster.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Database.html#createTransaction()">createTransaction()</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></dt>
 <dd>
-<div class="block">Creates a <a href="com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb"><code>Transaction</code></a> that operates on this <code>Database</code>.<br>
+<div class="block">Creates a <a href="com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb"><code>Transaction</code></a> that operates on this <code>Database</code>.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Tenant.html#createTransaction()">createTransaction()</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Tenant.html" title="interface in com.apple.foundationdb">Tenant</a></dt>
+<dd>
+<div class="block">Creates a <a href="com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb"><code>Transaction</code></a> that operates on this <code>Tenant</code>.<br>
  <br>
  <b>Note:</b> Java transactions automatically set the <a href="com/apple/foundationdb/TransactionOptions.html#setUsedDuringCommitProtectionDisable()"><code>TransactionOptions.setUsedDuringCommitProtectionDisable()</code></a>
   option.</div>
@@ -523,9 +547,19 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <div class="block">Creates a <a href="com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb"><code>Transaction</code></a> that operates on this <code>Database</code> with the given <code>Executor</code>
  for asynchronous callbacks.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Tenant.html#createTransaction(java.util.concurrent.Executor)">createTransaction(Executor)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Tenant.html" title="interface in com.apple.foundationdb">Tenant</a></dt>
+<dd>
+<div class="block">Creates a <a href="com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb"><code>Transaction</code></a> that operates on this <code>Tenant</code> with the given <code>Executor</code>
+ for asynchronous callbacks.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Database.html#createTransaction(java.util.concurrent.Executor,com.apple.foundationdb.EventKeeper)">createTransaction(Executor, EventKeeper)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></dt>
 <dd>
 <div class="block">Creates a <a href="com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb"><code>Transaction</code></a> that operates on this <code>Database</code> with the given <code>Executor</code>
+ for asynchronous callbacks.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Tenant.html#createTransaction(java.util.concurrent.Executor,com.apple.foundationdb.EventKeeper)">createTransaction(Executor, EventKeeper)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Tenant.html" title="interface in com.apple.foundationdb">Tenant</a></dt>
+<dd>
+<div class="block">Creates a <a href="com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb"><code>Transaction</code></a> that operates on this <code>Tenant</code> with the given <code>Executor</code>
  for asynchronous callbacks.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/directory/DirectoryLayer.html#createWithContentSubspace(com.apple.foundationdb.subspace.Subspace)">createWithContentSubspace(Subspace)</a></span> - Static method in class com.apple.foundationdb.directory.<a href="com/apple/foundationdb/directory/DirectoryLayer.html" title="class in com.apple.foundationdb.directory">DirectoryLayer</a></dt>
@@ -565,6 +599,22 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/directory/DirectoryLayer.html#DEFAULT_NODE_SUBSPACE">DEFAULT_NODE_SUBSPACE</a></span> - Static variable in class com.apple.foundationdb.directory.<a href="com/apple/foundationdb/directory/DirectoryLayer.html" title="class in com.apple.foundationdb.directory">DirectoryLayer</a></dt>
 <dd>
 <div class="block">The default node <a href="com/apple/foundationdb/subspace/Subspace.html" title="class in com.apple.foundationdb.subspace"><code>Subspace</code></a> used by a <code>DirectoryLayer</code> when none is specified.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TenantManagement.html#deleteTenant(com.apple.foundationdb.Database,byte%5B%5D)">deleteTenant(Database, byte[])</a></span> - Static method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TenantManagement.html" title="class in com.apple.foundationdb">TenantManagement</a></dt>
+<dd>
+<div class="block">Deletes a tenant from the cluster using a transaction created on the specified <code>Database</code>.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TenantManagement.html#deleteTenant(com.apple.foundationdb.Database,com.apple.foundationdb.tuple.Tuple)">deleteTenant(Database, Tuple)</a></span> - Static method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TenantManagement.html" title="class in com.apple.foundationdb">TenantManagement</a></dt>
+<dd>
+<div class="block">Deletes a tenant from the cluster using a transaction created on the specified <code>Database</code>.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TenantManagement.html#deleteTenant(com.apple.foundationdb.Transaction,byte%5B%5D)">deleteTenant(Transaction, byte[])</a></span> - Static method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TenantManagement.html" title="class in com.apple.foundationdb">TenantManagement</a></dt>
+<dd>
+<div class="block">Deletes a tenant from the cluster.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TenantManagement.html#deleteTenant(com.apple.foundationdb.Transaction,com.apple.foundationdb.tuple.Tuple)">deleteTenant(Transaction, Tuple)</a></span> - Static method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TenantManagement.html" title="class in com.apple.foundationdb">TenantManagement</a></dt>
+<dd>
+<div class="block">Deletes a tenant from the cluster.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/directory/DirectoryMoveException.html#destPath">destPath</a></span> - Variable in exception com.apple.foundationdb.directory.<a href="com/apple/foundationdb/directory/DirectoryMoveException.html" title="class in com.apple.foundationdb.directory">DirectoryMoveException</a></dt>
 <dd>
@@ -661,6 +711,8 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/KeyValue.html#equals(java.lang.Object)">equals(Object)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a></dt>
 <dd>&nbsp;</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/MappedKeyValue.html#equals(java.lang.Object)">equals(Object)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/MappedKeyValue.html" title="class in com.apple.foundationdb">MappedKeyValue</a></dt>
+<dd>&nbsp;</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Range.html#equals(java.lang.Object)">equals(Object)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/Range.html" title="class in com.apple.foundationdb">Range</a></dt>
 <dd>
 <div class="block">Returns <code>true</code> if the given <code>Object</code> is a <code>Range</code>
@@ -713,6 +765,10 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/directory/DirectorySubspace.html#exists(com.apple.foundationdb.ReadTransactionContext,java.util.List)">exists(ReadTransactionContext, List&lt;String&gt;)</a></span> - Method in class com.apple.foundationdb.directory.<a href="com/apple/foundationdb/directory/DirectorySubspace.html" title="class in com.apple.foundationdb.directory">DirectorySubspace</a></dt>
 <dd>&nbsp;</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/JNIUtil.html#exportLibrary(java.lang.String)">exportLibrary(String)</a></span> - Static method in class com.apple.foundationdb.<a href="com/apple/foundationdb/JNIUtil.html" title="class in com.apple.foundationdb">JNIUtil</a></dt>
+<dd>
+<div class="block">Export a library from classpath resources to a temporary file.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/directory/PathUtil.html#extend(java.util.List,java.lang.String...)">extend(List&lt;String&gt;, String...)</a></span> - Static method in class com.apple.foundationdb.directory.<a href="com/apple/foundationdb/directory/PathUtil.html" title="class in com.apple.foundationdb.directory">PathUtil</a></dt>
 <dd>
 <div class="block">Extends a path by an arbitrary number of elements.</div>
@@ -776,6 +832,8 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <div class="block">Creates a <code>Versionstamp</code> instance based on the given byte array
   representation.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/MappedKeyValue.html#fromBytes(byte%5B%5D,int%5B%5D)">fromBytes(byte[], int[])</a></span> - Static method in class com.apple.foundationdb.<a href="com/apple/foundationdb/MappedKeyValue.html" title="class in com.apple.foundationdb">MappedKeyValue</a></dt>
+<dd>&nbsp;</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#fromBytes(byte%5B%5D,int,int)">fromBytes(byte[], int, int)</a></span> - Static method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
 <dd>
 <div class="block">Construct a new <code>Tuple</code> with elements decoded from a supplied <code>byte</code> array.</div>
@@ -958,6 +1016,20 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dd>
 <div class="block">Gets an indexed item as a <code>long</code>.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Database.html#getMainThreadBusyness()">getMainThreadBusyness()</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></dt>
+<dd>
+<div class="block">Returns a value which indicates the saturation of the client
+ <br>
+ <b>Note:</b> By default, this value is updated every second</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/ReadTransaction.html#getMappedRange(com.apple.foundationdb.KeySelector,com.apple.foundationdb.KeySelector,byte%5B%5D,int,boolean,com.apple.foundationdb.StreamingMode)">getMappedRange(KeySelector, KeySelector, byte[], int, boolean, StreamingMode)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a></dt>
+<dd>
+<div class="block">WARNING: This feature is considered experimental at this time.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Tenant.html#getName()">getName()</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Tenant.html" title="interface in com.apple.foundationdb">Tenant</a></dt>
+<dd>
+<div class="block">Returns the name of this <code>Tenant</code>.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#getNestedList(int)">getNestedList(int)</a></span> - Method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
 <dd>
 <div class="block">Gets an indexed item as a <code>List</code>.</div>
@@ -1032,6 +1104,21 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dd>
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/MappedKeyValue.html#getRangeBegin()">getRangeBegin()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/MappedKeyValue.html" title="class in com.apple.foundationdb">MappedKeyValue</a></dt>
+<dd>&nbsp;</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/MappedKeyValue.html#getRangeEnd()">getRangeEnd()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/MappedKeyValue.html" title="class in com.apple.foundationdb">MappedKeyValue</a></dt>
+<dd>&nbsp;</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/MappedKeyValue.html#getRangeResult()">getRangeResult()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/MappedKeyValue.html" title="class in com.apple.foundationdb">MappedKeyValue</a></dt>
+<dd>&nbsp;</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/ReadTransaction.html#getRangeSplitPoints(byte%5B%5D,byte%5B%5D,long)">getRangeSplitPoints(byte[], byte[], long)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a></dt>
+<dd>
+<div class="block">Gets a list of keys that can split the given range into (roughly) equally sized chunks based on <code>chunkSize</code>.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/ReadTransaction.html#getRangeSplitPoints(com.apple.foundationdb.Range,long)">getRangeSplitPoints(Range, long)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a></dt>
+<dd>
+<div class="block">Gets a list of keys that can split the given range into (roughly) equally sized chunks based on <code>chunkSize</code>
+ Note: the returned split points contain the start key and end key of the given range.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/ReadTransaction.html#getReadVersion()">getReadVersion()</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a></dt>
 <dd>
 <div class="block">Gets the version at which the reads for this <code>Transaction</code> will access the database.</div>
@@ -1093,6 +1180,8 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
  this class.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/KeyValue.html#hashCode()">hashCode()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a></dt>
+<dd>&nbsp;</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/MappedKeyValue.html#hashCode()">hashCode()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/MappedKeyValue.html" title="class in com.apple.foundationdb">MappedKeyValue</a></dt>
 <dd>&nbsp;</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Range.html#hashCode()">hashCode()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/Range.html" title="class in com.apple.foundationdb">Range</a></dt>
 <dd>
@@ -1219,6 +1308,10 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dd>
 <div class="block">The number of JNI calls that were exercised.</div>
 </dd>
+<dt><a href="com/apple/foundationdb/JNIUtil.html" title="class in com.apple.foundationdb"><span class="typeNameLink">JNIUtil</span></a> - Class in <a href="com/apple/foundationdb/package-summary.html">com.apple.foundationdb</a></dt>
+<dd>
+<div class="block">Utility for loading a dynamic library from the classpath.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/ByteArrayUtil.html#join(byte%5B%5D...)">join(byte[]...)</a></span> - Static method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/ByteArrayUtil.html" title="class in com.apple.foundationdb.tuple">ByteArrayUtil</a></dt>
 <dd>
 <div class="block">Joins a variable number of byte arrays into one larger array.</div>
@@ -1241,6 +1334,8 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dd>
 <div class="block">Computes the key that would sort immediately after <code>key</code>.</div>
 </dd>
+<dt><a href="com/apple/foundationdb/KeyArrayResult.html" title="class in com.apple.foundationdb"><span class="typeNameLink">KeyArrayResult</span></a> - Class in <a href="com/apple/foundationdb/package-summary.html">com.apple.foundationdb</a></dt>
+<dd>&nbsp;</dd>
 <dt><a href="com/apple/foundationdb/KeySelector.html" title="class in com.apple.foundationdb"><span class="typeNameLink">KeySelector</span></a> - Class in <a href="com/apple/foundationdb/package-summary.html">com.apple.foundationdb</a></dt>
 <dd>
 <div class="block">A <code>KeySelector</code> identifies a particular key in the database.</div>
@@ -1325,6 +1420,8 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <div class="block">Map a <code>CloseableAsyncIterator</code> into a <code>CloseableAsyncIterator</code> of another type or with
   each element modified in some fashion.</div>
 </dd>
+<dt><a href="com/apple/foundationdb/MappedKeyValue.html" title="class in com.apple.foundationdb"><span class="typeNameLink">MappedKeyValue</span></a> - Class in <a href="com/apple/foundationdb/package-summary.html">com.apple.foundationdb</a></dt>
+<dd>&nbsp;</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/MutationType.html#MAX">MAX</a></span> - com.apple.foundationdb.<a href="com/apple/foundationdb/MutationType.html" title="enum in com.apple.foundationdb">MutationType</a></dt>
 <dd>
 <div class="block">Performs a little-endian comparison of byte strings.</div>
@@ -1472,6 +1569,32 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dd>
 <div class="block">The layer byte string that the directory was opened with.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Database.html#openTenant(byte%5B%5D)">openTenant(byte[])</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></dt>
+<dd>
+<div class="block">Opens an existing tenant to be used for running transactions.<br>
+ <br>
+ <b>Note:</b> opening a tenant does not check its existence in the cluster.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Database.html#openTenant(byte%5B%5D,java.util.concurrent.Executor)">openTenant(byte[], Executor)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></dt>
+<dd>
+<div class="block">Opens an existing tenant to be used for running transactions.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Database.html#openTenant(byte%5B%5D,java.util.concurrent.Executor,com.apple.foundationdb.EventKeeper)">openTenant(byte[], Executor, EventKeeper)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></dt>
+<dd>
+<div class="block">Opens an existing tenant to be used for running transactions.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Database.html#openTenant(com.apple.foundationdb.tuple.Tuple)">openTenant(Tuple)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></dt>
+<dd>
+<div class="block">Opens an existing tenant to be used for running transactions.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Database.html#openTenant(com.apple.foundationdb.tuple.Tuple,java.util.concurrent.Executor)">openTenant(Tuple, Executor)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></dt>
+<dd>
+<div class="block">Opens an existing tenant to be used for running transactions.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Database.html#openTenant(com.apple.foundationdb.tuple.Tuple,java.util.concurrent.Executor,com.apple.foundationdb.EventKeeper)">openTenant(Tuple, Executor, EventKeeper)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></dt>
+<dd>
+<div class="block">Opens an existing tenant to be used for running transactions.</div>
+</dd>
 <dt><a href="com/apple/foundationdb/OptionConsumer.html" title="interface in com.apple.foundationdb"><span class="typeNameLink">OptionConsumer</span></a> - Interface in <a href="com/apple/foundationdb/package-summary.html">com.apple.foundationdb</a></dt>
 <dd>
 <div class="block">An object on which encoded options can be set.</div>
@@ -1496,6 +1619,10 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/MutationType.html#OR">OR</a></span> - com.apple.foundationdb.<a href="com/apple/foundationdb/MutationType.html" title="enum in com.apple.foundationdb">MutationType</a></dt>
 <dd>
 <div class="deprecationBlock"><span class="deprecatedLabel">Deprecated.</span></div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/KeySelector.html#orEqual()">orEqual()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a></dt>
+<dd>
+<div class="block">Returns the orEqual parameter for this <code>KeySelector</code>.</div>
 </dd>
 </dl>
 <a id="I:P">
@@ -1644,9 +1771,17 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dd>
 <div class="block">Runs a function in this context that takes a read-only transaction.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Tenant.html#read(java.util.function.Function)">read(Function&lt;? super ReadTransaction, T&gt;)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Tenant.html" title="interface in com.apple.foundationdb">Tenant</a></dt>
+<dd>
+<div class="block">Runs a read-only transactional function against this <code>Tenant</code> with retry logic.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Database.html#read(java.util.function.Function,java.util.concurrent.Executor)">read(Function&lt;? super ReadTransaction, T&gt;, Executor)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></dt>
 <dd>
 <div class="block">Runs a read-only transactional function against this <code>Database</code> with retry logic.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Tenant.html#read(java.util.function.Function,java.util.concurrent.Executor)">read(Function&lt;? super ReadTransaction, T&gt;, Executor)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Tenant.html" title="interface in com.apple.foundationdb">Tenant</a></dt>
+<dd>
+<div class="block">Runs a read-only transactional function against this <code>Tenant</code> with retry logic.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Database.html#readAsync(java.util.function.Function)">readAsync(Function&lt;? super ReadTransaction, ? extends CompletableFuture&lt;T&gt;&gt;)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></dt>
 <dd>
@@ -1656,9 +1791,17 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dd>
 <div class="block">Runs a function in this context that takes a read-only transaction.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Tenant.html#readAsync(java.util.function.Function)">readAsync(Function&lt;? super ReadTransaction, ? extends CompletableFuture&lt;T&gt;&gt;)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Tenant.html" title="interface in com.apple.foundationdb">Tenant</a></dt>
+<dd>
+<div class="block">Runs a read-only transactional function against this <code>Tenant</code> with retry logic.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Database.html#readAsync(java.util.function.Function,java.util.concurrent.Executor)">readAsync(Function&lt;? super ReadTransaction, ? extends CompletableFuture&lt;T&gt;&gt;, Executor)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></dt>
 <dd>
 <div class="block">Runs a read-only transactional function against this <code>Database</code> with retry logic.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Tenant.html#readAsync(java.util.function.Function,java.util.concurrent.Executor)">readAsync(Function&lt;? super ReadTransaction, ? extends CompletableFuture&lt;T&gt;&gt;, Executor)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Tenant.html" title="interface in com.apple.foundationdb">Tenant</a></dt>
+<dd>
+<div class="block">Runs a read-only transactional function against this <code>Tenant</code> with retry logic.</div>
 </dd>
 <dt><a href="com/apple/foundationdb/ReadTransaction.html" title="interface in com.apple.foundationdb"><span class="typeNameLink">ReadTransaction</span></a> - Interface in <a href="com/apple/foundationdb/package-summary.html">com.apple.foundationdb</a></dt>
 <dd>
@@ -1736,6 +1879,10 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dd>
 <div class="block">Runs a transactional function against this <code>Database</code> with retry logic.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Tenant.html#run(java.util.function.Function)">run(Function&lt;? super Transaction, T&gt;)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Tenant.html" title="interface in com.apple.foundationdb">Tenant</a></dt>
+<dd>
+<div class="block">Runs a transactional function against this <code>Tenant</code> with retry logic.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Transaction.html#run(java.util.function.Function)">run(Function&lt;? super Transaction, T&gt;)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb">Transaction</a></dt>
 <dd>
 <div class="block">Run a function once against this <code>Transaction</code>.</div>
@@ -1748,9 +1895,17 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dd>
 <div class="block">Runs a transactional function against this <code>Database</code> with retry logic.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Tenant.html#run(java.util.function.Function,java.util.concurrent.Executor)">run(Function&lt;? super Transaction, T&gt;, Executor)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Tenant.html" title="interface in com.apple.foundationdb">Tenant</a></dt>
+<dd>
+<div class="block">Runs a transactional function against this <code>Tenant</code> with retry logic.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Database.html#runAsync(java.util.function.Function)">runAsync(Function&lt;? super Transaction, ? extends CompletableFuture&lt;T&gt;&gt;)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></dt>
 <dd>
 <div class="block">Runs a transactional function against this <code>Database</code> with retry logic.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Tenant.html#runAsync(java.util.function.Function)">runAsync(Function&lt;? super Transaction, ? extends CompletableFuture&lt;T&gt;&gt;)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Tenant.html" title="interface in com.apple.foundationdb">Tenant</a></dt>
+<dd>
+<div class="block">Runs a transactional function against this <code>Tenant</code> with retry logic.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Transaction.html#runAsync(java.util.function.Function)">runAsync(Function&lt;? super Transaction, ? extends CompletableFuture&lt;T&gt;&gt;)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb">Transaction</a></dt>
 <dd>
@@ -1763,6 +1918,10 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Database.html#runAsync(java.util.function.Function,java.util.concurrent.Executor)">runAsync(Function&lt;? super Transaction, ? extends CompletableFuture&lt;T&gt;&gt;, Executor)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></dt>
 <dd>
 <div class="block">Runs a transactional function against this <code>Database</code> with retry logic.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/Tenant.html#runAsync(java.util.function.Function,java.util.concurrent.Executor)">runAsync(Function&lt;? super Transaction, ? extends CompletableFuture&lt;T&gt;&gt;, Executor)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/Tenant.html" title="interface in com.apple.foundationdb">Tenant</a></dt>
+<dd>
+<div class="block">Runs a transactional function against this <code>Tenant</code> with retry logic.</div>
 </dd>
 </dl>
 <a id="I:S">
@@ -1874,6 +2033,10 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dd>
 <div class="block">Disables the multi-version client API and instead uses the local client directly.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/NetworkOptions.html#setDistributedClientTracer(java.lang.String)">setDistributedClientTracer(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></dt>
+<dd>
+<div class="block">Set a tracer to run on the client.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setDurabilityDatacenter()">setDurabilityDatacenter()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>&nbsp;</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setDurabilityDevNullIsWebScale()">setDurabilityDevNullIsWebScale()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
@@ -1889,6 +2052,10 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/NetworkOptions.html#setEnableSlowTaskProfiling()">setEnableSlowTaskProfiling()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></dt>
 <dd>
 <div class="deprecationBlock"><span class="deprecatedLabel">Deprecated.</span></div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setExpensiveClearCostEstimationEnable()">setExpensiveClearCostEstimationEnable()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
+<dd>
+<div class="block">Asks storage servers for how many bytes a clear key range contains.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/NetworkOptions.html#setExternalClientDirectory(java.lang.String)">setExternalClientDirectory(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></dt>
 <dd>
@@ -1954,6 +2121,10 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dd>
 <div class="block">Specifies that this transaction should be treated as highest priority and that lower priority transactions should block behind this one.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setRawAccess()">setRawAccess()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
+<dd>
+<div class="block">Allows this transaction to access the raw key-space when tenant mode is on.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setReadAheadDisable()">setReadAheadDisable()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>
 <div class="deprecationBlock"><span class="deprecatedLabel">Deprecated.</span></div>
@@ -2006,6 +2177,14 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dd>
 <div class="block">Snapshot read operations will see the results of writes done in the same transaction.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setSpanParent(byte%5B%5D)">setSpanParent(byte[])</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
+<dd>
+<div class="block">Adds a parent to the Span of this transaction.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setSpecialKeySpaceEnableWrites()">setSpecialKeySpaceEnableWrites()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
+<dd>
+<div class="block">By default, users are not allowed to write to special keys.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setSpecialKeySpaceRelaxed()">setSpecialKeySpaceRelaxed()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>
 <div class="block">By default, the special key space will only allow users to read from exactly one module (a subspace in the special key space).</div>
@@ -2013,6 +2192,10 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setTag(java.lang.String)">setTag(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>
 <div class="block">Adds a tag to the transaction that can be used to apply manual targeted throttling.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/DatabaseOptions.html#setTestCausalReadRisky()">setTestCausalReadRisky()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/DatabaseOptions.html" title="class in com.apple.foundationdb">DatabaseOptions</a></dt>
+<dd>
+<div class="block">An integer between 0 and 100 (default is 0) expressing the probability that a client will verify it can't read stale data whenever it detects a recovery.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setTimeout(long)">setTimeout(long)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>
@@ -2078,6 +2261,10 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dd>
 <div class="block">Sets the maximum size of all the trace output files put together.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/NetworkOptions.html#setTracePartialFileSuffix(java.lang.String)">setTracePartialFileSuffix(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></dt>
+<dd>
+<div class="block">Set file suffix for partially written log files.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/NetworkOptions.html#setTraceRollSize(long)">setTraceRollSize(long)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></dt>
 <dd>
 <div class="block">Sets the maximum size in bytes of a single trace output file.</div>
@@ -2092,7 +2279,7 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/DatabaseOptions.html#setTransactionIncludePortInAddress()">setTransactionIncludePortInAddress()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/DatabaseOptions.html" title="class in com.apple.foundationdb">DatabaseOptions</a></dt>
 <dd>
-<div class="block">Addresses returned by get_addresses_for_key include the port when enabled.</div>
+<div class="deprecationBlock"><span class="deprecatedLabel">Deprecated.</span></div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setTransactionLoggingEnable(java.lang.String)">setTransactionLoggingEnable(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>
@@ -2127,9 +2314,17 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <div class="block">Enables or disables the stderr warning that is printed whenever an object with FoundationDB
   native resources is garbage collected without being closed.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/DatabaseOptions.html#setUseConfigDatabase()">setUseConfigDatabase()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/DatabaseOptions.html" title="class in com.apple.foundationdb">DatabaseOptions</a></dt>
+<dd>
+<div class="block">Use configuration database.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setUsedDuringCommitProtectionDisable()">setUsedDuringCommitProtectionDisable()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>
 <div class="block">By default, operations that are performed on a transaction while it is being committed will not only fail themselves, but they will attempt to fail other in-flight operations (such as the commit) as well.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setUseGrvCache()">setUseGrvCache()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
+<dd>
+<div class="block">Allows this transaction to use cached GRV from the database context.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setUseProvisionalProxies()">setUseProvisionalProxies()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>
@@ -2238,6 +2433,18 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dd>
 <div class="block">Replaces the output of an asynchronous task with a predetermined value.</div>
 </dd>
+<dt><a href="com/apple/foundationdb/Tenant.html" title="interface in com.apple.foundationdb"><span class="typeNameLink">Tenant</span></a> - Interface in <a href="com/apple/foundationdb/package-summary.html">com.apple.foundationdb</a></dt>
+<dd>
+<div class="block">A tenant represents a named key-space within a database that can be interacted with
+ transactionally.<br>
+ <br>
+ The simplest correct programs using tenants will make use of the methods defined
+  in the <a href="com/apple/foundationdb/TransactionContext.html" title="interface in com.apple.foundationdb"><code>TransactionContext</code></a> interface.</div>
+</dd>
+<dt><a href="com/apple/foundationdb/TenantManagement.html" title="class in com.apple.foundationdb"><span class="typeNameLink">TenantManagement</span></a> - Class in <a href="com/apple/foundationdb/package-summary.html">com.apple.foundationdb</a></dt>
+<dd>
+<div class="block">The FoundationDB API includes function to manage the set of tenants in a cluster.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/EventKeeper.html#time(com.apple.foundationdb.EventKeeper.Event,long,java.util.concurrent.TimeUnit)">time(EventKeeper.Event, long, TimeUnit)</a></span> - Method in interface com.apple.foundationdb.<a href="com/apple/foundationdb/EventKeeper.html" title="interface in com.apple.foundationdb">EventKeeper</a></dt>
 <dd>
 <div class="block">Count the time taken to perform an action, in the specified units.</div>
@@ -2251,6 +2458,10 @@ $('.navPadding').css('padding-top', $('.fixedNav').css("height"));
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/directory/DirectorySubspace.html#toString()">toString()</a></span> - Method in class com.apple.foundationdb.directory.<a href="com/apple/foundationdb/directory/DirectorySubspace.html" title="class in com.apple.foundationdb.directory">DirectorySubspace</a></dt>
 <dd>&nbsp;</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/KeySelector.html#toString()">toString()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a></dt>
+<dd>&nbsp;</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/KeyValue.html#toString()">toString()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a></dt>
+<dd>&nbsp;</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/MappedKeyValue.html#toString()">toString()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/MappedKeyValue.html" title="class in com.apple.foundationdb">MappedKeyValue</a></dt>
 <dd>&nbsp;</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/Range.html#toString()">toString()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/Range.html" title="class in com.apple.foundationdb">Range</a></dt>
 <dd>

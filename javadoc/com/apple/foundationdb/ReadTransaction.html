@@ -26,7 +26,7 @@
     catch(err) {
     }
 //-->
-var data = {"i0":6,"i1":6,"i2":6,"i3":6,"i4":6,"i5":6,"i6":6,"i7":6,"i8":6,"i9":6,"i10":6,"i11":6,"i12":6,"i13":6,"i14":6,"i15":6,"i16":6,"i17":6,"i18":6,"i19":6,"i20":6,"i21":6,"i22":6};
+var data = {"i0":6,"i1":6,"i2":6,"i3":6,"i4":6,"i5":6,"i6":6,"i7":6,"i8":6,"i9":6,"i10":6,"i11":6,"i12":6,"i13":6,"i14":6,"i15":6,"i16":6,"i17":6,"i18":6,"i19":6,"i20":6,"i21":6,"i22":6,"i23":6,"i24":6,"i25":6};
 var tabs = {65535:["t0","All Methods"],2:["t2","Instance Methods"],4:["t3","Abstract Methods"]};
 var altColor = "altColor";
 var rowColor = "rowColor";
@@ -235,6 +235,18 @@ extends <a href="ReadTransactionContext.html" title="interface in com.apple.foun
 </td>
 </tr>
 <tr id="i6" class="altColor">
+<td class="colFirst"><code><a href="async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="MappedKeyValue.html" title="class in com.apple.foundationdb">MappedKeyValue</a>&gt;</code></td>
+<th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#getMappedRange(com.apple.foundationdb.KeySelector,com.apple.foundationdb.KeySelector,byte%5B%5D,int,boolean,com.apple.foundationdb.StreamingMode)">getMappedRange</a></span>&#8203;(<a href="KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;begin,
+              <a href="KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;end,
+              byte[]&nbsp;mapper,
+              int&nbsp;limit,
+              boolean&nbsp;reverse,
+              <a href="StreamingMode.html" title="enum in com.apple.foundationdb">StreamingMode</a>&nbsp;mode)</code></th>
+<td class="colLast">
+<div class="block">WARNING: This feature is considered experimental at this time.</div>
+</td>
+</tr>
+<tr id="i7" class="rowColor">
 <td class="colFirst"><code><a href="async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#getRange(byte%5B%5D,byte%5B%5D)">getRange</a></span>&#8203;(byte[]&nbsp;begin,
         byte[]&nbsp;end)</code></th>
@@ -242,7 +254,7 @@ extends <a href="ReadTransactionContext.html" title="interface in com.apple.foun
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i7" class="rowColor">
+<tr id="i8" class="altColor">
 <td class="colFirst"><code><a href="async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#getRange(byte%5B%5D,byte%5B%5D,int)">getRange</a></span>&#8203;(byte[]&nbsp;begin,
         byte[]&nbsp;end,
@@ -251,7 +263,7 @@ extends <a href="ReadTransactionContext.html" title="interface in com.apple.foun
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i8" class="altColor">
+<tr id="i9" class="rowColor">
 <td class="colFirst"><code><a href="async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#getRange(byte%5B%5D,byte%5B%5D,int,boolean)">getRange</a></span>&#8203;(byte[]&nbsp;begin,
         byte[]&nbsp;end,
@@ -261,7 +273,7 @@ extends <a href="ReadTransactionContext.html" title="interface in com.apple.foun
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i9" class="rowColor">
+<tr id="i10" class="altColor">
 <td class="colFirst"><code><a href="async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#getRange(byte%5B%5D,byte%5B%5D,int,boolean,com.apple.foundationdb.StreamingMode)">getRange</a></span>&#8203;(byte[]&nbsp;begin,
         byte[]&nbsp;end,
@@ -272,7 +284,7 @@ extends <a href="ReadTransactionContext.html" title="interface in com.apple.foun
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i10" class="altColor">
+<tr id="i11" class="rowColor">
 <td class="colFirst"><code><a href="async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#getRange(com.apple.foundationdb.KeySelector,com.apple.foundationdb.KeySelector)">getRange</a></span>&#8203;(<a href="KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;begin,
         <a href="KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;end)</code></th>
@@ -280,7 +292,7 @@ extends <a href="ReadTransactionContext.html" title="interface in com.apple.foun
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i11" class="rowColor">
+<tr id="i12" class="altColor">
 <td class="colFirst"><code><a href="async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#getRange(com.apple.foundationdb.KeySelector,com.apple.foundationdb.KeySelector,int)">getRange</a></span>&#8203;(<a href="KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;begin,
         <a href="KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;end,
@@ -289,7 +301,7 @@ extends <a href="ReadTransactionContext.html" title="interface in com.apple.foun
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i12" class="altColor">
+<tr id="i13" class="rowColor">
 <td class="colFirst"><code><a href="async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#getRange(com.apple.foundationdb.KeySelector,com.apple.foundationdb.KeySelector,int,boolean)">getRange</a></span>&#8203;(<a href="KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;begin,
         <a href="KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;end,
@@ -299,7 +311,7 @@ extends <a href="ReadTransactionContext.html" title="interface in com.apple.foun
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i13" class="rowColor">
+<tr id="i14" class="altColor">
 <td class="colFirst"><code><a href="async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#getRange(com.apple.foundationdb.KeySelector,com.apple.foundationdb.KeySelector,int,boolean,com.apple.foundationdb.StreamingMode)">getRange</a></span>&#8203;(<a href="KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;begin,
         <a href="KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;end,
@@ -310,14 +322,14 @@ extends <a href="ReadTransactionContext.html" title="interface in com.apple.foun
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i14" class="altColor">
+<tr id="i15" class="rowColor">
 <td class="colFirst"><code><a href="async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#getRange(com.apple.foundationdb.Range)">getRange</a></span>&#8203;(<a href="Range.html" title="class in com.apple.foundationdb">Range</a>&nbsp;range)</code></th>
 <td class="colLast">
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i15" class="rowColor">
+<tr id="i16" class="altColor">
 <td class="colFirst"><code><a href="async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#getRange(com.apple.foundationdb.Range,int)">getRange</a></span>&#8203;(<a href="Range.html" title="class in com.apple.foundationdb">Range</a>&nbsp;range,
         int&nbsp;limit)</code></th>
@@ -325,7 +337,7 @@ extends <a href="ReadTransactionContext.html" title="interface in com.apple.foun
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i16" class="altColor">
+<tr id="i17" class="rowColor">
 <td class="colFirst"><code><a href="async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#getRange(com.apple.foundationdb.Range,int,boolean)">getRange</a></span>&#8203;(<a href="Range.html" title="class in com.apple.foundationdb">Range</a>&nbsp;range,
         int&nbsp;limit,
@@ -334,7 +346,7 @@ extends <a href="ReadTransactionContext.html" title="interface in com.apple.foun
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i17" class="rowColor">
+<tr id="i18" class="altColor">
 <td class="colFirst"><code><a href="async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="KeyValue.html" title="class in com.apple.foundationdb">KeyValue</a>&gt;</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#getRange(com.apple.foundationdb.Range,int,boolean,com.apple.foundationdb.StreamingMode)">getRange</a></span>&#8203;(<a href="Range.html" title="class in com.apple.foundationdb">Range</a>&nbsp;range,
         int&nbsp;limit,
@@ -344,35 +356,53 @@ extends <a href="ReadTransactionContext.html" title="interface in com.apple.foun
 <div class="block">Gets an ordered range of keys and values from the database.</div>
 </td>
 </tr>
-<tr id="i18" class="altColor">
+<tr id="i19" class="rowColor">
+<td class="colFirst"><code>java.util.concurrent.CompletableFuture&lt;<a href="KeyArrayResult.html" title="class in com.apple.foundationdb">KeyArrayResult</a>&gt;</code></td>
+<th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#getRangeSplitPoints(byte%5B%5D,byte%5B%5D,long)">getRangeSplitPoints</a></span>&#8203;(byte[]&nbsp;begin,
+                   byte[]&nbsp;end,
+                   long&nbsp;chunkSize)</code></th>
+<td class="colLast">
+<div class="block">Gets a list of keys that can split the given range into (roughly) equally sized chunks based on <code>chunkSize</code>.</div>
+</td>
+</tr>
+<tr id="i20" class="altColor">
+<td class="colFirst"><code>java.util.concurrent.CompletableFuture&lt;<a href="KeyArrayResult.html" title="class in com.apple.foundationdb">KeyArrayResult</a>&gt;</code></td>
+<th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#getRangeSplitPoints(com.apple.foundationdb.Range,long)">getRangeSplitPoints</a></span>&#8203;(<a href="Range.html" title="class in com.apple.foundationdb">Range</a>&nbsp;range,
+                   long&nbsp;chunkSize)</code></th>
+<td class="colLast">
+<div class="block">Gets a list of keys that can split the given range into (roughly) equally sized chunks based on <code>chunkSize</code>
+ Note: the returned split points contain the start key and end key of the given range.</div>
+</td>
+</tr>
+<tr id="i21" class="rowColor">
 <td class="colFirst"><code>java.util.concurrent.CompletableFuture&lt;java.lang.Long&gt;</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#getReadVersion()">getReadVersion</a></span>()</code></th>
 <td class="colLast">
 <div class="block">Gets the version at which the reads for this <code>Transaction</code> will access the database.</div>
 </td>
 </tr>
-<tr id="i19" class="rowColor">
+<tr id="i22" class="altColor">
 <td class="colFirst"><code>boolean</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#isSnapshot()">isSnapshot</a></span>()</code></th>
 <td class="colLast">
 <div class="block">Gets whether this transaction is a snapshot view of the database.</div>
 </td>
 </tr>
-<tr id="i20" class="altColor">
+<tr id="i23" class="rowColor">
 <td class="colFirst"><code><a href="TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#options()">options</a></span>()</code></th>
 <td class="colLast">
 <div class="block">Returns a set of options that can be set on a <code>Transaction</code></div>
 </td>
 </tr>
-<tr id="i21" class="rowColor">
+<tr id="i24" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#setReadVersion(long)">setReadVersion</a></span>&#8203;(long&nbsp;version)</code></th>
 <td class="colLast">
 <div class="block">Directly sets the version of the database at which to execute reads.</div>
 </td>
 </tr>
-<tr id="i22" class="altColor">
+<tr id="i25" class="rowColor">
 <td class="colFirst"><code><a href="ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a></code></td>
 <th class="colSecond" scope="row"><code><span class="memberNameLink"><a href="#snapshot()">snapshot</a></span>()</code></th>
 <td class="colLast">
@@ -439,7 +469,7 @@ extends <a href="ReadTransactionContext.html" title="interface in com.apple.foun
   whether read conflict ranges are omitted for any reads done through this <code>ReadTransaction</code>.
  <br>
  For more information about how to use snapshot reads correctly, see
- <a href="/foundationdb/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.</div>
+ <a href="/foundationdb/developer-guide.html#snapshot-reads" target="_blank">Using snapshot reads</a>.</div>
 <dl>
 <dt><span class="returnLabel">Returns:</span></dt>
 <dd>whether this is a snapshot view of the database with relaxed isolation properties</dd>
@@ -457,11 +487,11 @@ extends <a href="ReadTransactionContext.html" title="interface in com.apple.foun
 <pre class="methodSignature"><a href="ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a>&nbsp;snapshot()</pre>
 <div class="block">Return a special-purpose, read-only view of the database. Reads done through this interface are known as "snapshot reads".
   Snapshot reads selectively relax FoundationDB's isolation property, reducing
-  <a href="/foundationdb/developer-guide.html#transaction-conflicts" target="_blank">Transaction conflicts</a>
+  <a href="/foundationdb/developer-guide.html#conflict-ranges" target="_blank">Transaction conflicts</a>
   but making reasoning about concurrency harder.<br>
  <br>
  For more information about how to use snapshot reads correctly, see
- <a href="/foundationdb/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.</div>
+ <a href="/foundationdb/developer-guide.html#snapshot-reads" target="_blank">Using snapshot reads</a>.</div>
 <dl>
 <dt><span class="returnLabel">Returns:</span></dt>
 <dd>a read-only view of this <code>ReadTransaction</code> with relaxed isolation properties</dd>
@@ -976,6 +1006,53 @@ extends <a href="ReadTransactionContext.html" title="interface in com.apple.foun
 </dl>
 </li>
 </ul>
+<a id="getMappedRange(com.apple.foundationdb.KeySelector,com.apple.foundationdb.KeySelector,byte[],int,boolean,com.apple.foundationdb.StreamingMode)">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>getMappedRange</h4>
+<pre class="methodSignature"><a href="async/AsyncIterable.html" title="interface in com.apple.foundationdb.async">AsyncIterable</a>&lt;<a href="MappedKeyValue.html" title="class in com.apple.foundationdb">MappedKeyValue</a>&gt;&nbsp;getMappedRange&#8203;(<a href="KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;begin,
+                                             <a href="KeySelector.html" title="class in com.apple.foundationdb">KeySelector</a>&nbsp;end,
+                                             byte[]&nbsp;mapper,
+                                             int&nbsp;limit,
+                                             boolean&nbsp;reverse,
+                                             <a href="StreamingMode.html" title="enum in com.apple.foundationdb">StreamingMode</a>&nbsp;mode)</pre>
+<div class="block">WARNING: This feature is considered experimental at this time. It is only allowed when using snapshot isolation
+ AND disabling read-your-writes.</div>
+<dl>
+<dt><span class="paramLabel">Parameters:</span></dt>
+<dd><code>begin</code> - the beginning of the range (inclusive)</dd>
+<dd><code>end</code> - the end of the range (exclusive)</dd>
+<dd><code>mapper</code> - TODO</dd>
+<dd><code>limit</code> - the maximum number of results to return. Limits results to the
+  <i>first</i> keys in the range. Pass <a href="#ROW_LIMIT_UNLIMITED"><code>ROW_LIMIT_UNLIMITED</code></a> if this query
+  should not limit the number of results. If <code>reverse</code> is <code>true</code> rows
+  will be limited starting at the end of the range.</dd>
+<dd><code>reverse</code> - return results starting at the end of the range in reverse order.
+  Reading ranges in reverse is supported natively by the database and should
+  have minimal extra cost.</dd>
+<dd><code>mode</code> - provide a hint about how the results are to be used. This
+  can provide speed improvements or efficiency gains based on the caller's
+  knowledge of the upcoming access pattern.
+
+ <p>
+     When converting the result of this query to a list using <a href="async/AsyncIterable.html#asList()"><code>AsyncIterable.asList()</code></a> with the <code>
+ ITERATOR</code> streaming mode, the query is automatically modified to fetch results in larger batches. This is done
+ because it is known in advance that the <a href="async/AsyncIterable.html#asList()"><code>AsyncIterable.asList()</code></a> function will fetch all results in the
+ range. If a limit is specified, the <code>EXACT</code> streaming mode will be used, and otherwise it will use <code>
+ WANT_ALL</code>.
+
+     To achieve comparable performance when iterating over an entire range without using <a href="async/AsyncIterable.html#asList()"><code>AsyncIterable.asList()</code></a>, the same streaming mode would need to be used.
+ </p></dd>
+<dt><span class="returnLabel">Returns:</span></dt>
+<dd>a handle to access the results of the asynchronous call</dd>
+<dt><span class="seeLabel">See Also:</span></dt>
+<dd><a href="KeySelector.html" title="class in com.apple.foundationdb"><code>KeySelector</code></a>, 
+<a href="async/AsyncIterator.html" title="interface in com.apple.foundationdb.async"><code>AsyncIterator</code></a></dd>
+</dl>
+</li>
+</ul>
 <a id="getEstimatedRangeSizeBytes(byte[],byte[])">
 <!--   -->
 </a>
@@ -1014,6 +1091,44 @@ extends <a href="ReadTransactionContext.html" title="interface in com.apple.foun
  that reason it is recommended to use this API to query against large ranges for accuracy considerations.
  For a rough reference, if the returned size is larger than 3MB, one can consider the size to be
  accurate.</div>
+<dl>
+<dt><span class="paramLabel">Parameters:</span></dt>
+<dd><code>range</code> - the range of the keys</dd>
+<dt><span class="returnLabel">Returns:</span></dt>
+<dd>a handle to access the results of the asynchronous call</dd>
+</dl>
+</li>
+</ul>
+<a id="getRangeSplitPoints(byte[],byte[],long)">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>getRangeSplitPoints</h4>
+<pre class="methodSignature">java.util.concurrent.CompletableFuture&lt;<a href="KeyArrayResult.html" title="class in com.apple.foundationdb">KeyArrayResult</a>&gt;&nbsp;getRangeSplitPoints&#8203;(byte[]&nbsp;begin,
+                                                                           byte[]&nbsp;end,
+                                                                           long&nbsp;chunkSize)</pre>
+<div class="block">Gets a list of keys that can split the given range into (roughly) equally sized chunks based on <code>chunkSize</code>.
+ Note: the returned split points contain the start key and end key of the given range.</div>
+<dl>
+<dt><span class="paramLabel">Parameters:</span></dt>
+<dd><code>begin</code> - the beginning of the range (inclusive)</dd>
+<dd><code>end</code> - the end of the range (exclusive)</dd>
+<dt><span class="returnLabel">Returns:</span></dt>
+<dd>a handle to access the results of the asynchronous call</dd>
+</dl>
+</li>
+</ul>
+<a id="getRangeSplitPoints(com.apple.foundationdb.Range,long)">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>getRangeSplitPoints</h4>
+<pre class="methodSignature">java.util.concurrent.CompletableFuture&lt;<a href="KeyArrayResult.html" title="class in com.apple.foundationdb">KeyArrayResult</a>&gt;&nbsp;getRangeSplitPoints&#8203;(<a href="Range.html" title="class in com.apple.foundationdb">Range</a>&nbsp;range,
+                                                                           long&nbsp;chunkSize)</pre>
+<div class="block">Gets a list of keys that can split the given range into (roughly) equally sized chunks based on <code>chunkSize</code>
+ Note: the returned split points contain the start key and end key of the given range.</div>
 <dl>
 <dt><span class="paramLabel">Parameters:</span></dt>
 <dd><code>range</code> - the range of the keys</dd>
