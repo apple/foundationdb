@@ -22,6 +22,7 @@
 #include <tuple>
 
 #include "fdbclient/Atomic.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseContext.h"
@@ -1446,7 +1447,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 
 			// Check on backing up key, if backup ranges are defined and a normal key
 			if (!(pProxyCommitData->vecBackupKeys.size() > 1 &&
-			      (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey))) {
+			      backupMutationMask().rangeContaining(m.param1).value())) {
 				continue;
 			}
 

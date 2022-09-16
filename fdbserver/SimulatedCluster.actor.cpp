@@ -503,13 +503,11 @@ ACTOR Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 		ASSERT(g_simulator->extraDatabases.size() == 1);
 		Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
-		auto extraFile =
-		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator->extraDatabases[0]));
-		state Database drDatabase = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
+		state Database drDatabase = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
 
 		TraceEvent("StartingDrAgents")
 		    .detail("ConnectionString", connRecord->getConnectionString().toString())
-		    .detail("ExtraString", extraFile->getConnectionString().toString());
+		    .detail("ExtraString", g_simulator->extraDatabases[0]);
 
 		state DatabaseBackupAgent dbAgent = DatabaseBackupAgent(cx);
 		state DatabaseBackupAgent extraAgent = DatabaseBackupAgent(drDatabase);
@@ -2482,14 +2480,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 	if (std::string_view(testFile).find("Backup") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.push_back(4);
 		testConfig.storageEngineExcludeTypes.push_back(5);
-	}
-
-	// Disable the default tenant in backup and DR tests for now. This is because backup does not currently duplicate
-	// the tenant map and related state.
-	// TODO: reenable when backup/DR or BlobGranule supports tenants.
-	if (std::string_view(testFile).find("Backup") != std::string_view::npos ||
-	    testConfig.extraDatabaseMode != ISimulator::ExtraDatabaseMode::Disabled) {
-		allowDefaultTenant = false;
 	}
 
 	// The RocksDB engine is not always built with the rest of fdbserver. Don't try to use it if it is not included

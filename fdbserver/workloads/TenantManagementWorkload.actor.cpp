@@ -219,8 +219,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 		if (self->useMetacluster) {
 			ASSERT(g_simulator->extraDatabases.size() == 1);
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(g_simulator->extraDatabases[0]);
-			self->dataDb = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
+			self->dataDb = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], cx->defaultTenant);
 		} else {
 			self->dataDb = cx;
 		}

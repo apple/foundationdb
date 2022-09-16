@@ -21,6 +21,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/ApiVersion.h"
@@ -129,16 +130,45 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		}
 
 		ASSERT(g_simulator->extraDatabases.size() == 1);
-		auto extraFile =
-		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator->extraDatabases[0]));
-		extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
+		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], wcx.defaultTenant);
 
 		TraceEvent("BARW_Start").detail("Locked", locked);
 	}
 
 	std::string description() const override { return "BackupToDBCorrectness"; }
 
-	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> setup(Database const& cx) override {
+		if (clientId != 0) {
+			return Void();
+		}
+		return _setup(cx, this);
+	}
+
+	ACTOR Future<Void> _setup(Database cx, BackupToDBCorrectnessWorkload* self) {
+		if (cx->defaultTenant.present() || BUGGIFY) {
+			if (cx->defaultTenant.present()) {
+				TenantMapEntry entry = wait(TenantAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
+
+				// If we are specifying sub-ranges (or randomly, if backing up normal keys), adjust them to be relative
+				// to the tenant
+				if (self->backupRanges.size() != 1 || self->backupRanges[0] != normalKeys ||
+				    deterministicRandom()->coinflip()) {
+					Standalone<VectorRef<KeyRangeRef>> modifiedBackupRanges;
+					for (int i = 0; i < self->backupRanges.size(); ++i) {
+						modifiedBackupRanges.push_back_deep(
+						    modifiedBackupRanges.arena(),
+						    self->backupRanges[i].withPrefix(entry.prefix, self->backupRanges.arena()));
+					}
+					self->backupRanges = modifiedBackupRanges;
+				}
+			}
+			for (auto r : getSystemBackupRanges()) {
+				self->backupRanges.push_back_deep(self->backupRanges.arena(), r);
+			}
+		}
+
+		return Void();
+	}
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
@@ -424,9 +454,6 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			TraceEvent("BARW_CheckLeftoverKeys", randomID).detail("BackupTag", printable(tag));
 
 			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
 				// Check the left over tasks
 				// We have to wait for the list to empty since an abort and get status
 				// can leave extra tasks in the queue
@@ -443,7 +470,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					wait(TaskBucket::debugPrintRange(cx, "\xff"_sr, StringRef()));
 				}
 
-				loop {
+				while (taskCount > 0) {
 					waitCycles++;
 
 					TraceEvent("BARW_NonzeroTaskWait", randomID)
@@ -458,21 +485,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 					wait(delay(5.0));
 					tr = makeReference<ReadYourWritesTransaction>(cx);
-					int64_t _taskCount = wait(backupAgent->getTaskCount(tr));
-					taskCount = _taskCount;
-
-					if (!taskCount) {
-						break;
-					}
-				}
-
-				if (taskCount) {
-					displaySystemKeys++;
-					TraceEvent(SevError, "BARW_NonzeroTaskCount", randomID)
-					    .detail("BackupTag", printable(tag))
-					    .detail("TaskCount", taskCount)
-					    .detail("WaitCycles", waitCycles);
-					printf("BackupCorrectnessLeftoverLogTasks: %ld\n", (long)taskCount);
+					wait(store(taskCount, backupAgent->getTaskCount(tr)));
 				}
 
 				RangeResult agentValues =

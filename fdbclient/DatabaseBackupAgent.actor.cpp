@@ -404,10 +404,10 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 							break;
 
 						if (backupVersions.get()[versionLoc + 1].key ==
-						    (removePrefix == StringRef() ? normalKeys.end : strinc(removePrefix))) {
+						    (removePrefix == StringRef() ? allKeys.end : strinc(removePrefix))) {
 							tr->clear(KeyRangeRef(
 							    backupVersions.get()[versionLoc].key.removePrefix(removePrefix).withPrefix(addPrefix),
-							    addPrefix == StringRef() ? normalKeys.end : strinc(addPrefix)));
+							    addPrefix == StringRef() ? allKeys.end : strinc(addPrefix)));
 						} else {
 							tr->clear(KeyRangeRef(backupVersions.get()[versionLoc].key,
 							                      backupVersions.get()[versionLoc + 1].key)
@@ -2624,7 +2624,7 @@ public:
 
 		int64_t startCount = 0;
 		state Key mapPrefix = logUidValue.withPrefix(applyMutationsKeyVersionMapRange.begin);
-		Key mapEnd = normalKeys.end.withPrefix(mapPrefix);
+		Key mapEnd = allKeys.end.withPrefix(mapPrefix);
 		tr->set(logUidValue.withPrefix(applyMutationsAddPrefixRange.begin), addPrefix);
 		tr->set(logUidValue.withPrefix(applyMutationsRemovePrefixRange.begin), removePrefix);
 		tr->set(logUidValue.withPrefix(applyMutationsKeyVersionCountRange.begin), StringRef((uint8_t*)&startCount, 8));

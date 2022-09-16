@@ -54,7 +54,7 @@ struct VersionedMessage {
 	Version getVersion() const { return version.version; }
 	uint32_t getSubVersion() const { return version.sub; }
 
-	// Returns true if the message is a mutation that should be backuped, i.e.,
+	// Returns true if the message is a mutation that should be backed up, i.e.,
 	// either key is not in system key space or is not a metadataVersionKey.
 	bool isBackupMessage(MutationRef* m,
 	                     const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys) {
@@ -82,7 +82,7 @@ struct VersionedMessage {
 			// We use dedicated arena for decrypt buffer, as the other arena is used to count towards backup lock bytes.
 			*m = m->decrypt(cipherKeys, decryptArena, BlobCipherMetrics::BACKUP, &message);
 		}
-		return normalKeys.contains(m->param1) || m->param1 == metadataVersionKey;
+		return backupMutationMask().rangeContaining(m->param1).value();
 	}
 
 	void collectCipherDetailIfEncrypted(std::unordered_set<BlobCipherDetails>& cipherDetails) {
