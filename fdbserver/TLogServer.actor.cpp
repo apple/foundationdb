@@ -3602,7 +3602,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 			if (recovered.canBeSet())
 				recovered.send(Void());
 
-			if (!self->durableClusterId.isValid()) {
+			if (!self.durableClusterId.isValid()) {
 				self.sharedActors.send(updateDurableClusterID(&self));
 			}
 			self.sharedActors.send(commitQueue(&self));
