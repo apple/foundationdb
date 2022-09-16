@@ -1176,7 +1176,6 @@ struct CreateTenantImpl {
 			if (!dataClusterMetadata.entry.hasCapacity()) {
 				throw cluster_no_capacity();
 			}
-			dataClusterDbs.push_back(getAndOpenDatabase(tr, self->tenantEntry.assignedCluster.get()));
 			dataClusterNames.push_back(self->tenantEntry.assignedCluster.get());
 		} else {
 			state KeyBackedSet<Tuple>::RangeResultType availableClusters =
@@ -1191,9 +1190,11 @@ struct CreateTenantImpl {
 				throw metacluster_no_capacity();
 			}
 			for (auto clusterTuple : availableClusters.results) {
-				dataClusterDbs.push_back(getAndOpenDatabase(tr, clusterTuple.getString(1)));
 				dataClusterNames.push_back(clusterTuple.getString(1));
 			}
+		}
+		for (auto dataClusterName : dataClusterNames) {
+			dataClusterDbs.push_back(getAndOpenDatabase(tr, dataClusterName));
 		}
 		wait(waitForAll(dataClusterDbs));
 		// Check the availability of our set of clusters
