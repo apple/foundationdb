@@ -401,14 +401,16 @@ if(WITH_PYTHON)
     endif()
   endif()
 
-  if (NOT WIN32)
+  if (NOT OPEN_FOR_IDE AND NOT WIN32)
     # setup venv for testing token-based authorization
+    set(fdb_c_lib $<TARGET_FILE:fdb_c>)
     set(authz_venv_dir ${CMAKE_CURRENT_BINARY_DIR}/authorization_test_venv)
     set(authz_venv_activate ". ${authz_venv_dir}/bin/activate")
     set(authz_venv_stamp_file ${authz_venv_dir}/venv.ready)
     set(authz_venv_cmd "")
     string(APPEND authz_venv_cmd "[[ ! -f ${authz_venv_stamp_file} ]] && ")
     string(APPEND authz_venv_cmd "${Python3_EXECUTABLE} -m venv ${authz_venv_dir} ")
+    string(APPEND authz_venv_cmd "&& ${CMAKE_COMMAND} -E copy ${fdb_c_lib} ${authz_venv_dir}/ ")
     string(APPEND authz_venv_cmd "&& ${authz_venv_activate} ")
     string(APPEND authz_venv_cmd "&& pip install --upgrade pip ")
     string(APPEND authz_venv_cmd "&& pip install --upgrade -r ${CMAKE_SOURCE_DIR}/tests/authorization/requirements.txt ")
@@ -424,7 +426,7 @@ if(WITH_PYTHON)
 	set(authz_script_dir ${CMAKE_SOURCE_DIR}/tests/authorization)
     set(authz_test_cmd "")
     string(APPEND authz_test_cmd "${authz_venv_activate} && ")
-    string(APPEND authz_test_cmd "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib pytest ${authz_script_dir}/authz_test.py -rA --build-dir ${CMAKE_BINARY_DIR} -vvv")
+    string(APPEND authz_test_cmd "LD_LIBRARY_PATH=${authz_venv_dir} pytest ${authz_script_dir}/authz_test.py -rA --build-dir ${CMAKE_BINARY_DIR} -vvv")
     add_test(
       NAME token_based_tenant_authorization
       WORKING_DIRECTORY ${authz_script_dir}
