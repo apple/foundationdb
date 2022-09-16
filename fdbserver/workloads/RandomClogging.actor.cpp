@@ -43,7 +43,7 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 		swizzleClog = getOption(options, LiteralStringRef("swizzle"), swizzleClog);
 	}
 
-	bool add(DeterministicRandom& random, WorkloadRequest const work, CompoundWorkload const& workload) override {
+	bool add(DeterministicRandom& random, WorkloadRequest const& work, CompoundWorkload const& workload) override {
 		auto desc = description();
 		unsigned alreadyAdded = std::count_if(workload.workloads.begin(),
 		                                      workload.workloads.end(),
@@ -57,6 +57,7 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 			scale = std::max(random.random01(), 0.1);
 			clogginess = std::max(random.random01(), 0.1);
 			swizzleClog = random.random01() < 0.3;
+			iterate = random.random01() < 0.5;
 		}
 		return willAdd;
 	}

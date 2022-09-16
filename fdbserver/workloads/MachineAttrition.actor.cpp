@@ -114,7 +114,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 		allowFaultInjection = getOption(options, LiteralStringRef("allowFaultInjection"), allowFaultInjection);
 	}
 
-	bool add(DeterministicRandom& random, WorkloadRequest const work, CompoundWorkload const& workload) override {
+	bool add(DeterministicRandom& random, WorkloadRequest const& work, CompoundWorkload const& workload) override {
 		auto desc = this->description();
 		unsigned alreadyAdded = std::count_if(workload.workloads.begin(),
 		                                      workload.workloads.end(),

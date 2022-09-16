@@ -303,15 +303,16 @@ Future<Void> CompoundWorkload::setup(Database const& cx) {
 	}
 	return waitForAll(res);
 }
+
 Future<Void> CompoundWorkload::start(Database const& cx) {
 	std::vector<Future<Void>> all;
-	all.reserve(workloads.size());
+	all.reserve(workloads.size() + failureInjection.size());
 	auto wCount = std::make_shared<unsigned>(0);
-	for (int i = 0; i < workloads.size(); i++) {
-		std::string workloadName = workloads[i]->description();
+	auto startWorkload = [&](TestWorkload& workload) -> Future<Void> {
+		auto workloadName = workload.description();
 		++(*wCount);
 		TraceEvent("WorkloadRunStatus").detail("Name", workloadName).detail("Count", *wCount).detail("Phase", "Start");
-		all.push_back(fmap(
+		return fmap(
 		    [workloadName, wCount](Void value) {
 			    --(*wCount);
 			    TraceEvent("WorkloadRunStatus")
@@ -320,31 +321,29 @@ Future<Void> CompoundWorkload::start(Database const& cx) {
 			        .detail("Phase", "End");
 			    return Void();
 		    },
-		    workloads[i]->start(cx)));
+		    workload.start(cx));
+	};
+	for (auto& workload : workloads) {
+		all.push_back(startWorkload(*workload));
 	}
-	auto done = waitForAll(all);
-	if (failureInjection.empty()) {
-		return done;
+	for (auto& workload : failureInjection) {
+		all.push_back(startWorkload(*workload));
 	}
-	std::vector<Future<Void>> res;
-	res.reserve(failureInjection.size());
-	for (auto& f : failureInjection) {
-		res.push_back(f->startInjectionWorkload(cx, done));
-	}
-	return waitForAll(res);
+	return waitForAll(all);
 }
+
 Future<bool> CompoundWorkload::check(Database const& cx) {
 	std::vector<Future<bool>> all;
-	all.reserve(workloads.size());
+	all.reserve(workloads.size() + failureInjection.size());
 	auto wCount = std::make_shared<unsigned>(0);
-	for (int i = 0; i < workloads.size(); i++) {
+	auto starter = [&](TestWorkload& workload) -> Future<bool> {
 		++(*wCount);
-		std::string workloadName = workloads[i]->description();
+		std::string workloadName = workload.description();
 		TraceEvent("WorkloadCheckStatus")
 		    .detail("Name", workloadName)
 		    .detail("Count", *wCount)
 		    .detail("Phase", "Start");
-		all.push_back(fmap(
+		return fmap(
 		    [workloadName, wCount](bool ret) {
 			    --(*wCount);
 			    TraceEvent("WorkloadCheckStatus")
@@ -353,18 +352,15 @@ Future<bool> CompoundWorkload::check(Database const& cx) {
 			        .detail("Phase", "End");
 			    return true;
 		    },
-		    workloads[i]->check(cx)));
+		    workload.check(cx));
+	};
+	for (auto& workload : workloads) {
+		all.push_back(starter(*workload));
 	}
-	auto done = allTrue(all);
-	if (failureInjection.empty()) {
-		return done;
+	for (auto& workload : failureInjection) {
+		all.push_back(starter(*workload));
 	}
-	std::vector<Future<bool>> res;
-	res.reserve(failureInjection.size());
-	for (auto& f : failureInjection) {
-		res.push_back(f->checkInjectionWorkload(cx, done));
-	}
-	return allTrue(res);
+	return allTrue(all);
 }
 
 ACTOR Future<std::vector<PerfMetric>> getMetricsCompoundWorkload(CompoundWorkload* self) {
@@ -426,7 +422,7 @@ void CompoundWorkload::getMetrics(std::vector<PerfMetric>&) {
 FailureInjectionWorkload::FailureInjectionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
 bool FailureInjectionWorkload::add(DeterministicRandom& random,
-                                   const WorkloadRequest work,
+                                   const WorkloadRequest& work,
                                    const CompoundWorkload& workload) {
 	auto desc = description();
 	unsigned alreadyAdded = std::count_if(workload.workloads.begin(), workload.workloads.end(), [&desc](auto const& w) {
