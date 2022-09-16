@@ -2559,7 +2559,7 @@ ACTOR Future<Void> updateDurableClusterID(TLogData* self) {
 		// Persist cluster ID once cluster has recovered.
 		if (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED) {
 			ASSERT(!self->durableClusterId.isValid());
-			state UID ccClusterId = self->dbInfo->get().client.clusterId;
+			state UID ccClusterId = self->dbInfo->get().clusterId;
 			self->durableClusterId = ccClusterId;
 			ASSERT(ccClusterId.isValid());
 
