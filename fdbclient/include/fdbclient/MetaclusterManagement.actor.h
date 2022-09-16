@@ -1113,9 +1113,7 @@ struct RestoreClusterImpl {
 			                      updatedEntry);
 		}
 
-		TraceEvent("MarkedDataClusterRestoring")
-		    .detail("Name", self->ctx.clusterName.get())
-		    .detail("Version", tr->getCommittedVersion());
+		TraceEvent("MarkedDataClusterRestoring").detail("Name", self->ctx.clusterName.get());
 
 		return true;
 	}
@@ -1199,39 +1197,46 @@ struct RestoreClusterImpl {
 		return gotAllTenants;
 	}
 
-	ACTOR static Future<bool> getTenantsFromManagementCluster(RestoreClusterImpl* self, Reference<ITransaction> tr) {
-		TenantNameRef begin = ""_sr;
+	ACTOR static Future<std::pair<bool, TenantName>> getTenantsFromManagementCluster(RestoreClusterImpl* self,
+	                                                                                 Reference<ITransaction> tr,
+	                                                                                 TenantName initialTenantName) {
+		TenantNameRef begin = initialTenantName;
 		TenantNameRef end = "\xff\xff"_sr;
 		state Future<KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>>> tenantsFuture =
 		    ManagementClusterMetadata::tenantMetadata().tenantMap.getRange(
 		        tr, begin, end, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
 		state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenants = wait(tenantsFuture);
 
+		state TenantName lastTenantNameRetrieved;
 		if (!tenants.results.empty()) {
 			for (auto t : tenants.results) {
 				self->mgmtClusterTenantMap.emplace(t.first, t.second);
+				lastTenantNameRetrieved = t.first;
 			}
 		}
 
-		return !tenants.more;
+		return std::pair<bool, TenantName>{ !tenants.more, lastTenantNameRetrieved };
 	}
 
-	ACTOR static Future<bool> getTenantIdNameIndexFromManagementCluster(RestoreClusterImpl* self,
-	                                                                    Reference<ITransaction> tr) {
-		uint64_t begin = 0;
+	ACTOR static Future<std::pair<bool, uint64_t>> getTenantIdNameIndexFromManagementCluster(RestoreClusterImpl* self,
+	                                                                                         Reference<ITransaction> tr,
+	                                                                                         uint64_t initialTenantId) {
+		uint64_t begin = initialTenantId;
 		uint64_t end = std::numeric_limits<uint64_t>::max();
 		state Future<KeyBackedRangeResult<std::pair<int64_t, TenantName>>> tenantsFuture =
 		    ManagementClusterMetadata::tenantMetadata().tenantIdIndex.getRange(
 		        tr, begin, end, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
 		state KeyBackedRangeResult<std::pair<int64_t, TenantName>> tenants = wait(tenantsFuture);
 
+		state uint64_t lastTenantIdRetrieved;
 		if (!tenants.results.empty()) {
 			for (auto t : tenants.results) {
 				self->mgmtClusterTenantIdIndex.emplace(t.first, t.second);
+				lastTenantIdRetrieved = t.first;
 			}
 		}
 
-		return !tenants.more;
+		return std::pair<bool, uint64_t>{ !tenants.more, lastTenantIdRetrieved };
 	}
 
 	ACTOR static Future<bool> getTenantsFromManagementClusterForCurrentDataCluster(RestoreClusterImpl* self,
@@ -1255,22 +1260,38 @@ struct RestoreClusterImpl {
 
 	ACTOR static Future<bool> getAllTenantsFromManagementCluster(RestoreClusterImpl* self) {
 		// get all tenants across all data clusters
-		bool gotAllTenants =
-		    wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
-			    return getTenantsFromManagementCluster(self, tr);
-		    }));
+		state TenantName beginRangeTenantName = ""_sr;
+		loop {
+			TenantName initialTenantName = beginRangeTenantName;
+			std::pair<bool, TenantName> tenantsItr = wait(self->ctx.runManagementTransaction(
+			    [self = self, initialTenantName](Reference<typename DB::TransactionT> tr) {
+				    return getTenantsFromManagementCluster(self, tr, initialTenantName);
+			    }));
 
-		if (!gotAllTenants) {
-			return false;
+			if (tenantsItr.first) {
+				// retrieved all the tenants
+				break;
+			} else {
+				// begin range from this tenant
+				beginRangeTenantName = tenantsItr.second;
+			}
 		}
 
-		bool gotAllTenants =
-		    wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
-			    return getTenantIdNameIndexFromManagementCluster(self, tr);
-		    }));
+		state uint64_t beginRangeTenantId = 0;
+		loop {
+			uint64_t initialTenantId = beginRangeTenantId;
+			std::pair<bool, uint64_t> tenantsItr = wait(self->ctx.runManagementTransaction(
+			    [self = self, initialTenantId](Reference<typename DB::TransactionT> tr) {
+				    return getTenantIdNameIndexFromManagementCluster(self, tr, initialTenantId);
+			    }));
 
-		if (!gotAllTenants) {
-			return false;
+			if (tenantsItr.first) {
+				// retrieved all the tenants
+				break;
+			} else {
+				// begin range from this tenantId
+				beginRangeTenantId = tenantsItr.second;
+			}
 		}
 
 		// get tenants for the specific data cluster
