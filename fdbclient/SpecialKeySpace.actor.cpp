@@ -475,7 +475,7 @@ Future<RangeResult> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw,
 	if (!limits.isValid())
 		return range_limits_invalid();
 	if (limits.isReached()) {
-		CODE_PROBE(true, "read limit 0");
+		CODE_PROBE(true, "Special Key Space range read limit 0");
 		return RangeResult();
 	}
 	// make sure orEqual == false
