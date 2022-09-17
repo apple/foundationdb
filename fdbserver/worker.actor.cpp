@@ -191,7 +191,7 @@ Error checkIOTimeout(Error const& e) {
 	// In simulation, have to check global timed out flag for both this process and the machine process on which IO is
 	// done
 	if (g_network->isSimulated() && !timeoutOccurred)
-		timeoutOccurred = g_pSimulator->getCurrentProcess()->machine->machineProcess->global(INetwork::enASIOTimedOut);
+		timeoutOccurred = g_simulator->getCurrentProcess()->machine->machineProcess->global(INetwork::enASIOTimedOut);
 
 	if (timeoutOccurred) {
 		CODE_PROBE(true, "Timeout occurred");
@@ -562,6 +562,7 @@ ACTOR Future<Void> registrationClient(
     Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
     Reference<AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>> const> bmInterf,
     Reference<AsyncVar<Optional<EncryptKeyProxyInterface>> const> ekpInterf,
+    Reference<AsyncVar<Optional<ConsistencyScanInterface>> const> csInterf,
     Reference<AsyncVar<bool> const> degraded,
     Reference<IClusterConnectionRecord> connRecord,
     Reference<AsyncVar<std::set<std::string>> const> issues,
@@ -602,6 +603,7 @@ ACTOR Future<Void> registrationClient(
 		    rkInterf->get(),
 		    bmInterf->get().present() ? bmInterf->get().get().second : Optional<BlobManagerInterface>(),
 		    ekpInterf->get(),
+		    csInterf->get(),
 		    degraded->get(),
 		    localConfig.isValid() ? localConfig->lastSeenVersion() : Optional<Version>(),
 		    localConfig.isValid() ? localConfig->configClassSet() : Optional<ConfigClassSet>(),
@@ -670,6 +672,7 @@ ACTOR Future<Void> registrationClient(
 			when(wait(ccInterface->onChange())) { break; }
 			when(wait(ddInterf->onChange())) { break; }
 			when(wait(rkInterf->onChange())) { break; }
+			when(wait(csInterf->onChange())) { break; }
 			when(wait(bmInterf->onChange())) { break; }
 			when(wait(ekpInterf->onChange())) { break; }
 			when(wait(degraded->onChange())) { break; }
@@ -693,6 +696,10 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 	}
 
 	if (dbi.ratekeeper.present() && dbi.ratekeeper.get().address() == address) {
+		return true;
+	}
+
+	if (dbi.consistencyScan.present() && dbi.consistencyScan.get().address() == address) {
 		return true;
 	}
 
@@ -1259,7 +1266,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
                                                  IKeyValueStore* store,
                                                  bool validateDataFiles,
                                                  Promise<Void>* rebootKVStore,
-                                                 Reference<IEncryptionKeyProvider> encryptionKeyProvider) {
+                                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider) {
 	state TrackRunningStorage _(id, storeType, runningStorages);
 	loop {
 		ErrorOr<Void> e = wait(errorOr(prevStorageServer));
@@ -1416,7 +1423,7 @@ void startRole(const Role& role,
 	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
 	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
 	if (g_network->isSimulated())
-		g_simulator.addRole(g_network->getLocalAddress(), role.roleName);
+		g_simulator->addRole(g_network->getLocalAddress(), role.roleName);
 }
 
 void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
@@ -1446,7 +1453,7 @@ void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
 	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
 	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
 	if (g_network->isSimulated())
-		g_simulator.removeRole(g_network->getLocalAddress(), role.roleName);
+		g_simulator->removeRole(g_network->getLocalAddress(), role.roleName);
 
 	if (role.includeInTraceRoles) {
 		removeTraceRole(role.abbreviation);
@@ -1620,6 +1627,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state UID lastBMRecruitRequestId;
 	state Reference<AsyncVar<Optional<EncryptKeyProxyInterface>>> ekpInterf(
 	    new AsyncVar<Optional<EncryptKeyProxyInterface>>());
+	state Reference<AsyncVar<Optional<ConsistencyScanInterface>>> csInterf(
+	    new AsyncVar<Optional<ConsistencyScanInterface>>());
 	state Future<Void> handleErrors = workerHandleErrors(errors.getFuture()); // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
@@ -1728,7 +1737,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			if (s.storedComponent == DiskStore::Storage) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
-				Reference<IEncryptionKeyProvider> encryptionKeyProvider =
+				Reference<IPageEncryptionKeyProvider> encryptionKeyProvider =
 				    makeReference<TenantAwareEncryptionKeyProvider>(dbInfo);
 				IKeyValueStore* kv = openKVStore(
 				    s.storeType,
@@ -1942,6 +1951,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       rkInterf,
 		                                       bmEpochAndInterf,
 		                                       ekpInterf,
+		                                       csInterf,
 		                                       degraded,
 		                                       connRecord,
 		                                       issues,
@@ -2134,6 +2144,31 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					rkInterf->set(Optional<RatekeeperInterface>(recruited));
 				}
 				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
+				req.reply.send(recruited);
+			}
+			when(InitializeConsistencyScanRequest req = waitNext(interf.consistencyScan.getFuture())) {
+				LocalLineage _;
+				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::ConsistencyScan;
+				ConsistencyScanInterface recruited(locality, req.reqId);
+				recruited.initEndpoints();
+
+				if (csInterf->get().present()) {
+					recruited = csInterf->get().get();
+					CODE_PROBE(true, "Recovered while already a consistencyscan");
+				} else {
+					startRole(Role::CONSISTENCYSCAN, recruited.id(), interf.id());
+					DUMPTOKEN(recruited.waitFailure);
+					DUMPTOKEN(recruited.haltConsistencyScan);
+
+					Future<Void> consistencyScanProcess = consistencyScan(recruited, dbInfo);
+					errorForwarders.add(forwardError(
+					    errors,
+					    Role::CONSISTENCYSCAN,
+					    recruited.id(),
+					    setWhenDoneOrError(consistencyScanProcess, csInterf, Optional<ConsistencyScanInterface>())));
+					csInterf->set(Optional<ConsistencyScanInterface>(recruited));
+				}
+				TraceEvent("ConsistencyScanReceived", req.reqId).detail("ConsistencyScanId", recruited.id());
 				req.reply.send(recruited);
 			}
 			when(InitializeBlobManagerRequest req = waitNext(interf.blobManager.getFuture())) {
@@ -2345,7 +2380,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                   folder,
 					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
-					Reference<IEncryptionKeyProvider> encryptionKeyProvider =
+					Reference<IPageEncryptionKeyProvider> encryptionKeyProvider =
 					    makeReference<TenantAwareEncryptionKeyProvider>(dbInfo);
 					IKeyValueStore* data = openKVStore(
 					    req.storeType,
@@ -3459,3 +3494,4 @@ const Role Role::STORAGE_CACHE("StorageCache", "SC");
 const Role Role::COORDINATOR("Coordinator", "CD");
 const Role Role::BACKUP("Backup", "BK");
 const Role Role::ENCRYPT_KEY_PROXY("EncryptKeyProxy", "EP");
+const Role Role::CONSISTENCYSCAN("ConsistencyScan", "CS");

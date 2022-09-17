@@ -181,7 +181,7 @@ struct MoveKeysWorkload : TestWorkload {
 	ACTOR Future<Void> forceMasterFailure(Database cx, MoveKeysWorkload* self) {
 		ASSERT(g_network->isSimulated());
 		loop {
-			if (g_simulator.killZone(self->dbInfo->get().master.locality.zoneId(), ISimulator::Reboot, true))
+			if (g_simulator->killZone(self->dbInfo->get().master.locality.zoneId(), ISimulator::Reboot, true))
 				return Void();
 			wait(delay(1.0));
 		}

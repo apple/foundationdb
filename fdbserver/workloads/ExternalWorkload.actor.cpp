@@ -242,14 +242,14 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 	}
 	uint64_t getProcessID() const override {
 		if (g_network->isSimulated()) {
-			return reinterpret_cast<uint64_t>(g_simulator.getCurrentProcess());
+			return reinterpret_cast<uint64_t>(g_simulator->getCurrentProcess());
 		} else {
 			return 0ul;
 		}
 	}
 	void setProcessID(uint64_t processID) override {
 		if (g_network->isSimulated()) {
-			g_simulator.currentProcess = reinterpret_cast<ISimulator::ProcessInfo*>(processID);
+			g_simulator->currentProcess = reinterpret_cast<ISimulator::ProcessInfo*>(processID);
 		}
 	}
 	double now() const override { return g_network->now(); }

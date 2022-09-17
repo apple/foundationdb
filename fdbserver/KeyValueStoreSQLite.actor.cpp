@@ -1810,7 +1810,7 @@ private:
 			cursor->set(a.kv);
 			++setsThisCommit;
 			++writesComplete;
-			if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting)
+			if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting)
 				TraceEvent("SetActionFinished", dbgid).detail("Elapsed", now() - s);
 		}
 
@@ -1824,7 +1824,7 @@ private:
 			cursor->fastClear(a.range, freeTableEmpty);
 			cursor->clear(a.range); // TODO: at most one
 			++writesComplete;
-			if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting)
+			if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting)
 				TraceEvent("ClearActionFinished", dbgid).detail("Elapsed", now() - s);
 		}
 
@@ -1864,7 +1864,7 @@ private:
 
 			diskBytesUsed = waitForAndGet(conn.dbFile->size()) + waitForAndGet(conn.walFile->size());
 
-			if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting)
+			if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting)
 				TraceEvent("CommitActionFinished", dbgid).detail("Elapsed", now() - t1);
 		}
 
@@ -1987,7 +1987,7 @@ private:
 
 			a.result.send(workPerformed);
 			++writesComplete;
-			if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting)
+			if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting)
 				TraceEvent("SpringCleaningActionFinished", dbgid).detail("Elapsed", now() - s);
 		}
 	};
@@ -1996,7 +1996,7 @@ private:
 		state int64_t lastReadsComplete = 0;
 		state int64_t lastWritesComplete = 0;
 		loop {
-			wait(delay(FLOW_KNOBS->DISK_METRIC_LOGGING_INTERVAL));
+			wait(delay(FLOW_KNOBS->SQLITE_DISK_METRIC_LOGGING_INTERVAL));
 
 			int64_t rc = self->readsComplete, wc = self->writesComplete;
 			TraceEvent("DiskMetrics", self->logID)
