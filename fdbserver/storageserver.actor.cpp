@@ -3777,7 +3777,8 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 {
 	state Span span("SS:getKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state Optional<ReadOptions> options = req.options;
+	//state Optional<ReadOptions> options = req.options;
+	state Optional<ReadOptions> options = ReadOptions(Optional<UID>(), ReadType::FETCH);
 	state ReadType type = options.present() ? options.get().type : ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
@@ -3797,7 +3798,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	if (!SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && type == ReadType::FETCH) {
 		type = ReadType::NORMAL;
 	}
-
+	type = ReadType::FETCH; // remove later
 	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[(int)type]));
 
 	// Track time from requestTime through now as read queueing wait time
@@ -4523,7 +4524,8 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 {
 	state Span span("SS:getMappedKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state Optional<ReadOptions> options = req.options;
+	//state Optional<ReadOptions> options = req.options;
+	state Optional<ReadOptions> options = ReadOptions(Optional<UID>(), ReadType::FETCH);
 	state ReadType type = options.present() ? options.get().type : ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
@@ -4543,7 +4545,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	if (!SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && type == ReadType::FETCH) {
 		type = ReadType::NORMAL;
 	}
-
+	type = ReadType::FETCH; // remove later
 	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[(int)type]));
 
 	// Track time from requestTime through now as read queueing wait time
@@ -4741,7 +4743,8 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 {
 	state Span span("SS:getKeyValuesStream"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	state Optional<ReadOptions> options = req.options;
+	//state Optional<ReadOptions> options = req.options;
+	state Optional<ReadOptions> options = ReadOptions(Optional<UID>(), ReadType::FETCH);
 	state ReadType type = options.present() ? options.get().type : ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
@@ -4760,7 +4763,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	if (!SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && type == ReadType::FETCH) {
 		type = ReadType::NORMAL;
 	}
-
+	type = ReadType::FETCH; // remove later
 	state int readPriority = data->readPriorityRanks[(int)type];
 	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(readPriority));
 
