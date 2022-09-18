@@ -2355,7 +2355,7 @@ private:
 			// While there are available slots and there are waiters, launch tasks
 			while (self->available > 0 && self->waiting > 0) {
 
-				while (!pQueue->empty() && ++lastPriorityCount < ioLaunchLimit) {
+				while (!pQueue->empty() && lastPriorityCount++ < ioLaunchLimit) {
 					Waiter w = pQueue->front();
 					pQueue->pop_front();
 					--self->waiting;
