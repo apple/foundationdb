@@ -779,6 +779,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( QUICK_GET_KEY_VALUES_LIMIT_BYTES,                      1e7 );
 	init( STORAGE_FEED_QUERY_HARD_LIMIT,                      100000 );
 	init( STORAGESERVER_MAX_RANK,                                  2 );
+	// Priorities which each ReadType maps to, in enumeration order
 	init( STORAGESERVER_READ_RANKS,                      "0,2,1,1,1" );
 	init( STORAGESERVER_READ_PRIORITIES,                   "48,32,8" );
 
