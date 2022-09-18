@@ -3777,7 +3777,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 {
 	state Span span("SS:getKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	//state Optional<ReadOptions> options = req.options;
+	// state Optional<ReadOptions> options = req.options;
 	state Optional<ReadOptions> options = ReadOptions(Optional<UID>(), ReadType::FETCH);
 	state ReadType type = options.present() ? options.get().type : ReadType::NORMAL;
 
@@ -4524,7 +4524,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 {
 	state Span span("SS:getMappedKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	//state Optional<ReadOptions> options = req.options;
+	// state Optional<ReadOptions> options = req.options;
 	state Optional<ReadOptions> options = ReadOptions(Optional<UID>(), ReadType::FETCH);
 	state ReadType type = options.present() ? options.get().type : ReadType::NORMAL;
 
@@ -4743,7 +4743,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 {
 	state Span span("SS:getKeyValuesStream"_loc, req.spanContext);
 	state int64_t resultSize = 0;
-	//state Optional<ReadOptions> options = req.options;
+	// state Optional<ReadOptions> options = req.options;
 	state Optional<ReadOptions> options = ReadOptions(Optional<UID>(), ReadType::FETCH);
 	state ReadType type = options.present() ? options.get().type : ReadType::NORMAL;
 
@@ -9926,22 +9926,22 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 		                               te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
 		                               te.detail("Tag", self->tag.toString());
 		                               std::vector<int> rpr = self->readPriorityRanks;
-		                               te.detail("ActiveReads", self->ssLock.totalWorkers());
+		                               te.detail("ActiveReads", self->ssLock.totalRunners());
 		                               te.detail("AwaitReads", self->ssLock.totalWaiters());
 		                               int type = (int)ReadType::EAGER;
-		                               te.detail("ActiveEager", self->ssLock.numWorkers(rpr[type]));
+		                               te.detail("ActiveEager", self->ssLock.numRunners(rpr[type]));
 		                               te.detail("AwaitEager", self->ssLock.numWaiters(rpr[type]));
 		                               type = (int)ReadType::FETCH;
-		                               te.detail("ActiveFetch", self->ssLock.numWorkers(rpr[type]));
+		                               te.detail("ActiveFetch", self->ssLock.numRunners(rpr[type]));
 		                               te.detail("AwaitFetch", self->ssLock.numWaiters(rpr[type]));
 		                               type = (int)ReadType::LOW;
-		                               te.detail("ActiveLow", self->ssLock.numWorkers(rpr[type]));
+		                               te.detail("ActiveLow", self->ssLock.numRunners(rpr[type]));
 		                               te.detail("AwaitLow", self->ssLock.numWaiters(rpr[type]));
 		                               type = (int)ReadType::NORMAL;
-		                               te.detail("ActiveNormal", self->ssLock.numWorkers(rpr[type]));
+		                               te.detail("ActiveNormal", self->ssLock.numRunners(rpr[type]));
 		                               te.detail("AwaitNormal", self->ssLock.numWaiters(rpr[type]));
 		                               type = (int)ReadType::HIGH;
-		                               te.detail("ActiveHigh", self->ssLock.numWorkers(rpr[type]));
+		                               te.detail("ActiveHigh", self->ssLock.numRunners(rpr[type]));
 		                               te.detail("AwaitHigh", self->ssLock.numWaiters(rpr[type]));
 		                               StorageBytes sb = self->storage.getStorageBytes();
 		                               te.detail("KvstoreBytesUsed", sb.used);

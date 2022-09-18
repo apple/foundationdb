@@ -2219,7 +2219,7 @@ public:
 		this->launchLimit = parseStringToVector<int>(launchLimit, ',');
 		ASSERT(this->launchLimit.size() == maxPriority + 1);
 		waiters.resize(maxPriority + 1);
-		workerCounts.resize(maxPriority + 1, 0);
+		runnerCounts.resize(maxPriority + 1, 0);
 		fRunner = runner(this);
 	}
 
@@ -2229,8 +2229,6 @@ public:
 
 		// This shortcut may enable a waiter to jump the line when the releaser loop yields
 		if (available > 0) {
-			--available;
-			workerCounts[priority] += 1;
 			Lock p;
 			addRunner(p, priority);
 			return p;
@@ -2288,11 +2286,11 @@ public:
 		return waiters[priority].size();
 	}
 
-	int totalWorkers() const { return concurrency - available; }
+	int totalRunners() const { return concurrency - available; }
 
-	int numWorkers(const unsigned int priority) const {
+	int numRunners(const unsigned int priority) const {
 		ASSERT(priority < waiters.size());
-		return workerCounts[priority];
+		return runnerCounts[priority];
 	}
 
 private:
@@ -2308,16 +2306,18 @@ private:
 	typedef Deque<Waiter> Queue;
 	std::vector<int> launchLimit;
 	std::vector<Queue> waiters;
-	std::vector<int> workerCounts;
+	std::vector<int> runnerCounts;
 	Deque<Future<Void>> runners;
 	Future<Void> fRunner;
 	AsyncTrigger release;
 	Promise<Void> brokenOnDestruct;
 
 	void addRunner(Lock& lock, int priority) {
+		runnerCounts[priority] += 1;
+		--available;
 		runners.push_back(map(ready(lock.promise.getFuture()), [=](Void) {
 			++available;
-			workerCounts[priority] -= 1;
+			runnerCounts[priority] -= 1;
 			if (waiting > 0 || runners.size() > 100) {
 				release.trigger();
 			}
@@ -2370,11 +2370,10 @@ private:
 
 					// If the lock was not already released, add it to the runners future queue
 					if (lock.promise.canBeSet()) {
-						self->workerCounts[priority] += 1;
 						self->addRunner(lock, priority);
 
 						// A slot has been consumed, so stop reading from this queue if there aren't any more
-						if (--self->available == 0) {
+						if (self->available == 0) {
 							break;
 						}
 					}

@@ -8482,11 +8482,11 @@ void RedwoodMetrics::getIOLockFields(TraceEvent* e, std::string* s) {
 	int maxPriority = ioLock->maxPriority();
 
 	if (e != nullptr) {
-		e->detail("ActiveReads", ioLock->totalWorkers());
+		e->detail("ActiveReads", ioLock->totalRunners());
 		e->detail("AwaitReads", ioLock->totalWaiters());
 
 		for (int priority = 0; priority <= maxPriority; ++priority) {
-			e->detail(format("ActiveP%d", priority), ioLock->numWorkers(priority));
+			e->detail(format("ActiveP%d", priority), ioLock->numRunners(priority));
 			e->detail(format("AwaitP%d", priority), ioLock->numWaiters(priority));
 		}
 	}
@@ -8496,13 +8496,13 @@ void RedwoodMetrics::getIOLockFields(TraceEvent* e, std::string* s) {
 		std::string await = "Await";
 
 		*s += "\n";
-		*s += format("%-15s %-8u  ", "ActiveReads", ioLock->totalWorkers());
+		*s += format("%-15s %-8u  ", "ActiveReads", ioLock->totalRunners());
 		*s += format("%-15s %-8u  ", "AwaitReads", ioLock->totalWaiters());
 		*s += "\n";
 
 		for (int priority = 0; priority <= maxPriority; ++priority) {
 			*s +=
-			    format("%-15s %-8u  ", (active + 'P' + std::to_string(priority)).c_str(), ioLock->numWorkers(priority));
+			    format("%-15s %-8u  ", (active + 'P' + std::to_string(priority)).c_str(), ioLock->numRunners(priority));
 		}
 		*s += "\n";
 		for (int priority = 0; priority <= maxPriority; ++priority) {
