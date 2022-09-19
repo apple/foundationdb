@@ -1688,6 +1688,9 @@ public:
 	}
 
 	void delayProcess(ProcessInfo* process) override {
+		if (!FLOW_KNOBS->ENABLE_SIMULATION_IMPROVEMENTS) {
+			return;
+		}
 		if (process->isMachineProcess() || process->startingClass == ProcessClass::TesterClass ||
 		    process != currentProcess || process->buggifyDelayCount > 7)
 			return;
