@@ -53,12 +53,14 @@ public:
 		Promise<Void> promise;
 	};
 
-	PriorityMultiLock(int concurrency, int maxPriority, std::string launchLimit)
-	  : concurrency(concurrency), available(concurrency), waiting(0) {
-		this->launchLimit = parseStringToVector<int>(launchLimit, ',');
-		ASSERT(this->launchLimit.size() == maxPriority + 1);
-		waiters.resize(maxPriority + 1);
-		runnerCounts.resize(maxPriority + 1, 0);
+	PriorityMultiLock(int concurrency, std::string launchLimits)
+	  : PriorityMultiLock(concurrency, parseStringToVector<int>(launchLimits, ',')) {}
+
+	PriorityMultiLock(int concurrency, std::vector<int> launchLimitsByPriority)
+	  : concurrency(concurrency), available(concurrency), waiting(0), launchLimits(launchLimitsByPriority) {
+
+		waiters.resize(launchLimits.size());
+		runnerCounts.resize(launchLimits.size(), 0);
 		fRunner = runner(this);
 	}
 
@@ -116,7 +118,7 @@ public:
 		s += "}";
 		return s;
 	}
-	int maxPriority() const { return launchLimit.size() - 1; }
+	int maxPriority() const { return launchLimits.size() - 1; }
 
 	int totalWaiters() const { return waiting; }
 
@@ -143,7 +145,7 @@ private:
 	int available;
 	int waiting;
 	typedef Deque<Waiter> Queue;
-	std::vector<int> launchLimit;
+	std::vector<int> launchLimits;
 	std::vector<Queue> waiters;
 	std::vector<int> runnerCounts;
 	Deque<Future<Void>> runners;
@@ -171,7 +173,7 @@ private:
 
 		// Priority to try to run tasks from next
 		state int priority = maxPriority;
-		state int ioLaunchLimit = self->launchLimit[priority];
+		state int ioLaunchLimit = self->launchLimits[priority];
 		state Queue* pQueue = &self->waiters[maxPriority];
 
 		// Track the number of waiters unlocked at the same priority in a row
@@ -231,7 +233,7 @@ private:
 				}
 
 				// Set launch limit to configured limit for the new priority to launch from
-				ioLaunchLimit = self->launchLimit[priority];
+				ioLaunchLimit = self->launchLimits[priority];
 
 				// If there are waiters at other priority levels, then reduce the launch limit by the number of
 				// runners for priority, possibly reducing it all the way to 0.
