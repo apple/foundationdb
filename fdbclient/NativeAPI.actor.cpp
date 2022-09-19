@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "boost/algorithm/string.hpp"
+#include "flow/CodeProbe.h"
 #include "fmt/format.h"
 
 #include "fdbclient/FDBOptions.g.h"
@@ -7915,6 +7916,23 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		}
 		if (keyRange.end < granuleEndKey) {
 			granuleEndKey = keyRange.end;
+		}
+
+		if (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01)) {
+			// simulate as if we read a stale mapping and a different worker owns the granule
+			ASSERT(!self->trState->cx->blobWorker_interf.empty());
+			CODE_PROBE(true, "Randomizing blob worker id for request");
+			TraceEvent ev("RandomizingBlobWorkerForReq");
+			ev.detail("OriginalWorker", workerId);
+			int randomIdx = deterministicRandom()->randomInt(0, self->trState->cx->blobWorker_interf.size());
+			for (auto& it : self->trState->cx->blobWorker_interf) {
+				if (randomIdx == 0) {
+					workerId = it.first;
+					break;
+				}
+				randomIdx--;
+			}
+			ev.detail("NewWorker", workerId);
 		}
 
 		state BlobGranuleFileRequest req;
