@@ -698,8 +698,10 @@ ThreadFuture<Version> DLDatabase::verifyBlobRange(const KeyRangeRef& keyRange, O
 		return unsupported_operation();
 	}
 
+	Version readVersion = version.present() ? version.get() : latestVersion;
+
 	FdbCApi::FDBFuture* f = api->databaseVerifyBlobRange(
-	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), version);
+	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), readVersion);
 
 	return toThreadFuture<Version>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		Version version = invalidVersion;
