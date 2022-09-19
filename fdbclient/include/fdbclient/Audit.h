@@ -107,4 +107,5 @@ struct TriggerAuditRequest {
 	bool async;
 	ReplyPromise<UID> reply;
 };
+
 #endif
