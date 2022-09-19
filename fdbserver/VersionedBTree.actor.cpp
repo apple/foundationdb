@@ -2984,7 +2984,7 @@ public:
 			             page->rawData());
 		} catch (Error& e) {
 			Error err = e;
-			if (g_network->isSimulated() && g_simulator.checkInjectedCorruption()) {
+			if (g_network->isSimulated() && g_simulator->checkInjectedCorruption()) {
 				err = err.asInjectedFault();
 			}
 
@@ -4781,7 +4781,7 @@ struct DecodeBoundaryVerifier {
 	static DecodeBoundaryVerifier* getVerifier(std::string name) {
 		static std::map<std::string, DecodeBoundaryVerifier> verifiers;
 		// Only use verifier in a non-restarted simulation so that all page writes are captured
-		if (g_network->isSimulated() && !g_simulator.restarted) {
+		if (g_network->isSimulated() && !g_simulator->restarted) {
 			return &verifiers[name];
 		}
 		return nullptr;

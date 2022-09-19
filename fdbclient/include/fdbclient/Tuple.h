@@ -71,7 +71,9 @@ struct Tuple {
 	size_t size() const { return offsets.size(); }
 	void reserve(size_t cap) { offsets.reserve(cap); }
 	void clear() {
-		data.clear();
+		// Make a new Standalone to use different memory so that
+		// previously returned objects from pack() are valid.
+		data = Standalone<VectorRef<uint8_t>>();
 		offsets.clear();
 	}
 	// Return a Tuple encoded raw string.

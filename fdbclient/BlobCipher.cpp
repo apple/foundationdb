@@ -190,7 +190,7 @@ BlobCipherKeyIdCache::BlobCipherKeyIdCache(EncryptCipherDomainId dId, size_t* si
 
 BlobCipherKeyIdCacheKey BlobCipherKeyIdCache::getCacheKey(const EncryptCipherBaseKeyId& baseCipherKeyId,
                                                           const EncryptCipherRandomSalt& salt) {
-	if (baseCipherKeyId == ENCRYPT_INVALID_CIPHER_KEY_ID || salt == ENCRYPT_INVALID_RANDOM_SALT) {
+	if (baseCipherKeyId == INVALID_ENCRYPT_CIPHER_KEY_ID || salt == INVALID_ENCRYPT_RANDOM_SALT) {
 		throw encrypt_invalid_id();
 	}
 	return std::make_pair(baseCipherKeyId, salt);
@@ -200,9 +200,9 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::getLatestCipherKey() {
 	if (!latestBaseCipherKeyId.present()) {
 		return Reference<BlobCipherKey>();
 	}
-	ASSERT_NE(latestBaseCipherKeyId.get(), ENCRYPT_INVALID_CIPHER_KEY_ID);
+	ASSERT_NE(latestBaseCipherKeyId.get(), INVALID_ENCRYPT_CIPHER_KEY_ID);
 	ASSERT(latestRandomSalt.present());
-	ASSERT_NE(latestRandomSalt.get(), ENCRYPT_INVALID_RANDOM_SALT);
+	ASSERT_NE(latestRandomSalt.get(), INVALID_ENCRYPT_RANDOM_SALT);
 
 	return getCipherByBaseCipherId(latestBaseCipherKeyId.get(), latestRandomSalt.get());
 }
@@ -221,7 +221,7 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::insertBaseCipherKey(const Encrypt
                                                                    int baseCipherLen,
                                                                    const int64_t refreshAt,
                                                                    const int64_t expireAt) {
-	ASSERT_GT(baseCipherId, ENCRYPT_INVALID_CIPHER_KEY_ID);
+	ASSERT_GT(baseCipherId, INVALID_ENCRYPT_CIPHER_KEY_ID);
 
 	// BaseCipherKeys are immutable, given the routine invocation updates 'latestCipher',
 	// ensure no key-tampering is done
@@ -269,8 +269,8 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::insertBaseCipherKey(const Encrypt
                                                                    const EncryptCipherRandomSalt& salt,
                                                                    const int64_t refreshAt,
                                                                    const int64_t expireAt) {
-	ASSERT_NE(baseCipherId, ENCRYPT_INVALID_CIPHER_KEY_ID);
-	ASSERT_NE(salt, ENCRYPT_INVALID_RANDOM_SALT);
+	ASSERT_NE(baseCipherId, INVALID_ENCRYPT_CIPHER_KEY_ID);
+	ASSERT_NE(salt, INVALID_ENCRYPT_RANDOM_SALT);
 
 	BlobCipherKeyIdCacheKey cacheKey = getCacheKey(baseCipherId, salt);
 
@@ -332,7 +332,7 @@ Reference<BlobCipherKey> BlobCipherKeyCache::insertCipherKey(const EncryptCipher
                                                              int baseCipherLen,
                                                              const int64_t refreshAt,
                                                              const int64_t expireAt) {
-	if (domainId == ENCRYPT_INVALID_DOMAIN_ID || baseCipherId == ENCRYPT_INVALID_CIPHER_KEY_ID) {
+	if (domainId == INVALID_ENCRYPT_DOMAIN_ID || baseCipherId == INVALID_ENCRYPT_CIPHER_KEY_ID) {
 		throw encrypt_invalid_id();
 	}
 
@@ -366,8 +366,8 @@ Reference<BlobCipherKey> BlobCipherKeyCache::insertCipherKey(const EncryptCipher
                                                              const EncryptCipherRandomSalt& salt,
                                                              const int64_t refreshAt,
                                                              const int64_t expireAt) {
-	if (domainId == ENCRYPT_INVALID_DOMAIN_ID || baseCipherId == ENCRYPT_INVALID_CIPHER_KEY_ID ||
-	    salt == ENCRYPT_INVALID_RANDOM_SALT) {
+	if (domainId == INVALID_ENCRYPT_DOMAIN_ID || baseCipherId == INVALID_ENCRYPT_CIPHER_KEY_ID ||
+	    salt == INVALID_ENCRYPT_RANDOM_SALT) {
 		throw encrypt_invalid_id();
 	}
 
@@ -397,7 +397,7 @@ Reference<BlobCipherKey> BlobCipherKeyCache::insertCipherKey(const EncryptCipher
 }
 
 Reference<BlobCipherKey> BlobCipherKeyCache::getLatestCipherKey(const EncryptCipherDomainId& domainId) {
-	if (domainId == ENCRYPT_INVALID_DOMAIN_ID) {
+	if (domainId == INVALID_ENCRYPT_DOMAIN_ID) {
 		TraceEvent(SevWarn, "BlobCipher.GetLatestCipherKeyInvalidID").detail("DomainId", domainId);
 		throw encrypt_invalid_id();
 	}
@@ -990,7 +990,7 @@ TEST_CASE("flow/BlobCipher") {
 	    cipherKeyCache->getLatestCipherKey(deterministicRandom()->randomInt(minDomainId, maxDomainId));
 	ASSERT(!latestKeyNonexists.isValid());
 	try {
-		cipherKeyCache->getLatestCipherKey(ENCRYPT_INVALID_DOMAIN_ID);
+		cipherKeyCache->getLatestCipherKey(INVALID_ENCRYPT_DOMAIN_ID);
 		ASSERT(false); // shouldn't get here
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_encrypt_invalid_id);

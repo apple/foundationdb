@@ -24,6 +24,10 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/format.hpp>
 
+const EncryptCipherDomainName FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME = "FdbSystemKeyspaceEncryptDomain"_sr;
+const EncryptCipherDomainName FDB_DEFAULT_ENCRYPT_DOMAIN_NAME = "FdbDefaultEncryptDomain"_sr;
+const EncryptCipherDomainName FDB_ENCRYPT_HEADER_DOMAIN_NAME = "FdbEncryptHeaderDomain"_sr;
+
 EncryptCipherMode encryptModeFromString(const std::string& modeStr) {
 	if (modeStr == "NONE") {
 		return ENCRYPT_CIPHER_MODE_NONE;

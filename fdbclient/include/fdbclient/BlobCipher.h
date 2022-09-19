@@ -140,9 +140,9 @@ private:
 #pragma pack(push, 1) // exact fit - no padding
 struct BlobCipherDetails {
 	// Encryption domain boundary identifier.
-	EncryptCipherDomainId encryptDomainId = ENCRYPT_INVALID_DOMAIN_ID;
+	EncryptCipherDomainId encryptDomainId = INVALID_ENCRYPT_DOMAIN_ID;
 	// BaseCipher encryption key identifier
-	EncryptCipherBaseKeyId baseCipherId = ENCRYPT_INVALID_CIPHER_KEY_ID;
+	EncryptCipherBaseKeyId baseCipherId = INVALID_ENCRYPT_CIPHER_KEY_ID;
 	// Random salt
 	EncryptCipherRandomSalt salt{};
 

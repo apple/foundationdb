@@ -1491,7 +1491,7 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 
 	wait(ioDegradedOrTimeoutError(
 	    c, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, self->degraded, SERVER_KNOBS->TLOG_DEGRADED_DURATION));
-	if (g_network->isSimulated() && !g_simulator.speedUpSimulation && BUGGIFY_WITH_PROB(0.0001)) {
+	if (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.0001)) {
 		wait(delay(6.0));
 	}
 	wait(self->queueCommitEnd.whenAtLeast(commitNumber - 1));

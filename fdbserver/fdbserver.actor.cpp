@@ -353,17 +353,17 @@ UID getSharedMemoryMachineId() {
 #endif
 }
 
-ACTOR void failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simulator.getCurrentProcess()) {
+ACTOR void failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simulator->getCurrentProcess()) {
 	wait(trigger);
 	if (enableFailures) {
 		printf("Killing machine: %s at %f\n", m->address.toString().c_str(), now());
-		g_simulator.killProcess(m, ISimulator::KillInstantly);
+		g_simulator->killProcess(m, ISimulator::KillInstantly);
 	}
 }
 
 void failAfter(Future<Void> trigger, Endpoint e) {
-	if (g_network == &g_simulator)
-		failAfter(trigger, g_simulator.getProcess(e));
+	if (g_network == g_simulator)
+		failAfter(trigger, g_simulator->getProcess(e));
 }
 
 ACTOR Future<Void> histogramReport() {
@@ -2265,7 +2265,7 @@ int main(int argc, char* argv[]) {
 				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
 			}
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
-			g_simulator.run();
+			g_simulator->run();
 		} else if (role == ServerRole::FDBD) {
 			// Update the global blob credential files list so that both fast
 			// restore workers and backup workers can access blob storage.
@@ -2475,7 +2475,7 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		// g_simulator.run();
+		// g_simulator->run();
 
 #ifdef ALLOC_INSTRUMENTATION
 		{

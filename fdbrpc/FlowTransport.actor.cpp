@@ -1136,9 +1136,10 @@ static void scanPackets(TransportData* transport,
 		if (checksumEnabled) {
 			bool isBuggifyEnabled = false;
 			if (g_network->isSimulated() && !isStableConnection &&
-			    g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration &&
+			    g_network->now() - g_simulator->lastConnectionFailure >
+			        g_simulator->connectionFailuresDisableDuration &&
 			    BUGGIFY_WITH_PROB(0.0001)) {
-				g_simulator.lastConnectionFailure = g_network->now();
+				g_simulator->lastConnectionFailure = g_network->now();
 				isBuggifyEnabled = true;
 				TraceEvent(SevInfo, "BitsFlip").log();
 				int flipBits = 32 - (int)floor(log2(deterministicRandom()->randomUInt32()));
@@ -1588,7 +1589,7 @@ FlowTransport::FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IP
   : self(new TransportData(transportId, maxWellKnownEndpoints, allowList)) {
 	self->multiVersionCleanup = multiVersionCleanupWorker(self);
 	if (g_network->isSimulated()) {
-		for (auto const& p : g_simulator.authKeys) {
+		for (auto const& p : g_simulator->authKeys) {
 			self->publicKeys.emplace(p.first, p.second.toPublic());
 		}
 	}

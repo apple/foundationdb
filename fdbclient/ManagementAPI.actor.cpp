@@ -956,7 +956,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	std::sort(old.coords.begin(), old.coords.end());
 	if (conn->hostnames == old.hostnames && conn->coords == old.coords && old.clusterKeyName() == newName) {
 		connectionStrings.clear();
-		if (g_network->isSimulated() && g_simulator.configDBType == ConfigDBType::DISABLED) {
+		if (g_network->isSimulated() && g_simulator->configDBType == ConfigDBType::DISABLED) {
 			disableConfigDB = true;
 		}
 		if (!disableConfigDB) {
@@ -973,7 +973,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		int i = 0;
 		int protectedCount = 0;
 		while ((protectedCount < ((desiredCoordinators.size() / 2) + 1)) && (i < desiredCoordinators.size())) {
-			auto process = g_simulator.getProcessByAddress(desiredCoordinators[i]);
+			auto process = g_simulator->getProcessByAddress(desiredCoordinators[i]);
 			auto addresses = process->addresses;
 
 			if (!process->isReliable()) {
@@ -981,9 +981,9 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 				continue;
 			}
 
-			g_simulator.protectedAddresses.insert(process->addresses.address);
+			g_simulator->protectedAddresses.insert(process->addresses.address);
 			if (addresses.secondaryAddress.present()) {
-				g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
+				g_simulator->protectedAddresses.insert(process->addresses.secondaryAddress.get());
 			}
 			TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
 			protectedCount++;
@@ -1077,12 +1077,12 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 
 			if (g_network->isSimulated()) {
 				for (int i = 0; i < (desiredCoordinators.size() / 2) + 1; i++) {
-					auto process = g_simulator.getProcessByAddress(desiredCoordinators[i]);
+					auto process = g_simulator->getProcessByAddress(desiredCoordinators[i]);
 					ASSERT(process->isReliable() || process->rebooting);
 
-					g_simulator.protectedAddresses.insert(process->addresses.address);
+					g_simulator->protectedAddresses.insert(process->addresses.address);
 					if (process->addresses.secondaryAddress.present()) {
-						g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
+						g_simulator->protectedAddresses.insert(process->addresses.secondaryAddress.get());
 					}
 					TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
 				}
@@ -1341,7 +1341,7 @@ struct AutoQuorumChange final : IQuorumChange {
 					continue;
 				}
 				// Exclude faulty node due to machine assassination
-				if (g_network->isSimulated() && !g_simulator.getProcessByAddress(worker->address)->isReliable()) {
+				if (g_network->isSimulated() && !g_simulator->getProcessByAddress(worker->address)->isReliable()) {
 					TraceEvent("AutoSelectCoordinators").detail("SkipUnreliableWorker", worker->address.toString());
 					continue;
 				}
@@ -2266,7 +2266,7 @@ ACTOR Future<Void> updateChangeFeed(Transaction* tr, Key rangeID, ChangeFeedStat
 	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 		if (val.present()) {
 			if (g_network->isSimulated()) {
-				g_simulator.validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
+				g_simulator->validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
 			}
 			tr->set(rangeIDKey,
 			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
@@ -2304,7 +2304,7 @@ ACTOR Future<Void> updateChangeFeed(Reference<ReadYourWritesTransaction> tr,
 	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 		if (val.present()) {
 			if (g_network->isSimulated()) {
-				g_simulator.validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
+				g_simulator->validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
 			}
 			tr->set(rangeIDKey,
 			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
@@ -2625,16 +2625,16 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 		data.address.ip = IPAddress(i);
 
 		if (g_network->isSimulated()) {
-			g_simulator.newProcess("TestCoordinator",
-			                       data.address.ip,
-			                       data.address.port,
-			                       false,
-			                       1,
-			                       data.locality,
-			                       ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
-			                       "",
-			                       "",
-			                       currentProtocolVersion());
+			g_simulator->newProcess("TestCoordinator",
+			                        data.address.ip,
+			                        data.address.port,
+			                        false,
+			                        1,
+			                        data.locality,
+			                        ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
+			                        "",
+			                        "",
+			                        currentProtocolVersion());
 		}
 
 		workers.push_back(data);

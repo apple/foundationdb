@@ -43,7 +43,7 @@ struct DummyWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(DummyWorkload* self, Database cx) {
 		if (self->displayDelay > 0.0)
 			wait(delay(self->displayDelay));
-		g_simulator.displayWorkers();
+		g_simulator->displayWorkers();
 		return Void();
 	}
 

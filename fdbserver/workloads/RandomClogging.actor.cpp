@@ -63,7 +63,7 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 	}
 
 	std::string description() const override {
-		if (&g_simulator == g_network)
+		if (g_simulator == g_network)
 			return "RandomClogging";
 		else
 			return "NoRC";
@@ -97,14 +97,14 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 
 	ACTOR void doClog(ISimulator::ProcessInfo* machine, double t, double delay = 0.0) {
 		wait(::delay(delay));
-		g_simulator.clogInterface(machine->address.ip, t);
+		g_simulator->clogInterface(machine->address.ip, t);
 	}
 
 	void clogRandomPair(double t) {
-		auto m1 = deterministicRandom()->randomChoice(g_simulator.getAllProcesses());
-		auto m2 = deterministicRandom()->randomChoice(g_simulator.getAllProcesses());
+		auto m1 = deterministicRandom()->randomChoice(g_simulator->getAllProcesses());
+		auto m2 = deterministicRandom()->randomChoice(g_simulator->getAllProcesses());
 		if (m1->address.ip != m2->address.ip)
-			g_simulator.clogPair(m1->address.ip, m2->address.ip, t);
+			g_simulator->clogPair(m1->address.ip, m2->address.ip, t);
 	}
 
 	ACTOR Future<Void> clogClient(RandomCloggingWorkload* self) {
@@ -112,7 +112,7 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 		state double workloadEnd = now() + self->testDuration;
 		loop {
 			wait(poisson(&lastTime, self->scale / self->clogginess));
-			auto machine = deterministicRandom()->randomChoice(g_simulator.getAllProcesses());
+			auto machine = deterministicRandom()->randomChoice(g_simulator->getAllProcesses());
 			double t = self->scale * 10.0 * exp(-10.0 * deterministicRandom()->random01());
 			t = std::max(0.0, std::min(t, workloadEnd - now()));
 			self->doClog(machine, t);
@@ -135,9 +135,9 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 			//  then unclog in a different order over the course of t seconds
 			std::vector<ISimulator::ProcessInfo*> swizzled;
 			std::vector<double> starts, ends;
-			for (int m = 0; m < g_simulator.getAllProcesses().size(); m++)
+			for (int m = 0; m < g_simulator->getAllProcesses().size(); m++)
 				if (deterministicRandom()->random01() < 0.5) {
-					swizzled.push_back(g_simulator.getAllProcesses()[m]);
+					swizzled.push_back(g_simulator->getAllProcesses()[m]);
 					starts.push_back(deterministicRandom()->random01() * t / 2);
 					ends.push_back(deterministicRandom()->random01() * t / 2 + t / 2);
 				}

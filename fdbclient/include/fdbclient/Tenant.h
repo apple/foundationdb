@@ -27,6 +27,7 @@
 #include "fdbclient/VersionedMap.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbrpc/TenantInfo.h"
+#include "flow/BooleanParam.h"
 #include "flow/flat_buffers.h"
 
 typedef StringRef TenantNameRef;
@@ -64,11 +65,13 @@ enum class TenantLockState { UNLOCKED, READ_ONLY, LOCKED };
 
 constexpr int TENANT_PREFIX_SIZE = sizeof(int64_t);
 
+FDB_DECLARE_BOOLEAN_PARAM(EnforceValidTenantId);
+
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
 
 	static Key idToPrefix(int64_t id);
-	static int64_t prefixToId(KeyRef prefix);
+	static int64_t prefixToId(KeyRef prefix, EnforceValidTenantId enforceTenantId = EnforceValidTenantId::True);
 
 	static std::string tenantStateToString(TenantState tenantState);
 	static TenantState stringToTenantState(std::string stateStr);
