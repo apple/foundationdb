@@ -303,7 +303,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			                                                  db->serverInfo->get().masterLifetime,
 			                                                  coordinators,
 			                                                  db->serverInfo->get().clusterInterface,
-			                                                  LiteralStringRef(""),
+			                                                  ""_sr,
 			                                                  addActor,
 			                                                  db->forceRecovery);
 
@@ -1355,7 +1355,7 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 	return Void();
 }
 
-#define TIME_KEEPER_VERSION LiteralStringRef("1")
+#define TIME_KEEPER_VERSION "1"_sr
 
 ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData* self) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
@@ -2508,7 +2508,7 @@ ACTOR Future<Void> watchBlobGranulesConfigKey(ClusterControllerData* self) {
 
 			Optional<Value> blobConfig = wait(tr->get(blobGranuleConfigKey));
 			if (blobConfig.present()) {
-				self->db.blobGranulesEnabled.set(blobConfig.get() == LiteralStringRef("1"));
+				self->db.blobGranulesEnabled.set(blobConfig.get() == "1"_sr);
 			}
 
 			state Future<Void> watch = tr->watch(blobGranuleConfigKey);

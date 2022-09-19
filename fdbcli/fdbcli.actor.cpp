@@ -654,7 +654,7 @@ ACTOR Future<Void> checkStatus(Future<Void> f,
 		StatusObject _s = wait(StatusClient::statusFetcher(localDb));
 		s = _s;
 	} else {
-		state ThreadFuture<Optional<Value>> statusValueF = tr->get(LiteralStringRef("\xff\xff/status/json"));
+		state ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
 		Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
 		if (!statusValue.present()) {
 			fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
@@ -698,7 +698,7 @@ ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens) {
 	for (int i = 1; i < tokens.size(); i++) {
 		snapCmd = snapCmd.withSuffix(tokens[i]);
 		if (i != tokens.size() - 1) {
-			snapCmd = snapCmd.withSuffix(LiteralStringRef(" "));
+			snapCmd = snapCmd.withSuffix(" "_sr);
 		}
 	}
 	try {
@@ -1328,13 +1328,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 				}
 
 				if (tokencmp(tokens[0], "fileconfigure")) {
-					if (tokens.size() == 2 || (tokens.size() == 3 && (tokens[1] == LiteralStringRef("new") ||
-					                                                  tokens[1] == LiteralStringRef("FORCE")))) {
-						bool _result =
-						    wait(makeInterruptable(fileConfigureCommandActor(db,
-						                                                     tokens.back().toString(),
-						                                                     tokens[1] == LiteralStringRef("new"),
-						                                                     tokens[1] == LiteralStringRef("FORCE"))));
+					if (tokens.size() == 2 ||
+					    (tokens.size() == 3 && (tokens[1] == "new"_sr || tokens[1] == "FORCE"_sr))) {
+						bool _result = wait(makeInterruptable(fileConfigureCommandActor(
+						    db, tokens.back().toString(), tokens[1] == "new"_sr, tokens[1] == "FORCE"_sr)));
 						if (!_result)
 							is_error = true;
 					} else {

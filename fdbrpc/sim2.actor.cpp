@@ -2648,8 +2648,8 @@ int sf_open(const char* filename, int flags, int convFlags, int mode) {
 Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& filename, int64_t flags, int64_t mode) {
 	ASSERT((flags & IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE) || !(flags & IAsyncFile::OPEN_CREATE) ||
 	       StringRef(filename).endsWith(
-	           LiteralStringRef(".fdb-lock"))); // We don't use "ordinary" non-atomic file creation right now except for
-	                                            // folder locking, and we don't have code to simulate its unsafeness.
+	           ".fdb-lock"_sr)); // We don't use "ordinary" non-atomic file creation right now except for
+	                             // folder locking, and we don't have code to simulate its unsafeness.
 
 	if ((flags & IAsyncFile::OPEN_EXCLUSIVE))
 		ASSERT(flags & IAsyncFile::OPEN_CREATE);

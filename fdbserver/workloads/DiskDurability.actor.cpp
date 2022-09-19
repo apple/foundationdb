@@ -87,14 +87,14 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 	double syncInterval;
 
 	DiskDurabilityWorkload(WorkloadContext const& wcx) : AsyncFileWorkload(wcx) {
-		writers = getOption(options, LiteralStringRef("writers"), 1);
-		filePages = getOption(options, LiteralStringRef("filePages"), 1000000);
+		writers = getOption(options, "writers"_sr, 1);
+		filePages = getOption(options, "filePages"_sr, 1000000);
 		fileSize = filePages * _PAGE_SIZE;
 		unbufferedIO = true;
 		uncachedIO = true;
 		fillRandom = false;
-		pagesPerWrite = getOption(options, LiteralStringRef("pagesPerWrite"), 1);
-		syncInterval = (double)(getOption(options, LiteralStringRef("syncIntervalMs"), 2000)) / 1000;
+		pagesPerWrite = getOption(options, "pagesPerWrite"_sr, 1);
+		syncInterval = (double)(getOption(options, "syncIntervalMs"_sr, 2000)) / 1000;
 	}
 
 	~DiskDurabilityWorkload() override {}

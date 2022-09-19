@@ -111,8 +111,8 @@ ACTOR Future<WorkerInterface> getDataDistributorWorker(Database cx, Reference<As
 ACTOR Future<int64_t> getDataInFlight(Database cx, WorkerInterface distributorWorker) {
 	try {
 		TraceEvent("DataInFlight").detail("Stage", "ContactingDataDistributor");
-		TraceEventFields md = wait(timeoutError(
-		    distributorWorker.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlight"))), 1.0));
+		TraceEventFields md = wait(
+		    timeoutError(distributorWorker.eventLogRequest.getReply(EventLogRequest("TotalDataInFlight"_sr)), 1.0));
 		int64_t dataInFlight = boost::lexical_cast<int64_t>(md.getValue("TotalBytes"));
 		return dataInFlight;
 	} catch (Error& e) {
@@ -300,7 +300,7 @@ getStorageWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo, b
 	    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
 		    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		    return tr->get(LiteralStringRef("usable_regions").withPrefix(configKeysPrefix));
+		    return tr->get("usable_regions"_sr.withPrefix(configKeysPrefix));
 	    }));
 	int usableRegions = 1;
 	if (regionsValue.present()) {
@@ -440,8 +440,8 @@ ACTOR Future<int64_t> getDataDistributionQueueSize(Database cx,
 	try {
 		TraceEvent("DataDistributionQueueSize").detail("Stage", "ContactingDataDistributor");
 
-		TraceEventFields movingDataMessage = wait(timeoutError(
-		    distributorWorker.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MovingData"))), 1.0));
+		TraceEventFields movingDataMessage =
+		    wait(timeoutError(distributorWorker.eventLogRequest.getReply(EventLogRequest("MovingData"_sr)), 1.0));
 
 		TraceEvent("DataDistributionQueueSize").detail("Stage", "GotString");
 
@@ -483,8 +483,7 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "ContactingMaster");
 
 			TraceEventFields teamCollectionInfoMessage = wait(timeoutError(
-			    dataDistributorWorker.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TeamCollectionInfo"))),
-			    1.0));
+			    dataDistributorWorker.eventLogRequest.getReply(EventLogRequest("TeamCollectionInfo"_sr)), 1.0));
 
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "GotString");
 
@@ -591,8 +590,8 @@ ACTOR Future<bool> getDataDistributionActive(Database cx, WorkerInterface distri
 	try {
 		TraceEvent("DataDistributionActive").detail("Stage", "ContactingDataDistributor");
 
-		TraceEventFields activeMessage = wait(timeoutError(
-		    distributorWorker.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStarting"))), 1.0));
+		TraceEventFields activeMessage = wait(
+		    timeoutError(distributorWorker.eventLogRequest.getReply(EventLogRequest("DDTrackerStarting"_sr)), 1.0));
 
 		return activeMessage.getValue("State") == "Active";
 	} catch (Error& e) {

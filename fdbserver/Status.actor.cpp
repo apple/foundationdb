@@ -1269,7 +1269,7 @@ ACTOR static Future<double> doReadProbe(Future<double> grvProbe, Transaction* tr
 	loop {
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
-			Optional<Standalone<StringRef>> _ = wait(tr->get(LiteralStringRef("\xff/StatusJsonTestKey62793")));
+			Optional<Standalone<StringRef>> _ = wait(tr->get("\xff/StatusJsonTestKey62793"_sr));
 			return g_network->timer_monotonic() - start;
 		} catch (Error& e) {
 			wait(tr->onError(e));
@@ -1702,17 +1702,16 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 		std::vector<Future<TraceEventFields>> futures;
 
 		// TODO:  Should this be serial?
-		futures.push_back(timeoutError(
-		    ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStarting"))), 1.0));
-		futures.push_back(timeoutError(
-		    ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("DDTrackerStats"))), 1.0));
-		futures.push_back(timeoutError(
-		    ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("MovingData"))), 1.0));
-		futures.push_back(timeoutError(
-		    ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlight"))), 1.0));
-		futures.push_back(timeoutError(
-		    ddWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlightRemote"))),
-		    1.0));
+		futures.push_back(
+		    timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("DDTrackerStarting"_sr)), 1.0));
+		futures.push_back(
+		    timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("DDTrackerStats"_sr)), 1.0));
+		futures.push_back(
+		    timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("MovingData"_sr)), 1.0));
+		futures.push_back(
+		    timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("TotalDataInFlight"_sr)), 1.0));
+		futures.push_back(
+		    timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("TotalDataInFlightRemote"_sr)), 1.0));
 
 		std::vector<TraceEventFields> dataInfo = wait(getAll(futures));
 
@@ -2084,8 +2083,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 			auto worker = getWorker(workersMap, p.address());
 			if (worker.present())
 				commitProxyStatFutures.push_back(timeoutError(
-				    worker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("ProxyMetrics"))),
-				    1.0));
+				    worker.get().interf.eventLogRequest.getReply(EventLogRequest("ProxyMetrics"_sr)), 1.0));
 			else
 				throw all_alternatives_failed(); // We need data from all proxies for this result to be trustworthy
 		}
@@ -2093,8 +2091,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 			auto worker = getWorker(workersMap, p.address());
 			if (worker.present())
 				grvProxyStatFutures.push_back(timeoutError(
-				    worker.get().interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("GrvProxyMetrics"))),
-				    1.0));
+				    worker.get().interf.eventLogRequest.getReply(EventLogRequest("GrvProxyMetrics"_sr)), 1.0));
 			else
 				throw all_alternatives_failed(); // We need data from all proxies for this result to be trustworthy
 		}
@@ -2161,9 +2158,9 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 	// Transactions
 	try {
 		state Future<TraceEventFields> f1 =
-		    timeoutError(rkWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("RkUpdate"))), 1.0);
-		state Future<TraceEventFields> f2 = timeoutError(
-		    rkWorker.interf.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("RkUpdateBatch"))), 1.0);
+		    timeoutError(rkWorker.interf.eventLogRequest.getReply(EventLogRequest("RkUpdate"_sr)), 1.0);
+		state Future<TraceEventFields> f2 =
+		    timeoutError(rkWorker.interf.eventLogRequest.getReply(EventLogRequest("RkUpdateBatch"_sr)), 1.0);
 		wait(success(f1) && success(f2));
 		TraceEventFields ratekeeper = f1.get();
 		TraceEventFields batchRatekeeper = f2.get();
@@ -2544,7 +2541,7 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 
 	std::map<NetworkAddress, StringRef> workerZones;
 	for (const auto& worker : workers) {
-		workerZones[worker.interf.address()] = worker.interf.locality.zoneId().orDefault(LiteralStringRef(""));
+		workerZones[worker.interf.address()] = worker.interf.locality.zoneId().orDefault(""_sr);
 	}
 	std::map<StringRef, int> coordinatorZoneCounts;
 	for (const auto& coordinator : coordinatorAddresses) {

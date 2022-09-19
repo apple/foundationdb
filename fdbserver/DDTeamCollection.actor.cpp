@@ -5174,9 +5174,9 @@ public:
 			UID uid(id, 0);
 			StorageServerInterface interface;
 			interface.uniqueID = uid;
-			interface.locality.set(LiteralStringRef("machineid"), Standalone<StringRef>(std::to_string(id)));
-			interface.locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(id % 5)));
-			interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(id % 3)));
+			interface.locality.set("machineid"_sr, Standalone<StringRef>(std::to_string(id)));
+			interface.locality.set("zoneid"_sr, Standalone<StringRef>(std::to_string(id % 5)));
+			interface.locality.set("data_hall"_sr, Standalone<StringRef>(std::to_string(id % 3)));
 			collection->server_info[uid] = makeReference<TCServerInfo>(
 			    interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
 			collection->server_status.set(uid, ServerStatus(false, false, false, interface.locality));
@@ -5229,11 +5229,11 @@ public:
 			       zone_id,
 			       machine_id,
 			       interface.address().toString().c_str());
-			interface.locality.set(LiteralStringRef("processid"), Standalone<StringRef>(std::to_string(process_id)));
-			interface.locality.set(LiteralStringRef("machineid"), Standalone<StringRef>(std::to_string(machine_id)));
-			interface.locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(zone_id)));
-			interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(data_hall_id)));
-			interface.locality.set(LiteralStringRef("dcid"), Standalone<StringRef>(std::to_string(dc_id)));
+			interface.locality.set("processid"_sr, Standalone<StringRef>(std::to_string(process_id)));
+			interface.locality.set("machineid"_sr, Standalone<StringRef>(std::to_string(machine_id)));
+			interface.locality.set("zoneid"_sr, Standalone<StringRef>(std::to_string(zone_id)));
+			interface.locality.set("data_hall"_sr, Standalone<StringRef>(std::to_string(data_hall_id)));
+			interface.locality.set("dcid"_sr, Standalone<StringRef>(std::to_string(dc_id)));
 			collection->server_info[uid] = makeReference<TCServerInfo>(
 			    interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
 

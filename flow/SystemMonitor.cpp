@@ -315,19 +315,19 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 				char* demangled = abi::__cxa_demangle(i->first, nullptr, nullptr, nullptr);
 				if (demangled) {
 					s = demangled;
-					if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))
-						s = s.substr(LiteralStringRef("(anonymous namespace)::").size());
+					if (StringRef(s).startsWith("(anonymous namespace)::"_sr))
+						s = s.substr("(anonymous namespace)::"_sr.size());
 					free(demangled);
 				} else
 					s = i->first;
 #else
 				s = i->first;
-				if (StringRef(s).startsWith(LiteralStringRef("class `anonymous namespace'::")))
-					s = s.substr(LiteralStringRef("class `anonymous namespace'::").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("class ")))
-					s = s.substr(LiteralStringRef("class ").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
-					s = s.substr(LiteralStringRef("struct ").size());
+				if (StringRef(s).startsWith("class `anonymous namespace'::"_sr))
+					s = s.substr("class `anonymous namespace'::"_sr.size());
+				else if (StringRef(s).startsWith("class "_sr))
+					s = s.substr("class "_sr.size());
+				else if (StringRef(s).startsWith("struct "_sr))
+					s = s.substr("struct "_sr.size());
 #endif
 				typeNames.emplace_back(s, i->first);
 			}

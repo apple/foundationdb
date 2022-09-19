@@ -188,8 +188,8 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	}
 
 	{
-		UniqueGeneration g = wait(
-		    reg.write.getReply(GenerationRegWriteRequest(KeyValueRef(the_key, LiteralStringRef("Value1")), firstGen)));
+		UniqueGeneration g =
+		    wait(reg.write.getReply(GenerationRegWriteRequest(KeyValueRef(the_key, "Value1"_sr), firstGen)));
 		//   (gen1==gen is considered a "successful" write)
 		ASSERT(g == firstGen);
 	}
@@ -198,7 +198,7 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 		GenerationRegReadReply r = wait(reg.read.getReply(GenerationRegReadRequest(the_key, UniqueGeneration())));
 		// read(key,gen2) returns (value,gen,rgen).
 		//     There was some earlier or concurrent write(key,value,gen).
-		ASSERT(r.value == LiteralStringRef("Value1"));
+		ASSERT(r.value == "Value1"_sr);
 		ASSERT(r.gen == firstGen);
 		//     There was some earlier or concurrent read(key,rgen).
 		ASSERT(r.rgen == firstGen);

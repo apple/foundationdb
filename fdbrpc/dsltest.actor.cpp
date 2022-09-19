@@ -643,9 +643,9 @@ void arenaTest() {
 	{
 		Arena arena;
 		VectorRef<StringRef> test;
-		test.push_back(arena, StringRef(arena, LiteralStringRef("Hello")));
-		test.push_back(arena, StringRef(arena, LiteralStringRef(", ")));
-		test.push_back(arena, StringRef(arena, LiteralStringRef("World!")));
+		test.push_back(arena, StringRef(arena, "Hello"_sr));
+		test.push_back(arena, StringRef(arena, ", "_sr));
+		test.push_back(arena, StringRef(arena, "World!"_sr));
 
 		for (auto i = test.begin(); i != test.end(); ++i)
 			for (auto j = i->begin(); j != i->end(); ++j)

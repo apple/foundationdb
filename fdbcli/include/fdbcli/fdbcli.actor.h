@@ -120,7 +120,7 @@ extern const KeyRef ignoreSSFailureSpecialKey;
 extern const KeyRangeRef processClassSourceSpecialKeyRange;
 extern const KeyRangeRef processClassTypeSpecialKeyRange;
 // Other special keys
-inline const KeyRef errorMsgSpecialKey = LiteralStringRef("\xff\xff/error_message");
+inline const KeyRef errorMsgSpecialKey = "\xff\xff/error_message"_sr;
 inline const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/management/options/worker_interfaces/verify"_sr;
 // help functions (Copied from fdbcli.actor.cpp)
 
