@@ -289,13 +289,17 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	GetRangeLimits randomLimits() {
 		// TODO : fix knobs for row_unlimited
-		int rowLimits = deterministicRandom()->randomInt(1, keysCount.getValue() + 1);
+		int rowLimits = deterministicRandom()->randomInt(0, keysCount.getValue() + 1);
 		// The largest key's bytes is longest prefix bytes + 1(for '/') + generated key bytes
 		// 8 here refers to bytes of KeyValueRef
 		int byteLimits = deterministicRandom()->randomInt(
 		    1, keysCount.getValue() * (keyBytes + (rangeCount + 1) + valBytes + 8) + 1);
 
-		return GetRangeLimits(rowLimits, byteLimits);
+		auto limit = GetRangeLimits(rowLimits, byteLimits);
+		// minRows is always initilized to 1
+		if (limit.rows == 0)
+			limit.minRows = 0;
+		return limit;
 	}
 
 	ACTOR Future<Void> testSpecialKeySpaceErrors(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
