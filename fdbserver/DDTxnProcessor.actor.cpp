@@ -22,6 +22,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbclient/DatabaseContext.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class DDTxnProcessorImpl {
@@ -493,4 +494,25 @@ Future<bool> DDTxnProcessor::isDataDistributionEnabled(const DDEnabledState* ddE
 
 Future<Void> DDTxnProcessor::pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const {
 	return DDTxnProcessorImpl::pollMoveKeysLock(cx, lock, ddEnabledState);
+}
+
+Future<std::pair<Optional<StorageMetrics>, int>> DDTxnProcessor::waitStorageMetrics(
+    const KeyRange& keys,
+    const StorageMetrics& min,
+    const StorageMetrics& max,
+    const StorageMetrics& permittedError,
+    int shardLimit,
+    int expectedShardCount) const {
+	return cx->waitStorageMetrics(keys, min, max, permittedError, shardLimit, expectedShardCount);
+}
+
+Future<Standalone<VectorRef<KeyRef>>> DDTxnProcessor::splitStorageMetrics(const KeyRange& keys,
+                                                                          const StorageMetrics& limit,
+                                                                          const StorageMetrics& estimated,
+                                                                          const Optional<int>& minSplitBytes) const {
+	return cx->splitStorageMetrics(keys, limit, estimated, minSplitBytes);
+}
+
+Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> DDTxnProcessor::getReadHotRanges(const KeyRange& keys) const {
+	return cx->getReadHotRanges(keys);
 }

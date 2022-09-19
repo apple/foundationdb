@@ -627,7 +627,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			actors.push_back(self->pollMoveKeysLock());
 			actors.push_back(reportErrorsExcept(dataDistributionTracker(self->initData,
-			                                                            cx,
+			                                                            self->txnProcessor,
 			                                                            self->relocationProducer,
 			                                                            self->shardsAffectedByTeamFailure,
 			                                                            self->physicalShardCollection,

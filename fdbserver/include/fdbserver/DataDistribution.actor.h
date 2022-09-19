@@ -499,7 +499,7 @@ struct TeamCollectionInterface {
 };
 
 ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
-                                           Database cx,
+                                           std::shared_ptr<IDDTxnProcessor> dbProcessor,
                                            PromiseStream<RelocateShard> output,
                                            Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                            Reference<PhysicalShardCollection> physicalShardCollection,
