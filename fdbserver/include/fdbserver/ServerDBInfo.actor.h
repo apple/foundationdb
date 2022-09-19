@@ -31,6 +31,7 @@
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/BlobManagerInterface.h"
+#include "fdbclient/ConsistencyScanInterface.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LatencyBandConfig.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -50,6 +51,7 @@ struct ServerDBInfo {
 	Optional<RatekeeperInterface> ratekeeper;
 	Optional<BlobManagerInterface> blobManager;
 	Optional<EncryptKeyProxyInterface> encryptKeyProxy;
+	Optional<ConsistencyScanInterface> consistencyScan;
 	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount
 	    recoveryCount; // A recovery count from DBCoreState.  A successful cluster recovery increments it twice;
@@ -83,6 +85,7 @@ struct ServerDBInfo {
 		           ratekeeper,
 		           blobManager,
 		           encryptKeyProxy,
+		           consistencyScan,
 		           resolvers,
 		           recoveryCount,
 		           recoveryState,

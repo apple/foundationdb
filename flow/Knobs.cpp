@@ -163,7 +163,9 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	//AsyncFileKAIO
 	init( MAX_OUTSTANDING,                                      64 );
 	init( MIN_SUBMIT,                                           10 );
-	init( DISK_METRIC_LOGGING_INTERVAL,                        5.0 );
+	init( SQLITE_DISK_METRIC_LOGGING_INTERVAL,                 5.0 );
+	init( KAIO_LATENCY_LOGGING_INTERVAL,                      30.0 );
+	init( KAIO_LATENCY_SAMPLE_SIZE,                          30000 );
 
 	init( PAGE_WRITE_CHECKSUM_HISTORY,                           0 ); if( randomize && BUGGIFY ) PAGE_WRITE_CHECKSUM_HISTORY = 10000000;
 	init( DISABLE_POSIX_KERNEL_AIO,                              0 );
@@ -238,6 +240,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( SIM_SPEEDUP_AFTER_SECONDS,                           450 );
 	init( MAX_TRACE_LINES,                               1'000'000 );
 	init( CODE_COV_TRACE_EVENT_SEVERITY,                        10 ); // Code coverage TraceEvent severity level
+	init( ENABLE_SIMULATION_IMPROVEMENTS,                    false ); // Separate normal workloads and failure injection
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );

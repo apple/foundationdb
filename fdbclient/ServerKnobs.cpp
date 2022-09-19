@@ -546,6 +546,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ATTEMPT_RECRUITMENT_DELAY,                           0.035 );
 	init( WAIT_FOR_DISTRIBUTOR_JOIN_DELAY,                       1.0 );
 	init( WAIT_FOR_RATEKEEPER_JOIN_DELAY,                        1.0 );
+	init( WAIT_FOR_CONSISTENCYSCAN_JOIN_DELAY,                   1.0 );
 	init( WAIT_FOR_BLOB_MANAGER_JOIN_DELAY,                      1.0 );
 	init( WAIT_FOR_ENCRYPT_KEY_PROXY_JOIN_DELAY,                 1.0 );
 	init( WORKER_FAILURE_TIME,                                   1.0 ); if( randomize && BUGGIFY ) WORKER_FAILURE_TIME = 10.0;
@@ -556,6 +557,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CHECK_REMOTE_HEALTH_INTERVAL,                           60 );
 	init( FORCE_RECOVERY_CHECK_DELAY,                            5.0 );
 	init( RATEKEEPER_FAILURE_TIME,                               1.0 );
+	init( CONSISTENCYSCAN_FAILURE_TIME,                          1.0 );
 	init( BLOB_MANAGER_FAILURE_TIME,                             1.0 );
 	init( REPLACE_INTERFACE_DELAY,                              60.0 );
 	init( REPLACE_INTERFACE_CHECK_DELAY,                         5.0 );

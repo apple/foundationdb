@@ -351,6 +351,8 @@ class TestRun:
         if self.use_tls_plugin:
             command += ['--tls_plugin', str(config.tls_plugin_path)]
             env["FDB_TLS_PLUGIN"] = str(config.tls_plugin_path)
+        if config.disable_kaio:
+            command += ['--knob-disable-posix-kernel-aio=1']
         if Version.of_binary(self.binary) >= '7.1.0':
             command += ['-fi', 'on' if self.fault_injection_enabled else 'off']
         if self.restarting:

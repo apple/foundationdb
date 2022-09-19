@@ -66,6 +66,16 @@ void parse(int* i, ValueRef const& v) {
 	*i = atoi(v.toString().c_str());
 }
 
+void parse(int64_t* i, ValueRef const& v) {
+	// FIXME: Sanity checking
+	*i = atoll(v.toString().c_str());
+}
+
+void parse(double* i, ValueRef const& v) {
+	// FIXME: Sanity checking
+	*i = atof(v.toString().c_str());
+}
+
 void parseReplicationPolicy(Reference<IReplicationPolicy>* policy, ValueRef const& v) {
 	BinaryReader reader(v, IncludeVersion());
 	serializeReplicationPolicy(reader, *policy);
