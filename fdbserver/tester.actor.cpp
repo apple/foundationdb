@@ -431,7 +431,7 @@ bool FailureInjectionWorkload::add(DeterministicRandom& random,
 	alreadyAdded += std::count_if(workload.failureInjection.begin(),
 	                              workload.failureInjection.end(),
 	                              [&desc](auto const& w) { return w->description() == desc; });
-	bool willAdd = work.useDatabase && 0.1 / (1 + alreadyAdded) > random.random01();
+	bool willAdd = alreadyAdded < 3 && work.useDatabase && 0.1 / (1 + alreadyAdded) > random.random01();
 	if (willAdd) {
 		initFailureInjectionMode(random, alreadyAdded);
 	}
