@@ -130,6 +130,13 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR Future<Key> versionedForcePurge(Database cx, KeyRange range, Optional<TenantName> tenantName) {
+		Version rv = deterministicRandom()->coinflip() ? latestVersion : 1;
+		Key purgeKey = wait(cx->purgeBlobGranules(range, rv, tenantName, true));
+
+		return purgeKey;
+	}
+
 	ACTOR Future<Void> unregisterRandomRange(Database cx, BlobGranuleRangesWorkload* self) {
 		int randomRangeIdx = deterministicRandom()->randomInt(0, self->activeRanges.size());
 		state KeyRange range = self->activeRanges[randomRangeIdx];
@@ -147,7 +154,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 				           range.begin.printable(),
 				           range.end.printable());
 			}
-			Key purgeKey = wait(cx->purgeBlobGranules(range, 1, {}, true));
+			Key purgeKey = wait(self->versionedForcePurge(cx, range, {}));
 			wait(cx->waitPurgeGranulesComplete(purgeKey));
 		}
 		bool success = wait(self->setRange(cx, range, false));
@@ -307,7 +314,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		}
 
 		// tear down range at end
-		Key purgeKey = wait(cx->purgeBlobGranules(range, 1, {}, true));
+		Key purgeKey = wait(self->versionedForcePurge(cx, range, {}));
 		wait(cx->waitPurgeGranulesComplete(purgeKey));
 		bool success = wait(self->setRange(cx, range, false));
 		ASSERT(success);
@@ -533,7 +540,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		}
 
 		// tear down + check that un-blobbifying at a non-aligned range also doesn't work
-		Key purgeKey = wait(cx->purgeBlobGranules(activeRange, 1, {}, true));
+		Key purgeKey = wait(self->versionedForcePurge(cx, activeRange, {}));
 		wait(cx->waitPurgeGranulesComplete(purgeKey));
 
 		if (deterministicRandom()->coinflip()) {
@@ -586,7 +593,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		wait(self->checkRange(cx, self, range, true));
 
 		// force purge range
-		Key purgeKey = wait(cx->purgeBlobGranules(range, 1, {}, true));
+		Key purgeKey = wait(self->versionedForcePurge(cx, range, {}));
 		wait(cx->waitPurgeGranulesComplete(purgeKey));
 		wait(self->checkRange(cx, self, range, false));
 
