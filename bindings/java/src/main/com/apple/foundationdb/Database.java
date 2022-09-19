@@ -166,6 +166,19 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 *
 	 * @param beginKey start of the key range
 	 * @param endKey end of the key range
+	 * @param force if true delete all data, if not keep data >= purgeVersion
+	 *
+	 * @return the key to watch for purge complete
+	 */
+	default CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, boolean force) {
+		return purgeBlobGranules(beginKey, endKey, -2, force, getExecutor());
+	}
+
+	/**
+	 * Runs {@link #purgeBlobGranules(Function)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
 	 * @param purgeVersion version to purge at
 	 * @param force if true delete all data, if not keep data >= purgeVersion
 	 *
