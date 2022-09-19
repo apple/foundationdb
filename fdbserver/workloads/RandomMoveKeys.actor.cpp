@@ -29,17 +29,21 @@
 #include "fdbserver/QuietDatabase.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct MoveKeysWorkload : TestWorkload {
+struct MoveKeysWorkload : FailureInjectionWorkload {
 	bool enabled;
-	double testDuration, meanDelay;
-	double maxKeyspace;
+	double testDuration = 10.0, meanDelay = 0.05;
+	double maxKeyspace = 0.1;
 	DatabaseConfiguration configuration;
 
-	MoveKeysWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	MoveKeysWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId && g_network->isSimulated(); // only do this on the "first" client
-		meanDelay = getOption(options, LiteralStringRef("meanDelay"), 0.05);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		maxKeyspace = getOption(options, LiteralStringRef("maxKeyspace"), 0.1);
+	}
+
+	MoveKeysWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
+		enabled = !clientId && g_network->isSimulated(); // only do this on the "first" client
+		meanDelay = getOption(options, LiteralStringRef("meanDelay"), meanDelay);
+		testDuration = getOption(options, LiteralStringRef("testDuration"), testDuration);
+		maxKeyspace = getOption(options, LiteralStringRef("maxKeyspace"), maxKeyspace);
 	}
 
 	std::string description() const override { return "MoveKeysWorkload"; }
@@ -232,3 +236,4 @@ struct MoveKeysWorkload : TestWorkload {
 };
 
 WorkloadFactory<MoveKeysWorkload> MoveKeysWorkloadFactory("RandomMoveKeys");
+FailureInjectorFactory<MoveKeysWorkload> MoveKeysFailureInjectionFactory;
