@@ -28,6 +28,7 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/Histogram.h"
+#include "flow/PriorityMultiLock.actor.h"
 #include <limits>
 #include <random>
 #include "fdbrpc/ContinuousSample.h"
