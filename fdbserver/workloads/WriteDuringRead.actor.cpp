@@ -27,6 +27,7 @@
 #include "flow/ActorCollection.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbclient/Atomic.h"
+#include "flow/ApiVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WriteDuringReadWorkload : TestWorkload {
@@ -88,10 +89,12 @@ struct WriteDuringReadWorkload : TestWorkload {
 		CODE_PROBE(adjacentKeys && (nodes + minNode) > CLIENT_KNOBS->KEY_SIZE_LIMIT,
 		           "WriteDuringReadWorkload testing large keys");
 
-		useExtraDB = g_simulator.extraDB != nullptr;
+		useExtraDB = !g_simulator->extraDatabases.empty();
 		if (useExtraDB) {
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
-			extraDB = Database::createDatabase(extraFile, -1);
+			ASSERT(g_simulator->extraDatabases.size() == 1);
+			auto extraFile =
+			    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator->extraDatabases[0]));
+			extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 			useSystemKeys = false;
 		}
 
@@ -680,7 +683,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 			loop {
 				wait(delay(now() - startTime > self->slowModeStart ||
-				                   (g_network->isSimulated() && g_simulator.speedUpSimulation)
+				                   (g_network->isSimulated() && g_simulator->speedUpSimulation)
 				               ? 1.0
 				               : 0.1));
 				try {

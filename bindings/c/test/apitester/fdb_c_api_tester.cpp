@@ -36,6 +36,8 @@ namespace FdbApiTester {
 
 namespace {
 
+#define API_VERSION_CLIENT_TMP_DIR 720
+
 enum TesterOptionId {
 	OPT_CONNFILE,
 	OPT_HELP,
@@ -46,6 +48,7 @@ enum TesterOptionId {
 	OPT_KNOB,
 	OPT_EXTERNAL_CLIENT_LIBRARY,
 	OPT_EXTERNAL_CLIENT_DIRECTORY,
+	OPT_FUTURE_VERSION_CLIENT_LIBRARY,
 	OPT_TMP_DIR,
 	OPT_DISABLE_LOCAL_CLIENT,
 	OPT_TEST_FILE,
@@ -72,6 +75,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_KNOB, "--knob-", SO_REQ_SEP },
 	  { OPT_EXTERNAL_CLIENT_LIBRARY, "--external-client-library", SO_REQ_SEP },
 	  { OPT_EXTERNAL_CLIENT_DIRECTORY, "--external-client-dir", SO_REQ_SEP },
+	  { OPT_FUTURE_VERSION_CLIENT_LIBRARY, "--future-version-client-library", SO_REQ_SEP },
 	  { OPT_TMP_DIR, "--tmp-dir", SO_REQ_SEP },
 	  { OPT_DISABLE_LOCAL_CLIENT, "--disable-local-client", SO_NONE },
 	  { OPT_TEST_FILE, "-f", SO_REQ_SEP },
@@ -110,6 +114,8 @@ void printProgramUsage(const char* execName) {
 	       "                 Path to the external client library.\n"
 	       "  --external-client-dir DIR\n"
 	       "                 Directory containing external client libraries.\n"
+	       "  --future-version-client-library FILE\n"
+	       "                 Path to a client library to be used with a future protocol version.\n"
 	       "  --tmp-dir DIR\n"
 	       "                 Directory for temporary files of the client.\n"
 	       "  --disable-local-client DIR\n"
@@ -204,6 +210,9 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 	case OPT_EXTERNAL_CLIENT_DIRECTORY:
 		options.externalClientDir = args.OptionArg();
 		break;
+	case OPT_FUTURE_VERSION_CLIENT_LIBRARY:
+		options.futureVersionClientLibrary = args.OptionArg();
+		break;
 	case OPT_TMP_DIR:
 		options.tmpDir = args.OptionArg();
 		break;
@@ -278,7 +287,7 @@ void fdb_check(fdb::Error e) {
 }
 
 void applyNetworkOptions(TesterOptions& options) {
-	if (!options.tmpDir.empty()) {
+	if (!options.tmpDir.empty() && options.apiVersion >= API_VERSION_CLIENT_TMP_DIR) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_TMP_DIR, options.tmpDir);
 	}
 	if (!options.externalClientLibrary.empty()) {
@@ -294,6 +303,11 @@ void applyNetworkOptions(TesterOptions& options) {
 		if (options.disableLocalClient) {
 			throw TesterError("Invalid options: Cannot disable local client if no external library is provided");
 		}
+	}
+
+	if (!options.futureVersionClientLibrary.empty()) {
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_FUTURE_VERSION_CLIENT_LIBRARY,
+		                        options.futureVersionClientLibrary);
 	}
 
 	if (options.testSpec.multiThreaded) {
@@ -338,6 +352,12 @@ void randomizeOptions(TesterOptions& options) {
 	options.numClientThreads = random.randomInt(options.testSpec.minClientThreads, options.testSpec.maxClientThreads);
 	options.numDatabases = random.randomInt(options.testSpec.minDatabases, options.testSpec.maxDatabases);
 	options.numClients = random.randomInt(options.testSpec.minClients, options.testSpec.maxClients);
+
+	// Choose a random number of tenants. If a test is configured to allow 0 tenants, then use 0 tenants half the time.
+	if (options.testSpec.maxTenants >= options.testSpec.minTenants &&
+	    (options.testSpec.minTenants > 0 || random.randomBool(0.5))) {
+		options.numTenants = random.randomInt(options.testSpec.minTenants, options.testSpec.maxTenants);
+	}
 }
 
 bool runWorkloads(TesterOptions& options) {
@@ -346,7 +366,12 @@ bool runWorkloads(TesterOptions& options) {
 		txExecOptions.blockOnFutures = options.testSpec.blockOnFutures;
 		txExecOptions.numDatabases = options.numDatabases;
 		txExecOptions.databasePerTransaction = options.testSpec.databasePerTransaction;
+		// 7.1 and older releases crash on database create errors
+		txExecOptions.injectDatabaseCreateErrors = options.testSpec.buggify && options.apiVersion > 710;
 		txExecOptions.transactionRetryLimit = options.transactionRetryLimit;
+		txExecOptions.tmpDir = options.tmpDir.empty() ? std::string("/tmp") : options.tmpDir;
+		txExecOptions.tamperClusterFile = options.testSpec.tamperClusterFile;
+		txExecOptions.numTenants = options.numTenants;
 
 		std::vector<std::shared_ptr<IWorkload>> workloads;
 		workloads.reserve(options.testSpec.workloads.size() * options.numClients);
@@ -358,6 +383,7 @@ bool runWorkloads(TesterOptions& options) {
 				config.options = workloadSpec.options;
 				config.clientId = i;
 				config.numClients = options.numClients;
+				config.numTenants = options.numTenants;
 				config.apiVersion = options.apiVersion;
 				std::shared_ptr<IWorkload> workload = IWorkloadFactory::create(workloadSpec.name, config);
 				if (!workload) {
@@ -419,7 +445,7 @@ int main(int argc, char** argv) {
 		}
 		randomizeOptions(options);
 
-		fdb::selectApiVersion(options.apiVersion);
+		fdb::selectApiVersionCapped(options.apiVersion);
 		applyNetworkOptions(options);
 		fdb::network::setup();
 

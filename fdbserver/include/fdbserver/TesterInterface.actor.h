@@ -66,6 +66,7 @@ struct WorkloadRequest {
 	double databasePingDelay;
 	int64_t sharedRandomNumber;
 	bool useDatabase;
+	bool runFailureWorkloads = true;
 	Optional<TenantNameRef> defaultTenant;
 
 	// The vector of option lists are to construct compound workloads.  If there
@@ -98,6 +99,7 @@ struct WorkloadRequest {
 		           clientCount,
 		           reply,
 		           defaultTenant,
+		           runFailureWorkloads,
 		           arena);
 	}
 };

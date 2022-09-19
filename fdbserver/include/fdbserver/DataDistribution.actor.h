@@ -25,20 +25,72 @@
 #define FDBSERVER_DATA_DISTRIBUTION_ACTOR_H
 
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/TenantCache.h"
+#include "fdbserver/TCInfo.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbserver/DDTxnProcessor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include <boost/heap/policies.hpp>
 #include <boost/heap/skew_heap.hpp>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ };
+/////////////////////////////// Data //////////////////////////////////////
+#ifndef __INTEL_COMPILER
+#pragma region Data
+#endif
+
+// SOMEDAY: whether it's possible to combine RelocateReason and DataMovementReason together?
+// RelocateReason to DataMovementReason is one-to-N mapping
+class RelocateReason {
+public:
+	enum Value : int8_t {
+		OTHER = 0,
+		REBALANCE_DISK,
+		REBALANCE_READ,
+		MERGE_SHARD,
+		SIZE_SPLIT,
+		WRITE_SPLIT,
+		TENANT_SPLIT,
+		__COUNT
+	};
+	RelocateReason(Value v) : value(v) { ASSERT(value != __COUNT); }
+	explicit RelocateReason(int v) : value((Value)v) { ASSERT(value != __COUNT); }
+	std::string toString() const {
+		switch (value) {
+		case OTHER:
+			return "Other";
+		case REBALANCE_DISK:
+			return "RebalanceDisk";
+		case REBALANCE_READ:
+			return "RebalanceRead";
+		case MERGE_SHARD:
+			return "MergeShard";
+		case SIZE_SPLIT:
+			return "SizeSplit";
+		case WRITE_SPLIT:
+			return "WriteSplit";
+		case TENANT_SPLIT:
+			return "TenantSplit";
+		case __COUNT:
+			ASSERT(false);
+		}
+		return "";
+	}
+	operator int() const { return (int)value; }
+	constexpr static int8_t typeCount() { return (int)__COUNT; }
+
+private:
+	Value value;
+};
 
 // One-to-one relationship to the priority knobs
 enum class DataMovementReason {
+	INVALID,
 	RECOVER_MOVE,
 	REBALANCE_UNDERUTILIZED_TEAM,
 	REBALANCE_OVERUTILIZED_TEAM,
@@ -55,8 +107,11 @@ enum class DataMovementReason {
 	TEAM_1_LEFT,
 	TEAM_FAILED,
 	TEAM_0_LEFT,
-	SPLIT_SHARD
+	SPLIT_SHARD,
+	ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD
 };
+extern int dataMovementPriority(DataMovementReason moveReason);
+extern DataMovementReason priorityToDataMovementReason(int priority);
 
 struct DDShardInfo;
 
@@ -89,135 +144,27 @@ struct RelocateShard {
 	std::shared_ptr<DataMove> dataMove; // Not null if this is a restored data move.
 	UID dataMoveId;
 	RelocateReason reason;
-	RelocateShard() : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::INVALID) {}
-	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason)
-	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason) {}
+	DataMovementReason moveReason;
+
+	UID traceId; // track the lifetime of this relocate shard
+
+	// Initialization when define is a better practice. We should avoid assignment of member after definition.
+	// static RelocateShard emptyRelocateShard() { return {}; }
+
+	RelocateShard(KeyRange const& keys, DataMovementReason moveReason, RelocateReason reason, UID traceId = UID())
+	  : keys(keys), priority(dataMovementPriority(moveReason)), cancelled(false), dataMoveId(anonymousShardId),
+	    reason(reason), moveReason(moveReason), traceId(traceId) {}
+
+	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason, UID traceId = UID())
+	  : keys(keys), priority(priority), cancelled(false), dataMoveId(anonymousShardId), reason(reason),
+	    moveReason(priorityToDataMovementReason(priority)), traceId(traceId) {}
 
 	bool isRestore() const { return this->dataMove != nullptr; }
-};
-
-struct IDataDistributionTeam {
-	virtual std::vector<StorageServerInterface> getLastKnownServerInterfaces() const = 0;
-	virtual int size() const = 0;
-	virtual std::vector<UID> const& getServerIDs() const = 0;
-	virtual void addDataInFlightToTeam(int64_t delta) = 0;
-	virtual void addReadInFlightToTeam(int64_t delta) = 0;
-	virtual int64_t getDataInFlightToTeam() const = 0;
-	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
-	virtual int64_t getReadInFlightToTeam() const = 0;
-	virtual double getLoadReadBandwidth(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
-	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) const = 0;
-	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) const = 0;
-	virtual bool hasHealthyAvailableSpace(double minRatio) const = 0;
-	virtual Future<Void> updateStorageMetrics() = 0;
-	virtual void addref() const = 0;
-	virtual void delref() const = 0;
-	virtual bool isHealthy() const = 0;
-	virtual void setHealthy(bool) = 0;
-	virtual int getPriority() const = 0;
-	virtual void setPriority(int) = 0;
-	virtual bool isOptimal() const = 0;
-	virtual bool isWrongConfiguration() const = 0;
-	virtual void setWrongConfiguration(bool) = 0;
-	virtual void addServers(const std::vector<UID>& servers) = 0;
-	virtual std::string getTeamID() const = 0;
-
-	std::string getDesc() const {
-		const auto& servers = getLastKnownServerInterfaces();
-		std::string s = format("TeamID %s; ", getTeamID().c_str());
-		s += format("Size %d; ", servers.size());
-		for (int i = 0; i < servers.size(); i++) {
-			if (i)
-				s += ", ";
-			s += servers[i].address().toString() + " " + servers[i].id().shortString();
-		}
-		return s;
-	}
-};
-
-FDB_DECLARE_BOOLEAN_PARAM(WantNewServers);
-FDB_DECLARE_BOOLEAN_PARAM(WantTrueBest);
-FDB_DECLARE_BOOLEAN_PARAM(PreferLowerDiskUtil);
-FDB_DECLARE_BOOLEAN_PARAM(TeamMustHaveShards);
-FDB_DECLARE_BOOLEAN_PARAM(ForReadBalance);
-FDB_DECLARE_BOOLEAN_PARAM(PreferLowerReadUtil);
-FDB_DECLARE_BOOLEAN_PARAM(FindTeamByServers);
-
-struct GetTeamRequest {
-	bool wantsNewServers; // In additional to servers in completeSources, try to find teams with new server
-	bool wantsTrueBest;
-	bool preferLowerDiskUtil; // if true, lower utilized team has higher score
-	bool teamMustHaveShards;
-	bool forReadBalance;
-	bool preferLowerReadUtil; // only make sense when forReadBalance is true
-	double inflightPenalty;
-	bool findTeamByServers;
-	std::vector<UID> completeSources;
-	std::vector<UID> src;
-	Promise<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> reply;
-
-	typedef Reference<IDataDistributionTeam> TeamRef;
-
-	GetTeamRequest() {}
-	GetTeamRequest(WantNewServers wantsNewServers,
-	               WantTrueBest wantsTrueBest,
-	               PreferLowerDiskUtil preferLowerDiskUtil,
-	               TeamMustHaveShards teamMustHaveShards,
-	               ForReadBalance forReadBalance = ForReadBalance::False,
-	               PreferLowerReadUtil preferLowerReadUtil = PreferLowerReadUtil::False,
-	               double inflightPenalty = 1.0)
-	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerDiskUtil(preferLowerDiskUtil),
-	    teamMustHaveShards(teamMustHaveShards), forReadBalance(forReadBalance),
-	    preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty),
-	    findTeamByServers(FindTeamByServers::False) {}
-	GetTeamRequest(std::vector<UID> servers)
-	  : wantsNewServers(WantNewServers::False), wantsTrueBest(WantTrueBest::False),
-	    preferLowerDiskUtil(PreferLowerDiskUtil::False), teamMustHaveShards(TeamMustHaveShards::False),
-	    forReadBalance(ForReadBalance::False), preferLowerReadUtil(PreferLowerReadUtil::False), inflightPenalty(1.0),
-	    findTeamByServers(FindTeamByServers::True), src(std::move(servers)) {}
-
-	// return true if a.score < b.score
-	[[nodiscard]] bool lessCompare(TeamRef a, TeamRef b, int64_t aLoadBytes, int64_t bLoadBytes) const {
-		int res = 0;
-		if (forReadBalance) {
-			res = preferLowerReadUtil ? greaterReadLoad(a, b) : lessReadLoad(a, b);
-		}
-		return res == 0 ? lessCompareByLoad(aLoadBytes, bLoadBytes) : res < 0;
-	}
-
-	std::string getDesc() const {
-		std::stringstream ss;
-
-		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
-		   << " PreferLowerDiskUtil:" << preferLowerDiskUtil << " teamMustHaveShards:" << teamMustHaveShards
-		   << "forReadBalance" << forReadBalance << " inflightPenalty:" << inflightPenalty
-		   << " findTeamByServers:" << findTeamByServers << ";";
-		ss << "CompleteSources:";
-		for (const auto& cs : completeSources) {
-			ss << cs.toString() << ",";
-		}
-
-		return std::move(ss).str();
-	}
 
 private:
-	// return true if preferHigherUtil && aLoadBytes <= bLoadBytes (higher load bytes has larger score)
-	// or preferLowerUtil && aLoadBytes > bLoadBytes
-	bool lessCompareByLoad(int64_t aLoadBytes, int64_t bLoadBytes) const {
-		bool lessLoad = aLoadBytes <= bLoadBytes;
-		return preferLowerDiskUtil ? !lessLoad : lessLoad;
-	}
-
-	// return -1 if a.readload > b.readload
-	static int greaterReadLoad(TeamRef a, TeamRef b) {
-		auto r1 = a->getLoadReadBandwidth(true), r2 = b->getLoadReadBandwidth(true);
-		return r1 == r2 ? 0 : (r1 > r2 ? -1 : 1);
-	}
-	// return -1 if a.readload < b.readload
-	static int lessReadLoad(TeamRef a, TeamRef b) {
-		auto r1 = a->getLoadReadBandwidth(false), r2 = b->getLoadReadBandwidth(false);
-		return r1 == r2 ? 0 : (r1 < r2 ? -1 : 1);
-	}
+	RelocateShard()
+	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::OTHER),
+	    moveReason(DataMovementReason::INVALID) {}
 };
 
 struct GetMetricsRequest {
@@ -228,17 +175,23 @@ struct GetMetricsRequest {
 };
 
 struct GetTopKMetricsReply {
-	std::vector<StorageMetrics> metrics;
+	struct KeyRangeStorageMetrics {
+		KeyRange range;
+		StorageMetrics metrics;
+		KeyRangeStorageMetrics() = default;
+		KeyRangeStorageMetrics(const KeyRange& range, const StorageMetrics& s) : range(range), metrics(s) {}
+	};
+	std::vector<KeyRangeStorageMetrics> shardMetrics;
 	double minReadLoad = -1, maxReadLoad = -1;
 	GetTopKMetricsReply() {}
-	GetTopKMetricsReply(std::vector<StorageMetrics> const& m, double minReadLoad, double maxReadLoad)
-	  : metrics(m), minReadLoad(minReadLoad), maxReadLoad(maxReadLoad) {}
+	GetTopKMetricsReply(std::vector<KeyRangeStorageMetrics> const& m, double minReadLoad, double maxReadLoad)
+	  : shardMetrics(m), minReadLoad(minReadLoad), maxReadLoad(maxReadLoad) {}
 };
+
 struct GetTopKMetricsRequest {
-	// whether a > b
-	typedef std::function<bool(const StorageMetrics& a, const StorageMetrics& b)> MetricsComparator;
-	int topK = 1; // default only return the top 1 shard based on the comparator
-	MetricsComparator comparator; // Return true if a.score > b.score, return the largest topK in keys
+private:
+	int topK = 1; // default only return the top 1 shard based on the GetTopKMetricsRequest::compare function
+public:
 	std::vector<KeyRange> keys;
 	Promise<GetTopKMetricsReply> reply; // topK storage metrics
 	double maxBytesReadPerKSecond = 0, minBytesReadPerKSecond = 0; // all returned shards won't exceed this read load
@@ -249,7 +202,25 @@ struct GetTopKMetricsRequest {
 	                      double maxBytesReadPerKSecond = std::numeric_limits<double>::max(),
 	                      double minBytesReadPerKSecond = 0)
 	  : topK(topK), keys(keys), maxBytesReadPerKSecond(maxBytesReadPerKSecond),
-	    minBytesReadPerKSecond(minBytesReadPerKSecond) {}
+	    minBytesReadPerKSecond(minBytesReadPerKSecond) {
+		ASSERT_GE(topK, 1);
+	}
+
+	int getTopK() const { return topK; };
+
+	// Return true if a.score > b.score, return the largest topK in keys
+	static bool compare(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
+	                    const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
+		return compareByReadDensity(a, b);
+	}
+
+private:
+	// larger read density means higher score
+	static bool compareByReadDensity(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
+	                                 const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
+		return a.metrics.bytesReadPerKSecond / std::max(a.metrics.bytes * 1.0, 1.0) >
+		       b.metrics.bytesReadPerKSecond / std::max(b.metrics.bytes * 1.0, 1.0);
+	}
 };
 
 struct GetMetricsListRequest {
@@ -261,84 +232,186 @@ struct GetMetricsListRequest {
 	GetMetricsListRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
 };
 
-struct TeamCollectionInterface {
-	PromiseStream<GetTeamRequest> getTeam;
-};
+// PhysicalShardCollection maintains physical shard concepts in data distribution
+// A physical shard contains one or multiple shards (key range)
+// PhysicalShardCollection is responsible for creation and maintenance of physical shards (including metrics)
+// For multiple DCs, PhysicalShardCollection maintains a pair of primary team and remote team
+// A primary team and a remote team shares a physical shard
+// For each shard (key-range) move, PhysicalShardCollection decides which physical shard and corresponding team(s) to
+// move The current design of PhysicalShardCollection assumes that there exists at most two teamCollections
+// TODO: unit test needed
+FDB_DECLARE_BOOLEAN_PARAM(InAnonymousPhysicalShard);
+FDB_DECLARE_BOOLEAN_PARAM(PhysicalShardHasMoreThanKeyRange);
+FDB_DECLARE_BOOLEAN_PARAM(InOverSizePhysicalShard);
+FDB_DECLARE_BOOLEAN_PARAM(PhysicalShardAvailable);
+FDB_DECLARE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
 
-class ShardsAffectedByTeamFailure : public ReferenceCounted<ShardsAffectedByTeamFailure> {
+class PhysicalShardCollection : public ReferenceCounted<PhysicalShardCollection> {
 public:
-	ShardsAffectedByTeamFailure() {}
+	PhysicalShardCollection() : requireTransition(false), lastTransitionStartTime(now()) {}
 
-	struct Team {
-		std::vector<UID> servers; // sorted
-		bool primary;
+	enum class PhysicalShardCreationTime { DDInit, DDRelocator };
 
-		Team() : primary(true) {}
-		Team(std::vector<UID> const& servers, bool primary) : servers(servers), primary(primary) {}
+	struct PhysicalShard {
+		PhysicalShard() : id(UID().first()) {}
 
-		bool operator<(const Team& r) const {
-			if (servers == r.servers)
-				return primary < r.primary;
-			return servers < r.servers;
-		}
-		bool operator>(const Team& r) const { return r < *this; }
-		bool operator<=(const Team& r) const { return !(*this > r); }
-		bool operator>=(const Team& r) const { return !(*this < r); }
-		bool operator==(const Team& r) const { return servers == r.servers && primary == r.primary; }
-		bool operator!=(const Team& r) const { return !(*this == r); }
+		PhysicalShard(uint64_t id,
+		              StorageMetrics const& metrics,
+		              std::vector<ShardsAffectedByTeamFailure::Team> teams,
+		              PhysicalShardCreationTime whenCreated)
+		  : id(id), metrics(metrics), teams(teams), whenCreated(whenCreated) {}
 
-		std::string toString() const { return describe(servers); };
+		std::string toString() const { return fmt::format("{}", std::to_string(id)); }
+
+		uint64_t id; // physical shard id (never changed)
+		StorageMetrics metrics; // current metrics, updated by shardTracker
+		std::vector<ShardsAffectedByTeamFailure::Team> teams; // which team owns this physical shard (never changed)
+		PhysicalShardCreationTime whenCreated; // when this physical shard is created (never changed)
 	};
 
-	// This tracks the data distribution on the data distribution server so that teamTrackers can
-	//   relocate the right shards when a team is degraded.
+	// Two-step team selection
+	// Usage: getting primary dest team and remote dest team in dataDistributionRelocator()
+	// The overall process has two steps:
+	// Step 1: get a physical shard id given the input primary team
+	// Return a new physical shard id if the input primary team is new or the team has no available physical shard
+	// checkPhysicalShardAvailable() defines whether a physical shard is available
+	uint64_t determinePhysicalShardIDGivenPrimaryTeam(ShardsAffectedByTeamFailure::Team primaryTeam,
+	                                                  StorageMetrics const& metrics,
+	                                                  bool forceToUseNewPhysicalShard,
+	                                                  uint64_t debugID);
 
-	// The following are important to make sure that failure responses don't revert splits or merges:
-	//   - The shards boundaries in the two data structures reflect "queued" RelocateShard requests
-	//       (i.e. reflects the desired set of shards being tracked by dataDistributionTracker,
-	//       rather than the status quo).  These boundaries are modified in defineShard and the content
-	//       of what servers correspond to each shard is a copy or union of the shards already there
-	//   - The teams associated with each shard reflect either the sources for non-moving shards
-	//       or the destination team for in-flight shards (the change is atomic with respect to team selection).
-	//       moveShard() changes the servers associated with a shard and will never adjust the shard
-	//       boundaries. If a move is received for a shard that has been redefined (the exact shard is
-	//       no longer in the map), the servers will be set for all contained shards and added to all
-	//       intersecting shards.
+	// Step 2: get a remote team which has the input physical shard
+	// Return empty if no such remote team
+	// May return a problematic remote team, and re-selection is required for this case
+	Optional<ShardsAffectedByTeamFailure::Team> tryGetAvailableRemoteTeamWith(uint64_t inputPhysicalShardID,
+	                                                                          StorageMetrics const& moveInMetrics,
+	                                                                          uint64_t debugID);
+	// Invariant:
+	// (1) If forceToUseNewPhysicalShard is set, use the bestTeams selected by getTeam(), and create a new physical
+	// shard for the teams
+	// (2) If forceToUseNewPhysicalShard is not set, use the primary team selected by getTeam()
+	//     If there exists a remote team which has an available physical shard with the primary team
+	//         Then, use the remote team. Note that the remote team may be unhealthy and the remote team
+	//         may be one who issues the current data relocation.
+	//         In this case, we set forceToUseNewPhysicalShard to use getTeam() to re-select the remote team
+	//     Otherwise, use getTeam() to re-select the remote team
 
-	int getNumberOfShards(UID ssID) const;
-	std::vector<KeyRange> getShardsFor(Team team) const;
-	bool hasShards(Team team) const;
+	// Create a physical shard when initializing PhysicalShardCollection
+	void initPhysicalShardCollection(KeyRange keys,
+	                                 std::vector<ShardsAffectedByTeamFailure::Team> selectedTeams,
+	                                 uint64_t physicalShardID,
+	                                 uint64_t debugID);
 
-	// The first element of the pair is either the source for non-moving shards or the destination team for in-flight
-	// shards The second element of the pair is all previous sources for in-flight shards
-	std::pair<std::vector<Team>, std::vector<Team>> getTeamsFor(KeyRangeRef keys);
+	// Create a physical shard when updating PhysicalShardCollection
+	void updatePhysicalShardCollection(KeyRange keys,
+	                                   bool isRestore,
+	                                   std::vector<ShardsAffectedByTeamFailure::Team> selectedTeams,
+	                                   uint64_t physicalShardID,
+	                                   const StorageMetrics& metrics,
+	                                   uint64_t debugID);
 
-	void defineShard(KeyRangeRef keys);
-	void moveShard(KeyRangeRef keys, std::vector<Team> destinationTeam);
-	void finishMove(KeyRangeRef keys);
-	void check() const;
+	// Update physicalShard metrics and return whether the keyRange needs to move out of its physical shard
+	MoveKeyRangeOutPhysicalShard trackPhysicalShard(KeyRange keyRange,
+	                                                StorageMetrics const& newMetrics,
+	                                                StorageMetrics const& oldMetrics,
+	                                                bool initWithNewMetrics);
 
-	PromiseStream<KeyRange> restartShardTracker;
+	// Clean up empty physicalShard
+	void cleanUpPhysicalShardCollection();
+
+	// Log physicalShard
+	void logPhysicalShardCollection();
 
 private:
-	struct OrderByTeamKey {
-		bool operator()(const std::pair<Team, KeyRange>& lhs, const std::pair<Team, KeyRange>& rhs) const {
-			if (lhs.first < rhs.first)
-				return true;
-			if (lhs.first > rhs.first)
-				return false;
-			return lhs.second.begin < rhs.second.begin;
+	// Track physicalShard metrics by tracking keyRange metrics
+	void updatePhysicalShardMetricsByKeyRange(KeyRange keyRange,
+	                                          StorageMetrics const& newMetrics,
+	                                          StorageMetrics const& oldMetrics,
+	                                          bool initWithNewMetrics);
+
+	// Check the input keyRange is in the anonymous physical shard
+	InAnonymousPhysicalShard isInAnonymousPhysicalShard(KeyRange keyRange);
+
+	// Check the input physicalShard has more keyRanges in addition to the input keyRange
+	PhysicalShardHasMoreThanKeyRange whetherPhysicalShardHasMoreThanKeyRange(uint64_t physicalShardID,
+	                                                                         KeyRange keyRange);
+
+	// Check the input keyRange is in an oversize physical shard
+	// This function returns true to enforce the keyRange to move out the physical shard
+	// Note that if the physical shard only contains the keyRange, always return FALSE
+	InOverSizePhysicalShard isInOverSizePhysicalShard(KeyRange keyRange);
+
+	// Generate a random physical shard ID, which is not UID().first() nor anonymousShardId.first()
+	uint64_t generateNewPhysicalShardID(uint64_t debugID);
+
+	// Check whether the input physical shard is available
+	// A physical shard is available if the current metric + moveInMetrics <= a threshold
+	PhysicalShardAvailable checkPhysicalShardAvailable(uint64_t physicalShardID, StorageMetrics const& moveInMetrics);
+
+	// If the input team has any available physical shard, return an available physical shard of the input team
+	Optional<uint64_t> trySelectAvailablePhysicalShardFor(ShardsAffectedByTeamFailure::Team team,
+	                                                      StorageMetrics const& metrics,
+	                                                      uint64_t debugID);
+
+	// Reduce the metics of input physical shard by the input metrics
+	void reduceMetricsForMoveOut(uint64_t physicalShardID, StorageMetrics const& metrics);
+
+	// Add the input metrics to the metrics of input physical shard
+	void increaseMetricsForMoveIn(uint64_t physicalShardID, StorageMetrics const& metrics);
+
+	// In physicalShardCollection, add a physical shard initialized by the input parameters to the collection
+	void insertPhysicalShardToCollection(uint64_t physicalShardID,
+	                                     StorageMetrics const& metrics,
+	                                     std::vector<ShardsAffectedByTeamFailure::Team> teams,
+	                                     uint64_t debugID,
+	                                     PhysicalShardCreationTime whenCreated);
+
+	// In teamPhysicalShardIDs, add the input physical shard id to the input teams
+	void updateTeamPhysicalShardIDsMap(uint64_t physicalShardID,
+	                                   std::vector<ShardsAffectedByTeamFailure::Team> inputTeams,
+	                                   uint64_t debugID);
+
+	// In keyRangePhysicalShardIDMap, set the input physical shard id to the input key range
+	void updatekeyRangePhysicalShardIDMap(KeyRange keyRange, uint64_t physicalShardID, uint64_t debugID);
+
+	// Return a string concating the input IDs interleaving with " "
+	std::string convertIDsToString(std::set<uint64_t> ids);
+
+	// Reset TransitionStartTime
+	// Consider a system without concept of physicalShard
+	// When restart, the system begins with a state where all keyRanges are in the anonymousShard
+	// Our goal is to make all keyRanges are out of the anonymousShard
+	// A keyRange moves out of the anonymousShard when the keyRange is triggered a data move
+	// It is possible that a keyRange is cold and no data move is triggered on this keyRange for long time
+	// In this case, we need to intentionally trigger data move on that keyRange
+	// The minimal time span between two successive data move for this purpose is TransitionStartTime
+	inline void resetLastTransitionStartTime() { // reset when a keyRange move is triggered for the transition
+		lastTransitionStartTime = now();
+		return;
+	}
+
+	// When DD restarts, it checks whether keyRange has anonymousShard
+	// If yes, setTransitionCheck() is call to trigger the process of removing anonymousShard
+	inline void setTransitionCheck() {
+		if (requireTransition == true) {
+			return;
 		}
-	};
+		requireTransition = true;
+		TraceEvent("PhysicalShardSetTransitionCheck");
+		return;
+	}
 
-	KeyRangeMap<std::pair<std::vector<Team>, std::vector<Team>>>
-	    shard_teams; // A shard can be affected by the failure of multiple teams if it is a queued merge, or when
-	                 // usable_regions > 1
-	std::set<std::pair<Team, KeyRange>, OrderByTeamKey> team_shards;
-	std::map<UID, int> storageServerShards;
+	inline bool requireTransitionCheck() { return requireTransition; }
 
-	void erase(Team team, KeyRange const& range);
-	void insert(Team team, KeyRange const& range);
+	// Core data structures
+	// Physical shard instances indexed by physical shard id
+	std::unordered_map<uint64_t, PhysicalShard> physicalShardInstances;
+	// Indicate a key range belongs to which physical shard
+	KeyRangeMap<uint64_t> keyRangePhysicalShardIDMap;
+	// Indicate what physical shards owned by a team
+	std::map<ShardsAffectedByTeamFailure::Team, std::set<uint64_t>> teamPhysicalShardIDs;
+	bool requireTransition;
+	double lastTransitionStartTime;
 };
 
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer
@@ -390,37 +463,6 @@ struct ShardTrackedData {
 	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
 };
 
-ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
-                                           Database cx,
-                                           PromiseStream<RelocateShard> output,
-                                           Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-                                           PromiseStream<GetMetricsRequest> getShardMetrics,
-                                           FutureStream<GetTopKMetricsRequest> getTopKMetrics,
-                                           PromiseStream<GetMetricsListRequest> getShardMetricsList,
-                                           FutureStream<Promise<int64_t>> getAverageShardBytes,
-                                           Promise<Void> readyToStart,
-                                           Reference<AsyncVar<bool>> zeroHealthyTeams,
-                                           UID distributorId,
-                                           KeyRangeMap<ShardTrackedData>* shards,
-                                           bool* trackerCancelled);
-
-ACTOR Future<Void> dataDistributionQueue(Database cx,
-                                         PromiseStream<RelocateShard> output,
-                                         FutureStream<RelocateShard> input,
-                                         PromiseStream<GetMetricsRequest> getShardMetrics,
-                                         PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
-                                         Reference<AsyncVar<bool>> processingUnhealthy,
-                                         Reference<AsyncVar<bool>> processingWiggle,
-                                         std::vector<TeamCollectionInterface> teamCollection,
-                                         Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-                                         MoveKeysLock lock,
-                                         PromiseStream<Promise<int64_t>> getAverageShardBytes,
-                                         FutureStream<Promise<int>> getUnhealthyRelocationCount,
-                                         UID distributorId,
-                                         int teamSize,
-                                         int singleRegionTeamSize,
-                                         const DDEnabledState* ddEnabledState);
-
 // Holds the permitted size and IO Bounds for a shard
 struct ShardSizeBounds {
 	StorageMetrics max;
@@ -438,6 +480,65 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
 // Determines the maximum shard size based on the size of the database
 int64_t getMaxShardSize(double dbSizeEstimate);
 
+struct StorageQuotaInfo {
+	std::map<Key, uint64_t> quotaMap;
+};
+
+#ifndef __INTEL_COMPILER
+#pragma endregion
+#endif
+
+// FIXME(xwang): Delete Old DD Actors once the refactoring is done
+/////////////////////////////// Old DD Actors //////////////////////////////////////
+#ifndef __INTEL_COMPILER
+#pragma region Old DD Actors
+#endif
+
+struct TeamCollectionInterface {
+	PromiseStream<GetTeamRequest> getTeam;
+};
+
+ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
+                                           Database cx,
+                                           PromiseStream<RelocateShard> output,
+                                           Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+                                           Reference<PhysicalShardCollection> physicalShardCollection,
+                                           PromiseStream<GetMetricsRequest> getShardMetrics,
+                                           FutureStream<GetTopKMetricsRequest> getTopKMetrics,
+                                           PromiseStream<GetMetricsListRequest> getShardMetricsList,
+                                           FutureStream<Promise<int64_t>> getAverageShardBytes,
+                                           Promise<Void> readyToStart,
+                                           Reference<AsyncVar<bool>> zeroHealthyTeams,
+                                           UID distributorId,
+                                           KeyRangeMap<ShardTrackedData>* shards,
+                                           bool* trackerCancelled,
+                                           Optional<Reference<TenantCache>> ddTenantCache);
+
+ACTOR Future<Void> dataDistributionQueue(Database cx,
+                                         PromiseStream<RelocateShard> output,
+                                         FutureStream<RelocateShard> input,
+                                         PromiseStream<GetMetricsRequest> getShardMetrics,
+                                         PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
+                                         Reference<AsyncVar<bool>> processingUnhealthy,
+                                         Reference<AsyncVar<bool>> processingWiggle,
+                                         std::vector<TeamCollectionInterface> teamCollection,
+                                         Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+                                         Reference<PhysicalShardCollection> physicalShardCollection,
+                                         MoveKeysLock lock,
+                                         PromiseStream<Promise<int64_t>> getAverageShardBytes,
+                                         FutureStream<Promise<int>> getUnhealthyRelocationCount,
+                                         UID distributorId,
+                                         int teamSize,
+                                         int singleRegionTeamSize,
+                                         const DDEnabledState* ddEnabledState);
+#ifndef __INTEL_COMPILER
+#pragma endregion
+#endif
+
+/////////////////////////////// Perpetual Storage Wiggle //////////////////////////////////////
+#ifndef __INTEL_COMPILER
+#pragma region Perpetual Storage Wiggle
+#endif
 class DDTeamCollection;
 
 struct StorageWiggleMetrics {
@@ -532,8 +633,9 @@ struct StorageWiggleMetrics {
 };
 
 struct StorageWiggler : ReferenceCounted<StorageWiggler> {
+	static constexpr double MIN_ON_CHECK_DELAY_SEC = 5.0;
 	enum State : uint8_t { INVALID = 0, RUN = 1, PAUSE = 2 };
-	AsyncVar<bool> nonEmpty;
+
 	DDTeamCollection const* teamCollection;
 	StorageWiggleMetrics metrics;
 	// data structures
@@ -546,7 +648,7 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	State wiggleState = State::INVALID;
 	double lastStateChangeTs = 0.0; // timestamp describes when did the state change
 
-	explicit StorageWiggler(DDTeamCollection* collection) : nonEmpty(false), teamCollection(collection){};
+	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection){};
 	// add server to wiggling queue
 	void addServer(const UID& serverId, const StorageMetadataType& metadata);
 	// remove server from wiggling queue
@@ -555,8 +657,14 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	void updateMetadata(const UID& serverId, const StorageMetadataType& metadata);
 	bool contains(const UID& serverId) const { return pq_handles.count(serverId) > 0; }
 	bool empty() const { return wiggle_pq.empty(); }
-	Optional<UID> getNextServerId();
 
+	// It's guarantee that When a.metadata >= b.metadata, if !necessary(a) then !necessary(b)
+	bool necessary(const UID& serverId, const StorageMetadataType& metadata) const;
+
+	// try to return the next storage server that is necessary to wiggle
+	Optional<UID> getNextServerId(bool necessaryOnly = true);
+	// next check time to avoid busy loop
+	Future<Void> onCheck() const;
 	State getWiggleState() const { return wiggleState; }
 	void setWiggleState(State s) {
 		if (wiggleState != s) {
@@ -591,6 +699,10 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 		return (wiggle_pq.top().first.createdTime >= metrics.last_round_start);
 	}
 };
+
+#ifndef __INTEL_COMPILER
+#pragma endregion
+#endif
 
 #include "flow/unactorcompiler.h"
 #endif

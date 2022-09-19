@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
+#include "fdbserver/ConfigBroadcaster.h"
 #include "fdbserver/CoordinatedState.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/Knobs.h"
@@ -346,7 +347,8 @@ struct MovableCoordinatedStateImpl {
 		// SOMEDAY: If we are worried about someone magically getting the new cluster ID and interfering, do a second
 		// cs.setExclusive( encode( ReallyTo, ... ) )
 		TraceEvent("ChangingQuorum").detail("ConnectionString", nc.toString());
-		wait(changeLeaderCoordinators(self->coordinators, StringRef(nc.toString())));
+		wait(ConfigBroadcaster::lockConfigNodes(self->coordinators) &&
+		     changeLeaderCoordinators(self->coordinators, StringRef(nc.toString())));
 		TraceEvent("ChangedQuorum").detail("ConnectionString", nc.toString());
 		throw coordinators_changed();
 	}
@@ -367,4 +369,16 @@ Future<Void> MovableCoordinatedState::setExclusive(Value v) {
 }
 Future<Void> MovableCoordinatedState::move(ClusterConnectionString const& nc) {
 	return MovableCoordinatedStateImpl::move(impl.get(), nc);
+}
+
+Optional<Value> updateCCSInMovableValue(ValueRef movableVal, KeyRef oldClusterKey, KeyRef newClusterKey) {
+	Optional<Value> result;
+	MovableValue moveVal = BinaryReader::fromStringRef<MovableValue>(
+	    movableVal, IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()));
+	if (moveVal.other.present() && moveVal.other.get().startsWith(oldClusterKey)) {
+		TraceEvent(SevDebug, "UpdateCCSInMovableValue").detail("OldConnectionString", moveVal.other.get());
+		moveVal.other = moveVal.other.get().removePrefix(oldClusterKey).withPrefix(newClusterKey);
+		result = BinaryWriter::toValue(moveVal, IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()));
+	}
+	return result;
 }

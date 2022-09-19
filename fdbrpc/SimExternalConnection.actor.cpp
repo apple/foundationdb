@@ -125,6 +125,10 @@ NetworkAddress SimExternalConnection::getPeerAddress() const {
 	}
 }
 
+bool SimExternalConnection::hasTrustedPeer() const {
+	return true;
+}
+
 UID SimExternalConnection::getDebugID() const {
 	return dbgid;
 }

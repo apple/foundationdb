@@ -21,7 +21,7 @@
 #include "fdbserver/RESTKmsConnector.h"
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/HTTP.h"
+#include "fdbrpc/HTTP.h"
 #include "flow/IAsyncFile.h"
 #include "fdbserver/KmsConnectorInterface.h"
 #include "fdbserver/Knobs.h"
@@ -276,7 +276,7 @@ ACTOR Future<Void> discoverKmsUrls(Reference<RESTKmsConnectorCtx> ctx, bool refr
 void parseKmsResponse(Reference<RESTKmsConnectorCtx> ctx,
                       Reference<HTTP::Response> resp,
                       Arena* arena,
-                      VectorRef<EncryptCipherKeyDetails>* outCipherKeyDetails) {
+                      VectorRef<EncryptCipherKeyDetailsRef>* outCipherKeyDetails) {
 	// Acceptable response payload json format:
 	//
 	// response_json_payload {
@@ -542,7 +542,7 @@ ACTOR
 Future<Void> fetchEncryptionKeys_impl(Reference<RESTKmsConnectorCtx> ctx,
                                       StringRef requestBodyRef,
                                       Arena* arena,
-                                      VectorRef<EncryptCipherKeyDetails>* outCipherKeyDetails) {
+                                      VectorRef<EncryptCipherKeyDetailsRef>* outCipherKeyDetails) {
 	state Reference<HTTP::Response> resp;
 
 	// Follow 2-phase scheme:
@@ -880,7 +880,7 @@ std::shared_ptr<platform::TmpFile> prepareTokenFile(const uint8_t* buff, const i
 
 std::shared_ptr<platform::TmpFile> prepareTokenFile(const int tokenLen) {
 	Standalone<StringRef> buff = makeString(tokenLen);
-	generateRandomData(mutateString(buff), tokenLen);
+	deterministicRandom()->randomBytes(mutateString(buff), tokenLen);
 
 	return prepareTokenFile(buff.begin(), tokenLen);
 }
@@ -941,7 +941,7 @@ ACTOR Future<Void> testValidationFileTokenPayloadTooLarge(Reference<RESTKmsConne
 	                        SERVER_KNOBS->REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE +
 	                    2;
 	Standalone<StringRef> buff = makeString(tokenLen);
-	generateRandomData(mutateString(buff), tokenLen);
+	deterministicRandom()->randomBytes(mutateString(buff), tokenLen);
 
 	std::string details;
 	state std::vector<std::shared_ptr<platform::TmpFile>> tokenfiles;
@@ -972,7 +972,7 @@ ACTOR Future<Void> testMultiValidationFileTokenFiles(Reference<RESTKmsConnectorC
 	state std::unordered_map<std::string, std::string> tokenNameValueMap;
 	state std::string tokenDetailsStr;
 
-	generateRandomData(mutateString(buff), tokenLen);
+	deterministicRandom()->randomBytes(mutateString(buff), tokenLen);
 
 	for (int i = 1; i <= numFiles; i++) {
 		std::string tokenName = std::to_string(i);
@@ -1096,15 +1096,14 @@ void validateKmsUrls(Reference<RESTKmsConnectorCtx> ctx) {
 	ASSERT_EQ(urlCtx->url.compare(KMS_URL_NAME_TEST), 0);
 }
 
-void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, Arena arena) {
+void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, Arena& arena) {
 	KmsConnLookupEKsByKeyIdsReq req;
 	std::unordered_map<EncryptCipherBaseKeyId, EncryptCipherDomainId> keyMap;
 	const int nKeys = deterministicRandom()->randomInt(7, 8);
 	for (int i = 1; i < nKeys; i++) {
 		EncryptCipherDomainId domainId = getRandomDomainId();
-		EncryptCipherDomainName domainName = domainId < 0
-		                                         ? StringRef(arena, std::string(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME))
-		                                         : StringRef(arena, std::to_string(domainId));
+		EncryptCipherDomainNameRef domainName = domainId < 0 ? StringRef(arena, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME)
+		                                                     : StringRef(arena, std::to_string(domainId));
 		req.encryptKeyInfos.emplace_back_deep(req.arena, domainId, i, domainName);
 		keyMap[i] = domainId;
 	}
@@ -1121,7 +1120,7 @@ void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, A
 	getFakeKmsResponse(requestBodyRef, true, httpResp);
 	TraceEvent("FetchKeysByKeyIds", ctx->uid).setMaxFieldLength(100000).detail("HttpRespStr", httpResp->content);
 
-	VectorRef<EncryptCipherKeyDetails> cipherDetails;
+	VectorRef<EncryptCipherKeyDetailsRef> cipherDetails;
 	parseKmsResponse(ctx, httpResp, &arena, &cipherDetails);
 	ASSERT_EQ(cipherDetails.size(), keyMap.size());
 	for (const auto& detail : cipherDetails) {
@@ -1135,16 +1134,15 @@ void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, A
 	}
 }
 
-void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, Arena arena) {
+void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, Arena& arena) {
 	KmsConnLookupEKsByDomainIdsReq req;
-	std::unordered_map<EncryptCipherDomainId, KmsConnLookupDomainIdsReqInfo> domainInfoMap;
+	std::unordered_map<EncryptCipherDomainId, KmsConnLookupDomainIdsReqInfoRef> domainInfoMap;
 	const int nKeys = deterministicRandom()->randomInt(7, 25);
 	for (int i = 1; i < nKeys; i++) {
 		EncryptCipherDomainId domainId = getRandomDomainId();
-		EncryptCipherDomainName domainName = domainId < 0
-		                                         ? StringRef(arena, std::string(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME))
-		                                         : StringRef(arena, std::to_string(domainId));
-		KmsConnLookupDomainIdsReqInfo reqInfo(req.arena, domainId, domainName);
+		EncryptCipherDomainNameRef domainName = domainId < 0 ? StringRef(arena, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME)
+		                                                     : StringRef(arena, std::to_string(domainId));
+		KmsConnLookupDomainIdsReqInfoRef reqInfo(req.arena, domainId, domainName);
 		if (domainInfoMap.insert({ domainId, reqInfo }).second) {
 			req.encryptDomainInfos.push_back(req.arena, reqInfo);
 		}
@@ -1159,7 +1157,7 @@ void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx
 	getFakeKmsResponse(jsonReqRef, false, httpResp);
 	TraceEvent("FetchKeysByDomainIds", ctx->uid).detail("HttpRespStr", httpResp->content);
 
-	VectorRef<EncryptCipherKeyDetails> cipherDetails;
+	VectorRef<EncryptCipherKeyDetailsRef> cipherDetails;
 	parseKmsResponse(ctx, httpResp, &arena, &cipherDetails);
 	ASSERT_EQ(domainInfoMap.size(), cipherDetails.size());
 	for (const auto& detail : cipherDetails) {
@@ -1174,7 +1172,7 @@ void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx
 
 void testMissingCipherDetailsTag(Reference<RESTKmsConnectorCtx> ctx) {
 	Arena arena;
-	VectorRef<EncryptCipherKeyDetails> cipherDetails;
+	VectorRef<EncryptCipherKeyDetailsRef> cipherDetails;
 
 	rapidjson::Document doc;
 	doc.SetObject();
@@ -1201,7 +1199,7 @@ void testMissingCipherDetailsTag(Reference<RESTKmsConnectorCtx> ctx) {
 
 void testMalformedCipherDetails(Reference<RESTKmsConnectorCtx> ctx) {
 	Arena arena;
-	VectorRef<EncryptCipherKeyDetails> cipherDetails;
+	VectorRef<EncryptCipherKeyDetailsRef> cipherDetails;
 
 	rapidjson::Document doc;
 	doc.SetObject();
@@ -1228,7 +1226,7 @@ void testMalformedCipherDetails(Reference<RESTKmsConnectorCtx> ctx) {
 
 void testMalfromedCipherDetailObj(Reference<RESTKmsConnectorCtx> ctx) {
 	Arena arena;
-	VectorRef<EncryptCipherKeyDetails> cipherDetails;
+	VectorRef<EncryptCipherKeyDetailsRef> cipherDetails;
 
 	rapidjson::Document doc;
 	doc.SetObject();
@@ -1260,7 +1258,7 @@ void testMalfromedCipherDetailObj(Reference<RESTKmsConnectorCtx> ctx) {
 
 void testKMSErrorResponse(Reference<RESTKmsConnectorCtx> ctx) {
 	Arena arena;
-	VectorRef<EncryptCipherKeyDetails> cipherDetails;
+	VectorRef<EncryptCipherKeyDetailsRef> cipherDetails;
 
 	rapidjson::Document doc;
 	doc.SetObject();
@@ -1350,7 +1348,7 @@ TEST_CASE("/KmsConnector/REST/ParseKmsDiscoveryUrls") {
 	state Arena arena;
 
 	// initialize cipher key used for testing
-	generateRandomData(&BASE_CIPHER_KEY_TEST[0], 32);
+	deterministicRandom()->randomBytes(&BASE_CIPHER_KEY_TEST[0], 32);
 
 	wait(testParseDiscoverKmsUrlFileNotFound(ctx));
 	wait(testParseDiscoverKmsUrlFile(ctx));
@@ -1363,7 +1361,7 @@ TEST_CASE("/KmsConnector/REST/ParseValidationTokenFile") {
 	state Arena arena;
 
 	// initialize cipher key used for testing
-	generateRandomData(&BASE_CIPHER_KEY_TEST[0], 32);
+	deterministicRandom()->randomBytes(&BASE_CIPHER_KEY_TEST[0], 32);
 
 	wait(testEmptyValidationFileDetails(ctx));
 	wait(testMalformedFileValidationTokenDetails(ctx));
@@ -1380,7 +1378,7 @@ TEST_CASE("/KmsConnector/REST/ParseKmsResponse") {
 	state Arena arena;
 
 	// initialize cipher key used for testing
-	generateRandomData(&BASE_CIPHER_KEY_TEST[0], 32);
+	deterministicRandom()->randomBytes(&BASE_CIPHER_KEY_TEST[0], 32);
 
 	testMissingCipherDetailsTag(ctx);
 	testMalformedCipherDetails(ctx);
@@ -1394,7 +1392,7 @@ TEST_CASE("/KmsConnector/REST/GetEncryptionKeyOps") {
 	state Arena arena;
 
 	// initialize cipher key used for testing
-	generateRandomData(&BASE_CIPHER_KEY_TEST[0], 32);
+	deterministicRandom()->randomBytes(&BASE_CIPHER_KEY_TEST[0], 32);
 
 	// Prepare KmsConnector context details
 	wait(testParseDiscoverKmsUrlFile(ctx));

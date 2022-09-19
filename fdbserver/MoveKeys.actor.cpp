@@ -27,6 +27,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
+#include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -281,6 +282,7 @@ Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock, const
 	return checkMoveKeysLock(tr, lock, ddEnabledState, false);
 }
 
+namespace {
 ACTOR Future<Optional<UID>> checkReadWrite(Future<ErrorOr<GetShardStateReply>> fReply, UID uid, Version version) {
 	ErrorOr<GetShardStateReply> reply = wait(fReply);
 	if (!reply.present() || reply.get().first < version)
@@ -295,7 +297,7 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
                                               FlowLock* cleanUpDataMoveParallelismLock,
                                               UID dataMoveId,
                                               const DDEnabledState* ddEnabledState) {
-	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	TraceEvent(SevInfo, "CleanUpSingleShardDataMoveBegin", dataMoveId).detail("Range", keys);
 
 	loop {
@@ -1225,7 +1227,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
                                           UID relocationIntervalId,
                                           const DDEnabledState* ddEnabledState,
                                           CancelConflictingDataMoves cancelConflictingDataMoves) {
-	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	state Future<Void> warningLogger = logWarningAfter("StartMoveShardsTooLong", 600, servers);
 
 	wait(startMoveKeysLock->take(TaskPriority::DataDistributionLaunch));
@@ -1560,7 +1562,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
                                            UID relocationIntervalId,
                                            std::map<UID, StorageServerInterface> tssMapping,
                                            const DDEnabledState* ddEnabledState) {
-	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	state KeyRange keys = targetKeys;
 	state Future<Void> warningLogger = logWarningAfter("FinishMoveShardsTooLong", 600, destinationTeam);
 	state int retries = 0;
@@ -1711,15 +1713,19 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				             Void(),
 				             TaskPriority::MoveKeys));
 
-				int count = 0;
+				std::vector<UID> readyServers;
 				for (int s = 0; s < serverReady.size(); ++s) {
-					count += serverReady[s].isReady() && !serverReady[s].isError();
+					if (serverReady[s].isReady() && !serverReady[s].isError()) {
+						readyServers.push_back(storageServerInterfaces[s].uniqueID);
+					}
 				}
 
 				TraceEvent(SevVerbose, "FinishMoveShardsWaitedServers", relocationIntervalId)
-				    .detail("ReadyServers", count);
+				    .detail("DataMoveID", dataMoveId)
+				    .detail("ReadyServers", describe(readyServers));
 
-				if (count == newDestinations.size()) {
+				if (readyServers.size() == newDestinations.size()) {
+
 					std::vector<Future<Void>> actors;
 					actors.push_back(krmSetRangeCoalescing(
 					    &tr, keyServersPrefix, range, allKeys, keyServersValue(destServers, {}, dataMoveId, UID())));
@@ -1789,6 +1795,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 	TraceEvent(SevDebug, "FinishMoveShardsEnd", relocationIntervalId).detail("DataMoveID", dataMoveId);
 	return Void();
 }
+
+}; // anonymous namespace
 
 ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInterface server) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
@@ -2220,7 +2228,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						const UID shardId = newShardId(deterministicRandom()->randomUInt64(), AssignEmptyRange::True);
 
 						// Assign the shard to teamForDroppedRange in keyServer space.
-						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 							tr.set(keyServersKey(it.key), keyServersValue(teamForDroppedRange, {}, shardId, UID()));
 						} else {
 							tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, teamForDroppedRange));
@@ -2237,7 +2245,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						// Assign the shard to the new team as an empty range.
 						// Note, there could be data loss.
 						for (const UID& id : teamForDroppedRange) {
-							if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+							if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 								actors.push_back(krmSetRangeCoalescing(
 								    &tr, serverKeysPrefixFor(id), range, allKeys, serverKeysValue(shardId)));
 							} else {
@@ -2439,76 +2447,75 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 	return Void();
 }
 
-ACTOR Future<Void> moveKeys(Database cx,
-                            UID dataMoveId,
-                            KeyRange keys,
-                            std::vector<UID> destinationTeam,
-                            std::vector<UID> healthyDestinations,
-                            MoveKeysLock lock,
-                            Promise<Void> dataMovementComplete,
-                            FlowLock* startMoveKeysParallelismLock,
-                            FlowLock* finishMoveKeysParallelismLock,
-                            bool hasRemote,
-                            UID relocationIntervalId,
-                            const DDEnabledState* ddEnabledState,
-                            CancelConflictingDataMoves cancelConflictingDataMoves) {
-	ASSERT(destinationTeam.size());
-	std::sort(destinationTeam.begin(), destinationTeam.end());
+Future<Void> startMovement(Database occ, MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		return startMoveShards(std::move(occ),
+		                       params.dataMoveId,
+		                       params.keys,
+		                       params.destinationTeam,
+		                       params.lock,
+		                       params.startMoveKeysParallelismLock,
+		                       params.relocationIntervalId,
+		                       params.ddEnabledState,
+		                       params.cancelConflictingDataMoves);
+	}
+	return startMoveKeys(std::move(occ),
+	                     params.keys,
+	                     params.destinationTeam,
+	                     params.lock,
+	                     params.startMoveKeysParallelismLock,
+	                     params.relocationIntervalId,
+	                     &tssMapping,
+	                     params.ddEnabledState);
+}
+
+Future<Void> finishMovement(Database occ,
+                            MoveKeysParams& params,
+                            const std::map<UID, StorageServerInterface>& tssMapping) {
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		return finishMoveShards(std::move(occ),
+		                        params.dataMoveId,
+		                        params.keys,
+		                        params.destinationTeam,
+		                        params.lock,
+		                        params.finishMoveKeysParallelismLock,
+		                        params.hasRemote,
+		                        params.relocationIntervalId,
+		                        tssMapping,
+		                        params.ddEnabledState);
+	}
+	return finishMoveKeys(std::move(occ),
+	                      params.keys,
+	                      params.destinationTeam,
+	                      params.lock,
+	                      params.finishMoveKeysParallelismLock,
+	                      params.hasRemote,
+	                      params.relocationIntervalId,
+	                      tssMapping,
+	                      params.ddEnabledState);
+}
+
+ACTOR Future<Void> moveKeys(Database occ, MoveKeysParams params) {
+	ASSERT(params.destinationTeam.size());
+	std::sort(params.destinationTeam.begin(), params.destinationTeam.end());
 
 	state std::map<UID, StorageServerInterface> tssMapping;
 
-	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		wait(startMoveShards(cx,
-		                     dataMoveId,
-		                     keys,
-		                     destinationTeam,
-		                     lock,
-		                     startMoveKeysParallelismLock,
-		                     relocationIntervalId,
-		                     ddEnabledState,
-		                     cancelConflictingDataMoves));
+	wait(startMovement(occ, params, tssMapping));
 
-	} else {
-		wait(startMoveKeys(cx,
-		                   keys,
-		                   destinationTeam,
-		                   lock,
-		                   startMoveKeysParallelismLock,
-		                   relocationIntervalId,
-		                   &tssMapping,
-		                   ddEnabledState));
-	}
+	state Future<Void> completionSignaller = checkFetchingState(occ,
+	                                                            params.healthyDestinations,
+	                                                            params.keys,
+	                                                            params.dataMovementComplete,
+	                                                            params.relocationIntervalId,
+	                                                            tssMapping);
 
-	state Future<Void> completionSignaller =
-	    checkFetchingState(cx, healthyDestinations, keys, dataMovementComplete, relocationIntervalId, tssMapping);
-
-	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		wait(finishMoveShards(cx,
-		                      dataMoveId,
-		                      keys,
-		                      destinationTeam,
-		                      lock,
-		                      finishMoveKeysParallelismLock,
-		                      hasRemote,
-		                      relocationIntervalId,
-		                      tssMapping,
-		                      ddEnabledState));
-	} else {
-		wait(finishMoveKeys(cx,
-		                    keys,
-		                    destinationTeam,
-		                    lock,
-		                    finishMoveKeysParallelismLock,
-		                    hasRemote,
-		                    relocationIntervalId,
-		                    tssMapping,
-		                    ddEnabledState));
-	}
+	wait(finishMovement(occ, params, tssMapping));
 
 	// This is defensive, but make sure that we always say that the movement is complete before moveKeys completes
 	completionSignaller.cancel();
-	if (!dataMovementComplete.isSet())
-		dataMovementComplete.send(Void());
+	if (!params.dataMovementComplete.isSet())
+		params.dataMovementComplete.send(Void());
 
 	return Void();
 }
@@ -2565,7 +2572,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 	// We have to set this range in two blocks, because the master tracking of "keyServersLocations" depends on a change
 	// to a specific
 	//   key (keyServersKeyServersKey)
-	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		const UID teamId = deterministicRandom()->randomUniqueID();
 		ksValue = keyServersValue(serverSrcUID, /*dest=*/std::vector<UID>(), teamId, UID());
 		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());

@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include <fdbserver/Knobs.h>
 #include <flow/actorcompiler.h>
@@ -82,7 +83,16 @@ struct LocalRatekeeperWorkload : TestWorkload {
 				    .detail("Actual", metrics.localRateLimit);
 			}
 			tr.reset();
-			Version readVersion = wait(tr.getReadVersion());
+			state Version readVersion = invalidVersion;
+			loop {
+				try {
+					Version v = wait(tr.getReadVersion());
+					readVersion = v;
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
 			requests.clear();
 			// we send 100 requests to this storage node and count how many of those get rejected
 			for (int i = 0; i < 100; ++i) {
@@ -118,7 +128,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(LocalRatekeeperWorkload* self, Database cx) {
 		wait(delay(self->startAfter));
 		state StorageServerInterface ssi = wait(getRandomStorage(cx));
-		g_simulator.disableFor(format("%s/updateStorage", ssi.id().toString().c_str()), now() + self->blockWritesFor);
+		g_simulator->disableFor(format("%s/updateStorage", ssi.id().toString().c_str()), now() + self->blockWritesFor);
 		state Future<Void> done = delay(self->blockWritesFor);
 		// not much will happen until the storage goes over the soft limit
 		wait(delay(double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX / 1e6)));

@@ -107,8 +107,8 @@ public:
 		    .detail("Flags", flags);
 
 		if ((flags & OPEN_LOCK) && !lock_fd(r->result)) {
-			TraceEvent(SevError, "UnableToLockFile").detail("Filename", filename).GetLastError();
-			throw io_error();
+			TraceEvent(SevWarn, "UnableToLockFile").detail("Filename", filename).GetLastError();
+			throw lock_file_failure();
 		}
 
 		return Reference<IAsyncFile>(new AsyncFileEIO(r->result, flags, filename));

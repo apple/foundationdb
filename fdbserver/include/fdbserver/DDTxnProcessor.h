@@ -50,7 +50,7 @@ public:
 
 	virtual ~IDDTxnProcessor() = default;
 
-	[[nodiscard]] virtual Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const { return MoveKeysLock(); }
+	[[nodiscard]] virtual Future<MoveKeysLock> takeMoveKeysLock(const UID& ddId) const { return MoveKeysLock(); }
 
 	virtual Future<DatabaseConfiguration> getDatabaseConfiguration() const { return DatabaseConfiguration(); }
 
@@ -61,6 +61,21 @@ public:
 	}
 
 	virtual Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const = 0;
+
+	virtual Future<bool> isDataDistributionEnabled(const DDEnabledState* ddEnabledState) const = 0;
+
+	virtual Future<Void> pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const = 0;
+
+	virtual Future<Void> removeKeysFromFailedServer(const UID& serverID,
+	                                                const std::vector<UID>& teamForDroppedRange,
+	                                                const MoveKeysLock& lock,
+	                                                const DDEnabledState* ddEnabledState) const = 0;
+	virtual Future<Void> removeStorageServer(const UID& serverID,
+	                                         const Optional<UID>& tssPairID,
+	                                         const MoveKeysLock& lock,
+	                                         const DDEnabledState* ddEnabledState) const = 0;
+
+	virtual Future<Void> moveKeys(const MoveKeysParams& params) const = 0;
 };
 
 class DDTxnProcessorImpl;
@@ -85,7 +100,7 @@ public:
 	    const std::vector<Optional<Key>>& remoteDcIds,
 	    const DDEnabledState* ddEnabledState) override;
 
-	Future<MoveKeysLock> takeMoveKeysLock(UID ddId) const override;
+	Future<MoveKeysLock> takeMoveKeysLock(UID const& ddId) const override;
 
 	Future<DatabaseConfiguration> getDatabaseConfiguration() const override;
 
@@ -94,6 +109,26 @@ public:
 	                               const DatabaseConfiguration& configuration) const override;
 
 	Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const override;
+
+	Future<bool> isDataDistributionEnabled(const DDEnabledState* ddEnabledState) const override;
+
+	Future<Void> pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const override;
+
+	Future<Void> removeKeysFromFailedServer(const UID& serverID,
+	                                        const std::vector<UID>& teamForDroppedRange,
+	                                        const MoveKeysLock& lock,
+	                                        const DDEnabledState* ddEnabledState) const override {
+		return ::removeKeysFromFailedServer(cx, serverID, teamForDroppedRange, lock, ddEnabledState);
+	}
+
+	Future<Void> removeStorageServer(const UID& serverID,
+	                                 const Optional<UID>& tssPairID,
+	                                 const MoveKeysLock& lock,
+	                                 const DDEnabledState* ddEnabledState) const override {
+		return ::removeStorageServer(cx, serverID, tssPairID, lock, ddEnabledState);
+	}
+
+	Future<Void> moveKeys(const MoveKeysParams& params) const override { return ::moveKeys(cx, params); }
 };
 
 // A mock transaction implementation for test usage.

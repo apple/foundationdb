@@ -31,9 +31,12 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"
+
 #include "fdbserver/ServerDBInfo.h"
-#include "flow/actorcompiler.h" // has to be last include
+#include "fdbserver/Knobs.h"
 #include "flow/flow.h"
+
+#include "flow/actorcompiler.h" // has to be last include
 
 struct GranuleHistory {
 	KeyRange range;
@@ -84,7 +87,8 @@ struct GranuleFiles {
 	              bool canCollapse,
 	              BlobGranuleChunkRef& chunk,
 	              Arena& replyArena,
-	              int64_t& deltaBytesCounter) const;
+	              int64_t& deltaBytesCounter,
+	              bool summarize) const;
 };
 
 // serialize change feed key as UID bytes, to use 16 bytes on disk
@@ -98,6 +102,9 @@ ACTOR Future<Optional<GranuleHistory>> getLatestGranuleHistory(Transaction* tr, 
 ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, GranuleFiles* files, UID granuleID);
 
 ACTOR Future<GranuleFiles> loadHistoryFiles(Database cx, UID granuleID);
+
+enum ForcedPurgeState { NonePurged, SomePurged, AllPurged };
+ACTOR Future<ForcedPurgeState> getForcePurgedState(Transaction* tr, KeyRange keyRange);
 
 // TODO: versioned like SS has?
 struct GranuleTenantData : NonCopyable, ReferenceCounted<GranuleTenantData> {
@@ -137,6 +144,13 @@ public:
 
 private:
 	Future<Void> collection;
+};
+
+ACTOR Future<Void> dumpManifest(Database db, Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<Void> loadManifest(Database db, Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<Void> printRestoreSummary(Database db, Reference<BlobConnectionProvider> blobConn);
+inline bool isFullRestoreMode() {
+	return SERVER_KNOBS->BLOB_FULL_RESTORE_MODE;
 };
 
 #include "flow/unactorcompiler.h"

@@ -61,10 +61,10 @@ if(${COROUTINE_IMPL} STREQUAL libcoro)
 endif()
 
 target_include_directories(fdbrpc PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include" PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
-target_link_libraries(fdbrpc PUBLIC flow PRIVATE rapidjson)
+target_link_libraries(fdbrpc PUBLIC flow libb64 md5 PRIVATE rapidjson)
 
 target_include_directories(fdbrpc_sampling PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include" PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libeio)
-target_link_libraries(fdbrpc_sampling PUBLIC flow_sampling PRIVATE rapidjson)
+target_link_libraries(fdbrpc_sampling PUBLIC flow_sampling libb64 md5 PRIVATE rapidjson)
 
 if(${COROUTINE_IMPL} STREQUAL libcoro)
   target_link_libraries(fdbrpc PUBLIC coro)
@@ -80,3 +80,5 @@ target_compile_definitions(fdbrpc_sampling PRIVATE -DENABLE_SAMPLING)
 if(WIN32)
   add_dependencies(fdbrpc_sampling_actors fdbrpc_actors)
 endif()
+
+add_subdirectory(tests)

@@ -155,13 +155,12 @@ struct OpenKVStoreRequest {
 struct IKVSGetValueRequest {
 	constexpr static FileIdentifier file_identifier = 1029439;
 	KeyRef key;
-	IKeyValueStore::ReadType type;
-	Optional<UID> debugID = Optional<UID>();
+	Optional<ReadOptions> options;
 	ReplyPromise<Optional<Value>> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, type, debugID, reply);
+		serializer(ar, key, options, reply);
 	}
 };
 
@@ -202,13 +201,12 @@ struct IKVSReadValuePrefixRequest {
 	constexpr static FileIdentifier file_identifier = 1928374;
 	KeyRef key;
 	int maxLength;
-	IKeyValueStore::ReadType type;
-	Optional<UID> debugID = Optional<UID>();
+	Optional<ReadOptions> options;
 	ReplyPromise<Optional<Value>> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, maxLength, type, debugID, reply);
+		serializer(ar, key, maxLength, options, reply);
 	}
 };
 
@@ -246,12 +244,12 @@ struct IKVSReadRangeRequest {
 	KeyRangeRef keys;
 	int rowLimit;
 	int byteLimit;
-	IKeyValueStore::ReadType type;
+	Optional<ReadOptions> options;
 	ReplyPromise<IKVSReadRangeReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, rowLimit, byteLimit, type, reply);
+		serializer(ar, keys, rowLimit, byteLimit, options, reply);
 	}
 };
 
@@ -402,25 +400,22 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 		return commitAndGetStorageBytes(this, commitReply);
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key,
-	                                  ReadType type = ReadType::NORMAL,
-	                                  Optional<UID> debugID = Optional<UID>()) override {
-		return readValueImpl(this, IKVSGetValueRequest{ key, type, debugID, ReplyPromise<Optional<Value>>() });
+	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options = Optional<ReadOptions>()) override {
+		return readValueImpl(this, IKVSGetValueRequest{ key, options, ReplyPromise<Optional<Value>>() });
 	}
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
-	                                        ReadType type = ReadType::NORMAL,
-	                                        Optional<UID> debugID = Optional<UID>()) override {
+	                                        Optional<ReadOptions> options = Optional<ReadOptions>()) override {
 		return interf.readValuePrefix.getReply(
-		    IKVSReadValuePrefixRequest{ key, maxLength, type, debugID, ReplyPromise<Optional<Value>>() });
+		    IKVSReadValuePrefixRequest{ key, maxLength, options, ReplyPromise<Optional<Value>>() });
 	}
 
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit = 1 << 30,
 	                              int byteLimit = 1 << 30,
-	                              ReadType type = ReadType::NORMAL) override {
-		IKVSReadRangeRequest req{ keys, rowLimit, byteLimit, type, ReplyPromise<IKVSReadRangeReply>() };
+	                              Optional<ReadOptions> options = Optional<ReadOptions>()) override {
+		IKVSReadRangeRequest req{ keys, rowLimit, byteLimit, options, ReplyPromise<IKVSReadRangeReply>() };
 		return fmap([](const IKVSReadRangeReply& reply) { return reply.toRangeResult(); },
 		            interf.readRange.getReply(req));
 	}
@@ -449,7 +444,7 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 			when(wait(delay(SERVER_KNOBS->REMOTE_KV_STORE_MAX_INIT_DURATION))) {
 				TraceEvent(SevError, "RemoteIKVSInitTooLong")
 				    .detail("TimeLimit", SERVER_KNOBS->REMOTE_KV_STORE_MAX_INIT_DURATION);
-				throw please_reboot_remote_kv_store();
+				throw please_reboot_kv_store(); // this will reboot the kv store
 			}
 		}
 		state Future<Void> connectionCheckingDelay = delay(FLOW_KNOBS->FAILURE_DETECTION_DELAY);
@@ -463,21 +458,21 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 				if (e.isError())
 					throw e.getError();
 				else
-					return e.get();
+					return Never();
 			}
 			when(int res = wait(returnCode)) {
 				TraceEvent(res != 0 ? SevError : SevInfo, "SpawnedProcessDied").detail("Res", res);
 				if (res)
-					throw please_reboot_remote_kv_store(); // this will reboot the worker
+					throw please_reboot_kv_store(); // this will reboot the kv store
 				else
-					return Void();
+					return Never();
 			}
 			when(wait(connectionCheckingDelay)) {
 				// for the corner case where the child process stuck and waitpid also does not give update on it
 				// In this scenario, we need to manually reboot the storage engine process
 				if (IFailureMonitor::failureMonitor().getState(childAddr).isFailed()) {
 					TraceEvent(SevError, "RemoteKVStoreConnectionStuck").log();
-					throw please_reboot_remote_kv_store(); // this will reboot the worker
+					throw please_reboot_kv_store(); // this will reboot the kv store
 				}
 				connectionCheckingDelay = delay(FLOW_KNOBS->FAILURE_DETECTION_DELAY);
 			}

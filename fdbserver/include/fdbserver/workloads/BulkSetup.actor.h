@@ -39,10 +39,29 @@
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+template <class T>
+struct sfinae_true : std::true_type {};
+
+template <class T>
+auto testAuthToken(int) -> sfinae_true<decltype(std::declval<T>().setAuthToken(std::declval<Transaction&>()))>;
+template <class>
+auto testAuthToken(long) -> std::false_type;
+
+template <class T>
+struct hasAuthToken : decltype(testAuthToken<T>(0)) {};
+
+template <class T>
+void setAuthToken(T const& self, Transaction& tr) {
+	if constexpr (hasAuthToken<T>::value) {
+		self.setAuthToken(tr);
+	}
+}
+
 ACTOR template <class T>
 Future<bool> checkRangeSimpleValueSize(Database cx, T* workload, uint64_t begin, uint64_t end) {
 	loop {
 		state Transaction tr(cx);
+		setAuthToken(*workload, tr);
 		try {
 			state Standalone<KeyValueRef> firstKV = (*workload)(begin);
 			state Standalone<KeyValueRef> lastKV = (*workload)(end - 1);
@@ -63,6 +82,7 @@ Future<uint64_t> setupRange(Database cx, T* workload, uint64_t begin, uint64_t e
 	state uint64_t bytesInserted = 0;
 	loop {
 		state Transaction tr(cx);
+		setAuthToken(*workload, tr);
 		try {
 			// if( deterministicRandom()->random01() < 0.001 )
 			//	tr.debugTransaction( deterministicRandom()->randomUniqueID() );
@@ -128,6 +148,7 @@ Future<uint64_t> setupRangeWorker(Database cx,
 
 			if (keysLoaded - lastStoredKeysLoaded >= keySaveIncrement || jobs->size() == 0) {
 				state Transaction tr(cx);
+				setAuthToken(*workload, tr);
 				try {
 					std::string countKey = format("keycount|%d|%d", workload->clientId, actorId);
 					std::string bytesKey = format("bytesstored|%d|%d", workload->clientId, actorId);
@@ -160,15 +181,30 @@ ACTOR Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Datab
 
 ACTOR template <class T>
 Future<Void> waitForLowInFlight(Database cx, T* workload) {
+	state Future<Void> timeout = delay(600.0);
 	loop {
-		int64_t inFlight = wait(getDataInFlight(cx, workload->dbInfo));
-		TraceEvent("DynamicWarming").detail("InFlight", inFlight);
-		if (inFlight > 1e6) { // Wait for just 1 MB to be in flight
-			wait(delay(1.0));
-		} else {
-			wait(delay(1.0));
-			TraceEvent("DynamicWarmingDone").log();
-			break;
+		try {
+			if (timeout.isReady()) {
+				throw timed_out();
+			}
+
+			int64_t inFlight = wait(getDataInFlight(cx, workload->dbInfo));
+			TraceEvent("DynamicWarming").detail("InFlight", inFlight);
+			if (inFlight > 1e6) { // Wait for just 1 MB to be in flight
+				wait(delay(1.0));
+			} else {
+				wait(delay(1.0));
+				TraceEvent("DynamicWarmingDone").log();
+				break;
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_attribute_not_found) {
+				// DD may not be initialized yet and attribute "DataInFlight" can be missing
+				wait(delay(1.0));
+			} else {
+				TraceEvent(SevWarn, "WaitForLowInFlightError").error(e);
+				throw;
+			}
 		}
 	}
 	return Void();
@@ -294,8 +330,8 @@ Future<Void> bulkSetup(Database cx,
 	// Here we wait for data in flight to go to 0 (this will not work on a database with other users)
 	if (postSetupWarming != 0) {
 		try {
-			wait(delay(5.0) >>
-			     waitForLowInFlight(cx, workload)); // Wait for the data distribution in a small test to start
+			wait(delay(5.0));
+			wait(waitForLowInFlight(cx, workload)); // Wait for the data distribution in a small test to start
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;

@@ -23,6 +23,7 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/ApiVersion.h"
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -37,9 +38,10 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 	bool switchComplete = false;
 
 	DifferentClustersSameRVWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		ASSERT(g_simulator.extraDB != nullptr);
-		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
-		extraDB = Database::createDatabase(extraFile, -1);
+		ASSERT(g_simulator->extraDatabases.size() == 1);
+		auto extraFile =
+		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator->extraDatabases[0]));
+		extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 100.0);
 		switchAfter = getOption(options, LiteralStringRef("switchAfter"), 50.0);
 		keyToRead = getOption(options, LiteralStringRef("keyToRead"), LiteralStringRef("someKey"));

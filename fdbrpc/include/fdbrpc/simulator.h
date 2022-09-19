@@ -20,19 +20,23 @@
 
 #ifndef FLOW_SIMULATOR_H
 #define FLOW_SIMULATOR_H
-#include "flow/ProtocolVersion.h"
+#pragma once
 #include <algorithm>
 #include <string>
-#pragma once
+#include <random>
+#include <limits>
 
 #include "flow/flow.h"
 #include "flow/Histogram.h"
+#include "flow/ProtocolVersion.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "flow/IAsyncFile.h"
 #include "flow/TDMetric.actor.h"
-#include <random>
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
+#include "fdbrpc/TokenSign.h"
 
 enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
@@ -59,6 +63,25 @@ public:
 	enum TSSMode { Disabled, EnabledNormal, EnabledAddDelay, EnabledDropMutations };
 
 	enum class BackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
+	enum class ExtraDatabaseMode { Disabled, LocalOrSingle, Single, Local, Multiple };
+
+	static ExtraDatabaseMode stringToExtraDatabaseMode(std::string databaseMode) {
+		if (databaseMode == "Disabled") {
+			return ExtraDatabaseMode::Disabled;
+		} else if (databaseMode == "LocalOrSingle") {
+			return ExtraDatabaseMode::LocalOrSingle;
+		} else if (databaseMode == "Single") {
+			return ExtraDatabaseMode::Single;
+		} else if (databaseMode == "Local") {
+			return ExtraDatabaseMode::Local;
+		} else if (databaseMode == "Multiple") {
+			return ExtraDatabaseMode::Multiple;
+		} else {
+			TraceEvent(SevError, "UnknownExtraDatabaseMode").detail("DatabaseMode", databaseMode);
+			ASSERT(false);
+			throw internal_error();
+		}
+	};
 
 	// Subclasses may subclass ProcessInfo as well
 	struct MachineInfo;
@@ -164,6 +187,8 @@ public:
 			case ProcessClass::DataDistributorClass:
 				return false;
 			case ProcessClass::RatekeeperClass:
+				return false;
+			case ProcessClass::ConsistencyScanClass:
 				return false;
 			case ProcessClass::BlobManagerClass:
 				return false;
@@ -405,7 +430,7 @@ public:
 		allSwapsDisabled = false;
 	}
 	bool canSwapToMachine(Optional<Standalone<StringRef>> zoneId) const {
-		return swapsDisabled.count(zoneId) == 0 && !allSwapsDisabled && !extraDB;
+		return swapsDisabled.count(zoneId) == 0 && !allSwapsDisabled && extraDatabases.empty();
 	}
 	void enableSwapsToAll() {
 		swapsDisabled.clear();
@@ -432,7 +457,7 @@ public:
 	int listenersPerProcess;
 	std::set<NetworkAddress> protectedAddresses;
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
-	class ClusterConnectionString* extraDB = nullptr;
+	std::vector<std::string> extraDatabases;
 	Reference<IReplicationPolicy> storagePolicy;
 	Reference<IReplicationPolicy> tLogPolicy;
 	int32_t tLogWriteAntiQuorum;
@@ -473,6 +498,10 @@ public:
 	bool setDiffProtocol; // true if a process with a different protocol version has been started
 
 	bool allowStorageMigrationTypeChange = false;
+	double injectTargetedSSRestartTime = std::numeric_limits<double>::max();
+	double injectSSDelayTime = std::numeric_limits<double>::max();
+
+	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 
 	flowGlobalType global(int id) const final { return getCurrentProcess()->global(id); };
 	void setGlobal(size_t id, flowGlobalType v) final { getCurrentProcess()->setGlobal(id, v); };
@@ -511,9 +540,7 @@ private:
 	bool allSwapsDisabled;
 };
 
-// Quickly make existing code work that expects g_simulator to be of class type (not a pointer)
-extern ISimulator* g_pSimulator;
-#define g_simulator (*g_pSimulator)
+extern ISimulator* g_simulator;
 
 void startNewSimulator(bool printSimTime);
 

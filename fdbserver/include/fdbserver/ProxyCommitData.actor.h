@@ -19,6 +19,8 @@
  */
 
 #pragma once
+#include "fdbserver/EncryptionOpsUtils.h"
+#include <unordered_map>
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H)
 #define FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H
 #include "fdbserver/ProxyCommitData.actor.g.h"
@@ -30,9 +32,9 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
+#include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/ResolverInterface.h"
-#include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "flow/IRandom.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -172,6 +174,7 @@ struct ProxyCommitData {
 	UID dbgid;
 	int64_t commitBatchesMemBytesCount;
 	std::map<TenantName, TenantMapEntry> tenantMap;
+	std::unordered_map<int64_t, TenantName> tenantIdIndex;
 	ProxyStats stats;
 	MasterInterface master;
 	std::vector<ResolverInterface> resolvers;
@@ -230,6 +233,8 @@ struct ProxyCommitData {
 	double lastMasterReset;
 	double lastResolverReset;
 	int localTLogCount = -1;
+
+	bool isEncryptionEnabled = false;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to
@@ -299,7 +304,8 @@ struct ProxyCommitData {
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
 	    singleKeyMutationEvent(LiteralStringRef("SingleKeyMutation")), lastTxsPop(0), popRemoteTxs(false),
 	    lastStartCommit(0), lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0),
-	    lastMasterReset(now()), lastResolverReset(now()) {
+	    lastMasterReset(now()), lastResolverReset(now()),
+	    isEncryptionEnabled(isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, db->get().client)) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 };

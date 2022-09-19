@@ -92,6 +92,63 @@ private:
 	virtual void getMetrics(std::vector<PerfMetric>& m) = 0;
 };
 
+struct CompoundWorkload;
+class DeterministicRandom;
+
+struct NoOptions {};
+
+struct FailureInjectionWorkload : TestWorkload {
+	FailureInjectionWorkload(WorkloadContext const&);
+	virtual ~FailureInjectionWorkload() {}
+	virtual bool add(DeterministicRandom& random, WorkloadRequest const& work, CompoundWorkload const& workload);
+	virtual void initFailureInjectionMode(DeterministicRandom& random, unsigned count);
+
+	Future<Void> setupInjectionWorkload(Database const& cx, Future<Void> done);
+	Future<Void> startInjectionWorkload(Database const& cx, Future<Void> done);
+	Future<bool> checkInjectionWorkload(Database const& cx, Future<bool> done);
+};
+
+struct IFailureInjectorFactory : ReferenceCounted<IFailureInjectorFactory> {
+	virtual ~IFailureInjectorFactory() = default;
+	static std::vector<Reference<IFailureInjectorFactory>>& factories() {
+		static std::vector<Reference<IFailureInjectorFactory>> _factories;
+		return _factories;
+	}
+	virtual Reference<FailureInjectionWorkload> create(WorkloadContext const& wcx) = 0;
+};
+
+template <class W>
+struct FailureInjectorFactory : IFailureInjectorFactory {
+	static_assert(std::is_base_of<FailureInjectionWorkload, W>::value);
+	FailureInjectorFactory() {
+		IFailureInjectorFactory::factories().push_back(Reference<IFailureInjectorFactory>::addRef(this));
+	}
+	Reference<FailureInjectionWorkload> create(WorkloadContext const& wcx) override {
+		return makeReference<W>(wcx, NoOptions());
+	}
+};
+
+struct CompoundWorkload : TestWorkload {
+	bool runFailureWorkloads = true;
+	std::vector<Reference<TestWorkload>> workloads;
+	std::vector<Reference<FailureInjectionWorkload>> failureInjection;
+
+	CompoundWorkload(WorkloadContext& wcx);
+	CompoundWorkload* add(Reference<TestWorkload>&& w);
+	void addFailureInjection(WorkloadRequest& work);
+
+	std::string description() const override;
+
+	Future<Void> setup(Database const& cx) override;
+	Future<Void> start(Database const& cx) override;
+	Future<bool> check(Database const& cx) override;
+
+	Future<std::vector<PerfMetric>> getMetrics() override;
+	double getCheckTimeout() const override;
+
+	void getMetrics(std::vector<PerfMetric>&) override;
+};
+
 struct WorkloadProcess;
 struct ClientWorkload : TestWorkload {
 	WorkloadProcess* impl;
@@ -223,6 +280,7 @@ public:
 	bool dumpAfterTest;
 	bool clearAfterTest;
 	bool useDB;
+	bool runFailureWorkloads = true;
 	double startDelay;
 	int phases;
 	Standalone<VectorRef<VectorRef<KeyValueRef>>> options;
@@ -295,6 +353,8 @@ Future<Void> testExpectedError(Future<Void> test,
                                std::map<std::string, std::string> details = {},
                                Optional<Error> throwOnError = Optional<Error>(),
                                UID id = UID());
+
+std::string getTestEncryptionFileName();
 
 #include "flow/unactorcompiler.h"
 

@@ -22,6 +22,7 @@
 #define FLOW_FDBCLIENT_COMMITTRANSACTION_H
 #pragma once
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Tracing.h"
@@ -79,7 +80,7 @@ struct MutationRef {
 		CompareAndClear,
 		Reserved_For_SpanContextMessage /* See fdbserver/SpanContextMessage.h */,
 		Reserved_For_OTELSpanContextMessage,
-		Reserved_For_EncryptedMutationMessage /* See fdbserver/EncryptedMutationMessage.actor.h */,
+		Encrypted, /* Represents an encrypted mutation and cannot be used directly before decrypting */
 		MAX_ATOMIC_OP
 	};
 	// This is stored this way for serialization purposes.
@@ -126,6 +127,68 @@ struct MutationRef {
 			param2 = param1;
 			param1 = param2.substr(0, param2.size() - 1);
 		}
+	}
+
+	// An encrypted mutation has type Encrypted, encryption header (which contains encryption metadata) as param1,
+	// and the payload as param2. It can be serialize/deserialize as normal mutation, but can only be used after
+	// decryption via decrypt().
+	bool isEncrypted() const { return type == Encrypted; }
+
+	const BlobCipherEncryptHeader* encryptionHeader() const {
+		ASSERT(isEncrypted());
+		return reinterpret_cast<const BlobCipherEncryptHeader*>(param1.begin());
+	}
+
+	MutationRef encrypt(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
+	                    const EncryptCipherDomainId& domainId,
+	                    Arena& arena,
+	                    BlobCipherMetrics::UsageType usageType) const {
+		ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
+		auto textCipherItr = cipherKeys.find(domainId);
+		auto headerCipherItr = cipherKeys.find(ENCRYPT_HEADER_DOMAIN_ID);
+		ASSERT(textCipherItr != cipherKeys.end() && textCipherItr->second.isValid());
+		ASSERT(headerCipherItr != cipherKeys.end() && headerCipherItr->second.isValid());
+		uint8_t iv[AES_256_IV_LENGTH] = { 0 };
+		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
+		BinaryWriter bw(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		bw << *this;
+		EncryptBlobCipherAes265Ctr cipher(textCipherItr->second,
+		                                  headerCipherItr->second,
+		                                  iv,
+		                                  AES_256_IV_LENGTH,
+		                                  ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+		                                  usageType);
+		BlobCipherEncryptHeader* header = new (arena) BlobCipherEncryptHeader;
+		StringRef headerRef(reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader));
+		StringRef payload =
+		    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), header, arena)->toStringRef();
+		return MutationRef(Encrypted, headerRef, payload);
+	}
+
+	MutationRef encryptMetadata(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
+	                            Arena& arena,
+	                            BlobCipherMetrics::UsageType usageType) const {
+		return encrypt(cipherKeys, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, arena, usageType);
+	}
+
+	MutationRef decrypt(const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys,
+	                    Arena& arena,
+	                    BlobCipherMetrics::UsageType usageType,
+	                    StringRef* buf = nullptr) const {
+		const BlobCipherEncryptHeader* header = encryptionHeader();
+		auto textCipherItr = cipherKeys.find(header->cipherTextDetails);
+		auto headerCipherItr = cipherKeys.find(header->cipherHeaderDetails);
+		ASSERT(textCipherItr != cipherKeys.end() && textCipherItr->second.isValid());
+		ASSERT(headerCipherItr != cipherKeys.end() && headerCipherItr->second.isValid());
+		DecryptBlobCipherAes256Ctr cipher(textCipherItr->second, headerCipherItr->second, header->iv, usageType);
+		StringRef plaintext = cipher.decrypt(param2.begin(), param2.size(), *header, arena)->toStringRef();
+		if (buf != nullptr) {
+			*buf = plaintext;
+		}
+		ArenaReader reader(arena, plaintext, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		MutationRef mutation;
+		reader >> mutation;
+		return mutation;
 	}
 
 	// These masks define which mutation types have particular properties (they are used to implement

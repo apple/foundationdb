@@ -41,7 +41,9 @@ Future<bool> getTeamCollectionValid(Database const& cx, WorkerInterface const&);
 Future<bool> getTeamCollectionValid(Database const& cx, Reference<AsyncVar<struct ServerDBInfo> const> const&);
 Future<std::vector<StorageServerInterface>> getStorageServers(Database const& cx,
                                                               bool const& use_system_priority = false);
-Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database const& cx, bool const& use_system_priority = false);
+Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database const& cx,
+                                                        bool const& use_system_priority = false,
+                                                        Version* const& grv = nullptr);
 Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
                                               int const& flags = 0);
 Future<WorkerInterface> getMasterWorker(Database const& cx, Reference<AsyncVar<ServerDBInfo> const> const& dbInfo);

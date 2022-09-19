@@ -108,7 +108,7 @@ ACTOR void destoryChildProcess(Future<Void> parentSSClosed, ISimulator::ProcessI
 	wait(parentSSClosed);
 	TraceEvent(SevDebug, message.c_str()).log();
 	// This one is root cause for most failures, make sure it's okay to destory
-	g_pSimulator->destroyProcess(childInfo);
+	g_simulator->destroyProcess(childInfo);
 	// Explicitly reset the connection with the child process in case re-spawn very quickly
 	FlowTransport::transport().resetConnection(childInfo->address);
 }
@@ -118,7 +118,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
                                  bool isSync,
                                  double maxSimDelayTime,
                                  IClosable* parent) {
-	state ISimulator::ProcessInfo* self = g_pSimulator->getCurrentProcess();
+	state ISimulator::ProcessInfo* self = g_simulator->getCurrentProcess();
 	state ISimulator::ProcessInfo* child;
 
 	state std::string role;
@@ -160,7 +160,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 		}
 	}
 	state int result = 0;
-	child = g_pSimulator->newProcess(
+	child = g_simulator->newProcess(
 	    "remote flow process",
 	    self->address.ip,
 	    0,
@@ -171,7 +171,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 	    self->dataFolder.c_str(),
 	    self->coordinationFolder.c_str(), // do we need to customize this coordination folder path?
 	    self->protocolVersion);
-	wait(g_pSimulator->onProcess(child));
+	wait(g_simulator->onProcess(child));
 	state Future<ISimulator::KillType> onShutdown = child->onShutdown();
 	state Future<ISimulator::KillType> parentShutdown = self->onShutdown();
 	state Future<Void> flowProcessF;
@@ -199,7 +199,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 			choose {
 				when(wait(flowProcessF)) {
 					TraceEvent(SevDebug, "ChildProcessKilled").log();
-					wait(g_pSimulator->onProcess(self));
+					wait(g_simulator->onProcess(self));
 					TraceEvent(SevDebug, "BackOnParentProcess").detail("Result", std::to_string(result));
 					destoryChildProcess(parentSSClosed, child, "StorageServerReceivedClosedMessage");
 				}

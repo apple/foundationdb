@@ -44,6 +44,7 @@
 
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "flow/flow.h"
+#include "flow/ApiVersion.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/FastRef.h"
@@ -73,7 +74,6 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-#define FDB_API_VERSION 720
 /*
  * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi
  * instance (e.g. from ThreadSafeApi)
@@ -103,6 +103,7 @@ enum {
 	OPT_DEBUG_TLS,
 	OPT_API_VERSION,
 	OPT_MEMORY,
+	OPT_USE_FUTURE_PROTOCOL_VERSION
 };
 
 CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -127,6 +128,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_DEBUG_TLS, "--debug-tls", SO_NONE },
 	                                  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
 	                                  { OPT_MEMORY, "--memory", SO_REQ_SEP },
+	                                  { OPT_USE_FUTURE_PROTOCOL_VERSION, "--use-future-protocol-version", SO_NONE },
 	                                  TLS_OPTION_FLAGS,
 	                                  SO_END_OF_OPTIONS };
 
@@ -475,6 +477,9 @@ static void printProgramUsage(const char* name) {
 	       "                 Useful in reporting and diagnosing TLS issues.\n"
 	       "  --build-flags  Print build information and exit.\n"
 	       "  --memory       Resident memory limit of the CLI (defaults to 8GiB).\n"
+	       "  --use-future-protocol-version\n"
+	       "                 Use the simulated future protocol version to connect to the cluster.\n"
+	       "                 This option can be used testing purposes only!\n"
 	       "  -v, --version  Print FoundationDB CLI version information and exit.\n"
 	       "  -h, --help     Display this help and exit.\n");
 }
@@ -578,7 +583,7 @@ void initHelp() {
 void printVersion() {
 	printf("FoundationDB CLI " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getSourceVersion());
-	printf("protocol %" PRIx64 "\n", currentProtocolVersion.version());
+	printf("protocol %" PRIx64 "\n", currentProtocolVersion().version());
 }
 
 void printBuildInformation() {
@@ -872,6 +877,7 @@ struct CLIOptions {
 	Optional<std::string> exec;
 	bool initialStatusCheck = true;
 	bool cliHints = true;
+	bool useFutureProtocolVersion = false;
 	bool debugTLS = false;
 	std::string tlsCertPath;
 	std::string tlsKeyPath;
@@ -883,7 +889,7 @@ struct CLIOptions {
 	std::vector<std::pair<std::string, std::string>> knobs;
 
 	// api version, using the latest version by default
-	int apiVersion = FDB_API_VERSION;
+	int apiVersion = ApiVersion::LATEST_VERSION;
 
 	CLIOptions(int argc, char* argv[]) {
 		program_name = argv[0];
@@ -932,12 +938,12 @@ struct CLIOptions {
 			if (*endptr != '\0') {
 				fprintf(stderr, "ERROR: invalid client version %s\n", args.OptionArg());
 				return 1;
-			} else if (apiVersion < 700 || apiVersion > FDB_API_VERSION) {
+			} else if (apiVersion < 700 || apiVersion > ApiVersion::LATEST_VERSION) {
 				// multi-version fdbcli only available after 7.0
 				fprintf(stderr,
 				        "ERROR: api version %s is not supported. (Min: 700, Max: %d)\n",
 				        args.OptionArg(),
-				        FDB_API_VERSION);
+				        ApiVersion::LATEST_VERSION);
 				return 1;
 			}
 			break;
@@ -973,6 +979,10 @@ struct CLIOptions {
 			break;
 		case OPT_NO_HINTS:
 			cliHints = false;
+			break;
+		case OPT_USE_FUTURE_PROTOCOL_VERSION:
+			useFutureProtocolVersion = true;
+			break;
 
 		// TLS Options
 		case TLSConfig::OPT_TLS_PLUGIN:
@@ -1040,37 +1050,7 @@ Future<T> stopNetworkAfter(Future<T> what) {
 	}
 }
 
-ACTOR Future<Void> addInterface(std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
-                                Reference<FlowLock> connectLock,
-                                KeyValue kv) {
-	wait(connectLock->take());
-	state FlowLock::Releaser releaser(*connectLock);
-	state ClientWorkerInterface workerInterf =
-	    BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
-	state ClientLeaderRegInterface leaderInterf(workerInterf.address());
-	choose {
-		when(Optional<LeaderInfo> rep =
-		         wait(brokenPromiseToNever(leaderInterf.getLeader.getReply(GetLeaderRequest())))) {
-			StringRef ip_port =
-			    (kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key)
-			        .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
-			(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
-
-			if (workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
-				Key full_ip_port2 =
-				    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
-				StringRef ip_port2 = full_ip_port2.endsWith(LiteralStringRef(":tls"))
-				                         ? full_ip_port2.removeSuffix(LiteralStringRef(":tls"))
-				                         : full_ip_port2;
-				(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
-			}
-		}
-		when(wait(delay(CLIENT_KNOBS->CLI_CONNECT_TIMEOUT))) {}
-	}
-	return Void();
-}
-
-ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
+ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnectionFile> ccf) {
 	state LineNoise& linenoise = *plinenoise;
 	state bool intrans = false;
 
@@ -1094,20 +1074,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state FdbOptions activeOptions;
 
 	state FdbOptions* options = &globalOptions;
-
-	state Reference<ClusterConnectionFile> ccf;
-
-	state std::pair<std::string, bool> resolvedClusterFile =
-	    ClusterConnectionFile::lookupClusterFileName(opt.clusterFile);
-	try {
-		ccf = makeReference<ClusterConnectionFile>(resolvedClusterFile.first);
-	} catch (Error& e) {
-		if (e.code() == error_code_operation_cancelled) {
-			throw;
-		}
-		fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
-		return 1;
-	}
 
 	// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents are
 	// logged. This thread will eventually run the network, so call it now.
@@ -1616,6 +1582,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "consistencyscan")) {
+					bool _result = wait(makeInterruptable(consistencyScanCommandActor(localDb, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "profile")) {
 					getTransaction(db, managementTenant, tr, options, intrans);
 					bool _result = wait(makeInterruptable(profileCommandActor(localDb, tr, tokens, intrans)));
@@ -1935,7 +1908,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "gettenant")) {
-					bool _result = wait(makeInterruptable(getTenantCommandActor(db, tokens, opt.apiVersion)));
+					bool _result = wait(makeInterruptable(getTenantCommandActor(db, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "configuretenant")) {
+					bool _result = wait(makeInterruptable(configureTenantCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -1943,6 +1923,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "renametenant")) {
 					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "metacluster")) {
+					bool _result = wait(makeInterruptable(metaclusterCommand(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -1981,7 +1968,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	}
 }
 
-ACTOR Future<int> runCli(CLIOptions opt) {
+ACTOR Future<int> runCli(CLIOptions opt, Reference<ClusterConnectionFile> ccf) {
 	state LineNoise linenoise(
 	    [](std::string const& line, std::vector<std::string>& completions) { fdbcliCompCmd(line, completions); },
 	    [enabled = opt.cliHints](std::string const& line) -> LineNoise::Hint {
@@ -2045,7 +2032,7 @@ ACTOR Future<int> runCli(CLIOptions opt) {
 		    .GetLastError();
 	}
 
-	state int result = wait(cli(opt, &linenoise));
+	state int result = wait(cli(opt, &linenoise, ccf));
 
 	if (!historyFilename.empty()) {
 		try {
@@ -2065,6 +2052,33 @@ ACTOR Future<Void> timeExit(double duration) {
 	wait(delay(duration));
 	fprintf(stderr, "Specified timeout reached -- exiting...\n");
 	return Void();
+}
+
+const char* checkTlsConfigAgainstCoordAddrs(const ClusterConnectionString& ccs) {
+	// Resolve TLS config and inspect whether any of the certificate, key, ca bytes has been set
+	extern TLSConfig tlsConfig;
+	auto const loaded = tlsConfig.loadSync();
+	const bool tlsConfigured =
+	    !loaded.getCertificateBytes().empty() || !loaded.getKeyBytes().empty() || !loaded.getCABytes().empty();
+	int tlsAddrs = 0;
+	int totalAddrs = 0;
+	for (const auto& addr : ccs.coords) {
+		if (addr.isTLS())
+			tlsAddrs++;
+		totalAddrs++;
+	}
+	for (const auto& host : ccs.hostnames) {
+		if (host.isTLS)
+			tlsAddrs++;
+		totalAddrs++;
+	}
+	if (tlsConfigured && tlsAddrs == 0) {
+		return "fdbcli is configured with TLS, but none of the coordinators have TLS addresses.";
+	} else if (!tlsConfigured && tlsAddrs == totalAddrs) {
+		return "fdbcli is not configured with TLS, but all of the coordinators have TLS addresses.";
+	} else {
+		return nullptr;
+	}
 }
 
 int main(int argc, char** argv) {
@@ -2171,15 +2185,37 @@ int main(int argc, char** argv) {
 		return 0;
 	}
 
+	Reference<ClusterConnectionFile> ccf;
+	std::pair<std::string, bool> resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(opt.clusterFile);
+
+	try {
+		ccf = makeReference<ClusterConnectionFile>(resolvedClusterFile.first);
+	} catch (Error& e) {
+		if (e.code() == error_code_operation_cancelled) {
+			throw;
+		}
+		fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
+		return 1;
+	}
+
+	// Make sure that TLS configuration lines up with ":tls" prefix on coordinator addresses
+	if (auto errorMsg = checkTlsConfigAgainstCoordAddrs(ccf->getConnectionString())) {
+		fprintf(stderr, "ERROR: %s\n", errorMsg);
+		return 1;
+	}
+
 	try {
 		API->selectApiVersion(opt.apiVersion);
+		if (opt.useFutureProtocolVersion) {
+			API->useFutureProtocolVersion();
+		}
 		API->setupNetwork();
 		opt.setupKnobs();
 		if (opt.exit_code != -1) {
 			return opt.exit_code;
 		}
 		Future<Void> memoryUsageMonitor = startMemoryUsageMonitor(opt.memLimit);
-		Future<int> cliFuture = runCli(opt);
+		Future<int> cliFuture = runCli(opt, ccf);
 		Future<Void> timeoutFuture = opt.exit_timeout ? timeExit(opt.exit_timeout) : Never();
 		auto f = stopNetworkAfter(success(cliFuture) || timeoutFuture);
 		API->runNetwork();

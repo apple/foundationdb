@@ -1,5 +1,7 @@
+testClass = "Backup"
+
 [configuration]
-extraDB = 1
+extraDatabaseMode = 'LocalOrSingle'
 
 [[test]]
 testTitle = 'BackupAndRestore'

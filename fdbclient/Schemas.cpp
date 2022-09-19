@@ -137,6 +137,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "blob_manager",
                         "blob_worker",
                         "encrypt_key_proxy",
+                        "consistency_scan",
                         "storage_cache",
                         "router",
                         "coordinator"
@@ -427,7 +428,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "log_server_min_free_space",
                   "log_server_min_free_space_ratio",
                   "storage_server_durability_lag",
-                  "storage_server_list_fetch_failed"
+                  "storage_server_list_fetch_failed",
+                  "blob_worker_lag",
+                  "blob_worker_missing"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -448,7 +451,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "log_server_min_free_space",
                   "log_server_min_free_space_ratio",
                   "storage_server_durability_lag",
-                  "storage_server_list_fetch_failed"
+                  "storage_server_list_fetch_failed",
+                  "blob_worker_lag",
+                  "blob_worker_missing"
                ]
             },
             "description":"The database is not being saturated by the workload."
@@ -557,6 +562,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "unreachable_ratekeeper_worker",
                   "unreachable_blobManager_worker",
                   "unreachable_encryptKeyProxy_worker",
+                  "unreachable_consistencyScan_worker",
                   "unreadable_configuration",
                   "full_replication_timeout",
                   "client_issues",
@@ -844,7 +850,25 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "disabled",
              "optional_experimental",
              "required_experimental"
+         ]},
+         "encryption_at_rest_mode": {
+             "$enum":[
+             "disabled",
+             "aes_256_ctr"
          ]}
+      },
+      "consistency_scan_info":{
+        "consistency_scan_enabled":false,
+        "restart":false,
+        "max_rate":0,
+        "target_interval":0,
+        "bytes_read_prev_round":0,
+        "last_round_start_datetime":"2022-04-20 00:05:05.123 +0000",
+        "last_round_finish_datetime":"1970-01-01 00:00:00.000 +0000",
+        "last_round_start_timestamp":1648857905.123,
+        "last_round_finish_timestamp":0,
+        "smoothed_round_seconds":1,
+        "finished_rounds":1
       },
       "data":{
          "least_operating_space_bytes_log_server":0,

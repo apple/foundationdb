@@ -1,8 +1,5 @@
 fdb_find_sources(FDBCLIENT_SRCS)
-list(APPEND FDBCLIENT_SRCS
-  sha1/SHA1.cpp
-  libb64/cdecode.c
-  libb64/cencode.c)
+list(APPEND FDBCLIENT_SRCS sha1/SHA1.cpp)
 
 message(STATUS "FDB version is ${FDB_VERSION}")
 message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")
@@ -71,13 +68,6 @@ if(WITH_AWS_BACKUP)
   include(awssdk)
 endif()
 
-find_package(ZLIB)
-if(ZLIB_FOUND)
-  add_compile_definitions(ZLIB_LIB_SUPPORTED)
-else()
-  message(STATUS "ZLIB package not found")
-endif()
-
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
 target_include_directories(fdbclient PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/versions.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/versions.h)
@@ -100,8 +90,8 @@ add_flow_target(LINK_TEST NAME fdbclientlinktest SRCS LinkTest.cpp)
 target_link_libraries(fdbclientlinktest PRIVATE fdbclient rapidxml) # re-link rapidxml due to private link interface
 
 if(BUILD_AZURE_BACKUP)
-  target_link_libraries(fdbclient PRIVATE curl uuid azure-storage-lite)
-  target_link_libraries(fdbclient_sampling PRIVATE curl uuid azure-storage-lite)
+  target_link_libraries(fdbclient PRIVATE curl azure-storage-lite)
+  target_link_libraries(fdbclient_sampling PRIVATE curl azure-storage-lite)
 endif()
 
 if(BUILD_AWS_BACKUP)

@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "flow/ITrace.h"
 #include "flow/Trace.h"
@@ -53,6 +54,7 @@ void DatabaseConfiguration::resetInternal() {
 	storageMigrationType = StorageMigrationType::DEFAULT;
 	blobGranulesEnabled = false;
 	tenantMode = TenantMode::DISABLED;
+	encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
 }
 
 int toInt(ValueRef const& v) {
@@ -62,6 +64,16 @@ int toInt(ValueRef const& v) {
 void parse(int* i, ValueRef const& v) {
 	// FIXME: Sanity checking
 	*i = atoi(v.toString().c_str());
+}
+
+void parse(int64_t* i, ValueRef const& v) {
+	// FIXME: Sanity checking
+	*i = atoll(v.toString().c_str());
+}
+
+void parse(double* i, ValueRef const& v) {
+	// FIXME: Sanity checking
+	*i = atof(v.toString().c_str());
 }
 
 void parseReplicationPolicy(Reference<IReplicationPolicy>* policy, ValueRef const& v) {
@@ -213,7 +225,8 @@ bool DatabaseConfiguration::isValid() const {
 	      (perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1) &&
 	      isValidPerpetualStorageWiggleLocality(perpetualStorageWiggleLocality) &&
 	      storageMigrationType != StorageMigrationType::UNSET && tenantMode >= TenantMode::DISABLED &&
-	      tenantMode < TenantMode::END)) {
+	      tenantMode < TenantMode::END && encryptionAtRestMode >= EncryptionAtRestMode::DISABLED &&
+	      encryptionAtRestMode < EncryptionAtRestMode::END)) {
 		return false;
 	}
 	std::set<Key> dcIds;
@@ -413,6 +426,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	result["storage_migration_type"] = storageMigrationType.toString();
 	result["blob_granules_enabled"] = (int32_t)blobGranulesEnabled;
 	result["tenant_mode"] = tenantMode.toString();
+	result["encryption_at_rest_mode"] = encryptionAtRestMode.toString();
 	return result;
 }
 
@@ -643,6 +657,8 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == LiteralStringRef("blob_granules_enabled")) {
 		parse((&type), value);
 		blobGranulesEnabled = (type != 0);
+	} else if (ck == LiteralStringRef("encryption_at_rest_mode")) {
+		encryptionAtRestMode = EncryptionAtRestMode::fromValue(value);
 	} else {
 		return false;
 	}

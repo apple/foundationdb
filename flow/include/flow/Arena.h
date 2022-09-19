@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <boost/functional/hash.hpp>
 #include <stdint.h>
+#include <string_view>
 #include <string>
 #include <cstring>
 #include <limits>
@@ -99,6 +100,7 @@ FDB_DECLARE_BOOLEAN_PARAM(FastInaccurateEstimate);
 // memory is freed by deleting the entire Arena at once. See flow/README.md for details on using Arenas.
 class Arena {
 public:
+	constexpr static auto fb_must_appear_last = true;
 	Arena();
 	explicit Arena(size_t reservedSize);
 	//~Arena();
@@ -364,6 +366,8 @@ class Standalone : private Arena, public T {
 public:
 	using RefType = T;
 
+	constexpr static auto fb_must_appear_last = false;
+
 	// T must have no destructor
 	Arena& arena() { return *(Arena*)this; }
 	const Arena& arena() const { return *(const Arena*)this; }
@@ -532,7 +536,9 @@ public:
 		return substr(0, size() - s.size());
 	}
 
-	std::string toString() const { return std::string((const char*)data, length); }
+	std::string toString() const { return std::string(reinterpret_cast<const char*>(data), length); }
+
+	std::string_view toStringView() const { return std::string_view(reinterpret_cast<const char*>(data), length); }
 
 	static bool isPrintable(char c) { return c > 32 && c < 127; }
 	inline std::string printable() const;
@@ -589,13 +595,19 @@ public:
 	}
 
 	// Removes bytes from begin up to and including the sep string, returns StringRef of the part before sep
-	StringRef eat(StringRef sep) {
+	StringRef eat(StringRef sep, bool* foundSep = nullptr) {
 		for (int i = 0, iend = size() - sep.size(); i <= iend; ++i) {
 			if (sep.compare(substr(i, sep.size())) == 0) {
+				if (foundSep) {
+					*foundSep = true;
+				}
 				StringRef token = substr(0, i);
 				*this = substr(i + sep.size());
 				return token;
 			}
+		}
+		if (foundSep) {
+			*foundSep = false;
 		}
 		return eat();
 	}
@@ -604,7 +616,9 @@ public:
 		*this = StringRef();
 		return r;
 	}
-	StringRef eat(const char* sep) { return eat(StringRef((const uint8_t*)sep, (int)strlen(sep))); }
+	StringRef eat(const char* sep, bool* foundSep = nullptr) {
+		return eat(StringRef((const uint8_t*)sep, (int)strlen(sep)), foundSep);
+	}
 	// Return StringRef of bytes from begin() up to but not including the first byte matching any byte in sep,
 	// and remove that sequence (including the sep byte) from *this
 	// Returns and removes all bytes from *this if no bytes within sep were found
@@ -840,6 +854,40 @@ inline bool operator<=(const StringRef& lhs, const StringRef& rhs) {
 }
 inline bool operator>=(const StringRef& lhs, const StringRef& rhs) {
 	return !(lhs < rhs);
+}
+
+typedef uint64_t Word;
+// Get the number of prefix bytes that are the same between a and b, up to their common length of cl
+static inline int commonPrefixLength(uint8_t const* ap, uint8_t const* bp, int cl) {
+	int i = 0;
+	const int wordEnd = cl - sizeof(Word) + 1;
+
+	for (; i < wordEnd; i += sizeof(Word)) {
+		Word a = *(Word*)ap;
+		Word b = *(Word*)bp;
+		if (a != b) {
+			return i + ctzll(a ^ b) / 8;
+		}
+		ap += sizeof(Word);
+		bp += sizeof(Word);
+	}
+
+	for (; i < cl; i++) {
+		if (*ap != *bp) {
+			return i;
+		}
+		++ap;
+		++bp;
+	}
+	return cl;
+}
+
+static inline int commonPrefixLength(const StringRef& a, const StringRef& b) {
+	return commonPrefixLength(a.begin(), b.begin(), std::min(a.size(), b.size()));
+}
+
+static inline int commonPrefixLength(const StringRef& a, const StringRef& b, int skipLen) {
+	return commonPrefixLength(a.begin() + skipLen, b.begin() + skipLen, std::min(a.size(), b.size()) - skipLen);
 }
 
 // This trait is used by VectorRef to determine if deep copy constructor should recursively

@@ -941,13 +941,13 @@ static Value dataOfRecord(const int i) {
 	return Value(format("data-of-record-%08d", i));
 }
 static std::string indexEntryKey(const int i) {
-	return Tuple().append(StringRef(prefix)).append(INDEX).append(indexKey(i)).append(primaryKey(i)).pack().toString();
+	return Tuple::makeTuple(prefix, INDEX, indexKey(i), primaryKey(i)).pack().toString();
 }
 static std::string recordKey(const int i, const int split) {
-	return Tuple().append(prefix).append(RECORD).append(primaryKey(i)).append(split).pack().toString();
+	return Tuple::makeTuple(prefix, RECORD, primaryKey(i), split).pack().toString();
 }
 static std::string recordValue(const int i, const int split) {
-	return Tuple().append(dataOfRecord(i)).append(split).pack().toString();
+	return Tuple::makeTuple(dataOfRecord(i), split).pack().toString();
 }
 
 const static int SPLIT_SIZE = 3;
@@ -993,13 +993,8 @@ GetMappedRangeResult getMappedIndexEntries(int beginId,
                                            fdb::Transaction& tr,
                                            int matchIndex,
                                            bool allMissing) {
-	std::string mapper = Tuple()
-	                         .append(prefix)
-	                         .append(RECORD)
-	                         .append(allMissing ? "{K[2]}"_sr : "{K[3]}"_sr)
-	                         .append("{...}"_sr)
-	                         .pack()
-	                         .toString();
+	std::string mapper =
+	    Tuple::makeTuple(prefix, RECORD, (allMissing ? "{K[2]}"_sr : "{K[3]}"_sr), "{...}"_sr).pack().toString();
 	return getMappedIndexEntries(beginId, endId, tr, mapper, matchIndex);
 }
 
@@ -1037,7 +1032,7 @@ TEST_CASE("tuple_support_versionstamp") {
 	// a random 12 bytes long StringRef as a versionstamp
 	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12"_sr;
 	Versionstamp vs(str);
-	const Tuple t = Tuple().append(prefix).append(RECORD).appendVersionstamp(vs).append("{K[3]}"_sr).append("{...}"_sr);
+	const Tuple t = Tuple::makeTuple(prefix, RECORD, vs, "{K[3]}"_sr, "{...}"_sr);
 	ASSERT(t.getVersionstamp(2) == vs);
 
 	// verify the round-way pack-unpack path for a Tuple containing a versionstamp
@@ -1181,7 +1176,7 @@ TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
 }
 
 TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_serializable") {
-	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).pack().toString();
+	std::string mapper = Tuple::makeTuple(prefix, RECORD, "{K[3]}"_sr).pack().toString();
 	fdb::Transaction tr(db);
 	auto result = get_mapped_range(
 	    tr,
@@ -1200,7 +1195,7 @@ TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_serializable") {
 }
 
 TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_ryw_enable") {
-	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).pack().toString();
+	std::string mapper = Tuple::makeTuple(prefix, RECORD, "{K[3]}"_sr).pack().toString();
 	fdb::Transaction tr(db);
 	fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0)); // Not disable RYW
 	auto result = get_mapped_range(
@@ -2766,6 +2761,7 @@ TEST_CASE("Blob Granule Functions") {
 	auto confValue =
 	    get_value("\xff/conf/blob_granules_enabled", /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
 	if (!confValue.has_value() || confValue.value() != "1") {
+		// std::cout << "skipping blob granule test" << std::endl;
 		return;
 	}
 
@@ -2822,7 +2818,6 @@ TEST_CASE("Blob Granule Functions") {
 		fdb::KeyValueArrayResult r =
 		    tr.read_blob_granules(key("bg"), key("bh"), originalReadVersion, -2, granuleContext);
 		fdb_error_t err = r.get(&out_kv, &out_count, &out_more);
-		;
 		if (err && err != 2037 /* blob_granule_not_materialized */) {
 			fdb::EmptyFuture f2 = tr.on_error(err);
 			fdb_check(wait_future(f2));
@@ -2858,7 +2853,7 @@ TEST_CASE("Blob Granule Functions") {
 	// test ranges
 
 	while (1) {
-		fdb::KeyRangeArrayFuture f = tr.get_blob_granule_ranges(key("bg"), key("bh"));
+		fdb::KeyRangeArrayFuture f = tr.get_blob_granule_ranges(key("bg"), key("bh"), 1000);
 		fdb_error_t err = wait_future(f);
 		if (err) {
 			fdb::EmptyFuture f2 = tr.on_error(err);
@@ -2870,6 +2865,10 @@ TEST_CASE("Blob Granule Functions") {
 		int out_count;
 		fdb_check(f.get(&out_kr, &out_count));
 
+		CHECK(std::string((const char*)out_kr[0].begin_key, out_kr[0].begin_key_length) <= key("bg"));
+		CHECK(std::string((const char*)out_kr[out_count - 1].end_key, out_kr[out_count - 1].end_key_length) >=
+		      key("bh"));
+
 		CHECK(out_count >= 1);
 		// check key ranges are in order
 		for (int i = 0; i < out_count; i++) {
@@ -2877,9 +2876,9 @@ TEST_CASE("Blob Granule Functions") {
 			CHECK(std::string((const char*)out_kr[i].begin_key, out_kr[i].begin_key_length) <
 			      std::string((const char*)out_kr[i].end_key, out_kr[i].end_key_length));
 		}
-		// Ranges themselves are sorted
+		// Ranges themselves are sorted and contiguous
 		for (int i = 0; i < out_count - 1; i++) {
-			CHECK(std::string((const char*)out_kr[i].end_key, out_kr[i].end_key_length) <=
+			CHECK(std::string((const char*)out_kr[i].end_key, out_kr[i].end_key_length) ==
 			      std::string((const char*)out_kr[i + 1].begin_key, out_kr[i + 1].begin_key_length));
 		}
 
@@ -2905,7 +2904,6 @@ TEST_CASE("Blob Granule Functions") {
 	fdb_check(wait_future(waitPurgeFuture));
 
 	// re-read again at the purge version to make sure it is still valid
-
 	while (1) {
 		fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
 		fdb::KeyValueArrayResult r =
@@ -2922,6 +2920,56 @@ TEST_CASE("Blob Granule Functions") {
 		tr.reset();
 		break;
 	}
+
+	// check granule summary
+	while (1) {
+		fdb::GranuleSummaryArrayFuture f = tr.summarize_blob_granules(key("bg"), key("bh"), originalReadVersion, 100);
+		fdb_error_t err = wait_future(f);
+		if (err) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		const FDBGranuleSummary* out_summaries;
+		int out_count;
+		fdb_check(f.get(&out_summaries, &out_count));
+
+		CHECK(out_count >= 1);
+		CHECK(out_count <= 100);
+
+		// check that ranges cover requested range
+		CHECK(std::string((const char*)out_summaries[0].key_range.begin_key,
+		                  out_summaries[0].key_range.begin_key_length) <= key("bg"));
+		CHECK(std::string((const char*)out_summaries[out_count - 1].key_range.end_key,
+		                  out_summaries[out_count - 1].key_range.end_key_length) >= key("bh"));
+
+		// check key ranges are in order
+		for (int i = 0; i < out_count; i++) {
+			// key range start < end
+			CHECK(std::string((const char*)out_summaries[i].key_range.begin_key,
+			                  out_summaries[i].key_range.begin_key_length) <
+			      std::string((const char*)out_summaries[i].key_range.end_key,
+			                  out_summaries[i].key_range.end_key_length));
+			// sanity check versions and sizes
+			CHECK(out_summaries[i].snapshot_version <= originalReadVersion);
+			CHECK(out_summaries[i].delta_version <= originalReadVersion);
+			CHECK(out_summaries[i].snapshot_version <= out_summaries[i].delta_version);
+			CHECK(out_summaries[i].snapshot_size > 0);
+			CHECK(out_summaries[i].delta_size >= 0);
+		}
+
+		// Ranges themselves are sorted and contiguous
+		for (int i = 0; i < out_count - 1; i++) {
+			CHECK(std::string((const char*)out_summaries[i].key_range.end_key,
+			                  out_summaries[i].key_range.end_key_length) ==
+			      std::string((const char*)out_summaries[i + 1].key_range.begin_key,
+			                  out_summaries[i + 1].key_range.begin_key_length));
+		}
+
+		tr.reset();
+		break;
+	}
 }
 
 int main(int argc, char** argv) {
@@ -2931,7 +2979,7 @@ int main(int argc, char** argv) {
 		          << std::endl;
 		return 1;
 	}
-	fdb_check(fdb_select_api_version(720));
+	fdb_check(fdb_select_api_version(FDB_API_VERSION));
 	if (argc >= 4) {
 		std::string externalClientLibrary = argv[3];
 		if (externalClientLibrary.substr(0, 2) != "--") {
