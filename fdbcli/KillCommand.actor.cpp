@@ -29,6 +29,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/CodeProbe.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -43,7 +44,7 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 	if (tokens.size() == 1) {
 		// initialize worker interfaces
 		address_interface->clear();
-		wait(getWorkerInterfaces(tr, address_interface));
+		wait(getWorkerInterfaces(tr, address_interface, true));
 	}
 	if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
 		if (address_interface->size() == 0) {

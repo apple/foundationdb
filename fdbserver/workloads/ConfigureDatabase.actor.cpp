@@ -52,9 +52,9 @@ static const char* backupTypes[] = { "backup_worker_enabled:=0", "backup_worker_
 
 std::string generateRegions() {
 	std::string result;
-	if (g_simulator.physicalDatacenters == 1 ||
-	    (g_simulator.physicalDatacenters == 2 && deterministicRandom()->random01() < 0.25) ||
-	    g_simulator.physicalDatacenters == 3) {
+	if (g_simulator->physicalDatacenters == 1 ||
+	    (g_simulator->physicalDatacenters == 2 && deterministicRandom()->random01() < 0.25) ||
+	    g_simulator->physicalDatacenters == 3) {
 		return " usable_regions=1 regions=\"\"";
 	}
 
@@ -87,7 +87,7 @@ std::string generateRegions() {
 	StatusArray remoteDcArr;
 	remoteDcArr.push_back(remoteDcObj);
 
-	if (g_simulator.physicalDatacenters > 3 && deterministicRandom()->random01() < 0.5) {
+	if (g_simulator->physicalDatacenters > 3 && deterministicRandom()->random01() < 0.5) {
 		StatusObject primarySatelliteObj;
 		primarySatelliteObj["id"] = "2";
 		primarySatelliteObj["priority"] = 1;
@@ -104,7 +104,7 @@ std::string generateRegions() {
 			remoteSatelliteObj["satellite_logs"] = deterministicRandom()->randomInt(1, 7);
 		remoteDcArr.push_back(remoteSatelliteObj);
 
-		if (g_simulator.physicalDatacenters > 5 && deterministicRandom()->random01() < 0.5) {
+		if (g_simulator->physicalDatacenters > 5 && deterministicRandom()->random01() < 0.5) {
 			StatusObject primarySatelliteObjB;
 			primarySatelliteObjB["id"] = "4";
 			primarySatelliteObjB["priority"] = 1;
@@ -124,17 +124,17 @@ std::string generateRegions() {
 			int satellite_replication_type = deterministicRandom()->randomInt(0, 3);
 			switch (satellite_replication_type) {
 			case 0: {
-				TEST(true); // Simulated cluster using no satellite redundancy mode
+				CODE_PROBE(true, "Simulated cluster using no satellite redundancy mode");
 				break;
 			}
 			case 1: {
-				TEST(true); // Simulated cluster using two satellite fast redundancy mode
+				CODE_PROBE(true, "Simulated cluster using two satellite fast redundancy mode");
 				primaryObj["satellite_redundancy_mode"] = "two_satellite_fast";
 				remoteObj["satellite_redundancy_mode"] = "two_satellite_fast";
 				break;
 			}
 			case 2: {
-				TEST(true); // Simulated cluster using two satellite safe redundancy mode
+				CODE_PROBE(true, "Simulated cluster using two satellite safe redundancy mode");
 				primaryObj["satellite_redundancy_mode"] = "two_satellite_safe";
 				remoteObj["satellite_redundancy_mode"] = "two_satellite_safe";
 				break;
@@ -147,21 +147,21 @@ std::string generateRegions() {
 			switch (satellite_replication_type) {
 			case 0: {
 				// FIXME: implement
-				TEST(true); // Simulated cluster using custom satellite redundancy mode
+				CODE_PROBE(true, "Simulated cluster using custom satellite redundancy mode");
 				break;
 			}
 			case 1: {
-				TEST(true); // Simulated cluster using no satellite redundancy mode (<5 datacenters)
+				CODE_PROBE(true, "Simulated cluster using no satellite redundancy mode (<5 datacenters)");
 				break;
 			}
 			case 2: {
-				TEST(true); // Simulated cluster using single satellite redundancy mode
+				CODE_PROBE(true, "Simulated cluster using single satellite redundancy mode");
 				primaryObj["satellite_redundancy_mode"] = "one_satellite_single";
 				remoteObj["satellite_redundancy_mode"] = "one_satellite_single";
 				break;
 			}
 			case 3: {
-				TEST(true); // Simulated cluster using double satellite redundancy mode
+				CODE_PROBE(true, "Simulated cluster using double satellite redundancy mode");
 				primaryObj["satellite_redundancy_mode"] = "one_satellite_double";
 				remoteObj["satellite_redundancy_mode"] = "one_satellite_double";
 				break;
@@ -180,20 +180,20 @@ std::string generateRegions() {
 		switch (remote_replication_type) {
 		case 0: {
 			// FIXME: implement
-			TEST(true); // Simulated cluster using custom remote redundancy mode
+			CODE_PROBE(true, "Simulated cluster using custom remote redundancy mode");
 			break;
 		}
 		case 1: {
-			TEST(true); // Simulated cluster using default remote redundancy mode
+			CODE_PROBE(true, "Simulated cluster using default remote redundancy mode");
 			break;
 		}
 		case 2: {
-			TEST(true); // Simulated cluster using single remote redundancy mode
+			CODE_PROBE(true, "Simulated cluster using single remote redundancy mode");
 			result += " remote_single";
 			break;
 		}
 		case 3: {
-			TEST(true); // Simulated cluster using double remote redundancy mode
+			CODE_PROBE(true, "Simulated cluster using double remote redundancy mode");
 			result += " remote_double";
 			break;
 		}
@@ -239,11 +239,11 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		allowDescriptorChange =
 		    getOption(options, LiteralStringRef("allowDescriptorChange"), SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
 		allowTestStorageMigration =
-		    getOption(options, "allowTestStorageMigration"_sr, false) && g_simulator.allowStorageMigrationTypeChange;
+		    getOption(options, "allowTestStorageMigration"_sr, false) && g_simulator->allowStorageMigrationTypeChange;
 		storageMigrationCompatibleConf = getOption(options, "storageMigrationCompatibleConf"_sr, false);
 		waitStoreTypeCheck = getOption(options, "waitStoreTypeCheck"_sr, false);
 		downgradeTest1 = getOption(options, "downgradeTest1"_sr, false);
-		g_simulator.usableRegions = 1;
+		g_simulator->usableRegions = 1;
 	}
 
 	std::string description() const override { return "DestroyDatabaseWorkload"; }
@@ -284,6 +284,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> _check(ConfigureDatabaseWorkload* self, Database cx) {
+		wait(delay(30.0));
 		// only storage_migration_type=gradual && perpetual_storage_wiggle=1 need this check because in QuietDatabase
 		// perpetual wiggle will be forced to close For other cases, later ConsistencyCheck will check KV store type
 		// there
@@ -346,7 +347,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	ACTOR Future<Void> singleDB(ConfigureDatabaseWorkload* self, Database cx) {
 		state Transaction tr;
 		loop {
-			if (g_simulator.speedUpSimulation) {
+			if (g_simulator->speedUpSimulation) {
 				return Void();
 			}
 			state int randomChoice;
@@ -372,14 +373,14 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			} else if (randomChoice == 3) {
 				//TraceEvent("ConfigureTestConfigureBegin").detail("NewConfig", newConfig);
 				int maxRedundancies = sizeof(redundancies) / sizeof(redundancies[0]);
-				if (g_simulator.physicalDatacenters == 2 || g_simulator.physicalDatacenters > 3) {
+				if (g_simulator->physicalDatacenters == 2 || g_simulator->physicalDatacenters > 3) {
 					maxRedundancies--; // There are not enough machines for triple replication in fearless
 					                   // configurations
 				}
 				int redundancy = deterministicRandom()->randomInt(0, maxRedundancies);
 				std::string config = redundancies[redundancy];
 
-				if (config == "triple" && g_simulator.physicalDatacenters == 3) {
+				if (config == "triple" && g_simulator->physicalDatacenters == 3) {
 					config = "three_data_hall ";
 				}
 
@@ -437,7 +438,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				    false)));
 			} else if (randomChoice == 8) {
 				if (self->allowTestStorageMigration) {
-					TEST(true); // storage migration type change
+					CODE_PROBE(true, "storage migration type change");
 
 					// randomly configuring perpetual_storage_wiggle_locality
 					state std::string randomPerpetualWiggleLocality;

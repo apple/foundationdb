@@ -35,10 +35,10 @@
 #include "operations.hpp"
 #include "time.hpp"
 #include "ddsketch.hpp"
-#include "contrib/rapidjson/rapidjson/document.h"
-#include "contrib/rapidjson/rapidjson/rapidjson.h"
-#include "contrib/rapidjson/rapidjson/stringbuffer.h"
-#include "contrib/rapidjson/rapidjson/writer.h"
+#include "rapidjson/document.h"
+#include "rapidjson/rapidjson.h"
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/writer.h"
 #include <iostream>
 #include <sstream>
 #include <vector>

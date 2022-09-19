@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "fdbserver/NetworkTest.h"
 #include "flow/Knobs.h"
 #include "flow/ActorCollection.h"
@@ -193,7 +193,8 @@ ACTOR Future<Void> testClientStream(std::vector<NetworkTestInterface> interfs,
 				ASSERT(rep.index == j++);
 			}
 		} catch (Error& e) {
-			ASSERT(e.code() == error_code_end_of_stream || e.code() == error_code_connection_failed);
+			ASSERT(e.code() == error_code_end_of_stream || e.code() == error_code_connection_failed ||
+			       e.code() == error_code_request_maybe_delivered);
 		}
 		latency->tock(sample);
 		(*completed)++;

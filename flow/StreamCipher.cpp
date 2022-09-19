@@ -131,7 +131,7 @@ EncryptionStreamCipher::EncryptionStreamCipher(const StreamCipherKey* key, const
 }
 
 StringRef EncryptionStreamCipher::encrypt(unsigned char const* plaintext, int len, Arena& arena) {
-	TEST(true); // Encrypting data with StreamCipher
+	CODE_PROBE(true, "Encrypting data with StreamCipher");
 	auto ciphertext = new (arena) unsigned char[len + AES_BLOCK_SIZE];
 	int bytes{ 0 };
 	EVP_EncryptUpdate(cipher.getCtx(), ciphertext, &bytes, plaintext, len);
@@ -153,7 +153,7 @@ DecryptionStreamCipher::DecryptionStreamCipher(const StreamCipherKey* key, const
 }
 
 StringRef DecryptionStreamCipher::decrypt(unsigned char const* ciphertext, int len, Arena& arena) {
-	TEST(true); // Decrypting data with StreamCipher
+	CODE_PROBE(true, "Decrypting data with StreamCipher");
 	auto plaintext = new (arena) unsigned char[len];
 	int bytesDecrypted{ 0 };
 	EVP_DecryptUpdate(cipher.getCtx(), plaintext, &bytesDecrypted, ciphertext, len);
@@ -174,7 +174,7 @@ HmacSha256StreamCipher::HmacSha256StreamCipher() : cipher(EVP_MAX_KEY_LENGTH) {
 }
 
 StringRef HmacSha256StreamCipher::digest(unsigned char const* data, int len, Arena& arena) {
-	TEST(true); // Digest using StreamCipher
+	CODE_PROBE(true, "Digest using StreamCipher");
 	unsigned int digestLen = HMAC_size(cipher.getHmacCtx());
 	auto digest = new (arena) unsigned char[digestLen];
 	HMAC_Update(cipher.getHmacCtx(), data, len);
@@ -199,11 +199,11 @@ TEST_CASE("flow/StreamCipher") {
 	StreamCipherKey const* key = StreamCipherKey::getGlobalCipherKey();
 
 	StreamCipher::IV iv;
-	generateRandomData(iv.data(), iv.size());
+	deterministicRandom()->randomBytes(iv.data(), iv.size());
 
 	Arena arena;
 	std::vector<unsigned char> plaintext(deterministicRandom()->randomInt(0, 10001));
-	generateRandomData(&plaintext.front(), plaintext.size());
+	deterministicRandom()->randomBytes(&plaintext.front(), plaintext.size());
 	std::vector<unsigned char> ciphertext(plaintext.size() + AES_BLOCK_SIZE);
 	std::vector<unsigned char> decryptedtext(plaintext.size() + AES_BLOCK_SIZE);
 

@@ -39,8 +39,10 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 
-		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
-		extraDB = Database::createDatabase(extraFile, -1);
+		ASSERT(g_simulator->extraDatabases.size() == 1);
+		auto extraFile =
+		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator->extraDatabases[0]));
+		extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 	}
 
 	std::string description() const override { return "AtomicSwitchover"; }
@@ -191,8 +193,8 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		TraceEvent("AS_Done").log();
 
 		// SOMEDAY: Remove after backup agents can exist quiescently
-		if (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
-			g_simulator.drAgents = ISimulator::BackupAgentType::NoBackupAgents;
+		if (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
+			g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
 		}
 
 		return Void();

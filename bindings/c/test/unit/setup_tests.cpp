@@ -42,13 +42,13 @@ TEST_CASE("setup") {
 	CHECK(err);
 
 	// Select current API version
-	fdb_check(fdb_select_api_version(720));
+	fdb_check(fdb_select_api_version(FDB_API_VERSION));
 
 	// Error to call again after a successful return
-	err = fdb_select_api_version(720);
+	err = fdb_select_api_version(FDB_API_VERSION);
 	CHECK(err);
 
-	CHECK(fdb_get_max_api_version() >= 720);
+	CHECK(fdb_get_max_api_version() >= FDB_API_VERSION);
 
 	fdb_check(fdb_setup_network());
 	// Calling a second time should fail

@@ -142,6 +142,10 @@ int64_t getQueueSize(const TraceEventFields& md) {
 	return inputBytes - durableBytes;
 }
 
+int64_t getDurableVersion(const TraceEventFields& md) {
+	return boost::lexical_cast<int64_t>(md.getValue("DurableVersion"));
+}
+
 // Computes the popped version lag for tlogs
 int64_t getPoppedVersionLag(const TraceEventFields& md) {
 	int64_t persistentDataDurableVersion = boost::lexical_cast<int64_t>(md.getValue("PersistentDataDurableVersion"));
@@ -231,7 +235,9 @@ ACTOR Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
 }
 
 // Returns a vector of blob worker interfaces which have been persisted under the system key space
-ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx, bool use_system_priority = false) {
+ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx,
+                                                              bool use_system_priority = false,
+                                                              Version* grv = nullptr) {
 	state Transaction tr(cx);
 	loop {
 		if (use_system_priority) {
@@ -247,6 +253,9 @@ ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx, bool 
 			blobWorkers.reserve(blobWorkersList.size());
 			for (int i = 0; i < blobWorkersList.size(); i++) {
 				blobWorkers.push_back(decodeBlobWorkerListValue(blobWorkersList[i].value));
+			}
+			if (grv) {
+				*grv = tr.getReadVersion().get();
 			}
 			return blobWorkers;
 		} catch (Error& e) {
@@ -355,23 +364,42 @@ int64_t extractMaxQueueSize(const std::vector<Future<TraceEventFields>>& message
 }
 
 // Timeout wrapper when getting the storage metrics. This will do some additional tracing
-ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInterface wi) {
-	state Future<TraceEventFields> result =
-	    wi.eventLogRequest.getReply(EventLogRequest(StringRef(storage.toString() + "/StorageMetrics")));
-	state Future<Void> timeout = delay(1.0);
-	choose {
-		when(TraceEventFields res = wait(result)) { return res; }
-		when(wait(timeout)) {
+ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInterface wi, Version version) {
+	state int retries = 0;
+	loop {
+		++retries;
+		state Future<TraceEventFields> result =
+		    wi.eventLogRequest.getReply(EventLogRequest(StringRef(storage.toString() + "/StorageMetrics")));
+		state Future<Void> timeout = delay(30.0);
+		choose {
+			when(TraceEventFields res = wait(result)) {
+				if (version == invalidVersion || getDurableVersion(res) >= static_cast<int64_t>(version)) {
+					return res;
+				}
+			}
+			when(wait(timeout)) {
+				TraceEvent("QuietDatabaseFailure")
+				    .detail("Reason", "Could not fetch StorageMetrics")
+				    .detail("Storage", format("%016" PRIx64, storage.first()));
+				throw timed_out();
+			}
+		}
+		if (retries > 30) {
 			TraceEvent("QuietDatabaseFailure")
-			    .detail("Reason", "Could not fetch StorageMetrics")
-			    .detail("Storage", format("%016" PRIx64, storage.first()));
+			    .detail("Reason", "Could not fetch StorageMetrics x30")
+			    .detail("Storage", format("%016" PRIx64, storage.first()))
+			    .detail("Version", version);
 			throw timed_out();
 		}
+		wait(delay(1.0));
 	}
-};
+}
 
 // Gets the maximum size of all the storage server queues
-ACTOR Future<int64_t> getMaxStorageServerQueueSize(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+ACTOR Future<int64_t> getMaxStorageServerQueueSize(Database cx,
+                                                   Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                                   Version version) {
+
 	TraceEvent("MaxStorageServerQueueSize").detail("Stage", "ContactingStorageServers");
 
 	Future<std::vector<StorageServerInterface>> serversFuture = getStorageServers(cx);
@@ -394,7 +422,7 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize(Database cx, Reference<AsyncV
 			    .detail("SS", servers[i].id());
 			throw attribute_not_found();
 		}
-		messages.push_back(getStorageMetricsTimeout(servers[i].id(), itr->second));
+		messages.push_back(getStorageMetricsTimeout(servers[i].id(), itr->second, version));
 	}
 
 	wait(waitForAll(messages));
@@ -629,9 +657,9 @@ ACTOR Future<int64_t> getVersionOffset(Database cx,
 ACTOR Future<Void> repairDeadDatacenter(Database cx,
                                         Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                         std::string context) {
-	if (g_network->isSimulated() && g_simulator.usableRegions > 1) {
-		bool primaryDead = g_simulator.datacenterDead(g_simulator.primaryDcId);
-		bool remoteDead = g_simulator.datacenterDead(g_simulator.remoteDcId);
+	if (g_network->isSimulated() && g_simulator->usableRegions > 1) {
+		bool primaryDead = g_simulator->datacenterDead(g_simulator->primaryDcId);
+		bool remoteDead = g_simulator->datacenterDead(g_simulator->remoteDcId);
 
 		// FIXME: the primary and remote can both be considered dead because excludes are not handled properly by the
 		// datacenterDead function
@@ -645,10 +673,10 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx,
 			    .detail("Stage", "Repopulate")
 			    .detail("RemoteDead", remoteDead)
 			    .detail("PrimaryDead", primaryDead);
-			g_simulator.usableRegions = 1;
+			g_simulator->usableRegions = 1;
 			wait(success(ManagementAPI::changeConfig(
 			    cx.getReference(),
-			    (primaryDead ? g_simulator.disablePrimary : g_simulator.disableRemote) + " repopulate_anti_quorum=1",
+			    (primaryDead ? g_simulator->disablePrimary : g_simulator->disableRemote) + " repopulate_anti_quorum=1",
 			    true)));
 			while (dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED) {
 				wait(dbInfo->onChange());
@@ -740,7 +768,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
                                         int64_t maxDataDistributionQueueSize = 0,
                                         int64_t maxPoppedVersionLag = 30e6,
                                         int64_t maxVersionOffset = 1e6) {
-	state QuietDatabaseChecker checker(isBuggifyEnabled(BuggifyType::General) ? 1500.0 : 1000.0);
+	state QuietDatabaseChecker checker(isBuggifyEnabled(BuggifyType::General) ? 4000.0 : 1000.0);
 	state Future<Void> reconfig =
 	    reconfigureAfter(cx, 100 + (deterministicRandom()->random01() * 100), dbInfo, "QuietDatabase");
 	state Future<int64_t> dataInFlight;
@@ -767,7 +795,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	// To get around this, quiet Database will disable the perpetual wiggle in the setup phase.
 
 	printf("Set perpetual_storage_wiggle=0 ...\n");
-	wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
+	state Version version = wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
 	printf("Set perpetual_storage_wiggle=0 Done.\n");
 
 	// Require 3 consecutive successful quiet database checks spaced 2 second apart
@@ -784,7 +812,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 			tLogQueueInfo = getTLogQueueInfo(cx, dbInfo);
 			dataDistributionQueueSize = getDataDistributionQueueSize(cx, distributorWorker, dataInFlightGate == 0);
 			teamCollectionValid = getTeamCollectionValid(cx, distributorWorker);
-			storageQueueSize = getMaxStorageServerQueueSize(cx, dbInfo);
+			storageQueueSize = getMaxStorageServerQueueSize(cx, dbInfo, version);
 			dataDistributionActive = getDataDistributionActive(cx, distributorWorker);
 			storageServersRecruiting = getStorageServersRecruiting(cx, distributorWorker, distributorUID);
 			versionOffset = getVersionOffset(cx, distributorWorker, dbInfo);

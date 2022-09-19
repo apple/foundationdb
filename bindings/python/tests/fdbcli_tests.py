@@ -7,6 +7,7 @@ import subprocess
 import logging
 import functools
 import json
+import tempfile
 import time
 import random
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
@@ -561,6 +562,7 @@ def profile(logger):
     assert output2 == default_profile_client_get_output
     # set rate and size limit
     run_fdbcli_command('profile', 'client', 'set', '0.5', '1GB')
+    time.sleep(1) # global config can take some time to sync
     output3 = run_fdbcli_command('profile', 'client', 'get')
     logger.debug(output3)
     output3_list = output3.split(' ')
@@ -569,6 +571,7 @@ def profile(logger):
     assert output3_list[-1] == '1000000000.'
     # change back to default value and check
     run_fdbcli_command('profile', 'client', 'set', 'default', 'default')
+    time.sleep(1) # global config can take some time to sync
     assert run_fdbcli_command('profile', 'client', 'get') == default_profile_client_get_output
 
 
@@ -599,7 +602,7 @@ def tenants(logger):
     output = run_fdbcli_command('createtenant tenant')
     assert output == 'The tenant `tenant\' has been created'
 
-    output = run_fdbcli_command('createtenant tenant2')
+    output = run_fdbcli_command('createtenant tenant2 tenant_group=tenant_group2')
     assert output == 'The tenant `tenant2\' has been created'
 
     output = run_fdbcli_command('listtenants')
@@ -616,9 +619,77 @@ def tenants(logger):
 
     output = run_fdbcli_command('gettenant tenant')
     lines = output.split('\n')
-    assert len(lines) == 2
+    assert len(lines) == 3
     assert lines[0].strip().startswith('id: ')
     assert lines[1].strip().startswith('prefix: ')
+    assert lines[2].strip() == 'tenant state: ready'
+
+    output = run_fdbcli_command('gettenant tenant JSON')
+    json_output = json.loads(output, strict=False)
+    assert(len(json_output) == 2)
+    assert('tenant' in json_output)
+    assert(json_output['type'] == 'success')
+    assert(len(json_output['tenant']) == 4)
+    assert('id' in json_output['tenant'])
+    assert('encrypted' in json_output['tenant'])
+    assert('prefix' in json_output['tenant'])
+    assert(len(json_output['tenant']['prefix']) == 2)
+    assert('base64' in json_output['tenant']['prefix'])
+    assert('printable' in json_output['tenant']['prefix'])
+    assert(json_output['tenant']['tenant_state'] == 'ready')
+
+    output = run_fdbcli_command('gettenant tenant2')
+    lines = output.split('\n')
+    assert len(lines) == 4
+    assert lines[0].strip().startswith('id: ')
+    assert lines[1].strip().startswith('prefix: ')
+    assert lines[2].strip() == 'tenant state: ready'
+    assert lines[3].strip() == 'tenant group: tenant_group2'
+
+    output = run_fdbcli_command('gettenant tenant2 JSON')
+    json_output = json.loads(output, strict=False)
+    assert(len(json_output) == 2)
+    assert('tenant' in json_output)
+    assert(json_output['type'] == 'success')
+    assert(len(json_output['tenant']) == 5)
+    assert('id' in json_output['tenant'])
+    assert('encrypted' in json_output['tenant'])
+    assert('prefix' in json_output['tenant'])
+    assert(json_output['tenant']['tenant_state'] == 'ready')
+    assert('tenant_group' in json_output['tenant'])
+    assert(len(json_output['tenant']['tenant_group']) == 2)
+    assert('base64' in json_output['tenant']['tenant_group'])
+    assert(json_output['tenant']['tenant_group']['printable'] == 'tenant_group2')
+
+    output = run_fdbcli_command('configuretenant tenant tenant_group=tenant_group1')
+    assert output == 'The configuration for tenant `tenant\' has been updated'
+
+    output = run_fdbcli_command('gettenant tenant')
+    lines = output.split('\n')
+    assert len(lines) == 4
+    assert lines[3].strip() == 'tenant group: tenant_group1'
+
+    output = run_fdbcli_command('configuretenant tenant unset tenant_group')
+    assert output == 'The configuration for tenant `tenant\' has been updated'
+
+    output = run_fdbcli_command('gettenant tenant')
+    lines = output.split('\n')
+    assert len(lines) == 3
+
+    output = run_fdbcli_command_and_get_error('configuretenant tenant tenant_group=tenant_group1 tenant_group=tenant_group2')
+    assert output == 'ERROR: configuration parameter `tenant_group\' specified more than once.'
+
+    output = run_fdbcli_command_and_get_error('configuretenant tenant unset')
+    assert output == 'ERROR: `unset\' specified without a configuration parameter.'
+
+    output = run_fdbcli_command_and_get_error('configuretenant tenant unset tenant_group=tenant_group1')
+    assert output == 'ERROR: unrecognized configuration parameter `tenant_group=tenant_group1\'.'
+
+    output = run_fdbcli_command_and_get_error('configuretenant tenant tenant_group')
+    assert output == 'ERROR: invalid configuration string `tenant_group\'. String must specify a value using `=\'.'
+
+    output = run_fdbcli_command_and_get_error('configuretenant tenant3 tenant_group=tenant_group1')
+    assert output == 'ERROR: Tenant does not exist (2131)'
 
     output = run_fdbcli_command('usetenant')
     assert output == 'Using the default tenant'
@@ -690,6 +761,77 @@ def tenants(logger):
 
     run_fdbcli_command('writemode on; clear tenant_test')
 
+def integer_options():
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env)
+    cmd_sequence = ['option on TIMEOUT 1000', 'writemode on', 'clear foo']
+    output, error_output = process.communicate(input='\n'.join(cmd_sequence).encode())
+
+    lines = output.decode().strip().split('\n')[-2:]
+    assert lines[0] == 'Option enabled for all transactions'
+    assert lines[1].startswith('Committed')
+    assert error_output == b''
+
+def tls_address_suffix():
+    # fdbcli shall prevent a non-TLS fdbcli run from connecting to an all-TLS cluster, and vice versa
+    preamble = 'eNW1yf1M:eNW1yf1M@'
+    def make_addr(port: int, tls: bool = False):
+        return "127.0.0.1:{}{}".format(port, ":tls" if tls else "")
+    testcases = [
+        # IsServerTLS, NumServerAddrs
+        (True, 1),
+        (False, 1),
+        (True, 3),
+        (False, 3),
+    ]
+    err_output_server_no_tls = "ERROR: fdbcli is configured with TLS, but none of the coordinators have TLS addresses."
+    err_output_server_tls = "ERROR: fdbcli is not configured with TLS, but all of the coordinators have TLS addresses."
+
+    # technically the contents of the certs and key files are not evaluated
+    # before tls-suffix check against tls configuration takes place,
+    # but we generate the certs and keys anyway to avoid
+    # imposing nuanced TLSConfig evaluation ordering requirement on the testcase
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cert_file = tmpdir + "/client-cert.pem"
+        key_file = tmpdir + "/client-key.pem"
+        ca_file = tmpdir + "/server-ca.pem"
+        mkcert_process = subprocess.run([
+                args.build_dir + "/bin/mkcert",
+                "--server-chain-length", "1",
+                "--client-chain-length", "1",
+                "--server-cert-file", tmpdir + "/server-cert.pem",
+                "--client-cert-file", tmpdir + "/client-cert.pem",
+                "--server-key-file", tmpdir + "/server-key.pem",
+                "--client-key-file", tmpdir + "/client-key.pem",
+                "--server-ca-file", tmpdir + "/server-ca.pem",
+                "--client-ca-file", tmpdir + "/client-ca.pem",
+            ],
+            capture_output=True)
+        if mkcert_process.returncode != 0:
+            print("mkcert returned with code {}".format(mkcert_process.returncode))
+            print("Output:\n{}{}\n".format(
+                        mkcert_process.stdout.decode("utf8").strip(),
+                        mkcert_process.stderr.decode("utf8").strip()))
+            assert False
+        cluster_fn = tmpdir + "/fdb.cluster"
+        for testcase in testcases:
+            is_server_tls, num_server_addrs = testcase
+            with open(cluster_fn, "w") as fp:
+                fp.write(preamble + ",".join(
+                    [make_addr(port=4000 + addr_idx, tls=is_server_tls) for addr_idx in range(num_server_addrs)]))
+                fp.close()
+                tls_args = ["--tls-certificate-file",
+                            cert_file,
+                            "--tls-key-file",
+                            key_file,
+                            "--tls-ca-file",
+                            ca_file] if not is_server_tls else []
+                fdbcli_process = subprocess.run(command_template[:2] + [cluster_fn] + tls_args, capture_output=True)
+                assert fdbcli_process.returncode != 0
+                err_out = fdbcli_process.stderr.decode("utf8").strip()
+                if is_server_tls:
+                    assert err_out == err_output_server_tls, f"unexpected output: {err_out}"
+                else:
+                    assert err_out == err_output_server_no_tls, f"unexpected output: {err_out}"
 
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter,
@@ -736,6 +878,8 @@ if __name__ == '__main__':
         triggerddteaminfolog()
         tenants()
         versionepoch()
+        integer_options()
+        tls_address_suffix()
     else:
         assert args.process_number > 1, "Process number should be positive"
         coordinators()

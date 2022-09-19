@@ -64,13 +64,12 @@ add_compile_definitions(BOOST_ERROR_CODE_HEADER_ONLY BOOST_SYSTEM_NO_DEPRECATED)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-include_directories(${CMAKE_SOURCE_DIR})
-include_directories(${CMAKE_BINARY_DIR})
-
 if(WIN32)
   add_definitions(-DBOOST_USE_WINDOWS_H)
   add_definitions(-DWIN32_LEAN_AND_MEAN)
   add_definitions(-D_ITERATOR_DEBUG_LEVEL=0)
+  add_definitions(-DNOGDI) # WinGDI.h defines macro ERROR
+  add_definitions(-D_USE_MATH_DEFINES) # Math constants
 endif()
 
 if (USE_CCACHE)
@@ -117,11 +116,12 @@ if(WIN32)
 else()
   set(GCC NO)
   set(CLANG NO)
-  set(ICC NO)
-  if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
+  set(ICX NO)
+  # CMAKE_CXX_COMPILER_ID is set to Clang even if CMAKE_CXX_COMPILER points to ICPX, so we have to check the compiler too.
+  if (${CMAKE_CXX_COMPILER} MATCHES ".*icpx")
+    set(ICX YES)
+  elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
     set(CLANG YES)
-  elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
-    set(ICC YES)
   else()
     # This is not a very good test. However, as we do not really support many architectures
     # this is good enough for now
@@ -192,6 +192,7 @@ else()
   endif()
 
   if(USE_GCOV)
+    add_compile_options(--coverage)
     add_link_options(--coverage)
   endif()
 
@@ -200,6 +201,8 @@ else()
       -fsanitize=undefined
       # TODO(atn34) Re-enable -fsanitize=alignment once https://github.com/apple/foundationdb/issues/1434 is resolved
       -fno-sanitize=alignment
+      # https://github.com/apple/foundationdb/issues/7955
+      -fno-sanitize=function
       -DBOOST_USE_UCONTEXT)
     list(APPEND SANITIZER_LINK_OPTIONS -fsanitize=undefined)
   endif()
@@ -276,7 +279,7 @@ else()
   # for more information.
   #add_compile_options(-fno-builtin-memcpy)
 
-  if (CLANG)
+  if (CLANG OR ICX)
     add_compile_options()
     if (APPLE OR USE_LIBCXX)
       add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>)
@@ -286,6 +289,10 @@ else()
         endif()
         add_link_options(-stdlib=libc++ -Wl,-build-id=sha1)
       endif()
+    endif()
+    if (NOT APPLE AND NOT USE_LIBCXX)
+      message(STATUS "Linking libatomic")
+      add_link_options(-latomic)
     endif()
     if (OPEN_FOR_IDE)
       add_compile_options(
@@ -304,11 +311,19 @@ else()
       -Wno-unknown-warning-option
       -Wno-unused-parameter
       -Wno-constant-logical-operand
+      # These need to be disabled for FDB's RocksDB storage server implementation
+      -Wno-deprecated-copy
+      -Wno-delete-non-abstract-non-virtual-dtor
+      -Wno-range-loop-construct
+      -Wno-reorder-ctor
+      # Needed for clang 13 (todo: Update above logic so that it figures out when to pass in -static-libstdc++ and when it will be ignored)
+      # When you remove this, you might need to move it back to the USE_CCACHE stanza.  It was (only) there before I moved it here.
+      -Wno-unused-command-line-argument
       )
     if (USE_CCACHE)
       add_compile_options(
         -Wno-register
-        -Wno-unused-command-line-argument)
+      )
     endif()
     if (PROFILE_INSTR_GENERATE)
       add_compile_options(-fprofile-instr-generate)
@@ -331,9 +346,6 @@ else()
     # Otherwise `state [[maybe_unused]] int x;` will issue a warning.
     # https://stackoverflow.com/questions/50646334/maybe-unused-on-member-variable-gcc-warns-incorrectly-that-attribute-is
     add_compile_options(-Wno-attributes)
-  elseif(ICC)
-    add_compile_options(-wd1879 -wd1011)
-    add_link_options(-static-intel)
   endif()
   add_compile_options(-Wno-error=format
     -Wunused-variable
@@ -341,7 +353,7 @@ else()
     -fvisibility=hidden
     -Wreturn-type
     -fPIC)
-  if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86" AND NOT CLANG)
+  if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^x86" AND NOT CLANG AND NOT ICX)
     add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wclass-memaccess>)
   endif()
   if (GPERFTOOLS_FOUND AND GCC)
@@ -350,6 +362,15 @@ else()
       -fno-builtin-calloc
       -fno-builtin-realloc
       -fno-builtin-free)
+  endif()
+  
+  if (ICX)
+    find_library(CXX_LIB NAMES c++ PATHS "/usr/local/lib" REQUIRED)
+    find_library(CXX_ABI_LIB NAMES c++abi PATHS "/usr/local/lib" REQUIRED)
+    add_compile_options($<$<COMPILE_LANGUAGE:C>:-ffp-contract=on>)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-ffp-contract=on>)
+    # No libc++ and libc++abi in Intel LIBRARY_PATH
+    link_libraries(${CXX_LIB} ${CXX_ABI_LIB})
   endif()
 
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")

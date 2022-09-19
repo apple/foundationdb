@@ -22,7 +22,8 @@
 #include <string>
 #include <vector>
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fdbclient/GenericManagementAPI.actor.h"
+#include "fmt/format.h"
 #include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -200,6 +201,20 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			}
 			out[p + key] = format("%d", tenantMode);
 		}
+
+		if (key == "encryption_at_rest_mode") {
+			EncryptionAtRestMode mode;
+			if (value == "disabled") {
+				mode = EncryptionAtRestMode::DISABLED;
+			} else if (value == "aes_256_ctr") {
+				mode = EncryptionAtRestMode::AES_256_CTR;
+			} else {
+				printf("Error: Only disabled|aes_256_ctr are valid for encryption_at_rest_mode.\n");
+				return out;
+			}
+			out[p + key] = format("%d", mode);
+		}
+
 		return out;
 	}
 
@@ -450,16 +465,21 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options) 
 	       options.count(p + "storage_engine") == 1;
 }
 
+ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr) {
+	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	RangeResult res = wait(tr->getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+	ASSERT(res.size() < CLIENT_KNOBS->TOO_MANY);
+	DatabaseConfiguration config;
+	config.fromKeyValues((VectorRef<KeyValueRef>)res);
+	return config;
+}
+
 ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			RangeResult res = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
-			ASSERT(res.size() < CLIENT_KNOBS->TOO_MANY);
-			DatabaseConfiguration config;
-			config.fromKeyValues((VectorRef<KeyValueRef>)res);
+			DatabaseConfiguration config = wait(getDatabaseConfiguration(&tr));
 			return config;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -798,6 +818,8 @@ ACTOR Future<Optional<ClusterConnectionString>> getConnectionString(Database cx)
 	}
 }
 
+static std::vector<std::string> connectionStrings;
+
 namespace {
 
 ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromStorageServer(Transaction* tr) {
@@ -815,6 +837,19 @@ ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromSt
 
 		Version readVersion = wait(tr->getReadVersion());
 		state Optional<Value> currentKey = wait(tr->get(coordinatorsKey));
+		if (g_network->isSimulated() && currentKey.present()) {
+			// If the change coordinators request succeeded, the coordinators
+			// should have changed to the connection string of the most
+			// recently issued request. If instead the connection string is
+			// equal to one of the previously issued requests, there is a bug
+			// and we are breaking the promises we make with
+			// commit_unknown_result (the transaction must no longer be in
+			// progress when receiving commit_unknown_result).
+			int n = connectionStrings.size() > 0 ? connectionStrings.size() - 1 : 0; // avoid underflow
+			for (int i = 0; i < n; ++i) {
+				ASSERT(currentKey.get() != connectionStrings.at(i));
+			}
+		}
 
 		if (!currentKey.present()) {
 			// Someone deleted this key entirely?
@@ -837,12 +872,59 @@ ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromSt
 	}
 }
 
+ACTOR Future<Void> verifyConfigurationDatabaseAlive(Database cx) {
+	state Backoff backoff;
+	loop {
+		try {
+			// Attempt to read a random value from the configuration
+			// database to make sure it is online.
+			state Reference<ISingleThreadTransaction> configTr =
+			    ISingleThreadTransaction::create(ISingleThreadTransaction::Type::PAXOS_CONFIG, cx);
+			Tuple tuple;
+			tuple.appendNull(); // config class
+			tuple << "test"_sr;
+			Optional<Value> serializedValue = wait(configTr->get(tuple.pack()));
+			TraceEvent("ChangeQuorumCheckerNewCoordinatorsOnline").log();
+			return Void();
+		} catch (Error& e) {
+			TraceEvent("ChangeQuorumCheckerNewCoordinatorsError").error(e);
+			if (e.code() == error_code_coordinators_changed) {
+				wait(backoff.onError());
+				configTr->reset();
+			} else {
+				wait(configTr->onError(e));
+			}
+		}
+	}
+}
+
+ACTOR Future<Void> resetPreviousCoordinatorsKey(Database cx) {
+	loop {
+		// When the change coordinators transaction succeeds, it uses the
+		// special key space error message to return a message to the client.
+		// This causes the underlying transaction to not be committed. In order
+		// to make sure we clear the previous coordinators key, we have to use
+		// a new transaction here.
+		state Reference<ISingleThreadTransaction> clearTr =
+		    ISingleThreadTransaction::create(ISingleThreadTransaction::Type::RYW, cx);
+		try {
+			clearTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			clearTr->clear(previousCoordinatorsKey);
+			wait(clearTr->commit());
+			return Void();
+		} catch (Error& e2) {
+			wait(clearTr->onError(e2));
+		}
+	}
+}
+
 } // namespace
 
 ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
                                                                ClusterConnectionString* conn,
-                                                               std::string newName) {
-
+                                                               std::string newName,
+                                                               bool disableConfigDB) {
+	TraceEvent("ChangeQuorumCheckerStart").detail("NewConnectionString", conn->toString());
 	state Optional<ClusterConnectionString> clusterConnectionStringOptional =
 	    wait(getClusterConnectionStringFromStorageServer(tr));
 
@@ -857,7 +939,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		conn->hostnames = old.hostnames;
 		conn->coords = old.coords;
 	}
-	std::vector<NetworkAddress> desiredCoordinators = wait(conn->tryResolveHostnames());
+	state std::vector<NetworkAddress> desiredCoordinators = wait(conn->tryResolveHostnames());
 	if (desiredCoordinators.size() != conn->hostnames.size() + conn->coords.size()) {
 		TraceEvent("ChangeQuorumCheckerEarlyTermination")
 		    .detail("Reason", "One or more hostnames are unresolvable")
@@ -873,16 +955,25 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	std::sort(old.hostnames.begin(), old.hostnames.end());
 	std::sort(old.coords.begin(), old.coords.end());
 	if (conn->hostnames == old.hostnames && conn->coords == old.coords && old.clusterKeyName() == newName) {
+		connectionStrings.clear();
+		if (g_network->isSimulated() && g_simulator->configDBType == ConfigDBType::DISABLED) {
+			disableConfigDB = true;
+		}
+		if (!disableConfigDB) {
+			wait(verifyConfigurationDatabaseAlive(tr->getDatabase()));
+		}
+		wait(resetPreviousCoordinatorsKey(tr->getDatabase()));
 		return CoordinatorsResult::SAME_NETWORK_ADDRESSES;
 	}
 
 	conn->parseKey(newName + ':' + deterministicRandom()->randomAlphaNumeric(32));
+	connectionStrings.push_back(conn->toString());
 
 	if (g_network->isSimulated()) {
 		int i = 0;
 		int protectedCount = 0;
 		while ((protectedCount < ((desiredCoordinators.size() / 2) + 1)) && (i < desiredCoordinators.size())) {
-			auto process = g_simulator.getProcessByAddress(desiredCoordinators[i]);
+			auto process = g_simulator->getProcessByAddress(desiredCoordinators[i]);
 			auto addresses = process->addresses;
 
 			if (!process->isReliable()) {
@@ -890,9 +981,9 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 				continue;
 			}
 
-			g_simulator.protectedAddresses.insert(process->addresses.address);
+			g_simulator->protectedAddresses.insert(process->addresses.address);
 			if (addresses.secondaryAddress.present()) {
-				g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
+				g_simulator->protectedAddresses.insert(process->addresses.secondaryAddress.get());
 			}
 			TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
 			protectedCount++;
@@ -921,6 +1012,9 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		when(wait(waitForAll(leaderServers))) {}
 		when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
 	}
+	TraceEvent("ChangeQuorumCheckerSetCoordinatorsKey")
+	    .detail("CurrentCoordinators", old.toString())
+	    .detail("NewCoordinators", conn->toString());
 	tr->set(coordinatorsKey, conn->toString());
 	return Optional<CoordinatorsResult>();
 }
@@ -983,12 +1077,12 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 
 			if (g_network->isSimulated()) {
 				for (int i = 0; i < (desiredCoordinators.size() / 2) + 1; i++) {
-					auto process = g_simulator.getProcessByAddress(desiredCoordinators[i]);
+					auto process = g_simulator->getProcessByAddress(desiredCoordinators[i]);
 					ASSERT(process->isReliable() || process->rebooting);
 
-					g_simulator.protectedAddresses.insert(process->addresses.address);
+					g_simulator->protectedAddresses.insert(process->addresses.address);
 					if (process->addresses.secondaryAddress.present()) {
-						g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
+						g_simulator->protectedAddresses.insert(process->addresses.secondaryAddress.get());
 					}
 					TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
 				}
@@ -997,8 +1091,8 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 			TraceEvent("AttemptingQuorumChange")
 			    .detail("FromCS", oldClusterConnectionString.toString())
 			    .detail("ToCS", newClusterConnectionString.toString());
-			TEST(oldClusterKeyName != newClusterKeyName); // Quorum change with new name
-			TEST(oldClusterKeyName == newClusterKeyName); // Quorum change with unchanged name
+			CODE_PROBE(oldClusterKeyName != newClusterKeyName, "Quorum change with new name");
+			CODE_PROBE(oldClusterKeyName == newClusterKeyName, "Quorum change with unchanged name");
 
 			state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 			state ClientCoordinators coord(Reference<ClusterConnectionMemoryRecord>(
@@ -1247,7 +1341,7 @@ struct AutoQuorumChange final : IQuorumChange {
 					continue;
 				}
 				// Exclude faulty node due to machine assassination
-				if (g_network->isSimulated() && !g_simulator.getProcessByAddress(worker->address)->isReliable()) {
+				if (g_network->isSimulated() && !g_simulator->getProcessByAddress(worker->address)->isReliable()) {
 					TraceEvent("AutoSelectCoordinators").detail("SkipUnreliableWorker", worker->address.toString());
 					continue;
 				}
@@ -1318,6 +1412,7 @@ ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> ser
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				ryw.set(
 				    SpecialKeySpace::getManagementApiCommandOptionSpecialKey(failed ? "failed" : "excluded", "force"),
@@ -1380,6 +1475,7 @@ ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				ryw.set(SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
 				            failed ? "failed_locality" : "excluded_locality", "force"),
@@ -1422,6 +1518,7 @@ ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> ser
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				for (auto& s : servers) {
 					if (!s.isValid()) {
@@ -1525,6 +1622,7 @@ ACTOR Future<Void> includeLocalities(Database cx, std::vector<std::string> local
 		state ReadYourWritesTransaction ryw(cx);
 		loop {
 			try {
+				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				if (includeAll) {
 					if (failed) {
@@ -2167,13 +2265,14 @@ ACTOR Future<Void> updateChangeFeed(Transaction* tr, Key rangeID, ChangeFeedStat
 		}
 	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 		if (val.present()) {
+			if (g_network->isSimulated()) {
+				g_simulator->validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
+			}
 			tr->set(rangeIDKey,
 			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
 			                        std::get<1>(decodeChangeFeedValue(val.get())),
 			                        status));
 			tr->clear(rangeIDKey);
-		} else {
-			throw unsupported_operation();
 		}
 	}
 	return Void();
@@ -2204,13 +2303,14 @@ ACTOR Future<Void> updateChangeFeed(Reference<ReadYourWritesTransaction> tr,
 		}
 	} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 		if (val.present()) {
+			if (g_network->isSimulated()) {
+				g_simulator->validationData.allDestroyedChangeFeedIDs.insert(rangeID.toString());
+			}
 			tr->set(rangeIDKey,
 			        changeFeedValue(std::get<0>(decodeChangeFeedValue(val.get())),
 			                        std::get<1>(decodeChangeFeedValue(val.get())),
 			                        status));
 			tr->clear(rangeIDKey);
-		} else {
-			throw unsupported_operation();
 		}
 	}
 	return Void();
@@ -2454,6 +2554,21 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 	}
 }
 
+void setStorageQuota(Transaction& tr, StringRef tenantName, uint64_t quota) {
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	auto key = storageQuotaKey(tenantName);
+	tr.set(key, BinaryWriter::toValue<uint64_t>(quota, Unversioned()));
+}
+
+ACTOR Future<Optional<uint64_t>> getStorageQuota(Transaction* tr, StringRef tenantName) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	state Optional<Value> v = wait(tr->get(storageQuotaKey(tenantName)));
+	if (!v.present()) {
+		return Optional<uint64_t>();
+	}
+	return BinaryReader::fromStringRef<uint64_t>(v.get(), Unversioned());
+}
+
 std::string ManagementAPI::generateErrorMessage(const CoordinatorsResult& res) {
 	// Note: the error message here should not be changed if possible
 	// If you do change the message here,
@@ -2510,16 +2625,16 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 		data.address.ip = IPAddress(i);
 
 		if (g_network->isSimulated()) {
-			g_simulator.newProcess("TestCoordinator",
-			                       data.address.ip,
-			                       data.address.port,
-			                       false,
-			                       1,
-			                       data.locality,
-			                       ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
-			                       "",
-			                       "",
-			                       currentProtocolVersion);
+			g_simulator->newProcess("TestCoordinator",
+			                        data.address.ip,
+			                        data.address.port,
+			                        false,
+			                        1,
+			                        data.locality,
+			                        ProcessClass(ProcessClass::CoordinatorClass, ProcessClass::CommandLineSource),
+			                        "",
+			                        "",
+			                        currentProtocolVersion());
 		}
 
 		workers.push_back(data);

@@ -18,7 +18,8 @@
  * limitations under the License.
  */
 
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "flow/ApiVersion.h"
+#include "fmt/format.h"
 #include "fdbbackup/BackupTLSConfig.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/Arena.h"
@@ -36,6 +37,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/TLSConfig.actor.h"
 
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/Status.h"
@@ -74,7 +76,7 @@
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
 
-#include "flow/SimpleOpt.h"
+#include "SimpleOpt/SimpleOpt.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Type of program being executed
@@ -927,7 +929,7 @@ void parentWatcher(void* parentHandle) {
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getSourceVersion());
-	printf("protocol %llx\n", (long long)currentProtocolVersion.version());
+	printf("protocol %llx\n", (long long)currentProtocolVersion().version());
 }
 
 static void printBuildInformation() {
@@ -1920,11 +1922,11 @@ ACTOR Future<Void> submitBackup(Database db,
 
 		if (dryRun) {
 			state KeyBackedTag tag = makeBackupTag(tagName);
-			Optional<UidAndAbortedFlagT> uidFlag = wait(tag.get(db));
+			Optional<UidAndAbortedFlagT> uidFlag = wait(tag.get(db.getReference()));
 
 			if (uidFlag.present()) {
 				BackupConfig config(uidFlag.get().first);
-				EBackupState backupStatus = wait(config.stateEnum().getOrThrow(db));
+				EBackupState backupStatus = wait(config.stateEnum().getOrThrow(db.getReference()));
 
 				// Throw error if a backup is currently running until we support parallel backups
 				if (BackupAgentBase::isRunnable(backupStatus)) {
@@ -2313,7 +2315,7 @@ ACTOR Future<Void> runRestore(Database db,
 			throw restore_error();
 		}
 
-		origDb = Database::createDatabase(originalClusterFile, Database::API_VERSION_LATEST);
+		origDb = Database::createDatabase(originalClusterFile, ApiVersion::LATEST_VERSION);
 		Version v = wait(timeKeeperVersionFromDatetime(targetTimestamp, origDb.get()));
 		fmt::print("Timestamp '{0}' resolves to version {1}\n", targetTimestamp, v);
 		targetVersion = v;
@@ -2719,7 +2721,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 			return Void();
 		}
 
-		Database origDb = Database::createDatabase(originalClusterFile, Database::API_VERSION_LATEST);
+		Database origDb = Database::createDatabase(originalClusterFile, ApiVersion::LATEST_VERSION);
 		Version v = wait(timeKeeperVersionFromDatetime(restoreTimestamp, origDb));
 		result["restore_timestamp"] = restoreTimestamp;
 		result["restore_timestamp_resolved_version"] = v;
@@ -2883,7 +2885,7 @@ ACTOR Future<Void> modifyBackup(Database db, std::string tagName, BackupModifyOp
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			state Optional<UidAndAbortedFlagT> uidFlag = wait(tag.get(db));
+			state Optional<UidAndAbortedFlagT> uidFlag = wait(tag.get(db.getReference()));
 
 			if (!uidFlag.present()) {
 				fprintf(stderr, "No backup exists on tag '%s'\n", tagName.c_str());
@@ -3126,7 +3128,7 @@ Optional<Database> connectToCluster(std::string const& clusterFile,
 	}
 
 	try {
-		db = Database::createDatabase(ccf, -1, IsInternal::True, localities);
+		db = Database::createDatabase(ccf, ApiVersion::LATEST_VERSION, IsInternal::True, localities);
 	} catch (Error& e) {
 		if (!quiet) {
 			fprintf(stderr, "ERROR: %s\n", e.what());
@@ -4122,7 +4124,7 @@ int main(int argc, char* argv[]) {
 				}
 
 				try {
-					db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST);
+					db = Database::createDatabase(restoreClusterFileDest, ApiVersion::LATEST_VERSION);
 				} catch (Error& e) {
 					fprintf(stderr,
 					        "Restore destination cluster file '%s' invalid: %s\n",
@@ -4201,7 +4203,7 @@ int main(int argc, char* argv[]) {
 				}
 
 				try {
-					db = Database::createDatabase(restoreClusterFileDest, Database::API_VERSION_LATEST);
+					db = Database::createDatabase(restoreClusterFileDest, ApiVersion::LATEST_VERSION);
 				} catch (Error& e) {
 					fprintf(stderr,
 					        "Restore destination cluster file '%s' invalid: %s\n",

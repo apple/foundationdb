@@ -27,6 +27,8 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.apple.foundationdb.tuple.ByteArrayUtil;
+
 /**
  * The starting point for accessing FoundationDB.
  *  <br>

@@ -26,26 +26,30 @@
 #endif
 
 #include <errno.h>
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "flow/Platform.h"
 #include "flow/Platform.actor.h"
 #include "flow/Arena.h"
 
 #include "flow/StreamCipher.h"
-#include "flow/BlobCipher.h"
+#include "flow/ScopeExit.h"
 #include "flow/Trace.h"
 #include "flow/Error.h"
 
 #include "flow/Knobs.h"
 
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <cstring>
-#include <algorithm>
+#include <string>
+#include <string_view>
+#include <vector>
 #include <boost/format.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/operations.hpp>
+#include <boost/algorithm/string.hpp>
 
 #include <sys/types.h>
 #include <time.h>
@@ -53,10 +57,6 @@
 #include <fcntl.h>
 #include "flow/UnitTest.h"
 #include "flow/FaultInjection.h"
-
-#include "fdbrpc/IAsyncFile.h"
-
-#include "fdbclient/AnnotateActor.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -68,6 +68,7 @@
 #include <direct.h>
 #include <pdh.h>
 #include <pdhmsg.h>
+#include <processenv.h>
 #pragma comment(lib, "pdh.lib")
 
 // for SHGetFolderPath
@@ -100,7 +101,7 @@
 #include <ifaddrs.h>
 #include <arpa/inet.h>
 
-#include "flow/stacktrace.h"
+#include "stacktrace/stacktrace.h"
 
 #ifdef __linux__
 /* Needed for memory allocation */
@@ -151,6 +152,9 @@
 #endif
 
 #ifdef __APPLE__
+/* Needed for cross-platform 'environ' */
+#include <crt_externs.h>
+
 #include <sys/uio.h>
 #include <sys/syslimits.h>
 #include <mach/mach.h>
@@ -1735,15 +1739,10 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 			    0,
 			    returnStats.elapsed -
 			        std::min<double>(returnStats.elapsed, (nowIOMilliSecs - (*statState)->lastIOMilliSecs) / 1000.0));
-			returnStats.processDiskReadSeconds = std::max<double>(
-			    0,
-			    returnStats.elapsed - std::min<double>(returnStats.elapsed,
-			                                           (nowReadMilliSecs - (*statState)->lastReadMilliSecs) / 1000.0));
+			returnStats.processDiskReadSeconds =
+			    std::min<double>(returnStats.elapsed, (nowReadMilliSecs - (*statState)->lastReadMilliSecs) / 1000.0);
 			returnStats.processDiskWriteSeconds =
-			    std::max<double>(0,
-			                     returnStats.elapsed -
-			                         std::min<double>(returnStats.elapsed,
-			                                          (nowWriteMilliSecs - (*statState)->lastWriteMilliSecs) / 1000.0));
+			    std::min<double>(returnStats.elapsed, (nowWriteMilliSecs - (*statState)->lastWriteMilliSecs) / 1000.0);
 			returnStats.processDiskRead = (nowReads - (*statState)->lastReads);
 			returnStats.processDiskWrite = (nowWrites - (*statState)->lastWrites);
 			returnStats.processDiskWriteSectors = (nowWriteSectors - (*statState)->lastWriteSectors);
@@ -1940,6 +1939,39 @@ std::string epochsToGMTString(double epochs) {
 	timeString += format(".%03.3d +0000", (int)(1000 * modf(epochs, &integerPart)));
 
 	return timeString;
+}
+
+std::vector<std::string> getEnvironmentKnobOptions() {
+	constexpr const size_t ENVKNOB_PREFIX_LEN = sizeof(ENVIRONMENT_KNOB_OPTION_PREFIX) - 1;
+	std::vector<std::string> knobOptions;
+#if defined(_WIN32)
+	auto e = GetEnvironmentStrings();
+	if (e == nullptr)
+		return {};
+	auto cleanup = ScopeExit([e]() { FreeEnvironmentStrings(e); });
+	while (*e) {
+		auto candidate = std::string_view(e);
+		if (boost::starts_with(candidate, ENVIRONMENT_KNOB_OPTION_PREFIX))
+			knobOptions.emplace_back(candidate.substr(ENVKNOB_PREFIX_LEN));
+		e += (candidate.size() + 1);
+	}
+#else
+	char** e = nullptr;
+#ifdef __linux__
+	e = environ;
+#elif defined(__APPLE__)
+	e = *_NSGetEnviron();
+#else
+#error Port me!
+#endif
+	for (; e && *e; e++) {
+		std::string_view envOption(*e);
+		if (boost::starts_with(envOption, ENVIRONMENT_KNOB_OPTION_PREFIX)) {
+			knobOptions.emplace_back(envOption.substr(ENVKNOB_PREFIX_LEN));
+		}
+	}
+#endif
+	return knobOptions;
 }
 
 void setMemoryQuota(size_t limit) {
@@ -3216,10 +3248,10 @@ void outOfMemory() {
 }
 
 // Because the lambda used with nftw below cannot capture
-int __eraseDirectoryRecurseiveCount;
+int __eraseDirectoryRecursiveCount;
 
 int eraseDirectoryRecursive(std::string const& dir) {
-	__eraseDirectoryRecurseiveCount = 0;
+	__eraseDirectoryRecursiveCount = 0;
 #ifdef _WIN32
 	system(("rd /s /q \"" + dir + "\"").c_str());
 #elif defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
@@ -3228,7 +3260,7 @@ int eraseDirectoryRecursive(std::string const& dir) {
 	    [](const char* fpath, const struct stat* sb, int typeflag, struct FTW* ftwbuf) -> int {
 		    int r = remove(fpath);
 		    if (r == 0)
-			    ++__eraseDirectoryRecurseiveCount;
+			    ++__eraseDirectoryRecursiveCount;
 		    return r;
 	    },
 	    64,
@@ -3245,25 +3277,7 @@ int eraseDirectoryRecursive(std::string const& dir) {
 #error Port me!
 #endif
 	// INJECT_FAULT( platform_error, "eraseDirectoryRecursive" );
-	return __eraseDirectoryRecurseiveCount;
-}
-
-bool isHwCrcSupported() {
-#if defined(_WIN32)
-	int info[4];
-	__cpuid(info, 1);
-	return (info[2] & (1 << 20)) != 0;
-#elif defined(__aarch64__)
-	return true; /* force to use crc instructions */
-#elif defined(__powerpc64__)
-	return false; /* force not to use crc instructions */
-#elif defined(__unixish__)
-	uint32_t eax, ebx, ecx, edx, level = 1, count = 0;
-	__cpuid_count(level, count, eax, ebx, ecx, edx);
-	return ((ecx >> 20) & 1) != 0;
-#else
-#error Port me!
-#endif
+	return __eraseDirectoryRecursiveCount;
 }
 
 TmpFile::TmpFile() : filename("") {
@@ -3491,7 +3505,12 @@ void* loadLibrary(const char* lib_path) {
 	void* dlobj = nullptr;
 
 #if defined(__unixish__)
-	dlobj = dlopen(lib_path, RTLD_LAZY | RTLD_LOCAL);
+	dlobj = dlopen(lib_path,
+	               RTLD_LAZY | RTLD_LOCAL
+#ifdef USE_SANITIZER // Keep alive dlopen()-ed libs for symbolized XSAN backtrace
+	                   | RTLD_NODELETE
+#endif
+	);
 	if (dlobj == nullptr) {
 		TraceEvent(SevWarn, "LoadLibraryFailed").detail("Library", lib_path).detail("Error", dlerror());
 	}
@@ -3603,6 +3622,12 @@ void platformInit() {
 #endif
 }
 
+std::vector<std::function<void()>> g_crashHandlerCallbacks;
+
+void registerCrashHandlerCallback(void (*f)()) {
+	g_crashHandlerCallbacks.push_back(f);
+}
+
 // The crashHandler function is registered to handle signals before the process terminates.
 // Basic information about the crash is printed/traced, and stdout and trace events are flushed.
 void crashHandler(int sig) {
@@ -3611,11 +3636,19 @@ void crashHandler(int sig) {
 	//  but the idea is that we're about to crash anyway...
 	std::string backtrace = platform::get_backtrace();
 
-	bool error = (sig != SIGUSR2);
+	bool error = (sig != SIGUSR2 && sig != SIGTERM);
 
 	StreamCipherKey::cleanup();
 	StreamCipher::cleanup();
-	BlobCipherKeyCache::cleanup();
+
+	for (auto& f : g_crashHandlerCallbacks) {
+		f();
+	}
+
+	fprintf(error ? stderr : stdout, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
+	if (error) {
+		fprintf(stderr, "Trace: %s\n", backtrace.c_str());
+	}
 
 	fflush(stdout);
 	{
@@ -3627,8 +3660,9 @@ void crashHandler(int sig) {
 	}
 	flushTraceFileVoid();
 
-	fprintf(stderr, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
-	fprintf(stderr, "Trace: %s\n", backtrace.c_str());
+#ifdef USE_GCOV
+	__gcov_flush();
+#endif
 
 	struct sigaction sa;
 	sa.sa_handler = SIG_DFL;
@@ -3668,6 +3702,7 @@ void registerCrashHandler() {
 	sigaction(SIGSEGV, &action, nullptr);
 	sigaction(SIGBUS, &action, nullptr);
 	sigaction(SIGUSR2, &action, nullptr);
+	sigaction(SIGTERM, &action, nullptr);
 #else
 	// No crash handler for other platforms!
 #endif

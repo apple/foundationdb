@@ -55,8 +55,6 @@ static bool isAlphaNumeric(const std::string& key) {
 }
 } // namespace
 
-const KeyRangeRef TenantMapRangeImpl::submoduleRange = KeyRangeRef("tenant_map/"_sr, "tenant_map0"_sr);
-
 std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToBoundary = {
 	{ SpecialKeySpace::MODULE::TRANSACTION,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0")) },
@@ -80,7 +78,8 @@ std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToB
 	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_lineage/"), LiteralStringRef("\xff\xff/actor_lineage0")) },
 	{ SpecialKeySpace::MODULE::ACTOR_PROFILER_CONF,
 	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_profiler_conf/"),
-	              LiteralStringRef("\xff\xff/actor_profiler_conf0")) }
+	              LiteralStringRef("\xff\xff/actor_profiler_conf0")) },
+	{ SpecialKeySpace::MODULE::CLUSTERID, singleKeyRange(LiteralStringRef("\xff\xff/cluster_id")) },
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {
@@ -117,7 +116,9 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	{ "datadistribution",
 	  KeyRangeRef(LiteralStringRef("data_distribution/"), LiteralStringRef("data_distribution0"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "tenantmap", TenantMapRangeImpl::submoduleRange.withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
+	{ "tenant", KeyRangeRef("tenant/"_sr, "tenant0"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "tenantmap",
+	  KeyRangeRef("tenant_map/"_sr, "tenant_map0"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) }
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::actorLineageApiCommandToRange = {
@@ -132,7 +133,8 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::actorLineageApiComman
 std::set<std::string> SpecialKeySpace::options = { "excluded/force",
 	                                               "failed/force",
 	                                               "excluded_locality/force",
-	                                               "failed_locality/force" };
+	                                               "failed_locality/force",
+	                                               "worker_interfaces/verify" };
 
 std::set<std::string> SpecialKeySpace::tracingOptions = { kTracingTransactionIdKey, kTracingTokenKey };
 
@@ -147,12 +149,17 @@ RangeResult rywGetRange(ReadYourWritesTransaction* ryw, const KeyRangeRef& kr, c
 ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* skrImpl,
                                                  ReadYourWritesTransaction* ryw,
                                                  KeySelector* ks,
-                                                 Optional<RangeResult>* cache) {
+                                                 KeyRangeMap<Optional<RangeResult>>* cache) {
 	// should be removed before calling
 	ASSERT(!ks->orEqual);
 
 	// never being called if KeySelector is already normalized
 	ASSERT(ks->offset != 1);
+
+	// Throw error if module doesn't support tenants and we have a tenant
+	if (ryw->getTenant().present() && !skrImpl->supportsTenants()) {
+		throw illegal_tenant_access();
+	}
 
 	state Key startKey(skrImpl->getKeyRange().begin);
 	state Key endKey(skrImpl->getKeyRange().end);
@@ -233,7 +240,7 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks,
                                              KeyRangeRef boundary,
                                              int* actualOffset,
                                              RangeResult* result,
-                                             Optional<RangeResult>* cache) {
+                                             KeyRangeMap<Optional<RangeResult>>* cache) {
 	// If offset < 1, where we need to move left, iter points to the range containing at least one smaller key
 	// (It's a wasting of time to walk through the range whose begin key is same as ks->key)
 	// (rangeContainingKeyBefore itself handles the case where ks->key == Key())
@@ -336,8 +343,9 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 	state int actualBeginOffset;
 	state int actualEndOffset;
 	state KeyRangeRef moduleBoundary;
-	// used to cache result from potential first read
-	state Optional<RangeResult> cache;
+	// used to cache results from potential first async read
+	// the current implementation will read the whole range result to save in the cache
+	state KeyRangeMap<Optional<RangeResult>> cache(Optional<RangeResult>(), specialKeys.end);
 
 	if (ryw->specialKeySpaceRelaxed()) {
 		moduleBoundary = sks->range;
@@ -363,16 +371,31 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 	// Handle all corner cases like what RYW does
 	// return if range inverted
 	if (actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
-		TEST(true); // inverted range
+		CODE_PROBE(true, "inverted range");
 		return RangeResultRef(false, false);
 	}
 	// If touches begin or end, return with readToBegin and readThroughEnd flags
 	if (begin.getKey() == moduleBoundary.end || end.getKey() == moduleBoundary.begin) {
-		TEST(true); // query touches begin or end
+		CODE_PROBE(true, "query touches begin or end");
 		return result;
 	}
 	state RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::Ranges ranges =
 	    sks->getReadImpls().intersectingRanges(KeyRangeRef(begin.getKey(), end.getKey()));
+
+	// Check tenant legality separately from below iterations
+	// because it may be partially completed and returned
+	// before illegal range is checked due to the limits handler
+	if (ryw->getTenant().present()) {
+		for (auto iter : ranges) {
+			if (iter->value() == nullptr) {
+				continue;
+			}
+			if (!iter->value()->supportsTenants()) {
+				throw illegal_tenant_access();
+			}
+		}
+	}
+
 	// TODO : workaround to write this two together to make the code compact
 	// The issue here is boost::iterator_range<> doest not provide rbegin(), rend()
 	iter = reverse ? ranges.end() : ranges.begin();
@@ -384,7 +407,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
-			if (iter->value()->isAsync() && cache.present()) {
+			if (iter->value()->isAsync() && cache.rangeContaining(keyStart).value().present()) {
 				const SpecialKeyRangeAsyncImpl* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value());
 				RangeResult pairs_ = wait(ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), limits, &cache));
 				pairs = pairs_;
@@ -415,7 +438,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 			KeyRangeRef kr = iter->range();
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
-			if (iter->value()->isAsync() && cache.present()) {
+			if (iter->value()->isAsync() && cache.rangeContaining(keyStart).value().present()) {
 				const SpecialKeyRangeAsyncImpl* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value());
 				RangeResult pairs_ = wait(ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), limits, &cache));
 				pairs = pairs_;
@@ -452,7 +475,7 @@ Future<RangeResult> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw,
 	if (!limits.isValid())
 		return range_limits_invalid();
 	if (limits.isReached()) {
-		TEST(true); // read limit 0
+		CODE_PROBE(true, "read limit 0");
 		return RangeResult();
 	}
 	// make sure orEqual == false
@@ -460,7 +483,7 @@ Future<RangeResult> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw,
 	end.removeOrEqual(end.arena());
 
 	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
-		TEST(true); // range inverted
+		CODE_PROBE(true, "range inverted");
 		return RangeResult();
 	}
 
@@ -498,6 +521,9 @@ void SpecialKeySpace::set(ReadYourWritesTransaction* ryw, const KeyRef& key, con
 		    .detail("Value", value.toString());
 		throw special_keys_no_write_module_found();
 	}
+	if (!impl->supportsTenants() && ryw->getTenant().present()) {
+		throw illegal_tenant_access();
+	}
 	return impl->set(ryw, key, value);
 }
 
@@ -515,6 +541,9 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& r
 		TraceEvent(SevDebug, "SpecialKeySpaceNoWriteModuleFound").detail("Range", range);
 		throw special_keys_no_write_module_found();
 	}
+	if (!begin->supportsTenants() && ryw->getTenant().present()) {
+		throw illegal_tenant_access();
+	}
 	return begin->clear(ryw, range);
 }
 
@@ -524,6 +553,9 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	auto impl = writeImpls[key];
 	if (impl == nullptr)
 		throw special_keys_no_write_module_found();
+	if (!impl->supportsTenants() && ryw->getTenant().present()) {
+		throw illegal_tenant_access();
+	}
 	return impl->clear(ryw, key);
 }
 
@@ -611,6 +643,16 @@ ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* 
 		++iter;
 	}
 	state std::vector<SpecialKeyRangeRWImpl*>::const_iterator it;
+	// Check validity of tenant support before iterating through
+	// module ptrs and potentially getting partial commits
+	if (ryw->getTenant().present()) {
+		for (it = writeModulePtrs.begin(); it != writeModulePtrs.end(); ++it) {
+			if (!(*it)->supportsTenants()) {
+				throw illegal_tenant_access();
+			}
+		}
+	}
+
 	for (it = writeModulePtrs.begin(); it != writeModulePtrs.end(); ++it) {
 		Optional<std::string> msg = wait((*it)->commit(ryw));
 		if (msg.present()) {
@@ -628,12 +670,8 @@ Future<Void> SpecialKeySpace::commit(ReadYourWritesTransaction* ryw) {
 	return commitActor(this, ryw);
 }
 
-SKSCTestImpl::SKSCTestImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
-
-Future<RangeResult> SKSCTestImpl::getRange(ReadYourWritesTransaction* ryw,
-                                           KeyRangeRef kr,
-                                           GetRangeLimits limitsHint) const {
-	ASSERT(range.contains(kr));
+// For SKSCTestRWImpl and SKSCTestAsyncReadImpl
+Future<RangeResult> SKSCTestGetRangeBase(ReadYourWritesTransaction* ryw, KeyRangeRef kr, GetRangeLimits limitsHint) {
 	auto resultFuture = ryw->getRange(kr, CLIENT_KNOBS->TOO_MANY);
 	// all keys are written to RYW, since GRV is set, the read should happen locally
 	ASSERT(resultFuture.isReady());
@@ -643,9 +681,27 @@ Future<RangeResult> SKSCTestImpl::getRange(ReadYourWritesTransaction* ryw,
 	return rywGetRange(ryw, kr, kvs);
 }
 
-Future<Optional<std::string>> SKSCTestImpl::commit(ReadYourWritesTransaction* ryw) {
+SKSCTestRWImpl::SKSCTestRWImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<RangeResult> SKSCTestRWImpl::getRange(ReadYourWritesTransaction* ryw,
+                                             KeyRangeRef kr,
+                                             GetRangeLimits limitsHint) const {
+	ASSERT(range.contains(kr));
+	return SKSCTestGetRangeBase(ryw, kr, limitsHint);
+}
+
+Future<Optional<std::string>> SKSCTestRWImpl::commit(ReadYourWritesTransaction* ryw) {
 	ASSERT(false);
 	return Optional<std::string>();
+}
+
+SKSCTestAsyncReadImpl::SKSCTestAsyncReadImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
+
+Future<RangeResult> SKSCTestAsyncReadImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                    KeyRangeRef kr,
+                                                    GetRangeLimits limitsHint) const {
+	ASSERT(range.contains(kr));
+	return SKSCTestGetRangeBase(ryw, kr, limitsHint);
 }
 
 ReadConflictRangeImpl::ReadConflictRangeImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
@@ -678,13 +734,14 @@ Future<RangeResult> ConflictingKeysImpl::getRange(ReadYourWritesTransaction* ryw
 	if (ryw->getTransactionState()->conflictingKeys) {
 		auto krMapPtr = ryw->getTransactionState()->conflictingKeys.get();
 		auto beginIter = krMapPtr->rangeContaining(kr.begin);
-		if (beginIter->begin() != kr.begin)
-			++beginIter;
 		auto endIter = krMapPtr->rangeContaining(kr.end);
+
+		if (!kr.contains(beginIter->begin()) && beginIter != endIter)
+			++beginIter;
 		for (auto it = beginIter; it != endIter; ++it) {
 			result.push_back_deep(result.arena(), KeyValueRef(it->begin(), it->value()));
 		}
-		if (endIter->begin() != kr.end)
+		if (kr.contains(endIter->begin()))
 			result.push_back_deep(result.arena(), KeyValueRef(endIter->begin(), endIter->value()));
 	}
 	return result;
@@ -1586,7 +1643,8 @@ Future<RangeResult> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
 
 void TracingOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
 	if (ryw->getApproximateSize() > 0) {
-		ryw->setSpecialKeySpaceErrorMsg("tracing options must be set first");
+		ryw->setSpecialKeySpaceErrorMsg(
+		    ManagementAPIError::toJsonString(false, "configure trace", "tracing options must be set first"));
 		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
 		return;
 	}
@@ -1599,7 +1657,8 @@ void TracingOptionsImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, 
 		} else if (value.toString() == "false") {
 			ryw->setToken(0);
 		} else {
-			ryw->setSpecialKeySpaceErrorMsg("token must be set to true/false");
+			ryw->setSpecialKeySpaceErrorMsg(
+			    ManagementAPIError::toJsonString(false, "configure trace token", "token must be set to true/false"));
 			throw special_keys_api_failure();
 		}
 	}
@@ -1613,12 +1672,12 @@ Future<Optional<std::string>> TracingOptionsImpl::commit(ReadYourWritesTransacti
 }
 
 void TracingOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
-	ryw->setSpecialKeySpaceErrorMsg("clear range disabled");
+	ryw->setSpecialKeySpaceErrorMsg(ManagementAPIError::toJsonString(false, "clear trace", "clear range disabled"));
 	throw special_keys_api_failure();
 }
 
 void TracingOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
-	ryw->setSpecialKeySpaceErrorMsg("clear disabled");
+	ryw->setSpecialKeySpaceErrorMsg(ManagementAPIError::toJsonString(false, "clear trace", "clear disabled"));
 	throw special_keys_api_failure();
 }
 
@@ -1719,11 +1778,15 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		}
 	}
 
+	auto configDBEntry = ryw->getSpecialKeySpaceWriteMap()[LiteralStringRef("config_db").withPrefix(kr.begin)];
+
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsStart")
 	    .detail("NewConnectionString", conn.toString())
-	    .detail("Description", entry.first ? entry.second.get().toString() : "");
+	    .detail("Description", entry.first ? entry.second.get().toString() : "")
+	    .detail("ConfigDBDisabled", configDBEntry.first);
 
-	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), &conn, newName));
+	Optional<CoordinatorsResult> r =
+	    wait(changeQuorumChecker(&ryw->getTransaction(), &conn, newName, configDBEntry.first));
 
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsFinish")
 	    .detail("Result", r.present() ? static_cast<int>(r.get()) : -1); // -1 means success
@@ -2004,7 +2067,7 @@ Future<Optional<std::string>> ClientProfilingImpl::commit(ReadYourWritesTransact
 		} else {
 			try {
 				double sampleRate = boost::lexical_cast<double>(sampleRateStr);
-				Tuple rate = Tuple().appendDouble(sampleRate);
+				Tuple rate = Tuple::makeTuple(sampleRate);
 				insertions.push_back_deep(insertions.arena(), KeyValueRef(fdbClientInfoTxnSampleRate, rate.pack()));
 			} catch (boost::bad_lexical_cast& e) {
 				return Optional<std::string>(ManagementAPIError::toJsonString(
@@ -2023,7 +2086,7 @@ Future<Optional<std::string>> ClientProfilingImpl::commit(ReadYourWritesTransact
 		} else {
 			try {
 				int64_t sizeLimit = boost::lexical_cast<int64_t>(sizeLimitStr);
-				Tuple size = Tuple().append(sizeLimit);
+				Tuple size = Tuple::makeTuple(sizeLimit);
 				insertions.push_back_deep(insertions.arena(), KeyValueRef(fdbClientInfoTxnSizeLimit, size.pack()));
 			} catch (boost::bad_lexical_cast& e) {
 				return Optional<std::string>(ManagementAPIError::toJsonString(
@@ -2163,7 +2226,8 @@ ACTOR static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransac
 	state std::vector<StringRef> endValues = kr.end.removePrefix(prefix).splitAny("/"_sr);
 	// Require index (either "state" or "time") and address:port.
 	if (beginValues.size() < 2 || endValues.size() < 2) {
-		ryw->setSpecialKeySpaceErrorMsg("missing required parameters (index, host)");
+		ryw->setSpecialKeySpaceErrorMsg(
+		    ManagementAPIError::toJsonString(false, "read actor_lineage", "missing required parameters (index, host)"));
 		throw special_keys_api_failure();
 	}
 
@@ -2182,12 +2246,14 @@ ACTOR static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransac
 				parse(endValues.begin() + 1, endValues.end(), endRangeHost, timeEnd, waitStateEnd, seqEnd);
 			}
 		} else {
-			ryw->setSpecialKeySpaceErrorMsg("invalid index in actor_lineage");
+			ryw->setSpecialKeySpaceErrorMsg(
+			    ManagementAPIError::toJsonString(false, "read actor_lineage", "invalid index in actor_lineage"));
 			throw special_keys_api_failure();
 		}
 	} catch (Error& e) {
 		if (e.code() != special_keys_api_failure().code()) {
-			ryw->setSpecialKeySpaceErrorMsg("failed to parse key");
+			ryw->setSpecialKeySpaceErrorMsg(
+			    ManagementAPIError::toJsonString(false, "read actor_lineage", "failed to parse key"));
 			throw special_keys_api_failure();
 		} else {
 			throw e;
@@ -2197,7 +2263,8 @@ ACTOR static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransac
 	if (kr.begin != kr.end && host != endRangeHost) {
 		// The client doesn't know about all the hosts, so a get range covering
 		// multiple hosts has no way of knowing which IP:port combos to use.
-		ryw->setSpecialKeySpaceErrorMsg("the host must remain the same on both ends of the range");
+		ryw->setSpecialKeySpaceErrorMsg(ManagementAPIError::toJsonString(
+		    false, "read actor_lineage", "the host must remain the same on both ends of the range"));
 		throw special_keys_api_failure();
 	}
 
@@ -2731,101 +2798,142 @@ Future<Optional<std::string>> FailedLocalitiesRangeImpl::commit(ReadYourWritesTr
 	return excludeLocalityCommitActor(ryw, true);
 }
 
-ACTOR Future<RangeResult> getTenantList(ReadYourWritesTransaction* ryw, KeyRangeRef kr, GetRangeLimits limitsHint) {
-	state KeyRef managementPrefix =
-	    kr.begin.substr(0,
-	                    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin.size() +
-	                        TenantMapRangeImpl::submoduleRange.begin.size());
+// Defined in ReadYourWrites.actor.cpp
+ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
+// Defined in NativeAPI.actor.cpp
+ACTOR Future<bool> verifyInterfaceActor(Reference<FlowLock> connectLock, ClientWorkerInterface workerInterf);
 
-	kr = kr.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
-	TenantNameRef beginTenant = kr.begin.removePrefix(TenantMapRangeImpl::submoduleRange.begin);
+ACTOR static Future<RangeResult> workerInterfacesImplGetRangeActor(ReadYourWritesTransaction* ryw,
+                                                                   KeyRef prefix,
+                                                                   KeyRangeRef kr) {
+	if (!ryw->getDatabase().getPtr() || !ryw->getDatabase()->getConnectionRecord())
+		return RangeResult();
 
-	TenantNameRef endTenant = kr.end;
-	if (endTenant.startsWith(TenantMapRangeImpl::submoduleRange.begin)) {
-		endTenant = endTenant.removePrefix(TenantMapRangeImpl::submoduleRange.begin);
-	} else {
-		endTenant = "\xff"_sr;
-	}
-
-	std::map<TenantName, TenantMapEntry> tenants =
-	    wait(ManagementAPI::listTenantsTransaction(&ryw->getTransaction(), beginTenant, endTenant, limitsHint.rows));
-
-	RangeResult results;
-	for (auto tenant : tenants) {
-		json_spirit::mObject tenantEntry;
-		tenantEntry["id"] = tenant.second.id;
-		tenantEntry["prefix"] = tenant.second.prefix.toString();
-		std::string tenantEntryString = json_spirit::write_string(json_spirit::mValue(tenantEntry));
-		ValueRef tenantEntryBytes(results.arena(), tenantEntryString);
-		results.push_back(results.arena(),
-		                  KeyValueRef(tenant.first.withPrefix(managementPrefix, results.arena()), tenantEntryBytes));
-	}
-
-	return results;
-}
-
-TenantMapRangeImpl::TenantMapRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
-
-Future<RangeResult> TenantMapRangeImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                 KeyRangeRef kr,
-                                                 GetRangeLimits limitsHint) const {
-	return getTenantList(ryw, kr, limitsHint);
-}
-
-ACTOR Future<Void> deleteTenantRange(ReadYourWritesTransaction* ryw, TenantName beginTenant, TenantName endTenant) {
-	std::map<TenantName, TenantMapEntry> tenants = wait(
-	    ManagementAPI::listTenantsTransaction(&ryw->getTransaction(), beginTenant, endTenant, CLIENT_KNOBS->TOO_MANY));
-
-	if (tenants.size() == CLIENT_KNOBS->TOO_MANY) {
-		TraceEvent(SevWarn, "DeleteTenantRangeTooLange")
-		    .detail("BeginTenant", beginTenant)
-		    .detail("EndTenant", endTenant);
-		ryw->setSpecialKeySpaceErrorMsg("too many tenants to range delete");
-		throw special_keys_api_failure();
-	}
-
-	std::vector<Future<Void>> deleteFutures;
-	for (auto tenant : tenants) {
-		deleteFutures.push_back(ManagementAPI::deleteTenantTransaction(&ryw->getTransaction(), tenant.first));
-	}
-
-	wait(waitForAll(deleteFutures));
-	return Void();
-}
-
-Future<Optional<std::string>> TenantMapRangeImpl::commit(ReadYourWritesTransaction* ryw) {
-	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
-	std::vector<Future<Void>> tenantManagementFutures;
-	for (auto range : ranges) {
-		if (!range.value().first) {
-			continue;
-		}
-
-		TenantNameRef tenantName =
-		    range.begin()
-		        .removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
-		        .removePrefix(TenantMapRangeImpl::submoduleRange.begin);
-
-		if (range.value().second.present()) {
-			tenantManagementFutures.push_back(
-			    success(ManagementAPI::createTenantTransaction(&ryw->getTransaction(), tenantName)));
-		} else {
-			// For a single key clear, just issue the delete
-			if (KeyRangeRef(range.begin(), range.end()).singleKeyRange()) {
-				tenantManagementFutures.push_back(
-				    ManagementAPI::deleteTenantTransaction(&ryw->getTransaction(), tenantName));
+	state RangeResult interfs = wait(getWorkerInterfaces(ryw->getDatabase()->getConnectionRecord()));
+	// for options' special keys, the boolean flag indicates if it's a SET operation
+	auto [verify, _] = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
+	    "worker_interfaces", "verify")];
+	state RangeResult result;
+	if (verify) {
+		// if verify option is set, we try to talk to every worker and only returns those we can talk to
+		Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+		state std::vector<Future<bool>> verifyInterfs;
+		for (const auto& [k_, value] : interfs) {
+			auto k = k_.withPrefix(prefix);
+			if (kr.contains(k)) {
+				ClientWorkerInterface workerInterf =
+				    BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion());
+				verifyInterfs.push_back(verifyInterfaceActor(connectLock, workerInterf));
 			} else {
-				TenantNameRef endTenant = range.end().removePrefix(
-				    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
-				if (endTenant.startsWith(submoduleRange.begin)) {
-					endTenant = endTenant.removePrefix(submoduleRange.begin);
-				} else {
-					endTenant = "\xff"_sr;
-				}
-				tenantManagementFutures.push_back(deleteTenantRange(ryw, tenantName, endTenant));
+				verifyInterfs.push_back(false);
+			}
+		}
+		wait(waitForAll(verifyInterfs));
+		// state int index;
+		for (int index = 0; index < interfs.size(); index++) {
+			if (verifyInterfs[index].get()) {
+				// if we can establish a connection, add the kv pair into the result
+				result.push_back_deep(result.arena(),
+				                      KeyValueRef(interfs[index].key.withPrefix(prefix), interfs[index].value));
+			}
+		}
+	} else {
+		for (const auto& [k_, v] : interfs) {
+			auto k = k_.withPrefix(prefix);
+			if (kr.contains(k))
+				result.push_back_deep(result.arena(), KeyValueRef(k, v));
+		}
+	}
+	std::sort(result.begin(), result.end(), KeyValueRef::OrderByKey{});
+	return result;
+}
+
+WorkerInterfacesSpecialKeyImpl::WorkerInterfacesSpecialKeyImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
+
+Future<RangeResult> WorkerInterfacesSpecialKeyImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                             KeyRangeRef kr,
+                                                             GetRangeLimits limitsHint) const {
+	return workerInterfacesImplGetRangeActor(ryw, getKeyRange().begin, kr);
+}
+
+ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
+                                               KeySelector begin,
+                                               KeySelector end,
+                                               GetRangeLimits limits,
+                                               Reverse reverse,
+                                               RangeResult result) {
+	if (!result.size()) {
+		RangeResult testResult = wait(ryw->getRange(begin, end, limits, Snapshot::True, reverse));
+		ASSERT(testResult == result);
+		return Void();
+	}
+
+	if (reverse) {
+		ASSERT(std::is_sorted(result.begin(), result.end(), KeyValueRef::OrderByKeyBack{}));
+	} else {
+		ASSERT(std::is_sorted(result.begin(), result.end(), KeyValueRef::OrderByKey{}));
+	}
+
+	// Generate a keyrange where we can determine the expected result based solely on the previous readrange, and whose
+	// boundaries may or may not be keys in result.
+	std::vector<Key> candidateKeys;
+	if (reverse) {
+		for (int i = result.size() - 1; i >= 0; --i) {
+			candidateKeys.emplace_back(result[i].key);
+			if (i - 1 >= 0) {
+				candidateKeys.emplace_back(keyBetween(KeyRangeRef(result[i].key, result[i - 1].key)));
+			}
+		}
+	} else {
+		for (int i = 0; i < result.size(); ++i) {
+			candidateKeys.emplace_back(result[i].key);
+			if (i + 1 < result.size()) {
+				candidateKeys.emplace_back(keyBetween(KeyRangeRef(result[i].key, result[i + 1].key)));
 			}
 		}
 	}
+	std::sort(candidateKeys.begin(), candidateKeys.end());
+	int originalSize = candidateKeys.size();
+	// Add more candidate keys so that we might read a range between two adjacent result keys.
+	for (int i = 0; i < originalSize - 1; ++i) {
+		candidateKeys.emplace_back(keyBetween(KeyRangeRef(candidateKeys[i], candidateKeys[i + 1])));
+	}
+	std::vector<Key> keys;
+	keys = { deterministicRandom()->randomChoice(candidateKeys), deterministicRandom()->randomChoice(candidateKeys) };
+	std::sort(keys.begin(), keys.end());
+	state KeySelector testBegin = firstGreaterOrEqual(keys[0]);
+	state KeySelector testEnd = firstGreaterOrEqual(keys[1]);
 
-	return tag(waitForAll(tenantManagementFutures), Optional<std::string>());
+	// Generate expected result. Linear time is ok here since we're in simulation, and there's a benefit to keeping this
+	// simple (as we're using it as an test oracle)
+	state RangeResult expectedResult;
+	// The reverse parameter should be the same as for the original read, so if
+	// reverse is true then the results are _already_ in reverse order.
+	for (const auto& kr : result) {
+		if (kr.key >= keys[0] && kr.key < keys[1]) {
+			expectedResult.push_back(expectedResult.arena(), kr);
+		}
+	}
+
+	// Test
+	RangeResult testResult = wait(ryw->getRange(testBegin, testEnd, limits, Snapshot::True, reverse));
+	if (testResult != expectedResult) {
+		fmt::print("Reverse: {}\n", reverse);
+		fmt::print("Original range: [{}, {})\n", begin.toString(), end.toString());
+		fmt::print("Original result:\n");
+		for (const auto& kr : result) {
+			fmt::print("	{} -> {}\n", kr.key.printable(), kr.value.printable());
+		}
+		fmt::print("Test range: [{}, {})\n", testBegin.getKey().printable(), testEnd.getKey().printable());
+		fmt::print("Expected:\n");
+		for (const auto& kr : expectedResult) {
+			fmt::print("	{} -> {}\n", kr.key.printable(), kr.value.printable());
+		}
+		fmt::print("Got:\n");
+		for (const auto& kr : testResult) {
+			fmt::print("	{} -> {}\n", kr.key.printable(), kr.value.printable());
+		}
+		ASSERT(testResult == expectedResult);
+	}
+	return Void();
 }

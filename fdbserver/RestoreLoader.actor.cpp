@@ -424,6 +424,9 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			ArenaReader rd(buf.arena(), StringRef(message, msgSize), AssumeVersion(g_network->protocolVersion()));
 			MutationRef mutation;
 			rd >> mutation;
+			if (mutation.isEncrypted()) {
+				throw encrypt_unsupported();
+			}
 
 			// Skip mutation whose commitVesion < range kv's version
 			if (logMutationTooOld(pRangeVersions, mutation, msgVersion.version)) {

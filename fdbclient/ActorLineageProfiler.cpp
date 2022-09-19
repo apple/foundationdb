@@ -20,7 +20,7 @@
 
 #include "flow/flow.h"
 #include "flow/singleton.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/IAsyncFile.h"
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/NameLineage.h"
 #include <msgpack.hpp>

@@ -21,7 +21,7 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Platform.h"
 #include "fdbclient/ThreadSafeTransaction.h"
-#include "bindings/c/foundationdb/ClientWorkload.h"
+#include "foundationdb/ClientWorkload.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -38,12 +38,10 @@ struct FDBPromiseImpl : FDBPromise {
 		if (g_network->isOnMainThread()) {
 			impl.send(*reinterpret_cast<T*>(value));
 		} else {
-			onMainThreadVoid(
-			    [impl = impl, val = *reinterpret_cast<T*>(value)]() -> Future<Void> {
-				    impl.send(val);
-				    return Void();
-			    },
-			    nullptr);
+			onMainThreadVoid([impl = impl, val = *reinterpret_cast<T*>(value)]() -> Future<Void> {
+				impl.send(val);
+				return Void();
+			});
 		}
 	}
 };
@@ -93,13 +91,11 @@ struct FDBLoggerImpl : FDBLogger {
 			traceFun();
 			flushTraceFileVoid();
 		} else {
-			onMainThreadVoid(
-			    [traceFun]() -> Future<Void> {
-				    traceFun();
-				    flushTraceFileVoid();
-				    return Void();
-			    },
-			    nullptr);
+			onMainThreadVoid([traceFun]() -> Future<Void> {
+				traceFun();
+				flushTraceFileVoid();
+				return Void();
+			});
 		}
 	}
 };
@@ -246,14 +242,14 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 	}
 	uint64_t getProcessID() const override {
 		if (g_network->isSimulated()) {
-			return reinterpret_cast<uint64_t>(g_simulator.getCurrentProcess());
+			return reinterpret_cast<uint64_t>(g_simulator->getCurrentProcess());
 		} else {
 			return 0ul;
 		}
 	}
 	void setProcessID(uint64_t processID) override {
 		if (g_network->isSimulated()) {
-			g_simulator.currentProcess = reinterpret_cast<ISimulator::ProcessInfo*>(processID);
+			g_simulator->currentProcess = reinterpret_cast<ISimulator::ProcessInfo*>(processID);
 		}
 	}
 	double now() const override { return g_network->now(); }

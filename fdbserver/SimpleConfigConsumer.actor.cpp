@@ -109,7 +109,7 @@ class SimpleConfigConsumerImpl {
 			} catch (Error& e) {
 				++self->failedChangeRequest;
 				if (e.code() == error_code_version_already_compacted) {
-					TEST(true); // SimpleConfigConsumer get version_already_compacted error
+					CODE_PROBE(true, "SimpleConfigConsumer get version_already_compacted error");
 					wait(getSnapshotAndChanges(self, broadcaster));
 				} else {
 					throw e;
@@ -145,7 +145,8 @@ class SimpleConfigConsumerImpl {
 		                                     reply.changes,
 		                                     committedVersion,
 		                                     reply.annotations,
-		                                     { self->cfi });
+		                                     { self->cfi },
+		                                     committedVersion);
 		return Void();
 	}
 
@@ -185,6 +186,11 @@ SimpleConfigConsumer::SimpleConfigConsumer(ServerCoordinators const& coordinator
                                            double pollingInterval,
                                            Optional<double> compactionInterval)
   : impl(PImpl<SimpleConfigConsumerImpl>::create(coordinators, pollingInterval, compactionInterval)) {}
+
+Future<Void> SimpleConfigConsumer::readSnapshot(ConfigBroadcaster& broadcaster) {
+	ASSERT(false);
+	return Void();
+}
 
 Future<Void> SimpleConfigConsumer::consume(ConfigBroadcaster& broadcaster) {
 	return impl->consume(broadcaster);

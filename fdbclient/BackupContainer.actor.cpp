@@ -22,7 +22,7 @@
 #include <ostream>
 
 // FIXME: Trim this down
-#include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fmt/format.h"
 #include "flow/Platform.actor.h"
 #include "fdbclient/AsyncTaskThread.h"
 #include "fdbclient/BackupContainer.h"
@@ -37,7 +37,9 @@
 #include "fdbrpc/simulator.h"
 #include "flow/Platform.h"
 #include "fdbclient/AsyncFileS3BlobStore.actor.h"
+#ifdef BUILD_AZURE_BACKUP
 #include "fdbclient/BackupContainerAzureBlobStore.h"
+#endif
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
 #include "fdbclient/BackupContainerS3BlobStore.h"
@@ -286,11 +288,46 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 #ifdef BUILD_AZURE_BACKUP
 		else if (u.startsWith("azure://"_sr)) {
 			u.eat("azure://"_sr);
-			auto accountName = u.eat("@"_sr).toString();
-			auto endpoint = u.eat("/"_sr).toString();
-			auto containerName = u.eat("/"_sr).toString();
-			r = makeReference<BackupContainerAzureBlobStore>(
-			    endpoint, accountName, containerName, encryptionKeyFileName);
+			auto address = u.eat("/"_sr);
+			if (address.endsWith(std::string(azure::storage_lite::constants::default_endpoint_suffix))) {
+				CODE_PROBE(true, "Azure backup url with standard azure storage account endpoint");
+				// <account>.<service>.core.windows.net/<resource_path>
+				auto endPoint = address.toString();
+				auto accountName = address.eat("."_sr).toString();
+				auto containerName = u.eat("/"_sr).toString();
+				r = makeReference<BackupContainerAzureBlobStore>(
+				    endPoint, accountName, containerName, encryptionKeyFileName);
+			} else {
+				// resolve the network address if necessary
+				std::string endpoint(address.toString());
+				Optional<NetworkAddress> parsedAddress = NetworkAddress::parseOptional(endpoint);
+				if (!parsedAddress.present()) {
+					try {
+						auto hostname = Hostname::parse(endpoint);
+						auto resolvedAddress = hostname.resolveBlocking();
+						if (resolvedAddress.present()) {
+							CODE_PROBE(true, "Azure backup url with hostname in the endpoint");
+							parsedAddress = resolvedAddress.get();
+						}
+					} catch (Error& e) {
+						TraceEvent(SevError, "InvalidAzureBackupUrl").error(e).detail("Endpoint", endpoint);
+						throw backup_invalid_url();
+					}
+				}
+				if (!parsedAddress.present()) {
+					TraceEvent(SevError, "InvalidAzureBackupUrl").detail("Endpoint", endpoint);
+					throw backup_invalid_url();
+				}
+				auto accountName = u.eat("/"_sr).toString();
+				// Avoid including ":tls" and "(fromHostname)"
+				// note: the endpoint needs to contain the account name
+				// so either "<account_name>.blob.core.windows.net" or "<ip>:<port>/<account_name>"
+				endpoint =
+				    fmt::format("{}/{}", formatIpPort(parsedAddress.get().ip, parsedAddress.get().port), accountName);
+				auto containerName = u.eat("/"_sr).toString();
+				r = makeReference<BackupContainerAzureBlobStore>(
+				    endpoint, accountName, containerName, encryptionKeyFileName);
+			}
 		}
 #endif
 		else {
@@ -391,21 +428,21 @@ ACTOR Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Databa
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			state std::vector<std::pair<int64_t, Version>> results =
+			state KeyBackedRangeResult<std::pair<int64_t, Version>> rangeResult =
 			    wait(versionMap.getRange(tr, 0, time, 1, Snapshot::False, Reverse::True));
-			if (results.size() != 1) {
+			if (rangeResult.results.size() != 1) {
 				// No key less than time was found in the database
 				// Look for a key >= time.
-				wait(store(results, versionMap.getRange(tr, time, std::numeric_limits<int64_t>::max(), 1)));
+				wait(store(rangeResult, versionMap.getRange(tr, time, std::numeric_limits<int64_t>::max(), 1)));
 
-				if (results.size() != 1) {
+				if (rangeResult.results.size() != 1) {
 					fprintf(stderr, "ERROR: Unable to calculate a version for given date/time.\n");
 					throw backup_error();
 				}
 			}
 
 			// Adjust version found by the delta between time and the time found and min with 0.
-			auto& result = results[0];
+			auto& result = rangeResult.results[0];
 			return std::max<Version>(0, result.second + (time - result.first) * CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 
 		} catch (Error& e) {
@@ -430,21 +467,21 @@ ACTOR Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version v, Reference
 		mid = (min + max + 1) / 2; // ceiling
 
 		// Find the highest time < mid
-		state std::vector<std::pair<int64_t, Version>> results =
+		state KeyBackedRangeResult<std::pair<int64_t, Version>> rangeResult =
 		    wait(versionMap.getRange(tr, min, mid, 1, Snapshot::False, Reverse::True));
 
-		if (results.size() != 1) {
+		if (rangeResult.results.size() != 1) {
 			if (mid == min) {
 				// There aren't any records having a version < v, so just look for any record having a time < now
 				// and base a result on it
-				wait(store(results, versionMap.getRange(tr, 0, (int64_t)now(), 1)));
+				wait(store(rangeResult, versionMap.getRange(tr, 0, (int64_t)now(), 1)));
 
-				if (results.size() != 1) {
+				if (rangeResult.results.size() != 1) {
 					// There aren't any timekeeper records to base a result on so return nothing
 					return Optional<int64_t>();
 				}
 
-				found = results[0];
+				found = rangeResult.results[0];
 				break;
 			}
 
@@ -452,7 +489,7 @@ ACTOR Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version v, Reference
 			continue;
 		}
 
-		found = results[0];
+		found = rangeResult.results[0];
 
 		if (v < found.second) {
 			max = found.first;

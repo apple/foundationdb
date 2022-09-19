@@ -19,7 +19,7 @@
  */
 
 #include "fdbrpc/Locality.h"
-#include "fdbserver/EncryptKeyProxyInterface.h"
+#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -329,7 +329,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		TEST(true); // Testing
+		CODE_PROBE(true, "Testing");
 		if (!enableTest) {
 			return Void();
 		}

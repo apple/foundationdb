@@ -25,7 +25,7 @@ https://apple.github.io/foundationdb/api-python.html"""
 
 from fdb import impl as _impl
 
-_tenant_map_prefix = b'\xff\xff/management/tenant_map/'
+_tenant_map_prefix = b'\xff\xff/management/tenant/map/'
 
 # If the existence_check_marker is an empty list, then check whether the tenant exists. 
 # After the check, append an item to the existence_check_marker list so that subsequent
@@ -103,7 +103,7 @@ class FDBTenantList(object):
 # JSON strings of the tenant metadata
 @_impl.transactional
 def _list_tenants_impl(tr, begin, end, limit):
-    tr.options.set_read_system_keys()
+    tr.options.set_raw_access()
     begin_key = b'%s%s' % (_tenant_map_prefix, begin)
     end_key = b'%s%s' % (_tenant_map_prefix, end)
 

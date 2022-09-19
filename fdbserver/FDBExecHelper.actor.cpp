@@ -27,7 +27,7 @@
 #include "fdbrpc/FlowProcess.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/WellKnownEndpoints.h"
+#include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbclient/versions.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/FDBExecHelper.actor.h"
@@ -108,7 +108,7 @@ ACTOR void destoryChildProcess(Future<Void> parentSSClosed, ISimulator::ProcessI
 	wait(parentSSClosed);
 	TraceEvent(SevDebug, message.c_str()).log();
 	// This one is root cause for most failures, make sure it's okay to destory
-	g_pSimulator->destroyProcess(childInfo);
+	g_simulator->destroyProcess(childInfo);
 	// Explicitly reset the connection with the child process in case re-spawn very quickly
 	FlowTransport::transport().resetConnection(childInfo->address);
 }
@@ -118,7 +118,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
                                  bool isSync,
                                  double maxSimDelayTime,
                                  IClosable* parent) {
-	state ISimulator::ProcessInfo* self = g_pSimulator->getCurrentProcess();
+	state ISimulator::ProcessInfo* self = g_simulator->getCurrentProcess();
 	state ISimulator::ProcessInfo* child;
 
 	state std::string role;
@@ -160,7 +160,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 		}
 	}
 	state int result = 0;
-	child = g_pSimulator->newProcess(
+	child = g_simulator->newProcess(
 	    "remote flow process",
 	    self->address.ip,
 	    0,
@@ -171,7 +171,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 	    self->dataFolder.c_str(),
 	    self->coordinationFolder.c_str(), // do we need to customize this coordination folder path?
 	    self->protocolVersion);
-	wait(g_pSimulator->onProcess(child));
+	wait(g_simulator->onProcess(child));
 	state Future<ISimulator::KillType> onShutdown = child->onShutdown();
 	state Future<ISimulator::KillType> parentShutdown = self->onShutdown();
 	state Future<Void> flowProcessF;
@@ -199,7 +199,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 			choose {
 				when(wait(flowProcessF)) {
 					TraceEvent(SevDebug, "ChildProcessKilled").log();
-					wait(g_pSimulator->onProcess(self));
+					wait(g_simulator->onProcess(self));
 					TraceEvent(SevDebug, "BackOnParentProcess").detail("Result", std::to_string(result));
 					destoryChildProcess(parentSSClosed, child, "StorageServerReceivedClosedMessage");
 				}
@@ -426,14 +426,12 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::stri
 	} else {
 		// copy the files
 		state std::string folderFrom = folder + "/.";
-		state std::string folderTo = folder + "-snap-" + uidStr.toString();
-		double maxSimDelayTime = 10.0;
-		folderTo = folder + "-snap-" + uidStr.toString() + "-" + role;
+		state std::string folderTo = folder + "-snap-" + uidStr.toString() + "-" + role;
 		std::vector<std::string> paramList;
 		std::string mkdirBin = "/bin/mkdir";
 		paramList.push_back(mkdirBin);
 		paramList.push_back(folderTo);
-		cmdErr = spawnProcess(mkdirBin, paramList, maxWaitTime, false /*isSync*/, maxSimDelayTime);
+		cmdErr = spawnProcess(mkdirBin, paramList, maxWaitTime, false /*isSync*/, 10.0);
 		wait(success(cmdErr));
 		err = cmdErr.get();
 		if (err == 0) {

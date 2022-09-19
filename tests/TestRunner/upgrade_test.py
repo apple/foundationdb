@@ -4,93 +4,25 @@ from argparse import ArgumentParser, RawDescriptionHelpFormatter
 import glob
 import os
 from pathlib import Path
-import platform
 import random
 import shutil
-import stat
 import subprocess
 import sys
 from threading import Thread, Event
 import traceback
 import time
-from urllib import request
-import hashlib
-
+from binary_download import FdbBinaryDownloader, SUPPORTED_VERSIONS, CURRENT_VERSION, FUTURE_VERSION
 from local_cluster import LocalCluster, random_secret_string
 
-SUPPORTED_PLATFORMS = ["x86_64"]
-SUPPORTED_VERSIONS = [
-    "7.2.0",
-    "7.1.5",
-    "7.1.4",
-    "7.1.3",
-    "7.1.2",
-    "7.1.1",
-    "7.1.0",
-    "7.0.0",
-    "6.3.24",
-    "6.3.23",
-    "6.3.22",
-    "6.3.18",
-    "6.3.17",
-    "6.3.16",
-    "6.3.15",
-    "6.3.13",
-    "6.3.12",
-    "6.3.9",
-    "6.2.30",
-    "6.2.29",
-    "6.2.28",
-    "6.2.27",
-    "6.2.26",
-    "6.2.25",
-    "6.2.24",
-    "6.2.23",
-    "6.2.22",
-    "6.2.21",
-    "6.2.20",
-    "6.2.19",
-    "6.2.18",
-    "6.2.17",
-    "6.2.16",
-    "6.2.15",
-    "6.2.10",
-    "6.1.13",
-    "6.1.12",
-    "6.1.11",
-    "6.1.10",
-    "6.0.18",
-    "6.0.17",
-    "6.0.16",
-    "6.0.15",
-    "6.0.14",
-    "5.2.8",
-    "5.2.7",
-    "5.1.7",
-    "5.1.6",
-]
+TENANT_API_VERSION = 720
+
 CLUSTER_ACTIONS = ["wiggle"]
-FDB_DOWNLOAD_ROOT = "https://github.com/apple/foundationdb/releases/download/"
-LOCAL_OLD_BINARY_REPO = "/opt/foundationdb/old/"
-CURRENT_VERSION = "7.2.0"
 HEALTH_CHECK_TIMEOUT_SEC = 5
 PROGRESS_CHECK_TIMEOUT_SEC = 30
 TESTER_STATS_INTERVAL_SEC = 5
 TRANSACTION_RETRY_LIMIT = 100
-MAX_DOWNLOAD_ATTEMPTS = 5
 RUN_WITH_GDB = False
-
-
-def make_executable_path(path):
-    st = os.stat(path)
-    os.chmod(path, st.st_mode | stat.S_IEXEC)
-
-
-def remove_file_no_fail(filename):
-    try:
-        os.remove(filename)
-    except OSError:
-        pass
+CLEANUP_ON_EXIT = True
 
 
 def version_from_str(ver_str):
@@ -114,68 +46,44 @@ def random_sleep(min_sec, max_sec):
     time.sleep(time_sec)
 
 
-def compute_sha256(filename):
-    hash_function = hashlib.sha256()
-    with open(filename, "rb") as f:
-        while True:
-            data = f.read(128 * 1024)
-            if not data:
-                break
-            hash_function.update(data)
-
-    return hash_function.hexdigest()
-
-
-def read_to_str(filename):
-    with open(filename, "r") as f:
-        return f.read()
-
-
 class UpgradeTest:
-    def __init__(
-        self,
-        args
-    ):
+    def __init__(self, args):
         self.build_dir = Path(args.build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(args.build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(args.build_dir)
+        self.tester_bin = self.build_dir.joinpath("bin", "fdb_c_api_tester")
+        assert self.tester_bin.exists(), "{} does not exist".format(self.tester_bin)
         self.upgrade_path = args.upgrade_path
         self.used_versions = set(self.upgrade_path).difference(set(CLUSTER_ACTIONS))
         for version in self.used_versions:
             assert version in SUPPORTED_VERSIONS, "Unsupported version or cluster action {}".format(version)
-        self.platform = platform.machine()
-        assert self.platform in SUPPORTED_PLATFORMS, "Unsupported platform {}".format(
-            self.platform
-        )
         self.tmp_dir = self.build_dir.joinpath("tmp", random_secret_string(16))
         self.tmp_dir.mkdir(parents=True)
-        self.download_dir = self.build_dir.joinpath("tmp", "old_binaries")
-        self.local_binary_repo = Path(LOCAL_OLD_BINARY_REPO)
-        if not self.local_binary_repo.exists():
-            self.local_binary_repo = None
+        self.downloader = FdbBinaryDownloader(args.build_dir)
         self.download_old_binaries()
         self.create_external_lib_dir()
+        self.testing_future_version = FUTURE_VERSION in self.upgrade_path
+        self.future_version_client_lib_path = (
+            self.downloader.lib_path(FUTURE_VERSION) if self.testing_future_version else None
+        )
         init_version = self.upgrade_path[0]
         self.cluster = LocalCluster(
             self.tmp_dir,
-            self.binary_path(init_version, "fdbserver"),
-            self.binary_path(init_version, "fdbmonitor"),
-            self.binary_path(init_version, "fdbcli"),
+            self.downloader.binary_path(init_version, "fdbserver"),
+            self.downloader.binary_path(init_version, "fdbmonitor"),
+            self.downloader.binary_path(init_version, "fdbcli"),
             args.process_number,
             create_config=False,
-            redundancy=args.redundancy
+            redundancy=args.redundancy,
+            blob_granules_enabled=args.blob_granules_enabled,
         )
         self.cluster.create_cluster_file()
         self.configure_version(init_version)
         self.log = self.cluster.log
         self.etc = self.cluster.etc
         self.data = self.cluster.data
-        self.input_pipe_path = self.tmp_dir.joinpath(
-            "input.{}".format(random_secret_string(8))
-        )
-        self.output_pipe_path = self.tmp_dir.joinpath(
-            "output.{}".format(random_secret_string(8))
-        )
+        self.input_pipe_path = self.tmp_dir.joinpath("input.{}".format(random_secret_string(8)))
+        self.output_pipe_path = self.tmp_dir.joinpath("output.{}".format(random_secret_string(8)))
         os.mkfifo(self.input_pipe_path)
         os.mkfifo(self.output_pipe_path)
         self.progress_event = Event()
@@ -183,116 +91,13 @@ class UpgradeTest:
         self.tester_retcode = None
         self.tester_proc = None
         self.output_pipe = None
-        self.tester_bin = None
         self.ctrl_pipe = None
-
-    # Check if the binaries for the given version are available in the local old binaries repository
-    def version_in_local_repo(self, version):
-        return (self.local_binary_repo is not None) and (self.local_binary_repo.joinpath(version).exists())
-
-    def binary_path(self, version, bin_name):
-        if version == CURRENT_VERSION:
-            return self.build_dir.joinpath("bin", bin_name)
-        elif self.version_in_local_repo(version):
-            return self.local_binary_repo.joinpath(version, "bin", "{}-{}".format(bin_name, version))
-        else:
-            return self.download_dir.joinpath(version, bin_name)
-
-    def lib_dir(self, version):
-        if version == CURRENT_VERSION:
-            return self.build_dir.joinpath("lib")
-        else:
-            return self.download_dir.joinpath(version)
-
-    # Download an old binary of a given version from a remote repository
-    def download_old_binary(
-        self, version, target_bin_name, remote_bin_name, make_executable
-    ):
-        local_file = self.download_dir.joinpath(version, target_bin_name)
-        if local_file.exists():
-            return
-
-        # Download to a temporary file and then replace the target file atomically
-        # to avoid consistency errors in case of multiple tests are downloading the
-        # same file in parallel
-        local_file_tmp = Path("{}.{}".format(str(local_file), random_secret_string(8)))
-        self.download_dir.joinpath(version).mkdir(parents=True, exist_ok=True)
-        remote_file = "{}{}/{}".format(FDB_DOWNLOAD_ROOT, version, remote_bin_name)
-        remote_sha256 = "{}.sha256".format(remote_file)
-        local_sha256 = Path("{}.sha256".format(local_file_tmp))
-
-        for attempt_cnt in range(MAX_DOWNLOAD_ATTEMPTS + 1):
-            if attempt_cnt == MAX_DOWNLOAD_ATTEMPTS:
-                assert False, "Failed to download {} after {} attempts".format(
-                    local_file_tmp, MAX_DOWNLOAD_ATTEMPTS
-                )
-            try:
-                print("Downloading '{}' to '{}'...".format(remote_file, local_file_tmp))
-                request.urlretrieve(remote_file, local_file_tmp)
-                print("Downloading '{}' to '{}'...".format(remote_sha256, local_sha256))
-                request.urlretrieve(remote_sha256, local_sha256)
-                print("Download complete")
-            except Exception as e:
-                print("Retrying on error:", e)
-                continue
-
-            assert local_file_tmp.exists(), "{} does not exist".format(local_file_tmp)
-            assert local_sha256.exists(), "{} does not exist".format(local_sha256)
-            expected_checksum = read_to_str(local_sha256)
-            actual_checkum = compute_sha256(local_file_tmp)
-            if expected_checksum == actual_checkum:
-                print("Checksum OK")
-                break
-            print(
-                "Checksum mismatch. Expected: {} Actual: {}".format(
-                    expected_checksum, actual_checkum
-                )
-            )
-
-        os.rename(local_file_tmp, local_file)
-        os.remove(local_sha256)
-
-        if make_executable:
-            make_executable_path(local_file)
-
-    # Copy a client library file from the local old binaries repository
-    # The file needs to be renamed to libfdb_c.so, because it is loaded with this name by fdbcli
-    def copy_clientlib_from_local_repo(self, version):
-        dest_lib_file = self.download_dir.joinpath(version, "libfdb_c.so")
-        if dest_lib_file.exists():
-            return
-        # Avoid race conditions in case of parallel test execution by first copying to a temporary file
-        # and then renaming it atomically
-        dest_file_tmp = Path("{}.{}".format(str(dest_lib_file), random_secret_string(8)))
-        src_lib_file = self.local_binary_repo.joinpath(version, "lib", "libfdb_c-{}.so".format(version))
-        assert src_lib_file.exists(), "Missing file {} in the local old binaries repository".format(src_lib_file)
-        self.download_dir.joinpath(version).mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src_lib_file, dest_file_tmp)
-        os.rename(dest_file_tmp, dest_lib_file)
-        assert dest_lib_file.exists(), "{} does not exist".format(dest_lib_file)
+        self.determine_api_version()
 
     # Download all old binaries required for testing the specified upgrade path
     def download_old_binaries(self):
         for version in self.used_versions:
-            if version == CURRENT_VERSION:
-                continue
-
-            if self.version_in_local_repo(version):
-                self.copy_clientlib_from_local_repo(version)
-                continue
-
-            self.download_old_binary(
-                version, "fdbserver", "fdbserver.{}".format(self.platform), True
-            )
-            self.download_old_binary(
-                version, "fdbmonitor", "fdbmonitor.{}".format(self.platform), True
-            )
-            self.download_old_binary(
-                version, "fdbcli", "fdbcli.{}".format(self.platform), True
-            )
-            self.download_old_binary(
-                version, "libfdb_c.so", "libfdb_c.{}.so".format(self.platform), False
-            )
+            self.downloader.download_old_binaries(version)
 
     # Create a directory for external client libraries for MVC and fill it
     # with the libraries necessary for the specified upgrade path
@@ -300,11 +105,11 @@ class UpgradeTest:
         self.external_lib_dir = self.tmp_dir.joinpath("client_libs")
         self.external_lib_dir.mkdir(parents=True)
         for version in self.used_versions:
-            src_file_path = self.lib_dir(version).joinpath("libfdb_c.so")
+            if version == FUTURE_VERSION:
+                continue
+            src_file_path = self.downloader.lib_path(version)
             assert src_file_path.exists(), "{} does not exist".format(src_file_path)
-            target_file_path = self.external_lib_dir.joinpath(
-                "libfdb_c.{}.so".format(version)
-            )
+            target_file_path = self.external_lib_dir.joinpath("libfdb_c.{}.so".format(version))
             shutil.copyfile(src_file_path, target_file_path)
 
     # Perform a health check of the cluster: Use fdbcli status command to check if the number of
@@ -320,19 +125,16 @@ class UpgradeTest:
                 continue
             num_proc = len(status["cluster"]["processes"])
             if num_proc != self.cluster.process_number:
-                print(
-                    "Health check: {} of {} processes found. Retrying".format(
-                        num_proc, self.cluster.process_number
-                    )
-                )
+                print("Health check: {} of {} processes found. Retrying".format(num_proc, self.cluster.process_number))
                 time.sleep(1)
                 continue
+            expected_version = self.cluster_version
+            if expected_version == FUTURE_VERSION:
+                expected_version = CURRENT_VERSION
             for (_, proc_stat) in status["cluster"]["processes"].items():
                 proc_ver = proc_stat["version"]
-                assert (
-                    proc_ver == self.cluster_version
-                ), "Process version: expected: {}, actual: {}".format(
-                    self.cluster_version, proc_ver
+                assert proc_ver == expected_version, "Process version: expected: {}, actual: {}".format(
+                    expected_version, proc_ver
                 )
             print("Health check: OK")
             return
@@ -340,12 +142,13 @@ class UpgradeTest:
 
     # Create and save a cluster configuration for the given version
     def configure_version(self, version):
-        self.cluster.fdbmonitor_binary = self.binary_path(version, "fdbmonitor")
-        self.cluster.fdbserver_binary = self.binary_path(version, "fdbserver")
-        self.cluster.fdbcli_binary = self.binary_path(version, "fdbcli")
-        self.cluster.set_env_var = "LD_LIBRARY_PATH", self.lib_dir(version)
-        if version_before(version, "7.1.0"):
-            self.cluster.use_legacy_conf_syntax = True
+        self.cluster.fdbmonitor_binary = self.downloader.binary_path(version, "fdbmonitor")
+        self.cluster.fdbserver_binary = self.downloader.binary_path(version, "fdbserver")
+        self.cluster.fdbcli_binary = self.downloader.binary_path(version, "fdbcli")
+        self.cluster.set_env_var("LD_LIBRARY_PATH", "%s:%s" % (
+            self.downloader.lib_dir(version), os.getenv("LD_LIBRARY_PATH")))
+        self.cluster.use_legacy_conf_syntax = version_before(version, "7.1.0")
+        self.cluster.use_future_protocol_version = version == FUTURE_VERSION
         self.cluster.save_config()
         self.cluster_version = version
 
@@ -361,12 +164,13 @@ class UpgradeTest:
     def __enter__(self):
         print("Starting cluster version {}".format(self.cluster_version))
         self.cluster.start_cluster()
-        self.cluster.create_database(enable_tenants=False)
+        self.cluster.create_database(enable_tenants=(self.api_version >= TENANT_API_VERSION))
         return self
 
     def __exit__(self, xc_type, exc_value, traceback):
         self.cluster.stop_cluster()
-        shutil.rmtree(self.tmp_dir)
+        if CLEANUP_ON_EXIT:
+            shutil.rmtree(self.tmp_dir)
 
     # Determine FDB API version matching the upgrade path
     def determine_api_version(self):
@@ -378,7 +182,6 @@ class UpgradeTest:
     def exec_workload(self, test_file):
         self.tester_retcode = 1
         try:
-            self.determine_api_version()
             cmd_args = [
                 self.tester_bin,
                 "--cluster-file",
@@ -402,19 +205,17 @@ class UpgradeTest:
                 "--transaction-retry-limit",
                 str(TRANSACTION_RETRY_LIMIT),
                 "--stats-interval",
-                str(TESTER_STATS_INTERVAL_SEC*1000)
+                str(TESTER_STATS_INTERVAL_SEC * 1000),
             ]
             if RUN_WITH_GDB:
                 cmd_args = ["gdb", "-ex", "run", "--args"] + cmd_args
-            print(
-                "Executing test command: {}".format(
-                    " ".join([str(c) for c in cmd_args])
-                )
-            )
+            if FUTURE_VERSION in self.upgrade_path:
+                cmd_args += ["--future-version-client-library", self.future_version_client_lib_path]
+            if self.cluster.blob_granules_enabled:
+                cmd_args += ["--blob-granule-local-file-path", str(self.cluster.data.joinpath("fdbblob")) + "/"]
+            print("Executing test command: {}".format(" ".join([str(c) for c in cmd_args])))
 
-            self.tester_proc = subprocess.Popen(
-                cmd_args, stdout=sys.stdout, stderr=sys.stderr
-            )
+            self.tester_proc = subprocess.Popen(cmd_args, stdout=sys.stdout, stderr=sys.stderr)
             self.tester_retcode = self.tester_proc.wait()
             self.tester_proc = None
 
@@ -438,9 +239,7 @@ class UpgradeTest:
         if self.progress_event.is_set():
             print("Progress check: OK")
         else:
-            assert False, "Progress check failed after upgrade to version {}".format(
-                self.cluster_version
-            )
+            assert False, "Progress check failed after upgrade to version {}".format(self.cluster_version)
 
     # The main function of a thread for reading and processing
     # the notifications received from the tester
@@ -496,8 +295,6 @@ class UpgradeTest:
     # - Start a thread for reading notifications from the tester
     # - Trigger the upgrade steps and checks in the main thread
     def exec_test(self, args):
-        self.tester_bin = self.build_dir.joinpath("bin", "fdb_c_api_tester")
-        assert self.tester_bin.exists(), "{} does not exist".format(self.tester_bin)
         self.tester_proc = None
         test_retcode = 1
         try:
@@ -523,11 +320,7 @@ class UpgradeTest:
 
     def grep_logs_for_events(self, severity):
         return (
-            subprocess.getoutput(
-                "grep -r 'Severity=\"{}\"' {}".format(
-                    severity, self.cluster.log.as_posix()
-                )
-            )
+            subprocess.getoutput("grep -r 'Severity=\"{}\"' {}".format(severity, self.cluster.log.as_posix()))
             .rstrip()
             .splitlines()
         )
@@ -535,9 +328,7 @@ class UpgradeTest:
     # Check the cluster log for errors
     def check_cluster_logs(self, error_limit=100):
         sev40s = (
-            subprocess.getoutput(
-                "grep -r 'Severity=\"40\"' {}".format(self.cluster.log.as_posix())
-            )
+            subprocess.getoutput("grep -r 'Severity=\"40\"' {}".format(self.cluster.log.as_posix()))
             .rstrip()
             .splitlines()
         )
@@ -548,7 +339,7 @@ class UpgradeTest:
             # correct asan annotations so that it shouldn't produce any false positives.
             if line.endswith(
                 "WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false "
-                "positives in some cases! "
+                "positives in some cases!"
             ):
                 continue
             if err_cnt < error_limit:
@@ -567,9 +358,7 @@ class UpgradeTest:
     # Check the server and client logs for warnings and dump them
     def dump_warnings_in_logs(self, limit=100):
         sev30s = (
-            subprocess.getoutput(
-                "grep -r 'Severity=\"30\"' {}".format(self.cluster.log.as_posix())
-            )
+            subprocess.getoutput("grep -r 'Severity=\"30\"' {}".format(self.cluster.log.as_posix()))
             .rstrip()
             .splitlines()
         )
@@ -577,11 +366,7 @@ class UpgradeTest:
         if len(sev30s) == 0:
             print("No warnings found in logs")
         else:
-            print(
-                ">>>>>>>>>>>>>>>>>>>> Found {} severity 30 events (warnings):".format(
-                    len(sev30s)
-                )
-            )
+            print(">>>>>>>>>>>>>>>>>>>> Found {} severity 30 events (warnings):".format(len(sev30s)))
             for line in sev30s[:limit]:
                 print(line)
 
@@ -617,8 +402,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--upgrade-path",
         nargs="+",
-        help="Cluster upgrade path: a space separated list of versions.\n" +
-        "The list may also contain cluster change actions: {}".format(CLUSTER_ACTIONS),
+        help="Cluster upgrade path: a space separated list of versions.\n"
+        + "The list may also contain cluster change actions: {}".format(CLUSTER_ACTIONS),
         default=[CURRENT_VERSION],
     )
     parser.add_argument(
@@ -645,8 +430,12 @@ if __name__ == "__main__":
         action="store_true",
     )
     parser.add_argument(
-        "--run-with-gdb", help="Execute the tester binary from gdb", action="store_true"
+        "--no-cleanup-on-error",
+        help="In case of an error do not remove any of the generated files",
+        action="store_true",
     )
+    parser.add_argument("--blob-granules-enabled", help="Enable blob granules", action="store_true")
+    parser.add_argument("--run-with-gdb", help="Execute the tester binary from gdb", action="store_true")
     args = parser.parse_args()
     if args.process_number == 0:
         args.process_number = random.randint(1, 5)
@@ -670,5 +459,7 @@ if __name__ == "__main__":
         test.dump_warnings_in_logs()
         if errcode != 0 and not args.disable_log_dump:
             test.dump_cluster_logs()
+        if errcode != 0 and args.no_cleanup_on_error:
+            CLEANUP_ON_EXIT = False
 
     sys.exit(errcode)

@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
 	Promise<Void> benchmarksDone;
 	std::thread benchmarkThread([&]() {
 		benchmark::RunSpecifiedBenchmarks();
-		onMainThreadVoid([&]() { benchmarksDone.send(Void()); }, nullptr);
+		onMainThreadVoid([&]() { benchmarksDone.send(Void()); });
 	});
 	auto f = stopNetworkAfter(benchmarksDone.getFuture());
 	runNetwork();

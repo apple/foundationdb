@@ -101,7 +101,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 				StorageMetrics sm = wait(cx->getStorageMetrics(self->wholeRange, 100));
 				// TraceEvent("RHDCheckPhaseLog")
 				//     .detail("KeyRangeSize", sm.bytes)
-				//     .detail("KeyRangeReadBandwith", sm.bytesReadPerKSecond);
+				//     .detail("KeyRangeReadBandwidth", sm.bytesReadPerKSecond);
 				Standalone<VectorRef<ReadHotRangeWithMetrics>> keyRanges = wait(cx->getReadHotRanges(self->wholeRange));
 				// TraceEvent("RHDCheckPhaseLog")
 				//     .detail("KeyRangesSize", keyRanges.size())

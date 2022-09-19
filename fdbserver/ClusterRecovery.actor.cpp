@@ -18,10 +18,12 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Metacluster.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupProgress.actor.h"
 #include "fdbserver/ClusterRecovery.actor.h"
+#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
 
@@ -58,7 +60,7 @@ ACTOR Future<Void> recoveryTerminateOnConflict(UID dbgid,
 		when(wait(onConflict)) {
 			if (!fullyRecovered.isSet()) {
 				TraceEvent("RecoveryTerminated", dbgid).detail("Reason", "Conflict");
-				TEST(true); // Coordinated state conflict, recovery terminating
+				CODE_PROBE(true, "Coordinated state conflict, recovery terminating");
 				throw worker_removed();
 			}
 			return Void();
@@ -110,7 +112,7 @@ ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
 
 			return Void();
 		} else {
-			TEST(true); // clusterWatchDatabase() !newMaster.present()
+			CODE_PROBE(true, "clusterWatchDatabase() !newMaster.present()");
 			wait(delay(SERVER_KNOBS->MASTER_SPIN_DELAY));
 		}
 	}
@@ -118,7 +120,7 @@ ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
 
 ACTOR Future<Void> clusterRecruitFromConfiguration(ClusterControllerData* self, Reference<RecruitWorkersInfo> req) {
 	// At the moment this doesn't really need to be an actor (it always completes immediately)
-	TEST(true); // ClusterController RecruitTLogsRequest
+	CODE_PROBE(true, "ClusterController RecruitTLogsRequest");
 	loop {
 		try {
 			req->rep = self->findWorkersForConfiguration(req->req);
@@ -150,7 +152,7 @@ ACTOR Future<RecruitRemoteFromConfigurationReply> clusterRecruitRemoteFromConfig
     ClusterControllerData* self,
     Reference<RecruitRemoteWorkersInfo> req) {
 	// At the moment this doesn't really need to be an actor (it always completes immediately)
-	TEST(true); // ClusterController RecruitTLogsRequest Remote
+	CODE_PROBE(true, "ClusterController RecruitTLogsRequest Remote");
 	loop {
 		try {
 			auto rep = self->findRemoteWorkersForConfiguration(req->req);
@@ -355,7 +357,7 @@ ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 			    !newServer.isError(error_code_request_maybe_delivered))
 				throw newServer.getError();
 
-			TEST(true); // initial storage recuitment loop failed to get new server
+			CODE_PROBE(true, "initial storage recuitment loop failed to get new server");
 			wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY));
 		} else {
 			if (!dcId_tags.count(recruits.storageServers[idx].locality.dcId())) {
@@ -521,6 +523,19 @@ ACTOR Future<Void> changeCoordinators(Reference<ClusterRecoveryData> self) {
 		TraceEvent("ChangeCoordinators", self->dbgid).log();
 		++self->changeCoordinatorsRequests;
 		state ChangeCoordinatorsRequest changeCoordinatorsRequest = req;
+		if (self->masterInterface.id() != changeCoordinatorsRequest.masterId) {
+			// Make sure the request is coming from a proxy from the same
+			// generation. If not, throw coordinators_changed - this is OK
+			// because the client will still receive commit_unknown_result, and
+			// will retry the request. This check is necessary because
+			// otherwise in rare circumstances where a recovery occurs between
+			// the change coordinators request from the client and the cstate
+			// actually being moved, the client may think the change
+			// coordinators command failed when it is still in progress. So we
+			// preempt the issue here and force failure if the generations
+			// don't match.
+			throw coordinators_changed();
+		}
 
 		// Kill cluster controller to facilitate coordinator registration update
 		if (self->controllerData->shouldCommitSuicide) {
@@ -736,7 +751,7 @@ ACTOR Future<Void> updateLogsValue(Reference<ClusterRecoveryData> self, Database
 			}
 
 			if (!found) {
-				TEST(true); // old master attempted to change logsKey
+				CODE_PROBE(true, "old master attempted to change logsKey");
 				return Void();
 			}
 
@@ -815,7 +830,7 @@ ACTOR Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Refer
 			                            std::vector<UID>()));
 		} else {
 			// The cluster should enter the accepting commits phase soon, and then we will register again
-			TEST(true); // cstate is updated but we aren't accepting commits yet
+			CODE_PROBE(true, "cstate is updated but we aren't accepting commits yet");
 		}
 	}
 }
@@ -999,7 +1014,8 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	                                                                                self->lastEpochEnd,
 	                                                                                self->commitProxies,
 	                                                                                self->resolvers,
-	                                                                                self->versionEpoch))));
+	                                                                                self->versionEpoch,
+	                                                                                self->primaryLocality))));
 
 	return confChanges;
 }
@@ -1012,11 +1028,6 @@ ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId,
 		Version ver = locality->get().knownCommittedVersion;
 		if (ver == invalidVersion) {
 			ver = oldLogSystem->getKnownCommittedVersion();
-		}
-		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-			// Do not try to split peeks between data centers in peekTxns() to recover mem kvstore.
-			// This recovery optimization won't work in UNICAST mode.
-			loc.first = -1;
 		}
 
 		locality->set(PeekTxsInfo(loc.first, loc.second, ver));
@@ -1048,14 +1059,15 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	if (self->txnStateStore)
 		self->txnStateStore->close();
 	self->txnStateLogAdapter = openDiskQueueAdapter(oldLogSystem, myLocality, txsPoppedVersion);
-	self->txnStateStore = keyValueStoreLogSystem(self->txnStateLogAdapter,
-	                                             self->dbInfo,
-	                                             self->dbgid,
-	                                             self->memoryLimit,
-	                                             false,
-	                                             false,
-	                                             true,
-	                                             SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION);
+	self->txnStateStore = keyValueStoreLogSystem(
+	    self->txnStateLogAdapter,
+	    self->dbInfo,
+	    self->dbgid,
+	    self->memoryLimit,
+	    false,
+	    false,
+	    true,
+	    isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, self->dbInfo->get().client));
 
 	// Version 0 occurs at the version epoch. The version epoch is the number
 	// of microseconds since the Unix epoch. It can be set through fdbcli.
@@ -1146,6 +1158,17 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	RangeResult rawHistoryTags = wait(self->txnStateStore->readRange(serverTagHistoryKeys));
 	for (auto& kv : rawHistoryTags) {
 		self->allTags.push_back(decodeServerTagValue(kv.value));
+	}
+
+	Optional<Value> metaclusterRegistrationVal =
+	    wait(self->txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration().key));
+	Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
+	    MetaclusterRegistrationEntry::decode(metaclusterRegistrationVal);
+	if (metaclusterRegistration.present()) {
+		self->controllerData->db.metaclusterName = metaclusterRegistration.get().metaclusterName;
+		self->controllerData->db.clusterType = metaclusterRegistration.get().clusterType;
+	} else {
+		self->controllerData->db.clusterType = ClusterType::STANDALONE;
 	}
 
 	uniquify(self->allTags);
@@ -1361,7 +1384,7 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 			}
 			when(Standalone<CommitTransactionRef> _req = wait(provisional)) {
 				state Standalone<CommitTransactionRef> req = _req; // mutable
-				TEST(true); // Emergency transaction processing during recovery
+				CODE_PROBE(true, "Emergency transaction processing during recovery");
 				TraceEvent("EmergencyTransaction", self->dbgid).log();
 				for (auto m = req.mutations.begin(); m != req.mutations.end(); ++m)
 					TraceEvent("EmergencyTransactionMutation", self->dbgid)
@@ -1415,7 +1438,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	wait(self->cstate.read());
 
-	if (self->cstate.prevDBState.lowestCompatibleProtocolVersion > currentProtocolVersion) {
+	if (self->cstate.prevDBState.lowestCompatibleProtocolVersion > currentProtocolVersion()) {
 		TraceEvent(SevWarnAlways, "IncompatibleProtocolVersion", self->dbgid).log();
 		throw internal_error();
 	}
@@ -1458,8 +1481,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 			           (self->cstate.myDBState.oldTLogData.size() - CLIENT_KNOBS->RECOVERY_DELAY_START_GENERATION)));
 		}
 		if (g_network->isSimulated() && self->cstate.myDBState.oldTLogData.size() > CLIENT_KNOBS->MAX_GENERATIONS_SIM) {
-			g_simulator.connectionFailuresDisableDuration = 1e6;
-			g_simulator.speedUpSimulation = true;
+			g_simulator->connectionFailuresDisableDuration = 1e6;
+			g_simulator->speedUpSimulation = true;
 			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyGenerations").log();
 		}
 	}
@@ -1476,10 +1499,10 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	DBCoreState newState = self->cstate.myDBState;
 	newState.recoveryCount++;
 	if (self->cstate.prevDBState.newestProtocolVersion.isInvalid() ||
-	    self->cstate.prevDBState.newestProtocolVersion < currentProtocolVersion) {
+	    self->cstate.prevDBState.newestProtocolVersion < currentProtocolVersion()) {
 		ASSERT(self->cstate.myDBState.lowestCompatibleProtocolVersion.isInvalid() ||
 		       !self->cstate.myDBState.newestProtocolVersion.isInvalid());
-		newState.newestProtocolVersion = currentProtocolVersion;
+		newState.newestProtocolVersion = currentProtocolVersion();
 		newState.lowestCompatibleProtocolVersion = minCompatibleProtocolVersion;
 	}
 	wait(self->cstate.write(newState) || recoverAndEndEpoch);
@@ -1563,7 +1586,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 		    .detail("SnapRecoveryFlag", snapRecoveryFlag.present() ? snapRecoveryFlag.get().toString() : "N/A")
 		    .detail("LastEpochEnd", self->lastEpochEnd);
 		if (snapRecoveryFlag.present()) {
-			TEST(true); // Recovering from snapshot, writing to snapShotEndVersionKey
+			CODE_PROBE(true, "Recovering from snapshot, writing to snapShotEndVersionKey");
 			BinaryWriter bw(Unversioned());
 			tr.set(recoveryCommitRequest.arena, snapshotEndVersionKey, (bw << self->lastEpochEnd).toValue());
 			// Pause the backups that got restored in this snapshot to avoid data corruption
@@ -1614,6 +1637,11 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	tr.set(
 	    recoveryCommitRequest.arena, primaryLocalityKey, BinaryWriter::toValue(self->primaryLocality, Unversioned()));
 	tr.set(recoveryCommitRequest.arena, backupVersionKey, backupVersionValue);
+	Optional<Value> txnStateStoreCoords = self->txnStateStore->readValue(coordinatorsKey).get();
+	if (txnStateStoreCoords.present() &&
+	    txnStateStoreCoords.get() != self->coordinators.ccr->getConnectionString().toString()) {
+		tr.set(recoveryCommitRequest.arena, previousCoordinatorsKey, txnStateStoreCoords.get());
+	}
 	tr.set(recoveryCommitRequest.arena, coordinatorsKey, self->coordinators.ccr->getConnectionString().toString());
 	tr.set(recoveryCommitRequest.arena, logsKey, self->logSystem->getLogsValue());
 	tr.set(recoveryCommitRequest.arena,
@@ -1640,7 +1668,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	                       self->dbgid,
 	                       recoveryCommitRequest.arena,
 	                       tr.mutations.slice(mmApplied, tr.mutations.size()),
-	                       self->txnStateStore);
+	                       self->txnStateStore,
+	                       self->dbInfo);
 	mmApplied = tr.mutations.size();
 
 	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the initial
@@ -1663,7 +1692,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	// unless we want to change TLogs
 	wait((success(recoveryCommit) && sendInitialCommitToResolvers(self)));
 	if (recoveryCommit.isReady() && recoveryCommit.get().isError()) {
-		TEST(true); // Cluster recovery failed because of the initial commit failed
+		CODE_PROBE(true, "Cluster recovery failed because of the initial commit failed");
 		throw cluster_recovery_failed();
 	}
 
@@ -1719,6 +1748,12 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	    .detail("StoreType", self->configuration.storageServerStoreType)
 	    .detail("RecoveryDuration", recoveryDuration)
 	    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
+
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_AVAILABLE_EVENT_NAME).c_str(),
+	           self->dbgid)
+	    .detail("NumOfOldGensOfLogs", self->cstate.myDBState.oldTLogData.size())
+	    .detail("AvailableAtVersion", self->recoveryTransactionVersion)
+	    .trackLatest(self->clusterRecoveryAvailableEventHolder->trackingKey);
 
 	self->addActor.send(changeCoordinators(self));
 	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);

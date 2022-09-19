@@ -22,6 +22,11 @@ else()
   cmake_minimum_required(VERSION 3.13)
 endif()
 
+# silence deprecation warnings in newer versions of cmake
+if(POLICY CMP0135)
+  cmake_policy(SET CMP0135 NEW)
+endif()
+
 project(foundationdb
   VERSION 7.2.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
@@ -105,14 +110,11 @@ set(FDB_PACKAGE_NAME "${FDB_MAJOR}.${FDB_MINOR}")
 configure_file(${CMAKE_SOURCE_DIR}/versions.target.cmake ${CMAKE_CURRENT_BINARY_DIR}/versions.target)
 file(WRITE ${CMAKE_BINARY_DIR}/version.txt ${FDB_VERSION})
 
-message(STATUS "FDB version is ${FDB_VERSION}")
-message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/versions.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/fdbclient/versions.h)
-
-
 ################################################################################
 # Flow
 ################################################################################
+
+include(utils)
 
 # Flow and other tools are written in C# - so we need that dependency
 include(EnableCsharp)
@@ -204,18 +206,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
 endif()
 
 ################################################################################
-# Build information
-################################################################################
-
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/BuildFlags.h.in ${CMAKE_CURRENT_BINARY_DIR}/fdbclient/BuildFlags.h)
-
-################################################################################
 # process compile commands for IDE
 ################################################################################
 if (CMAKE_EXPORT_COMPILE_COMMANDS AND WITH_PYTHON)
   add_custom_command(
 	  OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
-	  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/contrib/gen_compile_db.py
+	  COMMAND $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/contrib/gen_compile_db.py
 	  ARGS -b ${CMAKE_CURRENT_BINARY_DIR} -s ${CMAKE_CURRENT_SOURCE_DIR} -o ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
 	  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/contrib/gen_compile_db.py ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
 	  COMMENT "Build compile commands for IDE"

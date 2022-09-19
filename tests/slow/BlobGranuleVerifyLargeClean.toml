@@ -2,10 +2,7 @@
 blobGranulesEnabled = true 
 allowDefaultTenant = false
 # FIXME: re-enable rocks at some point
-storageEngineExcludeTypes = [4]
-
-[[knobs]]
-bg_range_source = "blobRangeKeys"
+storageEngineExcludeTypes = [4, 5]
 
 [[test]]
 testTitle = 'BlobGranuleVerifyLargeClean'
@@ -28,3 +25,4 @@ testTitle = 'BlobGranuleVerifyLargeClean'
     [[test.workload]]
     testName = 'BlobGranuleVerifier'
     testDuration = 120.0
+    enablePurging = false
