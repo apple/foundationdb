@@ -705,7 +705,7 @@ public:
 	std::map<Version, std::vector<KeyRange>>
 	    pendingRemoveRanges; // Pending requests to remove ranges from physical shards
 
-	Reference<IEncryptionKeyProvider> encryptionKeyProvider;
+	Reference<IPageEncryptionKeyProvider> encryptionKeyProvider;
 
 	bool shardAware; // True if the storage server is aware of the physical shards.
 
@@ -1250,7 +1250,7 @@ public:
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
 	              StorageServerInterface const& ssi,
-	              Reference<IEncryptionKeyProvider> encryptionKeyProvider)
+	              Reference<IPageEncryptionKeyProvider> encryptionKeyProvider)
 	  : tenantPrefixIndex(makeReference<TenantPrefixIndex>()), encryptionKeyProvider(encryptionKeyProvider),
 	    shardAware(false), tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                                               TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
@@ -4843,6 +4843,11 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				                       !data->isTss() && !data->isSSWithTSSPair())
 				                          ? 1
 				                          : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+				TraceEvent(SevDebug, "SSGetKeyValueStreamLimits")
+				    .detail("ByteLimit", byteLimit)
+				    .detail("ReqLimit", req.limit)
+				    .detail("Begin", begin.printable())
+				    .detail("End", end.printable());
 				GetKeyValuesReply _r = wait(readRange(data,
 				                                      version,
 				                                      KeyRangeRef(begin, end),
@@ -10689,7 +10694,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
-                                 Reference<IEncryptionKeyProvider> encryptionKeyProvider) {
+                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider) {
 	state StorageServer self(persistentData, db, ssi, encryptionKeyProvider);
 	self.shardAware = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && persistentData->shardAware();
 	state Future<Void> ssCore;
@@ -10780,7 +10785,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  std::string folder,
                                  Promise<Void> recovered,
                                  Reference<IClusterConnectionRecord> connRecord,
-                                 Reference<IEncryptionKeyProvider> encryptionKeyProvider) {
+                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider) {
 	state StorageServer self(persistentData, db, ssi, encryptionKeyProvider);
 	state Future<Void> ssCore;
 	self.folder = folder;

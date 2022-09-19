@@ -852,6 +852,8 @@ const KeyRef perpetualStorageWiggleStatsPrefix(
 
 const KeyRef triggerDDTeamInfoPrintKey(LiteralStringRef("\xff/triggerDDTeamInfoPrint"));
 
+const KeyRef consistencyScanInfoKey = "\xff/consistencyScanInfo"_sr;
+
 const KeyRef encryptionAtRestModeConfKey(LiteralStringRef("\xff/conf/encryption_at_rest_mode"));
 
 const KeyRangeRef excludedServersKeys(LiteralStringRef("\xff/conf/excluded/"), LiteralStringRef("\xff/conf/excluded0"));
