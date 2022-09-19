@@ -41,7 +41,7 @@ private:
 		OP_CLEAR,
 		OP_CLEAR_RANGE,
 		OP_READ,
-		OP_GET_RANGES,
+		OP_GET_GRANULES,
 		OP_SUMMARIZE,
 		OP_GET_BLOB_RANGES,
 		OP_LAST = OP_GET_BLOB_RANGES
@@ -129,7 +129,7 @@ private:
 		    getTenant(tenantId));
 	}
 
-	void randomGetRangesOp(TTaskFct cont, std::optional<int> tenantId) {
+	void randomGetGranulesOp(TTaskFct cont, std::optional<int> tenantId) {
 		fdb::Key begin = randomKeyName();
 		fdb::Key end = randomKeyName();
 		if (begin > end) {
@@ -149,36 +149,7 @@ private:
 			        true);
 		    },
 		    [this, begin, end, results, cont]() {
-			    if (seenReadSuccess) {
-				    ASSERT(results->size() > 0);
-				    ASSERT(results->front().beginKey <= begin);
-				    ASSERT(results->back().endKey >= end);
-			    }
-
-			    for (int i = 0; i < results->size(); i++) {
-				    // no empty or inverted ranges
-				    if ((*results)[i].beginKey >= (*results)[i].endKey) {
-					    error(fmt::format("Empty/inverted range [{0} - {1}) for getBlobGranuleRanges({2} - {3})",
-					                      fdb::toCharsRef((*results)[i].beginKey),
-					                      fdb::toCharsRef((*results)[i].endKey),
-					                      fdb::toCharsRef(begin),
-					                      fdb::toCharsRef(end)));
-				    }
-				    ASSERT((*results)[i].beginKey < (*results)[i].endKey);
-			    }
-
-			    for (int i = 1; i < results->size(); i++) {
-				    // ranges contain entire requested key range
-				    if ((*results)[i].beginKey != (*results)[i].endKey) {
-					    error(fmt::format("Non-contiguous range [{0} - {1}) for getBlobGranuleRanges({2} - {3})",
-					                      fdb::toCharsRef((*results)[i].beginKey),
-					                      fdb::toCharsRef((*results)[i].endKey),
-					                      fdb::toCharsRef(begin),
-					                      fdb::toCharsRef(end)));
-				    }
-				    ASSERT((*results)[i].beginKey == (*results)[i - 1].endKey);
-			    }
-
+			    this->validateRanges(results, begin, end, seenReadSuccess);
 			    schedule(cont);
 		    },
 		    getTenant(tenantId));
@@ -304,8 +275,8 @@ private:
 		case OP_READ:
 			randomReadOp(cont, tenantId);
 			break;
-		case OP_GET_RANGES:
-			randomGetRangesOp(cont, tenantId);
+		case OP_GET_GRANULES:
+			randomGetGranulesOp(cont, tenantId);
 			break;
 		case OP_SUMMARIZE:
 			randomSummarizeOp(cont, tenantId);
