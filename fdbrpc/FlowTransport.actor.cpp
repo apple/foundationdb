@@ -299,12 +299,12 @@ public:
 	~TransportData();
 
 	void initMetrics() {
-		bytesSent.init(LiteralStringRef("Net2.BytesSent"));
-		countPacketsReceived.init(LiteralStringRef("Net2.CountPacketsReceived"));
-		countPacketsGenerated.init(LiteralStringRef("Net2.CountPacketsGenerated"));
-		countConnEstablished.init(LiteralStringRef("Net2.CountConnEstablished"));
-		countConnClosedWithError.init(LiteralStringRef("Net2.CountConnClosedWithError"));
-		countConnClosedWithoutError.init(LiteralStringRef("Net2.CountConnClosedWithoutError"));
+		bytesSent.init("Net2.BytesSent"_sr);
+		countPacketsReceived.init("Net2.CountPacketsReceived"_sr);
+		countPacketsGenerated.init("Net2.CountPacketsGenerated"_sr);
+		countConnEstablished.init("Net2.CountConnEstablished"_sr);
+		countConnClosedWithError.init("Net2.CountConnClosedWithError"_sr);
+		countConnClosedWithoutError.init("Net2.CountConnClosedWithoutError"_sr);
 	}
 
 	Reference<struct Peer> getPeer(NetworkAddress const& address);

@@ -90,7 +90,7 @@ std::string secondsToTimeFormat(int64_t seconds) {
 		return format("%lld second(s)", seconds);
 }
 
-const Key FileBackupAgent::keyLastRestorable = LiteralStringRef("last_restorable");
+const Key FileBackupAgent::keyLastRestorable = "last_restorable"_sr;
 
 // For convenience
 typedef FileBackupAgent::ERestoreState ERestoreState;
@@ -98,19 +98,19 @@ typedef FileBackupAgent::ERestoreState ERestoreState;
 StringRef FileBackupAgent::restoreStateText(ERestoreState id) {
 	switch (id) {
 	case ERestoreState::UNITIALIZED:
-		return LiteralStringRef("unitialized");
+		return "unitialized"_sr;
 	case ERestoreState::QUEUED:
-		return LiteralStringRef("queued");
+		return "queued"_sr;
 	case ERestoreState::STARTING:
-		return LiteralStringRef("starting");
+		return "starting"_sr;
 	case ERestoreState::RUNNING:
-		return LiteralStringRef("running");
+		return "running"_sr;
 	case ERestoreState::COMPLETED:
-		return LiteralStringRef("completed");
+		return "completed"_sr;
 	case ERestoreState::ABORTED:
-		return LiteralStringRef("aborted");
+		return "aborted"_sr;
 	default:
-		return LiteralStringRef("Unknown");
+		return "Unknown"_sr;
 	}
 }
 
@@ -162,7 +162,7 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 	// Get the source container as a bare URL, without creating a container instance
-	KeyBackedProperty<Value> sourceContainerURL() { return configSpace.pack(LiteralStringRef("sourceContainer")); }
+	KeyBackedProperty<Value> sourceContainerURL() { return configSpace.pack("sourceContainer"_sr); }
 
 	// Total bytes written by all log and range restore tasks.
 	KeyBackedBinaryValue<int64_t> bytesWritten() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
@@ -775,8 +775,7 @@ ACTOR static Future<Void> abortFiveZeroBackup(FileBackupAgent* backupAgent,
 
 	state Subspace statusSpace = backupAgent->subspace.get(BackupAgentBase::keyStates).get(uid.toString());
 	state Subspace globalConfig = backupAgent->subspace.get(BackupAgentBase::keyConfig).get(uid.toString());
-	state Subspace newConfigSpace =
-	    uidPrefixKey(LiteralStringRef("uid->config/").withPrefix(fileBackupPrefixRange.begin), uid);
+	state Subspace newConfigSpace = uidPrefixKey("uid->config/"_sr.withPrefix(fileBackupPrefixRange.begin), uid);
 
 	Optional<Value> statusStr = wait(tr->get(statusSpace.pack(FileBackupAgent::keyStateStatus)));
 	state EBackupState status =
@@ -845,7 +844,7 @@ struct AbortFiveZeroBackupTask : TaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef AbortFiveZeroBackupTask::name = LiteralStringRef("abort_legacy_backup");
+StringRef AbortFiveZeroBackupTask::name = "abort_legacy_backup"_sr;
 REGISTER_TASKFUNC(AbortFiveZeroBackupTask);
 REGISTER_TASKFUNC_ALIAS(AbortFiveZeroBackupTask, file_backup_diff_logs);
 REGISTER_TASKFUNC_ALIAS(AbortFiveZeroBackupTask, file_backup_log_range);
@@ -929,7 +928,7 @@ struct AbortFiveOneBackupTask : TaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef AbortFiveOneBackupTask::name = LiteralStringRef("abort_legacy_backup_5.2");
+StringRef AbortFiveOneBackupTask::name = "abort_legacy_backup_5.2"_sr;
 REGISTER_TASKFUNC(AbortFiveOneBackupTask);
 REGISTER_TASKFUNC_ALIAS(AbortFiveOneBackupTask, file_backup_write_range);
 REGISTER_TASKFUNC_ALIAS(AbortFiveOneBackupTask, file_backup_dispatch_ranges);
@@ -968,7 +967,7 @@ ACTOR static Future<Key> addBackupTask(StringRef name,
 	}
 	wait(waitFor->onSetAddTask(tr, taskBucket, task));
 
-	return LiteralStringRef("OnSetAddTask");
+	return "OnSetAddTask"_sr;
 }
 
 // Clears the backup ID from "backupStartedKey" to pause backup workers.
@@ -1385,7 +1384,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		return Void();
 	}
 };
-StringRef BackupRangeTaskFunc::name = LiteralStringRef("file_backup_write_range_5.2");
+StringRef BackupRangeTaskFunc::name = "file_backup_write_range_5.2"_sr;
 REGISTER_TASKFUNC(BackupRangeTaskFunc);
 
 struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
@@ -1956,7 +1955,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		return Void();
 	}
 };
-StringRef BackupSnapshotDispatchTask::name = LiteralStringRef("file_backup_dispatch_ranges_5.2");
+StringRef BackupSnapshotDispatchTask::name = "file_backup_dispatch_ranges_5.2"_sr;
 REGISTER_TASKFUNC(BackupSnapshotDispatchTask);
 
 struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
@@ -2195,7 +2194,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 	}
 };
 
-StringRef BackupLogRangeTaskFunc::name = LiteralStringRef("file_backup_write_logs_5.2");
+StringRef BackupLogRangeTaskFunc::name = "file_backup_write_logs_5.2"_sr;
 REGISTER_TASKFUNC(BackupLogRangeTaskFunc);
 
 // This task stopped being used in 6.2, however the code remains here to handle upgrades.
@@ -2270,7 +2269,7 @@ struct EraseLogRangeTaskFunc : BackupTaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef EraseLogRangeTaskFunc::name = LiteralStringRef("file_backup_erase_logs_5.2");
+StringRef EraseLogRangeTaskFunc::name = "file_backup_erase_logs_5.2"_sr;
 REGISTER_TASKFUNC(EraseLogRangeTaskFunc);
 
 struct BackupLogsDispatchTask : BackupTaskFuncBase {
@@ -2440,7 +2439,7 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef BackupLogsDispatchTask::name = LiteralStringRef("file_backup_dispatch_logs_5.2");
+StringRef BackupLogsDispatchTask::name = "file_backup_dispatch_logs_5.2"_sr;
 REGISTER_TASKFUNC(BackupLogsDispatchTask);
 
 struct FileBackupFinishedTask : BackupTaskFuncBase {
@@ -2500,7 +2499,7 @@ struct FileBackupFinishedTask : BackupTaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef FileBackupFinishedTask::name = LiteralStringRef("file_backup_finished_5.2");
+StringRef FileBackupFinishedTask::name = "file_backup_finished_5.2"_sr;
 REGISTER_TASKFUNC(FileBackupFinishedTask);
 
 struct BackupSnapshotManifest : BackupTaskFuncBase {
@@ -2689,7 +2688,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef BackupSnapshotManifest::name = LiteralStringRef("file_backup_write_snapshot_manifest_5.2");
+StringRef BackupSnapshotManifest::name = "file_backup_write_snapshot_manifest_5.2"_sr;
 REGISTER_TASKFUNC(BackupSnapshotManifest);
 
 Future<Key> BackupSnapshotDispatchTask::addSnapshotManifestTask(Reference<ReadYourWritesTransaction> tr,
@@ -2875,7 +2874,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef StartFullBackupTaskFunc::name = LiteralStringRef("file_backup_start_5.2");
+StringRef StartFullBackupTaskFunc::name = "file_backup_start_5.2"_sr;
 REGISTER_TASKFUNC(StartFullBackupTaskFunc);
 
 struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
@@ -2922,7 +2921,7 @@ struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
 		}
 
 		wait(waitFor->onSetAddTask(tr, taskBucket, task));
-		return LiteralStringRef("OnSetAddTask");
+		return "OnSetAddTask"_sr;
 	}
 
 	static StringRef name;
@@ -2942,7 +2941,7 @@ struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef RestoreCompleteTaskFunc::name = LiteralStringRef("restore_complete");
+StringRef RestoreCompleteTaskFunc::name = "restore_complete"_sr;
 REGISTER_TASKFUNC(RestoreCompleteTaskFunc);
 
 struct RestoreFileTaskFuncBase : RestoreTaskFuncBase {
@@ -3214,7 +3213,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		}
 
 		wait(waitFor->onSetAddTask(tr, taskBucket, task));
-		return LiteralStringRef("OnSetAddTask");
+		return "OnSetAddTask"_sr;
 	}
 
 	static StringRef name;
@@ -3234,7 +3233,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef RestoreRangeTaskFunc::name = LiteralStringRef("restore_range_data");
+StringRef RestoreRangeTaskFunc::name = "restore_range_data"_sr;
 REGISTER_TASKFUNC(RestoreRangeTaskFunc);
 
 // Decodes a mutation log key, which contains (hash, commitVersion, chunkNumber) and
@@ -3528,7 +3527,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 		}
 
 		wait(waitFor->onSetAddTask(tr, taskBucket, task));
-		return LiteralStringRef("OnSetAddTask");
+		return "OnSetAddTask"_sr;
 	}
 
 	Future<Void> execute(Database cx,
@@ -3544,7 +3543,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef RestoreLogDataTaskFunc::name = LiteralStringRef("restore_log_data");
+StringRef RestoreLogDataTaskFunc::name = "restore_log_data"_sr;
 REGISTER_TASKFUNC(RestoreLogDataTaskFunc);
 
 struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
@@ -3912,7 +3911,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		}
 
 		wait(waitFor->onSetAddTask(tr, taskBucket, task));
-		return LiteralStringRef("OnSetAddTask");
+		return "OnSetAddTask"_sr;
 	}
 
 	Future<Void> execute(Database cx,
@@ -3928,7 +3927,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef RestoreDispatchTaskFunc::name = LiteralStringRef("restore_dispatch");
+StringRef RestoreDispatchTaskFunc::name = "restore_dispatch"_sr;
 REGISTER_TASKFUNC(RestoreDispatchTaskFunc);
 
 ACTOR Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr, Key tagName) {
@@ -4270,7 +4269,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		}
 
 		wait(waitFor->onSetAddTask(tr, taskBucket, task));
-		return LiteralStringRef("OnSetAddTask");
+		return "OnSetAddTask"_sr;
 	}
 
 	StringRef getName() const override { return name; };
@@ -4288,7 +4287,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef StartFullRestoreTaskFunc::name = LiteralStringRef("restore_start");
+StringRef StartFullRestoreTaskFunc::name = "restore_start"_sr;
 REGISTER_TASKFUNC(StartFullRestoreTaskFunc);
 } // namespace fileBackup
 
@@ -4881,7 +4880,7 @@ public:
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			try {
-				tr->set(backupPausedKey, pause ? LiteralStringRef("1") : LiteralStringRef("0"));
+				tr->set(backupPausedKey, pause ? "1"_sr : "0"_sr);
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {

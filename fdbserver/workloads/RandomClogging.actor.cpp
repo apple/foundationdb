@@ -37,10 +37,10 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 
 	RandomCloggingWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		testDuration = getOption(options, LiteralStringRef("testDuration"), testDuration);
-		scale = getOption(options, LiteralStringRef("scale"), scale);
-		clogginess = getOption(options, LiteralStringRef("clogginess"), clogginess);
-		swizzleClog = getOption(options, LiteralStringRef("swizzle"), swizzleClog);
+		testDuration = getOption(options, "testDuration"_sr, testDuration);
+		scale = getOption(options, "scale"_sr, scale);
+		clogginess = getOption(options, "clogginess"_sr, clogginess);
+		swizzleClog = getOption(options, "swizzle"_sr, swizzleClog);
 	}
 
 	bool add(DeterministicRandom& random, WorkloadRequest const& work, CompoundWorkload const& workload) override {

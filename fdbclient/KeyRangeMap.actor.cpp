@@ -246,7 +246,7 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 	// Determine how far to extend this range at the beginning
 	auto beginRange = keys[0].get();
 	bool hasBegin = beginRange.size() > 0 && beginRange[0].key.startsWith(mapPrefix);
-	Value beginValue = hasBegin ? beginRange[0].value : LiteralStringRef("");
+	Value beginValue = hasBegin ? beginRange[0].value : ""_sr;
 
 	state Key beginKey = withPrefix.begin;
 	if (beginValue == value) {
@@ -259,7 +259,7 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 	bool hasEnd = endRange.size() >= 1 && endRange[0].key.startsWith(mapPrefix) && endRange[0].key <= withPrefix.end;
 	bool hasNext = (endRange.size() == 2 && endRange[1].key.startsWith(mapPrefix)) ||
 	               (endRange.size() == 1 && withPrefix.end < endRange[0].key && endRange[0].key.startsWith(mapPrefix));
-	Value existingValue = hasEnd ? endRange[0].value : LiteralStringRef("");
+	Value existingValue = hasEnd ? endRange[0].value : ""_sr;
 	bool valueMatches = value == existingValue;
 
 	KeyRange conflictRange = KeyRangeRef(hasBegin ? beginRange[0].key : mapPrefix, withPrefix.begin);
@@ -317,20 +317,20 @@ Future<Void> krmSetRangeCoalescing(Reference<ReadYourWritesTransaction> const& t
 
 TEST_CASE("/keyrangemap/decoderange/aligned") {
 	Arena arena;
-	Key prefix = LiteralStringRef("/prefix/");
-	StringRef fullKeyA = StringRef(arena, LiteralStringRef("/prefix/a"));
-	StringRef fullKeyB = StringRef(arena, LiteralStringRef("/prefix/b"));
-	StringRef fullKeyC = StringRef(arena, LiteralStringRef("/prefix/c"));
-	StringRef fullKeyD = StringRef(arena, LiteralStringRef("/prefix/d"));
+	Key prefix = "/prefix/"_sr;
+	StringRef fullKeyA = StringRef(arena, "/prefix/a"_sr);
+	StringRef fullKeyB = StringRef(arena, "/prefix/b"_sr);
+	StringRef fullKeyC = StringRef(arena, "/prefix/c"_sr);
+	StringRef fullKeyD = StringRef(arena, "/prefix/d"_sr);
 
-	StringRef keyA = StringRef(arena, LiteralStringRef("a"));
-	StringRef keyB = StringRef(arena, LiteralStringRef("b"));
-	StringRef keyC = StringRef(arena, LiteralStringRef("c"));
-	StringRef keyD = StringRef(arena, LiteralStringRef("d"));
-	StringRef keyE = StringRef(arena, LiteralStringRef("e"));
-	StringRef keyAB = StringRef(arena, LiteralStringRef("ab"));
-	StringRef keyAC = StringRef(arena, LiteralStringRef("ac"));
-	StringRef keyCD = StringRef(arena, LiteralStringRef("cd"));
+	StringRef keyA = StringRef(arena, "a"_sr);
+	StringRef keyB = StringRef(arena, "b"_sr);
+	StringRef keyC = StringRef(arena, "c"_sr);
+	StringRef keyD = StringRef(arena, "d"_sr);
+	StringRef keyE = StringRef(arena, "e"_sr);
+	StringRef keyAB = StringRef(arena, "ab"_sr);
+	StringRef keyAC = StringRef(arena, "ac"_sr);
+	StringRef keyCD = StringRef(arena, "cd"_sr);
 
 	// Fake getRange() call.
 	RangeResult kv;
@@ -369,20 +369,20 @@ TEST_CASE("/keyrangemap/decoderange/aligned") {
 
 TEST_CASE("/keyrangemap/decoderange/unaligned") {
 	Arena arena;
-	Key prefix = LiteralStringRef("/prefix/");
-	StringRef fullKeyA = StringRef(arena, LiteralStringRef("/prefix/a"));
-	StringRef fullKeyB = StringRef(arena, LiteralStringRef("/prefix/b"));
-	StringRef fullKeyC = StringRef(arena, LiteralStringRef("/prefix/c"));
-	StringRef fullKeyD = StringRef(arena, LiteralStringRef("/prefix/d"));
+	Key prefix = "/prefix/"_sr;
+	StringRef fullKeyA = StringRef(arena, "/prefix/a"_sr);
+	StringRef fullKeyB = StringRef(arena, "/prefix/b"_sr);
+	StringRef fullKeyC = StringRef(arena, "/prefix/c"_sr);
+	StringRef fullKeyD = StringRef(arena, "/prefix/d"_sr);
 
-	StringRef keyA = StringRef(arena, LiteralStringRef("a"));
-	StringRef keyB = StringRef(arena, LiteralStringRef("b"));
-	StringRef keyC = StringRef(arena, LiteralStringRef("c"));
-	StringRef keyD = StringRef(arena, LiteralStringRef("d"));
-	StringRef keyE = StringRef(arena, LiteralStringRef("e"));
-	StringRef keyAB = StringRef(arena, LiteralStringRef("ab"));
-	StringRef keyAC = StringRef(arena, LiteralStringRef("ac"));
-	StringRef keyCD = StringRef(arena, LiteralStringRef("cd"));
+	StringRef keyA = StringRef(arena, "a"_sr);
+	StringRef keyB = StringRef(arena, "b"_sr);
+	StringRef keyC = StringRef(arena, "c"_sr);
+	StringRef keyD = StringRef(arena, "d"_sr);
+	StringRef keyE = StringRef(arena, "e"_sr);
+	StringRef keyAB = StringRef(arena, "ab"_sr);
+	StringRef keyAC = StringRef(arena, "ac"_sr);
+	StringRef keyCD = StringRef(arena, "cd"_sr);
 
 	// Fake getRange() call.
 	RangeResult kv;

@@ -159,12 +159,11 @@ FDB_DECLARE_BOOLEAN_PARAM(UnlimitedCommitBytes);
 FDB_DEFINE_BOOLEAN_PARAM(UnlimitedCommitBytes);
 
 // Immutable
-static const KeyValueRef persistFormat(LiteralStringRef(PERSIST_PREFIX "Format"),
-                                       LiteralStringRef("FoundationDB/StorageServer/1/4"));
+static const KeyValueRef persistFormat(LiteralStringRef(PERSIST_PREFIX "Format"), "FoundationDB/StorageServer/1/4"_sr);
 static const KeyValueRef persistShardAwareFormat(LiteralStringRef(PERSIST_PREFIX "Format"),
-                                                 LiteralStringRef("FoundationDB/StorageServer/1/5"));
-static const KeyRangeRef persistFormatReadableRange(LiteralStringRef("FoundationDB/StorageServer/1/2"),
-                                                    LiteralStringRef("FoundationDB/StorageServer/1/6"));
+                                                 "FoundationDB/StorageServer/1/5"_sr);
+static const KeyRangeRef persistFormatReadableRange("FoundationDB/StorageServer/1/2"_sr,
+                                                    "FoundationDB/StorageServer/1/6"_sr);
 static const KeyRef persistID = LiteralStringRef(PERSIST_PREFIX "ID");
 static const KeyRef persistTssPairID = LiteralStringRef(PERSIST_PREFIX "tssPairID");
 static const KeyRef persistSSPairID = LiteralStringRef(PERSIST_PREFIX "ssWithTSSPairID");
@@ -1281,8 +1280,8 @@ public:
 	    prevVersion(0), rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
 	    primaryLocality(tagLocalityInvalid), knownCommittedVersion(0), versionLag(0), logProtocol(0),
 	    thisServerID(ssi.id()), tssInQuarantine(false), db(db), actors(false),
-	    byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), durableInProgress(Void()), watchBytes(0),
-	    numWatches(0), noRecentUpdates(false), lastUpdate(now()), updateEagerReads(nullptr),
+	    byteSampleClears(false, "\xff\xff\xff"_sr), durableInProgress(Void()), watchBytes(0), numWatches(0),
+	    noRecentUpdates(false), lastUpdate(now()), updateEagerReads(nullptr),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysParallelismFullLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_FULL),
 	    changeFeedDiskReadsLock(SERVER_KNOBS->CHANGE_FEED_DISK_READS_PARALLELISM),
@@ -1295,10 +1294,10 @@ public:
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
 
-		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
-		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
-		durableVersion.initMetric(LiteralStringRef("StorageServer.DurableVersion"), counters.cc.id);
-		desiredOldestVersion.initMetric(LiteralStringRef("StorageServer.DesiredOldestVersion"), counters.cc.id);
+		version.initMetric("StorageServer.Version"_sr, counters.cc.id);
+		oldestVersion.initMetric("StorageServer.OldestVersion"_sr, counters.cc.id);
+		durableVersion.initMetric("StorageServer.DurableVersion"_sr, counters.cc.id);
+		desiredOldestVersion.initMetric("StorageServer.DesiredOldestVersion"_sr, counters.cc.id);
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
@@ -1522,7 +1521,7 @@ public:
 	}
 };
 
-const StringRef StorageServer::CurrentRunningFetchKeys::emptyString = LiteralStringRef("");
+const StringRef StorageServer::CurrentRunningFetchKeys::emptyString = ""_sr;
 const KeyRangeRef StorageServer::CurrentRunningFetchKeys::emptyKeyRange =
     KeyRangeRef(StorageServer::CurrentRunningFetchKeys::emptyString,
                 StorageServer::CurrentRunningFetchKeys::emptyString);
@@ -1919,15 +1918,15 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 
 		DEBUG_MUTATION("ShardGetValue",
 		               version,
-		               MutationRef(MutationRef::DebugKey, req.key, v.present() ? v.get() : LiteralStringRef("<null>")),
+		               MutationRef(MutationRef::DebugKey, req.key, v.present() ? v.get() : "<null>"_sr),
 		               data->thisServerID);
 		DEBUG_MUTATION("ShardGetPath",
 		               version,
 		               MutationRef(MutationRef::DebugKey,
 		                           req.key,
-		                           path == 0   ? LiteralStringRef("0")
-		                           : path == 1 ? LiteralStringRef("1")
-		                                       : LiteralStringRef("2")),
+		                           path == 0   ? "0"_sr
+		                           : path == 1 ? "1"_sr
+		                                       : "2"_sr),
 		               data->thisServerID);
 
 		/*
@@ -2035,13 +2034,12 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 				throw transaction_too_old();
 			}
 
-			DEBUG_MUTATION(
-			    "ShardWatchValue",
-			    latest,
-			    MutationRef(MutationRef::DebugKey,
-			                metadata->key,
-			                reply.value.present() ? StringRef(reply.value.get()) : LiteralStringRef("<null>")),
-			    data->thisServerID);
+			DEBUG_MUTATION("ShardWatchValue",
+			               latest,
+			               MutationRef(MutationRef::DebugKey,
+			                           metadata->key,
+			                           reply.value.present() ? StringRef(reply.value.get()) : "<null>"_sr),
+			               data->thisServerID);
 
 			if (metadata->debugID.present())
 				g_traceBatch.addEvent(
@@ -7094,7 +7092,7 @@ ACTOR Future<Void> restoreShards(StorageServer* data,
 		        : availableShards[availableLoc + 1].key.removePrefix(persistShardAvailableKeys.begin));
 		ASSERT(!shardRange.empty());
 
-		const bool nowAvailable = availableShards[availableLoc].value != LiteralStringRef("0");
+		const bool nowAvailable = availableShards[availableLoc].value != "0"_sr;
 		auto existingShards = data->shards.intersectingRanges(shardRange);
 		for (auto it = existingShards.begin(); it != existingShards.end(); ++it) {
 			TraceEvent(SevVerbose, "RestoreShardsValidateAvailable", data->thisServerID)
@@ -7119,7 +7117,7 @@ ACTOR Future<Void> restoreShards(StorageServer* data,
 		                           ? allKeys.end
 		                           : assignedShards[assignedLoc + 1].key.removePrefix(persistShardAssignedKeys.begin));
 		ASSERT(!shardRange.empty());
-		const bool nowAssigned = assignedShards[assignedLoc].value != LiteralStringRef("0");
+		const bool nowAssigned = assignedShards[assignedLoc].value != "0"_sr;
 
 		auto existingShards = data->shards.intersectingRanges(shardRange);
 		for (auto it = existingShards.begin(); it != existingShards.end(); ++it) {
@@ -9085,8 +9083,8 @@ void StorageServerDisk::makeNewStorageServerDurable(const bool shardAware) {
 		storage->set(KeyValueRef(persistStorageServerShardKeys.begin.toString(),
 		                         ObjectWriter::toValue(StorageServerShard::notAssigned(allKeys, 0), IncludeVersion())));
 	} else {
-		storage->set(KeyValueRef(persistShardAssignedKeys.begin.toString(), LiteralStringRef("0")));
-		storage->set(KeyValueRef(persistShardAvailableKeys.begin.toString(), LiteralStringRef("0")));
+		storage->set(KeyValueRef(persistShardAssignedKeys.begin.toString(), "0"_sr));
+		storage->set(KeyValueRef(persistShardAvailableKeys.begin.toString(), "0"_sr));
 	}
 
 	auto view = data->tenantMap.atLatest();
@@ -9108,16 +9106,12 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 
 	self->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, availableKeys.begin, availableKeys.end));
 	++self->counters.kvSystemClearRanges;
-	self->addMutationToMutationLog(mLV,
-	                               MutationRef(MutationRef::SetValue,
-	                                           availableKeys.begin,
-	                                           available ? LiteralStringRef("1") : LiteralStringRef("0")));
+	self->addMutationToMutationLog(
+	    mLV, MutationRef(MutationRef::SetValue, availableKeys.begin, available ? "1"_sr : "0"_sr));
 	if (keys.end != allKeys.end) {
 		bool endAvailable = self->shards.rangeContaining(keys.end)->value()->isCFInVersionedData();
-		self->addMutationToMutationLog(mLV,
-		                               MutationRef(MutationRef::SetValue,
-		                                           availableKeys.end,
-		                                           endAvailable ? LiteralStringRef("1") : LiteralStringRef("0")));
+		self->addMutationToMutationLog(
+		    mLV, MutationRef(MutationRef::SetValue, availableKeys.end, endAvailable ? "1"_sr : "0"_sr));
 	}
 
 	// When a shard is moved out, delete all related checkpoints created for data move.
@@ -9183,16 +9177,12 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 	//TraceEvent("SetAssignedStatus", self->thisServerID).detail("Version", mLV.version).detail("RangeBegin", assignedKeys.begin).detail("RangeEnd", assignedKeys.end);
 	self->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, assignedKeys.begin, assignedKeys.end));
 	++self->counters.kvSystemClearRanges;
-	self->addMutationToMutationLog(mLV,
-	                               MutationRef(MutationRef::SetValue,
-	                                           assignedKeys.begin,
-	                                           nowAssigned ? LiteralStringRef("1") : LiteralStringRef("0")));
+	self->addMutationToMutationLog(
+	    mLV, MutationRef(MutationRef::SetValue, assignedKeys.begin, nowAssigned ? "1"_sr : "0"_sr));
 	if (keys.end != allKeys.end) {
 		bool endAssigned = self->shards.rangeContaining(keys.end)->value()->assigned();
-		self->addMutationToMutationLog(mLV,
-		                               MutationRef(MutationRef::SetValue,
-		                                           assignedKeys.end,
-		                                           endAssigned ? LiteralStringRef("1") : LiteralStringRef("0")));
+		self->addMutationToMutationLog(
+		    mLV, MutationRef(MutationRef::SetValue, assignedKeys.end, endAssigned ? "1"_sr : "0"_sr));
 	}
 
 	if (BUGGIFY) {
@@ -9273,7 +9263,7 @@ void StorageServerDisk::makeVersionDurable(Version version) {
 
 // Update data->storage to persist tss quarantine state
 void StorageServerDisk::makeTssQuarantineDurable() {
-	storage->set(KeyValueRef(persistTssQuarantine, LiteralStringRef("1")));
+	storage->set(KeyValueRef(persistTssQuarantine, "1"_sr));
 }
 
 void StorageServerDisk::changeLogProtocol(Version version, ProtocolVersion protocol) {
@@ -9322,7 +9312,7 @@ ACTOR Future<Void> applyByteSampleResult(StorageServer* data,
 		} else {
 			data->byteSampleClears.insert(KeyRangeRef(begin.removePrefix(persistByteSampleKeys.begin),
 			                                          end == persistByteSampleKeys.end
-			                                              ? LiteralStringRef("\xff\xff\xff")
+			                                              ? "\xff\xff\xff"_sr
 			                                              : end.removePrefix(persistByteSampleKeys.begin)),
 			                              true);
 			data->byteSampleClearsTooLarge.set(data->byteSampleClears.size() >
@@ -9565,7 +9555,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		                     : available[availableLoc + 1].key.removePrefix(persistShardAvailableKeys.begin));
 		ASSERT(!keys.empty());
 
-		bool nowAvailable = available[availableLoc].value != LiteralStringRef("0");
+		bool nowAvailable = available[availableLoc].value != "0"_sr;
 		/*if(nowAvailable)
 		  TraceEvent("AvailableShard", data->thisServerID).detail("RangeBegin", keys.begin).detail("RangeEnd", keys.end);*/
 		data->newestAvailableVersion.insert(keys, nowAvailable ? latestVersion : invalidVersion);
@@ -9585,7 +9575,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 			                     ? allKeys.end
 			                     : assigned[assignedLoc + 1].key.removePrefix(persistShardAssignedKeys.begin));
 			ASSERT(!keys.empty());
-			bool nowAssigned = assigned[assignedLoc].value != LiteralStringRef("0");
+			bool nowAssigned = assigned[assignedLoc].value != "0"_sr;
 			/*if(nowAssigned)
 			  TraceEvent("AssignedShard", data->thisServerID).detail("RangeBegin", keys.begin).detail("RangeEnd", keys.end);*/
 			changeServerKeys(data, keys, nowAssigned, version, CSK_RESTORE);

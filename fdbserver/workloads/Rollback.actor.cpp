@@ -40,11 +40,11 @@ struct RollbackWorkload : FailureInjectionWorkload {
 
 	RollbackWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		meanDelay = getOption(options, LiteralStringRef("meanDelay"), meanDelay); // Only matters if multiple==true
-		clogDuration = getOption(options, LiteralStringRef("clogDuration"), clogDuration);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), testDuration);
-		enableFailures = getOption(options, LiteralStringRef("enableFailures"), enableFailures);
-		multiple = getOption(options, LiteralStringRef("multiple"), multiple);
+		meanDelay = getOption(options, "meanDelay"_sr, meanDelay); // Only matters if multiple==true
+		clogDuration = getOption(options, "clogDuration"_sr, clogDuration);
+		testDuration = getOption(options, "testDuration"_sr, testDuration);
+		enableFailures = getOption(options, "enableFailures"_sr, enableFailures);
+		multiple = getOption(options, "multiple"_sr, multiple);
 	}
 
 	void initFailureInjectionMode(DeterministicRandom& random, unsigned count) override {

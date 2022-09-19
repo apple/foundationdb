@@ -36,10 +36,10 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 
 	FastTriggeredWatchesWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), operations("Operations"), retries("Retries") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
-		nodes = getOption(options, LiteralStringRef("nodes"), 100);
+		testDuration = getOption(options, "testDuration"_sr, 600.0);
+		nodes = getOption(options, "nodes"_sr, 100);
 		defaultValue = StringRef(format("%010d", deterministicRandom()->randomInt(0, 1000)));
-		keyBytes = std::max(getOption(options, LiteralStringRef("keyBytes"), 16), 16);
+		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 16);
 	}
 
 	std::string description() const override { return "Watches"; }

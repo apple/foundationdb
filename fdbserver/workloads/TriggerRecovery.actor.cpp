@@ -35,10 +35,10 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 	Optional<int32_t> currentNumOfResolvers;
 
 	TriggerRecoveryLoopWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		startTime = getOption(options, LiteralStringRef("startTime"), 0.0);
-		numRecoveries = getOption(options, LiteralStringRef("numRecoveries"), deterministicRandom()->randomInt(1, 10));
-		delayBetweenRecoveries = getOption(options, LiteralStringRef("delayBetweenRecoveries"), 0.0);
-		killAllProportion = getOption(options, LiteralStringRef("killAllProportion"), 0.1);
+		startTime = getOption(options, "startTime"_sr, 0.0);
+		numRecoveries = getOption(options, "numRecoveries"_sr, deterministicRandom()->randomInt(1, 10));
+		delayBetweenRecoveries = getOption(options, "delayBetweenRecoveries"_sr, 0.0);
+		killAllProportion = getOption(options, "killAllProportion"_sr, 0.1);
 		ASSERT((numRecoveries > 0) && (startTime >= 0) && (delayBetweenRecoveries >= 0));
 		TraceEvent(SevInfo, "TriggerRecoveryLoopSetup")
 		    .detail("StartTime", startTime)
@@ -112,16 +112,14 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				RangeResult kvs = wait(tr.getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-				                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
-				                                   CLIENT_KNOBS->TOO_MANY));
+				RangeResult kvs =
+				    wait(tr.getRange(KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
+				                     CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!kvs.more);
 				std::map<Key, Value> address_interface;
 				for (auto it : kvs) {
-					auto ip_port =
-					    (it.key.endsWith(LiteralStringRef(":tls")) ? it.key.removeSuffix(LiteralStringRef(":tls"))
-					                                               : it.key)
-					        .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
+					auto ip_port = (it.key.endsWith(":tls"_sr) ? it.key.removeSuffix(":tls"_sr) : it.key)
+					                   .removePrefix("\xff\xff/worker_interfaces/"_sr);
 					address_interface[ip_port] = it.value;
 				}
 				for (auto it : address_interface) {
@@ -129,7 +127,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 						BinaryReader::fromStringRef<ClientWorkerInterface>(it.second, IncludeVersion())
 						    .reboot.send(RebootRequest());
 					else
-						tr.set(LiteralStringRef("\xff\xff/reboot_worker"), it.second);
+						tr.set("\xff\xff/reboot_worker"_sr, it.second);
 				}
 				TraceEvent(SevInfo, "TriggerRecoveryLoop_AttempedKillAll").log();
 				return Void();

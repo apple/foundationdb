@@ -100,14 +100,14 @@ PacketBuffer* writeRequestHeader(std::string const& verb,
 	writer.serializeBytes(verb);
 	writer.serializeBytes(" ", 1);
 	writer.serializeBytes(resource);
-	writer.serializeBytes(LiteralStringRef(" HTTP/1.1\r\n"));
+	writer.serializeBytes(" HTTP/1.1\r\n"_sr);
 	for (auto h : headers) {
 		writer.serializeBytes(h.first);
-		writer.serializeBytes(LiteralStringRef(": "));
+		writer.serializeBytes(": "_sr);
 		writer.serializeBytes(h.second);
-		writer.serializeBytes(LiteralStringRef("\r\n"));
+		writer.serializeBytes("\r\n"_sr);
 	}
-	writer.serializeBytes(LiteralStringRef("\r\n"));
+	writer.serializeBytes("\r\n"_sr);
 	return writer.finish();
 }
 

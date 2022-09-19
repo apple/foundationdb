@@ -87,30 +87,29 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 	BlobGranuleVerifierWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		doSetup = !clientId; // only do this on the "first" client
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 120.0);
-		timeTravelLimit = getOption(options, LiteralStringRef("timeTravelLimit"), testDuration);
-		timeTravelBufferSize = getOption(options, LiteralStringRef("timeTravelBufferSize"), 100000000);
-		threads = getOption(options, LiteralStringRef("threads"), 1);
+		testDuration = getOption(options, "testDuration"_sr, 120.0);
+		timeTravelLimit = getOption(options, "timeTravelLimit"_sr, testDuration);
+		timeTravelBufferSize = getOption(options, "timeTravelBufferSize"_sr, 100000000);
+		threads = getOption(options, "threads"_sr, 1);
 
-		enablePurging = getOption(options, LiteralStringRef("enablePurging"), sharedRandomNumber % 3 == 0);
+		enablePurging = getOption(options, "enablePurging"_sr, sharedRandomNumber % 3 == 0);
 		sharedRandomNumber /= 3;
 		// FIXME: re-enable this! There exist several bugs with purging active granules where a small amount of state
 		// won't be cleaned up.
-		strictPurgeChecking =
-		    getOption(options, LiteralStringRef("strictPurgeChecking"), false /*sharedRandomNumber % 2 == 0*/);
+		strictPurgeChecking = getOption(options, "strictPurgeChecking"_sr, false /*sharedRandomNumber % 2 == 0*/);
 		sharedRandomNumber /= 2;
 
-		doForcePurge = getOption(options, LiteralStringRef("doForcePurge"), sharedRandomNumber % 3 == 0);
+		doForcePurge = getOption(options, "doForcePurge"_sr, sharedRandomNumber % 3 == 0);
 		sharedRandomNumber /= 3;
 
-		purgeAtLatest = getOption(options, LiteralStringRef("purgeAtLatest"), sharedRandomNumber % 3 == 0);
+		purgeAtLatest = getOption(options, "purgeAtLatest"_sr, sharedRandomNumber % 3 == 0);
 		sharedRandomNumber /= 3;
 
 		// randomly some tests write data first and then turn on blob granules later, to test conversion of existing DB
 		initAtEnd = !enablePurging && sharedRandomNumber % 10 == 0;
 		sharedRandomNumber /= 10;
 
-		clearAndMergeCheck = getOption(options, LiteralStringRef("clearAndMergeCheck"), sharedRandomNumber % 10 == 0);
+		clearAndMergeCheck = getOption(options, "clearAndMergeCheck"_sr, sharedRandomNumber % 10 == 0);
 		sharedRandomNumber /= 10;
 
 		// don't do strictPurgeChecking or forcePurge if !enablePurging
@@ -160,7 +159,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->set(blobRangeChangeKey, deterministicRandom()->randomUniqueID().toString());
-				wait(krmSetRange(tr, blobRangeKeys.begin, KeyRange(normalKeys), LiteralStringRef("1")));
+				wait(krmSetRange(tr, blobRangeKeys.begin, KeyRange(normalKeys), "1"_sr));
 				wait(tr->commit());
 				if (BGV_DEBUG) {
 					printf("Successfully set up blob granule range for normalKeys\n");

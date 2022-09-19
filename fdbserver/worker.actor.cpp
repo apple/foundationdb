@@ -300,18 +300,18 @@ ACTOR Future<Void> loadedPonger(FutureStream<LoadedPingRequest> pings) {
 	loop {
 		LoadedPingRequest pong = waitNext(pings);
 		LoadedReply rep;
-		rep.payload = (pong.loadReply ? payloadBack : LiteralStringRef(""));
+		rep.payload = (pong.loadReply ? payloadBack : ""_sr);
 		rep.id = pong.id;
 		pong.reply.send(rep);
 	}
 }
 
-StringRef fileStoragePrefix = LiteralStringRef("storage-");
-StringRef testingStoragePrefix = LiteralStringRef("testingstorage-");
-StringRef fileLogDataPrefix = LiteralStringRef("log-");
-StringRef fileVersionedLogDataPrefix = LiteralStringRef("log2-");
-StringRef fileLogQueuePrefix = LiteralStringRef("logqueue-");
-StringRef tlogQueueExtension = LiteralStringRef("fdq");
+StringRef fileStoragePrefix = "storage-"_sr;
+StringRef testingStoragePrefix = "testingstorage-"_sr;
+StringRef fileLogDataPrefix = "log-"_sr;
+StringRef fileVersionedLogDataPrefix = "log2-"_sr;
+StringRef fileLogQueuePrefix = "logqueue-"_sr;
+StringRef tlogQueueExtension = "fdq"_sr;
 
 enum class FilesystemCheck {
 	FILES_ONLY,
@@ -388,12 +388,12 @@ struct TLogOptions {
 			if (key.size() != 0 && value.size() == 0)
 				return default_error_or();
 
-			if (key == LiteralStringRef("V")) {
+			if (key == "V"_sr) {
 				ErrorOr<TLogVersion> tLogVersion = TLogVersion::FromStringRef(value);
 				if (tLogVersion.isError())
 					return tLogVersion.getError();
 				options.version = tLogVersion.get();
-			} else if (key == LiteralStringRef("LS")) {
+			} else if (key == "LS"_sr) {
 				ErrorOr<TLogSpillType> tLogSpillType = TLogSpillType::FromStringRef(value);
 				if (tLogSpillType.isError())
 					return tLogSpillType.getError();
@@ -615,7 +615,7 @@ ACTOR Future<Void> registrationClient(
 		}
 
 		if (!upToDate) {
-			request.issues.push_back_deep(request.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
+			request.issues.push_back_deep(request.issues.arena(), "incorrect_cluster_file_contents"_sr);
 			std::string connectionString = connRecord->getConnectionString().toString();
 			if (!incorrectTime.present()) {
 				incorrectTime = now();
@@ -763,7 +763,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	// Setup a ServerDBInfo for test.
 	ServerDBInfo testDbInfo;
 	LocalityData testLocal;
-	testLocal.set(LiteralStringRef("dcid"), StringRef(std::to_string(1)));
+	testLocal.set("dcid"_sr, StringRef(std::to_string(1)));
 	testDbInfo.master.locality = testLocal;
 
 	// Manually set up a master address.
@@ -779,7 +779,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	// Create a remote TLog. Although the remote TLog also uses the local address, it shouldn't be considered as
 	// in primary DC given the remote locality.
 	LocalityData fakeRemote;
-	fakeRemote.set(LiteralStringRef("dcid"), StringRef(std::to_string(2)));
+	fakeRemote.set("dcid"_sr, StringRef(std::to_string(2)));
 	TLogInterface remoteTlog(fakeRemote);
 	remoteTlog.initEndpoints();
 	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(remoteTlog));
@@ -844,7 +844,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimarySatelliteDc") {
 	// Setup a ServerDBInfo for test.
 	ServerDBInfo testDbInfo;
 	LocalityData testLocal;
-	testLocal.set(LiteralStringRef("dcid"), StringRef(std::to_string(1)));
+	testLocal.set("dcid"_sr, StringRef(std::to_string(1)));
 	testDbInfo.master.locality = testLocal;
 
 	// First, create an empty TLogInterface, and check that it shouldn't be considered as in satellite DC.
@@ -876,7 +876,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimarySatelliteDc") {
 	// Create a remote TLog, and it should be considered as in remote DC.
 	NetworkAddress remoteTLogAddress(IPAddress(0x37373737), 1);
 	LocalityData fakeRemote;
-	fakeRemote.set(LiteralStringRef("dcid"), StringRef(std::to_string(2)));
+	fakeRemote.set("dcid"_sr, StringRef(std::to_string(2)));
 	TLogInterface remoteTLog(fakeRemote);
 	remoteTLog.initEndpoints();
 	remoteTLog.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ remoteTLogAddress }, UID(1, 2)));
@@ -925,7 +925,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndRemoteDc") {
 	// Setup a ServerDBInfo for test.
 	ServerDBInfo testDbInfo;
 	LocalityData testLocal;
-	testLocal.set(LiteralStringRef("dcid"), StringRef(std::to_string(1)));
+	testLocal.set("dcid"_sr, StringRef(std::to_string(1)));
 	testDbInfo.master.locality = testLocal;
 
 	// First, create an empty TLogInterface, and check that it shouldn't be considered as in remote DC.
@@ -941,7 +941,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndRemoteDc") {
 
 	// Create a remote TLog, and it should be considered as in remote DC.
 	LocalityData fakeRemote;
-	fakeRemote.set(LiteralStringRef("dcid"), StringRef(std::to_string(2)));
+	fakeRemote.set("dcid"_sr, StringRef(std::to_string(2)));
 	TLogInterface remoteTlog(fakeRemote);
 	remoteTlog.initEndpoints();
 
@@ -1420,8 +1420,8 @@ void startRole(const Role& role,
 
 	// Update roles map, log Roles metrics
 	g_roles.insert({ role.roleName, roleId.shortString() });
-	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
-	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
+	StringMetricHandle("Roles"_sr) = roleString(g_roles, false);
+	StringMetricHandle("RolesWithIDs"_sr) = roleString(g_roles, true);
 	if (g_network->isSimulated())
 		g_simulator->addRole(g_network->getLocalAddress(), role.roleName);
 }
@@ -1450,8 +1450,8 @@ void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
 
 	// Update roles map, log Roles metrics
 	g_roles.erase({ role.roleName, id.shortString() });
-	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
-	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
+	StringMetricHandle("Roles"_sr) = roleString(g_roles, false);
+	StringMetricHandle("RolesWithIDs"_sr) = roleString(g_roles, true);
 	if (g_network->isSimulated())
 		g_simulator->removeRole(g_network->getLocalAddress(), role.roleName);
 
