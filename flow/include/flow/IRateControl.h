@@ -58,7 +58,7 @@ public:
 			// prevent int overflow
 			m_budget = m_limit;
 		} else {
-			returnUnused(int(std::min(unused, double(m_limit))));
+			returnUnused(int(unused));
 		}
 		m_last_update = ts;
 		m_budget -= n;
