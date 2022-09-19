@@ -296,6 +296,18 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 *
 	 * @param beginKey start of the key range
 	 * @param endKey end of the key range
+	 *
+	 * @return a future with the version of the last blob granule.
+	 */
+	default CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey) {
+		return verifyBlobRange(beginKey, endKey, -2, getExecutor());
+	}
+
+	/**
+	 * Runs {@link #verifyBlobRange(Function)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
 	 * @param version version to read at
 	 *
 	 * @return a future with the version of the last blob granule.

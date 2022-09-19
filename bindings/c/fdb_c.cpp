@@ -548,10 +548,14 @@ extern "C" DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_verify_blob_rang
                                                                                   uint8_t const* end_key_name,
                                                                                   int end_key_name_length,
                                                                                   int64_t version) {
+	Optional<Version> rv;
+	if (version != latestVersion) {
+		rv = version;
+	}
 	return (FDBFuture*)(DB(db)
 	                        ->verifyBlobRange(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
 	                                                      StringRef(end_key_name, end_key_name_length)),
-	                                          version)
+	                                          rv)
 	                        .extractPtr());
 }
 

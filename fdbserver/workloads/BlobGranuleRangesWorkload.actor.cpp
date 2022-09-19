@@ -201,7 +201,11 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> isRangeActive(Database cx, KeyRange range) {
-		Version v = wait(cx->verifyBlobRange(range, {}));
+		Optional<Version> rv;
+		if (deterministicRandom()->coinflip()) {
+			rv = latestVersion;
+		}
+		state Version v = wait(cx->verifyBlobRange(range, rv));
 		return v != invalidVersion;
 	}
 
