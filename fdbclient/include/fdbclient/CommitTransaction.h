@@ -20,11 +20,11 @@
 
 #ifndef FLOW_FDBCLIENT_COMMITTRANSACTION_H
 #define FLOW_FDBCLIENT_COMMITTRANSACTION_H
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
 #pragma once
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Tracing.h"
 

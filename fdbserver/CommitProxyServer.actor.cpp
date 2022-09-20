@@ -1459,7 +1459,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					MutationRef backupMutation(
 					    MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
 
-					// TODO (Nim): Encrypt properly by splitting clear range across tenant boundaries
+					// TODO (Nim): Currently clear ranges are encrypted using the default encryption key, this must be
+					// changed to account for clear ranges which span tenant boundaries
 					if (self->pProxyCommitData->isEncryptionEnabled) {
 						if (backupMutation.param1 == m.param1 && backupMutation.param2 == m.param2 &&
 						    encryptedMutation.present()) {
