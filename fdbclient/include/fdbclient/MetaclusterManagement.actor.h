@@ -1157,10 +1157,8 @@ struct RestoreClusterImpl {
 		    TenantMetadata::tenantMap().getRange(tr, begin, end, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
 		state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenants = wait(tenantsFuture);
 
-		if (!tenants.results.empty()) {
-			for (auto t : tenants.results) {
-				self->dataClusterTenantMap.emplace(t.first, t.second);
-			}
+		for (auto t : tenants.results) {
+			self->dataClusterTenantMap.emplace(t.first, t.second);
 		}
 
 		return !tenants.more;
@@ -1174,10 +1172,8 @@ struct RestoreClusterImpl {
 		    TenantMetadata::tenantIdIndex().getRange(tr, begin, end, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
 		state KeyBackedRangeResult<std::pair<int64_t, TenantName>> tenants = wait(tenantsFuture);
 
-		if (!tenants.results.empty()) {
-			for (auto t : tenants.results) {
-				self->dataClusterTenantIdIndex.emplace(t.first, t.second);
-			}
+		for (auto t : tenants.results) {
+			self->dataClusterTenantIdIndex.emplace(t.first, t.second);
 		}
 
 		return !tenants.more;
@@ -1208,11 +1204,9 @@ struct RestoreClusterImpl {
 		state KeyBackedRangeResult<std::pair<TenantName, TenantMapEntry>> tenants = wait(tenantsFuture);
 
 		state TenantName lastTenantNameRetrieved;
-		if (!tenants.results.empty()) {
-			for (auto t : tenants.results) {
-				self->mgmtClusterTenantMap.emplace(t.first, t.second);
-				lastTenantNameRetrieved = t.first;
-			}
+		for (auto t : tenants.results) {
+			self->mgmtClusterTenantMap.emplace(t.first, t.second);
+			lastTenantNameRetrieved = t.first;
 		}
 
 		return std::pair<bool, TenantName>{ !tenants.more, lastTenantNameRetrieved };
@@ -1229,11 +1223,9 @@ struct RestoreClusterImpl {
 		state KeyBackedRangeResult<std::pair<int64_t, TenantName>> tenants = wait(tenantsFuture);
 
 		state uint64_t lastTenantIdRetrieved;
-		if (!tenants.results.empty()) {
-			for (auto t : tenants.results) {
-				self->mgmtClusterTenantIdIndex.emplace(t.first, t.second);
-				lastTenantIdRetrieved = t.first;
-			}
+		for (auto t : tenants.results) {
+			self->mgmtClusterTenantIdIndex.emplace(t.first, t.second);
+			lastTenantIdRetrieved = t.first;
 		}
 
 		return std::pair<bool, uint64_t>{ !tenants.more, lastTenantIdRetrieved };
@@ -1248,11 +1240,9 @@ struct RestoreClusterImpl {
 		        tr, clusterTupleRange.first, clusterTupleRange.second, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
 		state KeyBackedRangeResult<Tuple> tenantEntries = wait(tenantEntriesFuture);
 
-		if (!tenantEntries.results.empty()) {
-			for (auto t : tenantEntries.results) {
-				ASSERT(t.getString(0) == self->clusterName);
-				self->mgmtTenantSet.insert(t.getString(1));
-			}
+		for (auto t : tenantEntries.results) {
+			ASSERT(t.getString(0) == self->clusterName);
+			self->mgmtTenantSet.insert(t.getString(1));
 		}
 
 		return !tenantEntries.more;
@@ -1273,7 +1263,7 @@ struct RestoreClusterImpl {
 				break;
 			} else {
 				// begin range from this tenant
-				beginRangeTenantName = tenantsItr.second;
+				beginRangeTenantName = keyAfter(tenantsItr.second);
 			}
 		}
 
@@ -1290,7 +1280,7 @@ struct RestoreClusterImpl {
 				break;
 			} else {
 				// begin range from this tenantId
-				beginRangeTenantId = tenantsItr.second;
+				beginRangeTenantId = tenantsItr.second + 1;
 			}
 		}
 

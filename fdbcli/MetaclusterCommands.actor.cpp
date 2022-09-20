@@ -518,6 +518,7 @@ CommandFactory metaclusterRegisterFactory(
         "`create_experimental' and `decommission' set up or deconfigure a metacluster.\n"
         "`register' and `remove' add and remove data clusters from the metacluster.\n"
         "`configure' updates the configuration of a data cluster.\n"
+        "`restore' restores the specified data cluster."
         "`list' prints a list of data clusters in the metacluster.\n"
         "`get' prints the metadata for a particular data cluster.\n"
         "`status' prints metacluster metadata.\n"),
