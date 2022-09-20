@@ -74,9 +74,6 @@ private:
 				    error(fmt::format("Operation succeeded in error test!"));
 			    }
 			    ASSERT(err.code() != error_code_success);
-			    if (err.code() != error_code_blob_granule_transaction_too_old) {
-				    seenReadSuccess = true;
-			    }
 			    if (err.code() != expectedError) {
 				    info(fmt::format("incorrect error. Expected {}, Got {}", expectedError, err.code()));
 				    if (err.code() == error_code_blob_granule_transaction_too_old) {
@@ -86,6 +83,9 @@ private:
 					    ctx->onError(err);
 				    }
 			    } else {
+				    if (err.code() != error_code_blob_granule_transaction_too_old) {
+					    seenReadSuccess = true;
+				    }
 				    ctx->done();
 			    }
 		    },

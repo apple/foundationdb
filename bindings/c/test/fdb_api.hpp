@@ -779,6 +779,13 @@ public:
 		return native::fdb_database_list_blobbified_ranges(
 		    db.get(), begin.data(), intSize(begin), end.data(), intSize(end), rangeLimit);
 	}
+
+	TypedFuture<future_var::Int64> verifyBlobRange(KeyRef begin, KeyRef end, int64_t version) {
+		if (!db)
+			throw std::runtime_error("verify_blob_range from null database");
+		return native::fdb_database_verify_blob_range(
+		    db.get(), begin.data(), intSize(begin), end.data(), intSize(end), version);
+	}
 };
 
 inline Error selectApiVersionNothrow(int version) {
