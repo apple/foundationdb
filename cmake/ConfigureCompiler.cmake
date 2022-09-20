@@ -290,6 +290,10 @@ else()
         add_link_options(-stdlib=libc++ -Wl,-build-id=sha1)
       endif()
     endif()
+    if (NOT APPLE AND NOT USE_LIBCXX)
+      message(STATUS "Linking libatomic")
+      add_link_options(-latomic)
+    endif()
     if (OPEN_FOR_IDE)
       add_compile_options(
         -Wno-unknown-attributes)
@@ -307,11 +311,19 @@ else()
       -Wno-unknown-warning-option
       -Wno-unused-parameter
       -Wno-constant-logical-operand
+      # These need to be disabled for FDB's RocksDB storage server implementation
+      -Wno-deprecated-copy
+      -Wno-delete-non-abstract-non-virtual-dtor
+      -Wno-range-loop-construct
+      -Wno-reorder-ctor
+      # Needed for clang 13 (todo: Update above logic so that it figures out when to pass in -static-libstdc++ and when it will be ignored)
+      # When you remove this, you might need to move it back to the USE_CCACHE stanza.  It was (only) there before I moved it here.
+      -Wno-unused-command-line-argument
       )
     if (USE_CCACHE)
       add_compile_options(
         -Wno-register
-        -Wno-unused-command-line-argument)
+      )
     endif()
     if (PROFILE_INSTR_GENERATE)
       add_compile_options(-fprofile-instr-generate)

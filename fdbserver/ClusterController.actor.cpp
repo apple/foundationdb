@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "fdbclient/SystemData.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbserver/Knobs.h"
@@ -43,7 +44,6 @@
 #include "fdbserver/ClusterRecovery.actor.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/DBCoreState.h"
-#include "fdbserver/ConfigBroadcaster.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/LeaderElection.h"
 #include "fdbserver/LogSystem.h"
@@ -139,6 +139,31 @@ struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
 	}
 };
 
+struct ConsistencyScanSingleton : Singleton<ConsistencyScanInterface> {
+
+	ConsistencyScanSingleton(const Optional<ConsistencyScanInterface>& interface) : Singleton(interface) {}
+
+	Role getRole() const { return Role::CONSISTENCYSCAN; }
+	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::ConsistencyScan; }
+
+	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
+		if (interface.present()) {
+			TraceEvent("CCCK_SetInf", cc->id).detail("Id", interface.get().id());
+			cc->db.setConsistencyScan(interface.get());
+		}
+	}
+	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
+		if (interface.present()) {
+			cc->id_worker[pid].haltConsistencyScan =
+			    brokenPromiseToNever(interface.get().haltConsistencyScan.getReply(HaltConsistencyScanRequest(cc->id)));
+		}
+	}
+	void recruit(ClusterControllerData* cc) const {
+		cc->lastRecruitTime = now();
+		cc->recruitConsistencyScan.set(true);
+	}
+};
+
 struct BlobManagerSingleton : Singleton<BlobManagerInterface> {
 
 	BlobManagerSingleton(const Optional<BlobManagerInterface>& interface) : Singleton(interface) {}
@@ -196,13 +221,17 @@ struct EncryptKeyProxySingleton : Singleton<EncryptKeyProxyInterface> {
 	}
 };
 
-ACTOR Future<Void> handleLeaderReplacement(Reference<ClusterRecoveryData> self, Future<Void> leaderFail) {
-	loop choose {
-		when(wait(leaderFail)) {
-			TraceEvent("LeaderReplaced", self->controllerData->id).log();
-			// We are no longer the leader if this has changed.
-			self->controllerData->shouldCommitSuicide = true;
-			throw restart_cluster_controller();
+ACTOR Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* self) {
+	state ReadYourWritesTransaction tr(self->db.db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			Optional<Value> previousCoordinators = wait(tr.get(previousCoordinatorsKey));
+			return previousCoordinators;
+		} catch (Error& e) {
+			wait(tr.onError(e));
 		}
 	}
 }
@@ -210,7 +239,6 @@ ACTOR Future<Void> handleLeaderReplacement(Reference<ClusterRecoveryData> self, 
 ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
                                         ClusterControllerData::DBInfo* db,
                                         ServerCoordinators coordinators,
-                                        Future<Void> leaderFail,
                                         Future<Void> recoveredDiskFiles) {
 	state MasterInterface iMaster;
 	state Reference<ClusterRecoveryData> recoveryData;
@@ -246,6 +274,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			dbInfo.ratekeeper = db->serverInfo->get().ratekeeper;
 			dbInfo.blobManager = db->serverInfo->get().blobManager;
 			dbInfo.encryptKeyProxy = db->serverInfo->get().encryptKeyProxy;
+			dbInfo.consistencyScan = db->serverInfo->get().consistencyScan;
 			dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
 			dbInfo.myLocality = db->serverInfo->get().myLocality;
 			dbInfo.client = ClientDBInfo();
@@ -274,7 +303,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			                                                  db->serverInfo->get().masterLifetime,
 			                                                  coordinators,
 			                                                  db->serverInfo->get().clusterInterface,
-			                                                  LiteralStringRef(""),
+			                                                  ""_sr,
 			                                                  addActor,
 			                                                  db->forceRecovery);
 
@@ -307,7 +336,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 					TraceEvent(SevDebug, "BackupWorkerDoneRequest", cluster->id).log();
 				}
 				when(wait(collection)) { throw internal_error(); }
-				when(wait(handleLeaderReplacement(recoveryData, leaderFail))) { throw internal_error(); }
 			}
 			// failed master (better master exists) could happen while change-coordinators request processing is
 			// in-progress
@@ -621,6 +649,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	// Try to find a new process for each singleton.
 	WorkerDetails newRKWorker = findNewProcessForSingleton(self, ProcessClass::Ratekeeper, id_used);
 	WorkerDetails newDDWorker = findNewProcessForSingleton(self, ProcessClass::DataDistributor, id_used);
+	WorkerDetails newCSWorker = findNewProcessForSingleton(self, ProcessClass::ConsistencyScan, id_used);
 
 	WorkerDetails newBMWorker;
 	if (self->db.blobGranulesEnabled.get()) {
@@ -635,6 +664,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	// Find best possible fitnesses for each singleton.
 	auto bestFitnessForRK = findBestFitnessForSingleton(self, newRKWorker, ProcessClass::Ratekeeper);
 	auto bestFitnessForDD = findBestFitnessForSingleton(self, newDDWorker, ProcessClass::DataDistributor);
+	auto bestFitnessForCS = findBestFitnessForSingleton(self, newCSWorker, ProcessClass::ConsistencyScan);
 
 	ProcessClass::Fitness bestFitnessForBM;
 	if (self->db.blobGranulesEnabled.get()) {
@@ -649,6 +679,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	auto& db = self->db.serverInfo->get();
 	auto rkSingleton = RatekeeperSingleton(db.ratekeeper);
 	auto ddSingleton = DataDistributorSingleton(db.distributor);
+	ConsistencyScanSingleton csSingleton(db.consistencyScan);
 	BlobManagerSingleton bmSingleton(db.blobManager);
 	EncryptKeyProxySingleton ekpSingleton(db.encryptKeyProxy);
 
@@ -659,6 +690,9 @@ void checkBetterSingletons(ClusterControllerData* self) {
 
 	bool ddHealthy = isHealthySingleton<DataDistributorInterface>(
 	    self, newDDWorker, ddSingleton, bestFitnessForDD, self->recruitingDistributorID);
+
+	bool csHealthy = isHealthySingleton<ConsistencyScanInterface>(
+	    self, newCSWorker, csSingleton, bestFitnessForCS, self->recruitingConsistencyScanID);
 
 	bool bmHealthy = true;
 	if (self->db.blobGranulesEnabled.get()) {
@@ -673,7 +707,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 	// if any of the singletons are unhealthy (rerecruited or not stable), then do not
 	// consider any further re-recruitments
-	if (!(rkHealthy && ddHealthy && bmHealthy && ekpHealthy)) {
+	if (!(rkHealthy && ddHealthy && bmHealthy && ekpHealthy && csHealthy)) {
 		return;
 	}
 
@@ -681,8 +715,10 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	// check if we can colocate the singletons in a more optimal way
 	Optional<Standalone<StringRef>> currRKProcessId = rkSingleton.interface.get().locality.processId();
 	Optional<Standalone<StringRef>> currDDProcessId = ddSingleton.interface.get().locality.processId();
+	Optional<Standalone<StringRef>> currCSProcessId = csSingleton.interface.get().locality.processId();
 	Optional<Standalone<StringRef>> newRKProcessId = newRKWorker.interf.locality.processId();
 	Optional<Standalone<StringRef>> newDDProcessId = newDDWorker.interf.locality.processId();
+	Optional<Standalone<StringRef>> newCSProcessId = newCSWorker.interf.locality.processId();
 
 	Optional<Standalone<StringRef>> currBMProcessId, newBMProcessId;
 	if (self->db.blobGranulesEnabled.get()) {
@@ -696,8 +732,8 @@ void checkBetterSingletons(ClusterControllerData* self) {
 		newEKPProcessId = newEKPWorker.interf.locality.processId();
 	}
 
-	std::vector<Optional<Standalone<StringRef>>> currPids = { currRKProcessId, currDDProcessId };
-	std::vector<Optional<Standalone<StringRef>>> newPids = { newRKProcessId, newDDProcessId };
+	std::vector<Optional<Standalone<StringRef>>> currPids = { currRKProcessId, currDDProcessId, currCSProcessId };
+	std::vector<Optional<Standalone<StringRef>>> newPids = { newRKProcessId, newDDProcessId, newCSProcessId };
 	if (self->db.blobGranulesEnabled.get()) {
 		currPids.emplace_back(currBMProcessId);
 		newPids.emplace_back(newBMProcessId);
@@ -727,7 +763,8 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	if (newColocMap[newRKProcessId] <= currColocMap[currRKProcessId] &&
 	    newColocMap[newDDProcessId] <= currColocMap[currDDProcessId] &&
 	    newColocMap[newBMProcessId] <= currColocMap[currBMProcessId] &&
-	    newColocMap[newEKPProcessId] <= currColocMap[currEKPProcessId]) {
+	    newColocMap[newEKPProcessId] <= currColocMap[currEKPProcessId] &&
+	    newColocMap[newCSProcessId] <= currColocMap[currCSProcessId]) {
 		// rerecruit the singleton for which we have found a better process, if any
 		if (newColocMap[newRKProcessId] < currColocMap[currRKProcessId]) {
 			rkSingleton.recruit(self);
@@ -737,6 +774,8 @@ void checkBetterSingletons(ClusterControllerData* self) {
 			bmSingleton.recruit(self);
 		} else if (SERVER_KNOBS->ENABLE_ENCRYPTION && newColocMap[newEKPProcessId] < currColocMap[currEKPProcessId]) {
 			ekpSingleton.recruit(self);
+		} else if (newColocMap[newCSProcessId] < currColocMap[currCSProcessId]) {
+			csSingleton.recruit(self);
 		}
 	}
 }
@@ -1222,13 +1261,12 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		    w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
 			self->masterProcessId = w.locality.processId();
 		}
-		if (configBroadcaster != nullptr && isCoordinator) {
-			self->addActor.send(configBroadcaster->registerNode(
-			    w,
-			    req.lastSeenKnobVersion,
-			    req.knobConfigClassSet,
-			    self->id_worker[w.locality.processId()].watcher,
-			    self->id_worker[w.locality.processId()].details.interf.configBroadcastInterface));
+		if (configBroadcaster != nullptr && req.lastSeenKnobVersion.present() && req.knobConfigClassSet.present()) {
+			self->addActor.send(configBroadcaster->registerNode(req.configBroadcastInterface,
+			                                                    req.lastSeenKnobVersion.get(),
+			                                                    req.knobConfigClassSet.get(),
+			                                                    self->id_worker[w.locality.processId()].watcher,
+			                                                    isCoordinator));
 		}
 		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 		self->updateDBInfo.trigger();
@@ -1259,12 +1297,12 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 			self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 			self->updateDBInfo.trigger();
 		}
-		if (configBroadcaster != nullptr && isCoordinator) {
-			self->addActor.send(configBroadcaster->registerNode(w,
-			                                                    req.lastSeenKnobVersion,
-			                                                    req.knobConfigClassSet,
+		if (configBroadcaster != nullptr && req.lastSeenKnobVersion.present() && req.knobConfigClassSet.present()) {
+			self->addActor.send(configBroadcaster->registerNode(req.configBroadcastInterface,
+			                                                    req.lastSeenKnobVersion.get(),
+			                                                    req.knobConfigClassSet.get(),
 			                                                    info->second.watcher,
-			                                                    info->second.details.interf.configBroadcastInterface));
+			                                                    isCoordinator));
 		}
 		checkOutstandingRequests(self);
 	} else {
@@ -1302,6 +1340,13 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		    self, w, currSingleton, registeringSingleton, self->recruitingEncryptKeyProxyID);
 	}
 
+	if (req.consistencyScanInterf.present()) {
+		auto currSingleton = ConsistencyScanSingleton(self->db.serverInfo->get().consistencyScan);
+		auto registeringSingleton = ConsistencyScanSingleton(req.consistencyScanInterf);
+		haltRegisteringOrCurrentSingleton<ConsistencyScanInterface>(
+		    self, w, currSingleton, registeringSingleton, self->recruitingConsistencyScanID);
+	}
+
 	// Notify the worker to register again with new process class/exclusive property
 	if (!req.reply.isSet() && newPriorityInfo != req.priorityInfo) {
 		req.reply.send(RegisterWorkerReply(newProcessClass, newPriorityInfo));
@@ -1310,7 +1355,7 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 	return Void();
 }
 
-#define TIME_KEEPER_VERSION LiteralStringRef("1")
+#define TIME_KEEPER_VERSION "1"_sr
 
 ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData* self) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
@@ -2163,6 +2208,101 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData* self) {
 	}
 }
 
+ACTOR Future<Void> startConsistencyScan(ClusterControllerData* self) {
+	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
+	TraceEvent("CCStartConsistencyScan", self->id).log();
+	loop {
+		try {
+			state bool no_consistencyScan = !self->db.serverInfo->get().consistencyScan.present();
+			while (!self->masterProcessId.present() ||
+			       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
+			       self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
+			}
+			if (no_consistencyScan && self->db.serverInfo->get().consistencyScan.present()) {
+				// Existing consistencyScan registers while waiting, so skip.
+				return Void();
+			}
+
+			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
+			WorkerFitnessInfo csWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
+			                                                                ProcessClass::ConsistencyScan,
+			                                                                ProcessClass::NeverAssign,
+			                                                                self->db.config,
+			                                                                id_used);
+
+			InitializeConsistencyScanRequest req(deterministicRandom()->randomUniqueID());
+			state WorkerDetails worker = csWorker.worker;
+			if (self->onMasterIsBetter(worker, ProcessClass::ConsistencyScan)) {
+				worker = self->id_worker[self->masterProcessId.get()].details;
+			}
+
+			self->recruitingConsistencyScanID = req.reqId;
+			TraceEvent("CCRecruitConsistencyScan", self->id)
+			    .detail("Addr", worker.interf.address())
+			    .detail("CSID", req.reqId);
+
+			ErrorOr<ConsistencyScanInterface> interf = wait(worker.interf.consistencyScan.getReplyUnlessFailedFor(
+			    req, SERVER_KNOBS->WAIT_FOR_CONSISTENCYSCAN_JOIN_DELAY, 0));
+			if (interf.present()) {
+				self->recruitConsistencyScan.set(false);
+				self->recruitingConsistencyScanID = interf.get().id();
+				const auto& consistencyScan = self->db.serverInfo->get().consistencyScan;
+				TraceEvent("CCConsistencyScanRecruited", self->id)
+				    .detail("Addr", worker.interf.address())
+				    .detail("CKID", interf.get().id());
+				if (consistencyScan.present() && consistencyScan.get().id() != interf.get().id() &&
+				    self->id_worker.count(consistencyScan.get().locality.processId())) {
+					TraceEvent("CCHaltConsistencyScanAfterRecruit", self->id)
+					    .detail("CKID", consistencyScan.get().id())
+					    .detail("DcID", printable(self->clusterControllerDcId));
+					ConsistencyScanSingleton(consistencyScan).halt(self, consistencyScan.get().locality.processId());
+				}
+				if (!consistencyScan.present() || consistencyScan.get().id() != interf.get().id()) {
+					self->db.setConsistencyScan(interf.get());
+				}
+				checkOutstandingRequests(self);
+				return Void();
+			} else {
+				TraceEvent("CCConsistencyScanRecruitEmpty", self->id).log();
+			}
+		} catch (Error& e) {
+			TraceEvent("CCConsistencyScanRecruitError", self->id).error(e);
+			if (e.code() != error_code_no_more_servers) {
+				throw;
+			}
+		}
+		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+	}
+}
+
+ACTOR Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
+	while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+		TraceEvent("CCMonitorConsistencyScanWaitingForRecovery", self->id).log();
+		wait(self->db.serverInfo->onChange());
+	}
+
+	TraceEvent("CCMonitorConsistencyScan", self->id).log();
+	loop {
+		if (self->db.serverInfo->get().consistencyScan.present() && !self->recruitConsistencyScan.get()) {
+			state Future<Void> wfClient =
+			    waitFailureClient(self->db.serverInfo->get().consistencyScan.get().waitFailure,
+			                      SERVER_KNOBS->CONSISTENCYSCAN_FAILURE_TIME);
+			choose {
+				when(wait(wfClient)) {
+					TraceEvent("CCMonitorConsistencyScanDied", self->id)
+					    .detail("CKID", self->db.serverInfo->get().consistencyScan.get().id());
+					self->db.clearInterf(ProcessClass::ConsistencyScanClass);
+				}
+				when(wait(self->recruitConsistencyScan.onChange())) {}
+			}
+		} else {
+			TraceEvent("CCMonitorConsistencyScanStarting", self->id).log();
+			wait(startConsistencyScan(self));
+		}
+	}
+}
+
 ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, double waitTime) {
 	// If master fails at the same time, give it a chance to clear master PID.
 	// Also wait to avoid too many consecutive recruits in a small time window.
@@ -2368,7 +2508,7 @@ ACTOR Future<Void> watchBlobGranulesConfigKey(ClusterControllerData* self) {
 
 			Optional<Value> blobConfig = wait(tr->get(blobGranuleConfigKey));
 			if (blobConfig.present()) {
-				self->db.blobGranulesEnabled.set(blobConfig.get() == LiteralStringRef("1"));
+				self->db.blobGranulesEnabled.set(blobConfig.get() == "1"_sr);
 			}
 
 			state Future<Void> watch = tr->watch(blobGranuleConfigKey);
@@ -2549,17 +2689,20 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          ConfigDBType configDBType,
                                          Future<Void> recoveredDiskFiles) {
 	state ClusterControllerData self(interf, locality, coordinators);
-	state ConfigBroadcaster configBroadcaster(coordinators, configDBType);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
 	state uint64_t step = 0;
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
+	state ConfigBroadcaster configBroadcaster;
+	if (configDBType != ConfigDBType::DISABLED) {
+		configBroadcaster = ConfigBroadcaster(coordinators, configDBType, getPreviousCoordinators(&self));
+	}
 
 	// EncryptKeyProxy is necessary for TLog recovery, recruit it as the first process
 	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		self.addActor.send(monitorEncryptKeyProxy(&self));
 	}
-	self.addActor.send(clusterWatchDatabase(
-	    &self, &self.db, coordinators, leaderFail, recoveredDiskFiles)); // Start the master database
+	self.addActor.send(
+	    clusterWatchDatabase(&self, &self.db, coordinators, recoveredDiskFiles)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
 	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(),
 	                                &self,
@@ -2577,6 +2720,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorRatekeeper(&self));
 	self.addActor.send(monitorBlobManager(&self));
 	self.addActor.send(watchBlobGranulesConfigKey(&self));
+	self.addActor.send(monitorConsistencyScan(&self));
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(traceCounters("ClusterControllerMetrics",
 	                                 self.id,
@@ -2669,6 +2813,12 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		when(GetServerDBInfoRequest req = waitNext(interf.getServerDBInfo.getFuture())) {
 			self.addActor.send(clusterGetServerInfo(&self.db, req.knownServerInfoID, req.reply));
 		}
+		when(wait(leaderFail)) {
+			// We are no longer the leader if this has changed.
+			endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Leader Replaced", true);
+			CODE_PROBE(true, "Leader replaced");
+			return Void();
+		}
 		when(ReplyPromise<Void> ping = waitNext(interf.clientInterface.ping.getFuture())) { ping.send(Void()); }
 	}
 }
@@ -2759,7 +2909,7 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 	state bool hasConnected = false;
 	loop {
 		try {
-			ServerCoordinators coordinators(connRecord);
+			ServerCoordinators coordinators(connRecord, configDBType);
 			wait(clusterController(
 			    coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType, recoveredDiskFiles));
 			hasConnected = true;

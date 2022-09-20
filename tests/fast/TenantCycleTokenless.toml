@@ -1,0 +1,36 @@
+[configuration]
+allowDefaultTenant = false
+allowDisablingTenants = false
+
+[[knobs]]
+allow_tokenless_tenant_access = true
+
+[[test]]
+testTitle = 'TenantCreation'
+
+    [[test.workload]]
+    testName = 'CreateTenant'
+    name = 'First'
+
+    [[test.workload]]
+    testName = 'CreateTenant'
+    name = 'Second'
+
+[[test]]
+testTitle = 'Cycle'
+
+    [[test.workload]]
+    testName = 'TenantCycle'
+    tenant = 'First'
+    transactionsPerSecond = 250.0
+    testDuration = 10.0
+    expectedRate = 0.80
+    useToken = false
+
+    [[test.workload]]
+    testName = 'TenantCycle'
+    tenant = 'Second'
+    transactionsPerSecond = 2500.0
+    testDuration = 10.0
+    expectedRate = 0.80
+    useToken = false

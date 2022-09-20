@@ -414,7 +414,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 	loop {
 		try {
 			state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
-			                            (g_network->isSimulated() && !g_simulator.speedUpSimulation)
+			                            (g_network->isSimulated() && !g_simulator->speedUpSimulation)
 			                                ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
 			                                : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
@@ -493,7 +493,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 	loop {
 		try {
 			state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
-			                            (g_network->isSimulated() && !g_simulator.speedUpSimulation)
+			                            (g_network->isSimulated() && !g_simulator->speedUpSimulation)
 			                                ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
 			                                : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
@@ -968,10 +968,9 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 					                                                       .get(BackupAgentBase::keySourceStates)
 					                                                       .get(currLogUid)
 					                                                       .pack(DatabaseBackupAgent::keyStateStatus));
-					state Future<Optional<Value>> foundBackupKey =
-					    tr->get(Subspace(currLogUid.withPrefix(LiteralStringRef("uid->config/"))
-					                         .withPrefix(fileBackupPrefixRange.begin))
-					                .pack(LiteralStringRef("stateEnum")));
+					state Future<Optional<Value>> foundBackupKey = tr->get(
+					    Subspace(currLogUid.withPrefix("uid->config/"_sr).withPrefix(fileBackupPrefixRange.begin))
+					        .pack("stateEnum"_sr));
 					wait(success(foundDRKey) && success(foundBackupKey));
 
 					if (foundDRKey.get().present() && foundBackupKey.get().present()) {

@@ -32,9 +32,10 @@ import com.apple.foundationdb.FDBException;
 import com.apple.foundationdb.Transaction;
 
 public class WatchTest {
+	public static final int API_VERSION = 720;
 
 	public static void main(String[] args) {
-		FDB fdb = FDB.selectAPIVersion(720);
+		FDB fdb = FDB.selectAPIVersion(API_VERSION);
 		try(Database database = fdb.open(args[0])) {
 			database.options().setLocationCacheSize(42);
 			try(Transaction tr = database.createTransaction()) {

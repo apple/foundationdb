@@ -340,6 +340,7 @@ public:
 	int64_t ROCKSDB_BLOCK_SIZE;
 	bool ENABLE_SHARDED_ROCKSDB;
 	int64_t ROCKSDB_WRITE_BUFFER_SIZE;
+	int64_t ROCKSDB_CF_WRITE_BUFFER_SIZE;
 	int64_t ROCKSDB_MAX_TOTAL_WAL_SIZE;
 	int64_t ROCKSDB_MAX_BACKGROUND_JOBS;
 	int64_t ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD;
@@ -456,6 +457,7 @@ public:
 	double ATTEMPT_RECRUITMENT_DELAY;
 	double WAIT_FOR_DISTRIBUTOR_JOIN_DELAY;
 	double WAIT_FOR_RATEKEEPER_JOIN_DELAY;
+	double WAIT_FOR_CONSISTENCYSCAN_JOIN_DELAY;
 	double WAIT_FOR_BLOB_MANAGER_JOIN_DELAY;
 	double WAIT_FOR_ENCRYPT_KEY_PROXY_JOIN_DELAY;
 	double WORKER_FAILURE_TIME;
@@ -469,6 +471,7 @@ public:
 	double CHECK_REMOTE_HEALTH_INTERVAL; // Remote DC health refresh interval.
 	double FORCE_RECOVERY_CHECK_DELAY;
 	double RATEKEEPER_FAILURE_TIME;
+	double CONSISTENCYSCAN_FAILURE_TIME;
 	double BLOB_MANAGER_FAILURE_TIME;
 	double REPLACE_INTERFACE_DELAY;
 	double REPLACE_INTERFACE_CHECK_DELAY;
@@ -567,9 +570,12 @@ public:
 	int64_t SPRING_BYTES_STORAGE_SERVER_BATCH;
 	int64_t STORAGE_HARD_LIMIT_BYTES;
 	int64_t STORAGE_HARD_LIMIT_BYTES_OVERAGE;
+	int64_t STORAGE_HARD_LIMIT_BYTES_SPEED_UP_SIM;
+	int64_t STORAGE_HARD_LIMIT_BYTES_OVERAGE_SPEED_UP_SIM;
 	int64_t STORAGE_HARD_LIMIT_VERSION_OVERAGE;
 	int64_t STORAGE_DURABILITY_LAG_HARD_MAX;
 	int64_t STORAGE_DURABILITY_LAG_SOFT_MAX;
+	bool STORAGE_INCLUDE_FEED_STORAGE_QUEUE;
 
 	int64_t LOW_PRIORITY_STORAGE_QUEUE_BYTES;
 	int64_t LOW_PRIORITY_DURABILITY_LAG;
@@ -643,6 +649,7 @@ public:
 	double BW_FETCH_WORKERS_INTERVAL;
 	double BW_RW_LOGGING_INTERVAL;
 	double BW_MAX_BLOCKED_INTERVAL;
+	double BW_RK_SIM_QUIESCE_DELAY;
 
 	// disk snapshot
 	int64_t MAX_FORKED_PROCESS_OUTPUT;
@@ -688,6 +695,7 @@ public:
 	int FETCH_KEYS_PARALLELISM_FULL;
 	int FETCH_KEYS_LOWER_PRIORITY;
 	int SERVE_FETCH_CHECKPOINT_PARALLELISM;
+	int CHANGE_FEED_DISK_READS_PARALLELISM;
 	int BUGGIFY_BLOCK_BYTES;
 	int64_t STORAGE_RECOVERY_VERSION_LAG_LIMIT;
 	double STORAGE_DURABILITY_LAG_REJECT_THRESHOLD;
@@ -726,7 +734,7 @@ public:
 	int CHECKPOINT_TRANSFER_BLOCK_BYTES;
 	int QUICK_GET_KEY_VALUES_LIMIT;
 	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
-	bool STORAGE_SERVER_SHARD_AWARE;
+	int STORAGE_FEED_QUERY_HARD_LIMIT;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -760,6 +768,12 @@ public:
 	bool WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER; // When enabled, the worker's health monitor also report any recent
 	                                                 // destroyed peers who are part of the transaction system to
 	                                                 // cluster controller.
+	bool STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT; // When enabled, storage server's worker will crash on io_timeout error;
+	                                          // this allows fdbmonitor to restart the worker and recreate the same SS.
+	                                          // When SS can be temporarily throttled by infrastructure, e.g, k8s,
+	                                          // Enabling this can reduce toil of manually restarting the SS.
+	                                          // Enable with caution: If io_timeout is caused by disk failure, we won't
+	                                          // want to restart the SS, which increases risk of data corruption.
 
 	// Test harness
 	double WORKER_POLL_DELAY;
@@ -773,6 +787,7 @@ public:
 
 	// Dynamic Knobs (implementation)
 	double COMPACTION_INTERVAL;
+	double BROADCASTER_SELF_UPDATE_DELAY;
 	double GET_COMMITTED_VERSION_TIMEOUT;
 	double GET_SNAPSHOT_AND_CHANGES_TIMEOUT;
 	double FETCH_CHANGES_TIMEOUT;
@@ -881,6 +896,7 @@ public:
 	int SIM_KMS_MAX_KEYS;
 	int ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH;
 	bool ENABLE_TLOG_ENCRYPTION;
+	bool ENABLE_STORAGE_SERVER_ENCRYPTION; // Currently only Redwood engine supports encryption
 	bool ENABLE_BLOB_GRANULE_ENCRYPTION;
 
 	// Compression
@@ -929,6 +945,8 @@ public:
 	int BLOB_MANAGER_CONCURRENT_MERGE_CHECKS;
 	double BGCC_TIMEOUT;
 	double BGCC_MIN_INTERVAL;
+	bool BLOB_MANIFEST_BACKUP;
+	bool BLOB_FULL_RESTORE_MODE;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;

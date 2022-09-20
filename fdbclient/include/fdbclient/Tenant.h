@@ -27,6 +27,7 @@
 #include "fdbclient/VersionedMap.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbrpc/TenantInfo.h"
+#include "flow/BooleanParam.h"
 #include "flow/flat_buffers.h"
 
 typedef StringRef TenantNameRef;
@@ -62,11 +63,15 @@ enum class TenantState { REGISTERING, READY, REMOVING, UPDATING_CONFIGURATION, R
 // Can be used in conjunction with the other tenant states above.
 enum class TenantLockState { UNLOCKED, READ_ONLY, LOCKED };
 
+constexpr int TENANT_PREFIX_SIZE = sizeof(int64_t);
+
+FDB_DECLARE_BOOLEAN_PARAM(EnforceValidTenantId);
+
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
 
 	static Key idToPrefix(int64_t id);
-	static int64_t prefixToId(KeyRef prefix);
+	static int64_t prefixToId(KeyRef prefix, EnforceValidTenantId enforceTenantId = EnforceValidTenantId::True);
 
 	static std::string tenantStateToString(TenantState tenantState);
 	static TenantState stringToTenantState(std::string stateStr);
@@ -94,7 +99,7 @@ struct TenantMapEntry {
 	TenantMapEntry(int64_t id, TenantState tenantState, Optional<TenantGroupName> tenantGroup, bool encrypted);
 
 	void setId(int64_t id);
-	std::string toJson(int apiVersion) const;
+	std::string toJson() const;
 
 	bool matchesConfiguration(TenantMapEntry const& other) const;
 	void configure(Standalone<StringRef> parameter, Optional<Value> value);
@@ -201,6 +206,6 @@ struct TenantMetadata {
 };
 
 typedef VersionedMap<TenantName, TenantMapEntry> TenantMap;
-typedef VersionedMap<Key, TenantName> TenantPrefixIndex;
+class TenantPrefixIndex : public VersionedMap<Key, TenantName>, public ReferenceCounted<TenantPrefixIndex> {};
 
 #endif

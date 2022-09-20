@@ -342,6 +342,29 @@ ThreadResult<RangeResult> DLTransaction::readBlobGranulesFinish(
 	return ThreadResult<RangeResult>((ThreadSingleAssignmentVar<RangeResult>*)(r));
 };
 
+ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>>
+DLTransaction::summarizeBlobGranules(const KeyRangeRef& keyRange, Optional<Version> summaryVersion, int rangeLimit) {
+	if (!api->transactionSummarizeBlobGranules) {
+		return unsupported_operation();
+	}
+
+	int64_t sv = summaryVersion.present() ? summaryVersion.get() : latestVersion;
+
+	FdbCApi::FDBFuture* f = api->transactionSummarizeBlobGranules(
+	    tr, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), sv, rangeLimit);
+
+	return toThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>>(
+	    api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		    const FdbCApi::FDBGranuleSummary* summaries;
+		    int summariesLength;
+		    FdbCApi::fdb_error_t error = api->futureGetGranuleSummaryArray(f, &summaries, &summariesLength);
+		    ASSERT(!error);
+		    // The memory for this is stored in the FDBFuture and is released when the future gets destroyed
+		    return Standalone<VectorRef<BlobGranuleSummaryRef>>(
+		        VectorRef<BlobGranuleSummaryRef>((BlobGranuleSummaryRef*)summaries, summariesLength), Arena());
+	    });
+}
+
 void DLTransaction::addReadConflictRange(const KeyRangeRef& keys) {
 	throwIfError(api->transactionAddConflictRange(
 	    tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDB_CONFLICT_RANGE_TYPE_READ));
@@ -629,7 +652,7 @@ ThreadFuture<bool> DLDatabase::blobbifyRange(const KeyRangeRef& keyRange) {
 	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
 
 	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		bool ret = false;
+		FdbCApi::fdb_bool_t ret = false;
 		ASSERT(!api->futureGetBool(f, &ret));
 		return ret;
 	});
@@ -644,7 +667,7 @@ ThreadFuture<bool> DLDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {
 	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
 
 	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		bool ret = false;
+		FdbCApi::fdb_bool_t ret = false;
 		ASSERT(!api->futureGetBool(f, &ret));
 		return ret;
 	});
@@ -728,8 +751,11 @@ void DLApi::init() {
 
 	loadClientFunction(&api->selectApiVersion, lib, fdbCPath, "fdb_select_api_version_impl", headerVersion >= 0);
 	loadClientFunction(&api->getClientVersion, lib, fdbCPath, "fdb_get_client_version", headerVersion >= 410);
-	loadClientFunction(
-	    &api->useFutureProtocolVersion, lib, fdbCPath, "fdb_use_future_protocol_version", headerVersion >= 720);
+	loadClientFunction(&api->useFutureProtocolVersion,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_use_future_protocol_version",
+	                   headerVersion >= ApiVersion::withFutureProtocolVersionApi().version());
 	loadClientFunction(&api->setNetworkOption, lib, fdbCPath, "fdb_network_set_option", headerVersion >= 0);
 	loadClientFunction(&api->setupNetwork, lib, fdbCPath, "fdb_setup_network", headerVersion >= 0);
 	loadClientFunction(&api->runNetwork, lib, fdbCPath, "fdb_run_network", headerVersion >= 0);
@@ -739,7 +765,7 @@ void DLApi::init() {
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_create_database_from_connection_string",
-	                   headerVersion >= 720);
+	                   headerVersion >= ApiVersion::withCreateDBFromConnString().version());
 
 	loadClientFunction(&api->databaseOpenTenant, lib, fdbCPath, "fdb_database_open_tenant", headerVersion >= 710);
 	loadClientFunction(
@@ -772,23 +798,39 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_database_wait_purge_granules_complete",
 	                   headerVersion >= 710);
-	loadClientFunction(&api->databaseBlobbifyRange, lib, fdbCPath, "fdb_database_blobbify_range", headerVersion >= 720);
-	loadClientFunction(
-	    &api->databaseUnblobbifyRange, lib, fdbCPath, "fdb_database_unblobbify_range", headerVersion >= 720);
-	loadClientFunction(
-	    &api->databaseListBlobbifiedRanges, lib, fdbCPath, "fdb_database_list_blobbified_ranges", headerVersion >= 720);
-	loadClientFunction(
-	    &api->databaseVerifyBlobRange, lib, fdbCPath, "fdb_database_verify_blob_range", headerVersion >= 720);
+	loadClientFunction(&api->databaseBlobbifyRange,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_database_blobbify_range",
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
+	loadClientFunction(&api->databaseUnblobbifyRange,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_database_unblobbify_range",
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
+	loadClientFunction(&api->databaseListBlobbifiedRanges,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_database_list_blobbified_ranges",
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
+	loadClientFunction(&api->databaseVerifyBlobRange,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_database_verify_blob_range",
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
 
 	loadClientFunction(
 	    &api->tenantCreateTransaction, lib, fdbCPath, "fdb_tenant_create_transaction", headerVersion >= 710);
-	loadClientFunction(
-	    &api->tenantPurgeBlobGranules, lib, fdbCPath, "fdb_tenant_purge_blob_granules", headerVersion >= 720);
+	loadClientFunction(&api->tenantPurgeBlobGranules,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_tenant_purge_blob_granules",
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
 	loadClientFunction(&api->tenantWaitPurgeGranulesComplete,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_tenant_wait_purge_granules_complete",
-	                   headerVersion >= 720);
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
 	loadClientFunction(&api->tenantDestroy, lib, fdbCPath, "fdb_tenant_destroy", headerVersion >= 710);
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option", headerVersion >= 0);
@@ -852,18 +894,27 @@ void DLApi::init() {
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_transaction_read_blob_granules_start",
-	                   headerVersion >= 720);
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
 	loadClientFunction(&api->transactionReadBlobGranulesFinish,
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_transaction_read_blob_granules_finish",
-	                   headerVersion >= 720);
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
+	loadClientFunction(&api->transactionSummarizeBlobGranules,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_summarize_blob_granules",
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
 	loadClientFunction(&api->futureGetInt64,
 	                   lib,
 	                   fdbCPath,
 	                   headerVersion >= 620 ? "fdb_future_get_int64" : "fdb_future_get_version",
 	                   headerVersion >= 0);
-	loadClientFunction(&api->futureGetBool, lib, fdbCPath, "fdb_future_get_bool", headerVersion >= 720);
+	loadClientFunction(&api->futureGetBool,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_future_get_bool",
+	                   headerVersion >= ApiVersion::withFutureGetBool().version());
 	loadClientFunction(&api->futureGetUInt64, lib, fdbCPath, "fdb_future_get_uint64", headerVersion >= 700);
 	loadClientFunction(&api->futureGetError, lib, fdbCPath, "fdb_future_get_error", headerVersion >= 0);
 	loadClientFunction(&api->futureGetKey, lib, fdbCPath, "fdb_future_get_key", headerVersion >= 0);
@@ -876,6 +927,11 @@ void DLApi::init() {
 	    &api->futureGetKeyValueArray, lib, fdbCPath, "fdb_future_get_keyvalue_array", headerVersion >= 0);
 	loadClientFunction(
 	    &api->futureGetMappedKeyValueArray, lib, fdbCPath, "fdb_future_get_mappedkeyvalue_array", headerVersion >= 710);
+	loadClientFunction(&api->futureGetGranuleSummaryArray,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_future_get_granule_summary_array",
+	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
 	loadClientFunction(&api->futureGetSharedState, lib, fdbCPath, "fdb_future_get_shared_state", headerVersion >= 710);
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel", headerVersion >= 0);
@@ -1250,6 +1306,16 @@ ThreadResult<RangeResult> MultiVersionTransaction::readBlobGranulesFinish(
 	return ThreadResult<RangeResult>(unsupported_operation());
 }
 
+ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> MultiVersionTransaction::summarizeBlobGranules(
+    const KeyRangeRef& keyRange,
+    Optional<Version> summaryVersion,
+    int rangeLimit) {
+	auto tr = getTransaction();
+	auto f = tr.transaction ? tr.transaction->summarizeBlobGranules(keyRange, summaryVersion, rangeLimit)
+	                        : makeTimeout<Standalone<VectorRef<BlobGranuleSummaryRef>>>();
+	return abortableFuture(f, tr.onChange);
+}
+
 void MultiVersionTransaction::atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) {
 	auto tr = getTransaction();
 	if (tr.transaction) {
@@ -1344,7 +1410,7 @@ void MultiVersionTransaction::setOption(FDBTransactionOptions::Option option, Op
 		throw invalid_option();
 	}
 
-	if (MultiVersionApi::apiVersionAtLeast(610) && itr->second.persistent) {
+	if (MultiVersionApi::api->getApiVersion().hasPersistentOptions() && itr->second.persistent) {
 		persistentOptions.emplace_back(option, value.castTo<Standalone<StringRef>>());
 	}
 
@@ -1862,7 +1928,7 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 		    .detail("OldProtocolVersion", dbProtocolVersion);
 		// When the protocol version changes, clear the corresponding entry in the shared state map
 		// so it can be re-initialized. Only do so if there was a valid previous protocol version.
-		if (dbProtocolVersion.present() && MultiVersionApi::apiVersionAtLeast(710)) {
+		if (dbProtocolVersion.present() && MultiVersionApi::api->getApiVersion().hasClusterSharedStateMap()) {
 			MultiVersionApi::api->clearClusterSharedStateMapEntry(clusterId, dbProtocolVersion.get());
 		}
 
@@ -1891,7 +1957,7 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 				return;
 			}
 
-			if (client->external && !MultiVersionApi::apiVersionAtLeast(610)) {
+			if (client->external && !MultiVersionApi::api->getApiVersion().hasInlineUpdateDatabase()) {
 				// Old API versions return a future when creating the database, so we need to wait for it
 				Reference<DatabaseState> self = Reference<DatabaseState>::addRef(this);
 				dbReady = mapThreadFuture<Void, Void>(
@@ -1975,7 +2041,8 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 			    .detail("ConnectionRecord", connectionRecord);
 		}
 	}
-	if (db.isValid() && dbProtocolVersion.present() && MultiVersionApi::apiVersionAtLeast(710)) {
+	if (db.isValid() && dbProtocolVersion.present() &&
+	    MultiVersionApi::api->getApiVersion().hasClusterSharedStateMap()) {
 		Future<std::string> updateResult =
 		    MultiVersionApi::api->updateClusterSharedStateMap(connectionRecord, dbProtocolVersion.get(), db);
 		sharedStateUpdater = map(errorOr(updateResult), [this](ErrorOr<std::string> result) {
@@ -2095,11 +2162,6 @@ void MultiVersionDatabase::LegacyVersionMonitor::close() {
 }
 
 // MultiVersionApi
-bool MultiVersionApi::apiVersionAtLeast(int minVersion) {
-	ASSERT_NE(MultiVersionApi::api->apiVersion, 0);
-	return MultiVersionApi::api->apiVersion >= minVersion || MultiVersionApi::api->apiVersion < 0;
-}
-
 void MultiVersionApi::runOnExternalClientsAllThreads(std::function<void(Reference<ClientInfo>)> func,
                                                      bool runOnFailedClients) {
 	for (int i = 0; i < threadCount; i++) {
@@ -2145,17 +2207,18 @@ Reference<ClientInfo> MultiVersionApi::getLocalClient() {
 }
 
 void MultiVersionApi::selectApiVersion(int apiVersion) {
+	ApiVersion newApiVersion(apiVersion);
 	if (!localClient) {
 		localClient = makeReference<ClientInfo>(getLocalClientAPI());
 		ASSERT(localClient);
 	}
 
-	if (this->apiVersion != 0 && this->apiVersion != apiVersion) {
+	if (this->apiVersion.isValid() && this->apiVersion != newApiVersion) {
 		throw api_version_already_set();
 	}
 
 	localClient->api->selectApiVersion(apiVersion);
-	this->apiVersion = apiVersion;
+	this->apiVersion = newApiVersion;
 }
 
 const char* MultiVersionApi::getClientVersion() {
@@ -2408,6 +2471,18 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 	} else if (option == FDBNetworkOptions::FUTURE_VERSION_CLIENT_LIBRARY) {
 		validateOption(value, true, false, false);
 		addExternalLibrary(abspath(value.get().toString()), true);
+	} else if (option == FDBNetworkOptions::TRACE_FILE_IDENTIFIER) {
+		validateOption(value, true, false, true);
+		traceFileIdentifier = value.get().toString();
+		{
+			MutexHolder holder(lock);
+			// Forward the option unmodified only to the the local client and let it validate it.
+			// While for external clients the trace file identifiers are determined in setupNetwork
+			localClient->api->setNetworkOption(option, value);
+		}
+	} else if (option == FDBNetworkOptions::TRACE_SHARE_AMONG_CLIENT_THREADS) {
+		validateOption(value, false, true);
+		traceShareBaseNameAmongThreads = true;
 	} else {
 		forwardOption = true;
 	}
@@ -2451,9 +2526,13 @@ void MultiVersionApi::setupNetwork() {
 			// Copy external lib for each thread
 			if (externalClients.count(filename) == 0) {
 				externalClients[filename] = {};
-				for (const auto& tmp : copyExternalLibraryPerThread(path)) {
+				auto libCopies = copyExternalLibraryPerThread(path);
+				for (int idx = 0; idx < libCopies.size(); ++idx) {
 					externalClients[filename].push_back(Reference<ClientInfo>(
-					    new ClientInfo(new DLApi(tmp.first, tmp.second /*unlink on load*/), path, useFutureVersion)));
+					    new ClientInfo(new DLApi(libCopies[idx].first, libCopies[idx].second /*unlink on load*/),
+					                   path,
+					                   useFutureVersion,
+					                   idx)));
 				}
 			}
 		}
@@ -2492,20 +2571,30 @@ void MultiVersionApi::setupNetwork() {
 	if (!bypassMultiClientApi) {
 		runOnExternalClientsAllThreads([this](Reference<ClientInfo> client) {
 			TraceEvent("InitializingExternalClient").detail("LibraryPath", client->libPath);
-			client->api->selectApiVersion(apiVersion);
+			client->api->selectApiVersion(apiVersion.version());
 			if (client->useFutureVersion) {
 				client->api->useFutureProtocolVersion();
 			}
 			client->loadVersion();
 		});
 
+		std::string baseTraceFileId;
+		if (apiVersion.hasTraceFileIdentifier()) {
+			// TRACE_FILE_IDENTIFIER option is supported since 6.3
+			baseTraceFileId = traceFileIdentifier.empty() ? format("%d", getpid()) : traceFileIdentifier;
+		}
+
 		MutexHolder holder(lock);
-		runOnExternalClientsAllThreads([this, transportId](Reference<ClientInfo> client) {
+		runOnExternalClientsAllThreads([this, transportId, baseTraceFileId](Reference<ClientInfo> client) {
 			for (auto option : options) {
 				client->api->setNetworkOption(option.first, option.second.castTo<StringRef>());
 			}
 			client->api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT_TRANSPORT_ID, std::to_string(transportId));
-
+			if (!baseTraceFileId.empty()) {
+				client->api->setNetworkOption(
+				    FDBNetworkOptions::TRACE_FILE_IDENTIFIER,
+				    traceShareBaseNameAmongThreads ? baseTraceFileId : client->getTraceFileIdentifier(baseTraceFileId));
+			}
 			client->api->setupNetwork();
 		});
 
@@ -2544,21 +2633,17 @@ void MultiVersionApi::runNetwork() {
 
 	std::vector<THREAD_HANDLE> handles;
 	if (!bypassMultiClientApi) {
-		for (int threadNum = 0; threadNum < threadCount; threadNum++) {
-			runOnExternalClients(threadNum, [&handles, threadNum](Reference<ClientInfo> client) {
-				if (client->external) {
-					std::string threadName = format("fdb-%s-%d", client->releaseVersion.c_str(), threadNum);
-					if (threadName.size() > 15) {
-						threadName = format("fdb-%s", client->releaseVersion.c_str());
-						if (threadName.size() > 15) {
-							threadName = "fdb-external";
-						}
-					}
-					handles.push_back(
-					    g_network->startThread(&runNetworkThread, client.getPtr(), 0, threadName.c_str()));
+		runOnExternalClientsAllThreads([&handles](Reference<ClientInfo> client) {
+			ASSERT(client->external);
+			std::string threadName = format("fdb-%s-%d", client->releaseVersion.c_str(), client->threadIndex);
+			if (threadName.size() > 15) {
+				threadName = format("fdb-%s", client->releaseVersion.c_str());
+				if (threadName.size() > 15) {
+					threadName = "fdb-external";
 				}
-			});
-		}
+			}
+			handles.push_back(g_network->startThread(&runNetworkThread, client.getPtr(), 0, threadName.c_str()));
+		});
 	}
 
 	localClient->api->runNetwork();
@@ -2671,9 +2756,9 @@ ACTOR Future<std::string> updateClusterSharedStateMapImpl(MultiVersionApi* self,
                                                           ProtocolVersion dbProtocolVersion,
                                                           Reference<IDatabase> db) {
 	// The cluster ID will be the connection record string (either a filename or the connection string itself)
-	// in API versions before we could read the cluster ID.
+	// in versions before we could read the cluster ID.
 	state std::string clusterId = connectionRecord.toString();
-	if (MultiVersionApi::apiVersionAtLeast(720)) {
+	if (dbProtocolVersion.hasClusterIdSpecialKey()) {
 		state Reference<ITransaction> tr = db->createTransaction();
 		loop {
 			try {
@@ -2848,7 +2933,7 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 MultiVersionApi::MultiVersionApi()
   : callbackOnMainThread(true), localClientDisabled(false), networkStartSetup(false), networkSetup(false),
     bypassMultiClientApi(false), externalClient(false), apiVersion(0), threadCount(0), tmpDir("/tmp"),
-    envOptionsLoaded(false) {}
+    traceShareBaseNameAmongThreads(false), envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 
@@ -2883,6 +2968,12 @@ bool ClientInfo::canReplace(Reference<ClientInfo> other) const {
 	}
 
 	return !protocolVersion.isCompatible(other->protocolVersion);
+}
+
+std::string ClientInfo::getTraceFileIdentifier(const std::string& baseIdentifier) {
+	std::string versionStr = releaseVersion;
+	std::replace(versionStr.begin(), versionStr.end(), '.', '_');
+	return format("%s_v%st%d", baseIdentifier.c_str(), versionStr.c_str(), threadIndex);
 }
 
 // UNIT TESTS
@@ -3170,7 +3261,7 @@ struct AbortableTest {
 	}
 };
 
-TEST_CASE("/fdbclient/multiversionclient/AbortableSingleAssignmentVar") {
+TEST_CASE("fdbclient/multiversionclient/AbortableSingleAssignmentVar") {
 	state volatile bool done = false;
 	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<AbortableTest>, (void*)&done);
 
@@ -3247,7 +3338,7 @@ struct DLTest {
 	}
 };
 
-TEST_CASE("/fdbclient/multiversionclient/DLSingleAssignmentVar") {
+TEST_CASE("fdbclient/multiversionclient/DLSingleAssignmentVar") {
 	state volatile bool done = false;
 
 	MultiVersionApi::api->callbackOnMainThread = true;
@@ -3291,7 +3382,7 @@ struct MapTest {
 	}
 };
 
-TEST_CASE("/fdbclient/multiversionclient/MapSingleAssignmentVar") {
+TEST_CASE("fdbclient/multiversionclient/MapSingleAssignmentVar") {
 	state volatile bool done = false;
 	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<MapTest>, (void*)&done);
 
@@ -3330,7 +3421,7 @@ struct FlatMapTest {
 	}
 };
 
-TEST_CASE("/fdbclient/multiversionclient/FlatMapSingleAssignmentVar") {
+TEST_CASE("fdbclient/multiversionclient/FlatMapSingleAssignmentVar") {
 	state volatile bool done = false;
 	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<FlatMapTest>, (void*)&done);
 

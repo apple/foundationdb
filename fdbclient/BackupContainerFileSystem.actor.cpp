@@ -1697,7 +1697,7 @@ ACTOR Future<Void> testBackupContainer(std::string url,
 
 	// List of sizes to use to test edge cases on underlying file implementations
 	state std::vector<int> fileSizes = { 0 };
-	if (StringRef(url).startsWith(LiteralStringRef("blob"))) {
+	if (StringRef(url).startsWith("blob"_sr)) {
 		fileSizes.push_back(CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE);
 		fileSizes.push_back(CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE + 10);
 	}
@@ -1705,8 +1705,8 @@ ACTOR Future<Void> testBackupContainer(std::string url,
 	loop {
 		state Version logStart = v;
 		state int kvfiles = deterministicRandom()->randomInt(0, 3);
-		state Key begin = LiteralStringRef("");
-		state Key end = LiteralStringRef("");
+		state Key begin = ""_sr;
+		state Key end = ""_sr;
 		state int blockSize = 3 * sizeof(uint32_t) + begin.size() + end.size() + 8;
 
 		while (kvfiles > 0) {

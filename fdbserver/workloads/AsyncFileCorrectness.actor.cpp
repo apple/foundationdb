@@ -75,9 +75,9 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 
 	AsyncFileCorrectnessWorkload(WorkloadContext const& wcx)
 	  : AsyncFileWorkload(wcx), memoryFile(nullptr), success(true), numOperations("Num Operations") {
-		maxOperationSize = getOption(options, LiteralStringRef("maxOperationSize"), 4096);
-		numSimultaneousOperations = getOption(options, LiteralStringRef("numSimultaneousOperations"), 10);
-		targetFileSize = getOption(options, LiteralStringRef("targetFileSize"), (uint64_t)163840);
+		maxOperationSize = getOption(options, "maxOperationSize"_sr, 4096);
+		numSimultaneousOperations = getOption(options, "numSimultaneousOperations"_sr, 10);
+		targetFileSize = getOption(options, "targetFileSize"_sr, (uint64_t)163840);
 
 		if (unbufferedIO)
 			maxOperationSize = std::max(_PAGE_SIZE, maxOperationSize);

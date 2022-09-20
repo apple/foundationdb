@@ -49,7 +49,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 	int hotServerCount = 0, currentHotRound = -1;
 
 	SkewedReadWriteWorkload(WorkloadContext const& wcx) : ReadWriteCommon(wcx) {
-		descriptionString = getOption(options, LiteralStringRef("description"), LiteralStringRef("SkewedReadWrite"));
+		descriptionString = getOption(options, "description"_sr, "SkewedReadWrite"_sr);
 		hotServerFraction = getOption(options, "hotServerFraction"_sr, 0.2);
 		hotServerShardFraction = getOption(options, "hotServerShardFraction"_sr, 1.0);
 		hotReadWriteServerOverlap = getOption(options, "hotReadWriteServerOverlap"_sr, 0.0);

@@ -25,17 +25,17 @@
 #include <utility>
 #include <vector>
 
+#include "fdbclient/CommitTransaction.h"
 #include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/CommitTransaction.h"
-#include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/GlobalConfig.h"
+#include "fdbclient/GrvProxyInterface.h"
+#include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/VersionVector.h"
 
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
-#include "GrvProxyInterface.h"
 
 struct CommitProxyInterface {
 	constexpr static FileIdentifier file_identifier = 8954922;
@@ -197,7 +197,7 @@ struct CommitTransactionRequest : TimedRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(
-		    ar, transaction, reply, arena, flags, debugID, commitCostEstimation, tagSet, spanContext, tenantInfo);
+		    ar, transaction, reply, flags, debugID, commitCostEstimation, tagSet, spanContext, tenantInfo, arena);
 	}
 };
 
@@ -339,7 +339,7 @@ struct GetKeyServerLocationsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, results, resultsTssMapping, tenantEntry, arena, resultsTagMapping);
+		serializer(ar, results, resultsTssMapping, tenantEntry, resultsTagMapping, arena);
 	}
 };
 
@@ -543,7 +543,7 @@ struct ProxySnapRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, snapPayload, snapUID, reply, arena, debugID);
+		serializer(ar, snapPayload, snapUID, reply, debugID, arena);
 	}
 };
 

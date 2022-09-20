@@ -107,8 +107,9 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		                                                    teamSize,
 		                                                    includes,
 		                                                    excludes));
-		includes.insert(teamA.begin(), teamA.end());
+
 		// Move range [TestKeyB, TestKeyC) to sh1, on the same server.
+		includes.insert(teamA.begin(), teamA.end());
 		state std::vector<UID> teamB = wait(self->moveShard(self,
 		                                                    cx,
 		                                                    UID(sh1, deterministicRandom()->randomUInt64()),
@@ -327,17 +328,17 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 				TraceEvent("TestMoveShardStartMoveKeys").detail("DataMove", dataMoveId);
 				wait(moveKeys(cx,
-				              dataMoveId,
-				              keys,
-				              dests,
-				              dests,
-				              moveKeysLock,
-				              Promise<Void>(),
-				              &self->startMoveKeysParallelismLock,
-				              &self->finishMoveKeysParallelismLock,
-				              false,
-				              deterministicRandom()->randomUniqueID(), // for logging only
-				              &ddEnabledState));
+				              MoveKeysParams{ dataMoveId,
+				                              keys,
+				                              dests,
+				                              dests,
+				                              moveKeysLock,
+				                              Promise<Void>(),
+				                              &self->startMoveKeysParallelismLock,
+				                              &self->finishMoveKeysParallelismLock,
+				                              false,
+				                              deterministicRandom()->randomUniqueID(), // for logging only
+				                              &ddEnabledState }));
 				break;
 			} catch (Error& e) {
 				if (e.code() == error_code_movekeys_conflict) {

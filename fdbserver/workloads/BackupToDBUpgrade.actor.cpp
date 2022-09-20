@@ -24,6 +24,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "flow/ApiVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // A workload which test the correctness of upgrading DR from 5.1 to 5.2
@@ -35,15 +36,15 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 	Database extraDB;
 
 	BackupToDBUpgradeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		backupAfter = getOption(options, LiteralStringRef("backupAfter"), deterministicRandom()->random01() * 10.0);
-		backupPrefix = getOption(options, LiteralStringRef("backupPrefix"), StringRef());
-		backupRangeLengthMax = getOption(options, LiteralStringRef("backupRangeLengthMax"), 1);
-		stopDifferentialAfter = getOption(options, LiteralStringRef("stopDifferentialAfter"), 60.0);
-		backupTag = getOption(options, LiteralStringRef("backupTag"), BackupAgentBase::getDefaultTag());
-		restoreTag = getOption(options, LiteralStringRef("restoreTag"), LiteralStringRef("restore"));
-		backupRangesCount = getOption(options, LiteralStringRef("backupRangesCount"), 5);
-		extraPrefix = backupPrefix.withPrefix(LiteralStringRef("\xfe\xff\xfe"));
-		backupPrefix = backupPrefix.withPrefix(LiteralStringRef("\xfe\xff\xff"));
+		backupAfter = getOption(options, "backupAfter"_sr, deterministicRandom()->random01() * 10.0);
+		backupPrefix = getOption(options, "backupPrefix"_sr, StringRef());
+		backupRangeLengthMax = getOption(options, "backupRangeLengthMax"_sr, 1);
+		stopDifferentialAfter = getOption(options, "stopDifferentialAfter"_sr, 60.0);
+		backupTag = getOption(options, "backupTag"_sr, BackupAgentBase::getDefaultTag());
+		restoreTag = getOption(options, "restoreTag"_sr, "restore"_sr);
+		backupRangesCount = getOption(options, "backupRangesCount"_sr, 5);
+		extraPrefix = backupPrefix.withPrefix("\xfe\xff\xfe"_sr);
+		backupPrefix = backupPrefix.withPrefix("\xfe\xff\xff"_sr);
 
 		ASSERT(backupPrefix != StringRef());
 
@@ -76,10 +77,10 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 		}
 
-		ASSERT(g_simulator.extraDatabases.size() == 1);
+		ASSERT(g_simulator->extraDatabases.size() == 1);
 		auto extraFile =
-		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
-		extraDB = Database::createDatabase(extraFile, -1);
+		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator->extraDatabases[0]));
+		extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
 
 		TraceEvent("DRU_Start").log();
 	}
@@ -177,7 +178,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					    .detail("TaskCount", taskCount)
 					    .detail("WaitCycles", waitCycles);
 					printf("EndingNonZeroTasks: %ld\n", (long)taskCount);
-					wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
+					wait(TaskBucket::debugPrintRange(cx, "\xff"_sr, StringRef()));
 				}
 
 				loop {
@@ -281,7 +282,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		}
 
 		if (displaySystemKeys) {
-			wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
+			wait(TaskBucket::debugPrintRange(cx, "\xff"_sr, StringRef()));
 		}
 
 		return Void();
@@ -519,8 +520,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 			TraceEvent("DRU_Complete").detail("BackupTag", printable(self->backupTag));
 
-			if (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
-				g_simulator.drAgents = ISimulator::BackupAgentType::NoBackupAgents;
+			if (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
+				g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupAndRestoreCorrectnessError").error(e);

@@ -22,6 +22,7 @@
 #include <tuple>
 
 #include "fdbclient/Atomic.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
@@ -29,7 +30,9 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/Tenant.h"
 #include "fdbclient/TransactionLineage.h"
+#include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
@@ -50,7 +53,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
-#include "flow/BlobCipher.h"
+#include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
@@ -442,7 +445,7 @@ void createWhitelistBinPathVec(const std::string& binPath, std::vector<Standalon
 	TraceEvent(SevDebug, "BinPathConverter").detail("Input", binPath);
 	StringRef input(binPath);
 	while (input != StringRef()) {
-		StringRef token = input.eat(LiteralStringRef(","));
+		StringRef token = input.eat(","_sr);
 		if (token != StringRef()) {
 			const uint8_t* ptr = token.begin();
 			while (ptr != token.end() && *ptr == ' ') {
@@ -618,7 +621,7 @@ struct CommitBatchContext {
 	bool isMyFirstBatch;
 	bool firstStateMutations;
 
-	Optional<Value> oldCoordinators;
+	Optional<Value> previousCoordinators;
 
 	StoreCommit_t storeCommits;
 
@@ -765,8 +768,8 @@ bool canReject(const std::vector<CommitTransactionRequest>& trs) {
 	for (const auto& tr : trs) {
 		if (tr.transaction.mutations.empty())
 			continue;
-		if (!tr.tenantInfo.name.present() && (tr.transaction.mutations[0].param1.startsWith(LiteralStringRef("\xff")) ||
-		                                      tr.transaction.read_conflict_ranges.empty())) {
+		if (!tr.tenantInfo.name.present() &&
+		    (tr.transaction.mutations[0].param1.startsWith("\xff"_sr) || tr.transaction.read_conflict_ranges.empty())) {
 			return false;
 		}
 	}
@@ -874,6 +877,81 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	return Void();
 }
 
+namespace {
+// Routine allows caller to find TenantName for a given TenantId. It returns empty optional when either TenantId is
+// invalid or tenant is unknown
+Optional<TenantName> getTenantName(ProxyCommitData* commitData, int64_t tenantId) {
+	if (tenantId != TenantInfo::INVALID_TENANT) {
+		auto itr = commitData->tenantIdIndex.find(tenantId);
+		if (itr != commitData->tenantIdIndex.end()) {
+			return Optional<TenantName>(itr->second);
+		}
+	}
+
+	return Optional<TenantName>();
+}
+
+std::pair<EncryptCipherDomainName, EncryptCipherDomainId> getEncryptDetailsFromMutationRef(ProxyCommitData* commitData,
+                                                                                           MutationRef m) {
+	std::pair<EncryptCipherDomainName, EncryptCipherDomainId> details(EncryptCipherDomainName(),
+	                                                                  INVALID_ENCRYPT_DOMAIN_ID);
+
+	// Possible scenarios:
+	// 1. Encryption domain (Tenant details) weren't explicitly provided, extract Tenant details using
+	// TenantPrefix (first 8 bytes of FDBKey)
+	// 2. Encryption domain isn't available, leverage 'default encryption domain'
+
+	if (isSystemKey(m.param1)) {
+		// Encryption domain == FDB SystemKeyspace encryption domain
+		details.first = EncryptCipherDomainName(FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME);
+		details.second = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
+	} else if (commitData->tenantMap.empty()) {
+		// Cluster serves no-tenants; use 'default encryption domain'
+	} else if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+		ASSERT_NE((MutationRef::Type)m.type, MutationRef::Type::ClearRange);
+
+		if (m.param1.size() >= TENANT_PREFIX_SIZE) {
+			// Parse mutation key to determine mutation encryption domain
+			StringRef prefix = m.param1.substr(0, TENANT_PREFIX_SIZE);
+			int64_t tenantId = TenantMapEntry::prefixToId(prefix, EnforceValidTenantId::False);
+			if (tenantId != TenantInfo::INVALID_TENANT) {
+				Optional<TenantName> tenantName = getTenantName(commitData, tenantId);
+				if (tenantName.present()) {
+					details.first = tenantName.get();
+					details.second = tenantId;
+				}
+			} else {
+				// Leverage 'default encryption domain'
+			}
+		}
+	} else {
+		// ClearRange is the 'only' MultiKey transaction allowed
+		ASSERT_EQ((MutationRef::Type)m.type, MutationRef::Type::ClearRange);
+
+		// FIXME: Handle Clear-range transaction, actions needed:
+		// 1. Transaction range can spawn multiple encryption domains (tenants)
+		// 2. Transaction can be a multi-key transaction spawning multiple tenants
+		// For now fallback to 'default encryption domain'
+
+		CODE_PROBE(true, "ClearRange mutation encryption");
+	}
+
+	// Unknown tenant, fallback to fdb default encryption domain
+	if (details.second == INVALID_ENCRYPT_DOMAIN_ID) {
+		ASSERT_EQ(details.first.size(), 0);
+		details.first = EncryptCipherDomainName(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
+		details.second = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
+
+		CODE_PROBE(true, "Default domain mutation encryption");
+	}
+
+	ASSERT_GT(details.first.size(), 0);
+
+	return details;
+}
+
+} // namespace
+
 ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	state double resolutionStart = now();
 	// Sending these requests is the fuzzy border between phase 1 and phase 2; it could conceivably overlap with
@@ -918,21 +996,27 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	state Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getCipherKeys;
 	if (pProxyCommitData->isEncryptionEnabled) {
 		static std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> defaultDomains = {
-			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME },
-			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
+			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME },
+			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_ENCRYPT_HEADER_DOMAIN_NAME },
+			{ FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
 		};
 		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> encryptDomains = defaultDomains;
 		for (int t = 0; t < trs.size(); t++) {
 			TenantInfo const& tenantInfo = trs[t].tenantInfo;
 			int64_t tenantId = tenantInfo.tenantId;
 			Optional<TenantNameRef> const& tenantName = tenantInfo.name;
-			// TODO(yiwu): In raw access mode, use tenant prefix to figure out tenant id for user data
 			if (tenantId != TenantInfo::INVALID_TENANT) {
 				ASSERT(tenantName.present());
-				encryptDomains[tenantId] = tenantName.get();
+				encryptDomains[tenantId] = Standalone(tenantName.get(), tenantInfo.arena);
+			} else {
+				for (auto m : trs[t].transaction.mutations) {
+					std::pair<EncryptCipherDomainName, int64_t> details =
+					    getEncryptDetailsFromMutationRef(pProxyCommitData, m);
+					encryptDomains[details.second] = details.first;
+				}
 			}
 		}
-		getCipherKeys = getLatestEncryptCipherKeys(pProxyCommitData->db, encryptDomains);
+		getCipherKeys = getLatestEncryptCipherKeys(pProxyCommitData->db, encryptDomains, BlobCipherMetrics::TLOG);
 	}
 
 	self->releaseFuture = releaseResolvingAfter(pProxyCommitData, self->releaseDelay, self->localBatchNumber);
@@ -1146,7 +1230,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	ASSERT(self->commitVersion);
 
 	if (!self->isMyFirstBatch &&
-	    pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get() != self->oldCoordinators.get()) {
+	    pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get() != self->previousCoordinators.get()) {
 		wait(brokenPromiseToNever(pProxyCommitData->db->get().clusterInterface.changeCoordinators.getReply(
 		    ChangeCoordinatorsRequest(pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get().get(),
 		                              self->pProxyCommitData->master.id()))));
@@ -1157,17 +1241,24 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 }
 
 void writeMutation(CommitBatchContext* self, int64_t tenantId, const MutationRef& mutation) {
-	static_assert(TenantInfo::INVALID_TENANT == ENCRYPT_INVALID_DOMAIN_ID);
-	if (!self->pProxyCommitData->isEncryptionEnabled || tenantId == TenantInfo::INVALID_TENANT) {
-		// TODO(yiwu): In raw access mode, use tenant prefix to figure out tenant id for user data
-		bool isRawAccess = tenantId == TenantInfo::INVALID_TENANT && !isSystemKey(mutation.param1) &&
-		                   !(mutation.type == MutationRef::ClearRange && isSystemKey(mutation.param2)) &&
-		                   self->pProxyCommitData->db->get().client.tenantMode == TenantMode::REQUIRED;
-		CODE_PROBE(isRawAccess, "Raw access to tenant key space");
-		self->toCommit.writeTypedMessage(mutation);
-	} else {
+	static_assert(TenantInfo::INVALID_TENANT == INVALID_ENCRYPT_DOMAIN_ID);
+
+	if (self->pProxyCommitData->isEncryptionEnabled) {
+		EncryptCipherDomainId domainId = tenantId;
+		if (domainId == INVALID_ENCRYPT_DOMAIN_ID) {
+			std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
+			    getEncryptDetailsFromMutationRef(self->pProxyCommitData, mutation);
+			domainId = p.second;
+
+			CODE_PROBE(true, "Raw access mutation encryption");
+		}
+
+		ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
+
 		Arena arena;
-		self->toCommit.writeTypedMessage(mutation.encrypt(self->cipherKeys, tenantId /*domainId*/, arena));
+		self->toCommit.writeTypedMessage(mutation.encrypt(self->cipherKeys, domainId, arena, BlobCipherMetrics::TLOG));
+	} else {
+		self->toCommit.writeTypedMessage(mutation);
 	}
 }
 
@@ -1373,7 +1464,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	}
 
 	self->isMyFirstBatch = !pProxyCommitData->version.get();
-	self->oldCoordinators = pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get();
+	self->previousCoordinators = pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get();
 
 	assertResolutionStateMutationsSizeConsistent(self->resolution);
 
@@ -2138,9 +2229,7 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 			throw snap_not_fully_recovered_unsupported();
 		}
 
-		auto result =
-		    commitData->txnStateStore->readValue(LiteralStringRef("log_anti_quorum").withPrefix(configKeysPrefix))
-		        .get();
+		auto result = commitData->txnStateStore->readValue("log_anti_quorum"_sr.withPrefix(configKeysPrefix)).get();
 		int logAntiQuorum = 0;
 		if (result.present()) {
 			logAntiQuorum = atoi(result.get().toString().c_str());
@@ -2481,10 +2570,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	commitData.localTLogCount = commitData.db->get().logSystemConfig.numLogs();
 	ASSERT(commitData.resolvers.size() != 0);
 	for (int i = 0; i < commitData.resolvers.size(); ++i) {
-		commitData.stats.resolverDist.push_back(
-		    Histogram::getHistogram(LiteralStringRef("CommitProxy"),
-		                            "ToResolver_" + commitData.resolvers[i].id().toString(),
-		                            Histogram::Unit::microseconds));
+		commitData.stats.resolverDist.push_back(Histogram::getHistogram(
+		    "CommitProxy"_sr, "ToResolver_" + commitData.resolvers[i].id().toString(), Histogram::Unit::microseconds));
 	}
 
 	// Initialize keyResolvers map

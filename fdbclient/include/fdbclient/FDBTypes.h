@@ -41,6 +41,7 @@ typedef StringRef KeyRef;
 typedef StringRef ValueRef;
 typedef int64_t Generation;
 typedef UID SpanID;
+typedef uint64_t CoordinatorsHash;
 
 enum {
 	tagLocalitySpecial = -1, // tag with this locality means it is invalidTag (id=0), txsTag (id=1), or cacheTag (id=2)
@@ -519,7 +520,7 @@ using MappedRangeResult = Standalone<struct MappedRangeResultRef>;
 enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
 inline Key keyAfter(const KeyRef& key) {
-	if (key == LiteralStringRef("\xff\xff"))
+	if (key == "\xff\xff"_sr)
 		return key;
 
 	Standalone<StringRef> r;
@@ -532,7 +533,7 @@ inline Key keyAfter(const KeyRef& key) {
 	return r;
 }
 inline KeyRef keyAfter(const KeyRef& key, Arena& arena) {
-	if (key == LiteralStringRef("\xff\xff"))
+	if (key == "\xff\xff"_sr)
 		return key;
 	uint8_t* t = new (arena) uint8_t[key.size() + 1];
 	memcpy(t, key.begin(), key.size());
@@ -947,17 +948,17 @@ struct TLogVersion {
 	}
 
 	static ErrorOr<TLogVersion> FromStringRef(StringRef s) {
-		if (s == LiteralStringRef("2"))
+		if (s == "2"_sr)
 			return V2;
-		if (s == LiteralStringRef("3"))
+		if (s == "3"_sr)
 			return V3;
-		if (s == LiteralStringRef("4"))
+		if (s == "4"_sr)
 			return V4;
-		if (s == LiteralStringRef("5"))
+		if (s == "5"_sr)
 			return V5;
-		if (s == LiteralStringRef("6"))
+		if (s == "6"_sr)
 			return V6;
-		if (s == LiteralStringRef("7"))
+		if (s == "7"_sr)
 			return V7;
 		return default_error_or();
 	}
@@ -1007,9 +1008,9 @@ struct TLogSpillType {
 	}
 
 	static ErrorOr<TLogSpillType> FromStringRef(StringRef s) {
-		if (s == LiteralStringRef("1"))
+		if (s == "1"_sr)
 			return VALUE;
-		if (s == LiteralStringRef("2"))
+		if (s == "2"_sr)
 			return REFERENCE;
 		return default_error_or();
 	}
@@ -1408,6 +1409,55 @@ struct TenantMode {
 	uint32_t mode;
 };
 
+struct EncryptionAtRestMode {
+	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
+	// just before END.
+	enum Mode { DISABLED = 0, AES_256_CTR = 1, END = 2 };
+
+	EncryptionAtRestMode() : mode(DISABLED) {}
+	EncryptionAtRestMode(Mode mode) : mode(mode) {
+		if ((uint32_t)mode >= END) {
+			this->mode = DISABLED;
+		}
+	}
+	operator Mode() const { return Mode(mode); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mode);
+	}
+
+	std::string toString() const {
+		switch (mode) {
+		case DISABLED:
+			return "disabled";
+		case AES_256_CTR:
+			return "aes_256_ctr";
+		default:
+			ASSERT(false);
+		}
+		return "";
+	}
+
+	Value toValue() const { return ValueRef(format("%d", (int)mode)); }
+
+	static EncryptionAtRestMode fromValue(Optional<ValueRef> val) {
+		if (!val.present()) {
+			return DISABLED;
+		}
+
+		// A failed parsing returns 0 (DISABLED)
+		int num = atoi(val.get().toString().c_str());
+		if (num < 0 || num >= END) {
+			return DISABLED;
+		}
+
+		return static_cast<Mode>(num);
+	}
+
+	uint32_t mode;
+};
+
 typedef StringRef ClusterNameRef;
 typedef Standalone<ClusterNameRef> ClusterName;
 
@@ -1528,6 +1578,42 @@ struct StorageWiggleValue {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, id);
+	}
+};
+
+enum class ReadType {
+	EAGER,
+	FETCH,
+	LOW,
+	NORMAL,
+	HIGH,
+};
+
+FDB_DECLARE_BOOLEAN_PARAM(CacheResult);
+
+// store options for storage engine read
+// ReadType describes the usage and priority of the read
+// cacheResult determines whether the storage engine cache for this read
+// consistencyCheckStartVersion indicates the consistency check which began at this version
+// debugID helps to trace the path of the read
+struct ReadOptions {
+	ReadType type;
+	// Once CacheResult is serializable, change type from bool to CacheResult
+	bool cacheResult;
+	Optional<UID> debugID;
+	Optional<Version> consistencyCheckStartVersion;
+
+	ReadOptions() : type(ReadType::NORMAL), cacheResult(CacheResult::True){};
+
+	ReadOptions(Optional<UID> debugID,
+	            ReadType type = ReadType::NORMAL,
+	            CacheResult cache = CacheResult::False,
+	            Optional<Version> version = Optional<Version>())
+	  : type(type), cacheResult(cache), debugID(debugID), consistencyCheckStartVersion(version){};
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, type, cacheResult, debugID, consistencyCheckStartVersion);
 	}
 };
 

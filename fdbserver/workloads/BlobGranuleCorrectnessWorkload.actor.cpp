@@ -193,7 +193,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 
 	BlobGranuleCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		doSetup = !clientId; // only do this on the "first" client
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 120.0);
+		testDuration = getOption(options, "testDuration"_sr, 120.0);
 
 		// randomize global test settings based on shared parameter to get similar workload across tests, but then vary
 		// different parameters within those constraints
@@ -475,7 +475,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		beginVersionByChunk.insert(normalKeys, 0);
 		int beginCollapsed = 0;
 		int beginNotCollapsed = 0;
-		Key lastBeginKey = LiteralStringRef("");
+		Key lastBeginKey = ""_sr;
 		for (auto& chunk : blob.second) {
 			KeyRange beginVersionRange;
 			if (chunk.tenantPrefix.present()) {

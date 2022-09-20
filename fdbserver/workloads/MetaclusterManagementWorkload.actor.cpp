@@ -96,15 +96,16 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		Reference<IDatabase> threadSafeHandle =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
 
-		MultiVersionApi::api->selectApiVersion(cx->apiVersion);
+		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 		self->managementDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
-		ASSERT(g_simulator.extraDatabases.size() > 0);
-		for (auto connectionString : g_simulator.extraDatabases) {
+		ASSERT(g_simulator->extraDatabases.size() > 0);
+		for (auto connectionString : g_simulator->extraDatabases) {
 			ClusterConnectionString ccs(connectionString);
 			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(ccs);
 			self->dataDbIndex.push_back(ClusterName(format("cluster_%08d", self->dataDbs.size())));
-			self->dataDbs[self->dataDbIndex.back()] = DataClusterData(Database::createDatabase(extraFile, -1));
+			self->dataDbs[self->dataDbIndex.back()] =
+			    DataClusterData(Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION));
 		}
 
 		wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));

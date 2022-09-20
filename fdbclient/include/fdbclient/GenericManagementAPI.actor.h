@@ -70,7 +70,8 @@ enum class ConfigurationResult {
 	SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
 	DATABASE_CREATED_WARN_ROCKSDB_EXPERIMENTAL,
 	DATABASE_CREATED_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
-	DATABASE_IS_REGISTERED
+	DATABASE_IS_REGISTERED,
+	ENCRYPTION_AT_REST_MODE_ALREADY_SET
 };
 
 enum class CoordinatorsResult {
@@ -248,7 +249,7 @@ Future<std::vector<ProcessData>> getWorkers(Reference<Tr> tr,
 // Accepts a full configuration in key/value format (from buildConfiguration)
 ACTOR template <class DB>
 Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string, std::string> m, bool force) {
-	state StringRef initIdKey = LiteralStringRef("\xff/init_id");
+	state StringRef initIdKey = "\xff/init_id"_sr;
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
 	if (!m.size()) {
@@ -274,6 +275,9 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 		if (!isCompleteConfiguration(m)) {
 			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
 		}
+	} else if (m.count(encryptionAtRestModeConfKey.toString()) != 0) {
+		// Encryption data at-rest mode can be set only at the time of database creation
+		return ConfigurationResult::ENCRYPTION_AT_REST_MODE_ALREADY_SET;
 	}
 
 	state Future<Void> tooLong = delay(60);
@@ -501,8 +505,8 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 				ASSERT(creating);
 				tr->atomicOp(databaseLockedKey,
 				             BinaryWriter::toValue(locked.get(), Unversioned())
-				                 .withPrefix(LiteralStringRef("0123456789"))
-				                 .withSuffix(LiteralStringRef("\x00\x00\x00\x00")),
+				                 .withPrefix("0123456789"_sr)
+				                 .withSuffix("\x00\x00\x00\x00"_sr),
 				             MutationRef::SetVersionstampedValue);
 			}
 
@@ -646,7 +650,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db,
                                          std::vector<StringRef> const& modes,
                                          Optional<ConfigureAutoResult> const& conf,
                                          bool force) {
-	if (modes.size() && modes[0] == LiteralStringRef("auto") && conf.present()) {
+	if (modes.size() && modes[0] == "auto"_sr && conf.present()) {
 		return autoConfig(db, conf.get());
 	}
 

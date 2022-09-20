@@ -33,6 +33,7 @@
 #include "fdbclient/Tenant.h"
 
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/Knobs.h"
 #include "flow/flow.h"
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -143,6 +144,13 @@ public:
 
 private:
 	Future<Void> collection;
+};
+
+ACTOR Future<Void> dumpManifest(Database db, Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<Void> loadManifest(Database db, Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<Void> printRestoreSummary(Database db, Reference<BlobConnectionProvider> blobConn);
+inline bool isFullRestoreMode() {
+	return SERVER_KNOBS->BLOB_FULL_RESTORE_MODE;
 };
 
 #include "flow/unactorcompiler.h"

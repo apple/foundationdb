@@ -21,19 +21,28 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
+#include "fdbrpc/TenantInfo.h"
+#include "flow/BooleanParam.h"
 #include "libb64/encode.h"
+#include "flow/ApiVersion.h"
 #include "flow/UnitTest.h"
+
+FDB_DEFINE_BOOLEAN_PARAM(EnforceValidTenantId);
 
 Key TenantMapEntry::idToPrefix(int64_t id) {
 	int64_t swapped = bigEndian64(id);
-	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), 8);
+	return StringRef(reinterpret_cast<const uint8_t*>(&swapped), TENANT_PREFIX_SIZE);
 }
 
-int64_t TenantMapEntry::prefixToId(KeyRef prefix) {
-	ASSERT(prefix.size() == 8);
+int64_t TenantMapEntry::prefixToId(KeyRef prefix, EnforceValidTenantId enforceValidTenantId) {
+	ASSERT(prefix.size() == TENANT_PREFIX_SIZE);
 	int64_t id = *reinterpret_cast<const int64_t*>(prefix.begin());
 	id = bigEndian64(id);
-	ASSERT(id >= 0);
+	if (enforceValidTenantId) {
+		ASSERT(id >= 0);
+	} else if (id < 0) {
+		return TenantInfo::INVALID_TENANT;
+	}
 	return id;
 }
 
@@ -122,24 +131,19 @@ void TenantMapEntry::setId(int64_t id) {
 	prefix = idToPrefix(id);
 }
 
-std::string TenantMapEntry::toJson(int apiVersion) const {
+std::string TenantMapEntry::toJson() const {
 	json_spirit::mObject tenantEntry;
 	tenantEntry["id"] = id;
 	tenantEntry["encrypted"] = encrypted;
 
-	if (apiVersion >= 720 || apiVersion == Database::API_VERSION_LATEST) {
-		json_spirit::mObject prefixObject;
-		std::string encodedPrefix = base64::encoder::from_string(prefix.toString());
-		// Remove trailing newline
-		encodedPrefix.resize(encodedPrefix.size() - 1);
+	json_spirit::mObject prefixObject;
+	std::string encodedPrefix = base64::encoder::from_string(prefix.toString());
+	// Remove trailing newline
+	encodedPrefix.resize(encodedPrefix.size() - 1);
 
-		prefixObject["base64"] = encodedPrefix;
-		prefixObject["printable"] = printable(prefix);
-		tenantEntry["prefix"] = prefixObject;
-	} else {
-		// This is not a standard encoding in JSON, and some libraries may not be able to easily decode it
-		tenantEntry["prefix"] = prefix.toString();
-	}
+	prefixObject["base64"] = encodedPrefix;
+	prefixObject["printable"] = printable(prefix);
+	tenantEntry["prefix"] = prefixObject;
 
 	tenantEntry["tenant_state"] = TenantMapEntry::tenantStateToString(tenantState);
 	if (assignedCluster.present()) {
