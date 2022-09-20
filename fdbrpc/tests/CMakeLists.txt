@@ -3,4 +3,5 @@ if(NOT WIN32)
   target_link_libraries(authz_tls_unittest PRIVATE flow fdbrpc fmt::fmt)
   add_test(NAME authorization_tls_unittest
            COMMAND $<TARGET_FILE:authz_tls_unittest>)
+  set_tests_properties(authorization_tls_unittest PROPERTIES TIMEOUT 300)
 endif()
