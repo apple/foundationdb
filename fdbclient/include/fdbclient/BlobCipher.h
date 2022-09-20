@@ -116,7 +116,7 @@ class EncryptBuf : public ReferenceCounted<EncryptBuf>, NonCopyable {
 public:
 	EncryptBuf(int size, Arena& arena) : allocSize(size), logicalSize(size) {
 		if (size > 0) {
-			buffer = new (arena) uint8_t[size];
+			buffer = new (arena) uint8_t[size]();
 		} else {
 			buffer = nullptr;
 		}
@@ -140,9 +140,9 @@ private:
 #pragma pack(push, 1) // exact fit - no padding
 struct BlobCipherDetails {
 	// Encryption domain boundary identifier.
-	EncryptCipherDomainId encryptDomainId = ENCRYPT_INVALID_DOMAIN_ID;
+	EncryptCipherDomainId encryptDomainId = INVALID_ENCRYPT_DOMAIN_ID;
 	// BaseCipher encryption key identifier
-	EncryptCipherBaseKeyId baseCipherId = ENCRYPT_INVALID_CIPHER_KEY_ID;
+	EncryptCipherBaseKeyId baseCipherId = INVALID_ENCRYPT_CIPHER_KEY_ID;
 	// Random salt
 	EncryptCipherRandomSalt salt{};
 
@@ -563,7 +563,6 @@ public:
 	                              const int plaintextLen,
 	                              BlobCipherEncryptHeader* header,
 	                              Arena&);
-	Standalone<StringRef> encryptBlobGranuleChunk(const uint8_t* plaintext, const int plaintextLen);
 
 private:
 	EVP_CIPHER_CTX* ctx;
@@ -628,16 +627,17 @@ public:
 	HmacSha256DigestGen(const unsigned char* key, size_t len);
 	~HmacSha256DigestGen();
 	HMAC_CTX* getCtx() const { return ctx; }
-	StringRef digest(unsigned char const* data, size_t len, Arena&);
+	unsigned int digest(unsigned char const* data, size_t len, unsigned char* buf, unsigned int bufLen);
 
 private:
 	HMAC_CTX* ctx;
 };
 
-StringRef computeAuthToken(const uint8_t* payload,
-                           const int payloadLen,
-                           const uint8_t* key,
-                           const int keyLen,
-                           Arena& arena);
+void computeAuthToken(const uint8_t* payload,
+                      const int payloadLen,
+                      const uint8_t* key,
+                      const int keyLen,
+                      unsigned char* digestBuf,
+                      unsigned int digestBufSz);
 
 #endif // FDBCLIENT_BLOB_CIPHER_H

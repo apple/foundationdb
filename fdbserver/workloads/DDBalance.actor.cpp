@@ -36,17 +36,17 @@ struct DDBalanceWorkload : TestWorkload {
 
 	DDBalanceWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), bin_shifts("Bin_Shifts"), operations("Operations"), retries("Retries"), latencies(2000) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		binCount = getOption(options, LiteralStringRef("binCount"), 1000);
-		writesPerTransaction = getOption(options, LiteralStringRef("writesPerTransaction"), 1);
-		keySpaceDriftFactor = getOption(options, LiteralStringRef("keySpaceDriftFactor"), 1);
-		moversPerClient = std::max(getOption(options, LiteralStringRef("moversPerClient"), 10), 1);
-		actorsPerClient = std::max(getOption(options, LiteralStringRef("actorsPerClient"), 100), 1);
-		int nodes = getOption(options, LiteralStringRef("nodes"), 10000);
-		discardEdgeMeasurements = getOption(options, LiteralStringRef("discardEdgeMeasurements"), true);
-		warmingDelay = getOption(options, LiteralStringRef("warmingDelay"), 0.0);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		binCount = getOption(options, "binCount"_sr, 1000);
+		writesPerTransaction = getOption(options, "writesPerTransaction"_sr, 1);
+		keySpaceDriftFactor = getOption(options, "keySpaceDriftFactor"_sr, 1);
+		moversPerClient = std::max(getOption(options, "moversPerClient"_sr, 10), 1);
+		actorsPerClient = std::max(getOption(options, "actorsPerClient"_sr, 100), 1);
+		int nodes = getOption(options, "nodes"_sr, 10000);
+		discardEdgeMeasurements = getOption(options, "discardEdgeMeasurements"_sr, true);
+		warmingDelay = getOption(options, "warmingDelay"_sr, 0.0);
 		transactionsPerSecond =
-		    getOption(options, LiteralStringRef("transactionsPerSecond"), 5000.0) / (clientCount * moversPerClient);
+		    getOption(options, "transactionsPerSecond"_sr, 5000.0) / (clientCount * moversPerClient);
 
 		nodesPerActor = nodes / (actorsPerClient * clientCount);
 

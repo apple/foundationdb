@@ -120,7 +120,7 @@ inline ValueRef doAppendIfFits(const Optional<ValueRef>& existingValueOptional,
 	if (!otherOperand.size())
 		return existingValue;
 	if (existingValue.size() + otherOperand.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) {
-		CODE_PROBE(true, "AppendIfFIts resulted in truncation");
+		CODE_PROBE(true, "AppendIfFits resulted in truncation");
 		return existingValue;
 	}
 

@@ -44,6 +44,7 @@
 
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "flow/flow.h"
+#include "flow/ApiVersion.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/FastRef.h"
@@ -73,7 +74,6 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-#define FDB_API_VERSION 720
 /*
  * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi
  * instance (e.g. from ThreadSafeApi)
@@ -654,7 +654,7 @@ ACTOR Future<Void> checkStatus(Future<Void> f,
 		StatusObject _s = wait(StatusClient::statusFetcher(localDb));
 		s = _s;
 	} else {
-		state ThreadFuture<Optional<Value>> statusValueF = tr->get(LiteralStringRef("\xff\xff/status/json"));
+		state ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
 		Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
 		if (!statusValue.present()) {
 			fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
@@ -698,7 +698,7 @@ ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens) {
 	for (int i = 1; i < tokens.size(); i++) {
 		snapCmd = snapCmd.withSuffix(tokens[i]);
 		if (i != tokens.size() - 1) {
-			snapCmd = snapCmd.withSuffix(LiteralStringRef(" "));
+			snapCmd = snapCmd.withSuffix(" "_sr);
 		}
 	}
 	try {
@@ -889,7 +889,7 @@ struct CLIOptions {
 	std::vector<std::pair<std::string, std::string>> knobs;
 
 	// api version, using the latest version by default
-	int apiVersion = FDB_API_VERSION;
+	int apiVersion = ApiVersion::LATEST_VERSION;
 
 	CLIOptions(int argc, char* argv[]) {
 		program_name = argv[0];
@@ -938,12 +938,12 @@ struct CLIOptions {
 			if (*endptr != '\0') {
 				fprintf(stderr, "ERROR: invalid client version %s\n", args.OptionArg());
 				return 1;
-			} else if (apiVersion < 700 || apiVersion > FDB_API_VERSION) {
+			} else if (apiVersion < 700 || apiVersion > ApiVersion::LATEST_VERSION) {
 				// multi-version fdbcli only available after 7.0
 				fprintf(stderr,
 				        "ERROR: api version %s is not supported. (Min: 700, Max: %d)\n",
 				        args.OptionArg(),
-				        FDB_API_VERSION);
+				        ApiVersion::LATEST_VERSION);
 				return 1;
 			}
 			break;
@@ -1328,13 +1328,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 				}
 
 				if (tokencmp(tokens[0], "fileconfigure")) {
-					if (tokens.size() == 2 || (tokens.size() == 3 && (tokens[1] == LiteralStringRef("new") ||
-					                                                  tokens[1] == LiteralStringRef("FORCE")))) {
-						bool _result =
-						    wait(makeInterruptable(fileConfigureCommandActor(db,
-						                                                     tokens.back().toString(),
-						                                                     tokens[1] == LiteralStringRef("new"),
-						                                                     tokens[1] == LiteralStringRef("FORCE"))));
+					if (tokens.size() == 2 ||
+					    (tokens.size() == 3 && (tokens[1] == "new"_sr || tokens[1] == "FORCE"_sr))) {
+						bool _result = wait(makeInterruptable(fileConfigureCommandActor(
+						    db, tokens.back().toString(), tokens[1] == "new"_sr, tokens[1] == "FORCE"_sr)));
 						if (!_result)
 							is_error = true;
 					} else {
@@ -1577,6 +1574,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 				if (tokencmp(tokens[0], "consistencycheck")) {
 					getTransaction(db, managementTenant, tr, options, intrans);
 					bool _result = wait(makeInterruptable(consistencyCheckCommandActor(tr, tokens, intrans)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "consistencyscan")) {
+					bool _result = wait(makeInterruptable(consistencyScanCommandActor(localDb, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;

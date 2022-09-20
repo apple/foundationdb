@@ -1102,9 +1102,8 @@ void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, A
 	const int nKeys = deterministicRandom()->randomInt(7, 8);
 	for (int i = 1; i < nKeys; i++) {
 		EncryptCipherDomainId domainId = getRandomDomainId();
-		EncryptCipherDomainNameRef domainName = domainId < 0
-		                                            ? StringRef(arena, std::string(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME))
-		                                            : StringRef(arena, std::to_string(domainId));
+		EncryptCipherDomainNameRef domainName = domainId < 0 ? StringRef(arena, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME)
+		                                                     : StringRef(arena, std::to_string(domainId));
 		req.encryptKeyInfos.emplace_back_deep(req.arena, domainId, i, domainName);
 		keyMap[i] = domainId;
 	}
@@ -1141,9 +1140,8 @@ void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx
 	const int nKeys = deterministicRandom()->randomInt(7, 25);
 	for (int i = 1; i < nKeys; i++) {
 		EncryptCipherDomainId domainId = getRandomDomainId();
-		EncryptCipherDomainNameRef domainName = domainId < 0
-		                                            ? StringRef(arena, std::string(FDB_DEFAULT_ENCRYPT_DOMAIN_NAME))
-		                                            : StringRef(arena, std::to_string(domainId));
+		EncryptCipherDomainNameRef domainName = domainId < 0 ? StringRef(arena, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME)
+		                                                     : StringRef(arena, std::to_string(domainId));
 		KmsConnLookupDomainIdsReqInfoRef reqInfo(req.arena, domainId, domainName);
 		if (domainInfoMap.insert({ domainId, reqInfo }).second) {
 			req.encryptDomainInfos.push_back(req.arena, reqInfo);

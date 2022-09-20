@@ -142,7 +142,7 @@ Future<Void> tssComparison(Req req,
 			if (!TSS_doCompare(src.get(), tss.get().get())) {
 				CODE_PROBE(true, "TSS Mismatch");
 				state TraceEvent mismatchEvent(
-				    (g_network->isSimulated() && g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations)
+				    (g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
 				        ? SevWarnAlways
 				        : SevError,
 				    TSS_mismatchTraceName(req));
@@ -206,7 +206,7 @@ Future<Void> tssComparison(Req req,
 
 						// record a summarized trace event instead
 						TraceEvent summaryEvent((g_network->isSimulated() &&
-						                         g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations)
+						                         g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
 						                            ? SevWarnAlways
 						                            : SevError,
 						                        TSS_mismatchTraceName(req));

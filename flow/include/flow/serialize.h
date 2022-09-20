@@ -453,17 +453,17 @@ public:
 	void serializeAsTuple(StringRef str) {
 		size_t last_pos = 0;
 
-		serializeBytes(LiteralStringRef("\x01"));
+		serializeBytes("\x01"_sr);
 
 		for (size_t pos = 0; pos < str.size(); ++pos) {
 			if (str[pos] == '\x00') {
 				serializeBytes(str.substr(last_pos, pos - last_pos));
-				serializeBytes(LiteralStringRef("\x00\xff"));
+				serializeBytes("\x00\xff"_sr);
 				last_pos = pos + 1;
 			}
 		}
 		serializeBytes(str.substr(last_pos, str.size() - last_pos));
-		serializeBytes(LiteralStringRef("\x00"));
+		serializeBytes("\x00"_sr);
 	}
 
 	void serializeAsTuple(bool t) {
