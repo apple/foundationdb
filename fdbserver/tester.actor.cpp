@@ -384,19 +384,21 @@ void CompoundWorkload::addFailureInjection(WorkloadRequest& work) {
 	if (!work.runFailureWorkloads || !FLOW_KNOBS->ENABLE_SIMULATION_IMPROVEMENTS) {
 		return;
 	}
-	// Some common workloads won't work with failure injection workloads
+	// Some workloads won't work with some failure injection workloads
+	std::set<std::string> disabledWorkloads;
 	for (auto const& w : workloads) {
-		auto desc = w->description();
-		if (desc == "ChangeConfig") {
-			return;
-		} else if (desc == "SaveAndKill") {
-			return;
-		}
+		w->disableFailureInjectionWorkloads(disabledWorkloads);
+	}
+	if (disabledWorkloads.count("all") > 0) {
+		return;
 	}
 	auto& factories = IFailureInjectorFactory::factories();
 	DeterministicRandom random(sharedRandomNumber);
 	for (auto& factory : factories) {
 		auto workload = factory->create(*this);
+		if (disabledWorkloads.count(workload->description()) > 0) {
+			continue;
+		}
 		while (workload->add(random, work, *this)) {
 			failureInjection.push_back(workload);
 			workload = factory->create(*this);
@@ -418,6 +420,8 @@ double CompoundWorkload::getCheckTimeout() const {
 void CompoundWorkload::getMetrics(std::vector<PerfMetric>&) {
 	ASSERT(false);
 }
+
+void TestWorkload::disableFailureInjectionWorkloads(std::set<std::string>& out) const {}
 
 FailureInjectionWorkload::FailureInjectionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
