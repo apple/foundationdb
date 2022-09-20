@@ -46,7 +46,7 @@ struct SaveAndKillWorkload : TestWorkload {
 
 	std::string description() const override { return "SaveAndKillWorkload"; }
 	Future<Void> setup(Database const& cx) override {
-		g_simulator.disableSwapsToAll();
+		g_simulator->disableSwapsToAll();
 		return Void();
 	}
 	Future<Void> start(Database const& cx) override { return _start(this); }
@@ -60,12 +60,12 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.LoadFile(self->restartInfo.c_str());
 
 		ini.SetValue("RESTORE", "isRestoring", format("%d", self->isRestoring).c_str());
-		ini.SetValue("META", "processesPerMachine", format("%d", g_simulator.processesPerMachine).c_str());
-		ini.SetValue("META", "listenersPerProcess", format("%d", g_simulator.listenersPerProcess).c_str());
-		ini.SetValue("META", "desiredCoordinators", format("%d", g_simulator.desiredCoordinators).c_str());
-		ini.SetValue("META", "connectionString", g_simulator.connectionString.c_str());
-		ini.SetValue("META", "testerCount", format("%d", g_simulator.testerCount).c_str());
-		ini.SetValue("META", "tssMode", format("%d", g_simulator.tssMode).c_str());
+		ini.SetValue("META", "processesPerMachine", format("%d", g_simulator->processesPerMachine).c_str());
+		ini.SetValue("META", "listenersPerProcess", format("%d", g_simulator->listenersPerProcess).c_str());
+		ini.SetValue("META", "desiredCoordinators", format("%d", g_simulator->desiredCoordinators).c_str());
+		ini.SetValue("META", "connectionString", g_simulator->connectionString.c_str());
+		ini.SetValue("META", "testerCount", format("%d", g_simulator->testerCount).c_str());
+		ini.SetValue("META", "tssMode", format("%d", g_simulator->tssMode).c_str());
 		ini.SetValue("META", "mockDNS", INetworkConnections::net()->convertMockDNSToString().c_str());
 
 		ini.SetBoolValue("META", "enableEncryption", SERVER_KNOBS->ENABLE_ENCRYPTION);
@@ -73,8 +73,9 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SetBoolValue("META", "enableStorageServerEncryption", SERVER_KNOBS->ENABLE_STORAGE_SERVER_ENCRYPTION);
 		ini.SetBoolValue("META", "enableBlobGranuleEncryption", SERVER_KNOBS->ENABLE_BLOB_GRANULE_ENCRYPTION);
 
-		std::vector<ISimulator::ProcessInfo*> processes = g_simulator.getAllProcesses();
-		std::map<NetworkAddress, ISimulator::ProcessInfo*> rebootingProcesses = g_simulator.currentlyRebootingProcesses;
+		std::vector<ISimulator::ProcessInfo*> processes = g_simulator->getAllProcesses();
+		std::map<NetworkAddress, ISimulator::ProcessInfo*> rebootingProcesses =
+		    g_simulator->currentlyRebootingProcesses;
 		std::map<std::string, ISimulator::ProcessInfo*> allProcessesMap;
 		for (const auto& [_, process] : rebootingProcesses) {
 			if (allProcessesMap.find(process->dataFolder) == allProcessesMap.end() && !process->isSpawnedKVProcess()) {
@@ -139,14 +140,14 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SaveFile(self->restartInfo.c_str());
 
 		for (auto process = allProcessesMap.begin(); process != allProcessesMap.end(); process++) {
-			g_simulator.killProcess(process->second, ISimulator::Reboot);
+			g_simulator->killProcess(process->second, ISimulator::Reboot);
 		}
 
 		for (i = 0; i < 100; i++) {
 			wait(delay(0.0));
 		}
 
-		g_simulator.stop();
+		g_simulator->stop();
 
 		return Void();
 	}

@@ -32,7 +32,6 @@
 #include "flow/Arena.h"
 
 #include "flow/StreamCipher.h"
-#include "flow/BlobCipher.h"
 #include "flow/ScopeExit.h"
 #include "flow/Trace.h"
 #include "flow/Error.h"
@@ -468,24 +467,22 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 	}
 
 	std::map<StringRef, int64_t> request = {
-		{ LiteralStringRef("MemTotal:"), 0 },       { LiteralStringRef("MemFree:"), 0 },
-		{ LiteralStringRef("MemAvailable:"), -1 },  { LiteralStringRef("Active(file):"), 0 },
-		{ LiteralStringRef("Inactive(file):"), 0 }, { LiteralStringRef("SwapTotal:"), 0 },
-		{ LiteralStringRef("SwapFree:"), 0 },       { LiteralStringRef("SReclaimable:"), 0 },
+		{ "MemTotal:"_sr, 0 },       { "MemFree:"_sr, 0 },   { "MemAvailable:"_sr, -1 }, { "Active(file):"_sr, 0 },
+		{ "Inactive(file):"_sr, 0 }, { "SwapTotal:"_sr, 0 }, { "SwapFree:"_sr, 0 },      { "SReclaimable:"_sr, 0 },
 	};
 
 	std::stringstream memInfoStream;
 	memInfoStream << fileStream.rdbuf();
 	getMemoryInfo(request, memInfoStream);
 
-	int64_t memFree = request[LiteralStringRef("MemFree:")];
-	int64_t pageCache = request[LiteralStringRef("Active(file):")] + request[LiteralStringRef("Inactive(file):")];
-	int64_t slabReclaimable = request[LiteralStringRef("SReclaimable:")];
-	int64_t usedSwap = request[LiteralStringRef("SwapTotal:")] - request[LiteralStringRef("SwapFree:")];
+	int64_t memFree = request["MemFree:"_sr];
+	int64_t pageCache = request["Active(file):"_sr] + request["Inactive(file):"_sr];
+	int64_t slabReclaimable = request["SReclaimable:"_sr];
+	int64_t usedSwap = request["SwapTotal:"_sr] - request["SwapFree:"_sr];
 
-	memInfo.total = 1024 * request[LiteralStringRef("MemTotal:")];
-	if (request[LiteralStringRef("MemAvailable:")] != -1) {
-		memInfo.available = 1024 * (request[LiteralStringRef("MemAvailable:")] - usedSwap);
+	memInfo.total = 1024 * request["MemTotal:"_sr];
+	if (request["MemAvailable:"_sr] != -1) {
+		memInfo.available = 1024 * (request["MemAvailable:"_sr] - usedSwap);
 	} else {
 		memInfo.available =
 		    1024 * (std::max<int64_t>(0,
@@ -2493,7 +2490,7 @@ bool createDirectory(std::string const& directory) {
 
 const uint8_t separatorChar = CANONICAL_PATH_SEPARATOR;
 StringRef separator(&separatorChar, 1);
-StringRef dotdot = LiteralStringRef("..");
+StringRef dotdot = ".."_sr;
 
 std::string cleanPath(std::string const& path) {
 	std::vector<StringRef> finalParts;
@@ -3157,19 +3154,19 @@ void outOfMemory() {
 		char* demangled = abi::__cxa_demangle(i->first, nullptr, nullptr, nullptr);
 		if (demangled) {
 			s = demangled;
-			if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))
-				s = s.substr(LiteralStringRef("(anonymous namespace)::").size());
+			if (StringRef(s).startsWith("(anonymous namespace)::"_sr))
+				s = s.substr("(anonymous namespace)::"_sr.size());
 			free(demangled);
 		} else
 			s = i->first;
 #else
 		s = i->first;
-		if (StringRef(s).startsWith(LiteralStringRef("class `anonymous namespace'::")))
-			s = s.substr(LiteralStringRef("class `anonymous namespace'::").size());
-		else if (StringRef(s).startsWith(LiteralStringRef("class ")))
-			s = s.substr(LiteralStringRef("class ").size());
-		else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
-			s = s.substr(LiteralStringRef("struct ").size());
+		if (StringRef(s).startsWith("class `anonymous namespace'::"_sr))
+			s = s.substr("class `anonymous namespace'::"_sr.size());
+		else if (StringRef(s).startsWith("class "_sr))
+			s = s.substr("class "_sr.size());
+		else if (StringRef(s).startsWith("struct "_sr))
+			s = s.substr("struct "_sr.size());
 #endif
 		typeNames.emplace_back(s, i->first);
 	}
@@ -3249,10 +3246,10 @@ void outOfMemory() {
 }
 
 // Because the lambda used with nftw below cannot capture
-int __eraseDirectoryRecurseiveCount;
+int __eraseDirectoryRecursiveCount;
 
 int eraseDirectoryRecursive(std::string const& dir) {
-	__eraseDirectoryRecurseiveCount = 0;
+	__eraseDirectoryRecursiveCount = 0;
 #ifdef _WIN32
 	system(("rd /s /q \"" + dir + "\"").c_str());
 #elif defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
@@ -3261,7 +3258,7 @@ int eraseDirectoryRecursive(std::string const& dir) {
 	    [](const char* fpath, const struct stat* sb, int typeflag, struct FTW* ftwbuf) -> int {
 		    int r = remove(fpath);
 		    if (r == 0)
-			    ++__eraseDirectoryRecurseiveCount;
+			    ++__eraseDirectoryRecursiveCount;
 		    return r;
 	    },
 	    64,
@@ -3278,7 +3275,7 @@ int eraseDirectoryRecursive(std::string const& dir) {
 #error Port me!
 #endif
 	// INJECT_FAULT( platform_error, "eraseDirectoryRecursive" );
-	return __eraseDirectoryRecurseiveCount;
+	return __eraseDirectoryRecursiveCount;
 }
 
 TmpFile::TmpFile() : filename("") {
@@ -3623,6 +3620,12 @@ void platformInit() {
 #endif
 }
 
+std::vector<std::function<void()>> g_crashHandlerCallbacks;
+
+void registerCrashHandlerCallback(void (*f)()) {
+	g_crashHandlerCallbacks.push_back(f);
+}
+
 // The crashHandler function is registered to handle signals before the process terminates.
 // Basic information about the crash is printed/traced, and stdout and trace events are flushed.
 void crashHandler(int sig) {
@@ -3635,7 +3638,10 @@ void crashHandler(int sig) {
 
 	StreamCipherKey::cleanup();
 	StreamCipher::cleanup();
-	BlobCipherKeyCache::cleanup();
+
+	for (auto& f : g_crashHandlerCallbacks) {
+		f();
+	}
 
 	fprintf(error ? stderr : stdout, "SIGNAL: %s (%d)\n", strsignal(sig), sig);
 	if (error) {
@@ -3990,21 +3996,19 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 	                        "VmallocUsed:      410576 kB\n";
 
 	std::map<StringRef, int64_t> request = {
-		{ LiteralStringRef("MemTotal:"), 0 },     { LiteralStringRef("MemFree:"), 0 },
-		{ LiteralStringRef("MemAvailable:"), 0 }, { LiteralStringRef("Buffers:"), 0 },
-		{ LiteralStringRef("Cached:"), 0 },       { LiteralStringRef("SwapTotal:"), 0 },
-		{ LiteralStringRef("SwapFree:"), 0 },
+		{ "MemTotal:"_sr, 0 }, { "MemFree:"_sr, 0 },   { "MemAvailable:"_sr, 0 }, { "Buffers:"_sr, 0 },
+		{ "Cached:"_sr, 0 },   { "SwapTotal:"_sr, 0 }, { "SwapFree:"_sr, 0 },
 	};
 
 	std::stringstream memInfoStream(memString);
 	getMemoryInfo(request, memInfoStream);
-	ASSERT(request[LiteralStringRef("MemTotal:")] == 24733228);
-	ASSERT(request[LiteralStringRef("MemFree:")] == 2077580);
-	ASSERT(request[LiteralStringRef("MemAvailable:")] == 0);
-	ASSERT(request[LiteralStringRef("Buffers:")] == 266940);
-	ASSERT(request[LiteralStringRef("Cached:")] == 16798292);
-	ASSERT(request[LiteralStringRef("SwapTotal:")] == 25165820);
-	ASSERT(request[LiteralStringRef("SwapFree:")] == 23680228);
+	ASSERT(request["MemTotal:"_sr] == 24733228);
+	ASSERT(request["MemFree:"_sr] == 2077580);
+	ASSERT(request["MemAvailable:"_sr] == 0);
+	ASSERT(request["Buffers:"_sr] == 266940);
+	ASSERT(request["Cached:"_sr] == 16798292);
+	ASSERT(request["SwapTotal:"_sr] == 25165820);
+	ASSERT(request["SwapFree:"_sr] == 23680228);
 	for (auto& item : request) {
 		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}
@@ -4049,13 +4053,13 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 
 	std::stringstream memInfoStream1(memString1);
 	getMemoryInfo(request, memInfoStream1);
-	ASSERT(request[LiteralStringRef("MemTotal:")] == 31856496);
-	ASSERT(request[LiteralStringRef("MemFree:")] == 25492716);
-	ASSERT(request[LiteralStringRef("MemAvailable:")] == 28470756);
-	ASSERT(request[LiteralStringRef("Buffers:")] == 313644);
-	ASSERT(request[LiteralStringRef("Cached:")] == 2956444);
-	ASSERT(request[LiteralStringRef("SwapTotal:")] == 0);
-	ASSERT(request[LiteralStringRef("SwapFree:")] == 0);
+	ASSERT(request["MemTotal:"_sr] == 31856496);
+	ASSERT(request["MemFree:"_sr] == 25492716);
+	ASSERT(request["MemAvailable:"_sr] == 28470756);
+	ASSERT(request["Buffers:"_sr] == 313644);
+	ASSERT(request["Cached:"_sr] == 2956444);
+	ASSERT(request["SwapTotal:"_sr] == 0);
+	ASSERT(request["SwapFree:"_sr] == 0);
 	for (auto& item : request) {
 		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}

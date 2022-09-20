@@ -282,6 +282,7 @@ Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock, const
 	return checkMoveKeysLock(tr, lock, ddEnabledState, false);
 }
 
+namespace {
 ACTOR Future<Optional<UID>> checkReadWrite(Future<ErrorOr<GetShardStateReply>> fReply, UID uid, Version version) {
 	ErrorOr<GetShardStateReply> reply = wait(fReply);
 	if (!reply.present() || reply.get().first < version)
@@ -1795,6 +1796,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 	return Void();
 }
 
+}; // anonymous namespace
+
 ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInterface server) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
@@ -2444,76 +2447,75 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 	return Void();
 }
 
-ACTOR Future<Void> moveKeys(Database cx,
-                            UID dataMoveId,
-                            KeyRange keys,
-                            std::vector<UID> destinationTeam,
-                            std::vector<UID> healthyDestinations,
-                            MoveKeysLock lock,
-                            Promise<Void> dataMovementComplete,
-                            FlowLock* startMoveKeysParallelismLock,
-                            FlowLock* finishMoveKeysParallelismLock,
-                            bool hasRemote,
-                            UID relocationIntervalId,
-                            const DDEnabledState* ddEnabledState,
-                            CancelConflictingDataMoves cancelConflictingDataMoves) {
-	ASSERT(destinationTeam.size());
-	std::sort(destinationTeam.begin(), destinationTeam.end());
+Future<Void> startMovement(Database occ, MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		return startMoveShards(std::move(occ),
+		                       params.dataMoveId,
+		                       params.keys,
+		                       params.destinationTeam,
+		                       params.lock,
+		                       params.startMoveKeysParallelismLock,
+		                       params.relocationIntervalId,
+		                       params.ddEnabledState,
+		                       params.cancelConflictingDataMoves);
+	}
+	return startMoveKeys(std::move(occ),
+	                     params.keys,
+	                     params.destinationTeam,
+	                     params.lock,
+	                     params.startMoveKeysParallelismLock,
+	                     params.relocationIntervalId,
+	                     &tssMapping,
+	                     params.ddEnabledState);
+}
+
+Future<Void> finishMovement(Database occ,
+                            MoveKeysParams& params,
+                            const std::map<UID, StorageServerInterface>& tssMapping) {
+	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+		return finishMoveShards(std::move(occ),
+		                        params.dataMoveId,
+		                        params.keys,
+		                        params.destinationTeam,
+		                        params.lock,
+		                        params.finishMoveKeysParallelismLock,
+		                        params.hasRemote,
+		                        params.relocationIntervalId,
+		                        tssMapping,
+		                        params.ddEnabledState);
+	}
+	return finishMoveKeys(std::move(occ),
+	                      params.keys,
+	                      params.destinationTeam,
+	                      params.lock,
+	                      params.finishMoveKeysParallelismLock,
+	                      params.hasRemote,
+	                      params.relocationIntervalId,
+	                      tssMapping,
+	                      params.ddEnabledState);
+}
+
+ACTOR Future<Void> moveKeys(Database occ, MoveKeysParams params) {
+	ASSERT(params.destinationTeam.size());
+	std::sort(params.destinationTeam.begin(), params.destinationTeam.end());
 
 	state std::map<UID, StorageServerInterface> tssMapping;
 
-	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		wait(startMoveShards(cx,
-		                     dataMoveId,
-		                     keys,
-		                     destinationTeam,
-		                     lock,
-		                     startMoveKeysParallelismLock,
-		                     relocationIntervalId,
-		                     ddEnabledState,
-		                     cancelConflictingDataMoves));
+	wait(startMovement(occ, params, tssMapping));
 
-	} else {
-		wait(startMoveKeys(cx,
-		                   keys,
-		                   destinationTeam,
-		                   lock,
-		                   startMoveKeysParallelismLock,
-		                   relocationIntervalId,
-		                   &tssMapping,
-		                   ddEnabledState));
-	}
+	state Future<Void> completionSignaller = checkFetchingState(occ,
+	                                                            params.healthyDestinations,
+	                                                            params.keys,
+	                                                            params.dataMovementComplete,
+	                                                            params.relocationIntervalId,
+	                                                            tssMapping);
 
-	state Future<Void> completionSignaller =
-	    checkFetchingState(cx, healthyDestinations, keys, dataMovementComplete, relocationIntervalId, tssMapping);
-
-	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-		wait(finishMoveShards(cx,
-		                      dataMoveId,
-		                      keys,
-		                      destinationTeam,
-		                      lock,
-		                      finishMoveKeysParallelismLock,
-		                      hasRemote,
-		                      relocationIntervalId,
-		                      tssMapping,
-		                      ddEnabledState));
-	} else {
-		wait(finishMoveKeys(cx,
-		                    keys,
-		                    destinationTeam,
-		                    lock,
-		                    finishMoveKeysParallelismLock,
-		                    hasRemote,
-		                    relocationIntervalId,
-		                    tssMapping,
-		                    ddEnabledState));
-	}
+	wait(finishMovement(occ, params, tssMapping));
 
 	// This is defensive, but make sure that we always say that the movement is complete before moveKeys completes
 	completionSignaller.cancel();
-	if (!dataMovementComplete.isSet())
-		dataMovementComplete.send(Void());
+	if (!params.dataMovementComplete.isSet())
+		params.dataMovementComplete.send(Void());
 
 	return Void();
 }

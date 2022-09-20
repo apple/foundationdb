@@ -621,7 +621,7 @@ class TagUidMap : public KeyBackedMap<std::string, UidAndAbortedFlagT> {
 	                                                           Snapshot snapshot);
 
 public:
-	TagUidMap(const StringRef& prefix) : TagMap(LiteralStringRef("tag->uid/").withPrefix(prefix)), prefix(prefix) {}
+	TagUidMap(const StringRef& prefix) : TagMap("tag->uid/"_sr.withPrefix(prefix)), prefix(prefix) {}
 
 	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr,
 	                                         Snapshot snapshot = Snapshot::False) {
@@ -656,7 +656,7 @@ public:
 	} TaskParams;
 
 	KeyBackedConfig(StringRef prefix, UID uid = UID())
-	  : uid(uid), prefix(prefix), configSpace(uidPrefixKey(LiteralStringRef("uid->config/").withPrefix(prefix), uid)) {}
+	  : uid(uid), prefix(prefix), configSpace(uidPrefixKey("uid->config/"_sr.withPrefix(prefix), uid)) {}
 
 	KeyBackedConfig(StringRef prefix, Reference<Task> task) : KeyBackedConfig(prefix, TaskParams.uid().get(task)) {}
 

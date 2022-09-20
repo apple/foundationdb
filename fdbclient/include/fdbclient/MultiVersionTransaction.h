@@ -368,7 +368,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*futureGetDatabase)(FDBFuture* f, FDBDatabase** outDb);
 	fdb_error_t (*futureGetInt64)(FDBFuture* f, int64_t* outValue);
 	fdb_error_t (*futureGetUInt64)(FDBFuture* f, uint64_t* outValue);
-	fdb_error_t (*futureGetBool)(FDBFuture* f, bool* outValue);
+	fdb_error_t (*futureGetBool)(FDBFuture* f, fdb_bool_t* outValue);
 	fdb_error_t (*futureGetError)(FDBFuture* f);
 	fdb_error_t (*futureGetKey)(FDBFuture* f, uint8_t const** outKey, int* outKeyLength);
 	fdb_error_t (*futureGetValue)(FDBFuture* f, fdb_bool_t* outPresent, uint8_t const** outValue, int* outValueLength);

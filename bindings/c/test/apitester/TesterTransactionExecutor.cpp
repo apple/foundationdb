@@ -23,24 +23,22 @@
 #include "foundationdb/fdb_c_types.h"
 #include "test/apitester/TesterScheduler.h"
 #include "test/fdb_api.hpp"
+#include <cstddef>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 #include <mutex>
 #include <atomic>
 #include <chrono>
 #include <thread>
 #include <fmt/format.h>
+#include <filesystem>
 
 namespace FdbApiTester {
 
 constexpr int LONG_WAIT_TIME_US = 2000000;
 constexpr int LARGE_NUMBER_OF_RETRIES = 10;
-
-void TransactionActorBase::complete(fdb::Error err) {
-	error = err;
-	context = {};
-}
 
 void ITransactionContext::continueAfterAll(std::vector<fdb::Future> futures, TTaskFct cont) {
 	auto counter = std::make_shared<std::atomic<int>>(futures.size());
@@ -73,22 +71,32 @@ void ITransactionContext::continueAfterAll(std::vector<fdb::Future> futures, TTa
 class TransactionContextBase : public ITransactionContext {
 public:
 	TransactionContextBase(ITransactionExecutor* executor,
-	                       std::shared_ptr<ITransactionActor> txActor,
-	                       TTaskFct cont,
+	                       TOpStartFct startFct,
+	                       TOpContFct cont,
 	                       IScheduler* scheduler,
 	                       int retryLimit,
-	                       std::string bgBasePath)
-	  : executor(executor), txActor(txActor), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
-	    txState(TxState::IN_PROGRESS), commitCalled(false), bgBasePath(bgBasePath) {
+	                       std::string bgBasePath,
+	                       std::optional<fdb::BytesRef> tenantName,
+	                       bool transactional)
+	  : executor(executor), startFct(startFct), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
+	    txState(TxState::IN_PROGRESS), commitCalled(false), bgBasePath(bgBasePath), tenantName(tenantName),
+	    transactional(transactional) {
 		databaseCreateErrorInjected = executor->getOptions().injectDatabaseCreateErrors &&
 		                              Random::get().randomBool(executor->getOptions().databaseCreateErrorRatio);
-		fdb::Database db;
 		if (databaseCreateErrorInjected) {
-			db = fdb::Database("not_existing_file");
+			fdbDb = fdb::Database(executor->getClusterFileForErrorInjection());
 		} else {
-			db = executor->selectDatabase();
+			fdbDb = executor->selectDatabase();
 		}
-		fdbTx = db.createTransaction();
+
+		if (transactional) {
+			if (tenantName) {
+				fdb::Tenant tenant = fdbDb.openTenant(*tenantName);
+				fdbTx = tenant.createTransaction();
+			} else {
+				fdbTx = fdbDb.createTransaction();
+			}
+		}
 	}
 
 	virtual ~TransactionContextBase() { ASSERT(txState == TxState::DONE); }
@@ -97,7 +105,9 @@ public:
 	// IN_PROGRESS -> (ON_ERROR -> IN_PROGRESS)* [-> ON_ERROR] -> DONE
 	enum class TxState { IN_PROGRESS, ON_ERROR, DONE };
 
-	fdb::Transaction tx() override { return fdbTx; }
+	fdb::Database db() override { return fdbDb.atomic_load(); }
+
+	fdb::Transaction tx() override { return fdbTx.atomic_load(); }
 
 	// Set a continuation to be executed when a future gets ready
 	void continueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
@@ -106,6 +116,7 @@ public:
 
 	// Complete the transaction with a commit
 	void commit() override {
+		ASSERT(transactional);
 		std::unique_lock<std::mutex> lock(mutex);
 		if (txState != TxState::IN_PROGRESS) {
 			return;
@@ -135,13 +146,15 @@ public:
 			           retriedErrors.size(),
 			           fmt::join(retriedErrorCodes(), ", "));
 		}
-		// cancel transaction so that any pending operations on it
-		// fail gracefully
-		fdbTx.cancel();
-		txActor->complete(fdb::Error::success());
-		cleanUp();
+
+		if (transactional) {
+			// cancel transaction so that any pending operations on it
+			// fail gracefully
+			fdbTx.cancel();
+			cleanUp();
+		}
 		ASSERT(txState == TxState::DONE);
-		contAfterDone();
+		contAfterDone(fdb::Error::success());
 	}
 
 	std::string getBGBasePath() override { return bgBasePath; }
@@ -164,19 +177,29 @@ public:
 
 		ASSERT(!onErrorFuture);
 
-		if (databaseCreateErrorInjected) {
+		if (databaseCreateErrorInjected && canBeInjectedDatabaseCreateError(err.code())) {
 			// Failed to create a database because of failure injection
 			// Restart by recreating the transaction in a valid database
-			scheduler->schedule([this]() {
-				databaseCreateErrorInjected = false;
-				fdb::Database db = executor->selectDatabase();
-				fdbTx = db.createTransaction();
-				restartTransaction();
+			auto thisRef = std::static_pointer_cast<TransactionContextBase>(shared_from_this());
+			scheduler->schedule([thisRef]() {
+				fdb::Database db = thisRef->executor->selectDatabase();
+				thisRef->fdbDb.atomic_store(db);
+				if (thisRef->transactional) {
+					if (thisRef->tenantName) {
+						fdb::Tenant tenant = db.openTenant(*thisRef->tenantName);
+						thisRef->fdbTx.atomic_store(tenant.createTransaction());
+					} else {
+						thisRef->fdbTx.atomic_store(db.createTransaction());
+					}
+				}
+				thisRef->restartTransaction();
 			});
-		} else {
+		} else if (transactional) {
 			onErrorArg = err;
 			onErrorFuture = tx().onError(err);
 			handleOnErrorFuture();
+		} else {
+			transactionFailed(err);
 		}
 	}
 
@@ -188,10 +211,16 @@ protected:
 	// Clean up transaction state after completing the transaction
 	// Note that the object may live longer, because it is referenced
 	// by not yet triggered callbacks
-	virtual void cleanUp() {
+	void cleanUp() {
 		ASSERT(txState == TxState::DONE);
 		ASSERT(!onErrorFuture);
-		txActor = {};
+		cancelPendingFutures();
+	}
+
+	virtual void cancelPendingFutures() {}
+
+	bool canBeInjectedDatabaseCreateError(fdb::Error::CodeType errCode) {
+		return errCode == error_code_no_cluster_file_found || errCode == error_code_connection_string_invalid;
 	}
 
 	// Complete the transaction with an (unretriable) error
@@ -207,9 +236,8 @@ protected:
 		// No need for lock from here on, because only one thread
 		// can enter DONE state and handle it
 
-		txActor->complete(err);
 		cleanUp();
-		contAfterDone();
+		contAfterDone(err);
 	}
 
 	// Handle result of an a transaction onError call
@@ -225,12 +253,13 @@ protected:
 	}
 
 	void restartTransaction() {
-		std::unique_lock<std::mutex> lock(mutex);
 		ASSERT(txState == TxState::ON_ERROR);
+		cancelPendingFutures();
+		std::unique_lock<std::mutex> lock(mutex);
 		txState = TxState::IN_PROGRESS;
 		commitCalled = false;
 		lock.unlock();
-		txActor->start();
+		startFct(shared_from_this());
 	}
 
 	// Checks if a transaction can be retried. Fails the transaction if the check fails
@@ -262,13 +291,17 @@ protected:
 	// Set in contructor, stays immutable
 	ITransactionExecutor* const executor;
 
+	// FDB database
+	// Provides a thread safe interface by itself (no need for mutex)
+	fdb::Database fdbDb;
+
 	// FDB transaction
 	// Provides a thread safe interface by itself (no need for mutex)
 	fdb::Transaction fdbTx;
 
-	// Actor implementing the transaction worklflow
+	// The function implementing the starting point of the transaction
 	// Set in constructor and reset on cleanup (no need for mutex)
-	std::shared_ptr<ITransactionActor> txActor;
+	TOpStartFct startFct;
 
 	// Mutex protecting access to shared mutable state
 	// Only the state that is accessible unter IN_PROGRESS state
@@ -277,7 +310,7 @@ protected:
 
 	// Continuation to be called after completion of the transaction
 	// Set in contructor, stays immutable
-	const TTaskFct contAfterDone;
+	const TOpContFct contAfterDone;
 
 	// Reference to the scheduler
 	// Set in contructor, stays immutable
@@ -319,6 +352,12 @@ protected:
 	// Indicates if the database error was injected
 	// Accessed on initialization and in ON_ERROR state only (no need for mutex)
 	bool databaseCreateErrorInjected;
+
+	// The tenant that we will run this transaction in
+	const std::optional<fdb::BytesRef> tenantName;
+
+	// Specifies whether the operation is transactional
+	const bool transactional;
 };
 
 /**
@@ -327,12 +366,15 @@ protected:
 class BlockingTransactionContext : public TransactionContextBase {
 public:
 	BlockingTransactionContext(ITransactionExecutor* executor,
-	                           std::shared_ptr<ITransactionActor> txActor,
-	                           TTaskFct cont,
+	                           TOpStartFct startFct,
+	                           TOpContFct cont,
 	                           IScheduler* scheduler,
 	                           int retryLimit,
-	                           std::string bgBasePath)
-	  : TransactionContextBase(executor, txActor, cont, scheduler, retryLimit, bgBasePath) {}
+	                           std::string bgBasePath,
+	                           std::optional<fdb::BytesRef> tenantName,
+	                           bool transactional)
+	  : TransactionContextBase(executor, startFct, cont, scheduler, retryLimit, bgBasePath, tenantName, transactional) {
+	}
 
 protected:
 	void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
@@ -402,12 +444,15 @@ protected:
 class AsyncTransactionContext : public TransactionContextBase {
 public:
 	AsyncTransactionContext(ITransactionExecutor* executor,
-	                        std::shared_ptr<ITransactionActor> txActor,
-	                        TTaskFct cont,
+	                        TOpStartFct startFct,
+	                        TOpContFct cont,
 	                        IScheduler* scheduler,
 	                        int retryLimit,
-	                        std::string bgBasePath)
-	  : TransactionContextBase(executor, txActor, cont, scheduler, retryLimit, bgBasePath) {}
+	                        std::string bgBasePath,
+	                        std::optional<fdb::BytesRef> tenantName,
+	                        bool transactional)
+	  : TransactionContextBase(executor, startFct, cont, scheduler, retryLimit, bgBasePath, tenantName, transactional) {
+	}
 
 protected:
 	void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
@@ -415,7 +460,7 @@ protected:
 		if (txState != TxState::IN_PROGRESS) {
 			return;
 		}
-		callbackMap[f] = CallbackInfo{ f, cont, shared_from_this(), retryOnError, timeNow() };
+		callbackMap[f] = CallbackInfo{ f, cont, shared_from_this(), retryOnError, timeNow(), false };
 		lock.unlock();
 		try {
 			f.then([this](fdb::Future f) { futureReadyCallback(f, this); });
@@ -462,7 +507,7 @@ protected:
 			           err.code(),
 			           err.what());
 		}
-		if (err.code() == error_code_transaction_cancelled) {
+		if (err.code() == error_code_transaction_cancelled || cbInfo.cancelled) {
 			return;
 		}
 		if (err.code() == error_code_success || !cbInfo.retryOnError) {
@@ -518,17 +563,17 @@ protected:
 		scheduler->schedule([thisRef]() { thisRef->handleOnErrorResult(); });
 	}
 
-	void cleanUp() override {
-		TransactionContextBase::cleanUp();
-
+	void cancelPendingFutures() override {
 		// Cancel all pending operations
 		// Note that the callbacks of the cancelled futures will still be called
 		std::unique_lock<std::mutex> lock(mutex);
 		std::vector<fdb::Future> futures;
 		for (auto& iter : callbackMap) {
+			iter.second.cancelled = true;
 			futures.push_back(iter.second.future);
 		}
 		lock.unlock();
+
 		for (auto& f : futures) {
 			f.cancel();
 		}
@@ -548,6 +593,7 @@ protected:
 		std::shared_ptr<ITransactionContext> thisRef;
 		bool retryOnError;
 		TimePoint startTime;
+		bool cancelled;
 	};
 
 	// Map for keeping track of future waits and holding necessary object references
@@ -567,29 +613,86 @@ class TransactionExecutorBase : public ITransactionExecutor {
 public:
 	TransactionExecutorBase(const TransactionExecutorOptions& options) : options(options), scheduler(nullptr) {}
 
+	~TransactionExecutorBase() {
+		if (tamperClusterFileThread.joinable()) {
+			tamperClusterFileThread.join();
+		}
+	}
+
 	void init(IScheduler* scheduler, const char* clusterFile, const std::string& bgBasePath) override {
 		this->scheduler = scheduler;
 		this->clusterFile = clusterFile;
 		this->bgBasePath = bgBasePath;
+
+		ASSERT(!options.tmpDir.empty());
+		emptyClusterFile.create(options.tmpDir, "fdbempty.cluster");
+		invalidClusterFile.create(options.tmpDir, "fdbinvalid.cluster");
+		invalidClusterFile.write(Random().get().randomStringLowerCase<std::string>(1, 100));
+
+		emptyListClusterFile.create(options.tmpDir, "fdbemptylist.cluster");
+		emptyListClusterFile.write(fmt::format("{}:{}@",
+		                                       Random().get().randomStringLowerCase<std::string>(3, 8),
+		                                       Random().get().randomStringLowerCase<std::string>(1, 100)));
+
+		if (options.tamperClusterFile) {
+			tamperedClusterFile.create(options.tmpDir, "fdb.cluster");
+			originalClusterFile = clusterFile;
+			this->clusterFile = tamperedClusterFile.getFileName();
+
+			// begin with a valid cluster file, but with non existing address
+			tamperedClusterFile.write(fmt::format("{}:{}@192.168.{}.{}:{}",
+			                                      Random().get().randomStringLowerCase<std::string>(3, 8),
+			                                      Random().get().randomStringLowerCase<std::string>(1, 100),
+			                                      Random().get().randomInt(1, 254),
+			                                      Random().get().randomInt(1, 254),
+			                                      Random().get().randomInt(2000, 10000)));
+
+			tamperClusterFileThread = std::thread([this]() {
+				std::this_thread::sleep_for(std::chrono::seconds(2));
+				// now write an invalid connection string
+				tamperedClusterFile.write(fmt::format("{}:{}@",
+				                                      Random().get().randomStringLowerCase<std::string>(3, 8),
+				                                      Random().get().randomStringLowerCase<std::string>(1, 100)));
+				std::this_thread::sleep_for(std::chrono::seconds(2));
+				// finally use correct cluster file contents
+				std::filesystem::copy_file(std::filesystem::path(originalClusterFile),
+				                           std::filesystem::path(tamperedClusterFile.getFileName()),
+				                           std::filesystem::copy_options::overwrite_existing);
+			});
+		}
 	}
 
 	const TransactionExecutorOptions& getOptions() override { return options; }
 
-	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) override {
+	void execute(TOpStartFct startFct,
+	             TOpContFct cont,
+	             std::optional<fdb::BytesRef> tenantName,
+	             bool transactional) override {
 		try {
 			std::shared_ptr<ITransactionContext> ctx;
 			if (options.blockOnFutures) {
 				ctx = std::make_shared<BlockingTransactionContext>(
-				    this, txActor, cont, scheduler, options.transactionRetryLimit, bgBasePath);
+				    this, startFct, cont, scheduler, options.transactionRetryLimit, bgBasePath, tenantName, true);
 			} else {
 				ctx = std::make_shared<AsyncTransactionContext>(
-				    this, txActor, cont, scheduler, options.transactionRetryLimit, bgBasePath);
+				    this, startFct, cont, scheduler, options.transactionRetryLimit, bgBasePath, tenantName, true);
 			}
-			txActor->init(ctx);
-			txActor->start();
+			startFct(ctx);
 		} catch (...) {
-			txActor->complete(fdb::Error(error_code_operation_failed));
-			cont();
+			cont(fdb::Error(error_code_operation_failed));
+		}
+	}
+
+	std::string getClusterFileForErrorInjection() override {
+		switch (Random::get().randomInt(0, 3)) {
+		case 0:
+			return fmt::format("{}{}", "not-existing-file", Random::get().randomStringLowerCase<std::string>(0, 2));
+		case 1:
+			return emptyClusterFile.getFileName();
+		case 2:
+			return invalidClusterFile.getFileName();
+		default: // case 3
+			return emptyListClusterFile.getFileName();
 		}
 	}
 
@@ -598,6 +701,12 @@ protected:
 	std::string bgBasePath;
 	std::string clusterFile;
 	IScheduler* scheduler;
+	TmpFile emptyClusterFile;
+	TmpFile invalidClusterFile;
+	TmpFile emptyListClusterFile;
+	TmpFile tamperedClusterFile;
+	std::thread tamperClusterFileThread;
+	std::string originalClusterFile;
 };
 
 /**
@@ -612,7 +721,7 @@ public:
 	void init(IScheduler* scheduler, const char* clusterFile, const std::string& bgBasePath) override {
 		TransactionExecutorBase::init(scheduler, clusterFile, bgBasePath);
 		for (int i = 0; i < options.numDatabases; i++) {
-			fdb::Database db(clusterFile);
+			fdb::Database db(this->clusterFile);
 			databases.push_back(db);
 		}
 	}

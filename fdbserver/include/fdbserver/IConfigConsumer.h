@@ -35,7 +35,9 @@
 class IConfigConsumer {
 public:
 	virtual ~IConfigConsumer() = default;
+	virtual Future<Void> readSnapshot(ConfigBroadcaster& broadcaster) = 0;
 	virtual Future<Void> consume(ConfigBroadcaster& broadcaster) = 0;
+	virtual void allowSpecialCaseRollforward() = 0;
 	virtual UID getID() const = 0;
 
 	static std::unique_ptr<IConfigConsumer> createTestSimple(ConfigFollowerInterface const& cfi,
@@ -46,5 +48,6 @@ public:
 	                                                     Optional<double> compactionInterval);
 	static std::unique_ptr<IConfigConsumer> createPaxos(ServerCoordinators const& coordinators,
 	                                                    double pollingInterval,
-	                                                    Optional<double> compactionInterval);
+	                                                    Optional<double> compactionInterval,
+	                                                    bool readPreviousCoordinators = false);
 };

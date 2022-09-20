@@ -221,17 +221,14 @@ private:
 ////// Persistence format (for self->persistentData)
 
 // Immutable keys
-static const KeyValueRef persistFormat(LiteralStringRef("Format"), LiteralStringRef("FoundationDB/LogServer/2/3"));
-static const KeyRangeRef persistFormatReadableRange(LiteralStringRef("FoundationDB/LogServer/2/3"),
-                                                    LiteralStringRef("FoundationDB/LogServer/2/4"));
-static const KeyRangeRef persistRecoveryCountKeys =
-    KeyRangeRef(LiteralStringRef("DbRecoveryCount/"), LiteralStringRef("DbRecoveryCount0"));
+static const KeyValueRef persistFormat("Format"_sr, "FoundationDB/LogServer/2/3"_sr);
+static const KeyRangeRef persistFormatReadableRange("FoundationDB/LogServer/2/3"_sr, "FoundationDB/LogServer/2/4"_sr);
+static const KeyRangeRef persistRecoveryCountKeys = KeyRangeRef("DbRecoveryCount/"_sr, "DbRecoveryCount0"_sr);
 
 // Updated on updatePersistentData()
-static const KeyRangeRef persistCurrentVersionKeys =
-    KeyRangeRef(LiteralStringRef("version/"), LiteralStringRef("version0"));
-static const KeyRange persistTagMessagesKeys = prefixRange(LiteralStringRef("TagMsg/"));
-static const KeyRange persistTagPoppedKeys = prefixRange(LiteralStringRef("TagPop/"));
+static const KeyRangeRef persistCurrentVersionKeys = KeyRangeRef("version/"_sr, "version0"_sr);
+static const KeyRange persistTagMessagesKeys = prefixRange("TagMsg/"_sr);
+static const KeyRange persistTagPoppedKeys = prefixRange("TagPop/"_sr);
 
 static Key persistTagMessagesKey(UID id, OldTag tag, Version version) {
 	BinaryWriter wr(Unversioned());
@@ -450,10 +447,10 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		          "Restored");
 		addActor.send(traceRole(Role::TRANSACTION_LOG, interf.id()));
 
-		persistentDataVersion.init(LiteralStringRef("TLog.PersistentDataVersion"), cc.id);
-		persistentDataDurableVersion.init(LiteralStringRef("TLog.PersistentDataDurableVersion"), cc.id);
-		version.initMetric(LiteralStringRef("TLog.Version"), cc.id);
-		queueCommittedVersion.initMetric(LiteralStringRef("TLog.QueueCommittedVersion"), cc.id);
+		persistentDataVersion.init("TLog.PersistentDataVersion"_sr, cc.id);
+		persistentDataDurableVersion.init("TLog.PersistentDataDurableVersion"_sr, cc.id);
+		version.initMetric("TLog.Version"_sr, cc.id);
+		queueCommittedVersion.initMetric("TLog.QueueCommittedVersion"_sr, cc.id);
 
 		specialCounter(cc, "Version", [this]() { return this->version.get(); });
 		specialCounter(cc, "SharedBytesInput", [tLogData]() { return tLogData->bytesInput; });
@@ -1463,7 +1460,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 	}
 
 	if (!fFormat.get().present()) {
-		RangeResult v = wait(self->persistentData->readRange(KeyRangeRef(StringRef(), LiteralStringRef("\xff")), 1));
+		RangeResult v = wait(self->persistentData->readRange(KeyRangeRef(StringRef(), "\xff"_sr), 1));
 		if (!v.size()) {
 			CODE_PROBE(true, "The DB is completely empty, so it was never initialized.  Delete it.");
 			throw worker_removed();

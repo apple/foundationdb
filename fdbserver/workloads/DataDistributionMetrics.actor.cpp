@@ -37,11 +37,11 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 
 	DataDistributionMetricsWorkload(WorkloadContext const& wcx)
 	  : KVWorkload(wcx), numShards(0), avgBytes(0), commits("Commits"), errors("Errors") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		keyPrefix = getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef("DDMetrics")).toString();
-		readPerTx = getOption(options, LiteralStringRef("readPerTransaction"), 1);
-		writePerTx = getOption(options, LiteralStringRef("writePerTransaction"), 5 * readPerTx);
-		delayPerLoop = getOption(options, LiteralStringRef("delayPerLoop"), 0.1); // throttling dd rpc calls
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		keyPrefix = getOption(options, "keyPrefix"_sr, "DDMetrics"_sr).toString();
+		readPerTx = getOption(options, "readPerTransaction"_sr, 1);
+		writePerTx = getOption(options, "writePerTransaction"_sr, 5 * readPerTx);
+		delayPerLoop = getOption(options, "delayPerLoop"_sr, 0.1); // throttling dd rpc calls
 		ASSERT(nodeCount > 1);
 	}
 

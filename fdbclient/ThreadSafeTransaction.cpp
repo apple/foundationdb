@@ -55,7 +55,7 @@ Reference<ITenant> ThreadSafeDatabase::openTenant(TenantNameRef tenantName) {
 }
 
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
-	auto type = isConfigDB ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
+	auto type = isConfigDB ? ISingleThreadTransaction::Type::PAXOS_CONFIG : ISingleThreadTransaction::Type::RYW;
 	return Reference<ITransaction>(new ThreadSafeTransaction(db, type, Optional<TenantName>()));
 }
 
@@ -171,7 +171,7 @@ ThreadFuture<bool> ThreadSafeDatabase::unblobbifyRange(const KeyRangeRef& keyRan
 	KeyRange range = keyRange;
 	return onMainThread([=]() -> Future<bool> {
 		db->checkDeferredError();
-		return db->blobbifyRange(range);
+		return db->unblobbifyRange(range);
 	});
 }
 
@@ -224,7 +224,7 @@ ThreadSafeDatabase::~ThreadSafeDatabase() {
 }
 
 Reference<ITransaction> ThreadSafeTenant::createTransaction() {
-	auto type = db->isConfigDB ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
+	auto type = db->isConfigDB ? ISingleThreadTransaction::Type::PAXOS_CONFIG : ISingleThreadTransaction::Type::RYW;
 	return Reference<ITransaction>(new ThreadSafeTransaction(db->db, type, name));
 }
 

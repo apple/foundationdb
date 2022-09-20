@@ -58,6 +58,9 @@ struct TestSpec {
 	// Execute each transaction in a separate database instance
 	bool databasePerTransaction = false;
 
+	// Test tampering the cluster file
+	bool tamperClusterFile = false;
+
 	// Size of the FDB client thread pool (a random number in the [min,max] range)
 	int minFdbThreads = 1;
 	int maxFdbThreads = 1;
@@ -78,6 +81,9 @@ struct TestSpec {
 	// Disable the ability to bypass the MVC API, for
 	// cases when there are no external clients
 	bool disableClientBypass = false;
+	// Number of tenants (a random number in the [min,max] range)
+	int minTenants = 0;
+	int maxTenants = 0;
 
 	// List of workloads with their options
 	std::vector<WorkloadSpec> workloads;

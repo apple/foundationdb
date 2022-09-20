@@ -95,6 +95,7 @@ extern const KeyRef advanceVersionSpecialKey;
 extern const KeyRef consistencyCheckSpecialKey;
 // coordinators
 extern const KeyRef clusterDescriptionSpecialKey;
+extern const KeyRef configDBSpecialKey;
 extern const KeyRef coordinatorsAutoSpecialKey;
 extern const KeyRef coordinatorsProcessSpecialKey;
 // datadistribution
@@ -119,7 +120,7 @@ extern const KeyRef ignoreSSFailureSpecialKey;
 extern const KeyRangeRef processClassSourceSpecialKeyRange;
 extern const KeyRangeRef processClassTypeSpecialKeyRange;
 // Other special keys
-inline const KeyRef errorMsgSpecialKey = LiteralStringRef("\xff\xff/error_message");
+inline const KeyRef errorMsgSpecialKey = "\xff\xff/error_message"_sr;
 inline const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/management/options/worker_interfaces/verify"_sr;
 // help functions (Copied from fdbcli.actor.cpp)
 
@@ -165,6 +166,8 @@ ACTOR Future<bool> configureTenantCommandActor(Reference<IDatabase> db, std::vec
 ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
                                                 std::vector<StringRef> tokens,
                                                 bool intrans);
+// consistency scan command
+ACTOR Future<bool> consistencyScanCommandActor(Database localDb, std::vector<StringRef> tokens);
 // coordinators command
 ACTOR Future<bool> coordinatorsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // createtenant command

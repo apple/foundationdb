@@ -22,11 +22,11 @@
 
 #include "fmt/format.h"
 #include "fdbrpc/sim_validation.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbserver/KmsConnectorInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
-#include "flow/BlobCipher.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
