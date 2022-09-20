@@ -2,8 +2,7 @@ import Flow
 
 // ==== ---------------------------------------------------------------------------------------------------------------
 
-//extension FlowPromiseInt: _FlowFutureOps {
-extension FlowFutureInt: _FlowFutureOps {
+extension FutureInt: _FlowFutureOps {
     typealias _T = CInt
 
     typealias CCBox = Box<CheckedContinuation<_T, Swift.Error>>

@@ -32,8 +32,10 @@
 // ==== ----------------------------------------------------------------------------------------------------------------
 
 #define SWIFT_CXX_REF_IMMORTAL                                                                                         \
-	__attribute__((swift_attr("import_as_ref"))) __attribute__((swift_attr("retain:immortal")))                        \
+	__attribute__((swift_attr("import_as_ref")))                                                                         \
+  __attribute__((swift_attr("retain:immortal")))                                                                       \
 	__attribute__((swift_attr("release:immortal")))
+
 #define SWIFT_SENDABLE __attribute__((swift_attr("@Sendable")))
 
 // ==== ----------------------------------------------------------------------------------------------------------------

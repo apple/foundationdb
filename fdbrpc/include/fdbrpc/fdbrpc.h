@@ -127,6 +127,8 @@ public:
 	}
 
 	void send(Never) { sendError(never_reply()); }
+  // SWIFT: Convenience method, since there is also a Swift.Never, so Never() could be confusing
+	void sendNever() const { send(Never()); }
 
 	Future<T> getFuture() const {
 		sav->addFutureRef();

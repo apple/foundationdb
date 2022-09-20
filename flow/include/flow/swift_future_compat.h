@@ -29,27 +29,27 @@
 // ==== ----------------------------------------------------------------------------------------------------------------
 // MARK: type aliases, since we cannot work with templates yet in Swift
 
-using FlowPromiseInt = Promise<int>;
-using FlowFutureInt = Future<int>;
-using FlowCallbackInt = Callback<int>;
+using PromiseInt = Promise<int>;
+using FutureInt = Future<int>;
+using CallbackInt = Callback<int>;
 
-using FlowPromiseString = Callback<std::string>;
+using PromiseString = Callback<std::string>;
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 
-FlowPromiseInt* _Nonnull makePromiseInt() {
-	return new Promise<int>();
-}
+//PromiseInt* _Nonnull makePromiseInt() {
+//	return new Promise<int>();
+//}
 
-FlowFutureInt* _Nonnull getFutureOfPromise(FlowPromiseInt* _Nonnull p) {
-	return p->_swiftGetFuture();
-}
+//FlowFutureInt* _Nonnull getFutureOfPromise(FlowPromiseInt* _Nonnull p) {
+//	return p->_swiftGetFuture();
+//}
 
-void sendPromiseInt(FlowPromiseInt* p, int value) {
-	printf("[c++] send %d\n", value);
-	p->send(value);
-	printf("[c++] sent %d\n", p->getFuture().get());
-}
+//void sendPromiseInt(FlowPromiseInt* p, int value) {
+//	printf("[c++] send %d\n", value);
+//	p->send(value);
+//	printf("[c++] sent %d\n", p->getFuture().get());
+//}
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 // MARK: Callback types
@@ -63,7 +63,7 @@ struct SWIFT_CXX_REF_IMMORTAL CCResume_Int {
 	void resume(int value) { resumeWithValue(this->cc, value); }
 };
 
-pthread_t _tid() {
+inline pthread_t _tid() {
 	return pthread_self();
 }
 
@@ -85,9 +85,9 @@ public:
 		return new SwiftContinuationCallbackInt(continuationBox, returning, throwing);
 	}
 
-	FlowCallbackInt* _Nonnull cast() { return this; }
+	CallbackInt* _Nonnull cast() { return this; }
 
-	void addCallbackAndClearTo(FlowFutureInt* _Nonnull f) { f->addCallbackAndClear(this); }
+	void addCallbackAndClearTo(FutureInt* _Nonnull f) { f->addCallbackAndClear(this); }
 	//	void addCallbackAndClearTo(FlowPromiseInt* _Nonnull p) {
 	//		auto f = p->getFuture();
 	//		printf("[c++][%s:%d] future\n", __FILE_NAME__, __LINE__);

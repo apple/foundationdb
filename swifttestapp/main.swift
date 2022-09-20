@@ -34,12 +34,12 @@ func swiftAsyncFunc() async {
     print("[swift][tid:\(_tid())] Properly resumed...")
 }
 
-func swiftFlowFutureAwait() async {
+func swiftFutureAwait() async {
     assertOnNet2EventLoop()
 
-    let p: FlowPromiseInt = makePromiseInt()
-    let f: FlowFutureInt = getFutureOfPromise(p) // FIXME(swift/c++): can't have a getFuture on the p because templates...
-    print("[swift][\(#fileID):\(#line)](\(#function)) got FlowPromiseInt") // FIXME(swift/c++): printing the promise crashes!
+    let p: PromiseInt = PromiseInt()
+    let f: FutureInt = p.getFutureRef()
+    print("[swift][\(#fileID):\(#line)](\(#function)) got PromiseInt") // FIXME(swift/c++): printing the promise crashes!
     precondition(!f.isReady(), "Future should not be ready yet")
 
     var num = 1111
@@ -53,11 +53,11 @@ func swiftFlowFutureAwait() async {
     precondition(f.isReady(), "Future should be ready by now")
 
     print("[swift][\(#fileID):\(#line)](\(#function)) await value = \(value ?? -1)")
-    precondition((value ?? -1) == num, "Value obtained from await did not match \(num), was: \(value)!")
+    precondition((value ?? -1) == num, "Value obtained from await did not match \(num), was: \(String(describing: value))!")
 
     print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2 --------------------")
-    let p2 = makePromiseInt()
-    let f2 = getFutureOfPromise(p2)
+    let p2 = PromiseInt()
+    let f2 = p2.getFutureRef()
     let num2 = 2222
     Task { [num2] in
         assertOnNet2EventLoop()
@@ -96,6 +96,16 @@ func actorTest() async {
     assertOnNet2EventLoop()
 }
 
+func flowActorTest() async {
+//    let fa = FDBServer.SimpleFlowActor.make()
+//
+//    assertOnNet2EventLoop()
+//    await fa.increment(name: "Caplin")
+    let num: CInt = 10
+    let returned = await flowSimpleIncrement(num)
+    precondition(returned == num + CInt(1))
+}
+
 
 let task = Task { // task execution will be intercepted
     assertOnNet2EventLoop()
@@ -107,12 +117,16 @@ let task = Task { // task execution will be intercepted
 
     print("[swift] futures test -----------------------------------------------")
     print("[swift] returned from 'await swiftAsyncFunc()'")
-    await swiftFlowFutureAwait()
-    print("[swift] returned from 'await swiftFlowFutureAwait()'")
+    await swiftFutureAwait()
+    print("[swift] returned from 'await swiftFutureAwait()'")
     print("[swift] ==== done ---------------------------------------------------")
 
     print("[swift] actors test -------------------------------------------------")
     await actorTest()
+    print("[swift] ==== done ---------------------------------------------------")
+
+    print("[swift] swift -> flow async call test -------------------------------")
+    await flowActorTest()
     print("[swift] ==== done ---------------------------------------------------")
 
     exit(0)

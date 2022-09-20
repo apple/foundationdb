@@ -245,8 +245,10 @@ struct LifetimeToken {
 	}
 };
 
+using MAP_UInt64_GetCommitVersionReply = std::map<uint64_t, GetCommitVersionReply>;
+
 struct CommitProxyVersionReplies {
-	std::map<uint64_t, GetCommitVersionReply> replies;
+  MAP_UInt64_GetCommitVersionReply replies;
 	NotifiedVersion latestRequestNum;
 
 	CommitProxyVersionReplies(CommitProxyVersionReplies&& r) noexcept

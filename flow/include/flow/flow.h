@@ -798,7 +798,10 @@ template <class T>
 class Promise;
 
 template <class T>
-class SWIFT_CXX_REF_IMMORTAL SWIFT_SENDABLE Future {
+class
+//SWIFT_CXX_REF_IMMORTAL
+SWIFT_SENDABLE
+Future {
 public:
 	T const& get() const { return sav->get(); }
 	T getValue() const { return get(); }
@@ -913,7 +916,10 @@ private:
 };
 
 template <class T>
-class SWIFT_CXX_REF_IMMORTAL SWIFT_SENDABLE Promise final {
+class
+//  SWIFT_CXX_REF_IMMORTAL
+    SWIFT_SENDABLE
+    Promise final {
 public:
 	template <class U>
 	void send(U&& value) const {
@@ -928,11 +934,12 @@ public:
 		sav->addFutureRef();
 		return Future<T>(sav);
 	}
+//  // FIXME: this is kind of wrong... should be a Future and not pointer to...
+//	Future<T>* _Nonnull getFutureRef() const {
+//		sav->addFutureRef();
+//		return new Future<T>(sav);
+//	}
 
-	Future<T>* _Nonnull _swiftGetFuture() const {
-		sav->addFutureRef();
-		return new Future<T>(sav);
-	}
 	bool isSet() const { return sav->isSet(); }
 	bool canBeSet() const { return sav->canBeSet(); }
 	bool isError() const { return sav->isError(); }

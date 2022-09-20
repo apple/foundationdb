@@ -28,6 +28,7 @@
 #include "fdbserver/WaitFailure.h"
 
 #include "flow/ProtocolVersion.h"
+#include "flow/swift.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static std::set<int> const& normalClusterRecoveryErrors() {
@@ -323,6 +324,28 @@ ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
 	}
 	return Void();
 }
+
+
+//ACTOR Future<int> flowSimpleOne() {
+//  return 1;
+//}
+
+ACTOR Future<int> flowSimpleIncrement(int value) {
+//  return value + wait(flowSimpleOne());
+  return value + 1;
+}
+
+class SWIFT_CXX_REF_IMMORTAL ExampleActor {
+public:
+  ExampleActor* make() {
+    return new ExampleActor();
+  }
+
+  ACTOR Future<int> flowSimpleIncrement() {
+    return 42;
+  }
+
+};
 
 ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
                                   RecruitFromConfigurationReply recruits,

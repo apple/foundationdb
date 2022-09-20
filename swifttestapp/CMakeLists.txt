@@ -1,7 +1,8 @@
 add_executable(swifttestapp
         main.swift
-        future_compat.swift
-        task_compat.swift
+        future_support.swift
+        collections_support.swift
+        task_support.swift
         )
 
 target_link_libraries(swifttestapp flow)
