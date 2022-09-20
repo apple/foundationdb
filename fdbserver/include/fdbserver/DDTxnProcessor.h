@@ -36,6 +36,8 @@ public:
 	struct SourceServers {
 		std::vector<UID> srcServers, completeSources; // the same as RelocateData.src, RelocateData.completeSources;
 	};
+	virtual Database getDb() const = 0;
+	virtual bool isMocked() const = 0;
 	// get the source server list and complete source server list for range
 	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) = 0;
 
@@ -88,6 +90,9 @@ class DDTxnProcessor : public IDDTxnProcessor {
 public:
 	DDTxnProcessor() = default;
 	explicit DDTxnProcessor(Database cx) : cx(cx) {}
+
+	Database getDb() const override { return cx; };
+	bool isMocked() const override { return false; };
 
 	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
 
