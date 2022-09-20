@@ -169,7 +169,7 @@ else()
   # and create a debuginfo rpm
   add_compile_options(-fno-omit-frame-pointer -gz)
   add_link_options(-gz)
-  if(FDB_RELEASE OR FULL_DEBUG_SYMBOLS)
+  if(FDB_RELEASE OR FULL_DEBUG_SYMBOLS OR CMAKE_BUILD_TYPE STREQUAL "Debug")
     # Configure with FULL_DEBUG_SYMBOLS=ON to generate all symbols for debugging with gdb
     # Also generating full debug symbols in release builds, because they are packaged
     # separately and installed optionally
