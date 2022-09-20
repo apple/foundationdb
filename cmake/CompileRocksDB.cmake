@@ -4,6 +4,12 @@ find_package(RocksDB 6.27.3)
 
 include(ExternalProject)
 
+if (USE_LIBCXX AND NOT APPLE)
+  set(ROCKS_CMAKE_CXX_FLAGS "-stdlib=libc++")
+else()
+  set(ROCKS_CMAKE_CXX_FLAGS "")
+endif()
+
 if (RocksDB_FOUND)
   ExternalProject_Add(rocksdb
     SOURCE_DIR "${RocksDB_ROOT}"
@@ -11,6 +17,7 @@ if (RocksDB_FOUND)
     CMAKE_ARGS -DUSE_RTTI=1 -DPORTABLE=${PORTABLE_ROCKSDB}
                -DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}
                -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+               -DCMAKE_CXX_FLAGS=${ROCKS_CMAKE_CXX_FLAGS}
                -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                -DFAIL_ON_WARNINGS=OFF
                -DWITH_GFLAGS=OFF
@@ -43,6 +50,7 @@ else()
     CMAKE_ARGS -DUSE_RTTI=1 -DPORTABLE=${PORTABLE_ROCKSDB}
                -DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}
                -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+               -DCMAKE_CXX_FLAGS=${ROCKS_CMAKE_CXX_FLAGS}
                -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                -DFAIL_ON_WARNINGS=OFF
                -DWITH_GFLAGS=OFF
