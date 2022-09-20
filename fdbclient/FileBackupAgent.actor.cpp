@@ -18,29 +18,29 @@
  * limitations under the License.
  */
 
-#include "fdbclient/Tenant.h"
 #include "flow/Arena.h"
 #include "flow/CodeProbe.h"
 #include "flow/EncryptUtils.h"
+#include "flow/network.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/Trace.h"
-#include "flow/network.h"
 #include "flow/serialize.h"
+#include "flow/Trace.h"
 #include "fmt/format.h"
-#include "fdbclient/BlobCipher.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/JsonBuilder.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RestoreInterface.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/KeyBackedTypes.h"
-#include "fdbclient/JsonBuilder.h"
+#include "fdbclient/Tenant.h"
 #include "fdbclient/TenantEntryCache.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
 
 #include <cinttypes>
 #include <ctime>
@@ -495,7 +495,7 @@ struct SnapshotFileBackupEncryptionKeys {
 };
 
 // File Format handlers.
-// Both Range and Log formats are designed to be readable starting at any 1MB boundary
+// Both Range and Log formats are designed to be readable starting at any BACKUP_RANGEFILE_BLOCK_SIZE boundary
 // so they can be read in parallel.
 //
 // Writer instances must be kept alive while any member actors are in progress.
@@ -527,6 +527,11 @@ struct SnapshotFileBackupEncryptionKeys {
 //   if the next KV pair wouldn't fit within the block after the value
 //   then the space after the final key to the next 1MB boundary would
 //   just be padding anyway.
+//
+//   NOTE: For the EncryptedRangeFileWriter blocks will be split either on the BACKUP_RANGEFILE_BLOCK_SIZE boundary or
+//   when a new tenant id is encountered. If a block is split for crossing tenant boundaries then the last key will be
+//   truncated to just the tenant prefix and the value will be empty (to avoid having sensitive data of one tenant be
+//   encrypted with a key for a different tenant)
 struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	struct Options {
 		constexpr static FileIdentifier file_identifier = 3152016;
@@ -562,7 +567,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (!(header.cipherHeaderDetails.baseCipherId == headerCipherKey->getBaseCipherId() &&
 		      header.cipherHeaderDetails.encryptDomainId == headerCipherKey->getDomainId() &&
 		      header.cipherHeaderDetails.salt == headerCipherKey->getSalt())) {
-			TraceEvent("EncryptionHeader_CipherHeaderMismatch")
+			TraceEvent(SevWarn, "EncryptionHeader_CipherHeaderMismatch")
 			    .detail("HeaderDomainId", headerCipherKey->getDomainId())
 			    .detail("ExpectedHeaderDomainId", header.cipherHeaderDetails.encryptDomainId)
 			    .detail("HeaderBaseCipherId", headerCipherKey->getBaseCipherId())
@@ -576,7 +581,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (!(header.cipherTextDetails.baseCipherId == textCipherKey->getBaseCipherId() &&
 		      header.cipherTextDetails.encryptDomainId == textCipherKey->getDomainId() &&
 		      header.cipherTextDetails.salt == textCipherKey->getSalt())) {
-			TraceEvent("EncryptionHeader_CipherTextMismatch")
+			TraceEvent(SevWarn, "EncryptionHeader_CipherTextMismatch")
 			    .detail("TextDomainId", textCipherKey->getDomainId())
 			    .detail("ExpectedTextDomainId", header.cipherTextDetails.encryptDomainId)
 			    .detail("TextBaseCipherId", textCipherKey->getBaseCipherId())
@@ -618,18 +623,12 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		                                     AES_256_IV_LENGTH,
 		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
 		                                     BlobCipherMetrics::BACKUP);
-		BlobCipherEncryptHeader header;
 		Arena arena;
-		int64_t payloadSize = wPtr - (encryptHeaderP + BlobCipherEncryptHeader::headerSize);
-		auto encryptedData =
-		    encryptor.encrypt(encryptHeaderP + BlobCipherEncryptHeader::headerSize, payloadSize, &header, arena);
+		int64_t payloadSize = wPtr - dataPayloadStart;
+		auto encryptedData = encryptor.encrypt(dataPayloadStart, payloadSize, encryptHeader, arena);
 
-		// write header to buffer
-		StringRef headerStr = BlobCipherEncryptHeader::toStringRef(header, arena);
-		std::memcpy(encryptHeaderP, headerStr.begin(), BlobCipherEncryptHeader::headerSize);
-
-		// write data to buffer
-		std::memcpy(encryptHeaderP + BlobCipherEncryptHeader::headerSize, encryptedData->begin(), payloadSize);
+		// re-write encrypted data to buffer
+		std::memcpy(dataPayloadStart, encryptedData->begin(), payloadSize);
 	}
 
 	ACTOR static Future<Void> updateEncryptionKeys(EncryptedRangeFileWriter* self,
@@ -748,8 +747,9 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		appendStringRefWithLenToBuffer(self, &serialized);
 
 		// leave space for encryption header
-		self->encryptHeaderP = self->wPtr;
+		self->encryptHeader = (BlobCipherEncryptHeader*)self->wPtr;
 		self->wPtr += BlobCipherEncryptHeader::headerSize;
+		self->dataPayloadStart = self->wPtr;
 
 		// If this is NOT the first block then write duplicate stuff needed from last block
 		if (self->blockEnd > self->blockSize) {
@@ -874,7 +874,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 private:
 	Standalone<StringRef> buffer;
 	uint8_t* wPtr;
-	uint8_t* encryptHeaderP;
+	BlobCipherEncryptHeader* encryptHeader;
+	uint8_t* dataPayloadStart;
 	int64_t blockEnd;
 	uint32_t fileVersion;
 	Options options;
@@ -884,7 +885,7 @@ private:
 };
 
 // File Format handlers.
-// Both Range and Log formats are designed to be readable starting at any 1MB boundary
+// Both Range and Log formats are designed to be readable starting at any BACKUP_RANGEFILE_BLOCK_SIZE boundary
 // so they can be read in parallel.
 //
 // Writer instances must be kept alive while any member actors are in progress.
@@ -1098,15 +1099,15 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			ASSERT(options.encryptionEnabled);
 
 			// read encryption header
-			const uint8_t* headerP = reader.consume(BlobCipherEncryptHeader::headerSize);
-			StringRef header = StringRef(headerP, BlobCipherEncryptHeader::headerSize);
-			const uint8_t* dataP = headerP + BlobCipherEncryptHeader::headerSize;
+			const uint8_t* headerStart = reader.consume(BlobCipherEncryptHeader::headerSize);
+			StringRef header = StringRef(headerStart, BlobCipherEncryptHeader::headerSize);
+			const uint8_t* dataPayloadStart = headerStart + BlobCipherEncryptHeader::headerSize;
 			// calculate the total bytes read up to (and including) the header
 			int64_t bytesRead = sizeof(int32_t) + sizeof(uint32_t) + optionsLen + BlobCipherEncryptHeader::headerSize;
 			// get the size of the encrypted payload and decrypt it
 			int64_t dataLen = len - bytesRead;
 			StringRef decryptedData =
-			    wait(EncryptedRangeFileWriter::decrypt(cx.get(), header, dataP, dataLen, &results.arena()));
+			    wait(EncryptedRangeFileWriter::decrypt(cx.get(), header, dataPayloadStart, dataLen, &results.arena()));
 			reader = StringRefReader(decryptedData, restore_corrupted_data());
 			Reference<TenantEntryCache<Void>> tenantCache = makeReference<TenantEntryCache<Void>>(cx.get());
 			wait(decodeKVPairs(&reader, &results, true, cx, tenantCache));
