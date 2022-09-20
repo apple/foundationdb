@@ -43,15 +43,12 @@ struct StorefrontWorkload : TestWorkload {
 	StorefrontWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"),
 	    spuriousCommitFailures("Spurious Commit Failures"), totalLatency("Total Latency") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 1000.0);
-		actorCount =
-		    getOption(options, LiteralStringRef("actorsPerClient"), std::max((int)(transactionsPerSecond / 100), 1));
-		maxOrderSize = getOption(options, LiteralStringRef("maxOrderSize"), 20);
-		itemCount =
-		    getOption(options, LiteralStringRef("itemCount"), transactionsPerSecond * clientCount * maxOrderSize);
-		minExpectedTransactionsPerSecond =
-		    transactionsPerSecond * getOption(options, LiteralStringRef("expectedRate"), 0.9);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 1000.0);
+		actorCount = getOption(options, "actorsPerClient"_sr, std::max((int)(transactionsPerSecond / 100), 1));
+		maxOrderSize = getOption(options, "maxOrderSize"_sr, 20);
+		itemCount = getOption(options, "itemCount"_sr, transactionsPerSecond * clientCount * maxOrderSize);
+		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.9);
 	}
 
 	std::string description() const override { return "StorefrontWorkload"; }
@@ -202,8 +199,7 @@ struct StorefrontWorkload : TestWorkload {
 
 	ACTOR Future<bool> tableBalancer(Database cx, StorefrontWorkload* self, KeyRangeRef keyRange) {
 		state std::vector<Future<std::vector<int>>> accumulators;
-		accumulators.push_back(
-		    self->orderAccumulator(cx, self, KeyRangeRef(LiteralStringRef("/orders/f"), LiteralStringRef("/orders0"))));
+		accumulators.push_back(self->orderAccumulator(cx, self, KeyRangeRef("/orders/f"_sr, "/orders0"_sr)));
 		for (int c = 0; c < 15; c++)
 			accumulators.push_back(self->orderAccumulator(
 			    cx, self, KeyRangeRef(Key(format("/orders/%x", c)), Key(format("/orders/%x", c + 1)))));

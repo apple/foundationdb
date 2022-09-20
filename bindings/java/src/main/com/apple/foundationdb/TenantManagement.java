@@ -52,10 +52,6 @@ public class TenantManagement {
 	 * @param tenantName The name of the tenant. Can be any byte string that does not begin a 0xFF byte.
 	 */
 	public static void createTenant(Transaction tr, byte[] tenantName) {
-		if (FDB.instance().getAPIVersion() < 720) {
-			tr.options().setSpecialKeySpaceRelaxed();
-		}
-
 		tr.options().setSpecialKeySpaceEnableWrites();
 		tr.set(ByteArrayUtil.join(TENANT_MAP_PREFIX, tenantName), new byte[0]);
 	}
@@ -90,7 +86,6 @@ public class TenantManagement {
 		final AtomicBoolean checkedExistence = new AtomicBoolean(false);
 		final byte[] key = ByteArrayUtil.join(TENANT_MAP_PREFIX, tenantName);
 		return db.runAsync(tr -> {
-			tr.options().setSpecialKeySpaceRelaxed();
 			tr.options().setSpecialKeySpaceEnableWrites();
 			if(checkedExistence.get()) {
 				tr.set(key, new byte[0]);
@@ -138,10 +133,6 @@ public class TenantManagement {
 	 * @param tenantName The name of the tenant being deleted.
 	 */
 	public static void deleteTenant(Transaction tr, byte[] tenantName) {
-		if (FDB.instance().getAPIVersion() < 720) {
-			tr.options().setSpecialKeySpaceRelaxed();
-		}
-
 		tr.options().setSpecialKeySpaceEnableWrites();
 		tr.clear(ByteArrayUtil.join(TENANT_MAP_PREFIX, tenantName));
 	}
@@ -182,7 +173,6 @@ public class TenantManagement {
 		final AtomicBoolean checkedExistence = new AtomicBoolean(false);
 		final byte[] key = ByteArrayUtil.join(TENANT_MAP_PREFIX, tenantName);
 		return db.runAsync(tr -> {
-			tr.options().setSpecialKeySpaceRelaxed();
 			tr.options().setSpecialKeySpaceEnableWrites();
 			if(checkedExistence.get()) {
 				tr.clear(key);
@@ -248,12 +238,7 @@ public class TenantManagement {
 	 * and the value is the unprocessed JSON string containing the tenant's metadata
 	 */
 	public static CloseableAsyncIterator<KeyValue> listTenants(Database db, Tuple begin, Tuple end, int limit) {
-		Transaction tr = db.createTransaction();
-		if (FDB.instance().getAPIVersion() < 720) {
-			tr.options().setSpecialKeySpaceRelaxed();
-		}
-
-		return listTenants_internal(tr, begin.pack(), end.pack(), limit);
+		return listTenants_internal(db.createTransaction(), begin.pack(), end.pack(), limit);
 	}
 
 	private static CloseableAsyncIterator<KeyValue> listTenants_internal(Transaction tr, byte[] begin, byte[] end,

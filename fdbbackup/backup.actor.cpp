@@ -905,12 +905,12 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	SO_END_OF_OPTIONS
 };
 
-const KeyRef exeAgent = LiteralStringRef("backup_agent");
-const KeyRef exeBackup = LiteralStringRef("fdbbackup");
-const KeyRef exeRestore = LiteralStringRef("fdbrestore");
-const KeyRef exeFastRestoreTool = LiteralStringRef("fastrestore_tool"); // must be lower case
-const KeyRef exeDatabaseAgent = LiteralStringRef("dr_agent");
-const KeyRef exeDatabaseBackup = LiteralStringRef("fdbdr");
+const KeyRef exeAgent = "backup_agent"_sr;
+const KeyRef exeBackup = "fdbbackup"_sr;
+const KeyRef exeRestore = "fdbrestore"_sr;
+const KeyRef exeFastRestoreTool = "fastrestore_tool"_sr; // must be lower case
+const KeyRef exeDatabaseAgent = "dr_agent"_sr;
+const KeyRef exeDatabaseBackup = "fdbdr"_sr;
 
 extern const char* getSourceVersion();
 
@@ -1351,7 +1351,7 @@ ProgramExe getProgramType(std::string programExe) {
 	}
 #endif
 	// For debugging convenience, remove .debug suffix if present.
-	if (StringRef(programExe).endsWith(LiteralStringRef(".debug")))
+	if (StringRef(programExe).endsWith(".debug"_sr))
 		programExe = programExe.substr(0, programExe.size() - 6);
 
 	// Check if backup agent
@@ -2449,8 +2449,8 @@ ACTOR Future<Void> runFastRestoreTool(Database db,
 			                                       dbVersion,
 			                                       LockDB::True,
 			                                       randomUID,
-			                                       LiteralStringRef(""),
-			                                       LiteralStringRef("")));
+			                                       ""_sr,
+			                                       ""_sr));
 			// TODO: Support addPrefix and removePrefix
 			if (waitForDone) {
 				// Wait for parallel restore to finish and unlock DB after that
@@ -3089,7 +3089,7 @@ static void addKeyRange(std::string optionValue, Standalone<VectorRef<KeyRangeRe
 Version parseVersion(const char* str) {
 	StringRef s((const uint8_t*)str, strlen(str));
 
-	if (s.endsWith(LiteralStringRef("days")) || s.endsWith(LiteralStringRef("d"))) {
+	if (s.endsWith("days"_sr) || s.endsWith("d"_sr)) {
 		float days;
 		if (sscanf(str, "%f", &days) != 1) {
 			fprintf(stderr, "Could not parse version: %s\n", str);
@@ -3608,7 +3608,7 @@ int main(int argc, char* argv[]) {
 			case OPT_DESTCONTAINER:
 				destinationContainer = args->OptionArg();
 				// If the url starts with '/' then prepend "file://" for backwards compatibility
-				if (StringRef(destinationContainer).startsWith(LiteralStringRef("/")))
+				if (StringRef(destinationContainer).startsWith("/"_sr))
 					destinationContainer = std::string("file://") + destinationContainer;
 				modifyOptions.destURL = destinationContainer;
 				break;
@@ -3654,7 +3654,7 @@ int main(int argc, char* argv[]) {
 			case OPT_RESTORECONTAINER:
 				restoreContainer = args->OptionArg();
 				// If the url starts with '/' then prepend "file://" for backwards compatibility
-				if (StringRef(restoreContainer).startsWith(LiteralStringRef("/")))
+				if (StringRef(restoreContainer).startsWith("/"_sr))
 					restoreContainer = std::string("file://") + restoreContainer;
 				break;
 			case OPT_DESCRIBE_DEEP:
@@ -4323,19 +4323,19 @@ int main(int argc, char* argv[]) {
 				char* demangled = abi::__cxa_demangle(i->first, NULL, NULL, NULL);
 				if (demangled) {
 					s = demangled;
-					if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))
-						s = s.substr(LiteralStringRef("(anonymous namespace)::").size());
+					if (StringRef(s).startsWith("(anonymous namespace)::"_sr))
+						s = s.substr("(anonymous namespace)::"_sr.size());
 					free(demangled);
 				} else
 					s = i->first;
 #else
 				s = i->first;
-				if (StringRef(s).startsWith(LiteralStringRef("class `anonymous namespace'::")))
-					s = s.substr(LiteralStringRef("class `anonymous namespace'::").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("class ")))
-					s = s.substr(LiteralStringRef("class ").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
-					s = s.substr(LiteralStringRef("struct ").size());
+				if (StringRef(s).startsWith("class `anonymous namespace'::"_sr))
+					s = s.substr("class `anonymous namespace'::"_sr.size());
+				else if (StringRef(s).startsWith("class "_sr))
+					s = s.substr("class "_sr.size());
+				else if (StringRef(s).startsWith("struct "_sr))
+					s = s.substr("struct "_sr.size());
 #endif
 
 				typeNames.emplace_back(s, i->first);

@@ -78,7 +78,7 @@ private:
 				    seenReadSuccess = true;
 			    }
 			    if (err.code() != expectedError) {
-				    info(fmt::format("incorrect error. Expected {}, Got {}", err.code(), expectedError));
+				    info(fmt::format("incorrect error. Expected {}, Got {}", expectedError, err.code()));
 				    if (err.code() == error_code_blob_granule_transaction_too_old) {
 					    ASSERT(!seenReadSuccess);
 					    ctx->done();

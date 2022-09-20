@@ -12,6 +12,7 @@ if (RocksDB_FOUND)
                -DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}
                -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+               -DFAIL_ON_WARNINGS=OFF
                -DWITH_GFLAGS=OFF
                -DWITH_TESTS=OFF
                -DWITH_TOOLS=OFF
@@ -43,6 +44,7 @@ else()
                -DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}
                -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+               -DFAIL_ON_WARNINGS=OFF
                -DWITH_GFLAGS=OFF
                -DWITH_TESTS=OFF
                -DWITH_TOOLS=OFF

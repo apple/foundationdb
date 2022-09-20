@@ -99,8 +99,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 		self->managementDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
-		ASSERT(g_simulator.extraDatabases.size() > 0);
-		for (auto connectionString : g_simulator.extraDatabases) {
+		ASSERT(g_simulator->extraDatabases.size() > 0);
+		for (auto connectionString : g_simulator->extraDatabases) {
 			ClusterConnectionString ccs(connectionString);
 			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(ccs);
 			self->dataDbIndex.push_back(ClusterName(format("cluster_%08d", self->dataDbs.size())));

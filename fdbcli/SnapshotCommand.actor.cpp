@@ -40,7 +40,7 @@ ACTOR Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<Str
 		for (int i = 1; i < tokens.size(); i++) {
 			snap_cmd = snap_cmd.withSuffix(tokens[i]);
 			if (i != tokens.size() - 1) {
-				snap_cmd = snap_cmd.withSuffix(LiteralStringRef(" "));
+				snap_cmd = snap_cmd.withSuffix(" "_sr);
 			}
 		}
 		try {

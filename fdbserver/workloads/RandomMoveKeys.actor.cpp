@@ -29,17 +29,21 @@
 #include "fdbserver/QuietDatabase.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct MoveKeysWorkload : TestWorkload {
+struct MoveKeysWorkload : FailureInjectionWorkload {
 	bool enabled;
-	double testDuration, meanDelay;
-	double maxKeyspace;
+	double testDuration = 10.0, meanDelay = 0.05;
+	double maxKeyspace = 0.1;
 	DatabaseConfiguration configuration;
 
-	MoveKeysWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	MoveKeysWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId && g_network->isSimulated(); // only do this on the "first" client
-		meanDelay = getOption(options, LiteralStringRef("meanDelay"), 0.05);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		maxKeyspace = getOption(options, LiteralStringRef("maxKeyspace"), 0.1);
+	}
+
+	MoveKeysWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
+		enabled = !clientId && g_network->isSimulated(); // only do this on the "first" client
+		meanDelay = getOption(options, "meanDelay"_sr, meanDelay);
+		testDuration = getOption(options, "testDuration"_sr, testDuration);
+		maxKeyspace = getOption(options, "maxKeyspace"_sr, maxKeyspace);
 	}
 
 	std::string description() const override { return "MoveKeysWorkload"; }
@@ -143,18 +147,18 @@ struct MoveKeysWorkload : TestWorkload {
 			state Promise<Void> signal;
 			state DDEnabledState ddEnabledState;
 			wait(moveKeys(cx,
-			              deterministicRandom()->randomUniqueID(),
-			              keys,
-			              destinationTeamIDs,
-			              destinationTeamIDs,
-			              lock,
-			              signal,
-			              &fl1,
-			              &fl2,
-			              false,
-			              relocateShardInterval.pairID,
-			              &ddEnabledState,
-			              CancelConflictingDataMoves::True));
+			              MoveKeysParams{ deterministicRandom()->randomUniqueID(),
+			                              keys,
+			                              destinationTeamIDs,
+			                              destinationTeamIDs,
+			                              lock,
+			                              signal,
+			                              &fl1,
+			                              &fl2,
+			                              false,
+			                              relocateShardInterval.pairID,
+			                              &ddEnabledState,
+			                              CancelConflictingDataMoves::True }));
 			TraceEvent(relocateShardInterval.end()).detail("Result", "Success");
 			return Void();
 		} catch (Error& e) {
@@ -181,7 +185,7 @@ struct MoveKeysWorkload : TestWorkload {
 	ACTOR Future<Void> forceMasterFailure(Database cx, MoveKeysWorkload* self) {
 		ASSERT(g_network->isSimulated());
 		loop {
-			if (g_simulator.killZone(self->dbInfo->get().master.locality.zoneId(), ISimulator::Reboot, true))
+			if (g_simulator->killZone(self->dbInfo->get().master.locality.zoneId(), ISimulator::Reboot, true))
 				return Void();
 			wait(delay(1.0));
 		}
@@ -232,3 +236,4 @@ struct MoveKeysWorkload : TestWorkload {
 };
 
 WorkloadFactory<MoveKeysWorkload> MoveKeysWorkloadFactory("RandomMoveKeys");
+FailureInjectorFactory<MoveKeysWorkload> MoveKeysFailureInjectionFactory;

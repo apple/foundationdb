@@ -50,7 +50,7 @@ static void bench_iterate(benchmark::State& state) {
 	auto kv = getKV(size, size);
 	ListImpl mutations;
 	populate(mutations, items, size, kv.key, kv.value);
-	while (state.KeepRunning()) {
+	for (auto _ : state) {
 		for (const auto& mutation : mutations) {
 			benchmark::DoNotOptimize(mutation);
 		}

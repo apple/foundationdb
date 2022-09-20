@@ -34,11 +34,11 @@ struct IndexScanWorkload : KVWorkload {
 
 	IndexScanWorkload(WorkloadContext const& wcx)
 	  : KVWorkload(wcx), rowsRead(0), chunks(0), failedTransactions(0), scans(0) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		bytesPerRead = getOption(options, LiteralStringRef("bytesPerRead"), 80000);
-		transactionDuration = getOption(options, LiteralStringRef("transactionDuration"), 1.0);
-		singleProcess = getOption(options, LiteralStringRef("singleProcess"), true);
-		readYourWrites = getOption(options, LiteralStringRef("readYourWrites"), true);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		bytesPerRead = getOption(options, "bytesPerRead"_sr, 80000);
+		transactionDuration = getOption(options, "transactionDuration"_sr, 1.0);
+		singleProcess = getOption(options, "singleProcess"_sr, true);
+		readYourWrites = getOption(options, "readYourWrites"_sr, true);
 	}
 
 	std::string description() const override { return "SimpleRead"; }

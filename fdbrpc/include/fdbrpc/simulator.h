@@ -186,6 +186,8 @@ public:
 				return false;
 			case ProcessClass::RatekeeperClass:
 				return false;
+			case ProcessClass::ConsistencyScanClass:
+				return false;
 			case ProcessClass::BlobManagerClass:
 				return false;
 			case ProcessClass::StorageCacheClass:
@@ -534,9 +536,7 @@ private:
 	bool allSwapsDisabled;
 };
 
-// Quickly make existing code work that expects g_simulator to be of class type (not a pointer)
-extern ISimulator* g_pSimulator;
-#define g_simulator (*g_pSimulator)
+extern ISimulator* g_simulator;
 
 void startNewSimulator(bool printSimTime);
 

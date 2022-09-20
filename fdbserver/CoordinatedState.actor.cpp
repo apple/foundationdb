@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
+#include "fdbserver/ConfigBroadcaster.h"
 #include "fdbserver/CoordinatedState.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/Knobs.h"
@@ -346,7 +347,8 @@ struct MovableCoordinatedStateImpl {
 		// SOMEDAY: If we are worried about someone magically getting the new cluster ID and interfering, do a second
 		// cs.setExclusive( encode( ReallyTo, ... ) )
 		TraceEvent("ChangingQuorum").detail("ConnectionString", nc.toString());
-		wait(changeLeaderCoordinators(self->coordinators, StringRef(nc.toString())));
+		wait(ConfigBroadcaster::lockConfigNodes(self->coordinators) &&
+		     changeLeaderCoordinators(self->coordinators, StringRef(nc.toString())));
 		TraceEvent("ChangedQuorum").detail("ConnectionString", nc.toString());
 		throw coordinators_changed();
 	}

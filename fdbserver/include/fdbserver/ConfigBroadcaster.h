@@ -39,15 +39,16 @@ class ConfigBroadcaster {
 	PImpl<class ConfigBroadcasterImpl> impl;
 
 public:
-	explicit ConfigBroadcaster(ServerCoordinators const&, ConfigDBType);
+	ConfigBroadcaster();
+	explicit ConfigBroadcaster(ServerCoordinators const&, ConfigDBType, Future<Optional<Value>>);
 	ConfigBroadcaster(ConfigBroadcaster&&);
 	ConfigBroadcaster& operator=(ConfigBroadcaster&&);
 	~ConfigBroadcaster();
-	Future<Void> registerNode(WorkerInterface const& w,
+	Future<Void> registerNode(ConfigBroadcastInterface const& broadcastInterface,
 	                          Version lastSeenVersion,
 	                          ConfigClassSet const& configClassSet,
 	                          Future<Void> watcher,
-	                          ConfigBroadcastInterface const& worker);
+	                          bool isCoordinator);
 	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                  Version mostRecentVersion,
 	                  Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations,
@@ -57,17 +58,25 @@ public:
 	                             Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                             Version changesVersion,
 	                             Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations,
-	                             std::vector<ConfigFollowerInterface> const& readReplicas);
+	                             std::vector<ConfigFollowerInterface> const& readReplicas,
+	                             Version largestLiveVersion,
+	                             bool fromPreviousCoordinators = false);
 	void applySnapshotAndChanges(std::map<ConfigKey, KnobValue>&& snapshot,
 	                             Version snapshotVersion,
 	                             Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                             Version changesVersion,
 	                             Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations,
-	                             std::vector<ConfigFollowerInterface> const& readReplicas);
+	                             std::vector<ConfigFollowerInterface> const& readReplicas,
+	                             Version largestLiveVersion,
+	                             bool fromPreviousCoordinators = false);
 	Future<Void> getError() const;
 	UID getID() const;
 	JsonBuilderObject getStatus() const;
 	void compact(Version compactionVersion);
+
+	// Locks all ConfigNodes running on the given coordinators, returning when
+	// a quorum have successfully locked.
+	static Future<Void> lockConfigNodes(ServerCoordinators coordinators);
 
 public: // Testing
 	explicit ConfigBroadcaster(ConfigFollowerInterface const&);
