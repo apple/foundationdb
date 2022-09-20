@@ -181,50 +181,28 @@ Optional<std::string> parseToken(StringRef token, const char* str) {
 ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 4 || tokens.size() > 6) {
 		fmt::print("Usage: metacluster restore <NAME> connection_string=<CONNECTION_STRING>\n"
-		           "[<add_new_tenants=[true|false]>|<remove_missing_tenants=[true|false]>]\n\n");
+		           "[repopulate_from_data_cluster]\n\n");
 		fmt::print("Restore a data cluster.\n");
 		return false;
 	}
 
-	state ClusterNameRef clusterName = tokens[3];
-
 	// connection string
 	ClusterConnectionString connectionString;
-	auto optVal = parseToken(tokens[4], "connection_string");
+	auto optVal = parseToken(tokens[3], "connection_string");
 	if (optVal.present()) {
 		connectionString = ClusterConnectionString(optVal.get());
 	}
 
-	AddNewTenants addNewTenants(AddNewTenants::True);
-	if (tokens.size() > 4) {
-		optVal = parseToken(tokens[4], "add_new_tenants");
-		if (optVal.present()) {
-			if (optVal.get() == "true") {
-				addNewTenants = AddNewTenants::True;
-			} else {
-				addNewTenants = AddNewTenants::False;
-			}
-		}
+	state bool restore_from_data_cluster = tokens.size() == 5;
+	if (restore_from_data_cluster) {
+		DataClusterEntry defaultEntry;
+		wait(MetaclusterAPI::restoreCluster(
+		    db, tokens[2], connectionString, defaultEntry, AddNewTenants::False, RemoveMissingTenants::True));
+
+		fmt::print("The cluster `{}' has been restored\n", printable(tokens[2]).c_str());
+		return true;
 	}
-
-	RemoveMissingTenants removeMissingTenants(RemoveMissingTenants::True);
-	if (tokens.size() > 5) {
-		optVal = parseToken(tokens[4], "remove_missing_tenants");
-		if (optVal.present()) {
-			if (optVal.get() == "true") {
-				removeMissingTenants = RemoveMissingTenants::True;
-			} else {
-				removeMissingTenants = RemoveMissingTenants::False;
-			}
-		}
-	}
-
-	DataClusterEntry defaultEntry;
-	wait(MetaclusterAPI::restoreCluster(
-	    db, clusterName, connectionString, defaultEntry, addNewTenants, removeMissingTenants));
-
-	fmt::print("The cluster `{}' has been restored\n", printable(clusterName).c_str());
-	return true;
+	return false;
 }
 
 // metacluster configure command
