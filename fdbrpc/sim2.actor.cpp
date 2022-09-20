@@ -229,11 +229,11 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		                                      FLOW_KNOBS->MAX_CLOGGING_LATENCY * deterministicRandom()->random01());
 		sendBufSize = std::max<double>(deterministicRandom()->randomInt(0, 5000000), 25e6 * (latency + .002));
 		// options like clogging or bitsflip are disabled for stable connections
-		stableConnection = std::any_of(process->childs.begin(),
-		                               process->childs.end(),
+		stableConnection = std::any_of(process->children.begin(),
+		                               process->children.end(),
 		                               [&](ISimulator::ProcessInfo* child) { return child && child == peerProcess; }) ||
-		                   std::any_of(peerProcess->childs.begin(),
-		                               peerProcess->childs.end(),
+		                   std::any_of(peerProcess->children.begin(),
+		                               peerProcess->children.end(),
 		                               [&](ISimulator::ProcessInfo* child) { return child && child == process; });
 
 		TraceEvent("Sim2Connection")
@@ -434,7 +434,7 @@ private:
 	}
 
 	void rollRandomClose() {
-		// make sure connections between parenta and their childs are not closed
+		// make sure connections between parenta and their children are not closed
 		if (!stableConnection &&
 		    now() - g_simulator->lastConnectionFailure > g_simulator->connectionFailuresDisableDuration &&
 		    deterministicRandom()->random01() < .00001) {
@@ -1686,6 +1686,43 @@ public:
 				doReboot(deterministicRandom()->randomChoice(processes), RebootProcess);
 		}
 	}
+
+	void delayProcess(ProcessInfo* process) override {
+		if (!FLOW_KNOBS->ENABLE_SIMULATION_IMPROVEMENTS) {
+			return;
+		}
+		if (process->isMachineProcess() || process->startingClass == ProcessClass::TesterClass ||
+		    process != currentProcess || process->buggifyDelayCount > 7)
+			return;
+
+		static constexpr double poissonProbs[8] = { 0.3679, 0.3679, 0.1839, 0.0613, 0.0153, 0.0031, 0.0005, 0.0001 };
+		double prob = poissonProbs[process->buggifyDelayCount];
+
+		if (deterministicRandom()->random01() < prob) {
+			double delaySec = deterministicRandom()->random01() * 1.0;
+			TraceEvent("ProcessDelayed")
+			    .detail("ProcessUID", process->uid)
+			    .detail("ProcessInfo", process->toString())
+			    .detail("DelayFor", delaySec)
+			    .detail("DelayCount", process->buggifyDelayCount);
+
+			{
+				MutexHolder holder(mutex);
+				decltype(tasks) newTasks;
+				while (!tasks.empty()) {
+					Task t = tasks.top();
+					tasks.pop();
+					if (t.machine == process) {
+						t.time += delaySec;
+					}
+					newTasks.push(std::move(t));
+				}
+				std::swap(tasks, newTasks);
+				process->buggifyDelayCount++;
+			}
+		}
+	}
+
 	void killProcess(ProcessInfo* machine, KillType kt) override {
 		TraceEvent("AttemptingKillProcess").detail("ProcessInfo", machine->toString());
 		if (kt < RebootAndDelete) {
@@ -2245,6 +2282,7 @@ public:
 
 			this->currentProcess = t.machine;
 			try {
+				delayProcess(t.machine);
 				t.action.send(Void());
 				ASSERT(this->currentProcess == t.machine);
 			} catch (Error& e) {
@@ -2567,7 +2605,7 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 		} else if (p->isSpawnedKVProcess()) {
 			TraceEvent(SevDebug, "DoRebootFailed").detail("Name", p->name).detail("Address", p->address);
 			return;
-		} else if (p->getChilds().size()) {
+		} else if (p->getChildren().size()) {
 			TraceEvent(SevDebug, "DoRebootFailedOnParentProcess").detail("Address", p->address);
 			return;
 		}
