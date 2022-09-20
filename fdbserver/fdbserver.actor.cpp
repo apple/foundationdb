@@ -85,6 +85,9 @@
 #include "flow/flow.h"
 #include "flow/network.h"
 
+#include "flow/swift.h"
+#include "flow/swift_hooks.h"
+
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
 #include <signal.h>
@@ -101,6 +104,10 @@
 #endif
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+// FIXME(swift): remove those
+extern "C" void testSwiftInFDB();
+extern "C" void swiftCallMeFuture(Promise<int>* promise);
 
 #if __has_include("SwiftModules/FDBServer")
 #include "SwiftModules/FDBServer"
@@ -368,6 +375,24 @@ ACTOR void failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simula
 void failAfter(Future<Void> trigger, Endpoint e) {
 	if (g_network == &g_simulator)
 		failAfter(trigger, g_simulator.getProcess(e));
+}
+
+ACTOR Future<Void> swiftCallsActor() {
+  loop {
+    printf("[c++][%s:%d](%s) [act] entered Flow actor ....\n", __FILE_NAME__, __LINE__, __FUNCTION__);
+
+    auto promise = Promise<int>();
+    printf("[c++][%s:%d](%s) [act] calling swiftCallMeFuture ....\n", __FILE_NAME__, __LINE__, __FUNCTION__);
+    swiftCallMeFuture(/*result=*/&promise);
+    printf("[c++][%s:%d](%s) [act] returned from swiftCallMeFuture ....\n", __FILE_NAME__, __LINE__, __FUNCTION__);
+
+
+    printf("[c++][%s:%d](%s) [act] waiting on future....\n", __FILE_NAME__, __LINE__, __FUNCTION__);
+    int i = wait(promise.getFuture());
+    printf("[c++][%s:%d](%s) [act] returned from future: %d\n", __FILE_NAME__, __LINE__, __FUNCTION__, i);
+
+    wait(delay(SERVER_KNOBS->HISTOGRAM_REPORT_INTERVAL));
+  }
 }
 
 ACTOR Future<Void> histogramReport() {
@@ -2013,20 +2038,6 @@ int main(int argc, char* argv[]) {
 
 		std::vector<Future<Void>> listenErrors;
 
-		if (getenv("FDBSWIFTTEST")) {
-#ifdef SWIFT_REVERSE_INTEROP_SUPPORTED
-            using namespace fdbserver_swift;
-            // FIXME: This is test code, remove.
-            int val = swiftFunctionCalledFromCpp(42);
-            if (val != 42)
-                abort();
-            testSwiftFDBServerMain();
-#else
-            fprintf(stderr, "ERROR: reverse interop not supported");
-#endif
-			flushAndExit(FDB_EXIT_SUCCESS);
-		}
-
 		if (role == ServerRole::Simulation || role == ServerRole::CreateTemplateDatabase) {
 			// startOldSimulator();
 			opts.buildNetwork(argv[0]);
@@ -2036,7 +2047,28 @@ int main(int argc, char* argv[]) {
 			                                                       static_cast<int>(TracerType::SIM_END))));
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
-			// g_network->installSwiftConcurrencyHooks();
+
+      // FIXME(swift): This is test code, remove.
+      if (getenv("FDBSWIFTTEST")) {
+        printf("[c++][main] setting up Swift Concurrency hooks\n");
+        installGlobalSwiftConcurrencyHooks(g_network);
+
+
+#ifdef SWIFT_REVERSE_INTEROP_SUPPORTED // ------------------------------------------------------------------------------
+        using namespace fdbserver_swift;
+            int val = swiftFunctionCalledFromCpp(42);
+            if (val != 42)
+                abort();
+#else // ---------------------------------------------------------------------------------------------------------------
+        fprintf(stderr, "ERROR: reverse interop not supported");
+#endif // SWIFT_REVERSE_INTEROP_SUPPORTED ------------------------------------------------------------------------------
+
+        auto swiftCallingFlowActor = swiftCallsActor(); // spawns actor that will call Swift functions
+
+        g_network->run();
+        while(true);
+      }
+
 			g_network->addStopCallback(Net2FileSystem::stop);
 			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT, &opts.allowList);
 			opts.buildNetwork(argv[0]);

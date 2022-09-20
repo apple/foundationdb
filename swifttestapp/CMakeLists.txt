@@ -6,6 +6,7 @@ add_executable(swifttestapp
         )
 
 target_link_libraries(swifttestapp flow)
+# target_link_libraries(swifttestapp fdbserver)
 
 target_include_directories(swifttestapp PUBLIC
     "${CMAKE_SOURCE_DIR}/flow/include"

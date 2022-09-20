@@ -2,7 +2,7 @@ import Flow
 
 // ==== ---------------------------------------------------------------------------------------------------------------
 
-extension FutureInt: _FlowFutureOps {
+extension FutureCInt: _FlowFutureOps {
     typealias _T = CInt
 
     typealias CCBox = Box<CheckedContinuation<_T, Swift.Error>>
@@ -23,7 +23,7 @@ extension FutureInt: _FlowFutureOps {
                 let ccBox = CCBox(cc)
                 let rawCCBox = UnsafeMutableRawPointer(Unmanaged.passRetained(ccBox).toOpaque())
 
-                var cb = CC.make(
+                let cb = CC.make(
                     rawCCBox,
                     /*returning:*/ { (_cc: UnsafeMutableRawPointer?, value: _T) in
                         let cc = Unmanaged<CCBox>.fromOpaque(_cc!).takeRetainedValue().value

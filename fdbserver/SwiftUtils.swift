@@ -5,21 +5,6 @@ import FDBClient
 #if ENABLE_REVERSE_INTEROP
 
 @_expose(Cxx)
-public func testSwiftFDBServerMain() {
-    print("[swift] fdbserver")
-    installGlobalSwiftConcurrencyHooks()
-
-    // capture the main thread ID
-    let mainTID = _tid()
-    func assertOnNet2EventLoop() {
-        precondition(_tid() == mainTID) // we're on the main thread, which the Net2 runloop runs on
-    }
-
-    print("[swift][tid:\(_tid())] run network @ thread:\(_tid())")
-    globalNetworkRun()
-}
-
-@_expose(Cxx)
 public func swiftFunctionCalledFromCpp(_ x: CInt) -> CInt {
     return x
 }
@@ -27,4 +12,21 @@ public func swiftFunctionCalledFromCpp(_ x: CInt) -> CInt {
 #endif
 
 func testFDBServerImport(_ p: ResolutionBalancer) {
+}
+
+public func swiftCallMe() async -> CInt {
+    print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) YES, called async code")
+    return CInt(42)
+}
+
+@_cdecl("swiftCallMeFuture")
+public func swiftCallMeFuture(result opaqueResultPromisePtr: OpaquePointer) {
+    let promisePtr = UnsafeMutablePointer<PromiseCInt>(opaqueResultPromisePtr)
+    let promise =  promisePtr.pointee
+
+    Task {
+        var value = await swiftCallMe()
+        promise.send(&value)
+        print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) value [\(value)] sent!")
+    }
 }

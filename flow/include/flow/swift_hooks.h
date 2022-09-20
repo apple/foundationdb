@@ -280,14 +280,11 @@ void swift_job_run_generic(swift::Job* job);
 
 SWIFT_CC(swift)
 void net2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job,
-                                  //                              swift_task_enqueueGlobal_original _Nonnull original) {
                                   void (*_Nonnull)(swift::Job*) __attribute__((swiftcall)));
 
-// TODO: have this hook up a concrete event loop, not just pretend to do so; it'd take a Net2 instance
-inline void installGlobalSwiftConcurrencyHooks() {
-	auto tls = new TLSConfig();
-	g_network = _swift_newNet2(tls, false, false);
-	printf("[c++] net        = %p\n", g_network);
+inline void installGlobalSwiftConcurrencyHooks(INetwork* net) {
+	printf("[c++] net        = %p\n", net);
+	printf("[c++] g_network  = %p\n", g_network);
 	printf("[c++] N2::g_net2 = %p\n", N2::g_net2);
 	//	if (net != N2::g_net2) {
 	//		printf("[c++] Failed to initialize the global network var: N2::g_net2\n");
@@ -296,6 +293,14 @@ inline void installGlobalSwiftConcurrencyHooks() {
 
 	swift_task_enqueueGlobal_hook = &net2_enqueueGlobal_hook_impl;
 	printf("[c++] configured: swift_task_enqueueGlobal_hook\n");
+}
+
+
+inline void installGlobalSwiftConcurrencyHooks() {
+  auto tls = new TLSConfig();
+  g_network = _swift_newNet2(tls, false, false);
+
+  installGlobalSwiftConcurrencyHooks(g_network);
 }
 
 inline void globalNetworkRun() {

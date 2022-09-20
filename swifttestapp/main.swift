@@ -1,6 +1,5 @@
 import Flow
 import FDBServer
-//import std
 
 print("[swift] start")
 
@@ -37,11 +36,11 @@ func swiftAsyncFunc() async {
 func swiftFutureAwait() async {
     assertOnNet2EventLoop()
 
-    let p: PromiseInt = PromiseInt()
-    var f: FutureInt = p.__getFutureUnsafe() // FIXME(swift): getFuture: C++ method 'getFuture' that returns unsafe projection of type 'Future' not imported
+    let p: PromiseCInt = PromiseCInt()
+    var f: FutureCInt = p.__getFutureUnsafe() // FIXME(swift): getFuture: C++ method 'getFuture' that returns unsafe projection of type 'Future' not imported
     // TODO(swift): we perhaps should add a note that __getFutureUnsafe is available?
 
-    print("[swift][\(#fileID):\(#line)](\(#function)) got PromiseInt") // FIXME(swift/c++): printing the promise crashes!
+    print("[swift][\(#fileID):\(#line)](\(#function)) got PromiseCInt") // FIXME(swift/c++): printing the promise crashes!
     precondition(!f.isReady(), "Future should not be ready yet")
 
     var num = 1111
@@ -58,7 +57,7 @@ func swiftFutureAwait() async {
     precondition((value ?? -1) == num, "Value obtained from await did not match \(num), was: \(String(describing: value))!")
 
     print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2 --------------------")
-    let p2 = PromiseInt()
+    let p2 = PromiseCInt()
     var f2 = p2.__getFutureUnsafe() // FIXME: Make these not unsafe...
     let num2 = 2222
     Task { [num2] in
@@ -98,38 +97,39 @@ func actorTest() async {
     assertOnNet2EventLoop()
 }
 
-//func flowActorTest() async {
-////    let fa = FDBServer.SimpleFlowActor.make()
-////
-////    assertOnNet2EventLoop()
-////    await fa.increment(name: "Caplin")
-//    let num: CInt = 10
-//    let returned = await flowSimpleIncrement(num)
-//    precondition(returned == num + CInt(1))
-//}
+func flowActorTest() async {
+    do {
+        var f = Flow.flowSimpleIncrement() // FIXME: we can't call .waitValue inline, since it is mutating
+        let returned: CInt = try await f.waitValue
+        precondition(returned == CInt(42))
+    } catch {
+        print("[swift][\(#fileID):\(#line)](\(#function)) error: \(error)")
+        fatalError()
+    }
+}
 
 
 let task = Task { // task execution will be intercepted
     assertOnNet2EventLoop()
 
-    print("[swift] await test -------------------------------------------------")
-    print("[swift][tid:\(_tid())] Started a task...")
-    await swiftAsyncFunc()
-    print("[swift] ==== done ---------------------------------------------------")
-
-    print("[swift] futures test -----------------------------------------------")
-    print("[swift] returned from 'await swiftAsyncFunc()'")
-    await swiftFutureAwait()
-    print("[swift] returned from 'await swiftFutureAwait()'")
-    print("[swift] ==== done ---------------------------------------------------")
-
-    print("[swift] actors test -------------------------------------------------")
-    await actorTest()
-    print("[swift] ==== done ---------------------------------------------------")
-
-//    print("[swift] swift -> flow async call test -------------------------------")
-//    await flowActorTest()
+//    print("[swift] await test -------------------------------------------------")
+//    print("[swift][tid:\(_tid())] Started a task...")
+//    await swiftAsyncFunc()
 //    print("[swift] ==== done ---------------------------------------------------")
+//
+//    print("[swift] futures test -----------------------------------------------")
+//    print("[swift] returned from 'await swiftAsyncFunc()'")
+//    await swiftFutureAwait()
+//    print("[swift] returned from 'await swiftFutureAwait()'")
+//    print("[swift] ==== done ---------------------------------------------------")
+//
+//    print("[swift] actors test -------------------------------------------------")
+//    await actorTest()
+//    print("[swift] ==== done ---------------------------------------------------")
+
+    print("[swift] swift -> flow async call test -------------------------------")
+    await flowActorTest()
+    print("[swift] ==== done ---------------------------------------------------")
 
     exit(0)
 }

@@ -29,27 +29,11 @@
 // ==== ----------------------------------------------------------------------------------------------------------------
 // MARK: type aliases, since we cannot work with templates yet in Swift
 
-using PromiseInt = Promise<int>;
-using FutureInt = Future<int>;
+using PromiseCInt = Promise<int>;
+using FutureCInt = Future<int>;
 using CallbackInt = Callback<int>;
 
 using PromiseString = Callback<std::string>;
-
-// ==== ----------------------------------------------------------------------------------------------------------------
-
-//PromiseInt* _Nonnull makePromiseInt() {
-//	return new Promise<int>();
-//}
-
-//FlowFutureInt* _Nonnull getFutureOfPromise(FlowPromiseInt* _Nonnull p) {
-//	return p->_swiftGetFuture();
-//}
-
-//void sendPromiseInt(FlowPromiseInt* p, int value) {
-//	printf("[c++] send %d\n", value);
-//	p->send(value);
-//	printf("[c++] sent %d\n", p->getFuture().get());
-//}
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 // MARK: Callback types
@@ -87,7 +71,7 @@ public:
 
 	CallbackInt* _Nonnull cast() { return this; }
 
-	void addCallbackAndClearTo(FutureInt f) {
+	void addCallbackAndClearTo(FutureCInt f) {
     f.addCallbackAndClear(this);
   }
 

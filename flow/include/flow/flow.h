@@ -57,6 +57,8 @@
 #include "flow/FileIdentifier.h"
 #include "flow/WriteOnlySet.h"
 
+#include "pthread.h"
+
 #include <boost/version.hpp>
 
 #define TEST(condition)                                                                                                \
@@ -658,7 +660,7 @@ public:
 			printf("[c++][%s:%d] send, fire! next:%p\n", __FILE_NAME__, __LINE__, Callback<T>::next);
 			Callback<T>::next->fire(this->value());
 		}
-		printf("[c++][%s:%d] send ..., done\n", __FILE_NAME__, __LINE__);
+		printf("[c++][tid:%lu][%s:%d] send ..., done\n", pthread_self(), __FILE_NAME__, __LINE__);
 	}
 
 	void send(Never) {
@@ -798,10 +800,7 @@ template <class T>
 class Promise;
 
 template <class T>
-class
-//SWIFT_CXX_REF_IMMORTAL
-SWIFT_SENDABLE
-Future {
+class SWIFT_SENDABLE Future {
 public:
 	T const& get() const { return sav->get(); }
 	T getValue() const { return get(); }
@@ -905,7 +904,7 @@ private:
 // Future<T> result = wait(x); // This is legal if wait() generates Futures, but it's probably wrong. It's a compilation
 // error if wait() generates StrictFutures.
 template <class T>
-class SWIFT_CXX_REF_IMMORTAL SWIFT_SENDABLE StrictFuture : public Future<T> {
+class SWIFT_SENDABLE StrictFuture : public Future<T> {
 public:
 	inline StrictFuture(Future<T> const& f) : Future<T>(f) {}
 	inline StrictFuture(Never n) : Future<T>(n) {}
@@ -916,10 +915,7 @@ private:
 };
 
 template <class T>
-class
-//  SWIFT_CXX_REF_IMMORTAL
-    SWIFT_SENDABLE
-    Promise final {
+class SWIFT_SENDABLE Promise final {
 public:
 	template <class U>
 	void send(U&& value) const {
