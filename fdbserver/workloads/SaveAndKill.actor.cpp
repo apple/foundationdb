@@ -45,6 +45,7 @@ struct SaveAndKillWorkload : TestWorkload {
 	}
 
 	std::string description() const override { return "SaveAndKillWorkload"; }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
 	Future<Void> setup(Database const& cx) override {
 		g_simulator->disableSwapsToAll();
 		return Void();

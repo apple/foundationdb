@@ -75,6 +75,7 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 	virtual ~TestWorkload(){};
 	virtual Future<Void> initialized() { return Void(); }
 	virtual std::string description() const = 0;
+	virtual void disableFailureInjectionWorkloads(std::set<std::string>& out) const;
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 	virtual Future<Void> start(Database const& cx) = 0;
 	virtual Future<bool> check(Database const& cx) = 0;

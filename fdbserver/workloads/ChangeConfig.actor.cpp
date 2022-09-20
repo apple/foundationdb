@@ -49,6 +49,8 @@ struct ChangeConfigWorkload : TestWorkload {
 
 	std::string description() const override { return "ChangeConfig"; }
 
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
+
 	Future<Void> start(Database const& cx) override {
 		if (this->clientId != 0)
 			return Void();
