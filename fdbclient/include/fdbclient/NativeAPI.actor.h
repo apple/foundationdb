@@ -75,7 +75,6 @@ struct NetworkOptions {
 	Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions;
 	bool runLoopProfilingEnabled;
 	bool primaryClient;
-	bool disableBypass;
 	std::map<std::string, KnobValue> knobs;
 
 	NetworkOptions();

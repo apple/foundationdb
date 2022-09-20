@@ -274,9 +274,6 @@ class TestConfig {
 			if (attrib == "disableEncryption") {
 				disableEncryption = strcmp(value.c_str(), "true") == 0;
 			}
-			if (attrib == "disableClientBypass") {
-				disableClientBypass = strcmp(value.c_str(), "true") == 0;
-			}
 			if (attrib == "restartInfoLocation") {
 				isFirstTestInRestart = true;
 			}
@@ -337,8 +334,6 @@ public:
 	// Set the maximum TLog version that can be selected for a test
 	// Refer to FDBTypes.h::TLogVersion. Defaults to the maximum supported version.
 	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
-	// Disable bypassing multi-version client API.
-	bool disableClientBypass = false;
 	// Set true to simplify simulation configs for easier debugging
 	bool simpleConfig = false;
 	int extraMachineCountDC = 0;
@@ -398,7 +393,6 @@ public:
 		    .add("disableHostname", &disableHostname)
 		    .add("disableRemoteKVS", &disableRemoteKVS)
 		    .add("disableEncryption", &disableEncryption)
-		    .add("disableClientBypass", &disableClientBypass)
 		    .add("simpleConfig", &simpleConfig)
 		    .add("generateFearless", &generateFearless)
 		    .add("datacenters", &datacenters)
@@ -1154,10 +1148,6 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			g_knobs.setKnob("enable_storage_server_encryption", KnobValueRef::create(bool{ false }));
 			g_knobs.setKnob("enable_blob_granule_encryption", KnobValueRef::create(bool{ false }));
 			TraceEvent(SevDebug, "DisableEncryption");
-		}
-		if (testConfig.disableClientBypass) {
-			setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_BYPASS);
-			TraceEvent(SevDebug, "DisableClientBypass");
 		}
 		*pConnString = conn;
 		*pTesterCount = testerCount;
@@ -1942,10 +1932,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		g_knobs.setKnob("enable_storage_server_encryption", KnobValueRef::create(bool{ false }));
 		g_knobs.setKnob("enable_blob_granule_encryption", KnobValueRef::create(bool{ false }));
 		TraceEvent(SevDebug, "DisableEncryption");
-	}
-	if (testConfig.disableClientBypass) {
-		setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_BYPASS);
-		TraceEvent(SevDebug, "DisableClientBypass");
 	}
 	auto configDBType = testConfig.getConfigDBType();
 	for (auto kv : startingConfigJSON) {

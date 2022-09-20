@@ -153,7 +153,7 @@ NetworkOptions::NetworkOptions()
   : traceRollSize(TRACE_DEFAULT_ROLL_SIZE), traceMaxLogsSize(TRACE_DEFAULT_MAX_LOGS_SIZE), traceLogGroup("default"),
     traceFormat("xml"), traceClockSource("now"),
     supportedVersions(new ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>()), runLoopProfilingEnabled(false),
-    primaryClient(true), disableBypass(false) {}
+    primaryClient(true) {}
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = "client_latency/"_sr;
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = "client_latency_counter/"_sr;
@@ -2519,10 +2519,6 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 	}
 	case FDBNetworkOptions::EXTERNAL_CLIENT:
 		networkOptions.primaryClient = false;
-		break;
-	case FDBNetworkOptions::DISABLE_CLIENT_BYPASS:
-		validateOptionValueNotPresent(value);
-		networkOptions.disableBypass = true;
 		break;
 	default:
 		break;

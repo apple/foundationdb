@@ -1,6 +1,3 @@
-[configuration]
-disableClientBypass=true
-
 [[test]]
 testTitle = 'SingleClientCausalConsistencyTest'
 

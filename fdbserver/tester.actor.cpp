@@ -1263,15 +1263,7 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	{ "disableRemoteKVS",
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } },
 	{ "disableEncryption",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } },
-	{ "disableClientBypass",
-	  [](const std::string& value) {
-	      if (value == "true") {
-		      setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_BYPASS);
-	      }
-	      // else { } It is disabled by default for tester
-	      TraceEvent("TestParserTest").detail("ParsedDisableClientBypass", "");
-	  } }
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } }
 };
 
 std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
