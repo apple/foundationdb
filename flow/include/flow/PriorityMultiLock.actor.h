@@ -1,0 +1,325 @@
+/*
+ * PriorityMultiLock.actor.h
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#pragma once
+
+// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
+// version.
+#if defined(NO_INTELLISENSE) && !defined(FLOW_PRIORITYMULTILOCK_ACTOR_G_H)
+#define FLOW_PRIORITYMULTILOCK_ACTOR_G_H
+#include "flow/PriorityMultiLock.actor.g.h"
+#elif !defined(PRIORITYMULTILOCK_ACTOR_H)
+#define PRIORITYMULTILOCK_ACTOR_H
+
+#include "flow/flow.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
+
+#define PRIORITYMULTILOCK_DEBUG 0
+
+#if PRIORITYMULTILOCK_DEBUG
+#define pml_debug_printf(...) printf(__VA_ARGS__)
+#else
+#define pml_debug_printf(...)
+#endif
+
+// A multi user lock with a concurrent holder limit where waiters request a lock with a priority
+// id and are granted locks based on a total concurrency and relative importants of the priority
+// ids defined.
+//
+// Scheduling logic
+// 	 launchLimits[n] = configured amount from the launchLimit vector for priority n
+//   waiters[n] = the number of waiters for priority n
+//   runnerCounts[n] = number of runners at priority n
+//
+//   totalActiveLaunchLimits = sum of limits for all priorities with waiters
+//   When waiters[n] becomes == 0, totalActiveLaunchLimits -= launchLimits[n]
+//   When waiters[n] becomes  > 0, totaltotalActiveLaunchLimitsLimits += launchLimits[n]
+//
+//   The total capacity of a priority to be considered when launching tasks is
+//     ceil(launchLimits[n] / totalLimits * concurrency)
+//
+// The interface is similar to FlowMutex except that lock holders can just drop the lock to release it.
+//
+// Usage:
+//   Lock lock = wait(prioritylock.lock(priorityLevel));
+//   lock.release();  // Explicit release, or
+//   // let lock and all copies of lock go out of scope to release
+class PriorityMultiLock {
+
+public:
+	// Waiting on the lock returns a Lock, which is really just a Promise<Void>
+	// Calling release() is not necessary, it exists in case the Lock holder wants to explicitly release
+	// the Lock before it goes out of scope.
+	struct Lock {
+		void release() { promise.send(Void()); }
+
+		// This is exposed in case the caller wants to use/copy it directly
+		Promise<Void> promise;
+	};
+
+	PriorityMultiLock(int concurrency, std::string launchLimits)
+	  : PriorityMultiLock(concurrency, parseStringToVector<int>(launchLimits, ',')) {}
+
+	PriorityMultiLock(int concurrency, std::vector<int> launchLimitsByPriority)
+	  : concurrency(concurrency), available(concurrency), waiting(0), totalActiveLaunchLimits(0),
+	    launchLimits(launchLimitsByPriority) {
+
+		waiters.resize(launchLimits.size());
+		runnerCounts.resize(launchLimits.size(), 0);
+		fRunner = runner(this);
+	}
+
+	~PriorityMultiLock() {}
+
+	Future<Lock> lock(int priority = 0) {
+		auto& q = waiters[priority];
+		Waiter w;
+
+		// If this priority currently has no waiters
+		if (q.empty()) {
+			// Add this priority's launch limit to totalLimits
+			totalActiveLaunchLimits += launchLimits[priority];
+
+			// If there are slots available and the priority has capacity then don't make the caller wait
+			if (available > 0 && runnerCounts[priority] < currentCapacity(priority)) {
+				// Remove this priority's launch limit from the total since it will remain empty
+				totalActiveLaunchLimits -= launchLimits[priority];
+
+				// Return a Lock to the caller
+				Lock p;
+				addRunner(p, priority);
+				return p;
+			}
+		}
+		q.push_back(w);
+		++waiting;
+
+		pml_debug_printf("lock line %d priority %d  %s\n", __LINE__, priority, toString().c_str());
+		return w.lockPromise.getFuture();
+	}
+
+	void kill() {
+		for (int i = 0; i < runners.size(); ++i) {
+			if (!runners[i].isReady()) {
+				runners[i].cancel();
+			}
+		}
+		runners.clear();
+		brokenOnDestruct.sendError(broken_promise());
+		waiting = 0;
+		waiters.clear();
+	}
+
+	std::string toString() const {
+		int runnersDone = 0;
+		for (int i = 0; i < runners.size(); ++i) {
+			if (runners[i].isReady()) {
+				++runnersDone;
+			}
+		}
+
+		std::string s =
+		    format("{ ptr=%p concurrency=%d available=%d running=%d waiting=%d runnersQueue=%d runnersDone=%d  ",
+		           this,
+		           concurrency,
+		           available,
+		           concurrency - available,
+		           waiting,
+		           runners.size(),
+		           runnersDone);
+
+		for (int i = 0; i < waiters.size(); ++i) {
+			s += format("p%d: limit=%d run=%d wait=%d cap=%d  ",
+			            i,
+			            launchLimits[i],
+			            runnerCounts[i],
+			            waiters[i].size(),
+			            waiters[i].empty() ? 0 : currentCapacity(i));
+		}
+
+		s += "}";
+		return s;
+	}
+	int maxPriority() const { return launchLimits.size() - 1; }
+
+	int totalWaiters() const { return waiting; }
+
+	int numWaiters(const unsigned int priority) const {
+		ASSERT(priority < waiters.size());
+		return waiters[priority].size();
+	}
+
+	int totalRunners() const { return concurrency - available; }
+
+	int numRunners(const unsigned int priority) const {
+		ASSERT(priority < waiters.size());
+		return runnerCounts[priority];
+	}
+
+private:
+	struct Waiter {
+		Waiter() : queuedTime(now()) {}
+		Promise<Lock> lockPromise;
+		double queuedTime;
+	};
+
+	// Total execution slots allowed across all priorities
+	int concurrency;
+	// Current available execution slots
+	int available;
+	// Total waiters across all priorities
+	int waiting;
+	// Sum of launch limits for all priorities with 1 or more waiters
+	int totalActiveLaunchLimits;
+
+	typedef Deque<Waiter> Queue;
+	// Launch limits by priority
+	std::vector<int> launchLimits;
+	// Queue of waiters by priority
+	std::vector<Queue> waiters;
+	// Count of active runners by priority
+	std::vector<int> runnerCounts;
+	// Current or recent (ended) runners
+	Deque<Future<Void>> runners;
+
+	Future<Void> fRunner;
+	AsyncTrigger wakeRunner;
+	Promise<Void> brokenOnDestruct;
+
+	void addRunner(Lock& lock, int priority) {
+		runnerCounts[priority] += 1;
+		--available;
+		runners.push_back(map(ready(lock.promise.getFuture()), [=](Void) {
+			++available;
+			runnerCounts[priority] -= 1;
+
+			// If there are any waiters or if the runners array is getting large, trigger the runner loop
+			if (waiting > 0 || runners.size() > 1000) {
+				wakeRunner.trigger();
+			}
+			return Void();
+		}));
+	}
+
+	// Current maximum running tasks for the specified priority, which must have waiters
+	// or the result is undefined
+	int currentCapacity(int priority) const {
+		// The total concurrency allowed for this priority at present is the total concurrency times
+		// priority's launch limit divided by the total launch limits for all priorities with waiters.
+		return ceil((float)launchLimits[priority] / totalActiveLaunchLimits * concurrency);
+	}
+
+	ACTOR static Future<Void> runner(PriorityMultiLock* self) {
+		state int sinceYield = 0;
+		state Future<Void> error = self->brokenOnDestruct.getFuture();
+
+		// Priority to try to run tasks from next
+		state int priority = 0;
+
+		loop {
+			pml_debug_printf(
+			    "runner loop start line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
+
+			// Cleanup finished runner futures at the front of the runner queue.
+			while (!self->runners.empty() && self->runners.front().isReady()) {
+				self->runners.pop_front();
+			}
+
+			// Wait for a runner to release its lock
+			wait(self->wakeRunner.onTrigger());
+			pml_debug_printf(
+			    "runner loop wake line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
+
+			if (++sinceYield == 100) {
+				sinceYield = 0;
+				wait(delay(0));
+				pml_debug_printf(
+				    "  runner afterDelay line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
+			}
+
+			// While there are available slots and there are waiters, launch tasks
+			while (self->available > 0 && self->waiting > 0) {
+				pml_debug_printf(
+				    "  launch loop start line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
+
+				// Find the next priority with waiters and capacity.  There must be at least one.
+				while (self->waiters[priority].empty() ||
+				       self->runnerCounts[priority] >= self->currentCapacity(priority)) {
+					if (++priority == self->waiters.size()) {
+						priority = 0;
+					}
+
+					pml_debug_printf("    launch loop scan line %d  priority=%d  %s\n",
+					                 __LINE__,
+					                 priority,
+					                 self->toString().c_str());
+				}
+
+				Queue& queue = self->waiters[priority];
+
+				while (!queue.empty() && self->runnerCounts[priority] < self->currentCapacity(priority)) {
+					pml_debug_printf(
+					    "    launching line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
+
+					Waiter w = queue.front();
+					queue.pop_front();
+
+					// If this priority is now empty, subtract its launch limit from totalLimits
+					if (queue.empty()) {
+						self->totalActiveLaunchLimits -= self->launchLimits[priority];
+
+						pml_debug_printf("      emptied priority line %d  priority=%d  %s\n",
+						                 __LINE__,
+						                 priority,
+						                 self->toString().c_str());
+					}
+
+					--self->waiting;
+					Lock lock;
+
+					w.lockPromise.send(lock);
+
+					// Self may have been destructed during the lock callback
+					if (error.isReady()) {
+						throw error.getError();
+					}
+
+					// If the lock was not already released, add it to the runners future queue
+					if (lock.promise.canBeSet()) {
+						self->addRunner(lock, priority);
+
+						// A slot has been consumed, so stop reading from this queue if there aren't any more
+						if (self->available == 0) {
+							pml_debug_printf("      avail now 0 line %d  priority=%d  %s\n",
+							                 __LINE__,
+							                 priority,
+							                 self->toString().c_str());
+							break;
+						}
+					}
+				}
+			}
+		}
+	}
+};
+
+#include "flow/unactorcompiler.h"
+
+#endif

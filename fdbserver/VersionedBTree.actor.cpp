@@ -28,6 +28,7 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/Histogram.h"
+#include "flow/PriorityMultiLock.actor.h"
 #include <limits>
 #include <random>
 #include "fdbrpc/ContinuousSample.h"
@@ -101,8 +102,6 @@ std::string addPrefix(std::string prefix, std::string lines) {
 	}
 	return s;
 }
-
-#define PRIORITYMULTILOCK_DEBUG 0
 
 // Some convenience functions for debugging to stringify various structures
 // Classes can add compatibility by either specializing toString<T> or implementing
@@ -223,7 +222,7 @@ std::string toString(const std::pair<F, S>& o) {
 constexpr static int ioMinPriority = 0;
 constexpr static int ioLeafPriority = 1;
 constexpr static int ioMaxPriority = 3;
-constexpr static int maxConcurrentReadsLaunchLimit = std::numeric_limits<int>::max();
+
 // A FIFO queue of T stored as a linked list of pages.
 // Main operations are pop(), pushBack(), pushFront(), and flush().
 //
@@ -2009,9 +2008,7 @@ public:
 	          bool memoryOnly,
 	          Reference<IEncryptionKeyProvider> keyProvider,
 	          Promise<Void> errorPromise = {})
-	  : keyProvider(keyProvider), ioLock(FLOW_KNOBS->MAX_OUTSTANDING,
-	                                     SERVER_KNOBS->REDWOOD_IO_MAX_PRIORITY,
-	                                     SERVER_KNOBS->REDWOOD_PRIORITY_LAUNCHS),
+	  : keyProvider(keyProvider), ioLock(FLOW_KNOBS->MAX_OUTSTANDING, SERVER_KNOBS->REDWOOD_PRIORITY_LAUNCHS),
 	    pageCacheBytes(pageCacheSizeBytes), desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize),
 	    filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
 	    remapCleanupWindowBytes(remapCleanupWindowBytes), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
@@ -7513,10 +7510,7 @@ RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"))
 class KeyValueStoreRedwood : public IKeyValueStore {
 public:
 	KeyValueStoreRedwood(std::string filename, UID logID, Reference<IEncryptionKeyProvider> encryptionKeyProvider)
-	  : m_filename(filename), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS,
-	                                            0,
-	                                            std::to_string(maxConcurrentReadsLaunchLimit)),
-	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
+	  : m_filename(filename), prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 
 		int pageSize =
 		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
@@ -7678,7 +7672,6 @@ public:
 				f.get();
 			} else {
 				CODE_PROBE(true, "Uncached forward range read seek");
-				wait(store(lock, self->m_concurrentReads.lock()));
 				wait(f);
 			}
 
@@ -7734,7 +7727,6 @@ public:
 				f.get();
 			} else {
 				CODE_PROBE(true, "Uncached reverse range read seek");
-				wait(store(lock, self->m_concurrentReads.lock()));
 				wait(f);
 			}
 
@@ -7801,9 +7793,6 @@ public:
 		wait(self->m_tree->initBTreeCursor(
 		    &cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::PointRead, options));
 
-		// Not locking for point reads, instead relying on IO priority lock
-		// state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock());
-
 		++g_redwoodMetrics.metric.opGet;
 		wait(cur.seekGTE(key));
 		if (cur.isValid() && cur.get().key == key) {
@@ -7839,7 +7828,6 @@ private:
 	Future<Void> m_init;
 	Promise<Void> m_closed;
 	Promise<Void> m_error;
-	PriorityMultiLock m_concurrentReads;
 	bool prefetch;
 	Version m_nextCommitVersion;
 	Reference<IEncryptionKeyProvider> m_keyProvider;
@@ -8482,11 +8470,11 @@ void RedwoodMetrics::getIOLockFields(TraceEvent* e, std::string* s) {
 	int maxPriority = ioLock->maxPriority();
 
 	if (e != nullptr) {
-		e->detail("ActiveReads", ioLock->totalWorkers());
+		e->detail("ActiveReads", ioLock->totalRunners());
 		e->detail("AwaitReads", ioLock->totalWaiters());
 
 		for (int priority = 0; priority <= maxPriority; ++priority) {
-			e->detail(format("ActiveP%d", priority), ioLock->numWorkers(priority));
+			e->detail(format("ActiveP%d", priority), ioLock->numRunners(priority));
 			e->detail(format("AwaitP%d", priority), ioLock->numWaiters(priority));
 		}
 	}
@@ -8496,13 +8484,13 @@ void RedwoodMetrics::getIOLockFields(TraceEvent* e, std::string* s) {
 		std::string await = "Await";
 
 		*s += "\n";
-		*s += format("%-15s %-8u  ", "ActiveReads", ioLock->totalWorkers());
+		*s += format("%-15s %-8u  ", "ActiveReads", ioLock->totalRunners());
 		*s += format("%-15s %-8u  ", "AwaitReads", ioLock->totalWaiters());
 		*s += "\n";
 
 		for (int priority = 0; priority <= maxPriority; ++priority) {
 			*s +=
-			    format("%-15s %-8u  ", (active + 'P' + std::to_string(priority)).c_str(), ioLock->numWorkers(priority));
+			    format("%-15s %-8u  ", (active + 'P' + std::to_string(priority)).c_str(), ioLock->numRunners(priority));
 		}
 		*s += "\n";
 		for (int priority = 0; priority <= maxPriority; ++priority) {
@@ -10997,5 +10985,59 @@ TEST_CASE(":/redwood/performance/histograms") {
 	double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
 	std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
 
+	return Void();
+}
+
+ACTOR Future<Void> waitLockIncrement(PriorityMultiLock* pml, int priority, int* pout) {
+	state PriorityMultiLock::Lock lock = wait(pml->lock(priority));
+	wait(delay(deterministicRandom()->random01() * .1));
+	++*pout;
+	return Void();
+}
+
+TEST_CASE("/redwood/PriorityMultiLock") {
+	state std::vector<int> priorities = { 10, 20, 40 };
+	state int concurrency = 25;
+	state PriorityMultiLock* pml = new PriorityMultiLock(concurrency, priorities);
+	state std::vector<int> counts;
+	counts.resize(priorities.size(), 0);
+
+	// Clog the lock buy taking concurrency locks at each level
+	state std::vector<Future<PriorityMultiLock::Lock>> lockFutures;
+	for (int i = 0; i < priorities.size(); ++i) {
+		for (int j = 0; j < concurrency; ++j) {
+			lockFutures.push_back(pml->lock(i));
+		}
+	}
+
+	// Wait for n = concurrency locks to be acquired
+	wait(quorum(lockFutures, concurrency));
+
+	state std::vector<Future<Void>> futures;
+	for (int i = 0; i < 10e3; ++i) {
+		int p = i % priorities.size();
+		futures.push_back(waitLockIncrement(pml, p, &counts[p]));
+	}
+
+	state Future<Void> f = waitForAll(futures);
+
+	// Release the locks
+	lockFutures.clear();
+
+	// Print stats and wait for all futures to be ready
+	loop {
+		choose {
+			when(wait(delay(1))) {
+				printf("counts: ");
+				for (auto c : counts) {
+					printf("%d ", c);
+				}
+				printf("   pml: %s\n", pml->toString().c_str());
+			}
+			when(wait(f)) { break; }
+		}
+	}
+
+	delete pml;
 	return Void();
 }

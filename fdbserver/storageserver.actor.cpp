@@ -37,6 +37,7 @@
 #include "flow/Error.h"
 #include "flow/Hash3.h"
 #include "flow/Histogram.h"
+#include "flow/PriorityMultiLock.actor.h"
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
 #include "flow/SystemMonitor.h"
@@ -1291,9 +1292,7 @@ public:
 	    changeFeedDiskReadsLock(SERVER_KNOBS->CHANGE_FEED_DISK_READS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
-	    ssLock(FLOW_KNOBS->MAX_OUTSTANDING * 2,
-	           SERVER_KNOBS->STORAGESERVER_MAX_RANK,
-	           SERVER_KNOBS->STORAGESERVER_READ_PRIORITIES),
+	    ssLock(FLOW_KNOBS->MAX_OUTSTANDING * 2, SERVER_KNOBS->STORAGESERVER_READ_PRIORITIES),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
 	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()),
@@ -9923,22 +9922,22 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 		                               te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
 		                               te.detail("Tag", self->tag.toString());
 		                               std::vector<int> rpr = self->readPriorityRanks;
-		                               te.detail("ActiveReads", self->ssLock.totalWorkers());
+		                               te.detail("ActiveReads", self->ssLock.totalRunners());
 		                               te.detail("AwaitReads", self->ssLock.totalWaiters());
 		                               int type = (int)ReadType::EAGER;
-		                               te.detail("ActiveEager", self->ssLock.numWorkers(rpr[type]));
+		                               te.detail("ActiveEager", self->ssLock.numRunners(rpr[type]));
 		                               te.detail("AwaitEager", self->ssLock.numWaiters(rpr[type]));
 		                               type = (int)ReadType::FETCH;
-		                               te.detail("ActiveFetch", self->ssLock.numWorkers(rpr[type]));
+		                               te.detail("ActiveFetch", self->ssLock.numRunners(rpr[type]));
 		                               te.detail("AwaitFetch", self->ssLock.numWaiters(rpr[type]));
 		                               type = (int)ReadType::LOW;
-		                               te.detail("ActiveLow", self->ssLock.numWorkers(rpr[type]));
+		                               te.detail("ActiveLow", self->ssLock.numRunners(rpr[type]));
 		                               te.detail("AwaitLow", self->ssLock.numWaiters(rpr[type]));
 		                               type = (int)ReadType::NORMAL;
-		                               te.detail("ActiveNormal", self->ssLock.numWorkers(rpr[type]));
+		                               te.detail("ActiveNormal", self->ssLock.numRunners(rpr[type]));
 		                               te.detail("AwaitNormal", self->ssLock.numWaiters(rpr[type]));
 		                               type = (int)ReadType::HIGH;
-		                               te.detail("ActiveHigh", self->ssLock.numWorkers(rpr[type]));
+		                               te.detail("ActiveHigh", self->ssLock.numRunners(rpr[type]));
 		                               te.detail("AwaitHigh", self->ssLock.numWaiters(rpr[type]));
 		                               StorageBytes sb = self->storage.getStorageBytes();
 		                               te.detail("KvstoreBytesUsed", sb.used);
