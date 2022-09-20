@@ -9,18 +9,21 @@ extension FutureInt: _FlowFutureOps {
     typealias CC = SwiftContinuationCallbackInt
     typealias CB = Flow.SwiftContinuationCallbackInt
 
+    // NOTE: cannot be a `var` because must be mutating because `self.addCallbackAndClear` is mutating (from C++)
     var waitValue: _T {
-        get async throws {
+        mutating get async throws {
             if self.isReady() {
                 print("[swift][\(#fileID):\(#line)](\(#function)) future was ready, return immediately.")
-                return get().pointee
+                // FIXME(swift): we'd need that technically to be:
+                //               return get().pointee
+                return __getUnsafe().pointee
             }
 
             return try await withCheckedThrowingContinuation { cc in
                 let ccBox = CCBox(cc)
                 let rawCCBox = UnsafeMutableRawPointer(Unmanaged.passRetained(ccBox).toOpaque())
 
-                let cb = CC.make(
+                var cb = CC.make(
                     rawCCBox,
                     /*returning:*/ { (_cc: UnsafeMutableRawPointer?, value: _T) in
                         let cc = Unmanaged<CCBox>.fromOpaque(_cc!).takeRetainedValue().value
@@ -31,6 +34,7 @@ extension FutureInt: _FlowFutureOps {
                         cc.resume(throwing: GeneralFlowError()) // TODO: map errors
                     }
                 )
+                // self.addCallbackAndClear(&cb)
                 cb.addCallbackAndClearTo(self)
             }
         }

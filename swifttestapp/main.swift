@@ -38,14 +38,16 @@ func swiftFutureAwait() async {
     assertOnNet2EventLoop()
 
     let p: PromiseInt = PromiseInt()
-    let f: FutureInt = p.getFutureRef()
+    var f: FutureInt = p.__getFutureUnsafe() // FIXME(swift): getFuture: C++ method 'getFuture' that returns unsafe projection of type 'Future' not imported
+    // TODO(swift): we perhaps should add a note that __getFutureUnsafe is available?
+
     print("[swift][\(#fileID):\(#line)](\(#function)) got PromiseInt") // FIXME(swift/c++): printing the promise crashes!
     precondition(!f.isReady(), "Future should not be ready yet")
 
     var num = 1111
     print("[swift][\(#fileID):\(#line)](\(#function)) send \(num)") // FIXME: printing the promise crashes!
     p.send(&num) // FIXME: rdar://99583467 ([C++ interop][fdb] Support xvalues, so we can use Future.send(U&& value))
-    print("[swift][\(#fileID):\(#line)](\(#function)) without wait, f.get(): \(f.get().pointee)")
+    print("[swift][\(#fileID):\(#line)](\(#function)) without wait, f.get(): \(f.__getUnsafe().pointee)")
 
     print("[swift][\(#fileID):\(#line)](\(#function)) wait...")
     let value: CInt? = try? await f.waitValue
@@ -57,7 +59,7 @@ func swiftFutureAwait() async {
 
     print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2 --------------------")
     let p2 = PromiseInt()
-    let f2 = p2.getFutureRef()
+    var f2 = p2.__getFutureUnsafe() // FIXME: Make these not unsafe...
     let num2 = 2222
     Task { [num2] in
         assertOnNet2EventLoop()
@@ -68,8 +70,8 @@ func swiftFutureAwait() async {
     }
     print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2: waiting...")
     let got2: CInt? = try? await f2.waitValue
-    print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2, got: \(got2)")
-    precondition(got2! == num2, "Value obtained from send after await did not match \(num2), was: \(got2)!")
+    print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2, got: \(String(describing: got2))")
+    precondition(got2! == num2, "Value obtained from send after await did not match \(num2), was: \(String(describing: got2))!")
 
     // assert that we hopped back and are again on the Net2 event loop thread:
     assertOnNet2EventLoop()
@@ -96,15 +98,15 @@ func actorTest() async {
     assertOnNet2EventLoop()
 }
 
-func flowActorTest() async {
-//    let fa = FDBServer.SimpleFlowActor.make()
-//
-//    assertOnNet2EventLoop()
-//    await fa.increment(name: "Caplin")
-    let num: CInt = 10
-    let returned = await flowSimpleIncrement(num)
-    precondition(returned == num + CInt(1))
-}
+//func flowActorTest() async {
+////    let fa = FDBServer.SimpleFlowActor.make()
+////
+////    assertOnNet2EventLoop()
+////    await fa.increment(name: "Caplin")
+//    let num: CInt = 10
+//    let returned = await flowSimpleIncrement(num)
+//    precondition(returned == num + CInt(1))
+//}
 
 
 let task = Task { // task execution will be intercepted
@@ -125,9 +127,9 @@ let task = Task { // task execution will be intercepted
     await actorTest()
     print("[swift] ==== done ---------------------------------------------------")
 
-    print("[swift] swift -> flow async call test -------------------------------")
-    await flowActorTest()
-    print("[swift] ==== done ---------------------------------------------------")
+//    print("[swift] swift -> flow async call test -------------------------------")
+//    await flowActorTest()
+//    print("[swift] ==== done ---------------------------------------------------")
 
     exit(0)
 }

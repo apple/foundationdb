@@ -87,13 +87,9 @@ public:
 
 	CallbackInt* _Nonnull cast() { return this; }
 
-	void addCallbackAndClearTo(FutureInt* _Nonnull f) { f->addCallbackAndClear(this); }
-	//	void addCallbackAndClearTo(FlowPromiseInt* _Nonnull p) {
-	//		auto f = p->getFuture();
-	//		printf("[c++][%s:%d] future\n", __FILE_NAME__, __LINE__);
-	//
-	//		f.addCallbackAndClear(this);
-	//	}
+	void addCallbackAndClearTo(FutureInt f) {
+    f.addCallbackAndClear(this);
+  }
 
 	// TODO: virtual is an issue
 	void fire(int const& value) {
