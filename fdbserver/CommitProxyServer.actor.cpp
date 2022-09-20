@@ -50,6 +50,7 @@
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/RestoreUtil.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
@@ -61,6 +62,7 @@
 #include "fdbclient/Tracing.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/network.h"
 
 ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply) {
 	state ReplyPromise<Void> reply = req.reply;
@@ -1240,25 +1242,47 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	return Void();
 }
 
-void writeMutation(CommitBatchContext* self, int64_t tenantId, const MutationRef& mutation) {
+ACTOR Future<MutationRef> writeMutation(CommitBatchContext* self,
+                                        int64_t tenantId,
+                                        const MutationRef* mutation,
+                                        Optional<MutationRef>* encryptedMutationOpt,
+                                        Arena* arena) {
 	static_assert(TenantInfo::INVALID_TENANT == INVALID_ENCRYPT_DOMAIN_ID);
 
 	if (self->pProxyCommitData->isEncryptionEnabled) {
 		EncryptCipherDomainId domainId = tenantId;
-		if (domainId == INVALID_ENCRYPT_DOMAIN_ID) {
-			std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
-			    getEncryptDetailsFromMutationRef(self->pProxyCommitData, mutation);
-			domainId = p.second;
+		state MutationRef encryptedMutation;
+		if (encryptedMutationOpt->present()) {
+			CODE_PROBE(true, "using already encrypted mutation");
+			encryptedMutation = encryptedMutationOpt->get();
+			ASSERT(encryptedMutation.isEncrypted());
+			// During simulation check whether the encrypted mutation matches the decrpyted mutation
+			if (g_network && g_network->isSimulated()) {
+				Reference<AsyncVar<ServerDBInfo> const> dbInfo = self->pProxyCommitData->db;
+				state const BlobCipherEncryptHeader* header = encryptedMutation.encryptionHeader();
+				TextAndHeaderCipherKeys cipherKeys =
+				    wait(getEncryptCipherKeys(dbInfo, *header, BlobCipherMetrics::TLOG));
+				MutationRef decryptedMutation = encryptedMutation.decrypt(cipherKeys, *arena, BlobCipherMetrics::TLOG);
+				ASSERT(decryptedMutation.param1 == mutation->param1 && decryptedMutation.param2 == mutation->param2 &&
+				       decryptedMutation.type == mutation->type);
+			}
+		} else {
+			if (domainId == INVALID_ENCRYPT_DOMAIN_ID) {
+				std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
+				    getEncryptDetailsFromMutationRef(self->pProxyCommitData, *mutation);
+				domainId = p.second;
 
-			CODE_PROBE(true, "Raw access mutation encryption");
+				CODE_PROBE(true, "Raw access mutation encryption");
+			}
+
+			ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
+			encryptedMutation = mutation->encrypt(self->cipherKeys, domainId, *arena, BlobCipherMetrics::TLOG);
 		}
-
-		ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
-
-		Arena arena;
-		self->toCommit.writeTypedMessage(mutation.encrypt(self->cipherKeys, domainId, arena, BlobCipherMetrics::TLOG));
+		self->toCommit.writeTypedMessage(encryptedMutation);
+		return encryptedMutation;
 	} else {
-		self->toCommit.writeTypedMessage(mutation);
+		self->toCommit.writeTypedMessage(*mutation);
+		return *mutation;
 	}
 }
 
@@ -1278,6 +1302,9 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 		state Optional<ClientTrCommitCostEstimation>* trCost = &trs[self->transactionNum].commitCostEstimation;
 		state int mutationNum = 0;
 		state VectorRef<MutationRef>* pMutations = &trs[self->transactionNum].transaction.mutations;
+		state VectorRef<Optional<MutationRef>>* encryptedMutations =
+		    &trs[self->transactionNum].transaction.encryptedMutations;
+		ASSERT(encryptedMutations->size() == 0 || encryptedMutations->size() == pMutations->size());
 		state int64_t tenantId = trs[self->transactionNum].tenantInfo.tenantId;
 
 		self->toCommit.addTransactionInfo(trs[self->transactionNum].spanContext);
@@ -1292,13 +1319,17 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				}
 			}
 
-			auto& m = (*pMutations)[mutationNum];
+			state MutationRef m = (*pMutations)[mutationNum];
+			state Optional<MutationRef> encryptedMutation =
+			    encryptedMutations->size() > 0 ? (*encryptedMutations)[mutationNum] : Optional<MutationRef>();
+			state Arena arena;
+			state MutationRef writtenMutation;
 			self->mutationCount++;
 			self->mutationBytes += m.expectedSize();
 			self->yieldBytes += m.expectedSize();
+			ASSERT(!m.isEncrypted());
 			// Determine the set of tags (responsible storage servers) for the mutation, splitting it
 			// if necessary.  Serialize (splits of) the mutation into the message buffer and add the tags.
-
 			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 				auto& tags = pProxyCommitData->tagsForKey(m.param1);
 
@@ -1336,7 +1367,11 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if (pProxyCommitData->cacheInfo[m.param1]) {
 					self->toCommit.addTag(cacheTag);
 				}
-				writeMutation(self, tenantId, m);
+				if (encryptedMutation.present()) {
+					ASSERT(encryptedMutation.get().isEncrypted());
+				}
+				MutationRef tempMutation = wait(writeMutation(self, tenantId, &m, &encryptedMutation, &arena));
+				writtenMutation = tempMutation;
 			} else if (m.type == MutationRef::ClearRange) {
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
 				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
@@ -1389,7 +1424,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if (pProxyCommitData->needsCacheTag(clearRange)) {
 					self->toCommit.addTag(cacheTag);
 				}
-				writeMutation(self, tenantId, m);
+				MutationRef tempMutation = wait(writeMutation(self, tenantId, &m, &encryptedMutation, &arena));
+				writtenMutation = tempMutation;
 			} else {
 				UNREACHABLE();
 			}
@@ -1403,7 +1439,9 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 			if (m.type != MutationRef::Type::ClearRange) {
 				// Add the mutation to the relevant backup tag
 				for (auto backupName : pProxyCommitData->vecBackupKeys[m.param1]) {
-					self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, m);
+					// If encryption is enabled make sure the mutation we are writing is also encrypted
+					ASSERT(!self->pProxyCommitData->isEncryptionEnabled || writtenMutation.isEncrypted());
+					self->logRangeMutations[backupName].push_back_deep(self->logRangeMutationsArena, writtenMutation);
 				}
 			} else {
 				KeyRangeRef mutationRange(m.param1, m.param2);
@@ -1420,6 +1458,21 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					// Create the custom mutation for the specific backup tag
 					MutationRef backupMutation(
 					    MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
+
+					// TODO (Nim): Currently clear ranges are encrypted using the default encryption key, this must be
+					// changed to account for clear ranges which span tenant boundaries
+					if (self->pProxyCommitData->isEncryptionEnabled) {
+						if (backupMutation.param1 == m.param1 && backupMutation.param2 == m.param2 &&
+						    encryptedMutation.present()) {
+							backupMutation = encryptedMutation.get();
+						} else {
+							std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
+							    getEncryptDetailsFromMutationRef(self->pProxyCommitData, backupMutation);
+							EncryptCipherDomainId domainId = p.second;
+							backupMutation =
+							    backupMutation.encrypt(self->cipherKeys, domainId, arena, BlobCipherMetrics::BACKUP);
+						}
+					}
 
 					// Add the mutation to the relevant backup tag
 					for (auto backupName : backupRange.value()) {
