@@ -512,6 +512,8 @@ ACTOR Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
 	wcx.clientId = work.clientId;
 	wcx.clientCount = work.clientCount;
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
+	wcx.ccr = ccr;
+	wcx.dbInfo = dbInfo;
 	// FIXME: Other stuff not filled in; why isn't this constructed here and passed down to the other
 	// getWorkloadIface()?
 	for (int i = 0; i < work.options.size(); i++) {
