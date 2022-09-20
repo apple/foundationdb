@@ -3593,9 +3593,9 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 			if (recovered.canBeSet())
 				recovered.send(Void());
 
-			if (!self.durableClusterId.isValid()) {
-				self.sharedActors.send(updateDurableClusterID(&self));
-			}
+			// if (!self.durableClusterId.isValid()) {
+			// 	self.sharedActors.send(updateDurableClusterID(&self));
+			// }
 			self.sharedActors.send(commitQueue(&self));
 			self.sharedActors.send(updateStorageLoop(&self));
 			self.sharedActors.send(traceRole(Role::SHARED_TRANSACTION_LOG, tlogId));
