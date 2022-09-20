@@ -103,8 +103,6 @@ std::string addPrefix(std::string prefix, std::string lines) {
 	return s;
 }
 
-#define PRIORITYMULTILOCK_DEBUG 0
-
 // Some convenience functions for debugging to stringify various structures
 // Classes can add compatibility by either specializing toString<T> or implementing
 //   std::string toString() const;
@@ -10987,5 +10985,59 @@ TEST_CASE(":/redwood/performance/histograms") {
 	double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
 	std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
 
+	return Void();
+}
+
+ACTOR Future<Void> waitLockIncrement(PriorityMultiLock* pml, int priority, int* pout) {
+	state PriorityMultiLock::Lock lock = wait(pml->lock(priority));
+	wait(delay(deterministicRandom()->random01() * .1));
+	++*pout;
+	return Void();
+}
+
+TEST_CASE("/redwood/PriorityMultiLock") {
+	state std::vector<int> priorities = { 10, 20, 40 };
+	state int concurrency = 25;
+	state PriorityMultiLock* pml = new PriorityMultiLock(concurrency, priorities);
+	state std::vector<int> counts;
+	counts.resize(priorities.size(), 0);
+
+	// Clog the lock buy taking concurrency locks at each level
+	state std::vector<Future<PriorityMultiLock::Lock>> lockFutures;
+	for (int i = 0; i < priorities.size(); ++i) {
+		for (int j = 0; j < concurrency; ++j) {
+			lockFutures.push_back(pml->lock(i));
+		}
+	}
+
+	// Wait for n = concurrency locks to be acquired
+	wait(quorum(lockFutures, concurrency));
+
+	state std::vector<Future<Void>> futures;
+	for (int i = 0; i < 10e3; ++i) {
+		int p = i % priorities.size();
+		futures.push_back(waitLockIncrement(pml, p, &counts[p]));
+	}
+
+	state Future<Void> f = waitForAll(futures);
+
+	// Release the locks
+	lockFutures.clear();
+
+	// Print stats and wait for all futures to be ready
+	loop {
+		choose {
+			when(wait(delay(1))) {
+				printf("counts: ");
+				for (auto c : counts) {
+					printf("%d ", c);
+				}
+				printf("   pml: %s\n", pml->toString().c_str());
+			}
+			when(wait(f)) { break; }
+		}
+	}
+
+	delete pml;
 	return Void();
 }
