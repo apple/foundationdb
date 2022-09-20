@@ -33,13 +33,16 @@
 
 namespace fdb_cli {
 
-Optional<std::pair<Optional<ClusterConnectionString>, Optional<DataClusterEntry>>>
-parseClusterConfiguration(std::vector<StringRef> const& tokens, DataClusterEntry const& defaults, int startIndex) {
+Optional<std::pair<Optional<ClusterConnectionString>, Optional<DataClusterEntry>>> parseClusterConfiguration(
+    std::vector<StringRef> const& tokens,
+    DataClusterEntry const& defaults,
+    int startIndex,
+    int endIndex) {
 	Optional<DataClusterEntry> entry;
 	Optional<ClusterConnectionString> connectionString;
 
 	std::set<std::string> usedParams;
-	for (int tokenNum = startIndex; tokenNum < tokens.size(); ++tokenNum) {
+	for (int tokenNum = startIndex; tokenNum < endIndex; ++tokenNum) {
 		StringRef token = tokens[tokenNum];
 		bool foundEquals;
 		StringRef param = token.eat("=", &foundEquals);
@@ -126,7 +129,7 @@ ACTOR Future<bool> metaclusterRegisterCommand(Reference<IDatabase> db, std::vect
 	}
 
 	DataClusterEntry defaultEntry;
-	auto config = parseClusterConfiguration(tokens, defaultEntry, 3);
+	auto config = parseClusterConfiguration(tokens, defaultEntry, 3, tokens.size());
 	if (!config.present()) {
 		return false;
 	} else if (!config.get().first.present()) {
@@ -158,25 +161,6 @@ ACTOR Future<bool> metaclusterRemoveCommand(Reference<IDatabase> db, std::vector
 	return true;
 }
 
-Optional<std::string> parseToken(StringRef token, const char* str) {
-	bool foundEquals;
-	StringRef param = token.eat("=", &foundEquals);
-	if (!foundEquals) {
-		fmt::print(stderr,
-		           "ERROR: invalid configuration string `{}'. String must specify a value using `='.\n",
-		           param.toString().c_str());
-		return Optional<std::string>();
-	}
-
-	if (!tokencmp(param, str)) {
-		fmt::print(
-		    stderr, "ERROR: invalid configuration string `{}'. Expected: `{}'.\n", param.toString().c_str(), str);
-		return Optional<std::string>();
-	}
-
-	return Optional<std::string>(token.toString());
-}
-
 // metacluster restore command
 ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 4 || tokens.size() > 6) {
@@ -187,17 +171,20 @@ ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vecto
 	}
 
 	// connection string
-	ClusterConnectionString connectionString;
-	auto optVal = parseToken(tokens[3], "connection_string");
-	if (optVal.present()) {
-		connectionString = ClusterConnectionString(optVal.get());
+	DataClusterEntry defaultEntry;
+	auto config = parseClusterConfiguration(tokens, defaultEntry, 3, 4);
+	if (!config.present()) {
+		return false;
+	} else if (!config.get().first.present()) {
+		fmt::print(stderr, "ERROR: connection_string must be configured when registering a cluster.\n");
+		return false;
 	}
 
 	state bool restore_from_data_cluster = tokens.size() == 5;
 	if (restore_from_data_cluster) {
 		DataClusterEntry defaultEntry;
 		wait(MetaclusterAPI::restoreCluster(
-		    db, tokens[2], connectionString, defaultEntry, AddNewTenants::False, RemoveMissingTenants::True));
+		    db, tokens[2], config.get().first.get(), defaultEntry, AddNewTenants::False, RemoveMissingTenants::True));
 
 		fmt::print("The cluster `{}' has been restored\n", printable(tokens[2]).c_str());
 		return true;
@@ -226,7 +213,7 @@ ACTOR Future<bool> metaclusterConfigureCommand(Reference<IDatabase> db, std::vec
 				throw cluster_not_found();
 			}
 
-			auto config = parseClusterConfiguration(tokens, metadata.get().entry, 3);
+			auto config = parseClusterConfiguration(tokens, metadata.get().entry, 3, tokens.size());
 			if (!config.present()) {
 				return false;
 			}
@@ -486,11 +473,10 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 		} else {
 			return {};
 		}
-	} else if (tokencmp(tokens[1], "restore") && tokens.size() < 4) {
+	} else if (tokencmp(tokens[1], "restore") && tokens.size() < 5) {
 		static std::vector<const char*> opts = { "<NAME>",
 			                                     "connection_string=<CONNECTION_STRING> ",
-			                                     "<add_new_tenants=[true|false]>",
-			                                     "<remove_missing_tenants=[true|false]>" };
+			                                     "[repopulate_from_data_cluster]" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "configure")) {
 		static std::vector<const char*> opts = {
