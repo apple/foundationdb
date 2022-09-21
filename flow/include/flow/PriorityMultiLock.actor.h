@@ -78,36 +78,39 @@ public:
 	  : PriorityMultiLock(concurrency, parseStringToVector<int>(launchLimits, ',')) {}
 
 	PriorityMultiLock(int concurrency, std::vector<int> launchLimitsByPriority)
-	  : concurrency(concurrency), available(concurrency), waiting(0), totalActiveLaunchLimits(0),
-	    launchLimits(launchLimitsByPriority) {
+	  : concurrency(concurrency), available(concurrency), waiting(0), totalActiveLaunchLimits(0) {
 
-		waiters.resize(launchLimits.size());
-		runnerCounts.resize(launchLimits.size(), 0);
+		priorities.resize(launchLimitsByPriority.size());
+		for (int i = 0; i < priorities.size(); ++i) {
+			priorities[i].launchLimit = launchLimitsByPriority[i];
+		}
+
 		fRunner = runner(this);
 	}
 
 	~PriorityMultiLock() {}
 
 	Future<Lock> lock(int priority = 0) {
-		auto& q = waiters[priority];
+		Priority& p = priorities[priority];
+		Queue& q = p.queue;
 		Waiter w;
 
 		// If this priority currently has no waiters
 		if (q.empty()) {
 			// Add this priority's launch limit to totalLimits
-			totalActiveLaunchLimits += launchLimits[priority];
+			totalActiveLaunchLimits += p.launchLimit;
 
 			// If there are slots available and the priority has capacity then don't make the caller wait
-			if (available > 0 && runnerCounts[priority] < currentCapacity(priority)) {
+			if (available > 0 && p.runners < currentCapacity(p.launchLimit)) {
 				// Remove this priority's launch limit from the total since it will remain empty
-				totalActiveLaunchLimits -= launchLimits[priority];
+				totalActiveLaunchLimits -= p.launchLimit;
 
 				// Return a Lock to the caller
-				Lock p;
-				addRunner(p, priority);
+				Lock lock;
+				addRunner(lock, &p);
 
 				pml_debug_printf("lock nowait line %d priority %d  %s\n", __LINE__, priority, toString().c_str());
-				return p;
+				return lock;
 			}
 		}
 		q.push_back(w);
@@ -126,7 +129,7 @@ public:
 		runners.clear();
 		brokenOnDestruct.sendError(broken_promise());
 		waiting = 0;
-		waiters.clear();
+		priorities.clear();
 	}
 
 	std::string toString() const {
@@ -147,32 +150,27 @@ public:
 		           runners.size(),
 		           runnersDone);
 
-		for (int i = 0; i < waiters.size(); ++i) {
-			s += format("p%d: limit=%d run=%d wait=%d cap=%d  ",
-			            i,
-			            launchLimits[i],
-			            runnerCounts[i],
-			            waiters[i].size(),
-			            waiters[i].empty() ? 0 : currentCapacity(i));
+		for (int i = 0; i < priorities.size(); ++i) {
+			s += format("p%d:{%s} ", i, priorities[i].toString(this).c_str());
 		}
 
 		s += "}";
 		return s;
 	}
-	int maxPriority() const { return launchLimits.size() - 1; }
+	int maxPriority() const { return priorities.size() - 1; }
 
 	int totalWaiters() const { return waiting; }
 
 	int numWaiters(const unsigned int priority) const {
-		ASSERT(priority < waiters.size());
-		return waiters[priority].size();
+		ASSERT(priority < priorities.size());
+		return priorities[priority].queue.size();
 	}
 
 	int totalRunners() const { return concurrency - available; }
 
 	int numRunners(const unsigned int priority) const {
-		ASSERT(priority < waiters.size());
-		return runnerCounts[priority];
+		ASSERT(priority < priorities.size());
+		return priorities[priority].runners;
 	}
 
 private:
@@ -192,12 +190,28 @@ private:
 	int totalActiveLaunchLimits;
 
 	typedef Deque<Waiter> Queue;
-	// Launch limits by priority
-	std::vector<int> launchLimits;
-	// Queue of waiters by priority
-	std::vector<Queue> waiters;
-	// Count of active runners by priority
-	std::vector<int> runnerCounts;
+
+	struct Priority {
+		Priority() : runners(0), launchLimit(0) {}
+
+		// Queue of waiters at this priority
+		Queue queue;
+		// Number of runners at this priority
+		int runners;
+		// Configured launch limit for this priority
+		int launchLimit;
+
+		std::string toString(const PriorityMultiLock* pml) const {
+			return format("limit=%d run=%d wait=%d cap=%d",
+			              launchLimit,
+			              runners,
+			              queue.size(),
+			              queue.empty() ? 0 : pml->currentCapacity(launchLimit));
+		}
+	};
+
+	std::vector<Priority> priorities;
+
 	// Current or recent (ended) runners
 	Deque<Future<Void>> runners;
 
@@ -205,16 +219,19 @@ private:
 	AsyncTrigger wakeRunner;
 	Promise<Void> brokenOnDestruct;
 
-	ACTOR static Future<Void> handleRelease(PriorityMultiLock* self, Future<Void> f, int priority) {
+	ACTOR static Future<Void> handleRelease(PriorityMultiLock* self, Future<Void> f, Priority* priority) {
 		try {
 			wait(f);
 		} catch (Error& e) {
 		}
 
 		++self->available;
-		self->runnerCounts[priority] -= 1;
+		priority->runners -= 1;
 
-		pml_debug_printf("lock release line %d priority %d  %s\n", __LINE__, priority, self->toString().c_str());
+		pml_debug_printf("lock release line %d priority %d  %s\n",
+		                 __LINE__,
+		                 (int)(priority - &self->priorities.front()),
+		                 self->toString().c_str());
 
 		// If there are any waiters or if the runners array is getting large, trigger the runner loop
 		if (self->waiting > 0 || self->runners.size() > 1000) {
@@ -223,18 +240,18 @@ private:
 		return Void();
 	}
 
-	void addRunner(Lock& lock, int priority) {
-		runnerCounts[priority] += 1;
+	void addRunner(Lock& lock, Priority* p) {
+		p->runners += 1;
 		--available;
-		runners.push_back(handleRelease(this, lock.promise.getFuture(), priority));
+		runners.push_back(handleRelease(this, lock.promise.getFuture(), p));
 	}
 
 	// Current maximum running tasks for the specified priority, which must have waiters
 	// or the result is undefined
-	int currentCapacity(int priority) const {
+	int currentCapacity(int launchLimit) const {
 		// The total concurrency allowed for this priority at present is the total concurrency times
 		// priority's launch limit divided by the total launch limits for all priorities with waiters.
-		return ceil((float)launchLimits[priority] / totalActiveLaunchLimits * concurrency);
+		return ceil((float)launchLimit / totalActiveLaunchLimits * concurrency);
 	}
 
 	ACTOR static Future<Void> runner(PriorityMultiLock* self) {
@@ -274,34 +291,36 @@ private:
 				pml_debug_printf(
 				    "  launch loop start line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
 
+				Priority* pPriority;
+
 				// Find the next priority with waiters and capacity.  There must be at least one.
 				loop {
-					if (++priority == self->waiters.size()) {
+					// Rotate to next priority
+					if (++priority == self->priorities.size()) {
 						priority = 0;
 					}
+
+					pPriority = &self->priorities[priority];
 
 					pml_debug_printf("    launch loop scan line %d  priority=%d  %s\n",
 					                 __LINE__,
 					                 priority,
 					                 self->toString().c_str());
 
-					if (!self->waiters[priority].empty() &&
-					    self->runnerCounts[priority] < self->currentCapacity(priority)) {
+					if (!pPriority->queue.empty() &&
+					    pPriority->runners < self->currentCapacity(pPriority->launchLimit)) {
 						break;
 					}
 				}
 
-				Queue& queue = self->waiters[priority];
-
-				pml_debug_printf(
-				    "    launching line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
+				Queue& queue = pPriority->queue;
 
 				Waiter w = queue.front();
 				queue.pop_front();
 
 				// If this priority is now empty, subtract its launch limit from totalLimits
 				if (queue.empty()) {
-					self->totalActiveLaunchLimits -= self->launchLimits[priority];
+					self->totalActiveLaunchLimits -= pPriority->launchLimit;
 
 					pml_debug_printf("      emptied priority line %d  priority=%d  %s\n",
 					                 __LINE__,
@@ -321,8 +340,14 @@ private:
 
 				// If the lock was not already released, add it to the runners future queue
 				if (lock.promise.canBeSet()) {
-					self->addRunner(lock, priority);
+					self->addRunner(lock, pPriority);
 				}
+
+				pml_debug_printf("    launched line %d alreadyDone=%d priority=%d  %s\n",
+				                 __LINE__,
+				                 !lock.promise.canBeSet(),
+				                 priority,
+				                 self->toString().c_str());
 			}
 		}
 	}
