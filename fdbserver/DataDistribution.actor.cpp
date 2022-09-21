@@ -644,7 +644,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
-			actors.push_back(reportErrorsExcept(dataDistributionQueue(cx,
+			actors.push_back(reportErrorsExcept(dataDistributionQueue(self->txnProcessor,
 			                                                          self->relocationProducer,
 			                                                          self->relocationConsumer.getFuture(),
 			                                                          getShardMetrics,

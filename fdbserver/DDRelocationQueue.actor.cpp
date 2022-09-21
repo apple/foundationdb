@@ -728,7 +728,7 @@ struct DDQueue : public IDDRelocationQueue {
 
 	DDQueue(UID mid,
 	        MoveKeysLock lock,
-	        Database cx,
+	        const std::shared_ptr<IDDTxnProcessor>& dbProcessor,
 	        std::vector<TeamCollectionInterface> teamCollections,
 	        Reference<ShardsAffectedByTeamFailure> sABTF,
 	        Reference<PhysicalShardCollection> physicalShardCollection,
@@ -739,7 +739,7 @@ struct DDQueue : public IDDRelocationQueue {
 	        FutureStream<RelocateShard> input,
 	        PromiseStream<GetMetricsRequest> getShardMetrics,
 	        PromiseStream<GetTopKMetricsRequest> getTopKMetrics)
-	  : IDDRelocationQueue(), distributorId(mid), lock(lock), cx(cx), txnProcessor(new DDTxnProcessor(cx)),
+	  : IDDRelocationQueue(), distributorId(mid), lock(lock), cx(dbProcessor->getDb()), txnProcessor(dbProcessor),
 	    teamCollections(teamCollections), shardsAffectedByTeamFailure(sABTF),
 	    physicalShardCollection(physicalShardCollection), getAverageShardBytes(getAverageShardBytes),
 	    startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
@@ -1293,6 +1293,7 @@ struct DDQueue : public IDDRelocationQueue {
 
 	// Schedules cancellation of a data move.
 	void enqueueCancelledDataMove(UID dataMoveId, KeyRange range, const DDEnabledState* ddEnabledState) {
+		ASSERT(!txnProcessor->isMocked()); // the mock implementation currently doesn't support data move
 		std::vector<Future<Void>> cleanup;
 		auto f = this->dataMoves.intersectingRanges(range);
 		for (auto it = f.begin(); it != f.end(); ++it) {
@@ -2016,7 +2017,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 	}
 	// randomly choose topK shards
 	int topK = std::max(1, std::min(int(0.1 * shards.size()), SERVER_KNOBS->READ_REBALANCE_SHARD_TOPK));
-	state Future<HealthMetrics> healthMetrics = self->cx->getHealthMetrics(true);
+	state Future<HealthMetrics> healthMetrics = self->txnProcessor->getHealthMetrics(true);
 	state GetTopKMetricsRequest req(
 	    shards, topK, (srcLoad - destLoad) * SERVER_KNOBS->READ_REBALANCE_MAX_SHARD_FRAC, srcLoad / shards.size());
 	state GetTopKMetricsReply reply = wait(brokenPromiseToNever(self->getTopKMetrics.getReply(req)));
@@ -2462,7 +2463,7 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueue* self, int teamCollectionIndex) {
 	}
 }
 
-ACTOR Future<Void> dataDistributionQueue(Database cx,
+ACTOR Future<Void> dataDistributionQueue(std::shared_ptr<IDDTxnProcessor> dbProcessor,
                                          PromiseStream<RelocateShard> output,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,
@@ -2481,7 +2482,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          const DDEnabledState* ddEnabledState) {
 	state DDQueue self(distributorId,
 	                   lock,
-	                   cx,
+	                   dbProcessor,
 	                   teamCollections,
 	                   shardsAffectedByTeamFailure,
 	                   physicalShardCollection,

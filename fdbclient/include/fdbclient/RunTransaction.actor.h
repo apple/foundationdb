@@ -98,5 +98,22 @@ Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>())
 	return result;
 }
 
+ACTOR template <class Function, class DB>
+Future<decltype(std::declval<Function>()(Reference<typename DB::TransactionT>()).getValue())> runReadOnlyTransactionNoRetry(
+    Reference<DB> db,
+    Function func) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	try {
+		// func should be idempotent; otherwise, retry will get undefined result
+		state decltype(std::declval<Function>()(Reference<typename DB::TransactionT>()).getValue()) result =
+		    wait(func(tr));
+		return result;
+	} catch (Error& e_) {
+		state Error e = e_;
+		wait(safeThreadFutureToFuture(tr->onError(e)));
+		throw e;
+	}
+}
+
 #include "flow/unactorcompiler.h"
 #endif

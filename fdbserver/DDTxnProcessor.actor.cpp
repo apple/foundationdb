@@ -22,6 +22,8 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbclient/DatabaseContext.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class DDTxnProcessorImpl {
@@ -493,4 +495,16 @@ Future<bool> DDTxnProcessor::isDataDistributionEnabled(const DDEnabledState* ddE
 
 Future<Void> DDTxnProcessor::pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const {
 	return DDTxnProcessorImpl::pollMoveKeysLock(cx, lock, ddEnabledState);
+}
+
+Future<HealthMetrics> DDTxnProcessor::getHealthMetrics(bool detailed) const {
+	return cx->getHealthMetrics(detailed);
+}
+
+Future<Optional<Value>> DDTxnProcessor::readRebalanceDDIgnoreKey() const {
+	return runReadOnlyTransactionNoRetry(cx.getReference(), [](Reference<ReadYourWritesTransaction> tr) {
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		return tr->get(rebalanceDDIgnoreKey);
+	});
 }

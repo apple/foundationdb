@@ -78,6 +78,10 @@ public:
 	                                         const DDEnabledState* ddEnabledState) const = 0;
 
 	virtual Future<Void> moveKeys(const MoveKeysParams& params) const = 0;
+
+	virtual Future<HealthMetrics> getHealthMetrics(bool detailed = false) const = 0;
+
+	virtual Future<Optional<Value>> readRebalanceDDIgnoreKey() const { return {}; }
 };
 
 class DDTxnProcessorImpl;
@@ -134,6 +138,10 @@ public:
 	}
 
 	Future<Void> moveKeys(const MoveKeysParams& params) const override { return ::moveKeys(cx, params); }
+
+	Future<HealthMetrics> getHealthMetrics(bool detailed) const override;
+
+	Future<Optional<Value>> readRebalanceDDIgnoreKey() const override;
 };
 
 // A mock transaction implementation for test usage.
