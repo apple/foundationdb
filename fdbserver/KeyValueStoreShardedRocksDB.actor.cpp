@@ -2173,14 +2173,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				rocksDBMetrics->getReadRangeQueueWaitHistogram(threadIndex)->sampleSeconds(readBeginTime - a.startTime);
 			}
 			rocksDBMetrics->getReadQueueLatencySample(threadIndex)->addMeasurement(readBeginTime - a.startTime);
-			// if (readBeginTime - a.startTime > readRangeTimeout) {
-			// 	TraceEvent(SevWarn, "ShardedRocksKVSReadTimeout")
-			// 	    .detail("Error", "Read range request timedout")
-			// 	    .detail("Method", "ReadRangeAction")
-			// 	    .detail("Timeout value", readRangeTimeout);
-			// 	a.result.sendError(transaction_too_old());
-			// 	return;
-			// }
+			if (readBeginTime - a.startTime > readRangeTimeout) {
+				TraceEvent(SevWarn, "ShardedRocksKVSReadTimeout")
+				    .detail("Error", "Read range request timedout")
+				    .detail("Method", "ReadRangeAction")
+				    .detail("Timeout value", readRangeTimeout);
+				a.result.sendError(transaction_too_old());
+				return;
+			}
 
 			int rowLimit = a.rowLimit;
 			int byteLimit = a.byteLimit;
