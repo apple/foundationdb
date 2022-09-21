@@ -29,7 +29,9 @@
 #include <boost/iostreams/filter/gzip.hpp>
 #endif
 #include <boost/iostreams/filtering_streambuf.hpp>
+#ifdef ZSTD_LIB_SUPPORTED
 #include <boost/iostreams/filter/zstd.hpp>
+#endif
 #include <sstream>
 
 StringRef CompressionUtils::compress(const CompressionFilter filter, const StringRef& data, Arena& arena) {
@@ -43,9 +45,12 @@ StringRef CompressionUtils::compress(const CompressionFilter filter, const Strin
 		return CompressionUtils::compress(filter, data, bio::gzip::default_compression, arena);
 	}
 #endif
+
+#ifdef ZSTD_LIB_SUPPORTED
 	if (filter == CompressionFilter::ZSTD) {
 		return CompressionUtils::compress(filter, data, bio::zstd::default_compression, arena);
 	}
+#endif
 	throw not_implemented();
 }
 
@@ -66,9 +71,13 @@ StringRef CompressionUtils::compress(const CompressionFilter filter, const Strin
 		out.push(bio::gzip_compressor(bio::gzip_params(level)));
 	}
 #endif
+
+#ifdef ZSTD_LIB_SUPPORTED
 	if (filter == CompressionFilter::ZSTD) {
 		out.push(bio::zstd_compressor(bio::zstd_params(level)));
 	}
+#endif
+
 	out.push(decomStream);
 	bio::copy(out, compStream);
 
@@ -92,9 +101,13 @@ StringRef CompressionUtils::decompress(const CompressionFilter filter, const Str
 		out.push(bio::gzip_decompressor());
 	}
 #endif
+
+#ifdef ZSTD_LIB_SUPPORTED
 	if (filter == CompressionFilter::ZSTD) {
 		out.push(bio::zstd_decompressor());
 	}
+#endif
+
 	out.push(compStream);
 	bio::copy(out, decompStream);
 
@@ -170,6 +183,7 @@ TEST_CASE("/CompressionUtils/gzipCompression2") {
 }
 #endif
 
+#ifdef ZSTD_LIB_SUPPORTED
 TEST_CASE("/CompressionUtils/zstdCompression") {
 	testCompression(CompressionFilter::ZSTD);
 	TraceEvent("ZstdCompressionDone");
@@ -183,3 +197,4 @@ TEST_CASE("/CompressionUtils/zstdCompression2") {
 
 	return Void();
 }
+#endif

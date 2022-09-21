@@ -41,7 +41,9 @@
 #ifdef ZLIB_LIB_SUPPORTED
 #include <boost/iostreams/filter/gzip.hpp>
 #endif
+#ifdef ZSTD_LIB_SUPPORTED
 #include <boost/iostreams/filter/zstd.hpp>
+#endif
 #include <cstring>
 #include <fstream> // for perf microbenchmark
 #include <limits>
@@ -75,12 +77,14 @@ static int getDefaultCompressionLevel(CompressionFilter filter) {
 		// return boost::iostream::gzip::best_compression;
 		return boost::iostreams::gzip::best_speed;
 #endif
+#ifdef ZSTD_LIB_SUPPORTED
 	} else if (filter == CompressionFilter::ZSTD) {
 		// opt for high speed compression, larger levels have a high cpu cost and not much compression ratio
 		// improvement, according to benchmarks
 		// return boost::iostreams::zstd::default_compression;
 		// return boost::iostreams::zstd::best_compression;
 		return boost::iostreams::zstd::best_speed;
+#endif
 	} else {
 		ASSERT(false);
 		return -1;
@@ -2086,11 +2090,21 @@ struct KeyValueGen {
 			cipherKeys = getCipherKeysCtx(ar);
 		}
 		if (deterministicRandom()->coinflip()) {
+			std::vector<CompressionFilter> filters;
+			filters.push_back(CompressionFilter::NONE);
 #ifdef ZLIB_LIB_SUPPORTED
-			compressFilter = CompressionFilter::GZIP;
-#else
-			compressFilter = deterministicRandom()->coinflip() ? CompressionFilter::NONE : CompressionFilter::ZSTD;
+			filters.push_back(CompressionFilter::GZIP);
 #endif
+#ifdef ZSTD_LIB_SUPPORTED
+			filters.push_back(CompressionFilter::ZSTD);
+#endif
+			ASSERT_GE(filters.size(), 1);
+			if (filters.size() == 1) {
+				compressFilter = filters[0];
+			} else {
+				int idx = deterministicRandom()->randomInt(0, filters.size());
+				compressFilter = filters[idx];
+			}
 		}
 	}
 
@@ -2277,7 +2291,9 @@ TEST_CASE("/blobgranule/files/validateEncryptionCompression") {
 #ifdef ZLIB_LIB_SUPPORTED
 	compressionModes.push_back(CompressionFilter::GZIP);
 #endif
+#ifdef ZSTD_LIB_SUPPORTED
 	compressionModes.push_back(CompressionFilter::ZSTD);
+#endif
 
 	std::vector<Value> snapshotValues;
 	for (bool encryptionMode : encryptionModes) {
@@ -2994,7 +3010,9 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 #ifdef ZLIB_LIB_SUPPORTED
 	compressionModes.push_back(CompressionFilter::GZIP);
 #endif
+#ifdef ZSTD_LIB_SUPPORTED
 	compressionModes.push_back(CompressionFilter::ZSTD);
+#endif
 
 	std::vector<std::string> runNames = { "logical" };
 	std::vector<std::pair<int64_t, double>> snapshotMetrics;
