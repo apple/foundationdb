@@ -205,21 +205,28 @@ private:
 	AsyncTrigger wakeRunner;
 	Promise<Void> brokenOnDestruct;
 
+	ACTOR static Future<Void> handleRelease(PriorityMultiLock* self, Future<Void> f, int priority) {
+		try {
+			wait(f);
+		} catch (Error& e) {
+		}
+
+		++self->available;
+		self->runnerCounts[priority] -= 1;
+
+		pml_debug_printf("lock release line %d priority %d  %s\n", __LINE__, priority, self->toString().c_str());
+
+		// If there are any waiters or if the runners array is getting large, trigger the runner loop
+		if (self->waiting > 0 || self->runners.size() > 1000) {
+			self->wakeRunner.trigger();
+		}
+		return Void();
+	}
+
 	void addRunner(Lock& lock, int priority) {
 		runnerCounts[priority] += 1;
 		--available;
-		runners.push_back(map(ready(lock.promise.getFuture()), [=](Void) {
-			++available;
-			runnerCounts[priority] -= 1;
-
-			pml_debug_printf("lock release line %d priority %d  %s\n", __LINE__, priority, toString().c_str());
-
-			// If there are any waiters or if the runners array is getting large, trigger the runner loop
-			if (waiting > 0 || runners.size() > 1000) {
-				wakeRunner.trigger();
-			}
-			return Void();
-		}));
+		runners.push_back(handleRelease(this, lock.promise.getFuture(), priority));
 	}
 
 	// Current maximum running tasks for the specified priority, which must have waiters
