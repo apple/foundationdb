@@ -131,7 +131,13 @@ else()
 
   # check linker flags.
   if (USE_LD STREQUAL "DEFAULT")
-    set(USE_LD "LD")
+    # Note:  Setting USE_LD = LD means "don't touch the linker settings", so we
+    # set USE_LD=LD on MacOS regardless of whether the compiler is Clang.
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND NOT APPLE)
+      set(USE_LD "LLD")
+    else()
+      set(USE_LD "LD")
+    endif()
   else()
     if ((NOT (USE_LD STREQUAL "LD")) AND (NOT (USE_LD STREQUAL "GOLD")) AND (NOT (USE_LD STREQUAL "LLD")) AND (NOT (USE_LD STREQUAL "BFD")))
       message (FATAL_ERROR "USE_LD must be set to DEFAULT, LD, BFD, GOLD, or LLD!")
