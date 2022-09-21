@@ -275,8 +275,7 @@ private:
 				    "  launch loop start line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
 
 				// Find the next priority with waiters and capacity.  There must be at least one.
-				while (self->waiters[priority].empty() ||
-				       self->runnerCounts[priority] >= self->currentCapacity(priority)) {
+				loop {
 					if (++priority == self->waiters.size()) {
 						priority = 0;
 					}
@@ -285,50 +284,44 @@ private:
 					                 __LINE__,
 					                 priority,
 					                 self->toString().c_str());
+
+					if (!self->waiters[priority].empty() &&
+					    self->runnerCounts[priority] < self->currentCapacity(priority)) {
+						break;
+					}
 				}
 
 				Queue& queue = self->waiters[priority];
 
-				while (!queue.empty() && self->runnerCounts[priority] < self->currentCapacity(priority)) {
-					pml_debug_printf(
-					    "    launching line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
+				pml_debug_printf(
+				    "    launching line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
 
-					Waiter w = queue.front();
-					queue.pop_front();
+				Waiter w = queue.front();
+				queue.pop_front();
 
-					// If this priority is now empty, subtract its launch limit from totalLimits
-					if (queue.empty()) {
-						self->totalActiveLaunchLimits -= self->launchLimits[priority];
+				// If this priority is now empty, subtract its launch limit from totalLimits
+				if (queue.empty()) {
+					self->totalActiveLaunchLimits -= self->launchLimits[priority];
 
-						pml_debug_printf("      emptied priority line %d  priority=%d  %s\n",
-						                 __LINE__,
-						                 priority,
-						                 self->toString().c_str());
-					}
+					pml_debug_printf("      emptied priority line %d  priority=%d  %s\n",
+					                 __LINE__,
+					                 priority,
+					                 self->toString().c_str());
+				}
 
-					--self->waiting;
-					Lock lock;
+				--self->waiting;
+				Lock lock;
 
-					w.lockPromise.send(lock);
+				w.lockPromise.send(lock);
 
-					// Self may have been destructed during the lock callback
-					if (error.isReady()) {
-						throw error.getError();
-					}
+				// Self may have been destructed during the lock callback
+				if (error.isReady()) {
+					throw error.getError();
+				}
 
-					// If the lock was not already released, add it to the runners future queue
-					if (lock.promise.canBeSet()) {
-						self->addRunner(lock, priority);
-
-						// A slot has been consumed, so stop reading from this queue if there aren't any more
-						if (self->available == 0) {
-							pml_debug_printf("      avail now 0 line %d  priority=%d  %s\n",
-							                 __LINE__,
-							                 priority,
-							                 self->toString().c_str());
-							break;
-						}
-					}
+				// If the lock was not already released, add it to the runners future queue
+				if (lock.promise.canBeSet()) {
+					self->addRunner(lock, priority);
 				}
 			}
 		}
