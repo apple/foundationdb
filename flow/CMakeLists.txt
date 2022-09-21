@@ -91,8 +91,3 @@ endif()
 
 add_executable(mkcert MkCertCli.cpp)
 target_link_libraries(mkcert PUBLIC flow)
-
-add_executable(mtls_unittest TLSTest.cpp)
-target_link_libraries(mtls_unittest PUBLIC flow)
-add_test(NAME mutual_tls_unittest
-         COMMAND $<TARGET_FILE:mtls_unittest>)
