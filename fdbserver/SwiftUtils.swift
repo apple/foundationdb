@@ -2,10 +2,9 @@ import Flow
 import FDBServer
 import FDBClient
 
-@_cdecl("testSwiftInFDB")
-public func testSwiftInFDB() {
+@_expose(Cxx)
+public func testSwiftFDBServerMain() {
     print("[swift] fdbserver")
-    print("a")
     installGlobalSwiftConcurrencyHooks()
 
     // capture the main thread ID
@@ -16,6 +15,11 @@ public func testSwiftInFDB() {
 
     print("[swift][tid:\(_tid())] run network @ thread:\(_tid())")
     globalNetworkRun()
+}
+
+@_expose(Cxx)
+public func swiftFunctionCalledFromCpp(_ x: CInt) -> CInt {
+    return x
 }
 
 func testFDBServerImport(_ p: ResolutionBalancer) {
