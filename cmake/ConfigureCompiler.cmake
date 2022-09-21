@@ -130,21 +130,18 @@ else()
   endif()
 
   # check linker flags.
-  if (USE_LD STREQUAL "DEFAULT")
-    # Note:  Setting USE_LD = LD means "don't touch the linker settings", so we
-    # set USE_LD=LD on MacOS regardless of whether the compiler is Clang.
-    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND NOT APPLE)
-      set(USE_LD "LLD")
-    else()
-      set(USE_LD "LD")
-    endif()
-  else()
-    if ((NOT (USE_LD STREQUAL "LD")) AND (NOT (USE_LD STREQUAL "GOLD")) AND (NOT (USE_LD STREQUAL "LLD")) AND (NOT (USE_LD STREQUAL "BFD")))
-      message (FATAL_ERROR "USE_LD must be set to DEFAULT, LD, BFD, GOLD, or LLD!")
-    endif()
+  if ((NOT (USE_LD STREQUAL "DEFAULT")) AND (NOT (USE_LD STREQUAL "LD")) AND (NOT (USE_LD STREQUAL "GOLD")) AND (NOT (USE_LD STREQUAL "LLD")) AND (NOT (USE_LD STREQUAL "BFD")))
+    message (FATAL_ERROR "USE_LD must be set to DEFAULT, LD, BFD, GOLD, or LLD!")
   endif()
 
-  # if USE_LD=LD, then we don't do anything, defaulting to whatever system
+  if (USE_LD STREQUAL "LD" AND (APPLE OR WIN32))
+    message (FATAL_ERROR "USE_LD must not be set to LD under MacOS or Windows.  (Set it to DEFAULT to get the old behavior)")
+  endif()
+
+  # if USE_LD=LD then we assume we're on Linux or some other platform that
+  # defaults to LD, and pretend it was set to DEFAULT.
+
+  # if USE_LD=DEFAULT then we don't do anything, defaulting to whatever system
   # linker is available (e.g. binutils doesn't normally exist on macOS, so this
   # implies the default xcode linker, and other distros may choose others by
   # default).

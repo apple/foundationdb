@@ -10,6 +10,12 @@ else()
   set(ROCKS_CMAKE_CXX_FLAGS "")
 endif()
 
+# Note:  If you find yourself reading this because you can't link to
+# a RocksDB shared library, or are having trouble with an executable
+# from the RocksDB build, consider passing through CMAKE_EXE_LINKER_FLAGS
+# and/or CMAKE_SHARED_LINKER_FLAGS.  As of this writing, we don't use
+# those build targets for anything.
+
 if (RocksDB_FOUND)
   ExternalProject_Add(rocksdb
     SOURCE_DIR "${RocksDB_ROOT}"
