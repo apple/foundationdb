@@ -27,7 +27,7 @@ function(generate_modulemap out module target)
         endif()
       endif()
       set(header_list "${header_list}    header \"${dirname}/${fname}\"\n")
-      # needs 3.20
+      # FIXME: needs 3.20 rdar://100204970 ([fdb] Update CMake to 3.20)
       #cmake_path(IS_PREFIX ${CMAKE_BINARY_DIR} ${headerdir} isGenerated)
       # if (NOT ${isGenerated})
       if (NOT ${headerdir} MATCHES ${CMAKE_BINARY_DIR})
