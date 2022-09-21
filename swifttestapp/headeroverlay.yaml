@@ -1,0 +1,7 @@
+{
+  "use-external-names": false,
+  "version": 0,
+  "roots": [
+    @VFS_ROOTS@
+  ]
+}
