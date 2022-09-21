@@ -1011,10 +1011,17 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 				ASSERT(tenantName.present());
 				encryptDomains[tenantId] = Standalone(tenantName.get(), tenantInfo.arena);
 			} else {
-				for (auto m : trs[t].transaction.mutations) {
-					std::pair<EncryptCipherDomainName, int64_t> details =
-					    getEncryptDetailsFromMutationRef(pProxyCommitData, m);
-					encryptDomains[details.second] = details.first;
+				// Optimization: avoid enumerating mutations if cluster only serves default encryption domains
+				if (pProxyCommitData->tenantMap.size() > 0) {
+					for (auto m : trs[t].transaction.mutations) {
+						std::pair<EncryptCipherDomainName, int64_t> details =
+						    getEncryptDetailsFromMutationRef(pProxyCommitData, m);
+						encryptDomains[details.second] = details.first;
+					}
+				} else {
+					// Ensure default encryption domain-ids are present.
+					ASSERT_EQ(encryptDomains.count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID), 1);
+					ASSERT_EQ(encryptDomains.count(FDB_DEFAULT_ENCRYPT_DOMAIN_ID), 1);
 				}
 			}
 		}
@@ -1473,14 +1480,11 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 						    encryptedMutation.present()) {
 							backupMutation = encryptedMutation.get();
 						} else {
-							// Avoid enumerating mutations if cluster only serves default encryption domains
-							if (pProxyCommitData->tenantMap.size() > 0) {
-								std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
-								    getEncryptDetailsFromMutationRef(self->pProxyCommitData, backupMutation);
-								EncryptCipherDomainId domainId = p.second;
-								backupMutation = backupMutation.encrypt(
-								    self->cipherKeys, domainId, arena, BlobCipherMetrics::BACKUP);
-							}
+							std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
+							    getEncryptDetailsFromMutationRef(self->pProxyCommitData, backupMutation);
+							EncryptCipherDomainId domainId = p.second;
+							backupMutation =
+							    backupMutation.encrypt(self->cipherKeys, domainId, arena, BlobCipherMetrics::BACKUP);
 						}
 					}
 
