@@ -46,7 +46,7 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 	// Verification Mode: We run the workload indefinitely in this mode.
 	// The idea is to keep going until we get a non-zero chaosMetric to ensure
 	// that we haven't lost the chaos event. testDuration is ignored in this mode
-	bool verificationMode;
+	bool verificationMode = false;
 
 	DiskFailureInjectionWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {}
 
