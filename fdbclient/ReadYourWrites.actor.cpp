@@ -1842,6 +1842,13 @@ Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> ReadYourWritesTransaction::
 	return waitOrError(tr.summarizeBlobGranules(range, summaryVersion, rangeLimit), resetPromise.getFuture());
 }
 
+void ReadYourWritesTransaction::addGranuleMaterializeStats(const GranuleMaterializeStats& stats) {
+	if (checkUsedDuringCommit()) {
+		throw used_during_commit();
+	}
+	tr.addGranuleMaterializeStats(stats);
+}
+
 void ReadYourWritesTransaction::addReadConflictRange(KeyRangeRef const& keys) {
 	if (checkUsedDuringCommit()) {
 		throw used_during_commit();
