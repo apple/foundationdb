@@ -1867,6 +1867,12 @@ ACTOR Future<Void> forceFlushCleanup(Reference<BlobWorkerData> bwData, Reference
 	if (metadata->forceFlushVersion.get() < v && metadata->pendingDeltaVersion < v) {
 		metadata->forceFlushVersion.set(v);
 		++bwData->stats.forceFlushCleanups;
+		if (BW_DEBUG) {
+			fmt::print("Granule [{0} - {1}) forcing flush cleanup @ {2}\n",
+			           metadata->keyRange.begin.printable(),
+			           metadata->keyRange.end.printable(),
+			           v);
+		}
 	}
 	return Void();
 }
@@ -1886,7 +1892,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 	state Future<Void> forceFlushCleanupFuture;
 	state GranuleStartState startState;
 	state bool readOldChangeFeed;
-	state Optional<std::pair<KeyRange, UID>> oldChangeFeedDataComplete;
 	state Key cfKey;
 	state Optional<Key> oldCFKey;
 	state int pendingSnapshots = 0;
@@ -2152,9 +2157,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				ASSERT(readOldChangeFeed);
 
 				readOldChangeFeed = false;
-				// set this so next delta file write updates granule split metadata to done
-				ASSERT(startState.splitParentGranule.present());
-				oldChangeFeedDataComplete = startState.splitParentGranule.get();
 				if (BW_DEBUG) {
 					fmt::print("Granule [{0} - {1}) switching to new change feed {2} @ {3}, {4}\n",
 					           metadata->keyRange.begin.printable(),
@@ -2293,7 +2295,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										ASSERT(cfRollbackVersion >= metadata->durableDeltaVersion.get());
 										CODE_PROBE(true, "rollback crossed change feed boundaries");
 										readOldChangeFeed = true;
-										oldChangeFeedDataComplete.reset();
 										forceFlushCleanupFuture = Never();
 									}
 
@@ -2423,6 +2424,21 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					CODE_PROBE(true, "Force flushing empty delta file!");
 				}
 
+				// launch pipelined, but wait for previous operation to complete before persisting to FDB
+				Future<BlobFileIndex> previousFuture;
+				if (!inFlightFiles.empty()) {
+					previousFuture = inFlightFiles.back().future;
+				} else {
+					previousFuture = Future<BlobFileIndex>(BlobFileIndex());
+				}
+
+				Optional<std::pair<KeyRange, UID>> oldChangeFeedDataComplete;
+				if (startState.splitParentGranule.present() &&
+				    metadata->pendingDeltaVersion < startState.changeFeedStartVersion &&
+				    lastDeltaVersion >= startState.changeFeedStartVersion) {
+					oldChangeFeedDataComplete = startState.splitParentGranule.get();
+				}
+
 				if (BW_DEBUG) {
 					fmt::print("Granule [{0} - {1}) flushing delta file after {2} bytes @ {3} {4}\n",
 					           metadata->keyRange.begin.printable(),
@@ -2432,13 +2448,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					           oldChangeFeedDataComplete.present() ? ". Finalizing " : "");
 				}
 
-				// launch pipelined, but wait for previous operation to complete before persisting to FDB
-				Future<BlobFileIndex> previousFuture;
-				if (!inFlightFiles.empty()) {
-					previousFuture = inFlightFiles.back().future;
-				} else {
-					previousFuture = Future<BlobFileIndex>(BlobFileIndex());
-				}
 				startDeltaFileWrite = bwData->deltaWritesLock->take();
 				Future<BlobFileIndex> dfFuture =
 				    writeDeltaFile(bwData,
@@ -2455,7 +2464,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				                   startDeltaFileWrite);
 				inFlightFiles.push_back(InFlightFile(dfFuture, lastDeltaVersion, metadata->bufferedDeltaBytes, false));
 
-				oldChangeFeedDataComplete.reset();
 				// add new pending delta file
 				ASSERT(metadata->pendingDeltaVersion < lastDeltaVersion);
 				metadata->pendingDeltaVersion = lastDeltaVersion;
