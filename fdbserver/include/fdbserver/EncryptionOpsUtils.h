@@ -22,6 +22,7 @@
 #define FDBSERVER_ENCRYPTION_OPS_UTIL_H
 #pragma once
 
+#include "flow/Error.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/CommitProxyInterface.h"
 
