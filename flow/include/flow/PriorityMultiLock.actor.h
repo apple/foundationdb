@@ -50,7 +50,7 @@
 //
 //   totalActiveLaunchLimits = sum of limits for all priorities with waiters
 //   When waiters[n] becomes == 0, totalActiveLaunchLimits -= launchLimits[n]
-//   When waiters[n] becomes  > 0, totaltotalActiveLaunchLimitsLimits += launchLimits[n]
+//   When waiters[n] becomes  > 0, totalActiveLaunchLimits += launchLimits[n]
 //
 //   The total capacity of a priority to be considered when launching tasks is
 //     ceil(launchLimits[n] / totalLimits * concurrency)
@@ -105,13 +105,15 @@ public:
 				// Return a Lock to the caller
 				Lock p;
 				addRunner(p, priority);
+
+				pml_debug_printf("lock nowait line %d priority %d  %s\n", __LINE__, priority, toString().c_str());
 				return p;
 			}
 		}
 		q.push_back(w);
 		++waiting;
 
-		pml_debug_printf("lock line %d priority %d  %s\n", __LINE__, priority, toString().c_str());
+		pml_debug_printf("lock wait line %d priority %d  %s\n", __LINE__, priority, toString().c_str());
 		return w.lockPromise.getFuture();
 	}
 
@@ -210,6 +212,8 @@ private:
 			++available;
 			runnerCounts[priority] -= 1;
 
+			pml_debug_printf("lock release line %d priority %d  %s\n", __LINE__, priority, toString().c_str());
+
 			// If there are any waiters or if the runners array is getting large, trigger the runner loop
 			if (waiting > 0 || runners.size() > 1000) {
 				wakeRunner.trigger();
@@ -243,12 +247,16 @@ private:
 			}
 
 			// Wait for a runner to release its lock
+			pml_debug_printf(
+			    "runner loop waitTrigger line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
 			wait(self->wakeRunner.onTrigger());
 			pml_debug_printf(
 			    "runner loop wake line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
 
 			if (++sinceYield == 100) {
 				sinceYield = 0;
+				pml_debug_printf(
+				    "  runner waitDelay line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
 				wait(delay(0));
 				pml_debug_printf(
 				    "  runner afterDelay line %d  priority=%d  %s\n", __LINE__, priority, self->toString().c_str());
