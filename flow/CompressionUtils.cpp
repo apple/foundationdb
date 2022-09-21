@@ -21,6 +21,7 @@
 #include "flow/CompressionUtils.h"
 
 #include "flow/Arena.h"
+#include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 
@@ -34,7 +35,27 @@
 #endif
 #include <sstream>
 
+namespace {
+std::unordered_set<CompressionFilter> getSupportedFilters() {
+	std::unordered_set<CompressionFilter> filters;
+
+	filters.insert(CompressionFilter::NONE);
+#ifdef ZLIB_LIB_SUPPORTED
+	filters.insert(CompressionFilter::GZIP);
+#endif
+#ifdef ZSTD_LIB_SUPPORTED
+	filters.insert(CompressionFilter::ZSTD);
+#endif
+	ASSERT_GE(filters.size(), 1);
+	return filters;
+}
+} // namespace
+
+std::unordered_set<CompressionFilter> CompressionUtils::supportedFilters = getSupportedFilters();
+
 StringRef CompressionUtils::compress(const CompressionFilter filter, const StringRef& data, Arena& arena) {
+	checkFilterSupported(filter);
+
 	if (filter == CompressionFilter::NONE) {
 		return StringRef(arena, data);
 	}
@@ -45,17 +66,17 @@ StringRef CompressionUtils::compress(const CompressionFilter filter, const Strin
 		return CompressionUtils::compress(filter, data, bio::gzip::default_compression, arena);
 	}
 #endif
-
 #ifdef ZSTD_LIB_SUPPORTED
 	if (filter == CompressionFilter::ZSTD) {
 		return CompressionUtils::compress(filter, data, bio::zstd::default_compression, arena);
 	}
 #endif
-	throw not_implemented();
+
+	throw internal_error(); // We should never get here
 }
 
 StringRef CompressionUtils::compress(const CompressionFilter filter, const StringRef& data, int level, Arena& arena) {
-	ASSERT(filter < CompressionFilter::LAST);
+	checkFilterSupported(filter);
 
 	if (filter == CompressionFilter::NONE) {
 		return StringRef(arena, data);
@@ -71,7 +92,6 @@ StringRef CompressionUtils::compress(const CompressionFilter filter, const Strin
 		out.push(bio::gzip_compressor(bio::gzip_params(level)));
 	}
 #endif
-
 #ifdef ZSTD_LIB_SUPPORTED
 	if (filter == CompressionFilter::ZSTD) {
 		out.push(bio::zstd_compressor(bio::zstd_params(level)));
@@ -85,7 +105,7 @@ StringRef CompressionUtils::compress(const CompressionFilter filter, const Strin
 }
 
 StringRef CompressionUtils::decompress(const CompressionFilter filter, const StringRef& data, Arena& arena) {
-	ASSERT(filter < CompressionFilter::LAST);
+	checkFilterSupported(filter);
 
 	if (filter == CompressionFilter::NONE) {
 		return StringRef(arena, data);
@@ -101,7 +121,6 @@ StringRef CompressionUtils::decompress(const CompressionFilter filter, const Str
 		out.push(bio::gzip_decompressor());
 	}
 #endif
-
 #ifdef ZSTD_LIB_SUPPORTED
 	if (filter == CompressionFilter::ZSTD) {
 		out.push(bio::zstd_decompressor());
@@ -112,6 +131,35 @@ StringRef CompressionUtils::decompress(const CompressionFilter filter, const Str
 	bio::copy(out, decompStream);
 
 	return StringRef(arena, decompStream.str());
+}
+
+int CompressionUtils::getDefaultCompressionLevel(CompressionFilter filter) {
+	checkFilterSupported(filter);
+
+	if (filter == CompressionFilter::NONE) {
+		return -1;
+	}
+
+#ifdef ZLIB_LIB_SUPPORTED
+	if (filter == CompressionFilter::GZIP) {
+		// opt for high speed compression, larger levels have a high cpu cost and not much compression ratio
+		// improvement, according to benchmarks
+		// return boost::iostream::gzip::default_compression;
+		// return boost::iostream::gzip::best_compression;
+		return boost::iostreams::gzip::best_speed;
+	}
+#endif
+#ifdef ZSTD_LIB_SUPPORTED
+	if (filter == CompressionFilter::ZSTD) {
+		// opt for high speed compression, larger levels have a high cpu cost and not much compression ratio
+		// improvement, according to benchmarks
+		// return boost::iostreams::zstd::default_compression;
+		// return boost::iostreams::zstd::best_compression;
+		return boost::iostreams::zstd::best_speed;
+	}
+#endif
+
+	throw internal_error(); // We should never get here
 }
 
 // Only used to link unit tests

@@ -38,12 +38,6 @@
 
 #include "fmt/format.h"
 
-#ifdef ZLIB_LIB_SUPPORTED
-#include <boost/iostreams/filter/gzip.hpp>
-#endif
-#ifdef ZSTD_LIB_SUPPORTED
-#include <boost/iostreams/filter/zstd.hpp>
-#endif
 #include <cstring>
 #include <fstream> // for perf microbenchmark
 #include <limits>
@@ -65,31 +59,6 @@ uint16_t MIN_SUPPORTED_BG_FORMAT_VERSION = 1;
 
 const uint8_t SNAPSHOT_FILE_TYPE = 'S';
 const uint8_t DELTA_FILE_TYPE = 'D';
-
-static int getDefaultCompressionLevel(CompressionFilter filter) {
-	if (filter == CompressionFilter::NONE) {
-		return -1;
-#ifdef ZLIB_LIB_SUPPORTED
-	} else if (filter == CompressionFilter::GZIP) {
-		// opt for high speed compression, larger levels have a high cpu cost and not much compression ratio
-		// improvement, according to benchmarks
-		// return boost::iostream::gzip::default_compression;
-		// return boost::iostream::gzip::best_compression;
-		return boost::iostreams::gzip::best_speed;
-#endif
-#ifdef ZSTD_LIB_SUPPORTED
-	} else if (filter == CompressionFilter::ZSTD) {
-		// opt for high speed compression, larger levels have a high cpu cost and not much compression ratio
-		// improvement, according to benchmarks
-		// return boost::iostreams::zstd::default_compression;
-		// return boost::iostreams::zstd::best_compression;
-		return boost::iostreams::zstd::best_speed;
-#endif
-	} else {
-		ASSERT(false);
-		return -1;
-	}
-}
 
 // Deltas in key order
 
@@ -491,8 +460,10 @@ struct IndexBlobGranuleFileChunkRef {
 	                     const CompressionFilter compFilter,
 	                     Arena& arena) {
 		chunkRef.compressionFilter = compFilter;
-		chunkRef.buffer = CompressionUtils::compress(
-		    chunkRef.compressionFilter.get(), chunk.contents(), getDefaultCompressionLevel(compFilter), arena);
+		chunkRef.buffer = CompressionUtils::compress(chunkRef.compressionFilter.get(),
+		                                             chunk.contents(),
+		                                             CompressionUtils::getDefaultCompressionLevel(compFilter),
+		                                             arena);
 
 		if (BG_ENCRYPT_COMPRESS_DEBUG) {
 			XXH64_hash_t chunkChksum = XXH3_64bits(chunk.contents().begin(), chunk.contents().size());
@@ -2091,13 +2062,9 @@ struct KeyValueGen {
 		}
 		if (deterministicRandom()->coinflip()) {
 			std::vector<CompressionFilter> filters;
-			filters.push_back(CompressionFilter::NONE);
-#ifdef ZLIB_LIB_SUPPORTED
-			filters.push_back(CompressionFilter::GZIP);
-#endif
-#ifdef ZSTD_LIB_SUPPORTED
-			filters.push_back(CompressionFilter::ZSTD);
-#endif
+			filters.insert(
+			    filters.end(), CompressionUtils::supportedFilters.begin(), CompressionUtils::supportedFilters.end());
+
 			ASSERT_GE(filters.size(), 1);
 			if (filters.size() == 1) {
 				compressFilter = filters[0];
@@ -2135,9 +2102,7 @@ struct KeyValueGen {
 		return StringRef(ar, value);
 	}
 
-	KeyRef randomUsedKey() const {
-		return usedKeysList[deterministicRandom()->randomInt(0, usedKeysList.size())];
-	}
+	KeyRef randomUsedKey() const { return usedKeysList[deterministicRandom()->randomInt(0, usedKeysList.size())]; }
 
 	KeyRange randomKeyRange() const {
 		ASSERT(!usedKeysList.empty());
@@ -2287,13 +2252,8 @@ TEST_CASE("/blobgranule/files/validateEncryptionCompression") {
 	BlobGranuleCipherKeysCtx cipherKeys = getCipherKeysCtx(ar);
 	std::vector<bool> encryptionModes = { false, true };
 	std::vector<Optional<CompressionFilter>> compressionModes;
-	compressionModes.push_back({});
-#ifdef ZLIB_LIB_SUPPORTED
-	compressionModes.push_back(CompressionFilter::GZIP);
-#endif
-#ifdef ZSTD_LIB_SUPPORTED
-	compressionModes.push_back(CompressionFilter::ZSTD);
-#endif
+	compressionModes.insert(
+	    compressionModes.end(), CompressionUtils::supportedFilters.begin(), CompressionUtils::supportedFilters.end());
 
 	std::vector<Value> snapshotValues;
 	for (bool encryptionMode : encryptionModes) {
@@ -3006,13 +2966,8 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 	std::vector<bool> chunkModes = { false, true };
 	std::vector<bool> encryptionModes = { false, true };
 	std::vector<Optional<CompressionFilter>> compressionModes;
-	compressionModes.push_back({});
-#ifdef ZLIB_LIB_SUPPORTED
-	compressionModes.push_back(CompressionFilter::GZIP);
-#endif
-#ifdef ZSTD_LIB_SUPPORTED
-	compressionModes.push_back(CompressionFilter::ZSTD);
-#endif
+	compressionModes.insert(
+	    compressionModes.end(), CompressionUtils::supportedFilters.begin(), CompressionUtils::supportedFilters.end());
 
 	std::vector<std::string> runNames = { "logical" };
 	std::vector<std::pair<int64_t, double>> snapshotMetrics;
