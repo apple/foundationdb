@@ -23,6 +23,8 @@ from multiprocessing import Pipe, Process
 from typing import Union, List
 from util import to_str, to_bytes, cleanup_tenant
 
+fdb.api_version(720)
+
 class _admin_request(object):
     def __init__(self, op: str, args: List[Union[str, bytes]]=[]):
         self.op = op
