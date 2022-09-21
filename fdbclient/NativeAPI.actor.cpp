@@ -155,8 +155,8 @@ NetworkOptions::NetworkOptions()
     supportedVersions(new ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>()), runLoopProfilingEnabled(false),
     primaryClient(true) {}
 
-static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
-static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
+static const Key CLIENT_LATENCY_INFO_PREFIX = "client_latency/"_sr;
+static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = "client_latency_counter/"_sr;
 
 void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi) {
 	auto result = tssMapping.find(ssi.id());
@@ -1153,7 +1153,7 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					if (quarantine) {
-						tr->set(tssQuarantineKeyFor(data.first), LiteralStringRef(""));
+						tr->set(tssQuarantineKeyFor(data.first), ""_sr);
 					} else {
 						tr->clear(serverTagKeyFor(data.first));
 					}
@@ -1329,7 +1329,7 @@ static RangeResult healthMetricsToKVPairs(const HealthMetrics& metrics, KeyRange
 	RangeResult result;
 	if (CLIENT_BUGGIFY)
 		return result;
-	if (kr.contains(LiteralStringRef("\xff\xff/metrics/health/aggregate")) && metrics.worstStorageDurabilityLag != 0) {
+	if (kr.contains("\xff\xff/metrics/health/aggregate"_sr) && metrics.worstStorageDurabilityLag != 0) {
 		json_spirit::mObject statsObj;
 		statsObj["batch_limited"] = metrics.batchLimited;
 		statsObj["tps_limit"] = metrics.tpsLimit;
@@ -1341,15 +1341,13 @@ static RangeResult healthMetricsToKVPairs(const HealthMetrics& metrics, KeyRange
 		std::string statsString =
 		    json_spirit::write_string(json_spirit::mValue(statsObj), json_spirit::Output_options::raw_utf8);
 		ValueRef bytes(result.arena(), statsString);
-		result.push_back(result.arena(), KeyValueRef(LiteralStringRef("\xff\xff/metrics/health/aggregate"), bytes));
+		result.push_back(result.arena(), KeyValueRef("\xff\xff/metrics/health/aggregate"_sr, bytes));
 	}
 	// tlog stats
 	{
 		int phase = 0; // Avoid comparing twice per loop iteration
 		for (const auto& [uid, logStats] : metrics.tLogQueue) {
-			StringRef k{
-				StringRef(uid.toString()).withPrefix(LiteralStringRef("\xff\xff/metrics/health/log/"), result.arena())
-			};
+			StringRef k{ StringRef(uid.toString()).withPrefix("\xff\xff/metrics/health/log/"_sr, result.arena()) };
 			if (phase == 0 && k >= kr.begin) {
 				phase = 1;
 			}
@@ -1371,8 +1369,7 @@ static RangeResult healthMetricsToKVPairs(const HealthMetrics& metrics, KeyRange
 	{
 		int phase = 0; // Avoid comparing twice per loop iteration
 		for (const auto& [uid, storageStats] : metrics.storageStats) {
-			StringRef k{ StringRef(uid.toString())
-				             .withPrefix(LiteralStringRef("\xff\xff/metrics/health/storage/"), result.arena()) };
+			StringRef k{ StringRef(uid.toString()).withPrefix("\xff\xff/metrics/health/storage/"_sr, result.arena()) };
 			if (phase == 0 && k >= kr.begin) {
 				phase = 1;
 			}
@@ -1398,10 +1395,9 @@ static RangeResult healthMetricsToKVPairs(const HealthMetrics& metrics, KeyRange
 
 ACTOR static Future<RangeResult> healthMetricsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	HealthMetrics metrics = wait(ryw->getDatabase()->getHealthMetrics(
-	    /*detailed ("per process")*/ kr.intersects(KeyRangeRef(LiteralStringRef("\xff\xff/metrics/health/storage/"),
-	                                                           LiteralStringRef("\xff\xff/metrics/health/storage0"))) ||
-	    kr.intersects(KeyRangeRef(LiteralStringRef("\xff\xff/metrics/health/log/"),
-	                              LiteralStringRef("\xff\xff/metrics/health/log0")))));
+	    /*detailed ("per process")*/ kr.intersects(
+	        KeyRangeRef("\xff\xff/metrics/health/storage/"_sr, "\xff\xff/metrics/health/storage0"_sr)) ||
+	    kr.intersects(KeyRangeRef("\xff\xff/metrics/health/log/"_sr, "\xff\xff/metrics/health/log0"_sr))));
 	return healthMetricsToKVPairs(metrics, kr);
 }
 
@@ -1507,8 +1503,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	tenantCacheSize = g_network->isSimulated() ? CLIENT_KNOBS->TENANT_CACHE_EVICTION_SIZE_SIM
 	                                           : CLIENT_KNOBS->TENANT_CACHE_EVICTION_SIZE;
 
-	getValueSubmitted.init(LiteralStringRef("NativeAPI.GetValueSubmitted"));
-	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
+	getValueSubmitted.init("NativeAPI.GetValueSubmitted"_sr);
+	getValueCompleted.init("NativeAPI.GetValueCompleted"_sr);
 
 	clientDBInfoMonitor = monitorClientDBInfoChange(this, clientInfo, &proxiesChangeTrigger);
 	tssMismatchHandler = handleTssMismatches(this);
@@ -1534,7 +1530,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<ManagementCommandsOptionsImpl>(
-		        KeyRangeRef(LiteralStringRef("options/"), LiteralStringRef("options0"))
+		        KeyRangeRef("options/"_sr, "options0"_sr)
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
@@ -1556,31 +1552,31 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READONLY,
 		    std::make_unique<ExclusionInProgressRangeImpl>(
-		        KeyRangeRef(LiteralStringRef("in_progress_exclusion/"), LiteralStringRef("in_progress_exclusion0"))
+		        KeyRangeRef("in_progress_exclusion/"_sr, "in_progress_exclusion0"_sr)
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::CONFIGURATION,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<ProcessClassRangeImpl>(
-		        KeyRangeRef(LiteralStringRef("process/class_type/"), LiteralStringRef("process/class_type0"))
+		        KeyRangeRef("process/class_type/"_sr, "process/class_type0"_sr)
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin)));
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::CONFIGURATION,
 		    SpecialKeySpace::IMPLTYPE::READONLY,
 		    std::make_unique<ProcessClassSourceRangeImpl>(
-		        KeyRangeRef(LiteralStringRef("process/class_source/"), LiteralStringRef("process/class_source0"))
+		        KeyRangeRef("process/class_source/"_sr, "process/class_source0"_sr)
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin)));
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<LockDatabaseImpl>(
-		        singleKeyRange(LiteralStringRef("db_locked"))
+		        singleKeyRange("db_locked"_sr)
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<ConsistencyCheckImpl>(
-		        singleKeyRange(LiteralStringRef("consistency_check_suspended"))
+		        singleKeyRange("consistency_check_suspended"_sr)
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::GLOBALCONFIG,
@@ -1594,44 +1590,44 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		    SpecialKeySpace::MODULE::CONFIGURATION,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<CoordinatorsImpl>(
-		        KeyRangeRef(LiteralStringRef("coordinators/"), LiteralStringRef("coordinators0"))
+		        KeyRangeRef("coordinators/"_sr, "coordinators0"_sr)
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin)));
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READONLY,
 		    std::make_unique<CoordinatorsAutoImpl>(
-		        singleKeyRange(LiteralStringRef("auto_coordinators"))
+		        singleKeyRange("auto_coordinators"_sr)
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<AdvanceVersionImpl>(
-		        singleKeyRange(LiteralStringRef("min_required_commit_version"))
+		        singleKeyRange("min_required_commit_version"_sr)
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<VersionEpochImpl>(
-		        singleKeyRange(LiteralStringRef("version_epoch"))
+		        singleKeyRange("version_epoch"_sr)
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<ClientProfilingImpl>(
-		        KeyRangeRef(LiteralStringRef("profiling/"), LiteralStringRef("profiling0"))
+		        KeyRangeRef("profiling/"_sr, "profiling0"_sr)
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)),
 		    /* deprecated */ 720);
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<MaintenanceImpl>(
-		        KeyRangeRef(LiteralStringRef("maintenance/"), LiteralStringRef("maintenance0"))
+		        KeyRangeRef("maintenance/"_sr, "maintenance0"_sr)
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<DataDistributionImpl>(
-		        KeyRangeRef(LiteralStringRef("data_distribution/"), LiteralStringRef("data_distribution0"))
+		        KeyRangeRef("data_distribution/"_sr, "data_distribution0"_sr)
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeysImpl(
 		    SpecialKeySpace::MODULE::ACTORLINEAGE,
@@ -1655,20 +1651,18 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		registerSpecialKeysImpl(SpecialKeySpace::MODULE::METRICS,
 		                        SpecialKeySpace::IMPLTYPE::READONLY,
 		                        std::make_unique<DDStatsRangeImpl>(ddStatsRange));
-		registerSpecialKeysImpl(
-		    SpecialKeySpace::MODULE::METRICS,
-		    SpecialKeySpace::IMPLTYPE::READONLY,
-		    std::make_unique<HealthMetricsRangeImpl>(KeyRangeRef(LiteralStringRef("\xff\xff/metrics/health/"),
-		                                                         LiteralStringRef("\xff\xff/metrics/health0"))));
-		registerSpecialKeysImpl(
-		    SpecialKeySpace::MODULE::WORKERINTERFACE,
-		    SpecialKeySpace::IMPLTYPE::READONLY,
-		    std::make_unique<WorkerInterfacesSpecialKeyImpl>(KeyRangeRef(
-		        LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0"))));
+		registerSpecialKeysImpl(SpecialKeySpace::MODULE::METRICS,
+		                        SpecialKeySpace::IMPLTYPE::READONLY,
+		                        std::make_unique<HealthMetricsRangeImpl>(
+		                            KeyRangeRef("\xff\xff/metrics/health/"_sr, "\xff\xff/metrics/health0"_sr)));
+		registerSpecialKeysImpl(SpecialKeySpace::MODULE::WORKERINTERFACE,
+		                        SpecialKeySpace::IMPLTYPE::READONLY,
+		                        std::make_unique<WorkerInterfacesSpecialKeyImpl>(
+		                            KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr)));
 		registerSpecialKeysImpl(SpecialKeySpace::MODULE::STATUSJSON,
 		                        SpecialKeySpace::IMPLTYPE::READONLY,
 		                        std::make_unique<SingleSpecialKeyImpl>(
-		                            LiteralStringRef("\xff\xff/status/json"),
+		                            "\xff\xff/status/json"_sr,
 		                            [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
 			                            if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
 				                            ++ryw->getDatabase()->transactionStatusRequests;
@@ -1681,7 +1675,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		registerSpecialKeysImpl(SpecialKeySpace::MODULE::CLUSTERFILEPATH,
 		                        SpecialKeySpace::IMPLTYPE::READONLY,
 		                        std::make_unique<SingleSpecialKeyImpl>(
-		                            LiteralStringRef("\xff\xff/cluster_file_path"),
+		                            "\xff\xff/cluster_file_path"_sr,
 		                            [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
 			                            try {
 				                            if (ryw->getDatabase().getPtr() &&
@@ -1701,7 +1695,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		    SpecialKeySpace::MODULE::CONNECTIONSTRING,
 		    SpecialKeySpace::IMPLTYPE::READONLY,
 		    std::make_unique<SingleSpecialKeyImpl>(
-		        LiteralStringRef("\xff\xff/connection_string"),
+		        "\xff\xff/connection_string"_sr,
 		        [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
 			        try {
 				        if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
@@ -1718,7 +1712,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		registerSpecialKeysImpl(SpecialKeySpace::MODULE::CLUSTERID,
 		                        SpecialKeySpace::IMPLTYPE::READONLY,
 		                        std::make_unique<SingleSpecialKeyImpl>(
-		                            LiteralStringRef("\xff\xff/cluster_id"),
+		                            "\xff\xff/cluster_id"_sr,
 		                            [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
 			                            try {
 				                            if (ryw->getDatabase().getPtr()) {
@@ -2485,7 +2479,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		ASSERT(value.present());
 
 		Standalone<VectorRef<ClientVersionRef>> supportedVersions;
-		std::vector<StringRef> supportedVersionsStrings = value.get().splitAny(LiteralStringRef(";"));
+		std::vector<StringRef> supportedVersionsStrings = value.get().splitAny(";"_sr);
 		for (StringRef versionString : supportedVersionsStrings) {
 #ifdef ADDRESS_SANITIZER
 			__lsan_disable();
@@ -5637,7 +5631,7 @@ void Transaction::addReadConflictRange(KeyRangeRef const& keys) {
 
 void Transaction::makeSelfConflicting() {
 	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(LiteralStringRef("\xFF/SC/"));
+	wr.serializeBytes("\xFF/SC/"_sr);
 	wr << deterministicRandom()->randomUniqueID();
 	auto r = singleKeyRange(wr.toValue(), tr.arena);
 	tr.transaction.read_conflict_ranges.push_back(tr.arena, r);
@@ -6835,19 +6829,16 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 	state Future<Void> timeout;
 	state Optional<UID> debugID;
 	state bool send_batch;
-	state Reference<Histogram> batchSizeDist = Histogram::getHistogram(LiteralStringRef("GrvBatcher"),
-	                                                                   LiteralStringRef("ClientGrvBatchSize"),
-	                                                                   Histogram::Unit::countLinear,
-	                                                                   0,
-	                                                                   CLIENT_KNOBS->MAX_BATCH_SIZE * 2);
+	state Reference<Histogram> batchSizeDist = Histogram::getHistogram(
+	    "GrvBatcher"_sr, "ClientGrvBatchSize"_sr, Histogram::Unit::countLinear, 0, CLIENT_KNOBS->MAX_BATCH_SIZE * 2);
 	state Reference<Histogram> batchIntervalDist =
-	    Histogram::getHistogram(LiteralStringRef("GrvBatcher"),
-	                            LiteralStringRef("ClientGrvBatchInterval"),
+	    Histogram::getHistogram("GrvBatcher"_sr,
+	                            "ClientGrvBatchInterval"_sr,
 	                            Histogram::Unit::microseconds,
 	                            0,
 	                            CLIENT_KNOBS->GRV_BATCH_TIMEOUT * 1000000 * 2);
-	state Reference<Histogram> grvReplyLatencyDist = Histogram::getHistogram(
-	    LiteralStringRef("GrvBatcher"), LiteralStringRef("ClientGrvReplyLatency"), Histogram::Unit::microseconds);
+	state Reference<Histogram> grvReplyLatencyDist =
+	    Histogram::getHistogram("GrvBatcher"_sr, "ClientGrvReplyLatency"_sr, Histogram::Unit::microseconds);
 	state double lastRequestTime = now();
 
 	state TransactionTagMap<uint32_t> tags;
@@ -7721,23 +7712,24 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Trans
 		if (tenantPrefix.present()) {
 			state Standalone<StringRef> mappingPrefix = tenantPrefix.get().withPrefix(blobGranuleMappingKeys.begin);
 
-			// basically krmGetRange, but enable it to not use tenant without RAW_ACCESS by doing manual getRange with
-			// UseTenant::False
+			// basically krmGetRangeUnaligned, but enable it to not use tenant without RAW_ACCESS by doing manual
+			// getRange with UseTenant::False
 			GetRangeLimits limits(2 * rangeLimit + 2);
 			limits.minRows = 2;
+
 			RangeResult rawMapping = wait(getRange(self->trState,
 			                                       self->getReadVersion(),
 			                                       lastLessOrEqual(keyRange.begin.withPrefix(mappingPrefix)),
-			                                       firstGreaterThan(keyRange.end.withPrefix(mappingPrefix)),
+			                                       KeySelectorRef(keyRange.end.withPrefix(mappingPrefix), false, +2),
 			                                       limits,
 			                                       Reverse::False,
 			                                       UseTenant::False));
 			// strip off mapping prefix
-			blobGranuleMapping = krmDecodeRanges(mappingPrefix, currentRange, rawMapping);
+			blobGranuleMapping = krmDecodeRanges(mappingPrefix, currentRange, rawMapping, false);
 		} else {
 			wait(store(
 			    blobGranuleMapping,
-			    krmGetRanges(
+			    krmGetRangesUnaligned(
 			        self, blobGranuleMappingKeys.begin, currentRange, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED)));
 		}
 
@@ -8154,7 +8146,7 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRan
 		// Chunk up to smaller ranges than this limit. Must be smaller than BG_TOO_MANY_GRANULES to not hit the limit
 		int batchCount = 0;
 		for (auto& it : allRanges) {
-			if (it.begin != curRegion.end) {
+			if (it.begin > curRegion.end) {
 				return invalidVersion;
 			}
 
@@ -8737,16 +8729,13 @@ ACTOR static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef add
 	for (const auto& it : kvs) {
 		ClientWorkerInterface workerInterf =
 		    BinaryReader::fromStringRef<ClientWorkerInterface>(it.value, IncludeVersion());
-		Key primaryAddress =
-		    it.key.endsWith(LiteralStringRef(":tls")) ? it.key.removeSuffix(LiteralStringRef(":tls")) : it.key;
+		Key primaryAddress = it.key.endsWith(":tls"_sr) ? it.key.removeSuffix(":tls"_sr) : it.key;
 		workerInterfaces[primaryAddress] = workerInterf;
 		// Also add mapping from a worker's second address(if present) to its interface
 		if (workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
 			Key secondAddress =
 			    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
-			secondAddress = secondAddress.endsWith(LiteralStringRef(":tls"))
-			                    ? secondAddress.removeSuffix(LiteralStringRef(":tls"))
-			                    : secondAddress;
+			secondAddress = secondAddress.endsWith(":tls"_sr) ? secondAddress.removeSuffix(":tls"_sr) : secondAddress;
 			workerInterfaces[secondAddress] = workerInterf;
 		}
 	}
@@ -9932,6 +9921,18 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 				TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(&tr, range.begin));
 				loadedTenantPrefix = true;
 				purgeRange = purgeRange.withPrefix(tenantEntry.prefix);
+			}
+
+			// must be aligned to blob range(s)
+			state Future<Optional<Value>> beginPresent = tr.get(purgeRange.begin.withPrefix(blobRangeKeys.begin));
+			state Future<Optional<Value>> endPresent = tr.get(purgeRange.end.withPrefix(blobRangeKeys.begin));
+			wait(success(beginPresent) && success(endPresent));
+			if (!beginPresent.get().present() || !endPresent.get().present()) {
+				TraceEvent("UnalignedPurge")
+				    .detail("Range", range)
+				    .detail("Version", purgeVersion)
+				    .detail("Force", force);
+				throw unsupported_operation();
 			}
 
 			Value purgeValue = blobGranulePurgeValueFor(purgeVersion, range, force);

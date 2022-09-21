@@ -7689,8 +7689,8 @@ public:
 
 #include "fdbserver/art_impl.h"
 
-RedwoodRecordRef VersionedBTree::dbBegin(LiteralStringRef(""));
-RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"));
+RedwoodRecordRef VersionedBTree::dbBegin(""_sr);
+RedwoodRecordRef VersionedBTree::dbEnd("\xff\xff\xff\xff\xff"_sr);
 
 class KeyValueStoreRedwood : public IKeyValueStore {
 public:
@@ -8349,8 +8349,8 @@ ACTOR Future<Void> verify(VersionedBTree* btree,
 			wait(btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead));
 
 			debug_printf("Verifying entire key range at version %" PRId64 "\n", v);
-			state Future<Void> fRangeAll = verifyRangeBTreeCursor(
-			    btree, LiteralStringRef(""), LiteralStringRef("\xff\xff"), v, written, pRecordsRead);
+			state Future<Void> fRangeAll =
+			    verifyRangeBTreeCursor(btree, ""_sr, "\xff\xff"_sr, v, written, pRecordsRead);
 			if (serial) {
 				wait(fRangeAll);
 			}
@@ -8675,35 +8675,26 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 		ASSERT(r2.getChildPage().begin() != id.begin());
 	}
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef("abc"_sr, ""_sr), RedwoodRecordRef("abc"_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef("abcd"), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef("abc"_sr, ""_sr), RedwoodRecordRef("abcd"_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abcd"), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef("abcd"_sr, ""_sr), RedwoodRecordRef("abc"_sr, ""_sr));
 
 	deltaTest(RedwoodRecordRef(std::string(300, 'k'), std::string(1e6, 'v')),
-	          RedwoodRecordRef(std::string(300, 'k'), LiteralStringRef("")));
+	          RedwoodRecordRef(std::string(300, 'k'), ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
 	Arena mem;
 	double start;
@@ -8740,8 +8731,8 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	RedwoodRecordRef rec1;
 	RedwoodRecordRef rec2;
 
-	rec1.key = LiteralStringRef("alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf1");
-	rec2.key = LiteralStringRef("alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf234");
+	rec1.key = "alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf1"_sr;
+	rec2.key = "alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf234"_sr;
 
 	start = timer();
 	total = 0;
@@ -8807,7 +8798,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	const int N = deterministicRandom()->randomInt(200, 1000);
 
 	RedwoodRecordRef prev;
-	RedwoodRecordRef next(LiteralStringRef("\xff\xff\xff\xff"));
+	RedwoodRecordRef next("\xff\xff\xff\xff"_sr);
 
 	Arena arena;
 	std::set<RedwoodRecordRef> uniqueItems;
@@ -8984,7 +8975,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 	const int N = deterministicRandom()->randomInt(200, 1000);
 
 	RedwoodRecordRef prev;
-	RedwoodRecordRef next(LiteralStringRef("\xff\xff\xff\xff"));
+	RedwoodRecordRef next("\xff\xff\xff\xff"_sr);
 
 	Arena arena;
 	std::set<RedwoodRecordRef> uniqueItems;
@@ -10883,7 +10874,7 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore* kvs,
 	if (clearAfter) {
 		printf("Clearing all keys\n");
 		intervalStart = timer();
-		kvs->clear(KeyRangeRef(LiteralStringRef(""), LiteralStringRef("\xff")));
+		kvs->clear(KeyRangeRef(""_sr, "\xff"_sr));
 		state StorageBytes sbClear = wait(getStableStorageBytes(kvs));
 		printf("Cleared all keys in %.2f seconds, final storageByte: %s\n",
 		       timer() - intervalStart,
@@ -11122,8 +11113,7 @@ TEST_CASE(":/redwood/performance/histograms") {
 	std::vector<Reference<Histogram>> histograms;
 	for (int i = 0; i < 33; i++) {
 		std::string levelString = "L" + std::to_string(i);
-		histograms.push_back(Histogram::getHistogram(
-		    LiteralStringRef("histogramTest"), LiteralStringRef("levelString"), Histogram::Unit::bytes));
+		histograms.push_back(Histogram::getHistogram("histogramTest"_sr, "levelString"_sr, Histogram::Unit::bytes));
 	}
 	for (int i = 0; i < 33; i++) {
 		for (int j = 0; j < 32; j++) {

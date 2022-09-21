@@ -46,25 +46,24 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 	// Verification Mode: We run the workload indefinitely in this mode.
 	// The idea is to keep going until we get a non-zero chaosMetric to ensure
 	// that we haven't lost the chaos event. testDuration is ignored in this mode
-	bool verificationMode;
+	bool verificationMode = false;
 
 	DiskFailureInjectionWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {}
 
 	DiskFailureInjectionWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		startDelay = getOption(options, LiteralStringRef("startDelay"), startDelay);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), testDuration);
-		verificationMode = getOption(options, LiteralStringRef("verificationMode"), verificationMode);
-		throttleDisk = getOption(options, LiteralStringRef("throttleDisk"), throttleDisk);
-		workersToThrottle = getOption(options, LiteralStringRef("workersToThrottle"), workersToThrottle);
-		stallInterval = getOption(options, LiteralStringRef("stallInterval"), stallInterval);
-		stallPeriod = getOption(options, LiteralStringRef("stallPeriod"), stallPeriod);
-		throttlePeriod = getOption(options, LiteralStringRef("throttlePeriod"), throttlePeriod);
-		corruptFile = getOption(options, LiteralStringRef("corruptFile"), corruptFile);
-		workersToCorrupt = getOption(options, LiteralStringRef("workersToCorrupt"), workersToCorrupt);
-		percentBitFlips = getOption(options, LiteralStringRef("percentBitFlips"), percentBitFlips);
-		periodicBroadcastInterval =
-		    getOption(options, LiteralStringRef("periodicBroadcastInterval"), periodicBroadcastInterval);
+		startDelay = getOption(options, "startDelay"_sr, startDelay);
+		testDuration = getOption(options, "testDuration"_sr, testDuration);
+		verificationMode = getOption(options, "verificationMode"_sr, verificationMode);
+		throttleDisk = getOption(options, "throttleDisk"_sr, throttleDisk);
+		workersToThrottle = getOption(options, "workersToThrottle"_sr, workersToThrottle);
+		stallInterval = getOption(options, "stallInterval"_sr, stallInterval);
+		stallPeriod = getOption(options, "stallPeriod"_sr, stallPeriod);
+		throttlePeriod = getOption(options, "throttlePeriod"_sr, throttlePeriod);
+		corruptFile = getOption(options, "corruptFile"_sr, corruptFile);
+		workersToCorrupt = getOption(options, "workersToCorrupt"_sr, workersToCorrupt);
+		percentBitFlips = getOption(options, "percentBitFlips"_sr, percentBitFlips);
+		periodicBroadcastInterval = getOption(options, "periodicBroadcastInterval"_sr, periodicBroadcastInterval);
 	}
 
 	void initFailureInjectionMode(DeterministicRandom& random, unsigned count) override { enabled = clientId == 0; }

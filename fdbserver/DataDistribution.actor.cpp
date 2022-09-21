@@ -882,8 +882,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 				workersMap[worker.interf.address()] = worker.interf;
 			}
 
-			Optional<Value> regionsValue =
-			    wait(tr.get(LiteralStringRef("usable_regions").withPrefix(configKeysPrefix)));
+			Optional<Value> regionsValue = wait(tr.get("usable_regions"_sr.withPrefix(configKeysPrefix)));
 			int usableRegions = 1;
 			if (regionsValue.present()) {
 				usableRegions = atoi(regionsValue.get().toString().c_str());

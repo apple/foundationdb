@@ -35,16 +35,13 @@ struct RestoreFromBlobWorkload : TestWorkload {
 	static constexpr const char* DESCRIPTION = "RestoreFromBlob";
 
 	RestoreFromBlobWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		restoreAfter = getOption(options, LiteralStringRef("restoreAfter"), 10.0);
-		backupTag = getOption(options, LiteralStringRef("backupTag"), BackupAgentBase::getDefaultTag());
-		auto backupURLString =
-		    getOption(options, LiteralStringRef("backupURL"), LiteralStringRef("http://0.0.0.0:10000")).toString();
-		auto accessKeyEnvVar =
-		    getOption(options, LiteralStringRef("accessKeyVar"), LiteralStringRef("BLOB_ACCESS_KEY")).toString();
-		auto secretKeyEnvVar =
-		    getOption(options, LiteralStringRef("secretKeyVar"), LiteralStringRef("BLOB_SECRET_KEY")).toString();
-		bool provideKeys = getOption(options, LiteralStringRef("provideKeys"), false);
-		waitForComplete.set(getOption(options, LiteralStringRef("waitForComplete"), true));
+		restoreAfter = getOption(options, "restoreAfter"_sr, 10.0);
+		backupTag = getOption(options, "backupTag"_sr, BackupAgentBase::getDefaultTag());
+		auto backupURLString = getOption(options, "backupURL"_sr, "http://0.0.0.0:10000"_sr).toString();
+		auto accessKeyEnvVar = getOption(options, "accessKeyVar"_sr, "BLOB_ACCESS_KEY"_sr).toString();
+		auto secretKeyEnvVar = getOption(options, "secretKeyVar"_sr, "BLOB_SECRET_KEY"_sr).toString();
+		bool provideKeys = getOption(options, "provideKeys"_sr, false);
+		waitForComplete.set(getOption(options, "waitForComplete"_sr, true));
 		if (provideKeys) {
 			updateBackupURL(backupURLString, accessKeyEnvVar, "<access_key>", secretKeyEnvVar, "<secret_key>");
 		}

@@ -75,7 +75,7 @@ VectorRef<StringRef> ExecCmdValueString::getBinaryArgs() const {
 void ExecCmdValueString::parseCmdValue() {
 	StringRef param = this->cmdValueString;
 	// get the binary path
-	this->binaryPath = param.eat(LiteralStringRef(" "));
+	this->binaryPath = param.eat(" "_sr);
 
 	// no arguments provided
 	if (param == StringRef()) {
@@ -84,7 +84,7 @@ void ExecCmdValueString::parseCmdValue() {
 
 	// extract the arguments
 	while (param != StringRef()) {
-		StringRef token = param.eat(LiteralStringRef(" "));
+		StringRef token = param.eat(" "_sr);
 		this->binaryArgs.push_back(this->binaryArgs.arena(), token);
 	}
 	return;

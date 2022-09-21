@@ -235,9 +235,9 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	PerfIntCounter retries;
 
 	ConfigureDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), retries("Retries") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 200.0);
+		testDuration = getOption(options, "testDuration"_sr, 200.0);
 		allowDescriptorChange =
-		    getOption(options, LiteralStringRef("allowDescriptorChange"), SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
+		    getOption(options, "allowDescriptorChange"_sr, SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
 		allowTestStorageMigration =
 		    getOption(options, "allowTestStorageMigration"_sr, false) && g_simulator->allowStorageMigrationTypeChange;
 		storageMigrationCompatibleConf = getOption(options, "storageMigrationCompatibleConf"_sr, false);
@@ -363,7 +363,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			if (randomChoice == 0) {
 				wait(success(
 				    runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
-					    return tr->get(LiteralStringRef("This read is only to ensure that the database recovered"));
+					    return tr->get("This read is only to ensure that the database recovered"_sr);
 				    })));
 				wait(delay(20 + 10 * deterministicRandom()->random01()));
 			} else if (randomChoice < 3) {

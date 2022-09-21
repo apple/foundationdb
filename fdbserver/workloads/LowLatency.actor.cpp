@@ -39,12 +39,12 @@ struct LowLatencyWorkload : TestWorkload {
 
 	LowLatencyWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), operations("Operations"), retries("Retries"), ok(true) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
-		maxGRVLatency = getOption(options, LiteralStringRef("maxGRVLatency"), 20.0);
-		maxCommitLatency = getOption(options, LiteralStringRef("maxCommitLatency"), 30.0);
-		checkDelay = getOption(options, LiteralStringRef("checkDelay"), 1.0);
-		testWrites = getOption(options, LiteralStringRef("testWrites"), true);
-		testKey = getOption(options, LiteralStringRef("testKey"), LiteralStringRef("testKey"));
+		testDuration = getOption(options, "testDuration"_sr, 600.0);
+		maxGRVLatency = getOption(options, "maxGRVLatency"_sr, 20.0);
+		maxCommitLatency = getOption(options, "maxCommitLatency"_sr, 30.0);
+		checkDelay = getOption(options, "checkDelay"_sr, 1.0);
+		testWrites = getOption(options, "testWrites"_sr, true);
+		testKey = getOption(options, "testKey"_sr, "testKey"_sr);
 	}
 
 	std::string description() const override { return "LowLatency"; }
@@ -81,7 +81,7 @@ struct LowLatencyWorkload : TestWorkload {
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 						if (doCommit) {
-							tr.set(self->testKey, LiteralStringRef(""));
+							tr.set(self->testKey, ""_sr);
 							wait(tr.commit());
 						} else {
 							wait(success(tr.getReadVersion()));

@@ -1333,7 +1333,7 @@ int SQLiteDB::checkAllPageChecksums() {
 	// then we could instead open a read cursor for the same effect, as currently tryReadEveryDbPage() requires it.
 	Statement* jm = new Statement(*this, "PRAGMA journal_mode");
 	ASSERT(jm->nextRow());
-	if (jm->column(0) != LiteralStringRef("wal")) {
+	if (jm->column(0) != "wal"_sr) {
 		TraceEvent(SevError, "JournalModeError").detail("Filename", filename).detail("Mode", jm->column(0));
 		ASSERT(false);
 	}
@@ -1502,7 +1502,7 @@ void SQLiteDB::open(bool writable) {
 
 	Statement jm(*this, "PRAGMA journal_mode");
 	ASSERT(jm.nextRow());
-	if (jm.column(0) != LiteralStringRef("wal")) {
+	if (jm.column(0) != "wal"_sr) {
 		TraceEvent(SevError, "JournalModeError").detail("Filename", filename).detail("Mode", jm.column(0));
 		ASSERT(false);
 	}
@@ -2287,9 +2287,9 @@ ACTOR Future<Void> KVFileCheck(std::string filename, bool integrity) {
 
 	StringRef kvFile(filename);
 	KeyValueStoreType type = KeyValueStoreType::END;
-	if (kvFile.endsWith(LiteralStringRef(".fdb")))
+	if (kvFile.endsWith(".fdb"_sr))
 		type = KeyValueStoreType::SSD_BTREE_V1;
-	else if (kvFile.endsWith(LiteralStringRef(".sqlite")))
+	else if (kvFile.endsWith(".sqlite"_sr))
 		type = KeyValueStoreType::SSD_BTREE_V2;
 	ASSERT(type != KeyValueStoreType::END);
 

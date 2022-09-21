@@ -44,20 +44,20 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 	if (tokens.size() < 2)
 		result = ConfigurationResult::NO_OPTIONS_PROVIDED;
 	else {
-		if (tokens[startToken] == LiteralStringRef("FORCE")) {
+		if (tokens[startToken] == "FORCE"_sr) {
 			force = true;
 			startToken = 2;
 		}
 
 		state Optional<ConfigureAutoResult> conf;
-		if (tokens[startToken] == LiteralStringRef("auto")) {
+		if (tokens[startToken] == "auto"_sr) {
 			// get cluster status
 			state Reference<ITransaction> tr = db->createTransaction();
 			if (!tr->isValid()) {
 				StatusObject _s = wait(StatusClient::statusFetcher(localDb));
 				s = _s;
 			} else {
-				state ThreadFuture<Optional<Value>> statusValueF = tr->get(LiteralStringRef("\xff\xff/status/json"));
+				state ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
 				Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
 				if (!statusValue.present()) {
 					fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
@@ -166,7 +166,7 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 	case ConfigurationResult::CONFLICTING_OPTIONS:
 	case ConfigurationResult::UNKNOWN_OPTION:
 	case ConfigurationResult::INCOMPLETE_CONFIGURATION:
-		printUsage(LiteralStringRef("configure"));
+		printUsage("configure"_sr);
 		ret = false;
 		break;
 	case ConfigurationResult::INVALID_CONFIGURATION:

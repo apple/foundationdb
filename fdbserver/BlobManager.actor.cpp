@@ -3290,7 +3290,7 @@ ACTOR Future<Void> loadForcePurgedRanges(Reference<BlobManagerData> bmData) {
 
 			// Add the mappings to our in memory key range map
 			for (int rangeIdx = 0; rangeIdx < results.size() - 1; rangeIdx++) {
-				if (results[rangeIdx].value == LiteralStringRef("1")) {
+				if (results[rangeIdx].value == "1"_sr) {
 					Key rangeStartKey = results[rangeIdx].key.removePrefix(blobGranuleForcePurgedKeys.begin);
 					Key rangeEndKey = results[rangeIdx + 1].key.removePrefix(blobGranuleForcePurgedKeys.begin);
 					// note: if the old owner is dead, we handle this in rangeAssigner
@@ -3474,7 +3474,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				break;
 			}
 			wait(checkManagerLock(tr, bmData));
-			wait(krmSetRange(tr, blobGranuleForcePurgedKeys.begin, normalKeys, LiteralStringRef("0")));
+			wait(krmSetRange(tr, blobGranuleForcePurgedKeys.begin, normalKeys, "0"_sr));
 			wait(tr->commit());
 			tr->reset();
 			break;
@@ -4462,8 +4462,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 				wait(checkManagerLock(&tr, self));
 				// FIXME: need to handle this better if range is unaligned. Need to not truncate existing granules, and
 				// instead cover whole of intersecting granules at begin/end
-				wait(krmSetRangeCoalescing(
-				    &tr, blobGranuleForcePurgedKeys.begin, range, normalKeys, LiteralStringRef("1")));
+				wait(krmSetRangeCoalescing(&tr, blobGranuleForcePurgedKeys.begin, range, normalKeys, "1"_sr));
 				wait(tr.commit());
 				break;
 			} catch (Error& e) {
@@ -5278,10 +5277,10 @@ TEST_CASE("/blobmanager/updateranges") {
 	RangeResult dbDataEmpty;
 	std::vector<std::pair<KeyRangeRef, bool>> kbrRanges;
 
-	StringRef keyA = StringRef(ar, LiteralStringRef("A"));
-	StringRef keyB = StringRef(ar, LiteralStringRef("B"));
-	StringRef keyC = StringRef(ar, LiteralStringRef("C"));
-	StringRef keyD = StringRef(ar, LiteralStringRef("D"));
+	StringRef keyA = StringRef(ar, "A"_sr);
+	StringRef keyB = StringRef(ar, "B"_sr);
+	StringRef keyC = StringRef(ar, "C"_sr);
+	StringRef keyD = StringRef(ar, "D"_sr);
 
 	// db data setup
 	RangeResult dbDataAB;

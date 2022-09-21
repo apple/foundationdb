@@ -56,65 +56,46 @@ static bool isAlphaNumeric(const std::string& key) {
 } // namespace
 
 std::unordered_map<SpecialKeySpace::MODULE, KeyRange> SpecialKeySpace::moduleToBoundary = {
-	{ SpecialKeySpace::MODULE::TRANSACTION,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/transaction/"), LiteralStringRef("\xff\xff/transaction0")) },
+	{ SpecialKeySpace::MODULE::TRANSACTION, KeyRangeRef("\xff\xff/transaction/"_sr, "\xff\xff/transaction0"_sr) },
 	{ SpecialKeySpace::MODULE::WORKERINTERFACE,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0")) },
-	{ SpecialKeySpace::MODULE::STATUSJSON, singleKeyRange(LiteralStringRef("\xff\xff/status/json")) },
-	{ SpecialKeySpace::MODULE::CONNECTIONSTRING, singleKeyRange(LiteralStringRef("\xff\xff/connection_string")) },
-	{ SpecialKeySpace::MODULE::CLUSTERFILEPATH, singleKeyRange(LiteralStringRef("\xff\xff/cluster_file_path")) },
-	{ SpecialKeySpace::MODULE::METRICS,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/metrics/"), LiteralStringRef("\xff\xff/metrics0")) },
-	{ SpecialKeySpace::MODULE::MANAGEMENT,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/management/"), LiteralStringRef("\xff\xff/management0")) },
-	{ SpecialKeySpace::MODULE::ERRORMSG, singleKeyRange(LiteralStringRef("\xff\xff/error_message")) },
-	{ SpecialKeySpace::MODULE::CONFIGURATION,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/configuration/"), LiteralStringRef("\xff\xff/configuration0")) },
-	{ SpecialKeySpace::MODULE::GLOBALCONFIG,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/global_config/"), LiteralStringRef("\xff\xff/global_config0")) },
-	{ SpecialKeySpace::MODULE::TRACING,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/tracing/"), LiteralStringRef("\xff\xff/tracing0")) },
-	{ SpecialKeySpace::MODULE::ACTORLINEAGE,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_lineage/"), LiteralStringRef("\xff\xff/actor_lineage0")) },
+	  KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr) },
+	{ SpecialKeySpace::MODULE::STATUSJSON, singleKeyRange("\xff\xff/status/json"_sr) },
+	{ SpecialKeySpace::MODULE::CONNECTIONSTRING, singleKeyRange("\xff\xff/connection_string"_sr) },
+	{ SpecialKeySpace::MODULE::CLUSTERFILEPATH, singleKeyRange("\xff\xff/cluster_file_path"_sr) },
+	{ SpecialKeySpace::MODULE::METRICS, KeyRangeRef("\xff\xff/metrics/"_sr, "\xff\xff/metrics0"_sr) },
+	{ SpecialKeySpace::MODULE::MANAGEMENT, KeyRangeRef("\xff\xff/management/"_sr, "\xff\xff/management0"_sr) },
+	{ SpecialKeySpace::MODULE::ERRORMSG, singleKeyRange("\xff\xff/error_message"_sr) },
+	{ SpecialKeySpace::MODULE::CONFIGURATION, KeyRangeRef("\xff\xff/configuration/"_sr, "\xff\xff/configuration0"_sr) },
+	{ SpecialKeySpace::MODULE::GLOBALCONFIG, KeyRangeRef("\xff\xff/global_config/"_sr, "\xff\xff/global_config0"_sr) },
+	{ SpecialKeySpace::MODULE::TRACING, KeyRangeRef("\xff\xff/tracing/"_sr, "\xff\xff/tracing0"_sr) },
+	{ SpecialKeySpace::MODULE::ACTORLINEAGE, KeyRangeRef("\xff\xff/actor_lineage/"_sr, "\xff\xff/actor_lineage0"_sr) },
 	{ SpecialKeySpace::MODULE::ACTOR_PROFILER_CONF,
-	  KeyRangeRef(LiteralStringRef("\xff\xff/actor_profiler_conf/"),
-	              LiteralStringRef("\xff\xff/actor_profiler_conf0")) },
-	{ SpecialKeySpace::MODULE::CLUSTERID, singleKeyRange(LiteralStringRef("\xff\xff/cluster_id")) },
+	  KeyRangeRef("\xff\xff/actor_profiler_conf/"_sr, "\xff\xff/actor_profiler_conf0"_sr) },
+	{ SpecialKeySpace::MODULE::CLUSTERID, singleKeyRange("\xff\xff/cluster_id"_sr) },
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandToRange = {
-	{ "exclude",
-	  KeyRangeRef(LiteralStringRef("excluded/"), LiteralStringRef("excluded0"))
-	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "failed",
-	  KeyRangeRef(LiteralStringRef("failed/"), LiteralStringRef("failed0"))
-	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "exclude", KeyRangeRef("excluded/"_sr, "excluded0"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "failed", KeyRangeRef("failed/"_sr, "failed0"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "excludedlocality",
-	  KeyRangeRef(LiteralStringRef("excluded_locality/"), LiteralStringRef("excluded_locality0"))
+	  KeyRangeRef("excluded_locality/"_sr, "excluded_locality0"_sr)
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "failedlocality",
-	  KeyRangeRef(LiteralStringRef("failed_locality/"), LiteralStringRef("failed_locality0"))
+	  KeyRangeRef("failed_locality/"_sr, "failed_locality0"_sr)
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "lock", singleKeyRange(LiteralStringRef("db_locked")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "lock", singleKeyRange("db_locked"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "consistencycheck",
-	  singleKeyRange(LiteralStringRef("consistency_check_suspended"))
-	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	  singleKeyRange("consistency_check_suspended"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "coordinators",
-	  KeyRangeRef(LiteralStringRef("coordinators/"), LiteralStringRef("coordinators0"))
-	      .withPrefix(moduleToBoundary[MODULE::CONFIGURATION].begin) },
+	  KeyRangeRef("coordinators/"_sr, "coordinators0"_sr).withPrefix(moduleToBoundary[MODULE::CONFIGURATION].begin) },
 	{ "advanceversion",
-	  singleKeyRange(LiteralStringRef("min_required_commit_version"))
-	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "versionepoch",
-	  singleKeyRange(LiteralStringRef("version_epoch")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "profile",
-	  KeyRangeRef(LiteralStringRef("profiling/"), LiteralStringRef("profiling0"))
-	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	  singleKeyRange("min_required_commit_version"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "versionepoch", singleKeyRange("version_epoch"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "profile", KeyRangeRef("profiling/"_sr, "profiling0"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "maintenance",
-	  KeyRangeRef(LiteralStringRef("maintenance/"), LiteralStringRef("maintenance0"))
-	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	  KeyRangeRef("maintenance/"_sr, "maintenance0"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "datadistribution",
-	  KeyRangeRef(LiteralStringRef("data_distribution/"), LiteralStringRef("data_distribution0"))
+	  KeyRangeRef("data_distribution/"_sr, "data_distribution0"_sr)
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "tenant", KeyRangeRef("tenant/"_sr, "tenant0"_sr).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "tenantmap",
@@ -122,12 +103,8 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 };
 
 std::unordered_map<std::string, KeyRange> SpecialKeySpace::actorLineageApiCommandToRange = {
-	{ "state",
-	  KeyRangeRef(LiteralStringRef("state/"), LiteralStringRef("state0"))
-	      .withPrefix(moduleToBoundary[MODULE::ACTORLINEAGE].begin) },
-	{ "time",
-	  KeyRangeRef(LiteralStringRef("time/"), LiteralStringRef("time0"))
-	      .withPrefix(moduleToBoundary[MODULE::ACTORLINEAGE].begin) }
+	{ "state", KeyRangeRef("state/"_sr, "state0"_sr).withPrefix(moduleToBoundary[MODULE::ACTORLINEAGE].begin) },
+	{ "time", KeyRangeRef("time/"_sr, "time0"_sr).withPrefix(moduleToBoundary[MODULE::ACTORLINEAGE].begin) }
 };
 
 std::set<std::string> SpecialKeySpace::options = { "excluded/force",
@@ -475,7 +452,7 @@ Future<RangeResult> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw,
 	if (!limits.isValid())
 		return range_limits_invalid();
 	if (limits.isReached()) {
-		CODE_PROBE(true, "read limit 0");
+		CODE_PROBE(true, "Special Key Space range read limit 0");
 		return RangeResult();
 	}
 	// make sure orEqual == false
@@ -567,8 +544,8 @@ bool validateSnakeCaseNaming(const KeyRef& k) {
 	// Suffix can be \xff\xff or \x00 in single key range
 	if (key.endsWith(specialKeys.begin))
 		key = key.removeSuffix(specialKeys.end);
-	else if (key.endsWith(LiteralStringRef("\x00")))
-		key = key.removeSuffix(LiteralStringRef("\x00"));
+	else if (key.endsWith("\x00"_sr))
+		key = key.removeSuffix("\x00"_sr);
 	for (const char& c : key.toString()) {
 		// only small letters, numbers, '/', '_' is allowed
 		ASSERT((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '/' || c == '_');
@@ -751,8 +728,8 @@ ACTOR Future<RangeResult> ddMetricsGetRangeActor(ReadYourWritesTransaction* ryw,
 	loop {
 		try {
 			auto keys = kr.removePrefix(ddStatsRange.begin);
-			Standalone<VectorRef<DDMetricsRef>> resultWithoutPrefix = wait(
-			    waitDataDistributionMetricsList(ryw->getDatabase(), keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT));
+			Standalone<VectorRef<DDMetricsRef>> resultWithoutPrefix =
+			    wait(waitDataDistributionMetricsList(ryw->getDatabase(), keys, CLIENT_KNOBS->TOO_MANY));
 			RangeResult result;
 			for (const auto& ddMetricsRef : resultWithoutPrefix) {
 				// each begin key is the previous end key, thus we only encode the begin key in the result
@@ -788,7 +765,7 @@ Future<RangeResult> DDStatsRangeImpl::getRange(ReadYourWritesTransaction* ryw,
 }
 
 Key SpecialKeySpace::getManagementApiCommandOptionSpecialKey(const std::string& command, const std::string& option) {
-	Key prefix = LiteralStringRef("options/").withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin);
+	Key prefix = "options/"_sr.withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin);
 	auto pair = command + "/" + option;
 	ASSERT(options.find(pair) != options.end());
 	return prefix.withSuffix(pair);
@@ -919,11 +896,11 @@ void ExcludeServersRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& 
 
 Key ExcludeServersRangeImpl::decode(const KeyRef& key) const {
 	return key.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
-	    .withPrefix(LiteralStringRef("\xff/conf/"));
+	    .withPrefix("\xff/conf/"_sr);
 }
 
 Key ExcludeServersRangeImpl::encode(const KeyRef& key) const {
-	return key.removePrefix(LiteralStringRef("\xff/conf/"))
+	return key.removePrefix("\xff/conf/"_sr)
 	    .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
 }
 
@@ -1162,11 +1139,11 @@ void FailedServersRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& k
 
 Key FailedServersRangeImpl::decode(const KeyRef& key) const {
 	return key.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
-	    .withPrefix(LiteralStringRef("\xff/conf/"));
+	    .withPrefix("\xff/conf/"_sr);
 }
 
 Key FailedServersRangeImpl::encode(const KeyRef& key) const {
-	return key.removePrefix(LiteralStringRef("\xff/conf/"))
+	return key.removePrefix("\xff/conf/"_sr)
 	    .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
 }
 
@@ -1328,8 +1305,7 @@ Future<Optional<std::string>> ProcessClassRangeImpl::commit(ReadYourWritesTransa
 			// validate class type
 			ValueRef processClassType = entry.second.get();
 			ProcessClass processClass(processClassType.toString(), ProcessClass::DBSource);
-			if (processClass.classType() == ProcessClass::InvalidClass &&
-			    processClassType != LiteralStringRef("default")) {
+			if (processClass.classType() == ProcessClass::InvalidClass && processClassType != "default"_sr) {
 				std::string error = "ERROR: \'" + processClassType.toString() + "\' is not a valid process class\n";
 				errorMsg = ManagementAPIError::toJsonString(false, "setclass", error);
 				return errorMsg;
@@ -1429,11 +1405,10 @@ ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransa
 		throw database_locked();
 	} else if (!val.present()) {
 		// lock database
-		ryw->getTransaction().atomicOp(databaseLockedKey,
-		                               BinaryWriter::toValue(uid, Unversioned())
-		                                   .withPrefix(LiteralStringRef("0123456789"))
-		                                   .withSuffix(LiteralStringRef("\x00\x00\x00\x00")),
-		                               MutationRef::SetVersionstampedValue);
+		ryw->getTransaction().atomicOp(
+		    databaseLockedKey,
+		    BinaryWriter::toValue(uid, Unversioned()).withPrefix("0123456789"_sr).withSuffix("\x00\x00\x00\x00"_sr),
+		    MutationRef::SetVersionstampedValue);
 		ryw->getTransaction().addWriteConflictRange(normalKeys);
 	}
 
@@ -1687,7 +1662,7 @@ ACTOR Future<RangeResult> coordinatorsGetRangeActor(ReadYourWritesTransaction* r
 	state ClusterConnectionString cs = ryw->getDatabase()->getConnectionRecord()->getConnectionString();
 	state std::vector<NetworkAddress> coordinator_processes = wait(cs.tryResolveHostnames());
 	RangeResult result;
-	Key cluster_decription_key = prefix.withSuffix(LiteralStringRef("cluster_description"));
+	Key cluster_decription_key = prefix.withSuffix("cluster_description"_sr);
 	if (kr.contains(cluster_decription_key)) {
 		result.push_back_deep(result.arena(), KeyValueRef(cluster_decription_key, cs.clusterKeyName()));
 	}
@@ -1702,7 +1677,7 @@ ACTOR Future<RangeResult> coordinatorsGetRangeActor(ReadYourWritesTransaction* r
 			processes_str += ",";
 		processes_str += w.toString();
 	}
-	Key processes_key = prefix.withSuffix(LiteralStringRef("processes"));
+	Key processes_key = prefix.withSuffix("processes"_sr);
 	if (kr.contains(processes_key)) {
 		result.push_back_deep(result.arena(), KeyValueRef(processes_key, Value(processes_str)));
 	}
@@ -1724,7 +1699,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 	state bool parse_error = false;
 
 	// check update for coordinators
-	Key processes_key = LiteralStringRef("processes").withPrefix(kr.begin);
+	Key processes_key = "processes"_sr.withPrefix(kr.begin);
 	auto processes_entry = ryw->getSpecialKeySpaceWriteMap()[processes_key];
 	if (processes_entry.first) {
 		ASSERT(processes_entry.second.present()); // no clear should be seen here
@@ -1764,7 +1739,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 
 	std::string newName;
 	// check update for cluster_description
-	Key cluster_decription_key = LiteralStringRef("cluster_description").withPrefix(kr.begin);
+	Key cluster_decription_key = "cluster_description"_sr.withPrefix(kr.begin);
 	auto entry = ryw->getSpecialKeySpaceWriteMap()[cluster_decription_key];
 	if (entry.first) {
 		// check valid description [a-zA-Z0-9_]+
@@ -1778,7 +1753,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		}
 	}
 
-	auto configDBEntry = ryw->getSpecialKeySpaceWriteMap()[LiteralStringRef("config_db").withPrefix(kr.begin)];
+	auto configDBEntry = ryw->getSpecialKeySpaceWriteMap()["config_db"_sr.withPrefix(kr.begin)];
 
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsStart")
 	    .detail("NewConnectionString", conn.toString())
@@ -2009,7 +1984,7 @@ Future<RangeResult> ClientProfilingImpl::getRange(ReadYourWritesTransaction* ryw
 	KeyRef prefix = getKeyRange().begin;
 	RangeResult result = RangeResult();
 	// client_txn_sample_rate
-	Key sampleRateKey = LiteralStringRef("client_txn_sample_rate").withPrefix(prefix);
+	Key sampleRateKey = "client_txn_sample_rate"_sr.withPrefix(prefix);
 
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
 
@@ -2030,7 +2005,7 @@ Future<RangeResult> ClientProfilingImpl::getRange(ReadYourWritesTransaction* ryw
 		}
 	}
 	// client_txn_size_limit
-	Key txnSizeLimitKey = LiteralStringRef("client_txn_size_limit").withPrefix(prefix);
+	Key txnSizeLimitKey = "client_txn_size_limit"_sr.withPrefix(prefix);
 	if (kr.contains(txnSizeLimitKey)) {
 		auto entry = ryw->getSpecialKeySpaceWriteMap()[txnSizeLimitKey];
 		if (!ryw->readYourWritesDisabled() && entry.first) {
@@ -2056,7 +2031,7 @@ Future<Optional<std::string>> ClientProfilingImpl::commit(ReadYourWritesTransact
 	Standalone<VectorRef<KeyRangeRef>> clears;
 
 	// client_txn_sample_rate
-	Key sampleRateKey = LiteralStringRef("client_txn_sample_rate").withPrefix(getKeyRange().begin);
+	Key sampleRateKey = "client_txn_sample_rate"_sr.withPrefix(getKeyRange().begin);
 	auto rateEntry = ryw->getSpecialKeySpaceWriteMap()[sampleRateKey];
 
 	if (rateEntry.first && rateEntry.second.present()) {
@@ -2076,7 +2051,7 @@ Future<Optional<std::string>> ClientProfilingImpl::commit(ReadYourWritesTransact
 		}
 	}
 	// client_txn_size_limit
-	Key txnSizeLimitKey = LiteralStringRef("client_txn_size_limit").withPrefix(getKeyRange().begin);
+	Key txnSizeLimitKey = "client_txn_size_limit"_sr.withPrefix(getKeyRange().begin);
 	auto sizeLimitEntry = ryw->getSpecialKeySpaceWriteMap()[txnSizeLimitKey];
 	if (sizeLimitEntry.first && sizeLimitEntry.second.present()) {
 		std::string sizeLimitStr = sizeLimitEntry.second.get().toString();
@@ -2121,11 +2096,11 @@ void parse(StringRef& val, double& d) {
 }
 
 void parse(StringRef& val, WaitState& w) {
-	if (val == LiteralStringRef("disk") || val == LiteralStringRef("Disk")) {
+	if (val == "disk"_sr || val == "Disk"_sr) {
 		w = WaitState::Disk;
-	} else if (val == LiteralStringRef("network") || val == LiteralStringRef("Network")) {
+	} else if (val == "network"_sr || val == "Network"_sr) {
 		w = WaitState::Network;
-	} else if (val == LiteralStringRef("running") || val == LiteralStringRef("Running")) {
+	} else if (val == "running"_sr || val == "Running"_sr) {
 		w = WaitState::Running;
 	} else {
 		throw std::range_error("failed to parse run state");
@@ -2525,7 +2500,7 @@ ACTOR static Future<RangeResult> DataDistributionGetRangeActor(ReadYourWritesTra
                                                                KeyRangeRef kr) {
 	state RangeResult result;
 	// dataDistributionModeKey
-	state Key modeKey = LiteralStringRef("mode").withPrefix(prefix);
+	state Key modeKey = "mode"_sr.withPrefix(prefix);
 
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
 
@@ -2541,7 +2516,7 @@ ACTOR static Future<RangeResult> DataDistributionGetRangeActor(ReadYourWritesTra
 		}
 	}
 	// rebalanceDDIgnoreKey
-	state Key rebalanceIgnoredKey = LiteralStringRef("rebalance_ignored").withPrefix(prefix);
+	state Key rebalanceIgnoredKey = "rebalance_ignored"_sr.withPrefix(prefix);
 	if (kr.contains(rebalanceIgnoredKey)) {
 		auto entry = ryw->getSpecialKeySpaceWriteMap()[rebalanceIgnoredKey];
 		if (ryw->readYourWritesDisabled() || !entry.first) {
@@ -2568,8 +2543,8 @@ Future<Optional<std::string>> DataDistributionImpl::commit(ReadYourWritesTransac
 
 	Optional<std::string> msg;
 	KeyRangeRef kr = getKeyRange();
-	Key modeKey = LiteralStringRef("mode").withPrefix(kr.begin);
-	Key rebalanceIgnoredKey = LiteralStringRef("rebalance_ignored").withPrefix(kr.begin);
+	Key modeKey = "mode"_sr.withPrefix(kr.begin);
+	Key rebalanceIgnoredKey = "rebalance_ignored"_sr.withPrefix(kr.begin);
 	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(kr);
 	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
 		if (!iter->value().first)
@@ -2756,11 +2731,11 @@ void ExcludedLocalitiesRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyR
 
 Key ExcludedLocalitiesRangeImpl::decode(const KeyRef& key) const {
 	return key.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
-	    .withPrefix(LiteralStringRef("\xff/conf/"));
+	    .withPrefix("\xff/conf/"_sr);
 }
 
 Key ExcludedLocalitiesRangeImpl::encode(const KeyRef& key) const {
-	return key.removePrefix(LiteralStringRef("\xff/conf/"))
+	return key.removePrefix("\xff/conf/"_sr)
 	    .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
 }
 
@@ -2785,11 +2760,11 @@ void FailedLocalitiesRangeImpl::set(ReadYourWritesTransaction* ryw, const KeyRef
 
 Key FailedLocalitiesRangeImpl::decode(const KeyRef& key) const {
 	return key.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
-	    .withPrefix(LiteralStringRef("\xff/conf/"));
+	    .withPrefix("\xff/conf/"_sr);
 }
 
 Key FailedLocalitiesRangeImpl::encode(const KeyRef& key) const {
-	return key.removePrefix(LiteralStringRef("\xff/conf/"))
+	return key.removePrefix("\xff/conf/"_sr)
 	    .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
 }
 

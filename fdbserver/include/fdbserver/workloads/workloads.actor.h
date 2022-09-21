@@ -67,7 +67,7 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 
 	// Subclasses are expected to also have a constructor with this signature (to work with WorkloadFactory<>):
 	explicit TestWorkload(WorkloadContext const& wcx) : WorkloadContext(wcx) {
-		bool runSetup = getOption(options, LiteralStringRef("runSetup"), true);
+		bool runSetup = getOption(options, "runSetup"_sr, true);
 		phases = TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
 		if (runSetup)
 			phases |= TestWorkload::SETUP;
@@ -174,15 +174,15 @@ struct KVWorkload : TestWorkload {
 	double absentFrac;
 
 	explicit KVWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		nodeCount = getOption(options, LiteralStringRef("nodeCount"), (uint64_t)100000);
-		nodePrefix = getOption(options, LiteralStringRef("nodePrefix"), (int64_t)-1);
-		actorCount = getOption(options, LiteralStringRef("actorCount"), 50);
-		keyBytes = std::max(getOption(options, LiteralStringRef("keyBytes"), 16), 4);
-		maxValueBytes = getOption(options, LiteralStringRef("valueBytes"), 96);
-		minValueBytes = getOption(options, LiteralStringRef("minValueBytes"), maxValueBytes);
+		nodeCount = getOption(options, "nodeCount"_sr, (uint64_t)100000);
+		nodePrefix = getOption(options, "nodePrefix"_sr, (int64_t)-1);
+		actorCount = getOption(options, "actorCount"_sr, 50);
+		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 4);
+		maxValueBytes = getOption(options, "valueBytes"_sr, 96);
+		minValueBytes = getOption(options, "minValueBytes"_sr, maxValueBytes);
 		ASSERT(minValueBytes <= maxValueBytes);
 
-		absentFrac = getOption(options, LiteralStringRef("absentFrac"), 0.0);
+		absentFrac = getOption(options, "absentFrac"_sr, 0.0);
 	}
 	Key getRandomKey() const;
 	Key getRandomKey(double absentFrac) const;

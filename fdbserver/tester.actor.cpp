@@ -154,7 +154,7 @@ Value getOption(VectorRef<KeyValueRef> options, Key key, Value defaultValue) {
 	for (int i = 0; i < options.size(); i++)
 		if (options[i].key == key) {
 			Value value = options[i].value;
-			options[i].value = LiteralStringRef("");
+			options[i].value = ""_sr;
 			return value;
 		}
 
@@ -166,7 +166,7 @@ int getOption(VectorRef<KeyValueRef> options, Key key, int defaultValue) {
 		if (options[i].key == key) {
 			int r;
 			if (sscanf(options[i].value.toString().c_str(), "%d", &r)) {
-				options[i].value = LiteralStringRef("");
+				options[i].value = ""_sr;
 				return r;
 			} else {
 				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
@@ -182,7 +182,7 @@ uint64_t getOption(VectorRef<KeyValueRef> options, Key key, uint64_t defaultValu
 		if (options[i].key == key) {
 			uint64_t r;
 			if (sscanf(options[i].value.toString().c_str(), "%" SCNd64, &r)) {
-				options[i].value = LiteralStringRef("");
+				options[i].value = ""_sr;
 				return r;
 			} else {
 				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
@@ -198,7 +198,7 @@ int64_t getOption(VectorRef<KeyValueRef> options, Key key, int64_t defaultValue)
 		if (options[i].key == key) {
 			int64_t r;
 			if (sscanf(options[i].value.toString().c_str(), "%" SCNd64, &r)) {
-				options[i].value = LiteralStringRef("");
+				options[i].value = ""_sr;
 				return r;
 			} else {
 				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
@@ -214,7 +214,7 @@ double getOption(VectorRef<KeyValueRef> options, Key key, double defaultValue) {
 		if (options[i].key == key) {
 			float r;
 			if (sscanf(options[i].value.toString().c_str(), "%f", &r)) {
-				options[i].value = LiteralStringRef("");
+				options[i].value = ""_sr;
 				return r;
 			}
 		}
@@ -223,10 +223,10 @@ double getOption(VectorRef<KeyValueRef> options, Key key, double defaultValue) {
 }
 
 bool getOption(VectorRef<KeyValueRef> options, Key key, bool defaultValue) {
-	Value p = getOption(options, key, defaultValue ? LiteralStringRef("true") : LiteralStringRef("false"));
-	if (p == LiteralStringRef("true"))
+	Value p = getOption(options, key, defaultValue ? "true"_sr : "false"_sr);
+	if (p == "true"_sr)
 		return true;
-	if (p == LiteralStringRef("false"))
+	if (p == "false"_sr)
 		return false;
 	ASSERT(false);
 	return false; // Assure that compiler is fine with the function
@@ -243,7 +243,7 @@ std::vector<std::string> getOption(VectorRef<KeyValueRef> options, Key key, std:
 					begin = c + 1;
 				}
 			v.push_back(options[i].value.substr(begin).toString());
-			options[i].value = LiteralStringRef("");
+			options[i].value = ""_sr;
 			return v;
 		}
 	return defaultValue;
@@ -260,7 +260,7 @@ bool hasOption(VectorRef<KeyValueRef> options, Key key) {
 
 // returns unconsumed options
 Standalone<VectorRef<KeyValueRef>> checkAllOptionsConsumed(VectorRef<KeyValueRef> options) {
-	static StringRef nothing = LiteralStringRef("");
+	static StringRef nothing = ""_sr;
 	Standalone<VectorRef<KeyValueRef>> unconsumed;
 	for (int i = 0; i < options.size(); i++)
 		if (!(options[i].value == nothing)) {
@@ -461,7 +461,7 @@ ACTOR Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
                                                        VectorRef<KeyValueRef> options,
                                                        Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	state Reference<TestWorkload> workload;
-	state Value testName = getOption(options, LiteralStringRef("testName"), LiteralStringRef("no-test-specified"));
+	state Value testName = getOption(options, "testName"_sr, "no-test-specified"_sr);
 	WorkloadContext wcx;
 	wcx.clientId = work.clientId;
 	wcx.clientCount = work.clientCount;
@@ -1061,11 +1061,10 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx,
 ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface> testers, StringRef configMode) {
 	state TestSpec spec;
 	Standalone<VectorRef<KeyValueRef>> options;
-	spec.title = LiteralStringRef("ChangeConfig");
+	spec.title = "ChangeConfig"_sr;
 	spec.runFailureWorkloads = false;
-	options.push_back_deep(options.arena(),
-	                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ChangeConfig")));
-	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("configMode"), configMode));
+	options.push_back_deep(options.arena(), KeyValueRef("testName"_sr, "ChangeConfig"_sr));
+	options.push_back_deep(options.arena(), KeyValueRef("configMode"_sr, configMode));
 	spec.options.push_back_deep(spec.options.arena(), options);
 
 	DistributedTestResults testResults = wait(runWorkload(cx, testers, spec, Optional<TenantName>()));
@@ -1094,32 +1093,31 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	}
 
 	Standalone<VectorRef<KeyValueRef>> options;
-	StringRef performQuiescent = LiteralStringRef("false");
-	StringRef performCacheCheck = LiteralStringRef("false");
-	StringRef performTSSCheck = LiteralStringRef("false");
+	StringRef performQuiescent = "false"_sr;
+	StringRef performCacheCheck = "false"_sr;
+	StringRef performTSSCheck = "false"_sr;
 	if (doQuiescentCheck) {
-		performQuiescent = LiteralStringRef("true");
+		performQuiescent = "true"_sr;
 		spec.restorePerpetualWiggleSetting = false;
 	}
 	if (doCacheCheck) {
-		performCacheCheck = LiteralStringRef("true");
+		performCacheCheck = "true"_sr;
 	}
 	if (doTSSCheck) {
-		performTSSCheck = LiteralStringRef("true");
+		performTSSCheck = "true"_sr;
 	}
-	spec.title = LiteralStringRef("ConsistencyCheck");
+	spec.title = "ConsistencyCheck"_sr;
 	spec.databasePingDelay = databasePingDelay;
 	spec.runFailureWorkloads = false;
 	spec.timeout = 32000;
-	options.push_back_deep(options.arena(),
-	                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
-	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performQuiescentChecks"), performQuiescent));
-	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performCacheCheck"), performCacheCheck));
-	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("performTSSCheck"), performTSSCheck));
-	options.push_back_deep(options.arena(),
-	                       KeyValueRef(LiteralStringRef("quiescentWaitTimeout"),
-	                                   ValueRef(options.arena(), format("%f", quiescentWaitTimeout))));
-	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("false")));
+	options.push_back_deep(options.arena(), KeyValueRef("testName"_sr, "ConsistencyCheck"_sr));
+	options.push_back_deep(options.arena(), KeyValueRef("performQuiescentChecks"_sr, performQuiescent));
+	options.push_back_deep(options.arena(), KeyValueRef("performCacheCheck"_sr, performCacheCheck));
+	options.push_back_deep(options.arena(), KeyValueRef("performTSSCheck"_sr, performTSSCheck));
+	options.push_back_deep(
+	    options.arena(),
+	    KeyValueRef("quiescentWaitTimeout"_sr, ValueRef(options.arena(), format("%f", quiescentWaitTimeout))));
+	options.push_back_deep(options.arena(), KeyValueRef("distributed"_sr, "false"_sr));
 	spec.options.push_back_deep(spec.options.arena(), options);
 
 	state double start = now();
@@ -1133,8 +1131,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 			return Void();
 		}
 		if (now() - start > softTimeLimit) {
-			spec.options[0].push_back_deep(spec.options.arena(),
-			                               KeyValueRef(LiteralStringRef("failureIsError"), LiteralStringRef("true")));
+			spec.options[0].push_back_deep(spec.options.arena(), KeyValueRef("failureIsError"_sr, "true"_sr));
 			lastRun = true;
 		}
 
@@ -1708,7 +1705,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		if (iter->simDrAgents != ISimulator::BackupAgentType::NoBackupAgents) {
 			simDrAgents = iter->simDrAgents;
 		}
-		enableDD = enableDD || getOption(iter->options[0], LiteralStringRef("enableDD"), false);
+		enableDD = enableDD || getOption(iter->options[0], "enableDD"_sr, false);
 	}
 
 	if (g_network->isSimulated()) {
@@ -1934,37 +1931,31 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 	if (whatToRun == TEST_TYPE_CONSISTENCY_CHECK) {
 		TestSpec spec;
 		Standalone<VectorRef<KeyValueRef>> options;
-		spec.title = LiteralStringRef("ConsistencyCheck");
+		spec.title = "ConsistencyCheck"_sr;
 		spec.runFailureWorkloads = false;
 		spec.databasePingDelay = 0;
 		spec.timeout = 0;
 		spec.waitForQuiescenceBegin = false;
 		spec.waitForQuiescenceEnd = false;
 		std::string rateLimitMax = format("%d", CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX);
-		options.push_back_deep(options.arena(),
-		                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
-		options.push_back_deep(options.arena(),
-		                       KeyValueRef(LiteralStringRef("performQuiescentChecks"), LiteralStringRef("false")));
-		options.push_back_deep(options.arena(),
-		                       KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("false")));
-		options.push_back_deep(options.arena(),
-		                       KeyValueRef(LiteralStringRef("failureIsError"), LiteralStringRef("true")));
-		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("indefinite"), LiteralStringRef("true")));
-		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("rateLimitMax"), StringRef(rateLimitMax)));
-		options.push_back_deep(options.arena(),
-		                       KeyValueRef(LiteralStringRef("shuffleShards"), LiteralStringRef("true")));
+		options.push_back_deep(options.arena(), KeyValueRef("testName"_sr, "ConsistencyCheck"_sr));
+		options.push_back_deep(options.arena(), KeyValueRef("performQuiescentChecks"_sr, "false"_sr));
+		options.push_back_deep(options.arena(), KeyValueRef("distributed"_sr, "false"_sr));
+		options.push_back_deep(options.arena(), KeyValueRef("failureIsError"_sr, "true"_sr));
+		options.push_back_deep(options.arena(), KeyValueRef("indefinite"_sr, "true"_sr));
+		options.push_back_deep(options.arena(), KeyValueRef("rateLimitMax"_sr, StringRef(rateLimitMax)));
+		options.push_back_deep(options.arena(), KeyValueRef("shuffleShards"_sr, "true"_sr));
 		spec.options.push_back_deep(spec.options.arena(), options);
 		testSet.testSpecs.push_back(spec);
 	} else if (whatToRun == TEST_TYPE_UNIT_TESTS) {
 		TestSpec spec;
 		Standalone<VectorRef<KeyValueRef>> options;
-		spec.title = LiteralStringRef("UnitTests");
+		spec.title = "UnitTests"_sr;
 		spec.startDelay = 0;
 		spec.useDB = false;
 		spec.timeout = 0;
-		options.push_back_deep(options.arena(),
-		                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("UnitTests")));
-		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("testsMatching"), fileName));
+		options.push_back_deep(options.arena(), KeyValueRef("testName"_sr, "UnitTests"_sr));
+		options.push_back_deep(options.arena(), KeyValueRef("testsMatching"_sr, fileName));
 		// Add unit test options as test spec options
 		for (auto& kv : testOptions.params) {
 			options.push_back_deep(options.arena(), KeyValueRef(kv.first, kv.second));

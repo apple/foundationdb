@@ -98,16 +98,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	Future<Void> monitorConsistencyCheckSettingsActor;
 
 	ConsistencyCheckWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		performQuiescentChecks = getOption(options, LiteralStringRef("performQuiescentChecks"), false);
-		performCacheCheck = getOption(options, LiteralStringRef("performCacheCheck"), false);
-		performTSSCheck = getOption(options, LiteralStringRef("performTSSCheck"), true);
-		quiescentWaitTimeout = getOption(options, LiteralStringRef("quiescentWaitTimeout"), 600.0);
-		distributed = getOption(options, LiteralStringRef("distributed"), true);
-		shardSampleFactor = std::max(getOption(options, LiteralStringRef("shardSampleFactor"), 1), 1);
-		failureIsError = getOption(options, LiteralStringRef("failureIsError"), false);
-		rateLimitMax = getOption(options, LiteralStringRef("rateLimitMax"), 0);
-		shuffleShards = getOption(options, LiteralStringRef("shuffleShards"), false);
-		indefinite = getOption(options, LiteralStringRef("indefinite"), false);
+		performQuiescentChecks = getOption(options, "performQuiescentChecks"_sr, false);
+		performCacheCheck = getOption(options, "performCacheCheck"_sr, false);
+		performTSSCheck = getOption(options, "performTSSCheck"_sr, true);
+		quiescentWaitTimeout = getOption(options, "quiescentWaitTimeout"_sr, 600.0);
+		distributed = getOption(options, "distributed"_sr, true);
+		shardSampleFactor = std::max(getOption(options, "shardSampleFactor"_sr, 1), 1);
+		failureIsError = getOption(options, "failureIsError"_sr, false);
+		rateLimitMax = getOption(options, "rateLimitMax"_sr, 0);
+		shuffleShards = getOption(options, "shuffleShards"_sr, false);
+		indefinite = getOption(options, "indefinite"_sr, false);
 		suspendConsistencyCheck.set(true);
 
 		success = true;
