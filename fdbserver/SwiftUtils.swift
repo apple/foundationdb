@@ -1,5 +1,6 @@
 import Flow
 import FDBServer
+import FDBClient
 
 @_cdecl("testSwiftInFDB")
 public func testSwiftInFDB() {

@@ -30,15 +30,14 @@ add_library(fdbserver_swift STATIC
         )
 
 target_include_directories(fdbserver_swift PUBLIC
-    "${CMAKE_SOURCE_DIR}/flow/include"
     "${CMAKE_BINARY_DIR}/flow/include"
-    "${CMAKE_SOURCE_DIR}/fdbclient/include"
     "${CMAKE_BINARY_DIR}/fdbclient/include"
-    "${CMAKE_SOURCE_DIR}/fdbserver/include"
     "${CMAKE_BINARY_DIR}/fdbserver/include"
     "${CMAKE_SOURCE_DIR}/fdbrpc/include"
     "${CMAKE_BINARY_DIR}/fdbrpc/include"
     "${CMAKE_SOURCE_DIR}/contrib/fmt-8.1.1/include"
+    "${CMAKE_SOURCE_DIR}/contrib/md5/include"
+    "${CMAKE_SOURCE_DIR}/contrib/libb64/include"
     "${CMAKE_SOURCE_DIR}/contrib/sqlite"
     "${CMAKE_BINARY_DIR}/boost_install/include"
     "${CMAKE_BINARY_DIR}/msgpackProject-prefix/src/msgpackProject/include"
@@ -52,7 +51,9 @@ target_include_directories(fdbserver_swift PRIVATE
 )
 
 # TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?
-target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++17 -enable-experimental-cxx-interop -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -DSWIFT_HACK>")
+target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++17 -enable-experimental-cxx-interop -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml>")
+# FIXME: remove
+target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -DSWIFT_HACK>")
 
 add_dependencies(fdbserver_swift fdbserver_actors)
 # This does not work! (see rdar://99107402)
