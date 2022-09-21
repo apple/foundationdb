@@ -350,7 +350,7 @@ Future<bool> CompoundWorkload::check(Database const& cx) {
 			        .detail("Name", workloadName)
 			        .detail("Remaining", *wCount)
 			        .detail("Phase", "End");
-			    return true;
+			    return ret;
 		    },
 		    workload.check(cx));
 	};
