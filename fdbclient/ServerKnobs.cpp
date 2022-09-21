@@ -367,7 +367,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_UNSAFE_AUTO_FSYNC,                           false );
 	init( ROCKSDB_PERIODIC_COMPACTION_SECONDS,                     0 );
 	init( ROCKSDB_PREFIX_LEN,                                      0 );
-	init( ROCKSDB_BLOCK_CACHE_SIZE,                                0 );
+	// If rocksdb block cache size is 0, the default 8MB is used.
+	int64_t blockCacheSize = isSimulated ? 0 : 1024 * 1024 * 1024 /* 1GB */;
+	init( ROCKSDB_BLOCK_CACHE_SIZE,                   blockCacheSize );
 	init( ROCKSDB_METRICS_DELAY,                                60.0 );
 	init( ROCKSDB_READ_VALUE_TIMEOUT,                            5.0 );
 	init( ROCKSDB_READ_VALUE_PREFIX_TIMEOUT,                     5.0 );
