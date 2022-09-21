@@ -497,7 +497,7 @@ TEST_CASE("/flow/Tracing/AddEvents") {
 	auto arena = span1.arena;
 	SmallVectorRef<KeyValueRef> attrs;
 	attrs.push_back(arena, KeyValueRef("foo"_sr, "bar"_sr));
-	span1.addEvent(LiteralStringRef("read_version"), 1.0, attrs);
+	span1.addEvent("read_version"_sr, 1.0, attrs);
 	ASSERT(span1.events[0].name.toString() == "read_version");
 	ASSERT(span1.events[0].time == 1.0);
 	ASSERT(span1.events[0].attributes.begin()->key.toString() == "foo");
@@ -505,7 +505,7 @@ TEST_CASE("/flow/Tracing/AddEvents") {
 
 	// Use helper method to add an OTELEventRef with no attributes to an OTELSpan
 	Span span2("span_with_event"_loc);
-	span2.addEvent(StringRef(span2.arena, LiteralStringRef("commit_succeed")), 1234567.100);
+	span2.addEvent(StringRef(span2.arena, "commit_succeed"_sr), 1234567.100);
 	ASSERT(span2.events[0].name.toString() == "commit_succeed");
 	ASSERT(span2.events[0].time == 1234567.100);
 	ASSERT(span2.events[0].attributes.size() == 0);
@@ -537,8 +537,8 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	IKnobCollection::getMutableGlobalKnobCollection().setKnob("tracing_span_attributes_enabled",
 	                                                          KnobValueRef::create(bool{ true }));
 	auto arena = span1.arena;
-	span1.addAttribute(StringRef(arena, LiteralStringRef("foo")), StringRef(arena, LiteralStringRef("bar")));
-	span1.addAttribute(StringRef(arena, LiteralStringRef("operation")), StringRef(arena, LiteralStringRef("grv")));
+	span1.addAttribute(StringRef(arena, "foo"_sr), StringRef(arena, "bar"_sr));
+	span1.addAttribute(StringRef(arena, "operation"_sr), StringRef(arena, "grv"_sr));
 	ASSERT_EQ(span1.attributes.size(), 3); // Includes default attribute of "address"
 	ASSERT(span1.attributes[1] == KeyValueRef("foo"_sr, "bar"_sr));
 	ASSERT(span1.attributes[2] == KeyValueRef("operation"_sr, "grv"_sr));
@@ -548,9 +548,9 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	                       deterministicRandom()->randomUInt64(),
 	                       TraceFlags::sampled));
 	auto s2Arena = span2.arena;
-	span2.addAttribute(StringRef(s2Arena, LiteralStringRef("a")), StringRef(s2Arena, LiteralStringRef("1")))
-	    .addAttribute(StringRef(s2Arena, LiteralStringRef("b")), LiteralStringRef("2"))
-	    .addAttribute(StringRef(s2Arena, LiteralStringRef("c")), LiteralStringRef("3"));
+	span2.addAttribute(StringRef(s2Arena, "a"_sr), StringRef(s2Arena, "1"_sr))
+	    .addAttribute(StringRef(s2Arena, "b"_sr), "2"_sr)
+	    .addAttribute(StringRef(s2Arena, "c"_sr), "3"_sr);
 
 	ASSERT_EQ(span2.attributes.size(), 4); // Includes default attribute of "address"
 	ASSERT(span2.attributes[1] == KeyValueRef("a"_sr, "1"_sr));
@@ -718,7 +718,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	attrs.push_back(s3Arena, KeyValueRef("foo"_sr, "bar"_sr));
 	span3.addAttribute("operation"_sr, "grv"_sr)
 	    .addLink(SpanContext(UID(300, 301), 400, TraceFlags::sampled))
-	    .addEvent(StringRef(s3Arena, LiteralStringRef("event1")), 100.101, attrs);
+	    .addEvent(StringRef(s3Arena, "event1"_sr), 100.101, attrs);
 	tracer.serialize_span(span3, request);
 	data = request.buffer.get();
 	ASSERT(data[0] == 0b10011100); // 12 element array.

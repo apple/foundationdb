@@ -65,8 +65,8 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 	state StringRef new_cluster_description;
 	state std::string auto_coordinators_str;
 	state bool disableConfigDB = false;
-	StringRef nameTokenBegin = LiteralStringRef("description=");
-	StringRef noConfigDB = LiteralStringRef("--no-config-db");
+	StringRef nameTokenBegin = "description="_sr;
+	StringRef noConfigDB = "--no-config-db"_sr;
 	for (auto tok = tokens.begin() + 1; tok != tokens.end(); ++tok) {
 		if (tok->startsWith(nameTokenBegin) && new_cluster_description.empty()) {
 			new_cluster_description = tok->substr(nameTokenBegin.size());
@@ -83,7 +83,7 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 		}
 	}
 
-	state bool automatic = tokens.size() == 2 && tokens[1] == LiteralStringRef("auto");
+	state bool automatic = tokens.size() == 2 && tokens[1] == "auto"_sr;
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
@@ -186,10 +186,10 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 
 namespace fdb_cli {
 
-const KeyRef clusterDescriptionSpecialKey = LiteralStringRef("\xff\xff/configuration/coordinators/cluster_description");
-const KeyRef configDBSpecialKey = LiteralStringRef("\xff\xff/configuration/coordinators/config_db");
-const KeyRef coordinatorsAutoSpecialKey = LiteralStringRef("\xff\xff/management/auto_coordinators");
-const KeyRef coordinatorsProcessSpecialKey = LiteralStringRef("\xff\xff/configuration/coordinators/processes");
+const KeyRef clusterDescriptionSpecialKey = "\xff\xff/configuration/coordinators/cluster_description"_sr;
+const KeyRef configDBSpecialKey = "\xff\xff/configuration/coordinators/config_db"_sr;
+const KeyRef coordinatorsAutoSpecialKey = "\xff\xff/management/auto_coordinators"_sr;
+const KeyRef coordinatorsProcessSpecialKey = "\xff\xff/configuration/coordinators/processes"_sr;
 
 ACTOR Future<bool> coordinatorsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 2) {

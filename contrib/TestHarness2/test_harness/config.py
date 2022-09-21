@@ -141,6 +141,7 @@ class Config:
         self.old_binaries_path_args = {'help': 'Path to the directory containing the old fdb binaries'}
         self.tls_plugin_path: Path = Path('/app/deploy/runtime/.tls_5_1/FDBLibTLS.so')
         self.tls_plugin_path_args = {'help': 'Path to the tls plugin used for binaries < 5.2.0'}
+        self.disable_kaio: bool = False
         self.use_valgrind: bool = False
         self.use_valgrind_args = {'action': 'store_true'}
         self.buggify = BuggifyOption('random')

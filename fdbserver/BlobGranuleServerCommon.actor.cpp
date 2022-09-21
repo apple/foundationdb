@@ -131,7 +131,7 @@ ACTOR Future<ForcedPurgeState> getForcePurgedState(Transaction* tr, KeyRange key
 		ASSERT(values[0].value != values[1].value);
 		return ForcedPurgeState::SomePurged;
 	} else {
-		return values[0].value == LiteralStringRef("1") ? ForcedPurgeState::AllPurged : ForcedPurgeState::NonePurged;
+		return values[0].value == "1"_sr ? ForcedPurgeState::AllPurged : ForcedPurgeState::NonePurged;
 	}
 }
 
@@ -155,7 +155,7 @@ void GranuleFiles::getFiles(Version beginVersion,
                             int64_t& deltaBytesCounter,
                             bool summarize) const {
 	BlobFileIndex dummyIndex; // for searching
-
+	ASSERT(!snapshotFiles.empty());
 	// if beginVersion == 0 or we can collapse, find the latest snapshot <= readVersion
 	auto snapshotF = snapshotFiles.end();
 	if (beginVersion == 0 || canCollapse) {

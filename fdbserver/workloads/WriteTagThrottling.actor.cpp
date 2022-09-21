@@ -66,23 +66,23 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	WriteTagThrottlingWorkload(WorkloadContext const& wcx)
 	  : KVWorkload(wcx), badActorReadLatency(SAMPLE_SIZE), goodActorReadLatency(SAMPLE_SIZE),
 	    badActorCommitLatency(SAMPLE_SIZE), goodActorCommitLatency(SAMPLE_SIZE) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 120.0);
-		badOpRate = getOption(options, LiteralStringRef("badOpRate"), 0.9);
-		numWritePerTr = getOption(options, LiteralStringRef("numWritePerTr"), 1);
-		numReadPerTr = getOption(options, LiteralStringRef("numReadPerTr"), 1);
-		numClearPerTr = getOption(options, LiteralStringRef("numClearPerTr"), 1);
-		hotRangeRate = getOption(options, LiteralStringRef("hotRangeRate"), 0.1);
-		populateData = getOption(options, LiteralStringRef("populateData"), true);
+		testDuration = getOption(options, "testDuration"_sr, 120.0);
+		badOpRate = getOption(options, "badOpRate"_sr, 0.9);
+		numWritePerTr = getOption(options, "numWritePerTr"_sr, 1);
+		numReadPerTr = getOption(options, "numReadPerTr"_sr, 1);
+		numClearPerTr = getOption(options, "numClearPerTr"_sr, 1);
+		hotRangeRate = getOption(options, "hotRangeRate"_sr, 0.1);
+		populateData = getOption(options, "populateData"_sr, true);
 
-		writeThrottle = getOption(options, LiteralStringRef("writeThrottle"), false);
-		badActorPerClient = getOption(options, LiteralStringRef("badActorPerClient"), 1);
-		goodActorPerClient = getOption(options, LiteralStringRef("goodActorPerClient"), 1);
+		writeThrottle = getOption(options, "writeThrottle"_sr, false);
+		badActorPerClient = getOption(options, "badActorPerClient"_sr, 1);
+		goodActorPerClient = getOption(options, "goodActorPerClient"_sr, 1);
 		actorCount = goodActorPerClient + badActorPerClient;
 
 		keyCount = getOption(options,
-		                     LiteralStringRef("keyCount"),
+		                     "keyCount"_sr,
 		                     std::max(3000, clientCount * actorCount * 3)); // enough keys to avoid too many conflicts
-		trInterval = actorCount * 1.0 / getOption(options, LiteralStringRef("trPerSecond"), 1000);
+		trInterval = actorCount * 1.0 / getOption(options, "trPerSecond"_sr, 1000);
 		if (badActorPerClient > 0) {
 			rangeEachBadActor = keyCount / (clientCount * badActorPerClient);
 		}

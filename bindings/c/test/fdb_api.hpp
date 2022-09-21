@@ -349,6 +349,7 @@ public:
 class Future {
 protected:
 	friend class Transaction;
+	friend class Database;
 	friend std::hash<Future>;
 	std::shared_ptr<native::FDBFuture> f;
 
@@ -718,6 +719,14 @@ public:
 	}
 	Database() noexcept : db(nullptr) {}
 
+	void atomic_store(Database other) { std::atomic_store(&db, other.db); }
+
+	Database atomic_load() {
+		Database retVal;
+		retVal.db = std::atomic_load(&db);
+		return retVal;
+	}
+
 	Error setOptionNothrow(FDBDatabaseOption option, int64_t value) noexcept {
 		return Error(native::fdb_database_set_option(
 		    db.get(), option, reinterpret_cast<const uint8_t*>(&value), static_cast<int>(sizeof(value))));
@@ -762,6 +771,13 @@ public:
 		if (err)
 			throwError("Failed to create transaction: ", err);
 		return Transaction(tx_native);
+	}
+
+	TypedFuture<future_var::KeyRangeRefArray> listBlobbifiedRanges(KeyRef begin, KeyRef end, int rangeLimit) {
+		if (!db)
+			throw std::runtime_error("list_blobbified_ranges from null database");
+		return native::fdb_database_list_blobbified_ranges(
+		    db.get(), begin.data(), intSize(begin), end.data(), intSize(end), rangeLimit);
 	}
 };
 
