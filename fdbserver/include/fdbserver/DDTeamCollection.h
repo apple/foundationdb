@@ -186,7 +186,53 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	enum class Status { NONE = 0, WIGGLING = 1, EXCLUDED = 2, FAILED = 3 };
 
-	std::vector<Reference<TCTeamSet>> m_teamSets;
+	class TeamSets {
+	private:
+		std::vector<Reference<TCTeamSet>> teamSets_;
+
+	public:
+		void foreach (std::function<void(const Reference<TCTeamInfo> team)> f) const {
+			for (auto& teamSet : teamSets_) {
+				teamSet->foreach (f);
+			}
+		}
+
+		template <typename T>
+		T sum(std::function<T(const Reference<TCTeamInfo> team)> f) const {
+			T result = 0;
+			for (const auto& teamSet : teamSets_) {
+				result += teamSet->sum(f);
+			}
+			return result;
+		}
+
+		bool any(std::function<bool(const Reference<TCTeamInfo>)> f) const {
+			for (const auto& teamSet : teamSets_) {
+				if (teamSet->any(f)) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		bool all(std::function<bool(const Reference<TCTeamInfo>)> f) const {
+			for (const auto& teamSet : teamSets_) {
+				if (!teamSet->all(f)) {
+					return false;
+				}
+			}
+			return true;
+		}
+
+		void add(Reference<TCTeamSet> teamSet) { teamSets_.push_back(teamSet); }
+
+		Reference<TCTeamSet> operator[](size_t teamSetIndex) const { return teamSets_[teamSetIndex]; }
+
+		size_t size() const { return teamSets_.size(); }
+
+		std::vector<Reference<TCTeamSet>>& teamSets() { return teamSets_; };
+	};
+	TeamSets teamSets;
 
 	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
 	// addActor is used to create the actorCollection when the dataDistributionTeamCollection is created
@@ -595,22 +641,20 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	template <class InputIt>
 	void addTeam(InputIt begin, InputIt end, IsInitialTeam isInitialTeam) {
-		addTeam(m_teamSets[0], begin, end, isInitialTeam);
+		addTeam(teamSets[0], begin, end, isInitialTeam);
 	}
 
 	void addTeam(const std::vector<Reference<TCServerInfo>>& newTeamServers,
 	             IsInitialTeam isInitialTeam,
 	             IsRedundantTeam isRedundantTeam = IsRedundantTeam::False) {
-		addTeam(m_teamSets[0], newTeamServers, isInitialTeam, isRedundantTeam);
+		addTeam(teamSets[0], newTeamServers, isInitialTeam, isRedundantTeam);
 	}
 
 	void addTeam(Reference<TCTeamSet> teamSet, std::set<UID> const& team, IsInitialTeam isInitialTeam) {
 		addTeam(teamSet, team.begin(), team.end(), isInitialTeam);
 	}
 
-	void addTeam(std::set<UID> const& team, IsInitialTeam isInitialTeam) {
-		addTeam(m_teamSets[0], team, isInitialTeam);
-	}
+	void addTeam(std::set<UID> const& team, IsInitialTeam isInitialTeam) { addTeam(teamSets[0], team, isInitialTeam); }
 
 	void addTeam(Reference<TCTeamSet> teamset,
 	             const std::vector<Reference<TCServerInfo>>& newTeamServers,
@@ -663,8 +707,8 @@ public:
 
 	size_t teamCount() const {
 		size_t count = 0;
-		for (auto& teamSet : m_teamSets) {
-			count += teamSet->teamCount();
+		for (auto i = 0; i < teamSets.size(); i++) {
+			count += teamSets[i]->teamCount();
 		}
 		return count;
 	}

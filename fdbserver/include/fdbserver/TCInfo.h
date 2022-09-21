@@ -282,6 +282,39 @@ public:
 	void addTeam(Reference<TCTeamInfo> team) { m_teams.push_back(team); }
 
 	std::vector<Reference<TCTeamInfo>> teams() const { return m_teams; }
+
+	void foreach (std::function<void(const Reference<TCTeamInfo> team)> f) {
+		for (auto& team : m_teams) {
+			f(team);
+		}
+	}
+
+	bool any(std::function<bool(const Reference<TCTeamInfo>)> f) const {
+		for (auto& team : teams()) {
+			if (f(team)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool all(std::function<bool(const Reference<TCTeamInfo>)> f) const {
+		for (auto& team : teams()) {
+			if (!f(team)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	template <typename T>
+	T sum(std::function<T(const Reference<TCTeamInfo>)> f) const {
+		T result = 0;
+		for (const auto& team : teams()) {
+			result += f(team);
+		}
+		return result;
+	}
 };
 
 class TCTenantInfo : public ReferenceCounted<TCTenantInfo> {
