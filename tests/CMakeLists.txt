@@ -425,7 +425,7 @@ if(WITH_PYTHON)
       NAME token_based_tenant_authorization
       WORKING_DIRECTORY ${authz_script_dir}
       COMMAND bash -c ${authz_test_cmd})
-    set_tests_properties(token_based_tenant_authorization PROPERTIES ENVIRONMENT PYTHONPATH=${CMAKE_SOURCE_DIR}/tests/TestRunner;LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib) # (local|tmp)_cluster.py
+    set_tests_properties(token_based_tenant_authorization PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/tests/TestRunner;LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib") # (local|tmp)_cluster.py
     set_tests_properties(token_based_tenant_authorization PROPERTIES FIXTURES_REQUIRED authz_virtual_env)
     set_tests_properties(token_based_tenant_authorization PROPERTIES TIMEOUT 120)
   endif()
