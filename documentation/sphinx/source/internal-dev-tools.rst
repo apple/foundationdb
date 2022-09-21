@@ -21,7 +21,7 @@ A simple example of a code probe could look as follows:
 
 On a very high level, the above code will indicate that whenever this line is executed and ``self->forceRecovery`` is ``true``, we ran into some interesting case. In addition this probe is also annotated with ``probe::context::sim2``. This indicates that we expect this code to be eventually hit in simulation.
 
-By default, FDB simply will write a trace-line when this code is hit and the condition is ``true``. If the code is never hit, the simulator will, at the end of the run, print the code probe but set the ``covered`` field to ``false``.
+By default, FDB simply will write a trace-line when this code is hit and the condition is ``true``. If the code is never hit, the simulator will, at the end of the run, print the code probe but set the ``covered`` field to ``false``. This all happens in the context of a single simulation run (``fdbserver`` doesn't have a concept of ensembles). This information is written into the log file. ``TestHarness`` (see below) will then use this information to write code probe statistics to the ensemble in the Joshua cluster (if the test is run in Joshua).
 
 We expect that ALL code probes will be hit in a nightly run. In the future we can potentially use this feature for other things (like instructing the simulator to do an extensive search starting when one of these probes is being hit).
 
