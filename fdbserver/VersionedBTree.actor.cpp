@@ -4896,7 +4896,10 @@ struct DecodeBoundaryVerifier {
 						        ::toString(v).c_str(),
 						        ::toString(domainId).c_str(),
 						        cursor.get().key.printable().c_str());
-						return false;
+						// Temporarily disabling the check, since if a tenant is removed, where the key provider
+						// would not find the domain, the data for the tenant may still be in Redwood and being read.
+						// TODO(yiwu): re-enable the check.
+						// return false;
 					}
 					cursor.moveNext();
 				}
@@ -11468,17 +11471,5 @@ TEST_CASE(":/redwood/performance/histograms") {
 	double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
 	std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
 
-	{
-		ContinuousSample<uint32_t> s = ContinuousSample<uint32_t>(pow(10, 3));
-		auto t_start = std::chrono::high_resolution_clock::now();
-		ASSERT(uniform.size() == inputSize);
-		for (size_t i = 0; i < uniform.size(); i++) {
-			s.addSample(uniform[i]);
-		}
-		auto t_end = std::chrono::high_resolution_clock::now();
-		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-		std::cout << "size of input: " << uniform.size() << std::endl;
-		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
-	}
 	return Void();
 }
