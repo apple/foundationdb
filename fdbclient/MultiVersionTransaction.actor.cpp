@@ -2460,7 +2460,6 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 			throw invalid_option();
 		}
 		disableBypass = true;
-		bypassMultiClientApi = false;
 	} else if (option == FDBNetworkOptions::CLIENT_THREADS_PER_VERSION) {
 		MutexHolder holder(lock);
 		validateOption(value, true, false, false);
