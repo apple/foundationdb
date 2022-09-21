@@ -22,11 +22,11 @@
 
 #include "fmt/format.h"
 #include "fdbrpc/sim_validation.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbserver/KmsConnectorInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
-#include "flow/BlobCipher.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
@@ -66,11 +66,14 @@ struct SimKmsConnectorContext : NonCopyable, ReferenceCounted<SimKmsConnectorCon
 		// Construct encryption keyStore.
 		// Note the keys generated must be the same after restart.
 		for (int i = 1; i <= maxEncryptionKeys; i++) {
-			Arena arena;
-			StringRef digest = computeAuthToken(
-			    reinterpret_cast<const unsigned char*>(&i), sizeof(i), SHA_KEY, AES_256_KEY_LENGTH, arena);
-			simEncryptKeyStore[i] =
-			    std::make_unique<SimEncryptKeyCtx>(i, reinterpret_cast<const char*>(digest.begin()));
+			uint8_t digest[AUTH_TOKEN_SIZE];
+			computeAuthToken(reinterpret_cast<const unsigned char*>(&i),
+			                 sizeof(i),
+			                 SHA_KEY,
+			                 AES_256_KEY_LENGTH,
+			                 &digest[0],
+			                 AUTH_TOKEN_SIZE);
+			simEncryptKeyStore[i] = std::make_unique<SimEncryptKeyCtx>(i, reinterpret_cast<const char*>(&digest[0]));
 		}
 	}
 };

@@ -1770,19 +1770,19 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			state Error error = success();
 			state Promise<Void> dataMovementComplete;
 			// Move keys from source to destination by changing the serverKeyList and keyServerList system keys
-			state Future<Void> doMoveKeys = moveKeys(self->cx,
-			                                         rd.dataMoveId,
-			                                         rd.keys,
-			                                         destIds,
-			                                         healthyIds,
-			                                         self->lock,
-			                                         dataMovementComplete,
-			                                         &self->startMoveKeysParallelismLock,
-			                                         &self->finishMoveKeysParallelismLock,
-			                                         self->teamCollections.size() > 1,
-			                                         relocateShardInterval.pairID,
-			                                         ddEnabledState,
-			                                         CancelConflictingDataMoves::False);
+			state Future<Void> doMoveKeys =
+			    self->txnProcessor->moveKeys(MoveKeysParams{ rd.dataMoveId,
+			                                                 rd.keys,
+			                                                 destIds,
+			                                                 healthyIds,
+			                                                 self->lock,
+			                                                 dataMovementComplete,
+			                                                 &self->startMoveKeysParallelismLock,
+			                                                 &self->finishMoveKeysParallelismLock,
+			                                                 self->teamCollections.size() > 1,
+			                                                 relocateShardInterval.pairID,
+			                                                 ddEnabledState,
+			                                                 CancelConflictingDataMoves::False });
 			state Future<Void> pollHealth =
 			    signalledTransferComplete ? Never()
 			                              : delay(SERVER_KNOBS->HEALTH_POLL_TIME, TaskPriority::DataDistributionLaunch);
@@ -1795,19 +1795,19 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 								healthyIds.insert(healthyIds.end(), extraIds.begin(), extraIds.end());
 								extraIds.clear();
 								ASSERT(totalIds == destIds.size()); // Sanity check the destIDs before we move keys
-								doMoveKeys = moveKeys(self->cx,
-								                      rd.dataMoveId,
-								                      rd.keys,
-								                      destIds,
-								                      healthyIds,
-								                      self->lock,
-								                      Promise<Void>(),
-								                      &self->startMoveKeysParallelismLock,
-								                      &self->finishMoveKeysParallelismLock,
-								                      self->teamCollections.size() > 1,
-								                      relocateShardInterval.pairID,
-								                      ddEnabledState,
-								                      CancelConflictingDataMoves::False);
+								doMoveKeys =
+								    self->txnProcessor->moveKeys(MoveKeysParams{ rd.dataMoveId,
+								                                                 rd.keys,
+								                                                 destIds,
+								                                                 healthyIds,
+								                                                 self->lock,
+								                                                 Promise<Void>(),
+								                                                 &self->startMoveKeysParallelismLock,
+								                                                 &self->finishMoveKeysParallelismLock,
+								                                                 self->teamCollections.size() > 1,
+								                                                 relocateShardInterval.pairID,
+								                                                 ddEnabledState,
+								                                                 CancelConflictingDataMoves::False });
 							} else {
 								self->fetchKeysComplete.insert(rd);
 								if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
@@ -1981,7 +1981,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
                                      Reference<IDataDistributionTeam> destTeam,
                                      bool primary,
                                      TraceEvent* traceEvent) {
-	if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
+	if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
 		traceEvent->detail("CancelingDueToSimulationSpeedup", true);
 		return false;
 	}
@@ -2067,7 +2067,7 @@ ACTOR static Future<bool> rebalanceTeams(DDQueue* self,
                                          Reference<IDataDistributionTeam const> destTeam,
                                          bool primary,
                                          TraceEvent* traceEvent) {
-	if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
+	if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
 		traceEvent->detail("CancelingDueToSimulationSpeedup", true);
 		return false;
 	}

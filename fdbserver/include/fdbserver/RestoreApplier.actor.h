@@ -371,7 +371,7 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 		nodeIndex = assignedIndex;
 
 		// Q: Why do we need to initMetric?
-		// version.initMetric(LiteralStringRef("RestoreApplier.Version"), cc.id);
+		// version.initMetric("RestoreApplier.Version"_sr, cc.id);
 
 		role = RestoreRole::Applier;
 	}

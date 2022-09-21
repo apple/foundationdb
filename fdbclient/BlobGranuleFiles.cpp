@@ -20,6 +20,7 @@
 
 #include "fdbclient/BlobGranuleFiles.h"
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/ClientKnobs.h"
 #include "fdbclient/CommitTransaction.h"
@@ -27,7 +28,6 @@
 #include "fdbclient/SystemData.h" // for allKeys unit test - could remove
 
 #include "flow/Arena.h"
-#include "flow/BlobCipher.h"
 #include "flow/CompressionUtils.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IRandom.h"
@@ -304,7 +304,8 @@ struct IndexBlockRef {
 		                                     eKeys.headerCipherKey,
 		                                     cipherKeysCtx.ivRef.begin(),
 		                                     AES_256_IV_LENGTH,
-		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+		                                     BlobCipherMetrics::BLOB_GRANULE);
 		Value serializedBuff = ObjectWriter::toValue(block, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 		BlobCipherEncryptHeader header;
 		buffer = encryptor.encrypt(serializedBuff.contents().begin(), serializedBuff.contents().size(), &header, arena)
@@ -332,7 +333,8 @@ struct IndexBlockRef {
 
 		validateEncryptionHeaderDetails(eKeys, header, cipherKeysCtx.ivRef);
 
-		DecryptBlobCipherAes256Ctr decryptor(eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin());
+		DecryptBlobCipherAes256Ctr decryptor(
+		    eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin(), BlobCipherMetrics::BLOB_GRANULE);
 		StringRef decrypted =
 		    decryptor.decrypt(idxRef.buffer.begin(), idxRef.buffer.size(), header, arena)->toStringRef();
 
@@ -425,7 +427,8 @@ struct IndexBlobGranuleFileChunkRef {
 		                                     eKeys.headerCipherKey,
 		                                     cipherKeysCtx.ivRef.begin(),
 		                                     AES_256_IV_LENGTH,
-		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+		                                     BlobCipherMetrics::BLOB_GRANULE);
 		BlobCipherEncryptHeader header;
 		chunkRef.buffer =
 		    encryptor.encrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), &header, arena)->toStringRef();
@@ -454,7 +457,8 @@ struct IndexBlobGranuleFileChunkRef {
 
 		validateEncryptionHeaderDetails(eKeys, header, cipherKeysCtx.ivRef);
 
-		DecryptBlobCipherAes256Ctr decryptor(eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin());
+		DecryptBlobCipherAes256Ctr decryptor(
+		    eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin(), BlobCipherMetrics::BLOB_GRANULE);
 		StringRef decrypted =
 		    decryptor.decrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), header, arena)->toStringRef();
 
@@ -1081,65 +1085,6 @@ ParsedDeltaBoundaryRef deltaAtVersion(const DeltaBoundaryRef& delta, Version beg
 		return ParsedDeltaBoundaryRef(delta.key, clearAfter);
 	} else {
 		return ParsedDeltaBoundaryRef(delta.key, clearAfter, *valueAtVersion);
-	}
-}
-
-void applyDeltasSorted(const Standalone<VectorRef<ParsedDeltaBoundaryRef>>& sortedDeltas,
-                       bool startClear,
-                       std::map<KeyRef, ValueRef>& dataMap) {
-	if (sortedDeltas.empty() && !startClear) {
-		return;
-	}
-
-	// sorted merge of 2 iterators
-	bool prevClear = startClear;
-	auto deltaIt = sortedDeltas.begin();
-	auto snapshotIt = dataMap.begin();
-
-	while (deltaIt != sortedDeltas.end() && snapshotIt != dataMap.end()) {
-		if (deltaIt->key < snapshotIt->first) {
-			// Delta is lower than snapshot. Insert new row, if the delta is a set. Ignore point clear and noop
-			if (deltaIt->isSet()) {
-				snapshotIt = dataMap.insert(snapshotIt, { deltaIt->key, deltaIt->value });
-				snapshotIt++;
-			}
-			prevClear = deltaIt->clearAfter;
-			deltaIt++;
-		} else if (snapshotIt->first < deltaIt->key) {
-			// Snapshot is lower than delta. Erase the current entry if the previous delta was a clearAfter
-			if (prevClear) {
-				snapshotIt = dataMap.erase(snapshotIt);
-			} else {
-				snapshotIt++;
-			}
-		} else {
-			// Delta and snapshot are for the same key. The delta is newer, so if it is a set, update the value, else if
-			// it's a clear, delete the value (ignore noop)
-			if (deltaIt->isSet()) {
-				snapshotIt->second = deltaIt->value;
-			} else if (deltaIt->isClear()) {
-				snapshotIt = dataMap.erase(snapshotIt);
-			}
-			if (!deltaIt->isClear()) {
-				snapshotIt++;
-			}
-			prevClear = deltaIt->clearAfter;
-			deltaIt++;
-		}
-	}
-	// Either we are out of deltas or out of snapshots.
-	// if snapshot remaining and prevClear last delta set, clear the rest of the map
-	if (prevClear && snapshotIt != dataMap.end()) {
-		CODE_PROBE(true, "last delta range cleared end of snapshot");
-		dataMap.erase(snapshotIt, dataMap.end());
-	}
-	// Apply remaining sets from delta, with no remaining snapshot
-	while (deltaIt != sortedDeltas.end()) {
-		if (deltaIt->isSet()) {
-			CODE_PROBE(true, "deltas past end of snapshot");
-			snapshotIt = dataMap.insert(snapshotIt, { deltaIt->key, deltaIt->value });
-		}
-		deltaIt++;
 	}
 }
 
@@ -2035,7 +1980,7 @@ struct KeyValueGen {
 		sharedPrefix = sharedPrefix.substr(0, sharedPrefixLen) + "_";
 		targetValueLength = deterministicRandom()->randomExp(0, 12);
 		allRange = KeyRangeRef(StringRef(sharedPrefix),
-		                       sharedPrefix.size() == 0 ? LiteralStringRef("\xff") : strinc(StringRef(sharedPrefix)));
+		                       sharedPrefix.size() == 0 ? "\xff"_sr : strinc(StringRef(sharedPrefix)));
 
 		if (deterministicRandom()->coinflip()) {
 			clearFrequency = 0.0;
@@ -2210,7 +2155,6 @@ Standalone<GranuleSnapshot> genSnapshot(KeyValueGen& kvGen, int targetDataBytes)
 	while (totalDataBytes < targetDataBytes) {
 		Optional<StringRef> key = kvGen.newKey();
 		if (!key.present()) {
-			CODE_PROBE(true, "snapshot unit test keyspace full");
 			break;
 		}
 		StringRef value = kvGen.value();
@@ -2355,9 +2299,9 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 	}
 
 	checkSnapshotEmpty(serialized, normalKeys.begin, data.front().key, kvGen.cipherKeys);
-	checkSnapshotEmpty(serialized, normalKeys.begin, LiteralStringRef("\x00"), kvGen.cipherKeys);
+	checkSnapshotEmpty(serialized, normalKeys.begin, "\x00"_sr, kvGen.cipherKeys);
 	checkSnapshotEmpty(serialized, keyAfter(data.back().key), normalKeys.end, kvGen.cipherKeys);
-	checkSnapshotEmpty(serialized, LiteralStringRef("\xfe"), normalKeys.end, kvGen.cipherKeys);
+	checkSnapshotEmpty(serialized, "\xfe"_sr, normalKeys.end, kvGen.cipherKeys);
 
 	fmt::print("Snapshot format test done!\n");
 

@@ -68,7 +68,7 @@ KeyBackedProperty<Reference<IBackupContainer>> RestoreConfigFR::sourceContainer(
 }
 // Get the source container as a bare URL, without creating a container instance
 KeyBackedProperty<Value> RestoreConfigFR::sourceContainerURL() {
-	return configSpace.pack(LiteralStringRef("sourceContainer"));
+	return configSpace.pack("sourceContainer"_sr);
 }
 
 // Total bytes written by all log and range restore tasks.

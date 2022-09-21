@@ -25,6 +25,7 @@
 #include <vector>
 #include <unordered_map>
 
+#include "fdbclient/ServerKnobs.h"
 #include "fdbrpc/simulator.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupContainerFileSystem.h"
@@ -1944,6 +1945,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 			for (auto it = splitPoints.boundaries.begin(); it != splitPoints.boundaries.end(); it++) {
 				bmData->mergeBoundaries[it->first] = it->second;
 			}
+
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled) {
@@ -2611,7 +2613,7 @@ ACTOR Future<Void> granuleMergeChecker(Reference<BlobManagerData> bmData) {
 
 		double sleepTime = SERVER_KNOBS->BG_MERGE_CANDIDATE_DELAY_SECONDS;
 		// Check more frequently if speedUpSimulation is set. This may
-		if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
+		if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
 			sleepTime = std::min(5.0, sleepTime);
 		}
 		// start delay at the start of the loop, to account for time spend in calculation
@@ -3288,7 +3290,7 @@ ACTOR Future<Void> loadForcePurgedRanges(Reference<BlobManagerData> bmData) {
 
 			// Add the mappings to our in memory key range map
 			for (int rangeIdx = 0; rangeIdx < results.size() - 1; rangeIdx++) {
-				if (results[rangeIdx].value == LiteralStringRef("1")) {
+				if (results[rangeIdx].value == "1"_sr) {
 					Key rangeStartKey = results[rangeIdx].key.removePrefix(blobGranuleForcePurgedKeys.begin);
 					Key rangeEndKey = results[rangeIdx + 1].key.removePrefix(blobGranuleForcePurgedKeys.begin);
 					// note: if the old owner is dead, we handle this in rangeAssigner
@@ -3455,6 +3457,10 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	// Once we acknowledge the existing blob workers, we can go ahead and recruit new ones
 	bmData->startRecruiting.trigger();
 
+	bmData->initBStore();
+	if (isFullRestoreMode())
+		wait(loadManifest(bmData->db, bmData->bstore));
+
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 
 	// set up force purge keys if not done already
@@ -3468,7 +3474,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				break;
 			}
 			wait(checkManagerLock(tr, bmData));
-			wait(krmSetRange(tr, blobGranuleForcePurgedKeys.begin, normalKeys, LiteralStringRef("0")));
+			wait(krmSetRange(tr, blobGranuleForcePurgedKeys.begin, normalKeys, "0"_sr));
 			wait(tr->commit());
 			tr->reset();
 			break;
@@ -3766,7 +3772,7 @@ ACTOR Future<Void> chaosRangeMover(Reference<BlobManagerData> bmData) {
 	loop {
 		wait(delay(30.0));
 
-		if (g_simulator.speedUpSimulation) {
+		if (g_simulator->speedUpSimulation) {
 			if (BM_DEBUG) {
 				printf("Range mover stopping\n");
 			}
@@ -4456,8 +4462,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 				wait(checkManagerLock(&tr, self));
 				// FIXME: need to handle this better if range is unaligned. Need to not truncate existing granules, and
 				// instead cover whole of intersecting granules at begin/end
-				wait(krmSetRangeCoalescing(
-				    &tr, blobGranuleForcePurgedKeys.begin, range, normalKeys, LiteralStringRef("1")));
+				wait(krmSetRangeCoalescing(&tr, blobGranuleForcePurgedKeys.begin, range, normalKeys, "1"_sr));
 				wait(tr.commit());
 				break;
 			} catch (Error& e) {
@@ -5042,6 +5047,28 @@ ACTOR Future<int64_t> bgccCheckGranule(Reference<BlobManagerData> bmData, KeyRan
 	return bytesRead;
 }
 
+// Check if there is any pending split. It's a precheck for manifest backup
+ACTOR Future<bool> hasPendingSplit(Reference<BlobManagerData> self) {
+	state Transaction tr(self->db);
+	loop {
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			RangeResult result = wait(tr.getRange(blobGranuleSplitKeys, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+			for (auto& row : result) {
+				std::pair<BlobGranuleSplitState, Version> gss = decodeBlobGranuleSplitValue(row.value);
+				if (gss.first != BlobGranuleSplitState::Done) {
+					return true;
+				}
+			}
+			return false;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 // FIXME: could eventually make this more thorough by storing some state in the DB or something
 // FIXME: simpler solution could be to shuffle ranges
 ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
@@ -5053,13 +5080,23 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 	if (BM_DEBUG) {
 		fmt::print("BGCC starting\n");
 	}
+	if (isFullRestoreMode())
+		wait(printRestoreSummary(bmData->db, bmData->bstore));
 
 	loop {
-		if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
+		if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
 			if (BM_DEBUG) {
 				printf("BGCC stopping\n");
 			}
 			return Void();
+		}
+
+		// Only dump blob manifest when there is no pending split to ensure data consistency
+		if (SERVER_KNOBS->BLOB_MANIFEST_BACKUP && !isFullRestoreMode()) {
+			bool pendingSplit = wait(hasPendingSplit(bmData));
+			if (!pendingSplit) {
+				wait(dumpManifest(bmData->db, bmData->bstore));
+			}
 		}
 
 		if (bmData->workersById.size() >= 1) {
@@ -5240,10 +5277,10 @@ TEST_CASE("/blobmanager/updateranges") {
 	RangeResult dbDataEmpty;
 	std::vector<std::pair<KeyRangeRef, bool>> kbrRanges;
 
-	StringRef keyA = StringRef(ar, LiteralStringRef("A"));
-	StringRef keyB = StringRef(ar, LiteralStringRef("B"));
-	StringRef keyC = StringRef(ar, LiteralStringRef("C"));
-	StringRef keyD = StringRef(ar, LiteralStringRef("D"));
+	StringRef keyA = StringRef(ar, "A"_sr);
+	StringRef keyB = StringRef(ar, "B"_sr);
+	StringRef keyC = StringRef(ar, "C"_sr);
+	StringRef keyD = StringRef(ar, "D"_sr);
 
 	// db data setup
 	RangeResult dbDataAB;

@@ -41,7 +41,7 @@ static void bench_serializable_traits_version(benchmark::State& state) {
 
 	size_t size = 0;
 	VersionVector deserializedVV;
-	while (state.KeepRunning()) {
+	for (auto _ : state) {
 		Standalone<StringRef> msg = ObjectWriter::toValue(serializedVV, Unversioned());
 
 		// Capture the serialized buffer size.
@@ -71,7 +71,7 @@ static void bench_dynamic_size_traits_version(benchmark::State& state) {
 
 	size_t size = 0;
 	VersionVector deserializedVV;
-	while (state.KeepRunning()) {
+	for (auto _ : state) {
 		size = dynamic_size_traits<VersionVector>::size(serializedVV, context);
 
 		uint8_t* buf = context.allocate(size);

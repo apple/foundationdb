@@ -22,8 +22,8 @@
 #define SIM_KMS_CONNECTOR_H
 #pragma once
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbserver/KmsConnector.h"
-#include "flow/BlobCipher.h"
 
 class SimKmsConnector : public KmsConnector {
 public:

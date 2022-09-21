@@ -368,7 +368,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*futureGetDatabase)(FDBFuture* f, FDBDatabase** outDb);
 	fdb_error_t (*futureGetInt64)(FDBFuture* f, int64_t* outValue);
 	fdb_error_t (*futureGetUInt64)(FDBFuture* f, uint64_t* outValue);
-	fdb_error_t (*futureGetBool)(FDBFuture* f, bool* outValue);
+	fdb_error_t (*futureGetBool)(FDBFuture* f, fdb_bool_t* outValue);
 	fdb_error_t (*futureGetError)(FDBFuture* f);
 	fdb_error_t (*futureGetKey)(FDBFuture* f, uint8_t const** outKey, int* outKeyLength);
 	fdb_error_t (*futureGetValue)(FDBFuture* f, fdb_bool_t* outPresent, uint8_t const** outValue, int* outValueLength);
@@ -776,17 +776,22 @@ struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 	IClientApi* api;
 	bool failed;
 	std::atomic_bool initialized;
+	int threadIndex;
 	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 
 	ClientInfo()
-	  : ClientDesc(std::string(), false, false), protocolVersion(0), api(nullptr), failed(true), initialized(false) {}
+	  : ClientDesc(std::string(), false, false), protocolVersion(0), api(nullptr), failed(true), initialized(false),
+	    threadIndex(0) {}
 	ClientInfo(IClientApi* api)
-	  : ClientDesc("internal", false, false), protocolVersion(0), api(api), failed(false), initialized(false) {}
-	ClientInfo(IClientApi* api, std::string libPath, bool useFutureVersion)
-	  : ClientDesc(libPath, true, useFutureVersion), protocolVersion(0), api(api), failed(false), initialized(false) {}
+	  : ClientDesc("internal", false, false), protocolVersion(0), api(api), failed(false), initialized(false),
+	    threadIndex(0) {}
+	ClientInfo(IClientApi* api, std::string libPath, bool useFutureVersion, int threadIndex)
+	  : ClientDesc(libPath, true, useFutureVersion), protocolVersion(0), api(api), failed(false), initialized(false),
+	    threadIndex(threadIndex) {}
 
 	void loadVersion();
 	bool canReplace(Reference<ClientInfo> other) const;
+	std::string getTraceFileIdentifier(const std::string& baseIdentifier);
 };
 
 class MultiVersionApi;
@@ -1106,6 +1111,8 @@ private:
 	int nextThread = 0;
 	int threadCount;
 	std::string tmpDir;
+	bool traceShareBaseNameAmongThreads;
+	std::string traceFileIdentifier;
 
 	Mutex lock;
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;

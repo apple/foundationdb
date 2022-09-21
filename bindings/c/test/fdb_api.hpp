@@ -46,6 +46,8 @@ namespace native {
 #include <foundationdb/fdb_c.h>
 }
 
+#define TENANT_API_VERSION_GUARD 720
+
 using ByteString = std::basic_string<uint8_t>;
 using BytesRef = std::basic_string_view<uint8_t>;
 using CharsRef = std::string_view;
@@ -347,6 +349,7 @@ public:
 class Future {
 protected:
 	friend class Transaction;
+	friend class Database;
 	friend std::hash<Future>;
 	std::shared_ptr<native::FDBFuture> f;
 
@@ -504,6 +507,14 @@ public:
 	Transaction() noexcept : Transaction(nullptr) {}
 	Transaction(const Transaction&) noexcept = default;
 	Transaction& operator=(const Transaction&) noexcept = default;
+
+	void atomic_store(Transaction other) { std::atomic_store(&tr, other.tr); }
+
+	Transaction atomic_load() {
+		Transaction retVal;
+		retVal.tr = std::atomic_load(&tr);
+		return retVal;
+	}
 
 	bool valid() const noexcept { return tr != nullptr; }
 
@@ -666,6 +677,7 @@ public:
 	static void createTenant(Transaction tr, BytesRef name) {
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, BytesRef());
 		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE, BytesRef());
+		tr.setOption(FDBTransactionOption::FDB_TR_OPTION_RAW_ACCESS, BytesRef());
 		tr.set(toBytesRef(fmt::format("{}{}", tenantManagementMapPrefix, toCharsRef(name))), BytesRef());
 	}
 
@@ -706,6 +718,14 @@ public:
 		db = std::shared_ptr<native::FDBDatabase>(db_raw, &native::fdb_database_destroy);
 	}
 	Database() noexcept : db(nullptr) {}
+
+	void atomic_store(Database other) { std::atomic_store(&db, other.db); }
+
+	Database atomic_load() {
+		Database retVal;
+		retVal.db = std::atomic_load(&db);
+		return retVal;
+	}
 
 	Error setOptionNothrow(FDBDatabaseOption option, int64_t value) noexcept {
 		return Error(native::fdb_database_set_option(
@@ -752,10 +772,17 @@ public:
 			throwError("Failed to create transaction: ", err);
 		return Transaction(tx_native);
 	}
+
+	TypedFuture<future_var::KeyRangeRefArray> listBlobbifiedRanges(KeyRef begin, KeyRef end, int rangeLimit) {
+		if (!db)
+			throw std::runtime_error("list_blobbified_ranges from null database");
+		return native::fdb_database_list_blobbified_ranges(
+		    db.get(), begin.data(), intSize(begin), end.data(), intSize(end), rangeLimit);
+	}
 };
 
 inline Error selectApiVersionNothrow(int version) {
-	if (version < 720) {
+	if (version < TENANT_API_VERSION_GUARD) {
 		Tenant::tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
 	}
 	return Error(native::fdb_select_api_version(version));
@@ -768,7 +795,7 @@ inline void selectApiVersion(int version) {
 }
 
 inline Error selectApiVersionCappedNothrow(int version) {
-	if (version < 720) {
+	if (version < TENANT_API_VERSION_GUARD) {
 		Tenant::tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
 	}
 	return Error(

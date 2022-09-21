@@ -652,7 +652,7 @@ ThreadFuture<bool> DLDatabase::blobbifyRange(const KeyRangeRef& keyRange) {
 	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
 
 	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		bool ret = false;
+		FdbCApi::fdb_bool_t ret = false;
 		ASSERT(!api->futureGetBool(f, &ret));
 		return ret;
 	});
@@ -667,7 +667,7 @@ ThreadFuture<bool> DLDatabase::unblobbifyRange(const KeyRangeRef& keyRange) {
 	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size());
 
 	return toThreadFuture<bool>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		bool ret = false;
+		FdbCApi::fdb_bool_t ret = false;
 		ASSERT(!api->futureGetBool(f, &ret));
 		return ret;
 	});
@@ -2471,6 +2471,18 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 	} else if (option == FDBNetworkOptions::FUTURE_VERSION_CLIENT_LIBRARY) {
 		validateOption(value, true, false, false);
 		addExternalLibrary(abspath(value.get().toString()), true);
+	} else if (option == FDBNetworkOptions::TRACE_FILE_IDENTIFIER) {
+		validateOption(value, true, false, true);
+		traceFileIdentifier = value.get().toString();
+		{
+			MutexHolder holder(lock);
+			// Forward the option unmodified only to the the local client and let it validate it.
+			// While for external clients the trace file identifiers are determined in setupNetwork
+			localClient->api->setNetworkOption(option, value);
+		}
+	} else if (option == FDBNetworkOptions::TRACE_SHARE_AMONG_CLIENT_THREADS) {
+		validateOption(value, false, true);
+		traceShareBaseNameAmongThreads = true;
 	} else {
 		forwardOption = true;
 	}
@@ -2514,9 +2526,13 @@ void MultiVersionApi::setupNetwork() {
 			// Copy external lib for each thread
 			if (externalClients.count(filename) == 0) {
 				externalClients[filename] = {};
-				for (const auto& tmp : copyExternalLibraryPerThread(path)) {
+				auto libCopies = copyExternalLibraryPerThread(path);
+				for (int idx = 0; idx < libCopies.size(); ++idx) {
 					externalClients[filename].push_back(Reference<ClientInfo>(
-					    new ClientInfo(new DLApi(tmp.first, tmp.second /*unlink on load*/), path, useFutureVersion)));
+					    new ClientInfo(new DLApi(libCopies[idx].first, libCopies[idx].second /*unlink on load*/),
+					                   path,
+					                   useFutureVersion,
+					                   idx)));
 				}
 			}
 		}
@@ -2562,13 +2578,23 @@ void MultiVersionApi::setupNetwork() {
 			client->loadVersion();
 		});
 
+		std::string baseTraceFileId;
+		if (apiVersion.hasTraceFileIdentifier()) {
+			// TRACE_FILE_IDENTIFIER option is supported since 6.3
+			baseTraceFileId = traceFileIdentifier.empty() ? format("%d", getpid()) : traceFileIdentifier;
+		}
+
 		MutexHolder holder(lock);
-		runOnExternalClientsAllThreads([this, transportId](Reference<ClientInfo> client) {
+		runOnExternalClientsAllThreads([this, transportId, baseTraceFileId](Reference<ClientInfo> client) {
 			for (auto option : options) {
 				client->api->setNetworkOption(option.first, option.second.castTo<StringRef>());
 			}
 			client->api->setNetworkOption(FDBNetworkOptions::EXTERNAL_CLIENT_TRANSPORT_ID, std::to_string(transportId));
-
+			if (!baseTraceFileId.empty()) {
+				client->api->setNetworkOption(
+				    FDBNetworkOptions::TRACE_FILE_IDENTIFIER,
+				    traceShareBaseNameAmongThreads ? baseTraceFileId : client->getTraceFileIdentifier(baseTraceFileId));
+			}
 			client->api->setupNetwork();
 		});
 
@@ -2607,21 +2633,17 @@ void MultiVersionApi::runNetwork() {
 
 	std::vector<THREAD_HANDLE> handles;
 	if (!bypassMultiClientApi) {
-		for (int threadNum = 0; threadNum < threadCount; threadNum++) {
-			runOnExternalClients(threadNum, [&handles, threadNum](Reference<ClientInfo> client) {
-				if (client->external) {
-					std::string threadName = format("fdb-%s-%d", client->releaseVersion.c_str(), threadNum);
-					if (threadName.size() > 15) {
-						threadName = format("fdb-%s", client->releaseVersion.c_str());
-						if (threadName.size() > 15) {
-							threadName = "fdb-external";
-						}
-					}
-					handles.push_back(
-					    g_network->startThread(&runNetworkThread, client.getPtr(), 0, threadName.c_str()));
+		runOnExternalClientsAllThreads([&handles](Reference<ClientInfo> client) {
+			ASSERT(client->external);
+			std::string threadName = format("fdb-%s-%d", client->releaseVersion.c_str(), client->threadIndex);
+			if (threadName.size() > 15) {
+				threadName = format("fdb-%s", client->releaseVersion.c_str());
+				if (threadName.size() > 15) {
+					threadName = "fdb-external";
 				}
-			});
-		}
+			}
+			handles.push_back(g_network->startThread(&runNetworkThread, client.getPtr(), 0, threadName.c_str()));
+		});
 	}
 
 	localClient->api->runNetwork();
@@ -2734,9 +2756,9 @@ ACTOR Future<std::string> updateClusterSharedStateMapImpl(MultiVersionApi* self,
                                                           ProtocolVersion dbProtocolVersion,
                                                           Reference<IDatabase> db) {
 	// The cluster ID will be the connection record string (either a filename or the connection string itself)
-	// in API versions before we could read the cluster ID.
+	// in versions before we could read the cluster ID.
 	state std::string clusterId = connectionRecord.toString();
-	if (MultiVersionApi::api->getApiVersion().hasCreateDBFromConnString()) {
+	if (dbProtocolVersion.hasClusterIdSpecialKey()) {
 		state Reference<ITransaction> tr = db->createTransaction();
 		loop {
 			try {
@@ -2911,7 +2933,7 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 MultiVersionApi::MultiVersionApi()
   : callbackOnMainThread(true), localClientDisabled(false), networkStartSetup(false), networkSetup(false),
     bypassMultiClientApi(false), externalClient(false), apiVersion(0), threadCount(0), tmpDir("/tmp"),
-    envOptionsLoaded(false) {}
+    traceShareBaseNameAmongThreads(false), envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 
@@ -2946,6 +2968,12 @@ bool ClientInfo::canReplace(Reference<ClientInfo> other) const {
 	}
 
 	return !protocolVersion.isCompatible(other->protocolVersion);
+}
+
+std::string ClientInfo::getTraceFileIdentifier(const std::string& baseIdentifier) {
+	std::string versionStr = releaseVersion;
+	std::replace(versionStr.begin(), versionStr.end(), '.', '_');
+	return format("%s_v%st%d", baseIdentifier.c_str(), versionStr.c_str(), threadIndex);
 }
 
 // UNIT TESTS
@@ -3233,7 +3261,7 @@ struct AbortableTest {
 	}
 };
 
-TEST_CASE("/fdbclient/multiversionclient/AbortableSingleAssignmentVar") {
+TEST_CASE("fdbclient/multiversionclient/AbortableSingleAssignmentVar") {
 	state volatile bool done = false;
 	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<AbortableTest>, (void*)&done);
 
@@ -3310,7 +3338,7 @@ struct DLTest {
 	}
 };
 
-TEST_CASE("/fdbclient/multiversionclient/DLSingleAssignmentVar") {
+TEST_CASE("fdbclient/multiversionclient/DLSingleAssignmentVar") {
 	state volatile bool done = false;
 
 	MultiVersionApi::api->callbackOnMainThread = true;
@@ -3354,7 +3382,7 @@ struct MapTest {
 	}
 };
 
-TEST_CASE("/fdbclient/multiversionclient/MapSingleAssignmentVar") {
+TEST_CASE("fdbclient/multiversionclient/MapSingleAssignmentVar") {
 	state volatile bool done = false;
 	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<MapTest>, (void*)&done);
 
@@ -3393,7 +3421,7 @@ struct FlatMapTest {
 	}
 };
 
-TEST_CASE("/fdbclient/multiversionclient/FlatMapSingleAssignmentVar") {
+TEST_CASE("fdbclient/multiversionclient/FlatMapSingleAssignmentVar") {
 	state volatile bool done = false;
 	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<FlatMapTest>, (void*)&done);
 

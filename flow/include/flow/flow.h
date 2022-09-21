@@ -1167,9 +1167,9 @@ public:
 	// stream.send( request )
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
 
-	void send(const T& value) const { queue->send(value); }
-	void send(T&& value) const { queue->send(std::move(value)); }
-	void sendError(const Error& error) const { queue->sendError(error); }
+	void send(const T& value) { queue->send(value); }
+	void send(T&& value) { queue->send(std::move(value)); }
+	void sendError(const Error& error) { queue->sendError(error); }
 
 	// stream.getReply( request )
 	//   Reliable at least once delivery: Eventually delivers request at least once and returns one of the replies if
@@ -1178,22 +1178,22 @@ public:
 	//   If a reply is returned, request was or will be delivered one or more times.
 	//   If cancelled, request was or will be delivered zero or more times.
 	template <class X>
-	Future<REPLY_TYPE(X)> getReply(const X& value) const {
+	Future<REPLY_TYPE(X)> getReply(const X& value) {
 		send(value);
 		return getReplyPromise(value).getFuture();
 	}
 	template <class X>
-	Future<REPLY_TYPE(X)> getReply(const X& value, TaskPriority taskID) const {
+	Future<REPLY_TYPE(X)> getReply(const X& value, TaskPriority taskID) {
 		setReplyPriority(value, taskID);
 		return getReplyPromise(value).getFuture();
 	}
 
 	template <class X>
-	Future<X> getReply() const {
+	Future<X> getReply() {
 		return getReply(Promise<X>());
 	}
 	template <class X>
-	Future<X> getReplyWithTaskID(TaskPriority taskID) const {
+	Future<X> getReplyWithTaskID(TaskPriority taskID) {
 		Promise<X> reply;
 		reply.getEndpoint(taskID);
 		return getReply(reply);

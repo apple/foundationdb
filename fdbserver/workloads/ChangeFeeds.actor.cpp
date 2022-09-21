@@ -108,7 +108,7 @@ Standalone<VectorRef<KeyValueRef>> advanceData(Standalone<VectorRef<KeyValueRef>
                                                Standalone<VectorRef<MutationsAndVersionRef>> mutations,
                                                Version begin,
                                                Version end) {
-	StringRef dbgKey = LiteralStringRef("");
+	StringRef dbgKey = ""_sr;
 	std::map<KeyRef, ValueRef> data;
 	for (auto& kv : source) {
 		if (kv.key == dbgKey)
