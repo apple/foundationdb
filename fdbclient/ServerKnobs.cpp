@@ -375,15 +375,16 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// KeyValueStoreRocksDB
 	init( ROCKSDB_READ_RANGE_ROW_LIMIT,                        65535 ); if( randomize && BUGGIFY )  ROCKSDB_READ_RANGE_ROW_LIMIT = deterministicRandom()->randomInt(2, 10);
 
+	init( ROCKSDB_THREAD_POOL_TYPE,                                0 );
 	init( ROCKSDB_THREAD_PROMISE_PRIORITY,                         0 );
-	init( ROCKSDB_READER_THREAD_PRIORITY,                         -1 );
-	init( ROCKSDB_WRITER_THREAD_PRIORITY,						   0 );
+	init( ROCKSDB_READER_THREAD_PRIORITY,                          0 );
+	init( ROCKSDB_WRITER_THREAD_PRIORITY,                          0 );
 	init( ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES,         true );
 	// init( ROCKSDB_TARGET_FILE_SIZE_BASE,                          10 );
 	// init( ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER,                     4 );
 	init( ROCKSDB_BACKGROUND_PARALLELISM,                          4 );
 	init( ROCKSDB_MAX_BACKGROUND_JOBS,                             4 ); // RocksDB default.
-	init( ROCKSDB_READ_PARALLELISM,                               32 );
+	init( ROCKSDB_READ_PARALLELISM,                                4 );
 	// Use a smaller memtable in simulation to avoid OOMs.
 	int64_t memtableBytes = isSimulated ? 32 * 1024 : 512 * 1024 * 1024;
 	init( ROCKSDB_MEMTABLE_BYTES,                      memtableBytes );

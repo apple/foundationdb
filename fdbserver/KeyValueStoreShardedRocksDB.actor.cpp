@@ -2271,18 +2271,30 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		if (g_network->isSimulated()) {
 			// writeThread = CoroThreadPool::createThreadPool();
 			// readThreads = CoroThreadPool::createThreadPool();
-			writeThread = createGenericThreadPool(0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
-			readThreads = createGenericThreadPool(0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY);
+			writeThread = createGenericThreadPool(
+			    0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY, SERVER_KNOBS->ROCKSDB_THREAD_POOL_TYPE);
+			readThreads = createGenericThreadPool(
+			    0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY, SERVER_KNOBS->ROCKSDB_THREAD_POOL_TYPE);
 		} else {
-			writeThread = createGenericThreadPool(0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
-			readThreads = createGenericThreadPool(0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY);
+			// writeThread = createGenericThreadPool(0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
+			// readThreads = createGenericThreadPool(0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY);
+			writeThread = createGenericThreadPool(
+			    0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY, SERVER_KNOBS->ROCKSDB_THREAD_POOL_TYPE);
+			readThreads = createGenericThreadPool(
+			    0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY, SERVER_KNOBS->ROCKSDB_THREAD_POOL_TYPE);
 		}
 		writeThread->addThread(new Writer(id, 0, shardManager.getColumnFamilyMap(), rocksDBMetrics), "fdb-rocksdb-wr");
-		TraceEvent("ShardedRocksDBReadThreads", id)
-		    .detail("KnobRocksDBReadParallelism", SERVER_KNOBS->ROCKSDB_READ_PARALLELISM);
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
 			readThreads->addThread(new Reader(id, i, rocksDBMetrics), "fdb-rocksdb-re");
 		}
+		TraceEvent(SevInfo, "ShardedRocksDBInstance", id)
+		    .detail("ReaderThreads", SERVER_KNOBS->ROCKSDB_READ_PARALLELISM)
+		    .detail("ThreadPoolFlavor", SERVER_KNOBS->ROCKSDB_THREAD_POOL_TYPE)
+		    .detail("ReaderPriority", SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY)
+		    .detail("BackgrondParallelism", SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM)
+		    .detail("MaxBackgroundJobs", SERVER_KNOBS->ROCKSDB_MAX_BACKGROUND_JOBS)
+		    .detail("DBWriteBufferSize", SERVER_KNOBS->ROCKSDB_WRITE_BUFFER_SIZE)
+		    .detail("ThreadReturnPromisePriority", SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY);
 	}
 
 	Future<Void> getError() const override { return errorFuture; }
@@ -2298,7 +2310,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		auto a = new Writer::CloseAction(&self->shardManager, deleteOnClose);
 		auto f = a->done.getFuture();
 		self->writeThread->post(a);
-		wait(f);
+		try {
+			wait(f);
+		} catch (Error& e) {
+			TraceEvent("ShardedRocksCloseError", self->id).errorUnsuppressed(e);
+			throw e;
+		}
 		wait(self->writeThread->stop());
 		if (self->closePromise.canBeSet())
 			self->closePromise.send(Void());

@@ -1576,7 +1576,10 @@ void Net2::run() {
 
 			taskBegin = newTaskBegin;
 			tscBegin = tscNow;
+			processThreadReady();
 		}
+
+		threadYield();
 
 		trackAtPriority(TaskPriority::RunLoop, taskBegin);
 
@@ -1636,6 +1639,7 @@ void Net2::run() {
 	}
 
 	for (auto& fn : stopCallbacks) {
+
 		fn();
 	}
 

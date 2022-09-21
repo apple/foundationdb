@@ -41,9 +41,16 @@ class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool>
 			threadUserObject = userObject;
 			try {
 				userObject->init();
-				// while (pool->ios.run_one() && (pool->mode == Mode::Run))
-				// 	;
-				pool->ios.run();
+				if (pool->flavor == 0) {
+					TraceEvent(SevInfo, "ThreadBeginWithFlavor0").detail("ThreadPriority", pool->priority());
+					while (pool->ios.run_one() && (pool->mode == Mode::Run))
+						;
+				} else if (pool->flavor == 1) {
+					TraceEvent(SevInfo, "ThreadBeginWithFlavor1").detail("ThreadPriority", pool->priority());
+					pool->ios.run();
+				} else {
+					TraceEvent(SevError, "ThreadPoolInvalidFlavor");
+				}
 			} catch (Error& e) {
 				TraceEvent(SevError, "ThreadPoolError").error(e);
 			}
@@ -65,6 +72,7 @@ class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool>
 	volatile int mode;
 	int stackSize;
 	int pri;
+	int flavor;
 
 	struct ActionWrapper {
 		PThreadAction action;
@@ -85,7 +93,8 @@ class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool>
 	};
 
 public:
-	ThreadPool(int stackSize, int pri) : dontstop(ios), mode(Run), stackSize(stackSize), pri(pri) {}
+	ThreadPool(int stackSize, int pri, int mode)
+	  : dontstop(ios), mode(Run), stackSize(stackSize), pri(pri), flavor(mode) {}
 	~ThreadPool() override {}
 	Future<Void> stop(Error const& e = success()) override {
 		if (mode == Shutdown)
@@ -117,8 +126,8 @@ public:
 	int priority() const { return pri; }
 };
 
-Reference<IThreadPool> createGenericThreadPool(int stackSize, int pri) {
-	return Reference<IThreadPool>(new ThreadPool(stackSize, pri));
+Reference<IThreadPool> createGenericThreadPool(int stackSize, int pri, int mode) {
+	return Reference<IThreadPool>(new ThreadPool(stackSize, pri, mode));
 }
 
 thread_local IThreadPoolReceiver* ThreadPool::Thread::threadUserObject;

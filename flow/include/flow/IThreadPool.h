@@ -145,7 +145,7 @@ private:
 	PromiseStream<T> promiseStream;
 };
 
-Reference<IThreadPool> createGenericThreadPool(int stackSize = 0, int pri = 10);
+Reference<IThreadPool> createGenericThreadPool(int stackSize = 0, int pri = 10, int mode = 0);
 
 class DummyThreadPool final : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
