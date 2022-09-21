@@ -1011,10 +1011,17 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 				ASSERT(tenantName.present());
 				encryptDomains[tenantId] = Standalone(tenantName.get(), tenantInfo.arena);
 			} else {
-				for (auto m : trs[t].transaction.mutations) {
-					std::pair<EncryptCipherDomainName, int64_t> details =
-					    getEncryptDetailsFromMutationRef(pProxyCommitData, m);
-					encryptDomains[details.second] = details.first;
+				// Optimization: avoid enumerating mutations if cluster only serves default encryption domains
+				if (pProxyCommitData->tenantMap.size() > 0) {
+					for (auto m : trs[t].transaction.mutations) {
+						std::pair<EncryptCipherDomainName, int64_t> details =
+						    getEncryptDetailsFromMutationRef(pProxyCommitData, m);
+						encryptDomains[details.second] = details.first;
+					}
+				} else {
+					// Ensure default encryption domain-ids are present.
+					ASSERT_EQ(encryptDomains.count(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID), 1);
+					ASSERT_EQ(encryptDomains.count(FDB_DEFAULT_ENCRYPT_DOMAIN_ID), 1);
 				}
 			}
 		}
@@ -1250,8 +1257,9 @@ ACTOR Future<MutationRef> writeMutation(CommitBatchContext* self,
 	static_assert(TenantInfo::INVALID_TENANT == INVALID_ENCRYPT_DOMAIN_ID);
 
 	if (self->pProxyCommitData->isEncryptionEnabled) {
-		EncryptCipherDomainId domainId = tenantId;
+		state EncryptCipherDomainId domainId = tenantId;
 		state MutationRef encryptedMutation;
+
 		if (encryptedMutationOpt->present()) {
 			CODE_PROBE(true, "using already encrypted mutation");
 			encryptedMutation = encryptedMutationOpt->get();
@@ -1271,6 +1279,12 @@ ACTOR Future<MutationRef> writeMutation(CommitBatchContext* self,
 				std::pair<EncryptCipherDomainName, EncryptCipherDomainId> p =
 				    getEncryptDetailsFromMutationRef(self->pProxyCommitData, *mutation);
 				domainId = p.second;
+
+				if (self->cipherKeys.find(domainId) == self->cipherKeys.end()) {
+					Reference<BlobCipherKey> cipherKey = wait(getLatestEncryptCipherKey(
+					    self->pProxyCommitData->db, domainId, p.first, BlobCipherMetrics::TLOG));
+					self->cipherKeys[domainId] = cipherKey;
+				}
 
 				CODE_PROBE(true, "Raw access mutation encryption");
 			}
@@ -1567,9 +1581,9 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	pProxyCommitData->stats.mutations += self->mutationCount;
 	pProxyCommitData->stats.mutationBytes += self->mutationBytes;
 
-	// Storage servers mustn't make durable versions which are not fully committed (because then they are impossible to
-	// roll back) We prevent this by limiting the number of versions which are semi-committed but not fully committed to
-	// be less than the MVCC window
+	// Storage servers mustn't make durable versions which are not fully committed (because then they are impossible
+	// to roll back) We prevent this by limiting the number of versions which are semi-committed but not fully
+	// committed to be less than the MVCC window
 	if (pProxyCommitData->committedVersion.get() <
 	    self->commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 		self->computeDuration += g_network->timer() - self->computeStart;
@@ -1768,8 +1782,8 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	// After logging finishes, we report the commit version to master so that every other proxy can get the most
 	// up-to-date live committed version. We also maintain the invariant that master's committed version >=
 	// self->committedVersion by reporting commit version first before updating self->committedVersion. Otherwise, a
-	// client may get a commit version that the master is not aware of, and next GRV request may get a version less than
-	// self->committedVersion.
+	// client may get a commit version that the master is not aware of, and next GRV request may get a version less
+	// than self->committedVersion.
 
 	CODE_PROBE(pProxyCommitData->committedVersion.get() > self->commitVersion,
 	           "later version was reported committed first");
@@ -1828,11 +1842,11 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 				for (int resolverInd : self->transactionResolverMap[t]) {
 					auto const& cKRs =
 					    self->resolution[resolverInd]
-					        .conflictingKeyRangeMap[self->nextTr[resolverInd]]; // nextTr[resolverInd] -> index of this
-					                                                            // trs[t] on the resolver
+					        .conflictingKeyRangeMap[self->nextTr[resolverInd]]; // nextTr[resolverInd] -> index of
+					                                                            // this trs[t] on the resolver
 					for (auto const& rCRIndex : cKRs)
-						// read_conflict_range can change when sent to resolvers, mapping the index from resolver-side
-						// to original index in commitTransactionRef
+						// read_conflict_range can change when sent to resolvers, mapping the index from
+						// resolver-side to original index in commitTransactionRef
 						conflictingKRIndices.push_back(conflictingKRIndices.arena(),
 						                               self->txReadConflictRangeIndexMap[t][resolverInd][rCRIndex]);
 				}
