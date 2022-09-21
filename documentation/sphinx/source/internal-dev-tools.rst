@@ -39,7 +39,7 @@ Test Harness
 TestHarness is our primary testing tool. It has multiple jobs:
 
 * *Running*: It can run a test in Joshua.
-* *Statistics*: It will choose a test to run based on previously spent CPU time for all tests. It does that by writing statistics about the test at the end of each run.
+* *Statistics*: It will choose a test to run based on previous runs (within the same ensemble) spent CPU time for each test. It does that by writing statistics about the test at the end of each run.
 * *Reporting*: After an ensemble has finished (or while it is running), ``TestHarness`` can be used to generate a report in ``xml`` or ``json``.
 
 Test Harness can be found in the FDB source repository under ``contrib/TestHarness2``. It has a weak dependency to `joshua <https://github.com/foundationDB/fdb-joshua>`_ (if Test Harness can find joshua it will report back about failed tests, otherwise it will just print out general statistics about the ensemble). Joshua will call Test Harness as follows:
