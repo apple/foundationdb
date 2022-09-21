@@ -23,7 +23,6 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/RunTransaction.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class DDTxnProcessorImpl {
@@ -452,6 +451,20 @@ class DDTxnProcessorImpl {
 			}
 		}
 	}
+
+	ACTOR static Future<Optional<Value>> readRebalanceDDIgnoreKey(Database cx) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				Optional<Value> res = wait(tr.get(rebalanceDDIgnoreKey));
+				return res;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
 };
 
 Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(const KeyRangeRef range) {
@@ -502,9 +515,5 @@ Future<HealthMetrics> DDTxnProcessor::getHealthMetrics(bool detailed) const {
 }
 
 Future<Optional<Value>> DDTxnProcessor::readRebalanceDDIgnoreKey() const {
-	return runReadOnlyTransactionNoRetry(cx.getReference(), [](Reference<ReadYourWritesTransaction> tr) {
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		return tr->get(rebalanceDDIgnoreKey);
-	});
+	return DDTxnProcessorImpl::readRebalanceDDIgnoreKey(cx);
 }

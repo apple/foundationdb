@@ -2165,16 +2165,35 @@ ACTOR Future<SrcDestTeamPair> getSrcDestTeams(DDQueue* self,
 	return {};
 }
 
+ACTOR Future<bool> getSkipRebalanceValue(std::shared_ptr<IDDTxnProcessor> txnProcessor, bool readRebalance) {
+	Optional<Value> val = wait(txnProcessor->readRebalanceDDIgnoreKey());
+
+	bool skipCurrentLoop = false;
+	if (val.present()) {
+		// NOTE: check special value "" and "on" might written in old version < 7.2
+		if (val.get().size() > 0 && val.get() != "on"_sr) {
+			int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
+			if (readRebalance) {
+				skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_READ) > 0;
+			} else {
+				skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
+			}
+		} else {
+			skipCurrentLoop = true;
+		}
+	}
+	return skipCurrentLoop;
+}
+
 ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, DataMovementReason reason) {
-	state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
-	state Transaction tr(self->cx);
+	state int resetCount = 0;
 	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
-	state Future<Void> delayF = Never();
 	state const bool readRebalance = isDataMovementForReadBalancing(reason);
-	state const char* eventName =
-	    isDataMovementForMountainChopper(reason) ? "BgDDMountainChopper_New" : "BgDDValleyFiller_New";
+	state const char* eventName = isDataMovementForMountainChopper(reason) ? "BgDDMountainChopper" : "BgDDValleyFiller";
 	state int ddPriority = dataMovementPriority(reason);
+	state double rebalancePollingInterval = 0;
+
 	loop {
 		state bool moved = false;
 		state Reference<IDataDistributionTeam> sourceTeam;
@@ -2183,42 +2202,27 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 		state GetTeamRequest destReq;
 		state TraceEvent traceEvent(eventName, self->distributorId);
 		traceEvent.suppressFor(5.0)
-		    .detail("PollingInterval", SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL)
+		    .detail("PollingInterval", rebalancePollingInterval)
 		    .detail("Rebalance", readRebalance ? "Read" : "Disk");
 
+		// NOTE: the DD throttling relies on DDQueue, so here just trigger the balancer periodically
+		wait(delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch));
+
+		if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
+			wait(store(skipCurrentLoop, getSkipRebalanceValue(self->txnProcessor, readRebalance)));
+			lastRead = now();
+		}
+		traceEvent.detail("Enabled", !skipCurrentLoop);
+
+		if (skipCurrentLoop) {
+			rebalancePollingInterval =
+			    std::max(rebalancePollingInterval, SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL);
+			continue;
+		} else {
+			rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
+		}
+
 		try {
-			// NOTE: the DD throttling relies on DDQueue
-			delayF = delay(SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL, TaskPriority::DataDistributionLaunch);
-			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
-				lastRead = now();
-				if (!val.present()) {
-					skipCurrentLoop = false;
-				} else {
-					// NOTE: check special value "" and "on" might written in old version < 7.2
-					if (val.get().size() > 0 && val.get() != "on"_sr) {
-						int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
-						if (readRebalance) {
-							skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_READ) > 0;
-						} else {
-							skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
-						}
-					} else {
-						skipCurrentLoop = true;
-					}
-				}
-			}
-
-			traceEvent.detail("Enabled", !skipCurrentLoop);
-
-			wait(delayF);
-			if (skipCurrentLoop) {
-				tr.reset();
-				continue;
-			}
-
 			traceEvent.detail("QueuedRelocations", self->priority_relocations[ddPriority]);
 
 			if (self->priority_relocations[ddPriority] < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
@@ -2254,11 +2258,11 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 			}
 
 			traceEvent.detail("ResetCount", resetCount);
-			tr.reset();
 		} catch (Error& e) {
 			// Log actor_cancelled because it's not legal to suppress an event that's initialized
 			traceEvent.errorUnsuppressed(e);
-			wait(tr.onError(e));
+			traceEvent.log();
+			throw;
 		}
 
 		traceEvent.detail("Moved", moved);
@@ -2366,7 +2370,6 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueue* self, int teamCollectionIndex) {
 
 ACTOR Future<Void> BgDDValleyFiller(DDQueue* self, int teamCollectionIndex) {
 	state double rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
-	state Transaction tr(self->cx);
 	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
 
@@ -2374,43 +2377,40 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueue* self, int teamCollectionIndex) {
 		state std::pair<Optional<Reference<IDataDistributionTeam>>, bool> randomTeam;
 		state bool moved = false;
 		state TraceEvent traceEvent("BgDDValleyFiller_Old", self->distributorId);
+
+		wait(delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch));
+
 		traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval).detail("Rebalance", "Disk");
 
-		try {
-			state Future<Void> delayF = delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch);
-			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
-				lastRead = now();
-				if (!val.present()) {
-					// reset loop interval
-					if (skipCurrentLoop) {
-						rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
-					}
-					skipCurrentLoop = false;
+		if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
+			Optional<Value> val = wait(self->txnProcessor->readRebalanceDDIgnoreKey());
+			lastRead = now();
+			if (!val.present()) {
+				// reset loop interval
+				if (skipCurrentLoop) {
+					rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
+				}
+				skipCurrentLoop = false;
+			} else {
+				// NOTE: check special value "" and "on" might written in old version < 7.2
+				if (val.get().size() > 0 && val.get() != "on"_sr) {
+					int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
+					skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
 				} else {
-					// NOTE: check special value "" and "on" might written in old version < 7.2
-					if (val.get().size() > 0 && val.get() != "on"_sr) {
-						int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
-						skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
-					} else {
-						skipCurrentLoop = true;
-					}
+					skipCurrentLoop = true;
 				}
 			}
+		}
 
-			traceEvent.detail("Enabled", !skipCurrentLoop);
+		traceEvent.detail("Enabled", !skipCurrentLoop);
+		if (skipCurrentLoop) {
+			// set loop interval to avoid busy wait here.
+			rebalancePollingInterval =
+			    std::max(rebalancePollingInterval, SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL);
+			continue;
+		}
 
-			wait(delayF);
-			if (skipCurrentLoop) {
-				// set loop interval to avoid busy wait here.
-				rebalancePollingInterval =
-				    std::max(rebalancePollingInterval, SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL);
-				tr.reset();
-				continue;
-			}
-
+		try {
 			traceEvent.detail("QueuedRelocations",
 			                  self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM]);
 			if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM] <
@@ -2450,12 +2450,12 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueue* self, int teamCollectionIndex) {
 					}
 				}
 			}
-
-			tr.reset();
 		} catch (Error& e) {
 			// Log actor_cancelled because it's not legal to suppress an event that's initialized
 			traceEvent.errorUnsuppressed(e);
-			wait(tr.onError(e));
+			traceEvent.detail("Moved", moved);
+			traceEvent.log();
+			throw;
 		}
 
 		traceEvent.detail("Moved", moved);
