@@ -845,6 +845,57 @@ def tenant_old_commands(logger):
     assert rename_output == rename_output_old
     assert delete_output == delete_output_old
 
+@enable_logging()
+def tenant_group_list(logger):
+    output = run_fdbcli_command('tenantgroup list')
+    assert output == 'The cluster has no tenant groups'
+
+    setup_tenants(['tenant', 'tenant2 tenant_group=tenant_group2', 'tenant3 tenant_group=tenant_group3'])
+
+    output = run_fdbcli_command('tenantgroup list')
+    assert output == '1. tenant_group2\n  2. tenant_group3'
+
+    output = run_fdbcli_command('tenantgroup list a z 1')
+    assert output == '1. tenant_group2'
+
+    output = run_fdbcli_command('tenantgroup list a tenant_group3')
+    assert output == '1. tenant_group2'
+
+    output = run_fdbcli_command('tenantgroup list tenant_group3 z')
+    assert output == '1. tenant_group3'
+
+    output = run_fdbcli_command('tenantgroup list a b')
+    assert output == 'The cluster has no tenant groups in the specified range'
+
+    output = run_fdbcli_command_and_get_error('tenantgroup list b a')
+    assert output == 'ERROR: end must be larger than begin'
+
+    output = run_fdbcli_command_and_get_error('tenantgroup list a b 12x')
+    assert output == 'ERROR: invalid limit `12x\''
+
+@enable_logging()
+def tenant_group_get(logger):
+    setup_tenants(['tenant tenant_group=tenant_group'])
+
+    output = run_fdbcli_command('tenantgroup get tenant_group')
+    assert output == 'The tenant group is present in the cluster'
+
+    output = run_fdbcli_command('tenantgroup get tenant_group JSON')
+    json_output = json.loads(output, strict=False)
+    assert(len(json_output) == 2)
+    assert('tenant_group' in json_output)
+    assert(json_output['type'] == 'success')
+    assert(len(json_output['tenant_group']) == 0)
+
+    output = run_fdbcli_command_and_get_error('tenantgroup get tenant_group2')
+    assert output == 'ERROR: tenant group not found'
+
+    output = run_fdbcli_command('tenantgroup get tenant_group2 JSON')
+    json_output = json.loads(output, strict=False)
+    assert(len(json_output) == 2)
+    assert(json_output['type'] == 'error')
+    assert(json_output['error'] == 'tenant group not found')
+
 def tenants():
     run_tenant_test(tenant_create)
     run_tenant_test(tenant_delete)
@@ -854,6 +905,8 @@ def tenants():
     run_tenant_test(tenant_rename)
     run_tenant_test(tenant_usetenant)
     run_tenant_test(tenant_old_commands)
+    run_tenant_test(tenant_group_list)
+    run_tenant_test(tenant_group_get)
 
 def integer_options():
     process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env)

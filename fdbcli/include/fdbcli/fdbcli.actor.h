@@ -239,6 +239,8 @@ ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
 Future<bool> tenantCommand(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // tenant command compatibility layer
 Future<bool> tenantCommandForwarder(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// tenantgroup command
+Future<bool> tenantGroupCommand(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // throttle command
 ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // triggerteaminfolog command

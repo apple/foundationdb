@@ -256,7 +256,7 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
-			state std::vector<TenantNameRef> tenantNames;
+			state std::vector<TenantName> tenantNames;
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 				std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
 				    wait(MetaclusterAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit));
