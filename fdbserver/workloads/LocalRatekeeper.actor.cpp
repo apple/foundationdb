@@ -51,10 +51,9 @@ struct LocalRatekeeperWorkload : TestWorkload {
 	bool testFailed = false;
 
 	LocalRatekeeperWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		startAfter = getOption(options, LiteralStringRef("startAfter"), startAfter);
-		blockWritesFor = getOption(options,
-		                           LiteralStringRef("blockWritesFor"),
-		                           double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) / double(1e6));
+		startAfter = getOption(options, "startAfter"_sr, startAfter);
+		blockWritesFor = getOption(
+		    options, "blockWritesFor"_sr, double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) / double(1e6));
 	}
 	std::string description() const override { return "LocalRatekeeperWorkload"; }
 
@@ -99,7 +98,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 				GetValueRequest req;
 				req.version = readVersion;
 				// we don't care about the value
-				req.key = LiteralStringRef("/lkfs");
+				req.key = "/lkfs"_sr;
 				requests.emplace_back(brokenPromiseToNever(ssi.getValue.getReply(req)));
 			}
 			wait(waitForAllReady(requests));

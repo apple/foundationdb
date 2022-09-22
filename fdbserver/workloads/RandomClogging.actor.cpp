@@ -18,24 +18,48 @@
  * limitations under the License.
  */
 
+#include "flow/DeterministicRandom.h"
+#include "fdbrpc/simulator.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct RandomCloggingWorkload : TestWorkload {
+struct RandomCloggingWorkload : FailureInjectionWorkload {
 	bool enabled;
-	double testDuration;
-	double scale, clogginess;
-	int swizzleClog;
+	double testDuration = 10.0;
+	double scale = 1.0, clogginess = 1.0;
+	int swizzleClog = 0;
+	bool iterate = false;
+	double maxRunDuration = 60.0, backoff = 1.5, suspend = 10.0;
 
-	RandomCloggingWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	RandomCloggingWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {}
+
+	RandomCloggingWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		scale = getOption(options, LiteralStringRef("scale"), 1.0);
-		clogginess = getOption(options, LiteralStringRef("clogginess"), 1.0);
-		swizzleClog = getOption(options, LiteralStringRef("swizzle"), 0);
+		testDuration = getOption(options, "testDuration"_sr, testDuration);
+		scale = getOption(options, "scale"_sr, scale);
+		clogginess = getOption(options, "clogginess"_sr, clogginess);
+		swizzleClog = getOption(options, "swizzle"_sr, swizzleClog);
+	}
+
+	bool add(DeterministicRandom& random, WorkloadRequest const& work, CompoundWorkload const& workload) override {
+		auto desc = description();
+		unsigned alreadyAdded = std::count_if(workload.workloads.begin(),
+		                                      workload.workloads.end(),
+		                                      [&desc](auto const& w) { return w->description() == desc; });
+		alreadyAdded += std::count_if(workload.failureInjection.begin(),
+		                              workload.failureInjection.end(),
+		                              [&desc](auto const& w) { return w->description() == desc; });
+		bool willAdd = work.useDatabase && 0.25 / (1 + alreadyAdded) > random.random01();
+		if (willAdd) {
+			enabled = this->clientId == 0;
+			scale = std::max(random.random01(), 0.1);
+			clogginess = std::max(random.random01(), 0.1);
+			swizzleClog = random.random01() < 0.3;
+			iterate = random.random01() < 0.5;
+		}
+		return willAdd;
 	}
 
 	std::string description() const override {
@@ -46,16 +70,30 @@ struct RandomCloggingWorkload : TestWorkload {
 	}
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
-		if (g_simulator == g_network && enabled)
-			return timeout(
-			    reportErrors(swizzleClog ? swizzleClogClient(this) : clogClient(this), "RandomCloggingError"),
-			    testDuration,
-			    Void());
-		else
-			return Void();
+		if (g_network->isSimulated() && enabled) {
+			return _start(this);
+		}
+		return Void();
 	}
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
+
+	ACTOR static Future<Void> _start(RandomCloggingWorkload* self) {
+		state Future<Void> done = delay(self->maxRunDuration);
+		loop {
+			wait(done ||
+			     timeout(reportErrors(self->swizzleClog ? self->swizzleClogClient(self) : self->clogClient(self),
+			                          "RandomCloggingError"),
+			             self->testDuration,
+			             Void()));
+			if (!done.isReady() && self->iterate) {
+				wait(delay(self->suspend));
+				self->suspend *= self->backoff;
+			} else {
+				return Void();
+			}
+		}
+	}
 
 	ACTOR void doClog(ISimulator::ProcessInfo* machine, double t, double delay = 0.0) {
 		wait(::delay(delay));
@@ -114,3 +152,4 @@ struct RandomCloggingWorkload : TestWorkload {
 };
 
 WorkloadFactory<RandomCloggingWorkload> RandomCloggingWorkloadFactory("RandomClogging");
+FailureInjectorFactory<RandomCloggingWorkload> RandomCloggingFailureInjectionFactory;

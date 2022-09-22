@@ -1544,7 +1544,7 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 			return getDatabase()->specialKeySpace->get(this, key);
 		}
 	} else {
-		if (key == LiteralStringRef("\xff\xff/status/json")) {
+		if (key == "\xff\xff/status/json"_sr) {
 			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
 				++tr.getDatabase()->transactionStatusRequests;
 				return getJSON(tr.getDatabase());
@@ -1553,7 +1553,7 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 			}
 		}
 
-		if (key == LiteralStringRef("\xff\xff/cluster_file_path")) {
+		if (key == "\xff\xff/cluster_file_path"_sr) {
 			try {
 				if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
 					Optional<Value> output = StringRef(tr.getDatabase()->getConnectionRecord()->getLocation());
@@ -1565,7 +1565,7 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 			return Optional<Value>();
 		}
 
-		if (key == LiteralStringRef("\xff\xff/connection_string")) {
+		if (key == "\xff\xff/connection_string"_sr) {
 			try {
 				if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
 					Reference<IClusterConnectionRecord> f = tr.getDatabase()->getConnectionRecord();
@@ -1627,7 +1627,7 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 			return getDatabase()->specialKeySpace->getRange(this, begin, end, limits, reverse);
 		}
 	} else {
-		if (begin.getKey() == LiteralStringRef("\xff\xff/worker_interfaces")) {
+		if (begin.getKey() == "\xff\xff/worker_interfaces"_sr) {
 			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
 				return getWorkerInterfaces(tr.getDatabase()->getConnectionRecord());
 			} else {
@@ -1697,7 +1697,7 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 			throw client_invalid_operation(); // Not support special keys.
 		}
 	} else {
-		if (begin.getKey() == LiteralStringRef("\xff\xff/worker_interfaces")) {
+		if (begin.getKey() == "\xff\xff/worker_interfaces"_sr) {
 			throw client_invalid_operation(); // Not support special keys.
 		}
 	}
@@ -2033,22 +2033,20 @@ RangeResult ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRange
 			if (kr.begin <= iter->begin() && iter->begin() < kr.end) {
 				result.push_back(result.arena(),
 				                 KeyValueRef(iter->begin().withPrefix(readConflictRangeKeysRange.begin, result.arena()),
-				                             iter->value() ? LiteralStringRef("1") : LiteralStringRef("0")));
+				                             iter->value() ? "1"_sr : "0"_sr));
 			}
 		}
 	} else {
-		CoalescedKeyRefRangeMap<ValueRef> readConflicts{ LiteralStringRef("0"), specialKeys.end };
+		CoalescedKeyRefRangeMap<ValueRef> readConflicts{ "0"_sr, specialKeys.end };
 		for (const auto& range : tr.readConflictRanges())
-			readConflicts.insert(range.withPrefix(readConflictRangeKeysRange.begin, result.arena()),
-			                     LiteralStringRef("1"));
+			readConflicts.insert(range.withPrefix(readConflictRangeKeysRange.begin, result.arena()), "1"_sr);
 		for (const auto& range : nativeReadRanges)
-			readConflicts.insert(range.withPrefix(readConflictRangeKeysRange.begin, result.arena()),
-			                     LiteralStringRef("1"));
+			readConflicts.insert(range.withPrefix(readConflictRangeKeysRange.begin, result.arena()), "1"_sr);
 		for (const auto& f : tr.getExtraReadConflictRanges()) {
 			if (f.isReady() && f.get().first < f.get().second)
 				readConflicts.insert(KeyRangeRef(f.get().first, f.get().second)
 				                         .withPrefix(readConflictRangeKeysRange.begin, result.arena()),
-				                     LiteralStringRef("1"));
+				                     "1"_sr);
 		}
 		auto beginIter = readConflicts.rangeContaining(kr.begin);
 		if (beginIter->begin() != kr.begin)
@@ -2066,7 +2064,7 @@ RangeResult ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRang
 	RangeResult result;
 
 	// Memory owned by result
-	CoalescedKeyRefRangeMap<ValueRef> writeConflicts{ LiteralStringRef("0"), specialKeys.end };
+	CoalescedKeyRefRangeMap<ValueRef> writeConflicts{ "0"_sr, specialKeys.end };
 
 	if (!options.readYourWritesDisabled) {
 		KeyRangeRef strippedWriteRangePrefix = kr.removePrefix(writeConflictRangeKeysRange.begin);
@@ -2079,15 +2077,13 @@ RangeResult ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRang
 				writeConflicts.insert(
 				    KeyRangeRef(it.beginKey().toArena(result.arena()), it.endKey().toArena(result.arena()))
 				        .withPrefix(writeConflictRangeKeysRange.begin, result.arena()),
-				    LiteralStringRef("1"));
+				    "1"_sr);
 		}
 	} else {
 		for (const auto& range : tr.writeConflictRanges())
-			writeConflicts.insert(range.withPrefix(writeConflictRangeKeysRange.begin, result.arena()),
-			                      LiteralStringRef("1"));
+			writeConflicts.insert(range.withPrefix(writeConflictRangeKeysRange.begin, result.arena()), "1"_sr);
 		for (const auto& range : nativeWriteRanges)
-			writeConflicts.insert(range.withPrefix(writeConflictRangeKeysRange.begin, result.arena()),
-			                      LiteralStringRef("1"));
+			writeConflicts.insert(range.withPrefix(writeConflictRangeKeysRange.begin, result.arena()), "1"_sr);
 	}
 
 	for (const auto& k : versionStampKeys) {
@@ -2107,8 +2103,7 @@ RangeResult ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRang
 		} else {
 			range = getVersionstampKeyRange(result.arena(), k, tr.getCachedReadVersion().orDefault(0), getMaxReadKey());
 		}
-		writeConflicts.insert(range.withPrefix(writeConflictRangeKeysRange.begin, result.arena()),
-		                      LiteralStringRef("1"));
+		writeConflicts.insert(range.withPrefix(writeConflictRangeKeysRange.begin, result.arena()), "1"_sr);
 	}
 
 	auto beginIter = writeConflicts.rangeContaining(kr.begin);
@@ -2154,13 +2149,13 @@ void ReadYourWritesTransaction::atomicOp(const KeyRef& key, const ValueRef& oper
 
 	KeyRef k;
 	if (!tr.apiVersionAtLeast(520) && operationType == MutationRef::SetVersionstampedKey) {
-		k = key.withSuffix(LiteralStringRef("\x00\x00"), arena);
+		k = key.withSuffix("\x00\x00"_sr, arena);
 	} else {
 		k = KeyRef(arena, key);
 	}
 	ValueRef v;
 	if (!tr.apiVersionAtLeast(520) && operationType == MutationRef::SetVersionstampedValue) {
-		v = operand.withSuffix(LiteralStringRef("\x00\x00\x00\x00"), arena);
+		v = operand.withSuffix("\x00\x00\x00\x00"_sr, arena);
 	} else {
 		v = ValueRef(arena, operand);
 	}
@@ -2212,17 +2207,17 @@ void ReadYourWritesTransaction::set(const KeyRef& key, const ValueRef& value) {
 		} else {
 			// These three special keys are deprecated in 7.0 and an alternative C API is added
 			// TODO : Rewrite related code using C api
-			if (key == LiteralStringRef("\xff\xff/reboot_worker")) {
+			if (key == "\xff\xff/reboot_worker"_sr) {
 				BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion())
 				    .reboot.send(RebootRequest());
 				return;
 			}
-			if (key == LiteralStringRef("\xff\xff/suspend_worker")) {
+			if (key == "\xff\xff/suspend_worker"_sr) {
 				BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion())
 				    .reboot.send(RebootRequest(false, false, options.timeoutInSeconds));
 				return;
 			}
-			if (key == LiteralStringRef("\xff\xff/reboot_and_check_worker")) {
+			if (key == "\xff\xff/reboot_and_check_worker"_sr) {
 				BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion())
 				    .reboot.send(RebootRequest(false, true));
 				return;

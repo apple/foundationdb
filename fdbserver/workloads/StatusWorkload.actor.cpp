@@ -39,11 +39,10 @@ struct StatusWorkload : TestWorkload {
 	StatusWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), requests("Status requests issued"), replies("Status replies received"),
 	    errors("Status Errors"), totalSize("Status reply size sum") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		requestsPerSecond = getOption(options, LiteralStringRef("requestsPerSecond"), 0.5);
-		enableLatencyBands =
-		    getOption(options, LiteralStringRef("enableLatencyBands"), deterministicRandom()->random01() < 0.5);
-		auto statusSchemaStr = getOption(options, LiteralStringRef("schema"), JSONSchemas::statusSchema);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		requestsPerSecond = getOption(options, "requestsPerSecond"_sr, 0.5);
+		enableLatencyBands = getOption(options, "enableLatencyBands"_sr, deterministicRandom()->random01() < 0.5);
+		auto statusSchemaStr = getOption(options, "schema"_sr, JSONSchemas::statusSchema);
 		if (statusSchemaStr.size()) {
 			json_spirit::mValue schema = readJSONStrictly(statusSchemaStr.toString());
 			parsedSchema = schema.get_obj();

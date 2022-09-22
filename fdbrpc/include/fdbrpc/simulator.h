@@ -186,6 +186,8 @@ public:
 				return false;
 			case ProcessClass::RatekeeperClass:
 				return false;
+			case ProcessClass::ConsistencyScanClass:
+				return false;
 			case ProcessClass::BlobManagerClass:
 				return false;
 			case ProcessClass::StorageCacheClass:

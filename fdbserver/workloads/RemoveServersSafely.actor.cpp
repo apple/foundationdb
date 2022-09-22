@@ -44,14 +44,14 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 	RemoveServersSafelyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled =
 		    !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
-		minMachinesToKill = getOption(options, LiteralStringRef("minMachinesToKill"), 1);
-		maxMachinesToKill = getOption(options, LiteralStringRef("maxMachinesToKill"), 10);
+		minMachinesToKill = getOption(options, "minMachinesToKill"_sr, 1);
+		maxMachinesToKill = getOption(options, "maxMachinesToKill"_sr, 10);
 		maxMachinesToKill = std::max(minMachinesToKill, maxMachinesToKill);
-		maxSafetyCheckRetries = getOption(options, LiteralStringRef("maxSafetyCheckRetries"), 50);
-		minDelay = getOption(options, LiteralStringRef("minDelay"), 0.0);
-		maxDelay = getOption(options, LiteralStringRef("maxDelay"), 60.0);
-		kill1Timeout = getOption(options, LiteralStringRef("kill1Timeout"), 60.0);
-		kill2Timeout = getOption(options, LiteralStringRef("kill2Timeout"), 6000.0);
+		maxSafetyCheckRetries = getOption(options, "maxSafetyCheckRetries"_sr, 50);
+		minDelay = getOption(options, "minDelay"_sr, 0.0);
+		maxDelay = getOption(options, "maxDelay"_sr, 60.0);
+		kill1Timeout = getOption(options, "kill1Timeout"_sr, 60.0);
+		kill2Timeout = getOption(options, "kill2Timeout"_sr, 6000.0);
 		killProcesses = deterministicRandom()->random01() < 0.5;
 		if (g_network->isSimulated()) {
 			g_simulator->allowLogSetKills = false;

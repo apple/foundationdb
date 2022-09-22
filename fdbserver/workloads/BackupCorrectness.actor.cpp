@@ -270,7 +270,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			                               StringRef(backupContainer),
 			                               {},
 			                               deterministicRandom()->randomInt(0, 60),
-			                               deterministicRandom()->randomInt(0, 100),
+			                               deterministicRandom()->randomInt(0, 2000),
 			                               tag.toString(),
 			                               backupRanges,
 			                               StopWhenDone{ !stopDifferentialDelay },

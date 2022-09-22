@@ -273,18 +273,18 @@ struct ApiWorkload : TestWorkload {
 
 	ApiWorkload(WorkloadContext const& wcx, int maxClients = -1)
 	  : TestWorkload(wcx), maxClients(maxClients), success(true), transactionFactory(nullptr) {
-		clientPrefixInt = getOption(options, LiteralStringRef("clientId"), clientId);
+		clientPrefixInt = getOption(options, "clientId"_sr, clientId);
 		clientPrefix = format("%010d", clientPrefixInt);
 
-		numKeys = getOption(options, LiteralStringRef("numKeys"), 5000);
-		onlyLowerCase = getOption(options, LiteralStringRef("onlyLowerCase"), false);
-		shortKeysRatio = getOption(options, LiteralStringRef("shortKeysRatio"), 0.5);
-		minShortKeyLength = getOption(options, LiteralStringRef("minShortKeyLength"), 1);
-		maxShortKeyLength = getOption(options, LiteralStringRef("maxShortKeyLength"), 3);
-		minLongKeyLength = getOption(options, LiteralStringRef("minLongKeyLength"), 1);
-		maxLongKeyLength = getOption(options, LiteralStringRef("maxLongKeyLength"), 128);
-		minValueLength = getOption(options, LiteralStringRef("minValueLength"), 1);
-		maxValueLength = getOption(options, LiteralStringRef("maxValueLength"), 10000);
+		numKeys = getOption(options, "numKeys"_sr, 5000);
+		onlyLowerCase = getOption(options, "onlyLowerCase"_sr, false);
+		shortKeysRatio = getOption(options, "shortKeysRatio"_sr, 0.5);
+		minShortKeyLength = getOption(options, "minShortKeyLength"_sr, 1);
+		maxShortKeyLength = getOption(options, "maxShortKeyLength"_sr, 3);
+		minLongKeyLength = getOption(options, "minLongKeyLength"_sr, 1);
+		maxLongKeyLength = getOption(options, "maxLongKeyLength"_sr, 128);
+		minValueLength = getOption(options, "minValueLength"_sr, 1);
+		maxValueLength = getOption(options, "maxValueLength"_sr, 10000);
 
 		useExtraDB = g_network->isSimulated() && !g_simulator->extraDatabases.empty();
 		if (useExtraDB) {

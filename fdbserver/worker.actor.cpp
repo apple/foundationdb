@@ -300,18 +300,18 @@ ACTOR Future<Void> loadedPonger(FutureStream<LoadedPingRequest> pings) {
 	loop {
 		LoadedPingRequest pong = waitNext(pings);
 		LoadedReply rep;
-		rep.payload = (pong.loadReply ? payloadBack : LiteralStringRef(""));
+		rep.payload = (pong.loadReply ? payloadBack : ""_sr);
 		rep.id = pong.id;
 		pong.reply.send(rep);
 	}
 }
 
-StringRef fileStoragePrefix = LiteralStringRef("storage-");
-StringRef testingStoragePrefix = LiteralStringRef("testingstorage-");
-StringRef fileLogDataPrefix = LiteralStringRef("log-");
-StringRef fileVersionedLogDataPrefix = LiteralStringRef("log2-");
-StringRef fileLogQueuePrefix = LiteralStringRef("logqueue-");
-StringRef tlogQueueExtension = LiteralStringRef("fdq");
+StringRef fileStoragePrefix = "storage-"_sr;
+StringRef testingStoragePrefix = "testingstorage-"_sr;
+StringRef fileLogDataPrefix = "log-"_sr;
+StringRef fileVersionedLogDataPrefix = "log2-"_sr;
+StringRef fileLogQueuePrefix = "logqueue-"_sr;
+StringRef tlogQueueExtension = "fdq"_sr;
 
 enum class FilesystemCheck {
 	FILES_ONLY,
@@ -388,12 +388,12 @@ struct TLogOptions {
 			if (key.size() != 0 && value.size() == 0)
 				return default_error_or();
 
-			if (key == LiteralStringRef("V")) {
+			if (key == "V"_sr) {
 				ErrorOr<TLogVersion> tLogVersion = TLogVersion::FromStringRef(value);
 				if (tLogVersion.isError())
 					return tLogVersion.getError();
 				options.version = tLogVersion.get();
-			} else if (key == LiteralStringRef("LS")) {
+			} else if (key == "LS"_sr) {
 				ErrorOr<TLogSpillType> tLogSpillType = TLogSpillType::FromStringRef(value);
 				if (tLogSpillType.isError())
 					return tLogSpillType.getError();
@@ -562,6 +562,7 @@ ACTOR Future<Void> registrationClient(
     Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
     Reference<AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>> const> bmInterf,
     Reference<AsyncVar<Optional<EncryptKeyProxyInterface>> const> ekpInterf,
+    Reference<AsyncVar<Optional<ConsistencyScanInterface>> const> csInterf,
     Reference<AsyncVar<bool> const> degraded,
     Reference<IClusterConnectionRecord> connRecord,
     Reference<AsyncVar<std::set<std::string>> const> issues,
@@ -602,6 +603,7 @@ ACTOR Future<Void> registrationClient(
 		    rkInterf->get(),
 		    bmInterf->get().present() ? bmInterf->get().get().second : Optional<BlobManagerInterface>(),
 		    ekpInterf->get(),
+		    csInterf->get(),
 		    degraded->get(),
 		    localConfig.isValid() ? localConfig->lastSeenVersion() : Optional<Version>(),
 		    localConfig.isValid() ? localConfig->configClassSet() : Optional<ConfigClassSet>(),
@@ -613,7 +615,7 @@ ACTOR Future<Void> registrationClient(
 		}
 
 		if (!upToDate) {
-			request.issues.push_back_deep(request.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
+			request.issues.push_back_deep(request.issues.arena(), "incorrect_cluster_file_contents"_sr);
 			std::string connectionString = connRecord->getConnectionString().toString();
 			if (!incorrectTime.present()) {
 				incorrectTime = now();
@@ -670,6 +672,7 @@ ACTOR Future<Void> registrationClient(
 			when(wait(ccInterface->onChange())) { break; }
 			when(wait(ddInterf->onChange())) { break; }
 			when(wait(rkInterf->onChange())) { break; }
+			when(wait(csInterf->onChange())) { break; }
 			when(wait(bmInterf->onChange())) { break; }
 			when(wait(ekpInterf->onChange())) { break; }
 			when(wait(degraded->onChange())) { break; }
@@ -693,6 +696,10 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 	}
 
 	if (dbi.ratekeeper.present() && dbi.ratekeeper.get().address() == address) {
+		return true;
+	}
+
+	if (dbi.consistencyScan.present() && dbi.consistencyScan.get().address() == address) {
 		return true;
 	}
 
@@ -756,7 +763,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	// Setup a ServerDBInfo for test.
 	ServerDBInfo testDbInfo;
 	LocalityData testLocal;
-	testLocal.set(LiteralStringRef("dcid"), StringRef(std::to_string(1)));
+	testLocal.set("dcid"_sr, StringRef(std::to_string(1)));
 	testDbInfo.master.locality = testLocal;
 
 	// Manually set up a master address.
@@ -772,7 +779,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	// Create a remote TLog. Although the remote TLog also uses the local address, it shouldn't be considered as
 	// in primary DC given the remote locality.
 	LocalityData fakeRemote;
-	fakeRemote.set(LiteralStringRef("dcid"), StringRef(std::to_string(2)));
+	fakeRemote.set("dcid"_sr, StringRef(std::to_string(2)));
 	TLogInterface remoteTlog(fakeRemote);
 	remoteTlog.initEndpoints();
 	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(remoteTlog));
@@ -837,7 +844,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimarySatelliteDc") {
 	// Setup a ServerDBInfo for test.
 	ServerDBInfo testDbInfo;
 	LocalityData testLocal;
-	testLocal.set(LiteralStringRef("dcid"), StringRef(std::to_string(1)));
+	testLocal.set("dcid"_sr, StringRef(std::to_string(1)));
 	testDbInfo.master.locality = testLocal;
 
 	// First, create an empty TLogInterface, and check that it shouldn't be considered as in satellite DC.
@@ -869,7 +876,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimarySatelliteDc") {
 	// Create a remote TLog, and it should be considered as in remote DC.
 	NetworkAddress remoteTLogAddress(IPAddress(0x37373737), 1);
 	LocalityData fakeRemote;
-	fakeRemote.set(LiteralStringRef("dcid"), StringRef(std::to_string(2)));
+	fakeRemote.set("dcid"_sr, StringRef(std::to_string(2)));
 	TLogInterface remoteTLog(fakeRemote);
 	remoteTLog.initEndpoints();
 	remoteTLog.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ remoteTLogAddress }, UID(1, 2)));
@@ -918,7 +925,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndRemoteDc") {
 	// Setup a ServerDBInfo for test.
 	ServerDBInfo testDbInfo;
 	LocalityData testLocal;
-	testLocal.set(LiteralStringRef("dcid"), StringRef(std::to_string(1)));
+	testLocal.set("dcid"_sr, StringRef(std::to_string(1)));
 	testDbInfo.master.locality = testLocal;
 
 	// First, create an empty TLogInterface, and check that it shouldn't be considered as in remote DC.
@@ -934,7 +941,7 @@ TEST_CASE("/fdbserver/worker/addressInDbAndRemoteDc") {
 
 	// Create a remote TLog, and it should be considered as in remote DC.
 	LocalityData fakeRemote;
-	fakeRemote.set(LiteralStringRef("dcid"), StringRef(std::to_string(2)));
+	fakeRemote.set("dcid"_sr, StringRef(std::to_string(2)));
 	TLogInterface remoteTlog(fakeRemote);
 	remoteTlog.initEndpoints();
 
@@ -1259,7 +1266,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
                                                  IKeyValueStore* store,
                                                  bool validateDataFiles,
                                                  Promise<Void>* rebootKVStore,
-                                                 Reference<IEncryptionKeyProvider> encryptionKeyProvider) {
+                                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider) {
 	state TrackRunningStorage _(id, storeType, runningStorages);
 	loop {
 		ErrorOr<Void> e = wait(errorOr(prevStorageServer));
@@ -1413,8 +1420,8 @@ void startRole(const Role& role,
 
 	// Update roles map, log Roles metrics
 	g_roles.insert({ role.roleName, roleId.shortString() });
-	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
-	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
+	StringMetricHandle("Roles"_sr) = roleString(g_roles, false);
+	StringMetricHandle("RolesWithIDs"_sr) = roleString(g_roles, true);
 	if (g_network->isSimulated())
 		g_simulator->addRole(g_network->getLocalAddress(), role.roleName);
 }
@@ -1443,8 +1450,8 @@ void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
 
 	// Update roles map, log Roles metrics
 	g_roles.erase({ role.roleName, id.shortString() });
-	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
-	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
+	StringMetricHandle("Roles"_sr) = roleString(g_roles, false);
+	StringMetricHandle("RolesWithIDs"_sr) = roleString(g_roles, true);
 	if (g_network->isSimulated())
 		g_simulator->removeRole(g_network->getLocalAddress(), role.roleName);
 
@@ -1620,6 +1627,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state UID lastBMRecruitRequestId;
 	state Reference<AsyncVar<Optional<EncryptKeyProxyInterface>>> ekpInterf(
 	    new AsyncVar<Optional<EncryptKeyProxyInterface>>());
+	state Reference<AsyncVar<Optional<ConsistencyScanInterface>>> csInterf(
+	    new AsyncVar<Optional<ConsistencyScanInterface>>());
 	state Future<Void> handleErrors = workerHandleErrors(errors.getFuture()); // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
@@ -1728,7 +1737,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			if (s.storedComponent == DiskStore::Storage) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
-				Reference<IEncryptionKeyProvider> encryptionKeyProvider =
+				Reference<IPageEncryptionKeyProvider> encryptionKeyProvider =
 				    makeReference<TenantAwareEncryptionKeyProvider>(dbInfo);
 				IKeyValueStore* kv = openKVStore(
 				    s.storeType,
@@ -1942,6 +1951,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       rkInterf,
 		                                       bmEpochAndInterf,
 		                                       ekpInterf,
+		                                       csInterf,
 		                                       degraded,
 		                                       connRecord,
 		                                       issues,
@@ -2134,6 +2144,31 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					rkInterf->set(Optional<RatekeeperInterface>(recruited));
 				}
 				TraceEvent("Ratekeeper_InitRequest", req.reqId).detail("RatekeeperId", recruited.id());
+				req.reply.send(recruited);
+			}
+			when(InitializeConsistencyScanRequest req = waitNext(interf.consistencyScan.getFuture())) {
+				LocalLineage _;
+				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::ConsistencyScan;
+				ConsistencyScanInterface recruited(locality, req.reqId);
+				recruited.initEndpoints();
+
+				if (csInterf->get().present()) {
+					recruited = csInterf->get().get();
+					CODE_PROBE(true, "Recovered while already a consistencyscan");
+				} else {
+					startRole(Role::CONSISTENCYSCAN, recruited.id(), interf.id());
+					DUMPTOKEN(recruited.waitFailure);
+					DUMPTOKEN(recruited.haltConsistencyScan);
+
+					Future<Void> consistencyScanProcess = consistencyScan(recruited, dbInfo);
+					errorForwarders.add(forwardError(
+					    errors,
+					    Role::CONSISTENCYSCAN,
+					    recruited.id(),
+					    setWhenDoneOrError(consistencyScanProcess, csInterf, Optional<ConsistencyScanInterface>())));
+					csInterf->set(Optional<ConsistencyScanInterface>(recruited));
+				}
+				TraceEvent("ConsistencyScanReceived", req.reqId).detail("ConsistencyScanId", recruited.id());
 				req.reply.send(recruited);
 			}
 			when(InitializeBlobManagerRequest req = waitNext(interf.blobManager.getFuture())) {
@@ -2345,7 +2380,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                   folder,
 					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
-					Reference<IEncryptionKeyProvider> encryptionKeyProvider =
+					Reference<IPageEncryptionKeyProvider> encryptionKeyProvider =
 					    makeReference<TenantAwareEncryptionKeyProvider>(dbInfo);
 					IKeyValueStore* data = openKVStore(
 					    req.storeType,
@@ -3459,3 +3494,4 @@ const Role Role::STORAGE_CACHE("StorageCache", "SC");
 const Role Role::COORDINATOR("Coordinator", "CD");
 const Role Role::BACKUP("Backup", "BK");
 const Role Role::ENCRYPT_KEY_PROXY("EncryptKeyProxy", "EP");
+const Role Role::CONSISTENCYSCAN("ConsistencyScan", "CS");

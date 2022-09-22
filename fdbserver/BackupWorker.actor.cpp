@@ -1069,7 +1069,7 @@ ACTOR static Future<Void> monitorWorkerPause(BackupData* self) {
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			Optional<Value> value = wait(tr->get(backupPausedKey));
-			bool paused = value.present() && value.get() == LiteralStringRef("1");
+			bool paused = value.present() && value.get() == "1"_sr;
 			if (self->paused.get() != paused) {
 				TraceEvent(paused ? "BackupWorkerPaused" : "BackupWorkerResumed", self->myId).log();
 				self->paused.set(paused);

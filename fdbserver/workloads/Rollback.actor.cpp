@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/DeterministicRandom.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -31,17 +32,25 @@
 // The workload first clogs network link between the chosen proxy and all tLogs but the unclogTlog;
 // While the network is still clogged, the workload kills the proxy and clogs the unclogged tlog's interface.
 // Note: The clogged network link's latency will become "clogDuration".
-struct RollbackWorkload : TestWorkload {
-	bool enableFailures, multiple, enabled;
-	double meanDelay, clogDuration, testDuration;
+struct RollbackWorkload : FailureInjectionWorkload {
+	bool enableFailures = false, multiple = true, enabled;
+	double meanDelay = 20.0, clogDuration = clogDuration = 3.0, testDuration = 10.0;
 
-	RollbackWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	RollbackWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {}
+
+	RollbackWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		meanDelay = getOption(options, LiteralStringRef("meanDelay"), 20.0); // Only matters if multiple==true
-		clogDuration = getOption(options, LiteralStringRef("clogDuration"), 3.0);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		enableFailures = getOption(options, LiteralStringRef("enableFailures"), false);
-		multiple = getOption(options, LiteralStringRef("multiple"), true);
+		meanDelay = getOption(options, "meanDelay"_sr, meanDelay); // Only matters if multiple==true
+		clogDuration = getOption(options, "clogDuration"_sr, clogDuration);
+		testDuration = getOption(options, "testDuration"_sr, testDuration);
+		enableFailures = getOption(options, "enableFailures"_sr, enableFailures);
+		multiple = getOption(options, "multiple"_sr, multiple);
+	}
+
+	void initFailureInjectionMode(DeterministicRandom& random, unsigned count) override {
+		enabled = clientId == 0;
+		multiple = random.coinflip();
+		enableFailures = random.random01() < 0.2;
 	}
 
 	std::string description() const override { return "RollbackWorkload"; }
@@ -122,3 +131,4 @@ struct RollbackWorkload : TestWorkload {
 };
 
 WorkloadFactory<RollbackWorkload> RollbackWorkloadFactory("Rollback");
+FailureInjectorFactory<RollbackWorkload> RollbackFailureInjectorFactory;

@@ -42,7 +42,7 @@ from docutils.parsers.rst import directives, Directive
 
 from sphinx import addnodes
 from sphinx.roles import XRefRole
-from sphinx.locale import l_, _
+from sphinx.locale import _
 from sphinx.domains import Domain, ObjType, Index
 from sphinx.directives import ObjectDescription
 from sphinx.util.nodes import make_refnode
@@ -83,18 +83,18 @@ class RubyObject(ObjectDescription):
     }
 
     doc_field_types = [
-        TypedField('parameter', label=l_('Parameters'),
+        TypedField('parameter', label=_('Parameters'),
                    names=('param', 'parameter', 'arg', 'argument'),
                    typerolename='obj', typenames=('paramtype', 'type')),
-        TypedField('variable', label=l_('Variables'), rolename='obj',
+        TypedField('variable', label=_('Variables'), rolename='obj',
                    names=('var', 'ivar', 'cvar'),
                    typerolename='obj', typenames=('vartype',)),
-        GroupedField('exceptions', label=l_('Raises'), rolename='exc',
+        GroupedField('exceptions', label=_('Raises'), rolename='exc',
                      names=('raises', 'raise', 'exception', 'except'),
                      can_collapse=True),
-        Field('returnvalue', label=l_('Returns'), has_arg=False,
+        Field('returnvalue', label=_('Returns'), has_arg=False,
               names=('returns', 'return')),
-        Field('returntype', label=l_('Return type'), has_arg=False,
+        Field('returntype', label=_('Return type'), has_arg=False,
               names=('rtype',)),
     ]
 
@@ -493,8 +493,8 @@ class RubyModuleIndex(Index):
     """
 
     name = 'modindex'
-    localname = l_('Ruby Module Index')
-    shortname = l_('modules')
+    localname = _('Ruby Module Index')
+    shortname = _('modules')
 
     def generate(self, docnames=None):
         content = {}
@@ -561,17 +561,17 @@ class RubyDomain(Domain):
     name = 'rb'
     label = 'Ruby'
     object_types = {
-        'function':        ObjType(l_('function'),         'func', 'obj'),
-        'global':          ObjType(l_('global variable'),  'global', 'obj'),
-        'method':          ObjType(l_('method'),           'meth', 'obj'),
-        'class':           ObjType(l_('class'),            'class', 'obj'),
-        'exception':       ObjType(l_('exception'),        'exc', 'obj'),
-        'classmethod':     ObjType(l_('class method'),     'meth', 'obj'),
-        'attr_reader':     ObjType(l_('attribute'),        'attr', 'obj'),
-        'attr_writer':     ObjType(l_('attribute'),        'attr', 'obj'),
-        'attr_accessor':   ObjType(l_('attribute'),        'attr', 'obj'),
-        'const':           ObjType(l_('const'),            'const', 'obj'),
-        'module':          ObjType(l_('module'),           'mod', 'obj'),
+        'function':        ObjType(_('function'),         'func', 'obj'),
+        'global':          ObjType(_('global variable'),  'global', 'obj'),
+        'method':          ObjType(_('method'),           'meth', 'obj'),
+        'class':           ObjType(_('class'),            'class', 'obj'),
+        'exception':       ObjType(_('exception'),        'exc', 'obj'),
+        'classmethod':     ObjType(_('class method'),     'meth', 'obj'),
+        'attr_reader':     ObjType(_('attribute'),        'attr', 'obj'),
+        'attr_writer':     ObjType(_('attribute'),        'attr', 'obj'),
+        'attr_accessor':   ObjType(_('attribute'),        'attr', 'obj'),
+        'const':           ObjType(_('const'),            'const', 'obj'),
+        'module':          ObjType(_('module'),           'mod', 'obj'),
     }
 
     directives = {
