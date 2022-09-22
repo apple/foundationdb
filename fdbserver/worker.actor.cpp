@@ -2103,7 +2103,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				TraceEvent("EncryptKeyProxyReceived", req.reqId).detail("EncryptKeyProxyId", recruited.id());
 				req.reply.send(recruited);
 			}
-			when(InitializeTLogRequest req = waitNext(interf.tLog.getFuture())) {
+			when(InitializeTLogRequest req_ = waitNext(interf.tLog.getFuture())) {
+				// FIXME: remove this line after debugging
+				InitializeTLogRequest req = req_;
+				req.storeType = KeyValueStoreType::SSD_REDWOOD_V1;
 				// For now, there's a one-to-one mapping of spill type to TLogVersion.
 				// With future work, a particular version of the TLog can support multiple
 				// different spilling strategies, at which point SpillType will need to be
