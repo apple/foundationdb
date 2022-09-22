@@ -189,7 +189,7 @@ public:
 };
 
 ACTOR Future<Void> dumpMetrics(Database cx, MetricsConfig* config, TDMetricCollection* collection) {
-	state MetricUpdateBatch batch;
+	state MetricBatch batch;
 	state Standalone<MetricKeyRef> mk;
 	ASSERT(collection != nullptr);
 	mk.prefix = StringRef(mk.arena(), config->space.key());
@@ -225,8 +225,8 @@ ACTOR Future<Void> dumpMetrics(Database cx, MetricsConfig* config, TDMetricColle
 
 		state std::map<int, Future<Void>> results;
 		// Call all of the callbacks, map each index to its resulting future
-		for (int i = 0, iend = batch.callbacks.size(); i < iend; ++i)
-			results[i] = batch.callbacks[i](&mdb, &batch);
+		for (int i = 0, iend = batch.scope.callbacks.size(); i < iend; ++i)
+			results[i] = batch.scope.callbacks[i](&mdb, &batch.scope);
 
 		loop {
 			state std::map<int, Future<Void>>::iterator cb = results.begin();
@@ -249,7 +249,7 @@ ACTOR Future<Void> dumpMetrics(Database cx, MetricsConfig* config, TDMetricColle
 			// Otherwise, wait to retry
 			wait(cbtr.onError(lastError));
 			for (auto& cb : results)
-				cb.second = batch.callbacks[cb.first](&mdb, &batch);
+				cb.second = batch.scope.callbacks[cb.first](&mdb, &batch.scope);
 		}
 
 		// If there are more rolltimes then next dump is now, otherwise if no metrics are enabled then it is
@@ -267,19 +267,19 @@ ACTOR Future<Void> dumpMetrics(Database cx, MetricsConfig* config, TDMetricColle
 		loop {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
-				for (auto& i : batch.inserts) {
+				for (auto& i : batch.scope.inserts) {
 					// fprintf(stderr, "%s: dump insert: %s\n", collection->address.toString().c_str(),
 					// printable(allInsertions[i].key).c_str());
 					tr.set(i.key, i.value());
 				}
 
-				for (auto& a : batch.appends) {
+				for (auto& a : batch.scope.appends) {
 					// fprintf(stderr, "%s: dump append: %s\n", collection->address.toString().c_str(),
 					// printable(allAppends[i].key).c_str());
 					tr.atomicOp(a.key, a.value(), MutationRef::AppendIfFits);
 				}
 
-				for (auto& u : batch.updates) {
+				for (auto& u : batch.scope.updates) {
 					// fprintf(stderr, "%s: dump update: %s\n", collection->address.toString().c_str(),
 					// printable(allUpdates[i].first).c_str());
 					tr.set(u.first, u.second);
