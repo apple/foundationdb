@@ -1428,6 +1428,7 @@ void Net2::run() {
 	TraceEvent::setNetworkThread();
 	TraceEvent("Net2Running")
 	    .detail("PrioritizeExternalThreads", FLOW_KNOBS->RUN_LOOP_PRIORITIZE_EXTERNAL_THREADS)
+	    .detail("PrioritizeThreadReturns", FLOW_KNOBS->RUN_LOOP_PRIORITIZE_THREAD_RETURNS)
 	    .log();
 
 	thread_network = this;
@@ -1578,7 +1579,7 @@ void Net2::run() {
 
 			taskBegin = newTaskBegin;
 			tscBegin = tscNow;
-			if (FLOW_KNOBS->RUN_LOOP_PRIORITIZE_EXTERNAL_THREADS) {
+			if (FLOW_KNOBS->RUN_LOOP_PRIORITIZE_THREAD_RETURNS) {
 				processThreadReady();
 			}
 		}

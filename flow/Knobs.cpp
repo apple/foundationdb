@@ -190,6 +190,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 		
 	//Net2 and FlowTransport
 	init( RUN_LOOP_PRIORITIZE_EXTERNAL_THREADS,               true );
+	init( RUN_LOOP_PRIORITIZE_THREAD_RETURNS,                 true );
 	init( MIN_COALESCE_DELAY,                                10e-6 ); if( randomize && BUGGIFY ) MIN_COALESCE_DELAY = 0;
 	init( MAX_COALESCE_DELAY,                                20e-6 ); if( randomize && BUGGIFY ) MAX_COALESCE_DELAY = 0;
 	init( SLOW_LOOP_CUTOFF,                          15.0 / 1000.0 );

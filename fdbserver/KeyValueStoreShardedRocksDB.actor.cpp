@@ -68,6 +68,7 @@ const StringRef ROCKSDB_READPREFIX_QUEUEWAIT_HISTOGRAM = LiteralStringRef("Rocks
 const StringRef ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM = LiteralStringRef("RocksDBReadRangeNewIterator");
 const StringRef ROCKSDB_READVALUE_GET_HISTOGRAM = LiteralStringRef("RocksDBReadValueGet");
 const StringRef ROCKSDB_READPREFIX_GET_HISTOGRAM = LiteralStringRef("RocksDBReadPrefixGet");
+const StringRef ROCKSDB_READ_RETURN_LATENCY_HISTOGRAM = "RocksDBReadReturn"_sr;
 
 namespace {
 struct PhysicalShard;
@@ -75,6 +76,9 @@ struct DataShard;
 struct ReadIterator;
 struct ShardedRocksDBKeyValueStore;
 
+Reference<Histogram> readReturnHistogram = Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+                                                                   ROCKSDB_READ_RETURN_LATENCY_HISTOGRAM,
+                                                                   Histogram::Unit::microseconds);
 using rocksdb::BackgroundErrorReason;
 
 // Returns string representation of RocksDB background error reason.
@@ -1988,10 +1992,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			  : key(key), shard(shard), debugID(debugID), startTime(timer_monotonic()),
 			    getHistograms(
 			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
-			    result(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY > 0
-			               ? ThreadReturnPromise<Optional<Value>>(
-			                     static_cast<TaskPriority>(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY))
-			               : ThreadReturnPromise<Optional<Value>>()) {}
+			    result(ThreadReturnPromise<Optional<Value>>(
+			        static_cast<TaskPriority>(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY),
+			        readReturnHistogram)) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
@@ -2069,12 +2072,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			  : key(key), maxLength(maxLength), shard(shard), debugID(debugID), startTime(timer_monotonic()),
 			    getHistograms(
 			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
-			    result(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY > 0
-			               ? ThreadReturnPromise<Optional<Value>>(
-			                     static_cast<TaskPriority>(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY))
-			               : ThreadReturnPromise<Optional<Value>>())
-
-			        {};
+			    result(ThreadReturnPromise<Optional<Value>>(
+			        static_cast<TaskPriority>(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY),
+			        readReturnHistogram)) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 
@@ -2154,10 +2154,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), startTime(timer_monotonic()),
 			    getHistograms(
 			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
-			    result(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY > 0
-			               ? ThreadReturnPromise<RangeResult>(
-			                     static_cast<TaskPriority>(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY))
-			               : ThreadReturnPromise<RangeResult>()) {
+			    result(ThreadReturnPromise<RangeResult>(
+			        static_cast<TaskPriority>(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY),
+			        readReturnHistogram)) {
 				for (const DataShard* shard : shards) {
 					if (shard != nullptr) {
 						shardRanges.emplace_back(shard->physicalShard, keys & shard->range);

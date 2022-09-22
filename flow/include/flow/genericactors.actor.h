@@ -1266,15 +1266,15 @@ Future<T> brokenPromiseToMaybeDelivered(Future<T> in) {
 }
 
 ACTOR template <class T, class U>
-void tagAndForwardWithDelayHis(Promise<T>* pOutputPromise,
-                               U value,
-                               Future<Void> signal,
-                               double startTime,
-                               Reference<Histogram> delayHis) {
+void tagAndForwardWithLatencyHistogram(Promise<T>* pOutputPromise,
+                                       U value,
+                                       Future<Void> signal,
+                                       double startTime,
+                                       Reference<Histogram> latencyHistogram) {
 	state Promise<T> out(std::move(*pOutputPromise));
 	wait(signal);
 	out.send(std::move(value));
-	delayHis->sampleSeconds(timer_monotonic() - startTime);
+	latencyHistogram->sampleSeconds(timer_monotonic() - startTime);
 }
 
 ACTOR template <class T, class U>
