@@ -193,7 +193,7 @@ uint64_t DynamicEventMetric::log(uint64_t explicitTime) {
 	return t;
 }
 
-void DynamicEventMetric::flushData(MetricKeyRef const& mk, uint64_t rollTime, MetricUpdateBatch& batch) {
+void DynamicEventMetric::flushData(MetricKeyRef const& mk, uint64_t rollTime, MetricBatch& batch) {
 	time.flushField(mk, rollTime, batch);
 	for (auto& [name, field] : fields)
 		field->flushField(mk, rollTime, batch);
