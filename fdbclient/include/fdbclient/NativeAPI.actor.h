@@ -477,6 +477,7 @@ public:
 	Database getDatabase() const { return trState->cx; }
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);
 
+	Transaction& getTransaction() { return *this; }
 	void setTransactionID(UID id);
 	void setToken(uint64_t token);
 
