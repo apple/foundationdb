@@ -101,8 +101,8 @@ struct NoOptions {};
 struct FailureInjectionWorkload : TestWorkload {
 	FailureInjectionWorkload(WorkloadContext const&);
 	virtual ~FailureInjectionWorkload() {}
-	virtual bool add(DeterministicRandom& random, WorkloadRequest const& work, CompoundWorkload const& workload);
-	virtual void initFailureInjectionMode(DeterministicRandom& random, unsigned count);
+	virtual void initFailureInjectionMode(DeterministicRandom& random);
+	virtual bool shouldInject(DeterministicRandom& random, const WorkloadRequest& work, const unsigned count) const;
 
 	Future<Void> setupInjectionWorkload(Database const& cx, Future<Void> done);
 	Future<Void> startInjectionWorkload(Database const& cx, Future<Void> done);
@@ -137,6 +137,9 @@ struct CompoundWorkload : TestWorkload {
 	CompoundWorkload(WorkloadContext& wcx);
 	CompoundWorkload* add(Reference<TestWorkload>&& w);
 	void addFailureInjection(WorkloadRequest& work);
+	bool shouldInjectFailure(DeterministicRandom& random,
+	                         const WorkloadRequest& work,
+	                         Reference<FailureInjectionWorkload> failureInjection) const;
 
 	std::string description() const override;
 
