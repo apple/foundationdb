@@ -22,6 +22,8 @@
 #include "flow/UnitTest.h"
 
 const uint8_t VERSIONSTAMP_96_CODE = 0x33;
+const uint8_t USER_TYPE_START = 0x40;
+const uint8_t USER_TYPE_END = 0x4f;
 
 // TODO: Many functions copied from bindings/flow/Tuple.cpp. Merge at some point.
 static float bigEndianFloat(float orig) {
@@ -59,7 +61,7 @@ static void adjustFloatingPoint(uint8_t* bytes, size_t size, bool encode) {
 	}
 }
 
-Tuple::Tuple(StringRef const& str, bool exclude_incomplete) {
+Tuple::Tuple(StringRef const& str, bool exclude_incomplete, bool include_user_type) {
 	data.append(data.arena(), str.begin(), str.size());
 
 	size_t i = 0;
@@ -80,6 +82,9 @@ Tuple::Tuple(StringRef const& str, bool exclude_incomplete) {
 			i += 1;
 		} else if (data[i] == VERSIONSTAMP_96_CODE) {
 			i += VERSIONSTAMP_TUPLE_SIZE + 1;
+		} else if (include_user_type && isUserType(data[i])) {
+			// User defined codes must come at the end of a Tuple and are not delimited.
+			i = data.size();
 		} else {
 			throw invalid_tuple_data_type();
 		}
@@ -92,6 +97,14 @@ Tuple::Tuple(StringRef const& str, bool exclude_incomplete) {
 
 Tuple Tuple::unpack(StringRef const& str, bool exclude_incomplete) {
 	return Tuple(str, exclude_incomplete);
+}
+
+Tuple Tuple::unpackUserType(StringRef const& str, bool exclude_incomplete) {
+	return Tuple(str, exclude_incomplete, true);
+}
+
+bool Tuple::isUserType(uint8_t code) const {
+	return code >= USER_TYPE_START && code <= USER_TYPE_END;
 }
 
 Tuple& Tuple::append(Tuple const& tuple) {
@@ -218,6 +231,15 @@ Tuple& Tuple::appendNull() {
 	return append(nullptr);
 }
 
+Tuple& Tuple::append(Tuple::UserTypeStr const& udt) {
+	offsets.push_back(data.size());
+	ASSERT(isUserType(udt.code));
+	data.push_back(data.arena(), udt.code);
+	data.append(data.arena(), udt.str.begin(), udt.str.size());
+
+	return *this;
+}
+
 Tuple::ElementType Tuple::getType(size_t index) const {
 	if (index >= offsets.size()) {
 		throw invalid_tuple_index();
@@ -241,6 +263,8 @@ Tuple::ElementType Tuple::getType(size_t index) const {
 		return ElementType::BOOL;
 	} else if (code == VERSIONSTAMP_96_CODE) {
 		return ElementType::VERSIONSTAMP;
+	} else if (isUserType(code)) {
+		return ElementType::USER_TYPE;
 	} else {
 		throw invalid_tuple_data_type();
 	}
@@ -401,6 +425,29 @@ Versionstamp Tuple::getVersionstamp(size_t index) const {
 	return Versionstamp(StringRef(data.begin() + offsets[index] + 1, VERSIONSTAMP_TUPLE_SIZE));
 }
 
+Tuple::UserTypeStr Tuple::getUserType(size_t index) const {
+	// Valid index.
+	if (index >= offsets.size()) {
+		throw invalid_tuple_index();
+	}
+
+	// Valid user type code.
+	ASSERT_LT(offsets[index], data.size());
+	uint8_t code = data[offsets[index]];
+	if (!isUserType(code)) {
+		throw invalid_tuple_data_type();
+	}
+
+	size_t start = offsets[index] + 1;
+
+	Standalone<StringRef> str;
+	VectorRef<uint8_t> staging;
+	staging.append(str.arena(), data.begin() + start, data.size() - start);
+	str.StringRef::operator=(StringRef(staging.begin(), staging.size()));
+
+	return Tuple::UserTypeStr(code, str);
+}
+
 KeyRange Tuple::range(Tuple const& tuple) const {
 	VectorRef<uint8_t> begin;
 	VectorRef<uint8_t> end;
@@ -440,9 +487,16 @@ StringRef Tuple::subTupleRawString(size_t index) const {
 	return StringRef(data.begin() + offsets[index], endPos - offsets[index]);
 }
 
-TEST_CASE("fdbclient/Tuple/makeTuple") {
-	Tuple t1 = Tuple::makeTuple(
-	    1, 1.0f, 1.0, false, "byteStr"_sr, Tuple::UnicodeStr("str"_sr), nullptr, Versionstamp("000000000000"_sr));
+TEST_CASE("/fdbclient/Tuple/makeTuple") {
+	Tuple t1 = Tuple::makeTuple(1,
+	                            1.0f,
+	                            1.0,
+	                            false,
+	                            "byteStr"_sr,
+	                            Tuple::UnicodeStr("str"_sr),
+	                            nullptr,
+	                            Versionstamp("000000000000"_sr),
+	                            Tuple::UserTypeStr(0x41, "12345678"_sr));
 	Tuple t2 = Tuple()
 	               .append(1)
 	               .append(1.0f)
@@ -451,7 +505,8 @@ TEST_CASE("fdbclient/Tuple/makeTuple") {
 	               .append("byteStr"_sr)
 	               .append(Tuple::UnicodeStr("str"_sr))
 	               .append(nullptr)
-	               .append(Versionstamp("000000000000"_sr));
+	               .append(Versionstamp("000000000000"_sr))
+	               .append(Tuple::UserTypeStr(0x41, "12345678"_sr));
 
 	ASSERT(t1.pack() == t2.pack());
 	ASSERT(t1.getType(0) == Tuple::INT);
@@ -462,7 +517,45 @@ TEST_CASE("fdbclient/Tuple/makeTuple") {
 	ASSERT(t1.getType(5) == Tuple::UTF8);
 	ASSERT(t1.getType(6) == Tuple::NULL_TYPE);
 	ASSERT(t1.getType(7) == Tuple::VERSIONSTAMP);
-	ASSERT(t1.size() == 8);
+	ASSERT(t1.getType(8) == Tuple::USER_TYPE);
+	ASSERT(t1.size() == 9);
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/Tuple/unpack") {
+	Tuple t1 = Tuple::makeTuple(1,
+	                            1.0f,
+	                            1.0,
+	                            false,
+	                            "byteStr"_sr,
+	                            Tuple::UnicodeStr("str"_sr),
+	                            nullptr,
+	                            Versionstamp("000000000000"_sr),
+	                            Tuple::UserTypeStr(0x41, "12345678"_sr));
+
+	Standalone<StringRef> packed = t1.pack();
+	Tuple t2 = Tuple::unpackUserType(packed);
+	ASSERT(t2.pack() == t1.pack());
+	ASSERT(t2.getInt(0) == t1.getInt(0));
+	ASSERT(t2.getFloat(1) == t1.getFloat(1));
+	ASSERT(t2.getDouble(2) == t1.getDouble(2));
+	ASSERT(t2.getBool(3) == t1.getBool(3));
+	ASSERT(t2.getString(4) == t1.getString(4));
+	ASSERT(t2.getString(5) == t1.getString(5));
+	ASSERT(t2.getType(6) == Tuple::NULL_TYPE);
+	ASSERT(t2.getVersionstamp(7) == t1.getVersionstamp(7));
+	ASSERT(t2.getUserType(8) == t1.getUserType(8));
+	ASSERT(t2.size() == 9);
+
+	try {
+		Tuple t3 = Tuple::unpack(packed);
+		ASSERT(false);
+	} catch (Error& e) {
+		if (e.code() != error_code_invalid_tuple_data_type) {
+			throw e;
+		}
+	}
 
 	return Void();
 }
