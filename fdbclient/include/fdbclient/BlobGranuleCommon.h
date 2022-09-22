@@ -276,6 +276,17 @@ struct BlobGranuleHistoryValue {
 	}
 };
 
+struct GranuleHistory {
+	KeyRange range;
+	Version version;
+	Standalone<BlobGranuleHistoryValue> value;
+
+	GranuleHistory() {}
+
+	GranuleHistory(KeyRange range, Version version, Standalone<BlobGranuleHistoryValue> value)
+	  : range(range), version(version), value(value) {}
+};
+
 // A manifest to assist full fdb restore from blob granule files
 struct BlobManifest {
 	constexpr static FileIdentifier file_identifier = 298872;

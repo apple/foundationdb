@@ -38,17 +38,6 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-struct GranuleHistory {
-	KeyRange range;
-	Version version;
-	Standalone<BlobGranuleHistoryValue> value;
-
-	GranuleHistory() {}
-
-	GranuleHistory(KeyRange range, Version version, Standalone<BlobGranuleHistoryValue> value)
-	  : range(range), version(version), value(value) {}
-};
-
 // Stores info about a file in blob storage
 struct BlobFileIndex {
 	Version version;
