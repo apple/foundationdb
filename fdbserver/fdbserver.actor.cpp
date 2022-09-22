@@ -102,8 +102,10 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// FIXME: remove.
-extern "C" void testSwiftInFDB();
+#if __has_include("SwiftModules/FDBServer")
+#include "SwiftModules/FDBServer"
+#define SWIFT_REVERSE_INTEROP_SUPPORTED
+#endif
 
 using namespace std::literals;
 
@@ -2012,7 +2014,16 @@ int main(int argc, char* argv[]) {
 		std::vector<Future<Void>> listenErrors;
 
 		if (getenv("FDBSWIFTTEST")) {
-			testSwiftInFDB();
+#ifdef SWIFT_REVERSE_INTEROP_SUPPORTED
+            using namespace fdbserver_swift;
+            // FIXME: This is test code, remove.
+            int val = swiftFunctionCalledFromCpp(42);
+            if (val != 42)
+                abort();
+            testSwiftFDBServerMain();
+#else
+            fprintf(stderr, "ERROR: reverse interop not supported");
+#endif
 			flushAndExit(FDB_EXIT_SUCCESS);
 		}
 
