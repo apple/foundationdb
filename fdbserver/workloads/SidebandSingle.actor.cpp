@@ -128,6 +128,11 @@ struct SidebandSingleWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> checker(SidebandSingleWorkload* self, Database cx) {
+		// Required for GRV Cache to work in simulation.
+		// Normally, MVC would set the shared state and it is verified upon setting the
+		// transaction option for GRV Cache.
+		// In simulation, explicitly initialize it when used for tests.
+		cx->initSharedState();
 		loop {
 			// Pair represents <Key, commitVersion>
 			state std::pair<uint64_t, Version> message = waitNext(self->interf.getFuture());

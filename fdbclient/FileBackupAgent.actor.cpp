@@ -3328,6 +3328,14 @@ bool AccumulatedMutations::matchesAnyRange(const std::vector<KeyRange>& ranges) 
 	std::vector<MutationRef> mutations = decodeMutationLogValue(serializedMutations);
 	for (auto& m : mutations) {
 		for (auto& r : ranges) {
+			if (m.type == MutationRef::Encrypted) {
+				// TODO:  In order to filter out encrypted mutations that are not relevant to the
+				// target range, they would have to be decrypted here in order to check relevance
+				// below, however the staged mutations would still need to remain encrypted for
+				// staging into the destination database.  Without decrypting, we must assume that
+				// some data could match the range and return true here.
+				return true;
+			}
 			if (m.type == MutationRef::ClearRange) {
 				if (r.intersects(KeyRangeRef(m.param1, m.param2))) {
 					return true;

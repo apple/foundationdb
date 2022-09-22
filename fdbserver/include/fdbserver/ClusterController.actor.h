@@ -183,10 +183,15 @@ public:
 
 		void setEncryptKeyProxy(const EncryptKeyProxyInterface& interf) {
 			auto newInfo = serverInfo->get();
+			auto newClientInfo = clientInfo->get();
+			newClientInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
 			newInfo.encryptKeyProxy = interf;
+			newInfo.client.encryptKeyProxy = interf;
+			newClientInfo.encryptKeyProxy = interf;
 			serverInfo->set(newInfo);
+			clientInfo->set(newClientInfo);
 		}
 
 		void setConsistencyScan(const ConsistencyScanInterface& interf) {
@@ -199,7 +204,9 @@ public:
 
 		void clearInterf(ProcessClass::ClassType t) {
 			auto newInfo = serverInfo->get();
+			auto newClientInfo = clientInfo->get();
 			newInfo.id = deterministicRandom()->randomUniqueID();
+			newClientInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
 			if (t == ProcessClass::DataDistributorClass) {
 				newInfo.distributor = Optional<DataDistributorInterface>();
@@ -209,10 +216,13 @@ public:
 				newInfo.blobManager = Optional<BlobManagerInterface>();
 			} else if (t == ProcessClass::EncryptKeyProxyClass) {
 				newInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
+				newInfo.client.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
+				newClientInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 			} else if (t == ProcessClass::ConsistencyScanClass) {
 				newInfo.consistencyScan = Optional<ConsistencyScanInterface>();
 			}
 			serverInfo->set(newInfo);
+			clientInfo->set(newClientInfo);
 		}
 
 		ACTOR static Future<Void> countClients(DBInfo* self) {
