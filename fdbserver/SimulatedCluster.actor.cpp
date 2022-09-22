@@ -1555,12 +1555,14 @@ void SimulationConfig::setSpecificConfig(const TestConfig& testConfig) {
 // Sets generateFearless and number of dataCenters based on testConfig details
 // The number of datacenters may be overwritten in setRegions
 void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
+	/*
 	generateFearless =
 	    testConfig.simpleConfig ? false : (testConfig.minimumRegions > 1 || deterministicRandom()->random01() < 0.5);
 	if (testConfig.generateFearless.present()) {
-		// overwrite whatever decision we made before
-		generateFearless = testConfig.generateFearless.get();
-	}
+	    // overwrite whatever decision we made before
+	    generateFearless = testConfig.generateFearless.get();
+	}*/
+	generateFearless = false;
 	datacenters =
 	    testConfig.simpleConfig
 	        ? 1
