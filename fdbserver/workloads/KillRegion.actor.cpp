@@ -40,6 +40,9 @@ struct KillRegionWorkload : TestWorkload {
 	}
 
 	std::string description() const override { return "KillRegionWorkload"; }
+
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
+
 	Future<Void> setup(Database const& cx) override {
 		if (enabled) {
 			return _setup(this, cx);
