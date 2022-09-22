@@ -81,6 +81,10 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 	std::string description() const override { return "MetaclusterManagement"; }
 
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert("MachineAttritionWorkload");
+	}
+
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
 			if (g_network->isSimulated() && BUGGIFY) {
