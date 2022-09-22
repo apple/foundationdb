@@ -2061,17 +2061,7 @@ struct KeyValueGen {
 			cipherKeys = getCipherKeysCtx(ar);
 		}
 		if (deterministicRandom()->coinflip()) {
-			std::vector<CompressionFilter> filters;
-			filters.insert(
-			    filters.end(), CompressionUtils::supportedFilters.begin(), CompressionUtils::supportedFilters.end());
-
-			ASSERT_GE(filters.size(), 1);
-			if (filters.size() == 1) {
-				compressFilter = filters[0];
-			} else {
-				int idx = deterministicRandom()->randomInt(0, filters.size());
-				compressFilter = filters[idx];
-			}
+			compressFilter = CompressionUtils::getRandomFilter();
 		}
 	}
 

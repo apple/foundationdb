@@ -162,6 +162,25 @@ int CompressionUtils::getDefaultCompressionLevel(CompressionFilter filter) {
 	throw internal_error(); // We should never get here
 }
 
+CompressionFilter CompressionUtils::getRandomFilter() {
+	ASSERT_GE(supportedFilters.size(), 1);
+	std::vector<CompressionFilter> filters;
+	filters.insert(filters.end(), CompressionUtils::supportedFilters.begin(), CompressionUtils::supportedFilters.end());
+
+	ASSERT_GE(filters.size(), 1);
+
+	CompressionFilter res;
+	if (filters.size() == 1) {
+		res = filters[0];
+	} else {
+		int idx = deterministicRandom()->randomInt(0, filters.size());
+		res = filters[idx];
+	}
+
+	ASSERT(supportedFilters.find(res) != supportedFilters.end());
+	return res;
+}
+
 // Only used to link unit tests
 void forceLinkCompressionUtilsTest() {}
 

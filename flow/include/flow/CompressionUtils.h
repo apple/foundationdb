@@ -39,6 +39,7 @@ struct CompressionUtils {
 	static StringRef decompress(const CompressionFilter filter, const StringRef& data, Arena& arena);
 
 	static int getDefaultCompressionLevel(CompressionFilter filter);
+	static CompressionFilter getRandomFilter();
 
 	static CompressionFilter fromFilterString(const std::string& filter) {
 		if (filter == "NONE") {
