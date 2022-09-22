@@ -248,6 +248,10 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 	std::string description() const override { return "DestroyDatabaseWorkload"; }
 
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert("MachineAttritionWorkload");
+	}
+
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
 	Future<Void> start(Database const& cx) override { return _start(this, cx); }
