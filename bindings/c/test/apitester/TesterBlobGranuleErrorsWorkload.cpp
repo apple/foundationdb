@@ -125,7 +125,7 @@ private:
 		if (begin > end) {
 			std::swap(begin, end);
 		}
-		execTransaction(
+		execOperation(
 		    [this, begin, end](auto ctx) {
 			    fdb::Future f = ctx->db().purgeBlobGranules(begin, end, -2, false).eraseType();
 			    ctx->continueAfter(
@@ -148,7 +148,7 @@ private:
 			std::swap(begin, end);
 		}
 		auto success = std::make_shared<bool>(false);
-		execTransaction(
+		execOperation(
 		    [begin, end, blobbify, success](auto ctx) {
 			    fdb::Future f = blobbify ? ctx->db().blobbifyRange(begin, end).eraseType()
 			                             : ctx->db().unblobbifyRange(begin, end).eraseType();
@@ -186,7 +186,7 @@ private:
 		if (begin > end) {
 			std::swap(begin, end);
 		}
-		execTransaction(
+		execOperation(
 		    [begin, end](auto ctx) {
 			    fdb::Future f = ctx->db().listBlobbifiedRanges(begin, end, 1000).eraseType();
 			    ctx->done();
@@ -200,7 +200,7 @@ private:
 		if (begin > end) {
 			std::swap(begin, end);
 		}
-		execTransaction(
+		execOperation(
 		    [begin, end](auto ctx) {
 			    fdb::Future f = ctx->db().verifyBlobRange(begin, end, -2 /* latest version*/).eraseType();
 			    ctx->done();
@@ -228,7 +228,7 @@ private:
 		if (begin > end) {
 			std::swap(begin, end);
 		}
-		execTransaction(
+		execOperation(
 		    [begin, end](auto ctx) {
 			    fdb::Future f = ctx->db().blobbifyRange(begin, end).eraseType();
 			    ctx->done();
@@ -242,7 +242,7 @@ private:
 		if (begin > end) {
 			std::swap(begin, end);
 		}
-		execTransaction(
+		execOperation(
 		    [begin, end](auto ctx) {
 			    fdb::Future f = ctx->db().unblobbifyRange(begin, end).eraseType();
 			    ctx->done();
@@ -256,7 +256,7 @@ private:
 		if (begin > end) {
 			std::swap(begin, end);
 		}
-		execTransaction(
+		execOperation(
 		    [begin, end](auto ctx) {
 			    fdb::Future f = ctx->db().purgeBlobGranules(begin, end, -2, false).eraseType();
 			    ctx->done();

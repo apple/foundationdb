@@ -157,6 +157,12 @@ private:
 	}
 
 	void randomSummarizeOp(TTaskFct cont, std::optional<int> tenantId) {
+		if (!seenReadSuccess) {
+			// tester can't handle this throwing bg_txn_too_old, so just don't call it unless we have already seen a
+			// read success
+			schedule(cont);
+			return;
+		}
 		fdb::Key begin = randomKeyName();
 		fdb::Key end = randomKeyName();
 		if (begin > end) {
@@ -175,11 +181,9 @@ private:
 			        true);
 		    },
 		    [this, begin, end, results, cont]() {
-			    if (seenReadSuccess) {
-				    ASSERT(results->size() > 0);
-				    ASSERT(results->front().keyRange.beginKey <= begin);
-				    ASSERT(results->back().keyRange.endKey >= end);
-			    }
+			    ASSERT(results->size() > 0);
+			    ASSERT(results->front().keyRange.beginKey <= begin);
+			    ASSERT(results->back().keyRange.endKey >= end);
 
 			    for (int i = 0; i < results->size(); i++) {
 				    // TODO: could do validation of subsequent calls and ensure snapshot version never decreases
