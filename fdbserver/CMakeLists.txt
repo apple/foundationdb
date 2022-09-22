@@ -72,6 +72,8 @@ add_custom_command(TARGET fdbserver_swift POST_BUILD
 # Setup the options for generating the C++ compatibility header
 # for the FDBServer Swift module.
 target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL: -Xfrontend -emit-clang-header-path -Xfrontend ${CMAKE_BINARY_DIR}/fdbserver/include/SwiftModules/FDBServer>")
+# FIXME: remove after toolchain upgrade
+target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL: -DENABLE_REVERSE_INTEROP>")
 
 endif() # ${REVERSE_INTEROP_SUPPORTED}
 
