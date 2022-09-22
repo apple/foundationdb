@@ -396,11 +396,11 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 		try {
 			state TenantMapEntry createEntry;
-			if (preferAssignedCluster) {
-				createEntry.assignedCluster = self->chooseClusterName();
-			}
 			loop {
 				try {
+					if (preferAssignedCluster) {
+						createEntry.assignedCluster = self->chooseClusterName();
+					}
 					Future<Void> createFuture = MetaclusterAPI::createTenant(self->managementDb, tenant, createEntry);
 					Optional<Void> result = wait(timeout(createFuture, deterministicRandom()->randomInt(1, 30)));
 					if (result.present()) {
