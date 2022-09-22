@@ -53,25 +53,9 @@ target_include_directories(fdbserver_swift PRIVATE
 # TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?
 target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++17 -enable-experimental-cxx-interop -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml>")
 
-include(CompilerChecks)
-check_swift_source_compiles("@_expose(Cxx) public func test() {}" REVERSE_INTEROP_SUPPORTED)
-
-if (NOT ${REVERSE_INTEROP_SUPPORTED})
-  message(FATAL_ERROR "Swift: reverse interop is required, but not supported.  Update your toolcain.")
-endif()
-
-message(STATUS "Swift: reverse interop is supported")
-# Generate a directory into which the C++ header will go.
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/fdbserver/include/SwiftModules)
-# Copy the shim file for C++ to find it.
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/fdbserver/include/shims)
-swift_get_resource_path(SWIFT_RESOURCE_PATH)
-add_custom_command(TARGET fdbserver_swift POST_BUILD
-                     COMMAND ${CMAKE_COMMAND} -E
-                         copy ${SWIFT_RESOURCE_PATH}/shims/_SwiftCxxInteroperability.h ${CMAKE_BINARY_DIR}/fdbserver/include/shims/_SwiftCxxInteroperability.h)
-# Setup the options for generating the C++ compatibility header
-# for the FDBServer Swift module.
-target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL: -Xfrontend -emit-clang-header-path -Xfrontend ${CMAKE_BINARY_DIR}/fdbserver/include/SwiftModules/FDBServer>")
+# Ensure that C++ code in fdbserver can import Swift using a compatibility header.
+include(SwiftToCXXInterop)
+generate_cxx_compat_header(fdbserver_swift "FDBServer")
 
 add_dependencies(fdbserver_swift fdbserver_actors)
 # This does not work! (see rdar://99107402)
