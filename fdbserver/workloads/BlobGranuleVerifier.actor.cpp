@@ -1028,6 +1028,13 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			wait(self->setUpBlobRange(cx));
 		}
 
+		state Future<Void> checkFeedCleanupFuture;
+		if (self->clientId == 0) {
+			checkFeedCleanupFuture = checkFeedCleanup(cx);
+		} else {
+			checkFeedCleanupFuture = Future<Void>(Void());
+		}
+
 		state Version readVersion = wait(self->doGrv(&tr));
 		state Version startReadVersion = readVersion;
 		state int checks = 0;
@@ -1124,6 +1131,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 
 		state bool dataPassed = wait(self->checkAllData(cx, self));
+		wait(checkFeedCleanupFuture);
 
 		state bool result =
 		    availabilityPassed && dataPassed && self->mismatches == 0 && (checks > 0) && (self->timeTravelTooOld == 0);
