@@ -1426,7 +1426,9 @@ ActorLineageSet& Net2::getActorLineageSet() {
 
 void Net2::run() {
 	TraceEvent::setNetworkThread();
-	TraceEvent("Net2Running").log();
+	TraceEvent("Net2Running")
+	    .detail("PrioritizeExternalThreads", FLOW_KNOBS->RUN_LOOP_PRIORITIZE_EXTERNAL_THREADS)
+	    .log();
 
 	thread_network = this;
 
@@ -1576,10 +1578,14 @@ void Net2::run() {
 
 			taskBegin = newTaskBegin;
 			tscBegin = tscNow;
-			processThreadReady();
+			if (FLOW_KNOBS->RUN_LOOP_PRIORITIZE_EXTERNAL_THREADS) {
+				processThreadReady();
+			}
 		}
 
-		threadYield();
+		if (FLOW_KNOBS->RUN_LOOP_PRIORITIZE_EXTERNAL_THREADS) {
+			threadYield();
+		}
 
 		trackAtPriority(TaskPriority::RunLoop, taskBegin);
 

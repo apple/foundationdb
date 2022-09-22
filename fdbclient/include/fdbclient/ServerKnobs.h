@@ -301,6 +301,8 @@ public:
 	// KeyValueStoreMemory
 	int64_t REPLACE_CONTENTS_BYTES;
 
+	bool YIELD_FOR_READER_THREADS;
+
 	// KeyValueStoreRocksDB
 	int ROCKSDB_THREAD_POOL_TYPE;
 	int ROCKSDB_THREAD_PROMISE_PRIORITY;

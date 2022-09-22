@@ -23,6 +23,7 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
 #include "flow/FastRef.h"
+#include "flow/Histogram.h"
 #include "flow/network.h"
 #include <utility>
 #include <functional>
@@ -1261,6 +1262,33 @@ Future<T> brokenPromiseToMaybeDelivered(Future<T> in) {
 			throw request_maybe_delivered();
 		}
 		throw;
+	}
+}
+
+ACTOR template <class T, class U>
+void tagAndForwardWithDelayHis(Promise<T>* pOutputPromise,
+                               U value,
+                               Future<Void> signal,
+                               double startTime,
+                               Reference<Histogram> delayHis) {
+	state Promise<T> out(std::move(*pOutputPromise));
+	wait(signal);
+	out.send(std::move(value));
+	delayHis->sampleSeconds(timer_monotonic() - startTime);
+}
+
+ACTOR template <class T, class U>
+void tagAndForwardWithDelayWarning(Promise<T>* pOutputPromise,
+                                   U value,
+                                   Future<Void> signal,
+                                   double startTime,
+                                   double timeout) {
+	state Promise<T> out(std::move(*pOutputPromise));
+	wait(signal);
+	out.send(std::move(value));
+	const double delay = timer() - startTime;
+	if (delay > timeout) {
+		TraceEvent(SevWarn, "SlowTagAndForward").detail("Delay", delay);
 	}
 }
 

@@ -3394,8 +3394,12 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			// Read the data on disk up to vCurrent (or the end of the range)
 			readEnd = vCurrent ? std::min(vCurrent.key(), range.end) : range.end;
 			state double readStartTime = timer_monotonic();
-			RangeResult atStorageVersion =
-			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type));
+			Future<RangeResult> atStorageVersionFuture =
+			    data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type);
+			if (SERVER_KNOBS->YIELD_FOR_READER_THREADS) {
+				threadYield();
+			}
+			RangeResult atStorageVersion = wait(atStorageVersionFuture);
 			data->counters.kvScanBytes += atStorageVersion.logicalSize();
 			data->counters.kvScanLatencySample.addMeasurement(timer_monotonic() - readStartTime);
 
@@ -3491,8 +3495,13 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			readBegin = vCurrent ? std::max(vCurrent->isClearTo() ? vCurrent->getEndKey() : vCurrent.key(), range.begin)
 			                     : range.begin;
 			readStartTime = timer_monotonic();
-			RangeResult atStorageVersion =
-			    wait(data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type));
+
+			Future<RangeResult> atStorageVersionFuture =
+			    data->storage.readRange(KeyRangeRef(readBegin, readEnd), limit, *pLimitBytes, type);
+			if (SERVER_KNOBS->YIELD_FOR_READER_THREADS) {
+				threadYield();
+			}
+			RangeResult atStorageVersion = wait(atStorageVersionFuture);
 			data->counters.kvScanLatencySample.addMeasurement(timer_monotonic() - readStartTime);
 			data->counters.kvScanBytes += atStorageVersion.logicalSize();
 

@@ -175,6 +175,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( BUGGIFY_FLOW_LOCK_RELEASE_DELAY,                     1.0 );
 	init( LOW_PRIORITY_DELAY_COUNT,                              5 );
 	init( LOW_PRIORITY_MAX_DELAY,                              5.0 );
+	init( TAG_AND_FORWARD_DELAY_THRESHOLD,                    0.05 );
 
 	// HTTP
 	init( HTTP_READ_SIZE,                                 128*1024 );
@@ -188,6 +189,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( INCREMENTAL_DELETE_INTERVAL,                         1.0 ); //every 1 second
 		
 	//Net2 and FlowTransport
+	init( RUN_LOOP_PRIORITIZE_EXTERNAL_THREADS,               true );
 	init( MIN_COALESCE_DELAY,                                10e-6 ); if( randomize && BUGGIFY ) MIN_COALESCE_DELAY = 0;
 	init( MAX_COALESCE_DELAY,                                20e-6 ); if( randomize && BUGGIFY ) MAX_COALESCE_DELAY = 0;
 	init( SLOW_LOOP_CUTOFF,                          15.0 / 1000.0 );

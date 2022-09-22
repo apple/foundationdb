@@ -25,6 +25,7 @@
 #include <string_view>
 
 #include "flow/flow.h"
+#include "flow/Histogram.h"
 
 // The IThreadPool interface represents a thread pool suitable for doing blocking disk-intensive work
 // (as opposed to a one-thread-per-core pool for CPU-intensive work)
@@ -82,8 +83,11 @@ public:
 template <class T>
 class ThreadReturnPromise : NonCopyable {
 public:
-	ThreadReturnPromise() : priority(TaskPriority::DefaultOnMainThread) {}
-	ThreadReturnPromise(TaskPriority priority) : priority(priority) {}
+	ThreadReturnPromise() : priority(TaskPriority::DefaultOnMainThread), warnTimeout(0.0) {}
+	ThreadReturnPromise(TaskPriority priority) : priority(priority), warnTimeout(0.0) {}
+	ThreadReturnPromise(TaskPriority priority, double warnTimeout) : priority(priority), warnTimeout(warnTimeout) {}
+	ThreadReturnPromise(TaskPriority priority, Reference<Histogram> latencyHis)
+	  : priority(priority), warnTimeout(0.0), latencyHis(latencyHis) {}
 	~ThreadReturnPromise() {
 		if (promise.isValid())
 			sendError(broken_promise());
@@ -96,7 +100,13 @@ public:
 	template <class U>
 	void send(U&& t) { // Can be called safely from another thread.  Call send or sendError at most once.
 		Promise<Void> signal;
-		tagAndForward(&promise, t, signal.getFuture());
+		if (latencyHis.isValid()) {
+			tagAndForwardWithDelayHis(&promise, t, signal.getFuture(), timer_monotonic(), latencyHis);
+		} else if (warnTimeout > 0) {
+			tagAndForwardWithDelayWarning(&promise, t, signal.getFuture(), timer(), warnTimeout);
+		} else {
+			tagAndForward(&promise, t, signal.getFuture());
+		}
 		g_network->onMainThread(std::move(signal),
 		                        g_network->isOnMainThread() ? incrementPriorityIfEven(g_network->getCurrentTask())
 		                                                    : this->priority);
@@ -112,6 +122,8 @@ public:
 
 private:
 	TaskPriority priority;
+	double warnTimeout;
+	Reference<Histogram> latencyHis;
 	Promise<T> promise;
 };
 

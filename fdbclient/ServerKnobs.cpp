@@ -371,7 +371,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	// KeyValueStoreMemory
 	init( REPLACE_CONTENTS_BYTES,                                1e5 );
-
+    init(YIELD_FOR_READER_THREADS,                             false ); 
 	// KeyValueStoreRocksDB
 	init( ROCKSDB_READ_RANGE_ROW_LIMIT,                        65535 ); if( randomize && BUGGIFY )  ROCKSDB_READ_RANGE_ROW_LIMIT = deterministicRandom()->randomInt(2, 10);
 
