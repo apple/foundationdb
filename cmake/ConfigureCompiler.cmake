@@ -352,6 +352,7 @@ else()
       $<${is_cxx_compile}:-Wno-unused-command-line-argument>
       $<${is_cxx_compile}:-Wno-unused-private-field>
       $<${is_cxx_compile}:-Wno-nullability-completeness>
+      $<${is_cxx_compile}:-Wno-macro-redefined>
     )
     if (USE_CCACHE)
       add_compile_options(
