@@ -66,9 +66,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	Future<bool> check(Database const& cx) override { return wrongResults.getValue() == 0; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
-
 	// disable the default timeout setting
 	double getCheckTimeout() const override { return std::numeric_limits<double>::max(); }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("MoveKeysWorkload"); }
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		cx->specialKeySpace = std::make_unique<SpecialKeySpace>();
