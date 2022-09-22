@@ -42,13 +42,11 @@ if(ROCKSDB_FOUND)
     CMAKE_ARGS ${RocksDB_CMAKE_ARGS}
     BUILD_BYPRODUCTS <BINARY_DIR>/librocksdb.a
     INSTALL_COMMAND ""
-    LOG_CONFIGURE TRUE
-    LOG_BUILD TRUE
   )
 
   ExternalProject_Get_Property(rocksdb BINARY_DIR)
   set(ROCKSDB_LIBRARIES
-    ${BINARY_DIR}/librocksdb.a)
+      ${BINARY_DIR}/librocksdb.a)
 else()
   ExternalProject_Add(rocksdb
     URL https://github.com/facebook/rocksdb/archive/refs/tags/v6.27.3.tar.gz
@@ -56,13 +54,11 @@ else()
     CMAKE_ARGS ${RocksDB_CMAKE_ARGS}
     BUILD_BYPRODUCTS <BINARY_DIR>/librocksdb.a
     INSTALL_COMMAND ""
-    LOG_CONFIGURE TRUE
-    LOG_BUILD TRUE
   )
 
   ExternalProject_Get_Property(rocksdb BINARY_DIR)
   set(ROCKSDB_LIBRARIES
-    ${BINARY_DIR}/librocksdb.a)
+      ${BINARY_DIR}/librocksdb.a)
 
   ExternalProject_Get_Property(rocksdb SOURCE_DIR)
   set(ROCKSDB_INCLUDE_DIR "${SOURCE_DIR}/include")
@@ -74,6 +70,6 @@ message(STATUS "Found RocksDB library: ${ROCKSDB_LIBRARIES}")
 message(STATUS "Found RocksDB includes: ${ROCKSDB_INCLUDE_DIR}")
 
 mark_as_advanced(
-  ROCKSDB_LIBRARIES
-  ROCKSDB_INCLUDE_DIR
+    ROCKSDB_LIBRARIES
+    ROCKSDB_INCLUDE_DIR
 )
