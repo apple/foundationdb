@@ -205,10 +205,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
   add_link_options(-lexecinfo)
 endif()
 
-if(NOT WIN32) # TODO: If Swift is on the Windows Builder, remove this check
-  add_subdirectory(swifttestapp)
-endif()
-
 ################################################################################
 # process compile commands for IDE
 ################################################################################

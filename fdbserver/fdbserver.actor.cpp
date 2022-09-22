@@ -109,10 +109,7 @@
 extern "C" void testSwiftInFDB();
 extern "C" void swiftCallMeFuture(Promise<int>* promise);
 
-#if __has_include("SwiftModules/FDBServer")
 #include "SwiftModules/FDBServer"
-#define SWIFT_REVERSE_INTEROP_SUPPORTED
-#endif
 
 using namespace std::literals;
 
@@ -2054,14 +2051,10 @@ int main(int argc, char* argv[]) {
         installGlobalSwiftConcurrencyHooks(g_network);
 
 
-#ifdef SWIFT_REVERSE_INTEROP_SUPPORTED // ------------------------------------------------------------------------------
         using namespace fdbserver_swift;
             int val = swiftFunctionCalledFromCpp(42);
             if (val != 42)
                 abort();
-#else // ---------------------------------------------------------------------------------------------------------------
-        fprintf(stderr, "ERROR: reverse interop not supported");
-#endif // SWIFT_REVERSE_INTEROP_SUPPORTED ------------------------------------------------------------------------------
 
         auto swiftCallingFlowActor = swiftCallsActor(); // spawns actor that will call Swift functions
 

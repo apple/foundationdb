@@ -2,14 +2,10 @@ import Flow
 import FDBServer
 import FDBClient
 
-#if ENABLE_REVERSE_INTEROP
-
 @_expose(Cxx)
 public func swiftFunctionCalledFromCpp(_ x: CInt) -> CInt {
     return x
 }
-
-#endif
 
 func testFDBServerImport(_ p: ResolutionBalancer) {
 }

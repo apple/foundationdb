@@ -56,7 +56,9 @@ target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHEL
 include(CompilerChecks)
 check_swift_source_compiles("@_expose(Cxx) public func test() {}" REVERSE_INTEROP_SUPPORTED)
 
-if (${REVERSE_INTEROP_SUPPORTED})
+if (NOT ${REVERSE_INTEROP_SUPPORTED})
+  message(FATAL_ERROR "Swift: reverse interop is required, but not supported.  Update your toolcain.")
+endif()
 
 message(STATUS "Swift: reverse interop is supported")
 # Generate a directory into which the C++ header will go.
@@ -70,10 +72,6 @@ add_custom_command(TARGET fdbserver_swift POST_BUILD
 # Setup the options for generating the C++ compatibility header
 # for the FDBServer Swift module.
 target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL: -Xfrontend -emit-clang-header-path -Xfrontend ${CMAKE_BINARY_DIR}/fdbserver/include/SwiftModules/FDBServer>")
-# FIXME: remove after toolchain upgrade
-target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL: -DENABLE_REVERSE_INTEROP>")
-
-endif() # ${REVERSE_INTEROP_SUPPORTED}
 
 add_dependencies(fdbserver_swift fdbserver_actors)
 # This does not work! (see rdar://99107402)
