@@ -4596,13 +4596,16 @@ public:
 		config.clear(tr);
 
 		state Key destUidValue(BinaryWriter::toValue(uid, Unversioned()));
-		if (normalizedRanges.size() == 1) {
+		if (normalizedRanges.size() == 1 || isDefaultBackup(normalizedRanges)) {
 			RangeResult existingDestUidValues = wait(
 			    tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 			bool found = false;
+			KeyRangeRef targetRange =
+			    normalizedRanges.size() == 1 ? normalizedRanges[0] : getDefaultBackupSharedRange();
 			for (auto it : existingDestUidValues) {
-				if (BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion()) ==
-				    normalizedRanges[0]) {
+				KeyRange uidRange =
+				    BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion());
+				if (uidRange == targetRange) {
 					destUidValue = it.value;
 					found = true;
 					break;
@@ -4610,10 +4613,9 @@ public:
 			}
 			if (!found) {
 				destUidValue = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
-				tr->set(
-				    BinaryWriter::toValue(normalizedRanges[0], IncludeVersion(ProtocolVersion::withSharedMutations()))
-				        .withPrefix(destUidLookupPrefix),
-				    destUidValue);
+				tr->set(BinaryWriter::toValue(targetRange, IncludeVersion(ProtocolVersion::withSharedMutations()))
+				            .withPrefix(destUidLookupPrefix),
+				        destUidValue);
 			}
 		}
 

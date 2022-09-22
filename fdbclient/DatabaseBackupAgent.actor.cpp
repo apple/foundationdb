@@ -1833,13 +1833,16 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 					return Void();
 				}
 
-				if (backupRanges.size() == 1) {
+				if (backupRanges.size() == 1 || isDefaultBackup(backupRanges)) {
 					RangeResult existingDestUidValues = wait(srcTr->getRange(
 					    KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 					bool found = false;
+					KeyRangeRef targetRange =
+					    (backupRanges.size() == 1) ? backupRanges[0] : getDefaultBackupSharedRange();
 					for (auto it : existingDestUidValues) {
-						if (BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix),
-						                                          IncludeVersion()) == backupRanges[0]) {
+						KeyRange uidRange = BinaryReader::fromStringRef<KeyRange>(
+						    it.key.removePrefix(destUidLookupPrefix), IncludeVersion());
+						if (uidRange == targetRange) {
 							if (destUidValue != it.value) {
 								// existing backup/DR is running
 								return Void();
@@ -1855,7 +1858,7 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 					}
 
 					srcTr->set(
-					    BinaryWriter::toValue(backupRanges[0], IncludeVersion(ProtocolVersion::withSharedMutations()))
+					    BinaryWriter::toValue(targetRange, IncludeVersion(ProtocolVersion::withSharedMutations()))
 					        .withPrefix(destUidLookupPrefix),
 					    destUidValue);
 				}
@@ -2077,13 +2080,16 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 				srcTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 				// Initialize destUid
-				if (backupRanges.size() == 1) {
+				if (backupRanges.size() == 1 || isDefaultBackup(backupRanges)) {
 					RangeResult existingDestUidValues = wait(srcTr->getRange(
 					    KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
+					KeyRangeRef targetRange =
+					    (backupRanges.size() == 1) ? backupRanges[0] : getDefaultBackupSharedRange();
 					bool found = false;
 					for (auto it : existingDestUidValues) {
-						if (BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix),
-						                                          IncludeVersion()) == backupRanges[0]) {
+						KeyRange uidRange = BinaryReader::fromStringRef<KeyRange>(
+						    it.key.removePrefix(destUidLookupPrefix), IncludeVersion());
+						if (uidRange == targetRange) {
 							destUidValue = it.value;
 							found = true;
 							break;
@@ -2091,10 +2097,10 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 					}
 					if (!found) {
 						destUidValue = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
-						srcTr->set(BinaryWriter::toValue(backupRanges[0],
-						                                 IncludeVersion(ProtocolVersion::withSharedMutations()))
-						               .withPrefix(destUidLookupPrefix),
-						           destUidValue);
+						srcTr->set(
+						    BinaryWriter::toValue(targetRange, IncludeVersion(ProtocolVersion::withSharedMutations()))
+						        .withPrefix(destUidLookupPrefix),
+						    destUidValue);
 					}
 				}
 

@@ -517,6 +517,32 @@ using KeySelector = Standalone<struct KeySelectorRef>;
 using RangeResult = Standalone<struct RangeResultRef>;
 using MappedRangeResult = Standalone<struct MappedRangeResultRef>;
 
+namespace std {
+template <>
+struct hash<KeyRangeRef> {
+	static constexpr std::hash<StringRef> hashFunc{};
+	std::size_t operator()(KeyRangeRef const& range) const {
+		std::size_t seed = 0;
+		boost::hash_combine(seed, hashFunc(range.begin));
+		boost::hash_combine(seed, hashFunc(range.end));
+		return seed;
+	}
+};
+} // namespace std
+
+namespace std {
+template <>
+struct hash<KeyRange> {
+	static constexpr std::hash<StringRef> hashFunc{};
+	std::size_t operator()(KeyRangeRef const& range) const {
+		std::size_t seed = 0;
+		boost::hash_combine(seed, hashFunc(range.begin));
+		boost::hash_combine(seed, hashFunc(range.end));
+		return seed;
+	}
+};
+} // namespace std
+
 enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
 inline Key keyAfter(const KeyRef& key) {

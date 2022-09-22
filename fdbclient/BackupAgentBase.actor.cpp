@@ -1232,3 +1232,8 @@ KeyRangeMap<bool> const& backupMutationMask() {
 
 	return mask;
 }
+
+KeyRangeRef const& getDefaultBackupSharedRange() {
+	static KeyRangeRef defaultSharedRange(""_sr, ""_sr);
+	return defaultSharedRange;
+}

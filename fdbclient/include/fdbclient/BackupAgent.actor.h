@@ -1009,5 +1009,28 @@ void addDefaultBackupRanges(Standalone<VectorRef<KeyRangeRef>>& backupKeys);
 VectorRef<KeyRangeRef> const& getSystemBackupRanges();
 KeyRangeMap<bool> const& backupMutationMask();
 
+template <class Container>
+bool isDefaultBackup(Container ranges) {
+	std::unordered_set<KeyRangeRef> uniqueRanges(ranges.begin(), ranges.end());
+	auto& systemBackupRanges = getSystemBackupRanges();
+
+	if (uniqueRanges.size() != systemBackupRanges.size() + 1) {
+		return false;
+	}
+
+	if (!uniqueRanges.count(normalKeys)) {
+		return false;
+	}
+	for (auto range : getSystemBackupRanges()) {
+		if (!uniqueRanges.count(range)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+KeyRangeRef const& getDefaultBackupSharedRange();
+
 #include "flow/unactorcompiler.h"
 #endif
