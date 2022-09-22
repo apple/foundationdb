@@ -211,8 +211,8 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 
 // blobkey command
 ACTOR Future<bool> blobKeyCommandActor(Database localDb,
-                                           Optional<TenantMapEntry> tenantEntry,
-                                           std::vector<StringRef> tokens);
+                                       Optional<TenantMapEntry> tenantEntry,
+                                       std::vector<StringRef> tokens);
 // maintenance command
 ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);
 ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,
