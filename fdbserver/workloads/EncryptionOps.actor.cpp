@@ -126,10 +126,10 @@ struct EncryptionOpsWorkload : TestWorkload {
 	EncryptCipherRandomSalt headerRandomSalt;
 
 	EncryptionOpsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), enableTTLTest(false) {
-		mode = getOption(options, LiteralStringRef("fixedSize"), 1);
-		numIterations = getOption(options, LiteralStringRef("numIterations"), 10);
-		pageSize = getOption(options, LiteralStringRef("pageSize"), 4096);
-		maxBufSize = getOption(options, LiteralStringRef("maxBufSize"), 512 * 1024);
+		mode = getOption(options, "fixedSize"_sr, 1);
+		numIterations = getOption(options, "numIterations"_sr, 10);
+		pageSize = getOption(options, "pageSize"_sr, 4096);
+		maxBufSize = getOption(options, "maxBufSize"_sr, 512 * 1024);
 		buff = std::make_unique<uint8_t[]>(maxBufSize);
 
 		// assign unique encryptionDomainId range per workload clients
@@ -221,6 +221,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 			cipherKeyCache->resetEncryptDomainId(id);
 		}
 
+		cipherKeyCache->resetEncryptDomainId(FDB_DEFAULT_ENCRYPT_DOMAIN_ID);
 		cipherKeyCache->resetEncryptDomainId(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID);
 		cipherKeyCache->resetEncryptDomainId(ENCRYPT_HEADER_DOMAIN_ID);
 

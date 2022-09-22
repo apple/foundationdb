@@ -698,8 +698,10 @@ ThreadFuture<Version> DLDatabase::verifyBlobRange(const KeyRangeRef& keyRange, O
 		return unsupported_operation();
 	}
 
+	Version readVersion = version.present() ? version.get() : latestVersion;
+
 	FdbCApi::FDBFuture* f = api->databaseVerifyBlobRange(
-	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), version);
+	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), readVersion);
 
 	return toThreadFuture<Version>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		Version version = invalidVersion;
@@ -2246,7 +2248,7 @@ void validateOption(Optional<StringRef> value, bool canBePresent, bool canBeAbse
 
 void MultiVersionApi::disableMultiVersionClientApi() {
 	MutexHolder holder(lock);
-	if (networkStartSetup || localClientDisabled) {
+	if (networkStartSetup || localClientDisabled || disableBypass) {
 		throw invalid_option();
 	}
 
@@ -2453,6 +2455,13 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		externalClient = true;
 		bypassMultiClientApi = true;
 		forwardOption = true;
+	} else if (option == FDBNetworkOptions::DISABLE_CLIENT_BYPASS) {
+		MutexHolder holder(lock);
+		ASSERT(!networkStartSetup);
+		if (bypassMultiClientApi) {
+			throw invalid_option();
+		}
+		disableBypass = true;
 	} else if (option == FDBNetworkOptions::CLIENT_THREADS_PER_VERSION) {
 		MutexHolder holder(lock);
 		validateOption(value, true, false, false);
@@ -2551,7 +2560,7 @@ void MultiVersionApi::setupNetwork() {
 
 		networkStartSetup = true;
 
-		if (externalClients.empty()) {
+		if (externalClients.empty() && !disableBypass) {
 			bypassMultiClientApi = true; // SOMEDAY: we won't be able to set this option once it becomes possible to add
 			                             // clients after setupNetwork is called
 		}
@@ -2762,7 +2771,6 @@ ACTOR Future<std::string> updateClusterSharedStateMapImpl(MultiVersionApi* self,
 		state Reference<ITransaction> tr = db->createTransaction();
 		loop {
 			try {
-				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
 				state ThreadFuture<Optional<Value>> clusterIdFuture = tr->get("\xff\xff/cluster_id"_sr);
 				Optional<Value> clusterIdVal = wait(safeThreadFutureToFuture(clusterIdFuture));
 				ASSERT(clusterIdVal.present());
@@ -2933,8 +2941,8 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 
 MultiVersionApi::MultiVersionApi()
   : callbackOnMainThread(true), localClientDisabled(false), networkStartSetup(false), networkSetup(false),
-    bypassMultiClientApi(false), externalClient(false), apiVersion(0), threadCount(0), tmpDir("/tmp"),
-    traceShareBaseNameAmongThreads(false), envOptionsLoaded(false) {}
+    disableBypass(false), bypassMultiClientApi(false), externalClient(false), apiVersion(0), threadCount(0),
+    tmpDir("/tmp"), traceShareBaseNameAmongThreads(false), envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 
@@ -3262,7 +3270,7 @@ struct AbortableTest {
 	}
 };
 
-TEST_CASE("/fdbclient/multiversionclient/AbortableSingleAssignmentVar") {
+TEST_CASE("fdbclient/multiversionclient/AbortableSingleAssignmentVar") {
 	state volatile bool done = false;
 	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<AbortableTest>, (void*)&done);
 
@@ -3339,7 +3347,7 @@ struct DLTest {
 	}
 };
 
-TEST_CASE("/fdbclient/multiversionclient/DLSingleAssignmentVar") {
+TEST_CASE("fdbclient/multiversionclient/DLSingleAssignmentVar") {
 	state volatile bool done = false;
 
 	MultiVersionApi::api->callbackOnMainThread = true;
@@ -3383,7 +3391,7 @@ struct MapTest {
 	}
 };
 
-TEST_CASE("/fdbclient/multiversionclient/MapSingleAssignmentVar") {
+TEST_CASE("fdbclient/multiversionclient/MapSingleAssignmentVar") {
 	state volatile bool done = false;
 	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<MapTest>, (void*)&done);
 
@@ -3422,7 +3430,7 @@ struct FlatMapTest {
 	}
 };
 
-TEST_CASE("/fdbclient/multiversionclient/FlatMapSingleAssignmentVar") {
+TEST_CASE("fdbclient/multiversionclient/FlatMapSingleAssignmentVar") {
 	state volatile bool done = false;
 	state THREAD_HANDLE thread = g_network->startThread(runSingleAssignmentVarTest<FlatMapTest>, (void*)&done);
 

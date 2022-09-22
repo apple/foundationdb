@@ -49,6 +49,7 @@ public:
 	int numClientThreads;
 	int numDatabases;
 	int numClients;
+	int numTenants = -1;
 	int statsIntervalMs = 0;
 	std::vector<std::pair<std::string, std::string>> knobs;
 	TestSpec testSpec;

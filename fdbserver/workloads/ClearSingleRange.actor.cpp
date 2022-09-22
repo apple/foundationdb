@@ -30,9 +30,9 @@ struct ClearSingleRange : TestWorkload {
 	double startDelay;
 
 	ClearSingleRange(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		begin = getOption(options, LiteralStringRef("begin"), normalKeys.begin);
-		end = getOption(options, LiteralStringRef("end"), normalKeys.end);
-		startDelay = getOption(options, LiteralStringRef("beginClearRange"), 10.0);
+		begin = getOption(options, "begin"_sr, normalKeys.begin);
+		end = getOption(options, "end"_sr, normalKeys.end);
+		startDelay = getOption(options, "beginClearRange"_sr, 10.0);
 	}
 
 	std::string description() const override { return "ClearSingleRangeWorkload"; }

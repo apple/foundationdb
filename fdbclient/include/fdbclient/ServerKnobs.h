@@ -457,6 +457,7 @@ public:
 	double ATTEMPT_RECRUITMENT_DELAY;
 	double WAIT_FOR_DISTRIBUTOR_JOIN_DELAY;
 	double WAIT_FOR_RATEKEEPER_JOIN_DELAY;
+	double WAIT_FOR_CONSISTENCYSCAN_JOIN_DELAY;
 	double WAIT_FOR_BLOB_MANAGER_JOIN_DELAY;
 	double WAIT_FOR_ENCRYPT_KEY_PROXY_JOIN_DELAY;
 	double WORKER_FAILURE_TIME;
@@ -470,6 +471,7 @@ public:
 	double CHECK_REMOTE_HEALTH_INTERVAL; // Remote DC health refresh interval.
 	double FORCE_RECOVERY_CHECK_DELAY;
 	double RATEKEEPER_FAILURE_TIME;
+	double CONSISTENCYSCAN_FAILURE_TIME;
 	double BLOB_MANAGER_FAILURE_TIME;
 	double REPLACE_INTERFACE_DELAY;
 	double REPLACE_INTERFACE_CHECK_DELAY;
@@ -693,6 +695,7 @@ public:
 	int FETCH_KEYS_PARALLELISM_FULL;
 	int FETCH_KEYS_LOWER_PRIORITY;
 	int SERVE_FETCH_CHECKPOINT_PARALLELISM;
+	int CHANGE_FEED_DISK_READS_PARALLELISM;
 	int BUGGIFY_BLOCK_BYTES;
 	int64_t STORAGE_RECOVERY_VERSION_LAG_LIMIT;
 	double STORAGE_DURABILITY_LAG_REJECT_THRESHOLD;
@@ -731,6 +734,10 @@ public:
 	int CHECKPOINT_TRANSFER_BLOCK_BYTES;
 	int QUICK_GET_KEY_VALUES_LIMIT;
 	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
+	int STORAGE_FEED_QUERY_HARD_LIMIT;
+	int STORAGE_SERVER_READ_CONCURRENCY;
+	std::string STORAGESERVER_READ_RANKS;
+	std::string STORAGESERVER_READ_PRIORITIES;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -764,6 +771,12 @@ public:
 	bool WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER; // When enabled, the worker's health monitor also report any recent
 	                                                 // destroyed peers who are part of the transaction system to
 	                                                 // cluster controller.
+	bool STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT; // When enabled, storage server's worker will crash on io_timeout error;
+	                                          // this allows fdbmonitor to restart the worker and recreate the same SS.
+	                                          // When SS can be temporarily throttled by infrastructure, e.g, k8s,
+	                                          // Enabling this can reduce toil of manually restarting the SS.
+	                                          // Enable with caution: If io_timeout is caused by disk failure, we won't
+	                                          // want to restart the SS, which increases risk of data corruption.
 
 	// Test harness
 	double WORKER_POLL_DELAY;
@@ -777,6 +790,7 @@ public:
 
 	// Dynamic Knobs (implementation)
 	double COMPACTION_INTERVAL;
+	double BROADCASTER_SELF_UPDATE_DELAY;
 	double GET_COMMITTED_VERSION_TIMEOUT;
 	double GET_SNAPSHOT_AND_CHANGES_TIMEOUT;
 	double FETCH_CHANGES_TIMEOUT;
@@ -853,7 +867,6 @@ public:
 	int REDWOOD_DEFAULT_EXTENT_SIZE; // Extent size for new Redwood files
 	int REDWOOD_DEFAULT_EXTENT_READ_SIZE; // Extent read size for Redwood files
 	int REDWOOD_EXTENT_CONCURRENT_READS; // Max number of simultaneous extent disk reads in progress.
-	int REDWOOD_KVSTORE_CONCURRENT_READS; // Max number of simultaneous point or range reads in progress.
 	bool REDWOOD_KVSTORE_RANGE_PREFETCH; // Whether to use range read prefetching
 	double REDWOOD_PAGE_REBUILD_MAX_SLACK; // When rebuilding pages, max slack to allow in page
 	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at
@@ -871,6 +884,8 @@ public:
 	double REDWOOD_HISTOGRAM_INTERVAL;
 	bool REDWOOD_EVICT_UPDATED_PAGES; // Whether to prioritize eviction of updated pages from cache.
 	int REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT; // Minimum height for which to keep and reuse page decode caches
+
+	std::string REDWOOD_PRIORITY_LAUNCHS;
 
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
@@ -927,6 +942,7 @@ public:
 	double BLOB_WORKER_BATCH_GRV_INTERVAL;
 	bool BLOB_WORKER_DO_REJECT_WHEN_FULL;
 	double BLOB_WORKER_REJECT_WHEN_FULL_THRESHOLD;
+	double BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY;
 
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN;
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX;
@@ -934,6 +950,8 @@ public:
 	int BLOB_MANAGER_CONCURRENT_MERGE_CHECKS;
 	double BGCC_TIMEOUT;
 	double BGCC_MIN_INTERVAL;
+	bool BLOB_MANIFEST_BACKUP;
+	bool BLOB_FULL_RESTORE_MODE;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;

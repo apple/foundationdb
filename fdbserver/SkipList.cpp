@@ -1046,32 +1046,32 @@ void miniConflictSetTest() {
 
 void operatorLessThanTest() {
 	{ // Longer strings before shorter strings.
-		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, 0, nullptr);
-		KeyInfo b(LiteralStringRef("hello\0"), /*begin=*/false, /*write=*/false, 0, nullptr);
+		KeyInfo a("hello"_sr, /*begin=*/false, /*write=*/true, 0, nullptr);
+		KeyInfo b("hello\0"_sr, /*begin=*/false, /*write=*/false, 0, nullptr);
 		ASSERT(a < b);
 		ASSERT(!(b < a));
 		ASSERT(!(a == b));
 	}
 
 	{ // Reads before writes.
-		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/false, 0, nullptr);
-		KeyInfo b(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, 0, nullptr);
+		KeyInfo a("hello"_sr, /*begin=*/false, /*write=*/false, 0, nullptr);
+		KeyInfo b("hello"_sr, /*begin=*/false, /*write=*/true, 0, nullptr);
 		ASSERT(a < b);
 		ASSERT(!(b < a));
 		ASSERT(!(a == b));
 	}
 
 	{ // Begin reads after writes.
-		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, 0, nullptr);
-		KeyInfo b(LiteralStringRef("hello"), /*begin=*/true, /*write=*/false, 0, nullptr);
+		KeyInfo a("hello"_sr, /*begin=*/false, /*write=*/true, 0, nullptr);
+		KeyInfo b("hello"_sr, /*begin=*/true, /*write=*/false, 0, nullptr);
 		ASSERT(a < b);
 		ASSERT(!(b < a));
 		ASSERT(!(a == b));
 	}
 
 	{ // Begin writes after writes.
-		KeyInfo a(LiteralStringRef("hello"), /*begin=*/false, /*write=*/true, 0, nullptr);
-		KeyInfo b(LiteralStringRef("hello"), /*begin=*/true, /*write=*/true, 0, nullptr);
+		KeyInfo a("hello"_sr, /*begin=*/false, /*write=*/true, 0, nullptr);
+		KeyInfo b("hello"_sr, /*begin=*/true, /*write=*/true, 0, nullptr);
 		ASSERT(a < b);
 		ASSERT(!(b < a));
 		ASSERT(!(a == b));

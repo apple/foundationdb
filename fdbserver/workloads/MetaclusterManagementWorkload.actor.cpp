@@ -81,6 +81,10 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 	std::string description() const override { return "MetaclusterManagement"; }
 
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert("MachineAttritionWorkload");
+	}
+
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
 			if (g_network->isSimulated() && BUGGIFY) {
@@ -99,8 +103,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 		self->managementDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
-		ASSERT(g_simulator.extraDatabases.size() > 0);
-		for (auto connectionString : g_simulator.extraDatabases) {
+		ASSERT(g_simulator->extraDatabases.size() > 0);
+		for (auto connectionString : g_simulator->extraDatabases) {
 			ClusterConnectionString ccs(connectionString);
 			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(ccs);
 			self->dataDbIndex.push_back(ClusterName(format("cluster_%08d", self->dataDbs.size())));

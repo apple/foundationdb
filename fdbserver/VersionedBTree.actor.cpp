@@ -28,6 +28,7 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/Histogram.h"
+#include "flow/PriorityMultiLock.actor.h"
 #include <limits>
 #include <random>
 #include "fdbrpc/ContinuousSample.h"
@@ -101,201 +102,6 @@ std::string addPrefix(std::string prefix, std::string lines) {
 	}
 	return s;
 }
-
-#define PRIORITYMULTILOCK_DEBUG 0
-
-// A multi user lock with a concurrent holder limit where waiters are granted the lock according to
-// an integer priority from 0 to maxPriority, inclusive, where higher integers are given priority.
-//
-// The interface is similar to FlowMutex except that lock holders can drop the lock to release it.
-//
-// Usage:
-//   Lock lock = wait(prioritylock.lock(priorityLevel));
-//   lock.release();  // Explicit release, or
-//   // let lock and all copies of lock go out of scope to release
-class PriorityMultiLock {
-
-public:
-	// Waiting on the lock returns a Lock, which is really just a Promise<Void>
-	// Calling release() is not necessary, it exists in case the Lock holder wants to explicitly release
-	// the Lock before it goes out of scope.
-	struct Lock {
-		void release() { promise.send(Void()); }
-
-		// This is exposed in case the caller wants to use/copy it directly
-		Promise<Void> promise;
-	};
-
-private:
-	struct Waiter {
-		Waiter() : queuedTime(now()) {}
-		Promise<Lock> lockPromise;
-		double queuedTime;
-	};
-
-	typedef Deque<Waiter> Queue;
-
-#if PRIORITYMULTILOCK_DEBUG
-#define prioritylock_printf(...) printf(__VA_ARGS__)
-#else
-#define prioritylock_printf(...)
-#endif
-
-public:
-	PriorityMultiLock(int concurrency, int maxPriority, int launchLimit = std::numeric_limits<int>::max())
-	  : concurrency(concurrency), available(concurrency), waiting(0), launchLimit(launchLimit) {
-		waiters.resize(maxPriority + 1);
-		fRunner = runner(this);
-	}
-
-	~PriorityMultiLock() { prioritylock_printf("destruct"); }
-
-	Future<Lock> lock(int priority = 0) {
-		prioritylock_printf("lock begin %s\n", toString().c_str());
-
-		// This shortcut may enable a waiter to jump the line when the releaser loop yields
-		if (available > 0) {
-			--available;
-			Lock p;
-			addRunner(p);
-			prioritylock_printf("lock exit immediate %s\n", toString().c_str());
-			return p;
-		}
-
-		Waiter w;
-		waiters[priority].push_back(w);
-		++waiting;
-		prioritylock_printf("lock exit queued %s\n", toString().c_str());
-		return w.lockPromise.getFuture();
-	}
-
-	std::string toString() const {
-		int runnersDone = 0;
-		for (int i = 0; i < runners.size(); ++i) {
-			if (runners[i].isReady()) {
-				++runnersDone;
-			}
-		}
-
-		std::string s =
-		    format("{ ptr=%p concurrency=%d available=%d running=%d waiting=%d runnersQueue=%d runnersDone=%d ",
-		           this,
-		           concurrency,
-		           available,
-		           concurrency - available,
-		           waiting,
-		           runners.size(),
-		           runnersDone);
-
-		for (int i = 0; i < waiters.size(); ++i) {
-			s += format("p%d_waiters=%u ", i, waiters[i].size());
-		}
-
-		s += "}";
-		return s;
-	}
-
-private:
-	void addRunner(Lock& lock) {
-		runners.push_back(map(ready(lock.promise.getFuture()), [=](Void) {
-			prioritylock_printf("Lock released\n");
-			++available;
-			if (waiting > 0 || runners.size() > 100) {
-				release.trigger();
-			}
-			return Void();
-		}));
-	}
-
-	ACTOR static Future<Void> runner(PriorityMultiLock* self) {
-		state int sinceYield = 0;
-		state Future<Void> error = self->brokenOnDestruct.getFuture();
-		state int maxPriority = self->waiters.size() - 1;
-
-		// Priority to try to run tasks from next
-		state int priority = maxPriority;
-		state Queue* pQueue = &self->waiters[maxPriority];
-
-		// Track the number of waiters unlocked at the same priority in a row
-		state int lastPriorityCount = 0;
-
-		loop {
-			// Cleanup finished runner futures at the front of the runner queue.
-			while (!self->runners.empty() && self->runners.front().isReady()) {
-				self->runners.pop_front();
-			}
-
-			// Wait for a runner to release its lock
-			wait(self->release.onTrigger());
-			prioritylock_printf("runner wakeup %s\n", self->toString().c_str());
-
-			if (++sinceYield == 1000) {
-				sinceYield = 0;
-				wait(delay(0));
-			}
-
-			// While there are available slots and there are waiters, launch tasks
-			while (self->available > 0 && self->waiting > 0) {
-				prioritylock_printf("Checking priority=%d lastPriorityCount=%d %s\n",
-				                    priority,
-				                    lastPriorityCount,
-				                    self->toString().c_str());
-
-				while (!pQueue->empty() && ++lastPriorityCount < self->launchLimit) {
-					Waiter w = pQueue->front();
-					pQueue->pop_front();
-					--self->waiting;
-					Lock lock;
-					prioritylock_printf("  Running waiter priority=%d wait=%f %s\n",
-					                    priority,
-					                    now() - w.queuedTime,
-					                    self->toString().c_str());
-					w.lockPromise.send(lock);
-
-					// Self may have been destructed during the lock callback
-					if (error.isReady()) {
-						throw error.getError();
-					}
-
-					// If the lock was not already released, add it to the runners future queue
-					if (lock.promise.canBeSet()) {
-						self->addRunner(lock);
-
-						// A slot has been consumed, so stop reading from this queue if there aren't any more
-						if (--self->available == 0) {
-							break;
-						}
-					}
-				}
-
-				// If there are no more slots available, then don't move to the next priority
-				if (self->available == 0) {
-					break;
-				}
-
-				// Decrease priority, wrapping around to max from 0
-				if (priority == 0) {
-					priority = maxPriority;
-				} else {
-					--priority;
-				}
-
-				pQueue = &self->waiters[priority];
-				lastPriorityCount = 0;
-			}
-		}
-	}
-
-	int concurrency;
-	int available;
-	int waiting;
-	int launchLimit;
-	std::vector<Queue> waiters;
-	Deque<Future<Void>> runners;
-	Future<Void> fRunner;
-	AsyncTrigger release;
-	Promise<Void> brokenOnDestruct;
-};
 
 // Some convenience functions for debugging to stringify various structures
 // Classes can add compatibility by either specializing toString<T> or implementing
@@ -1665,6 +1471,8 @@ struct RedwoodMetrics {
 		kvSizeReadByGetRange = Reference<Histogram>(
 		    new Histogram(Reference<HistogramRegistry>(), "kvSize", "ReadByGetRange", Histogram::Unit::bytes));
 
+		ioLock = nullptr;
+
 		// These histograms are used for Btree events, hence level > 0
 		unsigned int levelCounter = 0;
 		for (RedwoodMetrics::Level& level : levels) {
@@ -1707,6 +1515,8 @@ struct RedwoodMetrics {
 	// btree levels and one extra level for non btree level.
 	Level levels[btreeLevels + 1];
 	metrics metric;
+	// pointer to the priority multi lock used in pager
+	PriorityMultiLock* ioLock;
 
 	Reference<Histogram> kvSizeWritten;
 	Reference<Histogram> kvSizeReadByGet;
@@ -1761,9 +1571,12 @@ struct RedwoodMetrics {
 	// The string is a reasonably well formatted page of information
 	void getFields(TraceEvent* e, std::string* s = nullptr, bool skipZeroes = false);
 
+	void getIOLockFields(TraceEvent* e, std::string* s = nullptr);
+
 	std::string toString(bool clearAfter) {
 		std::string s;
 		getFields(nullptr, &s);
+		getIOLockFields(nullptr, &s);
 
 		if (clearAfter) {
 			clear();
@@ -1798,6 +1611,7 @@ ACTOR Future<Void> redwoodMetricsLogger() {
 		double elapsed = now() - g_redwoodMetrics.startTime;
 		e.detail("Elapsed", elapsed);
 		g_redwoodMetrics.getFields(&e);
+		g_redwoodMetrics.getIOLockFields(&e);
 		g_redwoodMetrics.clear();
 	}
 }
@@ -2192,9 +2006,9 @@ public:
 	          int64_t remapCleanupWindowBytes,
 	          int concurrentExtentReads,
 	          bool memoryOnly,
-	          Reference<IEncryptionKeyProvider> keyProvider,
+	          Reference<IPageEncryptionKeyProvider> keyProvider,
 	          Promise<Void> errorPromise = {})
-	  : keyProvider(keyProvider), ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2),
+	  : keyProvider(keyProvider), ioLock(FLOW_KNOBS->MAX_OUTSTANDING, SERVER_KNOBS->REDWOOD_PRIORITY_LAUNCHS),
 	    pageCacheBytes(pageCacheSizeBytes), desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize),
 	    filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
 	    remapCleanupWindowBytes(remapCleanupWindowBytes), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
@@ -2206,6 +2020,7 @@ public:
 		// This sets the page cache size for all PageCacheT instances using the same evictor
 		pageCache.evictor().sizeLimit = pageCacheBytes;
 
+		g_redwoodMetrics.ioLock = &ioLock;
 		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();
 		}
@@ -2974,7 +2789,7 @@ public:
 		try {
 			page->postReadHeader(pageID);
 			if (page->isEncrypted()) {
-				EncryptionKey k = wait(self->keyProvider->getSecrets(page->encryptionKey));
+				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
 				page->encryptionKey = k;
 			}
 			page->postReadPayload(pageID);
@@ -2984,7 +2799,7 @@ public:
 			             page->rawData());
 		} catch (Error& e) {
 			Error err = e;
-			if (g_network->isSimulated() && g_simulator.checkInjectedCorruption()) {
+			if (g_network->isSimulated() && g_simulator->checkInjectedCorruption()) {
 				err = err.asInjectedFault();
 			}
 
@@ -3042,7 +2857,7 @@ public:
 		try {
 			page->postReadHeader(pageIDs.front());
 			if (page->isEncrypted()) {
-				EncryptionKey k = wait(self->keyProvider->getSecrets(page->encryptionKey));
+				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
 				page->encryptionKey = k;
 			}
 			page->postReadPayload(pageIDs.front());
@@ -3955,7 +3770,7 @@ private:
 	int physicalExtentSize;
 	int pagesPerExtent;
 
-	Reference<IEncryptionKeyProvider> keyProvider;
+	Reference<IPageEncryptionKeyProvider> keyProvider;
 
 	PriorityMultiLock ioLock;
 
@@ -4781,7 +4596,7 @@ struct DecodeBoundaryVerifier {
 	static DecodeBoundaryVerifier* getVerifier(std::string name) {
 		static std::map<std::string, DecodeBoundaryVerifier> verifiers;
 		// Only use verifier in a non-restarted simulation so that all page writes are captured
-		if (g_network->isSimulated() && !g_simulator.restarted) {
+		if (g_network->isSimulated() && !g_simulator->restarted) {
 			return &verifiers[name];
 		}
 		return nullptr;
@@ -5036,7 +4851,7 @@ public:
 	VersionedBTree(IPager2* pager,
 	               std::string name,
 	               EncodingType defaultEncodingType,
-	               Reference<IEncryptionKeyProvider> keyProvider)
+	               Reference<IPageEncryptionKeyProvider> keyProvider)
 	  : m_pager(pager), m_encodingType(defaultEncodingType), m_enforceEncodingType(false), m_keyProvider(keyProvider),
 	    m_pBuffer(nullptr), m_mutationCount(0), m_name(name) {
 
@@ -5064,7 +4879,7 @@ public:
 		state Reference<ArenaPage> page = self->m_pager->newPageBuffer();
 		page->init(self->m_encodingType, PageType::BTreeNode, 1);
 		if (page->isEncrypted()) {
-			EncryptionKey k = wait(self->m_keyProvider->getByRange(dbBegin.key, dbEnd.key));
+			ArenaPage::EncryptionKey k = wait(self->m_keyProvider->getLatestDefaultEncryptionKey());
 			page->encryptionKey = k;
 		}
 
@@ -5543,7 +5358,7 @@ private:
 	IPager2* m_pager;
 	EncodingType m_encodingType;
 	bool m_enforceEncodingType;
-	Reference<IEncryptionKeyProvider> m_keyProvider;
+	Reference<IPageEncryptionKeyProvider> m_keyProvider;
 
 	// Counter to update with DecodeCache memory usage
 	int64_t* m_pDecodeCacheMemory = nullptr;
@@ -5843,7 +5658,7 @@ private:
 			           (pagesToBuild[pageIndex].blockCount == 1) ? PageType::BTreeNode : PageType::BTreeSuperNode,
 			           height);
 			if (page->isEncrypted()) {
-				EncryptionKey k = wait(self->m_keyProvider->getByRange(pageLowerBound.key, pageUpperBound.key));
+				ArenaPage::EncryptionKey k = wait(self->m_keyProvider->getLatestDefaultEncryptionKey());
 				page->encryptionKey = k;
 			}
 
@@ -7689,14 +7504,13 @@ public:
 
 #include "fdbserver/art_impl.h"
 
-RedwoodRecordRef VersionedBTree::dbBegin(LiteralStringRef(""));
-RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"));
+RedwoodRecordRef VersionedBTree::dbBegin(""_sr);
+RedwoodRecordRef VersionedBTree::dbEnd("\xff\xff\xff\xff\xff"_sr);
 
 class KeyValueStoreRedwood : public IKeyValueStore {
 public:
-	KeyValueStoreRedwood(std::string filename, UID logID, Reference<IEncryptionKeyProvider> encryptionKeyProvider)
-	  : m_filename(filename), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS, 0),
-	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
+	KeyValueStoreRedwood(std::string filename, UID logID, Reference<IPageEncryptionKeyProvider> encryptionKeyProvider)
+	  : m_filename(filename), prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 
 		int pageSize =
 		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
@@ -7723,7 +7537,7 @@ public:
 		//
 		// TODO(yiwu): When the cluster encryption config is available later, fail if the cluster is configured to
 		// enable encryption, but the Redwood instance is unencrypted.
-		if (encryptionKeyProvider && encryptionKeyProvider->shouldEnableEncryption()) {
+		if (encryptionKeyProvider && encryptionKeyProvider->enableEncryption()) {
 			encodingType = EncodingType::AESEncryptionV1;
 			m_keyProvider = encryptionKeyProvider;
 		}
@@ -7755,6 +7569,8 @@ public:
 
 	ACTOR void shutdown(KeyValueStoreRedwood* self, bool dispose) {
 		TraceEvent(SevInfo, "RedwoodShutdown").detail("Filename", self->m_filename).detail("Dispose", dispose);
+
+		g_redwoodMetrics.ioLock = nullptr;
 
 		// In simulation, if the instance is being disposed of then sometimes run destructive sanity check.
 		if (g_network->isSimulated() && dispose && BUGGIFY) {
@@ -7856,7 +7672,6 @@ public:
 				f.get();
 			} else {
 				CODE_PROBE(true, "Uncached forward range read seek");
-				wait(store(lock, self->m_concurrentReads.lock()));
 				wait(f);
 			}
 
@@ -7912,7 +7727,6 @@ public:
 				f.get();
 			} else {
 				CODE_PROBE(true, "Uncached reverse range read seek");
-				wait(store(lock, self->m_concurrentReads.lock()));
 				wait(f);
 			}
 
@@ -7979,9 +7793,6 @@ public:
 		wait(self->m_tree->initBTreeCursor(
 		    &cur, self->m_tree->getLastCommittedVersion(), PagerEventReasons::PointRead, options));
 
-		// Not locking for point reads, instead relying on IO priority lock
-		// state PriorityMultiLock::Lock lock = wait(self->m_concurrentReads.lock());
-
 		++g_redwoodMetrics.metric.opGet;
 		wait(cur.seekGTE(key));
 		if (cur.isValid() && cur.get().key == key) {
@@ -8017,10 +7828,9 @@ private:
 	Future<Void> m_init;
 	Promise<Void> m_closed;
 	Promise<Void> m_error;
-	PriorityMultiLock m_concurrentReads;
 	bool prefetch;
 	Version m_nextCommitVersion;
-	Reference<IEncryptionKeyProvider> m_keyProvider;
+	Reference<IPageEncryptionKeyProvider> m_keyProvider;
 	Future<Void> m_lastCommit = Void();
 
 	template <typename T>
@@ -8031,7 +7841,7 @@ private:
 
 IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                        UID logID,
-                                       Reference<IEncryptionKeyProvider> encryptionKeyProvider) {
+                                       Reference<IPageEncryptionKeyProvider> encryptionKeyProvider) {
 	return new KeyValueStoreRedwood(filename, logID, encryptionKeyProvider);
 }
 
@@ -8349,8 +8159,8 @@ ACTOR Future<Void> verify(VersionedBTree* btree,
 			wait(btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead));
 
 			debug_printf("Verifying entire key range at version %" PRId64 "\n", v);
-			state Future<Void> fRangeAll = verifyRangeBTreeCursor(
-			    btree, LiteralStringRef(""), LiteralStringRef("\xff\xff"), v, written, pRecordsRead);
+			state Future<Void> fRangeAll =
+			    verifyRangeBTreeCursor(btree, ""_sr, "\xff\xff"_sr, v, written, pRecordsRead);
 			if (serial) {
 				wait(fRangeAll);
 			}
@@ -8653,6 +8463,43 @@ void RedwoodMetrics::getFields(TraceEvent* e, std::string* s, bool skipZeroes) {
 	}
 }
 
+void RedwoodMetrics::getIOLockFields(TraceEvent* e, std::string* s) {
+	if (ioLock == nullptr)
+		return;
+
+	int maxPriority = ioLock->maxPriority();
+
+	if (e != nullptr) {
+		e->detail("ActiveReads", ioLock->totalRunners());
+		e->detail("AwaitReads", ioLock->totalWaiters());
+
+		for (int priority = 0; priority <= maxPriority; ++priority) {
+			e->detail(format("ActiveP%d", priority), ioLock->numRunners(priority));
+			e->detail(format("AwaitP%d", priority), ioLock->numWaiters(priority));
+		}
+	}
+
+	if (s != nullptr) {
+		std::string active = "Active";
+		std::string await = "Await";
+
+		*s += "\n";
+		*s += format("%-15s %-8u  ", "ActiveReads", ioLock->totalRunners());
+		*s += format("%-15s %-8u  ", "AwaitReads", ioLock->totalWaiters());
+		*s += "\n";
+
+		for (int priority = 0; priority <= maxPriority; ++priority) {
+			*s +=
+			    format("%-15s %-8u  ", (active + 'P' + std::to_string(priority)).c_str(), ioLock->numRunners(priority));
+		}
+		*s += "\n";
+		for (int priority = 0; priority <= maxPriority; ++priority) {
+			*s +=
+			    format("%-15s %-8u  ", (await + 'P' + std::to_string(priority)).c_str(), ioLock->numWaiters(priority));
+		}
+	}
+}
+
 TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[0] == 3);
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[1] == 4);
@@ -8675,35 +8522,26 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 		ASSERT(r2.getChildPage().begin() != id.begin());
 	}
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef("abc"_sr, ""_sr), RedwoodRecordRef("abc"_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef("abcd"), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef("abc"_sr, ""_sr), RedwoodRecordRef("abcd"_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abcd"), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef("abcd"_sr, ""_sr), RedwoodRecordRef("abc"_sr, ""_sr));
 
 	deltaTest(RedwoodRecordRef(std::string(300, 'k'), std::string(1e6, 'v')),
-	          RedwoodRecordRef(std::string(300, 'k'), LiteralStringRef("")));
+	          RedwoodRecordRef(std::string(300, 'k'), ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
 	Arena mem;
 	double start;
@@ -8740,8 +8578,8 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	RedwoodRecordRef rec1;
 	RedwoodRecordRef rec2;
 
-	rec1.key = LiteralStringRef("alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf1");
-	rec2.key = LiteralStringRef("alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf234");
+	rec1.key = "alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf1"_sr;
+	rec2.key = "alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf234"_sr;
 
 	start = timer();
 	total = 0;
@@ -8807,7 +8645,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	const int N = deterministicRandom()->randomInt(200, 1000);
 
 	RedwoodRecordRef prev;
-	RedwoodRecordRef next(LiteralStringRef("\xff\xff\xff\xff"));
+	RedwoodRecordRef next("\xff\xff\xff\xff"_sr);
 
 	Arena arena;
 	std::set<RedwoodRecordRef> uniqueItems;
@@ -8984,7 +8822,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 	const int N = deterministicRandom()->randomInt(200, 1000);
 
 	RedwoodRecordRef prev;
-	RedwoodRecordRef next(LiteralStringRef("\xff\xff\xff\xff"));
+	RedwoodRecordRef next("\xff\xff\xff\xff"_sr);
 
 	Arena arena;
 	std::set<RedwoodRecordRef> uniqueItems;
@@ -9814,7 +9652,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 	state EncodingType encodingType =
 	    static_cast<EncodingType>(deterministicRandom()->randomInt(0, EncodingType::MAX_ENCODING_TYPE));
-	state Reference<IEncryptionKeyProvider> keyProvider;
+	state Reference<IPageEncryptionKeyProvider> keyProvider;
 	if (encodingType == EncodingType::AESEncryptionV1) {
 		keyProvider = makeReference<RandomEncryptionKeyProvider>();
 	} else if (encodingType == EncodingType::XOREncryption_TestOnly) {
@@ -10300,7 +10138,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 		                      remapCleanupWindowBytes,
 		                      concurrentExtentReads,
 		                      false,
-		                      Reference<IEncryptionKeyProvider>());
+		                      Reference<IPageEncryptionKeyProvider>());
 
 		wait(success(pager->init()));
 
@@ -10358,7 +10196,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	                      remapCleanupWindowBytes,
 	                      concurrentExtentReads,
 	                      false,
-	                      Reference<IEncryptionKeyProvider>());
+	                      Reference<IPageEncryptionKeyProvider>());
 	wait(success(pager->init()));
 
 	printf("Starting ExtentQueue FastPath Recovery from Disk.\n");
@@ -10503,9 +10341,9 @@ TEST_CASE(":/redwood/performance/set") {
 	                                 remapCleanupWindowBytes,
 	                                 concurrentExtentReads,
 	                                 pagerMemoryOnly,
-	                                 Reference<IEncryptionKeyProvider>());
+	                                 Reference<IPageEncryptionKeyProvider>());
 	state VersionedBTree* btree =
-	    new VersionedBTree(pager, file, EncodingType::XXHash64, Reference<IEncryptionKeyProvider>());
+	    new VersionedBTree(pager, file, EncodingType::XXHash64, Reference<IPageEncryptionKeyProvider>());
 	wait(btree->init());
 	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 
@@ -10883,7 +10721,7 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore* kvs,
 	if (clearAfter) {
 		printf("Clearing all keys\n");
 		intervalStart = timer();
-		kvs->clear(KeyRangeRef(LiteralStringRef(""), LiteralStringRef("\xff")));
+		kvs->clear(KeyRangeRef(""_sr, "\xff"_sr));
 		state StorageBytes sbClear = wait(getStableStorageBytes(kvs));
 		printf("Cleared all keys in %.2f seconds, final storageByte: %s\n",
 		       timer() - intervalStart,
@@ -11117,92 +10955,79 @@ TEST_CASE(":/redwood/performance/randomRangeScans") {
 	return Void();
 }
 
-TEST_CASE(":/redwood/performance/histogramThroughput") {
-	std::default_random_engine generator;
-	std::uniform_int_distribution<uint32_t> distribution(0, UINT32_MAX);
-	state size_t inputSize = pow(10, 8);
-	state std::vector<uint32_t> uniform;
-	for (int i = 0; i < inputSize; i++) {
-		uniform.push_back(distribution(generator));
+TEST_CASE(":/redwood/performance/histograms") {
+	// Time needed to log 33 histograms.
+	std::vector<Reference<Histogram>> histograms;
+	for (int i = 0; i < 33; i++) {
+		std::string levelString = "L" + std::to_string(i);
+		histograms.push_back(Histogram::getHistogram("histogramTest"_sr, "levelString"_sr, Histogram::Unit::bytes));
 	}
-	std::cout << "size of input: " << uniform.size() << std::endl;
-	{
-		// Time needed to log 33 histograms.
-		std::vector<Reference<Histogram>> histograms;
-		for (int i = 0; i < 33; i++) {
-			std::string levelString = "L" + std::to_string(i);
-			histograms.push_back(Histogram::getHistogram(
-			    LiteralStringRef("histogramTest"), LiteralStringRef("levelString"), Histogram::Unit::bytes));
+	for (int i = 0; i < 33; i++) {
+		for (int j = 0; j < 32; j++) {
+			histograms[i]->sample(std::pow(2, j));
 		}
-		for (int i = 0; i < 33; i++) {
-			for (int j = 0; j < 32; j++) {
-				histograms[i]->sample(std::pow(2, j));
-			}
-		}
-		auto t_start = std::chrono::high_resolution_clock::now();
-		for (int i = 0; i < 33; i++) {
-			histograms[i]->writeToLog(30.0);
-		}
-		auto t_end = std::chrono::high_resolution_clock::now();
-		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-		std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
 	}
-	{
-		std::cout << "Histogram Unit bytes" << std::endl;
-		auto t_start = std::chrono::high_resolution_clock::now();
-		Reference<Histogram> h = Histogram::getHistogram(
-		    LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::bytes);
-		ASSERT(uniform.size() == inputSize);
-		for (size_t i = 0; i < uniform.size(); i++) {
-			h->sample(uniform[i]);
-		}
-		auto t_end = std::chrono::high_resolution_clock::now();
-		std::cout << h->drawHistogram();
-		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
+	auto t_start = std::chrono::high_resolution_clock::now();
+	for (int i = 0; i < 33; i++) {
+		histograms[i]->writeToLog(30.0);
+	}
+	auto t_end = std::chrono::high_resolution_clock::now();
+	double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+	std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
 
-		Reference<Histogram> hCopy = Histogram::getHistogram(
-		    LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::bytes);
-		std::cout << hCopy->drawHistogram();
-		GetHistogramRegistry().logReport();
-	}
-	{
-		std::cout << "Histogram Unit percentage: " << std::endl;
-		auto t_start = std::chrono::high_resolution_clock::now();
-		Reference<Histogram> h = Histogram::getHistogram(
-		    LiteralStringRef("histogramTest"), LiteralStringRef("counts"), Histogram::Unit::percentageLinear);
-		ASSERT(uniform.size() == inputSize);
-		for (size_t i = 0; i < uniform.size(); i++) {
-			h->samplePercentage((double)uniform[i] / UINT32_MAX);
-		}
-		auto t_end = std::chrono::high_resolution_clock::now();
-		std::cout << h->drawHistogram();
-		GetHistogramRegistry().logReport();
-		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
-	}
 	return Void();
 }
-TEST_CASE(":/redwood/performance/continuousSmapleThroughput") {
-	std::default_random_engine generator;
-	std::uniform_int_distribution<uint32_t> distribution(0, UINT32_MAX);
-	state size_t inputSize = pow(10, 8);
-	state std::vector<uint32_t> uniform;
-	for (int i = 0; i < inputSize; i++) {
-		uniform.push_back(distribution(generator));
+
+ACTOR Future<Void> waitLockIncrement(PriorityMultiLock* pml, int priority, int* pout) {
+	state PriorityMultiLock::Lock lock = wait(pml->lock(priority));
+	wait(delay(deterministicRandom()->random01() * .1));
+	++*pout;
+	return Void();
+}
+
+TEST_CASE("/redwood/PriorityMultiLock") {
+	state std::vector<int> priorities = { 10, 20, 40 };
+	state int concurrency = 25;
+	state PriorityMultiLock* pml = new PriorityMultiLock(concurrency, priorities);
+	state std::vector<int> counts;
+	counts.resize(priorities.size(), 0);
+
+	// Clog the lock buy taking concurrency locks at each level
+	state std::vector<Future<PriorityMultiLock::Lock>> lockFutures;
+	for (int i = 0; i < priorities.size(); ++i) {
+		for (int j = 0; j < concurrency; ++j) {
+			lockFutures.push_back(pml->lock(i));
+		}
 	}
 
-	{
-		ContinuousSample<uint32_t> s = ContinuousSample<uint32_t>(pow(10, 3));
-		auto t_start = std::chrono::high_resolution_clock::now();
-		ASSERT(uniform.size() == inputSize);
-		for (size_t i = 0; i < uniform.size(); i++) {
-			s.addSample(uniform[i]);
-		}
-		auto t_end = std::chrono::high_resolution_clock::now();
-		double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-		std::cout << "size of input: " << uniform.size() << std::endl;
-		std::cout << "Time in millisecond: " << elapsed_time_ms << std::endl;
+	// Wait for n = concurrency locks to be acquired
+	wait(quorum(lockFutures, concurrency));
+
+	state std::vector<Future<Void>> futures;
+	for (int i = 0; i < 10e3; ++i) {
+		int p = i % priorities.size();
+		futures.push_back(waitLockIncrement(pml, p, &counts[p]));
 	}
+
+	state Future<Void> f = waitForAll(futures);
+
+	// Release the locks
+	lockFutures.clear();
+
+	// Print stats and wait for all futures to be ready
+	loop {
+		choose {
+			when(wait(delay(1))) {
+				printf("counts: ");
+				for (auto c : counts) {
+					printf("%d ", c);
+				}
+				printf("   pml: %s\n", pml->toString().c_str());
+			}
+			when(wait(f)) { break; }
+		}
+	}
+
+	delete pml;
 	return Void();
 }

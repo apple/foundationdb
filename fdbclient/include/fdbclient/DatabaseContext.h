@@ -544,6 +544,18 @@ public:
 	Counter transactionGrvFullBatches;
 	Counter transactionGrvTimedOutBatches;
 	Counter transactionCommitVersionNotFoundForSS;
+	Counter bgReadInputBytes;
+	Counter bgReadOutputBytes;
+
+	// Change Feed metrics. Omit change feed metrics from logging if not used
+	bool usedAnyChangeFeeds;
+	CounterCollection ccFeed;
+	Counter feedStreamStarts;
+	Counter feedMergeStreamStarts;
+	Counter feedErrors;
+	Counter feedNonRetriableErrors;
+	Counter feedPops;
+	Counter feedPopsFallback;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
 	    bytesPerCommit, bgLatencies, bgGranulesPerRequest;
