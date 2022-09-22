@@ -107,9 +107,6 @@
 #define SWIFT_REVERSE_INTEROP_SUPPORTED
 #endif
 
-// FIXME: remove.
-extern "C" void testSwiftInFDB();
-
 using namespace std::literals;
 
 // clang-format off
