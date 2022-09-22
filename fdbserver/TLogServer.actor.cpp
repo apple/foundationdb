@@ -1005,6 +1005,9 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 						const IDiskQueue::location begin = logData->versionLocation[currentVersion].first;
 						const IDiskQueue::location end = logData->versionLocation[currentVersion].second;
 						ASSERT(end > begin && end.lo - begin.lo < std::numeric_limits<uint32_t>::max());
+						ASSERT(begin.hi == 0); // DEBUG ASSERT
+						ASSERT(end.hi == 0);
+
 						uint32_t length = static_cast<uint32_t>(end.lo - begin.lo);
 						refSpilledTagCount++;
 
