@@ -1114,7 +1114,10 @@ struct CreateTenantImpl {
 				// The tenant creation has already started, so resume where we left off
 				self->tenantEntry = existingEntry.get();
 				ASSERT(existingEntry.get().assignedCluster.present());
-
+				if (self->preferAssignedCluster &&
+				    existingEntry.get().assignedCluster.get() != self->tenantEntry.assignedCluster.get()) {
+					throw cluster_not_found();
+				}
 				wait(self->ctx.setCluster(tr, existingEntry.get().assignedCluster.get()));
 				return true;
 			} else {
@@ -1159,6 +1162,9 @@ struct CreateTenantImpl {
 				ASSERT(groupEntry.get().assignedCluster.present());
 				if (self->preferAssignedCluster &&
 				    groupEntry.get().assignedCluster.get() != self->tenantEntry.assignedCluster.get()) {
+					TraceEvent("MetaclusterCreateTenantGroupClusterMismatch")
+					    .detail("TenantGroupCluster", groupEntry.get().assignedCluster.get())
+					    .detail("SpecifiedCluster", self->tenantEntry.assignedCluster.get());
 					throw invalid_tenant_configuration();
 				}
 				return std::make_pair(groupEntry.get().assignedCluster.get(), true);

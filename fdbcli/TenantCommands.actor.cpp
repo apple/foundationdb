@@ -114,6 +114,7 @@ ACTOR Future<bool> tenantCreateCommand(Reference<IDatabase> db, std::vector<Stri
 		fmt::print("Creates a new tenant in the cluster with the specified name.\n");
 		fmt::print("An optional group can be specified that will require this tenant\n");
 		fmt::print("to be placed on the same cluster as other tenants in the same group.\n");
+		fmt::print("An optional cluster name can be specified that this tenant will be placed in.\n");
 		return false;
 	}
 

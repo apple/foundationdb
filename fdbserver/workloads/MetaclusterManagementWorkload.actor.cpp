@@ -423,6 +423,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 			auto assignedCluster = self->dataDbs.find(entry.assignedCluster.get());
 
+			ASSERT(!preferAssignedCluster || createEntry.assignedCluster.get() == assignedCluster->first);
 			ASSERT(assignedCluster != self->dataDbs.end());
 			ASSERT(assignedCluster->second.tenants.insert(tenant).second);
 			ASSERT(assignedCluster->second.tenantGroupCapacity >= assignedCluster->second.tenants.size());
