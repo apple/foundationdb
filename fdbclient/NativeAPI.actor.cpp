@@ -601,7 +601,8 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 	loop {
 		wait(delay(CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskPriority::FlushTrace));
 
-		if (!g_network->isSimulated()) {
+		bool logTraces = !g_network->isSimulated() || BUGGIFY_WITH_PROB(0.01);
+		if (logTraces) {
 			TraceEvent ev("TransactionMetrics", cx->dbId);
 
 			ev.detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
@@ -653,6 +654,19 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 		cx->bytesPerCommit.clear();
 		cx->bgLatencies.clear();
 		cx->bgGranulesPerRequest.clear();
+
+		if (cx->usedAnyChangeFeeds && logTraces) {
+			TraceEvent feedEv("ChangeFeedClientMetrics", cx->dbId);
+
+			feedEv.detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
+			    .detail("Cluster",
+			            cx->getConnectionRecord()
+			                ? cx->getConnectionRecord()->getConnectionString().clusterKeyName().toString()
+			                : "")
+			    .detail("Internal", cx->internal);
+
+			cx->ccFeed.logToTraceEvent(feedEv);
+		}
 
 		lastLogged = now();
 	}
@@ -1458,17 +1472,19 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
-    transactionCommitVersionNotFoundForSS("CommitVersionNotFoundForSS", cc), latencies(1000), readLatencies(1000),
-    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), bgLatencies(1000),
-    bgGranulesPerRequest(1000), outstandingWatches(0), sharedStatePtr(nullptr), lastGrvTime(0.0), cachedReadVersion(0),
+    transactionCommitVersionNotFoundForSS("CommitVersionNotFoundForSS", cc), usedAnyChangeFeeds(false),
+    ccFeed("ChangeFeedClientMetrics"), feedStreamStarts("FeedStreamStarts", ccFeed),
+    feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed), feedErrors("FeedErrors", ccFeed),
+    feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed), feedPops("FeedPops", ccFeed),
+    feedPopsFallback("FeedPopsFallback", ccFeed), latencies(1000), readLatencies(1000), commitLatencies(1000),
+    GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), bgLatencies(1000), bgGranulesPerRequest(1000),
+    outstandingWatches(0), sharedStatePtr(nullptr), lastGrvTime(0.0), cachedReadVersion(0),
     lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0), lastProxyRequestTime(0.0),
     transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor),
-    coordinator(coordinator), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
+    coordinator(coordinator), apiVersion(_apiVersion), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
     detailedHealthMetricsLastUpdated(0), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
-
-	apiVersion = ApiVersion(_apiVersion);
 
 	dbId = deterministicRandom()->randomUniqueID();
 
@@ -1500,32 +1516,6 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 	globalConfig = std::make_unique<GlobalConfig>(this);
 
-	if (apiVersion.hasTenantsV2()) {
-		registerSpecialKeysImpl(
-		    SpecialKeySpace::MODULE::CLUSTERID,
-		    SpecialKeySpace::IMPLTYPE::READONLY,
-		    std::make_unique<SingleSpecialKeyImpl>(
-		        LiteralStringRef("\xff\xff/cluster_id"), [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
-			        try {
-				        if (ryw->getDatabase().getPtr()) {
-					        return map(getClusterId(ryw->getDatabase()),
-					                   [](UID id) { return Optional<Value>(StringRef(id.toString())); });
-				        }
-			        } catch (Error& e) {
-				        return e;
-			        }
-			        return Optional<Value>();
-		        }));
-		registerSpecialKeysImpl(
-		    SpecialKeySpace::MODULE::MANAGEMENT,
-		    SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<TenantRangeImpl<true>>(SpecialKeySpace::getManagementApiCommandRange("tenant")));
-	} else if (apiVersion.hasTenantsV1()) {
-		registerSpecialKeysImpl(
-		    SpecialKeySpace::MODULE::MANAGEMENT,
-		    SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<TenantRangeImpl<false>>(SpecialKeySpace::getManagementApiCommandRange("tenantmap")));
-	}
 	if (apiVersion.version() >= 700) {
 		registerSpecialKeysImpl(SpecialKeySpace::MODULE::ERRORMSG,
 		                        SpecialKeySpace::IMPLTYPE::READONLY,
@@ -1719,6 +1709,26 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 			        }
 			        return Optional<Value>();
 		        }));
+		registerSpecialKeysImpl(
+		    SpecialKeySpace::MODULE::CLUSTERID,
+		    SpecialKeySpace::IMPLTYPE::READONLY,
+		    std::make_unique<SingleSpecialKeyImpl>(
+		        LiteralStringRef("\xff\xff/cluster_id"), [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+			        try {
+				        if (ryw->getDatabase().getPtr()) {
+					        return map(getClusterId(ryw->getDatabase()),
+					                   [](UID id) { return Optional<Value>(StringRef(id.toString())); });
+				        }
+			        } catch (Error& e) {
+				        return e;
+			        }
+			        return Optional<Value>();
+		        }));
+
+		registerSpecialKeysImpl(
+		    SpecialKeySpace::MODULE::MANAGEMENT,
+		    SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<TenantRangeImpl>(SpecialKeySpace::getManagementApiCommandRange("tenant")));
 	}
 	throttleExpirer = recurring([this]() { expireThrottles(); }, CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
 
@@ -1758,9 +1768,13 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
-    transactionCommitVersionNotFoundForSS("CommitVersionNotFoundForSS", cc), latencies(1000), readLatencies(1000),
-    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), bgLatencies(1000),
-    bgGranulesPerRequest(1000), transactionTracingSample(false),
+    transactionCommitVersionNotFoundForSS("CommitVersionNotFoundForSS", cc), usedAnyChangeFeeds(false),
+    ccFeed("ChangeFeedClientMetrics"), feedStreamStarts("FeedStreamStarts", ccFeed),
+    feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed), feedErrors("FeedErrors", ccFeed),
+    feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed), feedPops("FeedPops", ccFeed),
+    feedPopsFallback("FeedPopsFallback", ccFeed), latencies(1000), readLatencies(1000), commitLatencies(1000),
+    GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), bgLatencies(1000), bgGranulesPerRequest(1000),
+    sharedStatePtr(nullptr), transactionTracingSample(false),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {}
 
@@ -7657,23 +7671,24 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Trans
 		if (tenantPrefix.present()) {
 			state Standalone<StringRef> mappingPrefix = tenantPrefix.get().withPrefix(blobGranuleMappingKeys.begin);
 
-			// basically krmGetRange, but enable it to not use tenant without RAW_ACCESS by doing manual getRange with
-			// UseTenant::False
+			// basically krmGetRangeUnaligned, but enable it to not use tenant without RAW_ACCESS by doing manual
+			// getRange with UseTenant::False
 			GetRangeLimits limits(2 * rangeLimit + 2);
 			limits.minRows = 2;
+
 			RangeResult rawMapping = wait(getRange(self->trState,
 			                                       self->getReadVersion(),
 			                                       lastLessOrEqual(keyRange.begin.withPrefix(mappingPrefix)),
-			                                       firstGreaterThan(keyRange.end.withPrefix(mappingPrefix)),
+			                                       KeySelectorRef(keyRange.end.withPrefix(mappingPrefix), false, +2),
 			                                       limits,
 			                                       Reverse::False,
 			                                       UseTenant::False));
 			// strip off mapping prefix
-			blobGranuleMapping = krmDecodeRanges(mappingPrefix, currentRange, rawMapping);
+			blobGranuleMapping = krmDecodeRanges(mappingPrefix, currentRange, rawMapping, false);
 		} else {
 			wait(store(
 			    blobGranuleMapping,
-			    krmGetRanges(
+			    krmGetRangesUnaligned(
 			        self, blobGranuleMappingKeys.begin, currentRange, 1000, GetRangeLimits::BYTE_LIMIT_UNLIMITED)));
 		}
 
@@ -8066,6 +8081,25 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRan
 	state Version readVersionOut = invalidVersion;
 	state int batchSize = BUGGIFY ? deterministicRandom()->randomInt(2, 10) : CLIENT_KNOBS->BG_TOO_MANY_GRANULES / 2;
 	state int loadSize = (BUGGIFY ? deterministicRandom()->randomInt(1, 20) : 20) * batchSize;
+
+	if (version.present()) {
+		if (version.get() == latestVersion) {
+			loop {
+				try {
+					Version _version = wait(tr.getReadVersion());
+					version = _version;
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+		}
+		if (version.get() <= 0) {
+			TraceEvent("VerifyBlobInvalidVersion").detail("Range", range).detail("Version", version);
+			throw unsupported_operation();
+		}
+	}
+
 	loop {
 		if (curRegion.begin >= range.end) {
 			return readVersionOut;
@@ -8090,7 +8124,7 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRan
 		// Chunk up to smaller ranges than this limit. Must be smaller than BG_TOO_MANY_GRANULES to not hit the limit
 		int batchCount = 0;
 		for (auto& it : allRanges) {
-			if (it.begin != curRegion.end) {
+			if (it.begin > curRegion.end) {
 				return invalidVersion;
 			}
 
@@ -9463,6 +9497,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
                                             bool canReadPopped) {
 	state Database cx(db);
 	state Span span("NAPI:GetChangeFeedStream"_loc);
+	db->usedAnyChangeFeeds = true;
 
 	results->endVersion = end;
 
@@ -9538,7 +9573,10 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				loc = 0;
 			}
 
+			++db->feedStreamStarts;
+
 			if (locations.size() > 1) {
+				++db->feedMergeStreamStarts;
 				std::vector<std::pair<StorageServerInterface, KeyRange>> interfs;
 				for (int i = 0; i < locations.size(); i++) {
 					interfs.emplace_back(locations[i].locations->getInterface(chosenLocations[i]),
@@ -9561,6 +9599,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				results->streams.clear();
 				results->storageData.clear();
 				if (e.code() == error_code_change_feed_popped) {
+					++db->feedNonRetriableErrors;
 					CODE_PROBE(true, "getChangeFeedStreamActor got popped");
 					results->mutations.sendError(e);
 					results->refresh.sendError(e);
@@ -9580,18 +9619,27 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    e.code() == error_code_connection_failed || e.code() == error_code_unknown_change_feed ||
 			    e.code() == error_code_broken_promise || e.code() == error_code_future_version ||
-			    e.code() == error_code_request_maybe_delivered) {
+			    e.code() == error_code_request_maybe_delivered ||
+			    e.code() == error_code_storage_too_many_feed_streams) {
+				++db->feedErrors;
 				db->changeFeedCache.erase(rangeID);
 				cx->invalidateCache(Key(), keys);
-				if (begin == lastBeginVersion) {
+				if (begin == lastBeginVersion || e.code() == error_code_storage_too_many_feed_streams) {
 					// We didn't read anything since the last failure before failing again.
-					// Do exponential backoff, up to 1 second
-					sleepWithBackoff = std::min(1.0, sleepWithBackoff * 1.5);
+					// Back off quickly and exponentially, up to 1 second
+					sleepWithBackoff = std::min(2.0, sleepWithBackoff * 5);
+					sleepWithBackoff = std::max(0.1, sleepWithBackoff);
 				} else {
 					sleepWithBackoff = CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY;
 				}
+				TraceEvent("ChangeFeedClientError")
+				    .errorUnsuppressed(e)
+				    .suppressFor(30.0)
+				    .detail("AnyProgress", begin != lastBeginVersion);
 				wait(delay(sleepWithBackoff));
 			} else {
+				++db->feedNonRetriableErrors;
+				TraceEvent("ChangeFeedClientErrorNonRetryable").errorUnsuppressed(e).suppressFor(5.0);
 				results->mutations.sendError(e);
 				results->refresh.sendError(change_feed_cancelled());
 				results->streams.clear();
@@ -9718,6 +9766,7 @@ Future<OverlappingChangeFeedsInfo> DatabaseContext::getOverlappingChangeFeeds(Ke
 }
 
 ACTOR static Future<Void> popChangeFeedBackup(Database cx, Key rangeID, Version version) {
+	++cx->feedPopsFallback;
 	state Transaction tr(cx);
 	loop {
 		try {
@@ -9755,6 +9804,8 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 	state Database cx(db);
 	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
 	state Span span("NAPI:PopChangeFeedMutations"_loc);
+	db->usedAnyChangeFeeds = true;
+	++db->feedPops;
 
 	state KeyRange keys = wait(getChangeFeedRange(db, cx, rangeID));
 
@@ -9839,6 +9890,24 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 	state KeyRange purgeRange = range;
 	state bool loadedTenantPrefix = false;
 
+	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	if (purgeVersion == latestVersion) {
+		loop {
+			try {
+				Version _purgeVersion = wait(tr.getReadVersion());
+				purgeVersion = _purgeVersion;
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		tr.reset();
+	}
+	if (purgeVersion <= 0) {
+		TraceEvent("PurgeInvalidVersion").detail("Range", range).detail("Version", purgeVersion).detail("Force", force);
+		throw unsupported_operation();
+	}
+
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -9849,6 +9918,18 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 				TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(&tr, range.begin));
 				loadedTenantPrefix = true;
 				purgeRange = purgeRange.withPrefix(tenantEntry.prefix);
+			}
+
+			// must be aligned to blob range(s)
+			state Future<Optional<Value>> beginPresent = tr.get(purgeRange.begin.withPrefix(blobRangeKeys.begin));
+			state Future<Optional<Value>> endPresent = tr.get(purgeRange.end.withPrefix(blobRangeKeys.begin));
+			wait(success(beginPresent) && success(endPresent));
+			if (!beginPresent.get().present() || !endPresent.get().present()) {
+				TraceEvent("UnalignedPurge")
+				    .detail("Range", range)
+				    .detail("Version", purgeVersion)
+				    .detail("Force", force);
+				throw unsupported_operation();
 			}
 
 			Value purgeValue = blobGranulePurgeValueFor(purgeVersion, range, force);

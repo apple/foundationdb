@@ -44,6 +44,7 @@
 
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "flow/flow.h"
+#include "flow/ApiVersion.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/FastRef.h"
@@ -73,7 +74,6 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-#define FDB_API_VERSION 720
 /*
  * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi
  * instance (e.g. from ThreadSafeApi)
@@ -889,7 +889,7 @@ struct CLIOptions {
 	std::vector<std::pair<std::string, std::string>> knobs;
 
 	// api version, using the latest version by default
-	int apiVersion = FDB_API_VERSION;
+	int apiVersion = ApiVersion::LATEST_VERSION;
 
 	CLIOptions(int argc, char* argv[]) {
 		program_name = argv[0];
@@ -938,12 +938,12 @@ struct CLIOptions {
 			if (*endptr != '\0') {
 				fprintf(stderr, "ERROR: invalid client version %s\n", args.OptionArg());
 				return 1;
-			} else if (apiVersion < 700 || apiVersion > FDB_API_VERSION) {
+			} else if (apiVersion < 700 || apiVersion > ApiVersion::LATEST_VERSION) {
 				// multi-version fdbcli only available after 7.0
 				fprintf(stderr,
 				        "ERROR: api version %s is not supported. (Min: 700, Max: %d)\n",
 				        args.OptionArg(),
-				        FDB_API_VERSION);
+				        ApiVersion::LATEST_VERSION);
 				return 1;
 			}
 			break;
@@ -1889,14 +1889,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "createtenant")) {
-					bool _result = wait(makeInterruptable(createTenantCommandActor(db, tokens, opt.apiVersion)));
+					bool _result = wait(makeInterruptable(createTenantCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "deletetenant")) {
-					bool _result = wait(makeInterruptable(deleteTenantCommandActor(db, tokens, opt.apiVersion)));
+					bool _result = wait(makeInterruptable(deleteTenantCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					else if (tenantName.present() && tokens[1] == tenantName.get()) {
@@ -1908,26 +1908,20 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "listtenants")) {
-					bool _result = wait(makeInterruptable(listTenantsCommandActor(db, tokens, opt.apiVersion)));
+					bool _result = wait(makeInterruptable(listTenantsCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "gettenant")) {
-					bool _result = wait(makeInterruptable(getTenantCommandActor(db, tokens, opt.apiVersion)));
+					bool _result = wait(makeInterruptable(getTenantCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "configuretenant")) {
-					if (opt.apiVersion < 720) {
-						fmt::print(stderr, "ERROR: tenants cannot be configured before API version 720.\n");
-						is_error = true;
-						continue;
-					}
-
 					bool _result = wait(makeInterruptable(configureTenantCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
@@ -1935,13 +1929,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				}
 
 				if (tokencmp(tokens[0], "renametenant")) {
-					if (opt.apiVersion < 720) {
-						fmt::print(stderr, "ERROR: tenants cannot be renamed before API version 720.\n");
-						is_error = true;
-						continue;
-					}
-
-					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens, opt.apiVersion)));
+					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;

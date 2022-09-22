@@ -27,7 +27,7 @@
 #include <unordered_map>
 #include <vector>
 
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 710200
 
 namespace FdbApiTester {
 
@@ -57,6 +57,9 @@ struct TestSpec {
 
 	// Execute each transaction in a separate database instance
 	bool databasePerTransaction = false;
+
+	// Test tampering the cluster file
+	bool tamperClusterFile = false;
 
 	// Size of the FDB client thread pool (a random number in the [min,max] range)
 	int minFdbThreads = 1;

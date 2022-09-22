@@ -23,7 +23,7 @@
 #pragma once
 
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 720
+#define FDB_API_VERSION 710200
 #endif
 
 #include <cassert>
@@ -45,6 +45,8 @@ namespace fdb {
 namespace native {
 #include <foundationdb/fdb_c.h>
 }
+
+#define TENANT_API_VERSION_GUARD 720
 
 using ByteString = std::basic_string<uint8_t>;
 using BytesRef = std::basic_string_view<uint8_t>;
@@ -505,6 +507,14 @@ public:
 	Transaction(const Transaction&) noexcept = default;
 	Transaction& operator=(const Transaction&) noexcept = default;
 
+	void atomic_store(Transaction other) { std::atomic_store(&tr, other.tr); }
+
+	Transaction atomic_load() {
+		Transaction retVal;
+		retVal.tr = std::atomic_load(&tr);
+		return retVal;
+	}
+
 	bool valid() const noexcept { return tr != nullptr; }
 
 	explicit operator bool() const noexcept { return valid(); }
@@ -755,7 +765,7 @@ public:
 };
 
 inline Error selectApiVersionNothrow(int version) {
-	if (version < 720) {
+	if (version < TENANT_API_VERSION_GUARD) {
 		Tenant::tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
 	}
 	return Error(native::fdb_select_api_version(version));
@@ -768,7 +778,7 @@ inline void selectApiVersion(int version) {
 }
 
 inline Error selectApiVersionCappedNothrow(int version) {
-	if (version < 720) {
+	if (version < TENANT_API_VERSION_GUARD) {
 		Tenant::tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
 	}
 	return Error(
