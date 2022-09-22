@@ -3597,8 +3597,8 @@ DDTeamCollection::DDTeamCollection(const std::shared_ptr<IDDTxnProcessor>& dbPro
                                    PromiseStream<GetMetricsRequest> getShardMetrics,
                                    Promise<UID> removeFailedServer,
                                    PromiseStream<Promise<int>> getUnhealthyRelocationCount)
-  : dbProcessor(dbProcessor), doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()),
-    lock(lock), output(output), unhealthyServers(0), storageWiggler(makeReference<StorageWiggler>(this)),
+  : dbProcessor(dbProcessor), doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock),
+    output(output), unhealthyServers(0), storageWiggler(makeReference<StorageWiggler>(this)),
     processingWiggle(processingWiggle), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
     initialFailureReactionDelay(
         delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
