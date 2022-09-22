@@ -145,8 +145,8 @@ ACTOR Future<bool> printBlobHistory(Database db, Key key, Optional<Version> vers
 namespace fdb_cli {
 
 ACTOR Future<bool> blobKeyCommandActor(Database localDb,
-                                           Optional<TenantMapEntry> tenantEntry,
-                                           std::vector<StringRef> tokens) {
+                                       Optional<TenantMapEntry> tenantEntry,
+                                       std::vector<StringRef> tokens) {
 	// enables blob writing for the given range
 	if (tokens.size() != 3 && tokens.size() != 4) {
 		printUsage(tokens[0]);
