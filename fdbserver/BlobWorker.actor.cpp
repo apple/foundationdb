@@ -1854,6 +1854,30 @@ ACTOR Future<bool> checkFileNotFoundForcePurgeRace(Reference<BlobWorkerData> bwD
 	}
 }
 
+// Does a force flush after consuming all data post-split from the parent granule's old change feed.
+// This guarantees that all of the data from the old change feed gets persisted to blob storage, and the old feed can be
+// cleaned up. This is particularly necessary for sequential workloads, where only one child granule after the split has
+// new writes. Adds a delay so that, if the granule is not write-cold and would have written a delta file soon anyway,
+// this does not add any extra overhead.
+ACTOR Future<Void> forceFlushCleanup(Reference<BlobWorkerData> bwData, Reference<GranuleMetadata> metadata, Version v) {
+	double cleanupDelay = SERVER_KNOBS->BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY;
+	if (cleanupDelay < 0) {
+		return Void();
+	}
+	wait(delay(cleanupDelay));
+	if (metadata->forceFlushVersion.get() < v && metadata->pendingDeltaVersion < v) {
+		metadata->forceFlushVersion.set(v);
+		++bwData->stats.forceFlushCleanups;
+		if (BW_DEBUG) {
+			fmt::print("Granule [{0} - {1}) forcing flush cleanup @ {2}\n",
+			           metadata->keyRange.begin.printable(),
+			           metadata->keyRange.end.printable(),
+			           v);
+		}
+	}
+	return Void();
+}
+
 // updater for a single granule
 // TODO: this is getting kind of large. Should try to split out this actor if it continues to grow?
 ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
@@ -1866,9 +1890,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 	state Future<Void> oldChangeFeedFuture;
 	state Future<Void> changeFeedFuture;
 	state Future<Void> checkMergeCandidate;
+	state Future<Void> forceFlushCleanupFuture;
 	state GranuleStartState startState;
 	state bool readOldChangeFeed;
-	state Optional<std::pair<KeyRange, UID>> oldChangeFeedDataComplete;
 	state Key cfKey;
 	state Optional<Key> oldCFKey;
 	state int pendingSnapshots = 0;
@@ -1990,7 +2014,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 		Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>(bwData->db.getPtr());
 
-		if (startState.splitParentGranule.present() && startVersion < startState.changeFeedStartVersion) {
+		if (startState.splitParentGranule.present() && startVersion + 1 < startState.changeFeedStartVersion) {
 			// read from parent change feed up until our new change feed is started
 			// Required to have canReadPopped = false, otherwise another granule can take over the change feed,
 			// and pop it. That could cause this worker to think it has the full correct set of data if it then
@@ -2017,7 +2041,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			                                                   false);
 			// in case previous worker died before popping the latest version, start another pop
 			if (startState.previousDurableVersion != invalidVersion) {
-				ASSERT(startState.previousDurableVersion >= startState.changeFeedStartVersion);
+				ASSERT(startState.previousDurableVersion + 1 >= startState.changeFeedStartVersion);
 				Future<Void> popFuture =
 				    bwData->db->popChangeFeedMutations(cfKey, startState.previousDurableVersion + 1);
 				inFlightPops.push_back(popFuture);
@@ -2138,9 +2162,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				ASSERT(readOldChangeFeed);
 
 				readOldChangeFeed = false;
-				// set this so next delta file write updates granule split metadata to done
-				ASSERT(startState.splitParentGranule.present());
-				oldChangeFeedDataComplete = startState.splitParentGranule.get();
 				if (BW_DEBUG) {
 					fmt::print("Granule [{0} - {1}) switching to new change feed {2} @ {3}, {4}\n",
 					           metadata->keyRange.begin.printable(),
@@ -2152,6 +2173,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				ASSERT(metadata->bufferedDeltaVersion <= metadata->activeCFData.get()->getVersion());
 				// update this for change feed popped detection
 				metadata->bufferedDeltaVersion = metadata->activeCFData.get()->getVersion();
+				forceFlushCleanupFuture = forceFlushCleanup(bwData, metadata, metadata->bufferedDeltaVersion);
 
 				Reference<ChangeFeedData> cfData = makeReference<ChangeFeedData>(bwData->db.getPtr());
 
@@ -2267,7 +2289,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									Reference<ChangeFeedData> cfData =
 									    makeReference<ChangeFeedData>(bwData->db.getPtr());
 
-									if (!readOldChangeFeed && cfRollbackVersion < startState.changeFeedStartVersion) {
+									if (!readOldChangeFeed &&
+									    cfRollbackVersion + 1 < startState.changeFeedStartVersion) {
 										// It isn't possible to roll back across the parent/child feed boundary,
 										// but as part of rolling back we may need to cancel in-flight delta
 										// files, and those delta files may include stuff from before the
@@ -2277,11 +2300,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										ASSERT(cfRollbackVersion >= metadata->durableDeltaVersion.get());
 										CODE_PROBE(true, "rollback crossed change feed boundaries");
 										readOldChangeFeed = true;
-										oldChangeFeedDataComplete.reset();
+										forceFlushCleanupFuture = Never();
 									}
 
 									if (readOldChangeFeed) {
-										ASSERT(cfRollbackVersion < startState.changeFeedStartVersion);
+										ASSERT(cfRollbackVersion + 1 < startState.changeFeedStartVersion);
 										ASSERT(oldCFKey.present());
 										oldChangeFeedFuture =
 										    bwData->db->getChangeFeedStream(cfData,
@@ -2293,12 +2316,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										                                    false);
 
 									} else {
-										if (cfRollbackVersion < startState.changeFeedStartVersion) {
+										if (cfRollbackVersion + 1 < startState.changeFeedStartVersion) {
 											fmt::print("Rollback past CF start??. rollback={0}, start={1}\n",
 											           cfRollbackVersion,
 											           startState.changeFeedStartVersion);
 										}
-										ASSERT(cfRollbackVersion >= startState.changeFeedStartVersion);
+										ASSERT(cfRollbackVersion + 1 >= startState.changeFeedStartVersion);
 
 										changeFeedFuture =
 										    bwData->db->getChangeFeedStream(cfData,
@@ -2406,6 +2429,21 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					CODE_PROBE(true, "Force flushing empty delta file!");
 				}
 
+				// launch pipelined, but wait for previous operation to complete before persisting to FDB
+				Future<BlobFileIndex> previousFuture;
+				if (!inFlightFiles.empty()) {
+					previousFuture = inFlightFiles.back().future;
+				} else {
+					previousFuture = Future<BlobFileIndex>(BlobFileIndex());
+				}
+
+				Optional<std::pair<KeyRange, UID>> oldChangeFeedDataComplete;
+				if (startState.splitParentGranule.present() &&
+				    metadata->pendingDeltaVersion < startState.changeFeedStartVersion &&
+				    lastDeltaVersion >= startState.changeFeedStartVersion) {
+					oldChangeFeedDataComplete = startState.splitParentGranule.get();
+				}
+
 				if (BW_DEBUG) {
 					fmt::print("Granule [{0} - {1}) flushing delta file after {2} bytes @ {3} {4}\n",
 					           metadata->keyRange.begin.printable(),
@@ -2415,13 +2453,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					           oldChangeFeedDataComplete.present() ? ". Finalizing " : "");
 				}
 
-				// launch pipelined, but wait for previous operation to complete before persisting to FDB
-				Future<BlobFileIndex> previousFuture;
-				if (!inFlightFiles.empty()) {
-					previousFuture = inFlightFiles.back().future;
-				} else {
-					previousFuture = Future<BlobFileIndex>(BlobFileIndex());
-				}
 				startDeltaFileWrite = bwData->deltaWritesLock->take();
 				Future<BlobFileIndex> dfFuture =
 				    writeDeltaFile(bwData,
@@ -2438,7 +2469,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				                   startDeltaFileWrite);
 				inFlightFiles.push_back(InFlightFile(dfFuture, lastDeltaVersion, metadata->bufferedDeltaBytes, false));
 
-				oldChangeFeedDataComplete.reset();
 				// add new pending delta file
 				ASSERT(metadata->pendingDeltaVersion < lastDeltaVersion);
 				metadata->pendingDeltaVersion = lastDeltaVersion;

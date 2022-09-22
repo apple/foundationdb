@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <fstream>
+
 #include "flow/flow.h"
 #include "flow/Histogram.h"
 #include "flow/Platform.h"
@@ -66,6 +68,35 @@ SystemStatistics getSystemStatistics() {
 	detail("TotalMemory" #size, FastAllocator<size>::getTotalMemory())                                                 \
 	    .detail("ApproximateUnusedMemory" #size, FastAllocator<size>::getApproximateMemoryUnused())                    \
 	    .detail("ActiveThreads" #size, FastAllocator<size>::getActiveThreads())
+
+namespace {
+
+#ifdef __linux__
+// Converts cgroup key, e.g. nr_periods, to NrPeriods
+std::string capitalizeCgroupKey(const std::string& key) {
+	bool wordStart = true;
+	std::string result;
+	result.reserve(key.size());
+
+	for (const char ch : key) {
+		if (std::isalnum(ch)) {
+			if (wordStart) {
+				result.push_back(std::toupper(ch));
+				wordStart = false;
+			} else {
+				result.push_back(ch);
+			}
+		} else {
+			// Skip non-alnum characters
+			wordStart = true;
+		}
+	}
+
+	return result;
+}
+#endif // __linux__
+
+} // anonymous namespace
 
 SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsState* statState, bool machineMetrics) {
 	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
@@ -284,8 +315,8 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 		}
 
 		if (machineMetrics) {
-			TraceEvent("MachineMetrics")
-			    .detail("Elapsed", currentStats.elapsed)
+			auto traceEvent = TraceEvent("MachineMetrics");
+			traceEvent.detail("Elapsed", currentStats.elapsed)
 			    .detail("MbpsSent", currentStats.machineMegabitsSent / currentStats.elapsed)
 			    .detail("MbpsReceived", currentStats.machineMegabitsReceived / currentStats.elapsed)
 			    .detail("OutSegs", currentStats.machineOutSegs)
@@ -298,6 +329,11 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			    .detail("ZoneID", machineState.zoneId)
 			    .detail("MachineID", machineState.machineId)
 			    .trackLatest("MachineMetrics");
+#ifdef __linux__
+			for (const auto& [k, v] : linux_os::reportCGroupCpuStat()) {
+				traceEvent.detail(capitalizeCgroupKey(k).c_str(), v);
+			}
+#endif // __linux__
 		}
 	}
 

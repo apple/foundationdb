@@ -37,6 +37,7 @@
 #include "flow/Error.h"
 #include "flow/Hash3.h"
 #include "flow/Histogram.h"
+#include "flow/PriorityMultiLock.actor.h"
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
 #include "flow/SystemMonitor.h"
@@ -1022,6 +1023,9 @@ public:
 
 	FlowLock serveFetchCheckpointParallelismLock;
 
+	PriorityMultiLock ssLock;
+	std::vector<int> readPriorityRanks;
+
 	int64_t instanceID;
 
 	Promise<Void> otherError;
@@ -1287,13 +1291,15 @@ public:
 	    changeFeedDiskReadsLock(SERVER_KNOBS->CHANGE_FEED_DISK_READS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
+	    ssLock(SERVER_KNOBS->STORAGE_SERVER_READ_CONCURRENCY, SERVER_KNOBS->STORAGESERVER_READ_PRIORITIES),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
 	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()),
 	    busiestWriteTagContext(ssi.id()), counters(this),
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
-
+		readPriorityRanks = parseStringToVector<int>(SERVER_KNOBS->STORAGESERVER_READ_RANKS, ',');
+		ASSERT(readPriorityRanks.size() > (int)ReadType::MAX);
 		version.initMetric("StorageServer.Version"_sr, counters.cc.id);
 		oldestVersion.initMetric("StorageServer.OldestVersion"_sr, counters.cc.id);
 		durableVersion.initMetric("StorageServer.DurableVersion"_sr, counters.cc.id);
@@ -1850,6 +1856,7 @@ std::vector<StorageServerShard> StorageServer::getStorageServerShards(KeyRangeRe
 
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	state int64_t resultSize = 0;
+	state PriorityMultiLock::Lock lock;
 	Span span("SS:getValue"_loc, req.spanContext);
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -1857,6 +1864,8 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	span.addAttribute("key"_sr, req.key);
 	// Temporarily disabled -- this path is hit a lot
 	// getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
+
+	state ReadType type = req.options.present() ? req.options.get().type : ReadType::NORMAL;
 
 	try {
 		++data->counters.getValueQueries;
@@ -1867,6 +1876,8 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 		// so we need to downgrade here
 		wait(data->getQueryDelay());
+
+		wait(store(lock, data->ssLock.lock(data->readPriorityRanks[(int)type])));
 
 		// Track time from requestTime through now as read queueing wait time
 		state double queueWaitEnd = g_network->timer();
@@ -2929,49 +2940,6 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	return std::make_pair(reply, gotAll);
 }
 
-ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
-                                         PromiseStream<Standalone<MutationsAndVersionRef>> results,
-                                         Key rangeID,
-                                         Version begin,
-                                         Version end,
-                                         KeyRange range) {
-	try {
-		loop {
-			state ChangeFeedStreamRequest feedRequest;
-			feedRequest.rangeID = rangeID;
-			feedRequest.begin = begin;
-			feedRequest.end = end;
-			feedRequest.range = range;
-			state std::pair<ChangeFeedStreamReply, bool> feedReply =
-			    wait(getChangeFeedMutations(data, feedRequest, true, false, UID()));
-			begin = feedReply.first.mutations.back().version + 1;
-			state int resultLoc = 0;
-			while (resultLoc < feedReply.first.mutations.size()) {
-				if (feedReply.first.mutations[resultLoc].mutations.size() ||
-				    feedReply.first.mutations[resultLoc].version == end - 1) {
-					wait(results.onEmpty());
-					results.send(feedReply.first.mutations[resultLoc]);
-				}
-				resultLoc++;
-			}
-
-			if (begin == end) {
-				return Void();
-			}
-		}
-	} catch (Error& e) {
-		if (e.code() == error_code_unknown_change_feed) {
-			CODE_PROBE(true, "CF was moved away, no more local data to merge with");
-			// Send endVersion so local stream is effectively done. We couldn't have send that already, because that
-			// would mean the stream would have finished without error
-			results.send(MutationsAndVersionRef(end, invalidVersion));
-		} else {
-			TraceEvent(SevError, "LocalChangeFeedError", data->thisServerID).error(e).detail("CFID", rangeID);
-		}
-		throw;
-	}
-}
-
 // Change feed stream must be sent an error as soon as it is moved away, or change feed can get incorrect results
 ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamRequest req, UID streamUID) {
 	auto feed = data->uidChangeFeed.find(req.rangeID);
@@ -3764,6 +3732,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	state Span span("SS:getKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
 	state Optional<ReadOptions> options = req.options;
+	state ReadType type = options.present() ? options.get().type : ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -3778,11 +3747,12 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.options.present() && req.options.get().type == ReadType::FETCH) {
-		wait(delay(0, TaskPriority::FetchKeys));
-	} else {
-		wait(data->getQueryDelay());
+	wait(data->getQueryDelay());
+	if (!SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && type == ReadType::FETCH) {
+		type = ReadType::NORMAL;
 	}
+
+	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[(int)type]));
 
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
@@ -4508,6 +4478,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	state Span span("SS:getMappedKeyValues"_loc, req.spanContext);
 	state int64_t resultSize = 0;
 	state Optional<ReadOptions> options = req.options;
+	state ReadType type = options.present() ? options.get().type : ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -4522,11 +4493,12 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.options.present() && req.options.get().type == ReadType::FETCH) {
-		wait(delay(0, TaskPriority::FetchKeys));
-	} else {
-		wait(data->getQueryDelay());
+	wait(data->getQueryDelay());
+	if (!SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && type == ReadType::FETCH) {
+		type = ReadType::NORMAL;
 	}
+
+	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(data->readPriorityRanks[(int)type]));
 
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
@@ -4724,6 +4696,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	state Span span("SS:getKeyValuesStream"_loc, req.spanContext);
 	state int64_t resultSize = 0;
 	state Optional<ReadOptions> options = req.options;
+	state ReadType type = options.present() ? options.get().type : ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
@@ -4737,11 +4710,13 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
-	if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.options.present() && req.options.get().type == ReadType::FETCH) {
-		wait(delay(0, TaskPriority::FetchKeys));
-	} else {
-		wait(delay(0, TaskPriority::DefaultEndpoint));
+	wait(delay(0, TaskPriority::DefaultEndpoint));
+	if (!SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && type == ReadType::FETCH) {
+		type = ReadType::NORMAL;
 	}
+
+	state int readPriority = data->readPriorityRanks[(int)type];
+	state PriorityMultiLock::Lock lock = wait(data->ssLock.lock(readPriority));
 
 	try {
 		if (req.options.present() && req.options.get().debugID.present())
@@ -4913,12 +4888,8 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 					end = lastKey;
 				}
 
-				if (SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY && req.options.present() &&
-				    req.options.get().type == ReadType::FETCH) {
-					wait(delay(0, TaskPriority::FetchKeys));
-				} else {
-					wait(delay(0, TaskPriority::DefaultEndpoint));
-				}
+				lock.release();
+				wait(store(lock, data->ssLock.lock(readPriority)));
 
 				data->transactionTagCounter.addRequest(req.tags, resultSize);
 			}
@@ -4939,14 +4910,19 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	state Span span("SS:getKey"_loc, req.spanContext);
+	state PriorityMultiLock::Lock lock;
 	if (req.tenantInfo.name.present()) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
 	state int64_t resultSize = 0;
 	state ReadOptions options;
+	state ReadType type = ReadType::NORMAL;
+
 	if (req.options.present()) {
 		options = req.options.get();
+		type = options.type;
 	}
+
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
 	++data->counters.getKeyQueries;
@@ -4957,6 +4933,8 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	wait(data->getQueryDelay());
+
+	wait(store(lock, data->ssLock.lock(data->readPriorityRanks[(int)type])));
 
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
@@ -5834,17 +5812,9 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 	state Version lastVersion = invalidVersion;
 	state int64_t versionsFetched = 0;
 
-	state PromiseStream<Standalone<MutationsAndVersionRef>> localResults;
+	// ensure SS is at least caught up to begin version, to maintain behavior with old fetch
+	wait(data->version.whenAtLeast(startVersion));
 
-	// Add 1 to fetch version to make sure the local stream will have more versions in the stream than the remote stream
-	// to avoid edge cases in the merge logic
-
-	state Future<Void> localStream =
-	    localChangeFeedStream(data, localResults, rangeId, startVersion, endVersion + 1, range);
-	state Standalone<MutationsAndVersionRef> localResult;
-
-	Standalone<MutationsAndVersionRef> _localResult = waitNext(localResults.getFuture());
-	localResult = _localResult;
 	try {
 		loop {
 			while (data->fetchKeysBudgetUsed.get()) {
@@ -5854,6 +5824,10 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 			state Standalone<VectorRef<MutationsAndVersionRef>> remoteResult =
 			    waitNext(feedResults->mutations.getFuture());
 			state int remoteLoc = 0;
+			// ensure SS is at least caught up to begin version, to maintain behavior with old fetch
+			if (!remoteResult.empty()) {
+				wait(data->version.whenAtLeast(remoteResult.back().version));
+			}
 
 			while (remoteLoc < remoteResult.size()) {
 				if (feedResults->popVersion - 1 > changeFeedInfo->emptyVersion) {
@@ -5881,80 +5855,53 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 					++data->counters.kvSystemClearRanges;
 				}
 
-				Version localVersion = localResult.version;
 				Version remoteVersion = remoteResult[remoteLoc].version;
-
-				if (remoteVersion <= localVersion) {
-					if (remoteVersion > changeFeedInfo->emptyVersion) {
-						// merge if same version
-						if (remoteVersion == localVersion && remoteResult[remoteLoc].mutations.size() &&
-						    remoteResult[remoteLoc].mutations.back().param1 != lastEpochEndPrivateKey) {
-							int remoteSize = remoteResult[remoteLoc].mutations.size();
-							ASSERT(localResult.mutations.size());
-							remoteResult[remoteLoc].mutations.append(
-							    remoteResult.arena(), localResult.mutations.begin(), localResult.mutations.size());
-							if (MUTATION_TRACKING_ENABLED) {
-								int midx = 0;
-								for (auto& m : remoteResult[remoteLoc].mutations) {
-									DEBUG_MUTATION("ChangeFeedWriteMoveMerge", remoteVersion, m, data->thisServerID)
-									    .detail("Range", range)
-									    .detail("FromLocal", midx >= remoteSize)
-									    .detail("ChangeFeedID", rangeId);
-									midx++;
-								}
-							}
-						} else {
-							if (MUTATION_TRACKING_ENABLED) {
-								for (auto& m : remoteResult[remoteLoc].mutations) {
-									DEBUG_MUTATION("ChangeFeedWriteMove", remoteVersion, m, data->thisServerID)
-									    .detail("Range", range)
-									    .detail("ChangeFeedID", rangeId);
-								}
-							}
-						}
-
-						data->storage.writeKeyValue(
-						    KeyValueRef(changeFeedDurableKey(rangeId, remoteVersion),
-						                changeFeedDurableValue(remoteResult[remoteLoc].mutations,
-						                                       remoteResult[remoteLoc].knownCommittedVersion)));
-						++data->counters.kvSystemClearRanges;
-						changeFeedInfo->fetchVersion = std::max(changeFeedInfo->fetchVersion, remoteVersion);
-
-						if (firstVersion == invalidVersion) {
-							firstVersion = remoteVersion;
-						}
-						lastVersion = remoteVersion;
-						versionsFetched++;
-					} else {
-						CODE_PROBE(true, "Change feed ignoring write on move because it was popped concurrently");
-						if (MUTATION_TRACKING_ENABLED) {
-							for (auto& m : remoteResult[remoteLoc].mutations) {
-								DEBUG_MUTATION("ChangeFeedWriteMoveIgnore", remoteVersion, m, data->thisServerID)
-								    .detail("Range", range)
-								    .detail("ChangeFeedID", rangeId)
-								    .detail("EmptyVersion", changeFeedInfo->emptyVersion);
-							}
-						}
-						if (versionsFetched > 0) {
-							ASSERT(firstVersion != invalidVersion);
-							ASSERT(lastVersion != invalidVersion);
-							data->storage.clearRange(
-							    KeyRangeRef(changeFeedDurableKey(changeFeedInfo->id, firstVersion),
-							                changeFeedDurableKey(changeFeedInfo->id, lastVersion + 1)));
-							++data->counters.kvSystemClearRanges;
-							firstVersion = invalidVersion;
-							lastVersion = invalidVersion;
-							versionsFetched = 0;
+				// ensure SS is at least caught up to this version, to maintain behavior with old fetch
+				ASSERT(remoteVersion <= data->version.get());
+				if (remoteVersion > changeFeedInfo->emptyVersion) {
+					if (MUTATION_TRACKING_ENABLED) {
+						for (auto& m : remoteResult[remoteLoc].mutations) {
+							DEBUG_MUTATION("ChangeFeedWriteMove", remoteVersion, m, data->thisServerID)
+							    .detail("Range", range)
+							    .detail("ChangeFeedID", rangeId);
 						}
 					}
-					remoteLoc++;
+
+					data->storage.writeKeyValue(
+					    KeyValueRef(changeFeedDurableKey(rangeId, remoteVersion),
+					                changeFeedDurableValue(remoteResult[remoteLoc].mutations,
+					                                       remoteResult[remoteLoc].knownCommittedVersion)));
+					++data->counters.kvSystemClearRanges;
+					changeFeedInfo->fetchVersion = std::max(changeFeedInfo->fetchVersion, remoteVersion);
+
+					if (firstVersion == invalidVersion) {
+						firstVersion = remoteVersion;
+					}
+					lastVersion = remoteVersion;
+					versionsFetched++;
+				} else {
+					CODE_PROBE(true, "Change feed ignoring write on move because it was popped concurrently");
+					if (MUTATION_TRACKING_ENABLED) {
+						for (auto& m : remoteResult[remoteLoc].mutations) {
+							DEBUG_MUTATION("ChangeFeedWriteMoveIgnore", remoteVersion, m, data->thisServerID)
+							    .detail("Range", range)
+							    .detail("ChangeFeedID", rangeId)
+							    .detail("EmptyVersion", changeFeedInfo->emptyVersion);
+						}
+					}
+					if (versionsFetched > 0) {
+						ASSERT(firstVersion != invalidVersion);
+						ASSERT(lastVersion != invalidVersion);
+						data->storage.clearRange(
+						    KeyRangeRef(changeFeedDurableKey(changeFeedInfo->id, firstVersion),
+						                changeFeedDurableKey(changeFeedInfo->id, lastVersion + 1)));
+						++data->counters.kvSystemClearRanges;
+						firstVersion = invalidVersion;
+						lastVersion = invalidVersion;
+						versionsFetched = 0;
+					}
 				}
-				if (localVersion <= remoteVersion) {
-					// Do this once per wait instead of once per version for efficiency
-					data->fetchingChangeFeeds.insert(changeFeedInfo->id);
-					Standalone<MutationsAndVersionRef> _localResult = waitNext(localResults.getFuture());
-					localResult = _localResult;
-				}
+				remoteLoc++;
 			}
 			// Do this once per wait instead of once per version for efficiency
 			data->fetchingChangeFeeds.insert(changeFeedInfo->id);
@@ -6543,11 +6490,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		state int debug_nextRetryToLog = 1;
 		state Error lastError;
 
-		// TODO: update to FETCH once the priority multi lock is used.
-		// leaving the readtype off for now to prevent data fetches stall under heavy load
 		// it is used to inform the storage that the rangeRead is for Fetch
-		// state ReadOptions options = ReadOptions(Optional<UID>(), ReadType::FETCH);
-		state ReadOptions options = ReadOptions(Optional<UID>(), ReadType::NORMAL);
+		state ReadOptions options = ReadOptions(fetchKeysID, ReadType::FETCH);
 
 		// FIXME: The client cache does not notice when servers are added to a team. To read from a local storage server
 		// we must refresh the cache manually.
@@ -9898,6 +9842,21 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 	                               [self = self](TraceEvent& te) {
 		                               te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
 		                               te.detail("Tag", self->tag.toString());
+		                               std::vector<int> rpr = self->readPriorityRanks;
+		                               te.detail("ReadsActive", self->ssLock.totalRunners());
+		                               te.detail("ReadsWaiting", self->ssLock.totalWaiters());
+		                               int type = (int)ReadType::FETCH;
+		                               te.detail("ReadFetchActive", self->ssLock.numRunners(rpr[type]));
+		                               te.detail("ReadFetchWaiting", self->ssLock.numWaiters(rpr[type]));
+		                               type = (int)ReadType::LOW;
+		                               te.detail("ReadLowActive", self->ssLock.numRunners(rpr[type]));
+		                               te.detail("ReadLowWaiting", self->ssLock.numWaiters(rpr[type]));
+		                               type = (int)ReadType::NORMAL;
+		                               te.detail("ReadNormalActive", self->ssLock.numRunners(rpr[type]));
+		                               te.detail("ReadNormalWaiting", self->ssLock.numWaiters(rpr[type]));
+		                               type = (int)ReadType::HIGH;
+		                               te.detail("ReadHighActive", self->ssLock.numRunners(rpr[type]));
+		                               te.detail("ReadHighWaiting", self->ssLock.numWaiters(rpr[type]));
 		                               StorageBytes sb = self->storage.getStorageBytes();
 		                               te.detail("KvstoreBytesUsed", sb.used);
 		                               te.detail("KvstoreBytesFree", sb.free);
@@ -10754,6 +10713,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		// If the storage server dies while something that uses self is still on the stack,
 		// we want that actor to complete before we terminate and that memory goes out of scope
+
+		self.ssLock.kill();
+
 		state Error err = e;
 		if (storageServerTerminated(self, persistentData, err)) {
 			ssCore.cancel();
@@ -10874,6 +10836,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		throw internal_error();
 	} catch (Error& e) {
+
+		self.ssLock.kill();
+
 		if (self.byteSampleRecovery.isValid()) {
 			self.byteSampleRecovery.cancel();
 		}

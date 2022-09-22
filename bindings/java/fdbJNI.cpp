@@ -1037,7 +1037,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1verify
 		return 0;
 	}
 
-	FDBFuture* f = fdb_database_list_blobbified_ranges(
+	FDBFuture* f = fdb_database_verify_blob_range(
 	    tr, startKey, jenv->GetArrayLength(beginKeyBytes), endKey, jenv->GetArrayLength(endKeyBytes), version);
 	jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)startKey, JNI_ABORT);
 	jenv->ReleaseByteArrayElements(endKeyBytes, (jbyte*)endKey, JNI_ABORT);

@@ -284,10 +284,20 @@ static JsonBuilderObject getError(const TraceEventFields& errorFields) {
 	return statusObj;
 }
 
-static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
-                                              std::vector<WorkerDetails> workers,
-                                              Optional<DatabaseConfiguration> configuration,
-                                              std::set<std::string>* incomplete_reasons) {
+namespace {
+
+void reportCgroupCpuStat(JsonBuilderObject& object, const TraceEventFields& eventFields) {
+	JsonBuilderObject cgroupCpuStatObj;
+	cgroupCpuStatObj.setKeyRawNumber("nr_periods", eventFields.getValue("NrPeriods"));
+	cgroupCpuStatObj.setKeyRawNumber("nr_throttled", eventFields.getValue("NrThrottled"));
+	cgroupCpuStatObj.setKeyRawNumber("throttled_time", eventFields.getValue("ThrottledTime"));
+	object["cgroup_cpu_stat"] = cgroupCpuStatObj;
+}
+
+JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
+                                       std::vector<WorkerDetails> workers,
+                                       Optional<DatabaseConfiguration> configuration,
+                                       std::set<std::string>* incomplete_reasons) {
 	JsonBuilderObject machineMap;
 	double metric;
 	int failed = 0;
@@ -338,6 +348,10 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 				memoryObj.setKeyRawNumber("committed_bytes", event.getValue("CommittedMemory"));
 				memoryObj.setKeyRawNumber("free_bytes", event.getValue("AvailableMemory"));
 				statusObj["memory"] = memoryObj;
+
+#ifdef __linux__
+				reportCgroupCpuStat(statusObj, event);
+#endif // __linux__
 
 				JsonBuilderObject cpuObj;
 				double cpuSeconds = event.getDouble("CPUSeconds");
@@ -401,6 +415,8 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 
 	return machineMap;
 }
+
+} // anonymous namespace
 
 JsonBuilderObject getLagObject(int64_t versions) {
 	JsonBuilderObject lag;
