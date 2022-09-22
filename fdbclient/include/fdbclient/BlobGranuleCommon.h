@@ -55,6 +55,13 @@ struct GranuleDeltas : VectorRef<MutationsAndVersionRef> {
 	}
 };
 
+struct GranuleMaterializeStats {
+	int64_t inputBytes;
+	int64_t outputBytes;
+
+	GranuleMaterializeStats() : inputBytes(0), outputBytes(0) {}
+};
+
 struct BlobGranuleCipherKeysMeta {
 	EncryptCipherDomainId textDomainId;
 	EncryptCipherBaseKeyId textBaseCipherId;
