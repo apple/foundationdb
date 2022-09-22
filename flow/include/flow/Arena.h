@@ -298,13 +298,9 @@ public:
 	bool operator<(Optional const& o) const { return impl < o.impl; }
 
 	void reset() { impl.reset(); }
-#ifndef SWIFT_HACK
 	size_t hash() const { return hashFunc(impl); }
-#endif
 private:
-#ifndef SWIFT_HACK
 	static inline std::hash<std::optional<T>> hashFunc{};
-#endif
 	std::optional<T> impl;
 };
 
