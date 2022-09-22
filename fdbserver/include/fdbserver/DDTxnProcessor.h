@@ -86,7 +86,7 @@ public:
 	                                         const MoveKeysLock& lock,
 	                                         const DDEnabledState* ddEnabledState) const = 0;
 
-	virtual Future<Void> moveKeys(const MoveKeysParams& params) const = 0;
+	virtual Future<Void> moveKeys(const MoveKeysParams& params) = 0;
 };
 
 class DDTxnProcessorImpl;
@@ -139,7 +139,7 @@ public:
 		return ::removeStorageServer(cx, serverID, tssPairID, lock, ddEnabledState);
 	}
 
-	Future<Void> moveKeys(const MoveKeysParams& params) const override { return ::moveKeys(cx, params); }
+	Future<Void> moveKeys(const MoveKeysParams& params) override { return ::moveKeys(cx, params); }
 };
 
 // A mock transaction implementation for test usage.
@@ -174,7 +174,7 @@ public:
 	// test only
 	void setupMockGlobalState(Reference<InitialDataDistribution> initData);
 
-	Future<Void> moveKeys(const MoveKeysParams& params) const override;
+	Future<Void> moveKeys(const MoveKeysParams& params) override;
 };
 
 #endif // FOUNDATIONDB_DDTXNPROCESSOR_H

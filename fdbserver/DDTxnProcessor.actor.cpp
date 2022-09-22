@@ -631,6 +631,6 @@ void DDMockTxnProcessor::setupMockGlobalState(Reference<InitialDataDistribution>
 }
 
 // FIXME: finish moveKeys implementation
-Future<Void> DDMockTxnProcessor::moveKeys(const MoveKeysParams& params) const {
+Future<Void> DDMockTxnProcessor::moveKeys(const MoveKeysParams& params) {
 	UNREACHABLE();
 }
