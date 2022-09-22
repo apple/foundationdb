@@ -1325,6 +1325,24 @@ struct DDQueue : public IDDRelocationQueue {
 	}
 
 	int getUnhealthyRelocationCount() override { return unhealthyRelocations; }
+
+	Future<SrcDestTeamPair> getSrcDestTeams(const int& teamCollectionIndex,
+	                                        const GetTeamRequest& srcReq,
+	                                        const GetTeamRequest& destReq,
+	                                        const int& priority,
+	                                        TraceEvent* traceEvent);
+
+	Future<bool> rebalanceReadLoad(DataMovementReason moveReason,
+	                               Reference<IDataDistributionTeam> sourceTeam,
+	                               Reference<IDataDistributionTeam> destTeam,
+	                               bool primary,
+	                               TraceEvent* traceEvent);
+
+	Future<bool> rebalanceTeams(DataMovementReason moveReason,
+	                            Reference<IDataDistributionTeam const> sourceTeam,
+	                            Reference<IDataDistributionTeam const> destTeam,
+	                            bool primary,
+	                            TraceEvent* traceEvent);
 };
 
 ACTOR Future<Void> cancelDataMove(struct DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState) {
@@ -2165,6 +2183,29 @@ ACTOR Future<SrcDestTeamPair> getSrcDestTeams(DDQueue* self,
 	return {};
 }
 
+Future<SrcDestTeamPair> DDQueue::getSrcDestTeams(const int& teamCollectionIndex,
+                                                 const GetTeamRequest& srcReq,
+                                                 const GetTeamRequest& destReq,
+                                                 const int& priority,
+                                                 TraceEvent* traceEvent) {
+	return ::getSrcDestTeams(this, teamCollectionIndex, srcReq, destReq, priority, traceEvent);
+}
+Future<bool> DDQueue::rebalanceReadLoad(DataMovementReason moveReason,
+                                        Reference<IDataDistributionTeam> sourceTeam,
+                                        Reference<IDataDistributionTeam> destTeam,
+                                        bool primary,
+                                        TraceEvent* traceEvent) {
+	return ::rebalanceReadLoad(this, moveReason, sourceTeam, destTeam, primary, traceEvent);
+}
+
+Future<bool> DDQueue::rebalanceTeams(DataMovementReason moveReason,
+                                     Reference<const IDataDistributionTeam> sourceTeam,
+                                     Reference<const IDataDistributionTeam> destTeam,
+                                     bool primary,
+                                     TraceEvent* traceEvent) {
+	return ::rebalanceTeams(this, moveReason, sourceTeam, destTeam, primary, traceEvent);
+}
+
 ACTOR Future<bool> getSkipRebalanceValue(std::shared_ptr<IDDTxnProcessor> txnProcessor, bool readRebalance) {
 	Optional<Value> val = wait(txnProcessor->readRebalanceDDIgnoreKey());
 
@@ -2207,22 +2248,21 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 
 		// NOTE: the DD throttling relies on DDQueue, so here just trigger the balancer periodically
 		wait(delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch));
-
-		if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
-			wait(store(skipCurrentLoop, getSkipRebalanceValue(self->txnProcessor, readRebalance)));
-			lastRead = now();
-		}
-		traceEvent.detail("Enabled", !skipCurrentLoop);
-
-		if (skipCurrentLoop) {
-			rebalancePollingInterval =
-			    std::max(rebalancePollingInterval, SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL);
-			continue;
-		} else {
-			rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
-		}
-
 		try {
+			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
+				wait(store(skipCurrentLoop, getSkipRebalanceValue(self->txnProcessor, readRebalance)));
+				lastRead = now();
+			}
+			traceEvent.detail("Enabled", !skipCurrentLoop);
+
+			if (skipCurrentLoop) {
+				rebalancePollingInterval =
+				    std::max(rebalancePollingInterval, SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL);
+				continue;
+			} else {
+				rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
+			}
+
 			traceEvent.detail("QueuedRelocations", self->priority_relocations[ddPriority]);
 
 			if (self->priority_relocations[ddPriority] < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
@@ -2240,7 +2280,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 				                         ForReadBalance(readRebalance),
 				                         PreferLowerReadUtil::True);
 				state Future<SrcDestTeamPair> getTeamFuture =
-				    getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, ddPriority, &traceEvent);
+				    self->getSrcDestTeams(teamCollectionIndex, srcReq, destReq, ddPriority, &traceEvent);
 				wait(ready(getTeamFuture));
 				sourceTeam = getTeamFuture.get().first;
 				destTeam = getTeamFuture.get().second;
@@ -2248,9 +2288,9 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 				// clang-format off
 				if (sourceTeam.isValid() && destTeam.isValid()) {
 					if (readRebalance) {
-						wait(store(moved,rebalanceReadLoad(self, reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
+						wait(store(moved,self->rebalanceReadLoad( reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
 					} else {
-						wait(store(moved,rebalanceTeams(self, reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
+						wait(store(moved,self->rebalanceTeams( reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
 					}
 				}
 				// clang-format on
