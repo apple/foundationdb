@@ -2978,8 +2978,10 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 		++data->counters.feedStreamQueries;
 
 		// FIXME: do something more sophisticated here besides hard limit
-		if (data->activeFeedQueries >= SERVER_KNOBS->STORAGE_FEED_QUERY_HARD_LIMIT ||
-		    (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.005))) {
+		// Allow other storage servers fetching feeds to go above this limit. currently, req.canReadPopped == read is a
+		// fetch from another ss
+		if (!req.canReadPopped && (data->activeFeedQueries >= SERVER_KNOBS->STORAGE_FEED_QUERY_HARD_LIMIT ||
+		                           (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.005)))) {
 			req.reply.sendError(storage_too_many_feed_streams());
 			++data->counters.rejectedFeedStreamQueries;
 			return Void();
