@@ -178,6 +178,15 @@ void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> 
 	}
 }
 
+json_spirit::mObject TenantGroupEntry::toJson() const {
+	json_spirit::mObject tenantGroupEntry;
+	if (assignedCluster.present()) {
+		tenantGroupEntry["assigned_cluster"] = assignedCluster.get().toString();
+	}
+
+	return tenantGroupEntry;
+}
+
 TenantMetadataSpecification& TenantMetadata::instance() {
 	static TenantMetadataSpecification _instance = TenantMetadataSpecification("\xff/"_sr);
 	return _instance;

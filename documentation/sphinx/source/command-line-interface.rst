@@ -522,6 +522,50 @@ Changes the name of an existing tenant.
 
 ``NEW_NAME`` - the desired name of the tenant. This name must not already be in use.
 
+
+tenantgroup
+-----------
+
+The ``tenantgroup`` command is used to view details about the tenant groups in a cluster. The ``tenantgroup`` command has the following subcommands:
+
+list
+^^^^
+
+``tenantgroup list [BEGIN] [END] [LIMIT]``
+
+Lists the tenant groups present in the cluster.
+
+``BEGIN`` - the first tenant group to list. Defaults to the empty tenant group name ``""``.
+
+``END`` - the exclusive end tenant group to list. Defaults to ``\xff\xff``.
+
+``LIMIT`` - the number of tenant groups to list. Defaults to 100.
+
+get
+^^^
+
+``tenantgroup get <NAME> [JSON]``
+
+Prints the metadata for a tenant group.
+
+``NAME`` - the name of the tenant group to print.
+
+``JSON`` - if specified, the output of the command will be printed in the form of a JSON string::
+
+    {
+        "tenant_group": {
+            "assigned_cluster": "cluster1",
+        },
+        "type": "success"
+    }
+
+In the event of an error, the JSON output will include an error message::
+
+    {
+        "error": "...",
+        "type": "error"
+    }
+
 throttle
 --------
 
