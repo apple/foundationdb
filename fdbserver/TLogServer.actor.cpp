@@ -1824,11 +1824,12 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				}
 			} else {
 				// FIXME: Limit to approximately DESIRED_TOTATL_BYTES somehow.
+				state KeyRange pdRange(KeyRangeRef(
+				    persistTagMessageRefsKey(logData->logId, reqTag, reqBegin),
+				    persistTagMessageRefsKey(logData->logId, reqTag, logData->persistentDataDurableVersion + 1)));
+
 				RangeResult kvrefs = wait(self->persistentData->readRange(
-				    KeyRangeRef(
-				        persistTagMessageRefsKey(logData->logId, reqTag, reqBegin),
-				        persistTagMessageRefsKey(logData->logId, reqTag, logData->persistentDataDurableVersion + 1)),
-				    SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_BATCHES_PER_PEEK + 1));
+				    pdRange, SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_BATCHES_PER_PEEK + 1));
 
 				//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", replyPromise.getEndpoint().getPrimaryAddress()).detail("Tag1Results", s1).detail("Tag2Results", s2).detail("Tag1ResultsLim", kv1.size()).detail("Tag2ResultsLim", kv2.size()).detail("Tag1ResultsLast", kv1.size() ? kv1[0].key : "").detail("Tag2ResultsLast", kv2.size() ? kv2[0].key : "").detail("Limited", limited).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowEpoch", self->epoch()).detail("NowSeq", self->sequence.getNextSequence());
 
@@ -1851,7 +1852,14 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 							firstVersion = std::min(firstVersion, sd.version);
 							const IDiskQueue::location end = sd.start.lo + sd.length;
 							if (end <= sd.start) {
-								TraceEvent(SevError, "TLogPeekLocationError")
+								TraceEvent(SevError, "TLogPeekLocationError1")
+								    .detail("KvrefsSize", kvrefs.size())
+								    .detail("Tag", reqTag)
+								    .detail("ReqBegin", reqBegin)
+								    .detail("KvrefsIndex", i)
+								    .detail("RangeBegin", pdRange.begin)
+								    .detail("RangeEnd", pdRange.end)
+								    .detail("ReturnedKey",kv.key)
 								    .detail("Start", std::string(sd.start))
 								    .detail("Length", sd.length)
 								    .detail("End", std::string(end));
@@ -1874,7 +1882,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				messageReads.reserve(commitLocations.size());
 				for (const auto& pair : commitLocations) {
 					if (pair.second <= pair.first) {
-						TraceEvent(SevError, "TLogPeekLocationError")
+						TraceEvent(SevError, "TLogPeekLocationError2")
 						    .detail("Start", std::string(pair.first))
 						    .detail("End", std::string(pair.second));
 						ASSERT(false); // DEBUG ASSERTION
