@@ -33,7 +33,7 @@ bool compareShardInfo(const DDShardInfo& a, const DDShardInfo& other) {
 	std::cout << describe(a.primarySrc) << " | " << describe(other.primarySrc) << "\n";
 	std::cout << describe(a.primaryDest) << " | " << describe(other.primaryDest) << "\n";
 	std::cout << describe(a.remoteSrc) << " | " << describe(other.remoteSrc) << "\n";
-	std::cout << describe(a.remoteSrc) << " | " << describe(other.remoteSrc) << "\n";
+	std::cout << describe(a.remoteDest) << " | " << describe(other.remoteDest) << "\n";
 
 	// Mock DD just care about the server<->key mapping in DDShardInfo
 	return a.key == other.key && a.hasDest == other.hasDest && a.primaryDest == other.primaryDest &&
