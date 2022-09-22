@@ -47,7 +47,7 @@ struct RollbackWorkload : FailureInjectionWorkload {
 		multiple = getOption(options, "multiple"_sr, multiple);
 	}
 
-	void initFailureInjectionMode(DeterministicRandom& random, unsigned count) override {
+	void initFailureInjectionMode(DeterministicRandom& random) override {
 		enabled = clientId == 0;
 		multiple = random.coinflip();
 		enableFailures = random.random01() < 0.2;
