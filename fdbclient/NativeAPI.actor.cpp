@@ -6704,6 +6704,9 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 
 	case FDBTransactionOptions::USE_GRV_CACHE:
 		validateOptionValueNotPresent(value);
+		if (apiVersionAtLeast(720) && !trState->cx->sharedStatePtr) {
+			throw invalid_option();
+		}
 		if (trState->numErrors == 0) {
 			trState->options.useGrvCache = true;
 		}

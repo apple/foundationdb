@@ -1104,6 +1104,7 @@ private:
 
 	bool networkStartSetup;
 	volatile bool networkSetup;
+	bool disableBypass;
 	volatile bool bypassMultiClientApi;
 	volatile bool externalClient;
 	ApiVersion apiVersion;
