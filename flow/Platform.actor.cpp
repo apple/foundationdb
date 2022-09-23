@@ -3729,6 +3729,7 @@ void registerCrashHandler() {
 	sigaction(SIGBUS, &action, nullptr);
 	sigaction(SIGUSR2, &action, nullptr);
 	sigaction(SIGTERM, &action, nullptr);
+	sigaction(SIGABRT, &action, nullptr);
 #else
 	// No crash handler for other platforms!
 #endif
