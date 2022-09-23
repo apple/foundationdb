@@ -9619,6 +9619,14 @@ Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Vo
 #pragma region Core
 #endif
 
+ACTOR Future<Void> waitMetricsTenantAware(StorageServer* self, WaitMetricsRequest req) {
+	wait(success(waitForVersionNoTooOld(self, latestVersion)));
+	Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo);
+	Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
+	wait(self->metrics.waitMetrics(req, delayJittered(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT), tenantPrefix));
+	return Void();
+}
+
 ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) {
 	state Future<Void> doPollMetrics = Void();
 
@@ -9660,11 +9668,13 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()");
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
-					wait(success(waitForVersionNoTooOld(self, latestVersion)));
-					Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo);
-					Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
-					self->actors.add(self->metrics.waitMetrics(
-					    req, delayJittered(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT), tenantPrefix));
+					// TODO(kejriwal)
+					self->actors.add(waitMetricsTenantAware(self, req));
+					// wait(success(waitForVersionNoTooOld(self, latestVersion)));
+					// Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo);
+					// Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
+					// self->actors.add(self->metrics.waitMetrics(
+					//     req, delayJittered(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT), tenantPrefix));
 				}
 			}
 			when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {

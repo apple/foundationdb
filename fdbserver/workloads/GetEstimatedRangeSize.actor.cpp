@@ -44,52 +44,51 @@ struct Members {
 };
 
 struct GetEstimatedRangeSizeWorkload : TestWorkload, Members {
-	int actorCount, nodeCount;
-	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
+	int nodeCount;
+	double testDuration;
 	Key keyPrefix;
+	bool hasTenant;
 
-	std::vector<Future<Void>> clients;
-	PerfIntCounter transactions, retries, tooOldRetries, commitFailedRetries;
-	PerfDoubleCounter totalLatency;
-
-	GetEstimatedRangeSizeWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), tooOldRetries("Retries.too_old"),
-	    commitFailedRetries("Retries.commit_failed"), totalLatency("Latency") {
+	GetEstimatedRangeSizeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
-		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
-		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
-		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
+		nodeCount = getOption(options, "nodeCount"_sr, 10000.0);
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString());
-		traceParentProbability = getOption(options, "traceParentProbability"_sr, 0.01);
-		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
+		hasTenant = hasOption(options, "tenant"_sr);
 
-		ASSERT(g_network->isSimulated());
-		auto k = g_simulator.authKeys.begin();
-		this->tenant = getOption(options, "tenant"_sr, "DefaultTenant"_sr);
-		// make it comfortably longer than the timeout of the workload
-		auto currentTime = uint64_t(lround(g_network->timer()));
-		this->token.algorithm = authz::Algorithm::ES256;
-		this->token.issuedAtUnixTime = currentTime;
-		this->token.expiresAtUnixTime =
-		    currentTime + uint64_t(std::lround(getCheckTimeout())) + uint64_t(std::lround(testDuration)) + 100;
-		this->token.keyId = k->first;
-		this->token.notBeforeUnixTime = currentTime - 10;
-		VectorRef<StringRef> tenants;
-		tenants.push_back_deep(this->arena, this->tenant);
-		this->token.tenants = tenants;
-		// we currently don't support this workload to be run outside of simulation
-		this->signedToken = authz::jwt::signToken(this->arena, this->token, k->second);
+		if (hasTenant) {
+			ASSERT(g_network->isSimulated());
+			auto k = g_simulator.authKeys.begin();
+			this->tenant = getOption(options, "tenant"_sr, "DefaultTenant"_sr);
+			// make it comfortably longer than the timeout of the workload
+			auto currentTime = uint64_t(lround(g_network->timer()));
+			this->token.algorithm = authz::Algorithm::ES256;
+			this->token.issuedAtUnixTime = currentTime;
+			this->token.expiresAtUnixTime =
+			    currentTime + uint64_t(std::lround(getCheckTimeout())) + uint64_t(std::lround(testDuration)) + 100;
+			this->token.keyId = k->first;
+			this->token.notBeforeUnixTime = currentTime - 10;
+			VectorRef<StringRef> tenants;
+			tenants.push_back_deep(this->arena, this->tenant);
+			this->token.tenants = tenants;
+			// we currently don't support this workload to be run outside of simulation
+			this->signedToken = authz::jwt::signToken(this->arena, this->token, k->second);
+		}
 	}
 
 	std::string description() const override { return "GetEstimatedRangeSizeWorkload"; }
 
 	Future<Void> setup(Database const& cx) override {
+		if (!hasTenant) {
+			return Void();
+		}
 		cx->defaultTenant = this->tenant;
 		return bulkSetup(cx, this, nodeCount, Promise<double>());
 	}
 
 	Future<Void> start(Database const& cx) override {
-		cx->defaultTenant = this->tenant;
+		if (clientId > 0) {
+			return Void();
+		}
 		return checkSize(this, cx);
 	}
 
@@ -100,7 +99,9 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload, Members {
 	StringRef getAuthToken() const { return this->signedToken; }
 
 	void setAuthToken(ReadYourWritesTransaction& tr) {
-		tr.setOption(FDBTransactionOptions::AUTHORIZATION_TOKEN, this->signedToken);
+		if (tr.getTenant().present()) {
+			tr.setOption(FDBTransactionOptions::AUTHORIZATION_TOKEN, this->signedToken);
+		}
 	}
 
 	Key keyForIndex(int n) { return key(n); }
@@ -110,20 +111,25 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload, Members {
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(key(n), value((n + 1) % nodeCount)); }
 
 	ACTOR static Future<Void> checkSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
-		int64_t size = wait(getSize(self, cx));
-		TraceEvent(SevDebug, "GetEstimatedRangeSizeResults")
-		    .detail("Tenant", cx->defaultTenant.get())
-		    .detail("TenantSize", size);
+		state int64_t size = wait(getSize(self, cx));
 		ASSERT_GT(size, 0);
 		return Void();
 	}
 
 	ACTOR static Future<int64_t> getSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
-		state ReadYourWritesTransaction tr(cx, cx->defaultTenant);
+		state Optional<TenantName> tenant = self->hasTenant ? self->tenant : Optional<TenantName>();
+		cx->defaultTenant = tenant;
+		state ReadYourWritesTransaction tr(cx, tenant);
+		TraceEvent(SevDebug, "AKGetSize1")
+		    .detail("Tenant", cx->defaultTenant.present() ? cx->defaultTenant.get() : "none"_sr);
+
 		loop {
 			try {
 				self->setAuthToken(tr);
 				state int64_t size = wait(tr.getEstimatedRangeSizeBytes(normalKeys));
+				TraceEvent(SevDebug, "AKGetSize2")
+				    .detail("Tenant", cx->defaultTenant.present() ? cx->defaultTenant.get() : "none"_sr)
+				    .detail("Size", size);
 				tr.reset();
 				return size;
 			} catch (Error& e) {
