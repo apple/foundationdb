@@ -59,16 +59,19 @@ generate_cxx_compat_header(fdbserver_swift "FDBServer")
 
 add_dependencies(fdbserver_swift fdbserver_actors)
 # This does not work! (see rdar://99107402)
-# target_link_libraries(fdbserver PRIVATE fdbserver_swift)
-add_dependencies(fdbserver fdbserver_swift)
+# target_link_libraries(fdbserver PRIVATE flow_swift fdbserver_swift)
+add_dependencies(fdbserver flow_swift fdbserver_swift)
 add_custom_target(show_fdbserver_swift_objs COMMAND ${CMAKE_COMMAND} -E echo "$<TARGET_OBJECTS:fdbserver_swift>")
+target_link_options(fdbserver PRIVATE "$<TARGET_OBJECTS:flow_swift>")
 target_link_options(fdbserver PRIVATE "$<TARGET_OBJECTS:fdbserver_swift>")
+# This dependency ensures that fdbserver depends on fdbserver_swift at link time.
+set_source_files_properties(IConfigConsumer.cpp PROPERTIES OBJECT_DEPENDS "${CMAKE_BINARY_DIR}/lib/libfdbserver_swift.a")
+
 swift_get_linker_search_paths(SWIFT_LINK_PATHS)
 target_link_directories(fdbserver PRIVATE "${SWIFT_LINK_PATHS}")
 target_link_options(fdbserver PRIVATE "-lswiftCore")
 target_link_options(fdbserver PRIVATE "-lswift_Concurrency")
-# This dependency ensures that fdbserver depends on fdbserver_swift at link time.
-set_source_files_properties(IConfigConsumer.cpp PROPERTIES OBJECT_DEPENDS "${CMAKE_BINARY_DIR}/lib/libfdbserver_swift.a")
+
 
 # Generate the module map for FDBServer.
 include(GenerateModulemap)

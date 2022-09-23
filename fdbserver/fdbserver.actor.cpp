@@ -109,6 +109,7 @@
 extern "C" void testSwiftInFDB();
 extern "C" void swiftCallMeFuture(Promise<int>* promise);
 
+#include "SwiftModules/Flow"
 #include "SwiftModules/FDBServer"
 
 using namespace std::literals;
@@ -2050,11 +2051,15 @@ int main(int argc, char* argv[]) {
         printf("[c++][main] setting up Swift Concurrency hooks\n");
         installGlobalSwiftConcurrencyHooks(g_network);
 
+        // Test calling into Swift's flow module.
+        using namespace flow_swift;
+        swiftFileB();
 
+        // Test calling into Swift's fdbserver module.
         using namespace fdbserver_swift;
-            int val = swiftFunctionCalledFromCpp(42);
-            if (val != 42)
-                abort();
+        int val = swiftFunctionCalledFromCpp(42);
+        if (val != 42)
+            abort();
 
         auto swiftCallingFlowActor = swiftCallsActor(); // spawns actor that will call Swift functions
 
