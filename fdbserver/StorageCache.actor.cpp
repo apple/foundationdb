@@ -248,9 +248,9 @@ public:
 	    lastTLogVersion(0), lastVersionWithData(0), peekVersion(0), compactionInProgress(Void()),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES), debug_inApplyUpdate(false),
 	    debug_lastValidateTime(0), versionLag(0), behind(false), counters(this) {
-		version.initMetric(LiteralStringRef("StorageCacheData.Version"), counters.cc.id);
-		desiredOldestVersion.initMetric(LiteralStringRef("StorageCacheData.DesriedOldestVersion"), counters.cc.id);
-		oldestVersion.initMetric(LiteralStringRef("StorageCacheData.OldestVersion"), counters.cc.id);
+		version.initMetric("StorageCacheData.Version"_sr, counters.cc.id);
+		desiredOldestVersion.initMetric("StorageCacheData.DesriedOldestVersion"_sr, counters.cc.id);
+		oldestVersion.initMetric("StorageCacheData.OldestVersion"_sr, counters.cc.id);
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
@@ -517,9 +517,9 @@ ACTOR Future<Void> getValueQ(StorageCacheData* data, GetValueRequest req) {
 		}
 
 		// DEBUG_MUTATION("CacheGetValue", version, MutationRef(MutationRef::DebugKey, req.key,
-		// v.present()?v.get():LiteralStringRef("<null>"))); DEBUG_MUTATION("CacheGetPath", version,
+		// v.present()?v.get():"<null>"_sr)); DEBUG_MUTATION("CacheGetPath", version,
 		// MutationRef(MutationRef::DebugKey, req.key,
-		// path==0?LiteralStringRef("0"):path==1?LiteralStringRef("1"):LiteralStringRef("2")));
+		// path==0?"0"_sr:path==1?"1"_sr:"2"_sr));
 
 		if (v.present()) {
 			++data->counters.rowsQueried;

@@ -65,9 +65,9 @@ struct SerializabilityWorkload : TestWorkload {
 	};
 
 	SerializabilityWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), success(true) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 30.0);
-		numOps = getOption(options, LiteralStringRef("numOps"), 21);
-		nodes = getOption(options, LiteralStringRef("nodes"), 1000);
+		testDuration = getOption(options, "testDuration"_sr, 30.0);
+		numOps = getOption(options, "numOps"_sr, 21);
+		nodes = getOption(options, "nodes"_sr, 1000);
 
 		adjacentKeys = false; // deterministicRandom()->random01() < 0.5;
 		valueSizeRange = std::make_pair(0, 100);

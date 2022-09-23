@@ -78,6 +78,9 @@ struct TestSpec {
 	int minClients = 1;
 	int maxClients = 10;
 
+	// Disable the ability to bypass the MVC API, for
+	// cases when there are no external clients
+	bool disableClientBypass = false;
 	// Number of tenants (a random number in the [min,max] range)
 	int minTenants = 0;
 	int maxTenants = 0;

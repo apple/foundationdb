@@ -130,12 +130,10 @@ struct GrvProxyStats {
 	                          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    recentRequests(0), lastBucketBegin(now()),
 	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE / FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
-	    grvConfirmEpochLiveDist(Histogram::getHistogram(LiteralStringRef("GrvProxy"),
-	                                                    LiteralStringRef("GrvConfirmEpochLive"),
-	                                                    Histogram::Unit::microseconds)),
-	    grvGetCommittedVersionRpcDist(Histogram::getHistogram(LiteralStringRef("GrvProxy"),
-	                                                          LiteralStringRef("GrvGetCommittedVersionRpc"),
-	                                                          Histogram::Unit::microseconds)) {
+	    grvConfirmEpochLiveDist(
+	        Histogram::getHistogram("GrvProxy"_sr, "GrvConfirmEpochLive"_sr, Histogram::Unit::microseconds)),
+	    grvGetCommittedVersionRpcDist(
+	        Histogram::getHistogram("GrvProxy"_sr, "GrvGetCommittedVersionRpc"_sr, Histogram::Unit::microseconds)) {
 		// The rate at which the limit(budget) is allowed to grow.
 		specialCounter(cc, "SystemGRVQueueSize", [this]() { return this->systemGRVQueueSize; });
 		specialCounter(cc, "DefaultGRVQueueSize", [this]() { return this->defaultGRVQueueSize; });

@@ -1156,10 +1156,8 @@ struct AutoQuorumChange final : IQuorumChange {
 	}
 
 	ACTOR static Future<int> getRedundancy(AutoQuorumChange* self, Transaction* tr) {
-		state Future<Optional<Value>> fStorageReplicas =
-		    tr->get(LiteralStringRef("storage_replicas").withPrefix(configKeysPrefix));
-		state Future<Optional<Value>> fLogReplicas =
-		    tr->get(LiteralStringRef("log_replicas").withPrefix(configKeysPrefix));
+		state Future<Optional<Value>> fStorageReplicas = tr->get("storage_replicas"_sr.withPrefix(configKeysPrefix));
+		state Future<Optional<Value>> fLogReplicas = tr->get("log_replicas"_sr.withPrefix(configKeysPrefix));
 		wait(success(fStorageReplicas) && success(fLogReplicas));
 		int redundancy = std::min(atoi(fStorageReplicas.get().get().toString().c_str()),
 		                          atoi(fLogReplicas.get().get().toString().c_str()));
@@ -1321,10 +1319,7 @@ struct AutoQuorumChange final : IQuorumChange {
 		std::map<StringRef, std::map<StringRef, int>> currentCounts;
 		std::map<StringRef, int> hardLimits;
 
-		std::vector<StringRef> fields({ LiteralStringRef("dcid"),
-		                                LiteralStringRef("data_hall"),
-		                                LiteralStringRef("zoneid"),
-		                                LiteralStringRef("machineid") });
+		std::vector<StringRef> fields({ "dcid"_sr, "data_hall"_sr, "zoneid"_sr, "machineid"_sr });
 
 		for (auto field = fields.begin(); field != fields.end(); field++) {
 			if (field->toString() == "zoneid") {
@@ -1350,7 +1345,7 @@ struct AutoQuorumChange final : IQuorumChange {
 					if (maxCounts[*field] == 0) {
 						maxCounts[*field] = 1;
 					}
-					auto value = worker->locality.get(*field).orDefault(LiteralStringRef(""));
+					auto value = worker->locality.get(*field).orDefault(""_sr);
 					auto currentCount = currentCounts[*field][value];
 					if (currentCount >= maxCounts[*field]) {
 						valid = false;
@@ -1359,7 +1354,7 @@ struct AutoQuorumChange final : IQuorumChange {
 				}
 				if (valid) {
 					for (auto field = fields.begin(); field != fields.end(); field++) {
-						auto value = worker->locality.get(*field).orDefault(LiteralStringRef(""));
+						auto value = worker->locality.get(*field).orDefault(""_sr);
 						currentCounts[*field][value] += 1;
 					}
 					chosen.push_back(worker->address);
@@ -1541,8 +1536,7 @@ ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> ser
 						// This is why we now make two clears: first only of the ip
 						// address, the second will delete all ports.
 						if (s.isWholeMachine())
-							ryw.clear(KeyRangeRef(addr.withSuffix(LiteralStringRef(":")),
-							                      addr.withSuffix(LiteralStringRef(";"))));
+							ryw.clear(KeyRangeRef(addr.withSuffix(":"_sr), addr.withSuffix(";"_sr)));
 					}
 				}
 				TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
@@ -2122,9 +2116,7 @@ ACTOR Future<Void> lockDatabase(Transaction* tr, UID id) {
 	}
 
 	tr->atomicOp(databaseLockedKey,
-	             BinaryWriter::toValue(id, Unversioned())
-	                 .withPrefix(LiteralStringRef("0123456789"))
-	                 .withSuffix(LiteralStringRef("\x00\x00\x00\x00")),
+	             BinaryWriter::toValue(id, Unversioned()).withPrefix("0123456789"_sr).withSuffix("\x00\x00\x00\x00"_sr),
 	             MutationRef::SetVersionstampedValue);
 	tr->addWriteConflictRange(normalKeys);
 	return Void();
@@ -2145,9 +2137,7 @@ ACTOR Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id)
 	}
 
 	tr->atomicOp(databaseLockedKey,
-	             BinaryWriter::toValue(id, Unversioned())
-	                 .withPrefix(LiteralStringRef("0123456789"))
-	                 .withSuffix(LiteralStringRef("\x00\x00\x00\x00")),
+	             BinaryWriter::toValue(id, Unversioned()).withPrefix("0123456789"_sr).withSuffix("\x00\x00\x00\x00"_sr),
 	             MutationRef::SetVersionstampedValue);
 	tr->addWriteConflictRange(normalKeys);
 	return Void();
@@ -2617,11 +2607,11 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 		auto dataHall = dataCenter + std::to_string(i / 2 % 2);
 		auto rack = dataHall + std::to_string(i % 2);
 		auto machineId = rack + std::to_string(i);
-		data.locality.set(LiteralStringRef("dcid"), StringRef(dataCenter));
-		data.locality.set(LiteralStringRef("data_hall"), StringRef(dataHall));
-		data.locality.set(LiteralStringRef("rack"), StringRef(rack));
-		data.locality.set(LiteralStringRef("zoneid"), StringRef(rack));
-		data.locality.set(LiteralStringRef("machineid"), StringRef(machineId));
+		data.locality.set("dcid"_sr, StringRef(dataCenter));
+		data.locality.set("data_hall"_sr, StringRef(dataHall));
+		data.locality.set("rack"_sr, StringRef(rack));
+		data.locality.set("zoneid"_sr, StringRef(rack));
+		data.locality.set("machineid"_sr, StringRef(machineId));
 		data.address.ip = IPAddress(i);
 
 		if (g_network->isSimulated()) {
@@ -2647,10 +2637,7 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 	std::map<StringRef, std::set<StringRef>> chosenValues;
 
 	ASSERT(chosen.size() == 5);
-	std::vector<StringRef> fields({ LiteralStringRef("dcid"),
-	                                LiteralStringRef("data_hall"),
-	                                LiteralStringRef("zoneid"),
-	                                LiteralStringRef("machineid") });
+	std::vector<StringRef> fields({ "dcid"_sr, "data_hall"_sr, "zoneid"_sr, "machineid"_sr });
 	for (auto worker = chosen.begin(); worker != chosen.end(); worker++) {
 		ASSERT(worker->ip.toV4() < workers.size());
 		LocalityData data = workers[worker->ip.toV4()].locality;
@@ -2659,10 +2646,10 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 		}
 	}
 
-	ASSERT(chosenValues[LiteralStringRef("dcid")].size() == 2);
-	ASSERT(chosenValues[LiteralStringRef("data_hall")].size() == 4);
-	ASSERT(chosenValues[LiteralStringRef("zoneid")].size() == 5);
-	ASSERT(chosenValues[LiteralStringRef("machineid")].size() == 5);
+	ASSERT(chosenValues["dcid"_sr].size() == 2);
+	ASSERT(chosenValues["data_hall"_sr].size() == 4);
+	ASSERT(chosenValues["zoneid"_sr].size() == 5);
+	ASSERT(chosenValues["machineid"_sr].size() == 5);
 	ASSERT(std::find(chosen.begin(), chosen.end(), workers[noAssignIndex].address) != chosen.end());
 
 	return Void();

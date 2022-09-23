@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -377,6 +378,8 @@ struct ReadWriteWorkload : ReadWriteCommon {
 	bool adjacentReads; // keys are adjacent within a transaction
 	bool adjacentWrites;
 	int extraReadConflictRangesPerTransaction, extraWriteConflictRangesPerTransaction;
+	int readType;
+	bool cacheResult;
 	Optional<Key> transactionTag;
 
 	int transactionsTagThrottled{ 0 };
@@ -386,23 +389,23 @@ struct ReadWriteWorkload : ReadWriteCommon {
 
 	ReadWriteWorkload(WorkloadContext const& wcx)
 	  : ReadWriteCommon(wcx), dependentReads(false), adjacentReads(false), adjacentWrites(false) {
-		extraReadConflictRangesPerTransaction =
-		    getOption(options, LiteralStringRef("extraReadConflictRangesPerTransaction"), 0);
-		extraWriteConflictRangesPerTransaction =
-		    getOption(options, LiteralStringRef("extraWriteConflictRangesPerTransaction"), 0);
-		dependentReads = getOption(options, LiteralStringRef("dependentReads"), false);
-		inconsistentReads = getOption(options, LiteralStringRef("inconsistentReads"), false);
-		adjacentReads = getOption(options, LiteralStringRef("adjacentReads"), false);
-		adjacentWrites = getOption(options, LiteralStringRef("adjacentWrites"), false);
-		rampUpLoad = getOption(options, LiteralStringRef("rampUpLoad"), false);
-		rampSweepCount = getOption(options, LiteralStringRef("rampSweepCount"), 1);
-		rangeReads = getOption(options, LiteralStringRef("rangeReads"), false);
-		rampTransactionType = getOption(options, LiteralStringRef("rampTransactionType"), false);
-		rampUpConcurrency = getOption(options, LiteralStringRef("rampUpConcurrency"), false);
-		batchPriority = getOption(options, LiteralStringRef("batchPriority"), false);
-		descriptionString = getOption(options, LiteralStringRef("description"), LiteralStringRef("ReadWrite"));
-		if (hasOption(options, LiteralStringRef("transactionTag"))) {
-			transactionTag = getOption(options, LiteralStringRef("transactionTag"), ""_sr);
+		extraReadConflictRangesPerTransaction = getOption(options, "extraReadConflictRangesPerTransaction"_sr, 0);
+		extraWriteConflictRangesPerTransaction = getOption(options, "extraWriteConflictRangesPerTransaction"_sr, 0);
+		dependentReads = getOption(options, "dependentReads"_sr, false);
+		inconsistentReads = getOption(options, "inconsistentReads"_sr, false);
+		adjacentReads = getOption(options, "adjacentReads"_sr, false);
+		adjacentWrites = getOption(options, "adjacentWrites"_sr, false);
+		rampUpLoad = getOption(options, "rampUpLoad"_sr, false);
+		rampSweepCount = getOption(options, "rampSweepCount"_sr, 1);
+		rangeReads = getOption(options, "rangeReads"_sr, false);
+		rampTransactionType = getOption(options, "rampTransactionType"_sr, false);
+		rampUpConcurrency = getOption(options, "rampUpConcurrency"_sr, false);
+		batchPriority = getOption(options, "batchPriority"_sr, false);
+		descriptionString = getOption(options, "description"_sr, "ReadWrite"_sr);
+		readType = getOption(options, "readType"_sr, 3);
+		cacheResult = getOption(options, "cacheResult"_sr, true);
+		if (hasOption(options, "transactionTag"_sr)) {
+			transactionTag = getOption(options, "transactionTag"_sr, ""_sr);
 		}
 
 		if (rampUpConcurrency)
@@ -411,8 +414,8 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		{
 			// with P(hotTrafficFraction) an access is directed to one of a fraction
 			//   of hot keys, else it is directed to a disjoint set of cold keys
-			hotKeyFraction = getOption(options, LiteralStringRef("hotKeyFraction"), 0.0);
-			double hotTrafficFraction = getOption(options, LiteralStringRef("hotTrafficFraction"), 0.0);
+			hotKeyFraction = getOption(options, "hotKeyFraction"_sr, 0.0);
+			double hotTrafficFraction = getOption(options, "hotTrafficFraction"_sr, 0.0);
 			ASSERT(hotKeyFraction >= 0 && hotTrafficFraction <= 1);
 			ASSERT(hotKeyFraction <= hotTrafficFraction); // hot keys should be actually hot!
 			// p(Cold key) = (1-FHP) * (1-hkf)
@@ -430,6 +433,10 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		if (transactionTag.present() && tr.getTags().size() == 0) {
 			tr.setOption(FDBTransactionOptions::AUTO_THROTTLE_TAG, transactionTag.get());
 		}
+		ReadOptions options;
+		options.type = static_cast<ReadType>(readType);
+		options.cacheResult = cacheResult;
+		tr.getTransaction().trState->readOptions = options;
 	}
 
 	std::string description() const override { return descriptionString.toString(); }
@@ -505,7 +512,6 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		state double startTime = now();
 		loop {
 			state Transaction tr(cx);
-
 			try {
 				self->setupTransaction(tr);
 				wait(self->readOp(&tr, keys, self, false));

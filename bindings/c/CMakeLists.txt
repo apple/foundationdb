@@ -294,6 +294,22 @@ if(NOT WIN32)
             )
 
   add_fdbclient_test(
+    NAME fdb_c_api_tests_local_only
+    DISABLE_LOG_DUMP
+    COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
+            --cluster-file
+            @CLUSTER_FILE@
+            --tester-binary
+            $<TARGET_FILE:fdb_c_api_tester>
+            --test-dir
+            ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/local_tests
+            --tmp-dir
+            @TMP_DIR@
+            --log-dir
+            @LOG_DIR@
+            )
+
+  add_fdbclient_test(
     NAME fdb_c_api_tests_blob_granule
     DISABLE_LOG_DUMP
     API_TEST_BLOB_GRANULES_ENABLED

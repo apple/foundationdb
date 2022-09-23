@@ -423,6 +423,8 @@ public:
 	                                                                           Optional<Version> summaryVersion,
 	                                                                           int rangeLimit);
 
+	void addGranuleMaterializeStats(const GranuleMaterializeStats& stats);
+
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
 	void set(const KeyRef& key, const ValueRef& value, AddConflictRange = AddConflictRange::True);
 	void atomicOp(const KeyRef& key,
@@ -477,6 +479,7 @@ public:
 	Database getDatabase() const { return trState->cx; }
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);
 
+	Transaction& getTransaction() { return *this; }
 	void setTransactionID(UID id);
 	void setToken(uint64_t token);
 

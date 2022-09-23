@@ -603,6 +603,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	int addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams);
 
 public:
+	std::shared_ptr<IDDTxnProcessor> db;
 	Database cx;
 
 	DatabaseConfiguration configuration;
@@ -620,7 +621,7 @@ public:
 	AsyncTrigger printDetailedTeamsInfo;
 	Reference<LocalitySet> storageServerSet;
 
-	DDTeamCollection(Database const& cx,
+	DDTeamCollection(const std::shared_ptr<IDDTxnProcessor>& db,
 	                 UID distributorId,
 	                 MoveKeysLock const& lock,
 	                 PromiseStream<RelocateShard> const& output,

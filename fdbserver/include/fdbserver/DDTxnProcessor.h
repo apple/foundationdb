@@ -36,6 +36,8 @@ public:
 	struct SourceServers {
 		std::vector<UID> srcServers, completeSources; // the same as RelocateData.src, RelocateData.completeSources;
 	};
+	virtual Database getDb() const = 0;
+	virtual bool isMocked() const = 0;
 	// get the source server list and complete source server list for range
 	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) = 0;
 
@@ -91,6 +93,10 @@ public:
 	    Optional<int> const& minSplitBytes = {}) const = 0;
 
 	virtual Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys) const = 0;
+
+	virtual Future<HealthMetrics> getHealthMetrics(bool detailed = false) const = 0;
+
+	virtual Future<Optional<Value>> readRebalanceDDIgnoreKey() const { return {}; }
 };
 
 class DDTxnProcessorImpl;
@@ -103,6 +109,9 @@ class DDTxnProcessor : public IDDTxnProcessor {
 public:
 	DDTxnProcessor() = default;
 	explicit DDTxnProcessor(Database cx) : cx(cx) {}
+
+	Database getDb() const override { return cx; };
+	bool isMocked() const override { return false; };
 
 	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
 
@@ -158,6 +167,10 @@ public:
 	                                                          Optional<int> const& minSplitBytes = {}) const override;
 
 	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys) const override;
+
+	Future<HealthMetrics> getHealthMetrics(bool detailed) const override;
+
+	Future<Optional<Value>> readRebalanceDDIgnoreKey() const override;
 };
 
 // A mock transaction implementation for test usage.
