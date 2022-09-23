@@ -30,7 +30,9 @@
 #include "flow/Arena.h"
 #include "flow/CompressionUtils.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/EncryptUtils.h"
 #include "flow/IRandom.h"
+#include "flow/Knobs.h"
 #include "flow/Trace.h"
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
@@ -289,7 +291,9 @@ struct IndexBlockRef {
 		                                     eKeys.headerCipherKey,
 		                                     cipherKeysCtx.ivRef.begin(),
 		                                     AES_256_IV_LENGTH,
-		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+		                                     FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED
+		                                         ? EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE
+		                                         : EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
 		                                     BlobCipherMetrics::BLOB_GRANULE);
 		Value serializedBuff = ObjectWriter::toValue(block, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 		BlobCipherEncryptHeader header;
@@ -412,7 +416,9 @@ struct IndexBlobGranuleFileChunkRef {
 		                                     eKeys.headerCipherKey,
 		                                     cipherKeysCtx.ivRef.begin(),
 		                                     AES_256_IV_LENGTH,
-		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+		                                     FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED
+		                                         ? EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE
+		                                         : EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
 		                                     BlobCipherMetrics::BLOB_GRANULE);
 		BlobCipherEncryptHeader header;
 		chunkRef.buffer =

@@ -38,6 +38,7 @@
 #include <limits>
 #include <memory>
 #include <openssl/aes.h>
+#include <openssl/cmac.h>
 #include <openssl/engine.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
@@ -192,7 +193,8 @@ typedef struct BlobCipherEncryptHeader {
 			uint8_t headerVersion{};
 			uint8_t encryptMode{};
 			uint8_t authTokenMode{};
-			uint8_t _reserved[4]{};
+			uint8_t authTokenAlgo{};
+			uint8_t _reserved[3]{};
 		} flags;
 		uint64_t _padding{};
 	};
@@ -223,12 +225,12 @@ typedef struct BlobCipherEncryptHeader {
 
 		struct {
 			// Cipher text authentication token
-			uint8_t cipherTextAuthToken[AUTH_TOKEN_SIZE]{};
-			uint8_t headerAuthToken[AUTH_TOKEN_SIZE]{};
+			uint8_t cipherTextAuthToken[AUTH_TOKEN_MAX_SIZE]{};
+			uint8_t headerAuthToken[AUTH_TOKEN_MAX_SIZE]{};
 		} multiAuthTokens;
 		struct {
-			uint8_t authToken[AUTH_TOKEN_SIZE]{};
-			uint8_t _reserved[AUTH_TOKEN_SIZE]{};
+			uint8_t authToken[AUTH_TOKEN_MAX_SIZE]{};
+			uint8_t _reserved[AUTH_TOKEN_MAX_SIZE]{};
 		} singleAuthToken;
 	};
 
@@ -555,7 +557,19 @@ public:
 	                           BlobCipherMetrics::UsageType usageType);
 	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
 	                           Reference<BlobCipherKey> hCipherKey,
+	                           const uint8_t* iv,
+	                           const int ivLen,
 	                           const EncryptAuthTokenMode mode,
+	                           const EncryptAuthTokenAlgo algo,
+	                           BlobCipherMetrics::UsageType usageType);
+	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
+	                           Reference<BlobCipherKey> hCipherKey,
+	                           const EncryptAuthTokenMode mode,
+	                           BlobCipherMetrics::UsageType usageType);
+	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
+	                           Reference<BlobCipherKey> hCipherKey,
+	                           const EncryptAuthTokenMode mode,
+	                           const EncryptAuthTokenAlgo algo,
 	                           BlobCipherMetrics::UsageType usageType);
 	~EncryptBlobCipherAes265Ctr();
 
@@ -571,6 +585,7 @@ private:
 	EncryptAuthTokenMode authTokenMode;
 	uint8_t iv[AES_256_IV_LENGTH];
 	BlobCipherMetrics::UsageType usageType;
+	EncryptAuthTokenAlgo authTokenAlgo;
 
 	void init();
 };
@@ -633,11 +648,23 @@ private:
 	HMAC_CTX* ctx;
 };
 
+class Aes256CmacDigestGen final : NonCopyable {
+public:
+	Aes256CmacDigestGen(const unsigned char* key, size_t len);
+	~Aes256CmacDigestGen();
+	CMAC_CTX* getCtx() const { return ctx; }
+	size_t digest(const uint8_t* data, const size_t datalen, uint8_t* digest, int digestlen);
+
+private:
+	CMAC_CTX* ctx;
+};
+
 void computeAuthToken(const uint8_t* payload,
                       const int payloadLen,
                       const uint8_t* key,
                       const int keyLen,
                       unsigned char* digestBuf,
-                      unsigned int digestBufSz);
+                      const EncryptAuthTokenAlgo algo,
+                      unsigned int digestMaxBufSz);
 
 #endif // FDBCLIENT_BLOB_CIPHER_H

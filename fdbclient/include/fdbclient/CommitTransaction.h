@@ -27,6 +27,8 @@
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Tracing.h"
+#include "flow/EncryptUtils.h"
+#include "flow/Knobs.h"
 
 // The versioned message has wire format : -1, version, messages
 static const int32_t VERSION_HEADER = -1;
@@ -157,7 +159,9 @@ struct MutationRef {
 		                                  headerCipherItr->second,
 		                                  iv,
 		                                  AES_256_IV_LENGTH,
-		                                  ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+		                                  FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED
+		                                      ? EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE
+		                                      : EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
 		                                  usageType);
 		BlobCipherEncryptHeader* header = new (arena) BlobCipherEncryptHeader;
 		StringRef headerRef(reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader));

@@ -29,6 +29,7 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/RadixTree.h"
 #include "flow/ActorCollection.h"
+#include "flow/EncryptUtils.h"
 #include "flow/Knobs.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -491,7 +492,9 @@ private:
 			ASSERT(cipherKeys.cipherHeaderKey.isValid());
 			EncryptBlobCipherAes265Ctr cipher(cipherKeys.cipherTextKey,
 			                                  cipherKeys.cipherHeaderKey,
-			                                  ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+			                                  FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED
+			                                      ? EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE
+			                                      : EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
 			                                  BlobCipherMetrics::KV_MEMORY);
 			BlobCipherEncryptHeader cipherHeader;
 			Arena arena;
