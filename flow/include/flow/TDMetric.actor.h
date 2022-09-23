@@ -168,6 +168,16 @@ struct MetricBatch {
 	FDBScope scope;
 	std::string statsd_message;
 
+	MetricBatch() {}
+
+	MetricBatch(FDBScope* in) {
+		assert(in != nullptr);
+		scope.inserts = std::move(in->inserts);
+		scope.appends = std::move(in->appends);
+		scope.updates = std::move(in->updates);
+		scope.callbacks = std::move(in->callbacks);
+	}
+
 	void clear() {
 		scope.clear();
 		statsd_message.clear();
@@ -618,7 +628,7 @@ public:
 	                                               IMetricDB* db,
 	                                               Standalone<MetricKeyRef> mk,
 	                                               uint64_t rollTime,
-	                                               MetricBatch* batch) {
+	                                               FDBScope* scope) {
 
 		Optional<Standalone<StringRef>> block = wait(db->getLastBlock(mk.packDataKey(-1)));
 
@@ -647,7 +657,8 @@ public:
 
 		// Now flush the level data up to the rollTime argument and patch anything older than
 		// lastTimeRequiringHeaderPatch
-		self->flushUpdates(mk, rollTime, *batch);
+		MetricBatch batch{ scope };
+		self->flushUpdates(mk, rollTime, batch);
 
 		return Void();
 	}
@@ -666,8 +677,8 @@ public:
 		Standalone<MetricKeyRef> mkCopy = mk;
 
 		// Previous header is not present so queue a callback which will update it
-		batch.scope.callbacks.push_back([=](IMetricDB* db, MetricBatch* batch) mutable -> Future<Void> {
-			return updatePreviousHeader(this, db, mkCopy, rollTime, batch);
+		batch.scope.callbacks.push_back([=](IMetricDB* db, FDBScope* s) mutable -> Future<Void> {
+			return updatePreviousHeader(this, db, mkCopy, rollTime, s);
 		});
 	}
 };
@@ -1433,11 +1444,12 @@ template <typename E>
 using EventMetricHandle = MetricHandle<EventMetric<E>>;
 
 class IMetric {
+protected:
 	std::string name;
 
 public:
 	IMetric(const std::string& n) : name{ n } {}
-	virtual ~IMetric() = 0;
+	virtual ~IMetric() {}
 	virtual void flush(MetricBatch&) = 0;
 };
 

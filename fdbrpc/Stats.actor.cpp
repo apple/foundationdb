@@ -22,8 +22,8 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 Counter::Counter(std::string const& name, CounterCollection& collection)
-  : name(name), interval_start(0), last_event(0), interval_sq_time(0), roughness_interval_start(0), interval_delta(0),
-    interval_start_value(0) {
+  : IMetric(name), interval_start(0), last_event(0), interval_sq_time(0), roughness_interval_start(0),
+    interval_delta(0), interval_start_value(0) {
 	metric.init(collection.getName() + "." + (char)toupper(name.at(0)) + name.substr(1), collection.getId());
 	collection.addCounter(this);
 }
@@ -80,6 +80,8 @@ void Counter::clear() {
 
 	metric = 0;
 }
+
+void Counter::flush(MetricBatch& batch) {}
 
 void CounterCollection::logToTraceEvent(TraceEvent& te) const {
 	for (ICounter* c : counters) {
