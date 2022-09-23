@@ -3936,7 +3936,6 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 			req.version = version;
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
-
 			setMatchIndex<GetKeyValuesFamilyRequest>(req, matchIndex);
 			req.spanContext = span.context;
 			trState->cx->getLatestCommitVersions(
