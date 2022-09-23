@@ -1688,15 +1688,20 @@ public:
 	}
 	void killProcess(ProcessInfo* machine, KillType kt) override {
 		TraceEvent("AttemptingKillProcess").detail("ProcessInfo", machine->toString());
-		if (kt < RebootAndDelete) {
+		// Refuse to kill a protected process.
+		if (kt < RebootAndDelete && protectedAddresses.count(machine->address) == 0) {
 			killProcess_internal(machine, kt);
 		}
 	}
 	void killInterface(NetworkAddress address, KillType kt) override {
 		if (kt < RebootAndDelete) {
 			std::vector<ProcessInfo*>& processes = machines[addressMap[address]->locality.machineId()].processes;
-			for (int i = 0; i < processes.size(); i++)
-				killProcess_internal(processes[i], kt);
+			for (auto& process : processes) {
+				// Refuse to kill a protected process.
+				if (protectedAddresses.count(process->address) == 0) {
+					killProcess_internal(process, kt);
+				}
+			}
 		}
 	}
 	bool killZone(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill, KillType* ktFinal) override {
@@ -2648,8 +2653,8 @@ int sf_open(const char* filename, int flags, int convFlags, int mode) {
 Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& filename, int64_t flags, int64_t mode) {
 	ASSERT((flags & IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE) || !(flags & IAsyncFile::OPEN_CREATE) ||
 	       StringRef(filename).endsWith(
-	           LiteralStringRef(".fdb-lock"))); // We don't use "ordinary" non-atomic file creation right now except for
-	                                            // folder locking, and we don't have code to simulate its unsafeness.
+	           ".fdb-lock"_sr)); // We don't use "ordinary" non-atomic file creation right now except for
+	                             // folder locking, and we don't have code to simulate its unsafeness.
 
 	if ((flags & IAsyncFile::OPEN_EXCLUSIVE))
 		ASSERT(flags & IAsyncFile::OPEN_CREATE);

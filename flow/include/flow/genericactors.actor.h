@@ -101,6 +101,21 @@ T sorted(T range) {
 }
 
 template <class T>
+std::vector<T> parseStringToVector(std::string str, char delim) {
+	std::vector<T> result;
+	std::stringstream stream(str);
+	std::string token;
+	while (stream.good()) {
+		getline(stream, token, delim);
+		std::istringstream tokenStream(token);
+		T item;
+		tokenStream >> item;
+		result.push_back(item);
+	}
+	return result;
+}
+
+template <class T>
 ErrorOr<T> errorOr(T t) {
 	return ErrorOr<T>(t);
 }

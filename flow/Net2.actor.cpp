@@ -1393,29 +1393,29 @@ ACTOR Future<Void> Net2::logTimeOffset() {
 }
 
 void Net2::initMetrics() {
-	bytesReceived.init(LiteralStringRef("Net2.BytesReceived"));
-	countWriteProbes.init(LiteralStringRef("Net2.CountWriteProbes"));
-	countReadProbes.init(LiteralStringRef("Net2.CountReadProbes"));
-	countReads.init(LiteralStringRef("Net2.CountReads"));
-	countWouldBlock.init(LiteralStringRef("Net2.CountWouldBlock"));
-	countWrites.init(LiteralStringRef("Net2.CountWrites"));
-	countRunLoop.init(LiteralStringRef("Net2.CountRunLoop"));
-	countCantSleep.init(LiteralStringRef("Net2.CountCantSleep"));
-	countWontSleep.init(LiteralStringRef("Net2.CountWontSleep"));
-	countTimers.init(LiteralStringRef("Net2.CountTimers"));
-	countTasks.init(LiteralStringRef("Net2.CountTasks"));
-	countYields.init(LiteralStringRef("Net2.CountYields"));
-	countYieldBigStack.init(LiteralStringRef("Net2.CountYieldBigStack"));
-	countYieldCalls.init(LiteralStringRef("Net2.CountYieldCalls"));
-	countASIOEvents.init(LiteralStringRef("Net2.CountASIOEvents"));
-	countYieldCallsTrue.init(LiteralStringRef("Net2.CountYieldCallsTrue"));
-	countRunLoopProfilingSignals.init(LiteralStringRef("Net2.CountRunLoopProfilingSignals"));
-	countTLSPolicyFailures.init(LiteralStringRef("Net2.CountTLSPolicyFailures"));
-	priorityMetric.init(LiteralStringRef("Net2.Priority"));
-	awakeMetric.init(LiteralStringRef("Net2.Awake"));
-	slowTaskMetric.init(LiteralStringRef("Net2.SlowTask"));
-	countLaunchTime.init(LiteralStringRef("Net2.CountLaunchTime"));
-	countReactTime.init(LiteralStringRef("Net2.CountReactTime"));
+	bytesReceived.init("Net2.BytesReceived"_sr);
+	countWriteProbes.init("Net2.CountWriteProbes"_sr);
+	countReadProbes.init("Net2.CountReadProbes"_sr);
+	countReads.init("Net2.CountReads"_sr);
+	countWouldBlock.init("Net2.CountWouldBlock"_sr);
+	countWrites.init("Net2.CountWrites"_sr);
+	countRunLoop.init("Net2.CountRunLoop"_sr);
+	countCantSleep.init("Net2.CountCantSleep"_sr);
+	countWontSleep.init("Net2.CountWontSleep"_sr);
+	countTimers.init("Net2.CountTimers"_sr);
+	countTasks.init("Net2.CountTasks"_sr);
+	countYields.init("Net2.CountYields"_sr);
+	countYieldBigStack.init("Net2.CountYieldBigStack"_sr);
+	countYieldCalls.init("Net2.CountYieldCalls"_sr);
+	countASIOEvents.init("Net2.CountASIOEvents"_sr);
+	countYieldCallsTrue.init("Net2.CountYieldCallsTrue"_sr);
+	countRunLoopProfilingSignals.init("Net2.CountRunLoopProfilingSignals"_sr);
+	countTLSPolicyFailures.init("Net2.CountTLSPolicyFailures"_sr);
+	priorityMetric.init("Net2.Priority"_sr);
+	awakeMetric.init("Net2.Awake"_sr);
+	slowTaskMetric.init("Net2.SlowTask"_sr);
+	countLaunchTime.init("Net2.CountLaunchTime"_sr);
+	countReactTime.init("Net2.CountReactTime"_sr);
 }
 
 bool Net2::checkRunnable() {
@@ -2310,7 +2310,7 @@ void net2_test(){
 	    reqs.resize(10000);
 	    for(int i=0; i<10000; i++) {
 	        TestGVR &req = reqs[i];
-	        req.key = LiteralStringRef("Foobar");
+	        req.key = "Foobar"_sr;
 
 	        SerializeSource<TestGVR> what(req);
 

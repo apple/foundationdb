@@ -223,8 +223,8 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		    CLIENT_KNOBS->TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL * 10; // initial delay + multiple refresh runs
 		wait(delay(refreshWait));
 
-		// InitRefresh + multiple timer based invocations
-		ASSERT_GE(cache->numCacheRefreshes(), 3);
+		// InitRefresh + multiple timer based invocations (at least 2 invocations of cache->refresh())
+		ASSERT_GE(cache->numCacheRefreshes(), 2);
 
 		TraceEvent("TestCacheRefreshEnd");
 		return Void();

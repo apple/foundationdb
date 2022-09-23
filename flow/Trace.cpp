@@ -163,11 +163,11 @@ public:
 	bool logTraceEventMetrics;
 
 	void initMetrics() {
-		SevErrorNames.init(LiteralStringRef("TraceEvents.SevError"));
-		SevWarnAlwaysNames.init(LiteralStringRef("TraceEvents.SevWarnAlways"));
-		SevWarnNames.init(LiteralStringRef("TraceEvents.SevWarn"));
-		SevInfoNames.init(LiteralStringRef("TraceEvents.SevInfo"));
-		SevDebugNames.init(LiteralStringRef("TraceEvents.SevDebug"));
+		SevErrorNames.init("TraceEvents.SevError"_sr);
+		SevWarnAlwaysNames.init("TraceEvents.SevWarnAlways"_sr);
+		SevWarnNames.init("TraceEvents.SevWarn"_sr);
+		SevInfoNames.init("TraceEvents.SevInfo"_sr);
+		SevDebugNames.init("TraceEvents.SevDebug"_sr);
 		logTraceEventMetrics = true;
 	}
 

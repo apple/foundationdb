@@ -1301,7 +1301,7 @@ void updateConfigForForcedRecovery(Reference<ClusterRecoveryData> self,
 	Standalone<CommitTransactionRef> regionCommit;
 	regionCommit.mutations.push_back_deep(
 	    regionCommit.arena(),
-	    MutationRef(MutationRef::SetValue, configKeysPrefix.toString() + "usable_regions", LiteralStringRef("1")));
+	    MutationRef(MutationRef::SetValue, configKeysPrefix.toString() + "usable_regions", "1"_sr));
 	self->configuration.applyMutation(regionCommit.mutations.back());
 	if (regionsChanged) {
 		std::sort(

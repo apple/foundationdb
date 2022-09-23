@@ -34,7 +34,7 @@ struct MemoryLifetime : KVWorkload {
 	std::string valueString;
 
 	MemoryLifetime(WorkloadContext const& wcx) : KVWorkload(wcx) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 60.0);
+		testDuration = getOption(options, "testDuration"_sr, 60.0);
 		valueString = std::string(maxValueBytes, '.');
 	}
 

@@ -39,12 +39,12 @@ struct TargetedKillWorkload : TestWorkload {
 
 	TargetedKillWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		killAt = getOption(options, LiteralStringRef("killAt"), 5.0);
-		reboot = getOption(options, LiteralStringRef("reboot"), false);
-		suspendDuration = getOption(options, LiteralStringRef("suspendDuration"), 1.0);
-		machineToKill = getOption(options, LiteralStringRef("machineToKill"), LiteralStringRef("master")).toString();
-		killAllMachineProcesses = getOption(options, LiteralStringRef("killWholeMachine"), false);
-		numKillStorages = getOption(options, LiteralStringRef("numKillStorages"), 1);
+		killAt = getOption(options, "killAt"_sr, 5.0);
+		reboot = getOption(options, "reboot"_sr, false);
+		suspendDuration = getOption(options, "suspendDuration"_sr, 1.0);
+		machineToKill = getOption(options, "machineToKill"_sr, "master"_sr).toString();
+		killAllMachineProcesses = getOption(options, "killWholeMachine"_sr, false);
+		numKillStorages = getOption(options, "numKillStorages"_sr, 1);
 	}
 
 	std::string description() const override { return "TargetedKillWorkload"; }
