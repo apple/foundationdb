@@ -34,6 +34,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/HealthMonitor.h"
+#include "fdbrpc/JsonWebKeySet.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "fdbrpc/IPAllowList.h"
 #include "fdbrpc/TokenCache.h"
@@ -44,8 +45,10 @@
 #include "flow/Net2Packet.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/ObjectSerializer.h"
+#include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
+#include "flow/WatchFile.actor.h"
 #define XXH_INLINE_ALL
 #include "flow/xxhash.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -309,6 +312,7 @@ public:
 
 	// Returns true if given network address 'address' is one of the address we are listening on.
 	bool isLocalAddress(const NetworkAddress& address) const;
+	void applyPublicKeySet(StringRef jwkSetString);
 
 	NetworkAddressCachedString localAddresses;
 	std::vector<Future<Void>> listeners;
@@ -341,6 +345,7 @@ public:
 
 	Future<Void> multiVersionCleanup;
 	Future<Void> pingLogger;
+	Future<Void> publicKeyFileWatch;
 
 	std::unordered_map<Standalone<StringRef>, PublicKey> publicKeys;
 };
@@ -958,7 +963,7 @@ void Peer::onIncomingConnection(Reference<Peer> self, Reference<IConnection> con
 		    .detail("FromAddr", conn->getPeerAddress())
 		    .detail("CanonicalAddr", destination)
 		    .detail("IsPublic", destination.isPublic())
-		    .detail("Trusted", self->transport->allowList(conn->getPeerAddress().ip));
+		    .detail("Trusted", self->transport->allowList(conn->getPeerAddress().ip) && conn->hasTrustedPeer());
 
 		connect.cancel();
 		prependConnectPacket();
@@ -1257,7 +1262,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 	state bool incompatiblePeerCounted = false;
 	state NetworkAddress peerAddress;
 	state ProtocolVersion peerProtocolVersion;
-	state bool trusted = transport->allowList(conn->getPeerAddress().ip);
+	state bool trusted = transport->allowList(conn->getPeerAddress().ip) && conn->hasTrustedPeer();
 	peerAddress = conn->getPeerAddress();
 
 	if (!peer) {
@@ -1526,6 +1531,27 @@ bool TransportData::isLocalAddress(const NetworkAddress& address) const {
 	return address == localAddresses.getAddressList().address ||
 	       (localAddresses.getAddressList().secondaryAddress.present() &&
 	        address == localAddresses.getAddressList().secondaryAddress.get());
+}
+
+void TransportData::applyPublicKeySet(StringRef jwkSetString) {
+	auto jwks = JsonWebKeySet::parse(jwkSetString, {});
+	if (!jwks.present())
+		throw pkey_decode_error();
+	const auto& keySet = jwks.get().keys;
+	publicKeys.clear();
+	int numPrivateKeys = 0;
+	for (auto [keyName, key] : keySet) {
+		// ignore private keys
+		if (key.isPublic()) {
+			publicKeys[keyName] = key.getPublic();
+		} else {
+			numPrivateKeys++;
+		}
+	}
+	TraceEvent(SevInfo, "AuthzPublicKeySetApply").detail("NumPublicKeys", publicKeys.size());
+	if (numPrivateKeys > 0) {
+		TraceEvent(SevWarnAlways, "AuthzPublicKeySetContainsPrivateKeys").detail("NumPrivateKeys", numPrivateKeys);
+	}
 }
 
 ACTOR static Future<Void> multiVersionCleanupWorker(TransportData* self) {
@@ -1965,4 +1991,63 @@ void FlowTransport::removePublicKey(StringRef name) {
 
 void FlowTransport::removeAllPublicKeys() {
 	self->publicKeys.clear();
+}
+
+void FlowTransport::loadPublicKeyFile(const std::string& filePath) {
+	if (!fileExists(filePath)) {
+		throw file_not_found();
+	}
+	int64_t const len = fileSize(filePath);
+	if (len <= 0) {
+		TraceEvent(SevWarn, "AuthzPublicKeySetEmpty").detail("Path", filePath);
+	} else if (len > FLOW_KNOBS->PUBLIC_KEY_FILE_MAX_SIZE) {
+		throw file_too_large();
+	} else {
+		auto json = readFileBytes(filePath, len);
+		self->applyPublicKeySet(StringRef(json));
+	}
+}
+
+ACTOR static Future<Void> watchPublicKeyJwksFile(std::string filePath, TransportData* self) {
+	state AsyncTrigger fileChanged;
+	state Future<Void> fileWatch;
+	state unsigned errorCount = 0; // error since watch start or last successful refresh
+
+	// Make sure this watch setup does not break due to async file system initialization not having been called
+	loop {
+		if (IAsyncFileSystem::filesystem())
+			break;
+		wait(delay(1.0));
+	}
+	const int& intervalSeconds = FLOW_KNOBS->PUBLIC_KEY_FILE_REFRESH_INTERVAL_SECONDS;
+	fileWatch = watchFileForChanges(filePath, &fileChanged, &intervalSeconds, "AuthzPublicKeySetRefreshStatError");
+	loop {
+		try {
+			wait(fileChanged.onTrigger());
+			state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
+			    filePath, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
+			state int64_t filesize = wait(file->size());
+			state std::string json(filesize, '\0');
+			if (filesize > FLOW_KNOBS->PUBLIC_KEY_FILE_MAX_SIZE)
+				throw file_too_large();
+			if (filesize <= 0) {
+				TraceEvent(SevWarn, "AuthzPublicKeySetEmpty").suppressFor(60);
+				continue;
+			}
+			wait(success(file->read(&json[0], filesize, 0)));
+			self->applyPublicKeySet(StringRef(json));
+			errorCount = 0;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			// parse/read error
+			errorCount++;
+			TraceEvent(SevWarn, "AuthzPublicKeySetRefreshError").error(e).detail("ErrorCount", errorCount);
+		}
+	}
+}
+
+void FlowTransport::watchPublicKeyFile(const std::string& publicKeyFilePath) {
+	self->publicKeyFileWatch = watchPublicKeyJwksFile(publicKeyFilePath, self);
 }

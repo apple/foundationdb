@@ -544,6 +544,8 @@ public:
 	Counter transactionGrvFullBatches;
 	Counter transactionGrvTimedOutBatches;
 	Counter transactionCommitVersionNotFoundForSS;
+	Counter bgReadInputBytes;
+	Counter bgReadOutputBytes;
 
 	// Change Feed metrics. Omit change feed metrics from logging if not used
 	bool usedAnyChangeFeeds;

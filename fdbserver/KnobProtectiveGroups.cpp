@@ -22,6 +22,7 @@
 
 #include <array>
 
+#include "flow/Knobs.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ServerKnobCollection.h"
 #include "fdbserver/Knobs.h"
@@ -51,6 +52,9 @@ void KnobProtectiveGroup::snapshotOriginalKnobs() {
 		ParsedKnobValue value = CLIENT_KNOBS->getKnob(name);
 		if (std::get_if<NoKnobFound>(&value)) {
 			value = SERVER_KNOBS->getKnob(name);
+		}
+		if (std::get_if<NoKnobFound>(&value)) {
+			value = FLOW_KNOBS->getKnob(name);
 		}
 		if (std::get_if<NoKnobFound>(&value)) {
 			ASSERT(false);

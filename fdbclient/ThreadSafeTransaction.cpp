@@ -454,7 +454,13 @@ ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranulesFinish(
     ReadBlobGranuleContext granuleContext) {
 	// do this work off of fdb network threads for performance!
 	Standalone<VectorRef<BlobGranuleChunkRef>> files = startFuture.get();
-	return loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersion, granuleContext);
+	GranuleMaterializeStats stats;
+	auto ret = loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersion, granuleContext, stats);
+	if (!ret.isError()) {
+		ISingleThreadTransaction* tr = this->tr;
+		onMainThreadVoid([tr, stats]() { tr->addGranuleMaterializeStats(stats); });
+	}
+	return ret;
 }
 
 ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> ThreadSafeTransaction::summarizeBlobGranules(
