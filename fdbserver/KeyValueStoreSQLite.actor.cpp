@@ -1996,7 +1996,7 @@ private:
 		state int64_t lastReadsComplete = 0;
 		state int64_t lastWritesComplete = 0;
 		loop {
-			wait(delay(FLOW_KNOBS->DISK_METRIC_LOGGING_INTERVAL));
+			wait(delay(FLOW_KNOBS->SQLITE_DISK_METRIC_LOGGING_INTERVAL));
 
 			int64_t rc = self->readsComplete, wc = self->writesComplete;
 			TraceEvent("DiskMetrics", self->logID)

@@ -1359,7 +1359,7 @@ else:
     except:
         # The system python on OS X can't find the library installed to /usr/local/lib if SIP is enabled
         # find_library does find the location in /usr/local/lib, so if the above fails fallback to using it
-        lib_path = ctypes.util.find_library(capi_name)
+        lib_path = ctypes.util.find_library("fdb_c")
         if lib_path is not None:
             try:
                 _capi = ctypes.CDLL(lib_path)
