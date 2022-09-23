@@ -126,8 +126,8 @@ public:
 				runners[i].cancel();
 			}
 		}
-		runners.clear();
 		brokenOnDestruct.sendError(broken_promise());
+		runners.clear();
 		waiting = 0;
 		priorities.clear();
 	}
