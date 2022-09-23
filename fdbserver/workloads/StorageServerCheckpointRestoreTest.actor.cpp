@@ -67,6 +67,8 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		return _start(this, cx);
 	}
 
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("MoveKeysWorkload"); }
+
 	ACTOR Future<Void> _start(SSCheckpointRestoreWorkload* self, Database cx) {
 		state Key key = "TestKey"_sr;
 		state Key endKey = "TestKey0"_sr;
