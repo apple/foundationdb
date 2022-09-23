@@ -514,7 +514,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            bool* trackerCancelled,
                                            Optional<Reference<TenantCache>> ddTenantCache);
 
-ACTOR Future<Void> dataDistributionQueue(std::shared_ptr<IDDTxnProcessor> dbProcessor,
+ACTOR Future<Void> dataDistributionQueue(std::shared_ptr<IDDTxnProcessor> db,
                                          PromiseStream<RelocateShard> output,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,

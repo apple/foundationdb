@@ -728,7 +728,7 @@ struct DDQueue : public IDDRelocationQueue {
 
 	DDQueue(UID mid,
 	        MoveKeysLock lock,
-	        const std::shared_ptr<IDDTxnProcessor>& dbProcessor,
+	        const std::shared_ptr<IDDTxnProcessor>& db,
 	        std::vector<TeamCollectionInterface> teamCollections,
 	        Reference<ShardsAffectedByTeamFailure> sABTF,
 	        Reference<PhysicalShardCollection> physicalShardCollection,
@@ -739,7 +739,7 @@ struct DDQueue : public IDDRelocationQueue {
 	        FutureStream<RelocateShard> input,
 	        PromiseStream<GetMetricsRequest> getShardMetrics,
 	        PromiseStream<GetTopKMetricsRequest> getTopKMetrics)
-	  : IDDRelocationQueue(), distributorId(mid), lock(lock), cx(dbProcessor->getDb()), txnProcessor(dbProcessor),
+	  : IDDRelocationQueue(), distributorId(mid), lock(lock), cx(db->getDb()), txnProcessor(db),
 	    teamCollections(teamCollections), shardsAffectedByTeamFailure(sABTF),
 	    physicalShardCollection(physicalShardCollection), getAverageShardBytes(getAverageShardBytes),
 	    startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
@@ -2209,20 +2209,22 @@ Future<bool> DDQueue::rebalanceTeams(DataMovementReason moveReason,
 ACTOR Future<bool> getSkipRebalanceValue(std::shared_ptr<IDDTxnProcessor> txnProcessor, bool readRebalance) {
 	Optional<Value> val = wait(txnProcessor->readRebalanceDDIgnoreKey());
 
+	if (!val.present())
+		return false;
+
 	bool skipCurrentLoop = false;
-	if (val.present()) {
-		// NOTE: check special value "" and "on" might written in old version < 7.2
-		if (val.get().size() > 0 && val.get() != "on"_sr) {
-			int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
-			if (readRebalance) {
-				skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_READ) > 0;
-			} else {
-				skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
-			}
+	// NOTE: check special value "" and "on" might written in old version < 7.2
+	if (val.get().size() > 0 && val.get() != "on"_sr) {
+		int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
+		if (readRebalance) {
+			skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_READ) > 0;
 		} else {
-			skipCurrentLoop = true;
+			skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
 		}
+	} else {
+		skipCurrentLoop = true;
 	}
+
 	return skipCurrentLoop;
 }
 
@@ -2309,7 +2311,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 	}
 }
 
-ACTOR Future<Void> dataDistributionQueue(std::shared_ptr<IDDTxnProcessor> dbProcessor,
+ACTOR Future<Void> dataDistributionQueue(std::shared_ptr<IDDTxnProcessor> db,
                                          PromiseStream<RelocateShard> output,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,
@@ -2328,7 +2330,7 @@ ACTOR Future<Void> dataDistributionQueue(std::shared_ptr<IDDTxnProcessor> dbProc
                                          const DDEnabledState* ddEnabledState) {
 	state DDQueue self(distributorId,
 	                   lock,
-	                   dbProcessor,
+	                   db,
 	                   teamCollections,
 	                   shardsAffectedByTeamFailure,
 	                   physicalShardCollection,

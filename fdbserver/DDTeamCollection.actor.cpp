@@ -3581,7 +3581,7 @@ bool DDTeamCollection::satisfiesPolicy(const std::vector<Reference<TCServerInfo>
 	return result && resultEntries.size() == 0;
 }
 
-DDTeamCollection::DDTeamCollection(const std::shared_ptr<IDDTxnProcessor>& dbProcessor,
+DDTeamCollection::DDTeamCollection(const std::shared_ptr<IDDTxnProcessor>& db,
                                    UID distributorId,
                                    MoveKeysLock const& lock,
                                    PromiseStream<RelocateShard> const& output,
@@ -3597,9 +3597,9 @@ DDTeamCollection::DDTeamCollection(const std::shared_ptr<IDDTxnProcessor>& dbPro
                                    PromiseStream<GetMetricsRequest> getShardMetrics,
                                    Promise<UID> removeFailedServer,
                                    PromiseStream<Promise<int>> getUnhealthyRelocationCount)
-  : dbProcessor(dbProcessor), doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock),
-    output(output), unhealthyServers(0), storageWiggler(makeReference<StorageWiggler>(this)),
-    processingWiggle(processingWiggle), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
+  : db(db), doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output),
+    unhealthyServers(0), storageWiggler(makeReference<StorageWiggler>(this)), processingWiggle(processingWiggle),
+    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
     initialFailureReactionDelay(
         delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
     initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay)), recruitingStream(0),
@@ -3618,8 +3618,8 @@ DDTeamCollection::DDTeamCollection(const std::shared_ptr<IDDTxnProcessor>& dbPro
     primary(primary), distributorId(distributorId), configuration(configuration),
     storageServerSet(new LocalityMap<UID>()) {
 
-	if (!dbProcessor->isMocked()) {
-		cx = this->dbProcessor->getDb();
+	if (!db->isMocked()) {
+		cx = this->db->getDb();
 	}
 
 	if (!primary || configuration.usableRegions == 1) {
