@@ -446,6 +446,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		tenantMapEntry.tenantName = tenant;
 		tenantMapEntry.tenantGroup = tenantGroup;
 
+		state TenantMapEntry tenantMapEntry;
+		tenantMapEntry.tenantGroup = tenantGroup;
+
 		try {
 			loop {
 				try {
@@ -809,6 +812,189 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		}
 
 		return Void();
+	}
+
+	ACTOR static Future<Void> configureTenant(MetaclusterManagementWorkload* self) {
+		state TenantName tenant = self->chooseTenantName();
+		state Optional<TenantGroupName> newTenantGroup = self->chooseTenantGroup();
+
+		auto itr = self->createdTenants.find(tenant);
+		state bool exists = itr != self->createdTenants.end();
+		state bool tenantGroupExists =
+		    newTenantGroup.present() && self->tenantGroups.find(newTenantGroup.get()) != self->tenantGroups.end();
+
+		state bool hasCapacity = false;
+		if (exists) {
+			auto& dataDb = self->dataDbs[itr->second.cluster];
+			hasCapacity = dataDb.ungroupedTenants.size() + dataDb.tenantGroups.size() < dataDb.tenantGroupCapacity;
+		}
+
+		state std::map<Standalone<StringRef>, Optional<Value>> configurationParameters = { { "tenant_group"_sr,
+			                                                                                 newTenantGroup } };
+
+		try {
+			loop {
+				Future<Void> configureFuture =
+				    MetaclusterAPI::configureTenant(self->managementDb, tenant, configurationParameters);
+				Optional<Void> result = wait(timeout(configureFuture, deterministicRandom()->randomInt(1, 30)));
+
+				if (result.present()) {
+					break;
+				}
+			}
+
+			ASSERT(exists);
+			auto tenantData = self->createdTenants.find(tenant);
+			ASSERT(tenantData != self->createdTenants.end());
+
+			auto& dataDb = self->dataDbs[tenantData->second.cluster];
+			ASSERT(dataDb.registered);
+
+			bool allocationRemoved = false;
+			bool allocationAdded = false;
+			if (tenantData->second.tenantGroup != newTenantGroup) {
+				if (tenantData->second.tenantGroup.present()) {
+					auto& tenantGroupData = self->tenantGroups[tenantData->second.tenantGroup.get()];
+					tenantGroupData.tenants.erase(tenant);
+					if (tenantGroupData.tenants.empty()) {
+						allocationRemoved = true;
+						self->tenantGroups.erase(tenantData->second.tenantGroup.get());
+						dataDb.tenantGroups.erase(tenantData->second.tenantGroup.get());
+					}
+				} else {
+					allocationRemoved = true;
+					self->ungroupedTenants.erase(tenant);
+					dataDb.ungroupedTenants.erase(tenant);
+				}
+
+				if (newTenantGroup.present()) {
+					auto [tenantGroupData, inserted] = self->tenantGroups.try_emplace(
+					    newTenantGroup.get(), TenantGroupData(tenantData->second.cluster));
+					tenantGroupData->second.tenants.insert(tenant);
+					if (inserted) {
+						allocationAdded = true;
+						dataDb.tenantGroups.insert(newTenantGroup.get());
+					}
+				} else {
+					allocationAdded = true;
+					self->ungroupedTenants.insert(tenant);
+					dataDb.ungroupedTenants.insert(tenant);
+				}
+
+				tenantData->second.tenantGroup = newTenantGroup;
+
+				if (allocationAdded && !allocationRemoved) {
+					ASSERT(hasCapacity);
+				} else if (allocationRemoved && !allocationAdded &&
+				           dataDb.ungroupedTenants.size() + dataDb.tenantGroups.size() >= dataDb.tenantGroupCapacity) {
+					--self->totalTenantGroupCapacity;
+				}
+			}
+
+			return Void();
+		} catch (Error& e) {
+			if (e.code() == error_code_tenant_not_found) {
+				ASSERT(!exists);
+				return Void();
+			} else if (e.code() == error_code_cluster_no_capacity) {
+				ASSERT(exists && !hasCapacity);
+				return Void();
+			} else if (e.code() == error_code_invalid_tenant_configuration) {
+				ASSERT(exists && tenantGroupExists &&
+				       self->createdTenants[tenant].cluster != self->tenantGroups[newTenantGroup.get()].cluster);
+				return Void();
+			}
+
+			TraceEvent(SevError, "ConfigureTenantFailure")
+			    .error(e)
+			    .detail("TenantName", tenant)
+			    .detail("TenantGroup", newTenantGroup);
+			ASSERT(false);
+			throw internal_error();
+		}
+	}
+
+	ACTOR static Future<Void> renameTenant(MetaclusterManagementWorkload* self) {
+		state TenantName tenant = self->chooseTenantName();
+		state TenantName newTenantName = self->chooseTenantName();
+
+		auto itr = self->createdTenants.find(tenant);
+		state bool exists = itr != self->createdTenants.end();
+
+		itr = self->createdTenants.find(newTenantName);
+		state bool newTenantExists = itr != self->createdTenants.end();
+
+		try {
+			state bool retried = false;
+			loop {
+				try {
+					Future<Void> renameFuture = MetaclusterAPI::renameTenant(self->managementDb, tenant, newTenantName);
+					Optional<Void> result = wait(timeout(renameFuture, deterministicRandom()->randomInt(1, 30)));
+
+					if (result.present()) {
+						break;
+					}
+
+					retried = true;
+				} catch (Error& e) {
+					// If we retry the rename after it had succeeded, we will get an error that we should ignore
+					if (e.code() == error_code_tenant_not_found && exists && !newTenantExists && retried) {
+						break;
+					}
+					throw e;
+				}
+			}
+
+			ASSERT(exists);
+			ASSERT(!newTenantExists);
+
+			Optional<TenantMapEntry> oldEntry = wait(MetaclusterAPI::tryGetTenant(self->managementDb, tenant));
+			ASSERT(!oldEntry.present());
+
+			TenantMapEntry newEntry = wait(MetaclusterAPI::getTenant(self->managementDb, newTenantName));
+
+			auto tenantData = self->createdTenants.find(tenant);
+			ASSERT(tenantData != self->createdTenants.end());
+			ASSERT(tenantData->second.tenantGroup == newEntry.tenantGroup);
+			ASSERT(newEntry.assignedCluster.present() && tenantData->second.cluster == newEntry.assignedCluster.get());
+
+			self->createdTenants[newTenantName] = tenantData->second;
+			self->createdTenants.erase(tenantData);
+
+			auto& dataDb = self->dataDbs[tenantData->second.cluster];
+			ASSERT(dataDb.registered);
+
+			dataDb.tenants.erase(tenant);
+			dataDb.tenants.insert(newTenantName);
+
+			if (tenantData->second.tenantGroup.present()) {
+				auto& tenantGroup = self->tenantGroups[tenantData->second.tenantGroup.get()];
+				tenantGroup.tenants.erase(tenant);
+				tenantGroup.tenants.insert(newTenantName);
+			} else {
+				dataDb.ungroupedTenants.erase(tenant);
+				dataDb.ungroupedTenants.insert(newTenantName);
+				self->ungroupedTenants.erase(tenant);
+				self->ungroupedTenants.insert(newTenantName);
+			}
+
+			return Void();
+		} catch (Error& e) {
+			if (e.code() == error_code_tenant_not_found) {
+				ASSERT(!exists);
+				return Void();
+			} else if (e.code() == error_code_tenant_already_exists) {
+				ASSERT(newTenantExists);
+				return Void();
+			}
+
+			TraceEvent(SevError, "RenameTenantFailure")
+			    .error(e)
+			    .detail("OldTenantName", tenant)
+			    .detail("NewTenantName", newTenantName);
+			ASSERT(false);
+			throw internal_error();
+		}
 	}
 
 	Future<Void> start(Database const& cx) override {
