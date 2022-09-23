@@ -204,7 +204,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                      int begin_key_name_length,
 	                                      uint8_t const* end_key_name,
 	                                      int end_key_name_length,
-	                                      Optional<Version> version);
+	                                      int64_t version);
 
 	// Tenant
 	fdb_error_t (*tenantCreateTransaction)(FDBTenant* tenant, FDBTransaction** outTransaction);
