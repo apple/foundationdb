@@ -3619,7 +3619,7 @@ DDTeamCollection::DDTeamCollection(const std::shared_ptr<IDDTxnProcessor>& db,
     storageServerSet(new LocalityMap<UID>()) {
 
 	if (!db->isMocked()) {
-		cx = this->db->getDb();
+		cx = this->db->context();
 	}
 
 	if (!primary || configuration.usableRegions == 1) {

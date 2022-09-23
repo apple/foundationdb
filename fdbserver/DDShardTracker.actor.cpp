@@ -75,7 +75,7 @@ ACTOR Future<Void> updateMaxShardSize(Reference<AsyncVar<int64_t>> dbSizeEstimat
 }
 
 struct DataDistributionTracker : public IDDShardTracker {
-	std::shared_ptr<IDDTxnProcessor> dbProcessor;
+	std::shared_ptr<IDDTxnProcessor> db;
 	UID distributorId;
 	KeyRangeMap<ShardTrackedData>* shards;
 	ActorCollection sizeChanges;
@@ -128,7 +128,7 @@ struct DataDistributionTracker : public IDDShardTracker {
 
 	Optional<Reference<TenantCache>> ddTenantCache;
 
-	DataDistributionTracker(std::shared_ptr<IDDTxnProcessor> dbProcessor,
+	DataDistributionTracker(std::shared_ptr<IDDTxnProcessor> db,
 	                        UID distributorId,
 	                        Promise<Void> const& readyToStart,
 	                        PromiseStream<RelocateShard> const& output,
@@ -138,7 +138,7 @@ struct DataDistributionTracker : public IDDShardTracker {
 	                        KeyRangeMap<ShardTrackedData>* shards,
 	                        bool* trackerCancelled,
 	                        Optional<Reference<TenantCache>> ddTenantCache)
-	  : IDDShardTracker(), dbProcessor(dbProcessor), distributorId(distributorId), shards(shards), sizeChanges(false),
+	  : IDDShardTracker(), db(db), distributorId(distributorId), shards(shards), sizeChanges(false),
 	    systemSizeEstimate(0), dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()),
 	    output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
 	    physicalShardCollection(physicalShardCollection), readyToStart(readyToStart),
@@ -300,12 +300,12 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 			loop {
 				// metrics.second is the number of key-ranges (i.e., shards) in the 'keys' key-range
 				std::pair<Optional<StorageMetrics>, int> metrics =
-				    wait(self()->dbProcessor->waitStorageMetrics(keys,
-				                                                 bounds.min,
-				                                                 bounds.max,
-				                                                 bounds.permittedError,
-				                                                 CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
-				                                                 shardCount));
+				    wait(self()->db->waitStorageMetrics(keys,
+				                                        bounds.min,
+				                                        bounds.max,
+				                                        bounds.permittedError,
+				                                        CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
+				                                        shardCount));
 				if (metrics.first.present()) {
 					BandwidthStatus newBandwidthStatus = getBandwidthStatus(metrics.first.get());
 					if (newBandwidthStatus == BandwidthStatusLow && bandwidthStatus != BandwidthStatusLow) {
@@ -376,8 +376,7 @@ ACTOR Future<Void> readHotDetector(DataDistributionTracker* self) {
 	try {
 		loop {
 			state KeyRange keys = waitNext(self->readHotShard.getFuture());
-			Standalone<VectorRef<ReadHotRangeWithMetrics>> readHotRanges =
-			    wait(self->dbProcessor->getReadHotRanges(keys));
+			Standalone<VectorRef<ReadHotRangeWithMetrics>> readHotRanges = wait(self->db->getReadHotRanges(keys));
 
 			for (const auto& keyRange : readHotRanges) {
 				TraceEvent("ReadHotRangeLog")
@@ -891,7 +890,7 @@ ACTOR Future<Void> shardSplitter(DataDistributionTracker* self,
 	splitMetrics.bytesReadPerKSecond = splitMetrics.infinity; // Don't split by readBandwidth
 
 	state Standalone<VectorRef<KeyRef>> splitKeys =
-	    wait(self->dbProcessor->splitStorageMetrics(keys, splitMetrics, metrics, SERVER_KNOBS->MIN_SHARD_BYTES));
+	    wait(self->db->splitStorageMetrics(keys, splitMetrics, metrics, SERVER_KNOBS->MIN_SHARD_BYTES));
 	// fprintf(stderr, "split keys:\n");
 	// for( int i = 0; i < splitKeys.size(); i++ ) {
 	//	fprintf(stderr, "   %s\n", printable(splitKeys[i]).c_str());
@@ -1453,7 +1452,7 @@ ACTOR Future<Void> fetchShardMetricsList(DataDistributionTracker* self, GetMetri
 }
 
 ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
-                                           std::shared_ptr<IDDTxnProcessor> dbProcessor,
+                                           std::shared_ptr<IDDTxnProcessor> db,
                                            PromiseStream<RelocateShard> output,
                                            Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                            Reference<PhysicalShardCollection> physicalShardCollection,
@@ -1467,7 +1466,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            KeyRangeMap<ShardTrackedData>* shards,
                                            bool* trackerCancelled,
                                            Optional<Reference<TenantCache>> ddTenantCache) {
-	state DataDistributionTracker self(dbProcessor,
+	state DataDistributionTracker self(db,
 	                                   distributorId,
 	                                   readyToStart,
 	                                   output,
