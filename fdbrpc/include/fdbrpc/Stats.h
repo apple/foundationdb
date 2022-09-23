@@ -80,7 +80,7 @@ struct CounterCollection {
 	void logToTraceEvent(TraceEvent& te) const;
 };
 
-struct Counter final : ICounter, NonCopyable {
+struct Counter final : ICounter, NonCopyable, IMetric {
 public:
 	typedef int64_t Value;
 
@@ -114,8 +114,9 @@ public:
 	bool hasRate() const override { return true; }
 	bool hasRoughness() const override { return true; }
 
+	void flush(MetricBatch& batch) override;
+
 private:
-	std::string name;
 	double interval_start, last_event, interval_sq_time, roughness_interval_start;
 	Value interval_delta, interval_start_value;
 	Int64MetricHandle metric;
@@ -224,18 +225,18 @@ private:
 	}
 };
 
-class LatencySample {
+class LatencySample : public IMetric {
 public:
 	LatencySample(std::string name, UID id, double loggingInterval, int sampleSize)
-	  : name(name), id(id), sampleStart(now()), sample(sampleSize),
+	  : IMetric(name), id(id), sampleStart(now()), sample(sampleSize),
 	    latencySampleEventHolder(makeReference<EventCacheHolder>(id.toString() + "/" + name)) {
 		logger = recurring([this]() { logSample(); }, loggingInterval);
 	}
 
 	void addMeasurement(double measurement) { sample.addSample(measurement); }
+	void flush(MetricBatch& batch) override {}
 
 private:
-	std::string name;
 	UID id;
 	double sampleStart;
 
