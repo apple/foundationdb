@@ -8766,6 +8766,16 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			if (info != data->uidChangeFeed.end()) {
 				// Cannot yield in mutation updating loop because of race with fetchVersion
 				Version alreadyFetched = std::max(info->second->fetchVersion, info->second->durableFetchVersion.get());
+				if (info->second->removing) {
+					auto cleanupPending = data->changeFeedCleanupDurable.find(info->second->id);
+					if (cleanupPending != data->changeFeedCleanupDurable.end() &&
+					    cleanupPending->second <= newOldestVersion) {
+						// due to a race, we just applied a cleanup mutation, but feed updates happen just after. Don't
+						// write any mutations for this feed.
+						curFeed++;
+						continue;
+					}
+				}
 				for (auto& it : info->second->mutations) {
 					if (it.version <= alreadyFetched) {
 						continue;
