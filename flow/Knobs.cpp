@@ -126,6 +126,11 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( NETWORK_TEST_REQUEST_COUNT,                            0 ); // 0 -> run forever
 	init( NETWORK_TEST_REQUEST_SIZE,                             1 );
 	init( NETWORK_TEST_SCRIPT_MODE,                          false );
+
+	//Authorization
+	init( ALLOW_TOKENLESS_TENANT_ACCESS,                     false );
+	init( PUBLIC_KEY_FILE_MAX_SIZE,                    1024 * 1024 );
+	init( PUBLIC_KEY_FILE_REFRESH_INTERVAL_SECONDS,             30 );
 	init( MAX_CACHED_EXPIRED_TOKENS,                          1024 );
 
 	//AsyncFileCached
@@ -155,7 +160,9 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	//AsyncFileKAIO
 	init( MAX_OUTSTANDING,                                      64 );
 	init( MIN_SUBMIT,                                           10 );
-	init( DISK_METRIC_LOGGING_INTERVAL,                        5.0 );
+	init( SQLITE_DISK_METRIC_LOGGING_INTERVAL,                 5.0 );
+	init( KAIO_LATENCY_LOGGING_INTERVAL,                      30.0 );
+	init( KAIO_LATENCY_SAMPLE_SIZE,                          30000 );
 
 	init( PAGE_WRITE_CHECKSUM_HISTORY,                           0 ); if( randomize && BUGGIFY ) PAGE_WRITE_CHECKSUM_HISTORY = 10000000;
 	init( DISABLE_POSIX_KERNEL_AIO,                              0 );
