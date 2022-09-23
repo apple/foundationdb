@@ -305,7 +305,17 @@ struct TenantEntryCacheWorkload : TestWorkload {
 	}
 
 	std::string description() const override { return "TenantEntryCache"; }
+
+	// Disable all fault injections for this test. They sometimes
+	// lead to failures in the CacheRefresh test, which has a 20
+	// second timeout in which it expects cache refreshes to make
+	// progress.
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert("all");
+	}
+
 	Future<bool> check(Database const& cx) override { return true; }
+
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
