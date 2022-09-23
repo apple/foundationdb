@@ -100,7 +100,7 @@ public:
 	    std::function<void(TraceEvent&)> const& decorator = [](auto& te) {});
 };
 
-struct Counter final : ICounter, NonCopyable {
+struct Counter final : ICounter, NonCopyable, IMetric {
 public:
 	typedef int64_t Value;
 
@@ -134,8 +134,9 @@ public:
 	bool hasRate() const override { return true; }
 	bool hasRoughness() const override { return true; }
 
+	void flush(MetricBatch& batch) override;
+
 private:
-	std::string name;
 	double interval_start, last_event, interval_sq_time, roughness_interval_start;
 	Value interval_delta, interval_start_value;
 	Int64MetricHandle metric;
@@ -214,10 +215,10 @@ public:
 	~LatencyBands();
 };
 
-class LatencySample {
+class LatencySample : public IMetric {
 public:
 	LatencySample(std::string name, UID id, double loggingInterval, double accuracy)
-	  : name(name), id(id), sampleStart(now()), sketch(accuracy),
+	  : IMetric(name), id(id), sampleStart(now()), sketch(accuracy),
 	    latencySampleEventHolder(makeReference<EventCacheHolder>(id.toString() + "/" + name)) {
 		assert(accuracy > 0);
 		if (accuracy <= 0) {
@@ -227,9 +228,9 @@ public:
 	}
 
 	void addMeasurement(double measurement) { sketch.addSample(measurement); }
+	void flush(MetricBatch& batch) override {}
 
 private:
-	std::string name;
 	UID id;
 	double sampleStart;
 

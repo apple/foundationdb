@@ -198,7 +198,7 @@ void DynamicEventMetric::flushData(MetricKeyRef const& mk, uint64_t rollTime, Me
 	for (auto& [name, field] : fields)
 		field->flushField(mk, rollTime, batch);
 	if (!latestRecorded) {
-		batch.updates.emplace_back(mk.packLatestKey(), StringRef());
+		batch.scope.updates.emplace_back(mk.packLatestKey(), StringRef());
 		latestRecorded = true;
 	}
 }
