@@ -66,7 +66,7 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 		periodicBroadcastInterval = getOption(options, "periodicBroadcastInterval"_sr, periodicBroadcastInterval);
 	}
 
-	void initFailureInjectionMode(DeterministicRandom& random, unsigned count) override { enabled = clientId == 0; }
+	void initFailureInjectionMode(DeterministicRandom& random) override { enabled = clientId == 0; }
 
 	std::string description() const override {
 		if (g_simulator == g_network)

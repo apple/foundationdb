@@ -399,11 +399,23 @@ void CompoundWorkload::addFailureInjection(WorkloadRequest& work) {
 		if (disabledWorkloads.count(workload->description()) > 0) {
 			continue;
 		}
-		while (workload->add(random, work, *this)) {
+		while (shouldInjectFailure(random, work, workload)) {
+			workload->initFailureInjectionMode(random);
 			failureInjection.push_back(workload);
 			workload = factory->create(*this);
 		}
 	}
+}
+
+bool CompoundWorkload::shouldInjectFailure(DeterministicRandom& random,
+                                           const WorkloadRequest& work,
+                                           Reference<FailureInjectionWorkload> failure) const {
+	auto desc = failure->description();
+	unsigned alreadyAdded =
+	    std::count_if(workloads.begin(), workloads.end(), [&desc](auto const& w) { return w->description() == desc; });
+	alreadyAdded += std::count_if(
+	    failureInjection.begin(), failureInjection.end(), [&desc](auto const& w) { return w->description() == desc; });
+	return failure->shouldInject(random, work, alreadyAdded);
 }
 
 Future<std::vector<PerfMetric>> CompoundWorkload::getMetrics() {
@@ -425,24 +437,13 @@ void TestWorkload::disableFailureInjectionWorkloads(std::set<std::string>& out) 
 
 FailureInjectionWorkload::FailureInjectionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
-bool FailureInjectionWorkload::add(DeterministicRandom& random,
-                                   const WorkloadRequest& work,
-                                   const CompoundWorkload& workload) {
-	auto desc = description();
-	unsigned alreadyAdded = std::count_if(workload.workloads.begin(), workload.workloads.end(), [&desc](auto const& w) {
-		return w->description() == desc;
-	});
-	alreadyAdded += std::count_if(workload.failureInjection.begin(),
-	                              workload.failureInjection.end(),
-	                              [&desc](auto const& w) { return w->description() == desc; });
-	bool willAdd = alreadyAdded < 3 && work.useDatabase && 0.1 / (1 + alreadyAdded) > random.random01();
-	if (willAdd) {
-		initFailureInjectionMode(random, alreadyAdded);
-	}
-	return willAdd;
-}
+void FailureInjectionWorkload::initFailureInjectionMode(DeterministicRandom& random) {}
 
-void FailureInjectionWorkload::initFailureInjectionMode(DeterministicRandom& random, unsigned count) {}
+bool FailureInjectionWorkload::shouldInject(DeterministicRandom& random,
+                                            const WorkloadRequest& work,
+                                            const unsigned alreadyAdded) const {
+	return alreadyAdded < 3 && work.useDatabase && 0.1 / (1 + alreadyAdded) > random.random01();
+}
 
 Future<Void> FailureInjectionWorkload::setupInjectionWorkload(const Database& cx, Future<Void> done) {
 	return holdWhile(this->setup(cx), done);
