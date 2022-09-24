@@ -1748,6 +1748,71 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 	}
 
+	// Read cluster configuration
+	if (useDB) {
+		state Transaction tr = Transaction(cx);
+		state DatabaseConfiguration configuration;
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				RangeResult results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
+				configuration.fromKeyValues((VectorRef<KeyValueRef>)results);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
+		g_simulator->storagePolicy = configuration.storagePolicy;
+		g_simulator->tLogPolicy = configuration.tLogPolicy;
+		g_simulator->tLogWriteAntiQuorum = configuration.tLogWriteAntiQuorum;
+		g_simulator->remoteTLogPolicy = configuration.remoteTLogPolicy;
+		g_simulator->usableRegions = configuration.usableRegions;
+		if (configuration.regions.size() > 0) {
+			g_simulator->primaryDcId = configuration.regions[0].dcId;
+			g_simulator->hasSatelliteReplication = configuration.regions[0].satelliteTLogReplicationFactor > 0;
+			if (configuration.regions[0].satelliteTLogUsableDcsFallback > 0) {
+				g_simulator->satelliteTLogPolicyFallback = configuration.regions[0].satelliteTLogPolicyFallback;
+				g_simulator->satelliteTLogWriteAntiQuorumFallback =
+				    configuration.regions[0].satelliteTLogWriteAntiQuorumFallback;
+			} else {
+				g_simulator->satelliteTLogPolicyFallback = configuration.regions[0].satelliteTLogPolicy;
+				g_simulator->satelliteTLogWriteAntiQuorumFallback =
+				    configuration.regions[0].satelliteTLogWriteAntiQuorum;
+			}
+			g_simulator->satelliteTLogPolicy = configuration.regions[0].satelliteTLogPolicy;
+			g_simulator->satelliteTLogWriteAntiQuorum = configuration.regions[0].satelliteTLogWriteAntiQuorum;
+
+			for (auto s : configuration.regions[0].satellites) {
+				g_simulator->primarySatelliteDcIds.push_back(s.dcId);
+			}
+		} else {
+			g_simulator->hasSatelliteReplication = false;
+			g_simulator->satelliteTLogWriteAntiQuorum = 0;
+		}
+
+		if (configuration.regions.size() == 2) {
+			g_simulator->remoteDcId = configuration.regions[1].dcId;
+			ASSERT((!configuration.regions[0].satelliteTLogPolicy && !configuration.regions[1].satelliteTLogPolicy) ||
+			       configuration.regions[0].satelliteTLogPolicy->info() ==
+			           configuration.regions[1].satelliteTLogPolicy->info());
+
+			for (auto s : configuration.regions[1].satellites) {
+				g_simulator->remoteSatelliteDcIds.push_back(s.dcId);
+			}
+		}
+
+		if (g_simulator->usableRegions < 2 || !g_simulator->hasSatelliteReplication) {
+			g_simulator->allowLogSetKills = false;
+		}
+
+		ASSERT(g_simulator->storagePolicy && g_simulator->tLogPolicy);
+		ASSERT(!g_simulator->hasSatelliteReplication || g_simulator->satelliteTLogPolicy);
+	}
+
 	if (useDB) {
 		std::vector<Future<Void>> tenantFutures;
 		for (auto tenant : tenantsToCreate) {
