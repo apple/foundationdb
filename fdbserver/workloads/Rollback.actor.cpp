@@ -47,7 +47,7 @@ struct RollbackWorkload : FailureInjectionWorkload {
 		multiple = getOption(options, "multiple"_sr, multiple);
 	}
 
-	void initFailureInjectionMode(DeterministicRandom& random, unsigned count) override {
+	void initFailureInjectionMode(DeterministicRandom& random) override {
 		enabled = clientId == 0;
 		multiple = random.coinflip();
 		enableFailures = random.random01() < 0.2;
@@ -104,7 +104,7 @@ struct RollbackWorkload : FailureInjectionWorkload {
 
 		// Kill the proxy and clog the unclogged tlog
 		if (self->enableFailures) {
-			g_simulator->killProcess(g_simulator->getProcessByAddress(proxy.address()), ISimulator::KillInstantly);
+			g_simulator->rebootProcess(g_simulator->getProcessByAddress(proxy.address()), ISimulator::Reboot);
 			g_simulator->clogInterface(uncloggedTLog.ip, self->clogDuration, ClogAll);
 		} else {
 			g_simulator->clogInterface(proxy.address().ip, self->clogDuration, ClogAll);

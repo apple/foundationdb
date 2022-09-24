@@ -1390,6 +1390,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "blobkey")) {
+					bool _result = wait(makeInterruptable(blobKeyCommandActor(localDb, tenantEntry, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "unlock")) {
 					if ((tokens.size() != 2) || (tokens[1].size() != 32) ||
 					    !std::all_of(tokens[1].begin(), tokens[1].end(), &isxdigit)) {
@@ -1878,48 +1885,32 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "createtenant")) {
-					bool _result = wait(makeInterruptable(createTenantCommandActor(db, tokens)));
-					if (!_result)
+				if (tokencmp(tokens[0], "tenant")) {
+					bool _result = wait(makeInterruptable(tenantCommand(db, tokens)));
+					if (!_result) {
 						is_error = true;
-					continue;
-				}
-
-				if (tokencmp(tokens[0], "deletetenant")) {
-					bool _result = wait(makeInterruptable(deleteTenantCommandActor(db, tokens)));
-					if (!_result)
-						is_error = true;
-					else if (tenantName.present() && tokens[1] == tenantName.get()) {
+					} else if (tokens.size() >= 3 && tenantName.present() && tokencmp(tokens[1], "delete") &&
+					           tokens[2] == tenantName.get()) {
 						printAtCol("WARNING: the active tenant was deleted. Use the `usetenant' or `defaulttenant' "
 						           "command to choose a new tenant.\n",
 						           80);
 					}
+
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "listtenants")) {
-					bool _result = wait(makeInterruptable(listTenantsCommandActor(db, tokens)));
-					if (!_result)
+				if (tokencmp(tokens[0], "createtenant") || tokencmp(tokens[0], "deletetenant") ||
+				    tokencmp(tokens[0], "listtenants") || tokencmp(tokens[0], "gettenant") ||
+				    tokencmp(tokens[0], "configuretenant") || tokencmp(tokens[0], "renametenant")) {
+					bool _result = wait(makeInterruptable(tenantCommandForwarder(db, tokens)));
+					if (!_result) {
 						is_error = true;
+					}
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "gettenant")) {
-					bool _result = wait(makeInterruptable(getTenantCommandActor(db, tokens)));
-					if (!_result)
-						is_error = true;
-					continue;
-				}
-
-				if (tokencmp(tokens[0], "configuretenant")) {
-					bool _result = wait(makeInterruptable(configureTenantCommandActor(db, tokens)));
-					if (!_result)
-						is_error = true;
-					continue;
-				}
-
-				if (tokencmp(tokens[0], "renametenant")) {
-					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens)));
+				if (tokencmp(tokens[0], "tenantgroup")) {
+					bool _result = wait(makeInterruptable(tenantGroupCommand(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
