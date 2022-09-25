@@ -19,7 +19,9 @@
  */
 
 #include "fdbrpc/Stats.h"
+#include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
+#include <string>
 
 Counter::Counter(std::string const& name, CounterCollection& collection)
   : IMetric(name), interval_start(0), last_event(0), interval_sq_time(0), roughness_interval_start(0),
@@ -81,7 +83,14 @@ void Counter::clear() {
 	metric = 0;
 }
 
-void Counter::flush(MetricBatch& batch) {}
+void Counter::flush(MetricBatch& batch) {
+	Value val = getValue();
+	std::string msg = create_statsd_message(name, StatsDMetric::COUNTER, std::to_string(val));
+	if (!batch.statsd_message.empty()) {
+		batch.statsd_message += "\n";
+	}
+	batch.statsd_message += msg;
+}
 
 void CounterCollection::logToTraceEvent(TraceEvent& te) const {
 	for (ICounter* c : counters) {

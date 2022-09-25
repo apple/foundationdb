@@ -20,6 +20,7 @@
 
 #ifndef FDBRPC_STATS_H
 #define FDBRPC_STATS_H
+#include <string>
 #include <type_traits>
 #pragma once
 
@@ -224,7 +225,28 @@ public:
 	}
 
 	void addMeasurement(double measurement) { sample.addSample(measurement); }
-	void flush(MetricBatch& batch) override {}
+	void flush(MetricBatch& batch) override {
+		std::string msg;
+
+		auto median_gauge = create_statsd_message(name, StatsDMetric::GAUGE, std::to_string(sample.median()));
+		auto p90_gauge = create_statsd_message(name, StatsDMetric::GAUGE, std::to_string(sample.percentile(0.9)));
+		auto p95_gauge = create_statsd_message(name, StatsDMetric::GAUGE, std::to_string(sample.percentile(0.95)));
+		auto p99_gauge = create_statsd_message(name, StatsDMetric::GAUGE, std::to_string(sample.percentile(0.99)));
+		auto p999_gauge = create_statsd_message(name, StatsDMetric::GAUGE, std::to_string(sample.percentile(0.999)));
+
+		if (!msg.empty()) {
+			msg += "\n";
+		}
+		msg += median_gauge;
+		msg += "\n";
+		msg += p90_gauge;
+		msg += "\n";
+		msg += p95_gauge;
+		msg += "\n";
+		msg += p99_gauge;
+		msg += "\n";
+		msg += p999_gauge;
+	}
 
 private:
 	UID id;
