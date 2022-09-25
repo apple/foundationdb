@@ -18,8 +18,11 @@
  * limitations under the License.
  */
 
+#include "flow/Error.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/flow.h"
+#include "flow/serialize.h"
+#include "flow/singleton.h"
 
 const StringRef BaseEventMetric::metricType = "Event"_sr;
 template <>
@@ -228,4 +231,38 @@ std::string MetricData::toString() const {
 	              appendStart,
 	              rollTime,
 	              writer.getLength());
+}
+
+std::string create_statsd_message(const std::string& name, StatsDMetric type, const std::string& val) {
+	return create_statsd_message(name, type, val, {});
+}
+
+std::string create_statsd_message(const std::string& name,
+                                  StatsDMetric type,
+                                  const std::string& val,
+                                  const std::vector<std::pair<std::string, std::string>>& tags) {
+	ASSERT(!name.empty());
+	std::string msg = name + ":" + val;
+	switch (type) {
+	case StatsDMetric::GAUGE:
+		msg += "|g";
+		break;
+
+	case StatsDMetric::COUNTER:
+		msg += "|c";
+		break;
+	}
+
+	if (!tags.empty()) {
+		msg += "|#";
+		for (size_t i = 0; i < tags.size(); i++) {
+			msg = msg + tags[i].first + ":" + tags[i].second;
+			// If we know there is another tag coming, we should add a comma in the message
+			if (i != tags.size() - 1) {
+				msg += ",";
+			}
+		}
+	}
+
+	return msg;
 }

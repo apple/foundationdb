@@ -1453,6 +1453,15 @@ public:
 	virtual void flush(MetricBatch&) = 0;
 };
 
+enum StatsDMetric { GAUGE = 0, COUNTER };
+
+std::string create_statsd_message(const std::string& name,
+                                  StatsDMetric type,
+                                  const std::string& val,
+                                  const std::vector<std::pair<std::string, std::string>>& tags);
+
+std::string create_statsd_message(const std::string& name, StatsDMetric type, const std::string& val);
+
 #include "flow/unactorcompiler.h"
 
 #endif
