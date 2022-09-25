@@ -366,7 +366,9 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			CODE_PROBE(err.code() == error_code_grv_proxy_failed, "Terminated due to GRV proxy failure");
 			CODE_PROBE(err.code() == error_code_resolver_failed, "Terminated due to resolver failure");
 			CODE_PROBE(err.code() == error_code_backup_worker_failed, "Terminated due to backup worker failure");
-			CODE_PROBE(err.code() == error_code_operation_failed, "Terminated due to failed operation");
+			CODE_PROBE(err.code() == error_code_operation_failed,
+			           "Terminated due to failed operation",
+			           probe::decoration::rare);
 			CODE_PROBE(err.code() == error_code_restart_cluster_controller,
 			           "Terminated due to cluster-controller restart.");
 
@@ -1306,7 +1308,7 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		}
 		checkOutstandingRequests(self);
 	} else {
-		CODE_PROBE(true, "Received an old worker registration request.");
+		CODE_PROBE(true, "Received an old worker registration request.", probe::decoration::rare);
 	}
 
 	// For each singleton

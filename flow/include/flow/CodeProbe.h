@@ -114,6 +114,25 @@ constexpr auto noSim = !simOnly;
 
 } // namespace assert
 
+namespace decoration {
+
+// Code probes that currently (as of 9/25/2022) are not expected to show up in a 250k-test Joshua run
+// are marked as "rare." This indicates a testing bug, and these probes should either be removed or testing
+// coverage should be improved to hit them. Ideally, then, we should remove uses of this annotation in the
+// long-term. However, this annotation has been added to prevent further regressions in code coverage, so that
+// we can detect changes that fail to hit non-rare code probes.
+//
+// This should also hopefully help with debugging, because if a code probe is marked as rare, it means that this
+// is a case not likely hit in simulation, and it may be a case that is more prone to buggy behaviour.
+struct Rare {
+	constexpr static AnnotationType type = AnnotationType::Decoration;
+	void trace(struct ICodeProbe const*, BaseTraceEvent& evt, bool) const { evt.detail("Rare", true); }
+};
+
+constexpr Rare rare;
+
+} // namespace decoration
+
 namespace func {
 
 struct Deduplicate {

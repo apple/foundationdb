@@ -230,7 +230,7 @@ class ConfigNodeImpl {
 			// Handle a very rare case where a ConfigNode loses data between
 			// responding with a committed version and responding to the
 			// subsequent get changes request.
-			CODE_PROBE(true, "ConfigNode data loss occurred on a minority of coordinators");
+			CODE_PROBE(true, "ConfigNode data loss occurred on a minority of coordinators", probe::decoration::rare);
 			req.reply.sendError(process_behind()); // Reuse the process_behind error
 			return Void();
 		}

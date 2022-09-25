@@ -917,7 +917,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 			                                  configuration.storageTeamSize - 1) -
 			                         storageFailures;
 			if (*storageFaultTolerance < 0) {
-				CODE_PROBE(true, "Too many failed storage servers to complete snapshot");
+				CODE_PROBE(true, "Too many failed storage servers to complete snapshot", probe::decoration::rare);
 				throw snap_storage_failed();
 			}
 			// tlogs
@@ -938,7 +938,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 			// get coordinators
 			Optional<Value> coordinators = wait(tr.get(coordinatorsKey));
 			if (!coordinators.present()) {
-				CODE_PROBE(true, "Failed to read the coordinatorsKey");
+				CODE_PROBE(true, "Failed to read the coordinatorsKey", probe::decoration::rare);
 				throw operation_failed();
 			}
 			ClusterConnectionString ccs(coordinators.get().toString());

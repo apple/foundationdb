@@ -157,7 +157,7 @@ private:
 			Standalone<StringRef> h = wait(self->queue->readNext(sizeof(uint32_t)));
 			if (h.size() != sizeof(uint32_t)) {
 				if (h.size()) {
-					CODE_PROBE(true, "Zero fill within size field");
+					CODE_PROBE(true, "Zero fill within size field", probe::decoration::rare);
 					int payloadSize = 0;
 					memcpy(&payloadSize, h.begin(), h.size());
 					zeroFillSize = sizeof(uint32_t) - h.size(); // zero fill the size itself
@@ -2189,7 +2189,7 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 		    .detail("LogId", logData->logId)
 		    .detail("Version", it->version.get())
 		    .detail("QueueVer", it->queueCommittedVersion.get());
-		CODE_PROBE(true, "A TLog was replaced before having a chance to commit its queue");
+		CODE_PROBE(true, "A TLog was replaced before having a chance to commit its queue", probe::decoration::rare);
 		it->queueCommittedVersion.set(it->version.get());
 	}
 	return Void();

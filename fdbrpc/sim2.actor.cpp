@@ -1615,7 +1615,8 @@ public:
 		CODE_PROBE(kt == FailDisk,
 		           "Simulated machine was killed with a failed disk",
 		           probe::context::sim2,
-		           probe::assert::simOnly);
+		           probe::assert::simOnly,
+		           probe::decoration::rare);
 
 		if (kt == KillInstantly) {
 			TraceEvent(SevWarn, "FailMachine")
@@ -2079,8 +2080,11 @@ public:
 		    .detail("KillTypeMin", ktMin)
 		    .detail("KilledDC", kt == ktMin);
 
-		CODE_PROBE(
-		    kt != ktMin, "DataCenter kill was rejected by killMachine", probe::context::sim2, probe::assert::simOnly);
+		CODE_PROBE(kt != ktMin,
+		           "DataCenter kill was rejected by killMachine",
+		           probe::context::sim2,
+		           probe::assert::simOnly,
+		           probe::decoration::rare);
 		CODE_PROBE((kt == ktMin) && (kt == RebootAndDelete),
 		           "Datacenter kill Resulted in a reboot and delete",
 		           probe::context::sim2,

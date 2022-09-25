@@ -644,7 +644,7 @@ private:
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		confChange = true;
-		CODE_PROBE(true, "Setting version epoch");
+		CODE_PROBE(true, "Setting version epoch", probe::decoration::rare);
 	}
 
 	void checkSetWriteRecoverKey(MutationRef m) {

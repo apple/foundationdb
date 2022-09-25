@@ -751,7 +751,7 @@ ACTOR Future<Void> updateLogsValue(Reference<ClusterRecoveryData> self, Database
 			}
 
 			if (!found) {
-				CODE_PROBE(true, "old master attempted to change logsKey");
+				CODE_PROBE(true, "old master attempted to change logsKey", probe::decoration::rare);
 				return Void();
 			}
 
@@ -830,7 +830,7 @@ ACTOR Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Refer
 			                            std::vector<UID>()));
 		} else {
 			// The cluster should enter the accepting commits phase soon, and then we will register again
-			CODE_PROBE(true, "cstate is updated but we aren't accepting commits yet");
+			CODE_PROBE(true, "cstate is updated but we aren't accepting commits yet", probe::decoration::rare);
 		}
 	}
 }
