@@ -746,7 +746,7 @@ TEST_CASE("/GlobalTagThrottler/WriteThrottling") {
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 100);
 	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalQuota = tagQuotaValue.totalQuota = 100.0;
+	tagQuotaValue.totalQuota = 100.0;
 	globalTagThrottler.setQuota(testTag, tagQuotaValue);
 	state Future<Void> client = GlobalTagThrottlerTesting::runClient(
 	    &globalTagThrottler, &storageServers, testTag, 5.0, 6.0, GlobalTagThrottlerTesting::OpType::WRITE);
