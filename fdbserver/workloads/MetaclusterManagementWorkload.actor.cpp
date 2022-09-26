@@ -392,14 +392,28 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		state bool exists = itr != self->createdTenants.end();
 		state bool hasCapacity = self->createdTenants.size() < self->totalTenantGroupCapacity;
 		state bool retried = false;
+		state bool retrySuccess = false;
 		state bool preferAssignedCluster = deterministicRandom()->coinflip();
+		// Choose between two preferred clusters because if we get a partial completion and
+		// retry, we want the operation to eventually succeed instead of having a chance of
+		// never re-visiting the original preferred cluster.
+		state std::pair<ClusterName, ClusterName> preferredClusters;
+		state Optional<ClusterName> originalPreferredCluster;
+		if (preferAssignedCluster) {
+			preferredClusters.first = self->chooseClusterName();
+			preferredClusters.second = self->chooseClusterName();
+		}
 
 		try {
 			state TenantMapEntry createEntry;
 			loop {
 				try {
-					if (preferAssignedCluster) {
-						createEntry.assignedCluster = self->chooseClusterName();
+					if (preferAssignedCluster && (!retried || deterministicRandom()->coinflip())) {
+						createEntry.assignedCluster =
+						    deterministicRandom()->coinflip() ? preferredClusters.first : preferredClusters.second;
+						if (!originalPreferredCluster.present()) {
+							originalPreferredCluster = createEntry.assignedCluster.get();
+						}
 					}
 					Future<Void> createFuture = MetaclusterAPI::createTenant(self->managementDb, tenant, createEntry);
 					Optional<Void> result = wait(timeout(createFuture, deterministicRandom()->randomInt(1, 30)));
@@ -412,7 +426,16 @@ struct MetaclusterManagementWorkload : TestWorkload {
 					if (e.code() == error_code_tenant_already_exists && retried && !exists) {
 						Optional<TenantMapEntry> entry = wait(MetaclusterAPI::tryGetTenant(self->managementDb, tenant));
 						ASSERT(entry.present());
+						retrySuccess = true;
 						break;
+					} else if (preferAssignedCluster && retried &&
+					           originalPreferredCluster.get() != createEntry.assignedCluster.get()) {
+						// When picking a different assigned cluster, it is possible to leave the
+						// tenant creation in a partially completed state, which we want to avoid.
+						// Continue retrying if the new preferred cluster throws errors rather than
+						// exiting immediately so we can allow the operation to finish.
+						TraceEvent("BreakpointRetry").error(e);
+						continue;
 					} else {
 						throw;
 					}
@@ -426,8 +449,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			ASSERT(entry.assignedCluster.present());
 
 			auto assignedCluster = self->dataDbs.find(entry.assignedCluster.get());
-
-			ASSERT(!preferAssignedCluster || createEntry.assignedCluster.get() == assignedCluster->first);
+			ASSERT(!preferAssignedCluster || retrySuccess ||
+			       createEntry.assignedCluster.get() == assignedCluster->first);
 			ASSERT(assignedCluster != self->dataDbs.end());
 			ASSERT(assignedCluster->second.tenants.insert(tenant).second);
 			ASSERT(assignedCluster->second.tenantGroupCapacity >= assignedCluster->second.tenants.size());

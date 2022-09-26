@@ -1112,12 +1112,15 @@ struct CreateTenantImpl {
 			} else if (!self->replaceExistingTenantId.present() ||
 			           self->replaceExistingTenantId.get() != existingEntry.get().id) {
 				// The tenant creation has already started, so resume where we left off
-				self->tenantEntry = existingEntry.get();
 				ASSERT(existingEntry.get().assignedCluster.present());
 				if (self->preferAssignedCluster &&
 				    existingEntry.get().assignedCluster.get() != self->tenantEntry.assignedCluster.get()) {
-					throw cluster_not_found();
+					TraceEvent("MetaclusterCreateTenantClusterMismatch")
+					    .detail("Preferred", self->tenantEntry.assignedCluster.get())
+					    .detail("Actual", existingEntry.get().assignedCluster.get());
+					throw invalid_tenant_configuration();
 				}
+				self->tenantEntry = existingEntry.get();
 				wait(self->ctx.setCluster(tr, existingEntry.get().assignedCluster.get()));
 				return true;
 			} else {
