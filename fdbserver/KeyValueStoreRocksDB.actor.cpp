@@ -1391,7 +1391,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			  : key(key), debugID(debugID), startTime(timer_monotonic()),
 			    getHistograms(
 			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
-			    result(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY, returnPromiseHistogram) {}
+			    result(static_cast<TaskPriority>(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY),
+			           returnPromiseHistogram) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& a) {
@@ -1483,7 +1484,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			  : key(key), maxLength(maxLength), debugID(debugID), startTime(timer_monotonic()),
 			    getHistograms(
 			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
-			    result(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY, returnPromiseHistogram) {}
+			    result(static_cast<TaskPriority>(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY),
+			           returnPromiseHistogram) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValuePrefixAction& a) {
@@ -1568,7 +1570,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), startTime(timer_monotonic()),
 			    getHistograms(
 			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
-			    result(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY, returnPromiseHistogram) {}
+			    result(static_cast<TaskPriority>(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY),
+			           returnPromiseHistogram) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 		};
 		void action(ReadRangeAction& a) {
