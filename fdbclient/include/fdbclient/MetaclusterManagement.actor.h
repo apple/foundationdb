@@ -1609,7 +1609,7 @@ struct ConfigureTenantImpl {
 		// Removing a tenant group is only possible if we have capacity for more groups on the current cluster
 		else if (!desiredGroup.present()) {
 			if (!self->ctx.dataClusterMetadata.get().entry.hasCapacity()) {
-				throw metacluster_no_capacity();
+				throw cluster_no_capacity();
 			}
 
 			wait(managementClusterRemoveTenantFromGroup(
@@ -1625,7 +1625,7 @@ struct ConfigureTenantImpl {
 		// If we are creating a new tenant group, we need to have capacity on the current cluster
 		if (!tenantGroupEntry.present()) {
 			if (!self->ctx.dataClusterMetadata.get().entry.hasCapacity()) {
-				throw metacluster_no_capacity();
+				throw cluster_no_capacity();
 			}
 			wait(managementClusterRemoveTenantFromGroup(
 			    tr, self->tenantName, tenantEntry, &self->ctx.dataClusterMetadata.get()));
@@ -1645,7 +1645,14 @@ struct ConfigureTenantImpl {
 
 		// We don't currently support movement between groups on different clusters
 		else {
-			throw cluster_no_capacity();
+			TraceEvent("TenantGroupChangeToDifferentCluster")
+			    .detail("Tenant", self->tenantName)
+			    .detail("OriginalGroup", tenantEntry.tenantGroup)
+			    .detail("DesiredGroup", desiredGroup)
+			    .detail("TenantAssignedCluster", tenantEntry.assignedCluster)
+			    .detail("DesiredGroupAssignedCluster", tenantGroupEntry.get().assignedCluster);
+
+			throw invalid_tenant_configuration();
 		}
 	}
 
