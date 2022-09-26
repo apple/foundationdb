@@ -688,8 +688,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BW_THROTTLING_ENABLED,                                true );
 
 	bool buggifySmallBWLag = randomize && BUGGIFY;
-	init( TARGET_BW_LAG,                                        50.0 ); if(buggifySmallBWLag) TARGET_BW_LAG = 10.0;
-	init( TARGET_BW_LAG_BATCH,                                  30.0 ); if(buggifySmallBWLag) TARGET_BW_LAG_BATCH = 4.0;
+	init( TARGET_BW_LAG,                                       240.0 ); if(buggifySmallBWLag) TARGET_BW_LAG = 10.0;
+	init( TARGET_BW_LAG_BATCH,                                 200.0 ); if(buggifySmallBWLag) TARGET_BW_LAG_BATCH = 4.0;
 	init( TARGET_BW_LAG_UPDATE,                                  9.0 ); if(buggifySmallBWLag) TARGET_BW_LAG_UPDATE = 1.0;
 	init( MIN_BW_HISTORY,                                         10 );
 	init( BW_ESTIMATION_INTERVAL,                               10.0 ); if(buggifySmallBWLag) BW_ESTIMATION_INTERVAL = 2.0;
@@ -783,10 +783,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( QUICK_GET_KEY_VALUES_LIMIT,                           2000 );
 	init( QUICK_GET_KEY_VALUES_LIMIT_BYTES,                      1e7 );
 	init( STORAGE_FEED_QUERY_HARD_LIMIT,                      100000 );
-	init( STORAGE_SERVER_READ_CONCURRENCY,                        70 );
-	// Priorities which each ReadType maps to, in enumeration order
-	init( STORAGESERVER_READ_RANKS,                      "0,2,1,1,1" );
-	init( STORAGESERVER_READ_PRIORITIES,                   "48,32,8" );
 
 	//Wait Failure
 	init( MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS,                 250 ); if( randomize && BUGGIFY ) MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS = 2;
@@ -898,6 +894,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REDWOOD_DEFAULT_EXTENT_SIZE,              32 * 1024 * 1024 );
 	init( REDWOOD_DEFAULT_EXTENT_READ_SIZE,              1024 * 1024 );
 	init( REDWOOD_EXTENT_CONCURRENT_READS,                         4 );
+	init( REDWOOD_KVSTORE_CONCURRENT_READS,                       64 );
 	init( REDWOOD_KVSTORE_RANGE_PREFETCH,                       true );
 	init( REDWOOD_PAGE_REBUILD_MAX_SLACK,                       0.33 );
 	init( REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES,                    10 );
@@ -910,7 +907,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REDWOOD_HISTOGRAM_INTERVAL,                           30.0 );
 	init( REDWOOD_EVICT_UPDATED_PAGES,                          true ); if( randomize && BUGGIFY ) { REDWOOD_EVICT_UPDATED_PAGES = false; }
 	init( REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT,                    2 ); if( randomize && BUGGIFY ) { REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT = deterministicRandom()->randomInt(1, 7); }
-	init( REDWOOD_PRIORITY_LAUNCHS,                    "32,32,32,32" );
 
 	// Server request latency measurement
 	init( LATENCY_SAMPLE_SIZE,                                100000 );

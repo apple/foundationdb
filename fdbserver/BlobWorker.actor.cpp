@@ -2437,10 +2437,13 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					previousFuture = Future<BlobFileIndex>(BlobFileIndex());
 				}
 
+				// The last version included in the old change feed is startState.cfStartVersion - 1.
+				// So if the previous delta file did not include this version, and the new delta file does, the old
+				// change feed is considered complete.
 				Optional<std::pair<KeyRange, UID>> oldChangeFeedDataComplete;
 				if (startState.splitParentGranule.present() &&
-				    metadata->pendingDeltaVersion < startState.changeFeedStartVersion &&
-				    lastDeltaVersion >= startState.changeFeedStartVersion) {
+				    metadata->pendingDeltaVersion + 1 < startState.changeFeedStartVersion &&
+				    lastDeltaVersion + 1 >= startState.changeFeedStartVersion) {
 					oldChangeFeedDataComplete = startState.splitParentGranule.get();
 				}
 

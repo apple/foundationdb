@@ -2172,6 +2172,10 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	}
 
 	ASSERT(coordinatorAddresses.size() > 0);
+
+	// Mark a random majority of the coordinators as protected, so
+	// we won't accidently kill off a quorum and render the
+	// cluster unrecoverable.
 	deterministicRandom()->randomShuffle(coordinatorAddresses);
 	for (int i = 0; i < (coordinatorAddresses.size() / 2) + 1; i++) {
 		TraceEvent("ProtectCoordinator")

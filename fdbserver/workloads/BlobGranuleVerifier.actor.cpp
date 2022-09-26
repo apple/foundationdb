@@ -1218,7 +1218,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	}
 
 	Future<bool> check(Database const& cx) override {
-		if (clientId == 0 || !doForcePurge) {
+		if (clientId == 0 || (!doForcePurge && !purgeAtLatest)) {
 			return _check(cx, this);
 		}
 		return true;

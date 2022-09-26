@@ -451,7 +451,13 @@ public:
 	int physicalDatacenters;
 	int processesPerMachine;
 	int listenersPerProcess;
+
+	// We won't kill machines in this set, but we might reboot
+	// them.  This is a conservative mechanism to prevent the
+	// simulator from killing off important processes and rendering
+	// the cluster unrecoverable, e.g. a quorum of coordinators.
 	std::set<NetworkAddress> protectedAddresses;
+
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
 	std::vector<std::string> extraDatabases;
 	Reference<IReplicationPolicy> storagePolicy;

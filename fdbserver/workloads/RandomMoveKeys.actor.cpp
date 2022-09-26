@@ -27,6 +27,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
+#include "flow/DeterministicRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MoveKeysWorkload : FailureInjectionWorkload {
@@ -49,6 +50,12 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 	std::string description() const override { return "MoveKeysWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+
+	bool shouldInject(DeterministicRandom& random,
+	                  const WorkloadRequest& work,
+	                  const unsigned alreadyAdded) const override {
+		return alreadyAdded < 1 && work.useDatabase && 0.1 / (1 + alreadyAdded) > random.random01();
+	}
 
 	ACTOR Future<Void> _start(Database cx, MoveKeysWorkload* self) {
 		if (self->enabled) {
