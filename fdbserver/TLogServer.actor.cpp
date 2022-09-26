@@ -1448,7 +1448,8 @@ ACTOR Future<Void> updateStorageLoop(TLogData* self) {
 void commitMessages(TLogData* self,
                     Reference<LogData> logData,
                     Version version,
-                    const std::vector<TagsAndMessage>& taggedMessages) {
+                    const std::vector<TagsAndMessage>& taggedMessages,
+                    Optional<std::vector<Tag>> tags = std::vector<Tag>()) {
 	// SOMEDAY: This method of copying messages is reasonably memory efficient, but it's still a lot of bytes copied.
 	// Find a way to do the memory allocation right as we receive the messages in the network layer.
 
@@ -1530,11 +1531,15 @@ void commitMessages(TLogData* self,
 					txsBytes += tagData->versionMessages.back().second.expectedSize();
 				}
 				if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-					auto iter = logData->waitingTags.find(tag);
-					if (iter != logData->waitingTags.end()) {
-						auto promise = iter->second;
-						logData->waitingTags.erase(iter);
-						promise.send(Void());
+					if (tags.present()) {
+						tags.get().push_back(tag);
+					} else {
+						auto iter = logData->waitingTags.find(tag);
+						if (iter != logData->waitingTags.end()) {
+							auto promise = iter->second;
+							logData->waitingTags.erase(iter);
+							promise.send(Void());
+						}
 					}
 				}
 
@@ -1561,7 +1566,12 @@ void commitMessages(TLogData* self,
 	//TraceEvent("TLogPushed", self->dbgid).detail("Bytes", addedBytes).detail("MessageBytes", messages.size()).detail("Tags", tags.size()).detail("ExpectedBytes", expectedBytes).detail("MCount", mCount).detail("TCount", tCount);
 }
 
-void commitMessages(TLogData* self, Reference<LogData> logData, Version version, Arena arena, StringRef messages) {
+void commitMessages(TLogData* self,
+                    Reference<LogData> logData,
+                    Version version,
+                    Arena arena,
+                    StringRef messages,
+                    Optional<std::vector<Tag>> tags = std::vector<Tag>()) {
 	ArenaReader rd(arena, messages, Unversioned());
 	self->tempTagMessages.clear();
 	while (!rd.empty()) {
@@ -1569,7 +1579,7 @@ void commitMessages(TLogData* self, Reference<LogData> logData, Version version,
 		tagsAndMsg.loadFromArena(&rd, nullptr);
 		self->tempTagMessages.push_back(std::move(tagsAndMsg));
 	}
-	commitMessages(self, logData, version, self->tempTagMessages);
+	commitMessages(self, logData, version, self->tempTagMessages, tags);
 }
 
 Version poppedVersion(Reference<LogData> self, Tag tag) {
@@ -1599,10 +1609,7 @@ ACTOR Future<Void> waitForMessagesForTag(Reference<LogData> self, Tag reqTag, Ve
 		return Void();
 	}
 	choose {
-		when(wait(self->waitingTags[reqTag].getFuture())) {
-			// we want the caller to finish first, otherwise the data structure it is building might not be complete
-			wait(delay(0.0));
-		}
+		when(wait(self->waitingTags[reqTag].getFuture())) { return Void(); }
 		when(wait(delay(timeout))) { self->blockingPeekTimeouts += 1; }
 	}
 	return Void();
@@ -2304,7 +2311,8 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
 
 		//TraceEvent("TLogCommit", logData->logId).detail("Version", req.version);
-		commitMessages(self, logData, req.version, req.arena, req.messages);
+		std::vector<Tag> tags;
+		commitMessages(self, logData, req.version, req.arena, req.messages, tags);
 
 		logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, req.knownCommittedVersion);
 
@@ -2323,6 +2331,15 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 		logData->version.set(req.version);
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			while (!tags.empty()) {
+				auto iter = logData->waitingTags.find(tags.back());
+				tags.pop_back();
+				if (iter != logData->waitingTags.end()) {
+					auto promise = iter->second;
+					logData->waitingTags.erase(iter);
+					promise.send(Void());
+				}
+			}
 			self->unknownCommittedVersions.push_front(std::make_tuple(req.version, req.tLogCount));
 			while (!self->unknownCommittedVersions.empty() &&
 			       std::get<0>(self->unknownCommittedVersions.back()) <= req.knownCommittedVersion) {
