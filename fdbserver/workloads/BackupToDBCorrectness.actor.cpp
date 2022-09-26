@@ -46,44 +46,44 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 	BackupToDBCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		locked.set(sharedRandomNumber % 2);
-		backupAfter = getOption(options, LiteralStringRef("backupAfter"), 10.0);
-		restoreAfter = getOption(options, LiteralStringRef("restoreAfter"), 35.0);
-		performRestore = getOption(options, LiteralStringRef("performRestore"), true);
-		backupTag = getOption(options, LiteralStringRef("backupTag"), BackupAgentBase::getDefaultTag());
-		restoreTag = getOption(options, LiteralStringRef("restoreTag"), LiteralStringRef("restore"));
-		backupPrefix = getOption(options, LiteralStringRef("backupPrefix"), StringRef());
+		backupAfter = getOption(options, "backupAfter"_sr, 10.0);
+		restoreAfter = getOption(options, "restoreAfter"_sr, 35.0);
+		performRestore = getOption(options, "performRestore"_sr, true);
+		backupTag = getOption(options, "backupTag"_sr, BackupAgentBase::getDefaultTag());
+		restoreTag = getOption(options, "restoreTag"_sr, "restore"_sr);
+		backupPrefix = getOption(options, "backupPrefix"_sr, StringRef());
 		backupRangesCount = getOption(options,
-		                              LiteralStringRef("backupRangesCount"),
+		                              "backupRangesCount"_sr,
 		                              5); // tests can hangs if set higher than 1 + BACKUP_MAP_KEY_LOWER_LIMIT
-		backupRangeLengthMax = getOption(options, LiteralStringRef("backupRangeLengthMax"), 1);
+		backupRangeLengthMax = getOption(options, "backupRangeLengthMax"_sr, 1);
 		abortAndRestartAfter =
 		    getOption(options,
-		              LiteralStringRef("abortAndRestartAfter"),
+		              "abortAndRestartAfter"_sr,
 		              (!locked && deterministicRandom()->random01() < 0.5)
 		                  ? deterministicRandom()->random01() * (restoreAfter - backupAfter) + backupAfter
 		                  : 0.0);
-		differentialBackup = getOption(
-		    options, LiteralStringRef("differentialBackup"), deterministicRandom()->random01() < 0.5 ? true : false);
+		differentialBackup =
+		    getOption(options, "differentialBackup"_sr, deterministicRandom()->random01() < 0.5 ? true : false);
 		stopDifferentialAfter =
 		    getOption(options,
-		              LiteralStringRef("stopDifferentialAfter"),
+		              "stopDifferentialAfter"_sr,
 		              differentialBackup ? deterministicRandom()->random01() *
 		                                           (restoreAfter - std::max(abortAndRestartAfter, backupAfter)) +
 		                                       std::max(abortAndRestartAfter, backupAfter)
 		                                 : 0.0);
-		agentRequest = getOption(options, LiteralStringRef("simDrAgents"), true);
-		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
+		agentRequest = getOption(options, "simDrAgents"_sr, true);
+		shareLogRange = getOption(options, "shareLogRange"_sr, false);
 
 		// Use sharedRandomNumber if shareLogRange is true so that we can ensure backup and DR both backup the same
 		// range
 		beforePrefix = shareLogRange ? (sharedRandomNumber & 1) : (deterministicRandom()->random01() < 0.5);
 
 		if (beforePrefix) {
-			extraPrefix = backupPrefix.withPrefix(LiteralStringRef("\xfe\xff\xfe"));
-			backupPrefix = backupPrefix.withPrefix(LiteralStringRef("\xfe\xff\xff"));
+			extraPrefix = backupPrefix.withPrefix("\xfe\xff\xfe"_sr);
+			backupPrefix = backupPrefix.withPrefix("\xfe\xff\xff"_sr);
 		} else {
-			extraPrefix = backupPrefix.withPrefix(LiteralStringRef("\x00\x00\x01"));
-			backupPrefix = backupPrefix.withPrefix(LiteralStringRef("\x00\x00\00"));
+			extraPrefix = backupPrefix.withPrefix("\x00\x00\x01"_sr);
+			backupPrefix = backupPrefix.withPrefix("\x00\x00\00"_sr);
 		}
 
 		ASSERT(backupPrefix != StringRef());
@@ -94,11 +94,10 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 		if (shareLogRange) {
 			if (beforePrefix)
-				backupRanges.push_back_deep(backupRanges.arena(),
-				                            KeyRangeRef(normalKeys.begin, LiteralStringRef("\xfe\xff\xfe")));
+				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(normalKeys.begin, "\xfe\xff\xfe"_sr));
 			else
 				backupRanges.push_back_deep(backupRanges.arena(),
-				                            KeyRangeRef(strinc(LiteralStringRef("\x00\x00\x01")), normalKeys.end));
+				                            KeyRangeRef(strinc("\x00\x00\x01"_sr), normalKeys.end));
 		} else if (backupRangesCount <= 0) {
 			if (beforePrefix)
 				backupRanges.push_back_deep(backupRanges.arena(),
@@ -441,7 +440,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					    .detail("TaskCount", taskCount)
 					    .detail("WaitCycles", waitCycles);
 					printf("EndingNonZeroTasks: %ld\n", (long)taskCount);
-					wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
+					wait(TaskBucket::debugPrintRange(cx, "\xff"_sr, StringRef()));
 				}
 
 				loop {
@@ -549,7 +548,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		}
 
 		if (displaySystemKeys) {
-			wait(TaskBucket::debugPrintRange(cx, LiteralStringRef("\xff"), StringRef()));
+			wait(TaskBucket::debugPrintRange(cx, "\xff"_sr, StringRef()));
 		}
 		return Void();
 	}

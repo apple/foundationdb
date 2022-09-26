@@ -37,15 +37,15 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 	AtomicRestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 
-		startAfter = getOption(options, LiteralStringRef("startAfter"), 10.0);
-		restoreAfter = getOption(options, LiteralStringRef("restoreAfter"), 20.0);
-		fastRestore = getOption(options, LiteralStringRef("fastRestore"), false);
+		startAfter = getOption(options, "startAfter"_sr, 10.0);
+		restoreAfter = getOption(options, "restoreAfter"_sr, 20.0);
+		fastRestore = getOption(options, "fastRestore"_sr, false);
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-		usePartitionedLogs.set(getOption(
-		    options, LiteralStringRef("usePartitionedLogs"), deterministicRandom()->random01() < 0.5 ? true : false));
+		usePartitionedLogs.set(
+		    getOption(options, "usePartitionedLogs"_sr, deterministicRandom()->random01() < 0.5 ? true : false));
 
-		addPrefix = getOption(options, LiteralStringRef("addPrefix"), LiteralStringRef(""));
-		removePrefix = getOption(options, LiteralStringRef("removePrefix"), LiteralStringRef(""));
+		addPrefix = getOption(options, "addPrefix"_sr, ""_sr);
+		removePrefix = getOption(options, "removePrefix"_sr, ""_sr);
 
 		// Correctness is not clean for addPrefix feature yet. Uncomment below to enable the test
 		// Generate addPrefix
@@ -81,7 +81,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	bool hasPrefix() const { return addPrefix != LiteralStringRef("") || removePrefix != LiteralStringRef(""); }
+	bool hasPrefix() const { return addPrefix != ""_sr || removePrefix != ""_sr; }
 
 	ACTOR static Future<Void> _start(Database cx, AtomicRestoreWorkload* self) {
 		state FileBackupAgent backupAgent;

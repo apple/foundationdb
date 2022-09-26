@@ -27,6 +27,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
+#include "flow/DeterministicRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MoveKeysWorkload : FailureInjectionWorkload {
@@ -41,14 +42,20 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 
 	MoveKeysWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId && g_network->isSimulated(); // only do this on the "first" client
-		meanDelay = getOption(options, LiteralStringRef("meanDelay"), meanDelay);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), testDuration);
-		maxKeyspace = getOption(options, LiteralStringRef("maxKeyspace"), maxKeyspace);
+		meanDelay = getOption(options, "meanDelay"_sr, meanDelay);
+		testDuration = getOption(options, "testDuration"_sr, testDuration);
+		maxKeyspace = getOption(options, "maxKeyspace"_sr, maxKeyspace);
 	}
 
 	std::string description() const override { return "MoveKeysWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+
+	bool shouldInject(DeterministicRandom& random,
+	                  const WorkloadRequest& work,
+	                  const unsigned alreadyAdded) const override {
+		return alreadyAdded < 1 && work.useDatabase && 0.1 / (1 + alreadyAdded) > random.random01();
+	}
 
 	ACTOR Future<Void> _start(Database cx, MoveKeysWorkload* self) {
 		if (self->enabled) {
@@ -56,6 +63,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 			state Transaction tr(cx);
 			loop {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				try {
 					RangeResult res = wait(tr.getRange(configKeys, 1000));
 					ASSERT(res.size() < 1000);

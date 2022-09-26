@@ -33,9 +33,9 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 
 	AtomicSwitchoverWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 
-		switch1delay = getOption(options, LiteralStringRef("switch1delay"), 50.0);
-		switch2delay = getOption(options, LiteralStringRef("switch2delay"), 50.0);
-		stopDelay = getOption(options, LiteralStringRef("stopDelay"), 50.0);
+		switch1delay = getOption(options, "switch1delay"_sr, 50.0);
+		switch2delay = getOption(options, "switch2delay"_sr, 50.0);
+		stopDelay = getOption(options, "stopDelay"_sr, 50.0);
 
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 

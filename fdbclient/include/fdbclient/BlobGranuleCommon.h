@@ -55,6 +55,13 @@ struct GranuleDeltas : VectorRef<MutationsAndVersionRef> {
 	}
 };
 
+struct GranuleMaterializeStats {
+	int64_t inputBytes;
+	int64_t outputBytes;
+
+	GranuleMaterializeStats() : inputBytes(0), outputBytes(0) {}
+};
+
 struct BlobGranuleCipherKeysMeta {
 	EncryptCipherDomainId textDomainId;
 	EncryptCipherBaseKeyId textBaseCipherId;
@@ -274,6 +281,17 @@ struct BlobGranuleHistoryValue {
 	void serialize(Ar& ar) {
 		serializer(ar, granuleID, parentBoundaries, parentVersions);
 	}
+};
+
+struct GranuleHistory {
+	KeyRange range;
+	Version version;
+	Standalone<BlobGranuleHistoryValue> value;
+
+	GranuleHistory() {}
+
+	GranuleHistory(KeyRange range, Version version, Standalone<BlobGranuleHistoryValue> value)
+	  : range(range), version(version), value(value) {}
 };
 
 // A manifest to assist full fdb restore from blob granule files

@@ -78,7 +78,7 @@ struct FeedTestData : ReferenceCounted<FeedTestData>, NonCopyable {
 	NotifiedVersion checkVersion;
 
 	FeedTestData(Key key, bool doPops)
-	  : key(key), keyRange(KeyRangeRef(key, keyAfter(key))), feedID(key.withPrefix(LiteralStringRef("CF"))), nextVal(0),
+	  : key(key), keyRange(KeyRangeRef(key, keyAfter(key))), feedID(key.withPrefix("CF"_sr)), nextVal(0),
 	    lastCleared(false), poppingVersion(0), poppedVersion(0), destroying(false), destroyed(false), complete(false),
 	    checkVersion(0) {
 		if (doPops) {

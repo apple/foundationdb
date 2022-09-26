@@ -74,17 +74,15 @@ void addInterfacesFromKVs(RangeResult& kvs,
 			return;
 		}
 		ClientLeaderRegInterface leaderInterf(workerInterf.address());
-		StringRef ip_port =
-		    (kv.key.endsWith(LiteralStringRef(":tls")) ? kv.key.removeSuffix(LiteralStringRef(":tls")) : kv.key)
-		        .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
+		StringRef ip_port = (kv.key.endsWith(":tls"_sr) ? kv.key.removeSuffix(":tls"_sr) : kv.key)
+		                        .removePrefix("\xff\xff/worker_interfaces/"_sr);
 		(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
 
 		if (workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
 			Key full_ip_port2 =
 			    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
-			StringRef ip_port2 = full_ip_port2.endsWith(LiteralStringRef(":tls"))
-			                         ? full_ip_port2.removeSuffix(LiteralStringRef(":tls"))
-			                         : full_ip_port2;
+			StringRef ip_port2 =
+			    full_ip_port2.endsWith(":tls"_sr) ? full_ip_port2.removeSuffix(":tls"_sr) : full_ip_port2;
 			(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
 		}
 	}
@@ -99,8 +97,7 @@ ACTOR Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
 	}
 	// Hold the reference to the standalone's memory
 	state ThreadFuture<RangeResult> kvsFuture = tr->getRange(
-	    KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"), LiteralStringRef("\xff\xff/worker_interfaces0")),
-	    CLIENT_KNOBS->TOO_MANY);
+	    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr), CLIENT_KNOBS->TOO_MANY);
 	state RangeResult kvs = wait(safeThreadFutureToFuture(kvsFuture));
 	ASSERT(!kvs.more);
 	if (verify) {

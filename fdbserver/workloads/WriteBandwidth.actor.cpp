@@ -40,12 +40,12 @@ struct WriteBandwidthWorkload : KVWorkload {
 	WriteBandwidthWorkload(WorkloadContext const& wcx)
 	  : KVWorkload(wcx), loadTime(0.0), transactions("Transactions"), retries("Retries"), commitLatencies(2000),
 	    GRVLatencies(2000) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		keysPerTransaction = getOption(options, LiteralStringRef("keysPerTransaction"), 100);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		keysPerTransaction = getOption(options, "keysPerTransaction"_sr, 100);
 		valueString = std::string(maxValueBytes, '.');
 
-		warmingDelay = getOption(options, LiteralStringRef("warmingDelay"), 0.0);
-		maxInsertRate = getOption(options, LiteralStringRef("maxInsertRate"), 1e12);
+		warmingDelay = getOption(options, "warmingDelay"_sr, 0.0);
+		maxInsertRate = getOption(options, "maxInsertRate"_sr, 1e12);
 	}
 
 	std::string description() const override { return "WriteBandwidth"; }

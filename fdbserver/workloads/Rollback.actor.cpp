@@ -40,14 +40,14 @@ struct RollbackWorkload : FailureInjectionWorkload {
 
 	RollbackWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		meanDelay = getOption(options, LiteralStringRef("meanDelay"), meanDelay); // Only matters if multiple==true
-		clogDuration = getOption(options, LiteralStringRef("clogDuration"), clogDuration);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), testDuration);
-		enableFailures = getOption(options, LiteralStringRef("enableFailures"), enableFailures);
-		multiple = getOption(options, LiteralStringRef("multiple"), multiple);
+		meanDelay = getOption(options, "meanDelay"_sr, meanDelay); // Only matters if multiple==true
+		clogDuration = getOption(options, "clogDuration"_sr, clogDuration);
+		testDuration = getOption(options, "testDuration"_sr, testDuration);
+		enableFailures = getOption(options, "enableFailures"_sr, enableFailures);
+		multiple = getOption(options, "multiple"_sr, multiple);
 	}
 
-	void initFailureInjectionMode(DeterministicRandom& random, unsigned count) override {
+	void initFailureInjectionMode(DeterministicRandom& random) override {
 		enabled = clientId == 0;
 		multiple = random.coinflip();
 		enableFailures = random.random01() < 0.2;
@@ -102,11 +102,12 @@ struct RollbackWorkload : FailureInjectionWorkload {
 		wait(delay(self->clogDuration / 3));
 		system = self->dbInfo->get();
 
-		// Kill the proxy and clog the unclogged tlog
 		if (self->enableFailures) {
-			g_simulator->killProcess(g_simulator->getProcessByAddress(proxy.address()), ISimulator::KillInstantly);
+			// Reboot the proxy and clog the unclogged tlog.
+			g_simulator->rebootProcess(g_simulator->getProcessByAddress(proxy.address()), ISimulator::Reboot);
 			g_simulator->clogInterface(uncloggedTLog.ip, self->clogDuration, ClogAll);
 		} else {
+			// Alternatively, if we're not injecting machine failures, clog the proxy and the unclogged tlog.
 			g_simulator->clogInterface(proxy.address().ip, self->clogDuration, ClogAll);
 			g_simulator->clogInterface(uncloggedTLog.ip, self->clogDuration, ClogAll);
 		}

@@ -37,29 +37,24 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 
 	RandomCloggingWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		testDuration = getOption(options, LiteralStringRef("testDuration"), testDuration);
-		scale = getOption(options, LiteralStringRef("scale"), scale);
-		clogginess = getOption(options, LiteralStringRef("clogginess"), clogginess);
-		swizzleClog = getOption(options, LiteralStringRef("swizzle"), swizzleClog);
+		testDuration = getOption(options, "testDuration"_sr, testDuration);
+		scale = getOption(options, "scale"_sr, scale);
+		clogginess = getOption(options, "clogginess"_sr, clogginess);
+		swizzleClog = getOption(options, "swizzle"_sr, swizzleClog);
 	}
 
-	bool add(DeterministicRandom& random, WorkloadRequest const& work, CompoundWorkload const& workload) override {
-		auto desc = description();
-		unsigned alreadyAdded = std::count_if(workload.workloads.begin(),
-		                                      workload.workloads.end(),
-		                                      [&desc](auto const& w) { return w->description() == desc; });
-		alreadyAdded += std::count_if(workload.failureInjection.begin(),
-		                              workload.failureInjection.end(),
-		                              [&desc](auto const& w) { return w->description() == desc; });
-		bool willAdd = work.useDatabase && 0.25 / (1 + alreadyAdded) > random.random01();
-		if (willAdd) {
-			enabled = this->clientId == 0;
-			scale = std::max(random.random01(), 0.1);
-			clogginess = std::max(random.random01(), 0.1);
-			swizzleClog = random.random01() < 0.3;
-			iterate = random.random01() < 0.5;
-		}
-		return willAdd;
+	bool shouldInject(DeterministicRandom& random,
+	                  const WorkloadRequest& work,
+	                  const unsigned alreadyAdded) const override {
+		return work.useDatabase && 0.25 / (1 + alreadyAdded) > random.random01();
+	}
+
+	void initFailureInjectionMode(DeterministicRandom& random) override {
+		enabled = this->clientId == 0;
+		scale = std::max(random.random01(), 0.1);
+		clogginess = std::max(random.random01(), 0.1);
+		swizzleClog = random.random01() < 0.3;
+		iterate = random.random01() < 0.5;
 	}
 
 	std::string description() const override {

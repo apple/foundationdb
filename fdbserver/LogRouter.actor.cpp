@@ -137,9 +137,7 @@ struct LogRouterData {
 	  : dbgid(dbgid), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(req.startVersion - 1), minPopped(0),
 	    startVersion(req.startVersion), minKnownCommittedVersion(0), poppedVersion(0), routerTag(req.routerTag),
 	    allowPops(false), foundEpochEnd(false), generation(req.recoveryCount),
-	    peekLatencyDist(Histogram::getHistogram(LiteralStringRef("LogRouter"),
-	                                            LiteralStringRef("PeekTLogLatency"),
-	                                            Histogram::Unit::microseconds)),
+	    peekLatencyDist(Histogram::getHistogram("LogRouter"_sr, "PeekTLogLatency"_sr, Histogram::Unit::microseconds)),
 	    cc("LogRouter", dbgid.toString()), getMoreCount("GetMoreCount", cc),
 	    getMoreBlockedCount("GetMoreBlockedCount", cc) {
 		// setup just enough of a logSet to be able to call getPushLocations
@@ -367,7 +365,7 @@ ACTOR Future<Void> pullAsyncData(LogRouterData* self) {
 
 				if (!foundMessage) {
 					ver--; // ver is the next possible version we will get data for
-					if (ver > self->version.get()) {
+					if (ver > self->version.get() && ver >= r->popped()) {
 						wait(waitForVersion(self, ver));
 
 						self->version.set(ver);

@@ -63,6 +63,8 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("MoveKeysWorkload"); }
+
 	Future<Void> start(Database const& cx) override {
 		if (!enabled) {
 			return Void();
