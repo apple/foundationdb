@@ -1455,11 +1455,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			double dbGetBeginTime = a.getHistograms ? timer_monotonic() : 0;
 			auto s = db->Get(options, cf, toSlice(a.key), &value);
+			const double endTime = timer_monotonic();
 			if (a.getHistograms) {
 				metricPromiseStream->send(
-				    std::make_pair(ROCKSDB_READPREFIX_GET_HISTOGRAM.toString(), timer_monotonic() - dbGetBeginTime));
+				    std::make_pair(ROCKSDB_READPREFIX_GET_HISTOGRAM.toString(), endTime - dbGetBeginTime));
 			}
-			sharedState->readLatency[threadIndex]->addMeasurement(timer_monotonic() - readBeginTime);
+			sharedState->readLatency[threadIndex]->addMeasurement(endTime - readBeginTime);
 
 			if (a.debugID.present()) {
 				traceBatch.get().addEvent("GetValuePrefixDebug",
@@ -1603,14 +1604,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				result.readThrough = result[result.size() - 1].key;
 			}
 			a.result.send(result);
+			const double endTime = timer_monotonic();
 			if (a.getHistograms) {
-				double currTime = timer_monotonic();
 				metricPromiseStream->send(
-				    std::make_pair(ROCKSDB_READRANGE_ACTION_HISTOGRAM.toString(), currTime - readBeginTime));
+				    std::make_pair(ROCKSDB_READRANGE_ACTION_HISTOGRAM.toString(), endTime - readBeginTime));
 				metricPromiseStream->send(
-				    std::make_pair(ROCKSDB_READRANGE_LATENCY_HISTOGRAM.toString(), currTime - a.startTime));
+				    std::make_pair(ROCKSDB_READRANGE_LATENCY_HISTOGRAM.toString(), endTime - a.startTime));
 			}
-			sharedState->scanLatency[threadIndex]->addMeasurement(timer_monotonic() - readBeginTime);
+			sharedState->scanLatency[threadIndex]->addMeasurement(endTime - readBeginTime);
 			if (doPerfContextMetrics) {
 				perfContextMetrics->set(threadIndex);
 			}
