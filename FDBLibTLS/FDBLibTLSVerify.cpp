@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <exception>
 #include <cstring>
+#include <stdexcept>
 
 static int hexValue(char c) {
 	static char const digits[] = "0123456789ABCDEF";
