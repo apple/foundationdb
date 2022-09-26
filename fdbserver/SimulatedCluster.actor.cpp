@@ -59,6 +59,27 @@ extern const char* getSourceVersion();
 
 using namespace std::literals;
 
+namespace probe {
+
+namespace assert {
+
+struct HasRocksDB {
+	constexpr static AnnotationType type = AnnotationType::Assertion;
+	bool operator()(ICodeProbe const* self) const {
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
+		return true;
+#else
+		return false;
+#endif
+	}
+};
+
+constexpr HasRocksDB hasRocksDB;
+
+} // namespace assert
+
+} // namespace probe
+
 // TODO: Defining these here is just asking for ODR violations.
 template <>
 std::string describe(bool const& val) {
@@ -1461,7 +1482,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		break;
 	}
 	case 4: {
-		CODE_PROBE(true, "Simulated cluster using RocksDB storage engine", probe::assert::rocksDB);
+		CODE_PROBE(true, "Simulated cluster using RocksDB storage engine", probe::assert::hasRocksDB);
 		set_config("ssd-rocksdb-v1");
 		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
 		// background threads.
@@ -1471,7 +1492,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		break;
 	}
 	case 5: {
-		CODE_PROBE(true, "Simulated cluster using Sharded RocksDB storage engine", probe::assert::rocksDB);
+		CODE_PROBE(true, "Simulated cluster using Sharded RocksDB storage engine", probe::assert::hasRocksDB);
 		set_config("ssd-sharded-rocksdb");
 		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
 		// background threads.

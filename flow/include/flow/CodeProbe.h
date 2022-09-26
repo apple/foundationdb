@@ -70,10 +70,6 @@ struct SimOnly {
 	constexpr static AnnotationType type = AnnotationType::Assertion;
 	bool operator()(ICodeProbe const* self) const;
 };
-struct RocksDB {
-	constexpr static AnnotationType type = AnnotationType::Assertion;
-	bool operator()(ICodeProbe const* self) const;
-};
 
 template <class Left, class Right>
 struct AssertOr {
@@ -115,7 +111,6 @@ constexpr std::enable_if_t<T::type == AnnotationType::Assertion, AssertNot<T>> o
 
 constexpr SimOnly simOnly;
 constexpr auto noSim = !simOnly;
-constexpr RocksDB rocksDB;
 
 } // namespace assert
 
