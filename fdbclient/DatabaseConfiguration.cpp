@@ -576,9 +576,9 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		parse((&type), value);
 		tLogDataStoreType = (KeyValueStoreType::StoreType)type;
 		// TODO:  Remove this once Redwood works as a log engine
-		if (tLogDataStoreType == KeyValueStoreType::SSD_REDWOOD_V1) {
-			tLogDataStoreType = KeyValueStoreType::SSD_BTREE_V2;
-		}
+//		if (tLogDataStoreType == KeyValueStoreType::SSD_REDWOOD_V1) {
+//			tLogDataStoreType = KeyValueStoreType::SSD_BTREE_V2;
+//		}
 		// TODO:  Remove this once memroy radix tree works as a log engine
 		if (tLogDataStoreType == KeyValueStoreType::MEMORY_RADIXTREE) {
 			tLogDataStoreType = KeyValueStoreType::SSD_BTREE_V2;

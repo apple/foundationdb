@@ -1821,6 +1821,9 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	setProcessesPerMachine(testConfig);
 	setTss(testConfig);
 	setConfigDB(testConfig);
+
+	// DEBUG ENFORCE REDWOOD STORE ENGINE
+	db.tLogDataStoreType = KeyValueStoreType::SSD_REDWOOD_V1;
 }
 
 // Configures the system according to the given specifications in order to run
