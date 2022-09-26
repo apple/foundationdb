@@ -66,3 +66,12 @@ function(fdb_find_sources out)
   endforeach()
   set(${out} "${res}" PARENT_SCOPE)
 endfunction()
+
+function(swift_find_sources out)
+  file(GLOB res
+    LIST_DIRECTORIES false
+    RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
+    CONFIGURE_DEPENDS "*.swift")
+
+  set(${out} "${res}" PARENT_SCOPE)
+endfunction()
