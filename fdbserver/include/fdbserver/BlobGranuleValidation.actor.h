@@ -60,7 +60,7 @@ ACTOR Future<Void> validateGranuleSummaries(Database cx,
                                             Optional<TenantName> tenantName,
                                             Promise<Void> testComplete);
 
-ACTOR Future<Void> checkFeedCleanup(Database cx);
+ACTOR Future<Void> checkFeedCleanup(Database cx, bool debug);
 
 #include "flow/unactorcompiler.h"
 

@@ -1003,7 +1003,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		state std::vector<Future<bool>> results;
 		state Future<Void> checkFeedCleanupFuture;
 		if (self->clientId == 0) {
-			checkFeedCleanupFuture = checkFeedCleanup(cx);
+			checkFeedCleanupFuture = checkFeedCleanup(cx, BGW_DEBUG);
 		} else {
 			checkFeedCleanupFuture = Future<Void>(Void());
 		}

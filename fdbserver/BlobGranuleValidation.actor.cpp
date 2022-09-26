@@ -365,7 +365,7 @@ ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getActiveFeeds(Transaction* 
 // TODO: add debug parameter
 // FIXME: this check currently assumes blob granules are the only users of change feeds, and will fail if that is not
 // the case
-ACTOR Future<Void> checkFeedCleanup(Database cx) {
+ACTOR Future<Void> checkFeedCleanup(Database cx, bool debug) {
 	if (SERVER_KNOBS->BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY < 0) {
 		// no guarantee of feed cleanup, return
 		return Void();
@@ -383,25 +383,30 @@ ACTOR Future<Void> checkFeedCleanup(Database cx) {
 			state std::vector<std::pair<Key, KeyRange>> activeFeeds = wait(getActiveFeeds(&tr));
 
 			// TODO REMOVE
-			fmt::print("{0} granules and {1} active feeds found\n", granules.size(), activeFeeds.size());
-			fmt::print("Granules:\n");
-			// TODO REMOVE
-			for (auto& it : granules) {
-				fmt::print("  [{0} - {1})\n", it.begin.printable(), it.end.printable());
+			if (debug) {
+				fmt::print("{0} granules and {1} active feeds found\n", granules.size(), activeFeeds.size());
 			}
+			/*fmt::print("Granules:\n");
+			for (auto& it : granules) {
+			    fmt::print("  [{0} - {1})\n", it.begin.printable(), it.end.printable());
+			}*/
 			bool allPresent = granules.size() == activeFeeds.size();
 			for (int i = 0; allPresent && i < granules.size(); i++) {
 				if (granules[i] != activeFeeds[i].second) {
-					fmt::print("Feed {0} for [{1} - {2}) still exists despite no granule!\n",
-					           activeFeeds[i].first.printable(),
-					           activeFeeds[i].second.begin.printable(),
-					           activeFeeds[i].second.end.printable());
+					if (debug) {
+						fmt::print("Feed {0} for [{1} - {2}) still exists despite no granule!\n",
+						           activeFeeds[i].first.printable(),
+						           activeFeeds[i].second.begin.printable(),
+						           activeFeeds[i].second.end.printable());
+					}
 					allPresent = false;
 					break;
 				}
 			}
 			if (allPresent) {
-				fmt::print("Feed Cleanup Check Complete\n");
+				if (debug) {
+					fmt::print("Feed Cleanup Check Complete\n");
+				}
 				return Void();
 			}
 			if (granules != lastGranules) {

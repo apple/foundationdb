@@ -1030,7 +1030,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 		state Future<Void> checkFeedCleanupFuture;
 		if (self->clientId == 0) {
-			checkFeedCleanupFuture = checkFeedCleanup(cx);
+			checkFeedCleanupFuture = checkFeedCleanup(cx, BGV_DEBUG);
 		} else {
 			checkFeedCleanupFuture = Future<Void>(Void());
 		}
