@@ -44,6 +44,7 @@
 #include "fdbserver/ClusterRecovery.actor.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/DBCoreState.h"
+#include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/LeaderElection.h"
 #include "fdbserver/LogSystem.h"
@@ -2682,6 +2683,26 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 	}
 }
 
+ACTOR Future<Void> metaclusterMetricsUpdater(ClusterControllerData* self) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+	loop {
+		try {
+			std::map<ClusterName, DataClusterMetadata> clusters =
+			    wait(MetaclusterAPI::listClustersTransaction(tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
+
+			auto capacityNumbers = MetaclusterAPI::metaclusterCapacity(clusters);
+			TraceEvent("MetaclusterCapacity")
+			    .detail("DataClusters", clusters.size())
+			    .detail("TotalCapacity", capacityNumbers.first.numTenantGroups)
+			    .detail("AllocatedCapacity", capacityNumbers.second.numTenantGroups);
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+		// Background updater updates every minute
+		wait(delay(60.0));
+	}
+}
+
 ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
                                          ServerCoordinators coordinators,
@@ -2721,6 +2742,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorBlobManager(&self));
 	self.addActor.send(watchBlobGranulesConfigKey(&self));
 	self.addActor.send(monitorConsistencyScan(&self));
+	self.addActor.send(metaclusterMetricsUpdater(&self));
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(traceCounters("ClusterControllerMetrics",
 	                                 self.id,
