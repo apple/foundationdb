@@ -8,7 +8,7 @@ The global tag throttler bases throttling decisions on "quotas" provided by clie
 * Reserved quota
 * Total quota
 
-The global tag throttler can not throttle tags to a throughput below the reserved quota, and it cannot allow throughput to exceed the total quota.
+The global tag throttler cannot throttle tags to a throughput below the reserved quota, and it cannot allow throughput to exceed the total quota.
 
 ### Cost
 Internally, the units for these quotas are "page costs", computed as follows. The "page cost" of a read operation is computed as:
