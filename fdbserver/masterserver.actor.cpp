@@ -34,10 +34,7 @@
 #include "fdbclient/VersionVector.h"
 
 
-#if __has_include("SwiftModules/FDBServer")
 #include "SwiftModules/FDBServer"
- #define SWIFT_REVERSE_INTEROP_SUPPORTED
-#endif
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

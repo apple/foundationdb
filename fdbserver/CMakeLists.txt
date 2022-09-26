@@ -1,5 +1,4 @@
 fdb_find_sources(FDBSERVER_SRCS)
-#swift_find_sources(FDBSERVER_SWIFT_SRCS)
 
 if(${COROUTINE_IMPL} STREQUAL libcoro)
   list(APPEND FDBSERVER_SRCS coroimpl/CoroFlowCoro.actor.cpp)
