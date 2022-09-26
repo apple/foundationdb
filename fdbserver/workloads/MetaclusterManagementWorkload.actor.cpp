@@ -191,8 +191,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			// Get a version to know that the cluster has recovered
 			wait(success(runTransaction(dataDb->db.getReference(),
 			                            [](Reference<ReadYourWritesTransaction> tr) { return tr->getReadVersion(); })));
-
-			return Void();
 		} catch (Error& e) {
 			if (e.code() == error_code_cluster_already_exists) {
 				ASSERT(dataDb->registered);
@@ -201,8 +199,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 			TraceEvent(SevError, "RegisterClusterFailure").error(e).detail("ClusterName", clusterName);
 			ASSERT(false);
-			throw internal_error();
 		}
+
+		return Void();
 	}
 
 	ACTOR static Future<Void> removeCluster(MetaclusterManagementWorkload* self) {
@@ -244,8 +243,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			// Get a version to know that the cluster has recovered
 			wait(success(runTransaction(dataDb->db.getReference(),
 			                            [](Reference<ReadYourWritesTransaction> tr) { return tr->getReadVersion(); })));
-
-			return Void();
 		} catch (Error& e) {
 			if (e.code() == error_code_cluster_not_found) {
 				ASSERT(!dataDb->registered);
@@ -257,8 +254,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 			TraceEvent(SevError, "RemoveClusterFailure").error(e).detail("ClusterName", clusterName);
 			ASSERT(false);
-			throw internal_error();
 		}
+
+		return Void();
 	}
 
 	ACTOR static Future<Void> listClusters(MetaclusterManagementWorkload* self) {
@@ -289,8 +287,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			}
 
 			ASSERT(resultItr == clusterList.end());
-
-			return Void();
 		} catch (Error& e) {
 			if (e.code() == error_code_inverted_range) {
 				ASSERT(clusterName1 > clusterName2);
@@ -302,8 +298,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			    .detail("EndClusterName", clusterName2)
 			    .detail("Limit", limit);
 			ASSERT(false);
-			throw internal_error();
 		}
+
+		return Void();
 	}
 
 	ACTOR static Future<Void> getCluster(MetaclusterManagementWorkload* self) {
@@ -314,7 +311,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			DataClusterMetadata clusterMetadata = wait(MetaclusterAPI::getCluster(self->managementDb, clusterName));
 			ASSERT(dataDb->registered);
 			ASSERT(dataDb->db->getConnectionRecord()->getConnectionString() == clusterMetadata.connectionString);
-			return Void();
 		} catch (Error& e) {
 			if (e.code() == error_code_cluster_not_found) {
 				ASSERT(!dataDb->registered);
@@ -322,8 +318,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			}
 			TraceEvent(SevError, "GetClusterFailure").error(e).detail("ClusterName", clusterName);
 			ASSERT(false);
-			throw internal_error();
 		}
+
+		return Void();
 	}
 
 	ACTOR static Future<Optional<DataClusterEntry>> configureImpl(MetaclusterManagementWorkload* self,
@@ -391,13 +388,12 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				self->totalTenantGroupCapacity += tenantGroupDelta;
 				dataDb->tenantGroupCapacity = updatedEntry.get().capacity.numTenantGroups;
 			}
-
-			return Void();
 		} catch (Error& e) {
 			TraceEvent(SevError, "ConfigureClusterFailure").error(e).detail("ClusterName", clusterName);
 			ASSERT(false);
-			throw internal_error();
 		}
+
+		return Void();
 	}
 
 	ACTOR static Future<Void> createTenant(MetaclusterManagementWorkload* self) {
@@ -496,8 +492,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			           assignedCluster->second.tenantGroups.size() + assignedCluster->second.ungroupedTenants.size());
 
 			self->createdTenants[tenant] = TenantData(entry.assignedCluster.get(), tenantGroup);
-
-			return Void();
 		} catch (Error& e) {
 			if (e.code() == error_code_tenant_already_exists) {
 				ASSERT(exists);
@@ -515,8 +509,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 			TraceEvent(SevError, "CreateTenantFailure").error(e).detail("TenantName", tenant);
 			ASSERT(false);
-			throw internal_error();
 		}
+
+		return Void();
 	}
 
 	ACTOR static Future<Void> deleteTenant(MetaclusterManagementWorkload* self) {
@@ -585,8 +580,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			}
 			dataDb.tenants.erase(tenantItr);
 			self->createdTenants.erase(tenant);
-
-			return Void();
 		} catch (Error& e) {
 			if (e.code() == error_code_tenant_not_found) {
 				ASSERT(!exists);
@@ -595,8 +588,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 			TraceEvent(SevError, "DeleteTenantFailure").error(e).detail("TenantName", tenant);
 			ASSERT(false);
-			throw internal_error();
 		}
+
+		return Void();
 	}
 
 	ACTOR static Future<Void> configureTenant(MetaclusterManagementWorkload* self) {
@@ -675,8 +669,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 					--self->totalTenantGroupCapacity;
 				}
 			}
-
-			return Void();
 		} catch (Error& e) {
 			if (e.code() == error_code_tenant_not_found) {
 				ASSERT(!exists);
@@ -695,8 +687,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			    .detail("TenantName", tenant)
 			    .detail("TenantGroup", newTenantGroup);
 			ASSERT(false);
-			throw internal_error();
 		}
+
+		return Void();
 	}
 
 	ACTOR static Future<Void> renameTenant(MetaclusterManagementWorkload* self) {
@@ -762,8 +755,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				self->ungroupedTenants.erase(tenant);
 				self->ungroupedTenants.insert(newTenantName);
 			}
-
-			return Void();
 		} catch (Error& e) {
 			if (e.code() == error_code_tenant_not_found) {
 				ASSERT(!exists);
@@ -778,8 +769,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			    .detail("OldTenantName", tenant)
 			    .detail("NewTenantName", newTenantName);
 			ASSERT(false);
-			throw internal_error();
 		}
+
+		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override {
