@@ -359,6 +359,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REPLACE_CONTENTS_BYTES,                                1e5 );
 
 	// KeyValueStoreRocksDB
+	init( ROCKSDB_SAMPLE_THREAD_RETURN_PROMISE_LATENCY,         true );
+ 	init( ROCKSDB_THREAD_PROMISE_PRIORITY,                      7500 );
 	init( ROCKSDB_READER_THREAD_PRIORITY,                          0 );
  	init( ROCKSDB_WRITER_THREAD_PRIORITY,                          0 );
 	init( ROCKSDB_BACKGROUND_PARALLELISM,                          4 );
