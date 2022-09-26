@@ -101,11 +101,9 @@ const StringRef ROCKSDB_READVALUE_GET_HISTOGRAM = LiteralStringRef("RocksDBReadV
 const StringRef ROCKSDB_READPREFIX_GET_HISTOGRAM = LiteralStringRef("RocksDBReadPrefixGet");
 const StringRef ROCKSDB_READ_RETURN_LATENCY_HISTOGRAM = "RocksDBReadReturn"_sr;
 
-Reference<Histogram> readReturnHistogram = SERVER_KNOBS->ROCKSDB_SAMPLE_THREAD_RETURN_PROMISE_LATENCY
-                                               ? Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-                                                                         ROCKSDB_READ_RETURN_LATENCY_HISTOGRAM,
-                                                                         Histogram::Unit::microseconds)
-                                               : Reference<Histogram>();
+// Reference<Histogram> readReturnHistogram = Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+//                                                                    ROCKSDB_READ_RETURN_LATENCY_HISTOGRAM,
+//                                                                    Histogram::Unit::microseconds);
 class SharedRocksDBState {
 public:
 	SharedRocksDBState();
@@ -1315,10 +1313,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ReadValueAction(KeyRef key, Optional<UID> debugID)
 			  : key(key), debugID(debugID), startTime(timer_monotonic()),
 			    getHistograms(
-			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
-			    result(ThreadReturnPromise<Optional<Value>>(
-			        static_cast<TaskPriority>(SERVER_KNOBS->ROCKSDB_THREAD_PROMISE_PRIORITY),
-			        readReturnHistogram)) {}
+			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false) {}
+			    // result(threadreturnpromise<optional<value>>(
+			    //     static_cast<taskpriority>(server_knobs->rocksdb_thread_promise_priority),
+			    //     readreturnhistogram)) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& a) {

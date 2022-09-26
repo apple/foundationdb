@@ -85,8 +85,8 @@ class ThreadReturnPromise : NonCopyable {
 public:
 	ThreadReturnPromise() : priority(TaskPriority::DefaultOnMainThread) {}
 	ThreadReturnPromise(TaskPriority priority) : priority(priority) {}
-	ThreadReturnPromise(TaskPriority priority, Reference<Histogram> latencyHis)
-	  : priority(priority), latencyHis(latencyHis) {}
+	ThreadReturnPromise(TaskPriority priority, Reference<Histogram> latencyHistogram)
+	  : priority(priority), latencyHistogram(latencyHistogram) {}
 	~ThreadReturnPromise() {
 		if (promise.isValid())
 			sendError(broken_promise());
@@ -99,8 +99,8 @@ public:
 	template <class U>
 	void send(U&& t) { // Can be called safely from another thread.  Call send or sendError at most once.
 		Promise<Void> signal;
-		if (latencyHis.isValid()) {
-			tagAndForwardWithLatencyHistogram(&promise, t, signal.getFuture(), timer_monotonic(), latencyHis);
+		if (latencyHistogram.isValid()) {
+			tagAndForward(&promise, t, signal.getFuture(), timer_monotonic(), latencyHistogram);
 		} else {
 			tagAndForward(&promise, t, signal.getFuture());
 		}
@@ -119,7 +119,7 @@ public:
 
 private:
 	TaskPriority priority;
-	Reference<Histogram> latencyHis;
+	Reference<Histogram> latencyHistogram;
 	Promise<T> promise;
 };
 

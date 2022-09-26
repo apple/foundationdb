@@ -441,6 +441,7 @@ struct StorageServerDisk {
 	// The following are pointers to the Counters in StorageServer::counters of the same names.
 	Counter* kvCommitLogicalBytes;
 	Counter* kvClearRanges;
+	
 	Counter* kvGets;
 	Counter* kvScans;
 	Counter* kvCommits;

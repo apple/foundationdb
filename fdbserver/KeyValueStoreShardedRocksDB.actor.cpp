@@ -76,9 +76,6 @@ struct DataShard;
 struct ReadIterator;
 struct ShardedRocksDBKeyValueStore;
 
-Reference<Histogram> readReturnHistogram = Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-                                                                   ROCKSDB_READ_RETURN_LATENCY_HISTOGRAM,
-                                                                   Histogram::Unit::microseconds);
 using rocksdb::BackgroundErrorReason;
 
 // Returns string representation of RocksDB background error reason.
@@ -1095,6 +1092,7 @@ public:
 	void collectPerfContext(int index);
 	void logPerfContext(bool ignoreZeroMetric);
 	// For Readers
+	Reference<Histogram> getReadReturnLatencyHistogram();
 	Reference<Histogram> getReadRangeLatencyHistogram(int index);
 	Reference<Histogram> getReadValueLatencyHistogram(int index);
 	Reference<Histogram> getReadPrefixLatencyHistogram(int index);
@@ -1131,6 +1129,7 @@ private:
 	// PerfContext
 	std::vector<std::tuple<const char*, int, std::vector<uint64_t>>> perfContextMetrics;
 	// Readers Histogram
+	Reference<Histogram> readReturnHistogram;
 	std::vector<Reference<Histogram>> readRangeLatencyHistograms;
 	std::vector<Reference<Histogram>> readValueLatencyHistograms;
 	std::vector<Reference<Histogram>> readPrefixLatencyHistograms;
@@ -1156,6 +1155,9 @@ private:
 	uint64_t getRocksdbPerfcontextMetric(int metric);
 };
 
+Reference<Histogram> RocksDBMetrics::getReadReturnLatencyHistogram() {
+	return this->readReturnHistogram;
+}
 // We have 4 readers and 1 writer. Following input index denotes the
 // id assigned to the reader thread when creating it
 Reference<Histogram> RocksDBMetrics::getReadRangeLatencyHistogram(int index) {
@@ -1365,6 +1367,8 @@ RocksDBMetrics::RocksDBMetrics(UID debugID, std::shared_ptr<rocksdb::Statistics>
 		}
 		vals.push_back(0); // add writer
 	}
+	readReturnHistogram = Histogram::getHistogram(
+	    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READ_RETURN_LATENCY_HISTOGRAM, Histogram::Unit::microseconds);
 	for (int i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; i++) {
 		readRangeLatencyHistograms.push_back(Histogram::getHistogram(
 		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READRANGE_LATENCY_HISTOGRAM, Histogram::Unit::microseconds));
@@ -1988,7 +1992,10 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			bool logShardMemUsage;
 			ThreadReturnPromise<Optional<Value>> result;
 
-			ReadValueAction(KeyRef key, PhysicalShard* shard, Optional<UID> debugID)
+			ReadValueAction(KeyRef key,
+			                PhysicalShard* shard,
+			                Optional<UID> debugID,
+			                Reference<Histogram> readReturnHistogram)
 			  : key(key), shard(shard), debugID(debugID), startTime(timer_monotonic()),
 			    getHistograms(
 			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
@@ -2068,7 +2075,11 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			bool logShardMemUsage;
 			ThreadReturnPromise<Optional<Value>> result;
 
-			ReadValuePrefixAction(Key key, int maxLength, PhysicalShard* shard, Optional<UID> debugID)
+			ReadValuePrefixAction(Key key,
+			                      int maxLength,
+			                      PhysicalShard* shard,
+			                      Optional<UID> debugID,
+			                      Reference<Histogram> readReturnHistogram)
 			  : key(key), maxLength(maxLength), shard(shard), debugID(debugID), startTime(timer_monotonic()),
 			    getHistograms(
 			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
@@ -2150,7 +2161,11 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			bool getHistograms;
 			bool logShardMemUsage;
 			ThreadReturnPromise<RangeResult> result;
-			ReadRangeAction(KeyRange keys, std::vector<DataShard*> shards, int rowLimit, int byteLimit)
+			ReadRangeAction(KeyRange keys,
+			                std::vector<DataShard*> shards,
+			                int rowLimit,
+			                int byteLimit,
+			                Reference<Histogram> readReturnHistogram)
 			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), startTime(timer_monotonic()),
 			    getHistograms(
 			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
@@ -2424,7 +2439,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		if (!shouldThrottle(type, key)) {
-			auto a = new Reader::ReadValueAction(key, shard->physicalShard, debugID);
+			auto a = new Reader::ReadValueAction(
+			    key, shard->physicalShard, debugID, this->rocksDBMetrics->getReadReturnLatencyHistogram());
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
@@ -2434,7 +2450,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
-		auto a = std::make_unique<Reader::ReadValueAction>(key, shard->physicalShard, debugID);
+		auto a = std::make_unique<Reader::ReadValueAction>(
+		    key, shard->physicalShard, debugID, this->rocksDBMetrics->getReadReturnLatencyHistogram());
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
@@ -2452,7 +2469,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		if (!shouldThrottle(type, key)) {
-			auto a = new Reader::ReadValuePrefixAction(key, maxLength, shard->physicalShard, debugID);
+			auto a = new Reader::ReadValuePrefixAction(
+			    key, maxLength, shard->physicalShard, debugID, this->rocksDBMetrics->getReadReturnLatencyHistogram());
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
@@ -2462,7 +2480,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
-		auto a = std::make_unique<Reader::ReadValuePrefixAction>(key, maxLength, shard->physicalShard, debugID);
+		auto a = std::make_unique<Reader::ReadValuePrefixAction>(
+		    key, maxLength, shard->physicalShard, debugID, this->rocksDBMetrics->getReadReturnLatencyHistogram());
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
@@ -2494,7 +2513,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		auto shards = shardManager.getDataShardsByRange(keys);
 
 		if (!shouldThrottle(type, keys.begin)) {
-			auto a = new Reader::ReadRangeAction(keys, shards, rowLimit, byteLimit);
+			auto a = new Reader::ReadRangeAction(
+			    keys, shards, rowLimit, byteLimit, this->rocksDBMetrics->getReadReturnLatencyHistogram());
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
@@ -2504,7 +2524,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		int maxWaiters = (type == IKeyValueStore::ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 		checkWaiters(semaphore, maxWaiters);
 
-		auto a = std::make_unique<Reader::ReadRangeAction>(keys, shards, rowLimit, byteLimit);
+		auto a = std::make_unique<Reader::ReadRangeAction>(
+		    keys, shards, rowLimit, byteLimit, this->rocksDBMetrics->getReadReturnLatencyHistogram());
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 

@@ -1266,30 +1266,11 @@ Future<T> brokenPromiseToMaybeDelivered(Future<T> in) {
 }
 
 ACTOR template <class T, class U>
-void tagAndForwardWithLatencyHistogram(Promise<T>* pOutputPromise,
-                                       U value,
-                                       Future<Void> signal,
-                                       double startTime,
-                                       Reference<Histogram> latencyHistogram) {
+void tagAndForward(Promise<T>* pOutputPromise, U value, Future<Void> signal, double startTime, Reference<Histogram> latencyHistogram) {
 	state Promise<T> out(std::move(*pOutputPromise));
 	wait(signal);
 	out.send(std::move(value));
 	latencyHistogram->sampleSeconds(timer_monotonic() - startTime);
-}
-
-ACTOR template <class T, class U>
-void tagAndForwardWithDelayWarning(Promise<T>* pOutputPromise,
-                                   U value,
-                                   Future<Void> signal,
-                                   double startTime,
-                                   double timeout) {
-	state Promise<T> out(std::move(*pOutputPromise));
-	wait(signal);
-	out.send(std::move(value));
-	const double delay = timer() - startTime;
-	if (delay > timeout) {
-		TraceEvent(SevWarn, "SlowTagAndForward").detail("Delay", delay);
-	}
 }
 
 ACTOR template <class T, class U>
