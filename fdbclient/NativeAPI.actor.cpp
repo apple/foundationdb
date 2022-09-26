@@ -187,6 +187,8 @@ void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageSe
 		                             TSSEndpointData(tssi.id(), tssi.getMappedKeyValues.getEndpoint(), metrics));
 		queueModel.updateTssEndpoint(ssi.getKeyValuesStream.getEndpoint().token.first(),
 		                             TSSEndpointData(tssi.id(), tssi.getKeyValuesStream.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.changeFeedStream.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.changeFeedStream.getEndpoint(), metrics));
 
 		// non-data requests duplicated for load
 		queueModel.updateTssEndpoint(ssi.watchValue.getEndpoint().token.first(),
@@ -197,6 +199,12 @@ void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageSe
 		                             TSSEndpointData(tssi.id(), tssi.getReadHotRanges.getEndpoint(), metrics));
 		queueModel.updateTssEndpoint(ssi.getRangeSplitPoints.getEndpoint().token.first(),
 		                             TSSEndpointData(tssi.id(), tssi.getRangeSplitPoints.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.overlappingChangeFeeds.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.overlappingChangeFeeds.getEndpoint(), metrics));
+
+		// duplicated to ensure feed data cleanup
+		queueModel.updateTssEndpoint(ssi.changeFeedPop.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.changeFeedPop.getEndpoint(), metrics));
 	}
 }
 
@@ -8913,6 +8921,224 @@ void DatabaseContext::setDesiredChangeFeedVersion(Version v) {
 	}
 }
 
+// Because two storage servers, depending on the shard map, can have different representations of a clear at the same
+// version depending on their shard maps at the time of the mutation, it is non-trivial to directly compare change feed
+// streams. Instead we compare the presence of data at each version. This both saves on cpu cost of validation, and
+// because historically most change feed corruption bugs are the absence of entire versions, not a subset of mutations
+// within a version.
+struct ChangeFeedTSSValidationData {
+	PromiseStream<Version> ssStreamSummary;
+	ReplyPromiseStream<ChangeFeedStreamReply> tssStream;
+	Future<Void> validatorFuture;
+	Version popVersion = invalidVersion;
+	bool done = false;
+
+	ChangeFeedTSSValidationData() {}
+	ChangeFeedTSSValidationData(ReplyPromiseStream<ChangeFeedStreamReply> tssStream) : tssStream(tssStream) {}
+
+	void send(const ChangeFeedStreamReply& ssReply) {
+		if (done) {
+			return;
+		}
+		popVersion = std::max(popVersion, ssReply.popVersion);
+		for (auto& it : ssReply.mutations) {
+			if (!it.mutations.empty()) {
+				ssStreamSummary.send(it.version);
+			}
+		}
+	}
+
+	void complete() {
+		done = true;
+		// destroy TSS stream to stop server actor
+		tssStream.reset();
+	}
+};
+
+void handleTSSChangeFeedMismatch(const ChangeFeedStreamRequest& request,
+                                 const TSSEndpointData& tssData,
+                                 int64_t matchesFound,
+                                 Version lastMatchingVersion,
+                                 Version ssVersion,
+                                 Version tssVersion) {
+	CODE_PROBE(true, "TSS mismatch in stream comparison");
+
+	if (tssData.metrics->shouldRecordDetailedMismatch()) {
+		TraceEvent mismatchEvent(
+		    (g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
+		        ? SevWarnAlways
+		        : SevError,
+		    "TSSMismatchChangeFeedStream");
+		mismatchEvent.setMaxEventLength(FLOW_KNOBS->TSS_LARGE_TRACE_SIZE);
+
+		// request info
+		mismatchEvent.detail("TSSID", tssData.tssId);
+		mismatchEvent.detail("FeedID", request.rangeID);
+		mismatchEvent.detail("BeginVersion", request.begin);
+		mismatchEvent.detail("EndVersion", request.end);
+		mismatchEvent.detail("StartKey", request.range.begin);
+		mismatchEvent.detail("EndKey", request.range.end);
+		mismatchEvent.detail("CanReadPopped", request.canReadPopped);
+		mismatchEvent.detail("DebugUID", request.debugUID);
+
+		// mismatch info
+		mismatchEvent.detail("MatchesFound", matchesFound);
+		mismatchEvent.detail("LastMatchingVersion", lastMatchingVersion);
+		mismatchEvent.detail("SSVersion", ssVersion);
+		mismatchEvent.detail("TSSVersion", tssVersion);
+
+		CODE_PROBE(FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
+		           "Tracing Full TSS Feed Mismatch in stream comparison");
+		CODE_PROBE(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
+		           "Tracing Partial TSS Feed Mismatch in stream comparison and storing the rest in FDB");
+
+		if (!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL) {
+			mismatchEvent.disable();
+			UID mismatchUID = deterministicRandom()->randomUniqueID();
+			tssData.metrics->recordDetailedMismatchData(mismatchUID, mismatchEvent.getFields().toString());
+
+			// record a summarized trace event instead
+			TraceEvent summaryEvent(
+			    (g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
+			        ? SevWarnAlways
+			        : SevError,
+			    "TSSMismatchChangeFeedStream");
+			summaryEvent.detail("TSSID", tssData.tssId)
+			    .detail("MismatchId", mismatchUID)
+			    .detail("FeedDebugUID", request.debugUID);
+		}
+	}
+}
+
+ACTOR Future<Void> changeFeedTSSValidator(ChangeFeedStreamRequest req,
+                                          Optional<ChangeFeedTSSValidationData>* data,
+                                          TSSEndpointData tssData) {
+	state bool ssDone = false;
+	state bool tssDone = false;
+	state std::deque<Version> ssSummary;
+	state std::deque<Version> tssSummary;
+
+	ASSERT(data->present());
+	state int64_t matchesFound = 0;
+	state Version lastMatchingVersion = req.begin - 1;
+
+	loop {
+		// If SS stream gets error, whole stream data gets reset, so it's ok to cancel this actor
+		if (!ssDone && ssSummary.empty()) {
+			try {
+				Version next = waitNext(data->get().ssStreamSummary.getFuture());
+				ssSummary.push_back(next);
+			} catch (Error& e) {
+				if (e.code() != error_code_end_of_stream) {
+					data->get().complete();
+					if (e.code() != error_code_operation_cancelled) {
+						tssData.metrics->ssError(e.code());
+					}
+					throw e;
+				}
+				ssDone = true;
+				if (tssDone) {
+					data->get().complete();
+					return Void();
+				}
+			}
+		}
+
+		if (!tssDone && tssSummary.empty()) {
+			try {
+				choose {
+					when(ChangeFeedStreamReply nextTss = waitNext(data->get().tssStream.getFuture())) {
+						for (auto& it : nextTss.mutations) {
+							if (!it.mutations.empty()) {
+								tssSummary.push_back(it.version);
+							}
+						}
+						data->get().popVersion = std::max(data->get().popVersion, nextTss.popVersion);
+					}
+					// if ss has result, tss needs to return it
+					when(wait((ssDone || !ssSummary.empty()) ? delay(2.0 * FLOW_KNOBS->LOAD_BALANCE_TSS_TIMEOUT)
+					                                         : Never())) {
+						++tssData.metrics->tssTimeouts;
+						data->get().complete();
+						return Void();
+					}
+				}
+
+			} catch (Error& e) {
+				if (e.code() == error_code_operation_cancelled) {
+					throw e;
+				}
+				if (e.code() == error_code_end_of_stream) {
+					tssDone = true;
+					if (ssDone) {
+						data->get().complete();
+						return Void();
+					}
+				} else {
+					tssData.metrics->tssError(e.code());
+					data->get().complete();
+					return Void();
+				}
+			}
+		}
+
+		while (!ssSummary.empty() && ssSummary.front() < data->get().popVersion) {
+			ssSummary.pop_front();
+		}
+
+		while (!tssSummary.empty() && tssSummary.front() < data->get().popVersion) {
+			tssSummary.pop_front();
+		}
+
+		while (!ssSummary.empty() && !tssSummary.empty()) {
+			CODE_PROBE(true, "Comparing TSS change feed data");
+			if (ssSummary.front() != tssSummary.front()) {
+				CODE_PROBE(true, "TSS change feed mismatch");
+				handleTSSChangeFeedMismatch(
+				    req, tssData, matchesFound, lastMatchingVersion, ssSummary.front(), tssSummary.front());
+				data->get().complete();
+				return Void();
+			}
+			matchesFound++;
+			lastMatchingVersion = ssSummary.front();
+			ssSummary.pop_front();
+			tssSummary.pop_front();
+		}
+
+		ASSERT(!ssDone || !tssDone); // both shouldn't be done, otherwise we shouldn't have looped
+		if ((ssDone && !tssSummary.empty()) || (tssDone && !ssSummary.empty())) {
+			CODE_PROBE(true, "TSS change feed mismatch at end of stream");
+			handleTSSChangeFeedMismatch(req,
+			                            tssData,
+			                            matchesFound,
+			                            lastMatchingVersion,
+			                            ssDone ? -1 : ssSummary.front(),
+			                            tssDone ? -1 : tssSummary.front());
+			data->get().complete();
+			return Void();
+		}
+	}
+}
+
+void maybeDuplicateTSSChangeFeedStream(ChangeFeedStreamRequest& req,
+                                       const RequestStream<ChangeFeedStreamRequest>& stream,
+                                       QueueModel* model,
+                                       Optional<ChangeFeedTSSValidationData>* tssData) {
+	if (model) {
+		Optional<TSSEndpointData> tssPair = model->getTssData(stream.getEndpoint().token.first());
+		if (tssPair.present()) {
+			CODE_PROBE(true, "duplicating feed stream to TSS");
+			resetReply(req);
+
+			RequestStream<ChangeFeedStreamRequest> tssRequestStream(tssPair.get().endpoint);
+			*tssData = Optional<ChangeFeedTSSValidationData>(
+			    ChangeFeedTSSValidationData(tssRequestStream.getReplyStream(req)));
+			// tie validator actor to the lifetime of the stream being active
+			tssData->get().validatorFuture = changeFeedTSSValidator(req, tssData, tssPair.get());
+		}
+	}
+}
+
 ChangeFeedStorageData::~ChangeFeedStorageData() {
 	if (context) {
 		context->changeFeedUpdaters.erase(interfToken);
@@ -9034,7 +9260,8 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
                                            Version end,
                                            Reference<ChangeFeedData> feedData,
                                            Reference<ChangeFeedStorageData> storageData,
-                                           UID debugUID) {
+                                           UID debugUID,
+                                           Optional<ChangeFeedTSSValidationData>* tssData) {
 
 	// calling lastReturnedVersion's callbacks could cause us to be cancelled
 	state Promise<Void> refresh = feedData->refresh;
@@ -9078,6 +9305,9 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 					if (rep.popVersion > feedData->popVersion) {
 						feedData->popVersion = rep.popVersion;
 					}
+					if (tssData->present() && rep.popVersion > tssData->get().popVersion) {
+						tssData->get().popVersion = rep.popVersion;
+					}
 
 					if (lastEmpty != invalidVersion && !results.isEmpty()) {
 						for (auto& it : feedData->storageData) {
@@ -9093,6 +9323,10 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 						wait(results.onEmpty());
 						if (rep.mutations[resultLoc].version >= nextVersion) {
 							results.send(rep.mutations[resultLoc]);
+							if (tssData->present() && !tssData->get().done &&
+							    !rep.mutations[resultLoc].mutations.empty()) {
+								tssData->get().ssStreamSummary.send(rep.mutations[resultLoc].version);
+							}
 
 							if (DEBUG_CF_CLIENT_TRACE) {
 								TraceEvent(SevDebug, "TraceChangeFeedClientMergeCursorSend", debugUID)
@@ -9288,6 +9522,11 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	state std::vector<Future<Void>> fetchers(interfs.size());
 	state std::vector<Future<Void>> onErrors(interfs.size());
 	state std::vector<MutationAndVersionStream> streams(interfs.size());
+	state std::vector<Optional<ChangeFeedTSSValidationData>> tssDatas;
+	tssDatas.reserve(interfs.size());
+	for (int i = 0; i < interfs.size(); i++) {
+		tssDatas.push_back({});
+	}
 
 	CODE_PROBE(interfs.size() > 10, "Large change feed merge cursor");
 	CODE_PROBE(interfs.size() > 100, "Very large change feed merge cursor");
@@ -9295,12 +9534,12 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	state UID mergeCursorUID = UID();
 	state std::vector<UID> debugUIDs;
 	results->streams.clear();
-	for (auto& it : interfs) {
+	for (int i = 0; i < interfs.size(); i++) {
 		ChangeFeedStreamRequest req;
 		req.rangeID = rangeID;
 		req.begin = *begin;
 		req.end = end;
-		req.range = it.second;
+		req.range = interfs[i].second;
 		req.canReadPopped = canReadPopped;
 		// divide total buffer size among sub-streams, but keep individual streams large enough to be efficient
 		req.replyBufferSize = replyBufferSize / interfs.size();
@@ -9312,7 +9551,11 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		mergeCursorUID =
 		    UID(mergeCursorUID.first() ^ req.debugUID.first(), mergeCursorUID.second() ^ req.debugUID.second());
 
-		results->streams.push_back(it.first.changeFeedStream.getReplyStream(req));
+		results->streams.push_back(interfs[i].first.changeFeedStream.getReplyStream(req));
+		maybeDuplicateTSSChangeFeedStream(req,
+		                                  interfs[i].first.changeFeedStream,
+		                                  db->enableLocalityLoadBalance ? &db->queueModel : nullptr,
+		                                  &tssDatas[i]);
 	}
 
 	results->maxSeenVersion = invalidVersion;
@@ -9349,7 +9592,8 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		                                      end,
 		                                      results,
 		                                      results->storageData[i],
-		                                      debugUIDs[i]);
+		                                      debugUIDs[i],
+		                                      &tssDatas[i]);
 	}
 
 	wait(waitForAny(onErrors) || mergeChangeFeedStreamInternal(results, interfs, streams, begin, end, mergeCursorUID));
@@ -9403,7 +9647,8 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
                                                   Reference<ChangeFeedData> results,
                                                   Key rangeID,
                                                   Version* begin,
-                                                  Version end) {
+                                                  Version end,
+                                                  Optional<ChangeFeedTSSValidationData>* tssData) {
 
 	state Promise<Void> refresh = results->refresh;
 	ASSERT(results->streams.size() == 1);
@@ -9455,6 +9700,10 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
 			results->mutations.send(
 			    Standalone<VectorRef<MutationsAndVersionRef>>(feedReply.mutations, feedReply.arena));
 
+			if (tssData->present()) {
+				tssData->get().send(feedReply);
+			}
+
 			// Because onEmpty returns here before the consuming process, we must do a delay(0)
 			wait(results->mutations.onEmpty());
 			wait(delay(0));
@@ -9503,6 +9752,7 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
                                           bool canReadPopped) {
 	state Database cx(db);
 	state ChangeFeedStreamRequest req;
+	state Optional<ChangeFeedTSSValidationData> tssData;
 	req.rangeID = rangeID;
 	req.begin = *begin;
 	req.end = end;
@@ -9536,7 +9786,11 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	}
 	refresh.send(Void());
 
-	wait(results->streams[0].onError() || singleChangeFeedStreamInternal(range, results, rangeID, begin, end));
+	maybeDuplicateTSSChangeFeedStream(
+	    req, interf.changeFeedStream, cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr, &tssData);
+
+	wait(results->streams[0].onError() ||
+	     singleChangeFeedStreamInternal(range, results, rangeID, begin, end, &tssData));
 
 	return Void();
 }
@@ -9882,12 +10136,23 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 		return Void();
 	}
 
+	auto model = cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr;
+
 	bool foundFailed = false;
 	for (int i = 0; i < locations.size() && !foundFailed; i++) {
 		for (int j = 0; j < locations[i].locations->size() && !foundFailed; j++) {
 			if (IFailureMonitor::failureMonitor()
 			        .getState(locations[i].locations->get(j, &StorageServerInterface::changeFeedPop).getEndpoint())
 			        .isFailed()) {
+				foundFailed = true;
+			}
+			// for now, if any of popping SS has a TSS pair, just always use backup method
+			if (model && model
+			                 ->getTssData(locations[i]
+			                                  .locations->get(j, &StorageServerInterface::changeFeedPop)
+			                                  .getEndpoint()
+			                                  .token.first())
+			                 .present()) {
 				foundFailed = true;
 			}
 		}

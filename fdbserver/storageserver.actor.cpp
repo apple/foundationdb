@@ -2859,20 +2859,6 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 	}
 
-	if (DEBUG_CF_TRACE) {
-		TraceEvent(SevDebug, "ChangeFeedMutationsDone", data->thisServerID)
-		    .detail("FeedID", req.rangeID)
-		    .detail("StreamUID", streamUID)
-		    .detail("Range", req.range)
-		    .detail("Begin", req.begin)
-		    .detail("End", req.end)
-		    .detail("FirstVersion", reply.mutations.empty() ? invalidVersion : reply.mutations.front().version)
-		    .detail("LastVersion", reply.mutations.empty() ? invalidVersion : reply.mutations.back().version)
-		    .detail("Count", reply.mutations.size())
-		    .detail("GotAll", gotAll)
-		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
-	}
-
 	if (DEBUG_CF_MISSING(req.rangeID, req.range, req.begin, reply.mutations.back().version) && !req.canReadPopped) {
 		bool foundVersion = false;
 		bool foundKey = false;
@@ -2923,6 +2909,21 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	}
 
 	reply.popVersion = feedInfo->emptyVersion + 1;
+
+	if (DEBUG_CF_TRACE) {
+		TraceEvent(SevDebug, "ChangeFeedMutationsDone", data->thisServerID)
+		    .detail("FeedID", req.rangeID)
+		    .detail("StreamUID", streamUID)
+		    .detail("Range", req.range)
+		    .detail("Begin", req.begin)
+		    .detail("End", req.end)
+		    .detail("FirstVersion", reply.mutations.empty() ? invalidVersion : reply.mutations.front().version)
+		    .detail("LastVersion", reply.mutations.empty() ? invalidVersion : reply.mutations.back().version)
+		    .detail("PopVersion", reply.popVersion)
+		    .detail("Count", reply.mutations.size())
+		    .detail("GotAll", gotAll)
+		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+	}
 
 	// If the SS's version advanced at all during any of the waits, the read from memory may have missed some
 	// mutations, so gotAll can only be true if data->version didn't change over the course of this actor
