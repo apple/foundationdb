@@ -1873,7 +1873,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				ASSERT(cf != columnFamilyMap->end());
 				auto begin = toSlice(range.begin);
 				auto end = toSlice(range.end);
-				ASSERT(a.db->SuggestCompactRange(cf->second, &begin, &end).ok());
+				if (SERVER_KNOBS->ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE) {
+					ASSERT(a.db->SuggestCompactRange(cf->second, &begin, &end).ok());
+				}
 			}
 
 			if (a.getHistograms) {

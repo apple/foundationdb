@@ -1171,7 +1171,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				for (const auto& keyRange : deletes) {
 					auto begin = toSlice(keyRange.begin);
 					auto end = toSlice(keyRange.end);
-					ASSERT(db->SuggestCompactRange(cf, &begin, &end).ok());
+					if (SERVER_KNOBS->ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE) {
+						ASSERT(db->SuggestCompactRange(cf, &begin, &end).ok());
+					}
 				}
 				if (a.getHistograms) {
 					metricPromiseStream->send(std::make_pair(ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM.toString(),
