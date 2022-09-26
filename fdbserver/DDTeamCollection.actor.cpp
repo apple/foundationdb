@@ -3595,7 +3595,7 @@ bool DDTeamCollection::satisfiesPolicy(const std::vector<Reference<TCServerInfo>
 	return result && resultEntries.size() == 0;
 }
 
-DDTeamCollection::DDTeamCollection(Database const& cx,
+DDTeamCollection::DDTeamCollection(const std::shared_ptr<IDDTxnProcessor>& db,
                                    UID distributorId,
                                    MoveKeysLock const& lock,
                                    PromiseStream<RelocateShard> const& output,
@@ -3612,7 +3612,7 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
                                    PromiseStream<GetMetricsRequest> getShardMetrics,
                                    Promise<UID> removeFailedServer,
                                    PromiseStream<Promise<int>> getUnhealthyRelocationCount)
-  : doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output),
+  : db(db), doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output),
     unhealthyServers(0), storageWiggler(makeReference<StorageWiggler>(this)), processingWiggle(processingWiggle),
     shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
     initialFailureReactionDelay(
@@ -3630,8 +3630,13 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
     teamCollectionInfoEventHolder(makeReference<EventCacheHolder>("TeamCollectionInfo")),
     storageServerRecruitmentEventHolder(
         makeReference<EventCacheHolder>("StorageServerRecruitment_" + distributorId.toString())),
-    primary(primary), distributorId(distributorId), cx(cx), configuration(configuration),
+    primary(primary), distributorId(distributorId), configuration(configuration),
     storageServerSet(new LocalityMap<UID>()) {
+
+	if (!db->isMocked()) {
+		cx = this->db->getDb();
+	}
+
 	if (!primary || configuration.usableRegions == 1) {
 		TraceEvent("DDTrackerStarting", distributorId)
 		    .detail("State", "Inactive")
@@ -5206,13 +5211,13 @@ public:
 	                                                            int teamSetCount = 1) {
 		Database database = DatabaseContext::create(
 		    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
-
+		auto txnProcessor = std::shared_ptr<IDDTxnProcessor>(new DDTxnProcessor(database));
 		DatabaseConfiguration conf;
 		conf.storageTeamSize = teamSize;
 		conf.storagePolicy = policy;
 
 		auto collection =
-		    std::unique_ptr<DDTeamCollection>(new DDTeamCollection(database,
+		    std::unique_ptr<DDTeamCollection>(new DDTeamCollection(txnProcessor,
 		                                                           UID(0, 0),
 		                                                           MoveKeysLock(),
 		                                                           PromiseStream<RelocateShard>(),
@@ -5234,9 +5239,9 @@ public:
 			UID uid(id, 0);
 			StorageServerInterface interface;
 			interface.uniqueID = uid;
-			interface.locality.set(LiteralStringRef("machineid"), Standalone<StringRef>(std::to_string(id)));
-			interface.locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(id % 5)));
-			interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(id % 3)));
+			interface.locality.set("machineid"_sr, Standalone<StringRef>(std::to_string(id)));
+			interface.locality.set("zoneid"_sr, Standalone<StringRef>(std::to_string(id % 5)));
+			interface.locality.set("data_hall"_sr, Standalone<StringRef>(std::to_string(id % 3)));
 			collection->server_info[uid] = makeReference<TCServerInfo>(
 			    interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
 			collection->server_status.set(uid, ServerStatus(false, false, false, interface.locality));
@@ -5252,13 +5257,13 @@ public:
 	                                                                   int teamSetCount = 1) {
 		Database database = DatabaseContext::create(
 		    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
-
+		auto txnProcessor = std::shared_ptr<IDDTxnProcessor>(new DDTxnProcessor(database));
 		DatabaseConfiguration conf;
 		conf.storageTeamSize = teamSize;
 		conf.storagePolicy = policy;
 
 		auto collection =
-		    std::unique_ptr<DDTeamCollection>(new DDTeamCollection(database,
+		    std::unique_ptr<DDTeamCollection>(new DDTeamCollection(txnProcessor,
 		                                                           UID(0, 0),
 		                                                           MoveKeysLock(),
 		                                                           PromiseStream<RelocateShard>(),
@@ -5291,11 +5296,11 @@ public:
 			       zone_id,
 			       machine_id,
 			       interface.address().toString().c_str());
-			interface.locality.set(LiteralStringRef("processid"), Standalone<StringRef>(std::to_string(process_id)));
-			interface.locality.set(LiteralStringRef("machineid"), Standalone<StringRef>(std::to_string(machine_id)));
-			interface.locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(zone_id)));
-			interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(data_hall_id)));
-			interface.locality.set(LiteralStringRef("dcid"), Standalone<StringRef>(std::to_string(dc_id)));
+			interface.locality.set("processid"_sr, Standalone<StringRef>(std::to_string(process_id)));
+			interface.locality.set("machineid"_sr, Standalone<StringRef>(std::to_string(machine_id)));
+			interface.locality.set("zoneid"_sr, Standalone<StringRef>(std::to_string(zone_id)));
+			interface.locality.set("data_hall"_sr, Standalone<StringRef>(std::to_string(data_hall_id)));
+			interface.locality.set("dcid"_sr, Standalone<StringRef>(std::to_string(dc_id)));
 			collection->server_info[uid] = makeReference<TCServerInfo>(
 			    interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
 

@@ -2192,7 +2192,7 @@ public:
 	          int64_t remapCleanupWindowBytes,
 	          int concurrentExtentReads,
 	          bool memoryOnly,
-	          Reference<IEncryptionKeyProvider> keyProvider,
+	          Reference<IPageEncryptionKeyProvider> keyProvider,
 	          Promise<Void> errorPromise = {})
 	  : keyProvider(keyProvider), ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2),
 	    pageCacheBytes(pageCacheSizeBytes), desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize),
@@ -2974,7 +2974,7 @@ public:
 		try {
 			page->postReadHeader(pageID);
 			if (page->isEncrypted()) {
-				EncryptionKey k = wait(self->keyProvider->getSecrets(page->encryptionKey));
+				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
 				page->encryptionKey = k;
 			}
 			page->postReadPayload(pageID);
@@ -2984,7 +2984,7 @@ public:
 			             page->rawData());
 		} catch (Error& e) {
 			Error err = e;
-			if (g_network->isSimulated() && g_simulator.checkInjectedCorruption()) {
+			if (g_network->isSimulated() && g_simulator->checkInjectedCorruption()) {
 				err = err.asInjectedFault();
 			}
 
@@ -3042,7 +3042,7 @@ public:
 		try {
 			page->postReadHeader(pageIDs.front());
 			if (page->isEncrypted()) {
-				EncryptionKey k = wait(self->keyProvider->getSecrets(page->encryptionKey));
+				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
 				page->encryptionKey = k;
 			}
 			page->postReadPayload(pageIDs.front());
@@ -3955,7 +3955,7 @@ private:
 	int physicalExtentSize;
 	int pagesPerExtent;
 
-	Reference<IEncryptionKeyProvider> keyProvider;
+	Reference<IPageEncryptionKeyProvider> keyProvider;
 
 	PriorityMultiLock ioLock;
 
@@ -4781,7 +4781,7 @@ struct DecodeBoundaryVerifier {
 	static DecodeBoundaryVerifier* getVerifier(std::string name) {
 		static std::map<std::string, DecodeBoundaryVerifier> verifiers;
 		// Only use verifier in a non-restarted simulation so that all page writes are captured
-		if (g_network->isSimulated() && !g_simulator.restarted) {
+		if (g_network->isSimulated() && !g_simulator->restarted) {
 			return &verifiers[name];
 		}
 		return nullptr;
@@ -5036,7 +5036,7 @@ public:
 	VersionedBTree(IPager2* pager,
 	               std::string name,
 	               EncodingType defaultEncodingType,
-	               Reference<IEncryptionKeyProvider> keyProvider)
+	               Reference<IPageEncryptionKeyProvider> keyProvider)
 	  : m_pager(pager), m_encodingType(defaultEncodingType), m_enforceEncodingType(false), m_keyProvider(keyProvider),
 	    m_pBuffer(nullptr), m_mutationCount(0), m_name(name) {
 
@@ -5064,7 +5064,7 @@ public:
 		state Reference<ArenaPage> page = self->m_pager->newPageBuffer();
 		page->init(self->m_encodingType, PageType::BTreeNode, 1);
 		if (page->isEncrypted()) {
-			EncryptionKey k = wait(self->m_keyProvider->getByRange(dbBegin.key, dbEnd.key));
+			ArenaPage::EncryptionKey k = wait(self->m_keyProvider->getLatestDefaultEncryptionKey());
 			page->encryptionKey = k;
 		}
 
@@ -5543,7 +5543,7 @@ private:
 	IPager2* m_pager;
 	EncodingType m_encodingType;
 	bool m_enforceEncodingType;
-	Reference<IEncryptionKeyProvider> m_keyProvider;
+	Reference<IPageEncryptionKeyProvider> m_keyProvider;
 
 	// Counter to update with DecodeCache memory usage
 	int64_t* m_pDecodeCacheMemory = nullptr;
@@ -5843,7 +5843,7 @@ private:
 			           (pagesToBuild[pageIndex].blockCount == 1) ? PageType::BTreeNode : PageType::BTreeSuperNode,
 			           height);
 			if (page->isEncrypted()) {
-				EncryptionKey k = wait(self->m_keyProvider->getByRange(pageLowerBound.key, pageUpperBound.key));
+				ArenaPage::EncryptionKey k = wait(self->m_keyProvider->getLatestDefaultEncryptionKey());
 				page->encryptionKey = k;
 			}
 
@@ -7689,12 +7689,12 @@ public:
 
 #include "fdbserver/art_impl.h"
 
-RedwoodRecordRef VersionedBTree::dbBegin(LiteralStringRef(""));
-RedwoodRecordRef VersionedBTree::dbEnd(LiteralStringRef("\xff\xff\xff\xff\xff"));
+RedwoodRecordRef VersionedBTree::dbBegin(""_sr);
+RedwoodRecordRef VersionedBTree::dbEnd("\xff\xff\xff\xff\xff"_sr);
 
 class KeyValueStoreRedwood : public IKeyValueStore {
 public:
-	KeyValueStoreRedwood(std::string filename, UID logID, Reference<IEncryptionKeyProvider> encryptionKeyProvider)
+	KeyValueStoreRedwood(std::string filename, UID logID, Reference<IPageEncryptionKeyProvider> encryptionKeyProvider)
 	  : m_filename(filename), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS, 0),
 	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 
@@ -7723,7 +7723,7 @@ public:
 		//
 		// TODO(yiwu): When the cluster encryption config is available later, fail if the cluster is configured to
 		// enable encryption, but the Redwood instance is unencrypted.
-		if (encryptionKeyProvider && encryptionKeyProvider->shouldEnableEncryption()) {
+		if (encryptionKeyProvider && encryptionKeyProvider->enableEncryption()) {
 			encodingType = EncodingType::AESEncryptionV1;
 			m_keyProvider = encryptionKeyProvider;
 		}
@@ -8020,7 +8020,7 @@ private:
 	PriorityMultiLock m_concurrentReads;
 	bool prefetch;
 	Version m_nextCommitVersion;
-	Reference<IEncryptionKeyProvider> m_keyProvider;
+	Reference<IPageEncryptionKeyProvider> m_keyProvider;
 	Future<Void> m_lastCommit = Void();
 
 	template <typename T>
@@ -8031,7 +8031,7 @@ private:
 
 IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                        UID logID,
-                                       Reference<IEncryptionKeyProvider> encryptionKeyProvider) {
+                                       Reference<IPageEncryptionKeyProvider> encryptionKeyProvider) {
 	return new KeyValueStoreRedwood(filename, logID, encryptionKeyProvider);
 }
 
@@ -8349,8 +8349,8 @@ ACTOR Future<Void> verify(VersionedBTree* btree,
 			wait(btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead));
 
 			debug_printf("Verifying entire key range at version %" PRId64 "\n", v);
-			state Future<Void> fRangeAll = verifyRangeBTreeCursor(
-			    btree, LiteralStringRef(""), LiteralStringRef("\xff\xff"), v, written, pRecordsRead);
+			state Future<Void> fRangeAll =
+			    verifyRangeBTreeCursor(btree, ""_sr, "\xff\xff"_sr, v, written, pRecordsRead);
 			if (serial) {
 				wait(fRangeAll);
 			}
@@ -8675,35 +8675,26 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 		ASSERT(r2.getChildPage().begin() != id.begin());
 	}
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef("abc"_sr, ""_sr), RedwoodRecordRef("abc"_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef("abcd"), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef("abc"_sr, ""_sr), RedwoodRecordRef("abcd"_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef("abcd"), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef("abc"), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef("abcd"_sr, ""_sr), RedwoodRecordRef("abc"_sr, ""_sr));
 
 	deltaTest(RedwoodRecordRef(std::string(300, 'k'), std::string(1e6, 'v')),
-	          RedwoodRecordRef(std::string(300, 'k'), LiteralStringRef("")));
+	          RedwoodRecordRef(std::string(300, 'k'), ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
-	deltaTest(RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")),
-	          RedwoodRecordRef(LiteralStringRef(""), LiteralStringRef("")));
+	deltaTest(RedwoodRecordRef(""_sr, ""_sr), RedwoodRecordRef(""_sr, ""_sr));
 
 	Arena mem;
 	double start;
@@ -8740,8 +8731,8 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	RedwoodRecordRef rec1;
 	RedwoodRecordRef rec2;
 
-	rec1.key = LiteralStringRef("alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf1");
-	rec2.key = LiteralStringRef("alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf234");
+	rec1.key = "alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf1"_sr;
+	rec2.key = "alksdfjaklsdfjlkasdjflkasdjfklajsdflk;ajsdflkajdsflkjadsf234"_sr;
 
 	start = timer();
 	total = 0;
@@ -8807,7 +8798,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	const int N = deterministicRandom()->randomInt(200, 1000);
 
 	RedwoodRecordRef prev;
-	RedwoodRecordRef next(LiteralStringRef("\xff\xff\xff\xff"));
+	RedwoodRecordRef next("\xff\xff\xff\xff"_sr);
 
 	Arena arena;
 	std::set<RedwoodRecordRef> uniqueItems;
@@ -8984,7 +8975,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 	const int N = deterministicRandom()->randomInt(200, 1000);
 
 	RedwoodRecordRef prev;
-	RedwoodRecordRef next(LiteralStringRef("\xff\xff\xff\xff"));
+	RedwoodRecordRef next("\xff\xff\xff\xff"_sr);
 
 	Arena arena;
 	std::set<RedwoodRecordRef> uniqueItems;
@@ -9814,7 +9805,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 	state EncodingType encodingType =
 	    static_cast<EncodingType>(deterministicRandom()->randomInt(0, EncodingType::MAX_ENCODING_TYPE));
-	state Reference<IEncryptionKeyProvider> keyProvider;
+	state Reference<IPageEncryptionKeyProvider> keyProvider;
 	if (encodingType == EncodingType::AESEncryptionV1) {
 		keyProvider = makeReference<RandomEncryptionKeyProvider>();
 	} else if (encodingType == EncodingType::XOREncryption_TestOnly) {
@@ -10300,7 +10291,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 		                      remapCleanupWindowBytes,
 		                      concurrentExtentReads,
 		                      false,
-		                      Reference<IEncryptionKeyProvider>());
+		                      Reference<IPageEncryptionKeyProvider>());
 
 		wait(success(pager->init()));
 
@@ -10358,7 +10349,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	                      remapCleanupWindowBytes,
 	                      concurrentExtentReads,
 	                      false,
-	                      Reference<IEncryptionKeyProvider>());
+	                      Reference<IPageEncryptionKeyProvider>());
 	wait(success(pager->init()));
 
 	printf("Starting ExtentQueue FastPath Recovery from Disk.\n");
@@ -10503,9 +10494,9 @@ TEST_CASE(":/redwood/performance/set") {
 	                                 remapCleanupWindowBytes,
 	                                 concurrentExtentReads,
 	                                 pagerMemoryOnly,
-	                                 Reference<IEncryptionKeyProvider>());
+	                                 Reference<IPageEncryptionKeyProvider>());
 	state VersionedBTree* btree =
-	    new VersionedBTree(pager, file, EncodingType::XXHash64, Reference<IEncryptionKeyProvider>());
+	    new VersionedBTree(pager, file, EncodingType::XXHash64, Reference<IPageEncryptionKeyProvider>());
 	wait(btree->init());
 	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 
@@ -10883,7 +10874,7 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore* kvs,
 	if (clearAfter) {
 		printf("Clearing all keys\n");
 		intervalStart = timer();
-		kvs->clear(KeyRangeRef(LiteralStringRef(""), LiteralStringRef("\xff")));
+		kvs->clear(KeyRangeRef(""_sr, "\xff"_sr));
 		state StorageBytes sbClear = wait(getStableStorageBytes(kvs));
 		printf("Cleared all keys in %.2f seconds, final storageByte: %s\n",
 		       timer() - intervalStart,
@@ -11122,8 +11113,7 @@ TEST_CASE(":/redwood/performance/histograms") {
 	std::vector<Reference<Histogram>> histograms;
 	for (int i = 0; i < 33; i++) {
 		std::string levelString = "L" + std::to_string(i);
-		histograms.push_back(Histogram::getHistogram(
-		    LiteralStringRef("histogramTest"), LiteralStringRef("levelString"), Histogram::Unit::bytes));
+		histograms.push_back(Histogram::getHistogram("histogramTest"_sr, "levelString"_sr, Histogram::Unit::bytes));
 	}
 	for (int i = 0; i < 33; i++) {
 		for (int j = 0; j < 32; j++) {

@@ -616,17 +616,16 @@ Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<Se
 Ratekeeper::Ratekeeper(UID id, Database db)
   : id(id), db(db), smoothReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
     smoothBatchReleasedTransactions(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-    actualTpsMetric(LiteralStringRef("Ratekeeper.ActualTPS")), lastWarning(0), lastSSListFetchedTimestamp(now()),
-    normalLimits(TransactionPriority::DEFAULT,
-                 "",
-                 SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
-                 SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER,
-                 SERVER_KNOBS->TARGET_BYTES_PER_TLOG,
-                 SERVER_KNOBS->SPRING_BYTES_TLOG,
-                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE,
-                 SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS,
-                 SERVER_KNOBS->TARGET_BW_LAG),
+    smoothTotalDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), actualTpsMetric("Ratekeeper.ActualTPS"_sr),
+    lastWarning(0), lastSSListFetchedTimestamp(now()), normalLimits(TransactionPriority::DEFAULT,
+                                                                    "",
+                                                                    SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
+                                                                    SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER,
+                                                                    SERVER_KNOBS->TARGET_BYTES_PER_TLOG,
+                                                                    SERVER_KNOBS->SPRING_BYTES_TLOG,
+                                                                    SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE,
+                                                                    SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS,
+                                                                    SERVER_KNOBS->TARGET_BW_LAG),
     batchLimits(TransactionPriority::BATCH,
                 "Batch",
                 SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH,
@@ -1208,7 +1207,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 
 	limits->tpsLimit = std::max(limits->tpsLimit, 0.0);
 
-	if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
+	if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
 		limits->tpsLimit = std::max(limits->tpsLimit, 100.0);
 	}
 

@@ -65,8 +65,7 @@ static void bench_latencyBands(benchmark::State& state) {
 BENCHMARK(bench_latencyBands)->Arg(1)->Arg(4)->Arg(7)->Arg(10)->ReportAggregatesOnly(true);
 
 static void bench_histogramInt(benchmark::State& state) {
-	Reference<Histogram> h =
-	    Histogram::getHistogram(LiteralStringRef("histogramTest"), LiteralStringRef("bytes"), Histogram::Unit::bytes);
+	Reference<Histogram> h = Histogram::getHistogram("histogramTest"_sr, "bytes"_sr, Histogram::Unit::bytes);
 	InputGenerator<int32_t> data(1e6, []() { return deterministicRandom()->randomInt64(0, 1e9); });
 
 	for (auto _ : state) {
@@ -78,8 +77,7 @@ static void bench_histogramInt(benchmark::State& state) {
 BENCHMARK(bench_histogramInt)->ReportAggregatesOnly(true);
 
 static void bench_histogramPct(benchmark::State& state) {
-	Reference<Histogram> h = Histogram::getHistogram(
-	    LiteralStringRef("histogramTest"), LiteralStringRef("pct"), Histogram::Unit::percentageLinear);
+	Reference<Histogram> h = Histogram::getHistogram("histogramTest"_sr, "pct"_sr, Histogram::Unit::percentageLinear);
 	InputGenerator<double> data(1e6, []() { return deterministicRandom()->random01() * 1.5; });
 
 	for (auto _ : state) {
@@ -91,8 +89,7 @@ static void bench_histogramPct(benchmark::State& state) {
 BENCHMARK(bench_histogramPct)->ReportAggregatesOnly(true);
 
 static void bench_histogramTime(benchmark::State& state) {
-	Reference<Histogram> h = Histogram::getHistogram(
-	    LiteralStringRef("histogramTest"), LiteralStringRef("latency"), Histogram::Unit::microseconds);
+	Reference<Histogram> h = Histogram::getHistogram("histogramTest"_sr, "latency"_sr, Histogram::Unit::microseconds);
 	InputGenerator<double> data(1e6, []() { return deterministicRandom()->random01() * 5; });
 
 	for (auto _ : state) {

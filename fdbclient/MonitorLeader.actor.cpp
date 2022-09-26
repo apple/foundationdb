@@ -248,7 +248,7 @@ TEST_CASE("/fdbclient/MonitorLeader/ConnectionString/hostname") {
 		hostnames.push_back(Hostname::parse(hn1 + ":" + port1));
 		hostnames.push_back(Hostname::parse(hn2 + ":" + port2));
 
-		ClusterConnectionString cs(hostnames, LiteralStringRef("TestCluster:0"));
+		ClusterConnectionString cs(hostnames, "TestCluster:0"_sr);
 		ASSERT(cs.hostnames.size() == 2);
 		ASSERT(cs.coords.size() == 0);
 		ASSERT(cs.toString() == connectionString);
@@ -259,7 +259,7 @@ TEST_CASE("/fdbclient/MonitorLeader/ConnectionString/hostname") {
 		hostnames.push_back(Hostname::parse(hn1 + ":" + port1));
 		hostnames.push_back(Hostname::parse(hn1 + ":" + port1));
 		try {
-			ClusterConnectionString cs(hostnames, LiteralStringRef("TestCluster:0"));
+			ClusterConnectionString cs(hostnames, "TestCluster:0"_sr);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_connection_string_invalid);
 		}
@@ -367,7 +367,7 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 		auto c = connectionString.begin();
 		while (c != connectionString.end()) {
 			if (deterministicRandom()->random01() < 0.1) // Add whitespace character
-				output += deterministicRandom()->randomChoice(LiteralStringRef(" \t\n\r"));
+				output += deterministicRandom()->randomChoice(" \t\n\r"_sr);
 			if (deterministicRandom()->random01() < 0.5) { // Add one of the input characters
 				output += *c;
 				++c;
@@ -378,7 +378,7 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 				for (int i = 0; i < charCount; i++) {
 					output += deterministicRandom()->randomChoice(LiteralStringRef("asdfzxcv123345:!@#$#$&()<\"\' \t"));
 				}
-				output += deterministicRandom()->randomChoice(LiteralStringRef("\n\r"));
+				output += deterministicRandom()->randomChoice("\n\r"_sr);
 			}
 		}
 
@@ -896,7 +896,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 				info.intermediateConnRecord = connRecord;
 				return info;
 			} else {
-				req.issues.push_back_deep(req.issues.arena(), LiteralStringRef("incorrect_cluster_file_contents"));
+				req.issues.push_back_deep(req.issues.arena(), "incorrect_cluster_file_contents"_sr);
 				std::string connectionString = connRecord->getConnectionString().toString();
 				if (!incorrectTime.present()) {
 					incorrectTime = now();

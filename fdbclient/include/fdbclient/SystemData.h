@@ -163,6 +163,9 @@ extern const KeyRef cacheChangePrefix;
 const Key cacheChangeKeyFor(uint16_t idx);
 uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key);
 
+// For persisting the consistency scan configuration and metrics
+extern const KeyRef consistencyScanInfoKey;
+
 // "\xff/tss/[[serverId]]" := "[[tssId]]"
 extern const KeyRangeRef tssMappingKeys;
 

@@ -63,6 +63,8 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("MoveKeysWorkload"); }
+
 	Future<Void> start(Database const& cx) override {
 		if (!enabled) {
 			return Void();
@@ -188,7 +190,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 			std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
 			if (!interfs.empty()) {
 				const auto& interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
-				if (g_simulator.protectedAddresses.count(interf.address()) == 0) {
+				if (g_simulator->protectedAddresses.count(interf.address()) == 0) {
 					dest.push_back(interf.uniqueID);
 					addr = interf.address();
 				}
@@ -256,9 +258,9 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	}
 
 	void killProcess(DataLossRecoveryWorkload* self, const NetworkAddress& addr) {
-		ISimulator::ProcessInfo* process = g_simulator.getProcessByAddress(addr);
+		ISimulator::ProcessInfo* process = g_simulator->getProcessByAddress(addr);
 		ASSERT(process->addresses.contains(addr));
-		g_simulator.killProcess(process, ISimulator::KillInstantly);
+		g_simulator->killProcess(process, ISimulator::KillInstantly);
 		TraceEvent("TestTeamKilled").detail("Address", addr);
 	}
 
