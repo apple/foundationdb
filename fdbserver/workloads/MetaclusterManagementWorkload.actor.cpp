@@ -434,7 +434,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 						// tenant creation in a partially completed state, which we want to avoid.
 						// Continue retrying if the new preferred cluster throws errors rather than
 						// exiting immediately so we can allow the operation to finish.
-						TraceEvent("BreakpointRetry").error(e);
 						continue;
 					} else {
 						throw;
