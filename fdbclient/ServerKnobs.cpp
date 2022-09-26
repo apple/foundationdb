@@ -716,6 +716,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENFORCE_TAG_THROTTLING_ON_PROXIES,                   false );
 	init( GLOBAL_TAG_THROTTLING_MIN_RATE,                        1.0 );
 	init( GLOBAL_TAG_THROTTLING_FOLDING_TIME,                   10.0 );
+	init( GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO,            5.0 );
 
 	//Storage Metrics
 	init( STORAGE_METRICS_AVERAGE_INTERVAL,                    120.0 );
@@ -766,7 +767,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( MIN_TAG_READ_PAGES_RATE,                             1.0e4 ); if( randomize && BUGGIFY ) MIN_TAG_READ_PAGES_RATE = 0;
 	init( MIN_TAG_WRITE_PAGES_RATE,                             3200 ); if( randomize && BUGGIFY ) MIN_TAG_WRITE_PAGES_RATE = 0;
 	init( TAG_MEASUREMENT_INTERVAL,                        30.0 ); if( randomize && BUGGIFY ) TAG_MEASUREMENT_INTERVAL = 1.0;
-	init( READ_COST_BYTE_FACTOR,                          16384 ); if( randomize && BUGGIFY ) READ_COST_BYTE_FACTOR = 4096;
 	init( PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS,                    true ); if( randomize && BUGGIFY ) PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS = false;
 	init( REPORT_DD_METRICS,                                    true );
 	init( DD_METRICS_REPORT_INTERVAL,                           30.0 );

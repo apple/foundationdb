@@ -90,7 +90,7 @@ class TransactionTagCounterImpl {
 	std::vector<StorageQueuingMetricsReply::TagInfo> previousBusiestTags;
 	Reference<EventCacheHolder> busiestReadTagEventHolder;
 
-	static int64_t costFunction(int64_t bytes) { return bytes / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1; }
+	static int64_t costFunction(int64_t bytes) { return bytes / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1; }
 
 public:
 	TransactionTagCounterImpl(UID thisServerID)
