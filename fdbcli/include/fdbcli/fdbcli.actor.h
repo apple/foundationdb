@@ -208,6 +208,11 @@ ACTOR Future<bool> changeFeedCommandActor(Database localDb,
 ACTOR Future<bool> blobRangeCommandActor(Database localDb,
                                          Optional<TenantMapEntry> tenantEntry,
                                          std::vector<StringRef> tokens);
+
+// blobkey command
+ACTOR Future<bool> blobKeyCommandActor(Database localDb,
+                                       Optional<TenantMapEntry> tenantEntry,
+                                       std::vector<StringRef> tokens);
 // maintenance command
 ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);
 ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,
@@ -239,6 +244,8 @@ ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
 Future<bool> tenantCommand(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // tenant command compatibility layer
 Future<bool> tenantCommandForwarder(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// tenantgroup command
+Future<bool> tenantGroupCommand(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // throttle command
 ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // triggerteaminfolog command

@@ -644,7 +644,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
-			actors.push_back(reportErrorsExcept(dataDistributionQueue(cx,
+			actors.push_back(reportErrorsExcept(dataDistributionQueue(self->txnProcessor,
 			                                                          self->relocationProducer,
 			                                                          self->relocationConsumer.getFuture(),
 			                                                          getShardMetrics,
@@ -679,7 +679,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			std::vector<DDTeamCollection*> teamCollectionsPtrs;
 			primaryTeamCollection = makeReference<DDTeamCollection>(
-			    cx,
+			    self->txnProcessor,
 			    self->ddId,
 			    self->lock,
 			    self->relocationProducer,
@@ -700,7 +700,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
 			if (self->configuration.usableRegions > 1) {
 				remoteTeamCollection =
-				    makeReference<DDTeamCollection>(cx,
+				    makeReference<DDTeamCollection>(self->txnProcessor,
 				                                    self->ddId,
 				                                    self->lock,
 				                                    self->relocationProducer,

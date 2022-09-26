@@ -1390,6 +1390,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "blobkey")) {
+					bool _result = wait(makeInterruptable(blobKeyCommandActor(localDb, tenantEntry, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "unlock")) {
 					if ((tokens.size() != 2) || (tokens[1].size() != 32) ||
 					    !std::all_of(tokens[1].begin(), tokens[1].end(), &isxdigit)) {
@@ -1899,6 +1906,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					if (!_result) {
 						is_error = true;
 					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "tenantgroup")) {
+					bool _result = wait(makeInterruptable(tenantGroupCommand(db, tokens)));
+					if (!_result)
+						is_error = true;
 					continue;
 				}
 
