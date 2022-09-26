@@ -21,6 +21,7 @@
 #ifndef FLOW_SWIFT_H
 #define FLOW_SWIFT_H
 
+#include "swift_compat.h"
 #include "swift/ABI/Task.h"
 #include "flow/ProtocolVersion.h"
 #pragma once
@@ -31,35 +32,9 @@
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 
-#define SWIFT_CXX_REF_IMMORTAL                                                                                         \
-	__attribute__((swift_attr("import_as_ref")))                                                                         \
-  __attribute__((swift_attr("retain:immortal")))                                                                       \
-	__attribute__((swift_attr("release:immortal")))
-
-#define SWIFT_SENDABLE __attribute__((swift_attr("@Sendable")))
-
-// ==== ----------------------------------------------------------------------------------------------------------------
-
-#if __has_feature(nullability)
-// Provide macros to temporarily suppress warning about the use of
-// _Nullable and _Nonnull.
-# define SWIFT_BEGIN_NULLABILITY_ANNOTATIONS                                   \
-  _Pragma("clang diagnostic push")                                             \
-  _Pragma("clang diagnostic ignored \"-Wnullability-extension\"")              \
-  _Pragma("clang assume_nonnull begin")
-# define SWIFT_END_NULLABILITY_ANNOTATIONS                                     \
-  _Pragma("clang diagnostic pop")                                              \
-  _Pragma("clang assume_nonnull end")
-
-#else
-// #define _Nullable and _Nonnull to nothing if we're not being built
-// with a compiler that supports them.
-# define _Nullable
-# define _Nonnull
-# define _Null_unspecified
-# define SWIFT_BEGIN_NULLABILITY_ANNOTATIONS
-# define SWIFT_END_NULLABILITY_ANNOTATIONS
-#endif
+inline pthread_t _tid() {
+  return pthread_self();
+}
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 

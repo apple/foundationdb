@@ -32,6 +32,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbserver/TLogInterface.h"
+#include "flow/swift_compat.h"
 
 using DBRecoveryCount = uint64_t;
 
@@ -260,5 +261,19 @@ struct CommitProxyVersionReplies {
 
 	CommitProxyVersionReplies() : latestRequestNum(0) {}
 };
+
+
+// ==== ----------------------------------------------------------------------------------------------------------------
+
+struct MasterDataShared : NonCopyable, ReferenceCounted<MasterDataShared> {
+  constexpr static FileIdentifier file_identifier = 5979145;
+};
+
+using ReferenceMasterDataShared = Reference<MasterDataShared>;
+//using ReferenceMasterDataShared = Reference<MasterData>;
+
+//struct SWIFT_CXX_REF_IMMORTAL SharedMasterData : NonCopyable, ReferenceCounted<SharedMasterData> {
+//  UID dbgid;
+//}
 
 #endif

@@ -1,5 +1,5 @@
 fdb_find_sources(FDBSERVER_SRCS)
-swift_find_sources(FDBSERVER_SWIFT_SRCS)
+#swift_find_sources(FDBSERVER_SWIFT_SRCS)
 
 if(${COROUTINE_IMPL} STREQUAL libcoro)
   list(APPEND FDBSERVER_SRCS coroimpl/CoroFlowCoro.actor.cpp)
@@ -27,7 +27,8 @@ add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 # Setup the Swift sources in FDBServer.
 include(FindSwiftLibs)
 add_library(fdbserver_swift STATIC
-        ${FDBSERVER_SWIFT_SRCS}
+        SwiftUtils.swift
+        masterserver.swift
         )
 
 target_include_directories(fdbserver_swift PUBLIC

@@ -103,14 +103,21 @@
 #include <Windows.h>
 #endif
 
+#if __has_include("SwiftModules/FDBServer")
+#include "SwiftModules/FDBServer"
+#define SWIFT_REVERSE_INTEROP_SUPPORTED
+#endif
+
+
+#if __has_include("SwiftModules/Flow")
+#include "SwiftModules/Flow"
+#endif
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // FIXME(swift): remove those
 extern "C" void testSwiftInFDB();
 extern "C" void swiftCallMeFuture(Promise<int>* promise);
-
-#include "SwiftModules/Flow"
-#include "SwiftModules/FDBServer"
 
 using namespace std::literals;
 
@@ -2051,9 +2058,6 @@ int main(int argc, char* argv[]) {
         printf("[c++][main] setting up Swift Concurrency hooks\n");
         installGlobalSwiftConcurrencyHooks(g_network);
 
-        // Test calling into Swift's flow module.
-        using namespace flow_swift;
-        swiftFileB();
 
         // Test calling into Swift's fdbserver module.
         using namespace fdbserver_swift;

@@ -33,40 +33,38 @@ using PromiseCInt = Promise<int>;
 using FutureCInt = Future<int>;
 using CallbackInt = Callback<int>;
 
-using PromiseString = Callback<std::string>;
+using PromiseVoid = Promise<Void>;
+using FutureVoid = Future<Void>;
+using CallbackVoid = Callback<Void>;
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 // MARK: Callback types
 
-struct SWIFT_CXX_REF_IMMORTAL CCResume_Int {
+struct SWIFT_CXX_REF_IMMORTAL CCResumeCInt {
 	void* cc;
 	void (*resumeWithValue)(void*, int);
 
-	explicit CCResume_Int(void* cc, void (*resumeWithValue)(void*, int)) : cc(cc), resumeWithValue(resumeWithValue) {}
+	explicit CCResumeCInt(void* cc, void (*resumeWithValue)(void*, int)) : cc(cc), resumeWithValue(resumeWithValue) {}
 
 	void resume(int value) { resumeWithValue(this->cc, value); }
 };
 
-inline pthread_t _tid() {
-	return pthread_self();
-}
-
-struct SWIFT_CXX_REF_IMMORTAL SwiftContinuationCallbackInt : Callback<int> {
+struct SWIFT_CXX_REF_IMMORTAL SwiftContinuationCallbackCInt : Callback<int> {
 private:
 	void* continuationBox;
 	void (*resumeWithValue)(void* _Nonnull /*context*/, /*value*/ int);
 	void (*resumeWithError)(void* _Nonnull /*context*/, /*value*/ Error);
 
-	SwiftContinuationCallbackInt(void* continuationBox,
+	SwiftContinuationCallbackCInt(void* continuationBox,
 	                             void (*_Nonnull returning)(void*, int),
 	                             void (*_Nonnull throwing)(void*, Error))
 	  : continuationBox(continuationBox), resumeWithValue(returning), resumeWithError(throwing) {}
 
 public:
-	static SwiftContinuationCallbackInt* _Nonnull make(void* continuationBox,
+	static SwiftContinuationCallbackCInt* _Nonnull make(void* continuationBox,
 	                                                   void (*_Nonnull returning)(void*, int),
 	                                                   void (*_Nonnull throwing)(void*, Error)) {
-		return new SwiftContinuationCallbackInt(continuationBox, returning, throwing);
+		return new SwiftContinuationCallbackCInt(continuationBox, returning, throwing);
 	}
 
 	CallbackInt* _Nonnull cast() { return this; }

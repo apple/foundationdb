@@ -30,7 +30,14 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/ActorCollection.h"
 #include "flow/Trace.h"
+#include "flow/swift_compat.h"
 #include "fdbclient/VersionVector.h"
+
+
+#if __has_include("SwiftModules/FDBServer")
+#include "SwiftModules/FDBServer"
+ #define SWIFT_REVERSE_INTEROP_SUPPORTED
+#endif
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -147,7 +154,20 @@ Version figureVersion(Version current,
 	return std::clamp(expected, current + toAdd - maxOffset, current + toAdd + maxOffset);
 }
 
+using ReferenceMasterDataShared = Reference<MasterDataShared>;
+
+// FIXME(swift) remove the need for these explicit decls
+extern "C" void MasterDataActor_getVersion(GetCommitVersionRequest req,
+                                           Promise<Void>* promise);
+
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
+
+  auto myself = Reference(new MasterDataShared());
+  auto promise = Promise<Void>();
+
+  MasterDataActor_getVersion(req, /*result=*/&promise);
+//  MasterDataActor_getVersion(self, req, /*result=*/&promise);
+
 	state Span span("M:getVersion"_loc, req.spanContext);
 	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
 	    self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes

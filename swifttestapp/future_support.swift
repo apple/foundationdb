@@ -6,8 +6,8 @@ extension FutureCInt: _FlowFutureOps {
     typealias _T = CInt
 
     typealias CCBox = Box<CheckedContinuation<_T, Swift.Error>>
-    typealias CC = SwiftContinuationCallbackInt
-    typealias CB = Flow.SwiftContinuationCallbackInt
+    typealias CC = SwiftContinuationCallbackCInt
+    typealias CB = Flow.SwiftContinuationCallbackCInt
 
     // NOTE: cannot be a `var` because must be mutating because `self.addCallbackAndClear` is mutating (from C++)
     var waitValue: _T {
