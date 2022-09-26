@@ -182,7 +182,6 @@ public:
 
 	// Return the explicitly set path.
 	// If one was not set, return the path from the environment.
-	// (Cert and Key only) If neither exist, check for fdb.pem in cwd
 	// (Cert and Key only) If fdb.pem doesn't exist, check for it in default config dir
 	// Otherwise return the empty string.
 	// Theoretically, fileExists() can block, so these functions are labelled as synchronous

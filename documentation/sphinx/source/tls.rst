@@ -126,7 +126,7 @@ Default Values
 Certificate file default location
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The default behavior when the certificate or key file is not specified is to look for a file named ``fdb.pem`` in the current working directory. If this file is not present, an attempt is made to load a file from a system-dependent location as follows:
+The default behavior when the certificate or key file is not specified is to look for a file named ``fdb.pem`` system-dependent locations as follows:
 
 * Linux: ``/etc/foundationdb/fdb.pem``
 * macOS: ``/usr/local/etc/foundationdb/fdb.pem``
