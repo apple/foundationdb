@@ -392,7 +392,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		state bool exists = itr != self->createdTenants.end();
 		state bool hasCapacity = self->createdTenants.size() < self->totalTenantGroupCapacity;
 		state bool retried = false;
-		state bool retrySuccess = false;
 		state bool preferAssignedCluster = deterministicRandom()->coinflip();
 		// Choose between two preferred clusters because if we get a partial completion and
 		// retry, we want the operation to eventually succeed instead of having a chance of
@@ -426,10 +425,13 @@ struct MetaclusterManagementWorkload : TestWorkload {
 					if (e.code() == error_code_tenant_already_exists && retried && !exists) {
 						Optional<TenantMapEntry> entry = wait(MetaclusterAPI::tryGetTenant(self->managementDb, tenant));
 						ASSERT(entry.present());
-						retrySuccess = true;
+						createEntry = entry.get();
 						break;
 					} else if (preferAssignedCluster && retried &&
-					           originalPreferredCluster.get() != createEntry.assignedCluster.get()) {
+					           originalPreferredCluster.get() != createEntry.assignedCluster.get() &&
+					           (e.code() == error_code_cluster_no_capacity ||
+					            e.code() == error_code_cluster_not_found ||
+					            e.code() == error_code_invalid_tenant_configuration)) {
 						// When picking a different assigned cluster, it is possible to leave the
 						// tenant creation in a partially completed state, which we want to avoid.
 						// Continue retrying if the new preferred cluster throws errors rather than
@@ -448,8 +450,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			ASSERT(entry.assignedCluster.present());
 
 			auto assignedCluster = self->dataDbs.find(entry.assignedCluster.get());
-			ASSERT(!preferAssignedCluster || retrySuccess ||
-			       createEntry.assignedCluster.get() == assignedCluster->first);
+			ASSERT(!preferAssignedCluster || createEntry.assignedCluster.get() == assignedCluster->first);
 			ASSERT(assignedCluster != self->dataDbs.end());
 			ASSERT(assignedCluster->second.tenants.insert(tenant).second);
 			ASSERT(assignedCluster->second.tenantGroupCapacity >= assignedCluster->second.tenants.size());
