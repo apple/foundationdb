@@ -505,6 +505,12 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			} else if (e.code() == error_code_cluster_not_found) {
 				ASSERT(preferAssignedCluster);
 				return Void();
+			} else if (e.code() == error_code_invalid_tenant_configuration) {
+				ASSERT(tenantGroup.present());
+				ASSERT(tenantMapEntry.assignedCluster.present());
+				auto itr = self->tenantGroups.find(tenantGroup.get());
+				ASSERT(itr->second.cluster != tenantMapEntry.assignedCluster.get());
+				return Void();
 			}
 
 			TraceEvent(SevError, "CreateTenantFailure").error(e).detail("TenantName", tenant);
