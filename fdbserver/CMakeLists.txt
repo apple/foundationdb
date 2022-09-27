@@ -28,6 +28,8 @@ include(FindSwiftLibs)
 add_library(fdbserver_swift STATIC
         SwiftUtils.swift
         masterserver.swift
+        swift_fdbserver_collections.swift
+        UID.swift
         )
 
 target_include_directories(fdbserver_swift PUBLIC

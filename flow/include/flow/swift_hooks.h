@@ -73,7 +73,9 @@
 #endif
 
 #if __has_attribute(noreturn)
+#ifndef SWIFT_NORETURN // since the generated Swift module header also will include a declaration
 #define SWIFT_NORETURN __attribute__((__noreturn__))
+#endif
 #else
 #define SWIFT_NORETURN
 #endif

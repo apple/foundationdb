@@ -33,7 +33,6 @@
 #include "flow/swift_compat.h"
 #include "fdbclient/VersionVector.h"
 
-
 #include "SwiftModules/FDBServer"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -96,10 +95,19 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	           Standalone<StringRef> const& dbId,
 	           PromiseStream<Future<Void>> addActor,
 	           bool forceRecovery)
-	  : dbgid(myInterface.id()), lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion),
-	    liveCommittedVersion(invalidVersion), databaseLocked(false), minKnownCommittedVersion(invalidVersion),
-	    coordinators(coordinators), version(invalidVersion), lastVersionTime(0), myInterface(myInterface),
-	    resolutionBalancer(&version), forceRecovery(forceRecovery), cc("Master", dbgid.toString()),
+	  : dbgid(myInterface.id()),
+      lastEpochEnd(invalidVersion),
+      recoveryTransactionVersion(invalidVersion),
+	    liveCommittedVersion(invalidVersion),
+      databaseLocked(false),
+      minKnownCommittedVersion(invalidVersion),
+	    coordinators(coordinators),
+      version(invalidVersion),
+      lastVersionTime(0),
+      myInterface(myInterface),
+	    resolutionBalancer(&version),
+      forceRecovery(forceRecovery),
+      cc("Master", dbgid.toString()),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
@@ -126,6 +134,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		balancer = resolutionBalancer.resolutionBalancing();
 		locality = tagLocalityInvalid;
 	}
+
 	~MasterData() = default;
 };
 
@@ -153,17 +162,15 @@ Version figureVersion(Version current,
 
 using ReferenceMasterDataShared = Reference<MasterDataShared>;
 
-// FIXME(swift) remove the need for these explicit decls
-extern "C" void MasterDataActor_getVersion(GetCommitVersionRequest req,
-                                           Promise<Void>* promise);
-
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
+  using namespace fdbserver_swift;
 
-  auto myself = Reference(new MasterDataShared());
+//  auto myself = Reference(new MasterDataShared());
+
+  auto actor = fdbserver_swift::makeMasterDataActor();
+
   auto promise = Promise<Void>();
-
-  MasterDataActor_getVersion(req, /*result=*/&promise);
-//  MasterDataActor_getVersion(self, req, /*result=*/&promise);
+  MasterDataActor_getVersion_workaround(&req, /*result=*/&promise);
 
 	state Span span("M:getVersion"_loc, req.spanContext);
 	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =

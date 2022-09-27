@@ -33,6 +33,7 @@
 #include "fdbserver/ResolverInterface.h"
 #include "fdbserver/TLogInterface.h"
 #include "flow/swift_compat.h"
+#include "flow/swift_future_compat.h"
 
 using DBRecoveryCount = uint64_t;
 
@@ -248,12 +249,14 @@ struct LifetimeToken {
 
 using MAP_UInt64_GetCommitVersionReply = std::map<uint64_t, GetCommitVersionReply>;
 
-struct CommitProxyVersionReplies {
+// FIXME(swift): this isn't really a reference type but we can't create it unless a ref or copy constructor...
+struct SWIFT_CXX_REF_IMMORTAL CommitProxyVersionReplies {
   MAP_UInt64_GetCommitVersionReply replies;
 	NotifiedVersion latestRequestNum;
 
 	CommitProxyVersionReplies(CommitProxyVersionReplies&& r) noexcept
 	  : replies(std::move(r.replies)), latestRequestNum(std::move(r.latestRequestNum)) {}
+
 	void operator=(CommitProxyVersionReplies&& r) noexcept {
 		replies = std::move(r.replies);
 		latestRequestNum = std::move(r.latestRequestNum);
@@ -262,11 +265,87 @@ struct CommitProxyVersionReplies {
 	CommitProxyVersionReplies() : latestRequestNum(0) {}
 };
 
-
 // ==== ----------------------------------------------------------------------------------------------------------------
 
-struct MasterDataShared : NonCopyable, ReferenceCounted<MasterDataShared> {
-  constexpr static FileIdentifier file_identifier = 5979145;
+using Map_UID_CommitProxyVersionReplies = std::map<UID, CommitProxyVersionReplies>;
+
+struct SWIFT_CXX_REF_IMMORTAL MasterDataShared : NonCopyable, ReferenceCounted<MasterDataShared> {
+
+  UID dbgid;
+
+  Version lastEpochEnd; // The last version in the old epoch not (to be) rolled back in this recovery
+  Version recoveryTransactionVersion; // The first version in this epoch
+
+//  NotifiedVersion prevTLogVersion; // Order of transactions to tlogs
+//
+//  NotifiedVersion liveCommittedVersion; // The largest live committed version reported by commit proxies.
+//  bool databaseLocked;
+//  Optional<Value> proxyMetadataVersion;
+//  Version minKnownCommittedVersion;
+//
+//  ServerCoordinators coordinators;
+
+  Version version; // The last version assigned to a proxy by getVersion()
+  double lastVersionTime;
+  Optional<Version> referenceVersion;
+
+  // std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
+  Map_UID_CommitProxyVersionReplies lastCommitProxyVersionReplies;
+
+//  MasterInterface myInterface;
+//
+//  ResolutionBalancer resolutionBalancer;
+
+  bool forceRecovery;
+//
+//  // Captures the latest commit version targeted for each storage server in the cluster.
+//  // @todo We need to ensure that the latest commit versions of storage servers stay
+//  // up-to-date in the presence of key range splits/merges.
+//  VersionVector ssVersionVector;
+//
+//  int8_t locality; // sequencer locality
+//
+  CounterCollection cc;
+  Counter getCommitVersionRequests;
+  Counter getLiveCommittedVersionRequests;
+  Counter reportLiveCommittedVersionRequests;
+//  // This counter gives an estimate of the number of non-empty peeks that storage servers
+//  // should do from tlogs (in the worst case, ignoring blocking peek timeouts).
+//  LatencySample versionVectorTagUpdates;
+//  Counter waitForPrevCommitRequests;
+//  Counter nonWaitForPrevCommitRequests;
+//  LatencySample versionVectorSizeOnCVReply;
+//  LatencySample waitForPrevLatencies;
+//
+//  PromiseStream<Future<Void>> addActor;
+//
+  FutureVoid logger;
+  FutureVoid balancer;
+
+  // --------------------------------------------------------------------------
+  MasterDataShared(
+//             Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
+             MasterInterface const& myInterface,
+//             ServerCoordinators const& coordinators,
+//             ClusterControllerFullInterface const& clusterController,
+//             Standalone<StringRef> const& dbId,
+//             PromiseStream<Future<Void>> addActor,
+             bool forceRecovery
+             ) :
+      cc("Master", dbgid.toString()),
+      getCommitVersionRequests("GetCommitVersionRequests", cc),
+      getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
+      reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc)
+      {
+    if (forceRecovery && !myInterface.locality.dcId().present()) {
+      TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
+      forceRecovery = false;
+    }
+  }
+
+  // --------------
+
+  ~MasterDataShared() = default;
 };
 
 using ReferenceMasterDataShared = Reference<MasterDataShared>;
