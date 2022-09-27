@@ -182,10 +182,10 @@ public actor MasterDataActor {
  public func MasterDataActor_getVersion_workaround(
      reqPtr: OpaquePointer,
      result opaqueResultPromisePtr: OpaquePointer) {
-     var actor = makeMasterDataActor()
+     let actor = makeMasterDataActor()
 
      MasterDataActor_getVersion(
-             myself: &actor,
+             myself: actor,
              req: UnsafePointer<GetCommitVersionRequest>(reqPtr).pointee,
              result: opaqueResultPromisePtr
      )

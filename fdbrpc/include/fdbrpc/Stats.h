@@ -21,6 +21,7 @@
 #ifndef FDBRPC_STATS_H
 #define FDBRPC_STATS_H
 #include <type_traits>
+#include "flow/swift_compat.h"
 #pragma once
 
 // Yet another performance statistics interface
@@ -80,7 +81,7 @@ struct CounterCollection {
 	void logToTraceEvent(TraceEvent& te) const;
 };
 
-struct Counter final : ICounter, NonCopyable {
+struct SWIFT_CXX_REF_IMMORTAL Counter final : ICounter, NonCopyable {
 public:
 	typedef int64_t Value;
 
