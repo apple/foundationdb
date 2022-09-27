@@ -1,5 +1,5 @@
 /*
- * MetricLogger.actor.h
+ * MetricClient.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -17,20 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "fdbserver/MetricClient.h"
 
-#pragma once
+StatdClient::StatdClient() {}
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_METRICLOGGER_ACTOR_G_H)
-#define FDBSERVER_METRICLOGGER_ACTOR_G_H
-#include "fdbserver/MetricLogger.actor.g.h"
-#elif !defined(FDBSERVER_METRICLOGGER_ACTOR_H)
-#define FDBSERVER_METRICLOGGER_ACTOR_H
-#include "flow/actorcompiler.h" // This must be the last #include
-
-// ACTOR Future<Void> runMetrics(Future<Database> fcx, Key metricsPrefix);
-ACTOR Future<Void> runMetrics();
-
-#include "flow/unactorcompiler.h"
-#endif
+void StatdClient::send(const MetricBatch& batch) {}

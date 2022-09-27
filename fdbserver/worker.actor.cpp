@@ -1775,7 +1775,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			try {
 				state Database db =
 				    Database::createDatabase(metricsConnFile, ApiVersion::LATEST_VERSION, IsInternal::True, locality);
-				metricsLogger = runMetrics(db, KeyRef(metricsPrefix));
+				metricsLogger = runMetrics();
 				db->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 			} catch (Error& e) {
 				TraceEvent(SevWarnAlways, "TDMetricsBadClusterFile").error(e).detail("ConnFile", metricsConnFile);
@@ -1783,7 +1783,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		} else {
 			auto lockAware = metricsPrefix.size() && metricsPrefix[0] == '\xff' ? LockAware::True : LockAware::False;
 			auto database = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, lockAware);
-			metricsLogger = runMetrics(database, KeyRef(metricsPrefix));
+			metricsLogger = runMetrics();
 			database->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 		}
 	}
