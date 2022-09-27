@@ -20,6 +20,7 @@
 
 #include <cmath>
 #include "flow/ApiVersion.h"
+#include "flow/Knobs.h"
 #include "flow/UnitTest.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/DatabaseContext.h"
@@ -27,6 +28,7 @@
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbserver/MetricLogger.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/flow.h"
 
 struct MetricsRule {
 	MetricsRule(bool enabled = false, int minLevel = 0, StringRef const& name = StringRef())
@@ -364,43 +366,59 @@ ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig* config, 
 	}
 }
 
-ACTOR Future<Void> runMetrics(Future<Database> fcx, Key prefix) {
-	// Never log to an empty prefix, it's pretty much always a bad idea.
-	if (prefix.size() == 0) {
-		TraceEvent(SevWarnAlways, "TDMetricsRefusingEmptyPrefix").log();
-		return Void();
-	}
+// ACTOR Future<Void> runMetrics(Future<Database> fcx, Key prefix) {
+// 	// Never log to an empty prefix, it's pretty much always a bad idea.
+// 	if (prefix.size() == 0) {
+// 		TraceEvent(SevWarnAlways, "TDMetricsRefusingEmptyPrefix").log();
+// 		return Void();
+// 	}
 
-	// Wait until the collection has been created and initialized.
-	state TDMetricCollection* metrics = nullptr;
+// 	// Wait until the collection has been created and initialized.
+// 	state TDMetricCollection* metrics = nullptr;
+// 	loop {
+// 		metrics = TDMetricCollection::getTDMetrics();
+// 		if (metrics != nullptr)
+// 			if (metrics->init())
+// 				break;
+// 		wait(delay(1.0));
+// 	}
+
+// 	state MetricsConfig config(prefix);
+
+// 	try {
+// 		Database cx = wait(fcx);
+// 		Future<Void> conf = metricRuleUpdater(cx, &config, metrics);
+// 		Future<Void> dump = dumpMetrics(cx, &config, metrics);
+// 		Future<Void> reg = updateMetricRegistration(cx, &config, metrics);
+
+// 		wait(conf || dump || reg);
+// 	} catch (Error& e) {
+// 		if (e.code() != error_code_actor_cancelled) {
+// 			// Disable all metrics
+// 			for (auto& it : metrics->metricMap)
+// 				it.value->setConfig(false);
+// 		}
+
+// 		TraceEvent(SevWarnAlways, "TDMetricsStopped").error(e);
+// 		throw e;
+// 	}
+// 	return Void();
+// }
+
+ACTOR Future<Void> runMetrics() {
+	state MetricCollection* metrics = nullptr;
+	state MetricBatch batch;
 	loop {
-		metrics = TDMetricCollection::getTDMetrics();
-		if (metrics != nullptr)
-			if (metrics->init())
-				break;
-		wait(delay(1.0));
-	}
-
-	state MetricsConfig config(prefix);
-
-	try {
-		Database cx = wait(fcx);
-		Future<Void> conf = metricRuleUpdater(cx, &config, metrics);
-		Future<Void> dump = dumpMetrics(cx, &config, metrics);
-		Future<Void> reg = updateMetricRegistration(cx, &config, metrics);
-
-		wait(conf || dump || reg);
-	} catch (Error& e) {
-		if (e.code() != error_code_actor_cancelled) {
-			// Disable all metrics
-			for (auto& it : metrics->metricMap)
-				it.value->setConfig(false);
+		metrics = MetricCollection::getMetricCollection();
+		if (metrics != nullptr) {
+			for (const auto& p : metrics->map) {
+				p.second->flush(batch);
+			}
+			// TODO: Send batch to metrics client
 		}
-
-		TraceEvent(SevWarnAlways, "TDMetricsStopped").error(e);
-		throw e;
+		batch.clear();
+		wait(delay(FLOW_KNOBS->METRICS_EMISSION_INTERVAL));
 	}
-	return Void();
 }
 
 TEST_CASE("/fdbserver/metrics/TraceEvents") {
@@ -418,7 +436,8 @@ TEST_CASE("/fdbserver/metrics/TraceEvents") {
 
 	state Database metricsDb = Database::createDatabase(metricsConnFile, ApiVersion::LATEST_VERSION);
 	TDMetricCollection::getTDMetrics()->address = "0.0.0.0:0"_sr;
-	state Future<Void> metrics = runMetrics(metricsDb, KeyRef(metricsPrefix));
+	// state Future<Void> metrics = runMetrics(metricsDb, KeyRef(metricsPrefix));
+	state Future<Void> metrics = runMetrics();
 	state int64_t x = 0;
 
 	state double w = 0.5;

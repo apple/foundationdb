@@ -255,7 +255,7 @@ public:
 	static MetricCollection* getMetricCollection() {
 		if (g_network == nullptr)
 			return nullptr;
-		return static_cast<MetricCollection*>((void*)g_network->global(INetwork::enTDMetrics));
+		return static_cast<MetricCollection*>((void*)g_network->global(INetwork::enMetrics));
 	}
 };
 
