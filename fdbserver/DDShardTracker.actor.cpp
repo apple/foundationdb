@@ -366,6 +366,8 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled && e.code() != error_code_dd_tracker_cancelled) {
+			// The above loop use Database cx, but those error should only be thrown in a code using transaction.
+			ASSERT(transactionRetryableErrors.count(e.code()) == 0);
 			self()->output.sendError(e); // Propagate failure to dataDistributionTracker
 		}
 		throw e;
@@ -388,8 +390,11 @@ ACTOR Future<Void> readHotDetector(DataDistributionTracker* self) {
 			}
 		}
 	} catch (Error& e) {
-		if (e.code() != error_code_actor_cancelled)
+		if (e.code() != error_code_actor_cancelled) {
+			// Those error should only be thrown in a code using transaction.
+			ASSERT(transactionRetryableErrors.count(e.code()) == 0);
 			self->output.sendError(e); // Propagate failure to dataDistributionTracker
+		}
 		throw e;
 	}
 }
