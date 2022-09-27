@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/WorkerInterface.actor.h"
+#include "flow/FastRef.h"
 #include "fmt/format.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
@@ -4886,25 +4887,45 @@ struct DecodeBoundaryVerifier {
 				        ::toString(b->second.domainId).c_str());
 				return false;
 			}
-			if (deterministicRandom()->random01() < domainPrefixScanProbability) {
-				cursor.moveFirst();
-				while (cursor.valid()) {
-					if (!keyProvider->keyFitsInDomain(domainId.get(), cursor.get().key, b->second.height > 1)) {
-						fprintf(stderr,
-						        "Encryption domain mismatch on %s, %s, domain: %s, key %s\n",
-						        ::toString(id).c_str(),
-						        ::toString(v).c_str(),
-						        ::toString(domainId).c_str(),
-						        cursor.get().key.printable().c_str());
-						// Temporarily disabling the check, since if a tenant is removed, where the key provider
-						// would not find the domain, the data for the tenant may still be in Redwood and being read.
-						// TODO(yiwu): re-enable the check.
-						// return false;
-					}
-					cursor.moveNext();
-				}
-				domainPrefixScanCount++;
+			// Temporarily disabling the check, since if a tenant is removed, where the key provider
+			// would not find the domain, the data for the tenant may still be in Redwood and being read.
+			// TODO(yiwu): re-enable the check.
+			/*
+			ASSERT(domainId.present());
+			auto checkKeyFitsInDomain = [&]() -> bool {
+			    if (!keyProvider->keyFitsInDomain(domainId.get(), cursor.get().key, b->second.height > 1)) {
+			        fprintf(stderr,
+			                "Encryption domain mismatch on %s, %s, domain: %s, key %s\n",
+			                ::toString(id).c_str(),
+			                ::toString(v).c_str(),
+			                ::toString(domainId).c_str(),
+			                cursor.get().key.printable().c_str());
+			        return false;
+			    }
+			    return true;
+			};
+			if (domainId.get() != keyProvider->getDefaultEncryptionDomainId()) {
+			    cursor.moveFirst();
+			    if (cursor.valid() && !checkKeyFitsInDomain()) {
+			        return false;
+			    }
+			    cursor.moveLast();
+			    if (cursor.valid() && !checkKeyFitsInDomain()) {
+			        return false;
+			    }
+			} else {
+			    if (deterministicRandom()->random01() < domainPrefixScanProbability) {
+			        cursor.moveFirst();
+			        while (cursor.valid()) {
+			            if (!checkKeyFitsInDomain()) {
+			                return false;
+			            }
+			            cursor.moveNext();
+			        }
+			        domainPrefixScanCount++;
+			    }
 			}
+			*/
 		}
 
 		return true;
@@ -5650,16 +5671,27 @@ private:
 
 	// Describes a range of a vector of records that should be built into a single BTreePage
 	struct PageToBuild {
-		PageToBuild(int index, int blockSize, EncodingType t)
+		PageToBuild(int index,
+		            int blockSize,
+		            EncodingType encodingType,
+		            unsigned int height,
+		            bool useEncryptionDomain,
+		            bool splitByDomain,
+		            IPageEncryptionKeyProvider* keyProvider)
 		  : startIndex(index), count(0), pageSize(blockSize),
 		    largeDeltaTree(pageSize > BTreePage::BinaryTree::SmallSizeLimit), blockSize(blockSize), blockCount(1),
-		    kvBytes(0) {
+		    kvBytes(0), encodingType(encodingType), height(height), useEncryptionDomain(useEncryptionDomain),
+		    splitByDomain(splitByDomain), keyProvider(keyProvider) {
 
 			// Subtrace Page header overhead, BTreePage overhead, and DeltaTree (BTreePage::BinaryTree) overhead.
-			bytesLeft = ArenaPage::getUsableSize(blockSize, t) - sizeof(BTreePage) - sizeof(BTreePage::BinaryTree);
+			bytesLeft =
+			    ArenaPage::getUsableSize(blockSize, encodingType) - sizeof(BTreePage) - sizeof(BTreePage::BinaryTree);
 		}
 
-		PageToBuild next(EncodingType t) { return PageToBuild(endIndex(), blockSize, t); }
+		PageToBuild next() {
+			return PageToBuild(
+			    endIndex(), blockSize, encodingType, height, useEncryptionDomain, splitByDomain, keyProvider);
+		}
 
 		int startIndex; // Index of the first record
 		int count; // Number of records added to the page
@@ -5671,13 +5703,15 @@ private:
 		int blockCount; // The number of blocks in pageSize
 		int kvBytes; // The amount of user key/value bytes added to the page
 
+		EncodingType encodingType;
+		unsigned int height;
+		bool useEncryptionDomain;
+		bool splitByDomain;
+		IPageEncryptionKeyProvider* keyProvider;
+
 		Optional<int64_t> domainId = Optional<int64_t>();
 		size_t domainPrefixLength = 0;
 		bool canUseDefaultDomain = false;
-
-		// encryption domain prefix for the current page.
-		// Empty if the page contain only domain prefixes.
-		KeyRef encryptionDomainPrefix;
 
 		// Number of bytes used by the generated/serialized BTreePage, including all headers
 		int usedBytes() const { return pageSize - bytesLeft; }
@@ -5741,14 +5775,7 @@ private:
 		// Try to add a record of the given delta size to the page.
 		// If force is true, the page will be expanded to make the record fit if needed.
 		// Return value is whether or not the record was added to the page.
-		bool addRecord(const RedwoodRecordRef& rec,
-		               int deltaSize,
-		               bool force,
-		               unsigned int height,
-		               IPageEncryptionKeyProvider* keyProvider,
-		               bool useEncryptionDomain,
-		               bool splitByDomain,
-		               const RedwoodRecordRef& next) {
+		bool addRecord(const RedwoodRecordRef& rec, const RedwoodRecordRef& nextRecord, int deltaSize, bool force) {
 
 			int nodeSize = deltaSize + BTreePage::BinaryTree::Node::headerSize(largeDeltaTree);
 
@@ -5783,7 +5810,8 @@ private:
 					} else if (canUseDefaultDomain &&
 					           (currentDomainId == defaultDomainId ||
 					            (prefixLength == rec.key.size() &&
-					             (next.key.empty() || !next.key.startsWith(rec.key.substr(0, prefixLength)))))) {
+					             (nextRecord.key.empty() ||
+					              !nextRecord.key.startsWith(rec.key.substr(0, prefixLength)))))) {
 						// The new record meets one of the following conditions:
 						//   1. it falls in the default domain, or
 						//   2. its key contain only the domain prefix, and
@@ -5826,7 +5854,7 @@ private:
 			return true;
 		}
 
-		void finish(IPageEncryptionKeyProvider* keyProvider, bool useEncryptionDomain) {
+		void finish() {
 			if (useEncryptionDomain && canUseDefaultDomain) {
 				domainId = keyProvider->getDefaultEncryptionDomainId();
 			}
@@ -5877,12 +5905,12 @@ private:
 			deltaSizes[i] = records[i].deltaSize(records[i - 1], prefixLen, true);
 		}
 
-		PageToBuild p(0, m_blockSize, m_encodingType);
-		bool beforeAddNewRecord = true;
+		PageToBuild p(
+		    0, m_blockSize, m_encodingType, height, useEncryptionDomain, splitByDomain, m_keyProvider.getPtr());
 
 		for (int i = 0; i < records.size();) {
 			bool force = p.count < minRecords || p.slackFraction() > maxSlack;
-			if (beforeAddNewRecord) {
+			if (i == 0 || p.count > 0) {
 				debug_printf("  before addRecord  i=%d  records=%d  deltaSize=%d  kvSize=%d  force=%d  pageToBuild=%s  "
 				             "record=%s",
 				             i,
@@ -5894,26 +5922,17 @@ private:
 				             records[i].toString(height == 1).c_str());
 			}
 
-			if (!p.addRecord(records[i],
-			                 deltaSizes[i],
-			                 force,
-			                 height,
-			                 m_keyProvider.getPtr(),
-			                 useEncryptionDomain,
-			                 splitByDomain,
-			                 i + 1 < records.size() ? records[i + 1] : emptyRecord)) {
-				p.finish(m_keyProvider.getPtr(), useEncryptionDomain);
+			if (!p.addRecord(records[i], i + 1 < records.size() ? records[i + 1] : emptyRecord, deltaSizes[i], force)) {
+				p.finish();
 				pages.push_back(p);
-				p = p.next(m_encodingType);
-				beforeAddNewRecord = false;
+				p = p.next();
 			} else {
-				beforeAddNewRecord = true;
 				i++;
 			}
 		}
 
 		if (p.count > 0) {
-			p.finish(m_keyProvider.getPtr(), useEncryptionDomain);
+			p.finish();
 			pages.push_back(p);
 		}
 
@@ -5982,7 +6001,7 @@ private:
 			ASSERT(pagesToBuild[0].domainId.present());
 			int64_t domainId = pagesToBuild[0].domainId.get();
 			// We need to make sure we use the domain prefix as the page lower bound, for the first page
-			// of a non-default domain on a level. That way when ensure that pages for a domain form a full subtree
+			// of a non-default domain on a level. That way we ensure that pages for a domain form a full subtree
 			// (i.e. have a single root) in the B-tree.
 			if (domainId != self->m_keyProvider->getDefaultEncryptionDomainId() &&
 			    !self->m_keyProvider->keyFitsInDomain(domainId, pageLowerBound.key, false)) {
@@ -6034,15 +6053,16 @@ private:
 				--p.count;
 				debug_printf("Skipping first null record, new count=%d\n", p.count);
 
-				// If the page is now empty then it must be the last page in pagesToBuild, otherwise there would
-				// be more than 1 item since internal pages need to have multiple children. While there is no page
-				// to be built here, a record must be added to the output set because the upper boundary of the last
+				// In case encryption or encryption domain is not enabled, if the page is now empty then it must be the
+				// last page in pagesToBuild, otherwise there would be more than 1 item since internal pages need to
+				// have multiple children. In case encryption and encryption domain is enabled, however, because of the
+				// page split by encryption domain, it may not be the last page.
+				//
+				// Either way, a record must be added to the output set because the upper boundary of the last
 				// page built does not match the upper boundary of the original page that this call to writePages() is
 				// replacing.  Put another way, the upper boundary of the rightmost page of the page set that was just
 				// built does not match the upper boundary of the original page that the page set is replacing, so
 				// adding the extra null link fixes this.
-				// TODO(yiwu): update the above comment to reflect that when encryption domain is in use,
-				// internal page can have only 1 item. So what we are seeing is not necessary the last page.
 				if (p.count == 0) {
 					ASSERT(useEncryptionDomain || lastPage);
 					records.push_back_deep(records.arena(), pageLowerBound);
@@ -6203,13 +6223,26 @@ private:
 		// commit record, build a new root page and update records to be a link to that new page.
 		// Root pointer size is limited because the pager commit header is limited to smallestPhysicalBlock in
 		// size.
+		//
+		// There's another case. When encryption domain is enabled, we want to make sure the root node is encrypted
+		// using the default encryption domain. An indication that's not true is when the first record is not
+		// is enabled, and the root node is not encrypted using the default
 		while (records.size() > 1 ||
 		       records.front().getChildPage().size() > (BUGGIFY ? 1 : BTreeCommitHeader::maxRootPointerSize) ||
 		       records[0].key != dbBegin.key) {
 			CODE_PROBE(records.size() == 1, "Writing a new root because the current root pointer would be too large");
-			CODE_PROBE(records[0].key != dbBegin.key,
-			           "Writing a new root because the current root is encrypted with non-default encryption domain "
-			           "cipher key");
+			if (records[0].key != dbBegin.key) {
+				ASSERT(self->m_keyProvider.isValid() && self->m_keyProvider->enableEncryption() &&
+				       self->m_keyProvider->enableEncryptionDomain());
+				int64_t domainId;
+				size_t prefixLength;
+				std::tie(domainId, prefixLength) = self->m_keyProvider->getEncryptionDomain(records[0].key);
+				ASSERT(domainId != self->m_keyProvider->getDefaultEncryptionDomainId());
+				ASSERT(records[0].key.size() == prefixLength);
+				CODE_PROBE(true,
+				           "Writing a new root because the current root is encrypted with non-default encryption "
+				           "domain cipher key");
+			}
 			self->m_header.height = ++height;
 			ASSERT(height < std::numeric_limits<int8_t>::max());
 			Standalone<VectorRef<RedwoodRecordRef>> newRecords = wait(
@@ -6597,6 +6630,7 @@ private:
 		void insert(BTreePage::BinaryTree::Cursor end, const VectorRef<RedwoodRecordRef>& recs) {
 			int i = 0;
 			if (updating) {
+				cloneForUpdate();
 				// Update must be done in the new tree, not the original tree where the end cursor will be from
 				end.switchTree(btPage()->tree());
 
@@ -6675,7 +6709,6 @@ private:
 
 			// If the children changed, replace [cBegin, cEnd) with newLinks
 			if (u.childrenChanged) {
-				// TODO(yiwu): do we need to clone in all cases?
 				cloneForUpdate();
 				if (updating) {
 					auto c = u.cBegin;
@@ -8063,6 +8096,10 @@ public:
 			ASSERT(encryptionKeyProvider->expectedEncodingType() == EncodingType::AESEncryptionV1);
 			encodingType = EncodingType::AESEncryptionV1;
 			m_keyProvider = encryptionKeyProvider;
+		} else if (g_network->isSimulated() && logID.hash() % 2 == 0) {
+			// Simulation only. Deterministically enable encryption based on uid
+			encodingType = EncodingType::XOREncryption_TestOnly;
+			m_keyProvider = makeReference<XOREncryptionKeyProvider_TestOnly>(filename);
 		}
 
 		IPager2* pager = new DWALPager(pageSize,
