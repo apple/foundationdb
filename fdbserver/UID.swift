@@ -1,8 +1,6 @@
 import Flow
 import FDBServer
 
-#if ENABLE_REVERSE_INTEROP
-
 extension Flow.UID: Hashable {
     public func hash(into hasher: inout Swift.Hasher) {
         self.first().hash(into: &hasher)
@@ -14,6 +12,3 @@ extension Flow.UID: Hashable {
     }
 }
 
-#else
-#error("Swift: C++ 'reverse' interop is required to build. Please update your Swift toolchain to a latest nightly build.")
-#endif

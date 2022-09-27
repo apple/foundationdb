@@ -2,8 +2,6 @@ import Flow
 import FDBServer
 import FDBClient
 
-#if ENABLE_REVERSE_INTEROP
-
 ///
 /// ```
 /// #define BUGGIFY_WITH_PROB(x)                                                                                           \
@@ -209,7 +207,3 @@ public func MasterDataActor_getVersion(
         print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Done calling getVersion impl!")
     }
 }
-
-#else
-#error("Swift: C++ 'reverse' interop is required to build. Please update your Swift toolchain to a latest nightly build.")
-#endif
