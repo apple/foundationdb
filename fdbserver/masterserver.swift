@@ -14,6 +14,14 @@ actor MasterDataActor {
     }
 }
 
+// FIXME: remove in favor of MasterDataActor_getVersion.
+ @_expose(Cxx)
+ public func MasterDataActor_getVersion_workaround(
+     reqPtr: OpaquePointer,
+     result opaqueResultPromisePtr: OpaquePointer) {
+     MasterDataActor_getVersion(req: UnsafePointer<GetCommitVersionRequest>(reqPtr).pointee, result: opaqueResultPromisePtr)
+ }
+
 @_expose(Cxx)
 public func MasterDataActor_getVersion(
 //        myself: ReferenceMasterDataShared,
