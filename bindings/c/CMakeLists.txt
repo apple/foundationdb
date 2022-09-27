@@ -198,7 +198,10 @@ if(NOT WIN32)
   target_link_libraries(fdb_c_client_memory_test PRIVATE fdb_c Threads::Threads)
 
   target_include_directories(fdb_c_api_tester_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/ ${CMAKE_SOURCE_DIR}/flow/include ${CMAKE_BINARY_DIR}/flow/include)
-  target_link_libraries(fdb_c_api_tester_impl PRIVATE fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target stdc++fs)
+  target_link_libraries(fdb_c_api_tester_impl PRIVATE fdb_cpp toml11_target Threads::Threads fmt::fmt boost_target)
+  if (NOT APPLE)
+      target_link_libraries(fdb_c_api_tester_impl PRIVATE stdc++fs)
+  endif()
   target_link_libraries(fdb_c_api_tester_impl PRIVATE SimpleOpt)
 
   target_include_directories(fdb_c_unit_tests_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
@@ -284,6 +287,22 @@ if(NOT WIN32)
             ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
             --test-dir
             ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
+            --tmp-dir
+            @TMP_DIR@
+            --log-dir
+            @LOG_DIR@
+            )
+
+  add_fdbclient_test(
+    NAME fdb_c_api_tests_local_only
+    DISABLE_LOG_DUMP
+    COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
+            --cluster-file
+            @CLUSTER_FILE@
+            --tester-binary
+            $<TARGET_FILE:fdb_c_api_tester>
+            --test-dir
+            ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/local_tests
             --tmp-dir
             @TMP_DIR@
             --log-dir

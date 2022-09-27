@@ -270,7 +270,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			                               StringRef(backupContainer),
 			                               {},
 			                               deterministicRandom()->randomInt(0, 60),
-			                               deterministicRandom()->randomInt(0, 100),
+			                               deterministicRandom()->randomInt(0, 2000),
 			                               tag.toString(),
 			                               backupRanges,
 			                               StopWhenDone{ !stopDifferentialDelay },
@@ -871,9 +871,9 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			}
 
 			// SOMEDAY: Remove after backup agents can exist quiescently
-			if ((g_simulator.backupAgents == ISimulator::BackupAgentType::BackupToFile) &&
+			if ((g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) &&
 			    (!BackupAndRestoreCorrectnessWorkload::backupAgentRequests)) {
-				g_simulator.backupAgents = ISimulator::BackupAgentType::NoBackupAgents;
+				g_simulator->backupAgents = ISimulator::BackupAgentType::NoBackupAgents;
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupAndRestoreCorrectness").error(e).GetLastError();
