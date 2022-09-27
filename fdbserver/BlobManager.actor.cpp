@@ -508,7 +508,7 @@ static void alignKeyBoundary(Reference<BlobManagerData> bmData,
 		alignedKey = alignedKey.removePrefix(tenantData->entry.prefix);
 	}
 	try {
-		t = Tuple::unpack(alignedKey, true);
+		t = Tuple::unpackUserType(alignedKey, true);
 		if (t.size() > offset) {
 			t2 = t.subTuple(0, t.size() - offset);
 			alignedKey = t2.pack();

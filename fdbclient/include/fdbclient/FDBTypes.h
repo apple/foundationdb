@@ -1581,7 +1581,13 @@ struct StorageWiggleValue {
 	}
 };
 
-enum class ReadType { EAGER = 0, FETCH = 1, LOW = 2, NORMAL = 3, HIGH = 4, MIN = EAGER, MAX = HIGH };
+enum class ReadType {
+	EAGER,
+	FETCH,
+	LOW,
+	NORMAL,
+	HIGH,
+};
 
 FDB_DECLARE_BOOLEAN_PARAM(CacheResult);
 

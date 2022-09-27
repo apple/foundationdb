@@ -76,6 +76,8 @@ parseTenantConfiguration(std::vector<StringRef> const& tokens, int startIndex, b
 
 		if (tokencmp(param, "tenant_group")) {
 			configParams[param] = value;
+		} else if (tokencmp(param, "assigned_cluster")) {
+			configParams[param] = value;
 		} else {
 			fmt::print(stderr, "ERROR: unrecognized configuration parameter `{}'.\n", param.toString().c_str());
 			return {};
@@ -93,6 +95,10 @@ void applyConfigurationToSpecialKeys(Reference<ITransaction> tr,
                                      TenantNameRef tenantName,
                                      std::map<Standalone<StringRef>, Optional<Value>> configuration) {
 	for (auto [configName, value] : configuration) {
+		if (configName == "assigned_cluster"_sr) {
+			fmt::print(stderr, "ERROR: assigned_cluster is only valid in metacluster configuration.\n");
+			throw invalid_tenant_configuration();
+		}
 		if (value.present()) {
 			tr->set(makeConfigKey(tenantName, configName), value.get());
 		} else {
@@ -103,11 +109,12 @@ void applyConfigurationToSpecialKeys(Reference<ITransaction> tr,
 
 // tenant create command
 ACTOR Future<bool> tenantCreateCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() < 3 || tokens.size() > 4) {
-		fmt::print("Usage: tenant create <NAME> [tenant_group=<TENANT_GROUP>]\n\n");
+	if (tokens.size() < 3 || tokens.size() > 5) {
+		fmt::print("Usage: tenant create <NAME> [tenant_group=<TENANT_GROUP>] [assigned_cluster=<CLUSTER_NAME>]\n\n");
 		fmt::print("Creates a new tenant in the cluster with the specified name.\n");
 		fmt::print("An optional group can be specified that will require this tenant\n");
 		fmt::print("to be placed on the same cluster as other tenants in the same group.\n");
+		fmt::print("An optional cluster name can be specified that this tenant will be placed in.\n");
 		return false;
 	}
 
