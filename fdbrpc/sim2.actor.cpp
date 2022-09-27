@@ -1688,7 +1688,7 @@ public:
 	}
 
 	void delayProcess(ProcessInfo* process) override {
-		if (!FLOW_KNOBS->ENABLE_SIMULATION_IMPROVEMENTS) {
+		if (!FLOW_KNOBS->ENABLE_SIMULATION_IMPROVEMENTS || true) {
 			return;
 		}
 		if (process->isMachineProcess() || process->startingClass == ProcessClass::TesterClass ||
