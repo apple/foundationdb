@@ -157,7 +157,7 @@ Future<Void> CounterCollection::traceCounters(std::string const& traceEventName,
 }
 
 void LatencyBands::insertBand(double value) {
-	bands.emplace(std::make_pair(value, std::make_unique<Counter>(format("Band%f", value), *cc)));
+	bands.emplace(std::make_pair(value, std::make_unique<Counter>(name + format("Band%f", value), *cc)));
 }
 
 FDB_DEFINE_BOOLEAN_PARAM(Filtered);
@@ -174,7 +174,7 @@ void LatencyBands::addThreshold(double value) {
 			ASSERT(!cc && !filteredCount);
 			cc = std::make_unique<CounterCollection>(name, id.toString());
 			logger = cc->traceCounters(name, id, loggingInterval, id.toString() + "/" + name, decorator);
-			filteredCount = std::make_unique<Counter>("Filtered", *cc);
+			filteredCount = std::make_unique<Counter>(name + "Filtered", *cc);
 			insertBand(std::numeric_limits<double>::infinity());
 		}
 
