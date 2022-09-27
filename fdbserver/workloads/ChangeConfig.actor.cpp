@@ -92,6 +92,7 @@ struct ChangeConfigWorkload : TestWorkload {
 
 		state bool extraConfigureBefore = deterministicRandom()->random01() < 0.5;
 
+		std::cout << "ChangeConfigureClient - config mode: " << self->configMode << "\n";
 		if (extraConfigureBefore) {
 			wait(self->extraDatabaseConfigure(self));
 		}

@@ -1414,6 +1414,11 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		noUnseed = true;
 		break;
 	}
+	case 5: {
+		TEST(true); // Simulated cluster using full redwood storage engine
+		set_config("ssd-redwood-1");
+		break;
+	}
 	default:
 		ASSERT(false); // Programmer forgot to adjust cases.
 	}
@@ -1821,9 +1826,6 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	setProcessesPerMachine(testConfig);
 	setTss(testConfig);
 	setConfigDB(testConfig);
-
-	// DEBUG ENFORCE REDWOOD STORE ENGINE
-	db.tLogDataStoreType = KeyValueStoreType::SSD_REDWOOD_V1;
 }
 
 // Configures the system according to the given specifications in order to run

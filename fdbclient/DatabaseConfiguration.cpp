@@ -311,6 +311,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	} else if (tLogDataStoreType == KeyValueStoreType::SSD_BTREE_V2 &&
 	           storageServerStoreType == KeyValueStoreType::MEMORY) {
 		result["storage_engine"] = "memory-2";
+	} else if (tLogDataStoreType == KeyValueStoreType::SSD_REDWOOD_V1 &&
+	           storageServerStoreType == KeyValueStoreType::SSD_REDWOOD_V1) {
+		result["storage_engine"] = "ssd-redwood-1";
 	} else {
 		result["storage_engine"] = "custom";
 	}
