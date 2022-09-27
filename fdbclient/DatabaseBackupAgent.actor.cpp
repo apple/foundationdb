@@ -37,11 +37,11 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-const Key DatabaseBackupAgent::keyAddPrefix = LiteralStringRef("add_prefix");
-const Key DatabaseBackupAgent::keyRemovePrefix = LiteralStringRef("remove_prefix");
-const Key DatabaseBackupAgent::keyRangeVersions = LiteralStringRef("range_versions");
-const Key DatabaseBackupAgent::keyCopyStop = LiteralStringRef("copy_stop");
-const Key DatabaseBackupAgent::keyDatabasesInSync = LiteralStringRef("databases_in_sync");
+const Key DatabaseBackupAgent::keyAddPrefix = "add_prefix"_sr;
+const Key DatabaseBackupAgent::keyRemovePrefix = "remove_prefix"_sr;
+const Key DatabaseBackupAgent::keyRangeVersions = "range_versions"_sr;
+const Key DatabaseBackupAgent::keyCopyStop = "copy_stop"_sr;
+const Key DatabaseBackupAgent::keyDatabasesInSync = "databases_in_sync"_sr;
 const int DatabaseBackupAgent::LATEST_DR_VERSION = 1;
 
 DatabaseBackupAgent::DatabaseBackupAgent()
@@ -75,8 +75,7 @@ DatabaseBackupAgent::DatabaseBackupAgent(Database src)
 class DRConfig {
 public:
 	DRConfig(UID uid = UID())
-	  : uid(uid),
-	    configSpace(uidPrefixKey(LiteralStringRef("uid->config/").withPrefix(databaseBackupPrefixRange.begin), uid)) {}
+	  : uid(uid), configSpace(uidPrefixKey("uid->config/"_sr.withPrefix(databaseBackupPrefixRange.begin), uid)) {}
 	DRConfig(Reference<Task> task)
 	  : DRConfig(BinaryReader::fromStringRef<UID>(task->params[BackupAgentBase::keyConfigLogUid], Unversioned())) {}
 
@@ -203,7 +202,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 		                           task,
 		                           parentTask->params[Task::reservedTaskParamValidKey],
 		                           task->params[BackupAgentBase::keyFolderId]));
-		return LiteralStringRef("OnSetAddTask");
+		return "OnSetAddTask"_sr;
 	}
 
 	ACTOR static Future<Void> _execute(Database cx,
@@ -536,9 +535,9 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 		return Void();
 	}
 };
-StringRef BackupRangeTaskFunc::name = LiteralStringRef("dr_backup_range");
-const Key BackupRangeTaskFunc::keyAddBackupRangeTasks = LiteralStringRef("addBackupRangeTasks");
-const Key BackupRangeTaskFunc::keyBackupRangeBeginKey = LiteralStringRef("backupRangeBeginKey");
+StringRef BackupRangeTaskFunc::name = "dr_backup_range"_sr;
+const Key BackupRangeTaskFunc::keyAddBackupRangeTasks = "addBackupRangeTasks"_sr;
+const Key BackupRangeTaskFunc::keyBackupRangeBeginKey = "backupRangeBeginKey"_sr;
 REGISTER_TASKFUNC(BackupRangeTaskFunc);
 
 struct FinishFullBackupTaskFunc : TaskFuncBase {
@@ -588,7 +587,7 @@ struct FinishFullBackupTaskFunc : TaskFuncBase {
 		                           task,
 		                           parentTask->params[Task::reservedTaskParamValidKey],
 		                           task->params[BackupAgentBase::keyFolderId]));
-		return LiteralStringRef("OnSetAddTask");
+		return "OnSetAddTask"_sr;
 	}
 
 	StringRef getName() const override { return name; };
@@ -606,7 +605,7 @@ struct FinishFullBackupTaskFunc : TaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef FinishFullBackupTaskFunc::name = LiteralStringRef("dr_finish_full_backup");
+StringRef FinishFullBackupTaskFunc::name = "dr_finish_full_backup"_sr;
 REGISTER_TASKFUNC(FinishFullBackupTaskFunc);
 
 struct EraseLogRangeTaskFunc : TaskFuncBase {
@@ -683,7 +682,7 @@ struct EraseLogRangeTaskFunc : TaskFuncBase {
 		                           task,
 		                           parentTask->params[Task::reservedTaskParamValidKey],
 		                           task->params[BackupAgentBase::keyFolderId]));
-		return LiteralStringRef("OnSetAddTask");
+		return "OnSetAddTask"_sr;
 	}
 
 	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
@@ -697,7 +696,7 @@ struct EraseLogRangeTaskFunc : TaskFuncBase {
 		return Void();
 	}
 };
-StringRef EraseLogRangeTaskFunc::name = LiteralStringRef("dr_erase_log_range");
+StringRef EraseLogRangeTaskFunc::name = "dr_erase_log_range"_sr;
 REGISTER_TASKFUNC(EraseLogRangeTaskFunc);
 
 struct CopyLogRangeTaskFunc : TaskFuncBase {
@@ -958,7 +957,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 		                           task,
 		                           parentTask->params[Task::reservedTaskParamValidKey],
 		                           task->params[BackupAgentBase::keyFolderId]));
-		return LiteralStringRef("OnSetAddTask");
+		return "OnSetAddTask"_sr;
 	}
 
 	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
@@ -989,8 +988,8 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 		return Void();
 	}
 };
-StringRef CopyLogRangeTaskFunc::name = LiteralStringRef("dr_copy_log_range");
-const Key CopyLogRangeTaskFunc::keyNextBeginVersion = LiteralStringRef("nextBeginVersion");
+StringRef CopyLogRangeTaskFunc::name = "dr_copy_log_range"_sr;
+const Key CopyLogRangeTaskFunc::keyNextBeginVersion = "nextBeginVersion"_sr;
 REGISTER_TASKFUNC(CopyLogRangeTaskFunc);
 
 struct CopyLogsTaskFunc : TaskFuncBase {
@@ -1125,7 +1124,7 @@ struct CopyLogsTaskFunc : TaskFuncBase {
 		                           task,
 		                           parentTask->params[Task::reservedTaskParamValidKey],
 		                           task->params[BackupAgentBase::keyFolderId]));
-		return LiteralStringRef("OnSetAddTask");
+		return "OnSetAddTask"_sr;
 	}
 
 	StringRef getName() const override { return name; };
@@ -1143,7 +1142,7 @@ struct CopyLogsTaskFunc : TaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef CopyLogsTaskFunc::name = LiteralStringRef("dr_copy_logs");
+StringRef CopyLogsTaskFunc::name = "dr_copy_logs"_sr;
 REGISTER_TASKFUNC(CopyLogsTaskFunc);
 
 struct FinishedFullBackupTaskFunc : TaskFuncBase {
@@ -1235,7 +1234,7 @@ struct FinishedFullBackupTaskFunc : TaskFuncBase {
 		                           task,
 		                           parentTask->params[Task::reservedTaskParamValidKey],
 		                           task->params[BackupAgentBase::keyFolderId]));
-		return LiteralStringRef("OnSetAddTask");
+		return "OnSetAddTask"_sr;
 	}
 
 	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
@@ -1283,8 +1282,8 @@ struct FinishedFullBackupTaskFunc : TaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef FinishedFullBackupTaskFunc::name = LiteralStringRef("dr_finished_full_backup");
-const Key FinishedFullBackupTaskFunc::keyInsertTask = LiteralStringRef("insertTask");
+StringRef FinishedFullBackupTaskFunc::name = "dr_finished_full_backup"_sr;
+const Key FinishedFullBackupTaskFunc::keyInsertTask = "insertTask"_sr;
 REGISTER_TASKFUNC(FinishedFullBackupTaskFunc);
 
 struct CopyDiffLogsTaskFunc : TaskFuncBase {
@@ -1396,7 +1395,7 @@ struct CopyDiffLogsTaskFunc : TaskFuncBase {
 		                           task,
 		                           parentTask->params[Task::reservedTaskParamValidKey],
 		                           task->params[BackupAgentBase::keyFolderId]));
-		return LiteralStringRef("OnSetAddTask");
+		return "OnSetAddTask"_sr;
 	}
 
 	StringRef getName() const override { return name; };
@@ -1414,7 +1413,7 @@ struct CopyDiffLogsTaskFunc : TaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef CopyDiffLogsTaskFunc::name = LiteralStringRef("dr_copy_diff_logs");
+StringRef CopyDiffLogsTaskFunc::name = "dr_copy_diff_logs"_sr;
 REGISTER_TASKFUNC(CopyDiffLogsTaskFunc);
 
 // Skip unneeded EraseLogRangeTaskFunc in 5.1
@@ -1446,7 +1445,7 @@ struct SkipOldEraseLogRangeTaskFunc : TaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef SkipOldEraseLogRangeTaskFunc::name = LiteralStringRef("dr_skip_legacy_task");
+StringRef SkipOldEraseLogRangeTaskFunc::name = "dr_skip_legacy_task"_sr;
 REGISTER_TASKFUNC(SkipOldEraseLogRangeTaskFunc);
 REGISTER_TASKFUNC_ALIAS(SkipOldEraseLogRangeTaskFunc, db_erase_log_range);
 
@@ -1652,7 +1651,7 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 		                           task,
 		                           parentTask->params[Task::reservedTaskParamValidKey],
 		                           task->params[BackupAgentBase::keyFolderId]));
-		return LiteralStringRef("OnSetAddTask");
+		return "OnSetAddTask"_sr;
 	}
 
 	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
@@ -1683,8 +1682,8 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 		return Void();
 	}
 };
-StringRef OldCopyLogRangeTaskFunc::name = LiteralStringRef("db_copy_log_range");
-const Key OldCopyLogRangeTaskFunc::keyNextBeginVersion = LiteralStringRef("nextBeginVersion");
+StringRef OldCopyLogRangeTaskFunc::name = "db_copy_log_range"_sr;
+const Key OldCopyLogRangeTaskFunc::keyNextBeginVersion = "nextBeginVersion"_sr;
 REGISTER_TASKFUNC(OldCopyLogRangeTaskFunc);
 
 struct AbortOldBackupTaskFunc : TaskFuncBase {
@@ -1753,7 +1752,7 @@ struct AbortOldBackupTaskFunc : TaskFuncBase {
 		                           task,
 		                           parentTask->params[Task::reservedTaskParamValidKey],
 		                           task->params[BackupAgentBase::keyFolderId]));
-		return LiteralStringRef("OnSetAddTask");
+		return "OnSetAddTask"_sr;
 	}
 
 	StringRef getName() const override { return name; };
@@ -1771,7 +1770,7 @@ struct AbortOldBackupTaskFunc : TaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef AbortOldBackupTaskFunc::name = LiteralStringRef("dr_abort_legacy_backup");
+StringRef AbortOldBackupTaskFunc::name = "dr_abort_legacy_backup"_sr;
 REGISTER_TASKFUNC(AbortOldBackupTaskFunc);
 REGISTER_TASKFUNC_ALIAS(AbortOldBackupTaskFunc, db_backup_range);
 REGISTER_TASKFUNC_ALIAS(AbortOldBackupTaskFunc, db_finish_full_backup);
@@ -1918,7 +1917,7 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef CopyDiffLogsUpgradeTaskFunc::name = LiteralStringRef("db_copy_diff_logs");
+StringRef CopyDiffLogsUpgradeTaskFunc::name = "db_copy_diff_logs"_sr;
 REGISTER_TASKFUNC(CopyDiffLogsUpgradeTaskFunc);
 
 struct BackupRestorableTaskFunc : TaskFuncBase {
@@ -2031,7 +2030,7 @@ struct BackupRestorableTaskFunc : TaskFuncBase {
 		                           task,
 		                           parentTask->params[Task::reservedTaskParamValidKey],
 		                           task->params[BackupAgentBase::keyFolderId]));
-		return LiteralStringRef("OnSetAddTask");
+		return "OnSetAddTask"_sr;
 	}
 
 	StringRef getName() const override { return name; };
@@ -2049,7 +2048,7 @@ struct BackupRestorableTaskFunc : TaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef BackupRestorableTaskFunc::name = LiteralStringRef("dr_backup_restorable");
+StringRef BackupRestorableTaskFunc::name = "dr_backup_restorable"_sr;
 REGISTER_TASKFUNC(BackupRestorableTaskFunc);
 
 struct StartFullBackupTaskFunc : TaskFuncBase {
@@ -2281,7 +2280,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 		task->params[BackupAgentBase::keyConfigBackupRanges] = keyConfigBackupRanges;
 		task->params[BackupAgentBase::keyTagName] = tagName;
 		task->params[DatabaseBackupAgent::keyDatabasesInSync] =
-		    backupAction == DatabaseBackupAgent::PreBackupAction::NONE ? LiteralStringRef("t") : LiteralStringRef("f");
+		    backupAction == DatabaseBackupAgent::PreBackupAction::NONE ? "t"_sr : "f"_sr;
 
 		if (!waitFor) {
 			return taskBucket->addTask(tr,
@@ -2301,7 +2300,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 		                               .get(logUid)
 		                               .pack(BackupAgentBase::keyFolderId),
 		                           task->params[BackupAgentBase::keyFolderId]));
-		return LiteralStringRef("OnSetAddTask");
+		return "OnSetAddTask"_sr;
 	}
 
 	StringRef getName() const override { return name; };
@@ -2319,7 +2318,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 };
-StringRef StartFullBackupTaskFunc::name = LiteralStringRef("dr_start_full_backup");
+StringRef StartFullBackupTaskFunc::name = "dr_start_full_backup"_sr;
 REGISTER_TASKFUNC(StartFullBackupTaskFunc);
 } // namespace dbBackup
 

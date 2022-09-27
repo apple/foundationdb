@@ -90,7 +90,7 @@ Future<EKPGetLatestBaseCipherKeysReply> getUncachedLatestEncryptCipherKeys(Refer
 ACTOR template <class T>
 Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getLatestEncryptCipherKeys(
     Reference<AsyncVar<T> const> db,
-    std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains,
+    std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains,
     BlobCipherMetrics::UsageType usageType) {
 	state Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
@@ -148,6 +148,21 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getL
 	BlobCipherMetrics::getInstance()->getLatestCipherKeysLatency.addMeasurement(elapsed);
 	BlobCipherMetrics::counters(usageType).getLatestCipherKeysLatency.addMeasurement(elapsed);
 	return cipherKeys;
+}
+
+// Get latest cipher key for given a encryption domain. It tries to get the cipher key from the local cache.
+// In case of cache miss, it fetches the cipher key from EncryptKeyProxy and put the result in the local cache
+// before return.
+ACTOR template <class T>
+Future<Reference<BlobCipherKey>> getLatestEncryptCipherKey(Reference<AsyncVar<T> const> db,
+                                                           EncryptCipherDomainId domainId,
+                                                           EncryptCipherDomainName domainName,
+                                                           BlobCipherMetrics::UsageType usageType) {
+	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains({ { domainId, domainName } });
+	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKey =
+	    wait(getLatestEncryptCipherKeys(db, domains, usageType));
+
+	return cipherKey.at(domainId);
 }
 
 ACTOR template <class T>
@@ -265,9 +280,9 @@ struct TextAndHeaderCipherKeys {
 ACTOR template <class T>
 Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(Reference<AsyncVar<T> const> db,
                                                                     EncryptCipherDomainId domainId,
-                                                                    EncryptCipherDomainNameRef domainName,
+                                                                    EncryptCipherDomainName domainName,
                                                                     BlobCipherMetrics::UsageType usageType) {
-	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains;
+	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
 	domains[domainId] = domainName;
 	domains[ENCRYPT_HEADER_DOMAIN_ID] = FDB_ENCRYPT_HEADER_DOMAIN_NAME;
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys =

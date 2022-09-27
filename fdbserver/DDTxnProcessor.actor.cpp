@@ -22,6 +22,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbclient/DatabaseContext.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class DDTxnProcessorImpl {
@@ -450,6 +451,20 @@ class DDTxnProcessorImpl {
 			}
 		}
 	}
+
+	ACTOR static Future<Optional<Value>> readRebalanceDDIgnoreKey(Database cx) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				Optional<Value> res = wait(tr.get(rebalanceDDIgnoreKey));
+				return res;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
 };
 
 Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(const KeyRangeRef range) {
@@ -633,4 +648,12 @@ void DDMockTxnProcessor::setupMockGlobalState(Reference<InitialDataDistribution>
 // FIXME: finish moveKeys implementation
 Future<Void> DDMockTxnProcessor::moveKeys(const MoveKeysParams& params) {
 	UNREACHABLE();
+}
+
+Future<HealthMetrics> DDTxnProcessor::getHealthMetrics(bool detailed) const {
+	return cx->getHealthMetrics(detailed);
+}
+
+Future<Optional<Value>> DDTxnProcessor::readRebalanceDDIgnoreKey() const {
+	return DDTxnProcessorImpl::readRebalanceDDIgnoreKey(cx);
 }

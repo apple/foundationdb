@@ -112,7 +112,7 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 		end = tokens[3];
 	}
 
-	if (end > LiteralStringRef("\xff")) {
+	if (end > "\xff"_sr) {
 		// TODO is this something we want?
 		fmt::print("Cannot blobbify system keyspace! Problematic End Key: {0}\n", tokens[3].printable());
 		return false;

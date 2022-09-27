@@ -33,7 +33,7 @@ struct BackupToDBAbort : TestWorkload {
 	UID lockid;
 
 	explicit BackupToDBAbort(const WorkloadContext& wcx) : TestWorkload(wcx) {
-		abortDelay = getOption(options, LiteralStringRef("abortDelay"), 50.0);
+		abortDelay = getOption(options, "abortDelay"_sr, 50.0);
 
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 

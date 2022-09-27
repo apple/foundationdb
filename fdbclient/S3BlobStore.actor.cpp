@@ -109,7 +109,7 @@ bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(request_tries, rt);
 	TRY_PARAM(request_timeout_min, rtom);
 	// TODO: For backward compatibility because request_timeout was renamed to request_timeout_min
-	if (name == LiteralStringRef("request_timeout") || name == LiteralStringRef("rto")) {
+	if (name == "request_timeout"_sr || name == "rto"_sr) {
 		request_timeout_min = value;
 		return true;
 	}
@@ -187,7 +187,7 @@ std::string guessRegionFromDomain(std::string domain) {
 
 		StringRef h(domain.c_str() + p);
 
-		if (!h.startsWith(LiteralStringRef("oss-"))) {
+		if (!h.startsWith("oss-"_sr)) {
 			h.eat(service); // ignore s3 service
 		}
 
@@ -208,7 +208,7 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 	try {
 		StringRef t(url);
 		StringRef prefix = t.eat("://");
-		if (prefix != LiteralStringRef("blobstore"))
+		if (prefix != "blobstore"_sr)
 			throw format("Invalid blobstore URL prefix '%s'", prefix.toString().c_str());
 
 		Optional<std::string> proxyHost, proxyPort;
@@ -261,7 +261,7 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 			StringRef value = t.eat("&");
 
 			// Special case for header
-			if (name == LiteralStringRef("header")) {
+			if (name == "header"_sr) {
 				StringRef originalValue = value;
 				StringRef headerFieldName = value.eat(":");
 				StringRef headerFieldValue = value;
@@ -282,7 +282,7 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 			}
 
 			// overwrite s3 region from parameter
-			if (name == LiteralStringRef("region")) {
+			if (name == "region"_sr) {
 				region = value.toString();
 				continue;
 			}
@@ -1428,7 +1428,7 @@ void S3BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb,
 	if (headers.find("Content-MD5") != headers.end())
 		headersList.push_back({ "content-md5", trim_copy(headers["Content-MD5"]) + "\n" });
 	for (auto h : headers) {
-		if (StringRef(h.first).startsWith(LiteralStringRef("x-amz")))
+		if (StringRef(h.first).startsWith("x-amz"_sr))
 			headersList.push_back({ to_lower_copy(h.first), trim_copy(h.second) + "\n" });
 	}
 	std::sort(headersList.begin(), headersList.end());
@@ -1489,7 +1489,7 @@ void S3BlobStoreEndpoint::setAuthHeaders(std::string const& verb, std::string co
 	msg.append("\n");
 	for (auto h : headers) {
 		StringRef name = h.first;
-		if (name.startsWith(LiteralStringRef("x-amz")) || name.startsWith(LiteralStringRef("x-icloud"))) {
+		if (name.startsWith("x-amz"_sr) || name.startsWith("x-icloud"_sr)) {
 			msg.append(h.first);
 			msg.append(":");
 			msg.append(h.second);

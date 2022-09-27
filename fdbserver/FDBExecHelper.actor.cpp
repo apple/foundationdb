@@ -18,6 +18,14 @@
  * limitations under the License.
  */
 
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__INTEL_COMPILER)
+#define BOOST_SYSTEM_NO_LIB
+#define BOOST_DATE_TIME_NO_LIB
+#define BOOST_REGEX_NO_LIB
+#include <boost/process.hpp>
+#endif
+#include <boost/algorithm/string.hpp>
+
 #include "flow/TLSConfig.actor.h"
 #include "flow/Trace.h"
 #include "flow/Platform.h"
@@ -33,14 +41,6 @@
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RemoteIKeyValueStore.actor.h"
-
-#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__INTEL_COMPILER)
-#define BOOST_SYSTEM_NO_LIB
-#define BOOST_DATE_TIME_NO_LIB
-#define BOOST_REGEX_NO_LIB
-#include <boost/process.hpp>
-#endif
-#include <boost/algorithm/string.hpp>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -75,7 +75,7 @@ VectorRef<StringRef> ExecCmdValueString::getBinaryArgs() const {
 void ExecCmdValueString::parseCmdValue() {
 	StringRef param = this->cmdValueString;
 	// get the binary path
-	this->binaryPath = param.eat(LiteralStringRef(" "));
+	this->binaryPath = param.eat(" "_sr);
 
 	// no arguments provided
 	if (param == StringRef()) {
@@ -84,7 +84,7 @@ void ExecCmdValueString::parseCmdValue() {
 
 	// extract the arguments
 	while (param != StringRef()) {
-		StringRef token = param.eat(LiteralStringRef(" "));
+		StringRef token = param.eat(" "_sr);
 		this->binaryArgs.push_back(this->binaryArgs.arena(), token);
 	}
 	return;

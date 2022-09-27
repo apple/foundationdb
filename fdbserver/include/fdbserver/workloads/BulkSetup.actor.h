@@ -198,7 +198,8 @@ Future<Void> waitForLowInFlight(Database cx, T* workload) {
 				break;
 			}
 		} catch (Error& e) {
-			if (e.code() == error_code_attribute_not_found) {
+			if (e.code() == error_code_attribute_not_found ||
+			    (e.code() == error_code_timed_out && !timeout.isReady())) {
 				// DD may not be initialized yet and attribute "DataInFlight" can be missing
 				wait(delay(1.0));
 			} else {

@@ -131,7 +131,7 @@ ACTOR Future<ForcedPurgeState> getForcePurgedState(Transaction* tr, KeyRange key
 		ASSERT(values[0].value != values[1].value);
 		return ForcedPurgeState::SomePurged;
 	} else {
-		return values[0].value == LiteralStringRef("1") ? ForcedPurgeState::AllPurged : ForcedPurgeState::NonePurged;
+		return values[0].value == "1"_sr ? ForcedPurgeState::AllPurged : ForcedPurgeState::NonePurged;
 	}
 }
 

@@ -38,12 +38,12 @@ struct InventoryTestWorkload : TestWorkload {
 
 	InventoryTestWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), totalLatency("Latency") {
-		actorCount = getOption(options, LiteralStringRef("actorCount"), 500);
-		nProducts = getOption(options, LiteralStringRef("nProducts"), 100000);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 10000);
-		fractionWriteTransactions = getOption(options, LiteralStringRef("fractionWriteTransactions"), 0.01);
-		productsPerWrite = getOption(options, LiteralStringRef("productsPerWrite"), 2);
+		actorCount = getOption(options, "actorCount"_sr, 500);
+		nProducts = getOption(options, "nProducts"_sr, 100000);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 10000);
+		fractionWriteTransactions = getOption(options, "fractionWriteTransactions"_sr, 0.01);
+		productsPerWrite = getOption(options, "productsPerWrite"_sr, 2);
 	}
 
 	std::string description() const override { return "InventoryTest"; }

@@ -187,24 +187,18 @@ private:
 ////// Persistence format (for self->persistentData)
 
 // Immutable keys
-static const KeyValueRef persistFormat(LiteralStringRef("Format"), LiteralStringRef("FoundationDB/LogServer/2/4"));
-static const KeyRangeRef persistFormatReadableRange(LiteralStringRef("FoundationDB/LogServer/2/3"),
-                                                    LiteralStringRef("FoundationDB/LogServer/2/5"));
-static const KeyRangeRef persistRecoveryCountKeys =
-    KeyRangeRef(LiteralStringRef("DbRecoveryCount/"), LiteralStringRef("DbRecoveryCount0"));
+static const KeyValueRef persistFormat("Format"_sr, "FoundationDB/LogServer/2/4"_sr);
+static const KeyRangeRef persistFormatReadableRange("FoundationDB/LogServer/2/3"_sr, "FoundationDB/LogServer/2/5"_sr);
+static const KeyRangeRef persistRecoveryCountKeys = KeyRangeRef("DbRecoveryCount/"_sr, "DbRecoveryCount0"_sr);
 
 // Updated on updatePersistentData()
-static const KeyRangeRef persistCurrentVersionKeys =
-    KeyRangeRef(LiteralStringRef("version/"), LiteralStringRef("version0"));
-static const KeyRangeRef persistKnownCommittedVersionKeys =
-    KeyRangeRef(LiteralStringRef("knownCommitted/"), LiteralStringRef("knownCommitted0"));
-static const KeyRangeRef persistLocalityKeys =
-    KeyRangeRef(LiteralStringRef("Locality/"), LiteralStringRef("Locality0"));
-static const KeyRangeRef persistLogRouterTagsKeys =
-    KeyRangeRef(LiteralStringRef("LogRouterTags/"), LiteralStringRef("LogRouterTags0"));
-static const KeyRangeRef persistTxsTagsKeys = KeyRangeRef(LiteralStringRef("TxsTags/"), LiteralStringRef("TxsTags0"));
-static const KeyRange persistTagMessagesKeys = prefixRange(LiteralStringRef("TagMsg/"));
-static const KeyRange persistTagPoppedKeys = prefixRange(LiteralStringRef("TagPop/"));
+static const KeyRangeRef persistCurrentVersionKeys = KeyRangeRef("version/"_sr, "version0"_sr);
+static const KeyRangeRef persistKnownCommittedVersionKeys = KeyRangeRef("knownCommitted/"_sr, "knownCommitted0"_sr);
+static const KeyRangeRef persistLocalityKeys = KeyRangeRef("Locality/"_sr, "Locality0"_sr);
+static const KeyRangeRef persistLogRouterTagsKeys = KeyRangeRef("LogRouterTags/"_sr, "LogRouterTags0"_sr);
+static const KeyRangeRef persistTxsTagsKeys = KeyRangeRef("TxsTags/"_sr, "TxsTags0"_sr);
+static const KeyRange persistTagMessagesKeys = prefixRange("TagMsg/"_sr);
+static const KeyRange persistTagPoppedKeys = prefixRange("TagPop/"_sr);
 
 static Key persistTagMessagesKey(UID id, Tag tag, Version version) {
 	BinaryWriter wr(Unversioned());
@@ -539,10 +533,10 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		          context);
 		addActor.send(traceRole(Role::TRANSACTION_LOG, interf.id()));
 
-		persistentDataVersion.init(LiteralStringRef("TLog.PersistentDataVersion"), cc.id);
-		persistentDataDurableVersion.init(LiteralStringRef("TLog.PersistentDataDurableVersion"), cc.id);
-		version.initMetric(LiteralStringRef("TLog.Version"), cc.id);
-		queueCommittedVersion.initMetric(LiteralStringRef("TLog.QueueCommittedVersion"), cc.id);
+		persistentDataVersion.init("TLog.PersistentDataVersion"_sr, cc.id);
+		persistentDataDurableVersion.init("TLog.PersistentDataDurableVersion"_sr, cc.id);
+		version.initMetric("TLog.Version"_sr, cc.id);
+		queueCommittedVersion.initMetric("TLog.QueueCommittedVersion"_sr, cc.id);
 
 		specialCounter(cc, "Version", [this]() { return this->version.get(); });
 		specialCounter(cc, "QueueCommittedVersion", [this]() { return this->queueCommittedVersion.get(); });
@@ -2329,7 +2323,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	}
 
 	if (!fFormat.get().present()) {
-		RangeResult v = wait(self->persistentData->readRange(KeyRangeRef(StringRef(), LiteralStringRef("\xff")), 1));
+		RangeResult v = wait(self->persistentData->readRange(KeyRangeRef(StringRef(), "\xff"_sr), 1));
 		if (!v.size()) {
 			CODE_PROBE(true, "The DB is completely empty, so it was never initialized.  Delete it.");
 			throw worker_removed();
@@ -2343,7 +2337,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 
 	state std::vector<Future<ErrorOr<Void>>> removed;
 
-	if (fFormat.get().get() == LiteralStringRef("FoundationDB/LogServer/2/3")) {
+	if (fFormat.get().get() == "FoundationDB/LogServer/2/3"_sr) {
 		// FIXME: need for upgrades from 5.X to 6.0, remove once this upgrade path is no longer needed
 		if (recovered.canBeSet())
 			recovered.send(Void());

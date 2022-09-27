@@ -119,12 +119,12 @@ private:
 
 		// If the value starts with a 0-byte, then we don't compress it
 		if (c == 0)
-			return val.withPrefix(LiteralStringRef("\x00"));
+			return val.withPrefix("\x00"_sr);
 
 		for (int i = 1; i < val.size(); i++) {
 			if (val[i] != c) {
 				// The value is something other than a single repeated character, so not compressible :-)
-				return val.withPrefix(LiteralStringRef("\x00"));
+				return val.withPrefix("\x00"_sr);
 			}
 		}
 
