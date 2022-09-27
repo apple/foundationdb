@@ -19,13 +19,14 @@
  */
 
 #include "fdbrpc/Stats.h"
+#include "flow/Knobs.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 #include <string>
 
 Counter::Counter(std::string const& name, CounterCollection& collection)
-  : IMetric(name), interval_start(0), last_event(0), interval_sq_time(0), roughness_interval_start(0),
-    interval_delta(0), interval_start_value(0) {
+  : IMetric(name, knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)), interval_start(0), last_event(0),
+    interval_sq_time(0), roughness_interval_start(0), interval_delta(0), interval_start_value(0) {
 	metric.init(collection.getName() + "." + (char)toupper(name.at(0)) + name.substr(1), collection.getId());
 	collection.addCounter(this);
 }
@@ -85,11 +86,21 @@ void Counter::clear() {
 
 void Counter::flush(MetricBatch& batch) {
 	Value val = getValue();
-	std::string msg = create_statsd_message(name, StatsDMetric::COUNTER, std::to_string(val));
-	if (!batch.statsd_message.empty()) {
-		batch.statsd_message += "\n";
+	switch (model) {
+	case MetricsDataModel::STATSD: {
+		std::string msg = createStatsdMessage(name, StatsDMetric::COUNTER, std::to_string(val));
+		if (!batch.statsd_message.empty()) {
+			batch.statsd_message += "\n";
+		}
+		batch.statsd_message += msg;
+		break;
 	}
-	batch.statsd_message += msg;
+	case MetricsDataModel::OTEL: {
+		break;
+	}
+	default:
+		break;
+	}
 }
 
 void CounterCollection::logToTraceEvent(TraceEvent& te) const {
