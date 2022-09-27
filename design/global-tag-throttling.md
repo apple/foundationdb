@@ -14,7 +14,7 @@ The global tag throttler cannot throttle tags to a throughput below the reserved
 Internally, the units for these quotas are "page costs", computed as follows. The "page cost" of a read operation is computed as:
 
 ```
-readCost = bytesRead / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1;
+readCost = ceiling(bytesRead / CLIENT_KNOBS->READ_COST_BYTE_FACTOR);
 ```
 
 The "page cost" of a write operation is computed as:
