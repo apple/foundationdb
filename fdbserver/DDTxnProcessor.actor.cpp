@@ -127,6 +127,43 @@ class DDTxnProcessorImpl {
 		return Void();
 	}
 
+	ACTOR static Future<int> tryUpdateReplicasKeyForDc(Database cx, Optional<Key> dcId, int storageTeamSize) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				Optional<Value> val = wait(tr.get(datacenterReplicasKeyFor(dcId)));
+				state int oldReplicas = val.present() ? decodeDatacenterReplicasValue(val.get()) : 0;
+				if (oldReplicas == storageTeamSize) {
+					return oldReplicas;
+				}
+				if (oldReplicas < storageTeamSize) {
+					tr.set(rebootWhenDurableKey, StringRef());
+				}
+				tr.set(datacenterReplicasKeyFor(dcId), datacenterReplicasValue(storageTeamSize));
+				wait(tr.commit());
+
+				return oldReplicas;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	ACTOR static Future<UID> getClusterId(Database cx) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<Value> clusterId = wait(tr.get(clusterIdKey));
+				ASSERT(clusterId.present());
+				return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	// Read keyservers, return unique set of teams
 	ACTOR static Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
 	    Database cx,
@@ -465,6 +502,21 @@ class DDTxnProcessorImpl {
 			}
 		}
 	}
+
+	ACTOR static Future<Void> waitDDTeamInfoPrintSignal(Database cx) {
+		state ReadYourWritesTransaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				state Future<Void> watchFuture = tr.watch(triggerDDTeamInfoPrintKey);
+				wait(tr.commit());
+				wait(watchFuture);
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
 };
 
 Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(const KeyRangeRef range) {
@@ -516,4 +568,16 @@ Future<HealthMetrics> DDTxnProcessor::getHealthMetrics(bool detailed) const {
 
 Future<Optional<Value>> DDTxnProcessor::readRebalanceDDIgnoreKey() const {
 	return DDTxnProcessorImpl::readRebalanceDDIgnoreKey(cx);
+}
+
+Future<int> DDTxnProcessor::tryUpdateReplicasKeyForDc(const Optional<Key>& dcId, const int& storageTeamSize) const {
+	return DDTxnProcessorImpl::tryUpdateReplicasKeyForDc(cx, dcId, storageTeamSize);
+}
+
+Future<UID> DDTxnProcessor::getClusterId() const {
+	return DDTxnProcessorImpl::getClusterId(cx);
+}
+
+Future<Void> DDTxnProcessor::waitDDTeamInfoPrintSignal() const {
+	return DDTxnProcessorImpl::waitDDTeamInfoPrintSignal(cx);
 }

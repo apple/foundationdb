@@ -62,6 +62,10 @@ public:
 		return Void();
 	}
 
+	virtual Future<int> tryUpdateReplicasKeyForDc(const Optional<Key>& dcId, const int& storageTeamSize) const {
+		return storageTeamSize;
+	}
+
 	virtual Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const = 0;
 
 	virtual Future<bool> isDataDistributionEnabled(const DDEnabledState* ddEnabledState) const = 0;
@@ -82,6 +86,10 @@ public:
 	virtual Future<HealthMetrics> getHealthMetrics(bool detailed = false) const = 0;
 
 	virtual Future<Optional<Value>> readRebalanceDDIgnoreKey() const { return {}; }
+
+	virtual Future<UID> getClusterId() const { return {}; }
+
+	virtual Future<Void> waitDDTeamInfoPrintSignal() const { return Never(); }
 };
 
 class DDTxnProcessorImpl;
@@ -117,6 +125,8 @@ public:
 	                               const std::vector<Optional<Key>>& remoteIds,
 	                               const DatabaseConfiguration& configuration) const override;
 
+	Future<int> tryUpdateReplicasKeyForDc(const Optional<Key>& dcId, const int& storageTeamSize) const override;
+
 	Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const override;
 
 	Future<bool> isDataDistributionEnabled(const DDEnabledState* ddEnabledState) const override;
@@ -142,6 +152,10 @@ public:
 	Future<HealthMetrics> getHealthMetrics(bool detailed) const override;
 
 	Future<Optional<Value>> readRebalanceDDIgnoreKey() const override;
+
+	Future<UID> getClusterId() const override;
+
+	Future<Void> waitDDTeamInfoPrintSignal() const override;
 };
 
 // A mock transaction implementation for test usage.
