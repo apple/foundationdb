@@ -228,12 +228,12 @@ void CodeProbes::traceMissedProbes(Optional<ExecutionContext> context) const {
 		std::tie(iter, std::ignore) = locations.emplace(probe.first, false);
 		iter->second = iter->second || probe.second->wasHit();
 	}
-	for (auto probe : codeProbes) {
-		auto iter = locations.find(probe.first);
+	for (const auto& [loc, probe] : codeProbes) {
+		auto iter = locations.find(loc);
 		ASSERT(iter != locations.end());
-		if (!iter->second) {
+		if (!iter->second && probe->shouldTrace()) {
 			iter->second = true;
-			probe.second->trace(false);
+			probe->trace(false);
 		}
 	}
 }
@@ -280,11 +280,11 @@ void ICodeProbe::printProbesJSON(std::vector<std::string> const& ctxs) {
 // annotations
 namespace assert {
 
-bool NoSim::operator()(ICodeProbe* self) const {
+bool NoSim::operator()(ICodeProbe const* self) const {
 	return !g_network->isSimulated();
 }
 
-bool SimOnly::operator()(ICodeProbe* self) const {
+bool SimOnly::operator()(ICodeProbe const* self) const {
 	return g_network->isSimulated();
 }
 
