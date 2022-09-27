@@ -147,6 +147,9 @@ public:
 
 	// Metrics
 	std::string METRICS_DATA_MODEL;
+	double METRICS_EMISSION_INTERVAL;
+	std::string METRICS_UDP_EMISSION_ADDR;
+	int METRICS_UDP_EMISSION_PORT;
 
 	// run loop profiling
 	double RUN_LOOP_PROFILING_INTERVAL;

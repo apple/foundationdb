@@ -232,6 +232,7 @@ public:
 	double taskBegin;
 	TaskPriority currentTaskID;
 	TDMetricCollection tdmetrics;
+	MetricCollection metrics;
 	ChaosMetrics chaosMetrics;
 	// we read now() from a different thread. On Intel, reading a double is atomic anyways, but on other platforms it's
 	// not. For portability this should be atomic
@@ -1227,6 +1228,7 @@ Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
 		setGlobal(INetwork::enChaosMetrics, (flowGlobalType)&chaosMetrics);
 	}
+	setGlobal(INetwork::enMetrics, (flowGlobalType)&metrics);
 	setGlobal(INetwork::enNetworkConnections, (flowGlobalType)network);
 	setGlobal(INetwork::enASIOService, (flowGlobalType)&reactor.ios);
 	setGlobal(INetwork::enBlobCredentialFiles, &blobCredentialFiles);
