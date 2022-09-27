@@ -531,7 +531,7 @@ public:
 		enBitFlipper = 17,
 		enHistogram = 18,
 		enTokenCache = 19,
-		enMetric,
+		enMetrics = 20,
 		COUNT // Add new fields before this enumerator
 	};
 
