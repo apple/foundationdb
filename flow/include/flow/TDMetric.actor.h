@@ -1443,24 +1443,29 @@ typedef MetricHandle<DoubleMetric> DoubleMetricHandle;
 template <typename E>
 using EventMetricHandle = MetricHandle<EventMetric<E>>;
 
+enum MetricsDataModel { STATSD = 0, OTEL };
+
+enum StatsDMetric { GAUGE = 0, COUNTER };
+
 class IMetric {
 protected:
 	std::string name;
+	MetricsDataModel model;
 
 public:
-	IMetric(const std::string& n) : name{ n } {}
+	IMetric(const std::string& n, MetricsDataModel m) : name{ n }, model{ m } {}
 	virtual ~IMetric() {}
 	virtual void flush(MetricBatch&) = 0;
 };
 
-enum StatsDMetric { GAUGE = 0, COUNTER };
+std::string createStatsdMessage(const std::string& name,
+                                StatsDMetric type,
+                                const std::string& val,
+                                const std::vector<std::pair<std::string, std::string>>& tags);
 
-std::string create_statsd_message(const std::string& name,
-                                  StatsDMetric type,
-                                  const std::string& val,
-                                  const std::vector<std::pair<std::string, std::string>>& tags);
+std::string createStatsdMessage(const std::string& name, StatsDMetric type, const std::string& val);
 
-std::string create_statsd_message(const std::string& name, StatsDMetric type, const std::string& val);
+MetricsDataModel knobToMetricModel(const std::string& knob);
 
 #include "flow/unactorcompiler.h"
 
