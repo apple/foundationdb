@@ -72,14 +72,12 @@ public actor MasterDataActor {
 //        let proxyItr: CommitProxyVersionReplies? = myself.lastCommitProxyVersionReplies
 //                .first(where: { $0.first == requestingProxyUID })
 
-        let proxyItr = myself.lastCommitProxyVersionReplies.__findUnsafe(requestingProxyUID)
-
 
         // NOTE: += operator is not imported, so we added an increment()
         // FIXME(swift): rdar://100012917 ([c++ interop] += operator does not seem to work/be imported)
-        myself.getCommitVersionRequests = myself.getCommitVersionRequests.successor() // this is ++
+        myself.getGetCommitVersionRequests() += 1
 
-        guard let lastVersionReplies: CommitProxyVersionReplies = proxyItr else {
+        guard let lastVersionReplies = lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID) else {
             // Request from invalid proxy (e.g. from duplicate recruitment request)
             req.reply.sendNever()
             return
@@ -91,12 +89,12 @@ public actor MasterDataActor {
         // BEFORE:
         // FIXME: await lastVersionReplies.latestRequestNum.whenAtLeast(limit: VersionMetricHandle.ValueType(req.requestNum - UInt64(1)))
 
-        let itr = lastVersionReplies.replies.first { $0.first == UInt(req.requestNum) }
-        if let itr {
+     
+        if lastVersionReplies.replies.count(UInt(req.requestNum)) != 0 {
             // NOTE: CODE_PROBE is macro, won't be imported
             // CODE_PROBE(true, "Duplicate request for sequence")
-            var lastVersionNum = itr.second
-            req.reply.send(&lastVersionNum) // TODO(swift): we should not require those to be inout
+            var lastVersionNum = lastVersionReplies.replies.__atUnsafe(UInt(req.requestNum))
+            req.reply.sendCopy(lastVersionNum) // TODO(swift): we should not require those to be inout
             return
 //        } else if (req.requestNum <= lastVersionReplies.latestRequestNum.get()) {
 //            // NOTE: CODE_PROBE is macro, won't be imported

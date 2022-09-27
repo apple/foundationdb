@@ -269,6 +269,13 @@ struct SWIFT_CXX_REF_IMMORTAL CommitProxyVersionReplies {
 
 using Map_UID_CommitProxyVersionReplies = std::map<UID, CommitProxyVersionReplies>;
 
+inline CommitProxyVersionReplies *_Nullable lookup_Map_UID_CommitProxyVersionReplies(Map_UID_CommitProxyVersionReplies &map, UID value) {
+    auto it = map.find(value);
+    if (it == map.end())
+        return nullptr;
+    return &(*it).second;
+}
+
 struct SWIFT_CXX_REF_IMMORTAL MasterDataShared : NonCopyable, ReferenceCounted<MasterDataShared> {
 
   UID dbgid;
@@ -321,6 +328,10 @@ struct SWIFT_CXX_REF_IMMORTAL MasterDataShared : NonCopyable, ReferenceCounted<M
 //
   FutureVoid logger;
   FutureVoid balancer;
+
+  inline Counter &getGetCommitVersionRequests() {
+    return getCommitVersionRequests;
+  }
 
   // --------------------------------------------------------------------------
   MasterDataShared(
