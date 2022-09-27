@@ -18,7 +18,24 @@
  * limitations under the License.
  */
 #include "fdbserver/MetricClient.h"
+#include "flow/FastRef.h"
+#include "flow/Knobs.h"
+#include "flow/Trace.h"
+#include "flow/actorcompiler.h"
 
-StatdClient::StatdClient() {}
+StatsdClient::StatsdClient() : socket_fd(-1) {
+	std::string destAddr = FLOW_KNOBS->METRICS_UDP_EMISSION_ADDR;
+	NetworkAddress destAddress =
+	    NetworkAddress::parse(destAddr + ":" + std::to_string(FLOW_KNOBS->METRICS_UDP_EMISSION_PORT));
+	socket = INetworkConnections::net()->createUDPSocket(destAddress);
+}
 
-void StatdClient::send(const MetricBatch& batch) {}
+void StatsdClient::send(const MetricBatch& batch) {
+	if (!socket.isReady()) {
+		return;
+	}
+	socket_fd = socket.get()->native_handle();
+	if (socket_fd != -1) {
+		::send(socket_fd, batch.statsd_message.data(), batch.statsd_message.size(), MSG_DONTWAIT);
+	}
+}

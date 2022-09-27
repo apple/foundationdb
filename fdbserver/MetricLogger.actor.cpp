@@ -27,8 +27,9 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbserver/MetricLogger.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "fdbserver/MetricClient.h"
 #include "flow/flow.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MetricsRule {
 	MetricsRule(bool enabled = false, int minLevel = 0, StringRef const& name = StringRef())
@@ -408,13 +409,15 @@ ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig* config, 
 ACTOR Future<Void> runMetrics() {
 	state MetricCollection* metrics = nullptr;
 	state MetricBatch batch;
+	// state IMetricClient* metricClient = new StatsdClient{};
+	state StatsdClient metricClient;
 	loop {
 		metrics = MetricCollection::getMetricCollection();
 		if (metrics != nullptr) {
 			for (const auto& p : metrics->map) {
 				p.second->flush(batch);
 			}
-			// TODO: Send batch to metrics client
+			metricClient.send(batch);
 		}
 		batch.clear();
 		wait(delay(FLOW_KNOBS->METRICS_EMISSION_INTERVAL));

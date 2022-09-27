@@ -93,6 +93,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( METRICS_DATA_MODEL, 							  "statsd", Atomic::NO ); // Defines the data model for which metrics are emitted
 	init( METRICS_EMISSION_INTERVAL, 						  30.0, Atomic::NO ); // The time (in seconds) between metric flushes
 	init( METRICS_UDP_EMISSION_ADDR, 				   "127.0.0.1" );
+	init( METRICS_UDP_EMISSION_PORT,                          8902 );
 
 	//connectionMonitor
 	init( CONNECTION_MONITOR_LOOP_TIME,   isSimulated ? 0.75 : 1.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_LOOP_TIME = 6.0;
