@@ -18,6 +18,9 @@ macro(cpackman_provide_dependency)
   endif()
   execute_process(
     COMMAND "${CMAKE_COMMAND}" -E env
+      CMAKE_COMMAND=${CMAKE_COMMAND}
+      CMAKE_VERSION=${CMAKE_VERSION}
+      CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
       PYTHONPATH=${CMAKE_SOURCE_DIR}/cmake
       CC=${CMAKE_C_COMPILER}
       CXX=${CMAKE_CXX_COMPILER}
@@ -35,7 +38,7 @@ macro(cpackman_provide_dependency)
     WORKING_DIRECTORY "${CPACKMAN_BINARY_DIR}"
     RESULT_VARIABLE res)
   if(res EQUAL "0")
-    file(READ "${CPACKMAN_BINARY_DIR}/cpackman_out.cmake" cpackman_output)
+    file(READ "${CPACKMAN_BINARY_DIR}/cpackman_out_${ARGV1}.cmake" cpackman_output)
     cmake_language(EVAL CODE "${cpackman_output}")
   endif()
 endmacro()

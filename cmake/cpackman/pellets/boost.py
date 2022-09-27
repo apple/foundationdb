@@ -1,8 +1,10 @@
+import os
 import sys
 from typing import TextIO, List
 
 from cpackman import FindPackageArgs, config
-from cpackman.pellets import Build, HTTPSource, run_command, add_static_library
+from cpackman.pellets import Build, HTTPSource, run_command, add_static_library, zstd
+from cpackman.pellets.zstd import ZSTDBuild
 
 
 class BoostBuild(Build):
@@ -42,38 +44,38 @@ class BoostBuild(Build):
     def run_build(self) -> None:
         if len(self.args.components) == 0:
             return
+        # build the zstd dependency
+        zstd_build = ZSTDBuild()
+        zstd_install_dir = zstd_build.install().absolute()
         jam_file = '{}/user-config.jam'.format(self.build_folder.absolute())
         with open(jam_file, 'w') as user_jam:
             print("using {} : "
                   ": {} :"
                   " {} {} ;".format(self.toolset, self.compiler, self.compiler_flags, self.linker_flags),
                   file=user_jam)
-        build_command = ['./b2',
+            print('using zstd : {} : <include>{} : <search>{} ;'.format(
+                zstd_build.fetch_source.version_str,
+                zstd_install_dir,
+                zstd_install_dir),
+                file=user_jam)
+        build_command = ['{}/b2'.format(self.build_folder.absolute()),
                          'link=static',
                          '--prefix={}'.format(self.install_folder.absolute()),
-                         '--user-config={}'.format(jam_file),
-                         'install']
-        run_command(build_command, env=self.env, cwd=self.build_folder.absolute())
+                         '--user-config={}'.format(jam_file)]
+        for component in self.args.components:
+            build_command.append('--with-{}'.format(component))
+        build_command.append('install')
+        run_command(build_command, env=self.env, cwd=self.fetch_source.get_source().absolute())
 
     def run_install(self) -> None:
         pass
 
     def print_target(self, out: TextIO):
-        print('add_library(Boost::boost INTERFACE)', file=out)
-        install_dir = self.install()
-        if len(self.args.components) == 0:
-            include_dir = self.fetch_source.source_root().absolute()
-        else:
-            include_dir = (install_dir / 'include').absolute()
-        print('target_include(Boost::boost SYSTEM INTERFACE {})'.format(include_dir), file=out)
-        for component in self.args.components:
-            add_static_library(
-                out,
-                target='Boost::{}'.format(component),
-                include_dirs=None,
-                link_language='CXX',
-                library_path=install_dir / 'lib' / 'libboost_{}.a'.format(component))
-        print('set(Boost_FOUND ON)', file=out)
+        print('set(Boost_ROOT "{}")'.format(self.install().absolute()), file=out)
+        print('find_package(Boost {} EXACT REQUIRED COMPONENTS {} CONFIG BYPASS_PROVIDER)'.format(
+            self.args.version,
+            ' '.join(self.args.components)),
+            file=out)
 
 
 def provide_module(out: TextIO, args: List[str]):

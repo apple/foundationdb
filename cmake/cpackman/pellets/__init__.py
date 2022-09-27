@@ -10,15 +10,18 @@ import urllib.parse
 import urllib.request
 from copy import copy
 from pathlib import Path
-from typing import Set, List, TextIO
+from typing import Set, List, TextIO, Dict
 
 from cpackman import config, eprint
 
 
 def run_command(cmd: List[str], env=os.environ, cwd=None):
+    print("Run Command: {}".format(' '.join(cmd)))
+    sys.stdout.flush()
     with subprocess.Popen(cmd, stdout=None, stderr=None, env=env, cwd=cwd) as process:
         process.wait()
         if process.returncode != 0:
+            print("Command: {}".format(' '.join(cmd)))
             raise RuntimeError('Command Failed')
 
 
@@ -38,16 +41,6 @@ class FetchSource:
 
     def get_source(self) -> Path:
         raise NotImplementedError()
-
-
-class GitSource(FetchSource):
-    def __init__(self, name: str, version_str: str, url: str, git_hash: str):
-        super().__init__(name, version_str)
-        self.url: str = url
-        self.git_hash = git_hash
-
-    def download(self):
-        pass
 
 
 class HTTPSource(FetchSource):
@@ -176,12 +169,60 @@ class Build:
         raise NotImplementedError()
 
 
+class CMakeBuild(Build):
+    def __init__(self, fetch_source: FetchSource,
+                 build_type: str = os.getenv('CMAKE_BUILD_TYPE'),
+                 cmake_vars: Dict[str, str] | None = None,
+                 cmake_files_dir: Path | None = None):
+        self.cmake_files_dir = cmake_files_dir
+        self.cmake_command = os.getenv('CMAKE_COMMAND')
+        assert self.cmake_command is not None
+        self.cmake_version = os.getenv('CMAKE_VERSION')
+        assert self.cmake_version is not None
+        assert build_type is not None
+        self.build_type = build_type
+        self.cmake_vars = cmake_vars if cmake_vars is not None else {}
+        super().__init__(fetch_source)
+
+    def build_id(self) -> str:
+        m = hashlib.sha1()
+        m.update(super().build_id().encode())
+        m.update(self.cmake_version.encode())
+        return m.hexdigest()
+
+    def run_configure(self) -> None:
+        src_dir = self.fetch_source.get_source().absolute()
+        if self.cmake_files_dir is not None:
+            src_dir = src_dir / self.cmake_files_dir
+        cmd = [self.cmake_command,
+               '-G',
+               'Ninja',
+               '-DCMAKE_BUILD_TYPE={}'.format(self.build_type),
+               '-DCMAKE_INSTALL_PREFIX={}'.format(self.install_folder.absolute())]
+        for k, v in self.cmake_vars.items():
+            assert k not in ('CMAKE_INSTALL_PREFIX', 'CMAKE_BUILD_TYPE')
+            cmd.append('-D{}={}'.format(k, v))
+        cmd.append(str(src_dir.absolute()))
+        run_command(cmd, env=self.env, cwd=self.build_folder)
+
+    def run_build(self) -> None:
+        cmd = ['ninja']
+        run_command(cmd, env=self.env, cwd=self.build_folder)
+
+    def run_install(self) -> None:
+        cmd = ['ninja', 'install']
+        run_command(cmd, env=self.env, cwd=self.build_folder)
+
+    def print_target(self, out: TextIO):
+        print('set({}_ROOT "{}")'.format(self.fetch_source.name, self.install().absolute()), file=out)
+        print('find_package({} REQUIRED CONFIG BYPASS_PROVIDER)'.format(self.fetch_source.name), file=out)
+
+
 class ConfigureMake(Build):
     def __init__(self, fetch_source: FetchSource,
                  additional_configure_args: List[str] | None = None,
                  additional_make_args: List[str] | None = None,
                  additional_install_args: List[str] | None = None):
-        super().__init__(fetch_source)
         self.additional_configure_args: List[str] = []
         if additional_configure_args is not None:
             self.additional_configure_args = additional_configure_args
@@ -191,6 +232,7 @@ class ConfigureMake(Build):
         self.additional_install_args: List[str] = []
         if additional_install_args is not None:
             self.additional_install_args = additional_install_args
+        super().__init__(fetch_source)
 
     def build_id(self) -> str:
         res = super().build_id()
@@ -222,19 +264,22 @@ class ConfigureMake(Build):
         cmd += self.additional_install_args if self.additional_install_args is not None else []
         run_command(cmd, env=self.env, cwd=self.build_folder)
 
+    def print_target(self, out: TextIO):
+        raise NotImplementedError()
+
 
 def add_static_library(out: TextIO, target: str,
                        include_dirs: List[Path] | None,
                        library_path: Path,
                        link_language: str):
     assert link_language in ['C', 'CXX']
-    includes = ''
+    properties: List[str] = ['IMPORTED_LINK_INTERFACE_LANGUAGES "{}"'.format(link_language),
+                             'IMPORTED_LOCATION "{}"'.format(library_path.absolute())]
     if include_dirs is not None:
-        includes = 'IMPORTED_LINK_INTERFACE_LANGUAGES {}\n'.format(' '.join(map(lambda x: str(x.absolute()),
-                                                                                include_dirs)))
+        include_str = ' '.join(map(lambda x: '"{}"'.format(x.absolute()), include_dirs))
+        properties.append('INTERFACE_INCLUDE_DIRECTORIES {}'.format(include_str))
     print('add_library({} STATIC IMPORTED)'.format(target), file=out)
-    print('set_target_properties({} PROPERTIES\n'
-          '  INTERFACE_INCLUDE_DIRECTORIES {}\n'
-          '{}'
-          '  IMPORTED_LOCATION "{}")'.format(target, includes, link_language, str(library_path.absolute())),
-          file=out)
+    print('set_target_properties({} PROPERTIES'.format(target), file=out, end='')
+    for prop in properties:
+        print('\n  {}'.format(prop), file=out, end='')
+    print(')', file=out)

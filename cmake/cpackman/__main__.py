@@ -2,8 +2,6 @@ import os
 import sys
 import importlib.util
 
-from . import eprint
-
 
 if os.name == 'nt':
     # CPackMan is not supported on Windows
@@ -14,7 +12,7 @@ package_name = sys.argv[2]
 module_name = 'cpackman.pellets.{}'.format(package_name.lower())
 spec = importlib.util.find_spec(module_name)
 if spec is not None:
-    with open('cpackman_out.cmake', 'w') as out:
+    with open('cpackman_out_{}.cmake'.format(sys.argv[2]), 'w') as out:
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
         assert spec.loader is not None

@@ -93,9 +93,10 @@ class FindPackageArgs:
         return 1
 
     def __init__(self, args: List[str]):
+        self.original_args = args
         self.components: List[str] = []
         self.optional_components: List[str] = []
-        i = 0
+        i = 1
         self.package_name = args[0]
         self.exact = False
         self.quiet = False
@@ -121,6 +122,7 @@ class FindPackageArgs:
             'HINTS': self._list_args(self.hints),
             'PATHS': self._list_args(self.paths)
         }
+        print('FindPackageArgs({})'.format(', '.join(args)))
         if len(args) == 1:
             return
         if args[i] not in self.keywords.keys():

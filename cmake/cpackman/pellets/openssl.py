@@ -47,26 +47,8 @@ class OpenSSLBuild(Build):
 
     def print_target(self, out: TextIO):
         install_path = self.install()
-        include_path = install_path / 'include'
-        ssl_path = install_path / 'lib' / 'libssl.a'
-        crypto_path = install_path / 'lib' / 'libcrypto.a'
-        add_static_library(out, 'OpenSSL::SSL',
-                           include_dirs=[include_path],
-                           library_path=ssl_path,
-                           link_language='C')
-        add_static_library(out, 'OpenSSL::Crypto',
-                           include_dirs=[include_path],
-                           library_path=crypto_path,
-                           link_language='C')
-        print('set(OPENSSL_FOUND ON)', file=out)
-        print('set(OPENSSL_VERSION, "{}")'.format(self.fetch_source.version_string()), file=out)
-        print('set(OPENSSL_INCLUDE_DIR "{}")'.format(str(include_path.absolute())), file=out)
-        print('set(OPENSSL_CRYPTO_LIBRARY "{}")'.format(str(crypto_path.absolute())), file=out)
-        print('set(OPENSSL_CRYPTO_LIBRARIES "{}")'.format(str(crypto_path.absolute())), file=out)
-        print('set(OPENSSL_SSL_LIBRARY "{}")'.format(str(ssl_path.absolute())), file=out)
-        print('set(OPENSSL_SSL_LIBRARIES "{}")'.format(str(ssl_path.absolute())), file=out)
-        print('set(OPENSSL_LIBRARIES "{}")'.format(';'.join([str(ssl_path.absolute()), str(crypto_path.absolute())])),
-              file=out)
+        print('set(OPENSSL_ROOT_DIR "{}")'.format(install_path.absolute()), file=out)
+        print('find_package(OpenSSL REQUIRED BYPASS_PROVIDER)', file=out)
 
 
 def provide_module(out: TextIO, args: List[str]):
