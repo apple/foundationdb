@@ -2060,9 +2060,7 @@ const char* checkTlsConfigAgainstCoordAddrs(const ClusterConnectionString& ccs) 
 			tlsAddrs++;
 		totalAddrs++;
 	}
-	if (tlsConfigured && tlsAddrs == 0) {
-		return "fdbcli is configured with TLS, but none of the coordinators have TLS addresses.";
-	} else if (!tlsConfigured && tlsAddrs == totalAddrs) {
+	if (!tlsConfigured && tlsAddrs == totalAddrs) {
 		return "fdbcli is not configured with TLS, but all of the coordinators have TLS addresses.";
 	} else {
 		return nullptr;
