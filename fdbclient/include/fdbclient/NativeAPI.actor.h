@@ -562,7 +562,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 
 // Round up to the nearest page size
 inline uint64_t getWriteOperationCost(uint64_t bytes) {
-	return (bytes - 1) / CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR + CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR;
+	return (bytes - 1) / CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR + 1
 }
 
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value
