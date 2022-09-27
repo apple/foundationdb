@@ -185,7 +185,7 @@ public:
 				ASSERT(!cc && !filteredCount);
 				cc = std::make_unique<CounterCollection>(name, id.toString());
 				logger = traceCounters(name, id, loggingInterval, cc.get(), id.toString() + "/" + name);
-				filteredCount = std::make_unique<Counter>("Filtered", *cc);
+				filteredCount = std::make_unique<Counter>(name + "Filtered", *cc);
 				insertBand(std::numeric_limits<double>::infinity());
 			}
 
@@ -224,7 +224,7 @@ private:
 	Future<Void> logger;
 
 	void insertBand(double value) {
-		bands.emplace(std::make_pair(value, std::make_unique<Counter>(format("Band%f", value), *cc)));
+		bands.emplace(std::make_pair(value, std::make_unique<Counter>(name + format("Band%f", value), *cc)));
 	}
 };
 
