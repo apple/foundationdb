@@ -2547,7 +2547,25 @@ ACTOR void setupAndRun(std::string dataFolder,
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(clusterFileDir);
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connectionString.get().toString());
-		wait(timeoutError(runTests(makeReference<ClusterConnectionFile>(joinPath(clusterFileDir, "fdb.cluster")),
+		state Reference<ClusterConnectionFile> connFile =
+		    makeReference<ClusterConnectionFile>(joinPath(clusterFileDir, "fdb.cluster"));
+		if (rebooting) {
+			// protect coordinators for restarting tests
+			std::vector<NetworkAddress> coordinatorAddresses =
+			    wait(connFile->getConnectionString().tryResolveHostnames());
+			ASSERT(coordinatorAddresses.size() > 0);
+			for (int i = 0; i < (coordinatorAddresses.size() / 2) + 1; i++) {
+				TraceEvent("ProtectCoordinator")
+				    .detail("Address", coordinatorAddresses[i])
+				    .detail("Coordinators", describe(coordinatorAddresses));
+				g_simulator->protectedAddresses.insert(NetworkAddress(
+				    coordinatorAddresses[i].ip, coordinatorAddresses[i].port, true, coordinatorAddresses[i].isTLS()));
+				if (coordinatorAddresses[i].port == 2) {
+					g_simulator->protectedAddresses.insert(NetworkAddress(coordinatorAddresses[i].ip, 1, true, true));
+				}
+			}
+		}
+		wait(timeoutError(runTests(connFile,
 		                           TEST_TYPE_FROM_FILE,
 		                           TEST_ON_TESTERS,
 		                           testerCount,
@@ -2556,7 +2574,8 @@ ACTOR void setupAndRun(std::string dataFolder,
 		                           LocalityData(),
 		                           UnitTestParameters(),
 		                           defaultTenant,
-		                           tenantsToCreate),
+		                           tenantsToCreate,
+		                           rebooting),
 		                  isBuggifyEnabled(BuggifyType::General) ? 36000.0 : 5400.0));
 	} catch (Error& e) {
 		TraceEvent(SevError, "SetupAndRunError").error(e);
