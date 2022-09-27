@@ -1453,8 +1453,15 @@ protected:
 	MetricsDataModel model;
 
 public:
-	IMetric(const std::string& n, MetricsDataModel m) : name{ n }, model{ m } {}
-	virtual ~IMetric() {}
+	IMetric(const std::string& n, MetricsDataModel m) : name{ n }, model{ m } {
+		MetricCollection* metrics = MetricCollection::getMetricCollection();
+		ASSERT(metrics != nullptr);
+		metrics->map[name] = this;
+	}
+	virtual ~IMetric() {
+		MetricCollection* metrics = MetricCollection::getMetricCollection();
+		metrics->map.erase(name);
+	}
 	virtual void flush(MetricBatch&) = 0;
 };
 

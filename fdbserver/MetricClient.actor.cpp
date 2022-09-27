@@ -1,5 +1,5 @@
 /*
- * MetricClient.h
+ * MetricClient.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,22 @@
  * limitations under the License.
  */
 #include "fdbserver/MetricClient.h"
+#include "flow/FastRef.h"
+#include "flow/Knobs.h"
+#include "flow/Trace.h"
+#include "flow/actorcompiler.h"
 
-StatdClient::StatdClient() {}
+UDPClient::UDPClient(const std::string& addr, uint32_t port) : socket_fd(-1) {
+	NetworkAddress destAddress = NetworkAddress::parse(addr + ":" + std::to_string(port));
+	socket = INetworkConnections::net()->createUDPSocket(destAddress);
+}
 
-void StatdClient::send(const MetricBatch& batch) {}
+void UDPClient::send(const MetricBatch& batch) {
+	if (!socket.isReady()) {
+		return;
+	}
+	socket_fd = socket.get()->native_handle();
+	if (socket_fd != -1) {
+		::send(socket_fd, batch.statsd_message.data(), batch.statsd_message.size(), MSG_DONTWAIT);
+	}
+}
