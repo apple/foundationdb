@@ -2092,6 +2092,8 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 						if (uidRange == targetRange) {
 							destUidValue = it.value;
 							found = true;
+							CODE_PROBE(targetRange == getDefaultBackupSharedRange(),
+							           "DR mutation sharing with default backup");
 							break;
 						}
 					}

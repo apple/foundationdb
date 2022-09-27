@@ -35,7 +35,6 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 	double backupStartAt, restoreStartAfterBackupFinished, stopDifferentialAfter;
 	Key backupTag, restoreTag;
 	Key backupPrefix, extraPrefix;
-	bool beforePrefix;
 	int backupRangesCount, backupRangeLengthMax;
 	bool differentialBackup, performRestore, agentRequest;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
@@ -43,11 +42,16 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 	Database extraDB;
 	LockDB locked{ false };
 	bool shareLogRange;
+	bool defaultBackup;
 	UID destUid;
 
 	BackupToDBCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		locked.set(sharedRandomNumber % 2);
 		backupAfter = getOption(options, "backupAfter"_sr, 10.0);
+		double minBackupAfter = getOption(options, "minBackupAfter"_sr, backupAfter);
+		if (backupAfter > minBackupAfter) {
+			backupAfter = deterministicRandom()->random01() * (backupAfter - minBackupAfter) + minBackupAfter;
+		}
 		restoreAfter = getOption(options, "restoreAfter"_sr, 35.0);
 		performRestore = getOption(options, "performRestore"_sr, true);
 		backupTag = getOption(options, "backupTag"_sr, BackupAgentBase::getDefaultTag());
@@ -74,26 +78,31 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		                                 : 0.0);
 		agentRequest = getOption(options, "simDrAgents"_sr, true);
 		shareLogRange = getOption(options, "shareLogRange"_sr, false);
+		defaultBackup = getOption(options, "defaultBackup"_sr, false);
 
 		// Use sharedRandomNumber if shareLogRange is true so that we can ensure backup and DR both backup the same
 		// range
-		beforePrefix = shareLogRange ? (sharedRandomNumber & 1) : (deterministicRandom()->random01() < 0.5);
+		bool beforePrefix = shareLogRange ? (sharedRandomNumber & 1) : (deterministicRandom()->random01() < 0.5);
 
-		if (beforePrefix) {
-			extraPrefix = backupPrefix.withPrefix("\xfe\xff\xfe"_sr);
-			backupPrefix = backupPrefix.withPrefix("\xfe\xff\xff"_sr);
-		} else {
-			extraPrefix = backupPrefix.withPrefix("\x00\x00\x01"_sr);
-			backupPrefix = backupPrefix.withPrefix("\x00\x00\00"_sr);
+		if (!defaultBackup) {
+			if (beforePrefix) {
+				extraPrefix = backupPrefix.withPrefix("\xfe\xff\xfe"_sr);
+				backupPrefix = backupPrefix.withPrefix("\xfe\xff\xff"_sr);
+			} else {
+				extraPrefix = backupPrefix.withPrefix("\x00\x00\x01"_sr);
+				backupPrefix = backupPrefix.withPrefix("\x00\x00\00"_sr);
+			}
+
+			ASSERT(backupPrefix != StringRef());
 		}
-
-		ASSERT(backupPrefix != StringRef());
 
 		KeyRef beginRange;
 		KeyRef endRange;
 		UID randomID = nondeterministicRandom()->randomUniqueID();
 
-		if (shareLogRange) {
+		if (defaultBackup) {
+			addDefaultBackupRanges(backupRanges);
+		} else if (shareLogRange) {
 			if (beforePrefix)
 				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(normalKeys.begin, "\xfe\xff\xfe"_sr));
 			else
@@ -145,7 +154,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _setup(Database cx, BackupToDBCorrectnessWorkload* self) {
-		if (cx->defaultTenant.present() || BUGGIFY) {
+		if (!self->defaultBackup && (cx->defaultTenant.present() || BUGGIFY)) {
 			if (cx->defaultTenant.present()) {
 				TenantMapEntry entry = wait(TenantAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
 
@@ -628,7 +637,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			state UID logUid = wait(backupAgent.getLogUid(self->extraDB, self->backupTag));
 
 			// Occasionally start yet another backup that might still be running when we restore
-			if (!self->locked && BUGGIFY) {
+			if (!self->locked && self->extraPrefix != self->backupPrefix && BUGGIFY) {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
 				try {
 					extraBackup = backupAgent.submitBackup(self->extraDB,

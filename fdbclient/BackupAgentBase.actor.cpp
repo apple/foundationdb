@@ -1220,11 +1220,9 @@ VectorRef<KeyRangeRef> const& getSystemBackupRanges() {
 	return systemBackupRanges;
 }
 
-KeyRangeMap<bool> const& backupMutationMask() {
+KeyRangeMap<bool> const& systemBackupMutationMask() {
 	static KeyRangeMap<bool> mask;
 	if (mask.size() == 1) {
-		mask.insert(normalKeys, true);
-		mask.insert(metadataVersionKey, true);
 		for (auto r : getSystemBackupRanges()) {
 			mask.insert(r, true);
 		}

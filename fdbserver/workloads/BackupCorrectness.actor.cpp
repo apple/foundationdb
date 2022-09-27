@@ -26,11 +26,13 @@
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
+#include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // A workload which test the correctness of backup and restore process
 struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	double backupAfter, restoreAfter, abortAndRestartAfter;
+	double minBackupAfter;
 	double backupStartAt, restoreStartAfterBackupFinished, stopDifferentialAfter;
 	Key backupTag;
 	int backupRangesCount, backupRangeLengthMax;
@@ -43,11 +45,16 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	bool allowPauses;
 	bool shareLogRange;
 	bool shouldSkipRestoreRanges;
+	bool defaultBackup;
 	Optional<std::string> encryptionKeyFileName;
 
 	BackupAndRestoreCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		locked.set(sharedRandomNumber % 2);
 		backupAfter = getOption(options, "backupAfter"_sr, 10.0);
+		double minBackupAfter = getOption(options, "minBackupAfter"_sr, backupAfter);
+		if (backupAfter > minBackupAfter) {
+			backupAfter = deterministicRandom()->random01() * (backupAfter - minBackupAfter) + minBackupAfter;
+		}
 		restoreAfter = getOption(options, "restoreAfter"_sr, 35.0);
 		performRestore = getOption(options, "performRestore"_sr, true);
 		backupTag = getOption(options, "backupTag"_sr, BackupAgentBase::getDefaultTag());
@@ -71,6 +78,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		agentRequest = getOption(options, "simBackupAgents"_sr, true);
 		allowPauses = getOption(options, "allowPauses"_sr, true);
 		shareLogRange = getOption(options, "shareLogRange"_sr, false);
+		defaultBackup = getOption(options, "defaultBackup"_sr, false);
 
 		std::vector<std::string> restorePrefixesToInclude =
 		    getOption(options, "restorePrefixesToInclude"_sr, std::vector<std::string>());
@@ -83,7 +91,9 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		TraceEvent("BARW_ClientId").detail("Id", wcx.clientId);
 		UID randomID = nondeterministicRandom()->randomUniqueID();
 		TraceEvent("BARW_PerformRestore", randomID).detail("Value", performRestore);
-		if (shareLogRange) {
+		if (defaultBackup) {
+			addDefaultBackupRanges(backupRanges);
+		} else if (shareLogRange) {
 			bool beforePrefix = sharedRandomNumber & 1;
 			if (beforePrefix)
 				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(normalKeys.begin, "\xfe\xff\xfe"_sr));
@@ -171,7 +181,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		state bool adjusted = false;
 		state TenantMapEntry entry;
 
-		if (cx->defaultTenant.present() || BUGGIFY) {
+		if (!self->defaultBackup && (cx->defaultTenant.present() || BUGGIFY)) {
 			if (cx->defaultTenant.present()) {
 				wait(store(entry, TenantAPI::getTenant(cx.getReference(), cx->defaultTenant.get())));
 

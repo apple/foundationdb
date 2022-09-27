@@ -1007,7 +1007,7 @@ void simulateBlobFailure();
 
 void addDefaultBackupRanges(Standalone<VectorRef<KeyRangeRef>>& backupKeys);
 VectorRef<KeyRangeRef> const& getSystemBackupRanges();
-KeyRangeMap<bool> const& backupMutationMask();
+KeyRangeMap<bool> const& systemBackupMutationMask();
 
 template <class Container>
 bool isDefaultBackup(Container ranges) {
