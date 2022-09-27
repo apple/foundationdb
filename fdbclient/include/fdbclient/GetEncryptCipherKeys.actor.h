@@ -150,6 +150,21 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getL
 	return cipherKeys;
 }
 
+// Get latest cipher key for given a encryption domain. It tries to get the cipher key from the local cache.
+// In case of cache miss, it fetches the cipher key from EncryptKeyProxy and put the result in the local cache
+// before return.
+ACTOR template <class T>
+Future<Reference<BlobCipherKey>> getLatestEncryptCipherKey(Reference<AsyncVar<T> const> db,
+                                                           EncryptCipherDomainId domainId,
+                                                           EncryptCipherDomainName domainName,
+                                                           BlobCipherMetrics::UsageType usageType) {
+	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains({ { domainId, domainName } });
+	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKey =
+	    wait(getLatestEncryptCipherKeys(db, domains, usageType));
+
+	return cipherKey.at(domainId);
+}
+
 ACTOR template <class T>
 Future<EKPGetBaseCipherKeysByIdsReply> getUncachedEncryptCipherKeys(Reference<AsyncVar<T> const> db,
                                                                     EKPGetBaseCipherKeysByIdsRequest request) {

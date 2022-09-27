@@ -264,7 +264,7 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 		bbOpts.whole_key_filtering = false;
 	}
 
-	if (rocksdb_block_cache == nullptr) {
+	if (rocksdb_block_cache == nullptr && SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE > 0) {
 		rocksdb_block_cache = rocksdb::NewLRUCache(SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE);
 	}
 	bbOpts.block_cache = rocksdb_block_cache;
