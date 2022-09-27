@@ -22,6 +22,7 @@
 #define FOUNDATIONDB_DDTXNPROCESSOR_H
 
 #include "fdbserver/Knobs.h"
+#include "flow/FastRef.h"
 #include "fdbserver/MoveKeys.actor.h"
 
 struct InitialDataDistribution;
@@ -31,7 +32,7 @@ struct InitialDataDistribution;
  * because the testability benefits from a mock implementation; b. Other control-plane roles should consider providing
  * its own TxnProcessor interface to provide testability, for example, Ratekeeper.
  * */
-class IDDTxnProcessor {
+class IDDTxnProcessor : public ReferenceCounted<IDDTxnProcessor> {
 public:
 	struct SourceServers {
 		std::vector<UID> srcServers, completeSources; // the same as RelocateData.src, RelocateData.completeSources;

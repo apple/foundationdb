@@ -75,7 +75,7 @@ ACTOR Future<Void> updateMaxShardSize(Reference<AsyncVar<int64_t>> dbSizeEstimat
 }
 
 struct DataDistributionTracker : public IDDShardTracker {
-	std::shared_ptr<IDDTxnProcessor> db;
+	Reference<IDDTxnProcessor> db;
 	UID distributorId;
 	KeyRangeMap<ShardTrackedData>* shards;
 	ActorCollection sizeChanges;
@@ -128,7 +128,7 @@ struct DataDistributionTracker : public IDDShardTracker {
 
 	Optional<Reference<TenantCache>> ddTenantCache;
 
-	DataDistributionTracker(std::shared_ptr<IDDTxnProcessor> db,
+	DataDistributionTracker(Reference<IDDTxnProcessor> db,
 	                        UID distributorId,
 	                        Promise<Void> const& readyToStart,
 	                        PromiseStream<RelocateShard> const& output,
@@ -1452,7 +1452,7 @@ ACTOR Future<Void> fetchShardMetricsList(DataDistributionTracker* self, GetMetri
 }
 
 ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
-                                           std::shared_ptr<IDDTxnProcessor> db,
+                                           Reference<IDDTxnProcessor> db,
                                            PromiseStream<RelocateShard> output,
                                            Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                            Reference<PhysicalShardCollection> physicalShardCollection,
