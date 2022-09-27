@@ -58,7 +58,8 @@ public:
 			hasBeenSet = true;
 			lock.leave();
 
-			if (future.isReady() && !future.isError()) {
+			if (future.isReady()) {
+				ASSERT(!future.isError());
 				ThreadSingleAssignmentVar<T>::send(future.get());
 			} else if (abortSignal.isReady()) {
 				ThreadSingleAssignmentVar<T>::sendError(cluster_version_changed());
@@ -104,16 +105,39 @@ private:
 			callbacksCleared = true;
 			lock.leave();
 
-			future.getPtr()->addref(); // Cancel will delref our future, but we don't want to destroy it until this
-			                           // callback gets destroyed
-			future.getPtr()->cancel();
+			bool notificationRequired = true;
+
+			if (!clearFutureCallback()) {
+				notificationRequired = false;
+			}
 
 			if (abortSignal.clearCallback(this)) {
 				ThreadSingleAssignmentVar<T>::delref();
+			} else {
+				notificationRequired = false;
+			}
+
+			if (notificationRequired) {
+				// The future has been cancelled before any of the events could
+				// be triggered. If there are any callbacks registered we must
+				// notify them about the cancellation
+				ASSERT(!hasBeenSet);
+				ThreadSingleAssignmentVar<T>::sendError(operation_cancelled());
 			}
 		} else {
 			lock.leave();
 		}
+	}
+
+	bool clearFutureCallback() {
+		if (future.clearCallback(this)) {
+			ThreadSingleAssignmentVar<T>::delref();
+			future.getPtr()->addref(); // Cancel will delref our future, but we don't want to destroy it until this
+			                           // callback gets destroyed
+			future.getPtr()->cancel();
+			return true;
+		}
+		return false;
 	}
 };
 
