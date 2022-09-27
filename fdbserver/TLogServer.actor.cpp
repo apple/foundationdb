@@ -2344,6 +2344,7 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 	// PERSIST: Initial setup of persistentData for a brand new tLog for a new database
 	state SafeAccessor<IKeyValueStore> storage(self->persistentData.getPtr());
 	wait(ioTimeoutError(storage->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+	wait(ioTimeoutError(storage->commit(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
 	storage->set(persistFormat);
 	storage->set(
 	    KeyValueRef(BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistCurrentVersionKeys.begin),
@@ -3030,6 +3031,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 
 	TraceEvent("TLogRestorePersistentState", self->dbgid).log();
 	wait(storage->init());
+	wait(storage->commit());
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
 	state Future<Optional<Value>> fRecoveryLocation = storage->readValue(persistRecoveryLocationKey);
 	state Future<Optional<Value>> fClusterId = storage->readValue(persistClusterIdKey);
