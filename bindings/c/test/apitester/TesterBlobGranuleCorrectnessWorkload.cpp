@@ -44,7 +44,8 @@ private:
 		OP_GET_GRANULES,
 		OP_SUMMARIZE,
 		OP_GET_BLOB_RANGES,
-		OP_LAST = OP_GET_BLOB_RANGES
+		OP_VERIFY,
+		OP_LAST = OP_VERIFY
 	};
 	std::vector<OpType> excludedOpTypes;
 
@@ -156,6 +157,12 @@ private:
 	}
 
 	void randomSummarizeOp(TTaskFct cont, std::optional<int> tenantId) {
+		if (!seenReadSuccess) {
+			// tester can't handle this throwing bg_txn_too_old, so just don't call it unless we have already seen a
+			// read success
+			schedule(cont);
+			return;
+		}
 		fdb::Key begin = randomKeyName();
 		fdb::Key end = randomKeyName();
 		if (begin > end) {
@@ -174,11 +181,9 @@ private:
 			        true);
 		    },
 		    [this, begin, end, results, cont]() {
-			    if (seenReadSuccess) {
-				    ASSERT(results->size() > 0);
-				    ASSERT(results->front().keyRange.beginKey <= begin);
-				    ASSERT(results->back().keyRange.endKey >= end);
-			    }
+			    ASSERT(results->size() > 0);
+			    ASSERT(results->front().keyRange.beginKey <= begin);
+			    ASSERT(results->back().keyRange.endKey >= end);
 
 			    for (int i = 0; i < results->size(); i++) {
 				    // TODO: could do validation of subsequent calls and ensure snapshot version never decreases
@@ -254,6 +259,39 @@ private:
 		    /* failOnError = */ false);
 	}
 
+	void randomVerifyOp(TTaskFct cont) {
+		fdb::Key begin = randomKeyName();
+		fdb::Key end = randomKeyName();
+		if (begin > end) {
+			std::swap(begin, end);
+		}
+
+		auto verifyVersion = std::make_shared<int64_t>(false);
+		// info("Verify op starting");
+
+		execOperation(
+		    [begin, end, verifyVersion](auto ctx) {
+			    fdb::Future f = ctx->db().verifyBlobRange(begin, end, -2 /* latest version*/).eraseType();
+			    ctx->continueAfter(f, [ctx, verifyVersion, f]() {
+				    *verifyVersion = f.get<fdb::future_var::Int64>();
+				    ctx->done();
+			    });
+		    },
+		    [this, begin, end, verifyVersion, cont]() {
+			    if (*verifyVersion == -1) {
+				    ASSERT(!seenReadSuccess);
+			    } else {
+				    if (!seenReadSuccess) {
+					    info("BlobGranuleCorrectness::randomVerifyOp first success");
+				    }
+				    seenReadSuccess = true;
+			    }
+			    // info(fmt::format("verify op done @ {}", *verifyVersion));
+			    schedule(cont);
+		    },
+		    /* failOnError = */ false);
+	}
+
 	void randomOperation(TTaskFct cont) {
 		std::optional<int> tenantId = randomTenant();
 
@@ -283,6 +321,9 @@ private:
 			break;
 		case OP_GET_BLOB_RANGES:
 			randomGetBlobRangesOp(cont);
+			break;
+		case OP_VERIFY:
+			randomVerifyOp(cont);
 			break;
 		}
 	}

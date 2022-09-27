@@ -248,7 +248,7 @@ FDB_DECLARE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
 
 class PhysicalShardCollection : public ReferenceCounted<PhysicalShardCollection> {
 public:
-	PhysicalShardCollection() : requireTransition(false), lastTransitionStartTime(now()) {}
+	PhysicalShardCollection() : lastTransitionStartTime(now()), requireTransition(false) {}
 
 	enum class PhysicalShardCreationTime { DDInit, DDRelocator };
 
@@ -514,14 +514,14 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            bool* trackerCancelled,
                                            Optional<Reference<TenantCache>> ddTenantCache);
 
-ACTOR Future<Void> dataDistributionQueue(Database cx,
+ACTOR Future<Void> dataDistributionQueue(std::shared_ptr<IDDTxnProcessor> db,
                                          PromiseStream<RelocateShard> output,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,
                                          PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
                                          Reference<AsyncVar<bool>> processingUnhealthy,
                                          Reference<AsyncVar<bool>> processingWiggle,
-                                         std::vector<TeamCollectionInterface> teamCollection,
+                                         std::vector<TeamCollectionInterface> teamCollections,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                          Reference<PhysicalShardCollection> physicalShardCollection,
                                          MoveKeysLock lock,

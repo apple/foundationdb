@@ -138,6 +138,8 @@ struct TenantGroupEntry {
 	TenantGroupEntry() = default;
 	TenantGroupEntry(Optional<ClusterName> assignedCluster) : assignedCluster(assignedCluster) {}
 
+	json_spirit::mObject toJson() const;
+
 	Value encode() { return ObjectWriter::toValue(*this, IncludeVersion()); }
 	static TenantGroupEntry decode(ValueRef const& value) {
 		return ObjectReader::fromStringRef<TenantGroupEntry>(value, IncludeVersion());

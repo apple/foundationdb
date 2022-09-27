@@ -35,6 +35,8 @@ TEST_CASE("/Atomic/DoAppendIfFits") {
 	{
 		Value existingValue = makeString(CLIENT_KNOBS->VALUE_SIZE_LIMIT - 1, arena);
 		Value otherOperand = makeString(2, arena);
+		deterministicRandom()->randomBytes(mutateString(existingValue), existingValue.size());
+		deterministicRandom()->randomBytes(mutateString(otherOperand), otherOperand.size());
 		// Appended values cannot fit in result, should return existingValue
 		auto result = doAppendIfFits(existingValue, otherOperand, arena);
 		ASSERT(compare(existingValue, result) == 0);
