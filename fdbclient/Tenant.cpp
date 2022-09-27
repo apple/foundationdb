@@ -172,6 +172,8 @@ bool TenantMapEntry::matchesConfiguration(TenantMapEntry const& other) const {
 void TenantMapEntry::configure(Standalone<StringRef> parameter, Optional<Value> value) {
 	if (parameter == "tenant_group"_sr) {
 		tenantGroup = value;
+	} else if (parameter == "assigned_cluster"_sr) {
+		assignedCluster = value;
 	} else {
 		TraceEvent(SevWarnAlways, "UnknownTenantConfigurationParameter").detail("Parameter", parameter);
 		throw invalid_tenant_configuration();

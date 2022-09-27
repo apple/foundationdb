@@ -4796,10 +4796,11 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 				// Even if TSS mode is Disabled, this may be the second test in a restarting test where the first run
 				// had it enabled.
-				state int byteLimit = (BUGGIFY && g_simulator->tssMode == ISimulator::TSSMode::Disabled &&
-				                       !data->isTss() && !data->isSSWithTSSPair())
-				                          ? 1
-				                          : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+				state int byteLimit =
+				    (BUGGIFY && g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::Disabled &&
+				     !data->isTss() && !data->isSSWithTSSPair())
+				        ? 1
+				        : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 				TraceEvent(SevDebug, "SSGetKeyValueStreamLimits")
 				    .detail("ByteLimit", byteLimit)
 				    .detail("ReqLimit", req.limit)

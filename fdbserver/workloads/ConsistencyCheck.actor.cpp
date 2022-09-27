@@ -1109,6 +1109,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		if (foundExtraDataStore) {
+			wait(delay(10)); // let the cluster get to fully_recovered after the reboot before retrying
 			self->testFailure("Extra data stores present on workers");
 			return false;
 		}
