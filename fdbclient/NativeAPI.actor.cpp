@@ -3846,10 +3846,14 @@ ACTOR Future<Void> watchValueMap(Future<Version> version,
                                  UseProvisionalProxies useProvisionalProxies) {
 	state Version ver = wait(version);
 
-	wait(getWatchFuture(cx,
-	                    makeReference<WatchParameters>(
-	                        tenant, key, value, ver, tags, spanContext, taskID, debugID, useProvisionalProxies)));
-
+	try {
+		wait(getWatchFuture(cx,
+		                    makeReference<WatchParameters>(
+		                        tenant, key, value, ver, tags, spanContext, taskID, debugID, useProvisionalProxies)));
+	} catch (Error& e) {
+		Reference<WatchMetadata> metadata = cx->getWatchMetadata(tenant.tenantId, key);
+		metadata->watchFutureSS.cancel();
+	}
 	return Void();
 }
 
@@ -5340,6 +5344,7 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 			}
 		}
 	} catch (Error& e) {
+		watch->watchFuture.cancel();
 		cx->removeWatch();
 		throw;
 	}
