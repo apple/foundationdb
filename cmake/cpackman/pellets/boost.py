@@ -1,3 +1,4 @@
+import hashlib
 import os
 import sys
 from typing import TextIO, List
@@ -9,13 +10,6 @@ from cpackman.pellets.zstd import ZSTDBuild
 
 class BoostBuild(Build):
     def __init__(self, args: List[str]):
-        super().__init__(
-            HTTPSource(
-                'Boost',
-                version_str='1.78.0',
-                url='https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.bz2',
-                checksum='8681f175d4bdb26c52222665793eef08490d7758529330f98d3b29dd0735bccc',
-                hash_function='sha256'))
         self.args = FindPackageArgs(args)
         self.toolset = 'clang' if config.cxx_compiler_id in ['Clang', 'AppleClang', 'Intel'] else 'gcc'
         self.compiler = config.cxx_compiler
@@ -30,6 +24,24 @@ class BoostBuild(Build):
                 linker_flags.append('-static-libgcc')
         self.compiler_flags = ' '.join(map(lambda flag: '<cxxflags>{}'.format(flag), compiler_flags))
         self.linker_flags = ' '.join(map(lambda flag: '<linkflags>{}'.format(flag), linker_flags))
+        super().__init__(
+            HTTPSource(
+                'Boost',
+                version_str='1.78.0',
+                url='https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.bz2',
+                checksum='8681f175d4bdb26c52222665793eef08490d7758529330f98d3b29dd0735bccc',
+                hash_function='sha256'))
+
+    def build_id(self) -> str:
+        m = hashlib.sha1()
+        m.update(super().build_id().encode())
+        m.update(self.toolset.encode())
+        for component in self.args.components:
+            m.update(component.encode())
+        m.update(self.compiler_flags.encode())
+        m.update(self.linker_flags.encode())
+        m.update(self.compiler.encode())
+        return m.hexdigest()
 
     def run_configure(self) -> None:
         if len(self.args.components) == 0:

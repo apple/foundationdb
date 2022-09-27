@@ -177,10 +177,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
 endif()
 
 find_package(zstd REQUIRED)
-find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem CONFIG PATHS ${BOOST_HINT_PATHS})
+find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem iostreams CONFIG PATHS ${BOOST_HINT_PATHS})
 # this is a hack -- we should remove this and instead link against the proper targets directly
 add_library(boost_target INTERFACE)
-target_link_libraries(boost_target INTERFACE Boost::context Boost::filesystem)
+target_link_libraries(boost_target INTERFACE Boost::context Boost::filesystem Boost::iostreams)
 include(GetMsgpack)
 add_subdirectory(contrib)
 add_subdirectory(flow)
