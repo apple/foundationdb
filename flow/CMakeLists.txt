@@ -38,6 +38,11 @@ target_link_libraries(flowlinktest PRIVATE flow stacktrace)
 #  message(STATUS "ZLIB package not found")
 #endif()
 
+set(IS_ARM_MAC NO)
+if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+  set(IS_ARM_MAC YES)
+endif()
+
 # TODO: Limit ZSTD availability to CLANG, for gcc resolve library link ordering
 if (CLANG AND NOT IS_ARM_MAC)
   include(CompileZstd)
