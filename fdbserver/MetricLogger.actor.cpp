@@ -27,8 +27,9 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbserver/MetricLogger.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "fdbserver/MetricClient.h"
 #include "flow/flow.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MetricsRule {
 	MetricsRule(bool enabled = false, int minLevel = 0, StringRef const& name = StringRef())
@@ -405,16 +406,52 @@ ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig* config, 
 // 	return Void();
 // }
 
+ACTOR Future<Void> startMetricsSimulationServer() {
+	MetricsDataModel model = knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL);
+	uint32_t port = (model == STATSD) ? FLOW_KNOBS->METRICS_UDP_EMISSION_PORT : FLOW_KNOBS->METRICS_UDP_EMISSION_PORT;
+	TraceEvent(SevInfo, "MetricsUDPServerStarted").detail("Address", "127.0.0.1").detail("Port", port);
+	state NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(port));
+	state Reference<IUDPSocket> serverSocket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
+	serverSocket->bind(localAddress);
+
+	state Standalone<StringRef> packetString = makeString(IUDPSocket::MAX_PACKET_SIZE);
+	state uint8_t* packet = mutateString(packetString);
+
+	loop {
+		int size = wait(serverSocket->receive(packet, packet + IUDPSocket::MAX_PACKET_SIZE));
+		auto message = packetString.substr(0, size);
+
+		// Let's just focus on statsd for now. For statsd, the message is expected to be seperated by newlines. We need
+		// to break each statsd metric and verify them individually.
+		if (model == MetricsDataModel::STATSD) {
+			std::string statsd_message = message.toString();
+			auto metrics = splitString(statsd_message, "\n");
+			for (const auto& metric : metrics) {
+				ASSERT(verifyStatsdMessage(metric));
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> runMetrics() {
 	state MetricCollection* metrics = nullptr;
 	state MetricBatch batch;
+	MetricsDataModel model = knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL);
+	std::string address =
+	    (model == STATSD) ? FLOW_KNOBS->METRICS_UDP_EMISSION_ADDR : FLOW_KNOBS->METRICS_UDP_EMISSION_ADDR;
+	uint32_t port = (model == STATSD) ? FLOW_KNOBS->METRICS_UDP_EMISSION_PORT : FLOW_KNOBS->METRICS_UDP_EMISSION_PORT;
+	state UDPClient metricClient{ address, port };
+	state Future<Void> metrics_actor;
+	if (g_network->isSimulated()) {
+		metrics_actor = startMetricsSimulationServer();
+	}
 	loop {
 		metrics = MetricCollection::getMetricCollection();
 		if (metrics != nullptr) {
 			for (const auto& p : metrics->map) {
 				p.second->flush(batch);
 			}
-			// TODO: Send batch to metrics client
+			metricClient.send(batch);
 		}
 		batch.clear();
 		wait(delay(FLOW_KNOBS->METRICS_EMISSION_INTERVAL));

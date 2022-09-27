@@ -24,10 +24,11 @@ public:
 	virtual ~IMetricClient() {}
 };
 
-class StatdClient : public IMetricClient {
+class UDPClient : public IMetricClient {
 	Future<Reference<IUDPSocket>> socket;
+	int socket_fd;
 
 public:
-	StatdClient();
+	UDPClient(const std::string& addr, uint32_t port);
 	void send(const MetricBatch& batch) override;
 };
