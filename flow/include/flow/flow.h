@@ -921,6 +921,10 @@ public:
 	void send(U&& value) const {
 		sav->send(std::forward<U>(value));
 	}
+    // Workaround for Swift's send && issue.
+    void sendCopy(const T& valueCopy) const {
+        sav->send(valueCopy);
+    }
 	template <class E>
 	void sendError(const E& exc) const {
 		sav->sendError(exc);
