@@ -147,6 +147,9 @@ public:
 	std::string TRACING_UDP_LISTENER_ADDR;
 	int TRACING_UDP_LISTENER_PORT;
 
+	// Metrics
+	std::string METRICS_DATA_MODEL;
+
 	// run loop profiling
 	double RUN_LOOP_PROFILING_INTERVAL;
 	double SLOWTASK_PROFILING_LOG_INTERVAL;

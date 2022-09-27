@@ -233,14 +233,14 @@ std::string MetricData::toString() const {
 	              writer.getLength());
 }
 
-std::string create_statsd_message(const std::string& name, StatsDMetric type, const std::string& val) {
-	return create_statsd_message(name, type, val, {});
+std::string createStatsdMessage(const std::string& name, StatsDMetric type, const std::string& val) {
+	return createStatsdMessage(name, type, val, {});
 }
 
-std::string create_statsd_message(const std::string& name,
-                                  StatsDMetric type,
-                                  const std::string& val,
-                                  const std::vector<std::pair<std::string, std::string>>& tags) {
+std::string createStatsdMessage(const std::string& name,
+                                StatsDMetric type,
+                                const std::string& val,
+                                const std::vector<std::pair<std::string, std::string>>& tags) {
 	ASSERT(!name.empty());
 	std::string msg = name + ":" + val;
 	switch (type) {
@@ -265,4 +265,11 @@ std::string create_statsd_message(const std::string& name,
 	}
 
 	return msg;
+}
+
+MetricsDataModel knobToMetricModel(const std::string& knob) {
+	if (knob == "statsd") {
+		return MetricsDataModel::STATSD;
+	}
+	return MetricsDataModel::OTEL;
 }
