@@ -44,7 +44,7 @@ fdbcli> quota set <tag> [reserved_throughput|total_throughput] <bytes_per_second
 Note that the quotas are specified in terms of bytes/second, and internally converted to page costs:
 
 ```
-page_cost_quota = byte_quota / CLIENT_KNOBS->READ_COST_BYTE_FACTOR
+page_cost_quota = ceiling(byte_quota / CLIENT_KNOBS->READ_COST_BYTE_FACTOR)
 ```
 
 ### Limit Calculation

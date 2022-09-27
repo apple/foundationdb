@@ -90,9 +90,9 @@ ACTOR Future<Void> setQuota(Reference<IDatabase> db, TransactionTag tag, LimitTy
 			// Internally, costs are stored in terms of pages, but in the API,
 			// costs are specified in terms of bytes
 			if (limitType == LimitType::TOTAL) {
-				quota.totalQuota = value / CLIENT_KNOBS->READ_COST_BYTE_FACTOR;
+				quota.totalQuota = (value - 1) / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1;
 			} else if (limitType == LimitType::RESERVED) {
-				quota.reservedQuota = value / CLIENT_KNOBS->READ_COST_BYTE_FACTOR;
+				quota.reservedQuota = (value - 1) / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1;
 			}
 			ThrottleApi::setTagQuota(tr, tag, quota.reservedQuota, quota.totalQuota);
 			wait(safeThreadFutureToFuture(tr->commit()));
