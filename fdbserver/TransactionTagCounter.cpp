@@ -91,9 +91,7 @@ class TransactionTagCounterImpl {
 	Reference<EventCacheHolder> busiestReadTagEventHolder;
 
 	// Round up to the nearest page size
-	static int64_t costFunction(int64_t bytes) {
-		return (bytes - 1) / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1;
-	}
+	static int64_t costFunction(int64_t bytes) { return (bytes - 1) / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1; }
 
 public:
 	TransactionTagCounterImpl(UID thisServerID)
