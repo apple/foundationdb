@@ -6,9 +6,7 @@ else()
   list(APPEND FDBSERVER_SRCS coroimpl/CoroFlow.actor.cpp)
 endif()
 
-if (WITH_ROCKSDB_EXPERIMENTAL)
-  add_definitions(-DSSD_ROCKSDB_EXPERIMENTAL)
-
+if(WITH_ROCKSDB_EXPERIMENTAL)
   include(CompileRocksDB)
   # CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
   # statically, so find the static library here.
@@ -44,6 +42,9 @@ else()
 endif()
 
 target_link_libraries(fdbserver PRIVATE toml11_target jemalloc rapidjson)
+if(WITH_ROCKSDB_EXPERIMENTAL)
+  target_compile_definitions(fdbserver PRIVATE SSD_ROCKSDB_EXPERIMENTAL)
+endif()
 # target_compile_definitions(fdbserver PRIVATE -DENABLE_SAMPLING)
 
 if(GPERFTOOLS_FOUND)
