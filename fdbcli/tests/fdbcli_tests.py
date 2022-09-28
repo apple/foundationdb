@@ -593,38 +593,105 @@ def triggerddteaminfolog(logger):
     output = run_fdbcli_command('triggerddteaminfolog')
     assert output == 'Triggered team info logging in data distribution.'
 
+def setup_tenants(tenants):
+    command = '; '.join(['tenant create %s' % t for t in tenants])
+    run_fdbcli_command(command)
+
+def clear_database_and_tenants():
+    run_fdbcli_command('writemode on; option on SPECIAL_KEY_SPACE_ENABLE_WRITES; clearrange "" \\xff; clearrange \\xff\\xff/management/tenant/map/ \\xff\\xff/management/tenant/map0')
+
+def run_tenant_test(test_func):
+    test_func()
+    clear_database_and_tenants()
 
 @enable_logging()
-def tenants(logger):
-    output = run_fdbcli_command('listtenants')
-    assert output == 'The cluster has no tenants'
+def tenant_create(logger):
+    output1 = run_fdbcli_command('tenant create tenant')
+    assert output1 == 'The tenant `tenant\' has been created'
 
-    output = run_fdbcli_command('createtenant tenant')
-    assert output == 'The tenant `tenant\' has been created'
-
-    output = run_fdbcli_command('createtenant tenant2 tenant_group=tenant_group2')
+    output = run_fdbcli_command('tenant create tenant2 tenant_group=tenant_group2')
     assert output == 'The tenant `tenant2\' has been created'
 
-    output = run_fdbcli_command('listtenants')
+    output = run_fdbcli_command_and_get_error('tenant create tenant')
+    assert output == 'ERROR: A tenant with the given name already exists (2132)'
+
+@enable_logging()
+def tenant_delete(logger):
+    setup_tenants(['tenant', 'tenant2'])
+    run_fdbcli_command('writemode on; usetenant tenant2; set tenant_test value')
+
+    # delete a tenant while the fdbcli is using that tenant
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env)
+    cmd_sequence = ['writemode on', 'usetenant tenant', 'tenant delete tenant', 'get tenant_test', 'defaulttenant', 'usetenant tenant']
+    output, error_output = process.communicate(input='\n'.join(cmd_sequence).encode())
+
+    lines = output.decode().strip().split('\n')[-6:]
+    error_lines = error_output.decode().strip().split('\n')[-2:]
+    assert lines[0] == 'Using tenant `tenant\''
+    assert lines[1] == 'The tenant `tenant\' has been deleted'
+    assert lines[2] == 'WARNING: the active tenant was deleted. Use the `usetenant\' or `defaulttenant\''
+    assert lines[3] == 'command to choose a new tenant.'
+    assert error_lines[0] == 'ERROR: Tenant does not exist (2131)'
+    assert lines[5] == 'Using the default tenant'
+    assert error_lines[1] == 'ERROR: Tenant `tenant\' does not exist'
+
+    # delete a non-empty tenant
+    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env)
+    cmd_sequence = ['writemode on', 'tenant delete tenant2', 'usetenant tenant2', 'clear tenant_test', 'defaulttenant', 'tenant delete tenant2']
+    output, error_output = process.communicate(input='\n'.join(cmd_sequence).encode())
+
+    lines = output.decode().strip().split('\n')[-4:]
+    error_lines = error_output.decode().strip().split('\n')[-1:]
+    assert error_lines[0] == 'ERROR: Cannot delete a non-empty tenant (2133)'
+    assert lines[0] == 'Using tenant `tenant2\''
+    assert lines[1].startswith('Committed')
+    assert lines[2] == 'Using the default tenant'
+    assert lines[3] == 'The tenant `tenant2\' has been deleted'
+
+    # delete a non-existing tenant
+    output = run_fdbcli_command_and_get_error('tenant delete tenant')
+    assert output == 'ERROR: Tenant does not exist (2131)'
+
+@enable_logging()
+def tenant_list(logger):
+    output = run_fdbcli_command('tenant list')
+    assert output == 'The cluster has no tenants'
+
+    setup_tenants(['tenant', 'tenant2'])
+
+    output = run_fdbcli_command('tenant list')
     assert output == '1. tenant\n  2. tenant2'
 
-    output = run_fdbcli_command('listtenants a z 1')
+    output = run_fdbcli_command('tenant list a z 1')
     assert output == '1. tenant'
 
-    output = run_fdbcli_command('listtenants a tenant2')
+    output = run_fdbcli_command('tenant list a tenant2')
     assert output == '1. tenant'
 
-    output = run_fdbcli_command('listtenants tenant2 z')
+    output = run_fdbcli_command('tenant list tenant2 z')
     assert output == '1. tenant2'
 
-    output = run_fdbcli_command('gettenant tenant')
+    output = run_fdbcli_command('tenant list a b')
+    assert output == 'The cluster has no tenants in the specified range'
+
+    output = run_fdbcli_command_and_get_error('tenant list b a')
+    assert output == 'ERROR: end must be larger than begin'
+
+    output = run_fdbcli_command_and_get_error('tenant list a b 12x')
+    assert output == 'ERROR: invalid limit `12x\''
+
+@enable_logging()
+def tenant_get(logger):
+    setup_tenants(['tenant', 'tenant2 tenant_group=tenant_group2'])
+
+    output = run_fdbcli_command('tenant get tenant')
     lines = output.split('\n')
     assert len(lines) == 3
     assert lines[0].strip().startswith('id: ')
     assert lines[1].strip().startswith('prefix: ')
     assert lines[2].strip() == 'tenant state: ready'
 
-    output = run_fdbcli_command('gettenant tenant JSON')
+    output = run_fdbcli_command('tenant get tenant JSON')
     json_output = json.loads(output, strict=False)
     assert(len(json_output) == 2)
     assert('tenant' in json_output)
@@ -638,7 +705,7 @@ def tenants(logger):
     assert('printable' in json_output['tenant']['prefix'])
     assert(json_output['tenant']['tenant_state'] == 'ready')
 
-    output = run_fdbcli_command('gettenant tenant2')
+    output = run_fdbcli_command('tenant get tenant2')
     lines = output.split('\n')
     assert len(lines) == 4
     assert lines[0].strip().startswith('id: ')
@@ -646,7 +713,7 @@ def tenants(logger):
     assert lines[2].strip() == 'tenant state: ready'
     assert lines[3].strip() == 'tenant group: tenant_group2'
 
-    output = run_fdbcli_command('gettenant tenant2 JSON')
+    output = run_fdbcli_command('tenant get tenant2 JSON')
     json_output = json.loads(output, strict=False)
     assert(len(json_output) == 2)
     assert('tenant' in json_output)
@@ -661,35 +728,56 @@ def tenants(logger):
     assert('base64' in json_output['tenant']['tenant_group'])
     assert(json_output['tenant']['tenant_group']['printable'] == 'tenant_group2')
 
-    output = run_fdbcli_command('configuretenant tenant tenant_group=tenant_group1')
+@enable_logging()
+def tenant_configure(logger):
+    setup_tenants(['tenant'])
+
+    output = run_fdbcli_command('tenant configure tenant tenant_group=tenant_group1')
     assert output == 'The configuration for tenant `tenant\' has been updated'
 
-    output = run_fdbcli_command('gettenant tenant')
+    output = run_fdbcli_command('tenant get tenant')
     lines = output.split('\n')
     assert len(lines) == 4
     assert lines[3].strip() == 'tenant group: tenant_group1'
 
-    output = run_fdbcli_command('configuretenant tenant unset tenant_group')
+    output = run_fdbcli_command('tenant configure tenant unset tenant_group')
     assert output == 'The configuration for tenant `tenant\' has been updated'
 
-    output = run_fdbcli_command('gettenant tenant')
+    output = run_fdbcli_command('tenant get tenant')
     lines = output.split('\n')
     assert len(lines) == 3
 
-    output = run_fdbcli_command_and_get_error('configuretenant tenant tenant_group=tenant_group1 tenant_group=tenant_group2')
+    output = run_fdbcli_command_and_get_error('tenant configure tenant tenant_group=tenant_group1 tenant_group=tenant_group2')
     assert output == 'ERROR: configuration parameter `tenant_group\' specified more than once.'
 
-    output = run_fdbcli_command_and_get_error('configuretenant tenant unset')
+    output = run_fdbcli_command_and_get_error('tenant configure tenant unset')
     assert output == 'ERROR: `unset\' specified without a configuration parameter.'
 
-    output = run_fdbcli_command_and_get_error('configuretenant tenant unset tenant_group=tenant_group1')
+    output = run_fdbcli_command_and_get_error('tenant configure tenant unset tenant_group=tenant_group1')
     assert output == 'ERROR: unrecognized configuration parameter `tenant_group=tenant_group1\'.'
 
-    output = run_fdbcli_command_and_get_error('configuretenant tenant tenant_group')
+    output = run_fdbcli_command_and_get_error('tenant configure tenant tenant_group')
     assert output == 'ERROR: invalid configuration string `tenant_group\'. String must specify a value using `=\'.'
 
-    output = run_fdbcli_command_and_get_error('configuretenant tenant3 tenant_group=tenant_group1')
+    output = run_fdbcli_command_and_get_error('tenant configure tenant3 tenant_group=tenant_group1')
     assert output == 'ERROR: Tenant does not exist (2131)'
+
+@enable_logging()
+def tenant_rename(logger):
+    setup_tenants(['tenant', 'tenant2'])
+
+    output = run_fdbcli_command('tenant rename tenant tenant3')
+    assert output == 'The tenant `tenant\' has been renamed to `tenant3\''
+
+    output = run_fdbcli_command_and_get_error('tenant rename tenant tenant4')
+    assert output == 'ERROR: Tenant does not exist (2131)'
+
+    output = run_fdbcli_command_and_get_error('tenant rename tenant2 tenant3')
+    assert output == 'ERROR: A tenant with the given name already exists (2132)'
+
+@enable_logging()
+def tenant_usetenant(logger):
+    setup_tenants(['tenant', 'tenant2'])
 
     output = run_fdbcli_command('usetenant')
     assert output == 'Using the default tenant'
@@ -722,44 +810,103 @@ def tenants(logger):
     assert lines[3] == '`tenant_test\' is `tenant2\''
 
     process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
-    cmd_sequence = ['usetenant tenant', 'get tenant_test', 'defaulttenant', 'get tenant_test']
+    cmd_sequence = ['usetenant tenant', 'get tenant_test', 'usetenant tenant2', 'get tenant_test', 'defaulttenant', 'get tenant_test']
     output, _ = process.communicate(input='\n'.join(cmd_sequence).encode())
 
-    lines = output.decode().strip().split('\n')[-4:]
+    lines = output.decode().strip().split('\n')[-6:]
     assert lines[0] == 'Using tenant `tenant\''
     assert lines[1] == '`tenant_test\' is `tenant\''
-    assert lines[2] == 'Using the default tenant'
-    assert lines[3] == '`tenant_test\' is `default_tenant\''
+    assert lines[2] == 'Using tenant `tenant2\''
+    assert lines[3] == '`tenant_test\' is `tenant2\''
+    assert lines[4] == 'Using the default tenant'
+    assert lines[5] == '`tenant_test\' is `default_tenant\''
 
-    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env)
-    cmd_sequence = ['writemode on', 'usetenant tenant', 'clear tenant_test',
-                    'deletetenant tenant', 'get tenant_test', 'defaulttenant', 'usetenant tenant']
-    output, error_output = process.communicate(input='\n'.join(cmd_sequence).encode())
+@enable_logging()
+def tenant_old_commands(logger):
+    create_output = run_fdbcli_command('tenant create tenant')
+    list_output = run_fdbcli_command('tenant list')
+    get_output = run_fdbcli_command('tenant get tenant')
+    # Run the gettenant command here because the ID will be different in the second block
+    get_output_old = run_fdbcli_command('gettenant tenant')
+    configure_output = run_fdbcli_command('tenant configure tenant tenant_group=tenant_group1')
+    rename_output = run_fdbcli_command('tenant rename tenant tenant2')
+    delete_output = run_fdbcli_command('tenant delete tenant2')
 
-    lines = output.decode().strip().split('\n')[-7:]
-    error_lines = error_output.decode().strip().split('\n')[-2:]
-    assert lines[0] == 'Using tenant `tenant\''
-    assert lines[1].startswith('Committed')
-    assert lines[2] == 'The tenant `tenant\' has been deleted'
-    assert lines[3] == 'WARNING: the active tenant was deleted. Use the `usetenant\' or `defaulttenant\''
-    assert lines[4] == 'command to choose a new tenant.'
-    assert error_lines[0] == 'ERROR: Tenant does not exist (2131)'
-    assert lines[6] == 'Using the default tenant'
-    assert error_lines[1] == 'ERROR: Tenant `tenant\' does not exist'
+    create_output_old = run_fdbcli_command('createtenant tenant')
+    list_output_old = run_fdbcli_command('listtenants')
+    configure_output_old = run_fdbcli_command('configuretenant tenant tenant_group=tenant_group1')
+    rename_output_old = run_fdbcli_command('renametenant tenant tenant2')
+    delete_output_old = run_fdbcli_command('deletetenant tenant2')
 
-    process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env)
-    cmd_sequence = ['writemode on', 'deletetenant tenant2', 'usetenant tenant2', 'clear tenant_test', 'defaulttenant', 'deletetenant tenant2']
-    output, error_output = process.communicate(input='\n'.join(cmd_sequence).encode())
+    assert create_output == create_output_old
+    assert list_output == list_output_old
+    assert get_output == get_output_old
+    assert configure_output == configure_output_old
+    assert rename_output == rename_output_old
+    assert delete_output == delete_output_old
 
-    lines = output.decode().strip().split('\n')[-4:]
-    error_lines = error_output.decode().strip().split('\n')[-1:]
-    assert error_lines[0] == 'ERROR: Cannot delete a non-empty tenant (2133)'
-    assert lines[0] == 'Using tenant `tenant2\''
-    assert lines[1].startswith('Committed')
-    assert lines[2] == 'Using the default tenant'
-    assert lines[3] == 'The tenant `tenant2\' has been deleted'
+@enable_logging()
+def tenant_group_list(logger):
+    output = run_fdbcli_command('tenantgroup list')
+    assert output == 'The cluster has no tenant groups'
 
-    run_fdbcli_command('writemode on; clear tenant_test')
+    setup_tenants(['tenant', 'tenant2 tenant_group=tenant_group2', 'tenant3 tenant_group=tenant_group3'])
+
+    output = run_fdbcli_command('tenantgroup list')
+    assert output == '1. tenant_group2\n  2. tenant_group3'
+
+    output = run_fdbcli_command('tenantgroup list a z 1')
+    assert output == '1. tenant_group2'
+
+    output = run_fdbcli_command('tenantgroup list a tenant_group3')
+    assert output == '1. tenant_group2'
+
+    output = run_fdbcli_command('tenantgroup list tenant_group3 z')
+    assert output == '1. tenant_group3'
+
+    output = run_fdbcli_command('tenantgroup list a b')
+    assert output == 'The cluster has no tenant groups in the specified range'
+
+    output = run_fdbcli_command_and_get_error('tenantgroup list b a')
+    assert output == 'ERROR: end must be larger than begin'
+
+    output = run_fdbcli_command_and_get_error('tenantgroup list a b 12x')
+    assert output == 'ERROR: invalid limit `12x\''
+
+@enable_logging()
+def tenant_group_get(logger):
+    setup_tenants(['tenant tenant_group=tenant_group'])
+
+    output = run_fdbcli_command('tenantgroup get tenant_group')
+    assert output == 'The tenant group is present in the cluster'
+
+    output = run_fdbcli_command('tenantgroup get tenant_group JSON')
+    json_output = json.loads(output, strict=False)
+    assert(len(json_output) == 2)
+    assert('tenant_group' in json_output)
+    assert(json_output['type'] == 'success')
+    assert(len(json_output['tenant_group']) == 0)
+
+    output = run_fdbcli_command_and_get_error('tenantgroup get tenant_group2')
+    assert output == 'ERROR: tenant group not found'
+
+    output = run_fdbcli_command('tenantgroup get tenant_group2 JSON')
+    json_output = json.loads(output, strict=False)
+    assert(len(json_output) == 2)
+    assert(json_output['type'] == 'error')
+    assert(json_output['error'] == 'tenant group not found')
+
+def tenants():
+    run_tenant_test(tenant_create)
+    run_tenant_test(tenant_delete)
+    run_tenant_test(tenant_list)
+    run_tenant_test(tenant_get)
+    run_tenant_test(tenant_configure)
+    run_tenant_test(tenant_rename)
+    run_tenant_test(tenant_usetenant)
+    run_tenant_test(tenant_old_commands)
+    run_tenant_test(tenant_group_list)
+    run_tenant_test(tenant_group_get)
 
 def integer_options():
     process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=fdbcli_env)
@@ -772,66 +919,22 @@ def integer_options():
     assert error_output == b''
 
 def tls_address_suffix():
-    # fdbcli shall prevent a non-TLS fdbcli run from connecting to an all-TLS cluster, and vice versa
+    # fdbcli shall prevent a non-TLS fdbcli run from connecting to an all-TLS cluster
     preamble = 'eNW1yf1M:eNW1yf1M@'
-    def make_addr(port: int, tls: bool = False):
-        return "127.0.0.1:{}{}".format(port, ":tls" if tls else "")
-    testcases = [
-        # IsServerTLS, NumServerAddrs
-        (True, 1),
-        (False, 1),
-        (True, 3),
-        (False, 3),
-    ]
-    err_output_server_no_tls = "ERROR: fdbcli is configured with TLS, but none of the coordinators have TLS addresses."
+    num_server_addrs = [1, 2, 5]
     err_output_server_tls = "ERROR: fdbcli is not configured with TLS, but all of the coordinators have TLS addresses."
 
-    # technically the contents of the certs and key files are not evaluated
-    # before tls-suffix check against tls configuration takes place,
-    # but we generate the certs and keys anyway to avoid
-    # imposing nuanced TLSConfig evaluation ordering requirement on the testcase
     with tempfile.TemporaryDirectory() as tmpdir:
-        cert_file = tmpdir + "/client-cert.pem"
-        key_file = tmpdir + "/client-key.pem"
-        ca_file = tmpdir + "/server-ca.pem"
-        mkcert_process = subprocess.run([
-                args.build_dir + "/bin/mkcert",
-                "--server-chain-length", "1",
-                "--client-chain-length", "1",
-                "--server-cert-file", tmpdir + "/server-cert.pem",
-                "--client-cert-file", tmpdir + "/client-cert.pem",
-                "--server-key-file", tmpdir + "/server-key.pem",
-                "--client-key-file", tmpdir + "/client-key.pem",
-                "--server-ca-file", tmpdir + "/server-ca.pem",
-                "--client-ca-file", tmpdir + "/client-ca.pem",
-            ],
-            capture_output=True)
-        if mkcert_process.returncode != 0:
-            print("mkcert returned with code {}".format(mkcert_process.returncode))
-            print("Output:\n{}{}\n".format(
-                        mkcert_process.stdout.decode("utf8").strip(),
-                        mkcert_process.stderr.decode("utf8").strip()))
-            assert False
         cluster_fn = tmpdir + "/fdb.cluster"
-        for testcase in testcases:
-            is_server_tls, num_server_addrs = testcase
+        for num_server_addr in num_server_addrs:
             with open(cluster_fn, "w") as fp:
                 fp.write(preamble + ",".join(
-                    [make_addr(port=4000 + addr_idx, tls=is_server_tls) for addr_idx in range(num_server_addrs)]))
+                    ["127.0.0.1:{}:tls".format(4000 + addr_idx) for addr_idx in range(num_server_addr)]))
                 fp.close()
-                tls_args = ["--tls-certificate-file",
-                            cert_file,
-                            "--tls-key-file",
-                            key_file,
-                            "--tls-ca-file",
-                            ca_file] if not is_server_tls else []
-                fdbcli_process = subprocess.run(command_template[:2] + [cluster_fn] + tls_args, capture_output=True)
+                fdbcli_process = subprocess.run(command_template[:2] + [cluster_fn], capture_output=True)
                 assert fdbcli_process.returncode != 0
                 err_out = fdbcli_process.stderr.decode("utf8").strip()
-                if is_server_tls:
-                    assert err_out == err_output_server_tls, f"unexpected output: {err_out}"
-                else:
-                    assert err_out == err_output_server_no_tls, f"unexpected output: {err_out}"
+                assert err_out == err_output_server_tls, f"unexpected output: {err_out}"
 
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter,

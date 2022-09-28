@@ -1688,15 +1688,20 @@ public:
 	}
 	void killProcess(ProcessInfo* machine, KillType kt) override {
 		TraceEvent("AttemptingKillProcess").detail("ProcessInfo", machine->toString());
-		if (kt < RebootAndDelete) {
+		// Refuse to kill a protected process.
+		if (kt < RebootAndDelete && protectedAddresses.count(machine->address) == 0) {
 			killProcess_internal(machine, kt);
 		}
 	}
 	void killInterface(NetworkAddress address, KillType kt) override {
 		if (kt < RebootAndDelete) {
 			std::vector<ProcessInfo*>& processes = machines[addressMap[address]->locality.machineId()].processes;
-			for (int i = 0; i < processes.size(); i++)
-				killProcess_internal(processes[i], kt);
+			for (auto& process : processes) {
+				// Refuse to kill a protected process.
+				if (protectedAddresses.count(process->address) == 0) {
+					killProcess_internal(process, kt);
+				}
+			}
 		}
 	}
 	bool killZone(Optional<Standalone<StringRef>> zoneId, KillType kt, bool forceKill, KillType* ktFinal) override {

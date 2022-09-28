@@ -266,6 +266,11 @@ func (o NetworkOptions) SetEnableRunLoopProfiling() error {
 	return o.setOpt(71, nil)
 }
 
+// Prevents the multi-version client API from being disabled, even if no external clients are configured. This option is required to use GRV caching.
+func (o NetworkOptions) SetDisableClientBypass() error {
+	return o.setOpt(72, nil)
+}
+
 // Enable client buggify - will make requests randomly fail (intended for client testing)
 func (o NetworkOptions) SetClientBuggifyEnable() error {
 	return o.setOpt(80, nil)
@@ -622,7 +627,7 @@ func (o TransactionOptions) SetBypassUnreadable() error {
 	return o.setOpt(1100, nil)
 }
 
-// Allows this transaction to use cached GRV from the database context. Defaults to off. Upon first usage, starts a background updater to periodically update the cache to avoid stale read versions.
+// Allows this transaction to use cached GRV from the database context. Defaults to off. Upon first usage, starts a background updater to periodically update the cache to avoid stale read versions. The disable_client_bypass option must also be set.
 func (o TransactionOptions) SetUseGrvCache() error {
 	return o.setOpt(1101, nil)
 }

@@ -129,7 +129,13 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 	}
 
 	// TODO could make keys variable length?
-	Key getKey(uint32_t key, uint32_t id) { return Tuple().append((int64_t)key).append((int64_t)id).pack(); }
+	Key getKey(uint32_t key, uint32_t id) {
+		std::stringstream ss;
+		ss << std::setw(32) << std::setfill('0') << id;
+		Standalone<StringRef> str(ss.str());
+		Tuple::UserTypeStr udt(0x41, str);
+		return Tuple::makeTuple((int64_t)key, udt).pack();
+	}
 
 	void validateGranuleBoundary(Key k, Key e, Key lastKey) {
 		if (k == allKeys.begin || k == allKeys.end) {
@@ -138,11 +144,11 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 
 		// Fully formed tuples are inserted. The expectation is boundaries should be a
 		// sub-tuple of the inserted key.
-		Tuple t = Tuple::unpack(k, true);
+		Tuple t = Tuple::unpackUserType(k, true);
 		if (SERVER_KNOBS->BG_KEY_TUPLE_TRUNCATE_OFFSET) {
 			Tuple t2;
 			try {
-				t2 = Tuple::unpack(lastKey);
+				t2 = Tuple::unpackUserType(lastKey);
 			} catch (Error& e) {
 				// Ignore being unable to parse lastKey as it may be a dummy key.
 			}

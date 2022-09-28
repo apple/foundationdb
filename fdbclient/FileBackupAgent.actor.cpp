@@ -18,14 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/Arena.h"
-#include "flow/CodeProbe.h"
-#include "flow/EncryptUtils.h"
-#include "flow/network.h"
-#include "flow/ObjectSerializer.h"
-#include "flow/ProtocolVersion.h"
-#include "flow/serialize.h"
-#include "flow/Trace.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
@@ -41,6 +33,15 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantEntryCache.actor.h"
+
+#include "flow/Arena.h"
+#include "flow/CodeProbe.h"
+#include "flow/EncryptUtils.h"
+#include "flow/network.h"
+#include "flow/ObjectSerializer.h"
+#include "flow/ProtocolVersion.h"
+#include "flow/serialize.h"
+#include "flow/Trace.h"
 
 #include <cinttypes>
 #include <ctime>
@@ -490,6 +491,7 @@ public:
 
 struct SnapshotFileBackupEncryptionKeys {
 	Reference<BlobCipherKey> textCipherKey;
+	EncryptCipherDomainName textDomain;
 	Reference<BlobCipherKey> headerCipherKey;
 	StringRef ivRef;
 };
@@ -536,15 +538,14 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	struct Options {
 		constexpr static FileIdentifier file_identifier = 3152016;
 
-		bool encryptionEnabled;
+		// TODO: Compression is not currently supported so this should always be false
+		bool compressionEnabled = false;
 
-		Options(bool encryptionEnabled) : encryptionEnabled(encryptionEnabled) {}
-
-		Options() = default;
+		Options() {}
 
 		template <class Ar>
 		void serialize(Ar& ar) {
-			serializer(ar, encryptionEnabled);
+			serializer(ar, compressionEnabled);
 		}
 	};
 
@@ -553,7 +554,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                         Reference<TenantEntryCache<Void>> tenantCache,
 	                         Reference<IBackupFile> file = Reference<IBackupFile>(),
 	                         int blockSize = 0,
-	                         Options options = Options(true))
+	                         Options options = Options())
 	  : cx(cx), arena(arena), tenantCache(tenantCache), file(file), blockSize(blockSize), blockEnd(0),
 	    fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION), options(options) {
 		buffer = makeString(blockSize);
@@ -615,40 +616,55 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		return decryptImpl(cx, headerS, dataP, dataLen, arena);
 	}
 
-	void encrypt() {
-		ASSERT(cipherKeys.headerCipherKey.isValid() && cipherKeys.textCipherKey.isValid());
-		EncryptBlobCipherAes265Ctr encryptor(cipherKeys.textCipherKey,
-		                                     cipherKeys.headerCipherKey,
-		                                     cipherKeys.ivRef.begin(),
+	ACTOR static Future<Reference<BlobCipherKey>> refreshKey(EncryptedRangeFileWriter* self,
+	                                                         EncryptCipherDomainId domainId,
+	                                                         EncryptCipherDomainName domainName) {
+		Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
+		TextAndHeaderCipherKeys cipherKeys =
+		    wait(getLatestEncryptCipherKeysForDomain(dbInfo, domainId, domainName, BlobCipherMetrics::BACKUP));
+		return cipherKeys.cipherTextKey;
+	}
+
+	ACTOR static Future<Void> encrypt(EncryptedRangeFileWriter* self) {
+		ASSERT(self->cipherKeys.headerCipherKey.isValid() && self->cipherKeys.textCipherKey.isValid());
+		// Ensure that the keys we got are still valid before flushing the block
+		if (self->cipherKeys.headerCipherKey->isExpired() || self->cipherKeys.headerCipherKey->needsRefresh()) {
+			Reference<BlobCipherKey> cipherKey =
+			    wait(refreshKey(self, self->cipherKeys.headerCipherKey->getDomainId(), FDB_ENCRYPT_HEADER_DOMAIN_NAME));
+			self->cipherKeys.headerCipherKey = cipherKey;
+		}
+		if (self->cipherKeys.textCipherKey->isExpired() || self->cipherKeys.textCipherKey->needsRefresh()) {
+			Reference<BlobCipherKey> cipherKey =
+			    wait(refreshKey(self, self->cipherKeys.textCipherKey->getDomainId(), self->cipherKeys.textDomain));
+			self->cipherKeys.textCipherKey = cipherKey;
+		}
+		EncryptBlobCipherAes265Ctr encryptor(self->cipherKeys.textCipherKey,
+		                                     self->cipherKeys.headerCipherKey,
+		                                     self->cipherKeys.ivRef.begin(),
 		                                     AES_256_IV_LENGTH,
 		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
 		                                     BlobCipherMetrics::BACKUP);
 		Arena arena;
-		int64_t payloadSize = wPtr - dataPayloadStart;
-		auto encryptedData = encryptor.encrypt(dataPayloadStart, payloadSize, encryptHeader, arena);
+		int64_t payloadSize = self->wPtr - self->dataPayloadStart;
+		auto encryptedData = encryptor.encrypt(self->dataPayloadStart, payloadSize, self->encryptHeader, arena);
 
 		// re-write encrypted data to buffer
-		std::memcpy(dataPayloadStart, encryptedData->begin(), payloadSize);
+		std::memcpy(self->dataPayloadStart, encryptedData->begin(), payloadSize);
+		return Void();
 	}
 
-	ACTOR static Future<Void> updateEncryptionKeys(EncryptedRangeFileWriter* self,
-	                                               KeyRef key,
-	                                               Reference<TenantEntryCache<Void>> cache) {
-		state std::pair<int64_t, TenantName> curTenantInfo = wait(getTenantIdName(key, cache));
+	ACTOR static Future<Void> updateEncryptionKeysCtx(EncryptedRangeFileWriter* self,
+	                                                  KeyRef key,
+	                                                  Reference<TenantEntryCache<Void>> cache) {
+		state std::pair<int64_t, TenantName> curTenantInfo = wait(getEncryptionDomainDetails(key, cache));
 		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
-		// Get and Set Header Cipher Key
-		TextAndHeaderCipherKeys systemCipherKeys =
-		    wait(getLatestSystemEncryptCipherKeys(dbInfo, BlobCipherMetrics::BACKUP));
-		self->cipherKeys.headerCipherKey = systemCipherKeys.cipherHeaderKey;
 
-		// Get text cipher key
-		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains;
-		domains.emplace(curTenantInfo.first, curTenantInfo.second);
-		// Get the latest write encryption key for the given tenant
-		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> textCipherKeys =
-		    wait(getLatestEncryptCipherKeys(dbInfo, domains, BlobCipherMetrics::BACKUP));
-		ASSERT(textCipherKeys.find(curTenantInfo.first) != textCipherKeys.end());
-		self->cipherKeys.textCipherKey = textCipherKeys.at(curTenantInfo.first);
+		// Get text and header cipher key
+		TextAndHeaderCipherKeys textAndHeaderCipherKeys = wait(getLatestEncryptCipherKeysForDomain(
+		    dbInfo, curTenantInfo.first, curTenantInfo.second, BlobCipherMetrics::BACKUP));
+		self->cipherKeys.textCipherKey = textAndHeaderCipherKeys.cipherTextKey;
+		self->cipherKeys.textDomain = curTenantInfo.second;
+		self->cipherKeys.headerCipherKey = textAndHeaderCipherKeys.cipherHeaderKey;
 
 		// Set ivRef
 		self->cipherKeys.ivRef = makeString(AES_256_IV_LENGTH, *self->arena);
@@ -680,16 +696,16 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	static bool isSystemKey(KeyRef key) { return key.size() && key[0] == systemKeys.begin[0]; }
 
-	ACTOR static Future<std::pair<int64_t, TenantName>> getTenantIdNameImpl(
+	ACTOR static Future<std::pair<int64_t, TenantName>> getEncryptionDomainDetailsImpl(
 	    KeyRef key,
 	    Reference<TenantEntryCache<Void>> tenantCache) {
 		if (isSystemKey(key)) {
 			return std::make_pair(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME);
 		}
-		if (key.size() < 8) {
+		if (key.size() < TENANT_PREFIX_SIZE) {
 			return std::make_pair(FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
 		}
-		KeyRef tenantPrefix = KeyRef(key.begin(), 8);
+		KeyRef tenantPrefix = KeyRef(key.begin(), TENANT_PREFIX_SIZE);
 		state int64_t tenantId = TenantMapEntry::prefixToId(tenantPrefix);
 		Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getById(tenantId));
 		if (payload.present()) {
@@ -698,9 +714,10 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		return std::make_pair(FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
 	}
 
-	static Future<std::pair<int64_t, TenantName>> getTenantIdName(KeyRef key,
-	                                                              Reference<TenantEntryCache<Void>> tenantCache) {
-		return getTenantIdNameImpl(key, tenantCache);
+	static Future<std::pair<int64_t, TenantName>> getEncryptionDomainDetails(
+	    KeyRef key,
+	    Reference<TenantEntryCache<Void>> tenantCache) {
+		return getEncryptionDomainDetailsImpl(key, tenantCache);
 	}
 
 	// Handles the first block and internal blocks.  Ends current block if needed.
@@ -721,9 +738,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (expectedFileSize(self) > 0) {
 			// write buffer to file since block is finished
 			ASSERT(currentBufferSize(self) == self->blockSize);
-			if (self->options.encryptionEnabled) {
-				self->encrypt();
-			}
+			wait(encrypt(self));
 			wait(self->file->append(self->buffer.begin(), self->blockSize));
 
 			// reset write pointer to beginning of StringRef
@@ -783,6 +798,27 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		return Void();
 	}
 
+	ACTOR static Future<Void> handleTenantBondary(EncryptedRangeFileWriter* self,
+	                                              Key k,
+	                                              Value v,
+	                                              bool writeValue,
+	                                              std::pair<int64_t, TenantName> curKeyTenantInfo) {
+		state KeyRef endKey = k;
+		// If we are crossing a boundary with a key that has a tenant prefix then truncate it
+		if (curKeyTenantInfo.first != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID &&
+		    curKeyTenantInfo.first != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
+			endKey = StringRef(k.begin(), TENANT_PREFIX_SIZE);
+		}
+		state ValueRef newValue = StringRef();
+		self->lastKey = k;
+		self->lastValue = v;
+		appendStringRefWithLenToBuffer(self, &endKey);
+		appendStringRefWithLenToBuffer(self, &newValue);
+		wait(newBlock(self, 0, endKey, writeValue));
+		wait(updateEncryptionKeysCtx(self, self->lastKey, self->tenantCache));
+		return Void();
+	}
+
 	ACTOR static Future<bool> finishCurTenantBlockStartNewIfNeeded(EncryptedRangeFileWriter* self,
 	                                                               Key k,
 	                                                               Value v,
@@ -791,25 +827,13 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (self->lastKey.size() == 0 || k.size() == 0) {
 			return false;
 		}
-		state std::pair<int64_t, TenantName> curKeyTenantInfo = wait(getTenantIdName(k, self->tenantCache));
+		state std::pair<int64_t, TenantName> curKeyTenantInfo = wait(getEncryptionDomainDetails(k, self->tenantCache));
 		state std::pair<int64_t, TenantName> prevKeyTenantInfo =
-		    wait(getTenantIdName(self->lastKey, self->tenantCache));
+		    wait(getEncryptionDomainDetails(self->lastKey, self->tenantCache));
 		// crossing tenant boundaries so finish the current block using only the tenant prefix of the new key
 		if (curKeyTenantInfo.first != prevKeyTenantInfo.first) {
 			CODE_PROBE(true, "crossed tenant boundaries");
-			state KeyRef endKey = k;
-			// If we are crossing a boundary with a key that has a tenant prefix then truncate it
-			if (curKeyTenantInfo.first != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID &&
-			    curKeyTenantInfo.first != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
-				endKey = StringRef(k.begin(), 8);
-			}
-			state ValueRef newValue = StringRef();
-			self->lastKey = k;
-			self->lastValue = v;
-			appendStringRefWithLenToBuffer(self, &endKey);
-			appendStringRefWithLenToBuffer(self, &newValue);
-			wait(newBlock(self, 0, endKey, writeValue));
-			wait(updateEncryptionKeys(self, self->lastKey, self->tenantCache));
+			wait(handleTenantBondary(self, k, v, writeValue, curKeyTenantInfo));
 			return true;
 		}
 		return false;
@@ -818,7 +842,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	// Start a new block if needed, then write the key and value
 	ACTOR static Future<Void> writeKV_impl(EncryptedRangeFileWriter* self, Key k, Value v) {
 		if (!self->cipherKeys.headerCipherKey.isValid() || !self->cipherKeys.textCipherKey.isValid()) {
-			wait(updateEncryptionKeys(self, k, self->tenantCache));
+			wait(updateEncryptionKeysCtx(self, k, self->tenantCache));
 		}
 		state int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
 		wait(newBlockIfNeeded(self, toWrite));
@@ -837,11 +861,14 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	// Write begin key or end key.
 	ACTOR static Future<Void> writeKey_impl(EncryptedRangeFileWriter* self, Key k) {
+		// TODO (Nim): Is it possible to write empty begin and end keys?
 		if (k.size() > 0 &&
 		    (!self->cipherKeys.headerCipherKey.isValid() || !self->cipherKeys.textCipherKey.isValid())) {
-			wait(updateEncryptionKeys(self, k, self->tenantCache));
+			wait(updateEncryptionKeysCtx(self, k, self->tenantCache));
 		}
-		int toWrite = sizeof(uint32_t) + k.size();
+
+		// Need to account for extra "empty" value being written in the case of crossing tenant boundaries
+		int toWrite = sizeof(uint32_t) + k.size() + sizeof(uint32_t);
 		wait(newBlockIfNeeded(self, toWrite));
 		bool createdNewBlock = wait(finishCurTenantBlockStartNewIfNeeded(self, k, StringRef(), false));
 		if (createdNewBlock) {
@@ -854,16 +881,16 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	Future<Void> writeKey(Key k) { return writeKey_impl(this, k); }
 
-	Future<Void> finish() {
+	ACTOR static Future<Void> finish_impl(EncryptedRangeFileWriter* self) {
 		// Write any outstanding bytes to the file
-		if (currentBufferSize(this) > 0) {
-			if (options.encryptionEnabled) {
-				encrypt();
-			}
-			return file->append(buffer.begin(), currentBufferSize(this));
+		if (currentBufferSize(self) > 0) {
+			wait(encrypt(self));
+			wait(self->file->append(self->buffer.begin(), currentBufferSize(self)));
 		}
 		return Void();
 	}
+
+	Future<Void> finish() { return finish_impl(this); }
 
 	Database cx;
 	Arena* arena;
@@ -1029,14 +1056,14 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 		if (encryptedBlock && g_network && g_network->isSimulated()) {
 			state KeyRef curKey = KeyRef(k, kLen);
 			state std::pair<int64_t, TenantName> prevTenantInfo =
-			    wait(EncryptedRangeFileWriter::getTenantIdName(prevKey, tenantCache));
+			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, tenantCache));
 			std::pair<int64_t, TenantName> curTenantInfo =
-			    wait(EncryptedRangeFileWriter::getTenantIdName(curKey, tenantCache));
+			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, tenantCache));
 			if (curKey.size() > 0 && prevKey.size() > 0 && prevTenantInfo.first != curTenantInfo.first) {
 				ASSERT(!done);
 				if (curTenantInfo.first != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID &&
 				    curTenantInfo.first != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
-					ASSERT(curKey.size() == 8);
+					ASSERT(curKey.size() == TENANT_PREFIX_SIZE);
 				}
 				done = true;
 			}
@@ -1096,7 +1123,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			StringRef optionsStringRef = StringRef(o, optionsLen);
 			EncryptedRangeFileWriter::Options options =
 			    ObjectReader::fromStringRef<EncryptedRangeFileWriter::Options>(optionsStringRef, IncludeVersion());
-			ASSERT(options.encryptionEnabled);
+			ASSERT(!options.compressionEnabled);
 
 			// read encryption header
 			const uint8_t* headerStart = reader.consume(BlobCipherEncryptHeader::headerSize);

@@ -38,6 +38,14 @@ target_link_libraries(flowlinktest PRIVATE flow stacktrace)
 #  message(STATUS "ZLIB package not found")
 #endif()
 
+# TODO: Limit ZSTD availability to CLANG, for gcc resolve library link ordering
+if (CLANG AND NOT IS_ARM_MAC)
+  include(CompileZstd)
+  compile_zstd()
+  target_link_libraries(flow PUBLIC ZSTD::ZSTD)
+  target_compile_definitions(flow PUBLIC ZSTD_LIB_SUPPORTED)
+endif()
+
 foreach(ft flow flow_sampling flowlinktest)
   target_include_directories(${ft} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
 

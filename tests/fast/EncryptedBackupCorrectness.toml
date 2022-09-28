@@ -2,6 +2,9 @@
 allowDefaultTenant = false
 allowDisablingTenants = false
 
+[[knobs]]
+enable_encryption = true
+
 [[test]]
 testTitle = 'TenantCreation'
 
