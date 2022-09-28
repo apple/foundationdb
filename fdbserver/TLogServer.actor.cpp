@@ -216,6 +216,8 @@ static const KeyRange persistTagMessagesKeys = prefixRange("TagMsg/"_sr);
 static const KeyRange persistTagMessageRefsKeys = prefixRange("TagMsgRef/"_sr);
 static const KeyRange persistTagPoppedKeys = prefixRange("TagPop/"_sr);
 
+static const KeyRef persistEncryptionAtRestModeKey = "encryptionAtRestMode"_sr;
+
 static Key persistTagMessagesKey(UID id, Tag tag, Version version) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(persistTagMessagesKeys.begin);
@@ -305,6 +307,8 @@ struct TLogData : NonCopyable {
 
 	UID dbgid;
 	UID workerID;
+
+	Optional<EncryptionAtRestMode> encryptionAtRestMode;
 
 	IKeyValueStore* persistentData; // Durable data on disk that were spilled.
 	IDiskQueue* rawPersistentQueue; // The physical queue the persistentQueue below stores its data. Ideally, log
@@ -2391,6 +2395,32 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 	return Void();
 }
 
+ACTOR Future<EncryptionAtRestMode> getEncryptionAtRestMode(TLogData* self) {
+	state ReadYourWritesTransaction tr(self->cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> value = wait(tr.get(encryptionAtRestModeConfKey));
+			EncryptionAtRestMode m;
+			if (value.present()) {
+				m = EncryptionAtRestMode::fromValue(value);
+			}
+
+			// TODO: Encryption at-rest is controlled via SEVER_KNOBs, in future the code shall be updated to replace
+			// per-component (TLog, Redwood, BlobGranule) KNOBs with single db-config
+			if (m.mode == EncryptionAtRestMode::Mode::DISABLED &&
+			    (SERVER_KNOBS->ENABLE_ENCRYPTION && SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION)) {
+				m = EncryptionAtRestMode(EncryptionAtRestMode::Mode::AES_256_CTR);
+			}
+			TraceEvent("GetEncryptionAtRestMode", self->dbgid).detail("Mode", m.toString());
+			return m;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 // send stopped promise instead of LogData* to avoid reference cycles
 ACTOR Future<Void> rejoinClusterController(TLogData* self,
                                            TLogInterface tli,
@@ -2576,6 +2606,26 @@ ACTOR Future<Void> tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData*
 	self->ignorePopDeadline = 0;
 	wait(processPopRequests(self, logData));
 	enablePopReq.reply.send(Void());
+	return Void();
+}
+
+ACTOR Future<Void> checkUpdateEncryptionAtRestMode(TLogData* self) {
+	EncryptionAtRestMode encryptionAtRestMode = wait(getEncryptionAtRestMode(self));
+
+	if (self->encryptionAtRestMode.present()) {
+		// Ensure the TLog encryptionAtRestMode status matches with the cluster config, if not, kill the TLog process.
+		// Approach prevents a fake TLog process joining the cluster.
+		ASSERT(self->encryptionAtRestMode.get() == encryptionAtRestMode);
+	} else {
+		self->encryptionAtRestMode = Optional<EncryptionAtRestMode>(encryptionAtRestMode);
+		wait(self->persistentDataCommitLock.take());
+		state FlowLock::Releaser commitLockReleaser(self->persistentDataCommitLock);
+		self->persistentData->set(
+		    KeyValueRef(persistEncryptionAtRestModeKey, self->encryptionAtRestMode.get().toValue()));
+		wait(self->persistentData->commit());
+		TraceEvent("PersistEncryptionAtRestMode").detail("Mode", self->encryptionAtRestMode.get().toString());
+	}
+
 	return Void();
 }
 
@@ -2966,6 +3016,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	state IKeyValueStore* storage = self->persistentData;
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
 	state Future<Optional<Value>> fRecoveryLocation = storage->readValue(persistRecoveryLocationKey);
+	state Future<Optional<Value>> fEncryptionAtRestMode = storage->readValue(persistEncryptionAtRestModeKey);
 	state Future<RangeResult> fVers = storage->readRange(persistCurrentVersionKeys);
 	state Future<RangeResult> fKnownCommitted = storage->readRange(persistKnownCommittedVersionKeys);
 	state Future<RangeResult> fLocality = storage->readRange(persistLocalityKeys);
@@ -2977,7 +3028,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 
 	// FIXME: metadata in queue?
 
-	wait(waitForAll(std::vector{ fFormat, fRecoveryLocation }));
+	wait(waitForAll(std::vector{ fFormat, fRecoveryLocation, fEncryptionAtRestMode }));
 	wait(waitForAll(std::vector{ fVers,
 	                             fKnownCommitted,
 	                             fLocality,
@@ -2986,6 +3037,12 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	                             fRecoverCounts,
 	                             fProtocolVersions,
 	                             fTLogSpillTypes }));
+
+	if (fEncryptionAtRestMode.get().present()) {
+		self->encryptionAtRestMode =
+		    Optional<EncryptionAtRestMode>(EncryptionAtRestMode::fromValue(fEncryptionAtRestMode.get()));
+		TraceEvent("PersistEncryptionAtRestModeRead").detail("Mode", self->encryptionAtRestMode.get().toString());
+	}
 
 	if (fFormat.get().present() && !persistFormatReadableRange.contains(fFormat.get().get())) {
 		// FIXME: remove when we no longer need to test upgrades from 4.X releases
@@ -3537,11 +3594,13 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 		// Disk errors need a chance to kill this actor.
 		wait(delay(0.000001));
 
-		if (recovered.canBeSet())
+		if (recovered.canBeSet()) {
 			recovered.send(Void());
+		}
 
 		self.sharedActors.send(commitQueue(&self));
 		self.sharedActors.send(updateStorageLoop(&self));
+		self.sharedActors.send(checkUpdateEncryptionAtRestMode(&self));
 		self.sharedActors.send(traceRole(Role::SHARED_TRANSACTION_LOG, tlogId));
 		state Future<Void> activeSharedChange = Void();
 
