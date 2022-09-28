@@ -88,7 +88,11 @@
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
 #include <signal.h>
+#if defined(__linux__)
 #include <sys/prctl.h>
+#elif defined(__FreeBSD__)
+#include <sys/procctl.h>
+#endif
 #ifdef ALLOC_INSTRUMENTATION
 #include <cxxabi.h>
 #endif
@@ -2396,9 +2400,14 @@ int main(int argc, char* argv[]) {
 			    g_network->getLocalAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
 			TraceEvent(SevDebug, "StartingFlowProcess").detail("FlowProcessName", opts.flowProcessName);
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 			prctl(PR_SET_PDEATHSIG, SIGTERM);
 			if (getppid() == 1) /* parent already died before prctl */
+				flushAndExit(FDB_EXIT_SUCCESS);
+#elif defined(__FreeBSD__)
+			const int sig = SIGTERM;
+			procctl(P_PID, 0, PROC_PDEATHSIG_CTL, (void*)&sig);
+			if (getppid() == 1) /* parent already died before procctl */
 				flushAndExit(FDB_EXIT_SUCCESS);
 #endif
 

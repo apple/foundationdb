@@ -39,7 +39,7 @@ target_link_libraries(flowlinktest PRIVATE flow stacktrace)
 #endif()
 
 # TODO: Limit ZSTD availability to CLANG, for gcc resolve library link ordering
-if (CLANG)
+if (CLANG AND NOT IS_ARM_MAC)
   include(CompileZstd)
   compile_zstd()
   target_link_libraries(flow PUBLIC ZSTD::ZSTD)
