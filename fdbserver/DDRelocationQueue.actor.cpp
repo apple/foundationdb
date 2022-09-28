@@ -2245,6 +2245,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 		state Reference<IDataDistributionTeam> destTeam;
 		state GetTeamRequest srcReq;
 		state GetTeamRequest destReq;
+		state int teamSetIndex = 0;
 		state TraceEvent traceEvent(eventName, self->distributorId);
 		traceEvent.suppressFor(5.0)
 		    .detail("PollingInterval", rebalancePollingInterval)
