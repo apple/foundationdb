@@ -59,7 +59,6 @@ extension FutureCInt: _FlowFutureOps {
 extension FutureVoid: _FlowFutureOps {
     public typealias _T = Void
     public typealias CC = SwiftContinuationCallbackVoid
-    public func HELLO() {}
 
     // FIXME: can't figure out a possible way to implement this using generics, we run into problems with the _T and the concrete template etc...
     public var waitValue: _T {

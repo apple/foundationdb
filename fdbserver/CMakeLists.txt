@@ -26,14 +26,15 @@ add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 # Setup the Swift sources in FDBServer.
 include(FindSwiftLibs)
 add_library(fdbserver_swift STATIC
-        SwiftUtils.swift
         masterserver.swift
+        SwiftUtils.swift
         swift_fdbserver_collections.swift
         UID.swift
         )
 
 target_include_directories(fdbserver_swift PUBLIC
     "${CMAKE_BINARY_DIR}/flow/include"
+    "${CMAKE_BINARY_DIR}/flow"
     "${CMAKE_BINARY_DIR}/fdbclient/include"
     "${CMAKE_BINARY_DIR}/fdbserver/include"
     "${CMAKE_SOURCE_DIR}/fdbrpc/include"
@@ -54,17 +55,23 @@ target_include_directories(fdbserver_swift PRIVATE
 )
 
 # TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?
-target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++17 -enable-experimental-cxx-interop -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml>")
+target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++17 -enable-experimental-cxx-interop -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml>")
 
 # Ensure that C++ code in fdbserver can import Swift using a compatibility header.
 include(SwiftToCXXInterop)
 generate_cxx_compat_header(fdbserver_swift "FDBServer")
 
+add_dependencies(fdbserver_swift flow_swift)
 add_dependencies(fdbserver_swift fdbserver_actors)
+# This does not work! (see rdar://99107402)
+# target_link_libraries(flow PRIVATE flow_swift)
+add_dependencies(fdbserver fdbserver_swift)
+
 # This does not work! (see rdar://99107402)
 # target_link_libraries(fdbserver PRIVATE flow_swift fdbserver_swift)
 add_dependencies(fdbserver flow_swift fdbserver_swift)
 add_custom_target(show_fdbserver_swift_objs COMMAND ${CMAKE_COMMAND} -E echo "$<TARGET_OBJECTS:fdbserver_swift>")
+target_link_options(fdbserver_swift PUBLIC "$<TARGET_OBJECTS:flow_swift>")
 target_link_options(fdbserver PRIVATE "$<TARGET_OBJECTS:flow_swift>")
 target_link_options(fdbserver PRIVATE "$<TARGET_OBJECTS:fdbserver_swift>")
 # This dependency ensures that fdbserver depends on fdbserver_swift at link time.
