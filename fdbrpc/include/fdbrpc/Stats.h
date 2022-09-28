@@ -253,13 +253,17 @@ public:
 		std::string msg;
 		switch (model) {
 		case MetricsDataModel::STATSD: {
-			auto median_gauge = createStatsdMessage(name, StatsDMetric::GAUGE, std::to_string(sample.median()));
-			auto p90_gauge = createStatsdMessage(name, StatsDMetric::GAUGE, std::to_string(sample.percentile(0.9)));
-			auto p95_gauge = createStatsdMessage(name, StatsDMetric::GAUGE, std::to_string(sample.percentile(0.95)));
-			auto p99_gauge = createStatsdMessage(name, StatsDMetric::GAUGE, std::to_string(sample.percentile(0.99)));
-			auto p999_gauge = createStatsdMessage(name, StatsDMetric::GAUGE, std::to_string(sample.percentile(0.999)));
+			auto median_gauge = createStatsdMessage(name + "p50", StatsDMetric::GAUGE, std::to_string(sample.median()));
+			auto p90_gauge =
+			    createStatsdMessage(name + "p90", StatsDMetric::GAUGE, std::to_string(sample.percentile(0.9)));
+			auto p95_gauge =
+			    createStatsdMessage(name + "p95", StatsDMetric::GAUGE, std::to_string(sample.percentile(0.95)));
+			auto p99_gauge =
+			    createStatsdMessage(name + "p99", StatsDMetric::GAUGE, std::to_string(sample.percentile(0.99)));
+			auto p999_gauge =
+			    createStatsdMessage(name + "p99.9", StatsDMetric::GAUGE, std::to_string(sample.percentile(0.999)));
 
-			if (!msg.empty()) {
+			if (!batch.statsd_message.empty()) {
 				msg += "\n";
 			}
 			msg += median_gauge;
@@ -271,6 +275,7 @@ public:
 			msg += p99_gauge;
 			msg += "\n";
 			msg += p999_gauge;
+			batch.statsd_message += msg;
 			break;
 		}
 
