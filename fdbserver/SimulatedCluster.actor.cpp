@@ -1446,7 +1446,13 @@ void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
 void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	// Using [0, 4) to disable the RocksDB storage engine.
 	// TODO: Figure out what is broken with the RocksDB engine in simulation.
-	int storage_engine_type = deterministicRandom()->randomInt(0, 6);
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
+	int maxStoreType = 6;
+#else
+	int maxStoreType = 4;
+#endif
+
+	int storage_engine_type = deterministicRandom()->randomInt(0, maxStoreType);
 	if (testConfig.storageEngineType.present()) {
 		storage_engine_type = testConfig.storageEngineType.get();
 	} else {
@@ -1454,7 +1460,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		while (std::find(testConfig.storageEngineExcludeTypes.begin(),
 		                 testConfig.storageEngineExcludeTypes.end(),
 		                 storage_engine_type) != testConfig.storageEngineExcludeTypes.end()) {
-			storage_engine_type = deterministicRandom()->randomInt(0, 6);
+			storage_engine_type = deterministicRandom()->randomInt(0, maxStoreType);
 		}
 	}
 
