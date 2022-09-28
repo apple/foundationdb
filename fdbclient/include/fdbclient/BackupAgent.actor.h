@@ -1005,10 +1005,18 @@ ACTOR Future<Void> transformRestoredDatabase(Database cx,
 
 void simulateBlobFailure();
 
+// Add the set of ranges that are backed up in a default backup to the given vector. This consists of all normal keys
+// and the system backup ranges.
 void addDefaultBackupRanges(Standalone<VectorRef<KeyRangeRef>>& backupKeys);
+
+// Return a vector containing the key ranges in system key-space that should be backed up in a default backup.
 VectorRef<KeyRangeRef> const& getSystemBackupRanges();
+
+// Return a key-range map that can be used to check whether a system key is a candidate backup key (i.e. whether it is
+// part of any system backup ranges).
 KeyRangeMap<bool> const& systemBackupMutationMask();
 
+// Returns true if the given set of ranges exactly matches the set of ranges included in a default backup.
 template <class Container>
 bool isDefaultBackup(Container ranges) {
 	std::unordered_set<KeyRangeRef> uniqueRanges(ranges.begin(), ranges.end());
@@ -1030,6 +1038,7 @@ bool isDefaultBackup(Container ranges) {
 	return true;
 }
 
+// Returns a key-range used to denote that a shared mutation stream belongs to the default backup set.
 KeyRangeRef const& getDefaultBackupSharedRange();
 
 #include "flow/unactorcompiler.h"
