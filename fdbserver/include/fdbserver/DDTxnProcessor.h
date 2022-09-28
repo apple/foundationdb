@@ -24,8 +24,10 @@
 #include "fdbserver/Knobs.h"
 #include "flow/FastRef.h"
 #include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/MockGlobalState.h"
 
 struct InitialDataDistribution;
+struct DDShardInfo;
 
 /* Testability Contract:
  * a. The DataDistributor has to use this interface to interact with data-plane (aka. run transaction / use Database),
@@ -40,7 +42,7 @@ public:
 	virtual Database context() const = 0;
 	virtual bool isMocked() const = 0;
 	// get the source server list and complete source server list for range
-	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) = 0;
+	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) { return SourceServers{}; };
 
 	// get the storage server list and Process class
 	virtual Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() = 0;
@@ -63,12 +65,21 @@ public:
 		return Void();
 	}
 
-	virtual Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const = 0;
+	virtual Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const { return Void(); };
 
-	virtual Future<bool> isDataDistributionEnabled(const DDEnabledState* ddEnabledState) const = 0;
+	virtual Future<bool> isDataDistributionEnabled(const DDEnabledState* ddEnabledState) const {
+		return ddEnabledState->isDDEnabled();
+	};
 
-	virtual Future<Void> pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const = 0;
+	virtual Future<Void> pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const {
+		return Never();
+	};
 
+	// Remove the server from shardMapping and set serverKeysFalse to the server's serverKeys list.
+	// Changes to keyServer and serverKey must happen symmetrically in this function.
+	// If serverID is the last source server for a shard, the shard will be erased, and then be assigned
+	// to teamForDroppedRange.
+	// It's used by `exclude failed` command to bypass data movement from failed server.
 	virtual Future<Void> removeKeysFromFailedServer(const UID& serverID,
 	                                                const std::vector<UID>& teamForDroppedRange,
 	                                                const MoveKeysLock& lock,
@@ -78,7 +89,7 @@ public:
 	                                         const MoveKeysLock& lock,
 	                                         const DDEnabledState* ddEnabledState) const = 0;
 
-	virtual Future<Void> moveKeys(const MoveKeysParams& params) const = 0;
+	virtual Future<Void> moveKeys(const MoveKeysParams& params) = 0;
 
 	virtual Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
 	                                                                            StorageMetrics const& min,
@@ -153,7 +164,7 @@ public:
 		return ::removeStorageServer(cx, serverID, tssPairID, lock, ddEnabledState);
 	}
 
-	Future<Void> moveKeys(const MoveKeysParams& params) const override { return ::moveKeys(cx, params); }
+	Future<Void> moveKeys(const MoveKeysParams& params) override { return ::moveKeys(cx, params); }
 
 	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
 	                                                                    StorageMetrics const& min,
@@ -177,6 +188,58 @@ public:
 // A mock transaction implementation for test usage.
 // Contract: every function involving mock transaction should return immediately to mimic the ACI property of real
 // transaction.
-class DDMockTxnProcessor : public IDDTxnProcessor {};
+class DDMockTxnProcessor : public IDDTxnProcessor {
+	std::shared_ptr<MockGlobalState> mgs;
+
+	std::vector<DDShardInfo> getDDShardInfos() const;
+
+public:
+	explicit DDMockTxnProcessor(std::shared_ptr<MockGlobalState> mgs = nullptr) : mgs(std::move(mgs)){};
+
+	Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() override;
+
+	Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
+	    const UID& distributorId,
+	    const MoveKeysLock& moveKeysLock,
+	    const std::vector<Optional<Key>>& remoteDcIds,
+	    const DDEnabledState* ddEnabledState) override;
+
+	Future<Void> removeKeysFromFailedServer(const UID& serverID,
+	                                        const std::vector<UID>& teamForDroppedRange,
+	                                        const MoveKeysLock& lock,
+	                                        const DDEnabledState* ddEnabledState) const override;
+
+	Future<Void> removeStorageServer(const UID& serverID,
+	                                 const Optional<UID>& tssPairID,
+	                                 const MoveKeysLock& lock,
+	                                 const DDEnabledState* ddEnabledState) const override;
+
+	// test only
+	void setupMockGlobalState(Reference<InitialDataDistribution> initData);
+
+	Future<Void> moveKeys(const MoveKeysParams& params) override;
+
+	Database context() const override { UNREACHABLE(); };
+
+	bool isMocked() const override { return true; };
+
+	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
+	                                                                    StorageMetrics const& min,
+	                                                                    StorageMetrics const& max,
+	                                                                    StorageMetrics const& permittedError,
+	                                                                    int shardLimit,
+	                                                                    int expectedShardCount) const override;
+
+	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
+	                                                          StorageMetrics const& limit,
+	                                                          StorageMetrics const& estimated,
+	                                                          Optional<int> const& minSplitBytes = {}) const override;
+
+	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys) const override {
+		UNREACHABLE();
+	}
+
+	Future<HealthMetrics> getHealthMetrics(bool detailed = false) const override;
+};
 
 #endif // FOUNDATIONDB_DDTXNPROCESSOR_H

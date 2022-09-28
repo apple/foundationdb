@@ -30,13 +30,13 @@
 #include "fdbserver/TCInfo.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbserver/DDTxnProcessor.h"
+#include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include <boost/heap/policies.hpp>
 #include <boost/heap/skew_heap.hpp>
-
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 /////////////////////////////// Data //////////////////////////////////////
@@ -417,6 +417,7 @@ private:
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer
 struct DDShardInfo {
 	Key key;
+	// all UID are sorted
 	std::vector<UID> primarySrc;
 	std::vector<UID> remoteSrc;
 	std::vector<UID> primaryDest;

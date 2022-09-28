@@ -50,6 +50,7 @@
 #include "flow/FaultInjection.h"
 #include "flow/CodeProbeUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "fdbserver/SimulatedCluster.h"
 
 #undef max
 #undef min
@@ -103,7 +104,7 @@ bool destructed = false;
 
 // Configuration details specified in workload test files that change the simulation
 // environment details
-class TestConfig {
+class TestConfig : public BasicTestConfig {
 	class ConfigBuilder {
 		using value_type = toml::basic_value<toml::discard_comments>;
 		using base_variant = std::variant<int, float, double, bool, std::string, std::vector<int>, ConfigDBType>;
@@ -326,6 +327,7 @@ class TestConfig {
 	ConfigDBType configDBType{ ConfigDBType::DISABLED };
 
 public:
+	int extraDB = 0;
 	ISimulator::ExtraDatabaseMode extraDatabaseMode = ISimulator::ExtraDatabaseMode::Disabled;
 	// The number of extra database used if the database mode is MULTIPLE
 	int extraDatabaseCount = 1;
@@ -333,7 +335,6 @@ public:
 	int minimumRegions = 0;
 	bool configureLocked = false;
 	bool startIncompatibleProcess = false;
-	int logAntiQuorum = -1;
 	bool isFirstTestInRestart = false;
 	// 7.0 cannot be downgraded to 6.3 after enabling TSS, so disable TSS for 6.3 downgrade tests
 	bool disableTss = false;
@@ -352,17 +353,15 @@ public:
 	//	5 = "ssd-sharded-rocksdb"
 	// Requires a comma-separated list of numbers WITHOUT whitespaces
 	std::vector<int> storageEngineExcludeTypes;
+	Optional<int> datacenters, stderrSeverity, processesPerMachine;
 	// Set the maximum TLog version that can be selected for a test
 	// Refer to FDBTypes.h::TLogVersion. Defaults to the maximum supported version.
 	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
-	// Set true to simplify simulation configs for easier debugging
-	bool simpleConfig = false;
 	int extraMachineCountDC = 0;
+
 	Optional<bool> generateFearless, buggify;
-	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
-	    stderrSeverity, machineCount, processesPerMachine, coordinators;
-	bool blobGranulesEnabled = false;
 	Optional<std::string> config;
+	bool blobGranulesEnabled = false;
 	bool randomlyRenameZoneId = false;
 
 	bool allowDefaultTenant = true;
@@ -474,6 +473,9 @@ public:
 			}
 		}
 	}
+
+	TestConfig() = default;
+	TestConfig(const BasicTestConfig& config) : BasicTestConfig(config) {}
 };
 
 template <class T>
@@ -1874,7 +1876,9 @@ void SimulationConfig::setTss(const TestConfig& testConfig) {
 }
 
 void setConfigDB(TestConfig const& testConfig) {
-	g_simulator->configDBType = testConfig.getConfigDBType();
+	if (g_simulator) {
+		g_simulator->configDBType = testConfig.getConfigDBType();
+	}
 }
 
 // Generates and sets an appropriate configuration for the database according to
@@ -2599,4 +2603,10 @@ ACTOR void setupAndRun(std::string dataFolder,
 	destructed = true;
 	wait(Never());
 	ASSERT(false);
+}
+
+DatabaseConfiguration generateNormalDatabaseConfiguration(const BasicTestConfig& testConfig) {
+	TestConfig config(testConfig);
+	SimulationConfig simConf(config);
+	return simConf.db;
 }

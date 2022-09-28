@@ -26,6 +26,7 @@
 #include "fdbserver/DDSharedContext.h"
 #include "fdbserver/TenantCache.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/workloads/workloads.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
@@ -77,10 +78,12 @@ ACTOR Future<Void> updateMaxShardSize(Reference<AsyncVar<int64_t>> dbSizeEstimat
 struct DataDistributionTracker : public IDDShardTracker {
 	Reference<IDDTxnProcessor> db;
 	UID distributorId;
-	KeyRangeMap<ShardTrackedData>* shards;
+
+	// At now, the lifetime of shards is guaranteed longer than DataDistributionTracker.
+	KeyRangeMap<ShardTrackedData>* shards = nullptr;
 	ActorCollection sizeChanges;
 
-	int64_t systemSizeEstimate;
+	int64_t systemSizeEstimate = 0;
 	Reference<AsyncVar<int64_t>> dbSizeEstimate;
 	Reference<AsyncVar<Optional<int64_t>>> maxShardSize;
 	Future<Void> maxShardSizeUpdater;
@@ -101,7 +104,7 @@ struct DataDistributionTracker : public IDDShardTracker {
 	// The reference to trackerCancelled must be extracted by actors,
 	// because by the time (trackerCancelled == true) this memory cannot
 	// be accessed
-	bool* trackerCancelled;
+	bool* trackerCancelled = nullptr;
 
 	// This class extracts the trackerCancelled reference from a DataDistributionTracker object
 	// Because some actors spawned by the dataDistributionTracker outlive the DataDistributionTracker
@@ -128,6 +131,8 @@ struct DataDistributionTracker : public IDDShardTracker {
 
 	Optional<Reference<TenantCache>> ddTenantCache;
 
+	DataDistributionTracker() = default;
+
 	DataDistributionTracker(Reference<IDDTxnProcessor> db,
 	                        UID distributorId,
 	                        Promise<Void> const& readyToStart,
@@ -145,7 +150,9 @@ struct DataDistributionTracker : public IDDShardTracker {
 	    anyZeroHealthyTeams(anyZeroHealthyTeams), trackerCancelled(trackerCancelled), ddTenantCache(ddTenantCache) {}
 
 	~DataDistributionTracker() override {
-		*trackerCancelled = true;
+		if (trackerCancelled) {
+			*trackerCancelled = true;
+		}
 		// Cancel all actors so they aren't waiting on sizeChanged broken promise
 		sizeChanges.clear(false);
 	}
@@ -1301,8 +1308,8 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 		loop {
 			onChange = Future<Void>();
 			returnMetrics.clear();
-			state int64_t minReadLoad = std::numeric_limits<int64_t>::max();
-			state int64_t maxReadLoad = std::numeric_limits<int64_t>::min();
+			state int64_t minReadLoad = -1;
+			state int64_t maxReadLoad = -1;
 			state int i;
 			for (i = 0; i < SERVER_KNOBS->DD_SHARD_COMPARE_LIMIT && i < req.keys.size(); ++i) {
 				auto range = req.keys[i];
@@ -1322,7 +1329,11 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 				}
 
 				if (metrics.bytesReadPerKSecond > 0) {
-					minReadLoad = std::min(metrics.bytesReadPerKSecond, minReadLoad);
+					if (minReadLoad == -1) {
+						minReadLoad = metrics.bytesReadPerKSecond;
+					} else {
+						minReadLoad = std::min(metrics.bytesReadPerKSecond, minReadLoad);
+					}
 					maxReadLoad = std::max(metrics.bytesReadPerKSecond, maxReadLoad);
 					if (req.minBytesReadPerKSecond <= metrics.bytesReadPerKSecond &&
 					    metrics.bytesReadPerKSecond <= req.maxBytesReadPerKSecond) {
@@ -1360,7 +1371,9 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 
 ACTOR Future<Void> fetchTopKShardMetrics(DataDistributionTracker* self, GetTopKMetricsRequest req) {
 	choose {
-		when(wait(fetchTopKShardMetrics_impl(self, req))) {}
+		// simulate time_out
+		when(wait(g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01) ? Never()
+		                                                              : fetchTopKShardMetrics_impl(self, req))) {}
 		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) {
 			CODE_PROBE(true, "TopK DD_SHARD_METRICS_TIMEOUT");
 			req.reply.send(GetTopKMetricsReply());
@@ -2066,4 +2079,25 @@ void PhysicalShardCollection::logPhysicalShardCollection() {
 		e.detail("MaxPhysicalShard", std::to_string(maxPhysicalShardID) + ":" + std::to_string(maxPhysicalShardBytes));
 		e.detail("MinPhysicalShard", std::to_string(minPhysicalShardID) + ":" + std::to_string(minPhysicalShardBytes));
 	}
+}
+
+// FIXME: complete this test with non-empty range
+TEST_CASE("/DataDistributor/Tracker/FetchTopK") {
+	state DataDistributionTracker self;
+	state std::vector<KeyRange> ranges;
+	// for (int i = 1; i <= 10; i += 2) {
+	//     ranges.emplace_back(KeyRangeRef(doubleToTestKey(i), doubleToTestKey(i + 2)));
+	//     std::cout << "add range: " << ranges.back().begin.toString() << "\n";
+	// }
+	state GetTopKMetricsRequest req(ranges, 3, 1000, 100000);
+
+	// double targetDensities[10] = { 2, 1, 3, 5, 4, 10, 6, 8, 7, 0 };
+
+	wait(fetchTopKShardMetrics(&self, req));
+	auto& reply = req.reply.getFuture().get();
+	ASSERT(reply.shardMetrics.empty());
+	ASSERT(reply.maxReadLoad == -1);
+	ASSERT(reply.minReadLoad == -1);
+
+	return Void();
 }
