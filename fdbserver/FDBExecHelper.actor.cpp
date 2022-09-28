@@ -188,7 +188,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 			}
 		}
 		if (role == "flowprocess" && !parentShutdown.isReady()) {
-			self->childs.push_back(child);
+			self->children.push_back(child);
 			state Future<Void> parentSSClosed = parent->onClosed();
 			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
 			FlowTransport::transport().bind(child->address, child->address);

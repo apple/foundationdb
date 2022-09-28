@@ -106,6 +106,8 @@ public:
 		bool rebooting;
 		std::vector<flowGlobalType> globals;
 
+		uint8_t buggifyDelayCount = 0;
+
 		INetworkConnections* network;
 
 		uint64_t fault_injection_r;
@@ -117,7 +119,7 @@ public:
 		ProtocolVersion protocolVersion;
 		bool excludeFromRestarts = false;
 
-		std::vector<ProcessInfo*> childs;
+		std::vector<ProcessInfo*> children;
 
 		ProcessInfo(const char* name,
 		            LocalityData locality,
@@ -153,7 +155,7 @@ public:
 			   << " fault_injection_p2:" << fault_injection_p2;
 			return ss.str();
 		}
-		std::vector<ProcessInfo*> const& getChilds() const { return childs; }
+		std::vector<ProcessInfo*> const& getChildren() const { return children; }
 
 		// Return true if the class type is suitable for stateful roles, such as tLog and StorageServer.
 		bool isAvailableClass() const {
@@ -200,6 +202,7 @@ public:
 				return false;
 			}
 		}
+		bool isMachineProcess() const { return name == "Machine"; }
 
 		Reference<IListener> getListener(const NetworkAddress& addr) const {
 			auto listener = listenerMap.find(addr);
@@ -287,6 +290,7 @@ public:
 	virtual void killProcess(ProcessInfo* machine, KillType) = 0;
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses) = 0;
 	virtual void rebootProcess(ProcessInfo* process, KillType kt) = 0;
+	virtual void delayProcess(ProcessInfo* process) = 0;
 	virtual void killInterface(NetworkAddress address, KillType) = 0;
 	virtual bool killMachine(Optional<Standalone<StringRef>> machineId,
 	                         KillType kt,
