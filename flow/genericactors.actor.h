@@ -32,10 +32,12 @@
 #include <list>
 #include <utility>
 
-#include "flow/flow.h"
+#include "flow/Histogram.h"
+#include "flow/IndexedSet.h"
 #include "flow/Knobs.h"
 #include "flow/Util.h"
-#include "flow/IndexedSet.h"
+#include "flow/flow.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #ifdef _MSC_VER
@@ -1207,6 +1209,18 @@ Future<T> brokenPromiseToMaybeDelivered(Future<T> in) {
 		}
 		throw;
 	}
+}
+
+ACTOR template <class T, class U>
+void tagAndForward(Promise<T>* pOutputPromise,
+                   U value,
+                   Future<Void> signal,
+                   double startTime,
+                   Reference<Histogram> latencyHistogram) {
+	state Promise<T> out(std::move(*pOutputPromise));
+	wait(signal);
+	latencyHistogram->sampleSeconds(timer_monotonic() - startTime);
+	out.send(std::move(value));
 }
 
 ACTOR template <class T, class U>

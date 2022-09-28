@@ -25,6 +25,7 @@
 #include <string_view>
 
 #include "flow/flow.h"
+#include "flow/Histogram.h"
 
 // The IThreadPool interface represents a thread pool suitable for doing blocking disk-intensive work
 // (as opposed to a one-thread-per-core pool for CPU-intensive work)
@@ -82,7 +83,10 @@ public:
 template <class T>
 class ThreadReturnPromise : NonCopyable {
 public:
-	ThreadReturnPromise() {}
+	ThreadReturnPromise() : priority(TaskPriority::DefaultOnMainThread) {}
+	ThreadReturnPromise(TaskPriority priority) : priority(priority) {}
+	ThreadReturnPromise(TaskPriority priority, Reference<Histogram> latencyHistogram)
+	  : priority(priority), latencyHistogram(latencyHistogram) {}
 	~ThreadReturnPromise() {
 		if (promise.isValid())
 			sendError(broken_promise());
@@ -95,22 +99,28 @@ public:
 	template <class U>
 	void send(U&& t) { // Can be called safely from another thread.  Call send or sendError at most once.
 		Promise<Void> signal;
-		tagAndForward(&promise, t, signal.getFuture());
+		if (latencyHistogram.isValid()) {
+			tagAndForward(&promise, t, signal.getFuture(), timer_monotonic(), latencyHistogram);
+		} else {
+			tagAndForward(&promise, t, signal.getFuture());
+		}
 		g_network->onMainThread(std::move(signal),
 		                        g_network->isOnMainThread() ? incrementPriorityIfEven(g_network->getCurrentTask())
-		                                                    : TaskPriority::DefaultOnMainThread);
+		                                                    : this->priority);
 	}
 	void sendError(Error e) { // Can be called safely from another thread.  Call send or sendError at most once.
 		Promise<Void> signal;
 		tagAndForwardError(&promise, e, signal.getFuture());
 		g_network->onMainThread(std::move(signal),
 		                        g_network->isOnMainThread() ? incrementPriorityIfEven(g_network->getCurrentTask())
-		                                                    : TaskPriority::DefaultOnMainThread);
+		                                                    : this->priority);
 	}
 	bool isValid() { return promise.isValid(); }
 
 private:
 	Promise<T> promise;
+	TaskPriority priority;
+	Reference<Histogram> latencyHistogram;
 };
 
 template <class T>
