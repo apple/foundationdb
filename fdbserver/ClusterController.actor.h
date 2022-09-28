@@ -2903,9 +2903,14 @@ public:
 		for (int i = 0; i < req.degradedPeers.size(); ++i) {
 			degradedPeersString += (i == 0 ? "" : " ") + req.degradedPeers[i].toString();
 		}
+		std::string disconnectedPeersString;
+		for (int i = 0; i < req.disconnectedPeers.size(); ++i) {
+			disconnectedPeersString += (i == 0 ? "" : " ") + req.disconnectedPeers[i].toString();
+		}
 		TraceEvent("ClusterControllerUpdateWorkerHealth")
 		    .detail("WorkerAddress", req.address)
-		    .detail("DegradedPeers", degradedPeersString);
+		    .detail("DegradedPeers", degradedPeersString)
+		    .detail("DisconnectedPeers", disconnectedPeersString);
 
 		double currentTime = now();
 
@@ -2914,6 +2919,11 @@ public:
 		if (workerHealth.find(req.address) == workerHealth.end()) {
 			workerHealth[req.address] = {};
 			for (const auto& degradedPeer : req.degradedPeers) {
+				workerHealth[req.address].degradedPeers[degradedPeer] = { currentTime, currentTime };
+			}
+
+			// TODO(zhewu): add disconnected peers in worker health.
+			for (const auto& degradedPeer : req.disconnectedPeers) {
 				workerHealth[req.address].degradedPeers[degradedPeer] = { currentTime, currentTime };
 			}
 
