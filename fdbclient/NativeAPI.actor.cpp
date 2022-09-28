@@ -45,6 +45,7 @@
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ClusterConnectionFile.h"
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
@@ -2304,6 +2305,13 @@ Database Database::createDatabase(std::string connFileName,
                                   LocalityData const& clientLocality) {
 	Reference<IClusterConnectionRecord> rccr = ClusterConnectionFile::openOrDefault(connFileName);
 	return Database::createDatabase(rccr, apiVersion, internal, clientLocality);
+}
+
+Database Database::createSimulatedExtraDatabase(std::string connectionString, Optional<TenantName> defaultTenant) {
+	auto extraFile = makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(connectionString));
+	Database db = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
+	db->defaultTenant = defaultTenant;
+	return db;
 }
 
 Reference<WatchMetadata> DatabaseContext::getWatchMetadata(int64_t tenantId, KeyRef key) const {

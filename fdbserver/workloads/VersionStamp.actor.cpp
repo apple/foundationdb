@@ -157,9 +157,7 @@ struct VersionStampWorkload : TestWorkload {
 	ACTOR Future<bool> _check(Database cx, VersionStampWorkload* self) {
 		if (self->validateExtraDB) {
 			ASSERT(g_simulator->extraDatabases.size() == 1);
-			auto extraFile =
-			    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator->extraDatabases[0]));
-			cx = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
+			cx = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], cx->defaultTenant);
 		}
 		state ReadYourWritesTransaction tr(cx);
 		// We specifically wish to grab the smalles read version that we can get and maintain it, to
@@ -317,9 +315,7 @@ struct VersionStampWorkload : TestWorkload {
 
 		if (!g_simulator->extraDatabases.empty()) {
 			ASSERT(g_simulator->extraDatabases.size() == 1);
-			auto extraFile =
-			    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator->extraDatabases[0]));
-			extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
+			extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], cx->defaultTenant);
 		}
 
 		state Future<Void> metadataWatch = Void();
