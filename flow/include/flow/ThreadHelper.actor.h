@@ -382,13 +382,6 @@ public:
 	// Like trySendError, except that it is assumed the assignment var is not already set.
 	void sendError(const Error& err) { ASSERT(trySendError(err)); }
 
-	ThreadCallback* getCallback() {
-		this->mutex.enter();
-		ThreadCallback* cb = callback;
-		this->mutex.leave();
-		return cb;
-	}
-
 	SetCallbackResult::Result callOrSetAsCallback(ThreadCallback* callback, int& userParam1, int notMadeActive) {
 		this->mutex.enter();
 		if (isReadyUnsafe()) {
