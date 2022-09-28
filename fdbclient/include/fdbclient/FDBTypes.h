@@ -1463,19 +1463,6 @@ typedef Standalone<ClusterNameRef> ClusterName;
 
 enum class ClusterType { STANDALONE, METACLUSTER_MANAGEMENT, METACLUSTER_DATA };
 
-// std::string getClusterType(const ClusterType& clusterType) {
-// 	switch (clusterType) {
-// 	case ClusterType::STANDALONE:
-// 		return "standalone";
-// 	case ClusterType::METACLUSTER_MANAGEMENT:
-// 		return "metacluster_management";
-// 	case ClusterType::METACLUSTER_DATA:
-// 		return "metacluster_data";
-// 	default:
-// 		return "unknown";
-// 	}
-// }
-
 struct GRVCacheSpace {
 	Version cachedReadVersion;
 	double lastGrvTime;

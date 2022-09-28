@@ -44,6 +44,7 @@
 #include "fdbserver/ClusterRecovery.actor.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/DBCoreState.h"
+#include "fdbclient/Metacluster.h"
 #include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/LeaderElection.h"
@@ -1499,7 +1500,9 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			                                                                  coordinators,
 			                                                                  incompatibleConnections,
 			                                                                  self->datacenterVersionDifference,
-			                                                                  configBroadcaster)));
+			                                                                  configBroadcaster,
+			                                                                  self->db.metaclusterRegistration,
+			                                                                  self->db.metaclusterMetrics)));
 
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
@@ -2686,17 +2689,45 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 ACTOR Future<Void> metaclusterMetricsUpdater(ClusterControllerData* self) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	loop {
-		try {
-			std::map<ClusterName, DataClusterMetadata> clusters =
-			    wait(MetaclusterAPI::listClustersTransaction(tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
-
-			auto capacityNumbers = MetaclusterAPI::metaclusterCapacity(clusters);
-			TraceEvent("MetaclusterCapacity")
-			    .detail("DataClusters", clusters.size())
-			    .detail("TotalCapacity", capacityNumbers.first.numTenantGroups)
-			    .detail("AllocatedCapacity", capacityNumbers.second.numTenantGroups);
-		} catch (Error& e) {
-			wait(tr->onError(e));
+		if (self->db.clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
+			try {
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				state std::map<ClusterName, DataClusterMetadata> clusters =
+				    // wait(MetaclusterAPI::listClustersTransaction(tr, ""_sr, "\xff"_sr,
+				    // CLIENT_KNOBS->MAX_DATA_CLUSTERS));
+				    wait(MetaclusterAPI::listClusters(
+				        self->cx.getReference(), ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
+				state int64_t tenantCount =
+				    wait(MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantCount.getD(
+				        tr, Snapshot::False, 0));
+				state std::pair<ClusterUsage, ClusterUsage> capacityNumbers =
+				    MetaclusterAPI::metaclusterCapacity(clusters);
+				// TraceEvent("MetaclusterCapacityDebugTr")
+				// 	.detail("DataClusters", clusters.size())
+				// 	.detail("TenantGroupCapacity", capacityNumbers.first.numTenantGroups)
+				// 	.detail("TenantGroupsAllocated", capacityNumbers.second.numTenantGroups);
+				// state std::map<ClusterName, DataClusterMetadata> clusters2 =
+				// 	wait(MetaclusterAPI::listClusters(self->cx.getReference(), ""_sr, "\xff"_sr,
+				// CLIENT_KNOBS->MAX_DATA_CLUSTERS)); state std::pair<ClusterUsage, ClusterUsage> capacityNumbers2 =
+				// MetaclusterAPI::metaclusterCapacity(clusters2); TraceEvent("MetaclusterCapacityDebugDb")
+				// 	.detail("DataClusters", clusters2.size())
+				// 	.detail("TenantGroupCapacity", capacityNumbers2.first.numTenantGroups)
+				// 	.detail("TenantGroupsAllocated", capacityNumbers2.second.numTenantGroups);
+				MetaclusterMetrics metrics;
+				metrics.numTenants = tenantCount;
+				metrics.numDataClusters = clusters.size();
+				metrics.tenantGroupCapacity = capacityNumbers.first.numTenantGroups;
+				metrics.tenantGroupsAllocated = capacityNumbers.second.numTenantGroups;
+				self->db.metaclusterMetrics = metrics;
+				TraceEvent("MetaclusterCapacity")
+				    .detail("DataClusters", self->db.metaclusterMetrics.numDataClusters)
+				    .detail("TenantGroupCapacity", self->db.metaclusterMetrics.tenantGroupCapacity)
+				    .detail("TenantGroupsAllocated", self->db.metaclusterMetrics.tenantGroupsAllocated);
+			} catch (Error& e) {
+				TraceEvent("MetaclusterUpdaterError").error(e);
+				wait(tr->onError(e));
+				continue;
+			}
 		}
 		// Background updater updates every minute
 		wait(delay(60.0));
