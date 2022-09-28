@@ -14,5 +14,6 @@ class ZLIB(ConfigureMake):
             name='ZLIB',
             version_str='1.2.12',
             url='https://zlib.net/zlib-1.2.12.tar.gz',
-            checksum='173e89893dcb8b4a150d7731cd72f0602f1d6b45e60e2a54efdf7f3fc3325fd7'
+            checksum='91844808532e5ce316b3c010929493c0244f3d37593afd6de04f71821d5136d9',
+            hash_function='sha256'
         ), additional_configure_args=['--static'])

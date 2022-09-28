@@ -39,8 +39,41 @@ class FetchSource:
     def version_string(self):
         return self.version_str
 
-    def get_source(self) -> Path:
+    def get_source_impl(self) -> Path:
         raise NotImplementedError()
+
+    def get_source(self) -> Path:
+        pathfile = self.source_folders / '{}-{}.cpackman'.format(self.name, self.version_str)
+        if pathfile.exists():
+            with open(pathfile, 'r') as f:
+                data = f.read().rstrip()
+                return Path(data)
+        else:
+            res = self.get_source_impl().absolute()
+            data = str(res)
+            with open(pathfile, 'w') as f:
+                print(data, file=f, end='')
+            return res
+
+
+class GitSource(FetchSource):
+    def __init__(self, name: str, version_str: str, url: str, git_hash: str, init_submodules: bool = False):
+        super().__init__(name, version_str)
+        self.url = url
+        self.git_hash = git_hash
+        self.init_submodules = init_submodules
+
+    def get_source_impl(self) -> Path:
+        folder_name = '{}-{}'.format(self.name, self.version_str)
+        res = self.source_folders / folder_name
+        clone_cmd = ['git', 'clone', self.url, folder_name]
+        run_command(clone_cmd, cwd=self.source_folders)
+        checkout_cmd = ['git', 'checkout', self.git_hash]
+        run_command(checkout_cmd, cwd=res)
+        if self.init_submodules:
+            init_submodules_cmd = ['git', 'submodule', 'update', '--init', '--recursive']
+            run_command(init_submodules_cmd, cwd=res)
+        return res
 
 
 class HTTPSource(FetchSource):
@@ -98,7 +131,7 @@ class HTTPSource(FetchSource):
         assert res is not None
         return res
 
-    def get_source(self) -> Path:
+    def get_source_impl(self) -> Path:
         if not self.get_filepath().exists():
             self.fetch()
         return self.unpack()
@@ -215,7 +248,7 @@ class CMakeBuild(Build):
 
     def print_target(self, out: TextIO):
         print('set({}_ROOT "{}")'.format(self.fetch_source.name, self.install().absolute()), file=out)
-        print('find_package({} REQUIRED CONFIG BYPASS_PROVIDER)'.format(self.fetch_source.name), file=out)
+        print('find_package({} CONFIG BYPASS_PROVIDER)'.format(self.fetch_source.name), file=out)
 
 
 class ConfigureMake(Build):

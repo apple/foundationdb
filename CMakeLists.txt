@@ -182,6 +182,7 @@ find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem iostreams CO
 add_library(boost_target INTERFACE)
 target_link_libraries(boost_target INTERFACE Boost::context Boost::filesystem Boost::iostreams)
 find_package(msgpack REQUIRED)
+find_package(AWSSDK REQUIRED)
 add_subdirectory(contrib)
 add_subdirectory(flow)
 add_subdirectory(fdbrpc)
