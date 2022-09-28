@@ -1,4 +1,4 @@
-from typing import TextIO
+from typing import TextIO, List
 
 from cpackman.pellets import ConfigureMake, HTTPSource
 
@@ -17,3 +17,7 @@ class ZLIB(ConfigureMake):
             checksum='91844808532e5ce316b3c010929493c0244f3d37593afd6de04f71821d5136d9',
             hash_function='sha256'
         ), additional_configure_args=['--static'])
+
+
+def provide_module(out: TextIO, args: List[str]):
+    ZLIB().print_target(out)

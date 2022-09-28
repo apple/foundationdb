@@ -7,11 +7,7 @@ else()
 endif()
 
 if(WITH_ROCKSDB_EXPERIMENTAL)
-  include(CompileRocksDB)
-  # CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
-  # statically, so find the static library here.
-  find_library(lz4_STATIC_LIBRARIES
-    NAMES liblz4.a REQUIRED)
+  find_package(RocksDB REQUIRED)
   if(WITH_LIBURING)
     find_package(uring)
   endif()
