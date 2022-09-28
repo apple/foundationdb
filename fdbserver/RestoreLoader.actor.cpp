@@ -819,7 +819,7 @@ void buildApplierRangeMap(KeyRangeMap<UID>* krMap, std::map<Key, UID>* pRangeToA
 		endKey++;
 	}
 	if (beginKey != pRangeToApplier->end()) {
-		krMap->insert(KeyRangeRef(beginKey->first, normalKeys.end), beginKey->second);
+		krMap->insert(KeyRangeRef(beginKey->first, allKeys.end), beginKey->second);
 	}
 }
 
@@ -1507,7 +1507,7 @@ void oldSplitMutation(std::map<Key, UID>* pRangeToApplier,
 		itApplier = itlow;
 		itlow++;
 		if (itlow == itup) {
-			ASSERT(m.param2 <= normalKeys.end);
+			ASSERT(m.param2 <= allKeys.end);
 			curm.param2 = m.param2;
 		} else if (m.param2 < itlow->first) {
 			UNREACHABLE();
@@ -1532,7 +1532,7 @@ TEST_CASE("/FastRestore/RestoreLoader/splitMutation") {
 	Standalone<VectorRef<UID>> nodeIDs;
 
 	// Prepare RangeToApplier
-	rangeToApplier.emplace(normalKeys.begin, deterministicRandom()->randomUniqueID());
+	rangeToApplier.emplace(allKeys.begin, deterministicRandom()->randomUniqueID());
 	int numAppliers = deterministicRandom()->randomInt(1, 50);
 	for (int i = 0; i < numAppliers; ++i) {
 		Key k = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 1000)));

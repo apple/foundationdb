@@ -145,9 +145,10 @@ struct IncrementalBackupWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> _start(Database cx, IncrementalBackupWorkload* self) {
+		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
+		addDefaultBackupRanges(backupRanges);
+
 		if (self->submitOnly) {
-			Standalone<VectorRef<KeyRangeRef>> backupRanges;
-			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 			TraceEvent("IBackupSubmitAttempt").log();
 			try {
 				wait(self->backupAgent.submitBackup(cx,
@@ -231,10 +232,10 @@ struct IncrementalBackupWorkload : TestWorkload {
 			                                       Key(self->tag.toString()),
 			                                       backupURL,
 			                                       {},
+			                                       backupRanges,
 			                                       WaitForComplete::True,
 			                                       invalidVersion,
 			                                       Verbose::True,
-			                                       normalKeys,
 			                                       Key(),
 			                                       Key(),
 			                                       LockDB::True,
