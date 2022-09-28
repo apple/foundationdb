@@ -181,7 +181,7 @@ find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem iostreams CO
 # this is a hack -- we should remove this and instead link against the proper targets directly
 add_library(boost_target INTERFACE)
 target_link_libraries(boost_target INTERFACE Boost::context Boost::filesystem Boost::iostreams)
-include(GetMsgpack)
+find_package(msgpack REQUIRED)
 add_subdirectory(contrib)
 add_subdirectory(flow)
 add_subdirectory(fdbrpc)
