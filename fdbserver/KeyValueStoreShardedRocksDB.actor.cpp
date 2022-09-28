@@ -1158,7 +1158,6 @@ private:
 	// Statistic Output from RocksDB
 	std::vector<std::tuple<const char*, uint32_t, uint64_t>> tickerStats;
 	std::vector<std::pair<const char*, std::string>> intPropertyStats;
-	std::vector<std::pair<const char*, std::string>> strPropertyStats;
 	// Iterator Pool Stats
 	std::unordered_map<std::string, uint64_t> readIteratorPoolStats;
 	// PerfContext
@@ -1306,11 +1305,6 @@ RocksDBMetrics::RocksDBMetrics(UID debugID, std::shared_ptr<rocksdb::Statistics>
 		{ "BlockCacheUsage", rocksdb::DB::Properties::kBlockCacheUsage },
 		{ "BlockCachePinnedUsage", rocksdb::DB::Properties::kBlockCachePinnedUsage },
 		{ "LiveSstFilesSize", rocksdb::DB::Properties::kLiveSstFilesSize },
-	};
-
-	strPropertyStats = {
-		{ "LevelStats", rocksdb::DB::Properties::kLevelStats },
-		{ "CompressionRatioAtLevel", rocksdb::DB::Properties::kCompressionRatioAtLevelPrefix },
 	};
 
 	perfContextMetrics = {
