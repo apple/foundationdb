@@ -597,10 +597,8 @@ Future<Void> enableAuto(Reference<DB> db, bool enabled) {
 
 class TagQuotaValue {
 public:
-	double reservedReadQuota{ 0.0 };
-	double totalReadQuota{ 0.0 };
-	double reservedWriteQuota{ 0.0 };
-	double totalWriteQuota{ 0.0 };
+	double reservedQuota{ 0.0 };
+	double totalQuota{ 0.0 };
 	bool isValid() const;
 	Value toValue() const;
 	static TagQuotaValue fromValue(ValueRef);
@@ -609,17 +607,10 @@ public:
 Key getTagQuotaKey(TransactionTagRef);
 
 template <class Tr>
-void setTagQuota(Reference<Tr> tr,
-                 TransactionTagRef tag,
-                 double reservedReadQuota,
-                 double totalReadQuota,
-                 double reservedWriteQuota,
-                 double totalWriteQuota) {
+void setTagQuota(Reference<Tr> tr, TransactionTagRef tag, double reservedQuota, double totalQuota) {
 	TagQuotaValue tagQuotaValue;
-	tagQuotaValue.reservedReadQuota = reservedReadQuota;
-	tagQuotaValue.totalReadQuota = totalReadQuota;
-	tagQuotaValue.reservedWriteQuota = reservedWriteQuota;
-	tagQuotaValue.totalWriteQuota = totalWriteQuota;
+	tagQuotaValue.reservedQuota = reservedQuota;
+	tagQuotaValue.totalQuota = totalQuota;
 	if (!tagQuotaValue.isValid()) {
 		throw invalid_throttle_quota_value();
 	}
