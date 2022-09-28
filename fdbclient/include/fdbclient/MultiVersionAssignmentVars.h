@@ -48,14 +48,6 @@ public:
 		}
 	}
 
-	~AbortableSingleAssignmentVar() {
-		ASSERT_ABORT(future.isValid());
-		ASSERT_ABORT(abortSignal.isValid());
-		ASSERT_ABORT(callbacksCleared);
-		ASSERT_ABORT(future.getPtr()->getCallback() != this);
-		ASSERT_ABORT(abortSignal.getPtr()->getCallback() != this);
-	}
-
 	void cancel() override {
 		cancelCallbacks();
 		ThreadSingleAssignmentVar<T>::cancel();
