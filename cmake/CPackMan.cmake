@@ -1,4 +1,7 @@
-set(CPACKMAN_BINARY_DIR "${CMAKE_BINARY_DIR}")
+# we don't support Windows yet
+if(NOT WIN32)
+  set(CPACKMAN_BINARY_DIR "${CMAKE_BINARY_DIR}")
+endif()
 
 macro(cpackman_provide_dependency)
   if(NOT "${ARGV0}" STREQUAL "FIND_PACKAGE")
@@ -33,6 +36,7 @@ macro(cpackman_provide_dependency)
       USE_TSAN=${USE_ASAN}
       USE_MSAN=${USE_ASAN}
       USE_UBSAN=${USE_ASAN}
+      WITH_LIBURING=${WITH_LIBURING}
       --
       "${Python3_EXECUTABLE}" -m cpackman ${ARGV}
     WORKING_DIRECTORY "${CPACKMAN_BINARY_DIR}"

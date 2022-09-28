@@ -221,6 +221,12 @@ class CMakeBuild(Build):
         m = hashlib.sha1()
         m.update(super().build_id().encode())
         m.update(self.cmake_version.encode())
+        m.update(self.cmake_command.encode())
+        m.update(self.build_type.encode())
+        if self.cmake_files_dir is not None:
+            m.update(str(self.cmake_files_dir.absolute()).encode())
+        for k, v in self.cmake_vars.items():
+            m.update('-D{}={}'.format(k, v).encode())
         return m.hexdigest()
 
     def run_configure(self) -> None:

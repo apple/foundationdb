@@ -12,12 +12,15 @@ class CurlBuild(CMakeBuild):
         self.zlib = ZLIB()
         openssl = str(self.openssl.install().absolute())
         zlib = str(self.zlib.install().absolute())
+        cmake_vars = {'OpenSSL_ROOT': openssl,
+                      'ZLIB_ROOT': zlib,
+                      'BUILD_SHARED_LIBS': 'OFF'}
         super().__init__(HTTPSource(
             name='CURL',
             version_str='7.85.0',
             url='https://curl.se/download/curl-7.85.0.tar.bz2',
             checksum='21a7e83628ee96164ac2b36ff6bf99d467c7b0b621c1f7e317d8f0d96011539c',
-            hash_function='sha256'), cmake_vars={'OpenSSL_ROOT': openssl, 'ZLIB_ROOT': zlib})
+            hash_function='sha256'), cmake_vars=cmake_vars)
 
     def build_id(self) -> str:
         m = hashlib.sha1()
