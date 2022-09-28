@@ -49,6 +49,7 @@ public actor MasterDataActor {
         // wait(lastVersionReplies.latestRequestNum.whenAtLeast(req.requestNum - 1))
         let latestRequestNumFuture = lastVersionReplies.getLatestRequestNumRef()
                 .whenAtLeast(VersionMetricHandle.ValueType(req.requestNum - UInt64(1)))
+        let x = try! await latestRequestNumFuture.HELLO()
         let latestRequestNum = try! await latestRequestNumFuture.waitValue
 
         if lastVersionReplies.replies.count(UInt(req.requestNum)) != 0 {

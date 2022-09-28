@@ -40,34 +40,36 @@ using CallbackVoid = Callback<Void>;
 // ==== ----------------------------------------------------------------------------------------------------------------
 // MARK: Callback types
 
-struct SWIFT_CXX_REF_IMMORTAL CCResumeCInt {
-	void* cc;
-	void (*resumeWithValue)(void*, int);
-
-	explicit CCResumeCInt(void* cc, void (*resumeWithValue)(void*, int)) : cc(cc), resumeWithValue(resumeWithValue) {}
-
-	void resume(int value) { resumeWithValue(this->cc, value); }
-};
+//struct SWIFT_CXX_REF_IMMORTAL CCResumeCInt {
+//	void* cc;
+//	void (*resumeWithValue)(void*, int);
+//
+//	explicit CCResumeCInt(void* cc, void (*resumeWithValue)(void*, int)) : cc(cc), resumeWithValue(resumeWithValue) {}
+//
+//	void resume(int value) { resumeWithValue(this->cc, value); }
+//};
 
 struct SWIFT_CXX_REF_IMMORTAL SwiftContinuationCallbackCInt : Callback<int> {
 private:
-	void* continuationBox;
-	void (*resumeWithValue)(void* _Nonnull /*context*/, /*value*/ int);
-	void (*resumeWithError)(void* _Nonnull /*context*/, /*value*/ Error);
+	void* _Nonnull continuationBox;
+	void (*_Nonnull resumeWithValue)(void* _Nonnull /*context*/, /*value*/ int);
+	void (*_Nonnull resumeWithError)(void* _Nonnull /*context*/, /*value*/ Error);
 
 	SwiftContinuationCallbackCInt(void* continuationBox,
-	                             void (*_Nonnull returning)(void*, int),
-	                             void (*_Nonnull throwing)(void*, Error))
-	  : continuationBox(continuationBox), resumeWithValue(returning), resumeWithError(throwing) {}
+	                              void (*_Nonnull returning)(void* _Nonnull, int),
+	                              void (*_Nonnull throwing)(void* _Nonnull, Error))
+	  : continuationBox(continuationBox),
+      resumeWithValue(returning),
+      resumeWithError(throwing) {}
 
 public:
 	static SwiftContinuationCallbackCInt* _Nonnull make(void* continuationBox,
-	                                                   void (*_Nonnull returning)(void*, int),
-	                                                   void (*_Nonnull throwing)(void*, Error)) {
+	                                                    void (*_Nonnull returning)(void* _Nonnull, int),
+	                                                    void (*_Nonnull throwing)(void* _Nonnull, Error)) {
 		return new SwiftContinuationCallbackCInt(continuationBox, returning, throwing);
 	}
 
-	CallbackInt* _Nonnull cast() { return this; }
+//	CallbackInt* _Nonnull cast() { return this; }
 
 	void addCallbackAndClearTo(FutureCInt f) {
     f.addCallbackAndClear(this);
@@ -86,6 +88,53 @@ public:
 		printf("[c++][%s:%d](%s) \n", __FILE_NAME__, __LINE__, __FUNCTION__);
 		Callback<int>::remove();
 		Callback<int>::next = 0;
+		resumeWithError(continuationBox, error);
+	}
+	void unwait() {
+		printf("[c++][%s:%d](%s) \n", __FILE_NAME__, __LINE__, __FUNCTION__);
+		// TODO: implement
+	}
+};
+
+struct SWIFT_CXX_REF_IMMORTAL SwiftContinuationCallbackVoid : Callback<Void> {
+private:
+	void* continuationBox;
+	void (*resumeWithValue)(void* _Nonnull /*context*/, /*value*/ Void);
+	void (*resumeWithError)(void* _Nonnull /*context*/, /*value*/ Error);
+
+	SwiftContinuationCallbackVoid(void* continuationBox,
+	                              void (*_Nonnull returning)(void* _Nonnull, Void),
+	                              void (*_Nonnull throwing)(void* _Nonnull, Error))
+	  : continuationBox(continuationBox),
+      resumeWithValue(returning),
+      resumeWithError(throwing) {}
+
+public:
+	static SwiftContinuationCallbackVoid* _Nonnull make(void* continuationBox,
+	                                                    void (*_Nonnull returning)(void* _Nonnull, Void),
+	                                                    void (*_Nonnull throwing)(void* _Nonnull, Error)) {
+		return new SwiftContinuationCallbackVoid(continuationBox, returning, throwing);
+	}
+
+//	CallbackVoid* _Nonnull cast() { return this; }
+
+	void addCallbackAndClearTo(FutureVoid f) {
+    f.addCallbackAndClear(this);
+  }
+
+	// TODO: virtual is an issue
+	void fire(Void const& value) {
+		printf("[c++][%s:%d](%s) cb:%p\n", __FILE_NAME__, __LINE__, __FUNCTION__, this);
+		Callback<Void>::remove();
+		Callback<Void>::next = 0;
+		resumeWithValue(continuationBox, value);
+	}
+
+	// TODO: virtual is an issue
+	void error(Error error) {
+		printf("[c++][%s:%d](%s) \n", __FILE_NAME__, __LINE__, __FUNCTION__);
+		Callback<Void>::remove();
+		Callback<Void>::next = 0;
 		resumeWithError(continuationBox, error);
 	}
 	void unwait() {
