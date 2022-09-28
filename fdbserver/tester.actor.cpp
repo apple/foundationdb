@@ -50,7 +50,7 @@ WorkloadContext::WorkloadContext() {}
 
 WorkloadContext::WorkloadContext(const WorkloadContext& r)
   : options(r.options), clientId(r.clientId), clientCount(r.clientCount), sharedRandomNumber(r.sharedRandomNumber),
-    dbInfo(r.dbInfo), ccr(r.ccr) {}
+    dbInfo(r.dbInfo), ccr(r.ccr), defaultTenant(r.defaultTenant) {}
 
 WorkloadContext::~WorkloadContext() {}
 
@@ -470,6 +470,7 @@ ACTOR Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
 	wcx.dbInfo = dbInfo;
 	wcx.options = options;
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
+	wcx.defaultTenant = work.defaultTenant.castTo<TenantName>();
 
 	workload = IWorkloadFactory::create(testName.toString(), wcx);
 	if (workload) {
@@ -515,6 +516,7 @@ ACTOR Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
 	wcx.ccr = ccr;
 	wcx.dbInfo = dbInfo;
+	wcx.defaultTenant = work.defaultTenant.castTo<TenantName>();
 	// FIXME: Other stuff not filled in; why isn't this constructed here and passed down to the other
 	// getWorkloadIface()?
 	for (int i = 0; i < work.options.size(); i++) {

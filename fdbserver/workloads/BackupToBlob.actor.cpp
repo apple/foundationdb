@@ -55,7 +55,8 @@ struct BackupToBlobWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(Database cx, BackupToBlobWorkload* self) {
 		state FileBackupAgent backupAgent;
 		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
-		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
+
+		addDefaultBackupRanges(backupRanges);
 
 		wait(delay(self->backupAfter));
 		wait(backupAgent.submitBackup(cx,

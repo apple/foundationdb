@@ -1,5 +1,6 @@
 [configuration]
 extraDatabaseMode = 'Single'
+allowDefaultTenant = false
 
 [[test]]
 testTitle = 'DifferentClustersSameRV'

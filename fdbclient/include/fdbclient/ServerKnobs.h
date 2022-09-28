@@ -614,7 +614,8 @@ public:
 	double GLOBAL_TAG_THROTTLING_MIN_RATE;
 	// Used by global tag throttling counters
 	double GLOBAL_TAG_THROTTLING_FOLDING_TIME;
-	double GLOBAL_TAG_THROTTLING_TRACE_INTERVAL;
+	// Cost multiplier for writes (because write operations are more expensive than reads)
+	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 

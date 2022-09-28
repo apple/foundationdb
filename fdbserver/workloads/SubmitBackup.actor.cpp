@@ -54,7 +54,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 	ACTOR static Future<Void> _start(SubmitBackupWorkload* self, Database cx) {
 		wait(delay(self->delayFor));
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
-		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
+		addDefaultBackupRanges(backupRanges);
 		try {
 			wait(self->backupAgent.submitBackup(cx,
 			                                    self->backupDir,
