@@ -3,7 +3,7 @@ project(awssdk-download NONE)
 # Compile the sdk with clang and libc++, since otherwise we get libc++ vs libstdc++ link errors when compiling fdb with clang
 set(AWSSDK_COMPILER_FLAGS "")
 if(APPLE OR USE_LIBCXX)
-  set(AWSSDK_COMPILER_FLAGS -stdlib=libc++ -nostdlib++)
+  set(AWSSDK_COMPILER_FLAGS "-stdlib=libc++ -nostdlib++")
 endif()
 
 include(ExternalProject)
