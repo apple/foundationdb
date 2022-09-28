@@ -218,6 +218,28 @@ public:
 	void setupMockGlobalState(Reference<InitialDataDistribution> initData);
 
 	Future<Void> moveKeys(const MoveKeysParams& params) override;
+
+	Database context() const override { UNREACHABLE(); };
+
+	bool isMocked() const override { return true; };
+
+	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
+	                                                                    StorageMetrics const& min,
+	                                                                    StorageMetrics const& max,
+	                                                                    StorageMetrics const& permittedError,
+	                                                                    int shardLimit,
+	                                                                    int expectedShardCount) const override;
+
+	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
+	                                                          StorageMetrics const& limit,
+	                                                          StorageMetrics const& estimated,
+	                                                          Optional<int> const& minSplitBytes = {}) const override;
+
+	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys) const override {
+		UNREACHABLE();
+	}
+
+	Future<HealthMetrics> getHealthMetrics(bool detailed = false) const override;
 };
 
 #endif // FOUNDATIONDB_DDTXNPROCESSOR_H

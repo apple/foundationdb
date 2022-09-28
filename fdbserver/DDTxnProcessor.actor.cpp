@@ -510,7 +510,6 @@ Future<Void> DDTxnProcessor::pollMoveKeysLock(const MoveKeysLock& lock, const DD
 	return DDTxnProcessorImpl::pollMoveKeysLock(cx, lock, ddEnabledState);
 }
 
-
 Future<std::pair<Optional<StorageMetrics>, int>> DDTxnProcessor::waitStorageMetrics(
     const KeyRange& keys,
     const StorageMetrics& min,
@@ -678,4 +677,29 @@ void DDMockTxnProcessor::setupMockGlobalState(Reference<InitialDataDistribution>
 // FIXME: finish moveKeys implementation
 Future<Void> DDMockTxnProcessor::moveKeys(const MoveKeysParams& params) {
 	UNREACHABLE();
+}
+
+// FIXME: finish implementation
+Future<HealthMetrics> DDMockTxnProcessor::getHealthMetrics(bool detailed) const {
+	return Future<HealthMetrics>();
+}
+
+// FIXME: finish implementation
+Future<Standalone<VectorRef<KeyRef>>> DDMockTxnProcessor::splitStorageMetrics(
+    const KeyRange& keys,
+    const StorageMetrics& limit,
+    const StorageMetrics& estimated,
+    const Optional<int>& minSplitBytes) const {
+	return Future<Standalone<VectorRef<KeyRef>>>();
+}
+
+// FIXME: finish implementation
+Future<std::pair<Optional<StorageMetrics>, int>> DDMockTxnProcessor::waitStorageMetrics(
+    const KeyRange& keys,
+    const StorageMetrics& min,
+    const StorageMetrics& max,
+    const StorageMetrics& permittedError,
+    int shardLimit,
+    int expectedShardCount) const {
+	return Future<std::pair<Optional<StorageMetrics>, int>>();
 }
