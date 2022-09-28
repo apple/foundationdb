@@ -33,50 +33,10 @@ public actor MasterDataActor {
         var req = req
 
         // TODO: Wrap with a tracing span
-        // NOTE: [] is not really usable, it wants the argument be inout:
-        // /root/src/foundationdb/fdbserver/masterserver.swift:31:89: error: passing value of type 'UID' to an inout parameter requires explicit '&'
-        //        let proxyItr: CommitProxyVersionReplies? = myself.lastCommitProxyVersionReplies[requestingProxy]
-        //                                                                                        ^
-        //                                                                                        &
-        // but we cannot really do this, since:
-        //
-        // /root/src/foundationdb/fdbserver/masterserver.swift:50:90: error: cannot pass an inout argument to a subscript; use 'withUnsafeMutablePointer' to explicitly convert argument to a pointer
-        //         let proxyItr: CommitProxyVersionReplies? = myself.lastCommitProxyVersionReplies[&requestingProxy]
-
-        // we also can't use find:
-        //
-        // let proxyItr: CommitProxyVersionReplies? = myself.lastCommitProxyVersionReplies.find(req.requestingProxy)
-        // because:
-        //
-        // /root/src/foundationdb/fdbserver/masterserver.swift:51:90: error: cannot convert value of type 'Any' to specified type 'CommitProxyVersionReplies?'
-        //         let proxyItr: CommitProxyVersionReplies? = myself.lastCommitProxyVersionReplies.find(req.requestingProxy)
-        //                                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~
-        //                                                                                                                   as! CommitProxyVersionReplies
-
-        // we can use first{} though it'll be less efficient:
-        // FIXME: still does not work:
-        // /root/src/foundationdb/fdbserver/masterserver.swift:59:89: error: value of type 'MAP_UInt64_GetCommitVersionReply' (aka 'std.__CxxTemplateInstSt3mapIm21GetCommitVersionReplySt4lessImESaISt4pairIKmS0_EEE') has no member 'first'
-        //        let proxyItr: CommitProxyVersionReplies? = myself.lastCommitProxyVersionReplies.first {
-        //            $0 == req.requestingProxy
-        //        }
         let requestingProxyUID: UID = req.requestingProxy
-
-        // can't use the unsafe find either:
-        // let proxyItr = myself.lastCommitProxyVersionReplies.__findUnsafe(requestingProxyUID)
-        //
-        // /root/src/foundationdb/fdbserver/masterserver.swift:65:74: error: cannot convert value of type 'UID' to expected argument type 'std.__CxxTemplateInstSt3mapIm21GetCommitVersionReplySt4lessImESaISt4pairIKmS0_EEE.key_type' (aka 'UInt')
-        //        let proxyItr = myself.lastCommitProxyVersionReplies.__findUnsafe(requestingProxyUID)
-        //                                                                         ^
-        // why would it want an UInt rather than the UID?
-
-//        let proxyItr: CommitProxyVersionReplies? = myself.lastCommitProxyVersionReplies
-//                .first(where: { $0.first == requestingProxyUID })
-
-
-        // NOTE: += operator is not imported, so we added an increment()
-        // FIXME(swift): rdar://100012917 ([c++ interop] += operator does not seem to work/be imported)
         myself.getGetCommitVersionRequests() += 1
 
+        // FIXME: workaround for std::map usability, see: rdar://100487652 ([fdp] std::map usability, can't effectively work with map in Swift)
         guard let lastVersionReplies = lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID) else {
             // Request from invalid proxy (e.g. from duplicate recruitment request)
             req.reply.sendNever()
@@ -85,11 +45,12 @@ public actor MasterDataActor {
 
         // CODE_PROBE(lastVersionReplies.latestRequestNum.get() < req.requestNum - 1, "Commit version request queued up")
 
-        // wait(lastVersionReplies.latestRequestNum.whenAtLeast(req.requestNum - 1))
         // BEFORE:
-        // FIXME: await lastVersionReplies.latestRequestNum.whenAtLeast(limit: VersionMetricHandle.ValueType(req.requestNum - UInt64(1)))
+        // wait(lastVersionReplies.latestRequestNum.whenAtLeast(req.requestNum - 1))
+        let latestRequestNumFuture = lastVersionReplies.getLatestRequestNumRef()
+                .whenAtLeast(VersionMetricHandle.ValueType(req.requestNum - UInt64(1)))
+        let latestRequestNum = try! await latestRequestNumFuture.waitValue
 
-     
         if lastVersionReplies.replies.count(UInt(req.requestNum)) != 0 {
             // NOTE: CODE_PROBE is macro, won't be imported
             // CODE_PROBE(true, "Duplicate request for sequence")

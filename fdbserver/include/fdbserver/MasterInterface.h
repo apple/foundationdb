@@ -263,6 +263,11 @@ struct SWIFT_CXX_REF_IMMORTAL CommitProxyVersionReplies {
 	}
 
 	CommitProxyVersionReplies() : latestRequestNum(0) {}
+
+  inline NotifiedVersion& getLatestRequestNumRef() {
+    return latestRequestNum;
+  }
+
 };
 
 // ==== ----------------------------------------------------------------------------------------------------------------

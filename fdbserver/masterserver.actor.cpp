@@ -163,14 +163,12 @@ Version figureVersion(Version current,
 using ReferenceMasterDataShared = Reference<MasterDataShared>;
 
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
-  using namespace fdbserver_swift;
-
-//  auto myself = Reference(new MasterDataShared());
-
-  auto actor = fdbserver_swift::makeMasterDataActor();
-
-  auto promise = Promise<Void>();
-  MasterDataActor_getVersion_workaround(&req, /*result=*/&promise);
+  {
+    using namespace fdbserver_swift;
+    auto actor = fdbserver_swift::makeMasterDataActor();
+    auto promise = Promise<Void>();
+    MasterDataActor_getVersion_workaround(&req, /*result=*/&promise);
+  }
 
 	state Span span("M:getVersion"_loc, req.spanContext);
 	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
