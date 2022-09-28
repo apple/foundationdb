@@ -94,7 +94,7 @@ public actor MasterDataActor {
             // NOTE: CODE_PROBE is macro, won't be imported
             // CODE_PROBE(true, "Duplicate request for sequence")
             var lastVersionNum = lastVersionReplies.replies.__atUnsafe(UInt(req.requestNum))
-            req.reply.sendCopy(lastVersionNum) // TODO(swift): we should not require those to be inout
+            req.reply.sendCopy(lastVersionNum.pointee) // TODO(swift): we should not require those to be inout
             return
 //        } else if (req.requestNum <= lastVersionReplies.latestRequestNum.get()) {
 //            // NOTE: CODE_PROBE is macro, won't be imported
