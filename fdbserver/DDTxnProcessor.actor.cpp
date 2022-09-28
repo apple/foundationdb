@@ -510,6 +510,27 @@ Future<Void> DDTxnProcessor::pollMoveKeysLock(const MoveKeysLock& lock, const DD
 	return DDTxnProcessorImpl::pollMoveKeysLock(cx, lock, ddEnabledState);
 }
 
+Future<std::pair<Optional<StorageMetrics>, int>> DDTxnProcessor::waitStorageMetrics(
+    const KeyRange& keys,
+    const StorageMetrics& min,
+    const StorageMetrics& max,
+    const StorageMetrics& permittedError,
+    int shardLimit,
+    int expectedShardCount) const {
+	return cx->waitStorageMetrics(keys, min, max, permittedError, shardLimit, expectedShardCount);
+}
+
+Future<Standalone<VectorRef<KeyRef>>> DDTxnProcessor::splitStorageMetrics(const KeyRange& keys,
+                                                                          const StorageMetrics& limit,
+                                                                          const StorageMetrics& estimated,
+                                                                          const Optional<int>& minSplitBytes) const {
+	return cx->splitStorageMetrics(keys, limit, estimated, minSplitBytes);
+}
+
+Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> DDTxnProcessor::getReadHotRanges(const KeyRange& keys) const {
+	return cx->getReadHotRanges(keys);
+}
+
 Future<HealthMetrics> DDTxnProcessor::getHealthMetrics(bool detailed) const {
 	return cx->getHealthMetrics(detailed);
 }

@@ -22,21 +22,22 @@
 #define FOUNDATIONDB_DDTXNPROCESSOR_H
 
 #include "fdbserver/Knobs.h"
+#include "flow/FastRef.h"
 #include "fdbserver/MoveKeys.actor.h"
 
 struct InitialDataDistribution;
 
 /* Testability Contract:
- * a. The DataDistributor has to use this interface to interact with data-plane (aka. run transaction), because the
- * testability benefits from a mock implementation; b. Other control-plane roles should consider providing its own
- * TxnProcessor interface to provide testability, for example, Ratekeeper.
+ * a. The DataDistributor has to use this interface to interact with data-plane (aka. run transaction / use Database),
+ * because the testability benefits from a mock implementation; b. Other control-plane roles should consider providing
+ * its own TxnProcessor interface to provide testability, for example, Ratekeeper.
  * */
-class IDDTxnProcessor {
+class IDDTxnProcessor : public ReferenceCounted<IDDTxnProcessor> {
 public:
 	struct SourceServers {
 		std::vector<UID> srcServers, completeSources; // the same as RelocateData.src, RelocateData.completeSources;
 	};
-	virtual Database getDb() const = 0;
+	virtual Database context() const = 0;
 	virtual bool isMocked() const = 0;
 	// get the source server list and complete source server list for range
 	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) = 0;
@@ -79,6 +80,21 @@ public:
 
 	virtual Future<Void> moveKeys(const MoveKeysParams& params) const = 0;
 
+	virtual Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
+	                                                                            StorageMetrics const& min,
+	                                                                            StorageMetrics const& max,
+	                                                                            StorageMetrics const& permittedError,
+	                                                                            int shardLimit,
+	                                                                            int expectedShardCount) const = 0;
+
+	virtual Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(
+	    KeyRange const& keys,
+	    StorageMetrics const& limit,
+	    StorageMetrics const& estimated,
+	    Optional<int> const& minSplitBytes = {}) const = 0;
+
+	virtual Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys) const = 0;
+
 	virtual Future<HealthMetrics> getHealthMetrics(bool detailed = false) const = 0;
 
 	virtual Future<Optional<Value>> readRebalanceDDIgnoreKey() const { return {}; }
@@ -95,7 +111,7 @@ public:
 	DDTxnProcessor() = default;
 	explicit DDTxnProcessor(Database cx) : cx(cx) {}
 
-	Database getDb() const override { return cx; };
+	Database context() const override { return cx; };
 	bool isMocked() const override { return false; };
 
 	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
@@ -138,6 +154,20 @@ public:
 	}
 
 	Future<Void> moveKeys(const MoveKeysParams& params) const override { return ::moveKeys(cx, params); }
+
+	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
+	                                                                    StorageMetrics const& min,
+	                                                                    StorageMetrics const& max,
+	                                                                    StorageMetrics const& permittedError,
+	                                                                    int shardLimit,
+	                                                                    int expectedShardCount) const override;
+
+	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
+	                                                          StorageMetrics const& limit,
+	                                                          StorageMetrics const& estimated,
+	                                                          Optional<int> const& minSplitBytes = {}) const override;
+
+	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys) const override;
 
 	Future<HealthMetrics> getHealthMetrics(bool detailed) const override;
 
