@@ -116,7 +116,7 @@ struct ManagementClusterMetadata {
 };
 
 // Helper function to compute metacluster capacity by passing the result of MetaclusterAPI::listClusters
-std::pair<ClusterUsage, ClusterUsage> metaclusterCapacity(std::map<ClusterName, DataClusterMetadata> clusters);
+std::pair<ClusterUsage, ClusterUsage> metaclusterCapacity(std::map<ClusterName, DataClusterMetadata> const& clusters);
 
 ACTOR Future<Reference<IDatabase>> openDatabase(ClusterConnectionString connectionString);
 

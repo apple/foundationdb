@@ -606,9 +606,9 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 	if (tokens.size() == 1) {
 		return { "<create|delete|list|get|configure|rename>", "[ARGS]" };
 	} else if (tokencmp(tokens[1], "create") && tokens.size() < 5) {
-		static std::vector<const char*> opts = {
-			"<NAME> [tenant_group=<TENANT_GROUP>] [assigned_cluster=<CLUSTER_NAME>]"
-		};
+		static std::vector<const char*> opts = { "<NAME>",
+			                                     "[tenant_group=<TENANT_GROUP>]",
+			                                     "[assigned_cluster=<CLUSTER_NAME>]" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "delete") && tokens.size() < 3) {
 		static std::vector<const char*> opts = { "<NAME>" };

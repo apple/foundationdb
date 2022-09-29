@@ -27,7 +27,7 @@
 
 namespace MetaclusterAPI {
 
-std::pair<ClusterUsage, ClusterUsage> metaclusterCapacity(std::map<ClusterName, DataClusterMetadata> clusters) {
+std::pair<ClusterUsage, ClusterUsage> metaclusterCapacity(std::map<ClusterName, DataClusterMetadata> const& clusters) {
 	ClusterUsage tenantGroupCapacity;
 	ClusterUsage tenantGroupsAllocated;
 	for (auto cluster : clusters) {

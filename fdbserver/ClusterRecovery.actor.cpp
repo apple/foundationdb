@@ -1168,8 +1168,8 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	Optional<UID> metaclusterId;
 	Optional<ClusterName> clusterName;
 	Optional<UID> clusterId;
+	self->controllerData->db.metaclusterRegistration = metaclusterRegistration;
 	if (metaclusterRegistration.present()) {
-		self->controllerData->db.metaclusterRegistration = metaclusterRegistration.get();
 		self->controllerData->db.metaclusterName = metaclusterRegistration.get().metaclusterName;
 		self->controllerData->db.clusterType = metaclusterRegistration.get().clusterType;
 		metaclusterName = metaclusterRegistration.get().metaclusterName;
@@ -1179,7 +1179,6 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 			clusterId = metaclusterRegistration.get().id;
 		}
 	} else {
-		self->controllerData->db.metaclusterRegistration = Optional<MetaclusterRegistrationEntry>();
 		self->controllerData->db.metaclusterName = Optional<ClusterName>();
 		self->controllerData->db.clusterType = ClusterType::STANDALONE;
 	}

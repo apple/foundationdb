@@ -447,6 +447,8 @@ Creates a new tenant in the cluster.
 
 ``TENANT_GROUP`` - The tenant group the tenant will be placed in.
 
+``CLUSTER_NAME`` - The cluster the tenant will be placed in (metacluster only). If unspecified, the metacluster will choose the cluster.
+
 delete
 ^^^^^^
 

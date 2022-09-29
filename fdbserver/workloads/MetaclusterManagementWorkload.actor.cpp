@@ -906,18 +906,25 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		std::map<ClusterName, DataClusterMetadata> dataClusters = wait(MetaclusterAPI::listClusters(
 		    self->managementDb, ""_sr, "\xff\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS + 1));
 
+		int totalTenantGroupsAllocated = 0;
 		std::vector<Future<Void>> dataClusterChecks;
 		for (auto [clusterName, dataClusterData] : self->dataDbs) {
 			auto dataClusterItr = dataClusters.find(clusterName);
 			if (dataClusterData.registered) {
 				ASSERT(dataClusterItr != dataClusters.end());
 				ASSERT(dataClusterItr->second.entry.capacity.numTenantGroups == dataClusterData.tenantGroupCapacity);
+				totalTenantGroupsAllocated +=
+				    dataClusterData.tenantGroups.size() + dataClusterData.ungroupedTenants.size();
 			} else {
 				ASSERT(dataClusterItr == dataClusters.end());
 			}
 
 			dataClusterChecks.push_back(checkDataCluster(self, clusterName, dataClusterData));
 		}
+		auto capacityNumbers = MetaclusterAPI::metaclusterCapacity(dataClusters);
+		ASSERT(capacityNumbers.first.numTenantGroups == self->totalTenantGroupCapacity);
+		ASSERT(capacityNumbers.second.numTenantGroups == totalTenantGroupsAllocated);
+
 		wait(waitForAll(dataClusterChecks));
 
 		wait(decommissionMetacluster(self));
