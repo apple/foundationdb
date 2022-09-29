@@ -2988,13 +2988,6 @@ ACTOR Future<Void> checkEmptyQueue(TLogData* self) {
 	}
 }
 
-ACTOR Future<Void> checkRecovered(TLogData* self) {
-	TraceEvent("TLogCheckRecoveredBegin", self->dbgid).log();
-	Optional<Value> v = wait(self->persistentData->readValue(StringRef()));
-	TraceEvent("TLogCheckRecoveredEnd", self->dbgid).log();
-	return Void();
-}
-
 ACTOR Future<Void> initPersistentStorage(TLogData* self) {
 	TraceEvent("TLogInitPersistentStorageStart", self->dbgid);
 
@@ -3005,6 +2998,8 @@ ACTOR Future<Void> initPersistentStorage(TLogData* self) {
 	state IKeyValueStore* storage = self->persistentData;
 	wait(storage->init());
 	storage->set(persistFormat);
+
+	wait(storage->commit());
 
 	TraceEvent("TLogInitPersistentStorageDone", self->dbgid);
 	return Void();
@@ -3595,7 +3590,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 			if (restoreFromDisk) {
 				wait(restorePersistentState(&self, locality, oldLog, recovered, tlogRequests));
 			} else {
-				wait(ioTimeoutError(checkEmptyQueue(&self) && checkRecovered(&self) && initPersistentStorage(&self),
+				wait(ioTimeoutError(checkEmptyQueue(&self) && initPersistentStorage(&self),
 				                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
 			}
 
