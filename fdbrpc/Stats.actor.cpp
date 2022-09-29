@@ -25,8 +25,9 @@
 #include <string>
 
 Counter::Counter(std::string const& name, CounterCollection& collection)
-  : IMetric(name, knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)), interval_start(0), last_event(0),
-    interval_sq_time(0), roughness_interval_start(0), interval_delta(0), interval_start_value(0) {
+  : IMetric(collection.name + "_" + name + "_" + collection.id, knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)),
+    interval_start(0), last_event(0), interval_sq_time(0), roughness_interval_start(0), interval_delta(0),
+    interval_start_value(0) {
 	metric.init(collection.name + "." + (char)toupper(name.at(0)) + name.substr(1), collection.id);
 	collection.counters.push_back(this);
 }
