@@ -21,14 +21,27 @@
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/JsonBuilder.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RestoreInterface.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/KeyBackedTypes.h"
-#include "fdbclient/JsonBuilder.h"
+#include "fdbclient/Tenant.h"
+#include "fdbclient/TenantEntryCache.actor.h"
+
+#include "flow/Arena.h"
+#include "flow/CodeProbe.h"
+#include "flow/EncryptUtils.h"
+#include "flow/network.h"
+#include "flow/ObjectSerializer.h"
+#include "flow/ProtocolVersion.h"
+#include "flow/serialize.h"
+#include "flow/Trace.h"
 
 #include <cinttypes>
 #include <ctime>
@@ -36,10 +49,15 @@
 #include "flow/IAsyncFile.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
+#include "flow/xxhash.h"
+
+#include <memory>
 #include <numeric>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
+#include <unordered_map>
+#include <utility>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -458,8 +476,443 @@ Value makePadding(int size) {
 	return pad.substr(0, size);
 }
 
+struct IRangeFileWriter {
+public:
+	virtual Future<Void> padEnd(bool final) = 0;
+
+	virtual Future<Void> writeKV(Key k, Value v) = 0;
+
+	virtual Future<Void> writeKey(Key k) = 0;
+
+	virtual Future<Void> finish() = 0;
+
+	virtual ~IRangeFileWriter() {}
+};
+
+struct SnapshotFileBackupEncryptionKeys {
+	Reference<BlobCipherKey> textCipherKey;
+	EncryptCipherDomainName textDomain;
+	Reference<BlobCipherKey> headerCipherKey;
+	StringRef ivRef;
+};
+
 // File Format handlers.
-// Both Range and Log formats are designed to be readable starting at any 1MB boundary
+// Both Range and Log formats are designed to be readable starting at any BACKUP_RANGEFILE_BLOCK_SIZE boundary
+// so they can be read in parallel.
+//
+// Writer instances must be kept alive while any member actors are in progress.
+//
+// EncryptedRangeFileWriter must be used as follows:
+//   1 - writeKey(key) the queried key range begin
+//   2 - writeKV(k, v) each kv pair to restore
+//   3 - writeKey(key) the queried key range end
+//   4 - finish()
+//
+// EncryptedRangeFileWriter will insert the required padding, header, and extra
+// end/begin keys around the 1MB boundaries as needed.
+//
+// Example:
+//   The range a-z is queries and returns c-j which covers 3 blocks across 2 tenants.
+//   The client code writes keys in this sequence:
+//             t1a t1c t1d t1e t1f t1g t2h t2i t2j t2z
+//
+//   H = header   P = padding   a...z = keys  v = value | = block boundary
+//
+//   Encoded file:  H t1a t1cv t1dv t1ev P | H t1e t1ev t1fv t1gv t2 P | H t2 t2hv t2iv t2jv t2z
+//   Decoded in blocks yields:
+//           Block 1: range [t1a, t1e) with kv pairs t1cv, t1dv
+//           Block 2: range [t1e, t2) with kv pairs t1ev, t1fv, t1gv
+//           Block 3: range [t2, t2z) with kv pairs t2hv, t2iv, t2jv
+//
+//   NOTE: All blocks except for the final block will have one last
+//   value which will not be used.  This isn't actually a waste since
+//   if the next KV pair wouldn't fit within the block after the value
+//   then the space after the final key to the next 1MB boundary would
+//   just be padding anyway.
+//
+//   NOTE: For the EncryptedRangeFileWriter blocks will be split either on the BACKUP_RANGEFILE_BLOCK_SIZE boundary or
+//   when a new tenant id is encountered. If a block is split for crossing tenant boundaries then the last key will be
+//   truncated to just the tenant prefix and the value will be empty (to avoid having sensitive data of one tenant be
+//   encrypted with a key for a different tenant)
+struct EncryptedRangeFileWriter : public IRangeFileWriter {
+	struct Options {
+		constexpr static FileIdentifier file_identifier = 3152016;
+
+		// TODO: Compression is not currently supported so this should always be false
+		bool compressionEnabled = false;
+
+		Options() {}
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, compressionEnabled);
+		}
+	};
+
+	EncryptedRangeFileWriter(Database cx,
+	                         Arena* arena,
+	                         Reference<TenantEntryCache<Void>> tenantCache,
+	                         Reference<IBackupFile> file = Reference<IBackupFile>(),
+	                         int blockSize = 0,
+	                         Options options = Options())
+	  : cx(cx), arena(arena), tenantCache(tenantCache), file(file), blockSize(blockSize), blockEnd(0),
+	    fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION), options(options) {
+		buffer = makeString(blockSize);
+		wPtr = mutateString(buffer);
+	}
+
+	static void validateEncryptionHeader(Reference<BlobCipherKey> headerCipherKey,
+	                                     Reference<BlobCipherKey> textCipherKey,
+	                                     BlobCipherEncryptHeader& header) {
+		// Validate encryption header 'cipherHeader' details
+		if (!(header.cipherHeaderDetails.baseCipherId == headerCipherKey->getBaseCipherId() &&
+		      header.cipherHeaderDetails.encryptDomainId == headerCipherKey->getDomainId() &&
+		      header.cipherHeaderDetails.salt == headerCipherKey->getSalt())) {
+			TraceEvent(SevWarn, "EncryptionHeader_CipherHeaderMismatch")
+			    .detail("HeaderDomainId", headerCipherKey->getDomainId())
+			    .detail("ExpectedHeaderDomainId", header.cipherHeaderDetails.encryptDomainId)
+			    .detail("HeaderBaseCipherId", headerCipherKey->getBaseCipherId())
+			    .detail("ExpectedHeaderBaseCipherId", header.cipherHeaderDetails.baseCipherId)
+			    .detail("HeaderSalt", headerCipherKey->getSalt())
+			    .detail("ExpectedHeaderSalt", header.cipherHeaderDetails.salt);
+			throw encrypt_header_metadata_mismatch();
+		}
+
+		// Validate encryption text 'cipherText' details sanity
+		if (!(header.cipherTextDetails.baseCipherId == textCipherKey->getBaseCipherId() &&
+		      header.cipherTextDetails.encryptDomainId == textCipherKey->getDomainId() &&
+		      header.cipherTextDetails.salt == textCipherKey->getSalt())) {
+			TraceEvent(SevWarn, "EncryptionHeader_CipherTextMismatch")
+			    .detail("TextDomainId", textCipherKey->getDomainId())
+			    .detail("ExpectedTextDomainId", header.cipherTextDetails.encryptDomainId)
+			    .detail("TextBaseCipherId", textCipherKey->getBaseCipherId())
+			    .detail("ExpectedTextBaseCipherId", header.cipherTextDetails.baseCipherId)
+			    .detail("TextSalt", textCipherKey->getSalt())
+			    .detail("ExpectedTextSalt", header.cipherTextDetails.salt);
+			throw encrypt_header_metadata_mismatch();
+		}
+	}
+
+	ACTOR static Future<StringRef> decryptImpl(Database cx,
+	                                           StringRef headerS,
+	                                           const uint8_t* dataP,
+	                                           int64_t dataLen,
+	                                           Arena* arena) {
+		Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
+		state BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(headerS);
+		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, header, BlobCipherMetrics::BACKUP));
+		ASSERT(cipherKeys.cipherHeaderKey.isValid() && cipherKeys.cipherTextKey.isValid());
+		validateEncryptionHeader(cipherKeys.cipherHeaderKey, cipherKeys.cipherTextKey, header);
+		DecryptBlobCipherAes256Ctr decryptor(
+		    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.iv, BlobCipherMetrics::BACKUP);
+		return decryptor.decrypt(dataP, dataLen, header, *arena)->toStringRef();
+	}
+
+	static Future<StringRef> decrypt(Database cx,
+	                                 StringRef headerS,
+	                                 const uint8_t* dataP,
+	                                 int64_t dataLen,
+	                                 Arena* arena) {
+		return decryptImpl(cx, headerS, dataP, dataLen, arena);
+	}
+
+	ACTOR static Future<Reference<BlobCipherKey>> refreshKey(EncryptedRangeFileWriter* self,
+	                                                         EncryptCipherDomainId domainId,
+	                                                         EncryptCipherDomainName domainName) {
+		Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
+		TextAndHeaderCipherKeys cipherKeys =
+		    wait(getLatestEncryptCipherKeysForDomain(dbInfo, domainId, domainName, BlobCipherMetrics::BACKUP));
+		return cipherKeys.cipherTextKey;
+	}
+
+	ACTOR static Future<Void> encrypt(EncryptedRangeFileWriter* self) {
+		ASSERT(self->cipherKeys.headerCipherKey.isValid() && self->cipherKeys.textCipherKey.isValid());
+		// Ensure that the keys we got are still valid before flushing the block
+		if (self->cipherKeys.headerCipherKey->isExpired() || self->cipherKeys.headerCipherKey->needsRefresh()) {
+			Reference<BlobCipherKey> cipherKey =
+			    wait(refreshKey(self, self->cipherKeys.headerCipherKey->getDomainId(), FDB_ENCRYPT_HEADER_DOMAIN_NAME));
+			self->cipherKeys.headerCipherKey = cipherKey;
+		}
+		if (self->cipherKeys.textCipherKey->isExpired() || self->cipherKeys.textCipherKey->needsRefresh()) {
+			Reference<BlobCipherKey> cipherKey =
+			    wait(refreshKey(self, self->cipherKeys.textCipherKey->getDomainId(), self->cipherKeys.textDomain));
+			self->cipherKeys.textCipherKey = cipherKey;
+		}
+		EncryptBlobCipherAes265Ctr encryptor(self->cipherKeys.textCipherKey,
+		                                     self->cipherKeys.headerCipherKey,
+		                                     self->cipherKeys.ivRef.begin(),
+		                                     AES_256_IV_LENGTH,
+		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+		                                     BlobCipherMetrics::BACKUP);
+		Arena arena;
+		int64_t payloadSize = self->wPtr - self->dataPayloadStart;
+		auto encryptedData = encryptor.encrypt(self->dataPayloadStart, payloadSize, self->encryptHeader, arena);
+
+		// re-write encrypted data to buffer
+		std::memcpy(self->dataPayloadStart, encryptedData->begin(), payloadSize);
+		return Void();
+	}
+
+	ACTOR static Future<Void> updateEncryptionKeysCtx(EncryptedRangeFileWriter* self,
+	                                                  KeyRef key,
+	                                                  Reference<TenantEntryCache<Void>> cache) {
+		state std::pair<int64_t, TenantName> curTenantInfo = wait(getEncryptionDomainDetails(key, cache));
+		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
+
+		// Get text and header cipher key
+		TextAndHeaderCipherKeys textAndHeaderCipherKeys = wait(getLatestEncryptCipherKeysForDomain(
+		    dbInfo, curTenantInfo.first, curTenantInfo.second, BlobCipherMetrics::BACKUP));
+		self->cipherKeys.textCipherKey = textAndHeaderCipherKeys.cipherTextKey;
+		self->cipherKeys.textDomain = curTenantInfo.second;
+		self->cipherKeys.headerCipherKey = textAndHeaderCipherKeys.cipherHeaderKey;
+
+		// Set ivRef
+		self->cipherKeys.ivRef = makeString(AES_256_IV_LENGTH, *self->arena);
+		deterministicRandom()->randomBytes(mutateString(self->cipherKeys.ivRef), AES_256_IV_LENGTH);
+		return Void();
+	}
+
+	// Returns the number of bytes that have been written to the buffer
+	static int64_t currentBufferSize(EncryptedRangeFileWriter* self) { return self->wPtr - self->buffer.begin(); }
+
+	static int64_t expectedFileSize(EncryptedRangeFileWriter* self) {
+		// Return what has already been written to file plus the size of the current buffer
+		// which indicates how many bytes the file will contain once the buffer is written
+		return self->file->size() + currentBufferSize(self);
+	}
+
+	static void copyToBuffer(EncryptedRangeFileWriter* self, const void* src, size_t size) {
+		std::memcpy(self->wPtr, src, size);
+		self->wPtr += size;
+		ASSERT(currentBufferSize(self) <= self->blockSize);
+	}
+
+	static void appendStringRefWithLenToBuffer(EncryptedRangeFileWriter* self, StringRef* s) {
+		// Append the string length followed by the string to the buffer
+		uint32_t lenBuf = bigEndian32((uint32_t)s->size());
+		copyToBuffer(self, &lenBuf, sizeof(lenBuf));
+		copyToBuffer(self, s->begin(), s->size());
+	}
+
+	static bool isSystemKey(KeyRef key) { return key.size() && key[0] == systemKeys.begin[0]; }
+
+	ACTOR static Future<std::pair<int64_t, TenantName>> getEncryptionDomainDetailsImpl(
+	    KeyRef key,
+	    Reference<TenantEntryCache<Void>> tenantCache) {
+		if (isSystemKey(key)) {
+			return std::make_pair(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME);
+		}
+		if (key.size() < TENANT_PREFIX_SIZE) {
+			return std::make_pair(FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
+		}
+		KeyRef tenantPrefix = KeyRef(key.begin(), TENANT_PREFIX_SIZE);
+		state int64_t tenantId = TenantMapEntry::prefixToId(tenantPrefix);
+		Optional<TenantEntryCachePayload<Void>> payload = wait(tenantCache->getById(tenantId));
+		if (payload.present()) {
+			return std::make_pair(tenantId, payload.get().name);
+		}
+		return std::make_pair(FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
+	}
+
+	static Future<std::pair<int64_t, TenantName>> getEncryptionDomainDetails(
+	    KeyRef key,
+	    Reference<TenantEntryCache<Void>> tenantCache) {
+		return getEncryptionDomainDetailsImpl(key, tenantCache);
+	}
+
+	// Handles the first block and internal blocks.  Ends current block if needed.
+	// The final flag is used in simulation to pad the file's final block to a whole block size
+	ACTOR static Future<Void> newBlock(EncryptedRangeFileWriter* self,
+	                                   int bytesNeeded,
+	                                   KeyRef lastKey,
+	                                   bool writeValue,
+	                                   bool final = false) {
+		// Write padding to finish current block if needed
+		int bytesLeft = self->blockEnd - expectedFileSize(self);
+		ASSERT(bytesLeft >= 0);
+		if (bytesLeft > 0) {
+			state Value paddingFFs = makePadding(bytesLeft);
+			copyToBuffer(self, paddingFFs.begin(), bytesLeft);
+		}
+
+		if (expectedFileSize(self) > 0) {
+			// write buffer to file since block is finished
+			ASSERT(currentBufferSize(self) == self->blockSize);
+			wait(encrypt(self));
+			wait(self->file->append(self->buffer.begin(), self->blockSize));
+
+			// reset write pointer to beginning of StringRef
+			self->wPtr = mutateString(self->buffer);
+		}
+
+		if (final) {
+			ASSERT(g_network->isSimulated());
+			return Void();
+		}
+
+		// Set new blockEnd
+		self->blockEnd += self->blockSize;
+
+		// write Header
+		copyToBuffer(self, (uint8_t*)&self->fileVersion, sizeof(self->fileVersion));
+
+		// write options struct
+		Value serialized =
+		    ObjectWriter::toValue(self->options, IncludeVersion(ProtocolVersion::withEncryptedSnapshotBackupFile()));
+		appendStringRefWithLenToBuffer(self, &serialized);
+
+		// leave space for encryption header
+		self->encryptHeader = (BlobCipherEncryptHeader*)self->wPtr;
+		self->wPtr += BlobCipherEncryptHeader::headerSize;
+		self->dataPayloadStart = self->wPtr;
+
+		// If this is NOT the first block then write duplicate stuff needed from last block
+		if (self->blockEnd > self->blockSize) {
+			appendStringRefWithLenToBuffer(self, &lastKey);
+			appendStringRefWithLenToBuffer(self, &self->lastKey);
+			if (writeValue) {
+				appendStringRefWithLenToBuffer(self, &self->lastValue);
+			}
+		}
+
+		// There must now be room in the current block for bytesNeeded or the block size is too small
+		if (expectedFileSize(self) + bytesNeeded > self->blockEnd) {
+			throw backup_bad_block_size();
+		}
+
+		return Void();
+	}
+
+	Future<Void> padEnd(bool final) {
+		if (expectedFileSize(this) > 0) {
+			return newBlock(this, 0, StringRef(), true, final);
+		}
+		return Void();
+	}
+
+	// Ends the current block if necessary based on bytesNeeded.
+	ACTOR static Future<Void> newBlockIfNeeded(EncryptedRangeFileWriter* self, int bytesNeeded) {
+		if (expectedFileSize(self) + bytesNeeded > self->blockEnd) {
+			wait(newBlock(self, bytesNeeded, self->lastKey, true));
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> handleTenantBondary(EncryptedRangeFileWriter* self,
+	                                              Key k,
+	                                              Value v,
+	                                              bool writeValue,
+	                                              std::pair<int64_t, TenantName> curKeyTenantInfo) {
+		state KeyRef endKey = k;
+		// If we are crossing a boundary with a key that has a tenant prefix then truncate it
+		if (curKeyTenantInfo.first != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID &&
+		    curKeyTenantInfo.first != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
+			endKey = StringRef(k.begin(), TENANT_PREFIX_SIZE);
+		}
+		state ValueRef newValue = StringRef();
+		self->lastKey = k;
+		self->lastValue = v;
+		appendStringRefWithLenToBuffer(self, &endKey);
+		appendStringRefWithLenToBuffer(self, &newValue);
+		wait(newBlock(self, 0, endKey, writeValue));
+		wait(updateEncryptionKeysCtx(self, self->lastKey, self->tenantCache));
+		return Void();
+	}
+
+	ACTOR static Future<bool> finishCurTenantBlockStartNewIfNeeded(EncryptedRangeFileWriter* self,
+	                                                               Key k,
+	                                                               Value v,
+	                                                               bool writeValue) {
+		// Don't want to start a new block if the current key or previous key is empty
+		if (self->lastKey.size() == 0 || k.size() == 0) {
+			return false;
+		}
+		state std::pair<int64_t, TenantName> curKeyTenantInfo = wait(getEncryptionDomainDetails(k, self->tenantCache));
+		state std::pair<int64_t, TenantName> prevKeyTenantInfo =
+		    wait(getEncryptionDomainDetails(self->lastKey, self->tenantCache));
+		// crossing tenant boundaries so finish the current block using only the tenant prefix of the new key
+		if (curKeyTenantInfo.first != prevKeyTenantInfo.first) {
+			CODE_PROBE(true, "crossed tenant boundaries");
+			wait(handleTenantBondary(self, k, v, writeValue, curKeyTenantInfo));
+			return true;
+		}
+		return false;
+	}
+
+	// Start a new block if needed, then write the key and value
+	ACTOR static Future<Void> writeKV_impl(EncryptedRangeFileWriter* self, Key k, Value v) {
+		if (!self->cipherKeys.headerCipherKey.isValid() || !self->cipherKeys.textCipherKey.isValid()) {
+			wait(updateEncryptionKeysCtx(self, k, self->tenantCache));
+		}
+		state int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
+		wait(newBlockIfNeeded(self, toWrite));
+		bool createdNewBlock = wait(finishCurTenantBlockStartNewIfNeeded(self, k, v, true));
+		if (createdNewBlock) {
+			return Void();
+		}
+		appendStringRefWithLenToBuffer(self, &k);
+		appendStringRefWithLenToBuffer(self, &v);
+		self->lastKey = k;
+		self->lastValue = v;
+		return Void();
+	}
+
+	Future<Void> writeKV(Key k, Value v) { return writeKV_impl(this, k, v); }
+
+	// Write begin key or end key.
+	ACTOR static Future<Void> writeKey_impl(EncryptedRangeFileWriter* self, Key k) {
+		// TODO (Nim): Is it possible to write empty begin and end keys?
+		if (k.size() > 0 &&
+		    (!self->cipherKeys.headerCipherKey.isValid() || !self->cipherKeys.textCipherKey.isValid())) {
+			wait(updateEncryptionKeysCtx(self, k, self->tenantCache));
+		}
+
+		// Need to account for extra "empty" value being written in the case of crossing tenant boundaries
+		int toWrite = sizeof(uint32_t) + k.size() + sizeof(uint32_t);
+		wait(newBlockIfNeeded(self, toWrite));
+		bool createdNewBlock = wait(finishCurTenantBlockStartNewIfNeeded(self, k, StringRef(), false));
+		if (createdNewBlock) {
+			return Void();
+		}
+		appendStringRefWithLenToBuffer(self, &k);
+		self->lastKey = k;
+		return Void();
+	}
+
+	Future<Void> writeKey(Key k) { return writeKey_impl(this, k); }
+
+	ACTOR static Future<Void> finish_impl(EncryptedRangeFileWriter* self) {
+		// Write any outstanding bytes to the file
+		if (currentBufferSize(self) > 0) {
+			wait(encrypt(self));
+			wait(self->file->append(self->buffer.begin(), currentBufferSize(self)));
+		}
+		return Void();
+	}
+
+	Future<Void> finish() { return finish_impl(this); }
+
+	Database cx;
+	Arena* arena;
+	Reference<TenantEntryCache<Void>> tenantCache;
+	Reference<IBackupFile> file;
+	int blockSize;
+
+private:
+	Standalone<StringRef> buffer;
+	uint8_t* wPtr;
+	BlobCipherEncryptHeader* encryptHeader;
+	uint8_t* dataPayloadStart;
+	int64_t blockEnd;
+	uint32_t fileVersion;
+	Options options;
+	Key lastKey;
+	Key lastValue;
+	SnapshotFileBackupEncryptionKeys cipherKeys;
+};
+
+// File Format handlers.
+// Both Range and Log formats are designed to be readable starting at any BACKUP_RANGEFILE_BLOCK_SIZE boundary
 // so they can be read in parallel.
 //
 // Writer instances must be kept alive while any member actors are in progress.
@@ -468,6 +921,7 @@ Value makePadding(int size) {
 //   1 - writeKey(key) the queried key range begin
 //   2 - writeKV(k, v) each kv pair to restore
 //   3 - writeKey(key) the queried key range end
+//	 4 - finish()
 //
 // RangeFileWriter will insert the required padding, header, and extra
 // end/begin keys around the 1MB boundaries as needed.
@@ -490,7 +944,7 @@ Value makePadding(int size) {
 //   if the next KV pair wouldn't fit within the block after the value
 //   then the space after the final key to the next 1MB boundary would
 //   just be padding anyway.
-struct RangeFileWriter {
+struct RangeFileWriter : public IRangeFileWriter {
 	RangeFileWriter(Reference<IBackupFile> file = Reference<IBackupFile>(), int blockSize = 0)
 	  : file(file), blockSize(blockSize), blockEnd(0), fileVersion(BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {}
 
@@ -530,10 +984,10 @@ struct RangeFileWriter {
 	}
 
 	// Used in simulation only to create backup file sizes which are an integer multiple of the block size
-	Future<Void> padEnd() {
+	Future<Void> padEnd(bool final) {
 		ASSERT(g_network->isSimulated());
 		if (file->size() > 0) {
-			return newBlock(this, 0, true);
+			return newBlock(this, 0, final);
 		}
 		return Void();
 	}
@@ -568,6 +1022,8 @@ struct RangeFileWriter {
 
 	Future<Void> writeKey(Key k) { return writeKey_impl(this, k); }
 
+	Future<Void> finish() { return Void(); }
+
 	Reference<IBackupFile> file;
 	int blockSize;
 
@@ -578,9 +1034,49 @@ private:
 	Key lastValue;
 };
 
+ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
+                                        Standalone<VectorRef<KeyValueRef>>* results,
+                                        bool encryptedBlock,
+                                        Optional<Database> cx,
+                                        Reference<TenantEntryCache<Void>> tenantCache) {
+	// Read begin key, if this fails then block was invalid.
+	state uint32_t kLen = reader->consumeNetworkUInt32();
+	state const uint8_t* k = reader->consume(kLen);
+	results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
+
+	// Read kv pairs and end key
+	while (1) {
+		// Read a key.
+		kLen = reader->consumeNetworkUInt32();
+		k = reader->consume(kLen);
+
+		// If eof reached or first value len byte is 0xFF then a valid block end was reached.
+		if (reader->eof() || *reader->rptr == 0xFF) {
+			results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
+			break;
+		}
+
+		// Read a value, which must exist or the block is invalid
+		uint32_t vLen = reader->consumeNetworkUInt32();
+		const uint8_t* v = reader->consume(vLen);
+		results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
+
+		// If eof reached or first byte of next key len is 0xFF then a valid block end was reached.
+		if (reader->eof() || *reader->rptr == 0xFF)
+			break;
+	}
+
+	// Make sure any remaining bytes in the block are 0xFF
+	for (auto b : reader->remainder())
+		if (b != 0xFF)
+			throw restore_corrupted_data_padding();
+	return Void();
+}
+
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
-                                                                      int len) {
+                                                                      int len,
+                                                                      Optional<Database> cx) {
 	state Standalone<StringRef> buf = makeString(len);
 	int rLen = wait(file->read(mutateString(buf), len, offset));
 	if (rLen != len)
@@ -588,48 +1084,44 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 
 	simulateBlobFailure();
 
-	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
+	state Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
 	state StringRefReader reader(buf, restore_corrupted_data());
+	state Arena arena;
 
 	try {
-		// Read header, currently only decoding BACKUP_AGENT_SNAPSHOT_FILE_VERSION
-		if (reader.consume<int32_t>() != BACKUP_AGENT_SNAPSHOT_FILE_VERSION)
+		// Read header, currently only decoding BACKUP_AGENT_SNAPSHOT_FILE_VERSION or
+		// BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION
+		int32_t file_version = reader.consume<int32_t>();
+		if (file_version == BACKUP_AGENT_SNAPSHOT_FILE_VERSION) {
+			wait(decodeKVPairs(&reader, &results, false, cx, Reference<TenantEntryCache<Void>>()));
+		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
+			CODE_PROBE(true, "decoding encrypted block");
+			ASSERT(cx.present());
+			// decode options struct
+			uint32_t optionsLen = reader.consumeNetworkUInt32();
+			const uint8_t* o = reader.consume(optionsLen);
+			StringRef optionsStringRef = StringRef(o, optionsLen);
+			EncryptedRangeFileWriter::Options options =
+			    ObjectReader::fromStringRef<EncryptedRangeFileWriter::Options>(optionsStringRef, IncludeVersion());
+			ASSERT(!options.compressionEnabled);
+
+			// read encryption header
+			const uint8_t* headerStart = reader.consume(BlobCipherEncryptHeader::headerSize);
+			StringRef header = StringRef(headerStart, BlobCipherEncryptHeader::headerSize);
+			const uint8_t* dataPayloadStart = headerStart + BlobCipherEncryptHeader::headerSize;
+			// calculate the total bytes read up to (and including) the header
+			int64_t bytesRead = sizeof(int32_t) + sizeof(uint32_t) + optionsLen + BlobCipherEncryptHeader::headerSize;
+			// get the size of the encrypted payload and decrypt it
+			int64_t dataLen = len - bytesRead;
+			StringRef decryptedData =
+			    wait(EncryptedRangeFileWriter::decrypt(cx.get(), header, dataPayloadStart, dataLen, &results.arena()));
+			reader = StringRefReader(decryptedData, restore_corrupted_data());
+			Reference<TenantEntryCache<Void>> tenantCache = makeReference<TenantEntryCache<Void>>(cx.get());
+			wait(decodeKVPairs(&reader, &results, true, cx, tenantCache));
+		} else {
 			throw restore_unsupported_file_version();
-
-		// Read begin key, if this fails then block was invalid.
-		uint32_t kLen = reader.consumeNetworkUInt32();
-		const uint8_t* k = reader.consume(kLen);
-		results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
-
-		// Read kv pairs and end key
-		while (1) {
-			// Read a key.
-			kLen = reader.consumeNetworkUInt32();
-			k = reader.consume(kLen);
-
-			// If eof reached or first value len byte is 0xFF then a valid block end was reached.
-			if (reader.eof() || *reader.rptr == 0xFF) {
-				results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
-				break;
-			}
-
-			// Read a value, which must exist or the block is invalid
-			uint32_t vLen = reader.consumeNetworkUInt32();
-			const uint8_t* v = reader.consume(vLen);
-			results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
-
-			// If eof reached or first byte of next key len is 0xFF then a valid block end was reached.
-			if (reader.eof() || *reader.rptr == 0xFF)
-				break;
 		}
-
-		// Make sure any remaining bytes in the block are 0xFF
-		for (auto b : reader.remainder())
-			if (b != 0xFF)
-				throw restore_corrupted_data_padding();
-
 		return results;
-
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "FileRestoreDecodeRangeFileBlockFailed")
 		    .error(e)
@@ -1066,8 +1558,8 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 
-	// Finish (which flushes/syncs) the file, and then in a single transaction, make some range backup progress durable.
-	// This means:
+	// Finish (which flushes/syncs) the file, and then in a single transaction, make some range backup progress
+	// durable. This means:
 	//  - increment the backup config's range bytes written
 	//  - update the range file map
 	//  - update the task begin key
@@ -1175,8 +1667,8 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		    .detail("EndKey", Params.endKey().get(task).printable())
 		    .detail("TaskKey", task->key.printable());
 
-		// When a key range task saves the last chunk of progress and then the executor dies, when the task continues
-		// its beginKey and endKey will be equal but there is no work to be done.
+		// When a key range task saves the last chunk of progress and then the executor dies, when the task
+		// continues its beginKey and endKey will be equal but there is no work to be done.
 		if (beginKey == endKey)
 			return Void();
 
@@ -1189,8 +1681,8 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		}
 
 		// Read everything from beginKey to endKey, write it to an output file, run the output file processor, and
-		// then set on_done. If we are still writing after X seconds, end the output file and insert a new backup_range
-		// task for the remainder.
+		// then set on_done. If we are still writing after X seconds, end the output file and insert a new
+		// backup_range task for the remainder.
 		state Reference<IBackupFile> outFile;
 		state Version outVersion = invalidVersion;
 		state Key lastKey;
@@ -1205,11 +1697,13 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		                                      Terminator::True,
 		                                      AccessSystemKeys::True,
 		                                      LockAware::True);
-		state RangeFileWriter rangeFile;
+		state std::unique_ptr<IRangeFileWriter> rangeFile;
 		state BackupConfig backup(task);
+		state Arena arena;
+		state Reference<TenantEntryCache<Void>> tenantCache = makeReference<TenantEntryCache<Void>>(cx);
 
-		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but if
-		// bc is false then clearly the backup is no longer in progress
+		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but
+		// if bc is false then clearly the backup is no longer in progress
 		state Reference<IBackupContainer> bc = wait(backup.backupContainer().getD(cx.getReference()));
 		if (!bc) {
 			return Void();
@@ -1217,6 +1711,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 		state bool done = false;
 		state int64_t nrKeys = 0;
+		state bool encryptionEnabled = false;
 
 		loop {
 			state RangeResultWithVersion values;
@@ -1231,16 +1726,19 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 					throw;
 			}
 
-			// If we've seen a new read version OR hit the end of the stream, then if we were writing a file finish it.
+			// If we've seen a new read version OR hit the end of the stream, then if we were writing a file finish
+			// it.
 			if (values.second != outVersion || done) {
 				if (outFile) {
 					CODE_PROBE(outVersion != invalidVersion, "Backup range task wrote multiple versions");
 					state Key nextKey = done ? endKey : keyAfter(lastKey);
-					wait(rangeFile.writeKey(nextKey));
+					wait(rangeFile->writeKey(nextKey));
 
 					if (BUGGIFY) {
-						wait(rangeFile.padEnd());
+						wait(rangeFile->padEnd(true));
 					}
+
+					wait(rangeFile->finish());
 
 					bool usedFile = wait(
 					    finishRangeFile(outFile, cx, task, taskBucket, KeyRangeRef(beginKey, nextKey), outVersion));
@@ -1264,8 +1762,8 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				// Start writing a new file after verifying this task should keep running as of a new read version
 				// (which must be >= outVersion)
 				outVersion = values.second;
-				// block size must be at least large enough for 3 max size keys and 2 max size values + overhead so 250k
-				// conservatively.
+				// block size must be at least large enough for 3 max size keys and 2 max size values + overhead so
+				// 250k conservatively.
 				state int blockSize =
 				    BUGGIFY ? deterministicRandom()->randomInt(250e3, 4e6) : CLIENT_KNOBS->BACKUP_RANGEFILE_BLOCK_SIZE;
 				state Version snapshotBeginVersion;
@@ -1279,6 +1777,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 						wait(taskBucket->keepRunning(tr, task) &&
 						     storeOrThrow(snapshotBeginVersion, backup.snapshotBeginVersion().get(tr)) &&
+						     storeOrThrow(encryptionEnabled, backup.enableSnapshotBackupEncryption().get(tr)) &&
 						     store(snapshotRangeFileCount, backup.snapshotRangeFileCount().getD(tr)));
 
 						break;
@@ -1291,16 +1790,22 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				    wait(bc->writeRangeFile(snapshotBeginVersion, snapshotRangeFileCount, outVersion, blockSize));
 				outFile = f;
 
+				encryptionEnabled = encryptionEnabled && cx->clientInfo->get().isEncryptionEnabled;
 				// Initialize range file writer and write begin key
-				rangeFile = RangeFileWriter(outFile, blockSize);
-				wait(rangeFile.writeKey(beginKey));
+				if (encryptionEnabled) {
+					CODE_PROBE(true, "using encrypted snapshot file writer");
+					rangeFile = std::make_unique<EncryptedRangeFileWriter>(cx, &arena, tenantCache, outFile, blockSize);
+				} else {
+					rangeFile = std::make_unique<RangeFileWriter>(outFile, blockSize);
+				}
+				wait(rangeFile->writeKey(beginKey));
 			}
 
 			// write kvData to file, update lastKey and key count
 			if (values.first.size() != 0) {
 				state size_t i = 0;
 				for (; i < values.first.size(); ++i) {
-					wait(rangeFile.writeKV(values.first[i].key, values.first[i].value));
+					wait(rangeFile->writeKV(values.first[i].key, values.first[i].value));
 				}
 				lastKey = values.first.back().key;
 				nrKeys += values.first.size();
@@ -1365,7 +1870,6 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 	                                  Reference<FutureBucket> futureBucket,
 	                                  Reference<Task> task) {
 		state Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
-
 		if (Params.addBackupRangeTasks().get(task)) {
 			wait(startBackupRangeInternal(tr, taskBucket, futureBucket, task, taskFuture));
 		} else {
@@ -1450,9 +1954,9 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		state double startTime = timer();
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
-		// The shard map will use 3 values classes.  Exactly SKIP, exactly DONE, then any number >= NOT_DONE_MIN which
-		// will mean not done. This is to enable an efficient coalesce() call to squash adjacent ranges which are not
-		// yet finished to enable efficiently finding random database shards which are not done.
+		// The shard map will use 3 values classes.  Exactly SKIP, exactly DONE, then any number >= NOT_DONE_MIN
+		// which will mean not done. This is to enable an efficient coalesce() call to squash adjacent ranges which
+		// are not yet finished to enable efficiently finding random database shards which are not done.
 		state int notDoneSequence = NOT_DONE_MIN;
 		state KeyRangeMap<int> shardMap(notDoneSequence++);
 		state Key beginKey = allKeys.begin;
@@ -1509,7 +2013,8 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 				     store(latestSnapshotEndVersion, config.latestSnapshotEndVersion().get(tr)) &&
 				     store(recentReadVersion, tr->getReadVersion()) && taskBucket->keepRunning(tr, task));
 
-				// If the snapshot batch future key does not exist, this is the first execution of this dispatch task so
+				// If the snapshot batch future key does not exist, this is the first execution of this dispatch
+				// task so
 				//    - create and set the snapshot batch future key
 				//    - initialize the batch size to 0
 				//    - initialize the target snapshot end version if it is not yet set
@@ -1521,7 +2026,8 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 					config.snapshotBatchSize().set(tr, snapshotBatchSize.get());
 
 					// The dispatch of this batch can take multiple separate executions if the executor fails
-					// so store a completion key for the dispatch finish() to set when dispatching the batch is done.
+					// so store a completion key for the dispatch finish() to set when dispatching the batch is
+					// done.
 					state TaskCompletionKey dispatchCompletionKey = TaskCompletionKey::joinWith(snapshotBatchFuture);
 					// this is a bad hack - but flow doesn't work well with lambda functions and caputring
 					// state variables...
@@ -1596,8 +2102,8 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 				// If this was the end of a dispatched range
 				if (!boundary.second) {
-					// Ensure that the dispatched boundaries exist AND set all shard ranges in the dispatched range to
-					// DONE.
+					// Ensure that the dispatched boundaries exist AND set all shard ranges in the dispatched range
+					// to DONE.
 					RangeMap<Key, int, KeyRangeRef>::Ranges shardRanges =
 					    shardMap.modify(KeyRangeRef(lastKey, boundary.first));
 					iShard = shardRanges.begin();
@@ -1679,10 +2185,10 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 			nextDispatchVersion = recentReadVersion + CLIENT_KNOBS->CORE_VERSIONSPERSECOND *
 			                                              CLIENT_KNOBS->BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC;
 
-		// If nextDispatchVersion is greater than snapshotTargetEndVersion (which could be in the past) then just use
-		// the greater of recentReadVersion or snapshotTargetEndVersion.  Any range tasks created in this dispatch will
-		// be scheduled at a random time between recentReadVersion and nextDispatchVersion,
-		// so nextDispatchVersion shouldn't be less than recentReadVersion.
+		// If nextDispatchVersion is greater than snapshotTargetEndVersion (which could be in the past) then just
+		// use the greater of recentReadVersion or snapshotTargetEndVersion.  Any range tasks created in this
+		// dispatch will be scheduled at a random time between recentReadVersion and nextDispatchVersion, so
+		// nextDispatchVersion shouldn't be less than recentReadVersion.
 		if (nextDispatchVersion > snapshotTargetEndVersion)
 			nextDispatchVersion = std::max(recentReadVersion, snapshotTargetEndVersion);
 
@@ -1702,12 +2208,12 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		state int countShardsToDispatch = std::max<int>(0, countExpectedShardsDone - countShardsDone);
 
 		// Calculate the number of shards that would have been dispatched by a normal (on-schedule)
-		// BackupSnapshotDispatchTask given the dispatch window and the start and expected-end versions of the current
-		// snapshot.
+		// BackupSnapshotDispatchTask given the dispatch window and the start and expected-end versions of the
+		// current snapshot.
 		int64_t dispatchWindow = nextDispatchVersion - recentReadVersion;
 
-		// If the scheduled snapshot interval is 0 (such as for initial, as-fast-as-possible snapshot) then all shards
-		// are considered late
+		// If the scheduled snapshot interval is 0 (such as for initial, as-fast-as-possible snapshot) then all
+		// shards are considered late
 		int countShardsExpectedPerNormalWindow;
 		if (snapshotScheduledVersionInterval == 0) {
 			countShardsExpectedPerNormalWindow = 0;
@@ -1718,8 +2224,8 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 			    (double(dispatchWindow) / snapshotScheduledVersionInterval) * countAllShards;
 		}
 
-		// The number of shards 'behind' the snapshot is the count of how may additional shards beyond normal are being
-		// dispatched, if any.
+		// The number of shards 'behind' the snapshot is the count of how may additional shards beyond normal are
+		// being dispatched, if any.
 		int countShardsBehind =
 		    std::max<int64_t>(0, countShardsToDispatch + snapshotBatchSize.get() - countShardsExpectedPerNormalWindow);
 		Params.shardsBehind().set(task, countShardsBehind);
@@ -1797,8 +2303,8 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 					wait(store(snapshotBatchSize.get(), config.snapshotBatchSize().getOrThrow(tr)) &&
 					     waitForAll(beginReads) && waitForAll(endReads) && taskBucket->keepRunning(tr, task));
 
-					// Snapshot batch size should be either oldBatchSize or newBatchSize. If new, this transaction is
-					// already done.
+					// Snapshot batch size should be either oldBatchSize or newBatchSize. If new, this transaction
+					// is already done.
 					if (snapshotBatchSize.get() == newBatchSize) {
 						break;
 					} else {
@@ -1836,8 +2342,8 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 							}
 
 							Version scheduledVersion = invalidVersion;
-							// If the next dispatch version is in the future, choose a random version at which to start
-							// the new task.
+							// If the next dispatch version is in the future, choose a random version at which to
+							// start the new task.
 							if (nextDispatchVersion > recentReadVersion)
 								scheduledVersion = recentReadVersion + deterministicRandom()->random01() *
 								                                           (nextDispatchVersion - recentReadVersion);
@@ -1863,8 +2369,8 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 							    .detail("BeginKey", range.begin.printable())
 							    .detail("EndKey", range.end.printable());
 						} else {
-							// This shouldn't happen because if the transaction was already done or if another execution
-							// of this task is making progress it should have been detected above.
+							// This shouldn't happen because if the transaction was already done or if another
+							// execution of this task is making progress it should have been detected above.
 							ASSERT(false);
 						}
 					}
@@ -1896,9 +2402,9 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 	}
 
 	// This function is just a wrapper for BackupSnapshotManifest::addTask() which is defined below.
-	// The BackupSnapshotDispatchTask and BackupSnapshotManifest tasks reference each other so in order to keep their
-	// execute and finish phases defined together inside their class definitions this wrapper is declared here but
-	// defined after BackupSnapshotManifest is defined.
+	// The BackupSnapshotDispatchTask and BackupSnapshotManifest tasks reference each other so in order to keep
+	// their execute and finish phases defined together inside their class definitions this wrapper is declared here
+	// but defined after BackupSnapshotManifest is defined.
 	static Future<Key> addSnapshotManifestTask(Reference<ReadYourWritesTransaction> tr,
 	                                           Reference<TaskBucket> taskBucket,
 	                                           Reference<Task> parentTask,
@@ -1931,9 +2437,9 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 		state Reference<TaskFuture> snapshotFinishedFuture = task->getDoneFuture(futureBucket);
 
-		// If the snapshot is finished, the next task is to write a snapshot manifest, otherwise it's another snapshot
-		// dispatch task. In either case, the task should wait for snapshotBatchFuture. The snapshot done key, passed to
-		// the current task, is also passed on.
+		// If the snapshot is finished, the next task is to write a snapshot manifest, otherwise it's another
+		// snapshot dispatch task. In either case, the task should wait for snapshotBatchFuture. The snapshot done
+		// key, passed to the current task, is also passed on.
 		if (Params.snapshotFinished().getOrDefault(task, false)) {
 			wait(success(addSnapshotManifestTask(
 			    tr, taskBucket, task, TaskCompletionKey::signal(snapshotFinishedFuture), snapshotBatchFuture)));
@@ -2027,10 +2533,10 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 		Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
 
 		// Get the set of key ranges that hold mutations for (beginVersion, endVersion).  They will be queried in
-		// parallel below and there is a limit on how many we want to process in a single BackupLogRangeTask so if that
-		// limit is exceeded then set the addBackupLogRangeTasks boolean in Params and stop, signalling the finish()
-		// step to break up the (beginVersion, endVersion) range into smaller intervals which are then processed by
-		// individual BackupLogRangeTasks.
+		// parallel below and there is a limit on how many we want to process in a single BackupLogRangeTask so if
+		// that limit is exceeded then set the addBackupLogRangeTasks boolean in Params and stop, signalling the
+		// finish() step to break up the (beginVersion, endVersion) range into smaller intervals which are then
+		// processed by individual BackupLogRangeTasks.
 		state Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(beginVersion, endVersion, destUidValue);
 		if (ranges.size() > CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES) {
 			Params.addBackupLogRangeTasks().set(task, true);
@@ -2044,9 +2550,9 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 		state Reference<IBackupFile> outFile = wait(bc->writeLogFile(beginVersion, endVersion, blockSize));
 		state LogFileWriter logFile(outFile, blockSize);
 
-		// Query all key ranges covering (beginVersion, endVersion) in parallel, writing their results to the results
-		// promise stream as they are received.  Note that this means the records read from the results stream are not
-		// likely to be in increasing Version order.
+		// Query all key ranges covering (beginVersion, endVersion) in parallel, writing their results to the
+		// results promise stream as they are received.  Note that this means the records read from the results
+		// stream are not likely to be in increasing Version order.
 		state PromiseStream<RangeResultWithVersion> results;
 		state std::vector<Future<Void>> rc;
 
@@ -2225,7 +2731,8 @@ struct EraseLogRangeTaskFunc : BackupTaskFuncBase {
 		    BackupConfig(logUid),
 		    waitFor,
 		    [=](Reference<Task> task) {
-			    Params.beginVersion().set(task, 1); // FIXME: remove in 6.X, only needed for 5.2 backward compatibility
+			    Params.beginVersion().set(task,
+			                              1); // FIXME: remove in 6.X, only needed for 5.2 backward compatibility
 			    Params.endVersion().set(task, endVersion);
 			    Params.destUidValue().set(task, destUidValue);
 		    },
@@ -2347,8 +2854,8 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 		state int priority = latestSnapshotEndVersion.present() ? 1 : 0;
 
 		if (!partitionedLog.present() || !partitionedLog.get()) {
-			// Add the initial log range task to read/copy the mutations and the next logs dispatch task which will run
-			// after this batch is done
+			// Add the initial log range task to read/copy the mutations and the next logs dispatch task which will
+			// run after this batch is done
 			wait(success(BackupLogRangeTaskFunc::addTask(tr,
 			                                             taskBucket,
 			                                             task,
@@ -2518,8 +3025,8 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
-		// Read the entire range file map into memory, then walk it backwards from its last entry to produce a list of
-		// non overlapping key range files
+		// Read the entire range file map into memory, then walk it backwards from its last entry to produce a list
+		// of non overlapping key range files
 		state std::map<Key, BackupConfig::RangeSlice> localmap;
 		state Key startKey;
 		state int batchSize = BUGGIFY ? 1 : 1000000;
@@ -2583,10 +3090,11 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 				totalBytes += r.fileSize;
 
 				// Jump to file that either ends where this file begins or has the greatest end that is less than
-				// the begin of this file.  In other words find the map key that is <= begin of this file.  To do this
-				// find the first end strictly greater than begin and then back up one.
+				// the begin of this file.  In other words find the map key that is <= begin of this file.  To do
+				// this find the first end strictly greater than begin and then back up one.
 				i = localmap.upper_bound(i->second.begin);
-				// If we get begin then we're done, there are no more ranges that end at or before the last file's begin
+				// If we get begin then we're done, there are no more ranges that end at or before the last file's
+				// begin
 				if (i == localmap.begin())
 					break;
 				--i;
@@ -2834,8 +3342,8 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		wait(success(BackupLogsDispatchTask::addTask(
 		    tr, taskBucket, task, 1, 0, beginVersion, TaskCompletionKey::joinWith(backupFinished))));
 
-		// If a clean stop is requested, the log and snapshot tasks will quit after the backup is restorable, then the
-		// following task will clean up and set the completed state.
+		// If a clean stop is requested, the log and snapshot tasks will quit after the backup is restorable, then
+		// the following task will clean up and set the completed state.
 		wait(success(
 		    FileBackupFinishedTask::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), backupFinished)));
 
@@ -2890,13 +3398,14 @@ struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
 		// Clear the file map now since it could be huge.
 		restore.fileSet().clear(tr);
 
-		// TODO:  Validate that the range version map has exactly the restored ranges in it.  This means that for any
-		// restore operation the ranges to restore must be within the backed up ranges, otherwise from the restore
-		// perspective it will appear that some key ranges were missing and so the backup set is incomplete and the
-		// restore has failed. This validation cannot be done currently because Restore only supports a single restore
-		// range but backups can have many ranges.
+		// TODO:  Validate that the range version map has exactly the restored ranges in it.  This means that for
+		// any restore operation the ranges to restore must be within the backed up ranges, otherwise from the
+		// restore perspective it will appear that some key ranges were missing and so the backup set is incomplete
+		// and the restore has failed. This validation cannot be done currently because Restore only supports a
+		// single restore range but backups can have many ranges.
 
-		// Clear the applyMutations stuff, including any unapplied mutations from versions beyond the restored version.
+		// Clear the applyMutations stuff, including any unapplied mutations from versions beyond the restored
+		// version.
 		restore.clearApplyMutationsKeys(tr);
 
 		wait(taskBucket->finish(tr, task));
@@ -3033,7 +3542,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		}
 
 		state Reference<IAsyncFile> inFile = wait(bc.get()->readFile(rangeFile.fileName));
-		state Standalone<VectorRef<KeyValueRef>> blockData = wait(decodeRangeFileBlock(inFile, readOffset, readLen));
+		state Standalone<VectorRef<KeyValueRef>> blockData =
+		    wait(decodeRangeFileBlock(inFile, readOffset, readLen, cx));
 
 		// First and last key are the range for this file
 		state KeyRange fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
@@ -3060,8 +3570,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 			state VectorRef<KeyValueRef> data = blockData.slice(rangeStart, rangeEnd);
 
 			// Shrink file range to be entirely within restoreRange and translate it to the new prefix
-			// First, use the untranslated file range to create the shrunk original file range which must be used in the
-			// kv range version map for applying mutations
+			// First, use the untranslated file range to create the shrunk original file range which must be used in
+			// the kv range version map for applying mutations
 			state KeyRange originalFileRange =
 			    KeyRangeRef(std::max(fileRange.begin, restoreRange.begin), std::min(fileRange.end, restoreRange.end));
 			originalFileRanges.push_back(originalFileRange);
@@ -3107,7 +3617,6 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 					                 : data[start].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()),
 					    (iend == end) ? fileRange.end
 					                  : data[iend].key.removePrefix(removePrefix.get()).withPrefix(addPrefix.get()));
-
 					tr->clear(trRange);
 
 					for (; i < iend; ++i) {
@@ -3431,8 +3940,8 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 		state Standalone<VectorRef<KeyValueRef>> dataOriginal =
 		    wait(decodeMutationLogFileBlock(inFile, readOffset, readLen));
 
-		// Filter the KV pairs extracted from the log file block to remove any records known to not be needed for this
-		// restore based on the restore range set.
+		// Filter the KV pairs extracted from the log file block to remove any records known to not be needed for
+		// this restore based on the restore range set.
 		state std::vector<KeyValueRef> dataFiltered = filterLogMutationKVPairs(dataOriginal, ranges);
 
 		state int start = 0;
@@ -3506,8 +4015,8 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 
 		state Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
-		// TODO:  Check to see if there is a leak in the FutureBucket since an invalid task (validation key fails) will
-		// never set its taskFuture.
+		// TODO:  Check to see if there is a leak in the FutureBucket since an invalid task (validation key fails)
+		// will never set its taskFuture.
 		wait(taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
 
 		return Void();
@@ -3615,8 +4124,8 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		}
 
 		state std::string beginFile = Params.beginFile().getOrDefault(task);
-		// Get a batch of files.  We're targeting batchSize blocks being dispatched so query for batchSize files (each
-		// of which is 0 or more blocks).
+		// Get a batch of files.  We're targeting batchSize blocks being dispatched so query for batchSize files
+		// (each of which is 0 or more blocks).
 		state int taskBatchSize = BUGGIFY ? 1 : CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE;
 		state RestoreConfig::FileSetT::RangeResultType files = wait(restore.fileSet().getRange(
 		    tr, Optional<RestoreConfig::RestoreFile>({ beginVersion, beginFile }), {}, taskBatchSize));
@@ -3638,8 +4147,8 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 
 		// If there were no files to load then this batch is done and restore is almost done.
 		if (files.results.size() == 0) {
-			// If adding to existing batch then blocks could be in progress so create a new Dispatch task that waits for
-			// them to finish
+			// If adding to existing batch then blocks could be in progress so create a new Dispatch task that waits
+			// for them to finish
 			if (addingToExistingBatch) {
 				// Setting next begin to restoreVersion + 1 so that any files in the file map at the restore version
 				// won't be dispatched again.
@@ -3689,8 +4198,8 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 				    .detail("Decision", "restore_complete")
 				    .detail("TaskInstance", THIS_ADDR);
 			} else {
-				// Applying of mutations is not yet finished so wait a small amount of time and then re-add this same
-				// task.
+				// Applying of mutations is not yet finished so wait a small amount of time and then re-add this
+				// same task.
 				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 				wait(success(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, beginVersion, "", 0, batchSize)));
 
@@ -3723,9 +4232,9 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		for (; i < files.results.size(); ++i) {
 			RestoreConfig::RestoreFile& f = files.results[i];
 
-			// Here we are "between versions" (prior to adding the first block of the first file of a new version) so
-			// this is an opportunity to end the current dispatch batch (which must end on a version boundary) if the
-			// batch size has been reached or exceeded
+			// Here we are "between versions" (prior to adding the first block of the first file of a new version)
+			// so this is an opportunity to end the current dispatch batch (which must end on a version boundary) if
+			// the batch size has been reached or exceeded
 			if (f.version != endVersion && remainingInBatch <= 0) {
 				// Next start will be at the first version after endVersion at the first file first block
 				++endVersion;
@@ -3787,13 +4296,13 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 			    .detail("TaskInstance", THIS_ADDR);
 		}
 
-		// If no blocks were dispatched then the next dispatch task should run now and be joined with the allPartsDone
-		// future
+		// If no blocks were dispatched then the next dispatch task should run now and be joined with the
+		// allPartsDone future
 		if (blocksDispatched == 0) {
 			std::string decision;
 
-			// If no files were dispatched either then the batch size wasn't large enough to catch all of the files at
-			// the next lowest non-dispatched version, so increase the batch size.
+			// If no files were dispatched either then the batch size wasn't large enough to catch all of the files
+			// at the next lowest non-dispatched version, so increase the batch size.
 			if (i == 0) {
 				batchSize *= 2;
 				decision = "increased_batch_size";
@@ -3836,13 +4345,13 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		restore.filesBlocksDispatched().atomicOp(tr, blocksDispatched, MutationRef::Type::AddValue);
 
 		// If beginFile is not empty then we had to stop in the middle of a version (possibly within a file) so we
-		// cannot end the batch here because we do not know if we got all of the files and blocks from the last version
-		// queued, so make sure remainingInBatch is at least 1.
+		// cannot end the batch here because we do not know if we got all of the files and blocks from the last
+		// version queued, so make sure remainingInBatch is at least 1.
 		if (!beginFile.empty())
 			remainingInBatch = std::max<int64_t>(1, remainingInBatch);
 
-		// If more blocks need to be dispatched in this batch then add a follow-on task that is part of the allPartsDone
-		// group which will won't wait to run and will add more block tasks.
+		// If more blocks need to be dispatched in this batch then add a follow-on task that is part of the
+		// allPartsDone group which will won't wait to run and will add more block tasks.
 		if (remainingInBatch > 0)
 			addTaskFutures.push_back(RestoreDispatchTaskFunc::addTask(tr,
 			                                                          taskBucket,
@@ -4119,7 +4628,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			keyRangesFilter.push_back_deep(keyRangesFilter.arena(), KeyRangeRef(r));
 		}
 		state Optional<RestorableFileSet> restorable =
-		    wait(bc->getRestoreSet(restoreVersion, keyRangesFilter, logsOnly, beginVersion));
+		    wait(bc->getRestoreSet(restoreVersion, cx, keyRangesFilter, logsOnly, beginVersion));
 		if (!restorable.present())
 			throw restore_missing_data();
 
@@ -4131,8 +4640,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			if (!inconsistentSnapshotOnly) {
 				for (const RangeFile& f : restorable.get().ranges) {
 					files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
-					// In a restore with both snapshots and logs, the firstConsistentVersion is the highest version of
-					// any range file.
+					// In a restore with both snapshots and logs, the firstConsistentVersion is the highest version
+					// of any range file.
 					firstConsistentVersion = std::max(firstConsistentVersion, f.version);
 				}
 			} else {
@@ -4381,7 +4890,7 @@ public:
 			    .detail("OverrideTargetVersion", targetVersion);
 		}
 
-		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
+		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion, cx));
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
@@ -4518,6 +5027,7 @@ public:
 	                                       int snapshotIntervalSeconds,
 	                                       std::string tagName,
 	                                       Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                                       bool encryptionEnabled,
 	                                       StopWhenDone stopWhenDone,
 	                                       UsePartitionedLog partitionedLog,
 	                                       IncrementalBackupOnly incrementalBackupOnly,
@@ -4640,6 +5150,7 @@ public:
 		config.snapshotIntervalSeconds().set(tr, snapshotIntervalSeconds);
 		config.partitionedLogEnabled().set(tr, partitionedLog);
 		config.incrementalBackupOnly().set(tr, incrementalBackupOnly);
+		config.enableSnapshotBackupEncryption().set(tr, encryptionEnabled);
 
 		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(
 		    tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
@@ -5347,7 +5858,7 @@ public:
 		}
 
 		Optional<RestorableFileSet> restoreSet =
-		    wait(bc->getRestoreSet(targetVersion, ranges, onlyApplyMutationLogs, beginVersion));
+		    wait(bc->getRestoreSet(targetVersion, cx, ranges, onlyApplyMutationLogs, beginVersion));
 
 		if (!restoreSet.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
@@ -5715,6 +6226,7 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
                                            int snapshotIntervalSeconds,
                                            std::string const& tagName,
                                            Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                           bool encryptionEnabled,
                                            StopWhenDone stopWhenDone,
                                            UsePartitionedLog partitionedLog,
                                            IncrementalBackupOnly incrementalBackupOnly,
@@ -5727,6 +6239,7 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
 	                                         snapshotIntervalSeconds,
 	                                         tagName,
 	                                         backupRanges,
+	                                         encryptionEnabled,
 	                                         stopWhenDone,
 	                                         partitionedLog,
 	                                         incrementalBackupOnly,

@@ -78,10 +78,14 @@ Future<bool> checkRangeSimpleValueSize(Database cx, T* workload, uint64_t begin,
 
 // Returns true if the range was added
 ACTOR template <class T>
-Future<uint64_t> setupRange(Database cx, T* workload, uint64_t begin, uint64_t end) {
+Future<uint64_t> setupRange(Database cx, T* workload, uint64_t begin, uint64_t end, std::vector<TenantName> tenants) {
 	state uint64_t bytesInserted = 0;
 	loop {
-		state Transaction tr(cx);
+		Optional<TenantName> tenant;
+		if (tenants.size() > 0) {
+			tenant = tenants.at(deterministicRandom()->randomInt(0, tenants.size()));
+		}
+		state Transaction tr(cx, tenant);
 		setAuthToken(*workload, tr);
 		try {
 			// if( deterministicRandom()->random01() < 0.001 )
@@ -128,7 +132,8 @@ Future<uint64_t> setupRangeWorker(Database cx,
                                   std::vector<std::pair<uint64_t, uint64_t>>* jobs,
                                   double maxKeyInsertRate,
                                   int keySaveIncrement,
-                                  int actorId) {
+                                  int actorId,
+                                  std::vector<TenantName> tenants) {
 	state double nextStart;
 	state uint64_t loadedRanges = 0;
 	state int lastStoredKeysLoaded = 0;
@@ -138,7 +143,7 @@ Future<uint64_t> setupRangeWorker(Database cx,
 		state std::pair<uint64_t, uint64_t> job = jobs->back();
 		jobs->pop_back();
 		nextStart = now() + (job.second - job.first) / maxKeyInsertRate;
-		uint64_t numBytes = wait(setupRange(cx, workload, job.first, job.second));
+		uint64_t numBytes = wait(setupRange(cx, workload, job.first, job.second, tenants));
 		if (numBytes > 0)
 			loadedRanges++;
 
@@ -225,7 +230,8 @@ Future<Void> bulkSetup(Database cx,
                        int keySaveIncrement = 0,
                        double keyCheckInterval = 0.1,
                        uint64_t startNodeIdx = 0,
-                       uint64_t endNodeIdx = 0) {
+                       uint64_t endNodeIdx = 0,
+                       std::vector<TenantName> tenants = std::vector<TenantName>()) {
 
 	state std::vector<std::pair<uint64_t, uint64_t>> jobs;
 	state uint64_t startNode = startNodeIdx ? startNodeIdx : (nodeCount * workload->clientId) / workload->clientCount;
@@ -305,7 +311,7 @@ Future<Void> bulkSetup(Database cx,
 		keySaveIncrement = 0;
 
 	for (int j = 0; j < BULK_SETUP_WORKERS; j++)
-		fs.push_back(setupRangeWorker(cx, workload, &jobs, maxWorkerInsertRate, keySaveIncrement, j));
+		fs.push_back(setupRangeWorker(cx, workload, &jobs, maxWorkerInsertRate, keySaveIncrement, j, tenants));
 	try {
 		wait(success(insertionTimes) && waitForAll(fs));
 	} catch (Error& e) {

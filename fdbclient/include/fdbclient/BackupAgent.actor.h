@@ -250,6 +250,7 @@ public:
 	                          int snapshotIntervalSeconds,
 	                          std::string const& tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                          bool encryptionEnabled,
 	                          StopWhenDone = StopWhenDone::True,
 	                          UsePartitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly = IncrementalBackupOnly::False,
@@ -261,6 +262,7 @@ public:
 	                          int snapshotIntervalSeconds,
 	                          std::string const& tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                          bool encryptionEnabled,
 	                          StopWhenDone stopWhenDone = StopWhenDone::True,
 	                          UsePartitionedLog partitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::False,
@@ -273,6 +275,7 @@ public:
 			                    snapshotIntervalSeconds,
 			                    tagName,
 			                    backupRanges,
+			                    encryptionEnabled,
 			                    stopWhenDone,
 			                    partitionedLog,
 			                    incrementalBackupOnly,
@@ -875,6 +878,11 @@ public:
 	// Stop differntial logging if already started or don't start after completing KV ranges
 	KeyBackedProperty<bool> stopWhenDone() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 
+	// Enable snapshot backup file encryption
+	KeyBackedProperty<bool> enableSnapshotBackupEncryption() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
 	// Latest version for which all prior versions have had their log copy tasks completed
 	KeyBackedProperty<Version> latestLogEndVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
 
@@ -983,7 +991,8 @@ struct StringRefReader {
 namespace fileBackup {
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
-                                                                      int len);
+                                                                      int len,
+                                                                      Optional<Database> cx);
 
 // Reads a mutation log block from file and parses into batch mutation blocks for further parsing.
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Reference<IAsyncFile> file,
