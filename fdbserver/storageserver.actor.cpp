@@ -944,6 +944,8 @@ public:
 		LatencySample readRangeLatencySample;
 		LatencySample readVersionWaitSample;
 		LatencySample readQueueWaitSample;
+		LatencySample kvReadRangeLatencySample;
+		LatencySample updateLatencySample;
 
 		LatencyBands readLatencyBands;
 		LatencySample mappedRangeSample; // Samples getMappedRange latency
@@ -1012,7 +1014,15 @@ public:
 		    mappedRangeLocalSample("GetMappedRangeLocalMetrics",
 		                           self->thisServerID,
 		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {
+		                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    kvReadRangeLatencySample("KVGetRangeMetrics",
+		                             self->thisServerID,
+		                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    updateLatencySample("UpdateLatencyMetrics",
+		                        self->thisServerID,
+		                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
 			specialCounter(cc, "StorageVersion", [self]() { return self->storageVersion(); });
@@ -3384,6 +3394,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
 
+			state double kvReadRange = g_network->timer();
 			GetKeyValuesReply _r = wait(readRange(data,
 			                                      version,
 			                                      KeyRangeRef(begin, end),
@@ -3392,6 +3403,8 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			                                      span.context,
 			                                      type,
 			                                      tenantPrefix));
+			double duration = g_network->timer() - kvReadRange;
+			data->counters.kvReadRangeLatencySample.addMeasurement(duration);
 			GetKeyValuesReply r = _r;
 
 			if (req.debugID.present())
@@ -6932,6 +6945,7 @@ ACTOR Future<Void> tssDelayForever() {
 }
 
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
+	state double updateStart = g_network->timer();
 	state double start;
 	try {
 
@@ -7355,6 +7369,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 			data->behind = false;
 		}
+
+		double duration = g_network->timer() - updateStart;
+		data->counters.updateLatencySample.addMeasurement(duration);
 
 		return Void(); // update will get called again ASAP
 	} catch (Error& err) {
