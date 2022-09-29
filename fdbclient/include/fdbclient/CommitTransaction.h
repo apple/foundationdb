@@ -155,14 +155,13 @@ struct MutationRef {
 		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
 		BinaryWriter bw(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 		bw << *this;
-		EncryptBlobCipherAes265Ctr cipher(textCipherItr->second,
-		                                  headerCipherItr->second,
-		                                  iv,
-		                                  AES_256_IV_LENGTH,
-		                                  FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED
-		                                      ? EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE
-		                                      : EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
-		                                  usageType);
+		EncryptBlobCipherAes265Ctr cipher(
+		    textCipherItr->second,
+		    headerCipherItr->second,
+		    iv,
+		    AES_256_IV_LENGTH,
+		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+		    usageType);
 		BlobCipherEncryptHeader* header = new (arena) BlobCipherEncryptHeader;
 		StringRef headerRef(reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader));
 		StringRef payload =

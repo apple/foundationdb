@@ -490,12 +490,11 @@ private:
 
 			ASSERT(cipherKeys.cipherTextKey.isValid());
 			ASSERT(cipherKeys.cipherHeaderKey.isValid());
-			EncryptBlobCipherAes265Ctr cipher(cipherKeys.cipherTextKey,
-			                                  cipherKeys.cipherHeaderKey,
-			                                  FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED
-			                                      ? EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE
-			                                      : EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
-			                                  BlobCipherMetrics::KV_MEMORY);
+			EncryptBlobCipherAes265Ctr cipher(
+			    cipherKeys.cipherTextKey,
+			    cipherKeys.cipherHeaderKey,
+			    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+			    BlobCipherMetrics::KV_MEMORY);
 			BlobCipherEncryptHeader cipherHeader;
 			Arena arena;
 			StringRef ciphertext =

@@ -372,9 +372,7 @@ public:
 			Header* h = reinterpret_cast<Header*>(header);
 			EncryptBlobCipherAes265Ctr cipher(cipherKeys.cipherTextKey,
 			                                  cipherKeys.cipherHeaderKey,
-			                                  FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED
-			                                      ? ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE
-			                                      : EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
+			                                  getEncryptAuthTokenMode(ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 			                                  BlobCipherMetrics::KV_REDWOOD);
 			Arena arena;
 			StringRef ciphertext = cipher.encrypt(payload, len, h, arena)->toStringRef();

@@ -67,8 +67,7 @@ struct SimKmsConnectorContext : NonCopyable, ReferenceCounted<SimKmsConnectorCon
 		// Note the keys generated must be the same after restart.
 		for (int i = 1; i <= maxEncryptionKeys; i++) {
 			uint8_t digest[AUTH_TOKEN_HMAC_SHA_SIZE];
-			computeAuthToken(reinterpret_cast<const unsigned char*>(&i),
-			                 sizeof(i),
+			computeAuthToken({ { reinterpret_cast<const uint8_t*>(&i), sizeof(i) } },
 			                 SHA_KEY,
 			                 AES_256_KEY_LENGTH,
 			                 &digest[0],

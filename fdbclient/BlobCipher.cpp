@@ -163,7 +163,7 @@ void BlobCipherKey::applyHmacSha256Derivation() {
 	memcpy(&buf[0] + baseCipherLen, &randomSalt, sizeof(EncryptCipherRandomSalt));
 	HmacSha256DigestGen hmacGen(baseCipher.get(), baseCipherLen);
 	unsigned int digestLen = hmacGen.digest(
-	    &buf[0], baseCipherLen + sizeof(EncryptCipherRandomSalt), cipher.get(), AUTH_TOKEN_HMAC_SHA_SIZE);
+	    { { &buf[0], baseCipherLen + sizeof(EncryptCipherRandomSalt) } }, cipher.get(), AUTH_TOKEN_HMAC_SHA_SIZE);
 	if (digestLen < AES_256_KEY_LENGTH) {
 		memcpy(cipher.get() + digestLen, buf, AES_256_KEY_LENGTH - digestLen);
 	}
@@ -582,11 +582,10 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 	// Alloc buffer computation accounts for 'header authentication' generation scheme. If single-auth-token needs
 	// to be generated, allocate buffer sufficient to append header to the cipherText optimizing memcpy cost.
 
-	const int allocSize = authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE
-	                          ? plaintextLen + AES_BLOCK_SIZE + sizeof(BlobCipherEncryptHeader)
-	                          : plaintextLen + AES_BLOCK_SIZE;
+	const int allocSize = plaintextLen + AES_BLOCK_SIZE;
 	Reference<EncryptBuf> encryptBuf = makeReference<EncryptBuf>(allocSize, arena);
 	uint8_t* ciphertext = encryptBuf->begin();
+
 	int bytes{ 0 };
 	if (EVP_EncryptUpdate(ctx, ciphertext, &bytes, plaintext, plaintextLen) != 1) {
 		TraceEvent(SevWarn, "BlobCipherEncryptUpdateFailed")
@@ -638,14 +637,11 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 
 		// Populate header authToken details
 		if (header->flags.authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE) {
-			ASSERT_GE(allocSize, (bytes + finalBytes + sizeof(BlobCipherEncryptHeader)));
-			ASSERT_GE(encryptBuf->getLogicalSize(), (bytes + finalBytes + sizeof(BlobCipherEncryptHeader)));
+			ASSERT_GE(allocSize, (bytes + finalBytes));
+			ASSERT_GE(encryptBuf->getLogicalSize(), (bytes + finalBytes));
 
-			memcpy(&ciphertext[bytes + finalBytes],
-			       reinterpret_cast<const uint8_t*>(header),
-			       sizeof(BlobCipherEncryptHeader));
-			computeAuthToken(ciphertext,
-			                 bytes + finalBytes + sizeof(BlobCipherEncryptHeader),
+			computeAuthToken({ { ciphertext, bytes + finalBytes },
+			                   { reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader) } },
 			                 headerCipherKey->rawCipher(),
 			                 AES_256_KEY_LENGTH,
 			                 &header->singleAuthToken.authToken[0],
@@ -655,15 +651,13 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 			ASSERT_EQ(header->flags.authTokenMode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI);
 
 			// TOOD: Use HMAC_SHA encyrption authentication scheme as AES_CMAC needs minimum 16 bytes cipher key
-			computeAuthToken(ciphertext,
-			                 bytes + finalBytes,
+			computeAuthToken({ { ciphertext, bytes + finalBytes } },
 			                 reinterpret_cast<const uint8_t*>(&header->cipherTextDetails.salt),
 			                 sizeof(EncryptCipherRandomSalt),
 			                 &header->multiAuthTokens.cipherTextAuthToken[0],
 			                 EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
 			                 AUTH_TOKEN_MAX_SIZE);
-			computeAuthToken(reinterpret_cast<const uint8_t*>(header),
-			                 sizeof(BlobCipherEncryptHeader),
+			computeAuthToken({ { reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader) } },
 			                 headerCipherKey->rawCipher(),
 			                 AES_256_KEY_LENGTH,
 			                 &header->multiAuthTokens.headerAuthToken[0],
@@ -730,8 +724,7 @@ void DecryptBlobCipherAes256Ctr::verifyHeaderAuthToken(const BlobCipherEncryptHe
 	       sizeof(BlobCipherEncryptHeader));
 	memset(reinterpret_cast<uint8_t*>(&headerCopy.multiAuthTokens.headerAuthToken), 0, AUTH_TOKEN_MAX_SIZE);
 	uint8_t computedHeaderAuthToken[AUTH_TOKEN_MAX_SIZE]{};
-	computeAuthToken(reinterpret_cast<const uint8_t*>(&headerCopy),
-	                 sizeof(BlobCipherEncryptHeader),
+	computeAuthToken({ { reinterpret_cast<const uint8_t*>(&headerCopy), sizeof(BlobCipherEncryptHeader) } },
 	                 headerCipherKey->rawCipher(),
 	                 AES_256_KEY_LENGTH,
 	                 &computedHeaderAuthToken[0],
@@ -756,21 +749,20 @@ void DecryptBlobCipherAes256Ctr::verifyHeaderAuthToken(const BlobCipherEncryptHe
 void DecryptBlobCipherAes256Ctr::verifyHeaderSingleAuthToken(const uint8_t* ciphertext,
                                                              const int ciphertextLen,
                                                              const BlobCipherEncryptHeader& header,
-                                                             uint8_t* buff,
                                                              Arena& arena) {
 	// Header authToken not set for single auth-token mode.
 	ASSERT(!headerAuthTokenValidationDone);
 
 	// prepare the payload {cipherText + encryptionHeader}
-	memcpy(&buff[0], ciphertext, ciphertextLen);
-	memcpy(&buff[ciphertextLen], reinterpret_cast<const uint8_t*>(&header), sizeof(BlobCipherEncryptHeader));
 	// ensure the 'authToken' is reset before computing the 'authentication token'
-	BlobCipherEncryptHeader* eHeader = (BlobCipherEncryptHeader*)(&buff[ciphertextLen]);
-	memset(reinterpret_cast<uint8_t*>(&eHeader->singleAuthToken), 0, 2 * AUTH_TOKEN_MAX_SIZE);
-
+	BlobCipherEncryptHeader headerCopy;
+	memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
+	       reinterpret_cast<const uint8_t*>(&header),
+	       sizeof(BlobCipherEncryptHeader));
+	memset(reinterpret_cast<uint8_t*>(&headerCopy.singleAuthToken), 0, 2 * AUTH_TOKEN_MAX_SIZE);
 	uint8_t computed[AUTH_TOKEN_MAX_SIZE];
-	computeAuthToken(buff,
-	                 ciphertextLen + sizeof(BlobCipherEncryptHeader),
+	computeAuthToken({ { ciphertext, ciphertextLen },
+	                   { reinterpret_cast<const uint8_t*>(&headerCopy), sizeof(BlobCipherEncryptHeader) } },
 	                 headerCipherKey->rawCipher(),
 	                 AES_256_KEY_LENGTH,
 	                 &computed[0],
@@ -793,15 +785,13 @@ void DecryptBlobCipherAes256Ctr::verifyHeaderSingleAuthToken(const uint8_t* ciph
 void DecryptBlobCipherAes256Ctr::verifyHeaderMultiAuthToken(const uint8_t* ciphertext,
                                                             const int ciphertextLen,
                                                             const BlobCipherEncryptHeader& header,
-                                                            uint8_t* buff,
                                                             Arena& arena) {
 	if (!headerAuthTokenValidationDone) {
 		verifyHeaderAuthToken(header, arena);
 	}
 	uint8_t computedCipherTextAuthToken[AUTH_TOKEN_MAX_SIZE];
 	// TOOD: Use HMAC_SHA encyrption authentication scheme as AES_CMAC needs minimum 16 bytes cipher key
-	computeAuthToken(ciphertext,
-	                 ciphertextLen,
+	computeAuthToken({ { ciphertext, ciphertextLen } },
 	                 reinterpret_cast<const uint8_t*>(&header.cipherTextDetails.salt),
 	                 sizeof(EncryptCipherRandomSalt),
 	                 &computedCipherTextAuthToken[0],
@@ -822,13 +812,12 @@ void DecryptBlobCipherAes256Ctr::verifyHeaderMultiAuthToken(const uint8_t* ciphe
 void DecryptBlobCipherAes256Ctr::verifyAuthTokens(const uint8_t* ciphertext,
                                                   const int ciphertextLen,
                                                   const BlobCipherEncryptHeader& header,
-                                                  uint8_t* buff,
                                                   Arena& arena) {
 	if (header.flags.authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE) {
-		verifyHeaderSingleAuthToken(ciphertext, ciphertextLen, header, buff, arena);
+		verifyHeaderSingleAuthToken(ciphertext, ciphertextLen, header, arena);
 	} else {
 		ASSERT_EQ(header.flags.authTokenMode, ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI);
-		verifyHeaderMultiAuthToken(ciphertext, ciphertextLen, header, buff, arena);
+		verifyHeaderMultiAuthToken(ciphertext, ciphertextLen, header, arena);
 	}
 
 	authTokensValidationDone = true;
@@ -867,13 +856,11 @@ Reference<EncryptBuf> DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphert
 		throw encrypt_ops_error();
 	}
 
-	const int allocSize = header.flags.authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE
-	                          ? ciphertextLen + AES_BLOCK_SIZE + sizeof(BlobCipherEncryptHeader)
-	                          : ciphertextLen + AES_BLOCK_SIZE;
+	const int allocSize = ciphertextLen + AES_BLOCK_SIZE;
 	Reference<EncryptBuf> decrypted = makeReference<EncryptBuf>(allocSize, arena);
 
 	if (header.flags.authTokenMode != EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
-		verifyAuthTokens(ciphertext, ciphertextLen, header, decrypted->begin(), arena);
+		verifyAuthTokens(ciphertext, ciphertextLen, header, arena);
 		ASSERT(authTokensValidationDone);
 	}
 
@@ -938,14 +925,15 @@ HmacSha256DigestGen::~HmacSha256DigestGen() {
 	}
 }
 
-unsigned int HmacSha256DigestGen::digest(const unsigned char* data,
-                                         size_t len,
+unsigned int HmacSha256DigestGen::digest(const std::vector<std::pair<const uint8_t*, size_t>>& payload,
                                          unsigned char* buf,
                                          unsigned int bufLen) {
 	ASSERT_EQ(bufLen, HMAC_size(ctx));
 
-	if (HMAC_Update(ctx, data, len) != 1) {
-		throw encrypt_ops_error();
+	for (const auto& p : payload) {
+		if (HMAC_Update(ctx, p.first, p.second) != 1) {
+			throw encrypt_ops_error();
+		}
 	}
 
 	unsigned int digestLen = 0;
@@ -970,12 +958,16 @@ Aes256CmacDigestGen::Aes256CmacDigestGen(const unsigned char* key, size_t keylen
 	}
 }
 
-size_t Aes256CmacDigestGen::digest(const uint8_t* data, const size_t datalen, uint8_t* digest, int digestlen) {
+size_t Aes256CmacDigestGen::digest(const std::vector<std::pair<const uint8_t*, size_t>>& payload,
+                                   uint8_t* digest,
+                                   int digestlen) {
 	ASSERT(ctx != nullptr);
 	ASSERT_GE(digestlen, AUTH_TOKEN_AES_CMAC_SIZE);
 
-	if (!CMAC_Update(ctx, data, datalen)) {
-		throw encrypt_ops_error();
+	for (const auto& p : payload) {
+		if (!CMAC_Update(ctx, p.first, p.second)) {
+			throw encrypt_ops_error();
+		}
 	}
 	size_t ret;
 	if (!CMAC_Final(ctx, digest, &ret)) {
@@ -991,10 +983,7 @@ Aes256CmacDigestGen::~Aes256CmacDigestGen() {
 	}
 }
 
-// TODO
-
-void computeAuthToken(const uint8_t* payload,
-                      const int payloadLen,
+void computeAuthToken(const std::vector<std::pair<const uint8_t*, size_t>>& payload,
                       const uint8_t* key,
                       const int keyLen,
                       unsigned char* digestBuf,
@@ -1010,7 +999,7 @@ void computeAuthToken(const uint8_t* payload,
 		ASSERT_EQ(authTokenSz, AUTH_TOKEN_HMAC_SHA_SIZE);
 
 		HmacSha256DigestGen hmacGenerator(key, keyLen);
-		unsigned int digestLen = hmacGenerator.digest(payload, payloadLen, digestBuf, authTokenSz);
+		unsigned int digestLen = hmacGenerator.digest(payload, digestBuf, authTokenSz);
 
 		ASSERT_EQ(digestLen, authTokenSz);
 	} else if (algo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC) {
@@ -1018,12 +1007,18 @@ void computeAuthToken(const uint8_t* payload,
 		ASSERT_EQ(keyLen, AES_256_KEY_LENGTH);
 
 		Aes256CmacDigestGen cmacGenerator(key, keyLen);
-		size_t digestLen = cmacGenerator.digest(payload, payloadLen, digestBuf, authTokenSz);
+		size_t digestLen = cmacGenerator.digest(payload, digestBuf, authTokenSz);
 
 		ASSERT_EQ(digestLen, authTokenSz);
 	} else {
 		throw not_implemented();
 	}
+}
+
+EncryptAuthTokenMode getEncryptAuthTokenMode(const EncryptAuthTokenMode mode) {
+	// Override mode if authToken isn't enabled
+	return FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED ? mode
+	                                                     : EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE;
 }
 
 // Only used to link unit tests
@@ -1196,7 +1191,7 @@ TEST_CASE("flow/BlobCipher") {
 		TraceEvent("NoneAuthModeStart");
 
 		EncryptBlobCipherAes265Ctr encryptor(cipherKey,
-		                                     Reference<BlobCipherKey>(),
+		                                     headerCipherKey,
 		                                     iv,
 		                                     AES_256_IV_LENGTH,
 		                                     EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,

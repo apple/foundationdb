@@ -74,7 +74,7 @@ typedef enum {
 	ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE = 0,
 	ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE = 1,
 	ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI = 2,
-	ENCRYPT_HEADER_AUTH_TOKEN_LAST = std::numeric_limits<uint8_t>::max() // Always the last element
+	ENCRYPT_HEADER_AUTH_TOKEN_LAST = 3 // Always the last element
 } EncryptAuthTokenMode;
 
 static_assert(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_LAST <= std::numeric_limits<uint8_t>::max(),
@@ -84,7 +84,7 @@ typedef enum {
 	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE = 0,
 	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA = 1,
 	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC = 2,
-	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_LAST = std::numeric_limits<uint8_t>::max() // Always the last element
+	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_LAST = 3 // Always the last element
 } EncryptAuthTokenAlgo;
 
 static_assert(EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_LAST <= std::numeric_limits<uint8_t>::max(),

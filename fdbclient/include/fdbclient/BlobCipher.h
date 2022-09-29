@@ -623,17 +623,14 @@ private:
 	void verifyAuthTokens(const uint8_t* ciphertext,
 	                      const int ciphertextLen,
 	                      const BlobCipherEncryptHeader& header,
-	                      uint8_t* buff,
 	                      Arena& arena);
 	void verifyHeaderSingleAuthToken(const uint8_t* ciphertext,
 	                                 const int ciphertextLen,
 	                                 const BlobCipherEncryptHeader& header,
-	                                 uint8_t* buff,
 	                                 Arena& arena);
 	void verifyHeaderMultiAuthToken(const uint8_t* ciphertext,
 	                                const int ciphertextLen,
 	                                const BlobCipherEncryptHeader& header,
-	                                uint8_t* buff,
 	                                Arena& arena);
 };
 
@@ -642,7 +639,9 @@ public:
 	HmacSha256DigestGen(const unsigned char* key, size_t len);
 	~HmacSha256DigestGen();
 	HMAC_CTX* getCtx() const { return ctx; }
-	unsigned int digest(unsigned char const* data, size_t len, unsigned char* buf, unsigned int bufLen);
+	unsigned int digest(const std::vector<std::pair<const uint8_t*, size_t>>& payload,
+	                    unsigned char* buf,
+	                    unsigned int bufLen);
 
 private:
 	HMAC_CTX* ctx;
@@ -653,18 +652,19 @@ public:
 	Aes256CmacDigestGen(const unsigned char* key, size_t len);
 	~Aes256CmacDigestGen();
 	CMAC_CTX* getCtx() const { return ctx; }
-	size_t digest(const uint8_t* data, const size_t datalen, uint8_t* digest, int digestlen);
+	size_t digest(const std::vector<std::pair<const uint8_t*, size_t>>& payload, uint8_t* digest, int digestlen);
 
 private:
 	CMAC_CTX* ctx;
 };
 
-void computeAuthToken(const uint8_t* payload,
-                      const int payloadLen,
+void computeAuthToken(const std::vector<std::pair<const uint8_t*, size_t>>& payload,
                       const uint8_t* key,
                       const int keyLen,
                       unsigned char* digestBuf,
                       const EncryptAuthTokenAlgo algo,
                       unsigned int digestMaxBufSz);
+
+EncryptAuthTokenMode getEncryptAuthTokenMode(const EncryptAuthTokenMode mode);
 
 #endif // FDBCLIENT_BLOB_CIPHER_H

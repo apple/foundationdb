@@ -287,14 +287,13 @@ struct IndexBlockRef {
 			TraceEvent(SevDebug, "IndexBlockEncrypt_Before").detail("Chksum", chksum);
 		}
 
-		EncryptBlobCipherAes265Ctr encryptor(eKeys.textCipherKey,
-		                                     eKeys.headerCipherKey,
-		                                     cipherKeysCtx.ivRef.begin(),
-		                                     AES_256_IV_LENGTH,
-		                                     FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED
-		                                         ? EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE
-		                                         : EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
-		                                     BlobCipherMetrics::BLOB_GRANULE);
+		EncryptBlobCipherAes265Ctr encryptor(
+		    eKeys.textCipherKey,
+		    eKeys.headerCipherKey,
+		    cipherKeysCtx.ivRef.begin(),
+		    AES_256_IV_LENGTH,
+		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+		    BlobCipherMetrics::BLOB_GRANULE);
 		Value serializedBuff = ObjectWriter::toValue(block, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 		BlobCipherEncryptHeader header;
 		buffer = encryptor.encrypt(serializedBuff.contents().begin(), serializedBuff.contents().size(), &header, arena)
@@ -412,14 +411,13 @@ struct IndexBlobGranuleFileChunkRef {
 			TraceEvent(SevDebug, "BlobChunkEncrypt_Before").detail("Chksum", chksum);
 		}
 
-		EncryptBlobCipherAes265Ctr encryptor(eKeys.textCipherKey,
-		                                     eKeys.headerCipherKey,
-		                                     cipherKeysCtx.ivRef.begin(),
-		                                     AES_256_IV_LENGTH,
-		                                     FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED
-		                                         ? EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE
-		                                         : EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
-		                                     BlobCipherMetrics::BLOB_GRANULE);
+		EncryptBlobCipherAes265Ctr encryptor(
+		    eKeys.textCipherKey,
+		    eKeys.headerCipherKey,
+		    cipherKeysCtx.ivRef.begin(),
+		    AES_256_IV_LENGTH,
+		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+		    BlobCipherMetrics::BLOB_GRANULE);
 		BlobCipherEncryptHeader header;
 		chunkRef.buffer =
 		    encryptor.encrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), &header, arena)->toStringRef();
