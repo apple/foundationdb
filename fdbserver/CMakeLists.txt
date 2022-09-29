@@ -34,7 +34,7 @@ add_library(fdbserver_swift STATIC
 
 target_include_directories(fdbserver_swift PUBLIC
     "${CMAKE_BINARY_DIR}/flow/include"
-    "${CMAKE_BINARY_DIR}/flow"
+    "${CMAKE_BINARY_DIR}/flow/"
     "${CMAKE_BINARY_DIR}/fdbclient/include"
     "${CMAKE_BINARY_DIR}/fdbserver/include"
     "${CMAKE_SOURCE_DIR}/fdbrpc/include"
@@ -49,13 +49,12 @@ target_include_directories(fdbserver_swift PUBLIC
 
 # TODO: We need a platform-agnostic way to find the C++ stdlib searchpaths
 target_include_directories(fdbserver_swift PRIVATE
-    "/opt/boost_1_78_0_clang"
     "/opt/rh/devtoolset-8/root/usr/include/c++/8/x86_64-redhat-linux/"
     "/opt/rh/devtoolset-8/root/usr/lib/gcc/x86_64-redhat-linux/8/../../../../include/c++/8"
 )
 
 # TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?
-target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++17 -enable-experimental-cxx-interop -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml>")
+target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++17 -enable-experimental-cxx-interop -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbserver/include/headeroverlay.yaml>")
 
 # Ensure that C++ code in fdbserver can import Swift using a compatibility header.
 include(SwiftToCXXInterop)
