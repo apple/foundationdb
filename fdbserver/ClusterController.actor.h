@@ -2934,7 +2934,7 @@ public:
 
 		auto& health = workerHealth[req.address];
 
-		auto updateDegradedPeer = [&health, &currentTime](const NetworkAddress& degradedPeer) {
+		auto updateDegradedPeer = [&health, currentTime](const NetworkAddress& degradedPeer) {
 			auto it = health.degradedPeers.find(degradedPeer);
 			if (it == health.degradedPeers.end()) {
 				health.degradedPeers[degradedPeer] = { currentTime, currentTime };
