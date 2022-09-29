@@ -230,7 +230,7 @@ Error statusToError(const rocksdb::Status& s) {
 
 rocksdb::ColumnFamilyOptions getCFOptions() {
 	rocksdb::ColumnFamilyOptions options;
-	options.level_compaction_dynamic_level_bytes = true;
+	options.level_compaction_dynamic_level_bytes = SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
 	options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
 	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
 		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
@@ -1873,7 +1873,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				ASSERT(cf != columnFamilyMap->end());
 				auto begin = toSlice(range.begin);
 				auto end = toSlice(range.end);
-				ASSERT(a.db->SuggestCompactRange(cf->second, &begin, &end).ok());
+				if (SERVER_KNOBS->ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE) {
+					ASSERT(a.db->SuggestCompactRange(cf->second, &begin, &end).ok());
+				}
 			}
 
 			if (a.getHistograms) {
