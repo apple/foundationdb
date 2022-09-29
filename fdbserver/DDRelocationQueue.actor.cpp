@@ -628,7 +628,7 @@ struct DDQueue : public IDDRelocationQueue {
 	UID distributorId;
 	MoveKeysLock lock;
 	Database cx;
-	std::shared_ptr<IDDTxnProcessor> txnProcessor;
+	Reference<IDDTxnProcessor> txnProcessor;
 
 	std::vector<TeamCollectionInterface> teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
@@ -728,7 +728,7 @@ struct DDQueue : public IDDRelocationQueue {
 
 	DDQueue(UID mid,
 	        MoveKeysLock lock,
-	        const std::shared_ptr<IDDTxnProcessor>& db,
+	        Reference<IDDTxnProcessor> db,
 	        std::vector<TeamCollectionInterface> teamCollections,
 	        Reference<ShardsAffectedByTeamFailure> sABTF,
 	        Reference<PhysicalShardCollection> physicalShardCollection,
@@ -739,7 +739,7 @@ struct DDQueue : public IDDRelocationQueue {
 	        FutureStream<RelocateShard> input,
 	        PromiseStream<GetMetricsRequest> getShardMetrics,
 	        PromiseStream<GetTopKMetricsRequest> getTopKMetrics)
-	  : IDDRelocationQueue(), distributorId(mid), lock(lock), cx(db->getDb()), txnProcessor(db),
+	  : IDDRelocationQueue(), distributorId(mid), lock(lock), cx(db->context()), txnProcessor(db),
 	    teamCollections(teamCollections), shardsAffectedByTeamFailure(sABTF),
 	    physicalShardCollection(physicalShardCollection), getAverageShardBytes(getAverageShardBytes),
 	    startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
@@ -2206,7 +2206,7 @@ Future<bool> DDQueue::rebalanceTeams(DataMovementReason moveReason,
 	return ::rebalanceTeams(this, moveReason, sourceTeam, destTeam, primary, traceEvent);
 }
 
-ACTOR Future<bool> getSkipRebalanceValue(std::shared_ptr<IDDTxnProcessor> txnProcessor, bool readRebalance) {
+ACTOR Future<bool> getSkipRebalanceValue(Reference<IDDTxnProcessor> txnProcessor, bool readRebalance) {
 	Optional<Value> val = wait(txnProcessor->readRebalanceDDIgnoreKey());
 
 	if (!val.present())
@@ -2311,7 +2311,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 	}
 }
 
-ACTOR Future<Void> dataDistributionQueue(std::shared_ptr<IDDTxnProcessor> db,
+ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
                                          PromiseStream<RelocateShard> output,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,

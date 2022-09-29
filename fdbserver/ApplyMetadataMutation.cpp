@@ -712,11 +712,15 @@ private:
 			    .detail("ClusterID", entry.id)
 			    .detail("ClusterName", entry.name);
 
+			Optional<Value> value = txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration().key).get();
 			if (!initialCommit) {
 				txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			}
 
-			confChange = true;
+			if (!value.present() || value.get() != m.param2) {
+				confChange = true;
+			}
+
 			CODE_PROBE(true, "Metacluster registration set");
 		}
 	}
@@ -977,6 +981,15 @@ private:
 						break;
 					}
 				}
+				auto& systemBackupRanges = getSystemBackupRanges();
+				for (auto r = systemBackupRanges.begin(); !foundKey && r != systemBackupRanges.end(); ++r) {
+					for (auto& it : vecBackupKeys->intersectingRanges(*r)) {
+						if (it.value().count(logDestination) > 0) {
+							foundKey = true;
+							break;
+						}
+					}
+				}
 				if (!foundKey) {
 					auto logRanges = vecBackupKeys->modify(singleKeyRange(metadataVersionKey));
 					for (auto logRange : logRanges) {
@@ -1112,8 +1125,12 @@ private:
 
 				MutationRef privatized;
 				privatized.type = MutationRef::ClearRange;
-				privatized.param1 = range.begin.withPrefix(systemKeys.begin, arena);
-				privatized.param2 = range.end.withPrefix(systemKeys.begin, arena);
+				privatized.param1 = systemKeys.begin.withSuffix(std::max(range.begin, subspace.begin), arena);
+				if (range.end < subspace.end) {
+					privatized.param2 = systemKeys.begin.withSuffix(range.end, arena);
+				} else {
+					privatized.param2 = systemKeys.begin.withSuffix(subspace.begin).withSuffix("\xff\xff"_sr, arena);
+				}
 				writeMutation(privatized);
 			}
 
@@ -1125,11 +1142,15 @@ private:
 		if (range.contains(MetaclusterMetadata::metaclusterRegistration().key)) {
 			TraceEvent("ClearMetaclusterRegistration", dbgid);
 
+			Optional<Value> value = txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration().key).get();
 			if (!initialCommit) {
 				txnStateStore->clear(singleKeyRange(MetaclusterMetadata::metaclusterRegistration().key));
 			}
 
-			confChange = true;
+			if (value.present()) {
+				confChange = true;
+			}
+
 			CODE_PROBE(true, "Metacluster registration cleared");
 		}
 	}

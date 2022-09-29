@@ -20,6 +20,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
@@ -93,11 +94,13 @@ struct RestoreBackupWorkload final : TestWorkload {
 	}
 
 	ACTOR static Future<Void> clearDatabase(Database cx) {
-		// TODO: Batch to avoid large clear ranges?
 		state Transaction tr(cx);
 		loop {
 			try {
 				tr.clear(normalKeys);
+				for (auto& r : getSystemBackupRanges()) {
+					tr.clear(r);
+				}
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
