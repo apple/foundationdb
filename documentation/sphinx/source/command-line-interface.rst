@@ -439,7 +439,7 @@ The ``tenant`` command is used to view and manage the tenants in a cluster. The 
 create
 ^^^^^^
 
-``tenant create <NAME> [tenant_group=<TENANT_GROUP>]``
+``tenant create <NAME> [tenant_group=<TENANT_GROUP>] [assigned_cluster=<CLUSTER_NAME>]``
 
 Creates a new tenant in the cluster.
 
