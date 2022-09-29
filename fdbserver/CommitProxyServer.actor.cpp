@@ -55,6 +55,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
+#include "flow/CodeProbe.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
@@ -998,7 +999,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	// Fetch cipher keys if needed.
 	state Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getCipherKeys;
 	if (pProxyCommitData->isEncryptionEnabled) {
-		static std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> defaultDomains = {
+		static const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> defaultDomains = {
 			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME },
 			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_ENCRYPT_HEADER_DOMAIN_NAME },
 			{ FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
@@ -1091,6 +1092,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				committed =
 				    committed && self->resolution[resolver].stateMutations[versionIndex][transactionIndex].committed;
 			if (committed) {
+				// Note: since we are not to commit, we don't need to pass cipherKeys for encryption.
 				applyMetadataMutations(SpanContext(),
 				                       *self->pProxyCommitData,
 				                       self->arena,
@@ -2488,6 +2490,17 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		tag_uid[decodeServerTagValue(kv.value)] = decodeServerTagKey(kv.key);
 	}
 
+	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
+	if (pContext->pCommitData->isEncryptionEnabled) {
+		static const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> metadataDomains = {
+			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME },
+			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_ENCRYPT_HEADER_DOMAIN_NAME }
+		};
+		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
+		    wait(getLatestEncryptCipherKeys(pContext->pCommitData->db, metadataDomains, BlobCipherMetrics::TLOG));
+		cipherKeys = cks;
+	}
+
 	loop {
 		wait(yield());
 
@@ -2545,13 +2558,16 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 
 		Arena arena;
 		bool confChanges;
+		CODE_PROBE(
+		    pContext->pCommitData->isEncryptionEnabled,
+		    "Commit proxy apply metadata mutations from txnStateStore on recovery, with encryption-at-rest enabled");
 		applyMetadataMutations(SpanContext(),
 		                       *pContext->pCommitData,
 		                       arena,
 		                       Reference<ILogSystem>(),
 		                       mutations,
 		                       /* pToCommit= */ nullptr,
-		                       /* pCipherKeys= */ nullptr,
+		                       pContext->pCommitData->isEncryptionEnabled ? &cipherKeys : nullptr,
 		                       confChanges,
 		                       /* version= */ 0,
 		                       /* popVersion= */ 0,

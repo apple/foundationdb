@@ -2024,7 +2024,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						    .detail("BlobManagerID",
 						            localInfo.blobManager.present() ? localInfo.blobManager.get().id() : UID())
 						    .detail("EncryptKeyProxyID",
-						            localInfo.encryptKeyProxy.present() ? localInfo.encryptKeyProxy.get().id() : UID());
+						            localInfo.encryptKeyProxy.present() ? localInfo.encryptKeyProxy.get().id() : UID())
+						    .detail("IsEncryptionEnabled", localInfo.client.isEncryptionEnabled);
 
 						dbInfo->set(localInfo);
 					}

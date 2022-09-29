@@ -106,6 +106,8 @@ public:
 	std::array<CounterSet, int(UsageType::MAX)> counterSets;
 };
 
+std::string toString(BlobCipherMetrics::UsageType type);
+
 // Encryption operations buffer management
 // Approach limits number of copies needed during encryption or decryption operations.
 // For encryption EncryptBuf is allocated using client supplied Arena and provided to AES library to capture

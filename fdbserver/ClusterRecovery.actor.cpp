@@ -1056,18 +1056,20 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// Sets self->configuration to the configuration (FF/conf/ keys) at self->lastEpochEnd
 
 	// Recover transaction state store
+	bool enableEncryptionForTxnStateStore =
+	    isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, self->dbInfo->get().client);
+	CODE_PROBE(enableEncryptionForTxnStateStore, "Enable encryption for txnStateStore");
 	if (self->txnStateStore)
 		self->txnStateStore->close();
 	self->txnStateLogAdapter = openDiskQueueAdapter(oldLogSystem, myLocality, txsPoppedVersion);
-	self->txnStateStore = keyValueStoreLogSystem(
-	    self->txnStateLogAdapter,
-	    self->dbInfo,
-	    self->dbgid,
-	    self->memoryLimit,
-	    false,
-	    false,
-	    true,
-	    isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, self->dbInfo->get().client));
+	self->txnStateStore = keyValueStoreLogSystem(self->txnStateLogAdapter,
+	                                             self->dbInfo,
+	                                             self->dbgid,
+	                                             self->memoryLimit,
+	                                             false,
+	                                             false,
+	                                             true,
+	                                             enableEncryptionForTxnStateStore);
 
 	// Version 0 occurs at the version epoch. The version epoch is the number
 	// of microseconds since the Unix epoch. It can be set through fdbcli.
