@@ -921,10 +921,12 @@ public:
 	void send(U&& value) const {
 		sav->send(std::forward<U>(value));
 	}
-    // Workaround for Swift's send && issue.
-    void sendCopy(const T& valueCopy) const {
-        sav->send(valueCopy);
-    }
+
+  // Workaround for Swift's send && issue.
+  void sendCopy(const T& valueCopy) const {
+    sav->send(valueCopy);
+  }
+
 	template <class E>
 	void sendError(const E& exc) const {
 		sav->sendError(exc);
@@ -934,11 +936,6 @@ public:
 		sav->addFutureRef();
 		return Future<T>(sav);
 	}
-//  // FIXME: this is kind of wrong... should be a Future and not pointer to...
-//	Future<T>* _Nonnull getFutureRef() const {
-//		sav->addFutureRef();
-//		return new Future<T>(sav);
-//	}
 
 	bool isSet() const { return sav->isSet(); }
 	bool canBeSet() const { return sav->canBeSet(); }

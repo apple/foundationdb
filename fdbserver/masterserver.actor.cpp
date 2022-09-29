@@ -163,12 +163,17 @@ Version figureVersion(Version current,
 using ReferenceMasterDataShared = Reference<MasterDataShared>;
 
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
-  {
+  if (getenv("FDBSWIFTTEST")) {
     using namespace fdbserver_swift;
-    auto actor = fdbserver_swift::makeMasterDataActor();
+
+    auto masterDataActor = MasterDataActor::init();
+
+    // TODO: we likely can pre-bake something to make these calls easier, without the explicit Promise creation
     auto promise = Promise<Void>();
-    MasterDataActor_getVersion_workaround(&req, /*result=*/&promise);
-  }
+    getVersion(masterDataActor, req, /*result=*/promise); // TODO: sure that no need for `&` for the promise?
+    wait(promise.getFuture());
+    return Void();
+  } // =================================================================================================================
 
 	state Span span("M:getVersion"_loc, req.spanContext);
 	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =

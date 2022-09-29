@@ -14,12 +14,6 @@ var BUGGIFY: Bool {
     false
 }
 
-@_expose(Cxx)
-public func makeMasterDataActor() -> MasterDataActor {
-    fatalError()
-}
-
-@_expose(Cxx)
 public actor MasterDataActor {
     // We're re-rolling the model type one field at a time...
     let myself: MasterDataShared
@@ -30,6 +24,7 @@ public actor MasterDataActor {
 
     /// Reply still done via req.reply
     func getVersion(req: GetCommitVersionRequest) async {
+        print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) handle request")
         // NOTE: the `req` is inout since `req.reply.sendNever()` imports as `mutating`
         var req = req
 
@@ -135,35 +130,38 @@ public actor MasterDataActor {
     }
 }
 
-// FIXME: remove in favor of MasterDataActor_getVersion.
- @_expose(Cxx)
- public func MasterDataActor_getVersion_workaround(
-     reqPtr: OpaquePointer,
-     result opaqueResultPromisePtr: OpaquePointer) {
-     let actor = makeMasterDataActor()
+/// Bridge type that wraps the target actor.
+@_expose(Cxx, "MasterDataActor")
+public struct MasterDataActorCxx {
+    let myself: MasterDataActor
 
-     MasterDataActor_getVersion(
-             myself: actor,
-             req: UnsafePointer<GetCommitVersionRequest>(reqPtr).pointee,
-             result: opaqueResultPromisePtr
-     )
- }
-
-@_expose(Cxx)
-public func MasterDataActor_getVersion(
-        myself target: MasterDataActor,
-        req: GetCommitVersionRequest,
-        result opaqueResultPromisePtr: OpaquePointer) {
-    print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
-
-    let promisePtr = UnsafeMutablePointer<PromiseVoid>(opaqueResultPromisePtr)
-    let promise = promisePtr.pointee
-
-    Task {
-        print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
-        await target.getVersion(req: req)
-        var result = Flow.Void()
-        promise.send(&result)
-        print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Done calling getVersion impl!")
+    public init() {
+        fatalError("TODO") // FIXME
     }
+    /// Mirror actor initializer, and initialize `myself`.
+    public init(data: MasterDataShared) {
+        myself = MasterDataActor(data: data)
+    }
+
+    /// Promise type must match result type of the target function.
+    /// If missing, please declare new `using PromiseXXX = Promise<XXX>;` in `swift_<MODULE>_future_support.h` files.
+    public func getVersion(req: GetCommitVersionRequest, result promise: PromiseVoid) {
+        print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
+        Task {
+            print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
+            await myself.getVersion(req: req)
+            var result = Flow.Void()
+            promise.send(&result)
+            print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Done calling getVersion impl!")
+        }
+    }
+}
+
+// FIXME: remove in favor of MasterDataActor_getVersion.
+@_expose(Cxx, "getVersion")
+public func MasterDataActor_getVersion(
+        target myself: MasterDataActorCxx,
+        req: GetCommitVersionRequest,
+        result promise: PromiseVoid) {
+    myself.getVersion(req: req, result: promise)
 }
