@@ -34,6 +34,11 @@ class RocksDBBuild(CMakeBuild):
             hash_function='sha256'
         ), cmake_vars=cmake_vars)
 
+    def print_target(self, out: TextIO):
+        self.lz4.print_target(out)
+        super().print_target(out)
+        print('add_library(lz4::lz4 ALIAS LZ4::lz4_static)', file=out)
+
 
 def provide_module(out: TextIO, args: List[str]):
     RocksDBBuild().print_target(out)

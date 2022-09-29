@@ -65,7 +65,8 @@ endif()
 
 if(WITH_AWS_BACKUP)
   add_compile_definitions(BUILD_AWS_BACKUP)
-  include(awssdk)
+  find_package(AWSSDK REQUIRED COMPONENTS core)
+  message(STATUS "AWS LINK LIBRARIES: ${AWSSDK_LINK_LIBRARIES}")
 endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
@@ -95,7 +96,6 @@ if(BUILD_AZURE_BACKUP)
 endif()
 
 if(BUILD_AWS_BACKUP)
-  target_link_libraries(fdbclient PUBLIC awssdk_target)
-  target_link_libraries(fdbclient_sampling PUBLIC awssdk_target)
+  target_link_libraries(fdbclient PUBLIC ${AWSSDK_LINK_LIBRARIES})
+  target_link_libraries(fdbclient_sampling PUBLIC ${AWSSDK_LINK_LIBRARIES})
 endif()
-

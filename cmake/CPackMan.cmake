@@ -1,7 +1,4 @@
-# we don't support Windows yet
-if(NOT WIN32)
-  set(CPACKMAN_BINARY_DIR "${CMAKE_BINARY_DIR}")
-endif()
+set(CPACKMAN_BINARY_DIR "${CMAKE_BINARY_DIR}")
 
 macro(cpackman_provide_dependency)
   if(NOT "${ARGV0}" STREQUAL "FIND_PACKAGE")

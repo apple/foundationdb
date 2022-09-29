@@ -7,6 +7,7 @@ else()
 endif()
 
 if(WITH_ROCKSDB_EXPERIMENTAL)
+  find_package(lz4 REQUIRED)
   find_package(RocksDB REQUIRED)
   if(WITH_LIBURING)
     find_package(uring)
@@ -29,7 +30,7 @@ if (WITH_ROCKSDB_EXPERIMENTAL)
   target_compile_definitions(fdbserver PRIVATE SSD_ROCKSDB_EXPERIMENTAL)
   target_link_libraries(fdbserver PRIVATE RocksDB::rocksdb)
 endif()
-target_link_libraries(fdbserver PRIVATE fdbclient sqlite toml11_target jemalloc rapidjson)
+target_link_libraries(fdbserver PRIVATE fdbclient sqlite toml11::toml11 jemalloc rapidjson)
 
 # target_compile_definitions(fdbserver PRIVATE -DENABLE_SAMPLING)
 

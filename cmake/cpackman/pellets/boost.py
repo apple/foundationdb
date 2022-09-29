@@ -46,12 +46,12 @@ class BoostBuild(Build):
     def run_configure(self) -> None:
         if len(self.args.components) == 0:
             return
-        source_folder = self.fetch_source.get_source().absolute()
+        self.source_folder = self.fetch_source.get_source().absolute()
         configure_command: List[str] = [
-            '{}/bootstrap.sh'.format(source_folder),
+            '{}/bootstrap.sh'.format(self.source_folder),
             '--with-libraries={}'.format(','.join(self.args.components)),
             '--with-toolset={}'.format(self.toolset)]
-        run_command(configure_command, env=self.env, cwd=self.build_folder.absolute())
+        run_command(configure_command, env=self.env, cwd=self.source_folder)
 
     def run_build(self) -> None:
         if len(self.args.components) == 0:
@@ -59,25 +59,33 @@ class BoostBuild(Build):
         # build the zstd dependency
         zstd_build = ZSTDBuild()
         zstd_install_dir = zstd_build.install().absolute()
-        jam_file = '{}/user-config.jam'.format(self.build_folder.absolute())
+        jam_file = '{}/user-config.jam'.format(self.source_folder)
         with open(jam_file, 'w') as user_jam:
             print("using {} : "
                   ": {} :"
                   " {} {} ;".format(self.toolset, self.compiler, self.compiler_flags, self.linker_flags),
                   file=user_jam)
-            print('using zstd : {} : <include>{} : <search>{} ;'.format(
+            lib_dir = 'lib'
+            if not (zstd_install_dir / lib_dir).exists():
+                lib_dir = 'lib64'
+                assert (zstd_install_dir / lib_dir).exists()
+            print('using zstd : {} : <include>{}/include <search>{}/{} ;'.format(
                 zstd_build.fetch_source.version_str,
                 zstd_install_dir,
-                zstd_install_dir),
+                zstd_install_dir,
+                lib_dir),
                 file=user_jam)
-        build_command = ['{}/b2'.format(self.build_folder.absolute()),
+        build_command = ['{}/b2'.format(self.source_folder.absolute()),
                          'link=static',
                          '--prefix={}'.format(self.install_folder.absolute()),
-                         '--user-config={}'.format(jam_file)]
+                         '--user-config={}'.format(jam_file),
+                         '-s', 'NO_BZIP2=1',
+                         '-s', 'NO_ZLIB=1',
+                         '-s', 'NO_LZMA=1']
         for component in self.args.components:
             build_command.append('--with-{}'.format(component))
         build_command.append('install')
-        run_command(build_command, env=self.env, cwd=self.fetch_source.get_source().absolute())
+        run_command(build_command, env=self.env, cwd=self.source_folder)
 
     def run_install(self) -> None:
         pass

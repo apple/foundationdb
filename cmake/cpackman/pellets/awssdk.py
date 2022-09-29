@@ -1,6 +1,7 @@
 import hashlib
 from typing import TextIO, List
 
+from cpackman import FindPackageArgs
 from cpackman.pellets import CMakeBuild, GitSource
 from cpackman.pellets.curl import CurlBuild
 from cpackman.pellets.openssl import OpenSSLBuild
@@ -8,7 +9,8 @@ from cpackman.pellets.zlib import ZLIB
 
 
 class AWSSDK(CMakeBuild):
-    def __init__(self):
+    def __init__(self, args: List[str]):
+        self.args = FindPackageArgs(args)
         self.openssl = OpenSSLBuild()
         self.zlib = ZLIB()
         self.curl = CurlBuild()
@@ -18,7 +20,7 @@ class AWSSDK(CMakeBuild):
         cmake_vars = {
             'BUILD_SHARED_LIBS': 'OFF',
             'ENABLE_TESTING': 'OFF',
-            'BUILD_ONLY': 'core',
+            'BUILD_ONLY': ';'.join(self.args.components if len(self.args.components) > 0 else ['core']),
             'OpenSSL_ROOT': openssl,
             'CMAKE_PREFIX_PATH': '{};{};{}'.format(zlib, curl, openssl)
         }
@@ -38,9 +40,17 @@ class AWSSDK(CMakeBuild):
         return m.hexdigest()
 
     def print_target(self, out: TextIO):
+        # AWS SDK does some non-standard stuff here, so we need to workaround
+        print('set(_AWS_CMAKE_PREFIX_PATH_BACKUP ${CMAKE_PREFIX_PATH})', file=out)
+        print('set(CMAKE_PREFIX_PATH {} {} {})'.format(self.openssl.install().absolute(),
+                                                      self.zlib.install().absolute(),
+                                                      self.curl.install().absolute()),
+              file=out)
         print('set(AWSSDK_ROOT "{}")'.format(self.install().absolute()), file=out)
-        print('find_package(AWSSDK BYPASS_PROVIDER)', file=out)
+        print('find_package(AWSSDK COMPONENTS {} BYPASS_PROVIDER)'.format(' '.join(
+            self.args.components if len(self.args.components) > 0 else ['core'])), file=out)
+        print('set(CMAKE_PREFIX_PATH ${_AWS_CMAKE_PREFIX_PATH_BACKUP})', file=out)
 
 
 def provide_module(out: TextIO, args: List[str]):
-    return AWSSDK().print_target(out)
+    return AWSSDK(args).print_target(out)
