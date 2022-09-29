@@ -2977,14 +2977,23 @@ public:
 
 		auto& health = workerHealth[req.address];
 
-		// Update the worker's degradedPeers.
-		for (const auto& peer : req.degradedPeers) {
-			auto it = health.degradedPeers.find(peer);
+		auto updateDegradedPeer = [&health, &currentTime](const NetworkAddress& degradedPeer) {
+			auto it = health.degradedPeers.find(degradedPeer);
 			if (it == health.degradedPeers.end()) {
-				health.degradedPeers[peer] = { currentTime, currentTime };
-				continue;
+				health.degradedPeers[degradedPeer] = { currentTime, currentTime };
+				return;
 			}
 			it->second.lastRefreshTime = currentTime;
+		};
+
+		// Update the worker's degradedPeers.
+		for (const auto& peer : req.degradedPeers) {
+			updateDegradedPeer(peer);
+		}
+
+		// TODO(zhewu): add disconnected peers in worker health.
+		for (const auto& peer : req.disconnectedPeers) {
+			updateDegradedPeer(peer);
 		}
 	}
 
