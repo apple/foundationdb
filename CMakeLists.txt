@@ -180,6 +180,9 @@ find_package(zstd REQUIRED)
 find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem iostreams CONFIG PATHS ${BOOST_HINT_PATHS})
 # this is a hack -- we should remove this and instead link against the proper targets directly
 add_library(boost_target INTERFACE)
+# Boost::iostreams doesn't link against zstd properly causing linker errors. So we have to do this again here
+set_property(TARGET Boost::iostreams PROPERTY INTERFACE_LINK_LIBRARIES)
+target_link_libraries(Boost::iostreams INTERFACE zstd::libzstd_static)
 target_link_libraries(boost_target INTERFACE Boost::context Boost::filesystem Boost::iostreams)
 find_package(msgpack REQUIRED)
 find_package(AWSSDK REQUIRED)
