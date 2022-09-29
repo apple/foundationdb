@@ -142,6 +142,7 @@ include(SwiftToCXXInterop)
 generate_cxx_compat_header(flow_swift "Flow")
 
 add_dependencies(flow_swift flow_actors)
+add_dependencies(flow_swift boost_targetProject)
 # This does not work! (see rdar://99107402)
 # target_link_libraries(flow PRIVATE flow_swift)
 add_dependencies(flow flow_swift)
