@@ -1043,32 +1043,12 @@ ACTOR static Future<Void> decodeKVPairs(StringRefReader* reader,
 	state uint32_t kLen = reader->consumeNetworkUInt32();
 	state const uint8_t* k = reader->consume(kLen);
 	results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
-	state KeyRef prevKey = KeyRef(k, kLen);
-	state bool done = false;
 
 	// Read kv pairs and end key
 	while (1) {
 		// Read a key.
 		kLen = reader->consumeNetworkUInt32();
 		k = reader->consume(kLen);
-		// make sure that all keys in a block belong to exactly one tenant,
-		// unless its the last key in which case it can be a truncated (different) tenant prefix
-		if (encryptedBlock && g_network && g_network->isSimulated()) {
-			state KeyRef curKey = KeyRef(k, kLen);
-			state std::pair<int64_t, TenantName> prevTenantInfo =
-			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(prevKey, tenantCache));
-			std::pair<int64_t, TenantName> curTenantInfo =
-			    wait(EncryptedRangeFileWriter::getEncryptionDomainDetails(curKey, tenantCache));
-			if (curKey.size() > 0 && prevKey.size() > 0 && prevTenantInfo.first != curTenantInfo.first) {
-				ASSERT(!done);
-				if (curTenantInfo.first != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID &&
-				    curTenantInfo.first != FDB_DEFAULT_ENCRYPT_DOMAIN_ID) {
-					ASSERT(curKey.size() == TENANT_PREFIX_SIZE);
-				}
-				done = true;
-			}
-			prevKey = curKey;
-		}
 
 		// If eof reached or first value len byte is 0xFF then a valid block end was reached.
 		if (reader->eof() || *reader->rptr == 0xFF) {
