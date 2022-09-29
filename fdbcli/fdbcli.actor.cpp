@@ -537,10 +537,10 @@ void initHelp() {
 	    CommandHelp("getversion",
 	                "Fetch the current read version",
 	                "Displays the current read version of the database or currently running transaction.");
-	helpMap["quota"] =
-	    CommandHelp("quota",
-	                "quota [get <tag> [reserved|total] [read|write]|set <tag> [reserved|total] [read|write] <value>]",
-	                "Get or modify the throughput quota for the specified tag.");
+	helpMap["quota"] = CommandHelp("quota",
+	                               "quota [get <tag> [reserved_throughput|total_throughput] | set <tag> "
+	                               "[reserved_throughput|total_throughput] <value>]",
+	                               "Get or modify the throughput quota for the specified tag.");
 	helpMap["reset"] =
 	    CommandHelp("reset",
 	                "reset the current transaction",
@@ -2060,9 +2060,7 @@ const char* checkTlsConfigAgainstCoordAddrs(const ClusterConnectionString& ccs) 
 			tlsAddrs++;
 		totalAddrs++;
 	}
-	if (tlsConfigured && tlsAddrs == 0) {
-		return "fdbcli is configured with TLS, but none of the coordinators have TLS addresses.";
-	} else if (!tlsConfigured && tlsAddrs == totalAddrs) {
+	if (!tlsConfigured && tlsAddrs == totalAddrs) {
 		return "fdbcli is not configured with TLS, but all of the coordinators have TLS addresses.";
 	} else {
 		return nullptr;

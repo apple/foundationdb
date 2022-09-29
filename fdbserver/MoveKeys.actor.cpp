@@ -185,6 +185,34 @@ bool DDEnabledState::setDDEnabled(bool status, UID snapUID) {
 	return true;
 }
 
+ACTOR Future<Void> readMoveKeysLock(Transaction* tr, MoveKeysLock* lock) {
+	{
+		Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
+		lock->prevOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
+	}
+	{
+		Optional<Value> readVal = wait(tr->get(moveKeysLockWriteKey));
+		lock->prevWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
+	}
+	return Void();
+}
+
+ACTOR Future<MoveKeysLock> readMoveKeysLock(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			state MoveKeysLock lock;
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			wait(readMoveKeysLock(&tr, &lock));
+			return lock;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+			CODE_PROBE(true, "readMoveKeysLock retry");
+		}
+	}
+}
+
 ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 	state Transaction tr(cx);
 	loop {
@@ -197,16 +225,7 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 				txnId = deterministicRandom()->randomUniqueID();
 				tr.debugTransaction(txnId);
 			}
-			{
-				Optional<Value> readVal = wait(tr.get(moveKeysLockOwnerKey));
-				lock.prevOwner =
-				    readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
-			}
-			{
-				Optional<Value> readVal = wait(tr.get(moveKeysLockWriteKey));
-				lock.prevWrite =
-				    readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
-			}
+			wait(readMoveKeysLock(&tr, &lock));
 			lock.myOwner = deterministicRandom()->randomUniqueID();
 			tr.set(moveKeysLockOwnerKey, BinaryWriter::toValue(lock.myOwner, Unversioned()));
 			wait(tr.commit());

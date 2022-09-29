@@ -96,6 +96,9 @@ public:
 	                               IsInternal internal = IsInternal::True,
 	                               LocalityData const& clientLocality = LocalityData());
 
+	static Database createSimulatedExtraDatabase(std::string connectionString,
+	                                             Optional<TenantName> defaultTenant = Optional<TenantName>());
+
 	Database() {} // an uninitialized database can be destructed or reassigned safely; that's it
 	void operator=(Database const& rhs) { db = rhs.db; }
 	Database(Database const& rhs) : db(rhs.db) {}
@@ -560,8 +563,9 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);
 
+// Round up to the nearest page size
 inline uint64_t getWriteOperationCost(uint64_t bytes) {
-	return bytes / std::max(1, CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR) + 1;
+	return (bytes - 1) / CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR + 1;
 }
 
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value

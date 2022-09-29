@@ -1856,11 +1856,7 @@ ACTOR Future<Void> submitDBBackup(Database src,
                                   std::string tagName) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
-
-		// Backup everything, if no ranges were specified
-		if (backupRanges.size() == 0) {
-			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-		}
+		ASSERT(!backupRanges.empty());
 
 		wait(backupAgent.submitBackup(
 		    dest, KeyRef(tagName), backupRanges, StopWhenDone::False, StringRef(), StringRef(), LockDB::True));
@@ -1914,11 +1910,7 @@ ACTOR Future<Void> submitBackup(Database db,
                                 IncrementalBackupOnly incrementalBackupOnly) {
 	try {
 		state FileBackupAgent backupAgent;
-
-		// Backup everything, if no ranges were specified
-		if (backupRanges.size() == 0) {
-			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-		}
+		ASSERT(!backupRanges.empty());
 
 		if (dryRun) {
 			state KeyBackedTag tag = makeBackupTag(tagName);
@@ -2018,11 +2010,7 @@ ACTOR Future<Void> switchDBBackup(Database src,
                                   ForceAction forceAction) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
-
-		// Backup everything, if no ranges were specified
-		if (backupRanges.size() == 0) {
-			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-		}
+		ASSERT(!backupRanges.empty());
 
 		wait(backupAgent.atomicSwitchover(dest, KeyRef(tagName), backupRanges, StringRef(), StringRef(), forceAction));
 		printf("The DR on tag `%s' was successfully switched.\n", printable(StringRef(tagName)).c_str());
@@ -2289,9 +2277,7 @@ ACTOR Future<Void> runRestore(Database db,
                               OnlyApplyMutationLogs onlyApplyMutationLogs,
                               InconsistentSnapshotOnly inconsistentSnapshotOnly,
                               Optional<std::string> encryptionKeyFile) {
-	if (ranges.empty()) {
-		ranges.push_back_deep(ranges.arena(), normalKeys);
-	}
+	ASSERT(!ranges.empty());
 
 	if (targetVersion != invalidVersion && !targetTimestamp.empty()) {
 		fprintf(stderr, "Restore target version and target timestamp cannot both be specified\n");
@@ -3944,6 +3930,12 @@ int main(int argc, char* argv[]) {
 
 			return result.present();
 		};
+
+		// The fastrestore tool does not yet support multiple ranges and is incompatible with tenants
+		// or other features that back up data in the system keys
+		if (backupKeys.empty() && programExe != ProgramExe::FASTRESTORE_TOOL) {
+			addDefaultBackupRanges(backupKeys);
+		}
 
 		switch (programExe) {
 		case ProgramExe::AGENT:

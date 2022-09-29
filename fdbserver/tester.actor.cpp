@@ -50,7 +50,7 @@ WorkloadContext::WorkloadContext() {}
 
 WorkloadContext::WorkloadContext(const WorkloadContext& r)
   : options(r.options), clientId(r.clientId), clientCount(r.clientCount), sharedRandomNumber(r.sharedRandomNumber),
-    dbInfo(r.dbInfo), ccr(r.ccr) {}
+    dbInfo(r.dbInfo), ccr(r.ccr), defaultTenant(r.defaultTenant) {}
 
 WorkloadContext::~WorkloadContext() {}
 
@@ -470,6 +470,7 @@ ACTOR Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
 	wcx.dbInfo = dbInfo;
 	wcx.options = options;
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
+	wcx.defaultTenant = work.defaultTenant.castTo<TenantName>();
 
 	workload = IWorkloadFactory::create(testName.toString(), wcx);
 	if (workload) {
@@ -515,6 +516,7 @@ ACTOR Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
 	wcx.ccr = ccr;
 	wcx.dbInfo = dbInfo;
+	wcx.defaultTenant = work.defaultTenant.castTo<TenantName>();
 	// FIXME: Other stuff not filled in; why isn't this constructed here and passed down to the other
 	// getWorkloadIface()?
 	for (int i = 0; i < work.options.size(); i++) {
@@ -1672,7 +1674,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
                             StringRef startingConfiguration,
                             LocalityData locality,
                             Optional<TenantName> defaultTenant,
-                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate) {
+                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate,
+                            bool restartingTest) {
 	state Database cx;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>);
 	state Future<Void> ccMonitor = monitorServerDBInfo(cc, LocalityData(), dbInfo); // FIXME: locality
@@ -1747,6 +1750,71 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 				perpetualWiggleEnabled = true;
 			}
 		}
+	}
+
+	// Read cluster configuration
+	if (useDB) {
+		state Transaction tr = Transaction(cx);
+		state DatabaseConfiguration configuration;
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				RangeResult results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
+				configuration.fromKeyValues((VectorRef<KeyValueRef>)results);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
+		g_simulator->storagePolicy = configuration.storagePolicy;
+		g_simulator->tLogPolicy = configuration.tLogPolicy;
+		g_simulator->tLogWriteAntiQuorum = configuration.tLogWriteAntiQuorum;
+		g_simulator->remoteTLogPolicy = configuration.remoteTLogPolicy;
+		g_simulator->usableRegions = configuration.usableRegions;
+		if (configuration.regions.size() > 0) {
+			g_simulator->primaryDcId = configuration.regions[0].dcId;
+			g_simulator->hasSatelliteReplication = configuration.regions[0].satelliteTLogReplicationFactor > 0;
+			if (configuration.regions[0].satelliteTLogUsableDcsFallback > 0) {
+				g_simulator->satelliteTLogPolicyFallback = configuration.regions[0].satelliteTLogPolicyFallback;
+				g_simulator->satelliteTLogWriteAntiQuorumFallback =
+				    configuration.regions[0].satelliteTLogWriteAntiQuorumFallback;
+			} else {
+				g_simulator->satelliteTLogPolicyFallback = configuration.regions[0].satelliteTLogPolicy;
+				g_simulator->satelliteTLogWriteAntiQuorumFallback =
+				    configuration.regions[0].satelliteTLogWriteAntiQuorum;
+			}
+			g_simulator->satelliteTLogPolicy = configuration.regions[0].satelliteTLogPolicy;
+			g_simulator->satelliteTLogWriteAntiQuorum = configuration.regions[0].satelliteTLogWriteAntiQuorum;
+
+			for (auto s : configuration.regions[0].satellites) {
+				g_simulator->primarySatelliteDcIds.push_back(s.dcId);
+			}
+		} else {
+			g_simulator->hasSatelliteReplication = false;
+			g_simulator->satelliteTLogWriteAntiQuorum = 0;
+		}
+
+		if (configuration.regions.size() == 2) {
+			g_simulator->remoteDcId = configuration.regions[1].dcId;
+			ASSERT((!configuration.regions[0].satelliteTLogPolicy && !configuration.regions[1].satelliteTLogPolicy) ||
+			       configuration.regions[0].satelliteTLogPolicy->info() ==
+			           configuration.regions[1].satelliteTLogPolicy->info());
+
+			for (auto s : configuration.regions[1].satellites) {
+				g_simulator->remoteSatelliteDcIds.push_back(s.dcId);
+			}
+		}
+
+		if (restartingTest || g_simulator->usableRegions < 2 || !g_simulator->hasSatelliteReplication) {
+			g_simulator->allowLogSetKills = false;
+		}
+
+		ASSERT(g_simulator->storagePolicy && g_simulator->tLogPolicy);
+		ASSERT(!g_simulator->hasSatelliteReplication || g_simulator->satelliteTLogPolicy);
 	}
 
 	if (useDB) {
@@ -1848,7 +1916,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
                             StringRef startingConfiguration,
                             LocalityData locality,
                             Optional<TenantName> defaultTenant,
-                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate) {
+                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate,
+                            bool restartingTest) {
 	state int flags = (at == TEST_ON_SERVERS ? 0 : GetWorkersRequest::TESTER_CLASS_ONLY) |
 	                  GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY;
 	state Future<Void> testerTimeout = delay(600.0); // wait 600 sec for testers to show up
@@ -1879,7 +1948,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	for (int i = 0; i < workers.size(); i++)
 		ts.push_back(workers[i].interf.testerInterface);
 
-	wait(runTests(cc, ci, ts, tests, startingConfiguration, locality, defaultTenant, tenantsToCreate));
+	wait(runTests(cc, ci, ts, tests, startingConfiguration, locality, defaultTenant, tenantsToCreate, restartingTest));
 	return Void();
 }
 
@@ -1918,7 +1987,8 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
                             LocalityData locality,
                             UnitTestParameters testOptions,
                             Optional<TenantName> defaultTenant,
-                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate) {
+                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate,
+                            bool restartingTest) {
 	state TestSet testSet;
 	state std::unique_ptr<KnobProtectiveGroup> knobProtectiveGroup(nullptr);
 	auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
@@ -1997,8 +2067,15 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		actors.push_back(
 		    reportErrors(monitorServerDBInfo(cc, LocalityData(), db), "MonitorServerDBInfo")); // FIXME: Locality
 		actors.push_back(reportErrors(testerServerCore(iTesters[0], connRecord, db, locality), "TesterServerCore"));
-		tests = runTests(
-		    cc, ci, iTesters, testSet.testSpecs, startingConfiguration, locality, defaultTenant, tenantsToCreate);
+		tests = runTests(cc,
+		                 ci,
+		                 iTesters,
+		                 testSet.testSpecs,
+		                 startingConfiguration,
+		                 locality,
+		                 defaultTenant,
+		                 tenantsToCreate,
+		                 restartingTest);
 	} else {
 		tests = reportErrors(runTests(cc,
 		                              ci,
@@ -2008,7 +2085,8 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		                              startingConfiguration,
 		                              locality,
 		                              defaultTenant,
-		                              tenantsToCreate),
+		                              tenantsToCreate,
+		                              restartingTest),
 		                     "RunTests");
 	}
 

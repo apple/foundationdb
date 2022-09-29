@@ -1454,8 +1454,8 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		// will mean not done. This is to enable an efficient coalesce() call to squash adjacent ranges which are not
 		// yet finished to enable efficiently finding random database shards which are not done.
 		state int notDoneSequence = NOT_DONE_MIN;
-		state KeyRangeMap<int> shardMap(notDoneSequence++, normalKeys.end);
-		state Key beginKey = normalKeys.begin;
+		state KeyRangeMap<int> shardMap(notDoneSequence++);
+		state Key beginKey = allKeys.begin;
 
 		// Read all shard boundaries and add them to the map
 		loop {
@@ -1464,7 +1464,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				state Future<Standalone<VectorRef<KeyRef>>> shardBoundaries =
-				    getBlockOfShards(tr, beginKey, normalKeys.end, CLIENT_KNOBS->TOO_MANY);
+				    getBlockOfShards(tr, beginKey, allKeys.end, CLIENT_KNOBS->TOO_MANY);
 				wait(success(shardBoundaries) && taskBucket->keepRunning(tr, task));
 
 				if (shardBoundaries.get().size() == 0)
@@ -1547,7 +1547,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		// Read all dispatched ranges
 		state std::vector<std::pair<Key, bool>> dispatchBoundaries;
 		tr->reset();
-		beginKey = normalKeys.begin;
+		beginKey = allKeys.begin;
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1555,7 +1555,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 				state Future<BackupConfig::RangeDispatchMapT::RangeResultType> bounds =
 				    config.snapshotRangeDispatchMap().getRange(
-				        tr, beginKey, keyAfter(normalKeys.end), CLIENT_KNOBS->TOO_MANY);
+				        tr, beginKey, keyAfter(allKeys.end), CLIENT_KNOBS->TOO_MANY);
 				wait(success(bounds) && taskBucket->keepRunning(tr, task) &&
 				     store(recentReadVersion, tr->getReadVersion()));
 
@@ -1618,7 +1618,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		// Set anything outside the backup ranges to SKIP.  We can use insert() here instead of modify()
 		// because it's OK to delete shard boundaries in the skipped ranges.
 		if (backupRanges.size() > 0) {
-			shardMap.insert(KeyRangeRef(normalKeys.begin, backupRanges.front().begin), SKIP);
+			shardMap.insert(KeyRangeRef(allKeys.begin, backupRanges.front().begin), SKIP);
 			wait(yield());
 
 			for (i = 0; i < backupRanges.size() - 1; ++i) {
@@ -1626,7 +1626,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 				wait(yield());
 			}
 
-			shardMap.insert(KeyRangeRef(backupRanges.back().end, normalKeys.end), SKIP);
+			shardMap.insert(KeyRangeRef(backupRanges.back().end, allKeys.end), SKIP);
 			wait(yield());
 		}
 
@@ -1647,7 +1647,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		}
 
 		// Coalesce the shard map to make random selection below more efficient.
-		shardMap.coalesce(normalKeys);
+		shardMap.coalesce(allKeys);
 		wait(yield());
 
 		// In this context "all" refers to all of the shards relevant for this particular backup
@@ -3068,8 +3068,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 
 			// Now shrink and translate fileRange
 			Key fileEnd = std::min(fileRange.end, restoreRange.end);
-			if (fileEnd == (removePrefix.get() == StringRef() ? normalKeys.end : strinc(removePrefix.get()))) {
-				fileEnd = addPrefix.get() == StringRef() ? normalKeys.end : strinc(addPrefix.get());
+			if (fileEnd == (removePrefix.get() == StringRef() ? allKeys.end : strinc(removePrefix.get()))) {
+				fileEnd = addPrefix.get() == StringRef() ? allKeys.end : strinc(addPrefix.get());
 			} else {
 				fileEnd = fileEnd.removePrefix(removePrefix.get()).withPrefix(addPrefix.get());
 			}
@@ -4251,7 +4251,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			// If this is an incremental restore, we need to set the applyMutationsMapPrefix
 			// to the earliest log version so no mutations are missed
 			Value versionEncoded = BinaryWriter::toValue(Params.firstVersion().get(task), Unversioned());
-			wait(krmSetRange(tr, restore.applyMutationsMapPrefix(), normalKeys, versionEncoded));
+			wait(krmSetRange(tr, restore.applyMutationsMapPrefix(), allKeys, versionEncoded));
 		}
 		return Void();
 	}
@@ -4596,24 +4596,28 @@ public:
 		config.clear(tr);
 
 		state Key destUidValue(BinaryWriter::toValue(uid, Unversioned()));
-		if (normalizedRanges.size() == 1) {
+		if (normalizedRanges.size() == 1 || isDefaultBackup(normalizedRanges)) {
 			RangeResult existingDestUidValues = wait(
 			    tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 			bool found = false;
+			KeyRangeRef targetRange =
+			    normalizedRanges.size() == 1 ? normalizedRanges[0] : getDefaultBackupSharedRange();
 			for (auto it : existingDestUidValues) {
-				if (BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion()) ==
-				    normalizedRanges[0]) {
+				KeyRange uidRange =
+				    BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix), IncludeVersion());
+				if (uidRange == targetRange) {
 					destUidValue = it.value;
 					found = true;
+					CODE_PROBE(targetRange == getDefaultBackupSharedRange(),
+					           "Backup mutation sharing with default backup");
 					break;
 				}
 			}
 			if (!found) {
 				destUidValue = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
-				tr->set(
-				    BinaryWriter::toValue(normalizedRanges[0], IncludeVersion(ProtocolVersion::withSharedMutations()))
-				        .withPrefix(destUidLookupPrefix),
-				    destUidValue);
+				tr->set(BinaryWriter::toValue(targetRange, IncludeVersion(ProtocolVersion::withSharedMutations()))
+				            .withPrefix(destUidLookupPrefix),
+				        destUidValue);
 			}
 		}
 
@@ -5625,6 +5629,60 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    deterministicRandom()->randomUniqueID());
 }
 
+Future<Version> FileBackupAgent::restore(Database cx,
+                                         Optional<Database> cxOrig,
+                                         Key tagName,
+                                         Key url,
+                                         Optional<std::string> proxy,
+                                         WaitForComplete waitForComplete,
+                                         Version targetVersion,
+                                         Verbose verbose,
+                                         KeyRange range,
+                                         Key addPrefix,
+                                         Key removePrefix,
+                                         LockDB lockDB,
+                                         OnlyApplyMutationLogs onlyApplyMutationLogs,
+                                         InconsistentSnapshotOnly inconsistentSnapshotOnly,
+                                         Version beginVersion,
+                                         Optional<std::string> const& encryptionKeyFileName) {
+	Standalone<VectorRef<KeyRangeRef>> rangeRef;
+	if (range.begin.empty() && range.end.empty()) {
+		addDefaultBackupRanges(rangeRef);
+	} else {
+		rangeRef.push_back_deep(rangeRef.arena(), range);
+	}
+	return restore(cx,
+	               cxOrig,
+	               tagName,
+	               url,
+	               proxy,
+	               rangeRef,
+	               waitForComplete,
+	               targetVersion,
+	               verbose,
+	               addPrefix,
+	               removePrefix,
+	               lockDB,
+	               onlyApplyMutationLogs,
+	               inconsistentSnapshotOnly,
+	               beginVersion,
+	               encryptionKeyFileName);
+}
+
+Future<Version> FileBackupAgent::atomicRestore(Database cx,
+                                               Key tagName,
+                                               KeyRange range,
+                                               Key addPrefix,
+                                               Key removePrefix) {
+	Standalone<VectorRef<KeyRangeRef>> rangeRef;
+	if (range.begin.empty() && range.end.empty()) {
+		addDefaultBackupRanges(rangeRef);
+	} else {
+		rangeRef.push_back_deep(rangeRef.arena(), range);
+	}
+	return atomicRestore(cx, tagName, rangeRef, addPrefix, removePrefix);
+}
+
 Future<Version> FileBackupAgent::atomicRestore(Database cx,
                                                Key tagName,
                                                Standalone<VectorRef<KeyRangeRef>> ranges,
@@ -5769,7 +5827,7 @@ ACTOR static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			KeyRef k1 = kvs[begin].key;
-			KeyRef k2 = end < kvs.size() ? kvs[end].key : normalKeys.end;
+			KeyRef k2 = end < kvs.size() ? kvs[end].key : allKeys.end;
 			TraceEvent(SevFRTestInfo, "TransformDatabaseContentsWriteKVReadBack")
 			    .detail("Range", KeyRangeRef(k1, k2))
 			    .detail("Begin", begin)

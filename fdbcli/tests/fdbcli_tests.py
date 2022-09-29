@@ -919,66 +919,22 @@ def integer_options():
     assert error_output == b''
 
 def tls_address_suffix():
-    # fdbcli shall prevent a non-TLS fdbcli run from connecting to an all-TLS cluster, and vice versa
+    # fdbcli shall prevent a non-TLS fdbcli run from connecting to an all-TLS cluster
     preamble = 'eNW1yf1M:eNW1yf1M@'
-    def make_addr(port: int, tls: bool = False):
-        return "127.0.0.1:{}{}".format(port, ":tls" if tls else "")
-    testcases = [
-        # IsServerTLS, NumServerAddrs
-        (True, 1),
-        (False, 1),
-        (True, 3),
-        (False, 3),
-    ]
-    err_output_server_no_tls = "ERROR: fdbcli is configured with TLS, but none of the coordinators have TLS addresses."
+    num_server_addrs = [1, 2, 5]
     err_output_server_tls = "ERROR: fdbcli is not configured with TLS, but all of the coordinators have TLS addresses."
 
-    # technically the contents of the certs and key files are not evaluated
-    # before tls-suffix check against tls configuration takes place,
-    # but we generate the certs and keys anyway to avoid
-    # imposing nuanced TLSConfig evaluation ordering requirement on the testcase
     with tempfile.TemporaryDirectory() as tmpdir:
-        cert_file = tmpdir + "/client-cert.pem"
-        key_file = tmpdir + "/client-key.pem"
-        ca_file = tmpdir + "/server-ca.pem"
-        mkcert_process = subprocess.run([
-                args.build_dir + "/bin/mkcert",
-                "--server-chain-length", "1",
-                "--client-chain-length", "1",
-                "--server-cert-file", tmpdir + "/server-cert.pem",
-                "--client-cert-file", tmpdir + "/client-cert.pem",
-                "--server-key-file", tmpdir + "/server-key.pem",
-                "--client-key-file", tmpdir + "/client-key.pem",
-                "--server-ca-file", tmpdir + "/server-ca.pem",
-                "--client-ca-file", tmpdir + "/client-ca.pem",
-            ],
-            capture_output=True)
-        if mkcert_process.returncode != 0:
-            print("mkcert returned with code {}".format(mkcert_process.returncode))
-            print("Output:\n{}{}\n".format(
-                        mkcert_process.stdout.decode("utf8").strip(),
-                        mkcert_process.stderr.decode("utf8").strip()))
-            assert False
         cluster_fn = tmpdir + "/fdb.cluster"
-        for testcase in testcases:
-            is_server_tls, num_server_addrs = testcase
+        for num_server_addr in num_server_addrs:
             with open(cluster_fn, "w") as fp:
                 fp.write(preamble + ",".join(
-                    [make_addr(port=4000 + addr_idx, tls=is_server_tls) for addr_idx in range(num_server_addrs)]))
+                    ["127.0.0.1:{}:tls".format(4000 + addr_idx) for addr_idx in range(num_server_addr)]))
                 fp.close()
-                tls_args = ["--tls-certificate-file",
-                            cert_file,
-                            "--tls-key-file",
-                            key_file,
-                            "--tls-ca-file",
-                            ca_file] if not is_server_tls else []
-                fdbcli_process = subprocess.run(command_template[:2] + [cluster_fn] + tls_args, capture_output=True)
+                fdbcli_process = subprocess.run(command_template[:2] + [cluster_fn], capture_output=True)
                 assert fdbcli_process.returncode != 0
                 err_out = fdbcli_process.stderr.decode("utf8").strip()
-                if is_server_tls:
-                    assert err_out == err_output_server_tls, f"unexpected output: {err_out}"
-                else:
-                    assert err_out == err_output_server_no_tls, f"unexpected output: {err_out}"
+                assert err_out == err_output_server_tls, f"unexpected output: {err_out}"
 
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter,
