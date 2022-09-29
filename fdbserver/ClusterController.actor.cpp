@@ -2687,32 +2687,18 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 }
 
 ACTOR Future<Void> metaclusterMetricsUpdater(ClusterControllerData* self) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	loop {
 		if (self->db.clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
+			state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				state std::map<ClusterName, DataClusterMetadata> clusters =
-				    // wait(MetaclusterAPI::listClustersTransaction(tr, ""_sr, "\xff"_sr,
-				    // CLIENT_KNOBS->MAX_DATA_CLUSTERS));
-				    wait(MetaclusterAPI::listClusters(
-				        self->cx.getReference(), ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
+				state std::map<ClusterName, DataClusterMetadata> clusters = wait(
+				    MetaclusterAPI::listClustersTransaction(tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
 				state int64_t tenantCount =
 				    wait(MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantCount.getD(
 				        tr, Snapshot::False, 0));
 				state std::pair<ClusterUsage, ClusterUsage> capacityNumbers =
 				    MetaclusterAPI::metaclusterCapacity(clusters);
-				// TraceEvent("MetaclusterCapacityDebugTr")
-				// 	.detail("DataClusters", clusters.size())
-				// 	.detail("TenantGroupCapacity", capacityNumbers.first.numTenantGroups)
-				// 	.detail("TenantGroupsAllocated", capacityNumbers.second.numTenantGroups);
-				// state std::map<ClusterName, DataClusterMetadata> clusters2 =
-				// 	wait(MetaclusterAPI::listClusters(self->cx.getReference(), ""_sr, "\xff"_sr,
-				// CLIENT_KNOBS->MAX_DATA_CLUSTERS)); state std::pair<ClusterUsage, ClusterUsage> capacityNumbers2 =
-				// MetaclusterAPI::metaclusterCapacity(clusters2); TraceEvent("MetaclusterCapacityDebugDb")
-				// 	.detail("DataClusters", clusters2.size())
-				// 	.detail("TenantGroupCapacity", capacityNumbers2.first.numTenantGroups)
-				// 	.detail("TenantGroupsAllocated", capacityNumbers2.second.numTenantGroups);
 				MetaclusterMetrics metrics;
 				metrics.numTenants = tenantCount;
 				metrics.numDataClusters = clusters.size();
