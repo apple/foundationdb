@@ -18,39 +18,40 @@
  * limitations under the License.
  */
 
-#include "fdbserver/WorkerInterface.actor.h"
-#include "flow/FastRef.h"
-#include "fmt/format.h"
+#include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/Tuple.h"
+#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/simulator.h"
+#include "fdbserver/DeltaTree.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/IPager.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/WorkerInterface.actor.h"
+#include "flow/ActorCollection.h"
 #include "flow/Error.h"
+#include "flow/FastRef.h"
+#include "flow/flow.h"
+#include "flow/genericactors.actor.h"
+#include "flow/Histogram.h"
+#include "flow/IAsyncFile.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/ObjectSerializer.h"
-#include "flow/Trace.h"
-#include "flow/flow.h"
-#include "flow/Histogram.h"
-#include <limits>
-#include <random>
-#include "fdbrpc/ContinuousSample.h"
-#include "fdbrpc/simulator.h"
-#include "fdbserver/IPager.h"
-#include "fdbclient/Tuple.h"
 #include "flow/serialize.h"
-#include "flow/genericactors.actor.h"
+#include "flow/Trace.h"
 #include "flow/UnitTest.h"
-#include "flow/IAsyncFile.h"
-#include "flow/ActorCollection.h"
+#include "fmt/format.h"
+
+#include <boost/intrusive/list.hpp>
+#include <cinttypes>
+#include <limits>
 #include <map>
+#include <random>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "fdbclient/CommitTransaction.h"
-#include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/DeltaTree.h"
-#include <string.h>
-#include <cinttypes>
-#include <boost/intrusive/list.hpp>
+
 #include "flow/actorcompiler.h" // must be last include
 
 #define REDWOOD_DEBUG 0
@@ -4782,6 +4783,8 @@ struct DecodeBoundaryVerifier {
 	int boundarySampleSize = 1000;
 	int boundaryPopulation = 0;
 	Reference<IPageEncryptionKeyProvider> keyProvider;
+
+	// Sample rate of pages to be scanned to verify if entries in the page meet domain prefix requirement.
 	double domainPrefixScanProbability = 0.01;
 	uint64_t domainPrefixScanCount = 0;
 
