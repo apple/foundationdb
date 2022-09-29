@@ -2687,48 +2687,48 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 }
 
 ACTOR Future<Void> metaclusterMetricsUpdater(ClusterControllerData* self) {
-	state Future<Void> updaterDelay =
-	    self->db.clusterType == ClusterType::METACLUSTER_MANAGEMENT ? delay(60.0) : Never();
-	loop choose {
-		when(wait(self->db.serverInfo->onChange())) {
-			updaterDelay = self->db.clusterType == ClusterType::METACLUSTER_MANAGEMENT ? delay(60.0) : Never();
-		}
-		when(wait(updaterDelay)) {
-			state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-			loop {
-				try {
-					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					state std::map<ClusterName, DataClusterMetadata> clusters;
-					state int64_t tenantCount;
-					wait(store(clusters,
-					           MetaclusterAPI::listClustersTransaction(
-					               tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS)) &&
-					     store(tenantCount,
-					           MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantCount.getD(
-					               tr, Snapshot::False, 0)));
-					state std::pair<ClusterUsage, ClusterUsage> capacityNumbers =
-					    MetaclusterAPI::metaclusterCapacity(clusters);
+	loop {
+		state Future<Void> updaterDelay =
+		    self->db.clusterType == ClusterType::METACLUSTER_MANAGEMENT ? delay(60.0) : Never();
+		choose {
+			when(wait(self->db.serverInfo->onChange())) {}
+			when(wait(updaterDelay)) {
+				state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+				loop {
+					try {
+						tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+						state std::map<ClusterName, DataClusterMetadata> clusters;
+						state int64_t tenantCount;
+						wait(store(clusters,
+						           MetaclusterAPI::listClustersTransaction(
+						               tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS)) &&
+						     store(tenantCount,
+						           MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantCount.getD(
+						               tr, Snapshot::False, 0)));
+						state std::pair<ClusterUsage, ClusterUsage> capacityNumbers =
+						    MetaclusterAPI::metaclusterCapacity(clusters);
 
-					MetaclusterMetrics metrics;
-					metrics.numTenants = tenantCount;
-					metrics.numDataClusters = clusters.size();
-					metrics.tenantGroupCapacity = capacityNumbers.first.numTenantGroups;
-					metrics.tenantGroupsAllocated = capacityNumbers.second.numTenantGroups;
-					self->db.metaclusterMetrics = metrics;
-					TraceEvent("MetaclusterCapacity")
-					    .detail("DataClusters", self->db.metaclusterMetrics.numDataClusters)
-					    .detail("TenantGroupCapacity", self->db.metaclusterMetrics.tenantGroupCapacity)
-					    .detail("TenantGroupsAllocated", self->db.metaclusterMetrics.tenantGroupsAllocated);
-					break;
-				} catch (Error& e) {
-					TraceEvent("MetaclusterUpdaterError").error(e);
-					// Cluster can change types during/before a metacluster transaction
-					// and throw an error due to timing issues.
-					// In such cases, go back to choose loop instead of retrying
-					if (e.code() == error_code_invalid_metacluster_operation) {
+						MetaclusterMetrics metrics;
+						metrics.numTenants = tenantCount;
+						metrics.numDataClusters = clusters.size();
+						metrics.tenantGroupCapacity = capacityNumbers.first.numTenantGroups;
+						metrics.tenantGroupsAllocated = capacityNumbers.second.numTenantGroups;
+						self->db.metaclusterMetrics = metrics;
+						TraceEvent("MetaclusterCapacity")
+						    .detail("DataClusters", self->db.metaclusterMetrics.numDataClusters)
+						    .detail("TenantGroupCapacity", self->db.metaclusterMetrics.tenantGroupCapacity)
+						    .detail("TenantGroupsAllocated", self->db.metaclusterMetrics.tenantGroupsAllocated);
 						break;
+					} catch (Error& e) {
+						TraceEvent("MetaclusterUpdaterError").error(e);
+						// Cluster can change types during/before a metacluster transaction
+						// and throw an error due to timing issues.
+						// In such cases, go back to choose loop instead of retrying
+						if (e.code() == error_code_invalid_metacluster_operation) {
+							break;
+						}
+						wait(tr->onError(e));
 					}
-					wait(tr->onError(e));
 				}
 			}
 		}
