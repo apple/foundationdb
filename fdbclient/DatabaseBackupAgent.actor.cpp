@@ -404,10 +404,10 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 							break;
 
 						if (backupVersions.get()[versionLoc + 1].key ==
-						    (removePrefix == StringRef() ? normalKeys.end : strinc(removePrefix))) {
+						    (removePrefix == StringRef() ? allKeys.end : strinc(removePrefix))) {
 							tr->clear(KeyRangeRef(
 							    backupVersions.get()[versionLoc].key.removePrefix(removePrefix).withPrefix(addPrefix),
-							    addPrefix == StringRef() ? normalKeys.end : strinc(addPrefix)));
+							    addPrefix == StringRef() ? allKeys.end : strinc(addPrefix)));
 						} else {
 							tr->clear(KeyRangeRef(backupVersions.get()[versionLoc].key,
 							                      backupVersions.get()[versionLoc + 1].key)
@@ -1833,13 +1833,16 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 					return Void();
 				}
 
-				if (backupRanges.size() == 1) {
+				if (backupRanges.size() == 1 || isDefaultBackup(backupRanges)) {
 					RangeResult existingDestUidValues = wait(srcTr->getRange(
 					    KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 					bool found = false;
+					KeyRangeRef targetRange =
+					    (backupRanges.size() == 1) ? backupRanges[0] : getDefaultBackupSharedRange();
 					for (auto it : existingDestUidValues) {
-						if (BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix),
-						                                          IncludeVersion()) == backupRanges[0]) {
+						KeyRange uidRange = BinaryReader::fromStringRef<KeyRange>(
+						    it.key.removePrefix(destUidLookupPrefix), IncludeVersion());
+						if (uidRange == targetRange) {
 							if (destUidValue != it.value) {
 								// existing backup/DR is running
 								return Void();
@@ -1855,7 +1858,7 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 					}
 
 					srcTr->set(
-					    BinaryWriter::toValue(backupRanges[0], IncludeVersion(ProtocolVersion::withSharedMutations()))
+					    BinaryWriter::toValue(targetRange, IncludeVersion(ProtocolVersion::withSharedMutations()))
 					        .withPrefix(destUidLookupPrefix),
 					    destUidValue);
 				}
@@ -2077,24 +2080,29 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 				srcTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 				// Initialize destUid
-				if (backupRanges.size() == 1) {
+				if (backupRanges.size() == 1 || isDefaultBackup(backupRanges)) {
 					RangeResult existingDestUidValues = wait(srcTr->getRange(
 					    KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
+					KeyRangeRef targetRange =
+					    (backupRanges.size() == 1) ? backupRanges[0] : getDefaultBackupSharedRange();
 					bool found = false;
 					for (auto it : existingDestUidValues) {
-						if (BinaryReader::fromStringRef<KeyRange>(it.key.removePrefix(destUidLookupPrefix),
-						                                          IncludeVersion()) == backupRanges[0]) {
+						KeyRange uidRange = BinaryReader::fromStringRef<KeyRange>(
+						    it.key.removePrefix(destUidLookupPrefix), IncludeVersion());
+						if (uidRange == targetRange) {
 							destUidValue = it.value;
 							found = true;
+							CODE_PROBE(targetRange == getDefaultBackupSharedRange(),
+							           "DR mutation sharing with default backup");
 							break;
 						}
 					}
 					if (!found) {
 						destUidValue = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
-						srcTr->set(BinaryWriter::toValue(backupRanges[0],
-						                                 IncludeVersion(ProtocolVersion::withSharedMutations()))
-						               .withPrefix(destUidLookupPrefix),
-						           destUidValue);
+						srcTr->set(
+						    BinaryWriter::toValue(targetRange, IncludeVersion(ProtocolVersion::withSharedMutations()))
+						        .withPrefix(destUidLookupPrefix),
+						    destUidValue);
 					}
 				}
 
@@ -2624,7 +2632,7 @@ public:
 
 		int64_t startCount = 0;
 		state Key mapPrefix = logUidValue.withPrefix(applyMutationsKeyVersionMapRange.begin);
-		Key mapEnd = normalKeys.end.withPrefix(mapPrefix);
+		Key mapEnd = allKeys.end.withPrefix(mapPrefix);
 		tr->set(logUidValue.withPrefix(applyMutationsAddPrefixRange.begin), addPrefix);
 		tr->set(logUidValue.withPrefix(applyMutationsRemovePrefixRange.begin), removePrefix);
 		tr->set(logUidValue.withPrefix(applyMutationsKeyVersionCountRange.begin), StringRef((uint8_t*)&startCount, 8));
@@ -3060,6 +3068,9 @@ public:
 
 		loop {
 			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
 				wait(success(tr->getReadVersion())); // get the read version before getting a version from the source
 				                                     // database to prevent the time differential from going negative
 
@@ -3070,9 +3081,6 @@ public:
 				statusText = "";
 
 				state UID logUid = wait(backupAgent->getLogUid(tr, tagName));
-
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				state Future<Optional<Value>> fPaused = tr->get(backupAgent->taskBucket->getPauseKey());
 				state Future<RangeResult> fErrorValues =

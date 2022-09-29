@@ -88,6 +88,7 @@ public:
 	virtual Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(KeyRange const& range,
 	                                                                                   Optional<Version> summaryVersion,
 	                                                                                   int rangeLimit) = 0;
+	virtual void addGranuleMaterializeStats(const GranuleMaterializeStats& stats) = 0;
 	virtual void addReadConflictRange(KeyRangeRef const& keys) = 0;
 	virtual void makeSelfConflicting() = 0;
 	virtual void atomicOp(KeyRef const& key, ValueRef const& operand, uint32_t operationType) = 0;

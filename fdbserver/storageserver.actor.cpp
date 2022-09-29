@@ -2967,8 +2967,10 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 		++data->counters.feedStreamQueries;
 
 		// FIXME: do something more sophisticated here besides hard limit
-		if (data->activeFeedQueries >= SERVER_KNOBS->STORAGE_FEED_QUERY_HARD_LIMIT ||
-		    (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.005))) {
+		// Allow other storage servers fetching feeds to go above this limit. currently, req.canReadPopped == read is a
+		// fetch from another ss
+		if (!req.canReadPopped && (data->activeFeedQueries >= SERVER_KNOBS->STORAGE_FEED_QUERY_HARD_LIMIT ||
+		                           (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.005)))) {
 			req.reply.sendError(storage_too_many_feed_streams());
 			++data->counters.rejectedFeedStreamQueries;
 			return Void();
@@ -4794,10 +4796,11 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 				// Even if TSS mode is Disabled, this may be the second test in a restarting test where the first run
 				// had it enabled.
-				state int byteLimit = (BUGGIFY && g_simulator->tssMode == ISimulator::TSSMode::Disabled &&
-				                       !data->isTss() && !data->isSSWithTSSPair())
-				                          ? 1
-				                          : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+				state int byteLimit =
+				    (BUGGIFY && g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::Disabled &&
+				     !data->isTss() && !data->isSSWithTSSPair())
+				        ? 1
+				        : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 				TraceEvent(SevDebug, "SSGetKeyValueStreamLimits")
 				    .detail("ByteLimit", byteLimit)
 				    .detail("ReqLimit", req.limit)

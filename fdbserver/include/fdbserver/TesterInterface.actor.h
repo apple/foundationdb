@@ -134,7 +134,8 @@ ACTOR Future<Void> runTests(
     LocalityData locality = LocalityData(),
     UnitTestParameters testOptions = UnitTestParameters(),
     Optional<TenantName> defaultTenant = Optional<TenantName>(),
-    Standalone<VectorRef<TenantNameRef>> tenantsToCreate = Standalone<VectorRef<TenantNameRef>>());
+    Standalone<VectorRef<TenantNameRef>> tenantsToCreate = Standalone<VectorRef<TenantNameRef>>(),
+    bool restartingTest = false);
 
 #include "flow/unactorcompiler.h"
 #endif

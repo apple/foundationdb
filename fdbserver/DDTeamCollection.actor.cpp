@@ -3581,7 +3581,7 @@ bool DDTeamCollection::satisfiesPolicy(const std::vector<Reference<TCServerInfo>
 	return result && resultEntries.size() == 0;
 }
 
-DDTeamCollection::DDTeamCollection(Database const& cx,
+DDTeamCollection::DDTeamCollection(Reference<IDDTxnProcessor>& db,
                                    UID distributorId,
                                    MoveKeysLock const& lock,
                                    PromiseStream<RelocateShard> const& output,
@@ -3597,7 +3597,7 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
                                    PromiseStream<GetMetricsRequest> getShardMetrics,
                                    Promise<UID> removeFailedServer,
                                    PromiseStream<Promise<int>> getUnhealthyRelocationCount)
-  : doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output),
+  : db(db), doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output),
     unhealthyServers(0), storageWiggler(makeReference<StorageWiggler>(this)), processingWiggle(processingWiggle),
     shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
     initialFailureReactionDelay(
@@ -3615,8 +3615,13 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
     teamCollectionInfoEventHolder(makeReference<EventCacheHolder>("TeamCollectionInfo")),
     storageServerRecruitmentEventHolder(
         makeReference<EventCacheHolder>("StorageServerRecruitment_" + distributorId.toString())),
-    primary(primary), distributorId(distributorId), cx(cx), configuration(configuration),
+    primary(primary), distributorId(distributorId), configuration(configuration),
     storageServerSet(new LocalityMap<UID>()) {
+
+	if (!db->isMocked()) {
+		cx = this->db->context();
+	}
+
 	if (!primary || configuration.usableRegions == 1) {
 		TraceEvent("DDTrackerStarting", distributorId)
 		    .detail("State", "Inactive")
@@ -5147,13 +5152,13 @@ public:
 	                                                            int processCount) {
 		Database database = DatabaseContext::create(
 		    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
-
+		auto txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(database));
 		DatabaseConfiguration conf;
 		conf.storageTeamSize = teamSize;
 		conf.storagePolicy = policy;
 
 		auto collection =
-		    std::unique_ptr<DDTeamCollection>(new DDTeamCollection(database,
+		    std::unique_ptr<DDTeamCollection>(new DDTeamCollection(txnProcessor,
 		                                                           UID(0, 0),
 		                                                           MoveKeysLock(),
 		                                                           PromiseStream<RelocateShard>(),
@@ -5191,13 +5196,13 @@ public:
 	                                                                   int processCount) {
 		Database database = DatabaseContext::create(
 		    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
-
+		auto txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(database));
 		DatabaseConfiguration conf;
 		conf.storageTeamSize = teamSize;
 		conf.storagePolicy = policy;
 
 		auto collection =
-		    std::unique_ptr<DDTeamCollection>(new DDTeamCollection(database,
+		    std::unique_ptr<DDTeamCollection>(new DDTeamCollection(txnProcessor,
 		                                                           UID(0, 0),
 		                                                           MoveKeysLock(),
 		                                                           PromiseStream<RelocateShard>(),

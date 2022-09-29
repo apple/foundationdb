@@ -678,7 +678,7 @@ inline static void flushOutputStreams() {
 #error Missing symbol export
 #endif
 
-#define crashAndDie() (*(volatile int*)0 = 0)
+#define crashAndDie() std::abort()
 
 #ifdef _WIN32
 #define strcasecmp stricmp

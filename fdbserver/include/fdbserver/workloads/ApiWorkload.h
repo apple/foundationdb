@@ -289,9 +289,7 @@ struct ApiWorkload : TestWorkload {
 		useExtraDB = g_network->isSimulated() && !g_simulator->extraDatabases.empty();
 		if (useExtraDB) {
 			ASSERT(g_simulator->extraDatabases.size() == 1);
-			auto extraFile =
-			    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator->extraDatabases[0]));
-			extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
+			extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], wcx.defaultTenant);
 		}
 	}
 

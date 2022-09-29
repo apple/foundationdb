@@ -25,6 +25,7 @@
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/Metacluster.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h" // has to be last include
@@ -328,7 +329,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 				for (auto r : ranges) {
 					if (version > r.value() && r.value() != invalidVersion) {
 						KeyRef minKey = std::min(r.range().end, range.end);
-						if (minKey == (removePrefix == StringRef() ? normalKeys.end : strinc(removePrefix))) {
+						if (minKey == (removePrefix == StringRef() ? allKeys.end : strinc(removePrefix))) {
 							logValue.param1 = std::max(r.range().begin, range.begin);
 							if (removePrefix.size()) {
 								logValue.param1 = logValue.param1.removePrefix(removePrefix);
@@ -336,7 +337,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 							if (addPrefix.size()) {
 								logValue.param1 = logValue.param1.withPrefix(addPrefix, tempArena);
 							}
-							logValue.param2 = addPrefix == StringRef() ? normalKeys.end : strinc(addPrefix, tempArena);
+							logValue.param2 = addPrefix == StringRef() ? allKeys.end : strinc(addPrefix, tempArena);
 							result->push_back_deep(*arena, logValue);
 							*mutationSize += logValue.expectedSize();
 						} else {
@@ -1199,3 +1200,38 @@ Standalone<StringRef> BackupAgentBase::getCurrentTime() {
 }
 
 std::string const BackupAgentBase::defaultTagName = "default";
+
+void addDefaultBackupRanges(Standalone<VectorRef<KeyRangeRef>>& backupKeys) {
+	backupKeys.push_back_deep(backupKeys.arena(), normalKeys);
+
+	for (auto& r : getSystemBackupRanges()) {
+		backupKeys.push_back_deep(backupKeys.arena(), r);
+	}
+}
+
+VectorRef<KeyRangeRef> const& getSystemBackupRanges() {
+	static Standalone<VectorRef<KeyRangeRef>> systemBackupRanges;
+	if (systemBackupRanges.empty()) {
+		systemBackupRanges.push_back_deep(systemBackupRanges.arena(), prefixRange(TenantMetadata::subspace()));
+		systemBackupRanges.push_back_deep(systemBackupRanges.arena(),
+		                                  singleKeyRange(MetaclusterMetadata::metaclusterRegistration().key));
+	}
+
+	return systemBackupRanges;
+}
+
+KeyRangeMap<bool> const& systemBackupMutationMask() {
+	static KeyRangeMap<bool> mask;
+	if (mask.size() == 1) {
+		for (auto r : getSystemBackupRanges()) {
+			mask.insert(r, true);
+		}
+	}
+
+	return mask;
+}
+
+KeyRangeRef const& getDefaultBackupSharedRange() {
+	static KeyRangeRef defaultSharedRange(""_sr, ""_sr);
+	return defaultSharedRange;
+}

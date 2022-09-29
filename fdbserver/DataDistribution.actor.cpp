@@ -252,7 +252,7 @@ public:
 	PromiseStream<Future<Void>> addActor;
 
 	// State initialized when bootstrap
-	std::shared_ptr<IDDTxnProcessor> txnProcessor;
+	Reference<IDDTxnProcessor> txnProcessor;
 	MoveKeysLock lock;
 	DatabaseConfiguration configuration;
 	std::vector<Optional<Key>> primaryDcId;
@@ -561,7 +561,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList) {
 	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
 	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
-	self->txnProcessor = std::shared_ptr<IDDTxnProcessor>(new DDTxnProcessor(cx));
+	self->txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(cx));
 
 	// cx->setOption( FDBDatabaseOptions::LOCATION_CACHE_SIZE, StringRef((uint8_t*)
 	// &SERVER_KNOBS->DD_LOCATION_CACHE_SIZE, 8) ); ASSERT( cx->locationCacheSize ==
@@ -627,7 +627,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			actors.push_back(self->pollMoveKeysLock());
 			actors.push_back(reportErrorsExcept(dataDistributionTracker(self->initData,
-			                                                            cx,
+			                                                            self->txnProcessor,
 			                                                            self->relocationProducer,
 			                                                            self->shardsAffectedByTeamFailure,
 			                                                            self->physicalShardCollection,
@@ -644,7 +644,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
-			actors.push_back(reportErrorsExcept(dataDistributionQueue(cx,
+			actors.push_back(reportErrorsExcept(dataDistributionQueue(self->txnProcessor,
 			                                                          self->relocationProducer,
 			                                                          self->relocationConsumer.getFuture(),
 			                                                          getShardMetrics,
@@ -679,7 +679,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			std::vector<DDTeamCollection*> teamCollectionsPtrs;
 			primaryTeamCollection = makeReference<DDTeamCollection>(
-			    cx,
+			    self->txnProcessor,
 			    self->ddId,
 			    self->lock,
 			    self->relocationProducer,
@@ -700,7 +700,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
 			if (self->configuration.usableRegions > 1) {
 				remoteTeamCollection =
-				    makeReference<DDTeamCollection>(cx,
+				    makeReference<DDTeamCollection>(self->txnProcessor,
 				                                    self->ddId,
 				                                    self->lock,
 				                                    self->relocationProducer,

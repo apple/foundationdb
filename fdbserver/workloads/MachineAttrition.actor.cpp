@@ -112,26 +112,10 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 		allowFaultInjection = getOption(options, "allowFaultInjection"_sr, allowFaultInjection);
 	}
 
-	bool add(DeterministicRandom& random, WorkloadRequest const& work, CompoundWorkload const& workload) override {
-		auto desc = this->description();
-		unsigned alreadyAdded = std::count_if(workload.workloads.begin(),
-		                                      workload.workloads.end(),
-		                                      [&desc](auto const& w) { return w->description() == desc; });
-		alreadyAdded += std::count_if(workload.failureInjection.begin(),
-		                              workload.failureInjection.end(),
-		                              [&desc](auto const& w) { return w->description() == desc; });
-		auto res = work.useDatabase && random.random01() < 1.0 / (2.0 + alreadyAdded);
-		if (res) {
-			initializeForInjection(random);
-		}
-		TraceEvent("AddingFailureInjection")
-		    .detail("Reboot", reboot)
-		    .detail("Replacement", replacement)
-		    .detail("AllowFaultInjection", allowFaultInjection)
-		    .detail("KillDC", killDc)
-		    .detail("KillDataHall", killDatahall)
-		    .detail("KillZone", killZone);
-		return res;
+	bool shouldInject(DeterministicRandom& random,
+	                  const WorkloadRequest& work,
+	                  const unsigned alreadyAdded) const override {
+		return work.useDatabase && random.random01() < 1.0 / (2.0 + alreadyAdded);
 	}
 
 	void initializeForInjection(DeterministicRandom& random) {
@@ -152,6 +136,13 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 			killDatahall = dataHalls.size() > 0 && killDc && random.random01() < 0.5;
 			killZone = zones.size() > 0 && random.random01() < 0.2;
 		}
+		TraceEvent("AddingFailureInjection")
+		    .detail("Reboot", reboot)
+		    .detail("Replacement", replacement)
+		    .detail("AllowFaultInjection", allowFaultInjection)
+		    .detail("KillDC", killDc)
+		    .detail("KillDataHall", killDatahall)
+		    .detail("KillZone", killZone);
 	}
 
 	static std::vector<ISimulator::ProcessInfo*> getServers() {

@@ -22,6 +22,7 @@
 #include <tuple>
 
 #include "fdbclient/Atomic.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseContext.h"
@@ -1444,9 +1445,26 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				UNREACHABLE();
 			}
 
-			// Check on backing up key, if backup ranges are defined and a normal key
-			if (!(pProxyCommitData->vecBackupKeys.size() > 1 &&
-			      (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey))) {
+			if (pProxyCommitData->vecBackupKeys.size() <= 1) {
+				continue;
+			}
+
+			// Check whether the mutation intersects any legal backup ranges
+			// If so, it will be clamped to the intersecting range(s) later
+			bool hasCandidateBackupKeys = false;
+			if (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey) {
+				hasCandidateBackupKeys = true;
+			} else if (m.type != MutationRef::Type::ClearRange) {
+				hasCandidateBackupKeys = systemBackupMutationMask().rangeContaining(m.param1).value();
+			} else {
+				for (auto& r : systemBackupMutationMask().intersectingRanges(KeyRangeRef(m.param1, m.param2))) {
+					if (r->value()) {
+						hasCandidateBackupKeys = true;
+						break;
+					}
+				}
+			}
+			if (!hasCandidateBackupKeys) {
 				continue;
 			}
 

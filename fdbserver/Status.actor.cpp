@@ -19,8 +19,8 @@
  */
 
 #include <cinttypes>
-#include "fdbclient/Metacluster.h"
 #include "fmt/format.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbserver/Status.h"
@@ -28,6 +28,7 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/Metacluster.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -1498,11 +1499,15 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 					if (loggingRanges.count(LogRangeAndUID(range, logUid))) {
 						std::pair<Key, Key> rangePair = std::make_pair(range.begin, range.end);
 						if (existingRanges.count(rangePair)) {
+							std::string rangeDescription = (range == getDefaultBackupSharedRange())
+							                                   ? "the default backup set"
+							                                   : format("`%s` - `%s`",
+							                                            printable(range.begin).c_str(),
+							                                            printable(range.end).c_str());
 							messages->push_back(JsonString::makeMessage(
 							    "duplicate_mutation_streams",
-							    format("Backup and DR are not sharing the same stream of mutations for `%s` - `%s`",
-							           printable(range.begin).c_str(),
-							           printable(range.end).c_str())
+							    format("Backup and DR are not sharing the same stream of mutations for %s",
+							           rangeDescription.c_str())
 							        .c_str()));
 							break;
 						}

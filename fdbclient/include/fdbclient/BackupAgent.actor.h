@@ -208,33 +208,14 @@ public:
 	                        WaitForComplete waitForComplete = WaitForComplete::True,
 	                        Version targetVersion = ::invalidVersion,
 	                        Verbose verbose = Verbose::True,
-	                        KeyRange range = normalKeys,
+	                        KeyRange range = KeyRange(),
 	                        Key addPrefix = Key(),
 	                        Key removePrefix = Key(),
 	                        LockDB lockDB = LockDB::True,
 	                        OnlyApplyMutationLogs onlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly inconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	                        Version beginVersion = ::invalidVersion,
-	                        Optional<std::string> const& encryptionKeyFileName = {}) {
-		Standalone<VectorRef<KeyRangeRef>> rangeRef;
-		rangeRef.push_back_deep(rangeRef.arena(), range);
-		return restore(cx,
-		               cxOrig,
-		               tagName,
-		               url,
-		               proxy,
-		               rangeRef,
-		               waitForComplete,
-		               targetVersion,
-		               verbose,
-		               addPrefix,
-		               removePrefix,
-		               lockDB,
-		               onlyApplyMutationLogs,
-		               inconsistentSnapshotOnly,
-		               beginVersion,
-		               encryptionKeyFileName);
-	}
+	                        Optional<std::string> const& encryptionKeyFileName = {});
 	Future<Version> atomicRestore(Database cx,
 	                              Key tagName,
 	                              Standalone<VectorRef<KeyRangeRef>> ranges,
@@ -242,13 +223,10 @@ public:
 	                              Key removePrefix = Key());
 	Future<Version> atomicRestore(Database cx,
 	                              Key tagName,
-	                              KeyRange range = normalKeys,
+	                              KeyRange range = KeyRange(),
 	                              Key addPrefix = Key(),
-	                              Key removePrefix = Key()) {
-		Standalone<VectorRef<KeyRangeRef>> rangeRef;
-		rangeRef.push_back_deep(rangeRef.arena(), range);
-		return atomicRestore(cx, tagName, rangeRef, addPrefix, removePrefix);
-	}
+	                              Key removePrefix = Key());
+
 	// Tries to abort the restore for a tag.  Returns the final (stable) state of the tag.
 	Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<ERestoreState> abortRestore(Database cx, Key tagName);
@@ -1026,6 +1004,42 @@ ACTOR Future<Void> transformRestoredDatabase(Database cx,
                                              Key removePrefix);
 
 void simulateBlobFailure();
+
+// Add the set of ranges that are backed up in a default backup to the given vector. This consists of all normal keys
+// and the system backup ranges.
+void addDefaultBackupRanges(Standalone<VectorRef<KeyRangeRef>>& backupKeys);
+
+// Return a vector containing the key ranges in system key-space that should be backed up in a default backup.
+VectorRef<KeyRangeRef> const& getSystemBackupRanges();
+
+// Return a key-range map that can be used to check whether a system key is a candidate backup key (i.e. whether it is
+// part of any system backup ranges).
+KeyRangeMap<bool> const& systemBackupMutationMask();
+
+// Returns true if the given set of ranges exactly matches the set of ranges included in a default backup.
+template <class Container>
+bool isDefaultBackup(Container ranges) {
+	std::unordered_set<KeyRangeRef> uniqueRanges(ranges.begin(), ranges.end());
+	auto& systemBackupRanges = getSystemBackupRanges();
+
+	if (uniqueRanges.size() != systemBackupRanges.size() + 1) {
+		return false;
+	}
+
+	if (!uniqueRanges.count(normalKeys)) {
+		return false;
+	}
+	for (auto range : getSystemBackupRanges()) {
+		if (!uniqueRanges.count(range)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+// Returns a key-range used to denote that a shared mutation stream belongs to the default backup set.
+KeyRangeRef const& getDefaultBackupSharedRange();
 
 #include "flow/unactorcompiler.h"
 #endif
