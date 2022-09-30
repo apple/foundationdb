@@ -120,6 +120,7 @@ public: // ctor & dtor
 		restartInfoLocation = getOption(options, "restartInfoLocation"_sr, "simfdb/restartInfo.ini"_sr).toString();
 		skipCheck = false;
 		retryLimit = getOption(options, "retryLimit"_sr, 5);
+		g_simulator->allowLogSetKills = false;
 	}
 
 public: // workload functions
@@ -235,8 +236,7 @@ public: // workload functions
 					wait(status);
 					break;
 				} catch (Error& e) {
-					if (e.code() == error_code_snap_log_anti_quorum_unsupported ||
-					    e.code() == error_code_snap_not_fully_recovered_unsupported) {
+					if (e.code() == error_code_snap_log_anti_quorum_unsupported) {
 						snapFailed = true;
 						break;
 					}
