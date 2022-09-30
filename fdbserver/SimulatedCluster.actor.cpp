@@ -2607,6 +2607,10 @@ ACTOR void setupAndRun(std::string dataFolder,
 
 DatabaseConfiguration generateNormalDatabaseConfiguration(const BasicTestConfig& testConfig) {
 	TestConfig config(testConfig);
+	if (!rocksDBEnabled) {
+		config.storageEngineExcludeTypes.push_back(4);
+		config.storageEngineExcludeTypes.push_back(5);
+	}
 	SimulationConfig simConf(config);
 	return simConf.db;
 }
