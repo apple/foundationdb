@@ -838,7 +838,6 @@ struct SplitRangeReply {
 	}
 };
 
-// TODO(kejriwal): ref
 struct SplitRangeRequest {
 	constexpr static FileIdentifier file_identifier = 10725174;
 	Arena arena;
