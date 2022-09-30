@@ -486,6 +486,7 @@ public:
 	TSSMode tssMode;
 	std::map<NetworkAddress, bool> corruptWorkerMap;
 	ConfigDBType configDBType;
+	bool blobGranulesEnabled;
 
 	// Used by workloads that perform reconfigurations
 	int testerCount;
