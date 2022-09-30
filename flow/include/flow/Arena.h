@@ -731,15 +731,6 @@ struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::tru
 	static std::string toString(const Standalone<T>& value) { return Traceable<T>::toString(value); }
 };
 
-namespace literal_string_ref {
-template <class T, int Size>
-StringRef LiteralStringRefHelper(const char* str) {
-	static_assert(std::is_same_v<T, const char(&)[Size]> || std::is_same_v<T, const char[Size]>,
-	              "Argument to LiteralStringRef must be a literal string");
-	return StringRef(reinterpret_cast<const uint8_t*>(str), Size - 1);
-}
-} // namespace literal_string_ref
-#define LiteralStringRef(str) literal_string_ref::LiteralStringRefHelper<decltype(str), sizeof(str)>(str)
 #define __FILE__sr StringRef(reinterpret_cast<const uint8_t*>(__FILE__), sizeof(__FILE__))
 #define __FUNCTION__sr StringRef(reinterpret_cast<const uint8_t*>(__FUNCTION__), sizeof(__FUNCTION__))
 
