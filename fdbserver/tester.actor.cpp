@@ -1724,6 +1724,11 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	}
 
 	state Future<Void> disabler = disableConnectionFailuresAfter(FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, "Tester");
+	state Future<Void> repairDataCenter;
+	if (useDB) {
+		Future<Void> reconfigure = reconfigureAfter(cx, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, dbInfo, "Tester");
+		repairDataCenter = reconfigure;
+	}
 
 	// Change the configuration (and/or create the database) if necessary
 	printf("startingConfiguration:%s start\n", startingConfiguration.toString().c_str());
