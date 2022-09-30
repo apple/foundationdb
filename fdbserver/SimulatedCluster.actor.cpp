@@ -1421,6 +1421,7 @@ void SimulationConfig::setSpecificConfig(const TestConfig& testConfig) {
 	if (testConfig.resolverCount.present()) {
 		db.resolverCount = testConfig.resolverCount.get();
 	}
+	db.blobGranulesEnabled = testConfig.blobGranulesEnabled;
 }
 
 // Sets generateFearless and number of dataCenters based on testConfig details
@@ -1938,6 +1939,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 	simconfig.db.tenantMode = tenantMode;
 	simconfig.db.encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
+
+	g_simulator->blobGranulesEnabled = simconfig.db.blobGranulesEnabled;
 
 	StatusObject startingConfigJSON = simconfig.db.toJSON(true);
 	std::string startingConfigString = "new";
