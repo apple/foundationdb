@@ -4784,7 +4784,7 @@ struct DecodeBoundaryVerifier {
 	int boundaryPopulation = 0;
 	Reference<IPageEncryptionKeyProvider> keyProvider;
 
-	// Sample rate of pages to be scanned to verify if entries in the page meet domain prefix requirement.
+	// Sample rate of pages to be scanned to verify if all entries in the page meet domain prefix requirement.
 	double domainPrefixScanProbability = 0.01;
 	uint64_t domainPrefixScanCount = 0;
 
@@ -4833,16 +4833,21 @@ struct DecodeBoundaryVerifier {
 
 		if (domainId.present()) {
 			ASSERT(keyProvider && keyProvider->enableEncryptionDomain());
+			// Temporarily disabling the check, since if a tenant is removed, where the key provider
+			// would not find the domain, the data for the tenant may still be in Redwood and being read.
+			// TODO(yiwu): re-enable the check.
+			/*
 			if (domainId.get() != keyProvider->getDefaultEncryptionDomainId() &&
 			    !keyProvider->keyFitsInDomain(domainId.get(), lowerBound, false)) {
-				fprintf(stderr,
-				        "Page lower bound not in domain: %s %s, domain id %s, lower bound '%s'\n",
-				        ::toString(id).c_str(),
-				        ::toString(v).c_str(),
-				        ::toString(domainId).c_str(),
-				        lowerBound.printable().c_str());
-				return false;
+			    fprintf(stderr,
+			            "Page lower bound not in domain: %s %s, domain id %s, lower bound '%s'\n",
+			            ::toString(id).c_str(),
+			            ::toString(v).c_str(),
+			            ::toString(domainId).c_str(),
+			            lowerBound.printable().c_str());
+			    return false;
 			}
+			*/
 		}
 
 		auto& b = boundariesByPageID[id.front()][v];
