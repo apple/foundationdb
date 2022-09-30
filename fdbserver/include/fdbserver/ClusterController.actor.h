@@ -183,10 +183,15 @@ public:
 
 		void setEncryptKeyProxy(const EncryptKeyProxyInterface& interf) {
 			auto newInfo = serverInfo->get();
+			auto newClientInfo = clientInfo->get();
+			newClientInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
 			newInfo.encryptKeyProxy = interf;
+			newInfo.client.encryptKeyProxy = interf;
+			newClientInfo.encryptKeyProxy = interf;
 			serverInfo->set(newInfo);
+			clientInfo->set(newClientInfo);
 		}
 
 		void setConsistencyScan(const ConsistencyScanInterface& interf) {
@@ -199,7 +204,9 @@ public:
 
 		void clearInterf(ProcessClass::ClassType t) {
 			auto newInfo = serverInfo->get();
+			auto newClientInfo = clientInfo->get();
 			newInfo.id = deterministicRandom()->randomUniqueID();
+			newClientInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
 			if (t == ProcessClass::DataDistributorClass) {
 				newInfo.distributor = Optional<DataDistributorInterface>();
@@ -209,10 +216,13 @@ public:
 				newInfo.blobManager = Optional<BlobManagerInterface>();
 			} else if (t == ProcessClass::EncryptKeyProxyClass) {
 				newInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
+				newInfo.client.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
+				newClientInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 			} else if (t == ProcessClass::ConsistencyScanClass) {
 				newInfo.consistencyScan = Optional<ConsistencyScanInterface>();
 			}
 			serverInfo->set(newInfo);
+			clientInfo->set(newClientInfo);
 		}
 
 		ACTOR static Future<Void> countClients(DBInfo* self) {
@@ -2936,9 +2946,14 @@ public:
 		for (int i = 0; i < req.degradedPeers.size(); ++i) {
 			degradedPeersString += (i == 0 ? "" : " ") + req.degradedPeers[i].toString();
 		}
+		std::string disconnectedPeersString;
+		for (int i = 0; i < req.disconnectedPeers.size(); ++i) {
+			disconnectedPeersString += (i == 0 ? "" : " ") + req.disconnectedPeers[i].toString();
+		}
 		TraceEvent("ClusterControllerUpdateWorkerHealth")
 		    .detail("WorkerAddress", req.address)
-		    .detail("DegradedPeers", degradedPeersString);
+		    .detail("DegradedPeers", degradedPeersString)
+		    .detail("DisconnectedPeers", disconnectedPeersString);
 
 		double currentTime = now();
 
@@ -2950,6 +2965,11 @@ public:
 				workerHealth[req.address].degradedPeers[degradedPeer] = { currentTime, currentTime };
 			}
 
+			// TODO(zhewu): add disconnected peers in worker health.
+			for (const auto& degradedPeer : req.disconnectedPeers) {
+				workerHealth[req.address].degradedPeers[degradedPeer] = { currentTime, currentTime };
+			}
+
 			return;
 		}
 
@@ -2957,14 +2977,23 @@ public:
 
 		auto& health = workerHealth[req.address];
 
-		// Update the worker's degradedPeers.
-		for (const auto& peer : req.degradedPeers) {
-			auto it = health.degradedPeers.find(peer);
+		auto updateDegradedPeer = [&health, currentTime](const NetworkAddress& degradedPeer) {
+			auto it = health.degradedPeers.find(degradedPeer);
 			if (it == health.degradedPeers.end()) {
-				health.degradedPeers[peer] = { currentTime, currentTime };
-				continue;
+				health.degradedPeers[degradedPeer] = { currentTime, currentTime };
+				return;
 			}
 			it->second.lastRefreshTime = currentTime;
+		};
+
+		// Update the worker's degradedPeers.
+		for (const auto& peer : req.degradedPeers) {
+			updateDegradedPeer(peer);
+		}
+
+		// TODO(zhewu): add disconnected peers in worker health.
+		for (const auto& peer : req.disconnectedPeers) {
+			updateDegradedPeer(peer);
 		}
 	}
 

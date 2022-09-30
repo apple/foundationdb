@@ -29,7 +29,9 @@
 #include <string>
 #include <string_view>
 
-#define AUTH_TOKEN_SIZE 32
+constexpr const int AUTH_TOKEN_HMAC_SHA_SIZE = 32;
+constexpr const int AUTH_TOKEN_AES_CMAC_SIZE = 16;
+constexpr const int AUTH_TOKEN_MAX_SIZE = AUTH_TOKEN_HMAC_SHA_SIZE;
 
 using EncryptCipherDomainId = int64_t;
 using EncryptCipherDomainNameRef = StringRef;
@@ -78,6 +80,23 @@ typedef enum {
 static_assert(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_LAST <= std::numeric_limits<uint8_t>::max(),
               "EncryptHeaderAuthToken value overflow");
 
+typedef enum {
+	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE = 0,
+	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA = 1,
+	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC = 2,
+	ENCRYPT_HEADER_AUTH_TOKEN_ALGO_LAST = 3 // Always the last element
+} EncryptAuthTokenAlgo;
+
+static_assert(EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_LAST <= std::numeric_limits<uint8_t>::max(),
+              "EncryptHeaerAuthTokenAlgo value overflow");
+
+bool isEncryptHeaderAuthTokenModeValid(const EncryptAuthTokenMode mode);
+bool isEncryptHeaderAuthTokenAlgoValid(const EncryptAuthTokenAlgo algo);
+bool isEncryptHeaderAuthTokenDetailsValid(const EncryptAuthTokenMode mode, const EncryptAuthTokenAlgo algo);
+EncryptAuthTokenAlgo getAuthTokenAlgoFromMode(const EncryptAuthTokenMode mode);
+EncryptAuthTokenMode getRandomAuthTokenMode();
+EncryptAuthTokenAlgo getRandomAuthTokenAlgo();
+
 constexpr std::string_view ENCRYPT_DBG_TRACE_CACHED_PREFIX = "Chd";
 constexpr std::string_view ENCRYPT_DBG_TRACE_QUERY_PREFIX = "Qry";
 constexpr std::string_view ENCRYPT_DBG_TRACE_INSERT_PREFIX = "Ins";
@@ -95,5 +114,7 @@ std::string getEncryptDbgTraceKeyWithTS(std::string_view prefix,
                                         EncryptCipherBaseKeyId baseCipherId,
                                         int64_t refAfterTS,
                                         int64_t expAfterTS);
+
+int getEncryptHeaderAuthTokenSize(int algo);
 
 #endif

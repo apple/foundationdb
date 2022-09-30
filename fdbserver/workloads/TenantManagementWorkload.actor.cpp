@@ -219,8 +219,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 		if (self->useMetacluster) {
 			ASSERT(g_simulator->extraDatabases.size() == 1);
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(g_simulator->extraDatabases[0]);
-			self->dataDb = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
+			self->dataDb = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], cx->defaultTenant);
 		} else {
 			self->dataDb = cx;
 		}
@@ -253,9 +252,9 @@ struct TenantManagementWorkload : TestWorkload {
 		return tenant;
 	}
 
-	Optional<TenantGroupName> chooseTenantGroup(bool allowSystemTenantGroup) {
+	Optional<TenantGroupName> chooseTenantGroup(bool allowSystemTenantGroup, bool allowEmptyGroup = true) {
 		Optional<TenantGroupName> tenantGroup;
-		if (deterministicRandom()->coinflip()) {
+		if (!allowEmptyGroup || deterministicRandom()->coinflip()) {
 			tenantGroup = TenantGroupNameRef(format("%s%08d",
 			                                        localTenantGroupNamePrefix.toString().c_str(),
 			                                        deterministicRandom()->randomInt(0, maxTenantGroups)));
@@ -276,10 +275,10 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	// Creates tenant(s) using the specified operation type
-	ACTOR static Future<Void> createImpl(Reference<ReadYourWritesTransaction> tr,
-	                                     std::map<TenantName, TenantMapEntry> tenantsToCreate,
-	                                     OperationType operationType,
-	                                     TenantManagementWorkload* self) {
+	ACTOR static Future<Void> createTenantImpl(Reference<ReadYourWritesTransaction> tr,
+	                                           std::map<TenantName, TenantMapEntry> tenantsToCreate,
+	                                           OperationType operationType,
+	                                           TenantManagementWorkload* self) {
 		if (operationType == OperationType::SPECIAL_KEYS) {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			for (auto [tenant, entry] : tenantsToCreate) {
@@ -310,6 +309,9 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(tr->commit());
 		} else {
 			ASSERT(tenantsToCreate.size() == 1);
+			if (deterministicRandom()->coinflip()) {
+				tenantsToCreate.begin()->second.assignedCluster = self->dataClusterName;
+			}
 			wait(MetaclusterAPI::createTenant(
 			    self->mvDb, tenantsToCreate.begin()->first, tenantsToCreate.begin()->second));
 		}
@@ -384,7 +386,7 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 
 					try {
-						Optional<Void> result = wait(timeout(createImpl(tr, tenantsToCreate, operationType, self),
+						Optional<Void> result = wait(timeout(createTenantImpl(tr, tenantsToCreate, operationType, self),
 						                                     deterministicRandom()->randomInt(1, 30)));
 
 						if (result.present()) {
@@ -571,12 +573,12 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	// Deletes the tenant or tenant range using the specified operation type
-	ACTOR static Future<Void> deleteImpl(Reference<ReadYourWritesTransaction> tr,
-	                                     TenantName beginTenant,
-	                                     Optional<TenantName> endTenant,
-	                                     std::vector<TenantName> tenants,
-	                                     OperationType operationType,
-	                                     TenantManagementWorkload* self) {
+	ACTOR static Future<Void> deleteTenantImpl(Reference<ReadYourWritesTransaction> tr,
+	                                           TenantName beginTenant,
+	                                           Optional<TenantName> endTenant,
+	                                           std::vector<TenantName> tenants,
+	                                           OperationType operationType,
+	                                           TenantManagementWorkload* self) {
 		state int tenantIndex;
 		if (operationType == OperationType::SPECIAL_KEYS) {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
@@ -715,7 +717,7 @@ struct TenantManagementWorkload : TestWorkload {
 					try {
 						state Version beforeVersion = wait(self->getReadVersion(tr));
 						Optional<Void> result =
-						    wait(timeout(deleteImpl(tr, beginTenant, endTenant, tenants, operationType, self),
+						    wait(timeout(deleteTenantImpl(tr, beginTenant, endTenant, tenants, operationType, self),
 						                 deterministicRandom()->randomInt(1, 30)));
 
 						if (result.present()) {
@@ -933,10 +935,10 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	// Gets the metadata for a tenant using the specified operation type
-	ACTOR static Future<TenantMapEntry> getImpl(Reference<ReadYourWritesTransaction> tr,
-	                                            TenantName tenant,
-	                                            OperationType operationType,
-	                                            TenantManagementWorkload* self) {
+	ACTOR static Future<TenantMapEntry> getTenantImpl(Reference<ReadYourWritesTransaction> tr,
+	                                                  TenantName tenant,
+	                                                  OperationType operationType,
+	                                                  TenantManagementWorkload* self) {
 		state TenantMapEntry entry;
 		if (operationType == OperationType::SPECIAL_KEYS) {
 			Key key = self->specialKeysTenantMapPrefix.withSuffix(tenant);
@@ -946,15 +948,12 @@ struct TenantManagementWorkload : TestWorkload {
 			}
 			entry = TenantManagementWorkload::jsonToTenantMapEntry(value.get());
 		} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
-			TenantMapEntry _entry = wait(TenantAPI::getTenant(self->dataDb.getReference(), tenant));
-			entry = _entry;
+			wait(store(entry, TenantAPI::getTenant(self->dataDb.getReference(), tenant)));
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			TenantMapEntry _entry = wait(TenantAPI::getTenantTransaction(tr, tenant));
-			entry = _entry;
+			wait(store(entry, TenantAPI::getTenantTransaction(tr, tenant)));
 		} else {
-			TenantMapEntry _entry = wait(MetaclusterAPI::getTenant(self->mvDb, tenant));
-			entry = _entry;
+			wait(store(entry, MetaclusterAPI::getTenant(self->mvDb, tenant)));
 		}
 
 		return entry;
@@ -974,7 +973,7 @@ struct TenantManagementWorkload : TestWorkload {
 		loop {
 			try {
 				// Get the tenant metadata and check that it matches our local state
-				state TenantMapEntry entry = wait(getImpl(tr, tenant, operationType, self));
+				state TenantMapEntry entry = wait(getTenantImpl(tr, tenant, operationType, self));
 				ASSERT(alreadyExists);
 				ASSERT(entry.id == tenantData.id);
 				ASSERT(entry.tenantGroup == tenantData.tenantGroup);
@@ -1011,7 +1010,7 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	// Gets a list of tenants using the specified operation type
-	ACTOR static Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listImpl(
+	ACTOR static Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantsImpl(
 	    Reference<ReadYourWritesTransaction> tr,
 	    TenantName beginTenant,
 	    TenantName endTenant,
@@ -1028,18 +1027,12 @@ struct TenantManagementWorkload : TestWorkload {
 				                                 TenantManagementWorkload::jsonToTenantMapEntry(result.value)));
 			}
 		} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
-			std::vector<std::pair<TenantName, TenantMapEntry>> _tenants =
-			    wait(TenantAPI::listTenants(self->dataDb.getReference(), beginTenant, endTenant, limit));
-			tenants = _tenants;
+			wait(store(tenants, TenantAPI::listTenants(self->dataDb.getReference(), beginTenant, endTenant, limit)));
 		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION) {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			std::vector<std::pair<TenantName, TenantMapEntry>> _tenants =
-			    wait(TenantAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit));
-			tenants = _tenants;
+			wait(store(tenants, TenantAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit)));
 		} else {
-			std::vector<std::pair<TenantName, TenantMapEntry>> _tenants =
-			    wait(MetaclusterAPI::listTenants(self->mvDb, beginTenant, endTenant, limit));
-			tenants = _tenants;
+			wait(store(tenants, MetaclusterAPI::listTenants(self->mvDb, beginTenant, endTenant, limit)));
 		}
 
 		return tenants;
@@ -1061,7 +1054,7 @@ struct TenantManagementWorkload : TestWorkload {
 			try {
 				// Attempt to read the chosen list of tenants
 				state std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
-				    wait(listImpl(tr, beginTenant, endTenant, limit, operationType, self));
+				    wait(listTenantsImpl(tr, beginTenant, endTenant, limit, operationType, self));
 
 				// Attempting to read the list of tenants using the metacluster API in a non-metacluster should
 				// return nothing in this test
@@ -1151,13 +1144,13 @@ struct TenantManagementWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> renameImpl(Reference<ReadYourWritesTransaction> tr,
-	                                     OperationType operationType,
-	                                     std::map<TenantName, TenantName> tenantRenames,
-	                                     bool tenantNotFound,
-	                                     bool tenantExists,
-	                                     bool tenantOverlap,
-	                                     TenantManagementWorkload* self) {
+	ACTOR static Future<Void> renameTenantImpl(Reference<ReadYourWritesTransaction> tr,
+	                                           OperationType operationType,
+	                                           std::map<TenantName, TenantName> tenantRenames,
+	                                           bool tenantNotFound,
+	                                           bool tenantExists,
+	                                           bool tenantOverlap,
+	                                           TenantManagementWorkload* self) {
 		if (operationType == OperationType::SPECIAL_KEYS) {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			for (auto& iter : tenantRenames) {
@@ -1230,7 +1223,8 @@ struct TenantManagementWorkload : TestWorkload {
 
 		loop {
 			try {
-				wait(renameImpl(tr, operationType, tenantRenames, tenantNotFound, tenantExists, tenantOverlap, self));
+				wait(renameTenantImpl(
+				    tr, operationType, tenantRenames, tenantNotFound, tenantExists, tenantOverlap, self));
 				wait(verifyTenantRenames(self, tenantRenames));
 				// Check that using the wrong rename API fails depending on whether we are using a metacluster
 				ASSERT(self->useMetacluster == (operationType == OperationType::METACLUSTER));
@@ -1284,12 +1278,12 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	// Changes the configuration of a tenant
-	ACTOR static Future<Void> configureImpl(Reference<ReadYourWritesTransaction> tr,
-	                                        TenantName tenant,
-	                                        std::map<Standalone<StringRef>, Optional<Value>> configParameters,
-	                                        OperationType operationType,
-	                                        bool specialKeysUseInvalidTuple,
-	                                        TenantManagementWorkload* self) {
+	ACTOR static Future<Void> configureTenantImpl(Reference<ReadYourWritesTransaction> tr,
+	                                              TenantName tenant,
+	                                              std::map<Standalone<StringRef>, Optional<Value>> configParameters,
+	                                              OperationType operationType,
+	                                              bool specialKeysUseInvalidTuple,
+	                                              TenantManagementWorkload* self) {
 		if (operationType == OperationType::SPECIAL_KEYS) {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			for (auto const& [config, value] : configParameters) {
@@ -1369,7 +1363,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 		loop {
 			try {
-				wait(configureImpl(tr, tenant, configuration, operationType, specialKeysUseInvalidTuple, self));
+				wait(configureTenantImpl(tr, tenant, configuration, operationType, specialKeysUseInvalidTuple, self));
 
 				ASSERT(exists);
 				ASSERT(!hasInvalidOption);
@@ -1418,6 +1412,164 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
+	// Gets the metadata for a tenant group using the specified operation type
+	ACTOR static Future<Optional<TenantGroupEntry>> getTenantGroupImpl(Reference<ReadYourWritesTransaction> tr,
+	                                                                   TenantGroupName tenant,
+	                                                                   OperationType operationType,
+	                                                                   TenantManagementWorkload* self) {
+		state Optional<TenantGroupEntry> entry;
+		if (operationType == OperationType::MANAGEMENT_DATABASE) {
+			wait(store(entry, TenantAPI::tryGetTenantGroup(self->dataDb.getReference(), tenant)));
+		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION ||
+		           operationType == OperationType::SPECIAL_KEYS) {
+			// There is no special-keys interface for reading tenant groups currently, so read them
+			// using the TenantAPI.
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			wait(store(entry, TenantAPI::tryGetTenantGroupTransaction(tr, tenant)));
+		} else {
+			wait(store(entry, MetaclusterAPI::tryGetTenantGroup(self->mvDb, tenant)));
+		}
+
+		return entry;
+	}
+
+	ACTOR static Future<Void> getTenantGroup(TenantManagementWorkload* self) {
+		state TenantGroupName tenantGroup = self->chooseTenantGroup(true, false).get();
+		state OperationType operationType = self->randomOperationType();
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb);
+
+		// True if the tenant group should should exist and return a result
+		auto itr = self->createdTenantGroups.find(tenantGroup);
+		state bool alreadyExists = itr != self->createdTenantGroups.end() &&
+		                           !(operationType == OperationType::METACLUSTER && !self->useMetacluster);
+
+		loop {
+			try {
+				// Get the tenant group metadata and check that it matches our local state
+				state Optional<TenantGroupEntry> entry = wait(getTenantGroupImpl(tr, tenantGroup, operationType, self));
+				ASSERT(alreadyExists == entry.present());
+				if (entry.present()) {
+					ASSERT(entry.get().assignedCluster.present() == (operationType == OperationType::METACLUSTER));
+				}
+				return Void();
+			} catch (Error& e) {
+				state bool retry = false;
+				state Error error = e;
+
+				// Transaction-based operations should retry
+				if (operationType == OperationType::MANAGEMENT_TRANSACTION ||
+				    operationType == OperationType::SPECIAL_KEYS) {
+					try {
+						wait(tr->onError(e));
+						retry = true;
+					} catch (Error& e) {
+						error = e;
+						retry = false;
+					}
+				}
+
+				if (!retry) {
+					TraceEvent(SevError, "GetTenantGroupFailure").error(error).detail("TenantGroupName", tenantGroup);
+					return Void();
+				}
+			}
+		}
+	}
+
+	// Gets a list of tenant groups using the specified operation type
+	ACTOR static Future<std::vector<std::pair<TenantGroupName, TenantGroupEntry>>> listTenantGroupsImpl(
+	    Reference<ReadYourWritesTransaction> tr,
+	    TenantGroupName beginTenantGroup,
+	    TenantGroupName endTenantGroup,
+	    int limit,
+	    OperationType operationType,
+	    TenantManagementWorkload* self) {
+		state std::vector<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroups;
+
+		if (operationType == OperationType::MANAGEMENT_DATABASE) {
+			wait(store(
+			    tenantGroups,
+			    TenantAPI::listTenantGroups(self->dataDb.getReference(), beginTenantGroup, endTenantGroup, limit)));
+		} else if (operationType == OperationType::MANAGEMENT_TRANSACTION ||
+		           operationType == OperationType::SPECIAL_KEYS) {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			wait(store(tenantGroups,
+			           TenantAPI::listTenantGroupsTransaction(tr, beginTenantGroup, endTenantGroup, limit)));
+		} else {
+			wait(store(tenantGroups,
+			           MetaclusterAPI::listTenantGroups(self->mvDb, beginTenantGroup, endTenantGroup, limit)));
+		}
+
+		return tenantGroups;
+	}
+
+	ACTOR static Future<Void> listTenantGroups(TenantManagementWorkload* self) {
+		state TenantGroupName beginTenantGroup = self->chooseTenantGroup(false, false).get();
+		state TenantGroupName endTenantGroup = self->chooseTenantGroup(false, false).get();
+		state int limit = std::min(CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1,
+		                           deterministicRandom()->randomInt(1, self->maxTenants * 2));
+		state OperationType operationType = self->randomOperationType();
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb);
+
+		if (beginTenantGroup > endTenantGroup) {
+			std::swap(beginTenantGroup, endTenantGroup);
+		}
+
+		loop {
+			try {
+				// Attempt to read the chosen list of tenant groups
+				state std::vector<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroups =
+				    wait(listTenantGroupsImpl(tr, beginTenantGroup, endTenantGroup, limit, operationType, self));
+
+				// Attempting to read the list of tenant groups using the metacluster API in a non-metacluster should
+				// return nothing in this test
+				if (operationType == OperationType::METACLUSTER && !self->useMetacluster) {
+					ASSERT(tenantGroups.size() == 0);
+					return Void();
+				}
+
+				ASSERT(tenantGroups.size() <= limit);
+
+				// Compare the resulting tenant list to the list we expected to get
+				auto localItr = self->createdTenantGroups.lower_bound(beginTenantGroup);
+				auto tenantMapItr = tenantGroups.begin();
+				for (; tenantMapItr != tenantGroups.end(); ++tenantMapItr, ++localItr) {
+					ASSERT(localItr != self->createdTenantGroups.end());
+					ASSERT(localItr->first == tenantMapItr->first);
+				}
+
+				// Make sure the list terminated at the right spot
+				ASSERT(tenantGroups.size() == limit || localItr == self->createdTenantGroups.end() ||
+				       localItr->first >= endTenantGroup);
+				return Void();
+			} catch (Error& e) {
+				state bool retry = false;
+				state Error error = e;
+
+				// Transaction-based operations need to be retried
+				if (operationType == OperationType::MANAGEMENT_TRANSACTION ||
+				    operationType == OperationType::SPECIAL_KEYS) {
+					try {
+						retry = true;
+						wait(tr->onError(e));
+					} catch (Error& e) {
+						error = e;
+						retry = false;
+					}
+				}
+
+				if (!retry) {
+					TraceEvent(SevError, "ListTenantGroupFailure")
+					    .error(error)
+					    .detail("BeginTenant", beginTenantGroup)
+					    .detail("EndTenant", endTenantGroup);
+
+					return Void();
+				}
+			}
+		}
+	}
+
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0 || !singleClient) {
 			return _start(cx, this);
@@ -1431,7 +1583,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 		// Run a random sequence of tenant management operations for the duration of the test
 		while (now() < start + self->testDuration) {
-			state int operation = deterministicRandom()->randomInt(0, 6);
+			state int operation = deterministicRandom()->randomInt(0, 8);
 			if (operation == 0) {
 				wait(createTenant(self));
 			} else if (operation == 1) {
@@ -1444,6 +1596,10 @@ struct TenantManagementWorkload : TestWorkload {
 				wait(renameTenant(self));
 			} else if (operation == 5) {
 				wait(configureTenant(self));
+			} else if (operation == 6) {
+				wait(getTenantGroup(self));
+			} else if (operation == 7) {
+				wait(listTenantGroups(self));
 			}
 		}
 

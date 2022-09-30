@@ -30,7 +30,9 @@
 #include "flow/Arena.h"
 #include "flow/CompressionUtils.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/EncryptUtils.h"
 #include "flow/IRandom.h"
+#include "flow/Knobs.h"
 #include "flow/Trace.h"
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
@@ -59,21 +61,6 @@ uint16_t MIN_SUPPORTED_BG_FORMAT_VERSION = 1;
 
 const uint8_t SNAPSHOT_FILE_TYPE = 'S';
 const uint8_t DELTA_FILE_TYPE = 'D';
-
-static int getDefaultCompressionLevel(CompressionFilter filter) {
-	if (filter == CompressionFilter::NONE) {
-		return -1;
-#ifdef ZLIB_LIB_SUPPORTED
-	} else if (filter == CompressionFilter::GZIP) {
-		// opt for high speed compression, larger levels have a high cpu cost and not much compression ratio
-		// improvement, according to benchmarks
-		return 1;
-#endif
-	} else {
-		ASSERT(false);
-		return -1;
-	}
-}
 
 // Deltas in key order
 
@@ -300,12 +287,13 @@ struct IndexBlockRef {
 			TraceEvent(SevDebug, "IndexBlockEncrypt_Before").detail("Chksum", chksum);
 		}
 
-		EncryptBlobCipherAes265Ctr encryptor(eKeys.textCipherKey,
-		                                     eKeys.headerCipherKey,
-		                                     cipherKeysCtx.ivRef.begin(),
-		                                     AES_256_IV_LENGTH,
-		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
-		                                     BlobCipherMetrics::BLOB_GRANULE);
+		EncryptBlobCipherAes265Ctr encryptor(
+		    eKeys.textCipherKey,
+		    eKeys.headerCipherKey,
+		    cipherKeysCtx.ivRef.begin(),
+		    AES_256_IV_LENGTH,
+		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+		    BlobCipherMetrics::BLOB_GRANULE);
 		Value serializedBuff = ObjectWriter::toValue(block, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 		BlobCipherEncryptHeader header;
 		buffer = encryptor.encrypt(serializedBuff.contents().begin(), serializedBuff.contents().size(), &header, arena)
@@ -423,12 +411,13 @@ struct IndexBlobGranuleFileChunkRef {
 			TraceEvent(SevDebug, "BlobChunkEncrypt_Before").detail("Chksum", chksum);
 		}
 
-		EncryptBlobCipherAes265Ctr encryptor(eKeys.textCipherKey,
-		                                     eKeys.headerCipherKey,
-		                                     cipherKeysCtx.ivRef.begin(),
-		                                     AES_256_IV_LENGTH,
-		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
-		                                     BlobCipherMetrics::BLOB_GRANULE);
+		EncryptBlobCipherAes265Ctr encryptor(
+		    eKeys.textCipherKey,
+		    eKeys.headerCipherKey,
+		    cipherKeysCtx.ivRef.begin(),
+		    AES_256_IV_LENGTH,
+		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+		    BlobCipherMetrics::BLOB_GRANULE);
 		BlobCipherEncryptHeader header;
 		chunkRef.buffer =
 		    encryptor.encrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), &header, arena)->toStringRef();
@@ -475,8 +464,10 @@ struct IndexBlobGranuleFileChunkRef {
 	                     const CompressionFilter compFilter,
 	                     Arena& arena) {
 		chunkRef.compressionFilter = compFilter;
-		chunkRef.buffer = CompressionUtils::compress(
-		    chunkRef.compressionFilter.get(), chunk.contents(), getDefaultCompressionLevel(compFilter), arena);
+		chunkRef.buffer = CompressionUtils::compress(chunkRef.compressionFilter.get(),
+		                                             chunk.contents(),
+		                                             CompressionUtils::getDefaultCompressionLevel(compFilter),
+		                                             arena);
 
 		if (BG_ENCRYPT_COMPRESS_DEBUG) {
 			XXH64_hash_t chunkChksum = XXH3_64bits(chunk.contents().begin(), chunk.contents().size());
@@ -1558,7 +1549,8 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
                                                     const KeyRangeRef& keyRange,
                                                     Version beginVersion,
                                                     Version readVersion,
-                                                    ReadBlobGranuleContext granuleContext) {
+                                                    ReadBlobGranuleContext granuleContext,
+                                                    GranuleMaterializeStats& stats) {
 	int64_t parallelism = granuleContext.granuleParallelism;
 	if (parallelism < 1) {
 		parallelism = 1;
@@ -1568,6 +1560,8 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 	}
 
 	GranuleLoadIds loadIds[files.size()];
+	int64_t inputBytes = 0;
+	int64_t outputBytes = 0;
 
 	try {
 		// Kick off first file reads if parallelism > 1
@@ -1592,6 +1586,7 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 				if (!snapshotData.get().begin()) {
 					return ErrorOr<RangeResult>(blob_granule_file_load_error());
 				}
+				inputBytes += snapshotData.get().size();
 			}
 
 			// +1 to avoid UBSAN variable length array of size zero
@@ -1604,11 +1599,16 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 				if (!deltaData[i].begin()) {
 					return ErrorOr<RangeResult>(blob_granule_file_load_error());
 				}
+				inputBytes += deltaData[i].size();
 			}
+
+			inputBytes += files[chunkIdx].newDeltas.expectedSize();
 
 			// materialize rows from chunk
 			chunkRows =
 			    materializeBlobGranule(files[chunkIdx], keyRange, beginVersion, readVersion, snapshotData, deltaData);
+
+			outputBytes += chunkRows.expectedSize();
 
 			results.arena().dependsOn(chunkRows.arena());
 			results.append(results.arena(), chunkRows.begin(), chunkRows.size());
@@ -1616,6 +1616,8 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 			// free once done by forcing FreeHandles to trigger
 			loadIds[chunkIdx].freeHandles.clear();
 		}
+		stats.inputBytes = inputBytes;
+		stats.outputBytes = outputBytes;
 		return ErrorOr<RangeResult>(results);
 	} catch (Error& e) {
 		return ErrorOr<RangeResult>(e);
@@ -1980,7 +1982,7 @@ struct KeyValueGen {
 		sharedPrefix = sharedPrefix.substr(0, sharedPrefixLen) + "_";
 		targetValueLength = deterministicRandom()->randomExp(0, 12);
 		allRange = KeyRangeRef(StringRef(sharedPrefix),
-		                       sharedPrefix.size() == 0 ? LiteralStringRef("\xff") : strinc(StringRef(sharedPrefix)));
+		                       sharedPrefix.size() == 0 ? "\xff"_sr : strinc(StringRef(sharedPrefix)));
 
 		if (deterministicRandom()->coinflip()) {
 			clearFrequency = 0.0;
@@ -2015,11 +2017,7 @@ struct KeyValueGen {
 			cipherKeys = getCipherKeysCtx(ar);
 		}
 		if (deterministicRandom()->coinflip()) {
-#ifdef ZLIB_LIB_SUPPORTED
-			compressFilter = CompressionFilter::GZIP;
-#else
-			compressFilter = CompressionFilter::NONE;
-#endif
+			compressFilter = CompressionUtils::getRandomFilter();
 		}
 	}
 
@@ -2199,10 +2197,8 @@ TEST_CASE("/blobgranule/files/validateEncryptionCompression") {
 	BlobGranuleCipherKeysCtx cipherKeys = getCipherKeysCtx(ar);
 	std::vector<bool> encryptionModes = { false, true };
 	std::vector<Optional<CompressionFilter>> compressionModes;
-	compressionModes.push_back({});
-#ifdef ZLIB_LIB_SUPPORTED
-	compressionModes.push_back(CompressionFilter::GZIP);
-#endif
+	compressionModes.insert(
+	    compressionModes.end(), CompressionUtils::supportedFilters.begin(), CompressionUtils::supportedFilters.end());
 
 	std::vector<Value> snapshotValues;
 	for (bool encryptionMode : encryptionModes) {
@@ -2299,9 +2295,9 @@ TEST_CASE("/blobgranule/files/snapshotFormatUnitTest") {
 	}
 
 	checkSnapshotEmpty(serialized, normalKeys.begin, data.front().key, kvGen.cipherKeys);
-	checkSnapshotEmpty(serialized, normalKeys.begin, LiteralStringRef("\x00"), kvGen.cipherKeys);
+	checkSnapshotEmpty(serialized, normalKeys.begin, "\x00"_sr, kvGen.cipherKeys);
 	checkSnapshotEmpty(serialized, keyAfter(data.back().key), normalKeys.end, kvGen.cipherKeys);
-	checkSnapshotEmpty(serialized, LiteralStringRef("\xfe"), normalKeys.end, kvGen.cipherKeys);
+	checkSnapshotEmpty(serialized, "\xfe"_sr, normalKeys.end, kvGen.cipherKeys);
 
 	fmt::print("Snapshot format test done!\n");
 
@@ -2916,9 +2912,8 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 	std::vector<bool> encryptionModes = { false, true };
 	std::vector<Optional<CompressionFilter>> compressionModes;
 	compressionModes.push_back({});
-#ifdef ZLIB_LIB_SUPPORTED
-	compressionModes.push_back(CompressionFilter::GZIP);
-#endif
+	compressionModes.insert(
+	    compressionModes.end(), CompressionUtils::supportedFilters.begin(), CompressionUtils::supportedFilters.end());
 
 	std::vector<std::string> runNames = { "logical" };
 	std::vector<std::pair<int64_t, double>> snapshotMetrics;
@@ -2948,6 +2943,10 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 				if (!chunk && compressionFilter.present()) {
 					continue;
 				}
+				if (compressionFilter.present() && CompressionFilter::NONE == compressionFilter.get()) {
+					continue;
+				}
+
 				std::string name;
 				if (!chunk) {
 					name = "old";
@@ -3020,9 +3019,13 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 			if (!chunk && encrypt) {
 				continue;
 			}
+
 			Optional<BlobGranuleCipherKeysCtx> keys = encrypt ? cipherKeys : Optional<BlobGranuleCipherKeysCtx>();
 			for (auto& compressionFilter : compressionModes) {
 				if (!chunk && compressionFilter.present()) {
+					continue;
+				}
+				if (compressionFilter.present() && CompressionFilter::NONE == compressionFilter.get()) {
 					continue;
 				}
 				std::string name;

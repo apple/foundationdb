@@ -130,6 +130,7 @@ public:
 	Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRange& range,
 	                                                                           Optional<Version> summaryVersion,
 	                                                                           int rangeLimit) override;
+	void addGranuleMaterializeStats(const GranuleMaterializeStats& stats) override;
 
 	void addReadConflictRange(KeyRangeRef const& keys) override;
 	void makeSelfConflicting() override { tr.makeSelfConflicting(); }

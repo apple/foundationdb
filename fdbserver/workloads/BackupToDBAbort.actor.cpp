@@ -33,14 +33,12 @@ struct BackupToDBAbort : TestWorkload {
 	UID lockid;
 
 	explicit BackupToDBAbort(const WorkloadContext& wcx) : TestWorkload(wcx) {
-		abortDelay = getOption(options, LiteralStringRef("abortDelay"), 50.0);
+		abortDelay = getOption(options, "abortDelay"_sr, 50.0);
 
-		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
+		addDefaultBackupRanges(backupRanges);
 
 		ASSERT(g_simulator->extraDatabases.size() == 1);
-		auto extraFile =
-		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator->extraDatabases[0]));
-		extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
+		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], wcx.defaultTenant);
 
 		lockid = UID(0xbeeffeed, 0xdecaf00d);
 	}

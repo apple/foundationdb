@@ -36,18 +36,20 @@ struct ChangeConfigWorkload : TestWorkload {
 	int coordinatorChanges; // number of times to change coordinators. Only applied if `coordinators` is set to `auto`
 
 	ChangeConfigWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		minDelayBeforeChange = getOption(options, LiteralStringRef("minDelayBeforeChange"), 0);
-		maxDelayBeforeChange = getOption(options, LiteralStringRef("maxDelayBeforeChange"), 0);
+		minDelayBeforeChange = getOption(options, "minDelayBeforeChange"_sr, 0);
+		maxDelayBeforeChange = getOption(options, "maxDelayBeforeChange"_sr, 0);
 		ASSERT(maxDelayBeforeChange >= minDelayBeforeChange);
-		configMode = getOption(options, LiteralStringRef("configMode"), StringRef()).toString();
-		networkAddresses = getOption(options, LiteralStringRef("coordinators"), StringRef()).toString();
-		coordinatorChanges = getOption(options, LiteralStringRef("coordinatorChanges"), 1);
+		configMode = getOption(options, "configMode"_sr, StringRef()).toString();
+		networkAddresses = getOption(options, "coordinators"_sr, StringRef()).toString();
+		coordinatorChanges = getOption(options, "coordinatorChanges"_sr, 1);
 		if (networkAddresses != "auto") {
 			coordinatorChanges = 1;
 		}
 	}
 
 	std::string description() const override { return "ChangeConfig"; }
+
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
 
 	Future<Void> start(Database const& cx) override {
 		if (this->clientId != 0)
@@ -90,8 +92,7 @@ struct ChangeConfigWorkload : TestWorkload {
 		std::vector<Future<Void>> futures;
 		if (g_network->isSimulated()) {
 			for (auto extraDatabase : g_simulator->extraDatabases) {
-				auto extraFile = makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(extraDatabase));
-				Database db = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
+				Database db = Database::createSimulatedExtraDatabase(extraDatabase);
 				futures.push_back(configureExtraDatabase(self, db));
 			}
 		}
@@ -154,9 +155,8 @@ struct ChangeConfigWorkload : TestWorkload {
 					// Set RAW_ACCESS to explicitly avoid using tenants because
 					// access to management keys is denied for tenant transactions
 					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-					Optional<Value> newCoordinatorsKey = wait(tr.get(
-					    LiteralStringRef("auto_coordinators")
-					        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+					Optional<Value> newCoordinatorsKey = wait(tr.get("auto_coordinators"_sr.withPrefix(
+					    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 					ASSERT(newCoordinatorsKey.present());
 					desiredCoordinatorsKey = newCoordinatorsKey.get().toString();
 					tr.reset();
@@ -193,8 +193,7 @@ struct ChangeConfigWorkload : TestWorkload {
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				tr.set(LiteralStringRef("processes")
-				           .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
+				tr.set("processes"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
 				       Value(desiredCoordinatorsKey));
 				TraceEvent(SevDebug, "CoordinatorsChangeBeforeCommit")
 				    .detail("Auto", autoChange)

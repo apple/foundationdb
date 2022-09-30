@@ -75,38 +75,3 @@ add_custom_command(OUTPUT ${package_file}
 add_custom_target(python_package DEPENDS ${package_file})
 add_dependencies(python_package python_binding)
 add_dependencies(packages python_package)
-
-if (NOT WIN32 AND NOT OPEN_FOR_IDE)
-  add_fdbclient_test(
-    NAME single_process_fdbcli_tests
-    COMMAND ${CMAKE_SOURCE_DIR}/bindings/python/tests/fdbcli_tests.py
-            ${CMAKE_BINARY_DIR}
-            @CLUSTER_FILE@
-            )
-  add_fdbclient_test(
-    NAME multi_process_fdbcli_tests
-    PROCESS_NUMBER 5
-    COMMAND ${CMAKE_SOURCE_DIR}/bindings/python/tests/fdbcli_tests.py
-            ${CMAKE_BINARY_DIR}
-            @CLUSTER_FILE@
-            5
-            )
-  if (TARGET external_client) # external_client copies fdb_c to bindings/c/libfdb_c_external.so
-    add_fdbclient_test(
-    NAME single_process_external_client_fdbcli_tests
-    COMMAND ${CMAKE_SOURCE_DIR}/bindings/python/tests/fdbcli_tests.py
-            ${CMAKE_BINARY_DIR}
-            @CLUSTER_FILE@
-            --external-client-library ${CMAKE_BINARY_DIR}/bindings/c/libfdb_c_external.so
-            )
-    add_fdbclient_test(
-    NAME multi_process_external_client_fdbcli_tests
-    PROCESS_NUMBER 5
-    COMMAND ${CMAKE_SOURCE_DIR}/bindings/python/tests/fdbcli_tests.py
-            ${CMAKE_BINARY_DIR}
-            @CLUSTER_FILE@
-            5
-            --external-client-library ${CMAKE_BINARY_DIR}/bindings/c/libfdb_c_external.so
-            )
-  endif()
-endif()

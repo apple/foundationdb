@@ -64,11 +64,11 @@ operator|(Left const& lhs, Right const& rhs) {
 namespace assert {
 struct NoSim {
 	constexpr static AnnotationType type = AnnotationType::Assertion;
-	bool operator()(ICodeProbe* self) const;
+	bool operator()(ICodeProbe const* self) const;
 };
 struct SimOnly {
 	constexpr static AnnotationType type = AnnotationType::Assertion;
-	bool operator()(ICodeProbe* self) const;
+	bool operator()(ICodeProbe const* self) const;
 };
 
 template <class Left, class Right>
@@ -135,6 +135,7 @@ struct CodeProbeAnnotations<> {
 	constexpr bool expectContext(ExecutionContext context, bool prevHadSomeContext = false) const {
 		return !prevHadSomeContext;
 	}
+	constexpr bool shouldTrace(ICodeProbe const*) const { return true; }
 	constexpr bool deduplicate() const { return false; }
 };
 
@@ -156,6 +157,16 @@ struct CodeProbeAnnotations<Head, Tail...> {
 		}
 		tail.hit(self);
 	}
+
+	bool shouldTrace(ICodeProbe const* self) const {
+		if constexpr (Head::type == AnnotationType::Assertion) {
+			if (!head(self)) {
+				return false;
+			}
+		}
+		return tail.shouldTrace(self);
+	}
+
 	void trace(const ICodeProbe* self, BaseTraceEvent& evt, bool condition) const {
 		if constexpr (Head::type == AnnotationType::Decoration) {
 			head.trace(self, evt, condition);
@@ -199,6 +210,7 @@ struct ICodeProbe {
 	virtual const char* condition() const = 0;
 	virtual const char* compilationUnit() const = 0;
 	virtual void trace(bool) const = 0;
+	virtual bool shouldTrace() const = 0;
 	virtual bool wasHit() const = 0;
 	virtual unsigned hitCount() const = 0;
 	virtual bool expectInContext(ExecutionContext context) const = 0;
@@ -232,6 +244,9 @@ struct CodeProbeImpl : ICodeProbe {
 		    .detail("Comment", Comment::value());
 		annotations.trace(this, evt, condition);
 	}
+
+	bool shouldTrace() const override { return annotations.shouldTrace(this); }
+
 	bool wasHit() const override { return _hitCount > 0; }
 	unsigned hitCount() const override { return _hitCount; }
 

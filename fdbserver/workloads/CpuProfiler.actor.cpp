@@ -42,9 +42,9 @@ struct CpuProfilerWorkload : TestWorkload {
 	std::vector<WorkerInterface> profilingWorkers;
 
 	CpuProfilerWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		initialDelay = getOption(options, LiteralStringRef("initialDelay"), 0.0);
-		duration = getOption(options, LiteralStringRef("duration"), -1.0);
-		roles = getOption(options, LiteralStringRef("roles"), std::vector<std::string>());
+		initialDelay = getOption(options, "initialDelay"_sr, 0.0);
+		duration = getOption(options, "duration"_sr, -1.0);
+		roles = getOption(options, "roles"_sr, std::vector<std::string>());
 		success = true;
 	}
 

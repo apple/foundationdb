@@ -55,6 +55,7 @@ struct WorkloadContext {
 	int64_t sharedRandomNumber;
 	Reference<AsyncVar<struct ServerDBInfo> const> dbInfo;
 	Reference<IClusterConnectionRecord> ccr;
+	Optional<TenantName> defaultTenant;
 
 	WorkloadContext();
 	WorkloadContext(const WorkloadContext&);
@@ -67,7 +68,7 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 
 	// Subclasses are expected to also have a constructor with this signature (to work with WorkloadFactory<>):
 	explicit TestWorkload(WorkloadContext const& wcx) : WorkloadContext(wcx) {
-		bool runSetup = getOption(options, LiteralStringRef("runSetup"), true);
+		bool runSetup = getOption(options, "runSetup"_sr, true);
 		phases = TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
 		if (runSetup)
 			phases |= TestWorkload::SETUP;
@@ -75,6 +76,7 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 	virtual ~TestWorkload(){};
 	virtual Future<Void> initialized() { return Void(); }
 	virtual std::string description() const = 0;
+	virtual void disableFailureInjectionWorkloads(std::set<std::string>& out) const;
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 	virtual Future<Void> start(Database const& cx) = 0;
 	virtual Future<bool> check(Database const& cx) = 0;
@@ -100,8 +102,8 @@ struct NoOptions {};
 struct FailureInjectionWorkload : TestWorkload {
 	FailureInjectionWorkload(WorkloadContext const&);
 	virtual ~FailureInjectionWorkload() {}
-	virtual bool add(DeterministicRandom& random, WorkloadRequest const& work, CompoundWorkload const& workload);
-	virtual void initFailureInjectionMode(DeterministicRandom& random, unsigned count);
+	virtual void initFailureInjectionMode(DeterministicRandom& random);
+	virtual bool shouldInject(DeterministicRandom& random, const WorkloadRequest& work, const unsigned count) const;
 
 	Future<Void> setupInjectionWorkload(Database const& cx, Future<Void> done);
 	Future<Void> startInjectionWorkload(Database const& cx, Future<Void> done);
@@ -136,6 +138,9 @@ struct CompoundWorkload : TestWorkload {
 	CompoundWorkload(WorkloadContext& wcx);
 	CompoundWorkload* add(Reference<TestWorkload>&& w);
 	void addFailureInjection(WorkloadRequest& work);
+	bool shouldInjectFailure(DeterministicRandom& random,
+	                         const WorkloadRequest& work,
+	                         Reference<FailureInjectionWorkload> failureInjection) const;
 
 	std::string description() const override;
 
@@ -173,15 +178,15 @@ struct KVWorkload : TestWorkload {
 	double absentFrac;
 
 	explicit KVWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		nodeCount = getOption(options, LiteralStringRef("nodeCount"), (uint64_t)100000);
-		nodePrefix = getOption(options, LiteralStringRef("nodePrefix"), (int64_t)-1);
-		actorCount = getOption(options, LiteralStringRef("actorCount"), 50);
-		keyBytes = std::max(getOption(options, LiteralStringRef("keyBytes"), 16), 4);
-		maxValueBytes = getOption(options, LiteralStringRef("valueBytes"), 96);
-		minValueBytes = getOption(options, LiteralStringRef("minValueBytes"), maxValueBytes);
+		nodeCount = getOption(options, "nodeCount"_sr, (uint64_t)100000);
+		nodePrefix = getOption(options, "nodePrefix"_sr, (int64_t)-1);
+		actorCount = getOption(options, "actorCount"_sr, 50);
+		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 4);
+		maxValueBytes = getOption(options, "valueBytes"_sr, 96);
+		minValueBytes = getOption(options, "minValueBytes"_sr, maxValueBytes);
 		ASSERT(minValueBytes <= maxValueBytes);
 
-		absentFrac = getOption(options, LiteralStringRef("absentFrac"), 0.0);
+		absentFrac = getOption(options, "absentFrac"_sr, 0.0);
 	}
 	Key getRandomKey() const;
 	Key getRandomKey(double absentFrac) const;

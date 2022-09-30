@@ -191,12 +191,12 @@ public:
 	static void init(Reference<IEventFD> ev, double ioTimeout) {
 		ASSERT(!FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO);
 		if (!g_network->isSimulated()) {
-			ctx.countAIOSubmit.init(LiteralStringRef("AsyncFile.CountAIOSubmit"));
-			ctx.countAIOCollect.init(LiteralStringRef("AsyncFile.CountAIOCollect"));
-			ctx.submitMetric.init(LiteralStringRef("AsyncFile.Submit"));
-			ctx.countPreSubmitTruncate.init(LiteralStringRef("AsyncFile.CountPreAIOSubmitTruncate"));
-			ctx.preSubmitTruncateBytes.init(LiteralStringRef("AsyncFile.PreAIOSubmitTruncateBytes"));
-			ctx.slowAioSubmitMetric.init(LiteralStringRef("AsyncFile.SlowAIOSubmit"));
+			ctx.countAIOSubmit.init("AsyncFile.CountAIOSubmit"_sr);
+			ctx.countAIOCollect.init("AsyncFile.CountAIOCollect"_sr);
+			ctx.submitMetric.init("AsyncFile.Submit"_sr);
+			ctx.countPreSubmitTruncate.init("AsyncFile.CountPreAIOSubmitTruncate"_sr);
+			ctx.preSubmitTruncateBytes.init("AsyncFile.PreAIOSubmitTruncateBytes"_sr);
+			ctx.slowAioSubmitMetric.init("AsyncFile.SlowAIOSubmit"_sr);
 		}
 
 		int rc = io_setup(FLOW_KNOBS->MAX_OUTSTANDING, &ctx.iocx);
@@ -648,17 +648,17 @@ private:
 	  : failed(false), fd(fd), flags(flags), filename(filename) {
 		ASSERT(!FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO);
 		if (!g_network->isSimulated()) {
-			countFileLogicalWrites.init(LiteralStringRef("AsyncFile.CountFileLogicalWrites"), filename);
-			countFileLogicalReads.init(LiteralStringRef("AsyncFile.CountFileLogicalReads"), filename);
-			countLogicalWrites.init(LiteralStringRef("AsyncFile.CountLogicalWrites"));
-			countLogicalReads.init(LiteralStringRef("AsyncFile.CountLogicalReads"));
+			countFileLogicalWrites.init("AsyncFile.CountFileLogicalWrites"_sr, filename);
+			countFileLogicalReads.init("AsyncFile.CountFileLogicalReads"_sr, filename);
+			countLogicalWrites.init("AsyncFile.CountLogicalWrites"_sr);
+			countLogicalReads.init("AsyncFile.CountLogicalReads"_sr);
 		}
 
 #if KAIO_LOGGING
 		logFile = nullptr;
 		// TODO:  Don't do this hacky investigation-specific thing
 		StringRef fname(filename);
-		if (fname.endsWith(LiteralStringRef(".sqlite")) || fname.endsWith(LiteralStringRef(".sqlite-wal"))) {
+		if (fname.endsWith(".sqlite"_sr) || fname.endsWith(".sqlite-wal"_sr)) {
 			std::string logFileName = basename(filename);
 			while (logFileName.find("/") != std::string::npos)
 				logFileName = logFileName.substr(logFileName.find("/") + 1);

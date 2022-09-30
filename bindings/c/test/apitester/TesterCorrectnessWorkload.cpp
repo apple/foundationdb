@@ -204,23 +204,23 @@ private:
 
 	void getRangeLoop(std::shared_ptr<ITransactionContext> ctx,
 	                  fdb::KeySelector begin,
-	                  fdb::KeySelector end,
+	                  fdb::Key endKey,
 	                  std::shared_ptr<std::vector<fdb::KeyValue>> results) {
 		auto f = ctx->tx().getRange(begin,
-		                            end,
+		                            fdb::key_select::firstGreaterOrEqual(endKey),
 		                            0 /*limit*/,
 		                            0 /*target_bytes*/,
 		                            FDB_STREAMING_MODE_WANT_ALL,
 		                            0 /*iteration*/,
 		                            false /*snapshot*/,
 		                            false /*reverse*/);
-		ctx->continueAfter(f, [this, ctx, f, end, results]() {
+		ctx->continueAfter(f, [this, ctx, f, endKey, results]() {
 			auto out = copyKeyValueArray(f.get());
 			results->insert(results->end(), out.first.begin(), out.first.end());
 			const bool more = out.second;
 			if (more) {
 				// Fetch the remaining results.
-				getRangeLoop(ctx, fdb::key_select::firstGreaterThan(results->back().key), end, results);
+				getRangeLoop(ctx, fdb::key_select::firstGreaterThan(results->back().key), endKey, results);
 			} else {
 				ctx->done();
 			}
@@ -237,10 +237,7 @@ private:
 			    // Clear the results vector, in case the transaction is retried.
 			    results->clear();
 
-			    getRangeLoop(ctx,
-			                 fdb::key_select::firstGreaterOrEqual(begin),
-			                 fdb::key_select::firstGreaterOrEqual(end),
-			                 results);
+			    getRangeLoop(ctx, fdb::key_select::firstGreaterOrEqual(begin), end, results);
 		    },
 		    [this, begin, end, results, cont, tenantId]() {
 			    auto expected = stores[tenantId].getRange(begin, end, results->size() + 10, false);

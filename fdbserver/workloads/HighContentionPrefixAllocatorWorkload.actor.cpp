@@ -38,9 +38,9 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 
 	HighContentionPrefixAllocatorWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), allocatorSubspace("test_subspace"_sr), allocator(allocatorSubspace) {
-		numRounds = getOption(options, LiteralStringRef("numRounds"), 500);
-		maxTransactionsPerRound = getOption(options, LiteralStringRef("maxTransactionsPerRound"), 20);
-		maxAllocationsPerTransaction = getOption(options, LiteralStringRef("maxAllocationsPerTransaction"), 20);
+		numRounds = getOption(options, "numRounds"_sr, 500);
+		maxTransactionsPerRound = getOption(options, "maxTransactionsPerRound"_sr, 20);
+		maxAllocationsPerTransaction = getOption(options, "maxAllocationsPerTransaction"_sr, 20);
 	}
 
 	std::string description() const override { return HighContentionPrefixAllocatorWorkload::NAME; }
