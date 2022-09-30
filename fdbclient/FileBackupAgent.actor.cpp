@@ -682,7 +682,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	}
 
 	static void copyToBuffer(EncryptedRangeFileWriter* self, const void* src, size_t size) {
-		if (src) {
+		if (size > 0) {
 			std::memcpy(self->wPtr, src, size);
 			self->wPtr += size;
 			ASSERT(currentBufferSize(self) <= self->blockSize);
