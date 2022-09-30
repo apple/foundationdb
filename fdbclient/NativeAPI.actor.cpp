@@ -10632,15 +10632,26 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobRanges(Reference<ReadYou
 	}
 }
 
-ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx, KeyRange range, bool active) {
+ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
+                                     KeyRange range,
+                                     bool active,
+                                     Optional<TenantName> tenantName) {
 	state Database db(cx);
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	state bool loadedTenantEntry = false;
 
 	state Value value = active ? blobRangeActive : blobRangeInactive;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			if (tenantName.present() && !loadedTenantEntry) {
+				TenantMapEntry tenantEntry =
+				    wait(blobGranuleGetTenantEntry(&tr->getTransaction(), range.begin, tenantName));
+				loadedTenantEntry = true;
+				range = range.withPrefix(tenantEntry.prefix);
+			}
 
 			Standalone<VectorRef<KeyRangeRef>> startBlobRanges = wait(getBlobRanges(tr, range, 1));
 
@@ -10678,12 +10689,12 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx, KeyRange ran
 	}
 }
 
-Future<bool> DatabaseContext::blobbifyRange(KeyRange range) {
-	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, true);
+Future<bool> DatabaseContext::blobbifyRange(KeyRange range, Optional<TenantName> tenantName) {
+	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, true, tenantName);
 }
 
-Future<bool> DatabaseContext::unblobbifyRange(KeyRange range) {
-	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, false);
+Future<bool> DatabaseContext::unblobbifyRange(KeyRange range, Optional<TenantName> tenantName) {
+	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, false, tenantName);
 }
 
 ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRangesActor(Reference<DatabaseContext> cx,
