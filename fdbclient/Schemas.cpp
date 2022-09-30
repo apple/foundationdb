@@ -964,6 +964,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       },
       "tenants":{
          "num_tenants":0
+      },
+      "metacluster" : {
+         "cluster_type" : "standalone"
       }
    },
    "client":{
