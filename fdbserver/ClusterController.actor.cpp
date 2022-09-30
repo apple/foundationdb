@@ -2715,6 +2715,7 @@ ACTOR Future<Void> metaclusterMetricsUpdater(ClusterControllerData* self) {
 						metrics.tenantGroupsAllocated = capacityNumbers.second.numTenantGroups;
 						self->db.metaclusterMetrics = metrics;
 						TraceEvent("MetaclusterCapacity")
+						    .detail("TotalTenants", self->db.metaclusterMetrics.numTenants)
 						    .detail("DataClusters", self->db.metaclusterMetrics.numDataClusters)
 						    .detail("TenantGroupCapacity", self->db.metaclusterMetrics.tenantGroupCapacity)
 						    .detail("TenantGroupsAllocated", self->db.metaclusterMetrics.tenantGroupsAllocated);
