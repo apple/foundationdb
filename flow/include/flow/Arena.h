@@ -832,6 +832,10 @@ inline bool operator==(const StringRef& lhs, const StringRef& rhs) {
 	ASSERT(lhs.size() >= 0);
 	return lhs.size() == rhs.size() && memcmp(lhs.begin(), rhs.begin(), static_cast<unsigned int>(lhs.size())) == 0;
 }
+template <int N>
+inline bool operator==(const StringRef& lhs, const char (&rhs)[N]) {
+	return lhs == StringRef(reinterpret_cast<const uint8_t*>(rhs), N);
+}
 inline bool operator<(const StringRef& lhs, const StringRef& rhs) {
 	if (std::min(lhs.size(), rhs.size()) > 0) {
 		int c = memcmp(lhs.begin(), rhs.begin(), std::min(lhs.size(), rhs.size()));
