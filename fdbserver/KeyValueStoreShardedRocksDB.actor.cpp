@@ -8,6 +8,7 @@
 #include <rocksdb/db.h>
 #include <rocksdb/filter_policy.h>
 #include <rocksdb/listener.h>
+#include <rocksdb/metadata.h>
 #include <rocksdb/options.h>
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/statistics.h>
@@ -571,6 +572,9 @@ public:
 	ACTOR static Future<Void> shardMetricsLogger(std::shared_ptr<ShardedRocksDBState> rState,
 	                                             Future<Void> openFuture,
 	                                             ShardManager* shardManager) {
+		state std::unordered_map<std::string, std::shared_ptr<PhysicalShard>>* physicalShards =
+		    shardManager->getAllShards();
+
 		try {
 			wait(openFuture);
 			loop {
@@ -581,6 +585,30 @@ public:
 				TraceEvent(SevInfo, "ShardedRocksKVSPhysialShardMetrics")
 				    .detail("NumActiveShards", shardManager->numActiveShards())
 				    .detail("TotalPhysicalShards", shardManager->numPhysicalShards());
+
+				for (auto& [id, shard] : *physicalShards) {
+					if (!shard->initialized()) {
+						continue;
+					}
+					std::string propValue = "";
+					ASSERT(shard->db->GetProperty(shard->cf, rocksdb::DB::Properties::kCFStats, &propValue));
+					TraceEvent(SevInfo, "PhysicalShardCFStats").detail("ShardId", id).detail("Detail", propValue);
+
+					// Get compression ratio for each level.
+					rocksdb::ColumnFamilyMetaData cfMetadata;
+					shard->db->GetColumnFamilyMetaData(shard->cf, &cfMetadata);
+					TraceEvent e(SevInfo, "PhysicalShardLevelStats");
+					e.detail("ShardId", id);
+					std::string levelProp;
+					for (auto it = cfMetadata.levels.begin(); it != cfMetadata.levels.end(); ++it) {
+						std::string propValue = "";
+						ASSERT(shard->db->GetProperty(shard->cf,
+						                              rocksdb::DB::Properties::kCompressionRatioAtLevelPrefix +
+						                                  std::to_string(it->level),
+						                              &propValue));
+						e.detail("Level" + std::to_string(it->level), std::to_string(it->size) + " " + propValue);
+					}
+				}
 			}
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled) {
@@ -1129,7 +1157,7 @@ private:
 	std::shared_ptr<rocksdb::Statistics> stats;
 	// Statistic Output from RocksDB
 	std::vector<std::tuple<const char*, uint32_t, uint64_t>> tickerStats;
-	std::vector<std::pair<const char*, std::string>> propertyStats;
+	std::vector<std::pair<const char*, std::string>> intPropertyStats;
 	// Iterator Pool Stats
 	std::unordered_map<std::string, uint64_t> readIteratorPoolStats;
 	// PerfContext
@@ -1248,10 +1276,10 @@ RocksDBMetrics::RocksDBMetrics(UID debugID, std::shared_ptr<rocksdb::Statistics>
 		{ "RowCacheHit", rocksdb::ROW_CACHE_HIT, 0 },
 		{ "RowCacheMiss", rocksdb::ROW_CACHE_MISS, 0 },
 		{ "CountIterSkippedKeys", rocksdb::NUMBER_ITER_SKIP, 0 },
+
 	};
-	propertyStats = {
-		// Zhe: TODO Aggregation
-		{ "NumCompactionsRunning", rocksdb::DB::Properties::kNumRunningCompactions },
+
+	intPropertyStats = {
 		{ "NumImmutableMemtables", rocksdb::DB::Properties::kNumImmutableMemTable },
 		{ "NumImmutableMemtablesFlushed", rocksdb::DB::Properties::kNumImmutableMemTableFlushed },
 		{ "IsMemtableFlushPending", rocksdb::DB::Properties::kMemTableFlushPending },
@@ -1260,27 +1288,25 @@ RocksDBMetrics::RocksDBMetrics(UID debugID, std::shared_ptr<rocksdb::Statistics>
 		{ "NumRunningCompactions", rocksdb::DB::Properties::kNumRunningCompactions },
 		{ "CumulativeBackgroundErrors", rocksdb::DB::Properties::kBackgroundErrors },
 		{ "CurrentSizeActiveMemtable", rocksdb::DB::Properties::kCurSizeActiveMemTable },
-		{ "AllMemtablesBytes", rocksdb::DB::Properties::kCurSizeAllMemTables }, // for mem usage
+		{ "AllMemtablesBytes", rocksdb::DB::Properties::kCurSizeAllMemTables },
 		{ "ActiveMemtableBytes", rocksdb::DB::Properties::kSizeAllMemTables },
 		{ "CountEntriesActiveMemtable", rocksdb::DB::Properties::kNumEntriesActiveMemTable },
 		{ "CountEntriesImmutMemtables", rocksdb::DB::Properties::kNumEntriesImmMemTables },
 		{ "CountDeletesActiveMemtable", rocksdb::DB::Properties::kNumDeletesActiveMemTable },
 		{ "CountDeletesImmutMemtables", rocksdb::DB::Properties::kNumDeletesImmMemTables },
 		{ "EstimatedCountKeys", rocksdb::DB::Properties::kEstimateNumKeys },
-		{ "EstimateSstReaderBytes", rocksdb::DB::Properties::kEstimateTableReadersMem }, // for mem usage
+		{ "EstimateSstReaderBytes", rocksdb::DB::Properties::kEstimateTableReadersMem },
 		{ "CountActiveSnapshots", rocksdb::DB::Properties::kNumSnapshots },
 		{ "OldestSnapshotTime", rocksdb::DB::Properties::kOldestSnapshotTime },
 		{ "CountLiveVersions", rocksdb::DB::Properties::kNumLiveVersions },
 		{ "EstimateLiveDataSize", rocksdb::DB::Properties::kEstimateLiveDataSize },
 		{ "BaseLevel", rocksdb::DB::Properties::kBaseLevel },
 		{ "EstPendCompactBytes", rocksdb::DB::Properties::kEstimatePendingCompactionBytes },
-		{ "BlockCacheUsage", rocksdb::DB::Properties::kBlockCacheUsage }, // for mem usage
-		{ "BlockCachePinnedUsage", rocksdb::DB::Properties::kBlockCachePinnedUsage }, // for mem usage
+		{ "BlockCacheUsage", rocksdb::DB::Properties::kBlockCacheUsage },
+		{ "BlockCachePinnedUsage", rocksdb::DB::Properties::kBlockCachePinnedUsage },
+		{ "LiveSstFilesSize", rocksdb::DB::Properties::kLiveSstFilesSize },
 	};
-	std::unordered_map<std::string, uint64_t> readIteratorPoolStats = {
-		{ "NumReadIteratorsCreated", 0 },
-		{ "NumTimesReadIteratorsReused", 0 },
-	};
+
 	perfContextMetrics = {
 		{ "UserKeyComparisonCount", rocksdb_user_key_comparison_count, {} },
 		{ "BlockCacheHitCount", rocksdb_block_cache_hit_count, {} },
@@ -1403,7 +1429,7 @@ void RocksDBMetrics::logStats(rocksdb::DB* db) {
 		e.detail(name, stat - cumulation);
 		cumulation = stat;
 	}
-	for (auto& [name, property] : propertyStats) {
+	for (auto& [name, property] : intPropertyStats) {
 		stat = 0;
 		ASSERT(db->GetAggregatedIntProperty(property, &stat));
 		e.detail(name, stat);
