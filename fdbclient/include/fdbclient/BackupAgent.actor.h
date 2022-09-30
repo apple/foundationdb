@@ -143,7 +143,7 @@ public:
 		futureBucket = std::move(r.futureBucket);
 	}
 
-	KeyBackedProperty<Key> lastBackupTimestamp() { return config.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Key> lastBackupTimestamp() { return config.pack(__FUNCTION__sr); }
 
 	Future<Void> run(Database cx, double pollDelay, int maxConcurrentTasks) {
 		return taskBucket->run(cx, futureBucket, std::make_shared<double const>(pollDelay), maxConcurrentTasks);
@@ -633,7 +633,7 @@ static inline Future<std::vector<KeyBackedTag>> getAllBackupTags(Reference<ReadY
 class KeyBackedConfig {
 public:
 	static struct {
-		static TaskParam<UID> uid() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<UID> uid() { return __FUNCTION__sr; }
 	} TaskParams;
 
 	KeyBackedConfig(StringRef prefix, UID uid = UID())
@@ -666,7 +666,7 @@ public:
 		});
 	}
 
-	KeyBackedProperty<std::string> tag() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<std::string> tag() { return configSpace.pack(__FUNCTION__sr); }
 
 	UID getUid() { return uid; }
 
@@ -675,12 +675,10 @@ public:
 	void clear(Reference<ReadYourWritesTransaction> tr) { tr->clear(configSpace.range()); }
 
 	// lastError is a pair of error message and timestamp expressed as an int64_t
-	KeyBackedProperty<std::pair<std::string, Version>> lastError() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
+	KeyBackedProperty<std::pair<std::string, Version>> lastError() { return configSpace.pack(__FUNCTION__sr); }
 
 	KeyBackedMap<int64_t, std::pair<std::string, Version>> lastErrorPerType() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+		return configSpace.pack(__FUNCTION__sr);
 	}
 
 	// Updates the error per type map and the last error property
@@ -769,47 +767,41 @@ public:
 
 	// Map of range end boundaries to info about the backup file written for that range.
 	typedef KeyBackedMap<Key, RangeSlice> RangeFileMapT;
-	RangeFileMapT snapshotRangeFileMap() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	RangeFileMapT snapshotRangeFileMap() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Number of kv range files that were both committed to persistent storage AND inserted into
 	// the snapshotRangeFileMap.  Note that since insertions could replace 1 or more existing
 	// map entries this is not necessarily the number of entries currently in the map.
 	// This value exists to help with sizing of kv range folders for BackupContainers that
 	// require it.
-	KeyBackedBinaryValue<int64_t> snapshotRangeFileCount() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedBinaryValue<int64_t> snapshotRangeFileCount() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Coalesced set of ranges already dispatched for writing.
 	typedef KeyBackedMap<Key, bool> RangeDispatchMapT;
-	RangeDispatchMapT snapshotRangeDispatchMap() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	RangeDispatchMapT snapshotRangeDispatchMap() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Interval to use for the first (initial) snapshot.
-	KeyBackedProperty<int64_t> initialSnapshotIntervalSeconds() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
+	KeyBackedProperty<int64_t> initialSnapshotIntervalSeconds() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Interval to use for determining the target end version for new snapshots
-	KeyBackedProperty<int64_t> snapshotIntervalSeconds() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<int64_t> snapshotIntervalSeconds() { return configSpace.pack(__FUNCTION__sr); }
 
 	// When the current snapshot began
-	KeyBackedProperty<Version> snapshotBeginVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Version> snapshotBeginVersion() { return configSpace.pack(__FUNCTION__sr); }
 
 	// When the current snapshot is desired to end.
 	// This can be changed at runtime to speed up or slow down a snapshot
-	KeyBackedProperty<Version> snapshotTargetEndVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Version> snapshotTargetEndVersion() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedProperty<int64_t> snapshotBatchSize() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<int64_t> snapshotBatchSize() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedProperty<Key> snapshotBatchFuture() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Key> snapshotBatchFuture() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedProperty<Key> snapshotBatchDispatchDoneKey() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Key> snapshotBatchDispatchDoneKey() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedProperty<int64_t> snapshotDispatchLastShardsBehind() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
+	KeyBackedProperty<int64_t> snapshotDispatchLastShardsBehind() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedProperty<Version> snapshotDispatchLastVersion() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
+	KeyBackedProperty<Version> snapshotDispatchLastVersion() { return configSpace.pack(__FUNCTION__sr); }
 
 	Future<Void> initNewSnapshot(Reference<ReadYourWritesTransaction> tr, int64_t intervalSeconds = -1) {
 		BackupConfig& copy = *this; // Capture this by value instead of this ptr
@@ -843,56 +835,50 @@ public:
 		});
 	}
 
-	KeyBackedBinaryValue<int64_t> rangeBytesWritten() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedBinaryValue<int64_t> rangeBytesWritten() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedBinaryValue<int64_t> logBytesWritten() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedBinaryValue<int64_t> logBytesWritten() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedProperty<EBackupState> stateEnum() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<EBackupState> stateEnum() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedProperty<Reference<IBackupContainer>> backupContainer() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
+	KeyBackedProperty<Reference<IBackupContainer>> backupContainer() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Set to true when all backup workers for saving mutation logs have been started.
-	KeyBackedProperty<bool> allWorkerStarted() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<bool> allWorkerStarted() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Each backup worker adds its (epoch, tag.id) to this property.
 	KeyBackedProperty<std::vector<std::pair<int64_t, int64_t>>> startedBackupWorkers() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+		return configSpace.pack(__FUNCTION__sr);
 	}
 
 	// Set to true if backup worker is enabled.
-	KeyBackedProperty<bool> backupWorkerEnabled() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<bool> backupWorkerEnabled() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Set to true if partitioned log is enabled (only useful if backup worker is also enabled).
-	KeyBackedProperty<bool> partitionedLogEnabled() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<bool> partitionedLogEnabled() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Set to true if only requesting incremental backup without base snapshot.
-	KeyBackedProperty<bool> incrementalBackupOnly() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<bool> incrementalBackupOnly() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Latest version for which all prior versions have saved by backup workers.
-	KeyBackedProperty<Version> latestBackupWorkerSavedVersion() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
+	KeyBackedProperty<Version> latestBackupWorkerSavedVersion() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Stop differntial logging if already started or don't start after completing KV ranges
-	KeyBackedProperty<bool> stopWhenDone() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<bool> stopWhenDone() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Enable snapshot backup file encryption
-	KeyBackedProperty<bool> enableSnapshotBackupEncryption() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
+	KeyBackedProperty<bool> enableSnapshotBackupEncryption() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Latest version for which all prior versions have had their log copy tasks completed
-	KeyBackedProperty<Version> latestLogEndVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Version> latestLogEndVersion() { return configSpace.pack(__FUNCTION__sr); }
 
 	// The end version of the last complete snapshot
-	KeyBackedProperty<Version> latestSnapshotEndVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Version> latestSnapshotEndVersion() { return configSpace.pack(__FUNCTION__sr); }
 
 	// The end version of the first complete snapshot
-	KeyBackedProperty<Version> firstSnapshotEndVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Version> firstSnapshotEndVersion() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedProperty<Key> destUidValue() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Key> destUidValue() { return configSpace.pack(__FUNCTION__sr); }
 
 	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -923,7 +909,7 @@ public:
 		           });
 	}
 
-	KeyBackedProperty<std::vector<KeyRange>> backupRanges() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<std::vector<KeyRange>> backupRanges() { return configSpace.pack(__FUNCTION__sr); }
 
 	void startMutationLogs(Reference<ReadYourWritesTransaction> tr, KeyRangeRef backupRange, Key destUidValue) {
 		Key mutationLogsDestKey = destUidValue.withPrefix(backupLogKeys.begin);

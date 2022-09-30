@@ -115,7 +115,7 @@ public:
 };
 
 struct ReservedTaskParams {
-	static TaskParam<Version> scheduledVersion() { return LiteralStringRef(__FUNCTION__); }
+	static TaskParam<Version> scheduledVersion() { return __FUNCTION__sr; }
 };
 
 class FutureBucket;

@@ -157,41 +157,37 @@ public:
 	RestoreConfig(UID uid = UID()) : KeyBackedConfig(fileRestorePrefixRange.begin, uid) {}
 	RestoreConfig(Reference<Task> task) : KeyBackedConfig(fileRestorePrefixRange.begin, task) {}
 
-	KeyBackedProperty<ERestoreState> stateEnum() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<ERestoreState> stateEnum() { return configSpace.pack(__FUNCTION__sr); }
 	Future<StringRef> stateText(Reference<ReadYourWritesTransaction> tr) {
 		return map(stateEnum().getD(tr),
 		           [](ERestoreState s) -> StringRef { return FileBackupAgent::restoreStateText(s); });
 	}
-	KeyBackedProperty<Key> addPrefix() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
-	KeyBackedProperty<Key> removePrefix() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
-	KeyBackedProperty<bool> onlyApplyMutationLogs() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
-	KeyBackedProperty<bool> inconsistentSnapshotOnly() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<Key> addPrefix() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<Key> removePrefix() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<bool> onlyApplyMutationLogs() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<bool> inconsistentSnapshotOnly() { return configSpace.pack(__FUNCTION__sr); }
 	// XXX: Remove restoreRange() once it is safe to remove. It has been changed to restoreRanges
-	KeyBackedProperty<KeyRange> restoreRange() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
-	KeyBackedProperty<std::vector<KeyRange>> restoreRanges() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
-	KeyBackedProperty<Key> batchFuture() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
-	KeyBackedProperty<Version> beginVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
-	KeyBackedProperty<Version> restoreVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
-	KeyBackedProperty<Version> firstConsistentVersion() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedProperty<KeyRange> restoreRange() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<std::vector<KeyRange>> restoreRanges() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<Key> batchFuture() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<Version> beginVersion() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<Version> restoreVersion() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<Version> firstConsistentVersion() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedProperty<Reference<IBackupContainer>> sourceContainer() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
+	KeyBackedProperty<Reference<IBackupContainer>> sourceContainer() { return configSpace.pack(__FUNCTION__sr); }
 	// Get the source container as a bare URL, without creating a container instance
 	KeyBackedProperty<Value> sourceContainerURL() { return configSpace.pack("sourceContainer"_sr); }
 
 	// Total bytes written by all log and range restore tasks.
-	KeyBackedBinaryValue<int64_t> bytesWritten() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedBinaryValue<int64_t> bytesWritten() { return configSpace.pack(__FUNCTION__sr); }
 	// File blocks that have had tasks created for them by the Dispatch task
-	KeyBackedBinaryValue<int64_t> filesBlocksDispatched() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedBinaryValue<int64_t> filesBlocksDispatched() { return configSpace.pack(__FUNCTION__sr); }
 	// File blocks whose tasks have finished
-	KeyBackedBinaryValue<int64_t> fileBlocksFinished() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedBinaryValue<int64_t> fileBlocksFinished() { return configSpace.pack(__FUNCTION__sr); }
 	// Total number of files in the fileMap
-	KeyBackedBinaryValue<int64_t> fileCount() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedBinaryValue<int64_t> fileCount() { return configSpace.pack(__FUNCTION__sr); }
 	// Total number of file blocks in the fileMap
-	KeyBackedBinaryValue<int64_t> fileBlockCount() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedBinaryValue<int64_t> fileBlockCount() { return configSpace.pack(__FUNCTION__sr); }
 
 	Future<std::vector<KeyRange>> getRestoreRangesOrDefault(Reference<ReadYourWritesTransaction> tr) {
 		return getRestoreRangesOrDefault_impl(this, tr);
@@ -234,7 +230,7 @@ public:
 	};
 
 	typedef KeyBackedSet<RestoreFile> FileSetT;
-	FileSetT fileSet() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	FileSetT fileSet() { return configSpace.pack(__FUNCTION__sr); }
 
 	Future<bool> isRunnable(Reference<ReadYourWritesTransaction> tr) {
 		return map(stateEnum().getD(tr), [](ERestoreState s) -> bool {
@@ -1531,9 +1527,9 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 	static constexpr uint32_t version = 1;
 
 	static struct {
-		static TaskParam<Key> beginKey() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<Key> endKey() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<bool> addBackupRangeTasks() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<Key> beginKey() { return __FUNCTION__sr; }
+		static TaskParam<Key> endKey() { return __FUNCTION__sr; }
+		static TaskParam<bool> addBackupRangeTasks() { return __FUNCTION__sr; }
 	} Params;
 
 	std::string toString(Reference<Task> task) const override {
@@ -1897,11 +1893,11 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 	static struct {
 		// Set by Execute, used by Finish
-		static TaskParam<int64_t> shardsBehind() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<int64_t> shardsBehind() { return __FUNCTION__sr; }
 		// Set by Execute, used by Finish
-		static TaskParam<bool> snapshotFinished() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<bool> snapshotFinished() { return __FUNCTION__sr; }
 		// Set by Execute, used by Finish
-		static TaskParam<Version> nextDispatchVersion() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<Version> nextDispatchVersion() { return __FUNCTION__sr; }
 	} Params;
 
 	StringRef getName() const override { return name; };
@@ -2469,10 +2465,10 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 	static constexpr uint32_t version = 1;
 
 	static struct {
-		static TaskParam<bool> addBackupLogRangeTasks() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<int64_t> fileSize() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<Version> beginVersion() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<Version> endVersion() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<bool> addBackupLogRangeTasks() { return __FUNCTION__sr; }
+		static TaskParam<int64_t> fileSize() { return __FUNCTION__sr; }
+		static TaskParam<Version> beginVersion() { return __FUNCTION__sr; }
+		static TaskParam<Version> endVersion() { return __FUNCTION__sr; }
 	} Params;
 
 	StringRef getName() const override { return name; };
@@ -2710,9 +2706,9 @@ struct EraseLogRangeTaskFunc : BackupTaskFuncBase {
 	StringRef getName() const override { return name; };
 
 	static struct {
-		static TaskParam<Version> beginVersion() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<Version> endVersion() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<Key> destUidValue() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<Version> beginVersion() { return __FUNCTION__sr; }
+		static TaskParam<Version> endVersion() { return __FUNCTION__sr; }
+		static TaskParam<Key> destUidValue() { return __FUNCTION__sr; }
 	} Params;
 
 	ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr,
@@ -2784,8 +2780,8 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 	static constexpr uint32_t version = 1;
 
 	static struct {
-		static TaskParam<Version> prevBeginVersion() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<Version> beginVersion() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<Version> prevBeginVersion() { return __FUNCTION__sr; }
+		static TaskParam<Version> beginVersion() { return __FUNCTION__sr; }
 	} Params;
 
 	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
@@ -3013,7 +3009,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 	static StringRef name;
 	static constexpr uint32_t version = 1;
 	static struct {
-		static TaskParam<Version> endVersion() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<Version> endVersion() { return __FUNCTION__sr; }
 	} Params;
 
 	ACTOR static Future<Void> _execute(Database cx,
@@ -3212,7 +3208,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 	static constexpr uint32_t version = 1;
 
 	static struct {
-		static TaskParam<Version> beginVersion() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<Version> beginVersion() { return __FUNCTION__sr; }
 	} Params;
 
 	ACTOR static Future<Void> _execute(Database cx,
@@ -3455,9 +3451,9 @@ REGISTER_TASKFUNC(RestoreCompleteTaskFunc);
 
 struct RestoreFileTaskFuncBase : RestoreTaskFuncBase {
 	struct InputParams {
-		static TaskParam<RestoreFile> inputFile() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<int64_t> readOffset() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<int64_t> readLen() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<RestoreFile> inputFile() { return __FUNCTION__sr; }
+		static TaskParam<int64_t> readOffset() { return __FUNCTION__sr; }
+		static TaskParam<int64_t> readLen() { return __FUNCTION__sr; }
 	} Params;
 
 	std::string toString(Reference<Task> task) const override {
@@ -3472,8 +3468,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 	static struct : InputParams {
 		// The range of data that the (possibly empty) data represented, which is set if it intersects the target
 		// restore range
-		static TaskParam<KeyRange> originalFileRange() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<std::vector<KeyRange>> originalFileRanges() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<KeyRange> originalFileRange() { return __FUNCTION__sr; }
+		static TaskParam<std::vector<KeyRange>> originalFileRanges() { return __FUNCTION__sr; }
 
 		static std::vector<KeyRange> getOriginalFileRanges(Reference<Task> task) {
 			if (originalFileRanges().exists(task)) {
@@ -4069,11 +4065,11 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 	StringRef getName() const override { return name; };
 
 	static struct {
-		static TaskParam<Version> beginVersion() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<std::string> beginFile() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<int64_t> beginBlock() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<int64_t> batchSize() { return LiteralStringRef(__FUNCTION__); }
-		static TaskParam<int64_t> remainingInBatch() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<Version> beginVersion() { return __FUNCTION__sr; }
+		static TaskParam<std::string> beginFile() { return __FUNCTION__sr; }
+		static TaskParam<int64_t> beginBlock() { return __FUNCTION__sr; }
+		static TaskParam<int64_t> batchSize() { return __FUNCTION__sr; }
+		static TaskParam<int64_t> remainingInBatch() { return __FUNCTION__sr; }
 	} Params;
 
 	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
@@ -4542,7 +4538,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 	static constexpr uint32_t version = 1;
 
 	static struct {
-		static TaskParam<Version> firstVersion() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<Version> firstVersion() { return __FUNCTION__sr; }
 	} Params;
 
 	// Find all files needed for the restore and save them in the RestoreConfig for the task.

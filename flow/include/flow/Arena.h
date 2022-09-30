@@ -740,6 +740,8 @@ StringRef LiteralStringRefHelper(const char* str) {
 }
 } // namespace literal_string_ref
 #define LiteralStringRef(str) literal_string_ref::LiteralStringRefHelper<decltype(str), sizeof(str)>(str)
+#define __FILE__sr StringRef(reinterpret_cast<const uint8_t*>(__FILE__), sizeof(__FILE__))
+#define __FUNCTION__sr StringRef(reinterpret_cast<const uint8_t*>(__FUNCTION__), sizeof(__FUNCTION__))
 
 template <>
 struct fmt::formatter<StringRef> : formatter<std::string_view> {
