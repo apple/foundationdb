@@ -16,16 +16,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-if(WIN32)
-  cmake_minimum_required(VERSION 3.15)
-else()
-  cmake_minimum_required(VERSION 3.13)
-endif()
+cmake_minimum_required(VERSION 3.24)
+
+################################################################################
+# CPackMan
+################################################################################
+
+set(CMAKE_PROJECT_TOP_LEVEL_INCLUDES "${CMAKE_PROJECT_TOP_LEVEL_INCLUDES};${CMAKE_CURRENT_SOURCE_DIR}/cmake/CPackMan.cmake")
 
 # silence deprecation warnings in newer versions of cmake
 if(POLICY CMP0135)
   cmake_policy(SET CMP0135 NEW)
 endif()
+
 
 project(foundationdb
   VERSION 7.2.0
@@ -34,6 +37,7 @@ project(foundationdb
   LANGUAGES C CXX ASM)
 
 set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH};${PROJECT_SOURCE_DIR}/cmake")
+
 message (STATUS "${PROJECT_SOURCE_DIR} ${PROJECT_BINARY_DIR}")
 if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
   message(FATAL_ERROR "In-source builds are forbidden")
@@ -172,8 +176,16 @@ if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
   include_directories(/usr/local/include)
 endif()
 
-include(CompileBoost)
-include(GetMsgpack)
+find_package(zstd REQUIRED)
+find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem iostreams CONFIG PATHS ${BOOST_HINT_PATHS})
+# this is a hack -- we should remove this and instead link against the proper targets directly
+add_library(boost_target INTERFACE)
+# Boost::iostreams doesn't link against zstd properly causing linker errors. So we have to do this again here
+set_property(TARGET Boost::iostreams PROPERTY INTERFACE_LINK_LIBRARIES)
+target_link_libraries(Boost::iostreams INTERFACE zstd::libzstd_static)
+target_link_libraries(boost_target INTERFACE Boost::context Boost::filesystem Boost::iostreams)
+find_package(msgpack REQUIRED)
+find_package(AWSSDK REQUIRED)
 add_subdirectory(contrib)
 add_subdirectory(flow)
 add_subdirectory(fdbrpc)

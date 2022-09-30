@@ -4,7 +4,7 @@ set(FORCE_ALL_COMPONENTS OFF CACHE BOOL "Fails cmake if not all dependencies are
 # jemalloc
 ################################################################################
 
-include(Jemalloc)
+find_package(jemalloc REQUIRED)
 
 ################################################################################
 # Valgrind
@@ -190,26 +190,7 @@ endif()
 
 # TOML can download and install itself into the binary directory, so it should
 # always be available.
-find_package(toml11 QUIET)
-if(toml11_FOUND)
-  add_library(toml11_target INTERFACE)
-  target_link_libraries(toml11_target INTERFACE toml11::toml11)
-else()
-  include(ExternalProject)  
-  ExternalProject_add(toml11Project
-    URL "https://github.com/ToruNiina/toml11/archive/v3.4.0.tar.gz"
-    URL_HASH SHA256=bc6d733efd9216af8c119d8ac64a805578c79cc82b813e4d1d880ca128bd154d
-    CMAKE_CACHE_ARGS
-      -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
-      -DCMAKE_C_COMPILER:FILEPATH=${CMAKE_C_COMPILER}
-      -DCMAKE_CXX_COMPILER:FILEPATH=${CMAKE_CXX_COMPILER}
-      -DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_CURRENT_BINARY_DIR}/toml11
-      -Dtoml11_BUILD_TEST:BOOL=OFF
-    BUILD_ALWAYS ON)
-  add_library(toml11_target INTERFACE)
-  add_dependencies(toml11_target toml11Project)
-  target_include_directories(toml11_target SYSTEM INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/toml11/include)
-endif()
+find_package(toml11 REQUIRED)
 
 ################################################################################
 # Coroutine implementation

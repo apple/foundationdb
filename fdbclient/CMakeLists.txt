@@ -65,14 +65,15 @@ endif()
 
 if(WITH_AWS_BACKUP)
   add_compile_definitions(BUILD_AWS_BACKUP)
-  include(awssdk)
+  find_package(AWSSDK REQUIRED COMPONENTS core)
+  message(STATUS "AWS LINK LIBRARIES: ${AWSSDK_LINK_LIBRARIES}")
 endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
 target_include_directories(fdbclient PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/versions.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/include/fdbclient/versions.h)
 add_dependencies(fdbclient fdboptions)
-target_link_libraries(fdbclient PUBLIC fdbrpc msgpack PRIVATE rapidxml)
+target_link_libraries(fdbclient PUBLIC fdbrpc msgpackc-cxx PRIVATE rapidxml)
 
 # Create a separate fdbclient library with sampling enabled. This lets
 # fdbserver retain sampling functionality in client code while disabling
@@ -80,7 +81,7 @@ target_link_libraries(fdbclient PUBLIC fdbrpc msgpack PRIVATE rapidxml)
 add_flow_target(STATIC_LIBRARY NAME fdbclient_sampling SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
 target_include_directories(fdbclient_sampling PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
 add_dependencies(fdbclient_sampling fdboptions)
-target_link_libraries(fdbclient_sampling PUBLIC fdbrpc_sampling msgpack PRIVATE rapidxml)
+target_link_libraries(fdbclient_sampling PUBLIC fdbrpc_sampling msgpackc-cxx PRIVATE rapidxml)
 target_compile_definitions(fdbclient_sampling PRIVATE -DENABLE_SAMPLING)
 if(WIN32)
   add_dependencies(fdbclient_sampling_actors fdbclient_actors)
@@ -95,7 +96,6 @@ if(BUILD_AZURE_BACKUP)
 endif()
 
 if(BUILD_AWS_BACKUP)
-  target_link_libraries(fdbclient PUBLIC awssdk_target)
-  target_link_libraries(fdbclient_sampling PUBLIC awssdk_target)
+  target_link_libraries(fdbclient PUBLIC ${AWSSDK_LINK_LIBRARIES})
+  target_link_libraries(fdbclient_sampling PUBLIC ${AWSSDK_LINK_LIBRARIES})
 endif()
-

@@ -7,11 +7,8 @@ else()
 endif()
 
 if(WITH_ROCKSDB_EXPERIMENTAL)
-  include(CompileRocksDB)
-  # CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
-  # statically, so find the static library here.
-  find_library(lz4_STATIC_LIBRARIES
-    NAMES liblz4.a REQUIRED)
+  find_package(lz4 REQUIRED)
+  find_package(RocksDB REQUIRED)
   if(WITH_LIBURING)
     find_package(uring)
   endif()
@@ -27,24 +24,14 @@ target_include_directories(fdbserver PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   ${CMAKE_CURRENT_BINARY_DIR}/include)
 if (WITH_ROCKSDB_EXPERIMENTAL)
-  add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)
-    target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR} ${uring_INCLUDE_DIR})
-    target_link_libraries(fdbserver PRIVATE fdbclient sqlite ${ROCKSDB_LIBRARIES} ${uring_LIBRARIES} ${lz4_STATIC_LIBRARIES})
     target_compile_definitions(fdbserver PRIVATE BOOST_ASIO_HAS_IO_URING=1 BOOST_ASIO_DISABLE_EPOLL=1)
-  else()
-    target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
-    target_link_libraries(fdbserver PRIVATE fdbclient sqlite ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
-    target_compile_definitions(fdbserver PRIVATE)
   endif()
-else()
-  target_link_libraries(fdbserver PRIVATE fdbclient sqlite)
-endif()
-
-target_link_libraries(fdbserver PRIVATE toml11_target jemalloc rapidjson)
-if(WITH_ROCKSDB_EXPERIMENTAL)
   target_compile_definitions(fdbserver PRIVATE SSD_ROCKSDB_EXPERIMENTAL)
+  target_link_libraries(fdbserver PRIVATE RocksDB::rocksdb)
 endif()
+target_link_libraries(fdbserver PRIVATE fdbclient sqlite toml11::toml11 jemalloc rapidjson)
+
 # target_compile_definitions(fdbserver PRIVATE -DENABLE_SAMPLING)
 
 if(GPERFTOOLS_FOUND)
