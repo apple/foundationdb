@@ -234,10 +234,11 @@ struct TenantEntryCacheWorkload : TestWorkload {
 				throw timed_out();
 			}
 
+			TraceEvent("TestCacheRefreshWait").detail("Elapsed", now() - startTime);
 			wait(delay(CLIENT_KNOBS->TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL));
 		}
 
-		TraceEvent("TestCacheRefreshEnd").detail("Elapsed", now() - startTime);
+		TraceEvent("TestCacheRefreshEnd").detail("ElapsedTotal", now() - startTime);
 		return Void();
 	}
 
