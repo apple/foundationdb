@@ -2911,6 +2911,7 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 	std::vector<bool> chunkModes = { false, true };
 	std::vector<bool> encryptionModes = { false, true };
 	std::vector<Optional<CompressionFilter>> compressionModes;
+	compressionModes.push_back({});
 	compressionModes.insert(
 	    compressionModes.end(), CompressionUtils::supportedFilters.begin(), CompressionUtils::supportedFilters.end());
 
@@ -2942,6 +2943,10 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 				if (!chunk && compressionFilter.present()) {
 					continue;
 				}
+				if (compressionFilter.present() && CompressionFilter::NONE == compressionFilter.get()) {
+					continue;
+				}
+
 				std::string name;
 				if (!chunk) {
 					name = "old";
@@ -3014,9 +3019,13 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 			if (!chunk && encrypt) {
 				continue;
 			}
+
 			Optional<BlobGranuleCipherKeysCtx> keys = encrypt ? cipherKeys : Optional<BlobGranuleCipherKeysCtx>();
 			for (auto& compressionFilter : compressionModes) {
 				if (!chunk && compressionFilter.present()) {
+					continue;
+				}
+				if (compressionFilter.present() && CompressionFilter::NONE == compressionFilter.get()) {
 					continue;
 				}
 				std::string name;
