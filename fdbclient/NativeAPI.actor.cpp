@@ -3632,6 +3632,9 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 		                                                              parameters->useProvisionalProxies,
 		                                                              Reverse::False,
 		                                                              parameters->version));
+		if (parameters->tenant.tenantId != locationInfo.tenantEntry.id) {
+			throw tenant_not_found();
+		}
 
 		try {
 			state Optional<UID> watchValueID = Optional<UID>();
@@ -5305,6 +5308,44 @@ Future<TenantInfo> populateAndGetTenant(Reference<TransactionState> trState, Key
 	}
 }
 
+// Restarts a watch after a database switch
+ACTOR Future<Void> restartWatch(Database cx,
+                                TenantInfo tenantInfo,
+                                Key key,
+                                Optional<Value> value,
+                                TagSet tags,
+                                SpanContext spanContext,
+                                TaskPriority taskID,
+                                Optional<UID> debugID,
+                                UseProvisionalProxies useProvisionalProxies) {
+	// The ID of the tenant may be different on the cluster that we switched to, so obtain the new ID
+	if (tenantInfo.name.present()) {
+		state KeyRangeLocationInfo locationInfo = wait(getKeyLocation(cx,
+		                                                              tenantInfo,
+		                                                              key,
+		                                                              &StorageServerInterface::watchValue,
+		                                                              spanContext,
+		                                                              debugID,
+		                                                              useProvisionalProxies,
+		                                                              Reverse::False,
+		                                                              latestVersion));
+		tenantInfo.tenantId = locationInfo.tenantEntry.id;
+	}
+
+	wait(watchValueMap(cx->minAcceptableReadVersion,
+	                   tenantInfo,
+	                   key,
+	                   value,
+	                   cx,
+	                   tags,
+	                   spanContext,
+	                   taskID,
+	                   debugID,
+	                   useProvisionalProxies));
+
+	return Void();
+}
+
 // FIXME: This seems pretty horrible. Now a Database can't die until all of its watches do...
 ACTOR Future<Void> watch(Reference<Watch> watch,
                          Database cx,
@@ -5332,16 +5373,15 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 						when(wait(cx->connectionFileChanged())) {
 							CODE_PROBE(true, "Recreated a watch after switch");
 							cx->clearWatchMetadata();
-							watch->watchFuture = watchValueMap(cx->minAcceptableReadVersion,
-							                                   tenantInfo,
-							                                   watch->key,
-							                                   watch->value,
-							                                   cx,
-							                                   tags,
-							                                   spanContext,
-							                                   taskID,
-							                                   debugID,
-							                                   useProvisionalProxies);
+							watch->watchFuture = restartWatch(cx,
+							                                  tenantInfo,
+							                                  watch->key,
+							                                  watch->value,
+							                                  tags,
+							                                  spanContext,
+							                                  taskID,
+							                                  debugID,
+							                                  useProvisionalProxies);
 						}
 					}
 				}
