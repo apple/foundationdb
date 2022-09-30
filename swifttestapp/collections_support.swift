@@ -11,8 +11,5 @@ public func ==(lhs: MAP_UInt64_GetCommitVersionReply.const_iterator,
     true
 }
 
-extension MAP_UInt64_GetCommitVersionReply.const_iterator: UnsafeCxxInputIterator {
-}
-
-extension MAP_UInt64_GetCommitVersionReply: CxxSequence {
-}
+extension MAP_UInt64_GetCommitVersionReply.const_iterator: UnsafeCxxInputIterator {}
+extension MAP_UInt64_GetCommitVersionReply: CxxSequence {}

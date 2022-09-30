@@ -26,6 +26,8 @@
 #include <cstdint>
 #include <utility>
 
+#include "swift_compat.h"
+
 // The thread safety this class provides is that it's safe to call addref and
 // delref on the same object concurrently in different threads. Subclass does
 // not get deleted until after all calls to delref complete.
@@ -96,7 +98,7 @@ void delref(P* ptr) {
 }
 
 template <class P>
-class Reference {
+class SWIFT_CXX_REF_IMMORTAL Reference {
 public:
 	Reference() : ptr(nullptr) {}
 	explicit Reference(P* ptr) : ptr(ptr) {}

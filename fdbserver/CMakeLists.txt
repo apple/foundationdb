@@ -26,11 +26,15 @@ add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 # Setup the Swift sources in FDBServer.
 include(FindSwiftLibs)
 add_library(fdbserver_swift STATIC
+        masterserver.swift
         SwiftUtils.swift
+        swift_fdbserver_collections.swift
+        UID.swift
         )
 
 target_include_directories(fdbserver_swift PUBLIC
     "${CMAKE_BINARY_DIR}/flow/include"
+    "${CMAKE_BINARY_DIR}/flow/"
     "${CMAKE_BINARY_DIR}/fdbclient/include"
     "${CMAKE_BINARY_DIR}/fdbserver/include"
     "${CMAKE_SOURCE_DIR}/fdbrpc/include"
@@ -45,7 +49,6 @@ target_include_directories(fdbserver_swift PUBLIC
 
 # TODO: We need a platform-agnostic way to find the C++ stdlib searchpaths
 target_include_directories(fdbserver_swift PRIVATE
-    "/opt/boost_1_78_0_clang"
     "/opt/rh/devtoolset-8/root/usr/include/c++/8/x86_64-redhat-linux/"
     "/opt/rh/devtoolset-8/root/usr/lib/gcc/x86_64-redhat-linux/8/../../../../include/c++/8"
 )
@@ -57,11 +60,17 @@ target_compile_options(fdbserver_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHEL
 include(SwiftToCXXInterop)
 generate_cxx_compat_header(fdbserver_swift "FDBServer")
 
+add_dependencies(fdbserver_swift flow_swift)
 add_dependencies(fdbserver_swift fdbserver_actors)
+# This does not work! (see rdar://99107402)
+# target_link_libraries(flow PRIVATE flow_swift)
+add_dependencies(fdbserver fdbserver_swift)
+
 # This does not work! (see rdar://99107402)
 # target_link_libraries(fdbserver PRIVATE flow_swift fdbserver_swift)
 add_dependencies(fdbserver flow_swift fdbserver_swift)
 add_custom_target(show_fdbserver_swift_objs COMMAND ${CMAKE_COMMAND} -E echo "$<TARGET_OBJECTS:fdbserver_swift>")
+target_link_options(fdbserver_swift PUBLIC "$<TARGET_OBJECTS:flow_swift>")
 target_link_options(fdbserver PRIVATE "$<TARGET_OBJECTS:flow_swift>")
 target_link_options(fdbserver PRIVATE "$<TARGET_OBJECTS:fdbserver_swift>")
 # This dependency ensures that fdbserver depends on fdbserver_swift at link time.

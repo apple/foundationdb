@@ -24,6 +24,7 @@
 // version.
 #include "flow/FastRef.h"
 #include "flow/network.h"
+#include "flow/swift_compat.h"
 #include <utility>
 #include <functional>
 #if defined(NO_INTELLISENSE) && !defined(FLOW_GENERICACTORS_ACTOR_G_H)
@@ -664,7 +665,7 @@ private:
 };
 
 template <class V>
-class AsyncVar : NonCopyable, public ReferenceCounted<AsyncVar<V>> {
+class SWIFT_CXX_REF_IMMORTAL AsyncVar : NonCopyable, public ReferenceCounted<AsyncVar<V>> {
 public:
 	AsyncVar() : value() {}
 	AsyncVar(V const& v) : value(v) {}

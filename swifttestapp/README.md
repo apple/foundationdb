@@ -1,5 +1,29 @@
 # Swift in FoundationDB
 
+## Running Swift experiments
+
+To build you have to currently:
+
+```
+cmake -G 'Ninja' -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_Swift_COMPILER=swiftc -D USE_CCACHE=ON ../src/foundationdb/
+```
+
+and the ninja invocation currently has to first build `fdbserver_swift` before `fdbserver` we're working to fix this though:
+
+```
+ninja fdbserver_swift fdbserver
+```
+
+Then you can run the binary with executing the "swift test" examples:
+
+```
+FDBSWIFTTEST=1 ./bin/fdbserver -p AUTO
+```
+
+This runs a bunch of "show it works" examples.
+
+We're working towards executing a complete `getVersion` in `masterserver` in Swift along side the real implementation. 
+
 ## Developer notes
 
 ### Importing reference types

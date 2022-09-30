@@ -108,13 +108,24 @@ generate_modulemap("${CMAKE_BINARY_DIR}/flow/include" "Flow" flow
 )
 
 add_library(flow_swift STATIC
+        future_support.swift
         SwiftFileA.swift
         SwiftFileB.swift
         )
 
 target_include_directories(flow_swift PUBLIC
     "${CMAKE_BINARY_DIR}/flow/include"
+    "${CMAKE_BINARY_DIR}/flow/"
+    "${CMAKE_BINARY_DIR}/fdbclient/include"
+    "${CMAKE_BINARY_DIR}/fdbserver/include"
+    "${CMAKE_SOURCE_DIR}/fdbrpc/include"
+    "${CMAKE_BINARY_DIR}/fdbrpc/include"
+    "${CMAKE_SOURCE_DIR}/contrib/fmt-8.1.1/include"
+    "${CMAKE_SOURCE_DIR}/contrib/md5/include"
+    "${CMAKE_SOURCE_DIR}/contrib/libb64/include"
+    "${CMAKE_SOURCE_DIR}/contrib/sqlite"
     "${CMAKE_BINARY_DIR}/boost_install/include"
+    "${CMAKE_BINARY_DIR}/msgpackProject-prefix/src/msgpackProject/include"
 )
 
 # TODO: We need a platform-agnostic way to find the C++ stdlib searchpaths
@@ -131,6 +142,7 @@ include(SwiftToCXXInterop)
 generate_cxx_compat_header(flow_swift "Flow")
 
 add_dependencies(flow_swift flow_actors)
+add_dependencies(flow_swift boost_targetProject)
 # This does not work! (see rdar://99107402)
 # target_link_libraries(flow PRIVATE flow_swift)
 add_dependencies(flow flow_swift)

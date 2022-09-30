@@ -457,3 +457,7 @@ else()
     endif()
   endif()
 endif()
+
+# Setup the Swift compiler options.
+set(CLANG_MODULE_CACHE_PATH ${CMAKE_BINARY_DIR}/clang-module-cache)
+set(CMAKE_Swift_FLAGS "-Xcc -fmodules-cache-path=${CLANG_MODULE_CACHE_PATH}" CACHE STRING "" FORCE)
