@@ -65,7 +65,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 	IDDTxnProcessorApiWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), ddContext(UID()) {
 		enabled = !clientId && g_network->isSimulated(); // only do this on the "first" client
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
 	}
 
 	std::string description() const override { return desc; }

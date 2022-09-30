@@ -4202,7 +4202,6 @@ std::string toString(BTreeNodeLinkRef id) {
 	return std::string("BTreePageID") + toString(id.begin(), id.end());
 }
 
-#define STR(x) LiteralStringRef(x)
 struct RedwoodRecordRef {
 	typedef uint8_t byte;
 
