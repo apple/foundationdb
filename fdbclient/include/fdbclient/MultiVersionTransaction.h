@@ -221,6 +221,18 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                              uint8_t const* purge_key_name,
 	                                              int purge_key_name_length);
 
+	FDBFuture* (*tenantBlobbifyRange)(FDBTenant* tenant,
+	                                  uint8_t const* begin_key_name,
+	                                  int begin_key_name_length,
+	                                  uint8_t const* end_key_name,
+	                                  int end_key_name_length);
+
+	FDBFuture* (*tenantUnblobbifyRange)(FDBTenant* tenant,
+	                                    uint8_t const* begin_key_name,
+	                                    int begin_key_name_length,
+	                                    uint8_t const* end_key_name,
+	                                    int end_key_name_length);
+
 	void (*tenantDestroy)(FDBTenant* tenant);
 
 	// Transaction
@@ -512,6 +524,9 @@ public:
 
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
+
+	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
 
 	void addref() override { ThreadSafeReferenceCounted<DLTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLTenant>::delref(); }
@@ -808,6 +823,9 @@ public:
 
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
+
+	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
 
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::delref(); }
