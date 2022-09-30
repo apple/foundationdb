@@ -1828,7 +1828,7 @@ public:
 		                   (kt == RebootAndDelete) || (kt == RebootProcessAndDelete))) {
 
 			if (!canKillMachineWithBlobWorkers(machineId, kt, &kt)) {
-				TraceEvent("canKillMachineWithBlobWorkers")
+				TraceEvent("CanKillMachineWithBlobWorkers")
 				    .detail("MachineId", machineId)
 				    .detail("KillType", kt)
 				    .detail("OrigKillType", ktOrig);
