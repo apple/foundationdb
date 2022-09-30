@@ -684,9 +684,6 @@ struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<Ne
 		if constexpr (IsPublic) {
 			if (!message.verify()) {
 				if constexpr (HasReply<T>) {
-					TraceEvent(SevWarnAlways, "AKDebug")
-					    .detail("Status", "RPC")
-					    .detail("Message", message.file_identifier);
 					message.reply.sendError(permission_denied());
 				}
 			} else {

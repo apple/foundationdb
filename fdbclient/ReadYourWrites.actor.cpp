@@ -1764,12 +1764,6 @@ Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyR
 	if (resetPromise.isSet())
 		return resetPromise.getFuture().getError();
 
-	TraceEvent(SevWarnAlways, "AKDebug")
-	    .detail("Status", "getEstimatedRangeSizeBytes")
-	    .detail("Tenant", tr.trState->hasTenant() ? tr.trState->tenant().get().toString() : "not present")
-	    .detail("TenantIdValid", tr.trState->tenantId() != TenantInfo::INVALID_TENANT)
-	    .detail("AuthPresent", tr.trState->authToken.present());
-
 	// Pass in the TransactionState only if tenant is present
 	Optional<Reference<TransactionState>> trState =
 	    tr.trState->hasTenant() ? tr.trState : Optional<Reference<TransactionState>>();
