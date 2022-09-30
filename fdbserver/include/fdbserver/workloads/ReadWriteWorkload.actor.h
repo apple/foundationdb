@@ -25,6 +25,7 @@
 #elif !defined(FDBSERVER_READWRITEWORKLOAD_ACTOR_H)
 #define FDBSERVER_READWRITEWORKLOAD_ACTOR_H
 
+#include "fdbrpc/DDSketch.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -75,7 +76,7 @@ struct ReadWriteCommon : KVWorkload {
 	EventMetricHandle<TransactionFailureMetric> transactionFailureMetric;
 	EventMetricHandle<ReadMetric> readMetric;
 	PerfIntCounter aTransactions, bTransactions, retries;
-	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, fullReadLatencies;
+	DDSketch<double> latencies, readLatencies, commitLatencies, GRVLatencies, fullReadLatencies;
 	double readLatencyTotal;
 	int readLatencyCount;
 	std::vector<PerfMetric> periodicMetrics;

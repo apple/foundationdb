@@ -920,8 +920,8 @@ public:
 	std::string REDWOOD_PRIORITY_LAUNCHS;
 
 	// Server request latency measurement
-	int LATENCY_SAMPLE_SIZE;
-	int FILE_LATENCY_SAMPLE_SIZE;
+	double LATENCY_SKETCH_ACCURACY;
+	double FILE_LATENCY_SKETCH_ACCURACY;
 	double LATENCY_METRICS_LOGGING_INTERVAL;
 
 	// Cluster recovery

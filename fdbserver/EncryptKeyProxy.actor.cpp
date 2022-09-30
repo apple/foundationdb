@@ -244,15 +244,15 @@ public:
 	    kmsLookupByIdsReqLatency("EKPKmsLookupByIdsReqLatency",
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                             SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    kmsLookupByDomainIdsReqLatency("EKPKmsLookupByDomainIdsReqLatency",
 	                                   id,
 	                                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                                   SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	                                   SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    kmsBlobMetadataReqLatency("EKPKmsBlobMetadataReqLatency",
 	                              id,
 	                              SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                              SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {}
+	                              SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {}
 
 	EncryptBaseCipherDomainIdKeyIdCacheKey getBaseCipherDomainIdKeyIdCacheKey(
 	    const EncryptCipherDomainId domainId,

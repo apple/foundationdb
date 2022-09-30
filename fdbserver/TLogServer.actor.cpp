@@ -1825,7 +1825,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				UID ssID = nondeterministicRandom()->randomUniqueID();
 				std::string s = "BlockingPeekLatencies-" + reqTag.toString();
 				logData->blockingPeekLatencies.try_emplace(
-				    reqTag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SAMPLE_SIZE);
+				    reqTag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
 			}
 			LatencySample& sample = logData->blockingPeekLatencies.at(reqTag);
 			sample.addMeasurement(latency);

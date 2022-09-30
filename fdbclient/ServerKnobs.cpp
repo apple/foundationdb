@@ -948,8 +948,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT,             false );
 
 	// Server request latency measurement
-	init( LATENCY_SAMPLE_SIZE,                                100000 );
-	init( FILE_LATENCY_SAMPLE_SIZE,                            10000 );
+	init( LATENCY_SKETCH_ACCURACY,                              0.01 );
+	init( FILE_LATENCY_SKETCH_ACCURACY,                         0.01 );
 	init( LATENCY_METRICS_LOGGING_INTERVAL,                     60.0 );
 
 	// Cluster recovery

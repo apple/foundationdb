@@ -21,7 +21,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tuple.h"
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/DeltaTree.h"
 #include "fdbserver/IKeyValueStore.h"

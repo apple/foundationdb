@@ -303,8 +303,8 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	          resnapshotLock,
 	          deltaWritesLock,
 	          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	          SERVER_KNOBS->FILE_LATENCY_SAMPLE_SIZE,
-	          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	          SERVER_KNOBS->FILE_LATENCY_SKETCH_ACCURACY,
+	          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    isEncryptionEnabled(isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION)) {}
 
 	bool managerEpochOk(int64_t epoch) {
@@ -1750,7 +1750,6 @@ bool granuleCanRetry(const Error& e) {
 	case error_code_http_request_failed:
 	case error_code_connection_failed:
 	case error_code_lookup_failed: // dns
-	case error_code_platform_error: // injected faults
 		return true;
 	default:
 		return false;

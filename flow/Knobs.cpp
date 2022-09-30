@@ -112,8 +112,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( PEER_UNAVAILABLE_FOR_LONG_TIME_TIMEOUT,           3600.0 );
 	init( INCOMPATIBLE_PEER_DELAY_BEFORE_LOGGING,              5.0 );
 	init( PING_LOGGING_INTERVAL,                               3.0 );
-	init( PING_SAMPLE_AMOUNT,                                  100 );
-	init( NETWORK_CONNECT_SAMPLE_AMOUNT,                       100 );
+	init( PING_SKETCH_ACCURACY,                                0.1 );
 
 	init( TLS_CERT_REFRESH_DELAY_SECONDS,                 12*60*60 );
 	init( TLS_SERVER_CONNECTION_THROTTLE_TIMEOUT,              9.0 );
@@ -168,7 +167,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MIN_SUBMIT,                                           10 );
 	init( SQLITE_DISK_METRIC_LOGGING_INTERVAL,                 5.0 );
 	init( KAIO_LATENCY_LOGGING_INTERVAL,                      30.0 );
-	init( KAIO_LATENCY_SAMPLE_SIZE,                          30000 );
+	init( KAIO_LATENCY_SKETCH_ACCURACY,                       0.01 );
 
 	init( PAGE_WRITE_CHECKSUM_HISTORY,                           0 ); if( randomize && BUGGIFY ) PAGE_WRITE_CHECKSUM_HISTORY = 10000000;
 	init( DISABLE_POSIX_KERNEL_AIO,                              0 );

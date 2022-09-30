@@ -42,8 +42,8 @@
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/EventTypes.actor.h"
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbrpc/Smoother.h"
+#include "fdbrpc/DDSketch.h"
 
 class StorageServerInfo : public ReferencedInterface<StorageServerInterface> {
 public:
@@ -565,7 +565,7 @@ public:
 	Counter bgReadRowsCleared;
 	Counter bgReadRowsInserted;
 	Counter bgReadRowsUpdated;
-	ContinuousSample<double> bgLatencies, bgGranulesPerRequest;
+	DDSketch<double> bgLatencies, bgGranulesPerRequest;
 
 	// Change Feed metrics. Omit change feed metrics from logging if not used
 	bool usedAnyChangeFeeds;
@@ -577,7 +577,7 @@ public:
 	Counter feedPops;
 	Counter feedPopsFallback;
 
-	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
+	DDSketch<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
 	    bytesPerCommit;
 
 	int outstandingWatches;

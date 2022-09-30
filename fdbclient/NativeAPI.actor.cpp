@@ -578,7 +578,7 @@ void traceTSSErrors(const char* name, UID tssId, const std::unordered_map<int, u
     Example:
     GetValueLatencySSMean
 */
-void traceSSOrTSSPercentiles(TraceEvent& ev, const std::string name, ContinuousSample<double>& sample) {
+void traceSSOrTSSPercentiles(TraceEvent& ev, const std::string name, DDSketch<double>& sample) {
 	ev.detail(name + "Mean", sample.mean());
 	// don't log the larger percentiles unless we actually have enough samples to log the accurate percentile instead of
 	// the largest sample in this window
@@ -595,8 +595,8 @@ void traceSSOrTSSPercentiles(TraceEvent& ev, const std::string name, ContinuousS
 
 void traceTSSPercentiles(TraceEvent& ev,
                          const std::string name,
-                         ContinuousSample<double>& ssSample,
-                         ContinuousSample<double>& tssSample) {
+                         DDSketch<double>& ssSample,
+                         DDSketch<double>& tssSample) {
 	ASSERT(ssSample.getPopulationSize() == tssSample.getPopulationSize());
 	ev.detail(name + "Count", ssSample.getPopulationSize());
 	if (ssSample.getPopulationSize() > 0) {
@@ -1534,12 +1534,12 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     ccBG("BlobGranuleReadMetrics"), bgReadInputBytes("BGReadInputBytes", ccBG),
     bgReadOutputBytes("BGReadOutputBytes", ccBG), bgReadSnapshotRows("BGReadSnapshotRows", ccBG),
     bgReadRowsCleared("BGReadRowsCleared", ccBG), bgReadRowsInserted("BGReadRowsInserted", ccBG),
-    bgReadRowsUpdated("BGReadRowsUpdated", ccBG), bgLatencies(1000), bgGranulesPerRequest(1000),
+    bgReadRowsUpdated("BGReadRowsUpdated", ccBG), bgLatencies(), bgGranulesPerRequest(),
     usedAnyChangeFeeds(false), ccFeed("ChangeFeedClientMetrics"), feedStreamStarts("FeedStreamStarts", ccFeed),
     feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed), feedErrors("FeedErrors", ccFeed),
     feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed), feedPops("FeedPops", ccFeed),
-    feedPopsFallback("FeedPopsFallback", ccFeed), latencies(1000), readLatencies(1000), commitLatencies(1000),
-    GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), outstandingWatches(0), sharedStatePtr(nullptr),
+    feedPopsFallback("FeedPopsFallback", ccFeed), latencies(), readLatencies(), commitLatencies(),
+    GRVLatencies(), mutationsPerCommit(), bytesPerCommit(), outstandingWatches(0), sharedStatePtr(nullptr),
     lastGrvTime(0.0), cachedReadVersion(0), lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0),
     lastProxyRequestTime(0.0), transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo),
     clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(_apiVersion), mvCacheInsertLocation(0),
