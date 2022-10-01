@@ -30,7 +30,9 @@
 #include "flow/Arena.h"
 #include "flow/CompressionUtils.h"
 #include "flow/DeterministicRandom.h"
+#include "flow/EncryptUtils.h"
 #include "flow/IRandom.h"
+#include "flow/Knobs.h"
 #include "flow/Trace.h"
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
@@ -285,12 +287,13 @@ struct IndexBlockRef {
 			TraceEvent(SevDebug, "IndexBlockEncrypt_Before").detail("Chksum", chksum);
 		}
 
-		EncryptBlobCipherAes265Ctr encryptor(eKeys.textCipherKey,
-		                                     eKeys.headerCipherKey,
-		                                     cipherKeysCtx.ivRef.begin(),
-		                                     AES_256_IV_LENGTH,
-		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
-		                                     BlobCipherMetrics::BLOB_GRANULE);
+		EncryptBlobCipherAes265Ctr encryptor(
+		    eKeys.textCipherKey,
+		    eKeys.headerCipherKey,
+		    cipherKeysCtx.ivRef.begin(),
+		    AES_256_IV_LENGTH,
+		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+		    BlobCipherMetrics::BLOB_GRANULE);
 		Value serializedBuff = ObjectWriter::toValue(block, IncludeVersion(ProtocolVersion::withBlobGranuleFile()));
 		BlobCipherEncryptHeader header;
 		buffer = encryptor.encrypt(serializedBuff.contents().begin(), serializedBuff.contents().size(), &header, arena)
@@ -408,12 +411,13 @@ struct IndexBlobGranuleFileChunkRef {
 			TraceEvent(SevDebug, "BlobChunkEncrypt_Before").detail("Chksum", chksum);
 		}
 
-		EncryptBlobCipherAes265Ctr encryptor(eKeys.textCipherKey,
-		                                     eKeys.headerCipherKey,
-		                                     cipherKeysCtx.ivRef.begin(),
-		                                     AES_256_IV_LENGTH,
-		                                     ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
-		                                     BlobCipherMetrics::BLOB_GRANULE);
+		EncryptBlobCipherAes265Ctr encryptor(
+		    eKeys.textCipherKey,
+		    eKeys.headerCipherKey,
+		    cipherKeysCtx.ivRef.begin(),
+		    AES_256_IV_LENGTH,
+		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+		    BlobCipherMetrics::BLOB_GRANULE);
 		BlobCipherEncryptHeader header;
 		chunkRef.buffer =
 		    encryptor.encrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), &header, arena)->toStringRef();
@@ -2907,6 +2911,7 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 	std::vector<bool> chunkModes = { false, true };
 	std::vector<bool> encryptionModes = { false, true };
 	std::vector<Optional<CompressionFilter>> compressionModes;
+	compressionModes.push_back({});
 	compressionModes.insert(
 	    compressionModes.end(), CompressionUtils::supportedFilters.begin(), CompressionUtils::supportedFilters.end());
 
@@ -2938,6 +2943,10 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 				if (!chunk && compressionFilter.present()) {
 					continue;
 				}
+				if (compressionFilter.present() && CompressionFilter::NONE == compressionFilter.get()) {
+					continue;
+				}
+
 				std::string name;
 				if (!chunk) {
 					name = "old";
@@ -3010,9 +3019,13 @@ TEST_CASE("!/blobgranule/files/benchFromFiles") {
 			if (!chunk && encrypt) {
 				continue;
 			}
+
 			Optional<BlobGranuleCipherKeysCtx> keys = encrypt ? cipherKeys : Optional<BlobGranuleCipherKeysCtx>();
 			for (auto& compressionFilter : compressionModes) {
 				if (!chunk && compressionFilter.present()) {
+					continue;
+				}
+				if (compressionFilter.present() && CompressionFilter::NONE == compressionFilter.get()) {
 					continue;
 				}
 				std::string name;

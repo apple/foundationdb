@@ -24,6 +24,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/TenantManagement.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "flow/IRandom.h"
@@ -45,6 +46,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	bool allowPauses;
 	bool shareLogRange;
 	bool shouldSkipRestoreRanges;
+	bool enableBackupEncryption;
 	bool defaultBackup;
 	Optional<std::string> encryptionKeyFileName;
 
@@ -60,6 +62,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		backupTag = getOption(options, "backupTag"_sr, BackupAgentBase::getDefaultTag());
 		backupRangesCount = getOption(options, "backupRangesCount"_sr, 5);
 		backupRangeLengthMax = getOption(options, "backupRangeLengthMax"_sr, 1);
+		enableBackupEncryption = getOption(options, "enableBackupEncryption"_sr, false);
 		abortAndRestartAfter =
 		    getOption(options,
 		              "abortAndRestartAfter"_sr,
@@ -340,6 +343,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			                               deterministicRandom()->randomInt(0, 2000),
 			                               tag.toString(),
 			                               backupRanges,
+			                               self->enableBackupEncryption && SERVER_KNOBS->ENABLE_ENCRYPTION,
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               UsePartitionedLog::False,
 			                               IncrementalBackupOnly::False,
@@ -593,14 +597,16 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			if (!self->locked && BUGGIFY) {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
 				try {
-					extraBackup = backupAgent.submitBackup(cx,
-					                                       "file://simfdb/backups/"_sr,
-					                                       {},
-					                                       deterministicRandom()->randomInt(0, 60),
-					                                       deterministicRandom()->randomInt(0, 100),
-					                                       self->backupTag.toString(),
-					                                       self->backupRanges,
-					                                       StopWhenDone::True);
+					extraBackup =
+					    backupAgent.submitBackup(cx,
+					                             "file://simfdb/backups/"_sr,
+					                             {},
+					                             deterministicRandom()->randomInt(0, 60),
+					                             deterministicRandom()->randomInt(0, 100),
+					                             self->backupTag.toString(),
+					                             self->backupRanges,
+					                             self->enableBackupEncryption && SERVER_KNOBS->ENABLE_ENCRYPTION,
+					                             StopWhenDone::True);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
 					    .error(e)
