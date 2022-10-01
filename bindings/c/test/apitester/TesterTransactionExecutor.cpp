@@ -151,8 +151,8 @@ public:
 			// cancel transaction so that any pending operations on it
 			// fail gracefully
 			fdbTx.cancel();
-			cleanUp();
 		}
+		cleanUp();
 		ASSERT(txState == TxState::DONE);
 		contAfterDone(fdb::Error::success());
 	}
