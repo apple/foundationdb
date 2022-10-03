@@ -1169,6 +1169,40 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTenant_Tenant_1unblobbify
 	return (jlong)f;
 }
 
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTenant_Tenant_1listBlobbifiedRanges(JNIEnv* jenv,
+                                                                                           jobject,
+                                                                                           jlong tPtr,
+                                                                                           jbyteArray beginKeyBytes,
+                                                                                           jbyteArray endKeyBytes,
+                                                                                           jint rangeLimit) {
+	if (!tPtr || !beginKeyBytes || !endKeyBytes) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBTenant* tenant = (FDBTenant*)tPtr;
+
+	uint8_t* startKey = (uint8_t*)jenv->GetByteArrayElements(beginKeyBytes, JNI_NULL);
+	if (!startKey) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	uint8_t* endKey = (uint8_t*)jenv->GetByteArrayElements(endKeyBytes, JNI_NULL);
+	if (!endKey) {
+		jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)startKey, JNI_ABORT);
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	FDBFuture* f = fdb_tenant_list_blobbified_ranges(
+	    tenant, startKey, jenv->GetArrayLength(beginKeyBytes), endKey, jenv->GetArrayLength(endKeyBytes), rangeLimit);
+	jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)startKey, JNI_ABORT);
+	jenv->ReleaseByteArrayElements(endKeyBytes, (jbyte*)endKey, JNI_ABORT);
+	return (jlong)f;
+}
+
 JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1setVersion(JNIEnv* jenv,
                                                                                           jobject,
                                                                                           jlong tPtr,

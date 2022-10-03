@@ -294,6 +294,32 @@ public interface Tenant extends AutoCloseable, TransactionContext {
 	CompletableFuture<Boolean> unblobbifyRange(byte[] beginKey, byte[] endKey, Executor e);
 
 	/**
+	 * Runs {@link #listBlobbifiedRanges(Function)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param rangeLimit batch size
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return a future with the list of blobbified ranges: [lastLessThan(beginKey), firstGreaterThanOrEqual(endKey)]
+	 */
+	default CompletableFuture<KeyRangeArrayResult> listBlobbifiedRanges(byte[] beginKey, byte[] endKey, int rangeLimit) {
+		return listBlobbifiedRanges(beginKey, endKey, rangeLimit, getExecutor());
+	 }
+
+	/**
+	 * Lists blobbified ranges in this tenant. There may be more if result.size() == rangeLimit.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param rangeLimit batch size
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return a future with the list of blobbified ranges: [lastLessThan(beginKey), firstGreaterThanOrEqual(endKey)]
+	 */
+	 CompletableFuture<KeyRangeArrayResult> listBlobbifiedRanges(byte[] beginKey, byte[] endKey, int rangeLimit, Executor e);
+
+	/**
 	 * Close the {@code Tenant} object and release any associated resources. This must be called at
 	 *  least once after the {@code Tenant} object is no longer in use. This can be called multiple
 	 *  times, but care should be taken that it is not in use in another thread at the time of the call.
