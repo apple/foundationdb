@@ -247,7 +247,66 @@ public interface Tenant extends AutoCloseable, TransactionContext {
 	<T> CompletableFuture<T> runAsync(
 			Function<? super Transaction, ? extends CompletableFuture<T>> retryable, Executor e);
 
-				/**
+
+	/**
+	 * Runs {@link #purgeBlobGranules(Function)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param force if true delete all data, if not keep data >= purgeVersion
+	 *
+	 * @return the key to watch for purge complete
+	 */
+	default CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, boolean force) {
+		return purgeBlobGranules(beginKey, endKey, -2, force, getExecutor());
+	}
+
+	/**
+	 * Runs {@link #purgeBlobGranules(Function)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param purgeVersion version to purge at
+	 * @param force if true delete all data, if not keep data >= purgeVersion
+	 *
+	 * @return the key to watch for purge complete
+	 */
+	default CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion, boolean force) {
+		return purgeBlobGranules(beginKey, endKey, purgeVersion, force, getExecutor());
+	}
+
+	/**
+	 * Queues a purge of blob granules for specified key range of this tenant, at the specified version.
+     *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param purgeVersion version to purge at
+	 * @param force if true delete all data, if not keep data >= purgeVersion
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return the key to watch for purge complete
+	 */
+	CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion, boolean force, Executor e);
+
+
+	/**
+	 * Runs {@link #waitPurgeGranulesComplete(Function)} on the default executor.
+	 *
+	 * @param purgeKey key to watch
+	 */
+	default CompletableFuture<Void> waitPurgeGranulesComplete(byte[] purgeKey) {
+		return waitPurgeGranulesComplete(purgeKey, getExecutor());
+	}
+
+	/**
+	 * Wait for a previous call to purgeBlobGranules to complete.
+	 *
+	 * @param purgeKey key to watch
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+	 */
+	CompletableFuture<Void> waitPurgeGranulesComplete(byte[] purgeKey, Executor e);
+
+	/**
 	 * Runs {@link #blobbifyRange(Function)} on the default executor.
 	 *
 	 * @param beginKey start of the key range

@@ -1103,6 +1103,69 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTenant_Tenant_1dispose(JNI
 	fdb_tenant_destroy((FDBTenant*)tPtr);
 }
 
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTenant_Tenant_1purgeBlobGranules(JNIEnv* jenv,
+                                                                                        jobject,
+                                                                                        jlong tPtr,
+                                                                                        jbyteArray beginKeyBytes,
+                                                                                        jbyteArray endKeyBytes,
+                                                                                        jlong purgeVersion,
+                                                                                        jboolean force) {
+	if (!tPtr || !beginKeyBytes || !endKeyBytes) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBTenant* tenant = (FDBTenant*)tPtr;
+
+	uint8_t* beginKeyArr = (uint8_t*)jenv->GetByteArrayElements(beginKeyBytes, JNI_NULL);
+	if (!beginKeyArr) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	uint8_t* endKeyArr = (uint8_t*)jenv->GetByteArrayElements(endKeyBytes, JNI_NULL);
+	if (!endKeyArr) {
+		jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)beginKeyArr, JNI_ABORT);
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	FDBFuture* f = fdb_tenant_purge_blob_granules(tenant,
+	                                              beginKeyArr,
+	                                              jenv->GetArrayLength(beginKeyBytes),
+	                                              endKeyArr,
+	                                              jenv->GetArrayLength(endKeyBytes),
+	                                              purgeVersion,
+	                                              (fdb_bool_t)force);
+	jenv->ReleaseByteArrayElements(beginKeyBytes, (jbyte*)beginKeyArr, JNI_ABORT);
+	jenv->ReleaseByteArrayElements(endKeyBytes, (jbyte*)endKeyArr, JNI_ABORT);
+	return (jlong)f;
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_apple_foundationdb_FDBTenant_Tenant_1waitPurgeGranulesComplete(JNIEnv* jenv,
+                                                                        jobject,
+                                                                        jlong tPtr,
+                                                                        jbyteArray purgeKeyBytes) {
+	if (!tPtr || !purgeKeyBytes) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBTenant* tenant = (FDBTenant*)tPtr;
+	uint8_t* purgeKeyArr = (uint8_t*)jenv->GetByteArrayElements(purgeKeyBytes, JNI_NULL);
+
+	if (!purgeKeyArr) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+	FDBFuture* f = fdb_tenant_wait_purge_granules_complete(tenant, purgeKeyArr, jenv->GetArrayLength(purgeKeyBytes));
+	jenv->ReleaseByteArrayElements(purgeKeyBytes, (jbyte*)purgeKeyArr, JNI_ABORT);
+
+	return (jlong)f;
+}
+
 JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTenant_Tenant_1blobbifyRange(JNIEnv* jenv,
                                                                                     jobject,
                                                                                     jlong tPtr,
