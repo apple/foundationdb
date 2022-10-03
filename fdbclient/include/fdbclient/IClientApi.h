@@ -155,6 +155,8 @@ public:
 	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
 	                                                                              int rangeLimit) = 0;
 
+	virtual ThreadFuture<Version> verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) = 0;
+
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 };

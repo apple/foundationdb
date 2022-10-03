@@ -540,6 +540,23 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> DLTenant::listBlobbifiedRanges(
 	});
 }
 
+ThreadFuture<Version> DLTenant::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
+	if (!api->tenantVerifyBlobRange) {
+		return unsupported_operation();
+	}
+
+	Version readVersion = version.present() ? version.get() : latestVersion;
+
+	FdbCApi::FDBFuture* f = api->tenantVerifyBlobRange(
+	    tenant, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), readVersion);
+
+	return toThreadFuture<Version>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		Version version = invalidVersion;
+		ASSERT(!api->futureGetInt64(f, &version));
+		return version;
+	});
+}
+
 // DLDatabase
 DLDatabase::DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase*> dbFuture) : api(api), db(nullptr) {
 	addref();
@@ -897,6 +914,11 @@ void DLApi::init() {
 	                   lib,
 	                   fdbCPath,
 	                   "fdb_tenant_list_blobbified_ranges",
+	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
+	loadClientFunction(&api->tenantVerifyBlobRange,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_tenant_verify_blob_range",
 	                   headerVersion >= ApiVersion::withTenantBlobRangeApi().version());
 	loadClientFunction(&api->tenantDestroy, lib, fdbCPath, "fdb_tenant_destroy", headerVersion >= 710);
 
@@ -1701,6 +1723,12 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> MultiVersionTenant::listBlobbif
 	auto tenantDb = tenantState->tenantVar->get();
 	auto f = tenantDb.value ? tenantDb.value->listBlobbifiedRanges(keyRange, rangeLimit)
 	                        : ThreadFuture<Standalone<VectorRef<KeyRangeRef>>>(Never());
+	return abortableFuture(f, tenantDb.onChange);
+}
+
+ThreadFuture<Version> MultiVersionTenant::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
+	auto tenantDb = tenantState->tenantVar->get();
+	auto f = tenantDb.value ? tenantDb.value->verifyBlobRange(keyRange, version) : ThreadFuture<Version>(Never());
 	return abortableFuture(f, tenantDb.onChange);
 }
 

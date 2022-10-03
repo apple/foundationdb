@@ -277,6 +277,16 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeTenant::listBlobbifie
 	});
 }
 
+ThreadFuture<Version> ThreadSafeTenant::verifyBlobRange(const KeyRangeRef& keyRange, Optional<Version> version) {
+	DatabaseContext* db = this->db->db;
+	TenantName tenantName = this->name;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<Version> {
+		db->checkDeferredError();
+		return db->verifyBlobRange(range, version, tenantName);
+	});
+}
+
 ThreadSafeTenant::~ThreadSafeTenant() {}
 
 ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
