@@ -55,7 +55,8 @@ struct RestoreFromBlobWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(Database cx, RestoreFromBlobWorkload* self) {
 		state FileBackupAgent backupAgent;
 		state Standalone<VectorRef<KeyRangeRef>> restoreRanges;
-		restoreRanges.push_back_deep(restoreRanges.arena(), normalKeys);
+
+		addDefaultBackupRanges(restoreRanges);
 
 		wait(delay(self->restoreAfter));
 		Version v = wait(

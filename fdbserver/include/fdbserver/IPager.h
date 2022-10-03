@@ -21,6 +21,7 @@
 
 #ifndef FDBSERVER_IPAGER_H
 #define FDBSERVER_IPAGER_H
+
 #include <cstddef>
 #include <stdint.h>
 #include "fdbclient/BlobCipher.h"
@@ -28,8 +29,10 @@
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/Tenant.h"
 #include "fdbserver/IClosable.h"
+#include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/FastAlloc.h"
+#include "flow/Knobs.h"
 #include "flow/flow.h"
 #include "flow/ProtocolVersion.h"
 
@@ -369,7 +372,7 @@ public:
 			Header* h = reinterpret_cast<Header*>(header);
 			EncryptBlobCipherAes265Ctr cipher(cipherKeys.cipherTextKey,
 			                                  cipherKeys.cipherHeaderKey,
-			                                  ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+			                                  getEncryptAuthTokenMode(ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 			                                  BlobCipherMetrics::KV_REDWOOD);
 			Arena arena;
 			StringRef ciphertext = cipher.encrypt(payload, len, h, arena)->toStringRef();

@@ -510,13 +510,14 @@ struct UpdateWorkerHealthRequest {
 	constexpr static FileIdentifier file_identifier = 5789927;
 	NetworkAddress address;
 	std::vector<NetworkAddress> degradedPeers;
+	std::vector<NetworkAddress> disconnectedPeers;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, address, degradedPeers);
+		serializer(ar, address, degradedPeers, disconnectedPeers);
 	}
 };
 

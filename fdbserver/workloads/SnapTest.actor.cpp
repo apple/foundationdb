@@ -120,6 +120,7 @@ public: // ctor & dtor
 		restartInfoLocation = getOption(options, "restartInfoLocation"_sr, "simfdb/restartInfo.ini"_sr).toString();
 		skipCheck = false;
 		retryLimit = getOption(options, "retryLimit"_sr, 5);
+		g_simulator->allowLogSetKills = false;
 	}
 
 public: // workload functions

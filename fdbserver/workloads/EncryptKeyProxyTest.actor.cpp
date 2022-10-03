@@ -57,7 +57,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			enableTest = true;
 			minDomainId = 1000 + (++seed * 30) + 1;
 			maxDomainId = deterministicRandom()->randomInt(minDomainId, minDomainId + 50) + 5;
-			TraceEvent("EKPTest_Init").detail("MinDomainId", minDomainId).detail("MaxDomainId", maxDomainId);
+			TraceEvent("EKPTestInit").detail("MinDomainId", minDomainId).detail("MaxDomainId", maxDomainId);
 		}
 	}
 
@@ -111,7 +111,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			}
 		}
 
-		TraceEvent("SimEmptyDomainIdCache_Done").log();
+		TraceEvent("SimEmptyDomainIdCacheDone").log();
 		return Void();
 	}
 
@@ -119,7 +119,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		state int expectedHits;
 		state int expectedMisses;
 
-		TraceEvent("SimPartialDomainIdCache_Start").log();
+		TraceEvent("SimPartialDomainIdCacheStart").log();
 
 		self->domainInfos.clear();
 
@@ -178,14 +178,14 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		}
 		self->domainInfos.clear();
 
-		TraceEvent("SimPartialDomainIdCache_Done").log();
+		TraceEvent("SimPartialDomainIdCacheDone").log();
 		return Void();
 	}
 
 	ACTOR Future<Void> simRandomBaseCipherIdCache(EncryptKeyProxyTestWorkload* self) {
 		state int expectedHits;
 
-		TraceEvent("SimRandomDomainIdCache_Start").log();
+		TraceEvent("SimRandomDomainIdCacheStart").log();
 
 		self->domainInfos.clear();
 		for (int i = 0; i < self->numDomains; i++) {
@@ -271,14 +271,14 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			}
 		}
 
-		TraceEvent("SimRandomDomainIdCache_Done").log();
+		TraceEvent("SimRandomDomainIdCacheDone").log();
 		return Void();
 	}
 
 	ACTOR Future<Void> simLookupInvalidKeyId(EncryptKeyProxyTestWorkload* self) {
 		Arena arena;
 
-		TraceEvent("SimLookupInvalidKeyId_Start").log();
+		TraceEvent("SimLookupInvalidKeyIdStart").log();
 
 		// Prepare a lookup with valid and invalid keyIds - SimEncryptKmsProxy should throw encrypt_key_not_found()
 		EKPGetBaseCipherKeysByIdsRequest req;
@@ -294,7 +294,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		ASSERT(rep.error.present());
 		ASSERT_EQ(rep.error.get().code(), error_code_encrypt_key_not_found);
 
-		TraceEvent("SimLookupInvalidKeyId_Done").log();
+		TraceEvent("SimLookupInvalidKeyIdDone").log();
 		return Void();
 	}
 

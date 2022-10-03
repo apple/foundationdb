@@ -219,14 +219,26 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		ASSERT_EQ(cache->numRefreshByInit(), 1);
 		ASSERT_GE(cache->numCacheRefreshes(), 1);
 
-		int refreshWait =
-		    CLIENT_KNOBS->TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL * 10; // initial delay + multiple refresh runs
-		wait(delay(refreshWait));
+		// Fault injection may cause delays in cluster recovery/availability, spin a loop to let cache refresh to
+		// trigger with a max wait of 5 mins; timed_out error is thrown if cache refresh isn't triggered.
 
-		// InitRefresh + multiple timer based invocations (at least 2 invocations of cache->refresh())
-		ASSERT_GE(cache->numCacheRefreshes(), 2);
+		state int64_t startTime = now();
+		state int64_t waitUntill = startTime + 300; // 5 mins max wait
+		loop {
+			// InitRefresh + multiple timer based invocations (at least 2 invocations of cache->refresh())
+			if (cache->numCacheRefreshes() >= 2) {
+				break;
+			}
 
-		TraceEvent("TestCacheRefreshEnd");
+			if (now() > waitUntill) {
+				throw timed_out();
+			}
+
+			TraceEvent("TestCacheRefreshWait").detail("Elapsed", now() - startTime);
+			wait(delay(CLIENT_KNOBS->TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL));
+		}
+
+		TraceEvent("TestCacheRefreshEnd").detail("ElapsedTotal", now() - startTime);
 		return Void();
 	}
 

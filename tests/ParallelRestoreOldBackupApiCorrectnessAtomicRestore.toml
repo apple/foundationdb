@@ -5,6 +5,8 @@ simBackupAgents = 'BackupToFile'
 #timeout is in seconds
 timeout = 360000
 runSetup = true
+# tenants are not supported with parallel restore
+allowDefaultTenant = false
 
     [[test.workload]]
     testName = 'ApiCorrectness'

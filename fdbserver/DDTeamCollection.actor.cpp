@@ -3554,7 +3554,7 @@ bool DDTeamCollection::satisfiesPolicy(const std::vector<Reference<TCServerInfo>
 	return result && resultEntries.size() == 0;
 }
 
-DDTeamCollection::DDTeamCollection(const std::shared_ptr<IDDTxnProcessor>& db,
+DDTeamCollection::DDTeamCollection(Reference<IDDTxnProcessor>& db,
                                    UID distributorId,
                                    MoveKeysLock const& lock,
                                    PromiseStream<RelocateShard> const& output,
@@ -3592,7 +3592,7 @@ DDTeamCollection::DDTeamCollection(const std::shared_ptr<IDDTxnProcessor>& db,
     storageServerSet(new LocalityMap<UID>()) {
 
 	if (!db->isMocked()) {
-		cx = this->db->getDb();
+		cx = this->db->context();
 	}
 
 	if (!primary || configuration.usableRegions == 1) {
@@ -5125,7 +5125,7 @@ public:
 	                                                            int processCount) {
 		Database database = DatabaseContext::create(
 		    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
-		auto txnProcessor = std::shared_ptr<IDDTxnProcessor>(new DDTxnProcessor(database));
+		auto txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(database));
 		DatabaseConfiguration conf;
 		conf.storageTeamSize = teamSize;
 		conf.storagePolicy = policy;
@@ -5169,7 +5169,7 @@ public:
 	                                                                   int processCount) {
 		Database database = DatabaseContext::create(
 		    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
-		auto txnProcessor = std::shared_ptr<IDDTxnProcessor>(new DDTxnProcessor(database));
+		auto txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(database));
 		DatabaseConfiguration conf;
 		conf.storageTeamSize = teamSize;
 		conf.storagePolicy = policy;

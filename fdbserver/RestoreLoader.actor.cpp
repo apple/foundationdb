@@ -85,7 +85,8 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     LoaderCounters* cc,
     Reference<IBackupContainer> bc,
     Version version,
-    RestoreAsset asset);
+    RestoreAsset asset,
+    Optional<Database> cx);
 ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreLoaderData> self);
 
 // Dispatch requests based on node's business (i.e, cpu usage for now) and requests' priorities
@@ -584,7 +585,7 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions,
 		subAsset.len = std::min<int64_t>(param.blockSize, param.asset.len - j);
 		if (param.isRangeFile) {
 			fileParserFutures.push_back(_parseRangeFileToMutationsOnLoader(
-			    kvOpsPerLPIter, samplesIter, &batchData->counters, bc, param.rangeVersion.get(), subAsset));
+			    kvOpsPerLPIter, samplesIter, &batchData->counters, bc, param.rangeVersion.get(), subAsset, cx));
 		} else {
 			// TODO: Sanity check the log file's range is overlapped with the restored version range
 			if (param.isPartitionedLog()) {
@@ -819,7 +820,7 @@ void buildApplierRangeMap(KeyRangeMap<UID>* krMap, std::map<Key, UID>* pRangeToA
 		endKey++;
 	}
 	if (beginKey != pRangeToApplier->end()) {
-		krMap->insert(KeyRangeRef(beginKey->first, normalKeys.end), beginKey->second);
+		krMap->insert(KeyRangeRef(beginKey->first, allKeys.end), beginKey->second);
 	}
 }
 
@@ -1236,7 +1237,8 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     LoaderCounters* cc,
     Reference<IBackupContainer> bc,
     Version version,
-    RestoreAsset asset) {
+    RestoreAsset asset,
+    Optional<Database> cx) {
 	state VersionedMutationsMap& kvOps = kvOpsIter->second;
 	state SampledMutationsVec& sampleMutations = samplesIter->second;
 
@@ -1259,7 +1261,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 			// version
 			Reference<IAsyncFile> inFile = wait(bc->readFile(asset.filename));
 			Standalone<VectorRef<KeyValueRef>> kvs =
-			    wait(fileBackup::decodeRangeFileBlock(inFile, asset.offset, asset.len));
+			    wait(fileBackup::decodeRangeFileBlock(inFile, asset.offset, asset.len, cx));
 			TraceEvent("FastRestoreLoaderDecodedRangeFile")
 			    .detail("BatchIndex", asset.batchIndex)
 			    .detail("Filename", asset.filename)
@@ -1507,7 +1509,7 @@ void oldSplitMutation(std::map<Key, UID>* pRangeToApplier,
 		itApplier = itlow;
 		itlow++;
 		if (itlow == itup) {
-			ASSERT(m.param2 <= normalKeys.end);
+			ASSERT(m.param2 <= allKeys.end);
 			curm.param2 = m.param2;
 		} else if (m.param2 < itlow->first) {
 			UNREACHABLE();
@@ -1532,7 +1534,7 @@ TEST_CASE("/FastRestore/RestoreLoader/splitMutation") {
 	Standalone<VectorRef<UID>> nodeIDs;
 
 	// Prepare RangeToApplier
-	rangeToApplier.emplace(normalKeys.begin, deterministicRandom()->randomUniqueID());
+	rangeToApplier.emplace(allKeys.begin, deterministicRandom()->randomUniqueID());
 	int numAppliers = deterministicRandom()->randomInt(1, 50);
 	for (int i = 0; i < numAppliers; ++i) {
 		Key k = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 1000)));

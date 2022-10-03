@@ -120,10 +120,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		ASSERT(g_simulator->extraDatabases.size() > 0);
 		for (auto connectionString : g_simulator->extraDatabases) {
 			ClusterConnectionString ccs(connectionString);
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(ccs);
 			self->dataDbIndex.push_back(ClusterName(format("cluster_%08d", self->dataDbs.size())));
 			self->dataDbs[self->dataDbIndex.back()] =
-			    DataClusterData(Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION));
+			    DataClusterData(Database::createSimulatedExtraDatabase(connectionString, cx->defaultTenant));
 		}
 
 		wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
@@ -745,14 +744,14 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			self->createdTenants[newTenantName] = tenantData->second;
 			self->createdTenants.erase(tenantData);
 
-			auto& dataDb = self->dataDbs[tenantData->second.cluster];
+			auto& dataDb = self->dataDbs[newEntry.assignedCluster.get()];
 			ASSERT(dataDb.registered);
 
 			dataDb.tenants.erase(tenant);
 			dataDb.tenants.insert(newTenantName);
 
-			if (tenantData->second.tenantGroup.present()) {
-				auto& tenantGroup = self->tenantGroups[tenantData->second.tenantGroup.get()];
+			if (newEntry.tenantGroup.present()) {
+				auto& tenantGroup = self->tenantGroups[newEntry.tenantGroup.get()];
 				tenantGroup.tenants.erase(tenant);
 				tenantGroup.tenants.insert(newTenantName);
 			} else {

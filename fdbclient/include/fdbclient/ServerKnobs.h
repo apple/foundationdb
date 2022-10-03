@@ -302,6 +302,8 @@ public:
 	int64_t REPLACE_CONTENTS_BYTES;
 
 	// KeyValueStoreRocksDB
+	bool ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
+	int ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
 	int ROCKSDB_READ_RANGE_ROW_LIMIT;
 	int ROCKSDB_BACKGROUND_PARALLELISM;
 	int ROCKSDB_READ_PARALLELISM;
@@ -614,7 +616,8 @@ public:
 	double GLOBAL_TAG_THROTTLING_MIN_RATE;
 	// Used by global tag throttling counters
 	double GLOBAL_TAG_THROTTLING_FOLDING_TIME;
-	double GLOBAL_TAG_THROTTLING_TRACE_INTERVAL;
+	// Cost multiplier for writes (because write operations are more expensive than reads)
+	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 

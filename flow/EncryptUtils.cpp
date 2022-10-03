@@ -19,6 +19,8 @@
  */
 
 #include "flow/EncryptUtils.h"
+#include "flow/IRandom.h"
+#include "flow/Knobs.h"
 #include "flow/Trace.h"
 
 #include <boost/algorithm/string.hpp>
@@ -70,4 +72,73 @@ std::string getEncryptDbgTraceKeyWithTS(std::string_view prefix,
 	boost::replace_all(dName, "_", "-");
 	boost::format fmter("%s.%lld.%s.%llu.%lld.%lld");
 	return boost::str(boost::format(fmter % prefix % domainId % dName % baseCipherId % refAfterTS % expAfterTS));
+}
+
+int getEncryptHeaderAuthTokenSize(int algo) {
+	switch (algo) {
+	case ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA:
+		return 32;
+	case ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC:
+		return 16;
+	default:
+		throw not_implemented();
+	}
+}
+
+bool isEncryptHeaderAuthTokenAlgoValid(const EncryptAuthTokenAlgo algo) {
+	return algo >= EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE &&
+	       algo < EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_LAST;
+}
+
+bool isEncryptHeaderAuthTokenModeValid(const EncryptAuthTokenMode mode) {
+	return mode >= EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE &&
+	       mode < EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_LAST;
+}
+
+bool isEncryptHeaderAuthTokenDetailsValid(const EncryptAuthTokenMode mode, const EncryptAuthTokenAlgo algo) {
+	if (!isEncryptHeaderAuthTokenModeValid(mode) || !isEncryptHeaderAuthTokenAlgoValid(algo) ||
+	    (mode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE &&
+	     algo != EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE) ||
+	    (mode != EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE &&
+	     algo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE)) {
+		return false;
+	}
+	return true;
+}
+
+// Routine enables mapping EncryptHeader authTokenAlgo for a given authTokenMode; rules followed are:
+// 1. AUTH_TOKEN_NONE overrides authTokenAlgo configuration (as expected)
+// 2. AuthToken mode governed by the FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO
+EncryptAuthTokenAlgo getAuthTokenAlgoFromMode(const EncryptAuthTokenMode mode) {
+	EncryptAuthTokenAlgo algo;
+
+	if (mode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
+		// TOKEN_MODE_NONE overrides authTokenAlgo
+		algo = EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE;
+	} else {
+		algo = (EncryptAuthTokenAlgo)FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO;
+		// Ensure cluster authTokenAlgo sanity
+		if (algo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE) {
+			TraceEvent(SevWarn, "AuthTokenAlgoMisconfiguration").detail("Algo", algo).detail("Mode", mode);
+			throw not_implemented();
+		}
+	}
+	ASSERT(isEncryptHeaderAuthTokenDetailsValid(mode, algo));
+	return algo;
+}
+
+EncryptAuthTokenMode getRandomAuthTokenMode() {
+	std::vector<EncryptAuthTokenMode> modes = { EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
+		                                        EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+		                                        EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI };
+	int idx = deterministicRandom()->randomInt(0, modes.size());
+	return modes[idx];
+}
+
+EncryptAuthTokenAlgo getRandomAuthTokenAlgo() {
+	EncryptAuthTokenAlgo algo = deterministicRandom()->coinflip()
+	                                ? EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC
+	                                : EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA;
+
+	return algo;
 }

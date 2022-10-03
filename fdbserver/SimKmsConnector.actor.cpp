@@ -66,13 +66,13 @@ struct SimKmsConnectorContext : NonCopyable, ReferenceCounted<SimKmsConnectorCon
 		// Construct encryption keyStore.
 		// Note the keys generated must be the same after restart.
 		for (int i = 1; i <= maxEncryptionKeys; i++) {
-			uint8_t digest[AUTH_TOKEN_SIZE];
-			computeAuthToken(reinterpret_cast<const unsigned char*>(&i),
-			                 sizeof(i),
+			uint8_t digest[AUTH_TOKEN_HMAC_SHA_SIZE];
+			computeAuthToken({ { reinterpret_cast<const uint8_t*>(&i), sizeof(i) } },
 			                 SHA_KEY,
 			                 AES_256_KEY_LENGTH,
 			                 &digest[0],
-			                 AUTH_TOKEN_SIZE);
+			                 EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
+			                 AUTH_TOKEN_HMAC_SHA_SIZE);
 			simEncryptKeyStore[i] = std::make_unique<SimEncryptKeyCtx>(i, reinterpret_cast<const char*>(&digest[0]));
 		}
 	}
