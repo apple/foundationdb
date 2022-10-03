@@ -247,6 +247,52 @@ public interface Tenant extends AutoCloseable, TransactionContext {
 	<T> CompletableFuture<T> runAsync(
 			Function<? super Transaction, ? extends CompletableFuture<T>> retryable, Executor e);
 
+				/**
+	 * Runs {@link #blobbifyRange(Function)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+
+	 * @return if the recording of the range was successful
+	 */
+	default CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey) {
+		return blobbifyRange(beginKey, endKey, getExecutor());
+	}
+
+	/**
+	 * Sets a range to be blobbified in this tenant. Must be a completely unblobbified range.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return if the recording of the range was successful
+	 */
+	CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey, Executor e);
+
+	/**
+	 * Runs {@link #unblobbifyRange(Function)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+
+	 * @return if the recording of the range was successful
+	 */
+	default CompletableFuture<Boolean> unblobbifyRange(byte[] beginKey, byte[] endKey) {
+		return unblobbifyRange(beginKey, endKey, getExecutor());
+	}
+
+	/**
+	 * Unsets a blobbified range in this tenant. The range must be aligned to known blob ranges.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param e the {@link Executor} to use for asynchronous callbacks
+
+	 * @return if the recording of the range was successful
+	 */
+	CompletableFuture<Boolean> unblobbifyRange(byte[] beginKey, byte[] endKey, Executor e);
+
 	/**
 	 * Close the {@code Tenant} object and release any associated resources. This must be called at
 	 *  least once after the {@code Tenant} object is no longer in use. This can be called multiple

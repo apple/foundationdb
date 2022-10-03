@@ -139,6 +139,26 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 	}
 
 	@Override
+	public CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey, Executor e) {
+		pointerReadLock.lock();
+		try {
+			return new FutureBool(Tenant_blobbifyRange(getPtr(), beginKey, endKey), e);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
+	public CompletableFuture<Boolean> unblobbifyRange(byte[] beginKey, byte[] endKey, Executor e) {
+		pointerReadLock.lock();
+		try {
+			return new FutureBool(Tenant_unblobbifyRange(getPtr(), beginKey, endKey), e);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
 	public byte[] getName() {
 		return name;
 	}
@@ -155,4 +175,6 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 
 	private native long Tenant_createTransaction(long cPtr);
 	private native void Tenant_dispose(long cPtr);
+	private native long Tenant_blobbifyRange(long cPtr, byte[] beginKey, byte[] endKey);
+	private native long Tenant_unblobbifyRange(long cPtr, byte[] beginKey, byte[] endKey);
 }
