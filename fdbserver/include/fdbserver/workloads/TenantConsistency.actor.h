@@ -184,6 +184,9 @@ private:
 				ASSERT(!tenantMapEntry.assignedCluster.present());
 				ASSERT(!tenantMapEntry.renameDestination.present());
 			}
+
+			// An error string should be set if and only if the tenant state is an error
+			ASSERT((tenantMapEntry.tenantState == TenantState::ERROR) != tenantMapEntry.error.empty());
 		}
 
 		ASSERT_EQ(metadata.tenantMap.size() + renameCount, metadata.tenantNameIndex.size());
