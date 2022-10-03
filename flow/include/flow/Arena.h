@@ -825,7 +825,7 @@ inline bool operator==(const StringRef& lhs, const StringRef& rhs) {
 }
 template <int N>
 inline bool operator==(const StringRef& lhs, const char (&rhs)[N]) {
-	return lhs == StringRef(reinterpret_cast<const uint8_t*>(rhs), N);
+	return lhs == StringRef(reinterpret_cast<const uint8_t*>(rhs), N - 1);
 }
 inline bool operator<(const StringRef& lhs, const StringRef& rhs) {
 	if (std::min(lhs.size(), rhs.size()) > 0) {
