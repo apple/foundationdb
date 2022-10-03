@@ -1902,6 +1902,7 @@ ACTOR Future<Void> submitBackup(Database db,
                                 int initialSnapshotIntervalSeconds,
                                 int snapshotIntervalSeconds,
                                 Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                bool encryptionEnabled,
                                 std::string tagName,
                                 bool dryRun,
                                 WaitForComplete waitForCompletion,
@@ -1957,6 +1958,7 @@ ACTOR Future<Void> submitBackup(Database db,
 			                              snapshotIntervalSeconds,
 			                              tagName,
 			                              backupRanges,
+			                              encryptionEnabled,
 			                              stopWhenDone,
 			                              usePartitionedLog,
 			                              incrementalBackupOnly));
@@ -2358,7 +2360,7 @@ ACTOR Future<Void> runRestore(Database db,
 				fmt::print("Restored to version {}\n", restoredVersion);
 			}
 		} else {
-			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion, ranges));
+			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion, db, ranges));
 
 			if (!rset.present()) {
 				fmt::print(stderr,
@@ -2468,7 +2470,7 @@ ACTOR Future<Void> runFastRestoreTool(Database db,
 				restoreVersion = dbVersion;
 			}
 
-			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion));
+			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion, db));
 			if (!rset.present()) {
 				fmt::print(stderr, "Insufficient data to restore to version {}\n", restoreVersion);
 				throw restore_invalid_version();
@@ -2673,7 +2675,8 @@ ACTOR Future<Void> queryBackup(const char* name,
                                Version restoreVersion,
                                std::string originalClusterFile,
                                std::string restoreTimestamp,
-                               Verbose verbose) {
+                               Verbose verbose,
+                               Optional<Database> cx) {
 	state UID operationId = deterministicRandom()->randomUniqueID();
 	state JsonBuilderObject result;
 	state std::string errorMessage;
@@ -2738,7 +2741,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 			                           format("the specified restorable version %lld is not valid", restoreVersion));
 			return Void();
 		}
-		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, keyRangesFilter));
+		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, cx, keyRangesFilter));
 		if (fileSet.present()) {
 			int64_t totalRangeFilesSize = 0, totalLogFilesSize = 0;
 			result["restore_version"] = fileSet.get().targetVersion;
@@ -3364,6 +3367,8 @@ int main(int argc, char* argv[]) {
 		bool trace = false;
 		bool quietDisplay = false;
 		bool dryRun = false;
+		// TODO (Nim): Set this value when we add optional encrypt_files CLI argument to backup agent start
+		bool encryptionEnabled = true;
 		std::string traceDir = "";
 		std::string traceFormat = "";
 		std::string traceLogGroup;
@@ -3956,6 +3961,7 @@ int main(int argc, char* argv[]) {
 				                           initialSnapshotIntervalSeconds,
 				                           snapshotIntervalSeconds,
 				                           backupKeys,
+				                           encryptionEnabled,
 				                           tagName,
 				                           dryRun,
 				                           waitForDone,
@@ -4076,7 +4082,8 @@ int main(int argc, char* argv[]) {
 				                          restoreVersion,
 				                          restoreClusterFileOrig,
 				                          restoreTimestamp,
-				                          Verbose{ !quietDisplay }));
+				                          Verbose{ !quietDisplay },
+				                          db));
 				break;
 
 			case BackupType::DUMP:

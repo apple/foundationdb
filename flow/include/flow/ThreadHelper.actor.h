@@ -98,8 +98,9 @@ struct ThreadCallback {
 	virtual void error(const Error&, int& userParam) = 0;
 	virtual ThreadCallback* addCallback(ThreadCallback* cb);
 
-	virtual void clearCallback(ThreadCallback* cb) {
+	virtual bool clearCallback(ThreadCallback* cb) {
 		// If this is the only registered callback this will be called with (possibly) arbitrary pointers
+		return false;
 	}
 
 	// Note that when a ThreadCallback is destroyed it must have no MultiCallbackHolders, but this can't be
@@ -187,10 +188,10 @@ public:
 		return (ThreadCallback*)this;
 	}
 
-	void clearCallback(ThreadCallback* callback) override {
+	bool clearCallback(ThreadCallback* callback) override {
 		MultiCallbackHolder* h = callback->getHolder(this);
 		if (h == nullptr) {
-			return;
+			return false;
 		}
 
 		UNSTOPPABLE_ASSERT(h->index < callbacks.size() && h->index >= 0);
@@ -204,6 +205,7 @@ public:
 
 		callbacks.pop_back();
 		callback->destroyHolder(h);
+		return true;
 	}
 
 	bool canFire(int notMadeActive) const override { return true; }
@@ -424,14 +426,16 @@ public:
 
 		// Only clear the callback if it belongs to the caller, because
 		// another actor could be waiting on it now!
-		if (callback == cb)
+		bool cleared = false;
+		if (callback == cb) {
 			callback = nullptr;
-		else if (callback != nullptr)
-			callback->clearCallback(cb);
+			cleared = true;
+		} else if (callback != nullptr) {
+			cleared = callback->clearCallback(cb);
+		}
 
 		this->mutex.leave();
-
-		return true;
+		return cleared;
 	}
 
 	void setCancel(Future<Void>&& cf) { cancelFuture = std::move(cf); }

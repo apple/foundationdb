@@ -85,7 +85,8 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     LoaderCounters* cc,
     Reference<IBackupContainer> bc,
     Version version,
-    RestoreAsset asset);
+    RestoreAsset asset,
+    Optional<Database> cx);
 ACTOR Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreLoaderData> self);
 
 // Dispatch requests based on node's business (i.e, cpu usage for now) and requests' priorities
@@ -584,7 +585,7 @@ ACTOR Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions,
 		subAsset.len = std::min<int64_t>(param.blockSize, param.asset.len - j);
 		if (param.isRangeFile) {
 			fileParserFutures.push_back(_parseRangeFileToMutationsOnLoader(
-			    kvOpsPerLPIter, samplesIter, &batchData->counters, bc, param.rangeVersion.get(), subAsset));
+			    kvOpsPerLPIter, samplesIter, &batchData->counters, bc, param.rangeVersion.get(), subAsset, cx));
 		} else {
 			// TODO: Sanity check the log file's range is overlapped with the restored version range
 			if (param.isPartitionedLog()) {
@@ -1236,7 +1237,8 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
     LoaderCounters* cc,
     Reference<IBackupContainer> bc,
     Version version,
-    RestoreAsset asset) {
+    RestoreAsset asset,
+    Optional<Database> cx) {
 	state VersionedMutationsMap& kvOps = kvOpsIter->second;
 	state SampledMutationsVec& sampleMutations = samplesIter->second;
 
@@ -1259,7 +1261,7 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 			// version
 			Reference<IAsyncFile> inFile = wait(bc->readFile(asset.filename));
 			Standalone<VectorRef<KeyValueRef>> kvs =
-			    wait(fileBackup::decodeRangeFileBlock(inFile, asset.offset, asset.len));
+			    wait(fileBackup::decodeRangeFileBlock(inFile, asset.offset, asset.len, cx));
 			TraceEvent("FastRestoreLoaderDecodedRangeFile")
 			    .detail("BatchIndex", asset.batchIndex)
 			    .detail("Filename", asset.filename)
