@@ -233,6 +233,13 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                    uint8_t const* end_key_name,
 	                                    int end_key_name_length);
 
+	FDBFuture* (*tenantListBlobbifiedRanges)(FDBTenant* tenant,
+	                                         uint8_t const* begin_key_name,
+	                                         int begin_key_name_length,
+	                                         uint8_t const* end_key_name,
+	                                         int end_key_name_length,
+	                                         int rangeLimit);
+
 	void (*tenantDestroy)(FDBTenant* tenant);
 
 	// Transaction
@@ -527,6 +534,8 @@ public:
 
 	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
 	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
 
 	void addref() override { ThreadSafeReferenceCounted<DLTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLTenant>::delref(); }
@@ -826,6 +835,8 @@ public:
 
 	ThreadFuture<bool> blobbifyRange(const KeyRangeRef& keyRange) override;
 	ThreadFuture<bool> unblobbifyRange(const KeyRangeRef& keyRange) override;
+	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(const KeyRangeRef& keyRange,
+	                                                                      int rangeLimit) override;
 
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::delref(); }

@@ -607,6 +607,19 @@ extern "C" DLLEXPORT FDBFuture* fdb_tenant_unblobbify_range(FDBTenant* tenant,
 	                        .extractPtr());
 }
 
+extern "C" DLLEXPORT FDBFuture* fdb_tenant_list_blobbified_ranges(FDBTenant* tenant,
+                                                                  uint8_t const* begin_key_name,
+                                                                  int begin_key_name_length,
+                                                                  uint8_t const* end_key_name,
+                                                                  int end_key_name_length,
+                                                                  int rangeLimit) {
+	return (FDBFuture*)(TENANT(tenant)
+	                        ->listBlobbifiedRanges(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                           StringRef(end_key_name, end_key_name_length)),
+	                                               rangeLimit)
+	                        .extractPtr());
+}
+
 extern "C" DLLEXPORT void fdb_tenant_destroy(FDBTenant* tenant) {
 	try {
 		TENANT(tenant)->delref();

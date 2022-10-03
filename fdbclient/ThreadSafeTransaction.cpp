@@ -266,6 +266,17 @@ ThreadFuture<bool> ThreadSafeTenant::unblobbifyRange(const KeyRangeRef& keyRange
 	});
 }
 
+ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeTenant::listBlobbifiedRanges(const KeyRangeRef& keyRange,
+                                                                                        int rangeLimit) {
+	DatabaseContext* db = this->db->db;
+	TenantName tenantName = this->name;
+	KeyRange range = keyRange;
+	return onMainThread([=]() -> Future<Standalone<VectorRef<KeyRangeRef>>> {
+		db->checkDeferredError();
+		return db->listBlobbifiedRanges(range, rangeLimit, tenantName);
+	});
+}
+
 ThreadSafeTenant::~ThreadSafeTenant() {}
 
 ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
