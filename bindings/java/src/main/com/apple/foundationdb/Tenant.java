@@ -320,6 +320,42 @@ public interface Tenant extends AutoCloseable, TransactionContext {
 	 CompletableFuture<KeyRangeArrayResult> listBlobbifiedRanges(byte[] beginKey, byte[] endKey, int rangeLimit, Executor e);
 
 	/**
+	 * Runs {@link #verifyBlobRange(Function)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 *
+	 * @return a future with the version of the last blob granule.
+	 */
+	default CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey) {
+		return verifyBlobRange(beginKey, endKey, -2, getExecutor());
+	}
+
+	/**
+	 * Runs {@link #verifyBlobRange(Function)} on the default executor.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param version version to read at
+	 *
+	 * @return a future with the version of the last blob granule.
+	 */
+	default CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey, long version) {
+		return verifyBlobRange(beginKey, endKey, version, getExecutor());
+	}
+
+	/**
+	 * Checks if a blob range is blobbified in this tenant.
+	 *
+	 * @param beginKey start of the key range
+	 * @param endKey end of the key range
+	 * @param version version to read at
+	 *
+	 * @return a future with the version of the last blob granule.
+	 */
+	CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey, long version, Executor e);
+
+	/**
 	 * Close the {@code Tenant} object and release any associated resources. This must be called at
 	 *  least once after the {@code Tenant} object is no longer in use. This can be called multiple
 	 *  times, but care should be taken that it is not in use in another thread at the time of the call.
