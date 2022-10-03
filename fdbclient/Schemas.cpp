@@ -602,7 +602,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          }
       ],
 )statusSchema"
-                                                          R"statusSchema(
+                                         R"statusSchema(
       "recovery_state":{
          "seconds_since_last_recovered":1,
          "required_resolvers":1,

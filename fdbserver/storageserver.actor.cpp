@@ -185,15 +185,13 @@ static const KeyRangeRef persistTenantMapKeys = KeyRangeRef(PERSIST_PREFIX "TM/"
 // data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
 
 static const KeyRangeRef persistStorageServerShardKeys =
-    KeyRangeRef(PERSIST_PREFIX "StorageServerShard/"_sr,
-                PERSIST_PREFIX "StorageServerShard0"_sr);
+    KeyRangeRef(PERSIST_PREFIX "StorageServerShard/"_sr, PERSIST_PREFIX "StorageServerShard0"_sr);
 
 // Checkpoint related prefixes.
 static const KeyRangeRef persistCheckpointKeys =
     KeyRangeRef(PERSIST_PREFIX "Checkpoint/"_sr, PERSIST_PREFIX "Checkpoint0"_sr);
 static const KeyRangeRef persistPendingCheckpointKeys =
-    KeyRangeRef(PERSIST_PREFIX "PendingCheckpoint/"_sr,
-                PERSIST_PREFIX "PendingCheckpoint0"_sr);
+    KeyRangeRef(PERSIST_PREFIX "PendingCheckpoint/"_sr, PERSIST_PREFIX "PendingCheckpoint0"_sr);
 static const std::string rocksdbCheckpointDirPrefix = "/rockscheckpoints_";
 
 struct AddingShard : NonCopyable {
