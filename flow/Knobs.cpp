@@ -241,7 +241,6 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( SIM_SPEEDUP_AFTER_SECONDS,                           450 );
 	init( MAX_TRACE_LINES,                               1'000'000 );
 	init( CODE_COV_TRACE_EVENT_SEVERITY,                        10 ); // Code coverage TraceEvent severity level
-	init( ENABLE_SIMULATION_IMPROVEMENTS,                    false ); // Separate normal workloads and failure injection
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
