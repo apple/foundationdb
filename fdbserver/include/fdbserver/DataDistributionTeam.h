@@ -80,6 +80,7 @@ struct GetTeamRequest {
 	bool findTeamByServers;
 	std::vector<UID> completeSources;
 	std::vector<UID> src;
+	int teamSetIndex;
 	Promise<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> reply;
 
 	typedef Reference<IDataDistributionTeam> TeamRef;
@@ -89,18 +90,19 @@ struct GetTeamRequest {
 	               WantTrueBest wantsTrueBest,
 	               PreferLowerDiskUtil preferLowerDiskUtil,
 	               TeamMustHaveShards teamMustHaveShards,
+	               int teamSetIndex,
 	               ForReadBalance forReadBalance = ForReadBalance::False,
 	               PreferLowerReadUtil preferLowerReadUtil = PreferLowerReadUtil::False,
 	               double inflightPenalty = 1.0)
 	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerDiskUtil(preferLowerDiskUtil),
 	    teamMustHaveShards(teamMustHaveShards), forReadBalance(forReadBalance),
 	    preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty),
-	    findTeamByServers(FindTeamByServers::False) {}
+	    findTeamByServers(FindTeamByServers::False), teamSetIndex(teamSetIndex) {}
 	GetTeamRequest(std::vector<UID> servers)
 	  : wantsNewServers(WantNewServers::False), wantsTrueBest(WantTrueBest::False),
 	    preferLowerDiskUtil(PreferLowerDiskUtil::False), teamMustHaveShards(TeamMustHaveShards::False),
 	    forReadBalance(ForReadBalance::False), preferLowerReadUtil(PreferLowerReadUtil::False), inflightPenalty(1.0),
-	    findTeamByServers(FindTeamByServers::True), src(std::move(servers)) {}
+	    findTeamByServers(FindTeamByServers::True), src(std::move(servers)), teamSetIndex(0) {}
 
 	// return true if a.score < b.score
 	[[nodiscard]] bool lessCompare(TeamRef a, TeamRef b, int64_t aLoadBytes, int64_t bLoadBytes) const {

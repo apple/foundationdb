@@ -573,6 +573,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 	state Reference<DDTeamCollection> primaryTeamCollection;
 	state Reference<DDTeamCollection> remoteTeamCollection;
 	state bool trackerCancelled;
+	state int teamSetCount = 1;
 	state bool ddIsTenantAware = SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED;
 	loop {
 		trackerCancelled = false;
@@ -687,6 +688,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    self->configuration,
 			    self->primaryDcId,
 			    self->configuration.usableRegions > 1 ? self->remoteDcIds : std::vector<Optional<Key>>(),
+			    teamSetCount,
 			    readyToStart.getFuture(),
 			    zeroHealthyTeams[0],
 			    IsPrimary::True,
@@ -708,6 +710,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				                                    self->configuration,
 				                                    self->remoteDcIds,
 				                                    Optional<std::vector<Optional<Key>>>(),
+				                                    teamSetCount,
 				                                    readyToStart.getFuture() && remoteRecovered(self->dbInfo),
 				                                    zeroHealthyTeams[1],
 				                                    IsPrimary::False,
@@ -1209,7 +1212,7 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 		return Void();
 	}
 	// If there is only 1 team, unsafe to mark failed: team building can get stuck due to lack of servers left
-	if (self->teamCollection->teams.size() <= 1) {
+	if (self->teamCollection->teamCount() <= 1) {
 		TraceEvent("DDExclusionSafetyCheckNotEnoughTeams", self->ddId).log();
 		reply.safe = false;
 		req.reply.send(reply);

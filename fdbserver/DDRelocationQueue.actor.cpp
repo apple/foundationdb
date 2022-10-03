@@ -1467,6 +1467,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			loop {
 				state int tciIndex = 0;
 				state bool foundTeams = true;
+				state int teamSetIndex = 0;
 				state bool bestTeamReady = false;
 				anyHealthy = false;
 				allHealthy = true;
@@ -1512,6 +1513,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						                          WantTrueBest(isValleyFillerPriority(rd.priority)),
 						                          PreferLowerDiskUtil::True,
 						                          TeamMustHaveShards::False,
+						                          teamSetIndex,
 						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
 						                          PreferLowerReadUtil::True,
 						                          inflightPenalty);
@@ -2243,6 +2245,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 		state Reference<IDataDistributionTeam> destTeam;
 		state GetTeamRequest srcReq;
 		state GetTeamRequest destReq;
+		state int teamSetIndex = 0;
 		state TraceEvent traceEvent(eventName, self->distributorId);
 		traceEvent.suppressFor(5.0)
 		    .detail("PollingInterval", rebalancePollingInterval)
@@ -2273,14 +2276,17 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 				                        WantTrueBest(mcMove),
 				                        PreferLowerDiskUtil::False,
 				                        TeamMustHaveShards::True,
+				                        teamSetIndex,
 				                        ForReadBalance(readRebalance),
 				                        PreferLowerReadUtil::False);
 				destReq = GetTeamRequest(WantNewServers::True,
 				                         WantTrueBest(!mcMove),
 				                         PreferLowerDiskUtil::True,
 				                         TeamMustHaveShards::False,
+				                         teamSetIndex,
 				                         ForReadBalance(readRebalance),
 				                         PreferLowerReadUtil::True);
+
 				state Future<SrcDestTeamPair> getTeamFuture =
 				    self->getSrcDestTeams(teamCollectionIndex, srcReq, destReq, ddPriority, &traceEvent);
 				wait(ready(getTeamFuture));
