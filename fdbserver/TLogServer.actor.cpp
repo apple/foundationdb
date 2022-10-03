@@ -3322,7 +3322,8 @@ bool tlogTerminated(TLogData* self, IKeyValueStore* persistentData, TLogQueue* p
 	}
 
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
-	    e.code() == error_code_file_not_found || e.code() == error_code_invalid_cluster_id) {
+	    e.code() == error_code_file_not_found || e.code() == error_code_invalid_cluster_id ||
+	    e.code() == error_code_broken_promise) {
 		TraceEvent("TLogTerminated", self->dbgid).errorUnsuppressed(e);
 		return true;
 	} else
