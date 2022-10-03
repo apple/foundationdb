@@ -731,8 +731,8 @@ struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::tru
 	static std::string toString(const Standalone<T>& value) { return Traceable<T>::toString(value); }
 };
 
-#define __FILE__sr StringRef(reinterpret_cast<const uint8_t*>(__FILE__), sizeof(__FILE__))
-#define __FUNCTION__sr StringRef(reinterpret_cast<const uint8_t*>(__FUNCTION__), sizeof(__FUNCTION__))
+#define __FILE__sr StringRef(reinterpret_cast<const uint8_t*>(__FILE__), sizeof(__FILE__) - 1)
+#define __FUNCTION__sr StringRef(reinterpret_cast<const uint8_t*>(__FUNCTION__), sizeof(__FUNCTION__) - 1)
 
 template <>
 struct fmt::formatter<StringRef> : formatter<std::string_view> {
