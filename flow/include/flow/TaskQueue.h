@@ -36,22 +36,19 @@ public:
 	TaskQueue() : tasksIssued(0), ready(FLOW_KNOBS->READY_QUEUE_RESERVED_SIZE) {}
 
 	// Add a task that is ready to be executed.
-	void addReady(TaskPriority taskId, Task* t) {
-		this->ready.push(OrderedTask((int64_t(taskId) << 32) - (++tasksIssued), taskId, t));
-	}
+	void addReady(TaskPriority taskId, Task* t) { this->ready.push(OrderedTask(getFIFOPriority(taskId), taskId, t)); }
 	// Add a task to be executed at a given future time instant (a "timer").
 	void addTimer(double at, TaskPriority taskId, Task* t) {
-		this->timers.push(DelayedTask(at, (int64_t(taskId) << 32) - (++tasksIssued), taskId, t));
+		this->timers.push(DelayedTask(at, getFIFOPriority(taskId), taskId, t));
 	}
 	// Add a task that is ready to be executed, potentially called from a thread that is different from main.
+	// Returns true iff the main thread need to be woken up to execute this task.
 	bool addReadyThreadSafe(bool isMainThread, TaskPriority taskID, Task* t) {
-		int64_t priority = int64_t(taskID) << 32;
-
 		if (isMainThread) {
 			processThreadReady();
-			this->ready.push(OrderedTask(priority - (++tasksIssued), taskID, t));
+			addReady(taskID, t);
 		} else {
-			if (threadReady.push(OrderedTask(priority, taskID, t)))
+			if (threadReady.push(std::make_pair(taskID, t)))
 				return true;
 		}
 		return false;
@@ -91,12 +88,11 @@ public:
 	void processThreadReady() {
 		int numReady = 0;
 		while (true) {
-			Optional<OrderedTask> t = threadReady.pop();
+			Optional<std::pair<TaskPriority, Task*>> t = threadReady.pop();
 			if (!t.present())
 				break;
-			t.get().priority -= ++tasksIssued;
-			ASSERT(t.get().task != 0);
-			ready.push(t.get());
+			ASSERT(t.get().second != nullptr);
+			addReady(t.get().first, t.get().second);
 			++numReady;
 		}
 		FDB_TRACE_PROBE(run_loop_thread_ready, numReady);
@@ -147,10 +143,13 @@ private:
 		void reserve(size_type capacity) { this->c.reserve(capacity); }
 	};
 
+	// Returns a unique priority value for a task which preserves FIFO ordering
+	// for tasks with the same priority.
+	int64_t getFIFOPriority(TaskPriority taskId) { return (int64_t(taskId) << 32) - (++tasksIssued); }
 	uint64_t tasksIssued;
 
 	ReadyQueue<OrderedTask> ready;
-	ThreadSafeQueue<OrderedTask> threadReady;
+	ThreadSafeQueue<std::pair<TaskPriority, Task*>> threadReady;
 
 	std::priority_queue<DelayedTask, std::vector<DelayedTask>> timers;
 
