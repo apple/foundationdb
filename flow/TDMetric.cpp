@@ -23,6 +23,9 @@
 #include "flow/flow.h"
 #include "flow/serialize.h"
 #include "flow/singleton.h"
+#include <cctype>
+#include <cstddef>
+#include <string>
 
 const StringRef BaseEventMetric::metricType = "Event"_sr;
 template <>
@@ -272,4 +275,101 @@ MetricsDataModel knobToMetricModel(const std::string& knob) {
 		return MetricsDataModel::STATSD;
 	}
 	return MetricsDataModel::OTEL;
+}
+
+std::vector<std::string> splitString(const std::string& str, const std::string& delimit) {
+	std::vector<std::string> splitted;
+	size_t pos = 0;
+	std::string s = str;
+
+	while ((pos = s.find(delimit)) != std::string::npos) {
+		splitted.push_back(s.substr(0, pos));
+		s.erase(0, pos + delimit.length());
+	}
+	splitted.push_back(s);
+	return splitted;
+}
+
+/*
+    Returns true if num is exactly a string representation of a number
+    Ex: "123", "123.65" both return true
+    "124.532.13", "t4fr", "102g" all return false
+*/
+bool isNumber(const std::string& num) {
+	if (num.empty()) {
+		return false;
+	}
+
+	size_t start = 0;
+	// We could have a negative number, if the first character isn't a digit
+	// but it's a "-", then we start from position 1. Otherwise it's not a valid number
+	if (!std::isdigit(num[0])) {
+		if (num[0] == '-') {
+			start = 1;
+		} else {
+			return false;
+		}
+	}
+
+	// Iterate through the string and make sure every char is a digit and there is only one occurence of "."
+	int dot_count = 0;
+	for (size_t i = start; i < num.size(); i++) {
+		if (!std::isdigit(num[i])) {
+			if (num[i] == '.') {
+				if (dot_count > 0) {
+					return false;
+				}
+				++dot_count;
+			} else {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+/*
+    Returns true if msg is a valid statsd string. Valid statsd strings are of the form
+    <name>:<value>|<type>|#<tag1-key>:<tag1-value>,<tag2-k/v>
+
+    Where name consists of only upper or lowercase letters (no symbols),
+    value is numeric (postive or negative, integer or decimal),
+    type is one of "g", "c",
+
+*/
+bool verifyStatsdMessage(const std::string& msg) {
+	auto tokens = splitString(msg, "|");
+	std::vector<std::string> statsdTypes{ "c", "g" };
+
+	// We can't have more than three "|" in our string based on above format
+	if (tokens.size() > 3) {
+		return false;
+	}
+
+	// First check if <name>:<value> is valid, this should be in tokens[0]
+	auto nameVal = splitString(tokens[0], ":");
+	if (nameVal.size() != 2) {
+		return false;
+	}
+	// nameVal[1] should be a numeric value
+	if (!isNumber(nameVal[1])) {
+		return false;
+	}
+
+	// The 2nd token should always represent a valid statsd type
+	if (std::find(statsdTypes.begin(), statsdTypes.end(), tokens[1]) == statsdTypes.end()) {
+		return false;
+	}
+
+	// It is optional to have tags but the tags section must be non-empty and begin
+	// with a "#"
+	if (tokens.size() > 2) {
+		if (tokens[2].empty()) {
+			return false;
+		}
+		if (tokens[2][0] != '#') {
+			return false;
+		}
+	}
+	return true;
 }

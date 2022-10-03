@@ -1477,6 +1477,8 @@ std::string createStatsdMessage(const std::string& name,
 
 std::string createStatsdMessage(const std::string& name, StatsDMetric type, const std::string& val);
 
+bool verifyStatsdMessage(const std::string& msg);
+
 MetricsDataModel knobToMetricModel(const std::string& knob);
 
 #include "flow/unactorcompiler.h"
