@@ -2428,23 +2428,31 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 
 			self->degradationInfo = self->getDegradationInfo();
 
-			// Compare `self->degradedServers` with `self->excludedDegradedServers` and remove those that have
+			// Compare `self->degradationInfo` with `self->excludedDegradedServers` and remove those that have
 			// recovered.
 			for (auto it = self->excludedDegradedServers.begin(); it != self->excludedDegradedServers.end();) {
-				if (self->degradationInfo.degradedServers.find(*it) == self->degradationInfo.degradedServers.end()) {
+				if (self->degradationInfo.degradedServers.find(*it) == self->degradationInfo.degradedServers.end() &&
+				    self->degradationInfo.disconnectedServers.find(*it) ==
+				        self->degradationInfo.disconnectedServers.end()) {
 					self->excludedDegradedServers.erase(it++);
 				} else {
 					++it;
 				}
 			}
 
-			if (!self->degradationInfo.degradedServers.empty() || self->degradationInfo.degradedSatellite) {
+			if (!self->degradationInfo.degradedServers.empty() || !self->degradationInfo.disconnectedServers.empty() ||
+			    self->degradationInfo.degradedSatellite) {
 				std::string degradedServerString;
 				for (const auto& server : self->degradationInfo.degradedServers) {
 					degradedServerString += server.toString() + " ";
 				}
+				std::string disconnectedServerString;
+				for (const auto& server : self->degradationInfo.disconnectedServers) {
+					disconnectedServerString += server.toString() + " ";
+				}
 				TraceEvent("ClusterControllerHealthMonitor")
 				    .detail("DegradedServers", degradedServerString)
+				    .detail("DisconnectedServers", disconnectedServerString)
 				    .detail("DegradedSatellite", self->degradationInfo.degradedSatellite);
 
 				// Check if the cluster controller should trigger a recovery to exclude any degraded servers from
