@@ -180,6 +180,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			}
 
 			ASSERT(!dataDb->registered);
+			ASSERT(!dataDb->detached || dataDb->tenants.empty());
 
 			dataDb->tenantGroupCapacity = entry.capacity.numTenantGroups;
 			self->totalTenantGroupCapacity += entry.capacity.numTenantGroups;
@@ -193,7 +194,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				ASSERT(dataDb->registered);
 				return Void();
 			} else if (e.code() == error_code_cluster_not_empty) {
-				ASSERT(dataDb->registered && dataDb->detached && !dataDb->tenants.empty());
+				ASSERT(dataDb->detached && !dataDb->tenants.empty());
 				return Void();
 			}
 
@@ -208,13 +209,13 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		state ClusterName clusterName = self->chooseClusterName();
 		state DataClusterData* dataDb = &self->dataDbs[clusterName];
 		state bool retried = false;
-		state bool detachCluster = deterministicRandom()->coinflip();
+		state bool detachCluster = false;
 
 		try {
 			loop {
 				// TODO: check force removal
 				Future<Void> removeFuture =
-				    MetaclusterAPI::removeCluster(self->managementDb, clusterName, detachCluster, !detachCluster);
+				    MetaclusterAPI::removeCluster(self->managementDb, clusterName, detachCluster);
 				try {
 					Optional<Void> result = wait(timeout(removeFuture, deterministicRandom()->randomInt(1, 30)));
 					if (result.present()) {
@@ -243,6 +244,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				dataDb->tenantGroupCapacity = 0;
 				dataDb->registered = false;
 			} else {
+				dataDb->registered = false;
 				dataDb->detached = true;
 			}
 
@@ -966,7 +968,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		std::vector<Future<Void>> removeClusterFutures;
 		for (auto [clusterName, clusterMetadata] : dataClusters) {
 			removeClusterFutures.push_back(
-			    MetaclusterAPI::removeCluster(self->managementDb, clusterName, !deleteTenants, true));
+			    MetaclusterAPI::removeCluster(self->managementDb, clusterName, !deleteTenants));
 		}
 
 		wait(waitForAll(removeClusterFutures));

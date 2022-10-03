@@ -723,17 +723,12 @@ struct RemoveClusterImpl {
 
 	// Initialization parameters
 	bool forceRemove;
-	bool cleanupManagementClusterState;
 
 	// Parameters set in markClusterRemoving
 	Optional<int64_t> lastTenantId;
 
-	RemoveClusterImpl(Reference<DB> managementDb,
-	                  ClusterName clusterName,
-	                  bool forceRemove,
-	                  bool cleanupManagementClusterState)
-	  : ctx(managementDb, clusterName), forceRemove(forceRemove),
-	    cleanupManagementClusterState(cleanupManagementClusterState) {}
+	RemoveClusterImpl(Reference<DB> managementDb, ClusterName clusterName, bool forceRemove)
+	  : ctx(managementDb, clusterName), forceRemove(forceRemove) {}
 
 	// Returns false if the cluster is no longer present, or true if it is present and the removal should proceed.
 	ACTOR static Future<bool> markClusterRemoving(RemoveClusterImpl* self, Reference<typename DB::TransactionT> tr) {
@@ -905,8 +900,8 @@ struct RemoveClusterImpl {
 		state std::pair<Tuple, Tuple> clusterTupleRange = std::make_pair(
 		    Tuple::makeTuple(self->ctx.clusterName.get()), Tuple::makeTuple(keyAfter(self->ctx.clusterName.get())));
 
-		state bool deleteTenants = self->cleanupManagementClusterState;
-		state bool deleteTenantGroups = self->cleanupManagementClusterState;
+		state bool deleteTenants = true;
+		state bool deleteTenantGroups = true;
 
 		loop {
 			bool clearedAll = wait(self->ctx.runManagementTransaction(
@@ -971,8 +966,8 @@ struct RemoveClusterImpl {
 };
 
 ACTOR template <class DB>
-Future<Void> removeCluster(Reference<DB> db, ClusterName name, bool forceRemove, bool cleanupManagementClusterState) {
-	state RemoveClusterImpl<DB> impl(db, name, forceRemove, cleanupManagementClusterState);
+Future<Void> removeCluster(Reference<DB> db, ClusterName name, bool forceRemove) {
+	state RemoveClusterImpl<DB> impl(db, name, forceRemove);
 	wait(impl.run());
 	return Void();
 }

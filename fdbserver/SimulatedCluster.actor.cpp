@@ -398,6 +398,7 @@ public:
 	ISimulator::ExtraDatabaseMode extraDatabaseMode = ISimulator::ExtraDatabaseMode::Disabled;
 	// The number of extra database used if the database mode is MULTIPLE
 	int extraDatabaseCount = 1;
+	bool extraDatabaseBackupAgents = false;
 	int minimumReplication = 0;
 	int minimumRegions = 0;
 	bool configureLocked = false;
@@ -481,6 +482,7 @@ public:
 		    .add("testPriority", &testPriority)
 		    .add("extraDatabaseMode", &extraDatabaseModeStr)
 		    .add("extraDatabaseCount", &extraDatabaseCount)
+			.add("extraDatabaseBackupAgents", &extraDatabaseBackupAgents)
 		    .add("minimumReplication", &minimumReplication)
 		    .add("minimumRegions", &minimumRegions)
 		    .add("configureLocked", &configureLocked)
@@ -2519,7 +2521,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 					                                                      baseFolder,
 					                                                      false,
 					                                                      machine == useSeedForMachine,
-					                                                      AgentAddition,
+					                                                      testConfig.extraDatabaseBackupAgents ? AgentAddition : AgentNone,
 					                                                      sslOnly,
 					                                                      whitelistBinPaths,
 					                                                      protocolVersion,

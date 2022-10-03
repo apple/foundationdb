@@ -4,6 +4,7 @@ allowDisablingTenants = false
 allowCreatingTenants = false
 extraDatabaseMode = 'Multiple'
 extraDatabaseCount = 5
+extraDatabaseBackupAgents = true
 
 [[test]]
 testTitle = 'MetaclusterRestoreTest'

@@ -155,7 +155,7 @@ ACTOR Future<bool> metaclusterRemoveCommand(Reference<IDatabase> db, std::vector
 	}
 
 	state ClusterNameRef clusterName = tokens[tokens.size() - 1];
-	wait(MetaclusterAPI::removeCluster(db, clusterName, tokens.size() == 4, true));
+	wait(MetaclusterAPI::removeCluster(db, clusterName, tokens.size() == 4));
 
 	fmt::print("The cluster `{}' has been removed\n", printable(clusterName).c_str());
 	return true;
