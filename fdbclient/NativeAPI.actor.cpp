@@ -8363,7 +8363,10 @@ ACTOR Future<Version> checkBlobSubrange(Database db, KeyRange keyRange, Optional
 	}
 }
 
-ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRange range, Optional<Version> version) {
+ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx,
+                                           KeyRange range,
+                                           Optional<Version> version,
+                                           Optional<TenantName> tenantName) {
 	state Database db(cx);
 	state Transaction tr(db);
 	state Standalone<VectorRef<KeyRangeRef>> allRanges;
@@ -8371,6 +8374,7 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRan
 	state Version readVersionOut = invalidVersion;
 	state int batchSize = BUGGIFY ? deterministicRandom()->randomInt(2, 10) : CLIENT_KNOBS->BG_TOO_MANY_GRANULES / 2;
 	state int loadSize = (BUGGIFY ? deterministicRandom()->randomInt(1, 20) : 20) * batchSize;
+	state bool loadedTenantEntry = false;
 
 	if (version.present()) {
 		if (version.get() == latestVersion) {
@@ -8393,6 +8397,12 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRan
 	loop {
 		if (curRegion.begin >= range.end) {
 			return readVersionOut;
+		}
+		if (tenantName.present() && !loadedTenantEntry) {
+			TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(&tr, range.begin, tenantName));
+			loadedTenantEntry = true;
+			range = range.withPrefix(tenantEntry.prefix);
+			curRegion = KeyRangeRef(range.begin, range.begin);
 		}
 		loop {
 			try {
@@ -8445,8 +8455,10 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRan
 	}
 }
 
-Future<Version> DatabaseContext::verifyBlobRange(const KeyRange& range, Optional<Version> version) {
-	return verifyBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, version);
+Future<Version> DatabaseContext::verifyBlobRange(const KeyRange& range,
+                                                 Optional<Version> version,
+                                                 Optional<TenantName> tenantName) {
+	return verifyBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, version, tenantName);
 }
 
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,

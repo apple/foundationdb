@@ -393,7 +393,9 @@ public:
 	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range,
 	                                                                int rangeLimit,
 	                                                                Optional<TenantName> tenantName = {});
-	Future<Version> verifyBlobRange(const KeyRange& range, Optional<Version> version);
+	Future<Version> verifyBlobRange(const KeyRange& range,
+	                                Optional<Version> version,
+	                                Optional<TenantName> tenantName = {});
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
