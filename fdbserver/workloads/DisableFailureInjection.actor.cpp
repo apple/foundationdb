@@ -21,7 +21,6 @@
 #include <fdbserver/workloads/workloads.actor.h>
 
 #include <string_view>
-#include <string>
 
 namespace {
 
@@ -39,7 +38,7 @@ struct DisableFailureInjectionWorkload : TestWorkload {
 		}
 	}
 
-	std::string description() const override { return std::string(NAME); }
+	std::string description() const override { return { NAME }; }
 	Future<Void> start(const Database& cx) override { return Void(); }
 	Future<bool> check(const Database& cx) override { return true; }
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
