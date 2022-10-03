@@ -4541,6 +4541,8 @@ Reference<TCTeamSet> DDTeamCollection::selectTeamSetToAddNewTeamTo() {
 	int minTeamSetSize = std::numeric_limits<int>::max();
 	std::vector<Reference<TCTeamSet>> teamSetsWithFewestTeams;
 
+	ASSERT(teamSets.size() > 0);
+
 	for (auto& teamSet : teamSets.teamSets()) {
 		if (teamSet->teamCount() < minTeamSetSize) {
 			teamSetsWithFewestTeams.clear();
@@ -5466,6 +5468,7 @@ public:
 		int result = collection->addTeamsBestOf(desiredTeams, desiredTeams, maxTeams);
 
 		ASSERT(collection->teamSets.size() == teamSetCount);
+		ASSERT(result > teamSetCount);
 		for (auto i = 0; i < collection->teamSets.size(); i++) {
 			ASSERT(collection->teamSets[i]->teamCount() >= result / teamSetCount);
 		}
