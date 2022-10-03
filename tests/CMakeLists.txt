@@ -252,7 +252,7 @@ if(WITH_PYTHON)
                restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
     TEST_FILES restarting/to_7.0.0/CycleTestRestart-1.txt
-               restarting/to_7.0.0/CycleTestRestart-2.txt)
+               restarting/to_7.0.0/CycleTestRestart-2.txt IGNORE)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0/SnapTestAttrition-1.txt
                restarting/from_7.1.0/SnapTestAttrition-2.txt)
