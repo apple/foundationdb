@@ -390,7 +390,9 @@ public:
 
 	Future<bool> blobbifyRange(KeyRange range, Optional<TenantName> tenantName = {});
 	Future<bool> unblobbifyRange(KeyRange range, Optional<TenantName> tenantName = {});
-	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range, int rangeLimit);
+	Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRanges(KeyRange range,
+	                                                                int rangeLimit,
+	                                                                Optional<TenantName> tenantName = {});
 	Future<Version> verifyBlobRange(const KeyRange& range, Optional<Version> version);
 
 	// private:
