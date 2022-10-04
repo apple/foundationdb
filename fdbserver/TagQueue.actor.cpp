@@ -134,7 +134,7 @@ ACTOR static Future<Void> mockServer(TagQueue* tagQueue) {
 	state SpannedDeque<GetReadVersionRequest> outDefaultPriority("TestTagQueue_Default"_loc);
 	state SpannedDeque<GetReadVersionRequest> outImmediatePriority("TestTagQueue_Immediate"_loc);
 	loop {
-		state double elapsed = (0.09 + 0.02 * deterministicRandom()->random01());
+		state double elapsed = (0.009 + 0.002 * deterministicRandom()->random01());
 		wait(delay(elapsed));
 		tagQueue->runEpoch(elapsed, outBatchPriority, outDefaultPriority, outImmediatePriority);
 		while (!outBatchPriority.empty()) {
@@ -152,6 +152,12 @@ ACTOR static Future<Void> mockServer(TagQueue* tagQueue) {
 	}
 }
 
+static bool isNear(double desired, int64_t actual) {
+	return std::abs(desired - actual) * 10 < desired;
+}
+
+// Rate limit set at 10, but client attempts 20 transactions per second.
+// Client should be throttled to only 10 transactions per second.
 TEST_CASE("/TagQueue/Simple") {
 	state TagQueue tagQueue;
 	state int64_t counter = 0;
@@ -165,5 +171,24 @@ TEST_CASE("/TagQueue/Simple") {
 	state Future<Void> server = mockServer(&tagQueue);
 	wait(timeout(client && server, 60.0, Void()));
 	TraceEvent("TagQuotaTest").detail("Counter", counter);
+	ASSERT(isNear(counter, 60.0 * 10.0));
+	return Void();
+}
+
+// Immediate-priority transactions are not throttled by the TagQueue
+TEST_CASE("/TagQueue/Immediate") {
+	state TagQueue tagQueue;
+	state int64_t counter = 0;
+	{
+		std::map<TransactionTag, double> rates;
+		rates["sampleTag"_sr] = 10.0;
+		tagQueue.updateRates(rates);
+	}
+
+	state Future<Void> client = mockClient(&tagQueue, TransactionPriority::IMMEDIATE, "sampleTag"_sr, 20.0, &counter);
+	state Future<Void> server = mockServer(&tagQueue);
+	wait(timeout(client && server, 60.0, Void()));
+	TraceEvent("TagQuotaTest").detail("Counter", counter);
+	ASSERT(isNear(counter, 60.0 * 20.0));
 	return Void();
 }
