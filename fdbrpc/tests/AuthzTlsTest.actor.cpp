@@ -46,32 +46,32 @@ enum ChainLength : int {
 };
 
 template <class... Args>
-void logRaw(Args&&... args) {
+void logRaw(fmt::format_string<Args...> fmt_str, Args&&... args) {
 	auto buf = fmt::memory_buffer{};
-	fmt::format_to(std::back_inserter(buf), std::forward<Args>(args)...);
+	fmt::format_to(std::back_inserter(buf), fmt_str, std::forward<Args>(args)...);
 	fmt::print(outp, "{}", std::string_view(buf.data(), buf.size()));
 }
 
 template <class... Args>
-void logWithPrefix(const char* prefix, Args&&... args) {
+void logWithPrefix(const char* prefix, fmt::format_string<Args...> fmt_str, Args&&... args) {
 	auto buf = fmt::memory_buffer{};
-	fmt::format_to(std::back_inserter(buf), std::forward<Args>(args)...);
+	fmt::format_to(std::back_inserter(buf), fmt_str, std::forward<Args>(args)...);
 	fmt::print(outp, "{}{}\n", prefix, std::string_view(buf.data(), buf.size()));
 }
 
 template <class... Args>
-void logc(Args&&... args) {
-	logWithPrefix("[CLIENT] ", std::forward<Args>(args)...);
+void logc(fmt::format_string<Args...> fmt_str, Args&&... args) {
+	logWithPrefix("[CLIENT] ", fmt_str, std::forward<Args>(args)...);
 }
 
 template <class... Args>
-void logs(Args&&... args) {
-	logWithPrefix("[SERVER] ", std::forward<Args>(args)...);
+void logs(fmt::format_string<Args...> fmt_str, Args&&... args) {
+	logWithPrefix("[SERVER] ", fmt_str, std::forward<Args>(args)...);
 }
 
 template <class... Args>
-void logm(Args&&... args) {
-	logWithPrefix("[ MAIN ] ", std::forward<Args>(args)...);
+void logm(fmt::format_string<Args...> fmt_str, Args&&... args) {
+	logWithPrefix("[ MAIN ] ", fmt_str, std::forward<Args>(args)...);
 }
 
 std::string drainPipe(int pipeFd) {
@@ -460,13 +460,13 @@ int runTlsTest(ChainLength serverChainLen, ChainLength clientChainLen) {
 	});
 	std::string const clientStdout = drainPipe(clientStdoutPipe[0]);
 	logm("/// Begin Client STDOUT ///");
-	logRaw(clientStdout);
+	logRaw(fmt::runtime(clientStdout));
 	logm("/// End Client STDOUT ///");
 	std::string const serverStdout = drainPipe(serverStdoutPipe[0]);
 	logm("/// Begin Server STDOUT ///");
-	logRaw(serverStdout);
+	logRaw(fmt::runtime(serverStdout));
 	logm("/// End Server STDOUT ///");
-	logm(ok ? "OK" : "FAILED");
+	logm(fmt::runtime(ok ? "OK" : "FAILED"));
 	return !ok;
 }
 
