@@ -1008,7 +1008,6 @@ public:
 
 	ACTOR static Future<Void> storageServerTracker(
 	    DDTeamCollection* self,
-	    Database cx,
 	    TCServerInfo* server, // This actor is owned by this TCServerInfo, point to server_info[id]
 	    Promise<Void> errorOut,
 	    Version addedVersion,
@@ -1191,7 +1190,7 @@ public:
 					}
 				}
 
-				failureTracker = storageServerFailureTracker(self, server, cx, &status, addedVersion);
+				failureTracker = storageServerFailureTracker(self, server, &status, addedVersion);
 				// We need to recruit new storage servers if the key value store type has changed
 				if (hasWrongDC || hasInvalidLocality || server->wrongStoreTypeToRemove.get()) {
 					self->restartRecruiting.trigger();
@@ -1219,11 +1218,8 @@ public:
 
 						// Remove server from FF/serverList
 						storageMetadataTracker.cancel();
-						wait(removeStorageServer(cx,
-						                         server->getId(),
-						                         server->getLastKnownInterface().tssPairID,
-						                         self->lock,
-						                         ddEnabledState));
+						wait(self->db->removeStorageServer(
+						    server->getId(), server->getLastKnownInterface().tssPairID, self->lock, ddEnabledState));
 
 						TraceEvent("StatusMapChange", self->distributorId)
 						    .detail("ServerID", server->getId())
@@ -1519,7 +1515,6 @@ public:
 
 	ACTOR static Future<Void> storageServerFailureTracker(DDTeamCollection* self,
 	                                                      TCServerInfo* server,
-	                                                      Database cx,
 	                                                      ServerStatus* status,
 	                                                      Version addedVersion) {
 		state StorageServerInterface interf = server->getLastKnownInterface();
@@ -1603,8 +1598,7 @@ public:
 					        "Available",
 					        IFailureMonitor::failureMonitor().getState(interf.waitFailure.getEndpoint()).isAvailable());
 				}
-				when(wait(status->isUnhealthy() ? self->waitForAllDataRemoved(cx, interf.id(), addedVersion)
-				                                : Never())) {
+				when(wait(status->isUnhealthy() ? self->waitForAllDataRemoved(interf.id(), addedVersion) : Never())) {
 					break;
 				}
 				when(wait(self->healthyZone.onChange())) {}
@@ -1615,10 +1609,9 @@ public:
 	}
 
 	ACTOR static Future<Void> waitForAllDataRemoved(DDTeamCollection const* teams,
-	                                                Database cx,
 	                                                UID serverID,
 	                                                Version addedVersion) {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(teams->cx);
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -3372,14 +3365,12 @@ Future<Void> DDTeamCollection::teamTracker(Reference<TCTeamInfo> team,
 	return DDTeamCollectionImpl::teamTracker(this, team, isBadTeam, isRedundantTeam);
 }
 
-Future<Void> DDTeamCollection::storageServerTracker(
-    Database cx,
-    TCServerInfo* server, // This actor is owned by this TCServerInfo, point to server_info[id]
-    Promise<Void> errorOut,
-    Version addedVersion,
-    DDEnabledState const& ddEnabledState,
-    bool isTss) {
-	return DDTeamCollectionImpl::storageServerTracker(this, cx, server, errorOut, addedVersion, &ddEnabledState, isTss);
+Future<Void> DDTeamCollection::storageServerTracker(TCServerInfo* server,
+                                                    Promise<Void> errorOut,
+                                                    Version addedVersion,
+                                                    DDEnabledState const& ddEnabledState,
+                                                    bool isTss) {
+	return DDTeamCollectionImpl::storageServerTracker(this, server, errorOut, addedVersion, &ddEnabledState, isTss);
 }
 
 Future<Void> DDTeamCollection::removeWrongStoreType() {
@@ -3401,14 +3392,13 @@ Future<Void> DDTeamCollection::removeBadTeams() {
 }
 
 Future<Void> DDTeamCollection::storageServerFailureTracker(TCServerInfo* server,
-                                                           Database cx,
                                                            ServerStatus* status,
                                                            Version addedVersion) {
-	return DDTeamCollectionImpl::storageServerFailureTracker(this, server, cx, status, addedVersion);
+	return DDTeamCollectionImpl::storageServerFailureTracker(this, server, status, addedVersion);
 }
 
-Future<Void> DDTeamCollection::waitForAllDataRemoved(Database cx, UID serverID, Version addedVersion) const {
-	return DDTeamCollectionImpl::waitForAllDataRemoved(this, cx, serverID, addedVersion);
+Future<Void> DDTeamCollection::waitForAllDataRemoved(UID serverID, Version addedVersion) const {
+	return DDTeamCollectionImpl::waitForAllDataRemoved(this, serverID, addedVersion);
 }
 
 Future<Void> DDTeamCollection::machineTeamRemover() {
@@ -4730,7 +4720,7 @@ void DDTeamCollection::addServer(StorageServerInterface newServer,
 		checkAndCreateMachine(r);
 	}
 
-	r->setTracker(storageServerTracker(cx, r.getPtr(), errorOut, addedVersion, ddEnabledState, newServer.isTss()));
+	r->setTracker(storageServerTracker(r.getPtr(), errorOut, addedVersion, ddEnabledState, newServer.isTss()));
 
 	if (!newServer.isTss()) {
 		// link and wake up tss' tracker so it knows when this server gets removed

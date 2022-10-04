@@ -424,8 +424,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	// Check the status of a storage server.
 	// Apply all requirements to the server and mark it as excluded if it fails to satisfies these requirements
-	Future<Void> storageServerTracker(Database cx,
-	                                  TCServerInfo* server,
+	Future<Void> storageServerTracker(TCServerInfo* server,
 	                                  Promise<Void> errorOut,
 	                                  Version addedVersion,
 	                                  DDEnabledState const& ddEnabledState,
@@ -440,11 +439,10 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	bool isCorrectDC(TCServerInfo const& server) const;
 
 	Future<Void> storageServerFailureTracker(TCServerInfo* server,
-	                                         Database cx,
 	                                         ServerStatus* status,
 	                                         Version addedVersion);
 
-	Future<Void> waitForAllDataRemoved(Database cx, UID serverID, Version addedVersion) const;
+	Future<Void> waitForAllDataRemoved(UID serverID, Version addedVersion) const;
 
 	// Create a transaction updating `perpetualStorageWiggleIDPrefix` to the next serverID according to a sorted
 	// wiggle_pq maintained by the wiggler.
