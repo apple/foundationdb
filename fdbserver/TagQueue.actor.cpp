@@ -64,26 +64,6 @@ void TagQueue::runEpoch(double elapsed,
                         SpannedDeque<GetReadVersionRequest>& outImmediatePriority) {
 	startEpoch();
 	Deque<DelayedRequest> newDelayedRequests;
-	while (!newRequests.empty()) {
-		auto const& req = newRequests.front();
-		if (canStart(req)) {
-			for (const auto& [tag, count] : req.tags) {
-				releasedInEpoch[tag] += count;
-			}
-			if (req.priority == TransactionPriority::BATCH) {
-				outBatchPriority.push_back(req);
-			} else if (req.priority == TransactionPriority::DEFAULT) {
-				outDefaultPriority.push_back(req);
-			} else if (req.priority == TransactionPriority::IMMEDIATE) {
-				outImmediatePriority.push_back(req);
-			} else {
-				ASSERT(false);
-			}
-		} else {
-			newDelayedRequests.emplace_back(req);
-		}
-		newRequests.pop_front();
-	}
 
 	while (!delayedRequests.empty()) {
 		auto const& delayedReq = delayedRequests.front();
@@ -105,6 +85,27 @@ void TagQueue::runEpoch(double elapsed,
 			newDelayedRequests.push_back(delayedReq);
 		}
 		delayedRequests.pop_front();
+	}
+
+	while (!newRequests.empty()) {
+		auto const& req = newRequests.front();
+		if (canStart(req)) {
+			for (const auto& [tag, count] : req.tags) {
+				releasedInEpoch[tag] += count;
+			}
+			if (req.priority == TransactionPriority::BATCH) {
+				outBatchPriority.push_back(req);
+			} else if (req.priority == TransactionPriority::DEFAULT) {
+				outDefaultPriority.push_back(req);
+			} else if (req.priority == TransactionPriority::IMMEDIATE) {
+				outImmediatePriority.push_back(req);
+			} else {
+				ASSERT(false);
+			}
+		} else {
+			newDelayedRequests.emplace_back(req);
+		}
+		newRequests.pop_front();
 	}
 
 	delayedRequests = std::move(newDelayedRequests);
