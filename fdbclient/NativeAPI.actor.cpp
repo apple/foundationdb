@@ -8936,11 +8936,13 @@ struct ChangeFeedTSSValidationData {
 	ChangeFeedTSSValidationData() {}
 	ChangeFeedTSSValidationData(ReplyPromiseStream<ChangeFeedStreamReply> tssStream) : tssStream(tssStream) {}
 
+	void updatePopped(Version newPopVersion) { popVersion = std::max(popVersion, newPopVersion); }
+
 	void send(const ChangeFeedStreamReply& ssReply) {
 		if (done) {
 			return;
 		}
-		popVersion = std::max(popVersion, ssReply.popVersion);
+		updatePopped(ssReply.popVersion);
 		for (auto& it : ssReply.mutations) {
 			if (!it.mutations.empty()) {
 				ssStreamSummary.send(it.version);
@@ -8960,7 +8962,14 @@ void handleTSSChangeFeedMismatch(const ChangeFeedStreamRequest& request,
                                  int64_t matchesFound,
                                  Version lastMatchingVersion,
                                  Version ssVersion,
-                                 Version tssVersion) {
+                                 Version tssVersion,
+                                 Version popVersion) {
+	if (request.canReadPopped) {
+		// There is a known issue where this can return different data between an SS and TSS when a feed was popped but
+		// the SS restarted before the pop could be persisted, for reads that can read popped data. As such, only count
+		// this as a mismatch when !req.canReadPopped
+		return;
+	}
 	CODE_PROBE(true, "TSS mismatch in stream comparison");
 
 	if (tssData.metrics->shouldRecordDetailedMismatch()) {
@@ -8979,6 +8988,7 @@ void handleTSSChangeFeedMismatch(const ChangeFeedStreamRequest& request,
 		mismatchEvent.detail("StartKey", request.range.begin);
 		mismatchEvent.detail("EndKey", request.range.end);
 		mismatchEvent.detail("CanReadPopped", request.canReadPopped);
+		mismatchEvent.detail("PopVersion", popVersion);
 		mismatchEvent.detail("DebugUID", request.debugUID);
 
 		// mismatch info
@@ -9094,8 +9104,13 @@ ACTOR Future<Void> changeFeedTSSValidator(ChangeFeedStreamRequest req,
 			CODE_PROBE(true, "Comparing TSS change feed data");
 			if (ssSummary.front() != tssSummary.front()) {
 				CODE_PROBE(true, "TSS change feed mismatch");
-				handleTSSChangeFeedMismatch(
-				    req, tssData, matchesFound, lastMatchingVersion, ssSummary.front(), tssSummary.front());
+				handleTSSChangeFeedMismatch(req,
+				                            tssData,
+				                            matchesFound,
+				                            lastMatchingVersion,
+				                            ssSummary.front(),
+				                            tssSummary.front(),
+				                            data->get().popVersion);
 				data->get().complete();
 				return Void();
 			}
@@ -9113,7 +9128,8 @@ ACTOR Future<Void> changeFeedTSSValidator(ChangeFeedStreamRequest req,
 			                            matchesFound,
 			                            lastMatchingVersion,
 			                            ssDone ? -1 : ssSummary.front(),
-			                            tssDone ? -1 : tssSummary.front());
+			                            tssDone ? -1 : tssSummary.front(),
+			                            data->get().popVersion);
 			data->get().complete();
 			return Void();
 		}
@@ -9305,8 +9321,8 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 					if (rep.popVersion > feedData->popVersion) {
 						feedData->popVersion = rep.popVersion;
 					}
-					if (tssData->present() && rep.popVersion > tssData->get().popVersion) {
-						tssData->get().popVersion = rep.popVersion;
+					if (tssData->present()) {
+						tssData->get().updatePopped(rep.popVersion);
 					}
 
 					if (lastEmpty != invalidVersion && !results.isEmpty()) {
@@ -9683,6 +9699,9 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
 		if (feedReply.popVersion > results->popVersion) {
 			results->popVersion = feedReply.popVersion;
 		}
+		if (tssData->present()) {
+			tssData->get().updatePopped(feedReply.popVersion);
+		}
 
 		// don't send completely empty set of mutations to promise stream
 		bool anyMutations = false;
@@ -9697,12 +9716,12 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
 			// stream. Anything with mutations should be strictly greater than lastReturnedVersion
 			ASSERT(feedReply.mutations.front().version > results->lastReturnedVersion.get());
 
-			results->mutations.send(
-			    Standalone<VectorRef<MutationsAndVersionRef>>(feedReply.mutations, feedReply.arena));
-
 			if (tssData->present()) {
 				tssData->get().send(feedReply);
 			}
+
+			results->mutations.send(
+			    Standalone<VectorRef<MutationsAndVersionRef>>(feedReply.mutations, feedReply.arena));
 
 			// Because onEmpty returns here before the consuming process, we must do a delay(0)
 			wait(results->mutations.onEmpty());
