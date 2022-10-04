@@ -85,8 +85,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	init( WRITE_TRACING_ENABLED,                              true ); if( randomize && BUGGIFY ) WRITE_TRACING_ENABLED = false;
 	init( TRACING_SPAN_ATTRIBUTES_ENABLED,                   false ); // Additional K/V and tenant data added to Span Attributes
-	init( TRACING_SAMPLE_RATE,                                 0.0 ); // Fraction of distributed traces (not spans) to sample (0 means ignore all traces)
-	init( TRACING_UDP_LISTENER_ADDR,                   "127.0.0.1" ); // Only applicable if TracerType is set to a network option
+	init( TRACING_SAMPLE_RATE,                                 0.0); // Fraction of distributed traces (not spans) to sample (0 means ignore all traces)
+	init( TRACING_UDP_LISTENER_ADDR,                   "127.0.0.1"); // Only applicable if TracerType is set to a network option
 	init( TRACING_UDP_LISTENER_PORT,                          8889 ); // Only applicable if TracerType is set to a network option
 
 	//connectionMonitor
@@ -229,7 +229,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( ZERO_LENGTH_FILE_PAD,                                  1 );
 	init( TRACE_FLUSH_INTERVAL,                               0.25 );
 	init( TRACE_RETRY_OPEN_INTERVAL,						  1.00 );
-	init( MIN_TRACE_SEVERITY,                isSimulated ?  1 : 10 ); // Related to the trace severity in Trace.h
+	init( MIN_TRACE_SEVERITY,                isSimulated ?  1 : 10, Atomic::NO ); // Related to the trace severity in Trace.h
 	init( MAX_TRACE_SUPPRESSIONS,                              1e4 );
 	init( TRACE_DATETIME_ENABLED,                             true ); // trace time in human readable format (always real time)
 	init( TRACE_SYNC_ENABLED,                                    0 );
@@ -245,7 +245,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
-	init( MAX_METRIC_SIZE,                                    2500 );
+	init( MAX_METRIC_SIZE,                                    2500, Atomic::NO );
 	init( MAX_METRIC_LEVEL,                                     25 );
 	init( METRIC_LEVEL_DIVISOR,                             log(4) );
 	init( METRIC_LIMIT_START_QUEUE_SIZE,                        10 );  // The queue size at which to start restricting logging by disabling levels

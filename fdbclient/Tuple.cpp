@@ -99,6 +99,48 @@ Tuple Tuple::unpack(StringRef const& str, bool exclude_incomplete) {
 	return Tuple(str, exclude_incomplete);
 }
 
+std::string Tuple::tupleToString(const Tuple& tuple) {
+	std::string str;
+	if (tuple.size() > 1) {
+		str += "(";
+	}
+	for (int i = 0; i < tuple.size(); ++i) {
+		Tuple::ElementType type = tuple.getType(i);
+		if (type == Tuple::NULL_TYPE) {
+			str += "NULL";
+		} else if (type == Tuple::BYTES || type == Tuple::UTF8) {
+			if (type == Tuple::UTF8) {
+				str += "u";
+			}
+			str += "\'" + tuple.getString(i).printable() + "\'";
+		} else if (type == Tuple::INT) {
+			str += format("%ld", tuple.getInt(i));
+		} else if (type == Tuple::FLOAT) {
+			str += format("%f", tuple.getFloat(i));
+		} else if (type == Tuple::DOUBLE) {
+			str += format("%f", tuple.getDouble(i));
+		} else if (type == Tuple::BOOL) {
+			str += tuple.getBool(i) ? "true" : "false";
+		} else if (type == Tuple::VERSIONSTAMP) {
+			TupleVersionstamp versionstamp = tuple.getVersionstamp(i);
+			str += format("Transaction Version: '%ld', BatchNumber: '%hd', UserVersion : '%hd'",
+			              versionstamp.getVersion(),
+			              versionstamp.getBatchNumber(),
+			              versionstamp.getUserVersion());
+		} else {
+			ASSERT(false);
+		}
+
+		if (i < tuple.size() - 1) {
+			str += ", ";
+		}
+	}
+	if (tuple.size() > 1) {
+		str += ")";
+	}
+	return str;
+}
+
 Tuple Tuple::unpackUserType(StringRef const& str, bool exclude_incomplete) {
 	return Tuple(str, exclude_incomplete, true);
 }
