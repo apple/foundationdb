@@ -1118,7 +1118,8 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			StringRef decryptedData =
 			    wait(EncryptedRangeFileWriter::decrypt(cx.get(), header, dataPayloadStart, dataLen, &results.arena()));
 			reader = StringRefReader(decryptedData, restore_corrupted_data());
-			Reference<TenantEntryCache<Void>> tenantCache = makeReference<TenantEntryCache<Void>>(cx.get());
+			state Reference<TenantEntryCache<Void>> tenantCache = makeReference<TenantEntryCache<Void>>(cx.get());
+			wait(tenantCache->init());
 			wait(decodeKVPairs(&reader, &results, true, cx, tenantCache));
 		} else {
 			throw restore_unsupported_file_version();
@@ -1703,6 +1704,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		state BackupConfig backup(task);
 		state Arena arena;
 		state Reference<TenantEntryCache<Void>> tenantCache = makeReference<TenantEntryCache<Void>>(cx);
+		wait(tenantCache->init());
 
 		// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but
 		// if bc is false then clearly the backup is no longer in progress

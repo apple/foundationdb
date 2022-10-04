@@ -24,6 +24,7 @@
 
 #include "fdbclient/Knobs.h"
 #include "fdbclient/TenantEntryCache.actor.h"
+#include "fdbrpc/TenantName.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
 #include "flow/Error.h"
@@ -77,8 +78,9 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> testTenantNotFound(Database cx) {
-		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(cx, createPayload);
+	ACTOR static Future<Void> testTenantNotFound(Database cx, TenantEntryCacheRefreshMode refreshMode) {
+		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(
+		    cx, deterministicRandom()->randomUniqueID(), createPayload, refreshMode);
 		TraceEvent("TenantNotFoundStart");
 
 		wait(cache->init());
@@ -99,11 +101,12 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> testCreateTenantsAndLookup(
-	    Database cx,
-	    TenantEntryCacheWorkload* self,
-	    std::vector<std::pair<TenantName, TenantMapEntry>>* tenantList) {
-		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(cx, createPayload);
+	ACTOR static Future<Void> testCreateTenantsAndLookup(Database cx,
+	                                                     TenantEntryCacheWorkload* self,
+	                                                     std::vector<std::pair<TenantName, TenantMapEntry>>* tenantList,
+	                                                     TenantEntryCacheRefreshMode refreshMode) {
+		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(
+		    cx, deterministicRandom()->randomUniqueID(), createPayload, refreshMode);
 		state int nTenants = deterministicRandom()->randomInt(5, self->maxTenants);
 
 		TraceEvent("CreateTenantsAndLookupStart");
@@ -139,8 +142,10 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 	ACTOR static Future<Void> testTenantInsert(Database cx,
 	                                           TenantEntryCacheWorkload* self,
-	                                           std::vector<std::pair<TenantName, TenantMapEntry>>* tenantList) {
-		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(cx, createPayload);
+	                                           std::vector<std::pair<TenantName, TenantMapEntry>>* tenantList,
+	                                           TenantEntryCacheRefreshMode refreshMode) {
+		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(
+		    cx, deterministicRandom()->randomUniqueID(), createPayload, refreshMode);
 
 		ASSERT(!tenantList->empty() && tenantList->size() >= 2);
 
@@ -186,8 +191,10 @@ struct TenantEntryCacheWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> testCacheReload(Database cx,
-	                                          std::vector<std::pair<TenantName, TenantMapEntry>>* tenantList) {
-		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(cx, createPayload);
+	                                          std::vector<std::pair<TenantName, TenantMapEntry>>* tenantList,
+	                                          TenantEntryCacheRefreshMode refreshMode) {
+		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(
+		    cx, deterministicRandom()->randomUniqueID(), createPayload, refreshMode);
 
 		ASSERT(!tenantList->empty());
 
@@ -287,6 +294,40 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR static Future<Void> testCacheWatchRefresh(Database cx) {
+		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(
+		    cx, deterministicRandom()->randomUniqueID(), createPayload, TenantEntryCacheRefreshMode::WATCH);
+		wait(cache->init());
+
+		// Ensure associated counter values gets updated
+		ASSERT_EQ(cache->numRefreshByInit(), 1);
+		ASSERT_GE(cache->numCacheRefreshes(), 1);
+
+		// Create tenant and make sure the cache is updated
+		state TenantName name = "TenantEntryCache_WatchRefresh"_sr;
+		state Optional<TenantMapEntry> entry = wait(TenantAPI::createTenant(cx.getReference(), name));
+		ASSERT(entry.present());
+
+		state int64_t startTime = now();
+		state int64_t waitUntill = startTime + 300; // 5 mins max wait
+		loop {
+			if (cache->numWatchRefreshes() >= 1) {
+				break;
+			}
+
+			if (now() > waitUntill) {
+				throw timed_out();
+			}
+
+			TraceEvent("TestCacheRefreshWait").detail("Elapsed", now() - startTime);
+			wait(delay(CLIENT_KNOBS->TENANT_ENTRY_CACHE_LIST_REFRESH_INTERVAL));
+		}
+		Optional<TenantEntryCachePayload<int64_t>> payload = wait(cache->getByName(name));
+		ASSERT(payload.present());
+		compareTenants(payload, entry.get());
+		return Void();
+	}
+
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0 && g_network->isSimulated() && BUGGIFY) {
 			IKnobCollection::getMutableGlobalKnobCollection().setKnob("tenant_entry_cache_list_refresh_interval",
@@ -305,13 +346,19 @@ struct TenantEntryCacheWorkload : TestWorkload {
 
 	ACTOR Future<Void> _start(Database cx, TenantEntryCacheWorkload* self) {
 		state std::vector<std::pair<TenantName, TenantMapEntry>> tenantList;
-
-		wait(testTenantNotFound(cx));
-		wait(testCreateTenantsAndLookup(cx, self, &tenantList));
-		wait(testTenantInsert(cx, self, &tenantList));
+		state TenantEntryCacheRefreshMode refreshMode;
+		if (deterministicRandom()->coinflip()) {
+			refreshMode = TenantEntryCacheRefreshMode::PERIODIC_TASK;
+		} else {
+			refreshMode = TenantEntryCacheRefreshMode::WATCH;
+		}
+		wait(testTenantNotFound(cx, refreshMode));
+		wait(testCreateTenantsAndLookup(cx, self, &tenantList, refreshMode));
+		wait(testTenantInsert(cx, self, &tenantList, refreshMode));
 		wait(tenantEntryRemove(cx, &tenantList));
 		wait(testTenantCacheDefaultFunc(cx));
 		wait(testCacheRefresh(cx));
+		wait(testCacheWatchRefresh(cx));
 
 		return Void();
 	}
