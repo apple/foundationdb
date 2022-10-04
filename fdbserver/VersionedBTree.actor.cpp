@@ -6234,7 +6234,7 @@ private:
 		//
 		// There's another case. When encryption domain is enabled, we want to make sure the root node is encrypted
 		// using the default encryption domain. An indication that's not true is when the first record is not
-		// is enabled, and the root node is not encrypted using the default
+		// is using dbBegin as key.
 		while (records.size() > 1 ||
 		       records.front().getChildPage().size() > (BUGGIFY ? 1 : BTreeCommitHeader::maxRootPointerSize) ||
 		       records[0].key != dbBegin.key) {
@@ -8104,7 +8104,7 @@ public:
 			ASSERT(encryptionKeyProvider->expectedEncodingType() == EncodingType::AESEncryptionV1);
 			encodingType = EncodingType::AESEncryptionV1;
 			m_keyProvider = encryptionKeyProvider;
-		} else if (g_network->isSimulated() && logID.hash() % 2 == 0) {
+		} else if (BUGGIFY) {
 			// Simulation only. Deterministically enable encryption based on uid
 			encodingType = EncodingType::XOREncryption_TestOnly;
 			m_keyProvider = makeReference<XOREncryptionKeyProvider_TestOnly>(filename);
