@@ -497,7 +497,7 @@ TEST_CASE("/flow/IndexedSet/all numbers") {
 		int ib = ii != is.end() ? *ii : 1000000;
 		ASSERT(ib == b);
 		if (ib != b) {
-			fmt::print("{0} {1} {2} {3} {4} {5}\n", ib == b ? "OK" : "ERROR", n, b, ib, is.sumTo(ii));
+			fmt::print("{0} {1} {2} {3} {4}\n", ib == b ? "OK" : "ERROR", n, b, ib, is.sumTo(ii));
 		}
 	}
 
