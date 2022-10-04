@@ -36,7 +36,7 @@
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/EncryptedMutationMessage.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbserver/GetEncryptCipherKeys.h"
+#include "fdbserver/GetEncryptCipherKeys.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
@@ -2313,9 +2313,9 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		std::vector<UID> src, dest;
 		ServerCacheInfo info;
 		// NOTE: An ACTOR will be compiled into several classes, the this pointer is from one of them.
-		auto updateTagInfo = [this](const std::vector<UID>& uids,
-		                            std::vector<Tag>& tags,
-		                            std::vector<Reference<StorageInfo>>& storageInfoItems) {
+		auto updateTagInfo = [pContext = pContext](const std::vector<UID>& uids,
+		                                           std::vector<Tag>& tags,
+		                                           std::vector<Reference<StorageInfo>>& storageInfoItems) {
 			for (const auto& id : uids) {
 				auto storageInfo = getStorageInfo(id, &pContext->pCommitData->storageCache, pContext->pTxnStateStore);
 				ASSERT(storageInfo->tag != invalidTag);

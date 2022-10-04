@@ -72,6 +72,8 @@ struct SSCheckpointWorkload : TestWorkload {
 		state Key endKey = "TestKey0"_sr;
 		state Value oldValue = "TestValue"_sr;
 		state KeyRange testRange = KeyRangeRef(key, endKey);
+		state std::vector<CheckpointMetaData> records;
+		state RangeResult res;
 
 		int ignore = wait(setDDMode(cx, 0));
 		state Version version = wait(self->writeAndVerify(self, cx, key, oldValue));
@@ -97,8 +99,8 @@ struct SSCheckpointWorkload : TestWorkload {
 		// Fetch checkpoint meta data.
 		loop {
 			try {
-				state std::vector<CheckpointMetaData> records =
-				    wait(getCheckpointMetaData(cx, testRange, version, format));
+				std::vector<CheckpointMetaData> _records = wait(getCheckpointMetaData(cx, testRange, version, format));
+				records = std::move(_records);
 				break;
 			} catch (Error& e) {
 				TraceEvent("TestFetchCheckpointMetadataError")
@@ -162,7 +164,8 @@ struct SSCheckpointWorkload : TestWorkload {
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				state RangeResult res = wait(tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
+				RangeResult _res = wait(tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
+				res = std::move(_res);
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -175,7 +178,11 @@ struct SSCheckpointWorkload : TestWorkload {
 			ASSERT(res[i] == kvRange[i]);
 		}
 
-		int ignore = wait(setDDMode(cx, 1));
+		// have this line in a block so we don't break OPEN_FOR_IDE
+		{
+			int ignore = wait(setDDMode(cx, 1));
+			(void)ignore;
+		}
 		return Void();
 	}
 

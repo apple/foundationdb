@@ -154,9 +154,10 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		 * */
 		state ReadYourWritesTransaction tr(cx);
 		state ReadYourWritesTransaction tr2(cx);
+		state Value val;
 		loop {
 			try {
-				state Value val = deterministicRandom()->randomUniqueID().toString();
+				val = deterministicRandom()->randomUniqueID().toString();
 				tr2.set(key, val);
 				state Future<Void> watch1 = tr2.watch(key);
 				wait(tr2.commit());
@@ -185,7 +186,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		loop {
 			try {
 				// watch1 and watch2 are set on the same k/v pair
-				state Value val = deterministicRandom()->randomUniqueID().toString();
+				state Value val(deterministicRandom()->randomUniqueID().toString());
 				tr2.set(key, val);
 				state Future<Void> watch1 = tr2.watch(key);
 				wait(tr2.commit());

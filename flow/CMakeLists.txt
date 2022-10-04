@@ -87,10 +87,16 @@ if(WIN32)
   add_dependencies(flow_sampling_actors flow_actors)
 endif()
 
-add_executable(mkcert MkCertCli.cpp)
+if(OPEN_FOR_IDE)
+  add_library(mkcert OBJECT MkCertCli.cpp)
+  add_library(mtls_unittest OBJECT TLSTest.cpp)
+else()
+  add_executable(mkcert MkCertCli.cpp)
+  add_executable(mtls_unittest TLSTest.cpp)
+endif()
 target_link_libraries(mkcert PUBLIC flow)
-
-add_executable(mtls_unittest TLSTest.cpp)
 target_link_libraries(mtls_unittest PUBLIC flow)
-add_test(NAME mutual_tls_unittest
-         COMMAND $<TARGET_FILE:mtls_unittest>)
+if(NOT OPEN_FOR_IDE)
+  add_test(NAME mutual_tls_unittest
+           COMMAND $<TARGET_FILE:mtls_unittest>)
+endif()

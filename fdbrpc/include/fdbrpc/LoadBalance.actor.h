@@ -94,10 +94,13 @@ Future<Void> tssComparison(Req req,
 	// we want to record ss/tss errors to metrics
 	state int srcErrorCode = error_code_success;
 	state int tssErrorCode = error_code_success;
+	state ErrorOr<Resp> src;
+	state Optional<ErrorOr<Resp>> tss;
 
 	loop {
 		choose {
-			when(state ErrorOr<Resp> src = wait(fSource)) {
+			when(ErrorOr<Resp> _src = wait(fSource)) {
+				src = _src;
 				srcEndTime = now();
 				fSource = Never();
 				finished++;
@@ -105,7 +108,8 @@ Future<Void> tssComparison(Req req,
 					break;
 				}
 			}
-			when(state Optional<ErrorOr<Resp>> tss = wait(fTssWithTimeout)) {
+			when(Optional<ErrorOr<Resp>> _tss = wait(fTssWithTimeout)) {
+				tss = _tss;
 				tssEndTime = now();
 				fTssWithTimeout = Never();
 				finished++;

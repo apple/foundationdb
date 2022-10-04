@@ -36,7 +36,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/Status.h"
+#include "fdbserver/Status.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbserver/CoordinationInterface.h"
@@ -1890,7 +1890,9 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 	}
 
 	choose {
-		when(wait(tests)) { return Void(); }
+		when(wait(tests)) {
+			return Void();
+		}
 		when(wait(quorum(actors, 1))) {
 			ASSERT(false);
 			throw internal_error();

@@ -412,7 +412,7 @@ public:
 	                                 Reference<FutureBucket> futureBucket,
 	                                 Reference<Task> task) {
 		state Reference<TaskFuncBase> taskFunc;
-		state VerifyTask verifyTask = false;
+		state VerifyTask verifyTask(false);
 
 		if (!task || !TaskFuncBase::isValidTask(task))
 			return false;

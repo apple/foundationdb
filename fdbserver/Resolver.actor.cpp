@@ -239,7 +239,9 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 		}
 
 		choose {
-			when(wait(self->version.whenAtLeast(req.prevVersion))) { break; }
+			when(wait(self->version.whenAtLeast(req.prevVersion))) {
+				break;
+			}
 			when(wait(self->checkNeededVersion.onTrigger())) {}
 		}
 	}
@@ -528,9 +530,9 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		std::vector<UID> src, dest;
 		ServerCacheInfo info;
 		// NOTE: An ACTOR will be compiled into several classes, the this pointer is from one of them.
-		auto updateTagInfo = [this](const std::vector<UID>& uids,
-		                            std::vector<Tag>& tags,
-		                            std::vector<Reference<StorageInfo>>& storageInfoItems) {
+		auto updateTagInfo = [pContext = pContext](const std::vector<UID>& uids,
+		                                           std::vector<Tag>& tags,
+		                                           std::vector<Reference<StorageInfo>>& storageInfoItems) {
 			for (const auto& id : uids) {
 				auto storageInfo = getStorageInfo(id, &pContext->pResolverData->storageCache, pContext->pTxnStateStore);
 				ASSERT(storageInfo->tag != invalidTag);
@@ -627,6 +629,7 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	state Reference<Resolver> self(new Resolver(resolver.id(), initReq.commitProxyCount, initReq.resolverCount));
 	state ActorCollection actors(false);
 	state Future<Void> doPollMetrics = self->resolverCount > 1 ? Void() : Future<Void>(Never());
+	state PromiseStream<Future<Void>> addActor;
 	actors.add(waitFailureServer(resolver.waitFailure.getFuture()));
 	actors.add(traceRole(Role::RESOLVER, resolver.id()));
 
@@ -642,7 +645,6 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	// Initialize txnStateStore
 	self->logSystem = ILogSystem::fromServerDBInfo(resolver.id(), db->get(), false, addActor);
 	self->localTLogCount = db->get().logSystemConfig.numLogs();
-	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> onError =
 	    transformError(actorCollection(addActor.getFuture()), broken_promise(), resolver_failed());
 	state TransactionStateResolveContext transactionStateResolveContext;
@@ -714,7 +716,9 @@ ACTOR Future<Void> resolver(ResolverInterface resolver,
 	try {
 		state Future<Void> core = resolverCore(resolver, initReq, db);
 		loop choose {
-			when(wait(core)) { return Void(); }
+			when(wait(core)) {
+				return Void();
+			}
 			when(wait(checkRemoved(db, initReq.recoveryCount, resolver))) {}
 		}
 	} catch (Error& e) {

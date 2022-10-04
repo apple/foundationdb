@@ -26,7 +26,7 @@
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/BackupProgress.actor.h"
 #include "fdbserver/EncryptedMutationMessage.h"
-#include "fdbserver/GetEncryptCipherKeys.h"
+#include "fdbserver/GetEncryptCipherKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"

@@ -2296,6 +2296,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
                                    FlowLock* cleanUpDataMoveParallelismLock,
                                    KeyRange keys,
                                    const DDEnabledState* ddEnabledState) {
+	state KeyRange range;
 	TraceEvent(SevVerbose, "CleanUpDataMoveBegin", dataMoveId).detail("DataMoveID", dataMoveId).detail("Range", keys);
 	state bool complete = false;
 
@@ -2307,7 +2308,9 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 			state Transaction tr(occ);
 			state std::unordered_map<UID, std::vector<Shard>> physicalShardMap;
 			state std::set<UID> oldDests;
-			state KeyRange range;
+			state DataMoveMetaData dataMove;
+
+			range = KeyRange();
 
 			try {
 				tr.trState->taskID = TaskPriority::MoveKeys;
@@ -2317,7 +2320,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 
 				Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
 				if (val.present()) {
-					state DataMoveMetaData dataMove = decodeDataMoveValue(val.get());
+					dataMove = decodeDataMoveValue(val.get());
 					TraceEvent(SevVerbose, "CleanUpDataMoveMetaData", dataMoveId)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMoveMetaData", dataMove.toString());

@@ -486,7 +486,9 @@ ACTOR Future<Void> deleteRecursively_impl(Reference<S3BlobStoreEndpoint> b,
 		loop {
 			choose {
 				// Throw if done throws, otherwise don't stop until end_of_stream
-				when(wait(done)) { done = Never(); }
+				when(wait(done)) {
+					done = Never();
+				}
 
 				when(S3BlobStoreEndpoint::ListResult list = waitNext(resultStream.getFuture())) {
 					for (auto& object : list.objects) {
@@ -1197,7 +1199,9 @@ ACTOR Future<S3BlobStoreEndpoint::ListResult> listObjects_impl(Reference<S3BlobS
 		loop {
 			choose {
 				// Throw if done throws, otherwise don't stop until end_of_stream
-				when(wait(done)) { done = Never(); }
+				when(wait(done)) {
+					done = Never();
+				}
 
 				when(S3BlobStoreEndpoint::ListResult info = waitNext(resultStream.getFuture())) {
 					results.commonPrefixes.insert(
@@ -1754,7 +1758,7 @@ Future<Void> S3BlobStoreEndpoint::finishMultiPartUpload(std::string const& bucke
 }
 
 TEST_CASE("/backup/s3/v4headers") {
-	S3BlobStoreEndpoint::Credentials creds{ "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "" }
+	S3BlobStoreEndpoint::Credentials creds{ "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "" };
 	// GET without query parameters
 	{
 		S3BlobStoreEndpoint s3("s3.amazonaws.com", "443", "amazonaws", "proxy", "port", creds);

@@ -18,9 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbserver/GetEncryptCipherKeys.h"
+#include "fdbserver/GetEncryptCipherKeys.actor.h"
 
 #include <boost/functional/hash.hpp>
+
+#include "flow/actorcompiler.h" // has to be last include
 
 namespace {
 

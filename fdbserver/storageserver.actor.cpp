@@ -55,7 +55,7 @@
 #include "fdbclient/VersionedMap.h"
 #include "fdbserver/EncryptedMutationMessage.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbserver/GetEncryptCipherKeys.h"
+#include "fdbserver/GetEncryptCipherKeys.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LatencyBandConfig.h"
@@ -1957,6 +1957,7 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 
 // Serves FetchCheckpointKeyValuesRequest, reads local checkpoint and sends it to the client over wire.
 ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpointKeyValuesRequest req) {
+	state ICheckpointReader* reader = nullptr;
 	wait(self->serveFetchCheckpointParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(self->serveFetchCheckpointParallelismLock);
 
@@ -1975,7 +1976,7 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 	}
 
 	try {
-		state ICheckpointReader* reader = newCheckpointReader(it->second, self->thisServerID);
+		reader = newCheckpointReader(it->second, self->thisServerID);
 		wait(reader->init(BinaryWriter::toValue(req.range, IncludeVersion())));
 
 		loop {

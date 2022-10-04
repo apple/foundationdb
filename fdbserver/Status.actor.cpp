@@ -22,7 +22,7 @@
 #include "fmt/format.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyBackedTypes.h"
-#include "fdbserver/Status.h"
+#include "fdbserver/Status.actor.h"
 #include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"

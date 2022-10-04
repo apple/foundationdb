@@ -52,7 +52,7 @@
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/Status.h"
+#include "fdbserver/Status.actor.h"
 #include "fdbserver/LatencyBandConfig.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbserver/RecoveryState.h"

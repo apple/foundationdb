@@ -19,8 +19,11 @@
  */
 #pragma once
 
-#ifndef FDBSERVER_GETCIPHERKEYS_H
-#define FDBSERVER_GETCIPHERKEYS_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_GETCIPHERKEYS_ACTOR_G_H)
+#define FDBSERVER_GETCIPHERKEYS_ACTOR_G_H
+#include "fdbserver/GetEncryptCipherKeys.actor.g.h"
+#elif !defined(FDBSERVER_GETCIPHERKEYS_ACTOR_H)
+#define FDBSERVER_GETCIPHERKEYS_ACTOR_H
 
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/BlobCipher.h"
@@ -28,19 +31,21 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "flow/actorcompiler.h"
+
 // Get latest cipher keys for given encryption domains. It tries to get the cipher keys from local cache.
 // In case of cache miss, it fetches the cipher keys from EncryptKeyProxy and put the result in the local cache
 // before return.
-Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getLatestEncryptCipherKeys(
-    const Reference<AsyncVar<ServerDBInfo> const>& db,
-    const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName>& domains);
+ACTOR Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getLatestEncryptCipherKeys(
+    Reference<AsyncVar<ServerDBInfo> const> db,
+    std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> domains);
 
 // Get cipher keys specified by the list of cipher details. It tries to get the cipher keys from local cache.
 // In case of cache miss, it fetches the cipher keys from EncryptKeyProxy and put the result in the local cache
 // before return.
-Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncryptCipherKeys(
-    const Reference<AsyncVar<ServerDBInfo> const>& db,
-    const std::unordered_set<BlobCipherDetails>& cipherDetails);
+ACTOR Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncryptCipherKeys(
+    Reference<AsyncVar<ServerDBInfo> const> db,
+    std::unordered_set<BlobCipherDetails> cipherDetails);
 
 struct TextAndHeaderCipherKeys {
 	Reference<BlobCipherKey> cipherTextKey;
@@ -49,10 +54,12 @@ struct TextAndHeaderCipherKeys {
 
 // Helper method to get latest cipher text key and cipher header key for system domain,
 // used for encrypting system data.
-Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(const Reference<AsyncVar<ServerDBInfo> const>& db);
+ACTOR Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(Reference<AsyncVar<ServerDBInfo> const> db);
 
 // Helper method to get both text cipher key and header cipher key for the given encryption header,
 // used for decrypting given encrypted data with encryption header.
-Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(const Reference<AsyncVar<ServerDBInfo> const>& db,
-                                                     const BlobCipherEncryptHeader& header);
+ACTOR Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<ServerDBInfo> const> db,
+                                                           BlobCipherEncryptHeader header);
+
+#include "flow/unactorcompiler.h"
 #endif

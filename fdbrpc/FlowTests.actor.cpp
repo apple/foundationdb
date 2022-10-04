@@ -353,7 +353,7 @@ TEST_CASE("/flow/flow/cancel2") {
 	return Void();
 }
 
-namespace {
+namespace flow_tests_details {
 // Simple message for flatbuffers unittests
 struct Int {
 	constexpr static FileIdentifier file_identifier = 12345;
@@ -381,16 +381,16 @@ TEST_CASE("/flow/flow/nonserializable futures") {
 
 	// ReplyPromise can be used like a normal promise
 	{
-		ReplyPromise<Int> rpInt;
-		Future<Int> f = rpInt.getFuture();
+		ReplyPromise<flow_tests_details::Int> rpInt;
+		Future<flow_tests_details::Int> f = rpInt.getFuture();
 		ASSERT(!f.isReady());
 		rpInt.send(123);
 		ASSERT(f.get().value == 123);
 	}
 
 	{
-		RequestStream<Int> rsInt;
-		FutureStream<Int> f = rsInt.getFuture();
+		RequestStream<flow_tests_details::Int> rsInt;
+		FutureStream<flow_tests_details::Int> f = rsInt.getFuture();
 		rsInt.send(1);
 		rsInt.send(2);
 		ASSERT(f.pop().value == 1);
@@ -403,7 +403,7 @@ TEST_CASE("/flow/flow/nonserializable futures") {
 TEST_CASE("/flow/flow/networked futures") {
 	// RequestStream can be serialized
 	{
-		RequestStream<Int> locInt;
+		RequestStream<flow_tests_details::Int> locInt;
 		BinaryWriter wr(IncludeVersion());
 		wr << locInt;
 
@@ -411,7 +411,7 @@ TEST_CASE("/flow/flow/networked futures") {
 		       locInt.getEndpoint().getPrimaryAddress() == FlowTransport::transport().getLocalAddress());
 
 		BinaryReader rd(wr.toValue(), IncludeVersion());
-		RequestStream<Int> remoteInt;
+		RequestStream<flow_tests_details::Int> remoteInt;
 		rd >> remoteInt;
 
 		ASSERT(remoteInt.getEndpoint() == locInt.getEndpoint());
@@ -420,14 +420,14 @@ TEST_CASE("/flow/flow/networked futures") {
 	// ReplyPromise can be serialized
 	// TODO: This needs to fiddle with g_currentDeliveryPeerAddress
 	if (0) {
-		ReplyPromise<Int> locInt;
+		ReplyPromise<flow_tests_details::Int> locInt;
 		BinaryWriter wr(IncludeVersion());
 		wr << locInt;
 
 		ASSERT(locInt.getEndpoint().isValid() && locInt.getEndpoint().isLocal());
 
 		BinaryReader rd(wr.toValue(), IncludeVersion());
-		ReplyPromise<Int> remoteInt;
+		ReplyPromise<flow_tests_details::Int> remoteInt;
 		rd >> remoteInt;
 
 		ASSERT(remoteInt.getEndpoint() == locInt.getEndpoint());
@@ -1084,7 +1084,9 @@ TEST_CASE("#flow/flow/perf/actor patterns") {
 			ASSERT(out2[i].isReady());
 		}
 		printf("2xcheeseActor(chooseTwoActor(cheeseActor(fifo), never)): %0.2f M/sec\n", N / 1e6 / (timer() - start));
+#ifndef OPEN_FOR_IDE
 		printf("sizeof(CheeseWaitActorActor) == %zu\n", sizeof(CheeseWaitActorActor));
+#endif
 	}
 
 	{
