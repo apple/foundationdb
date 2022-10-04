@@ -268,6 +268,7 @@ TEST_CASE("/fdbrpc/Base64UrlEncode") {
 		ASSERT(decodeOutput.present());
 		if (input != decodeOutput.get()) {
 			fmt::print("Dynamic case {} (decode) failed, expected '{}', got '{}'\n",
+			           i + 1,
 			           input.toHexString(),
 			           decodeOutput.get().toHexString());
 			ASSERT(false);
