@@ -6111,6 +6111,49 @@ ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trS
 	}
 }
 
+ACTOR static Future<Optional<CommitResult>> determineCommitStatus(Reference<TransactionState> trState,
+                                                                  Version minPossibleCommitVersion,
+                                                                  Version maxPossibleCommitVersion,
+                                                                  IdempotencyIdRef idempotencyId) {
+	state Transaction tr(trState->cx);
+	state int retries = 0;
+	state Span span("NAPI:determineCommitStatus"_loc, trState->spanContext);
+	tr.span.setParent(span.context);
+	loop {
+		try {
+			TraceEvent("DetermineCommitStatus")
+			    .detail("IdempotencyId", idempotencyId.asStringRefUnsafe().printable())
+			    .detail("Retries", retries);
+			tr.trState->options = trState->options;
+			tr.trState->taskID = trState->taskID;
+			tr.trState->authToken = trState->authToken;
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			KeyRange possibleRange =
+			    KeyRangeRef(BinaryWriter::toValue(bigEndian64(minPossibleCommitVersion), Unversioned())
+			                    .withPrefix(idempotencyIdKeys.begin),
+			                BinaryWriter::toValue(bigEndian64(maxPossibleCommitVersion + 1), Unversioned())
+			                    .withPrefix(idempotencyIdKeys.begin));
+			RangeResult range = wait(tr.getRange(possibleRange, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!range.more);
+			for (const auto& kv : range) {
+				auto commitResult = kvContainsIdempotencyId(kv, idempotencyId);
+				if (commitResult.present()) {
+					return commitResult;
+				}
+			}
+			return Optional<CommitResult>();
+		} catch (Error& e) {
+			TraceEvent("DetermineCommitStatusError")
+			    .errorUnsuppressed(e)
+			    .detail("IdempotencyId", idempotencyId.asStringRefUnsafe().printable())
+			    .detail("Retries", retries);
+			wait(tr.onError(e));
+		}
+		++retries;
+	}
+}
+
 void Transaction::cancelWatches(Error const& e) {
 	for (int i = 0; i < watches.size(); ++i)
 		if (!watches[i]->onChangeTrigger.isSet())
@@ -6418,7 +6461,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 		if (e.code() == error_code_request_maybe_delivered || e.code() == error_code_commit_unknown_result) {
 			// We don't know if the commit happened, and it might even still be in flight.
 
-			if (!trState->options.causalWriteRisky) {
+			if (!trState->options.causalWriteRisky || req.idempotencyId.valid()) {
 				// Make sure it's not still in flight, either by ensuring the master we submitted to is dead, or the
 				// version we submitted with is dead, or by committing a conflicting transaction successfully
 				// if ( cx->getCommitProxies()->masterGeneration <= originalMasterGeneration )
@@ -6435,6 +6478,24 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 
 				wait(
 				    commitDummyTransaction(trState, singleKeyRange(selfConflictingRange.begin), tenantPrefixPrepended));
+				if (req.idempotencyId.valid()) {
+					Optional<CommitResult> commitResult =
+					    wait(determineCommitStatus(trState,
+					                               req.transaction.read_snapshot,
+					                               req.transaction.read_snapshot + 5e6,
+					                               req.idempotencyId));
+					if (commitResult.present()) {
+						Standalone<StringRef> ret = makeString(10);
+						placeVersionstamp(
+						    mutateString(ret), commitResult.get().commitVersion, commitResult.get().batchIndex);
+						trState->versionstampPromise.send(ret);
+						CODE_PROBE(true, "AutomaticIdempotencyCommitted");
+						return Void();
+					} else {
+						CODE_PROBE(true, "AutomaticIdempotencyNotCommitted");
+						throw transaction_too_old();
+					}
+				}
 			}
 
 			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry loops
