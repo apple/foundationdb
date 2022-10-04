@@ -1579,7 +1579,7 @@ public:
 							    .detail("Status", status->toString());
 							status->isFailed = false;
 						} else if (self->clearHealthyZoneFuture.isReady()) {
-							self->clearHealthyZoneFuture = clearHealthyZone(self->cx);
+							self->clearHealthyZoneFuture = clearHealthyZone(self->dbContext());
 							TraceEvent("MaintenanceZoneCleared", self->distributorId).log();
 							self->healthyZone.set(Optional<Key>());
 						}
@@ -1608,8 +1608,8 @@ public:
 		return Void(); // Don't ignore failures
 	}
 
-	ACTOR static Future<Void> waitForAllDataRemoved(DDTeamCollection const* teams, UID serverID, Version addedVersion) {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(teams->cx);
+	ACTOR static Future<Void> waitForAllDataRemoved(DDTeamCollection const* self, UID serverID, Version addedVersion) {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -1623,9 +1623,9 @@ public:
 					TraceEvent(SevVerbose, "WaitForAllDataRemoved")
 					    .detail("Server", serverID)
 					    .detail("CanRemove", canRemove)
-					    .detail("Shards", teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
-					ASSERT_GE(teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID), 0);
-					if (canRemove && teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0) {
+					    .detail("Shards", self->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
+					ASSERT_GE(self->shardsAffectedByTeamFailure->getNumberOfShards(serverID), 0);
+					if (canRemove && self->shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0) {
 						return Void();
 					}
 				}
@@ -1833,7 +1833,7 @@ public:
 
 	ACTOR static Future<Void> trackExcludedServers(DDTeamCollection* self) {
 		// Fetch the list of excluded servers
-		state ReadYourWritesTransaction tr(self->cx);
+		state ReadYourWritesTransaction tr(self->dbContext());
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1926,14 +1926,13 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> updateNextWigglingStorageID(DDTeamCollection* teamCollection) {
-		state Key writeKey =
-		    perpetualStorageWiggleIDPrefix.withSuffix(teamCollection->primary ? "primary/"_sr : "remote/"_sr);
+	ACTOR static Future<Void> updateNextWigglingStorageID(DDTeamCollection* self) {
+		state Key writeKey = perpetualStorageWiggleIDPrefix.withSuffix(self->primary ? "primary/"_sr : "remote/"_sr);
 		state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(writeKey,
 		                                                                                          IncludeVersion());
-		state UID nextId = wait(teamCollection->getNextWigglingServerID());
+		state UID nextId = wait(self->getNextWigglingServerID());
 		state StorageWiggleValue value(nextId);
-		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(teamCollection->cx));
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->dbContext()));
 		loop {
 			// write the next server id
 			try {
@@ -1946,9 +1945,9 @@ public:
 			}
 		}
 
-		teamCollection->nextWiggleInfo.send(value);
-		TraceEvent(SevDebug, "PerpetualStorageWiggleNextID", teamCollection->distributorId)
-		    .detail("Primary", teamCollection->primary)
+		self->nextWiggleInfo.send(value);
+		TraceEvent(SevDebug, "PerpetualStorageWiggleNextID", self->distributorId)
+		    .detail("Primary", self->primary)
 		    .detail("WriteID", nextId);
 
 		return Void();
@@ -2124,15 +2123,15 @@ public:
 	// This coroutine sets a watch to monitor the value change of `perpetualStorageWiggleKey` which is controlled by
 	// command `configure perpetual_storage_wiggle=$value` if the value is 1, this actor start 2 actors,
 	// `perpetualStorageWiggleIterator` and `perpetualStorageWiggler`. Otherwise, it sends stop signal to them.
-	ACTOR static Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollection) {
+	ACTOR static Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* self) {
 		state int speed = 0;
 		state AsyncVar<bool> stopWiggleSignal(true);
 		state PromiseStream<Void> finishStorageWiggleSignal;
 		state SignalableActorCollection collection;
-		teamCollection->pauseWiggle = makeReference<AsyncVar<bool>>(true);
+		self->pauseWiggle = makeReference<AsyncVar<bool>>(true);
 
 		loop {
-			state ReadYourWritesTransaction tr(teamCollection->cx);
+			state ReadYourWritesTransaction tr(self->dbContext());
 			loop {
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2147,20 +2146,17 @@ public:
 					ASSERT(speed == 1 || speed == 0);
 					if (speed == 1 && stopWiggleSignal.get()) { // avoid duplicated start
 						stopWiggleSignal.set(false);
-						collection.add(teamCollection->perpetualStorageWiggleIterator(
-						    stopWiggleSignal, finishStorageWiggleSignal.getFuture()));
-						collection.add(
-						    teamCollection->perpetualStorageWiggler(stopWiggleSignal, finishStorageWiggleSignal));
-						TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId)
-						    .detail("Primary", teamCollection->primary);
+						collection.add(self->perpetualStorageWiggleIterator(stopWiggleSignal,
+						                                                    finishStorageWiggleSignal.getFuture()));
+						collection.add(self->perpetualStorageWiggler(stopWiggleSignal, finishStorageWiggleSignal));
+						TraceEvent("PerpetualStorageWiggleOpen", self->distributorId).detail("Primary", self->primary);
 					} else if (speed == 0) {
 						if (!stopWiggleSignal.get()) {
 							stopWiggleSignal.set(true);
 							wait(collection.signalAndReset());
-							teamCollection->pauseWiggle->set(true);
+							self->pauseWiggle->set(true);
 						}
-						TraceEvent("PerpetualStorageWiggleClose", teamCollection->distributorId)
-						    .detail("Primary", teamCollection->primary);
+						TraceEvent("PerpetualStorageWiggleClose", self->distributorId).detail("Primary", self->primary);
 					}
 					wait(watchFuture);
 					break;
@@ -2172,7 +2168,7 @@ public:
 	}
 
 	ACTOR static Future<Void> waitHealthyZoneChange(DDTeamCollection* self) {
-		state ReadYourWritesTransaction tr(self->cx);
+		state ReadYourWritesTransaction tr(self->dbContext());
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -2814,7 +2810,7 @@ public:
 	// read the current map of `perpetualStorageWiggleIDPrefix`, then restore wigglingId.
 	ACTOR static Future<Void> readStorageWiggleMap(DDTeamCollection* self) {
 		state std::vector<std::pair<UID, StorageWiggleValue>> res =
-		    wait(readStorageWiggleValues(self->cx, self->primary, false));
+		    wait(readStorageWiggleValues(self->dbContext(), self->primary, false));
 		if (res.size() > 0) {
 			// SOMEDAY: support wiggle multiple SS at once
 			ASSERT(!self->wigglingId.present()); // only single process wiggle is allowed
@@ -2826,7 +2822,7 @@ public:
 	ACTOR static Future<Void> updateStorageMetadata(DDTeamCollection* self, TCServerInfo* server) {
 		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
 		    serverMetadataKeys.begin, IncludeVersion());
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
 
 		// Update server's storeType, especially when it was created
 		wait(server->updateStoreType());
@@ -3567,10 +3563,6 @@ DDTeamCollection::DDTeamCollection(Reference<IDDTxnProcessor>& db,
         makeReference<EventCacheHolder>("StorageServerRecruitment_" + distributorId.toString())),
     primary(primary), distributorId(distributorId), configuration(configuration),
     storageServerSet(new LocalityMap<UID>()) {
-
-	if (!db->isMocked()) {
-		cx = this->db->context();
-	}
 
 	if (!primary || configuration.usableRegions == 1) {
 		TraceEvent("DDTrackerStarting", distributorId)
