@@ -1630,6 +1630,7 @@ Key storageQuotaKey(StringRef tenantName) {
 }
 
 const KeyRangeRef idempotencyIdKeys("\xff\x02/idmp/"_sr, "\xff\x02/idmp0"_sr);
+const KeyRef idempotencyIdsExpiredVersion("\xff\x02/idmpExpiredVersion");
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi) {

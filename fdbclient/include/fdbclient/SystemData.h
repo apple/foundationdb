@@ -709,6 +709,7 @@ extern const KeyRef storageQuotaPrefix;
 Key storageQuotaKey(StringRef tenantName);
 
 extern const KeyRangeRef idempotencyIdKeys;
+extern const KeyRef idempotencyIdsExpiredVersion;
 
 #pragma clang diagnostic pop
 

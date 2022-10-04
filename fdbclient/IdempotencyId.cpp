@@ -1,3 +1,23 @@
+/*
+ * IdempotencyId.cpp
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include "fdbclient/IdempotencyId.h"
 #include "fdbclient/SystemData.h"
 #include "flow/UnitTest.h"
@@ -14,7 +34,8 @@ void IdempotencyIdKVBuilder::setCommitVersion(Version commitVersion) {
 	impl->commitVersion = commitVersion;
 }
 
-void IdempotencyIdKVBuilder::add(const IdempotencyId& id, uint16_t batchIndex) {
+void IdempotencyIdKVBuilder::add(const IdempotencyIdRef& id, uint16_t batchIndex) {
+	ASSERT(id.valid());
 	if (impl->batchIndexHighOrderByte.present()) {
 		ASSERT((batchIndex >> 8) == impl->batchIndexHighOrderByte.get());
 	} else {
@@ -26,9 +47,12 @@ void IdempotencyIdKVBuilder::add(const IdempotencyId& id, uint16_t batchIndex) {
 	impl->value << uint8_t(batchIndex); // Low order byte of batchIndex
 }
 
-KeyValue IdempotencyIdKVBuilder::buildAndClear() {
+Optional<KeyValue> IdempotencyIdKVBuilder::buildAndClear() {
 	ASSERT(impl->commitVersion.present());
-	ASSERT(impl->batchIndexHighOrderByte.present());
+	if (!impl->batchIndexHighOrderByte.present()) {
+		*impl = IdempotencyIdKVBuilderImpl{};
+		return {};
+	}
 
 	BinaryWriter key{ Unversioned() };
 	key.serializeBytes(idempotencyIdKeys.begin);
@@ -39,14 +63,17 @@ KeyValue IdempotencyIdKVBuilder::buildAndClear() {
 
 	*impl = IdempotencyIdKVBuilderImpl{};
 
-	KeyValue result;
-	result.arena() = v.arena();
-	result.key = key.toValue(result.arena());
-	result.value = v;
+	Optional<KeyValue> result = KeyValue();
+	result.get().arena() = v.arena();
+	result.get().key = key.toValue(result.get().arena());
+	result.get().value = v;
 	return result;
 }
 
-Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const IdempotencyId& id) {
+IdempotencyIdKVBuilder::~IdempotencyIdKVBuilder() = default;
+
+Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const IdempotencyIdRef& id) {
+	ASSERT(id.valid());
 	// The common case is that the kv does not contain the idempotency id
 	StringRef needle = id.asStringRef();
 	StringRef haystack = kv.value;
@@ -80,33 +107,36 @@ Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const Idem
 
 void forceLinkIdempotencyIdTests() {}
 
+namespace {
+IdempotencyIdRef generate(Arena& arena) {
+	int length = deterministicRandom()->coinflip() ? deterministicRandom()->randomInt(16, 256) : 16;
+	StringRef id = makeString(length, arena);
+	deterministicRandom()->randomBytes(mutateString(id), length);
+	return IdempotencyIdRef(id);
+}
+} // namespace
+
 TEST_CASE("/fdbclient/IdempotencyId/basic") {
 	Arena arena;
 	uint16_t firstBatchIndex = deterministicRandom()->randomUInt32();
 	uint16_t batchIndex = firstBatchIndex;
 	Version commitVersion = deterministicRandom()->randomInt64(0, std::numeric_limits<Version>::max());
-	std::vector<IdempotencyId> idVector; // Reference
-	std::unordered_set<IdempotencyId> idSet; // Make sure hash+equals works
+	std::vector<IdempotencyIdRef> idVector; // Reference
+	std::unordered_set<IdempotencyIdRef> idSet; // Make sure hash+equals works
 	IdempotencyIdKVBuilder builder; // Check kv data format
 	builder.setCommitVersion(commitVersion);
 
 	for (int i = 0; i < 5; ++i) {
-		UID id = deterministicRandom()->randomUniqueID();
+		auto id = generate(arena);
 		idVector.emplace_back(id);
 		idSet.emplace(id);
-		builder.add(IdempotencyId(id), batchIndex++);
-	}
-	for (int i = 0; i < 5; ++i) {
-		int length = deterministicRandom()->randomInt(16, 256);
-		StringRef id = makeString(length, arena);
-		deterministicRandom()->randomBytes(mutateString(id), length);
-		idVector.emplace_back(id);
-		idSet.emplace(id);
-		builder.add(IdempotencyId(id), batchIndex++);
+		builder.add(id, batchIndex++);
 	}
 
 	batchIndex = firstBatchIndex;
-	KeyValue kv = builder.buildAndClear();
+	Optional<KeyValue> kvOpt = builder.buildAndClear();
+	ASSERT(kvOpt.present());
+	const auto& kv = kvOpt.get();
 
 	ASSERT(idSet.size() == idVector.size());
 	for (const auto& id : idVector) {
@@ -120,7 +150,22 @@ TEST_CASE("/fdbclient/IdempotencyId/basic") {
 	}
 	ASSERT(idSet.size() == 0);
 
-	ASSERT(!kvContainsIdempotencyId(kv, IdempotencyId(deterministicRandom()->randomUniqueID())).present());
+	ASSERT(!kvContainsIdempotencyId(kv, generate(arena)).present());
 
+	return Void();
+}
+
+TEST_CASE("/fdbclient/IdempotencyId/serialization") {
+	ASSERT(ObjectReader::fromStringRef<IdempotencyIdRef>(ObjectWriter::toValue(IdempotencyIdRef(), Unversioned()),
+	                                                     Unversioned()) == IdempotencyIdRef());
+	for (int i = 0; i < 1000; ++i) {
+		Arena arena;
+		auto id = generate(arena);
+		auto serialized = ObjectWriter::toValue(id, Unversioned());
+		IdempotencyIdRef t;
+		ObjectReader reader(serialized.begin(), Unversioned());
+		reader.deserialize(t);
+		ASSERT(t == id);
+	}
 	return Void();
 }
