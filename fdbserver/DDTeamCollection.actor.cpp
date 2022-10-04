@@ -60,7 +60,7 @@ class DDTeamCollectionImpl {
 				// Because worker's processId can be changed when its locality is changed, we cannot watch on the old
 				// processId; This actor is inactive most time, so iterating all workers incurs little performance
 				// overhead.
-				state std::vector<ProcessData> workers = wait(getWorkers(self->cx));
+				state std::vector<ProcessData> workers = wait(self->db->getWorkers());
 				state std::set<AddressExclusion> existingAddrs;
 				for (int i = 0; i < workers.size(); i++) {
 					const ProcessData& workerData = workers[i];
@@ -1608,9 +1608,7 @@ public:
 		return Void(); // Don't ignore failures
 	}
 
-	ACTOR static Future<Void> waitForAllDataRemoved(DDTeamCollection const* teams,
-	                                                UID serverID,
-	                                                Version addedVersion) {
+	ACTOR static Future<Void> waitForAllDataRemoved(DDTeamCollection const* teams, UID serverID, Version addedVersion) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(teams->cx);
 		loop {
 			try {
@@ -1844,7 +1842,7 @@ public:
 				state Future<RangeResult> flocalitiesExclude =
 				    tr.getRange(excludedLocalityKeys, CLIENT_KNOBS->TOO_MANY);
 				state Future<RangeResult> flocalitiesFailed = tr.getRange(failedLocalityKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<std::vector<ProcessData>> fworkers = getWorkers(self->cx);
+				state Future<std::vector<ProcessData>> fworkers = self->db->getWorkers();
 				wait(success(fresultsExclude) && success(fresultsFailed) && success(flocalitiesExclude) &&
 				     success(flocalitiesFailed));
 
