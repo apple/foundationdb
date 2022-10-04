@@ -18,10 +18,20 @@
  * limitations under the License.
  */
 
+// See design/idempotency_ids.md for moreo information
+
 #pragma once
 
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/PImpl.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
+#include "flow/serialize.h"
+
+struct CommitResult {
+	Version commitVersion;
+	uint16_t batchIndex;
+};
 
 struct IdempotencyId {
 	explicit IdempotencyId(UID id) : IdempotencyId(StringRef(reinterpret_cast<const uint8_t*>(&id), sizeof(UID))) {}
@@ -76,6 +86,8 @@ private:
 		uint8_t* ptr;
 	} second; // If first < 256, then ptr is valid. Otherwise id is valid.
 	friend std::hash<IdempotencyId>;
+	friend struct IdempotencyIdKVBuilder;
+	friend Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const IdempotencyId& id);
 };
 
 namespace std {
@@ -87,3 +99,21 @@ struct hash<IdempotencyId> {
 
 // The plan is to use this as a key in a potentially large hashtable, so it should be compact.
 static_assert(sizeof(IdempotencyId) == 16);
+
+// Use in the commit proxy to construct a kv pair according to the format described in design/idempotency_ids.md
+struct IdempotencyIdKVBuilder {
+	IdempotencyIdKVBuilder();
+	void setCommitVersion(Version commitVersion);
+	// All calls to add must share the same high order byte of batchIndex
+	void add(const IdempotencyId& id, uint16_t batchIndex);
+	// Must call setCommitVersion before calling buildAndClear. Must call add at least once before calling
+	// buildAndClear. After calling buildAndClear, this object is in the same state as if it were just default
+	// constructed.
+	KeyValue buildAndClear();
+
+private:
+	PImpl<struct IdempotencyIdKVBuilderImpl> impl;
+};
+
+// Check if id is present in kv, and if so return the commit version and batchIndex
+Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const IdempotencyId& id);

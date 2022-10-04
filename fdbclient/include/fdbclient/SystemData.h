@@ -708,6 +708,8 @@ extern const KeyRangeRef storageQuotaKeys;
 extern const KeyRef storageQuotaPrefix;
 Key storageQuotaKey(StringRef tenantName);
 
+extern const KeyRangeRef idempotencyIdKeys;
+
 #pragma clang diagnostic pop
 
 #endif
