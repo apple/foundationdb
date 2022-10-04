@@ -419,8 +419,8 @@ TEST_CASE("/fdbclient/TaskBucket/Subspace") {
 	t3.append(ghi);
 	printf("%d==========%s===%d\n", 13, printable(subspace_test5.pack(t3)).c_str(), subspace_test5.pack(t3).size());
 	ASSERT(subspace_test5.pack(t3) == subspace_test5.get(StringRef()).get(def).pack(ghi));
-	ASSERT(subspace_test5.pack(t3) == LiteralStringRef("abc\x01user\x00\x15\x7b\x01\x00\x01"
-	                                                   "def\x00\x01ghi\x00"));
+	ASSERT(subspace_test5.pack(t3) == "abc\x01user\x00\x15\x7b\x01\x00\x01"
+	                                  "def\x00\x01ghi\x00"_sr);
 
 	printf("%d==========%s===%d\n",
 	       14,

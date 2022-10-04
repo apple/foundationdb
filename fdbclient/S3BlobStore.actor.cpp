@@ -98,7 +98,7 @@ S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 
 bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 #define TRY_PARAM(n, sn)                                                                                               \
-	if (name == LiteralStringRef(#n) || name == LiteralStringRef(#sn)) {                                               \
+	if (name == #n || name == #sn) {                                                                                   \
 		n = value;                                                                                                     \
 		return true;                                                                                                   \
 	}

@@ -459,7 +459,7 @@ public:
 
 		if (!it.is_unreadable() && !it.is_unknown_range() && key.offset > 1) {
 			*readThroughEnd = true;
-			key.setKey(maxKey); // maxKey is a KeyRef, but points to a LiteralStringRef. TODO: how can we ASSERT this?
+			key.setKey(maxKey); // maxKey is a KeyRef, but points to a literal. TODO: how can we ASSERT this?
 			key.offset = 1;
 			return;
 		}

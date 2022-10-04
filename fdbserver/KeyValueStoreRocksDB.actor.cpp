@@ -258,7 +258,7 @@ using DB = rocksdb::DB*;
 using CF = rocksdb::ColumnFamilyHandle*;
 
 #define PERSIST_PREFIX "\xff\xff"
-const KeyRef persistVersion = LiteralStringRef(PERSIST_PREFIX "Version");
+const KeyRef persistVersion = PERSIST_PREFIX "Version"_sr;
 const StringRef ROCKSDBSTORAGE_HISTOGRAM_GROUP = "RocksDBStorage"_sr;
 const StringRef ROCKSDB_COMMIT_LATENCY_HISTOGRAM = "RocksDBCommitLatency"_sr;
 const StringRef ROCKSDB_COMMIT_ACTION_HISTOGRAM = "RocksDBCommitAction"_sr;

@@ -48,7 +48,7 @@ TEST_CASE("/flow/actorcompiler/lineNumbers") {
 		}
 		break;
 	}
-	ASSERT(LiteralStringRef(__FILE__).endsWith("FlowTests.actor.cpp"_sr));
+	ASSERT(__FILE__sr.endsWith("FlowTests.actor.cpp"_sr));
 	return Void();
 }
 
