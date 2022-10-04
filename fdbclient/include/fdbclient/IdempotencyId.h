@@ -67,7 +67,7 @@ struct IdempotencyId {
 
 	~IdempotencyId() {
 		if (indirect()) {
-			delete second.ptr;
+			delete[] second.ptr;
 		}
 	}
 
