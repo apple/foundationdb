@@ -286,7 +286,7 @@ StringRef toStringRef(rocksdb::Slice s) {
 
 rocksdb::ColumnFamilyOptions getCFOptions() {
 	rocksdb::ColumnFamilyOptions options;
-	options.level_compaction_dynamic_level_bytes = true;
+	options.level_compaction_dynamic_level_bytes = SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
 	options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
 	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
 		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
@@ -1157,16 +1157,18 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			} else {
 				a.done.send(Void());
 
-				double compactRangeBeginTime = a.getHistograms ? timer_monotonic() : 0;
-				for (const auto& keyRange : deletes) {
-					auto begin = toSlice(keyRange.begin);
-					auto end = toSlice(keyRange.end);
-					ASSERT(db->SuggestCompactRange(cf, &begin, &end).ok());
-				}
-				if (a.getHistograms) {
-					metricPromiseStream.send(std::make_tuple(threadIndex,
-					                                         ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM.toString(),
-					                                         timer_monotonic() - compactRangeBeginTime));
+				if (SERVER_KNOBS->ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE) {
+					double compactRangeBeginTime = a.getHistograms ? timer_monotonic() : 0;
+					for (const auto& keyRange : deletes) {
+						auto begin = toSlice(keyRange.begin);
+						auto end = toSlice(keyRange.end);
+						ASSERT(db->SuggestCompactRange(cf, &begin, &end).ok());
+					}
+					if (a.getHistograms) {
+						metricPromiseStream.send(std::make_tuple(threadIndex,
+						                                         ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM.toString(),
+						                                         timer_monotonic() - compactRangeBeginTime));
+					}
 				}
 			}
 			if (a.getHistograms) {
