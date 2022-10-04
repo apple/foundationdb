@@ -2462,6 +2462,8 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 						if (self->recentRecoveryCountDueToHealth() < SERVER_KNOBS->CC_MAX_HEALTH_RECOVERY_COUNT) {
 							self->recentHealthTriggeredRecoveryTime.push(now());
 							self->excludedDegradedServers = self->degradationInfo.degradedServers;
+							self->excludedDegradedServers.insert(self->degradationInfo.disconnectedServers.begin(),
+							                                     self->degradationInfo.disconnectedServers.end());
 							TraceEvent("DegradedServerDetectedAndTriggerRecovery")
 							    .detail("RecentRecoveryCountDueToHealth", self->recentRecoveryCountDueToHealth());
 							self->db.forceMasterFailure.trigger();
