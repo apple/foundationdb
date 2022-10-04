@@ -3036,7 +3036,8 @@ public:
 		std::unordered_set<NetworkAddress>
 		    degradedServers; // The servers that the cluster controller is considered as degraded. The servers in this
 		                     // list are not excluded unless they are added to `excludedDegradedServers`.
-		std::unordered_set<NetworkAddress> disconnectedServers; // Similar to the above list, but the servers experiencing connection issue.
+		std::unordered_set<NetworkAddress>
+		    disconnectedServers; // Similar to the above list, but the servers experiencing connection issue.
 
 		bool degradedSatellite = false; // Indicates that the entire satellite DC is degraded.
 	};
