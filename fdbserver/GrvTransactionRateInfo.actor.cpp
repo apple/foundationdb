@@ -26,7 +26,9 @@
 
 GrvTransactionRateInfo::GrvTransactionRateInfo(double rate)
   : rate(rate), smoothRate(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW),
-    smoothReleased(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW) {}
+    smoothReleased(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW) {
+	smoothRate.setTotal(rate);
+}
 
 bool GrvTransactionRateInfo::canStart(int64_t numAlreadyStarted, int64_t count) const {
 	return numAlreadyStarted + count <=
