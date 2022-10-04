@@ -30,13 +30,13 @@
 #include "fdbserver/TCInfo.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbserver/DDTxnProcessor.h"
+#include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include <boost/heap/policies.hpp>
 #include <boost/heap/skew_heap.hpp>
-
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 /////////////////////////////// Data //////////////////////////////////////
@@ -248,7 +248,7 @@ FDB_DECLARE_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
 
 class PhysicalShardCollection : public ReferenceCounted<PhysicalShardCollection> {
 public:
-	PhysicalShardCollection() : requireTransition(false), lastTransitionStartTime(now()) {}
+	PhysicalShardCollection() : lastTransitionStartTime(now()), requireTransition(false) {}
 
 	enum class PhysicalShardCreationTime { DDInit, DDRelocator };
 
@@ -417,6 +417,7 @@ private:
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer
 struct DDShardInfo {
 	Key key;
+	// all UID are sorted
 	std::vector<UID> primarySrc;
 	std::vector<UID> remoteSrc;
 	std::vector<UID> primaryDest;
@@ -499,7 +500,7 @@ struct TeamCollectionInterface {
 };
 
 ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> initData,
-                                           Database cx,
+                                           Reference<IDDTxnProcessor> db,
                                            PromiseStream<RelocateShard> output,
                                            Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                            Reference<PhysicalShardCollection> physicalShardCollection,
@@ -514,14 +515,14 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            bool* trackerCancelled,
                                            Optional<Reference<TenantCache>> ddTenantCache);
 
-ACTOR Future<Void> dataDistributionQueue(Database cx,
+ACTOR Future<Void> dataDistributionQueue(Reference<IDDTxnProcessor> db,
                                          PromiseStream<RelocateShard> output,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,
                                          PromiseStream<GetTopKMetricsRequest> getTopKMetrics,
                                          Reference<AsyncVar<bool>> processingUnhealthy,
                                          Reference<AsyncVar<bool>> processingWiggle,
-                                         std::vector<TeamCollectionInterface> teamCollection,
+                                         std::vector<TeamCollectionInterface> teamCollections,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                          Reference<PhysicalShardCollection> physicalShardCollection,
                                          MoveKeysLock lock,

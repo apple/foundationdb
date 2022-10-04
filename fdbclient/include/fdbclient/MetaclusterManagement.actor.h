@@ -1065,6 +1065,7 @@ Future<Void> managementClusterRemoveTenantFromGroup(Transaction tr,
 template <class DB>
 struct CreateTenantImpl {
 	MetaclusterOperationContext<DB> ctx;
+	bool preferAssignedCluster;
 
 	// Initialization parameters
 	TenantName tenantName;
@@ -1073,8 +1074,12 @@ struct CreateTenantImpl {
 	// Parameter set if tenant creation permanently fails on the data cluster
 	Optional<int64_t> replaceExistingTenantId;
 
-	CreateTenantImpl(Reference<DB> managementDb, TenantName tenantName, TenantMapEntry tenantEntry)
-	  : ctx(managementDb), tenantName(tenantName), tenantEntry(tenantEntry) {}
+	CreateTenantImpl(Reference<DB> managementDb,
+	                 bool preferAssignedCluster,
+	                 TenantName tenantName,
+	                 TenantMapEntry tenantEntry)
+	  : ctx(managementDb), preferAssignedCluster(preferAssignedCluster), tenantName(tenantName),
+	    tenantEntry(tenantEntry) {}
 
 	ACTOR static Future<ClusterName> checkClusterAvailability(Reference<IDatabase> dataClusterDb,
 	                                                          ClusterName clusterName) {
@@ -1107,9 +1112,15 @@ struct CreateTenantImpl {
 			} else if (!self->replaceExistingTenantId.present() ||
 			           self->replaceExistingTenantId.get() != existingEntry.get().id) {
 				// The tenant creation has already started, so resume where we left off
-				self->tenantEntry = existingEntry.get();
 				ASSERT(existingEntry.get().assignedCluster.present());
-
+				if (self->preferAssignedCluster &&
+				    existingEntry.get().assignedCluster.get() != self->tenantEntry.assignedCluster.get()) {
+					TraceEvent("MetaclusterCreateTenantClusterMismatch")
+					    .detail("Preferred", self->tenantEntry.assignedCluster.get())
+					    .detail("Actual", existingEntry.get().assignedCluster.get());
+					throw invalid_tenant_configuration();
+				}
+				self->tenantEntry = existingEntry.get();
 				wait(self->ctx.setCluster(tr, existingEntry.get().assignedCluster.get()));
 				return true;
 			} else {
@@ -1152,31 +1163,52 @@ struct CreateTenantImpl {
 
 			if (groupEntry.present()) {
 				ASSERT(groupEntry.get().assignedCluster.present());
+				if (self->preferAssignedCluster &&
+				    groupEntry.get().assignedCluster.get() != self->tenantEntry.assignedCluster.get()) {
+					TraceEvent("MetaclusterCreateTenantGroupClusterMismatch")
+					    .detail("TenantGroupCluster", groupEntry.get().assignedCluster.get())
+					    .detail("SpecifiedCluster", self->tenantEntry.assignedCluster.get());
+					throw invalid_tenant_configuration();
+				}
 				return std::make_pair(groupEntry.get().assignedCluster.get(), true);
 			}
 		}
 
-		// Get a set of the most full clusters that still have capacity
-		state KeyBackedSet<Tuple>::RangeResultType availableClusters =
-		    wait(ManagementClusterMetadata::clusterCapacityIndex.getRange(
-		        tr, {}, {}, CLIENT_KNOBS->METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK, Snapshot::False, Reverse::True));
-
-		if (availableClusters.results.empty()) {
-			throw metacluster_no_capacity();
-		}
-
 		state std::vector<Future<Reference<IDatabase>>> dataClusterDbs;
-		for (auto clusterTuple : availableClusters.results) {
-			dataClusterDbs.push_back(getAndOpenDatabase(tr, clusterTuple.getString(1)));
-		}
-
-		wait(waitForAll(dataClusterDbs));
-
-		// Check the availability of our set of clusters
+		state std::vector<ClusterName> dataClusterNames;
 		state std::vector<Future<ClusterName>> clusterAvailabilityChecks;
-		for (int i = 0; i < availableClusters.results.size(); ++i) {
-			clusterAvailabilityChecks.push_back(
-			    checkClusterAvailability(dataClusterDbs[i].get(), availableClusters.results[i].getString(1)));
+		// Get a set of the most full clusters that still have capacity
+		// If preferred cluster is specified, look for that one.
+		if (self->preferAssignedCluster) {
+			DataClusterMetadata dataClusterMetadata =
+			    wait(getClusterTransaction(tr, self->tenantEntry.assignedCluster.get()));
+			if (!dataClusterMetadata.entry.hasCapacity()) {
+				throw cluster_no_capacity();
+			}
+			dataClusterNames.push_back(self->tenantEntry.assignedCluster.get());
+		} else {
+			state KeyBackedSet<Tuple>::RangeResultType availableClusters =
+			    wait(ManagementClusterMetadata::clusterCapacityIndex.getRange(
+			        tr,
+			        {},
+			        {},
+			        CLIENT_KNOBS->METACLUSTER_ASSIGNMENT_CLUSTERS_TO_CHECK,
+			        Snapshot::False,
+			        Reverse::True));
+			if (availableClusters.results.empty()) {
+				throw metacluster_no_capacity();
+			}
+			for (auto clusterTuple : availableClusters.results) {
+				dataClusterNames.push_back(clusterTuple.getString(1));
+			}
+		}
+		for (auto dataClusterName : dataClusterNames) {
+			dataClusterDbs.push_back(getAndOpenDatabase(tr, dataClusterName));
+		}
+		wait(waitForAll(dataClusterDbs));
+		// Check the availability of our set of clusters
+		for (int i = 0; i < dataClusterDbs.size(); ++i) {
+			clusterAvailabilityChecks.push_back(checkClusterAvailability(dataClusterDbs[i].get(), dataClusterNames[i]));
 		}
 
 		// Wait for a successful availability check from some cluster. We prefer the most full cluster, but if it
@@ -1323,7 +1355,7 @@ struct CreateTenantImpl {
 
 ACTOR template <class DB>
 Future<Void> createTenant(Reference<DB> db, TenantName name, TenantMapEntry tenantEntry) {
-	state CreateTenantImpl<DB> impl(db, name, tenantEntry);
+	state CreateTenantImpl<DB> impl(db, tenantEntry.assignedCluster.present(), name, tenantEntry);
 	wait(impl.run());
 	return Void();
 }
@@ -1577,7 +1609,7 @@ struct ConfigureTenantImpl {
 		// Removing a tenant group is only possible if we have capacity for more groups on the current cluster
 		else if (!desiredGroup.present()) {
 			if (!self->ctx.dataClusterMetadata.get().entry.hasCapacity()) {
-				throw metacluster_no_capacity();
+				throw cluster_no_capacity();
 			}
 
 			wait(managementClusterRemoveTenantFromGroup(
@@ -1593,7 +1625,7 @@ struct ConfigureTenantImpl {
 		// If we are creating a new tenant group, we need to have capacity on the current cluster
 		if (!tenantGroupEntry.present()) {
 			if (!self->ctx.dataClusterMetadata.get().entry.hasCapacity()) {
-				throw metacluster_no_capacity();
+				throw cluster_no_capacity();
 			}
 			wait(managementClusterRemoveTenantFromGroup(
 			    tr, self->tenantName, tenantEntry, &self->ctx.dataClusterMetadata.get()));
@@ -1613,7 +1645,14 @@ struct ConfigureTenantImpl {
 
 		// We don't currently support movement between groups on different clusters
 		else {
-			throw cluster_no_capacity();
+			TraceEvent("TenantGroupChangeToDifferentCluster")
+			    .detail("Tenant", self->tenantName)
+			    .detail("OriginalGroup", tenantEntry.tenantGroup)
+			    .detail("DesiredGroup", desiredGroup)
+			    .detail("TenantAssignedCluster", tenantEntry.assignedCluster)
+			    .detail("DesiredGroupAssignedCluster", tenantGroupEntry.get().assignedCluster);
+
+			throw invalid_tenant_configuration();
 		}
 	}
 
@@ -1918,6 +1957,61 @@ Future<Void> renameTenant(Reference<DB> db, TenantName oldName, TenantName newNa
 	state RenameTenantImpl<DB> impl(db, oldName, newName);
 	wait(impl.run());
 	return Void();
+}
+
+template <class Transaction>
+Future<Optional<TenantGroupEntry>> tryGetTenantGroupTransaction(Transaction tr, TenantGroupName name) {
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+	return ManagementClusterMetadata::tenantMetadata().tenantGroupMap.get(tr, name);
+}
+
+ACTOR template <class DB>
+Future<Optional<TenantGroupEntry>> tryGetTenantGroup(Reference<DB> db, TenantGroupName name) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			Optional<TenantGroupEntry> entry = wait(tryGetTenantGroupTransaction(tr, name));
+			return entry;
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
+ACTOR template <class Transaction>
+Future<std::vector<std::pair<TenantGroupName, TenantGroupEntry>>> listTenantGroupsTransaction(Transaction tr,
+                                                                                              TenantGroupName begin,
+                                                                                              TenantGroupName end,
+                                                                                              int limit) {
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+
+	KeyBackedRangeResult<std::pair<TenantGroupName, TenantGroupEntry>> results =
+	    wait(ManagementClusterMetadata::tenantMetadata().tenantGroupMap.getRange(tr, begin, end, limit));
+
+	return results.results;
+}
+
+ACTOR template <class DB>
+Future<std::vector<std::pair<TenantGroupName, TenantGroupEntry>>> listTenantGroups(Reference<DB> db,
+                                                                                   TenantGroupName begin,
+                                                                                   TenantGroupName end,
+                                                                                   int limit) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			std::vector<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroups =
+			    wait(listTenantGroupsTransaction(tr, begin, end, limit));
+			return tenantGroups;
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
 }
 
 } // namespace MetaclusterAPI

@@ -88,7 +88,11 @@
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
 #include <signal.h>
+#if defined(__linux__)
 #include <sys/prctl.h>
+#elif defined(__FreeBSD__)
+#include <sys/procctl.h>
+#endif
 #ifdef ALLOC_INSTRUMENTATION
 #include <cxxabi.h>
 #endif
@@ -111,7 +115,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
 	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONNECTOR_TYPE, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,
 	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION
 };
@@ -200,6 +204,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_BLOB_CREDENTIAL_FILE,  "--blob-credential-file",      SO_REQ_SEP },
 	{ OPT_CONFIG_PATH,           "--config-path",               SO_REQ_SEP },
 	{ OPT_USE_TEST_CONFIG_DB,    "--use-test-config-db",        SO_NONE },
+	{ OPT_NO_CONFIG_DB,          "--no-config-db",              SO_NONE },
 	{ OPT_FAULT_INJECTION,       "-fi",                         SO_REQ_SEP },
 	{ OPT_FAULT_INJECTION,       "--fault-injection",           SO_REQ_SEP },
 	{ OPT_PROFILER,	             "--profiler-",                 SO_REQ_SEP },
@@ -352,17 +357,17 @@ UID getSharedMemoryMachineId() {
 #endif
 }
 
-ACTOR void failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simulator.getCurrentProcess()) {
+ACTOR void failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simulator->getCurrentProcess()) {
 	wait(trigger);
 	if (enableFailures) {
 		printf("Killing machine: %s at %f\n", m->address.toString().c_str(), now());
-		g_simulator.killProcess(m, ISimulator::KillInstantly);
+		g_simulator->killProcess(m, ISimulator::KillInstantly);
 	}
 }
 
 void failAfter(Future<Void> trigger, Endpoint e) {
-	if (g_network == &g_simulator)
-		failAfter(trigger, g_simulator.getProcess(e));
+	if (g_network == g_simulator)
+		failAfter(trigger, g_simulator->getProcess(e));
 }
 
 ACTOR Future<Void> histogramReport() {
@@ -389,12 +394,10 @@ void testSerializationSpeed() {
 				CommitTransactionRef& tr = batch[t];
 				tr.read_snapshot = 0;
 				for (int i = 0; i < 2; i++)
-					tr.mutations.push_back_deep(
-					    batchArena,
-					    MutationRef(MutationRef::SetValue, LiteralStringRef("KeyABCDE"), LiteralStringRef("SomeValu")));
-				tr.mutations.push_back_deep(
-				    batchArena,
-				    MutationRef(MutationRef::ClearRange, LiteralStringRef("BeginKey"), LiteralStringRef("EndKeyAB")));
+					tr.mutations.push_back_deep(batchArena,
+					                            MutationRef(MutationRef::SetValue, "KeyABCDE"_sr, "SomeValu"_sr));
+				tr.mutations.push_back_deep(batchArena,
+				                            MutationRef(MutationRef::ClearRange, "BeginKey"_sr, "EndKeyAB"_sr));
 			}
 
 			build += timer() - tstart;
@@ -884,7 +887,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
 		const std::string& publicAddressStr = publicAddressStrs[ii];
-		bool autoPublicAddress = StringRef(publicAddressStr).startsWith(LiteralStringRef("auto:"));
+		bool autoPublicAddress = StringRef(publicAddressStr).startsWith("auto:"_sr);
 		NetworkAddress currentPublicAddress;
 		if (autoPublicAddress) {
 			try {
@@ -1069,7 +1072,7 @@ struct CLIOptions {
 	const char* blobCredsFromENV = nullptr;
 
 	std::string configPath;
-	ConfigDBType configDBType{ ConfigDBType::DISABLED };
+	ConfigDBType configDBType{ ConfigDBType::PAXOS };
 
 	Reference<IClusterConnectionRecord> connectionFile;
 	Standalone<StringRef> machineId;
@@ -1627,6 +1630,9 @@ private:
 			case OPT_USE_TEST_CONFIG_DB:
 				configDBType = ConfigDBType::SIMPLE;
 				break;
+			case OPT_NO_CONFIG_DB:
+				configDBType = ConfigDBType::DISABLED;
+				break;
 			case OPT_FLOW_PROCESS_NAME:
 				flowProcessName = args.OptionArg();
 				std::cout << flowProcessName << std::endl;
@@ -1759,7 +1765,7 @@ private:
 
 		bool autoPublicAddress =
 		    std::any_of(publicAddressStrs.begin(), publicAddressStrs.end(), [](const std::string& addr) {
-			    return StringRef(addr).startsWith(LiteralStringRef("auto:"));
+			    return StringRef(addr).startsWith("auto:"_sr);
 		    });
 		if ((role != ServerRole::Simulation && role != ServerRole::CreateTemplateDatabase &&
 		     role != ServerRole::KVFileIntegrityCheck && role != ServerRole::KVFileGenerateIOLogChecksums &&
@@ -2261,7 +2267,7 @@ int main(int argc, char* argv[]) {
 				                KnobValue::create(ini.GetBoolValue("META", "enableBlobGranuleEncryption", false)));
 			}
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
-			g_simulator.run();
+			g_simulator->run();
 		} else if (role == ServerRole::FDBD) {
 			// Update the global blob credential files list so that both fast
 			// restore workers and backup workers can access blob storage.
@@ -2394,9 +2400,14 @@ int main(int argc, char* argv[]) {
 			    g_network->getLocalAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
 			TraceEvent(SevDebug, "StartingFlowProcess").detail("FlowProcessName", opts.flowProcessName);
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 			prctl(PR_SET_PDEATHSIG, SIGTERM);
 			if (getppid() == 1) /* parent already died before prctl */
+				flushAndExit(FDB_EXIT_SUCCESS);
+#elif defined(__FreeBSD__)
+			const int sig = SIGTERM;
+			procctl(P_PID, 0, PROC_PDEATHSIG_CTL, (void*)&sig);
+			if (getppid() == 1) /* parent already died before procctl */
 				flushAndExit(FDB_EXIT_SUCCESS);
 #endif
 
@@ -2471,7 +2482,7 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		// g_simulator.run();
+		// g_simulator->run();
 
 #ifdef ALLOC_INSTRUMENTATION
 		{
@@ -2490,19 +2501,19 @@ int main(int argc, char* argv[]) {
 				char* demangled = abi::__cxa_demangle(i->first, nullptr, nullptr, nullptr);
 				if (demangled) {
 					s = demangled;
-					if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))
-						s = s.substr(LiteralStringRef("(anonymous namespace)::").size());
+					if (StringRef(s).startsWith("(anonymous namespace)::"_sr))
+						s = s.substr("(anonymous namespace)::"_sr.size());
 					free(demangled);
 				} else
 					s = i->first;
 #else
 				s = i->first;
-				if (StringRef(s).startsWith(LiteralStringRef("class `anonymous namespace'::")))
-					s = s.substr(LiteralStringRef("class `anonymous namespace'::").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("class ")))
-					s = s.substr(LiteralStringRef("class ").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
-					s = s.substr(LiteralStringRef("struct ").size());
+				if (StringRef(s).startsWith("class `anonymous namespace'::"_sr))
+					s = s.substr("class `anonymous namespace'::"_sr.size());
+				else if (StringRef(s).startsWith("class "_sr))
+					s = s.substr("class "_sr.size());
+				else if (StringRef(s).startsWith("struct "_sr))
+					s = s.substr("struct "_sr.size());
 #endif
 
 				typeNames.emplace_back(s, i->first);

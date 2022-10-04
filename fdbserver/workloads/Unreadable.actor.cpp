@@ -32,8 +32,8 @@ struct UnreadableWorkload : TestWorkload {
 	std::vector<Future<Void>> clients;
 
 	UnreadableWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
-		nodeCount = getOption(options, LiteralStringRef("nodeCount"), (uint64_t)100000);
+		testDuration = getOption(options, "testDuration"_sr, 600.0);
+		nodeCount = getOption(options, "nodeCount"_sr, (uint64_t)100000);
 	}
 
 	std::string description() const override { return "Unreadable"; }

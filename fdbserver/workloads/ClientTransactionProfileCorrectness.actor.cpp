@@ -26,8 +26,8 @@
 #include "fdbclient/Tuple.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
-static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
+static const Key CLIENT_LATENCY_INFO_PREFIX = "client_latency/"_sr;
+static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = "client_latency_counter/"_sr;
 
 /*
 FF               - 2 bytes \xff\x02
@@ -37,8 +37,7 @@ NNNN             - 4 Bytes Chunk number (Big Endian)
 TTTT             - 4 Bytes Total number of chunks (Big Endian)
 XXXX             - Variable length user provided transaction identifier
 */
-StringRef sampleTrInfoKey =
-    LiteralStringRef("\xff\x02/fdbClientInfo/client_latency/SSSSSSSSSS/RRRRRRRRRRRRRRRR/NNNNTTTT/XXXX/");
+StringRef sampleTrInfoKey = "\xff\x02/fdbClientInfo/client_latency/SSSSSSSSSS/RRRRRRRRRRRRRRRR/NNNNTTTT/XXXX/"_sr;
 static const auto chunkNumStartIndex = sampleTrInfoKey.toString().find('N');
 static const auto numChunksStartIndex = sampleTrInfoKey.toString().find('T');
 static const int chunkFormatSize = 4;
@@ -203,10 +202,10 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 
 	ClientTransactionProfileCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		samplingProbability = getOption(options,
-		                                LiteralStringRef("samplingProbability"),
+		                                "samplingProbability"_sr,
 		                                deterministicRandom()->random01() / 10); // rand range 0 - 0.1
 		trInfoSizeLimit = getOption(options,
-		                            LiteralStringRef("trInfoSizeLimit"),
+		                            "trInfoSizeLimit"_sr,
 		                            deterministicRandom()->randomInt(100 * 1024, 10 * 1024 * 1024)); // 100 KB - 10 MB
 		TraceEvent(SevInfo, "ClientTransactionProfilingSetup")
 		    .detail("ClientId", clientId)

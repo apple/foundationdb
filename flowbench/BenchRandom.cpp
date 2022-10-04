@@ -23,9 +23,8 @@
 #include "flow/IRandom.h"
 
 static void bench_random(benchmark::State& state) {
-	while (state.KeepRunning()) {
-		double r = deterministicRandom()->random01();
-		benchmark::DoNotOptimize(r);
+	for (auto _ : state) {
+		benchmark::DoNotOptimize(deterministicRandom()->random01());
 	}
 	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }

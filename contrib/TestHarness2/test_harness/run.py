@@ -18,7 +18,7 @@ from functools import total_ordering
 from pathlib import Path
 from test_harness.version import Version
 from test_harness.config import config
-from typing import List, Pattern, OrderedDict
+from typing import Dict, List, Pattern, OrderedDict
 
 from test_harness.summarize import Summary, SummaryTree
 
@@ -309,6 +309,7 @@ class TestRun:
         self.trace_format: str | None = config.trace_format
         if Version.of_binary(self.binary) < "6.1.0":
             self.trace_format = None
+        self.use_tls_plugin = Version.of_binary(self.binary) < "5.2.0"
         self.temp_path = config.run_dir / str(self.uid)
         # state for the run
         self.retryable_error: bool = False
@@ -332,8 +333,14 @@ class TestRun:
 
     def run(self):
         command: List[str] = []
+        env: Dict[str, str] = os.environ.copy()
         valgrind_file: Path | None = None
-        if self.use_valgrind:
+        if self.use_valgrind and self.binary == config.binary:
+            # Only run the binary under test under valgrind. There's nothing we
+            # can do about valgrind errors in old binaries anyway, and it makes
+            # the test take longer. Also old binaries weren't built with
+            # USE_VALGRIND=ON, and we have seen false positives with valgrind in
+            # such binaries.
             command.append('valgrind')
             valgrind_file = self.temp_path / Path('valgrind-{}.xml'.format(self.random_seed))
             dbg_path = os.getenv('FDB_VALGRIND_DBGPATH')
@@ -346,6 +353,11 @@ class TestRun:
                     '-s', str(self.random_seed)]
         if self.trace_format is not None:
             command += ['--trace_format', self.trace_format]
+        if self.use_tls_plugin:
+            command += ['--tls_plugin', str(config.tls_plugin_path)]
+            env["FDB_TLS_PLUGIN"] = str(config.tls_plugin_path)
+        if config.disable_kaio:
+            command += ['--knob-disable-posix-kernel-aio=1']
         if Version.of_binary(self.binary) >= '7.1.0':
             command += ['-fi', 'on' if self.fault_injection_enabled else 'off']
         if self.restarting:
@@ -361,7 +373,7 @@ class TestRun:
         resources = ResourceMonitor()
         resources.start()
         process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, cwd=self.temp_path,
-                                   text=True)
+                                   text=True, env=env)
         did_kill = False
         timeout = 20 * config.kill_seconds if self.use_valgrind else config.kill_seconds
         err_out: str

@@ -1333,7 +1333,7 @@ int SQLiteDB::checkAllPageChecksums() {
 	// then we could instead open a read cursor for the same effect, as currently tryReadEveryDbPage() requires it.
 	Statement* jm = new Statement(*this, "PRAGMA journal_mode");
 	ASSERT(jm->nextRow());
-	if (jm->column(0) != LiteralStringRef("wal")) {
+	if (jm->column(0) != "wal"_sr) {
 		TraceEvent(SevError, "JournalModeError").detail("Filename", filename).detail("Mode", jm->column(0));
 		ASSERT(false);
 	}
@@ -1502,7 +1502,7 @@ void SQLiteDB::open(bool writable) {
 
 	Statement jm(*this, "PRAGMA journal_mode");
 	ASSERT(jm.nextRow());
-	if (jm.column(0) != LiteralStringRef("wal")) {
+	if (jm.column(0) != "wal"_sr) {
 		TraceEvent(SevError, "JournalModeError").detail("Filename", filename).detail("Mode", jm.column(0));
 		ASSERT(false);
 	}
@@ -1810,7 +1810,7 @@ private:
 			cursor->set(a.kv);
 			++setsThisCommit;
 			++writesComplete;
-			if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting)
+			if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting)
 				TraceEvent("SetActionFinished", dbgid).detail("Elapsed", now() - s);
 		}
 
@@ -1824,7 +1824,7 @@ private:
 			cursor->fastClear(a.range, freeTableEmpty);
 			cursor->clear(a.range); // TODO: at most one
 			++writesComplete;
-			if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting)
+			if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting)
 				TraceEvent("ClearActionFinished", dbgid).detail("Elapsed", now() - s);
 		}
 
@@ -1864,7 +1864,7 @@ private:
 
 			diskBytesUsed = waitForAndGet(conn.dbFile->size()) + waitForAndGet(conn.walFile->size());
 
-			if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting)
+			if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting)
 				TraceEvent("CommitActionFinished", dbgid).detail("Elapsed", now() - t1);
 		}
 
@@ -1987,7 +1987,7 @@ private:
 
 			a.result.send(workPerformed);
 			++writesComplete;
-			if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting)
+			if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting)
 				TraceEvent("SpringCleaningActionFinished", dbgid).detail("Elapsed", now() - s);
 		}
 	};
@@ -1996,7 +1996,7 @@ private:
 		state int64_t lastReadsComplete = 0;
 		state int64_t lastWritesComplete = 0;
 		loop {
-			wait(delay(FLOW_KNOBS->DISK_METRIC_LOGGING_INTERVAL));
+			wait(delay(FLOW_KNOBS->SQLITE_DISK_METRIC_LOGGING_INTERVAL));
 
 			int64_t rc = self->readsComplete, wc = self->writesComplete;
 			TraceEvent("DiskMetrics", self->logID)
@@ -2287,9 +2287,9 @@ ACTOR Future<Void> KVFileCheck(std::string filename, bool integrity) {
 
 	StringRef kvFile(filename);
 	KeyValueStoreType type = KeyValueStoreType::END;
-	if (kvFile.endsWith(LiteralStringRef(".fdb")))
+	if (kvFile.endsWith(".fdb"_sr))
 		type = KeyValueStoreType::SSD_BTREE_V1;
-	else if (kvFile.endsWith(LiteralStringRef(".sqlite")))
+	else if (kvFile.endsWith(".sqlite"_sr))
 		type = KeyValueStoreType::SSD_BTREE_V2;
 	ASSERT(type != KeyValueStoreType::END);
 

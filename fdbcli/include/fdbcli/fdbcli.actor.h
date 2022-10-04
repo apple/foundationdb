@@ -95,6 +95,7 @@ extern const KeyRef advanceVersionSpecialKey;
 extern const KeyRef consistencyCheckSpecialKey;
 // coordinators
 extern const KeyRef clusterDescriptionSpecialKey;
+extern const KeyRef configDBSpecialKey;
 extern const KeyRef coordinatorsAutoSpecialKey;
 extern const KeyRef coordinatorsProcessSpecialKey;
 // datadistribution
@@ -119,7 +120,7 @@ extern const KeyRef ignoreSSFailureSpecialKey;
 extern const KeyRangeRef processClassSourceSpecialKeyRange;
 extern const KeyRangeRef processClassTypeSpecialKeyRange;
 // Other special keys
-inline const KeyRef errorMsgSpecialKey = LiteralStringRef("\xff\xff/error_message");
+inline const KeyRef errorMsgSpecialKey = "\xff\xff/error_message"_sr;
 inline const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/management/options/worker_interfaces/verify"_sr;
 // help functions (Copied from fdbcli.actor.cpp)
 
@@ -159,20 +160,16 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
                                          std::vector<StringRef> tokens,
                                          LineNoise* linenoise,
                                          Future<Void> warn);
-// configuretenant command
-ACTOR Future<bool> configureTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // consistency command
 ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
                                                 std::vector<StringRef> tokens,
                                                 bool intrans);
+// consistency scan command
+ACTOR Future<bool> consistencyScanCommandActor(Database localDb, std::vector<StringRef> tokens);
 // coordinators command
 ACTOR Future<bool> coordinatorsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
-// createtenant command
-ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion);
 // datadistribution command
 ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
-// deletetenant command
-ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion);
 // exclude command
 ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, Future<Void> warn);
 // expensive_data_check command
@@ -188,8 +185,6 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
                                              bool force);
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
-// gettenant command
-ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion);
 // include command
 ACTOR Future<bool> includeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // kill command
@@ -197,8 +192,6 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
                                     Reference<ITransaction> tr,
                                     std::vector<StringRef> tokens,
                                     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
-// listtenants command
-ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion);
 // lock/unlock command
 ACTOR Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
@@ -215,6 +208,11 @@ ACTOR Future<bool> changeFeedCommandActor(Database localDb,
 ACTOR Future<bool> blobRangeCommandActor(Database localDb,
                                          Optional<TenantMapEntry> tenantEntry,
                                          std::vector<StringRef> tokens);
+
+// blobkey command
+ACTOR Future<bool> blobKeyCommandActor(Database localDb,
+                                       Optional<TenantMapEntry> tenantEntry,
+                                       std::vector<StringRef> tokens);
 // maintenance command
 ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);
 ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,
@@ -226,8 +224,6 @@ ACTOR Future<bool> profileCommandActor(Database db,
                                        Reference<ITransaction> tr,
                                        std::vector<StringRef> tokens,
                                        bool intrans);
-// renametenant command
-ACTOR Future<bool> renameTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, int apiVersion);
 // quota command
 ACTOR Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // setclass command
@@ -244,6 +240,12 @@ ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
                                        Reference<ITransaction> tr,
                                        std::vector<StringRef> tokens,
                                        std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
+// tenant command
+Future<bool> tenantCommand(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// tenant command compatibility layer
+Future<bool> tenantCommandForwarder(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// tenantgroup command
+Future<bool> tenantGroupCommand(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // throttle command
 ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // triggerteaminfolog command

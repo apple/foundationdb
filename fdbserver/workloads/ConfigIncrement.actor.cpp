@@ -39,12 +39,14 @@ class ConfigIncrementWorkload : public TestWorkload {
 	static Key getConfigKey() { return Tuple::makeTuple(/* config class */ nullptr, testKnobName).pack(); }
 
 	ACTOR static Future<int> get(Reference<ISingleThreadTransaction> tr) {
-		TraceEvent(SevDebug, "ConfigIncrementGet");
+		state TraceEvent te(SevDebug, "ConfigIncrementGet");
 		Optional<Value> serializedValue = wait(tr->get(getConfigKey()));
 		if (!serializedValue.present()) {
 			return 0;
 		} else {
-			return BinaryReader::fromStringRef<int>(serializedValue.get(), Unversioned());
+			int value = BinaryReader::fromStringRef<int>(serializedValue.get(), Unversioned());
+			te.detail("Value", value);
+			return value;
 		}
 	}
 
@@ -98,9 +100,9 @@ class ConfigIncrementWorkload : public TestWorkload {
 	}
 
 	ACTOR static Future<bool> check(ConfigIncrementWorkload* self, Database cx) {
-		state Reference<ISingleThreadTransaction> tr = self->getTransaction(cx);
 		loop {
 			try {
+				state Reference<ISingleThreadTransaction> tr = self->getTransaction(cx);
 				state int currentValue = wait(get(tr));
 				auto expectedValue = self->incrementActors * self->incrementsPerActor;
 				TraceEvent("ConfigIncrementCheck")
@@ -115,9 +117,9 @@ class ConfigIncrementWorkload : public TestWorkload {
 
 	Reference<ISingleThreadTransaction> getTransaction(Database cx) const {
 		ASSERT(g_network->isSimulated()); // TODO: Enforce elsewhere
-		ASSERT(g_simulator.configDBType != ConfigDBType::DISABLED);
-		auto type = (g_simulator.configDBType == ConfigDBType::SIMPLE) ? ISingleThreadTransaction::Type::SIMPLE_CONFIG
-		                                                               : ISingleThreadTransaction::Type::PAXOS_CONFIG;
+		ASSERT(g_simulator->configDBType != ConfigDBType::DISABLED);
+		auto type = (g_simulator->configDBType == ConfigDBType::SIMPLE) ? ISingleThreadTransaction::Type::SIMPLE_CONFIG
+		                                                                : ISingleThreadTransaction::Type::PAXOS_CONFIG;
 		return ISingleThreadTransaction::create(type, cx);
 	}
 

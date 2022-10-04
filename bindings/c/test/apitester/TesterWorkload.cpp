@@ -106,30 +106,49 @@ void WorkloadBase::schedule(TTaskFct task) {
 	});
 }
 
-void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskFct cont, bool failOnError) {
+void WorkloadBase::execTransaction(TOpStartFct startFct,
+                                   TTaskFct cont,
+                                   std::optional<fdb::BytesRef> tenant,
+                                   bool failOnError) {
+	doExecute(startFct, cont, tenant, failOnError, true);
+}
+
+// Execute a non-transactional database operation within the workload
+void WorkloadBase::execOperation(TOpStartFct startFct, TTaskFct cont, bool failOnError) {
+	doExecute(startFct, cont, {}, failOnError, false);
+}
+
+void WorkloadBase::doExecute(TOpStartFct startFct,
+                             TTaskFct cont,
+                             std::optional<fdb::BytesRef> tenant,
+                             bool failOnError,
+                             bool transactional) {
 	ASSERT(inProgress);
 	if (failed) {
 		return;
 	}
 	tasksScheduled++;
 	numTxStarted++;
-	manager->txExecutor->execute(tx, [this, tx, cont, failOnError]() {
-		numTxCompleted++;
-		fdb::Error err = tx->getError();
-		if (err.code() == error_code_success) {
-			cont();
-		} else {
-			std::string msg = fmt::format("Transaction failed with error: {} ({})", err.code(), err.what());
-			if (failOnError) {
-				error(msg);
-				failed = true;
-			} else {
-				info(msg);
-				cont();
-			}
-		}
-		scheduledTaskDone();
-	});
+	manager->txExecutor->execute(
+	    startFct,
+	    [this, startFct, cont, failOnError](fdb::Error err) {
+		    numTxCompleted++;
+		    if (err.code() == error_code_success) {
+			    cont();
+		    } else {
+			    std::string msg = fmt::format("Transaction failed with error: {} ({})", err.code(), err.what());
+			    if (failOnError) {
+				    error(msg);
+				    failed = true;
+			    } else {
+				    info(msg);
+				    cont();
+			    }
+		    }
+		    scheduledTaskDone();
+	    },
+	    tenant,
+	    transactional);
 }
 
 void WorkloadBase::info(const std::string& msg) {

@@ -130,12 +130,10 @@ struct GrvProxyStats {
 	                          SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    recentRequests(0), lastBucketBegin(now()),
 	    bucketInterval(FLOW_KNOBS->BASIC_LOAD_BALANCE_UPDATE_RATE / FLOW_KNOBS->BASIC_LOAD_BALANCE_BUCKETS),
-	    grvConfirmEpochLiveDist(Histogram::getHistogram(LiteralStringRef("GrvProxy"),
-	                                                    LiteralStringRef("GrvConfirmEpochLive"),
-	                                                    Histogram::Unit::microseconds)),
-	    grvGetCommittedVersionRpcDist(Histogram::getHistogram(LiteralStringRef("GrvProxy"),
-	                                                          LiteralStringRef("GrvGetCommittedVersionRpc"),
-	                                                          Histogram::Unit::microseconds)) {
+	    grvConfirmEpochLiveDist(
+	        Histogram::getHistogram("GrvProxy"_sr, "GrvConfirmEpochLive"_sr, Histogram::Unit::microseconds)),
+	    grvGetCommittedVersionRpcDist(
+	        Histogram::getHistogram("GrvProxy"_sr, "GrvGetCommittedVersionRpc"_sr, Histogram::Unit::microseconds)) {
 		// The rate at which the limit(budget) is allowed to grow.
 		specialCounter(cc, "SystemGRVQueueSize", [this]() { return this->systemGRVQueueSize; });
 		specialCounter(cc, "DefaultGRVQueueSize", [this]() { return this->defaultGRVQueueSize; });
@@ -563,7 +561,7 @@ ACTOR Future<Void> queueGetReadVersionRequests(
 			bool canBeQueued = true;
 			if (stats->txnRequestIn.getValue() - stats->txnRequestOut.getValue() >
 			        SERVER_KNOBS->START_TRANSACTION_MAX_QUEUE_SIZE ||
-			    (g_network->isSimulated() && !g_simulator.speedUpSimulation &&
+			    (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
 			     deterministicRandom()->random01() < 0.01)) {
 				// When the limit is hit, try to drop requests from the lower priority queues.
 				if (req.priority == TransactionPriority::BATCH) {

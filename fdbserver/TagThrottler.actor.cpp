@@ -52,15 +52,13 @@ class TagThrottlerImpl {
 
 					wait(success(throttledTagKeys) && success(autoThrottlingEnabled));
 
-					if (autoThrottlingEnabled.get().present() &&
-					    autoThrottlingEnabled.get().get() == LiteralStringRef("0")) {
+					if (autoThrottlingEnabled.get().present() && autoThrottlingEnabled.get().get() == "0"_sr) {
 						CODE_PROBE(true, "Auto-throttling disabled");
 						if (self->autoThrottlingEnabled) {
 							TraceEvent("AutoTagThrottlingDisabled", self->id).log();
 						}
 						self->autoThrottlingEnabled = false;
-					} else if (autoThrottlingEnabled.get().present() &&
-					           autoThrottlingEnabled.get().get() == LiteralStringRef("1")) {
+					} else if (autoThrottlingEnabled.get().present() && autoThrottlingEnabled.get().get() == "1"_sr) {
 						CODE_PROBE(true, "Auto-throttling enabled");
 						if (!self->autoThrottlingEnabled) {
 							TraceEvent("AutoTagThrottlingEnabled", self->id).log();
@@ -74,8 +72,7 @@ class TagThrottlerImpl {
 						}
 						self->autoThrottlingEnabled = SERVER_KNOBS->AUTO_TAG_THROTTLING_ENABLED;
 						if (!committed)
-							tr.set(tagThrottleAutoEnabledKey,
-							       LiteralStringRef(self->autoThrottlingEnabled ? "1" : "0"));
+							tr.set(tagThrottleAutoEnabledKey, self->autoThrottlingEnabled ? "1"_sr : "0"_sr);
 					}
 
 					RkTagThrottleCollection updatedTagThrottles;

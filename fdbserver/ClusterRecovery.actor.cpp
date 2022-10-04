@@ -1151,7 +1151,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 		self->recoveryTransactionVersion += deterministicRandom()->randomInt64(0, 10000000);
 	}
 
-	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_RECOVERED_EVENT_NAME).c_str(),
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_RECOVERING_EVENT_NAME).c_str(),
 	           self->dbgid)
 	    .detail("LastEpochEnd", self->lastEpochEnd)
 	    .detail("RecoveryTransactionVersion", self->recoveryTransactionVersion);
@@ -1340,7 +1340,7 @@ void updateConfigForForcedRecovery(Reference<ClusterRecoveryData> self,
 	Standalone<CommitTransactionRef> regionCommit;
 	regionCommit.mutations.push_back_deep(
 	    regionCommit.arena(),
-	    MutationRef(MutationRef::SetValue, configKeysPrefix.toString() + "usable_regions", LiteralStringRef("1")));
+	    MutationRef(MutationRef::SetValue, configKeysPrefix.toString() + "usable_regions", "1"_sr));
 	self->configuration.applyMutation(regionCommit.mutations.back());
 	if (regionsChanged) {
 		std::sort(
@@ -1520,8 +1520,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 			           (self->cstate.myDBState.oldTLogData.size() - CLIENT_KNOBS->RECOVERY_DELAY_START_GENERATION)));
 		}
 		if (g_network->isSimulated() && self->cstate.myDBState.oldTLogData.size() > CLIENT_KNOBS->MAX_GENERATIONS_SIM) {
-			g_simulator.connectionFailuresDisableDuration = 1e6;
-			g_simulator.speedUpSimulation = true;
+			g_simulator->connectionFailuresDisableDuration = 1e6;
+			g_simulator->speedUpSimulation = true;
 			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyGenerations").log();
 		}
 	}
@@ -1678,6 +1678,11 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	tr.set(
 	    recoveryCommitRequest.arena, primaryLocalityKey, BinaryWriter::toValue(self->primaryLocality, Unversioned()));
 	tr.set(recoveryCommitRequest.arena, backupVersionKey, backupVersionValue);
+	Optional<Value> txnStateStoreCoords = self->txnStateStore->readValue(coordinatorsKey).get();
+	if (txnStateStoreCoords.present() &&
+	    txnStateStoreCoords.get() != self->coordinators.ccr->getConnectionString().toString()) {
+		tr.set(recoveryCommitRequest.arena, previousCoordinatorsKey, txnStateStoreCoords.get());
+	}
 	tr.set(recoveryCommitRequest.arena, coordinatorsKey, self->coordinators.ccr->getConnectionString().toString());
 	tr.set(recoveryCommitRequest.arena, logsKey, self->logSystem->getLogsValue());
 	tr.set(recoveryCommitRequest.arena,

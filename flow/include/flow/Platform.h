@@ -143,6 +143,7 @@ inline static T& makeDependent(T& value) {
 	return value;
 }
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -244,6 +245,16 @@ double getProcessorTimeThread();
 
 double getProcessorTimeProcess();
 
+#ifdef __linux__
+namespace linux_os {
+
+// Collects the /sys/fs/cgroup/cpu,cpuacct/cpu.stat information and returns the content
+// For more information about cpu,cpuacct, check manpages for cgroup
+std::map<std::string, int64_t> reportCGroupCpuStat();
+
+} // namespace linux_os
+#endif // __linux__
+
 uint64_t getMemoryUsage();
 
 uint64_t getResidentMemoryUsage();
@@ -316,6 +327,7 @@ void renameFile(std::string const& fromPath, std::string const& toPath);
 void atomicReplace(std::string const& path, std::string const& content, bool textmode = true);
 
 // Read a file into memory
+// This requires the file to be seekable
 std::string readFileBytes(std::string const& filename, int maxSize);
 
 // Read a file into memory supplied by the caller
@@ -666,7 +678,7 @@ inline static void flushOutputStreams() {
 #error Missing symbol export
 #endif
 
-#define crashAndDie() (*(volatile int*)0 = 0)
+#define crashAndDie() std::abort()
 
 #ifdef _WIN32
 #define strcasecmp stricmp
@@ -772,7 +784,7 @@ int64_t getNumProfilesDeferred();
 int64_t getNumProfilesOverflowed();
 int64_t getNumProfilesCaptured();
 
-#else
+#else // __cplusplus
 #define EXTERNC
 #endif // __cplusplus
 
@@ -794,7 +806,14 @@ EXTERNC void flushAndExit(int exitCode);
 // Initilization code that's run at the beginning of every entry point (except fdbmonitor)
 void platformInit();
 
+// Register a callback which will run as part of the crash handler. Use in conjunction with registerCrashHandler.
+// The callback being added should be simple and unlikely to fail, otherwise it will fail the crash handler,
+// preventing necessary logging being printed. Also, the crash handler may not be comprehensive in handling all
+// failure cases.
+void registerCrashHandlerCallback(void (*f)());
+
 void registerCrashHandler();
+
 void setupRunLoopProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
 

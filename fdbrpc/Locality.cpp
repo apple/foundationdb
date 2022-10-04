@@ -21,13 +21,13 @@
 #include "fdbrpc/Locality.h"
 
 const UID LocalityData::UNSET_ID = UID(0x0ccb4e0feddb5583, 0x010f6b77d9d10ece);
-const StringRef LocalityData::keyProcessId = LiteralStringRef("processid");
-const StringRef LocalityData::keyZoneId = LiteralStringRef("zoneid");
-const StringRef LocalityData::keyDcId = LiteralStringRef("dcid");
-const StringRef LocalityData::keyMachineId = LiteralStringRef("machineid");
-const StringRef LocalityData::keyDataHallId = LiteralStringRef("data_hall");
-const StringRef LocalityData::ExcludeLocalityKeyMachineIdPrefix = LiteralStringRef("locality_machineid:");
-const StringRef LocalityData::ExcludeLocalityPrefix = LiteralStringRef("locality_");
+const StringRef LocalityData::keyProcessId = "processid"_sr;
+const StringRef LocalityData::keyZoneId = "zoneid"_sr;
+const StringRef LocalityData::keyDcId = "dcid"_sr;
+const StringRef LocalityData::keyMachineId = "machineid"_sr;
+const StringRef LocalityData::keyDataHallId = "data_hall"_sr;
+const StringRef LocalityData::ExcludeLocalityKeyMachineIdPrefix = "locality_machineid:"_sr;
+const StringRef LocalityData::ExcludeLocalityPrefix = "locality_"_sr;
 
 ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const {
 	switch (role) {
@@ -260,6 +260,24 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		default:
 			return ProcessClass::WorstFit;
 		}
+	case ProcessClass::ConsistencyScan:
+		switch (_class) {
+		case ProcessClass::ConsistencyScanClass:
+			return ProcessClass::BestFit;
+		case ProcessClass::StatelessClass:
+			return ProcessClass::GoodFit;
+		case ProcessClass::UnsetClass:
+			return ProcessClass::UnsetFit;
+		case ProcessClass::MasterClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::CoordinatorClass:
+		case ProcessClass::TesterClass:
+		case ProcessClass::StorageCacheClass:
+		case ProcessClass::BlobWorkerClass:
+			return ProcessClass::NeverAssign;
+		default:
+			return ProcessClass::WorstFit;
+		}
 	case ProcessClass::BlobManager:
 		switch (_class) {
 		case ProcessClass::BlobManagerClass:
@@ -332,24 +350,25 @@ LBDistance::Type loadBalanceDistance(LocalityData const& loc1, LocalityData cons
 StringRef to_string(ProcessClass::ClusterRole role) {
 	// clang-format off
 	switch (role) {
-	case ProcessClass::Storage:           return LiteralStringRef("Storage");
-	case ProcessClass::TLog:              return LiteralStringRef("TLog");
-	case ProcessClass::CommitProxy:       return LiteralStringRef("CommitProxy");
-	case ProcessClass::GrvProxy:          return LiteralStringRef("GrvProxy");
-	case ProcessClass::Master:            return LiteralStringRef("Master");
-	case ProcessClass::Resolver:          return LiteralStringRef("Resolver");
-	case ProcessClass::LogRouter:         return LiteralStringRef("LogRouter");
-	case ProcessClass::ClusterController: return LiteralStringRef("ClusterController");
-	case ProcessClass::DataDistributor:   return LiteralStringRef("DataDistributor");
-	case ProcessClass::Ratekeeper:        return LiteralStringRef("Ratekeeper");
-	case ProcessClass::BlobManager:       return LiteralStringRef("BlobManager");
-	case ProcessClass::BlobWorker:        return LiteralStringRef("BlobWorker");
-	case ProcessClass::StorageCache:      return LiteralStringRef("StorageCache");
-	case ProcessClass::Backup:            return LiteralStringRef("Backup");
-	case ProcessClass::EncryptKeyProxy:   return LiteralStringRef("EncryptKeyProxy");
-	case ProcessClass::VersionIndexer:    return LiteralStringRef("VersionIndexer");
-	case ProcessClass::Worker:            return LiteralStringRef("Worker");
-	case ProcessClass::NoRole:            return LiteralStringRef("NoRole");
+	case ProcessClass::Storage:           return "Storage"_sr;
+	case ProcessClass::TLog:              return "TLog"_sr;
+	case ProcessClass::CommitProxy:       return "CommitProxy"_sr;
+	case ProcessClass::GrvProxy:          return "GrvProxy"_sr;
+	case ProcessClass::Master:            return "Master"_sr;
+	case ProcessClass::Resolver:          return "Resolver"_sr;
+	case ProcessClass::LogRouter:         return "LogRouter"_sr;
+	case ProcessClass::ClusterController: return "ClusterController"_sr;
+	case ProcessClass::DataDistributor:   return "DataDistributor"_sr;
+	case ProcessClass::Ratekeeper:        return "Ratekeeper"_sr;
+	case ProcessClass::ConsistencyScan:   return "ConsistencyScan"_sr;
+	case ProcessClass::BlobManager:       return "BlobManager"_sr;
+	case ProcessClass::BlobWorker:        return "BlobWorker"_sr;
+	case ProcessClass::StorageCache:      return "StorageCache"_sr;
+	case ProcessClass::Backup:            return "Backup"_sr;
+	case ProcessClass::EncryptKeyProxy:   return "EncryptKeyProxy"_sr;
+	case ProcessClass::VersionIndexer:    return "VersionIndexer"_sr;
+	case ProcessClass::Worker:            return "Worker"_sr;
+	case ProcessClass::NoRole:            return "NoRole"_sr;
 	}
 	// clang-format on
 	UNSTOPPABLE_ASSERT(false);

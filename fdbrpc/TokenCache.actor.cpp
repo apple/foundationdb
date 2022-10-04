@@ -287,10 +287,17 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 		    [](Arena&, IRandom&, authz::jwt::TokenRef& token) { token.issuedAtUnixTime.reset(); },
 		    "NoIssuedAt",
 		},
-
 		{
 		    [](Arena& arena, IRandom&, authz::jwt::TokenRef& token) { token.tenants.reset(); },
 		    "NoTenants",
+		},
+		{
+		    [](Arena& arena, IRandom&, authz::jwt::TokenRef& token) {
+		        StringRef* newTenants = new (arena) StringRef[1];
+		        *newTenants = token.tenants.get()[0].substr(1);
+		        token.tenants = VectorRef<StringRef>(newTenants, 1);
+		    },
+		    "UnmatchedTenant",
 		},
 	};
 	auto const pubKeyName = "somePublicKey"_sr;
@@ -301,20 +308,31 @@ TEST_CASE("/fdbrpc/authz/TokenCache/BadTokens") {
 		auto& rng = *deterministicRandom();
 		auto validTokenSpec = authz::jwt::makeRandomTokenSpec(arena, rng, authz::Algorithm::ES256);
 		validTokenSpec.keyId = pubKeyName;
-		for (auto i = 0; i < numBadMutations; i++) {
+		for (auto i = 0; i <= numBadMutations; i++) {
 			FlowTransport::transport().addPublicKey(pubKeyName, privateKey.toPublic());
 			auto publicKeyClearGuard =
 			    ScopeExit([pubKeyName]() { FlowTransport::transport().removePublicKey(pubKeyName); });
-			auto [mutationFn, mutationDesc] = badMutations[i];
+			auto signedToken = StringRef();
 			auto tmpArena = Arena();
-			auto mutatedTokenSpec = validTokenSpec;
-			mutationFn(tmpArena, rng, mutatedTokenSpec);
-			auto signedToken = authz::jwt::signToken(tmpArena, mutatedTokenSpec, privateKey);
-			if (TokenCache::instance().validate(validTokenSpec.tenants.get()[0], signedToken)) {
-				fmt::print("Unexpected successful validation at mutation {}, token spec: {}\n",
-				           mutationDesc,
-				           mutatedTokenSpec.toStringRef(tmpArena).toStringView());
-				ASSERT(false);
+			if (i < numBadMutations) {
+				auto [mutationFn, mutationDesc] = badMutations[i];
+				auto mutatedTokenSpec = validTokenSpec;
+				mutationFn(tmpArena, rng, mutatedTokenSpec);
+				signedToken = authz::jwt::signToken(tmpArena, mutatedTokenSpec, privateKey);
+				if (TokenCache::instance().validate(validTokenSpec.tenants.get()[0], signedToken)) {
+					fmt::print("Unexpected successful validation at mutation {}, token spec: {}\n",
+					           mutationDesc,
+					           mutatedTokenSpec.toStringRef(tmpArena).toStringView());
+					ASSERT(false);
+				}
+			} else {
+				// squeeze in a bad signature case that does not fit into mutation interface
+				signedToken = authz::jwt::signToken(tmpArena, validTokenSpec, privateKey);
+				signedToken = signedToken.substr(0, signedToken.size() - 1);
+				if (TokenCache::instance().validate(validTokenSpec.tenants.get()[0], signedToken)) {
+					fmt::print("Unexpected successful validation with a token with truncated signature part\n");
+					ASSERT(false);
+				}
 			}
 		}
 	}

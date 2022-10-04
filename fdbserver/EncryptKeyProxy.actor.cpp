@@ -21,7 +21,6 @@
 #include "fdbclient/EncryptKeyProxyInterface.h"
 
 #include "fdbrpc/Locality.h"
-#include "fdbrpc/Stats.h"
 #include "fdbserver/KmsConnector.h"
 #include "fdbserver/KmsConnectorInterface.h"
 #include "fdbserver/Knobs.h"
@@ -223,6 +222,10 @@ public:
 	Counter blobMetadataRefreshed;
 	Counter numBlobMetadataRefreshErrors;
 
+	LatencySample kmsLookupByIdsReqLatency;
+	LatencySample kmsLookupByDomainIdsReqLatency;
+	LatencySample kmsBlobMetadataReqLatency;
+
 	explicit EncryptKeyProxyData(UID id)
 	  : myId(id), ekpCacheMetrics("EKPMetrics", myId.toString()),
 	    baseCipherKeyIdCacheMisses("EKPCipherIdCacheMisses", ekpCacheMetrics),
@@ -235,7 +238,19 @@ public:
 	    blobMetadataCacheHits("EKPBlobMetadataCacheHits", ekpCacheMetrics),
 	    blobMetadataCacheMisses("EKPBlobMetadataCacheMisses", ekpCacheMetrics),
 	    blobMetadataRefreshed("EKPBlobMetadataRefreshed", ekpCacheMetrics),
-	    numBlobMetadataRefreshErrors("EKPBlobMetadataRefreshErrors", ekpCacheMetrics) {}
+	    numBlobMetadataRefreshErrors("EKPBlobMetadataRefreshErrors", ekpCacheMetrics),
+	    kmsLookupByIdsReqLatency("EKPKmsLookupByIdsReqLatency",
+	                             id,
+	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    kmsLookupByDomainIdsReqLatency("EKPKmsLookupByDomainIdsReqLatency",
+	                                   id,
+	                                   SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                                   SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    kmsBlobMetadataReqLatency("EKPKmsBlobMetadataReqLatency",
+	                              id,
+	                              SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                              SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {}
 
 	EncryptBaseCipherDomainIdKeyIdCacheKey getBaseCipherDomainIdKeyIdCacheKey(
 	    const EncryptCipherDomainId domainId,
@@ -375,7 +390,9 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 				    keysByIdsReq.arena, item.second.domainId, item.second.baseCipherId, item.second.domainName);
 			}
 			keysByIdsReq.debugId = keysByIds.debugId;
+			state double startTime = now();
 			KmsConnLookupEKsByKeyIdsRep keysByIdsRep = wait(kmsConnectorInf.ekLookupByIds.getReply(keysByIdsReq));
+			ekpProxyData->kmsLookupByIdsReqLatency.addMeasurement(now() - startTime);
 
 			for (const auto& item : keysByIdsRep.cipherKeyDetails) {
 				keyIdsReply.baseCipherDetails.emplace_back(
@@ -394,7 +411,7 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 
 				const auto itr = lookupCipherInfoMap.find(std::make_pair(item.encryptDomainId, item.encryptKeyId));
 				if (itr == lookupCipherInfoMap.end()) {
-					TraceEvent(SevError, "GetCipherKeysByKeyIds_MappingNotFound", ekpProxyData->myId)
+					TraceEvent(SevError, "GetCipherKeysByKeyIdsMappingNotFound", ekpProxyData->myId)
 					    .detail("DomainId", item.encryptDomainId);
 					throw encrypt_keys_fetch_failed();
 				}
@@ -511,8 +528,10 @@ ACTOR Future<Void> getLatestCipherKeys(Reference<EncryptKeyProxyData> ekpProxyDa
 			}
 			keysByDomainIdReq.debugId = latestKeysReq.debugId;
 
+			state double startTime = now();
 			KmsConnLookupEKsByDomainIdsRep keysByDomainIdRep =
 			    wait(kmsConnectorInf.ekLookupByDomainIds.getReply(keysByDomainIdReq));
+			ekpProxyData->kmsLookupByDomainIdsReqLatency.addMeasurement(now() - startTime);
 
 			for (auto& item : keysByDomainIdRep.cipherKeyDetails) {
 				CipherKeyValidityTS validityTS = getCipherKeyValidityTS(item.refreshAfterSec, item.expireAfterSec);
@@ -527,7 +546,7 @@ ACTOR Future<Void> getLatestCipherKeys(Reference<EncryptKeyProxyData> ekpProxyDa
 				// Record the fetched cipher details to the local cache for the future references
 				const auto itr = lookupCipherDomains.find(item.encryptDomainId);
 				if (itr == lookupCipherDomains.end()) {
-					TraceEvent(SevError, "GetLatestCipherKeys_DomainIdNotFound", ekpProxyData->myId)
+					TraceEvent(SevError, "GetLatestCipherKeysDomainIdNotFound", ekpProxyData->myId)
 					    .detail("DomainId", item.encryptDomainId);
 					throw encrypt_keys_fetch_failed();
 				}
@@ -583,7 +602,7 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
                                              KmsConnectorInterface kmsConnectorInf) {
 	state UID debugId = deterministicRandom()->randomUniqueID();
 
-	state TraceEvent t("RefreshEKs_Start", ekpProxyData->myId);
+	state TraceEvent t("RefreshEKsStart", ekpProxyData->myId);
 	t.setMaxEventLength(SERVER_KNOBS->ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH);
 	t.detail("KmsConnInf", kmsConnectorInf.id());
 	t.detail("DebugId", debugId);
@@ -609,11 +628,13 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
 			}
 		}
 
+		state double startTime = now();
 		KmsConnLookupEKsByDomainIdsRep rep = wait(kmsConnectorInf.ekLookupByDomainIds.getReply(req));
+		ekpProxyData->kmsLookupByDomainIdsReqLatency.addMeasurement(now() - startTime);
 		for (const auto& item : rep.cipherKeyDetails) {
 			const auto itr = ekpProxyData->baseCipherDomainIdCache.find(item.encryptDomainId);
 			if (itr == ekpProxyData->baseCipherDomainIdCache.end()) {
-				TraceEvent(SevInfo, "RefreshEKs_DomainIdNotFound", ekpProxyData->myId)
+				TraceEvent(SevInfo, "RefreshEKsDomainIdNotFound", ekpProxyData->myId)
 				    .detail("DomainId", item.encryptDomainId);
 				// Continue updating the cache with other elements
 				continue;
@@ -641,7 +662,7 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
 		t.detail("NumKeys", rep.cipherKeyDetails.size());
 	} catch (Error& e) {
 		if (!canReplyWith(e)) {
-			TraceEvent(SevWarn, "RefreshEKs_Error").error(e);
+			TraceEvent(SevWarn, "RefreshEKsError").error(e);
 			throw e;
 		}
 		TraceEvent("RefreshEKs").detail("ErrorCode", e.code());
@@ -707,7 +728,9 @@ ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxy
 	if (!lookupDomains.empty()) {
 		try {
 			KmsConnBlobMetadataReq kmsReq(lookupDomains, req.debugId);
+			state double startTime = now();
 			KmsConnBlobMetadataRep kmsRep = wait(kmsConnectorInf.blobMetadataReq.getReply(kmsReq));
+			ekpProxyData->kmsBlobMetadataReqLatency.addMeasurement(now() - startTime);
 			metadataDetails.arena().dependsOn(kmsRep.metadataDetails.arena());
 
 			for (auto& item : kmsRep.metadataDetails) {
@@ -753,7 +776,9 @@ ACTOR Future<Void> refreshBlobMetadataCore(Reference<EncryptKeyProxyData> ekpPro
 		for (auto& item : ekpProxyData->blobMetadataDomainIdCache) {
 			req.domainIds.emplace_back(item.first);
 		}
+		state double startTime = now();
 		KmsConnBlobMetadataRep rep = wait(kmsConnectorInf.blobMetadataReq.getReply(req));
+		ekpProxyData->kmsBlobMetadataReqLatency.addMeasurement(now() - startTime);
 		for (auto& item : rep.metadataDetails) {
 			ekpProxyData->insertIntoBlobMetadataCache(item.domainId, item);
 			t.detail("BM" + std::to_string(item.domainId), "");
@@ -803,7 +828,7 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface, 
 	state KmsConnectorInterface kmsConnectorInf;
 	kmsConnectorInf.initEndpoints();
 
-	TraceEvent("EKP_Start", self->myId).detail("KmsConnectorInf", kmsConnectorInf.id());
+	TraceEvent("EKPStart", self->myId).detail("KmsConnectorInf", kmsConnectorInf.id());
 
 	activateKmsConnector(self, kmsConnectorInf);
 
@@ -836,7 +861,7 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface, 
 				self->addActor.send(getLatestBlobMetadata(self, kmsConnectorInf, req));
 			}
 			when(HaltEncryptKeyProxyRequest req = waitNext(ekpInterface.haltEncryptKeyProxy.getFuture())) {
-				TraceEvent("EKP_Halted", self->myId).detail("ReqID", req.requesterID);
+				TraceEvent("EKPHalted", self->myId).detail("ReqID", req.requesterID);
 				req.reply.send(Void());
 				break;
 			}
@@ -846,7 +871,7 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface, 
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent("EKP_Terminated", self->myId).errorUnsuppressed(e);
+		TraceEvent("EKPTerminated", self->myId).errorUnsuppressed(e);
 	}
 
 	return Void();

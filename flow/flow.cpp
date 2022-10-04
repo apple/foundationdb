@@ -525,7 +525,7 @@ TEST_CASE("/flow/FlatBuffers/Standalone") {
 		ASSERT(in == out);
 	}
 	{
-		StringRef in = LiteralStringRef("foobar");
+		StringRef in = "foobar"_sr;
 		Standalone<StringRef> out;
 		ObjectWriter writer(Unversioned());
 		writer.serialize(in);

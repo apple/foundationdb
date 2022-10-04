@@ -31,6 +31,7 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/RatekeeperInterface.h"
+#include "fdbclient/ConsistencyScanInterface.h"
 #include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbclient/BlobWorkerInterface.h"
@@ -58,6 +59,7 @@ struct WorkerInterface {
 	RequestStream<struct InitializeRatekeeperRequest> ratekeeper;
 	RequestStream<struct InitializeBlobManagerRequest> blobManager;
 	RequestStream<struct InitializeBlobWorkerRequest> blobWorker;
+	RequestStream<struct InitializeConsistencyScanRequest> consistencyScan;
 	RequestStream<struct InitializeResolverRequest> resolver;
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
@@ -76,7 +78,6 @@ struct WorkerInterface {
 	RequestStream<struct WorkerSnapRequest> workerSnapReq;
 	RequestStream<struct UpdateServerDBInfoRequest> updateServerDBInfo;
 
-	ConfigBroadcastInterface configBroadcastInterface;
 	TesterInterface testerInterface;
 
 	UID id() const { return tLog.getEndpoint().token; }
@@ -116,6 +117,7 @@ struct WorkerInterface {
 		           ratekeeper,
 		           blobManager,
 		           blobWorker,
+		           consistencyScan,
 		           resolver,
 		           storage,
 		           logRouter,
@@ -132,7 +134,6 @@ struct WorkerInterface {
 		           backup,
 		           encryptKeyProxy,
 		           updateServerDBInfo,
-		           configBroadcastInterface,
 		           versionIndexer);
 	}
 };
@@ -144,7 +145,7 @@ struct WorkerDetails {
 	bool degraded;
 	bool recoveredDiskFiles;
 
-	WorkerDetails() : degraded(false) {}
+	WorkerDetails() : degraded(false), recoveredDiskFiles(false) {}
 	WorkerDetails(const WorkerInterface& interf, ProcessClass processClass, bool degraded, bool recoveredDiskFiles)
 	  : interf(interf), processClass(processClass), degraded(degraded), recoveredDiskFiles(recoveredDiskFiles) {}
 
@@ -152,7 +153,7 @@ struct WorkerDetails {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, interf, processClass, degraded);
+		serializer(ar, interf, processClass, degraded, recoveredDiskFiles);
 	}
 };
 
@@ -438,14 +439,16 @@ struct RegisterWorkerRequest {
 	Optional<RatekeeperInterface> ratekeeperInterf;
 	Optional<BlobManagerInterface> blobManagerInterf;
 	Optional<EncryptKeyProxyInterface> encryptKeyProxyInterf;
+	Optional<ConsistencyScanInterface> consistencyScanInterf;
 	Standalone<VectorRef<StringRef>> issues;
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise<RegisterWorkerReply> reply;
 	bool degraded;
-	Version lastSeenKnobVersion;
-	ConfigClassSet knobConfigClassSet;
+	Optional<Version> lastSeenKnobVersion;
+	Optional<ConfigClassSet> knobConfigClassSet;
 	bool requestDbInfo;
 	bool recoveredDiskFiles;
+	ConfigBroadcastInterface configBroadcastInterface;
 
 	RegisterWorkerRequest()
 	  : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown), degraded(false) {}
@@ -458,14 +461,17 @@ struct RegisterWorkerRequest {
 	                      Optional<RatekeeperInterface> rkInterf,
 	                      Optional<BlobManagerInterface> bmInterf,
 	                      Optional<EncryptKeyProxyInterface> ekpInterf,
+	                      Optional<ConsistencyScanInterface> csInterf,
 	                      bool degraded,
-	                      Version lastSeenKnobVersion,
-	                      ConfigClassSet knobConfigClassSet,
-	                      bool recoveredDiskFiles)
+	                      Optional<Version> lastSeenKnobVersion,
+	                      Optional<ConfigClassSet> knobConfigClassSet,
+	                      bool recoveredDiskFiles,
+	                      ConfigBroadcastInterface configBroadcastInterface)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), blobManagerInterf(bmInterf),
-	    encryptKeyProxyInterf(ekpInterf), degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion),
-	    knobConfigClassSet(knobConfigClassSet), requestDbInfo(false), recoveredDiskFiles(recoveredDiskFiles) {}
+	    encryptKeyProxyInterf(ekpInterf), consistencyScanInterf(csInterf), degraded(degraded),
+	    lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet), requestDbInfo(false),
+	    recoveredDiskFiles(recoveredDiskFiles), configBroadcastInterface(configBroadcastInterface) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -479,6 +485,7 @@ struct RegisterWorkerRequest {
 		           ratekeeperInterf,
 		           blobManagerInterf,
 		           encryptKeyProxyInterf,
+		           consistencyScanInterf,
 		           issues,
 		           incompatiblePeers,
 		           reply,
@@ -486,7 +493,8 @@ struct RegisterWorkerRequest {
 		           lastSeenKnobVersion,
 		           knobConfigClassSet,
 		           requestDbInfo,
-		           recoveredDiskFiles);
+		           recoveredDiskFiles,
+		           configBroadcastInterface);
 	}
 };
 
@@ -510,13 +518,14 @@ struct UpdateWorkerHealthRequest {
 	constexpr static FileIdentifier file_identifier = 5789927;
 	NetworkAddress address;
 	std::vector<NetworkAddress> degradedPeers;
+	std::vector<NetworkAddress> disconnectedPeers;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, address, degradedPeers);
+		serializer(ar, address, degradedPeers, disconnectedPeers);
 	}
 };
 
@@ -741,6 +750,19 @@ struct InitializeRatekeeperRequest {
 
 	InitializeRatekeeperRequest() {}
 	explicit InitializeRatekeeperRequest(UID uid) : reqId(uid) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reqId, reply);
+	}
+};
+
+struct InitializeConsistencyScanRequest {
+	constexpr static FileIdentifier file_identifier = 3104275;
+	UID reqId;
+	ReplyPromise<ConsistencyScanInterface> reply;
+
+	InitializeConsistencyScanRequest() {}
+	explicit InitializeConsistencyScanRequest(UID uid) : reqId(uid) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reqId, reply);
@@ -1009,6 +1031,7 @@ struct Role {
 	static const Role COORDINATOR;
 	static const Role BACKUP;
 	static const Role ENCRYPT_KEY_PROXY;
+	static const Role CONSISTENCYSCAN;
 	static const Role VERSION_INDEXER;
 
 	std::string roleName;
@@ -1047,6 +1070,8 @@ struct Role {
 			return BACKUP;
 		case ProcessClass::EncryptKeyProxy:
 			return ENCRYPT_KEY_PROXY;
+		case ProcessClass::ConsistencyScan:
+			return CONSISTENCYSCAN;
 		case ProcessClass::VersionIndexer:
 			return VERSION_INDEXER;
 		case ProcessClass::Worker:
@@ -1116,7 +1141,7 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei, Reference<
 class IKeyValueStore;
 class ServerCoordinators;
 class IDiskQueue;
-class IEncryptionKeyProvider;
+class IPageEncryptionKeyProvider;
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
@@ -1126,7 +1151,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
-                                 Reference<IEncryptionKeyProvider> encryptionKeyProvider);
+                                 Reference<IPageEncryptionKeyProvider> encryptionKeyProvider);
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,
@@ -1135,7 +1160,7 @@ ACTOR Future<Void> storageServer(
     Promise<Void> recovered,
     Reference<IClusterConnectionRecord>
         connRecord, // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
-    Reference<IEncryptionKeyProvider> encryptionKeyProvider);
+    Reference<IPageEncryptionKeyProvider> encryptionKeyProvider);
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
@@ -1170,6 +1195,7 @@ ACTOR Future<Void> logRouter(TLogInterface interf,
                              Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
+ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 ACTOR Future<Void> blobManager(BlobManagerInterface bmi, Reference<AsyncVar<ServerDBInfo> const> db, int64_t epoch);
 ACTOR Future<Void> storageCacheServer(StorageServerInterface interf,
                                       uint16_t id,
@@ -1238,7 +1264,7 @@ ACTOR template <class T>
 Future<T> ioTimeoutError(Future<T> what, double time) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
-	if (g_network->isSimulated() && !g_simulator.speedUpSimulation) {
+	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
 		time += std::max(0.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
 	}
 	Future<Void> end = lowPriorityDelay(time);
@@ -1246,7 +1272,7 @@ Future<T> ioTimeoutError(Future<T> what, double time) {
 		when(T t = wait(what)) { return t; }
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (g_network->isSimulated() && !g_simulator.getCurrentProcess()->isReliable()) {
+			if (g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable()) {
 				err = err.asInjectedFault();
 			}
 			TraceEvent(SevError, "IoTimeoutError").error(err);
@@ -1262,7 +1288,7 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
                                    double degradedTime) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
-	if (g_network->isSimulated() && !g_simulator.speedUpSimulation) {
+	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
 		double timeShift = std::max(0.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
 		errTime += timeShift;
 		degradedTime += timeShift;
@@ -1285,7 +1311,7 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 		when(T t = wait(what)) { return t; }
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (g_network->isSimulated() && !g_simulator.getCurrentProcess()->isReliable()) {
+			if (g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable()) {
 				err = err.asInjectedFault();
 			}
 			TraceEvent(SevError, "IoTimeoutError").error(err);

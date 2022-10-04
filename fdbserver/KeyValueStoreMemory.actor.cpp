@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
@@ -28,6 +29,7 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/RadixTree.h"
 #include "flow/ActorCollection.h"
+#include "flow/EncryptUtils.h"
 #include "flow/Knobs.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -489,7 +491,10 @@ private:
 			ASSERT(cipherKeys.cipherTextKey.isValid());
 			ASSERT(cipherKeys.cipherHeaderKey.isValid());
 			EncryptBlobCipherAes265Ctr cipher(
-			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+			    cipherKeys.cipherTextKey,
+			    cipherKeys.cipherHeaderKey,
+			    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+			    BlobCipherMetrics::KV_MEMORY);
 			BlobCipherEncryptHeader cipherHeader;
 			Arena arena;
 			StringRef ciphertext =
@@ -497,7 +502,7 @@ private:
 			log->push(StringRef((const uint8_t*)&cipherHeader, BlobCipherEncryptHeader::headerSize));
 			log->push(ciphertext);
 		}
-		return log->push(LiteralStringRef("\x01")); // Changes here should be reflected in OP_DISK_OVERHEAD
+		return log->push("\x01"_sr); // Changes here should be reflected in OP_DISK_OVERHEAD
 	}
 
 	// In case the op data is not encrypted, simply read the operands and the zero fill flag.
@@ -527,8 +532,10 @@ private:
 			return data;
 		}
 		state BlobCipherEncryptHeader cipherHeader = *(BlobCipherEncryptHeader*)data.begin();
-		TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(self->db, cipherHeader));
-		DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, cipherHeader.iv);
+		TextAndHeaderCipherKeys cipherKeys =
+		    wait(getEncryptCipherKeys(self->db, cipherHeader, BlobCipherMetrics::KV_MEMORY));
+		DecryptBlobCipherAes256Ctr cipher(
+		    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, cipherHeader.iv, BlobCipherMetrics::KV_MEMORY);
 		Arena arena;
 		StringRef plaintext = cipher
 		                          .decrypt(data.begin() + BlobCipherEncryptHeader::headerSize,
@@ -825,7 +832,7 @@ private:
 
 					auto thisSnapshotEnd = self->log_op(OpSnapshotEnd, StringRef(), StringRef());
 					//TraceEvent("SnapshotEnd", self->id)
-					//	.detail("LastKey", lastKey.present() ? lastKey.get() : LiteralStringRef("<none>"))
+					//	.detail("LastKey", lastKey.present() ? lastKey.get() : "<none>"_sr)
 					//	.detail("CurrentSnapshotEndLoc", self->currentSnapshotEnd)
 					//	.detail("PreviousSnapshotEndLoc", self->previousSnapshotEnd)
 					//	.detail("ThisSnapshotEnd", thisSnapshotEnd)
@@ -961,7 +968,8 @@ private:
 	}
 
 	ACTOR static Future<Void> updateCipherKeys(KeyValueStoreMemory* self) {
-		TextAndHeaderCipherKeys cipherKeys = wait(getLatestSystemEncryptCipherKeys(self->db));
+		TextAndHeaderCipherKeys cipherKeys =
+		    wait(getLatestSystemEncryptCipherKeys(self->db, BlobCipherMetrics::KV_MEMORY));
 		self->cipherKeys = cipherKeys;
 		return Void();
 	}

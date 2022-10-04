@@ -53,7 +53,7 @@ struct ReadAfterWriteWorkload : KVWorkload {
 	ContinuousSample<double> propagationLatency;
 
 	ReadAfterWriteWorkload(WorkloadContext const& wcx) : KVWorkload(wcx), propagationLatency(SAMPLE_SIZE) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
 	}
 
 	std::string description() const override { return "ReadAfterWriteWorkload"; }

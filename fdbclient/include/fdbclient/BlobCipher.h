@@ -17,10 +17,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef FLOW_BLOB_CIPHER_H
-#define FLOW_BLOB_CIPHER_H
+#ifndef FDBCLIENT_BLOB_CIPHER_H
+#define FDBCLIENT_BLOB_CIPHER_H
 #pragma once
 
+#include "fdbrpc/Stats.h"
 #include "flow/Arena.h"
 #include "flow/EncryptUtils.h"
 #include "flow/FastRef.h"
@@ -28,6 +29,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/Knobs.h"
 #include "flow/network.h"
+#include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/serialize.h"
 
@@ -36,6 +38,7 @@
 #include <limits>
 #include <memory>
 #include <openssl/aes.h>
+#include <openssl/cmac.h>
 #include <openssl/engine.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
@@ -50,6 +53,59 @@
 #define AES_256_KEY_LENGTH 32
 #define AES_256_IV_LENGTH 16
 
+class BlobCipherMetrics : public NonCopyable {
+public:
+	static BlobCipherMetrics* getInstance() {
+		static BlobCipherMetrics* instance = nullptr;
+		if (instance == nullptr) {
+			instance = new BlobCipherMetrics;
+		}
+		return instance;
+	}
+
+	// Order of this enum has to match initializer of counterSets.
+	enum UsageType : int {
+		TLOG = 0,
+		KV_MEMORY,
+		KV_REDWOOD,
+		BLOB_GRANULE,
+		BACKUP,
+		TEST,
+		MAX,
+	};
+
+	struct CounterSet {
+		Counter encryptCPUTimeNS;
+		Counter decryptCPUTimeNS;
+		LatencySample getCipherKeysLatency;
+		LatencySample getLatestCipherKeysLatency;
+
+		CounterSet(CounterCollection& cc, std::string name);
+	};
+
+	static CounterSet& counters(UsageType t) {
+		ASSERT(t < UsageType::MAX);
+		return getInstance()->counterSets[int(t)];
+	}
+
+private:
+	BlobCipherMetrics();
+
+	CounterCollection cc;
+	Future<Void> traceFuture;
+
+public:
+	Counter cipherKeyCacheHit;
+	Counter cipherKeyCacheMiss;
+	Counter cipherKeyCacheExpired;
+	Counter latestCipherKeyCacheHit;
+	Counter latestCipherKeyCacheMiss;
+	Counter latestCipherKeyCacheNeedsRefresh;
+	LatencySample getCipherKeysLatency;
+	LatencySample getLatestCipherKeysLatency;
+	std::array<CounterSet, int(UsageType::MAX)> counterSets;
+};
+
 // Encryption operations buffer management
 // Approach limits number of copies needed during encryption or decryption operations.
 // For encryption EncryptBuf is allocated using client supplied Arena and provided to AES library to capture
@@ -61,7 +117,7 @@ class EncryptBuf : public ReferenceCounted<EncryptBuf>, NonCopyable {
 public:
 	EncryptBuf(int size, Arena& arena) : allocSize(size), logicalSize(size) {
 		if (size > 0) {
-			buffer = new (arena) uint8_t[size];
+			buffer = new (arena) uint8_t[size]();
 		} else {
 			buffer = nullptr;
 		}
@@ -85,9 +141,9 @@ private:
 #pragma pack(push, 1) // exact fit - no padding
 struct BlobCipherDetails {
 	// Encryption domain boundary identifier.
-	EncryptCipherDomainId encryptDomainId = ENCRYPT_INVALID_DOMAIN_ID;
+	EncryptCipherDomainId encryptDomainId = INVALID_ENCRYPT_DOMAIN_ID;
 	// BaseCipher encryption key identifier
-	EncryptCipherBaseKeyId baseCipherId = ENCRYPT_INVALID_CIPHER_KEY_ID;
+	EncryptCipherBaseKeyId baseCipherId = INVALID_ENCRYPT_CIPHER_KEY_ID;
 	// Random salt
 	EncryptCipherRandomSalt salt{};
 
@@ -137,7 +193,8 @@ typedef struct BlobCipherEncryptHeader {
 			uint8_t headerVersion{};
 			uint8_t encryptMode{};
 			uint8_t authTokenMode{};
-			uint8_t _reserved[4]{};
+			uint8_t authTokenAlgo{};
+			uint8_t _reserved[3]{};
 		} flags;
 		uint64_t _padding{};
 	};
@@ -168,12 +225,12 @@ typedef struct BlobCipherEncryptHeader {
 
 		struct {
 			// Cipher text authentication token
-			uint8_t cipherTextAuthToken[AUTH_TOKEN_SIZE]{};
-			uint8_t headerAuthToken[AUTH_TOKEN_SIZE]{};
+			uint8_t cipherTextAuthToken[AUTH_TOKEN_MAX_SIZE]{};
+			uint8_t headerAuthToken[AUTH_TOKEN_MAX_SIZE]{};
 		} multiAuthTokens;
 		struct {
-			uint8_t authToken[AUTH_TOKEN_SIZE]{};
-			uint8_t _reserved[AUTH_TOKEN_SIZE]{};
+			uint8_t authToken[AUTH_TOKEN_MAX_SIZE]{};
+			uint8_t _reserved[AUTH_TOKEN_MAX_SIZE]{};
 		} singleAuthToken;
 	};
 
@@ -324,8 +381,7 @@ using BlobCipherKeyIdCacheMapCItr =
 
 struct BlobCipherKeyIdCache : ReferenceCounted<BlobCipherKeyIdCache> {
 public:
-	BlobCipherKeyIdCache();
-	explicit BlobCipherKeyIdCache(EncryptCipherDomainId dId);
+	explicit BlobCipherKeyIdCache(EncryptCipherDomainId dId, size_t* sizeStat);
 
 	BlobCipherKeyIdCacheKey getCacheKey(const EncryptCipherBaseKeyId& baseCipherId,
 	                                    const EncryptCipherRandomSalt& salt);
@@ -378,11 +434,15 @@ public:
 	// API returns list of all 'cached' cipherKeys
 	std::vector<Reference<BlobCipherKey>> getAllCipherKeys();
 
+	// Return number of cipher keys in the cahce.
+	size_t getSize() const { return keyIdCache.size(); }
+
 private:
 	EncryptCipherDomainId domainId;
 	BlobCipherKeyIdCacheMap keyIdCache;
 	Optional<EncryptCipherBaseKeyId> latestBaseCipherKeyId;
 	Optional<EncryptCipherRandomSalt> latestRandomSalt;
+	size_t* sizeStat; // pointer to the outer BlobCipherKeyCache size count.
 };
 
 using BlobCipherDomainCacheMap = std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKeyIdCache>>;
@@ -447,10 +507,19 @@ public:
 
 	// API enables dropping all 'cached' cipherKeys for a given encryption domain Id.
 	// Useful to cleanup cache if an encryption domain gets removed/destroyed etc.
-
 	void resetEncryptDomainId(const EncryptCipherDomainId domainId);
 
+	// Total number of cipher keys in the cache.
+	size_t getSize() const { return size; }
+
 	static Reference<BlobCipherKeyCache> getInstance() {
+		static bool cleanupRegistered = false;
+		if (!cleanupRegistered) {
+			// We try to avoid cipher keys appear in core dumps, so we clean them up before crash.
+			// TODO(yiwu): use of MADV_DONTDUMP instead of the crash handler.
+			registerCrashHandlerCallback(BlobCipherKeyCache::cleanup);
+			cleanupRegistered = true;
+		}
 		if (g_network->isSimulated()) {
 			return FlowSingleton<BlobCipherKeyCache>::getInstance(
 			    []() { return makeReference<BlobCipherKeyCache>(g_network->isSimulated()); });
@@ -466,6 +535,7 @@ public:
 
 private:
 	BlobCipherDomainCacheMap domainCacheMap;
+	size_t size = 0;
 
 	BlobCipherKeyCache() {}
 };
@@ -483,17 +553,30 @@ public:
 	                           Reference<BlobCipherKey> hCipherKey,
 	                           const uint8_t* iv,
 	                           const int ivLen,
-	                           const EncryptAuthTokenMode mode);
+	                           const EncryptAuthTokenMode mode,
+	                           BlobCipherMetrics::UsageType usageType);
 	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
 	                           Reference<BlobCipherKey> hCipherKey,
-	                           const EncryptAuthTokenMode mode);
+	                           const uint8_t* iv,
+	                           const int ivLen,
+	                           const EncryptAuthTokenMode mode,
+	                           const EncryptAuthTokenAlgo algo,
+	                           BlobCipherMetrics::UsageType usageType);
+	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
+	                           Reference<BlobCipherKey> hCipherKey,
+	                           const EncryptAuthTokenMode mode,
+	                           BlobCipherMetrics::UsageType usageType);
+	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> tCipherKey,
+	                           Reference<BlobCipherKey> hCipherKey,
+	                           const EncryptAuthTokenMode mode,
+	                           const EncryptAuthTokenAlgo algo,
+	                           BlobCipherMetrics::UsageType usageType);
 	~EncryptBlobCipherAes265Ctr();
 
 	Reference<EncryptBuf> encrypt(const uint8_t* plaintext,
 	                              const int plaintextLen,
 	                              BlobCipherEncryptHeader* header,
 	                              Arena&);
-	Standalone<StringRef> encryptBlobGranuleChunk(const uint8_t* plaintext, const int plaintextLen);
 
 private:
 	EVP_CIPHER_CTX* ctx;
@@ -501,6 +584,8 @@ private:
 	Reference<BlobCipherKey> headerCipherKey;
 	EncryptAuthTokenMode authTokenMode;
 	uint8_t iv[AES_256_IV_LENGTH];
+	BlobCipherMetrics::UsageType usageType;
+	EncryptAuthTokenAlgo authTokenAlgo;
 
 	void init();
 };
@@ -512,7 +597,8 @@ class DecryptBlobCipherAes256Ctr final : NonCopyable, public ReferenceCounted<De
 public:
 	DecryptBlobCipherAes256Ctr(Reference<BlobCipherKey> tCipherKey,
 	                           Reference<BlobCipherKey> hCipherKey,
-	                           const uint8_t* iv);
+	                           const uint8_t* iv,
+	                           BlobCipherMetrics::UsageType usageType);
 	~DecryptBlobCipherAes256Ctr();
 
 	Reference<EncryptBuf> decrypt(const uint8_t* ciphertext,
@@ -531,22 +617,20 @@ private:
 	Reference<BlobCipherKey> headerCipherKey;
 	bool headerAuthTokenValidationDone;
 	bool authTokensValidationDone;
+	BlobCipherMetrics::UsageType usageType;
 
 	void verifyEncryptHeaderMetadata(const BlobCipherEncryptHeader& header);
 	void verifyAuthTokens(const uint8_t* ciphertext,
 	                      const int ciphertextLen,
 	                      const BlobCipherEncryptHeader& header,
-	                      uint8_t* buff,
 	                      Arena& arena);
 	void verifyHeaderSingleAuthToken(const uint8_t* ciphertext,
 	                                 const int ciphertextLen,
 	                                 const BlobCipherEncryptHeader& header,
-	                                 uint8_t* buff,
 	                                 Arena& arena);
 	void verifyHeaderMultiAuthToken(const uint8_t* ciphertext,
 	                                const int ciphertextLen,
 	                                const BlobCipherEncryptHeader& header,
-	                                uint8_t* buff,
 	                                Arena& arena);
 };
 
@@ -555,16 +639,32 @@ public:
 	HmacSha256DigestGen(const unsigned char* key, size_t len);
 	~HmacSha256DigestGen();
 	HMAC_CTX* getCtx() const { return ctx; }
-	StringRef digest(unsigned char const* data, size_t len, Arena&);
+	unsigned int digest(const std::vector<std::pair<const uint8_t*, size_t>>& payload,
+	                    unsigned char* buf,
+	                    unsigned int bufLen);
 
 private:
 	HMAC_CTX* ctx;
 };
 
-StringRef computeAuthToken(const uint8_t* payload,
-                           const int payloadLen,
-                           const uint8_t* key,
-                           const int keyLen,
-                           Arena& arena);
+class Aes256CmacDigestGen final : NonCopyable {
+public:
+	Aes256CmacDigestGen(const unsigned char* key, size_t len);
+	~Aes256CmacDigestGen();
+	CMAC_CTX* getCtx() const { return ctx; }
+	size_t digest(const std::vector<std::pair<const uint8_t*, size_t>>& payload, uint8_t* digest, int digestlen);
 
-#endif // FLOW_BLOB_CIPHER_H
+private:
+	CMAC_CTX* ctx;
+};
+
+void computeAuthToken(const std::vector<std::pair<const uint8_t*, size_t>>& payload,
+                      const uint8_t* key,
+                      const int keyLen,
+                      unsigned char* digestBuf,
+                      const EncryptAuthTokenAlgo algo,
+                      unsigned int digestMaxBufSz);
+
+EncryptAuthTokenMode getEncryptAuthTokenMode(const EncryptAuthTokenMode mode);
+
+#endif // FDBCLIENT_BLOB_CIPHER_H

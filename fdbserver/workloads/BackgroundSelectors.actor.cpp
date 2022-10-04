@@ -39,13 +39,12 @@ struct BackgroundSelectorWorkload : TestWorkload {
 
 	BackgroundSelectorWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), operations("Operations"), checks("Checks"), retries("Retries") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		actorsPerClient = std::max(getOption(options, LiteralStringRef("actorsPerClient"), 1), 1);
-		maxDiff = std::max(getOption(options, LiteralStringRef("maxDiff"), 100), 2);
-		minDrift = getOption(options, LiteralStringRef("minDiff"), -10);
-		maxDrift = getOption(options, LiteralStringRef("minDiff"), 100);
-		transactionsPerSecond =
-		    getOption(options, LiteralStringRef("transactionsPerSecond"), 10.0) / (clientCount * actorsPerClient);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		actorsPerClient = std::max(getOption(options, "actorsPerClient"_sr, 1), 1);
+		maxDiff = std::max(getOption(options, "maxDiff"_sr, 100), 2);
+		minDrift = getOption(options, "minDiff"_sr, -10);
+		maxDrift = getOption(options, "minDiff"_sr, 100);
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 10.0) / (clientCount * actorsPerClient);
 		resultLimit = 10 * maxDiff;
 	}
 
