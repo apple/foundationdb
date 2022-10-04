@@ -2729,67 +2729,56 @@ public:
 	                                               FutureStream<Void> serverRemoved,
 	                                               const DDEnabledState* ddEnabledState) {
 		state Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
-		state Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> serverListAndProcessClasses =
-		    Never();
+		state Future<ServerWorkerInfos> serverListAndProcessClasses = Never();
 		state bool isFetchingResults = false;
-		state Transaction tr(self->cx);
 		loop {
-			try {
-				choose {
-					when(wait(checkSignal)) {
-						checkSignal = Never();
-						isFetchingResults = true;
-						serverListAndProcessClasses = NativeAPI::getServerListAndProcessClasses(&tr);
-					}
-					when(std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
-					         wait(serverListAndProcessClasses)) {
-						serverListAndProcessClasses = Never();
-						isFetchingResults = false;
+			choose {
+				when(wait(checkSignal)) {
+					checkSignal = Never();
+					isFetchingResults = true;
+					serverListAndProcessClasses = self->db->getServerListAndProcessClasses();
+				}
+				when(ServerWorkerInfos infos = wait(serverListAndProcessClasses)) {
+					auto& servers = infos.servers;
+					serverListAndProcessClasses = Never();
+					isFetchingResults = false;
 
-						for (int i = 0; i < results.size(); i++) {
-							UID serverId = results[i].first.id();
-							StorageServerInterface const& ssi = results[i].first;
-							ProcessClass const& processClass = results[i].second;
-							if (!self->shouldHandleServer(ssi)) {
-								continue;
-							} else if (self->server_and_tss_info.count(serverId)) {
-								auto& serverInfo = self->server_and_tss_info[serverId];
-								if (ssi.getValue.getEndpoint() !=
-								        serverInfo->getLastKnownInterface().getValue.getEndpoint() ||
-								    processClass != serverInfo->getLastKnownClass().classType()) {
-									Promise<std::pair<StorageServerInterface, ProcessClass>> currentInterfaceChanged =
-									    serverInfo->interfaceChanged;
-									serverInfo->interfaceChanged =
-									    Promise<std::pair<StorageServerInterface, ProcessClass>>();
-									serverInfo->onInterfaceChanged =
-									    Future<std::pair<StorageServerInterface, ProcessClass>>(
-									        serverInfo->interfaceChanged.getFuture());
-									currentInterfaceChanged.send(std::make_pair(ssi, processClass));
-								}
-							} else if (!self->recruitingIds.count(ssi.id())) {
-								self->addServer(ssi,
-								                processClass,
-								                self->serverTrackerErrorOut,
-								                tr.getReadVersion().get(),
-								                *ddEnabledState);
+					for (int i = 0; i < servers.size(); i++) {
+						UID serverId = servers[i].first.id();
+						StorageServerInterface const& ssi = servers[i].first;
+						ProcessClass const& processClass = servers[i].second;
+						if (!self->shouldHandleServer(ssi)) {
+							continue;
+						} else if (self->server_and_tss_info.count(serverId)) {
+							auto& serverInfo = self->server_and_tss_info[serverId];
+							if (ssi.getValue.getEndpoint() !=
+							        serverInfo->getLastKnownInterface().getValue.getEndpoint() ||
+							    processClass != serverInfo->getLastKnownClass().classType()) {
+								Promise<std::pair<StorageServerInterface, ProcessClass>> currentInterfaceChanged =
+								    serverInfo->interfaceChanged;
+								serverInfo->interfaceChanged =
+								    Promise<std::pair<StorageServerInterface, ProcessClass>>();
+								serverInfo->onInterfaceChanged =
+								    Future<std::pair<StorageServerInterface, ProcessClass>>(
+								        serverInfo->interfaceChanged.getFuture());
+								currentInterfaceChanged.send(std::make_pair(ssi, processClass));
 							}
+						} else if (!self->recruitingIds.count(ssi.id())) {
+							self->addServer(ssi,
+							                processClass,
+							                self->serverTrackerErrorOut,
+							                infos.readVersion.get(),
+							                *ddEnabledState);
 						}
-
-						tr = Transaction(self->cx);
-						checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
 					}
-					when(waitNext(serverRemoved)) {
-						if (isFetchingResults) {
-							tr = Transaction(self->cx);
-							serverListAndProcessClasses = NativeAPI::getServerListAndProcessClasses(&tr);
-						}
+
+					checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskPriority::DataDistributionLaunch);
+				}
+				when(waitNext(serverRemoved)) {
+					if (isFetchingResults) {
+						serverListAndProcessClasses = self->db->getServerListAndProcessClasses();
 					}
 				}
-			} catch (Error& e) {
-				wait(tr.onError(e));
-				serverListAndProcessClasses = Never();
-				isFetchingResults = false;
-				checkSignal = Void();
 			}
 		}
 	}

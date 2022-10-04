@@ -28,6 +28,20 @@
 class DDTxnProcessorImpl {
 	friend class DDTxnProcessor;
 
+	ACTOR static Future<ServerWorkerInfos> getServerListAndProcessClasses(Database cx) {
+		state Transaction tr(cx);
+		state ServerWorkerInfos res;
+		loop {
+			try {
+				wait(store(res.servers, NativeAPI::getServerListAndProcessClasses(&tr)));
+				res.readVersion = tr.getReadVersion().get();
+				return res;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	// return {sourceServers, completeSources}
 	ACTOR static Future<IDDTxnProcessor::SourceServers> getSourceServersForRange(Database cx, KeyRangeRef keys) {
 		state std::set<UID> servers;
@@ -523,9 +537,8 @@ Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(
 	return DDTxnProcessorImpl::getSourceServersForRange(cx, range);
 }
 
-Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> DDTxnProcessor::getServerListAndProcessClasses() {
-	Transaction tr(cx);
-	return NativeAPI::getServerListAndProcessClasses(&tr);
+Future<ServerWorkerInfos> DDTxnProcessor::getServerListAndProcessClasses() {
+	return DDTxnProcessorImpl::getServerListAndProcessClasses(cx);
 }
 
 Future<MoveKeysLock> DDTxnProcessor::takeMoveKeysLock(const UID& ddId) const {
@@ -603,12 +616,13 @@ Future<Void> DDTxnProcessor::waitDDTeamInfoPrintSignal() const {
 	return DDTxnProcessorImpl::waitDDTeamInfoPrintSignal(cx);
 }
 
-Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>>
-DDMockTxnProcessor::getServerListAndProcessClasses() {
-	std::vector<std::pair<StorageServerInterface, ProcessClass>> res;
+Future<ServerWorkerInfos> DDMockTxnProcessor::getServerListAndProcessClasses() {
+	ServerWorkerInfos res;
 	for (auto& [_, mss] : mgs->allServers) {
-		res.emplace_back(mss.ssi, ProcessClass(ProcessClass::StorageClass, ProcessClass::DBSource));
+		res.servers.emplace_back(mss.ssi, ProcessClass(ProcessClass::StorageClass, ProcessClass::DBSource));
 	}
+	// FIXME(xwang): possible generate version from time?
+	res.readVersion = 0;
 	return res;
 }
 
@@ -683,7 +697,7 @@ Future<Reference<InitialDataDistribution>> DDMockTxnProcessor::getInitialDataDis
 	// FIXME: now we just ignore ddEnabledState and moveKeysLock, will fix it in the future
 	Reference<InitialDataDistribution> res = makeReference<InitialDataDistribution>();
 	res->mode = 1;
-	res->allServers = getServerListAndProcessClasses().get();
+	res->allServers = getServerListAndProcessClasses().get().servers;
 	res->shards = getDDShardInfos();
 	std::tie(res->primaryTeams, res->remoteTeams) = getAllTeamsInRegion(res->shards);
 	return res;
