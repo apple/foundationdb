@@ -35,7 +35,7 @@ struct ApiCorrectnessWorkload : ApiWorkload {
 private:
 // Enable to track the activity on a particular key
 #if CENABLED(0, NOT_IN_CLEAN)
-#define targetKey LiteralStringRef( ??? )
+#define targetKey "???"_sr
 
 	void debugKey(KeyRef key, std::string context) {
 		if (key == targetKey)

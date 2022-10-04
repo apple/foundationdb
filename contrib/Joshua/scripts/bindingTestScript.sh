@@ -83,6 +83,7 @@ fi
 # Stop the cluster
 if stopCluster; then
 	unset FDBSERVERID
+	trap - EXIT
 fi
 
 exit "${status}"

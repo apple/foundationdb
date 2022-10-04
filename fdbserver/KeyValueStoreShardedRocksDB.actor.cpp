@@ -1894,12 +1894,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			a.done.send(Void());
-			for (const auto& [id, range] : deletes) {
-				auto cf = columnFamilyMap->find(id);
-				ASSERT(cf != columnFamilyMap->end());
-				auto begin = toSlice(range.begin);
-				auto end = toSlice(range.end);
-				if (SERVER_KNOBS->ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE) {
+			if (SERVER_KNOBS->ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE) {
+				for (const auto& [id, range] : deletes) {
+					auto cf = columnFamilyMap->find(id);
+					ASSERT(cf != columnFamilyMap->end());
+					auto begin = toSlice(range.begin);
+					auto end = toSlice(range.end);
+
 					ASSERT(a.db->SuggestCompactRange(cf->second, &begin, &end).ok());
 				}
 			}
