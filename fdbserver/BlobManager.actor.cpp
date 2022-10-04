@@ -384,6 +384,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 
 	int64_t epoch;
 	int64_t seqNo = 1;
+	int64_t manifestDumperSeqNo = 1;
 
 	Promise<Void> iAmReplaced;
 
@@ -5072,16 +5073,12 @@ ACTOR Future<bool> hasPendingSplit(Reference<BlobManagerData> self) {
 // FIXME: could eventually make this more thorough by storing some state in the DB or something
 // FIXME: simpler solution could be to shuffle ranges
 ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
-
 	state Reference<IRateControl> rateLimiter =
 	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->BG_CONSISTENCY_CHECK_TARGET_SPEED_KB * 1024, 1));
-	bmData->initBStore();
 
 	if (BM_DEBUG) {
 		fmt::print("BGCC starting\n");
 	}
-	if (isFullRestoreMode())
-		wait(printRestoreSummary(bmData->db, bmData->bstore));
 
 	loop {
 		if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
@@ -5089,14 +5086,6 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 				printf("BGCC stopping\n");
 			}
 			return Void();
-		}
-
-		// Only dump blob manifest when there is no pending split to ensure data consistency
-		if (SERVER_KNOBS->BLOB_MANIFEST_BACKUP && !isFullRestoreMode()) {
-			bool pendingSplit = wait(hasPendingSplit(bmData));
-			if (!pendingSplit) {
-				wait(dumpManifest(bmData->db, bmData->bstore));
-			}
 		}
 
 		if (bmData->workersById.size() >= 1) {
@@ -5142,6 +5131,22 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 			}
 			wait(delay(60.0));
 		}
+	}
+}
+
+ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
+	if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
+		return Void();
+	}
+
+	bmData->initBStore();
+	loop {
+		bool pendingSplit = wait(hasPendingSplit(bmData));
+		if (!pendingSplit) {
+			wait(dumpManifest(bmData->db, bmData->bstore, bmData->epoch, bmData->manifestDumperSeqNo));
+			bmData->manifestDumperSeqNo++;
+		}
+		wait(delay(SERVER_KNOBS->BLOB_MANIFEST_BACKUP_INTERVAL));
 	}
 }
 
@@ -5208,6 +5213,9 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		}
 		if (SERVER_KNOBS->BG_ENABLE_MERGING) {
 			self->addActor.send(granuleMergeChecker(self));
+		}
+		if (SERVER_KNOBS->BLOB_MANIFEST_BACKUP && !isFullRestoreMode()) {
+			self->addActor.send(backupManifest(self));
 		}
 
 		if (BUGGIFY) {
