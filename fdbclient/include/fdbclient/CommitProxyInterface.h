@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_COMMITPROXYINTERFACE_H
 #define FDBCLIENT_COMMITPROXYINTERFACE_H
+#include "fdbclient/IdempotencyId.h"
 #pragma once
 
 #include <utility>
@@ -186,6 +187,7 @@ struct CommitTransactionRequest : TimedRequest {
 	Optional<UID> debugID;
 	Optional<ClientTrCommitCostEstimation> commitCostEstimation;
 	Optional<TagSet> tagSet;
+	IdempotencyIdRef idempotencyId;
 
 	TenantInfo tenantInfo;
 
@@ -196,8 +198,17 @@ struct CommitTransactionRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, transaction, reply, flags, debugID, commitCostEstimation, tagSet, spanContext, tenantInfo, arena);
+		serializer(ar,
+		           transaction,
+		           reply,
+		           flags,
+		           debugID,
+		           commitCostEstimation,
+		           tagSet,
+		           spanContext,
+		           tenantInfo,
+		           idempotencyId,
+		           arena);
 	}
 };
 
