@@ -6517,6 +6517,18 @@ Future<Void> Transaction::commitMutations() {
 				tr.transaction.read_conflict_ranges.emplace_back(
 				    tr.arena, extraConflictRanges[i].get().first, extraConflictRanges[i].get().second);
 
+		if (tr.idempotencyId.valid()) {
+			// We need to be able confirm that this transaction is no longer in
+			// flight, and if the idempotency id is in the read and write
+			// conflict range we can use that.
+			BinaryWriter wr(Unversioned());
+			wr.serializeBytes("\xFF/SC/"_sr);
+			wr.serializeBytes(tr.idempotencyId.asStringRefUnsafe());
+			auto r = singleKeyRange(wr.toValue(), tr.arena);
+			tr.transaction.read_conflict_ranges.push_back(tr.arena, r);
+			tr.transaction.write_conflict_ranges.push_back(tr.arena, r);
+		}
+
 		if (!trState->options.causalWriteRisky &&
 		    !intersects(tr.transaction.write_conflict_ranges, tr.transaction.read_conflict_ranges).present())
 			makeSelfConflicting();
@@ -6826,6 +6838,23 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 			trState->authToken = Standalone<StringRef>(value.get());
 		else
 			trState->authToken.reset();
+		break;
+	case FDBTransactionOptions::IDEMPOTENCY_ID:
+		validateOptionValuePresent(value);
+		if (!(value.get().size() >= 16 && value.get().size() < 256)) {
+			Error e = invalid_option();
+			TraceEvent(SevWarn, "IdempotencyIdInvalidSize")
+			    .error(e)
+			    .detail("IdempotencyId", value.get().printable())
+			    .detail("Recommendation", "Use an idempotency id that's at least 16 bytes and less than 256 bytes");
+			throw e;
+		}
+		tr.idempotencyId = IdempotencyIdRef(tr.arena, IdempotencyIdRef(value.get()));
+		break;
+	case FDBTransactionOptions::AUTOMATIC_IDEMPOTENCY:
+		validateOptionValueNotPresent(value);
+		tr.idempotencyId = IdempotencyIdRef(
+		    tr.arena, IdempotencyIdRef(BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned())));
 		break;
 
 	default:

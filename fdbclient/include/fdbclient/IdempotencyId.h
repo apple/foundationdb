@@ -59,7 +59,7 @@ struct IdempotencyIdRef {
 	}
 
 	IdempotencyIdRef(Arena& arena, IdempotencyIdRef t)
-	  : IdempotencyIdRef(t.valid() && t.indirect() ? StringRef(arena, t.asStringRef()) : t.asStringRef()) {}
+	  : IdempotencyIdRef(t.valid() && t.indirect() ? StringRef(arena, t.asStringRefUnsafe()) : t.asStringRefUnsafe()) {}
 
 	int expectedSize() const {
 		if (valid() && indirect()) {
@@ -68,7 +68,7 @@ struct IdempotencyIdRef {
 		return 0;
 	}
 
-	bool operator==(const IdempotencyIdRef& other) const { return asStringRef() == other.asStringRef(); }
+	bool operator==(const IdempotencyIdRef& other) const { return asStringRefUnsafe() == other.asStringRefUnsafe(); }
 
 	IdempotencyIdRef(IdempotencyIdRef&& other) = default;
 	IdempotencyIdRef& operator=(IdempotencyIdRef&& other) = default;
@@ -83,10 +83,8 @@ struct IdempotencyIdRef {
 
 	bool valid() const { return first != 0; }
 
-private:
-	bool indirect() const { return first < 256; }
 	// Result may reference this, so *this must outlive result.
-	StringRef asStringRef() const {
+	StringRef asStringRefUnsafe() const {
 		if (!valid()) {
 			return StringRef();
 		}
@@ -96,6 +94,9 @@ private:
 			return StringRef(reinterpret_cast<const uint8_t*>(this), sizeof(*this));
 		}
 	}
+
+private:
+	bool indirect() const { return first < 256; }
 	// first == 0 means this id is invalid. This representation is not ambiguous
 	// because if first < 256, then first is the length of the id, but a valid
 	// id as at least 16 bytes long.
@@ -104,16 +105,18 @@ private:
 		uint64_t id;
 		const uint8_t* ptr;
 	} second; // If first < 256, then ptr is valid. Otherwise id is valid.
-	friend std::hash<IdempotencyIdRef>;
-	friend struct IdempotencyIdKVBuilder;
-	friend Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const IdempotencyIdRef& id);
-	friend struct dynamic_size_traits<IdempotencyIdRef>;
 };
+
+using IdempotencyId = Standalone<IdempotencyIdRef>;
 
 namespace std {
 template <>
 struct hash<IdempotencyIdRef> {
-	std::size_t operator()(const IdempotencyIdRef& id) const { return std::hash<StringRef>{}(id.asStringRef()); }
+	std::size_t operator()(const IdempotencyIdRef& id) const { return std::hash<StringRef>{}(id.asStringRefUnsafe()); }
+};
+template <>
+struct hash<IdempotencyId> {
+	std::size_t operator()(const IdempotencyId& id) const { return std::hash<StringRef>{}(id.asStringRefUnsafe()); }
 };
 } // namespace std
 
@@ -121,11 +124,11 @@ template <>
 struct dynamic_size_traits<IdempotencyIdRef> : std::true_type {
 	template <class Context>
 	static size_t size(const IdempotencyIdRef& t, Context&) {
-		return t.asStringRef().size();
+		return t.asStringRefUnsafe().size();
 	}
 	template <class Context>
 	static void save(uint8_t* out, const IdempotencyIdRef& t, Context&) {
-		StringRef s = t.asStringRef();
+		StringRef s = t.asStringRefUnsafe();
 		std::copy(s.begin(), s.end(), out);
 	}
 

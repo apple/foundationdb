@@ -41,7 +41,7 @@ void IdempotencyIdKVBuilder::add(const IdempotencyIdRef& id, uint16_t batchIndex
 	} else {
 		impl->batchIndexHighOrderByte = batchIndex >> 8;
 	}
-	StringRef s = id.asStringRef();
+	StringRef s = id.asStringRefUnsafe();
 	impl->value << uint8_t(s.size());
 	impl->value.serializeBytes(s);
 	impl->value << uint8_t(batchIndex); // Low order byte of batchIndex
@@ -75,7 +75,7 @@ IdempotencyIdKVBuilder::~IdempotencyIdKVBuilder() = default;
 Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const IdempotencyIdRef& id) {
 	ASSERT(id.valid());
 	// The common case is that the kv does not contain the idempotency id
-	StringRef needle = id.asStringRef();
+	StringRef needle = id.asStringRefUnsafe();
 	StringRef haystack = kv.value;
 	if (memmem(haystack.begin(), haystack.size(), needle.begin(), needle.size()) == nullptr) {
 		return {};
