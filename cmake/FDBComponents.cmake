@@ -56,8 +56,8 @@ endif()
 # Python Bindings
 ################################################################################
 
-find_package(Python COMPONENTS Interpreter)
-if(Python_Interpreter_FOUND)
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
   set(WITH_PYTHON ON)
 else()
   message(WARNING "Could not found a suitable python interpreter")
@@ -178,7 +178,7 @@ set(PORTABLE_ROCKSDB ON CACHE BOOL "Compile RocksDB in portable mode") # Set thi
 set(WITH_LIBURING OFF CACHE BOOL "Build with liburing enabled") # Set this to ON to include liburing
 # RocksDB is currently enabled by default for GCC but does not build with the latest
 # Clang.
-if (SSD_ROCKSDB_EXPERIMENTAL AND GCC)
+if (SSD_ROCKSDB_EXPERIMENTAL AND NOT WIN32)
   set(WITH_ROCKSDB_EXPERIMENTAL ON)
 else()
   set(WITH_ROCKSDB_EXPERIMENTAL OFF)
@@ -200,6 +200,9 @@ else()
     URL "https://github.com/ToruNiina/toml11/archive/v3.4.0.tar.gz"
     URL_HASH SHA256=bc6d733efd9216af8c119d8ac64a805578c79cc82b813e4d1d880ca128bd154d
     CMAKE_CACHE_ARGS
+      -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
+      -DCMAKE_C_COMPILER:FILEPATH=${CMAKE_C_COMPILER}
+      -DCMAKE_CXX_COMPILER:FILEPATH=${CMAKE_CXX_COMPILER}
       -DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_CURRENT_BINARY_DIR}/toml11
       -Dtoml11_BUILD_TEST:BOOL=OFF
     BUILD_ALWAYS ON)
@@ -229,7 +232,12 @@ set(COROUTINE_IMPL ${DEFAULT_COROUTINE_IMPL} CACHE STRING "Which coroutine imple
 
 set(BUILD_AWS_BACKUP OFF CACHE BOOL "Build AWS S3 SDK backup client")
 if (BUILD_AWS_BACKUP)
-  set(WITH_AWS_BACKUP ON)
+  if (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    set(WITH_AWS_BACKUP ON)
+  else()
+    message(WARNING "BUILD_AWS_BACKUP set but ignored ${CMAKE_SYSTEM_PROCESSOR} is not supported yet")
+    set(WITH_AWS_BACKUP OFF)
+  endif()
 else()
   set(WITH_AWS_BACKUP OFF)
 endif()

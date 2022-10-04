@@ -37,11 +37,6 @@ struct is_fb_function_t<T, typename std::enable_if<T::is_fb_visitor>::type> : st
 template <class T>
 constexpr bool is_fb_function = is_fb_function_t<T>::value;
 
-template <class Visitor, class... Items>
-typename std::enable_if<is_fb_function<Visitor>, void>::type serializer(Visitor& visitor, Items&... items) {
-	visitor(items...);
-}
-
 template <class... Ts>
 struct pack {};
 
@@ -60,6 +55,40 @@ struct index_impl<0, pack<T, Ts...>> {
 
 template <int i, class Pack>
 using index_t = typename index_impl<i, Pack>::type;
+
+template <class T, typename = void>
+struct fb_must_appear_last_t : std::false_type {};
+
+template <class T>
+struct fb_must_appear_last_t<T, typename std::enable_if<T::fb_must_appear_last>::type>
+  : std::conditional_t<T::fb_must_appear_last, std::true_type, std::false_type> {};
+
+template <class T>
+constexpr bool fb_must_appear_last = fb_must_appear_last_t<T>::value;
+
+template <class Item, class... Items>
+constexpr bool fb_appears_last_property_helper(pack<Item, Items...>) {
+	if constexpr (sizeof...(Items) == 0) {
+		return true;
+	} else {
+		return !fb_must_appear_last<Item> && fb_appears_last_property_helper(pack<Items...>{});
+	}
+}
+template <class... Items>
+constexpr bool fb_appears_last_property(pack<Items...>) {
+	if constexpr (sizeof...(Items) == 0) {
+		return true;
+	} else {
+		return fb_appears_last_property_helper(pack<Items...>{});
+	}
+}
+
+template <class Visitor, class... Items>
+typename std::enable_if<is_fb_function<Visitor>, void>::type serializer(Visitor& visitor, Items&... items) {
+	static_assert(fb_appears_last_property(pack<Items...>{}),
+	              "An argument to a serializer call that must appear last (Arena?) does not appear last");
+	visitor(items...);
+}
 
 template <class T, typename = void>
 struct scalar_traits : std::false_type {

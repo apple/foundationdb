@@ -20,11 +20,12 @@
 
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/KeyBackedTypes.h" // for key backed map codecs for tss mapping
+#include "fdbclient/Metacluster.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ApplyMetadataMutation.h"
-#include "fdbserver/EncryptedMutationMessage.h"
+#include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
@@ -58,9 +59,10 @@ public:
 	                           const UID& dbgid_,
 	                           Arena& arena_,
 	                           const VectorRef<MutationRef>& mutations_,
-	                           IKeyValueStore* txnStateStore_)
+	                           IKeyValueStore* txnStateStore_,
+	                           Reference<AsyncVar<ServerDBInfo> const> db)
 	  : spanContext(spanContext_), dbgid(dbgid_), arena(arena_), mutations(mutations_), txnStateStore(txnStateStore_),
-	    confChange(dummyConfChange) {}
+	    confChange(dummyConfChange), dbInfo(db) {}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           Arena& arena_,
@@ -82,16 +84,17 @@ public:
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
 	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
-	    initialCommit(initialCommit_) {}
+	    tenantIdIndex(&proxyCommitData_.tenantIdIndex), initialCommit(initialCommit_), dbInfo(proxyCommitData_.db) {}
 
 	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           ResolverData& resolverData_,
-	                           const VectorRef<MutationRef>& mutations_)
+	                           const VectorRef<MutationRef>& mutations_,
+	                           Reference<AsyncVar<ServerDBInfo> const> db)
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
 	    txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
 	    confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem), popVersion(resolverData_.popVersion),
 	    keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
-	    initialCommit(resolverData_.initialCommit), forResolver(true) {}
+	    initialCommit(resolverData_.initialCommit), forResolver(true), dbInfo(db) {}
 
 private:
 	// The following variables are incoming parameters
@@ -131,12 +134,15 @@ private:
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
 	std::map<TenantName, TenantMapEntry>* tenantMap = nullptr;
+	std::unordered_map<int64_t, TenantName>* tenantIdIndex = nullptr;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
 	bool initialCommit = false;
 
 	// true if called from Resolver
 	bool forResolver = false;
+
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 
 private:
 	// The following variables are used internally
@@ -158,12 +164,12 @@ private:
 
 private:
 	void writeMutation(const MutationRef& m) {
-		if (forResolver || !SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION) {
+		if (forResolver || !isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, dbInfo->get().client)) {
 			toCommit->writeTypedMessage(m);
 		} else {
 			ASSERT(cipherKeys != nullptr);
 			Arena arena;
-			toCommit->writeTypedMessage(EncryptedMutationMessage::encryptMetadata(arena, *cipherKeys, m));
+			toCommit->writeTypedMessage(m.encryptMetadata(*cipherKeys, arena, BlobCipherMetrics::TLOG));
 		}
 	}
 
@@ -322,7 +328,8 @@ private:
 	}
 
 	void checkSetConfigKeys(MutationRef m) {
-		if (!m.param1.startsWith(configKeysPrefix) && m.param1 != coordinatorsKey) {
+		if (!m.param1.startsWith(configKeysPrefix) && m.param1 != coordinatorsKey &&
+		    m.param1 != previousCoordinatorsKey) {
 			return;
 		}
 		if (Optional<StringRef>(m.param2) !=
@@ -338,7 +345,8 @@ private:
 				TraceEvent("MutationRequiresRestart", dbgid)
 				    .detail("M", m)
 				    .detail("PrevValue", t.orDefault("(none)"_sr))
-				    .detail("ToCommit", toCommit != nullptr);
+				    .detail("ToCommit", toCommit != nullptr)
+				    .detail("InitialCommit", initialCommit);
 				confChange = true;
 			}
 		}
@@ -624,7 +632,7 @@ private:
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		confChange = true;
-		TEST(true); // Recovering at a higher version.
+		CODE_PROBE(true, "Recovering at a higher version.");
 	}
 
 	void checkSetVersionEpochKey(MutationRef m) {
@@ -636,7 +644,7 @@ private:
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		confChange = true;
-		TEST(true); // Setting version epoch
+		CODE_PROBE(true, "Setting version epoch");
 	}
 
 	void checkSetWriteRecoverKey(MutationRef m) {
@@ -646,18 +654,27 @@ private:
 		TraceEvent("WriteRecoveryKeySet", dbgid).log();
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
-		TEST(true); // Snapshot created, setting writeRecoveryKey in txnStateStore
+		CODE_PROBE(true, "Snapshot created, setting writeRecoveryKey in txnStateStore");
 	}
 
 	void checkSetTenantMapPrefix(MutationRef m) {
-		if (m.param1.startsWith(tenantMapPrefix)) {
+		KeyRef prefix = TenantMetadata::tenantMap().subspace.begin;
+		if (m.param1.startsWith(prefix)) {
+			TenantName tenantName = m.param1.removePrefix(prefix);
+			TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
+
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
-				TenantName tenantName = m.param1.removePrefix(tenantMapPrefix);
-				TenantMapEntry tenantEntry = TenantMapEntry::decode(m.param2);
 
-				TraceEvent("CommitProxyInsertTenant", dbgid).detail("Tenant", tenantName).detail("Version", version);
+				TraceEvent("CommitProxyInsertTenant", dbgid)
+				    .detail("Tenant", tenantName)
+				    .detail("Id", tenantEntry.id)
+				    .detail("Version", version);
+
 				(*tenantMap)[tenantName] = tenantEntry;
+				if (tenantIdIndex) {
+					(*tenantIdIndex)[tenantEntry.id] = tenantName;
+				}
 			}
 
 			if (!initialCommit) {
@@ -680,7 +697,31 @@ private:
 				writeMutation(privatized);
 			}
 
-			TEST(true); // Tenant added to map
+			CODE_PROBE(true, "Tenant added to map");
+		}
+	}
+
+	void checkSetMetaclusterRegistration(MutationRef m) {
+		if (m.param1 == MetaclusterMetadata::metaclusterRegistration().key) {
+			MetaclusterRegistrationEntry entry = MetaclusterRegistrationEntry::decode(m.param2);
+
+			TraceEvent("SetMetaclusterRegistration", dbgid)
+			    .detail("ClusterType", entry.clusterType)
+			    .detail("MetaclusterID", entry.metaclusterId)
+			    .detail("MetaclusterName", entry.metaclusterName)
+			    .detail("ClusterID", entry.id)
+			    .detail("ClusterName", entry.name);
+
+			Optional<Value> value = txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration().key).get();
+			if (!initialCommit) {
+				txnStateStore->set(KeyValueRef(m.param1, m.param2));
+			}
+
+			if (!value.present() || value.get() != m.param2) {
+				confChange = true;
+			}
+
+			CODE_PROBE(true, "Metacluster registration set");
 		}
 	}
 
@@ -940,6 +981,15 @@ private:
 						break;
 					}
 				}
+				auto& systemBackupRanges = getSystemBackupRanges();
+				for (auto r = systemBackupRanges.begin(); !foundKey && r != systemBackupRanges.end(); ++r) {
+					for (auto& it : vecBackupKeys->intersectingRanges(*r)) {
+						if (it.value().count(logDestination) > 0) {
+							foundKey = true;
+							break;
+						}
+					}
+				}
 				if (!foundKey) {
 					auto logRanges = vecBackupKeys->modify(singleKeyRange(metadataVersionKey));
 					for (auto logRange : logRanges) {
@@ -1028,13 +1078,14 @@ private:
 	}
 
 	void checkClearTenantMapPrefix(KeyRangeRef range) {
-		if (tenantMapKeys.intersects(range)) {
+		KeyRangeRef subspace = TenantMetadata::tenantMap().subspace;
+		if (subspace.intersects(range)) {
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
 
-				StringRef startTenant = std::max(range.begin, tenantMapPrefix).removePrefix(tenantMapPrefix);
-				StringRef endTenant = (range.end.startsWith(tenantMapPrefix) ? range.end : tenantMapKeys.end)
-				                          .removePrefix(tenantMapPrefix);
+				StringRef startTenant = std::max(range.begin, subspace.begin).removePrefix(subspace.begin);
+				StringRef endTenant =
+				    range.end.startsWith(subspace.begin) ? range.end.removePrefix(subspace.begin) : "\xff\xff"_sr;
 
 				TraceEvent("CommitProxyEraseTenants", dbgid)
 				    .detail("BeginTenant", startTenant)
@@ -1043,6 +1094,17 @@ private:
 
 				auto startItr = tenantMap->lower_bound(startTenant);
 				auto endItr = tenantMap->lower_bound(endTenant);
+
+				if (tenantIdIndex) {
+					// Iterate over iterator-range and remove entries from TenantIdName map
+					// TODO: O(n) operation, optimize cpu
+					auto itr = startItr;
+					while (itr != endItr) {
+						tenantIdIndex->erase(itr->second.id);
+						itr++;
+					}
+				}
+
 				tenantMap->erase(startItr, endItr);
 			}
 
@@ -1063,18 +1125,42 @@ private:
 
 				MutationRef privatized;
 				privatized.type = MutationRef::ClearRange;
-				privatized.param1 = range.begin.withPrefix(systemKeys.begin, arena);
-				privatized.param2 = range.end.withPrefix(systemKeys.begin, arena);
+				privatized.param1 = systemKeys.begin.withSuffix(std::max(range.begin, subspace.begin), arena);
+				if (range.end < subspace.end) {
+					privatized.param2 = systemKeys.begin.withSuffix(range.end, arena);
+				} else {
+					privatized.param2 = systemKeys.begin.withSuffix(subspace.begin).withSuffix("\xff\xff"_sr, arena);
+				}
 				writeMutation(privatized);
 			}
 
-			TEST(true); // Tenant cleared from map
+			CODE_PROBE(true, "Tenant cleared from map");
+		}
+	}
+
+	void checkClearMetaclusterRegistration(KeyRangeRef range) {
+		if (range.contains(MetaclusterMetadata::metaclusterRegistration().key)) {
+			TraceEvent("ClearMetaclusterRegistration", dbgid);
+
+			Optional<Value> value = txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration().key).get();
+			if (!initialCommit) {
+				txnStateStore->clear(singleKeyRange(MetaclusterMetadata::metaclusterRegistration().key));
+			}
+
+			if (value.present()) {
+				confChange = true;
+			}
+
+			CODE_PROBE(true, "Metacluster registration cleared");
 		}
 	}
 
 	void checkClearMiscRangeKeys(KeyRangeRef range) {
 		if (initialCommit) {
 			return;
+		}
+		if (range.contains(previousCoordinatorsKey)) {
+			txnStateStore->clear(singleKeyRange(previousCoordinatorsKey));
 		}
 		if (range.contains(coordinatorsKey)) {
 			txnStateStore->clear(singleKeyRange(coordinatorsKey));
@@ -1194,6 +1280,7 @@ public:
 				checkSetMinRequiredCommitVersionKey(m);
 				checkSetVersionEpochKey(m);
 				checkSetTenantMapPrefix(m);
+				checkSetMetaclusterRegistration(m);
 				checkSetOtherKeys(m);
 			} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {
 				KeyRangeRef range(m.param1, m.param2);
@@ -1211,6 +1298,7 @@ public:
 				checkClearTssQuarantineKeys(m, range);
 				checkClearVersionEpochKeys(m, range);
 				checkClearTenantMapPrefix(range);
+				checkClearMetaclusterRegistration(range);
 				checkClearMiscRangeKeys(range);
 			}
 		}
@@ -1243,7 +1331,6 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             Version version,
                             Version popVersion,
                             bool initialCommit) {
-
 	ApplyMetadataMutationsImpl(spanContext,
 	                           arena,
 	                           mutations,
@@ -1260,14 +1347,16 @@ void applyMetadataMutations(SpanContext const& spanContext,
 
 void applyMetadataMutations(SpanContext const& spanContext,
                             ResolverData& resolverData,
-                            const VectorRef<MutationRef>& mutations) {
-	ApplyMetadataMutationsImpl(spanContext, resolverData, mutations).apply();
+                            const VectorRef<MutationRef>& mutations,
+                            Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	ApplyMetadataMutationsImpl(spanContext, resolverData, mutations, dbInfo).apply();
 }
 
 void applyMetadataMutations(SpanContext const& spanContext,
                             const UID& dbgid,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,
-                            IKeyValueStore* txnStateStore) {
-	ApplyMetadataMutationsImpl(spanContext, dbgid, arena, mutations, txnStateStore).apply();
+                            IKeyValueStore* txnStateStore,
+                            Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	ApplyMetadataMutationsImpl(spanContext, dbgid, arena, mutations, txnStateStore, dbInfo).apply();
 }

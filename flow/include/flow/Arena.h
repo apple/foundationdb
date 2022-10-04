@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <boost/functional/hash.hpp>
 #include <stdint.h>
+#include <string_view>
 #include <string>
 #include <cstring>
 #include <limits>
@@ -41,6 +42,8 @@
 #include <set>
 #include <type_traits>
 #include <sstream>
+#include <string_view>
+#include <fmt/format.h>
 
 // TrackIt is a zero-size class for tracking constructions, destructions, and assignments of instances
 // of a class.  Just inherit TrackIt<T> from T to enable tracking of construction and destruction of
@@ -97,6 +100,7 @@ FDB_DECLARE_BOOLEAN_PARAM(FastInaccurateEstimate);
 // memory is freed by deleting the entire Arena at once. See flow/README.md for details on using Arenas.
 class Arena {
 public:
+	constexpr static auto fb_must_appear_last = true;
 	Arena();
 	explicit Arena(size_t reservedSize);
 	//~Arena();
@@ -362,6 +366,8 @@ class Standalone : private Arena, public T {
 public:
 	using RefType = T;
 
+	constexpr static auto fb_must_appear_last = false;
+
 	// T must have no destructor
 	Arena& arena() { return *(Arena*)this; }
 	const Arena& arena() const { return *(const Arena*)this; }
@@ -530,7 +536,9 @@ public:
 		return substr(0, size() - s.size());
 	}
 
-	std::string toString() const { return std::string((const char*)data, length); }
+	std::string toString() const { return std::string(reinterpret_cast<const char*>(data), length); }
+
+	std::string_view toStringView() const { return std::string_view(reinterpret_cast<const char*>(data), length); }
 
 	static bool isPrintable(char c) { return c > 32 && c < 127; }
 	inline std::string printable() const;
@@ -587,13 +595,19 @@ public:
 	}
 
 	// Removes bytes from begin up to and including the sep string, returns StringRef of the part before sep
-	StringRef eat(StringRef sep) {
+	StringRef eat(StringRef sep, bool* foundSep = nullptr) {
 		for (int i = 0, iend = size() - sep.size(); i <= iend; ++i) {
 			if (sep.compare(substr(i, sep.size())) == 0) {
+				if (foundSep) {
+					*foundSep = true;
+				}
 				StringRef token = substr(0, i);
 				*this = substr(i + sep.size());
 				return token;
 			}
+		}
+		if (foundSep) {
+			*foundSep = false;
 		}
 		return eat();
 	}
@@ -602,7 +616,9 @@ public:
 		*this = StringRef();
 		return r;
 	}
-	StringRef eat(const char* sep) { return eat(StringRef((const uint8_t*)sep, (int)strlen(sep))); }
+	StringRef eat(const char* sep, bool* foundSep = nullptr) {
+		return eat(StringRef((const uint8_t*)sep, (int)strlen(sep)), foundSep);
+	}
 	// Return StringRef of bytes from begin() up to but not including the first byte matching any byte in sep,
 	// and remove that sequence (including the sep byte) from *this
 	// Returns and removes all bytes from *this if no bytes within sep were found
@@ -715,15 +731,17 @@ struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::tru
 	static std::string toString(const Standalone<T>& value) { return Traceable<T>::toString(value); }
 };
 
-namespace literal_string_ref {
-template <class T, int Size>
-StringRef LiteralStringRefHelper(const char* str) {
-	static_assert(std::is_same_v<T, const char(&)[Size]> || std::is_same_v<T, const char[Size]>,
-	              "Argument to LiteralStringRef must be a literal string");
-	return StringRef(reinterpret_cast<const uint8_t*>(str), Size - 1);
-}
-} // namespace literal_string_ref
-#define LiteralStringRef(str) literal_string_ref::LiteralStringRefHelper<decltype(str), sizeof(str)>(str)
+#define __FILE__sr StringRef(reinterpret_cast<const uint8_t*>(__FILE__), sizeof(__FILE__) - 1)
+#define __FUNCTION__sr StringRef(reinterpret_cast<const uint8_t*>(__FUNCTION__), sizeof(__FUNCTION__) - 1)
+
+template <>
+struct fmt::formatter<StringRef> : formatter<std::string_view> {
+	template <typename FormatContext>
+	auto format(const StringRef& str, FormatContext& ctx) -> decltype(ctx.out()) {
+		std::string_view view(reinterpret_cast<const char*>(str.begin()), str.size());
+		return formatter<string_view>::format(view, ctx);
+	}
+};
 
 inline StringRef operator"" _sr(const char* str, size_t size) {
 	return StringRef(reinterpret_cast<const uint8_t*>(str), size);
@@ -805,6 +823,10 @@ inline bool operator==(const StringRef& lhs, const StringRef& rhs) {
 	ASSERT(lhs.size() >= 0);
 	return lhs.size() == rhs.size() && memcmp(lhs.begin(), rhs.begin(), static_cast<unsigned int>(lhs.size())) == 0;
 }
+template <int N>
+inline bool operator==(const StringRef& lhs, const char (&rhs)[N]) {
+	return lhs == StringRef(reinterpret_cast<const uint8_t*>(rhs), N - 1);
+}
 inline bool operator<(const StringRef& lhs, const StringRef& rhs) {
 	if (std::min(lhs.size(), rhs.size()) > 0) {
 		int c = memcmp(lhs.begin(), rhs.begin(), std::min(lhs.size(), rhs.size()));
@@ -829,6 +851,40 @@ inline bool operator<=(const StringRef& lhs, const StringRef& rhs) {
 }
 inline bool operator>=(const StringRef& lhs, const StringRef& rhs) {
 	return !(lhs < rhs);
+}
+
+typedef uint64_t Word;
+// Get the number of prefix bytes that are the same between a and b, up to their common length of cl
+static inline int commonPrefixLength(uint8_t const* ap, uint8_t const* bp, int cl) {
+	int i = 0;
+	const int wordEnd = cl - sizeof(Word) + 1;
+
+	for (; i < wordEnd; i += sizeof(Word)) {
+		Word a = *(Word*)ap;
+		Word b = *(Word*)bp;
+		if (a != b) {
+			return i + ctzll(a ^ b) / 8;
+		}
+		ap += sizeof(Word);
+		bp += sizeof(Word);
+	}
+
+	for (; i < cl; i++) {
+		if (*ap != *bp) {
+			return i;
+		}
+		++ap;
+		++bp;
+	}
+	return cl;
+}
+
+static inline int commonPrefixLength(const StringRef& a, const StringRef& b) {
+	return commonPrefixLength(a.begin(), b.begin(), std::min(a.size(), b.size()));
+}
+
+static inline int commonPrefixLength(const StringRef& a, const StringRef& b, int skipLen) {
+	return commonPrefixLength(a.begin() + skipLen, b.begin() + skipLen, std::min(a.size(), b.size()) - skipLen);
 }
 
 // This trait is used by VectorRef to determine if deep copy constructor should recursively

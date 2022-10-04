@@ -43,7 +43,7 @@ ACTOR Future<Optional<NetworkAddress>> resolveImpl(Hostname* self) {
 	try {
 		std::vector<NetworkAddress> addresses =
 		    wait(INetworkConnections::net()->resolveTCPEndpointWithDNSCache(self->host, self->service));
-		NetworkAddress address = addresses[deterministicRandom()->randomInt(0, addresses.size())];
+		NetworkAddress address = INetworkConnections::pickOneAddress(addresses);
 		address.flags = 0; // Reset the parsed address to public
 		address.fromHostname = NetworkAddressFromHostname::True;
 		if (self->isTLS) {
@@ -84,7 +84,7 @@ Optional<NetworkAddress> Hostname::resolveBlocking() {
 	try {
 		std::vector<NetworkAddress> addresses =
 		    INetworkConnections::net()->resolveTCPEndpointBlockingWithDNSCache(host, service);
-		NetworkAddress address = addresses[deterministicRandom()->randomInt(0, addresses.size())];
+		NetworkAddress address = INetworkConnections::pickOneAddress(addresses);
 		address.flags = 0; // Reset the parsed address to public
 		address.fromHostname = NetworkAddressFromHostname::True;
 		if (isTLS) {

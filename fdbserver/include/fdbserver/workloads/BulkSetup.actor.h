@@ -39,10 +39,29 @@
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+template <class T>
+struct sfinae_true : std::true_type {};
+
+template <class T>
+auto testAuthToken(int) -> sfinae_true<decltype(std::declval<T>().setAuthToken(std::declval<Transaction&>()))>;
+template <class>
+auto testAuthToken(long) -> std::false_type;
+
+template <class T>
+struct hasAuthToken : decltype(testAuthToken<T>(0)) {};
+
+template <class T>
+void setAuthToken(T const& self, Transaction& tr) {
+	if constexpr (hasAuthToken<T>::value) {
+		self.setAuthToken(tr);
+	}
+}
+
 ACTOR template <class T>
 Future<bool> checkRangeSimpleValueSize(Database cx, T* workload, uint64_t begin, uint64_t end) {
 	loop {
 		state Transaction tr(cx);
+		setAuthToken(*workload, tr);
 		try {
 			state Standalone<KeyValueRef> firstKV = (*workload)(begin);
 			state Standalone<KeyValueRef> lastKV = (*workload)(end - 1);
@@ -59,10 +78,15 @@ Future<bool> checkRangeSimpleValueSize(Database cx, T* workload, uint64_t begin,
 
 // Returns true if the range was added
 ACTOR template <class T>
-Future<uint64_t> setupRange(Database cx, T* workload, uint64_t begin, uint64_t end) {
+Future<uint64_t> setupRange(Database cx, T* workload, uint64_t begin, uint64_t end, std::vector<TenantName> tenants) {
 	state uint64_t bytesInserted = 0;
 	loop {
-		state Transaction tr(cx);
+		Optional<TenantName> tenant;
+		if (tenants.size() > 0) {
+			tenant = tenants.at(deterministicRandom()->randomInt(0, tenants.size()));
+		}
+		state Transaction tr(cx, tenant);
+		setAuthToken(*workload, tr);
 		try {
 			// if( deterministicRandom()->random01() < 0.001 )
 			//	tr.debugTransaction( deterministicRandom()->randomUniqueID() );
@@ -108,7 +132,8 @@ Future<uint64_t> setupRangeWorker(Database cx,
                                   std::vector<std::pair<uint64_t, uint64_t>>* jobs,
                                   double maxKeyInsertRate,
                                   int keySaveIncrement,
-                                  int actorId) {
+                                  int actorId,
+                                  std::vector<TenantName> tenants) {
 	state double nextStart;
 	state uint64_t loadedRanges = 0;
 	state int lastStoredKeysLoaded = 0;
@@ -118,7 +143,7 @@ Future<uint64_t> setupRangeWorker(Database cx,
 		state std::pair<uint64_t, uint64_t> job = jobs->back();
 		jobs->pop_back();
 		nextStart = now() + (job.second - job.first) / maxKeyInsertRate;
-		uint64_t numBytes = wait(setupRange(cx, workload, job.first, job.second));
+		uint64_t numBytes = wait(setupRange(cx, workload, job.first, job.second, tenants));
 		if (numBytes > 0)
 			loadedRanges++;
 
@@ -128,6 +153,7 @@ Future<uint64_t> setupRangeWorker(Database cx,
 
 			if (keysLoaded - lastStoredKeysLoaded >= keySaveIncrement || jobs->size() == 0) {
 				state Transaction tr(cx);
+				setAuthToken(*workload, tr);
 				try {
 					std::string countKey = format("keycount|%d|%d", workload->clientId, actorId);
 					std::string bytesKey = format("bytesstored|%d|%d", workload->clientId, actorId);
@@ -160,15 +186,31 @@ ACTOR Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Datab
 
 ACTOR template <class T>
 Future<Void> waitForLowInFlight(Database cx, T* workload) {
+	state Future<Void> timeout = delay(600.0);
 	loop {
-		int64_t inFlight = wait(getDataInFlight(cx, workload->dbInfo));
-		TraceEvent("DynamicWarming").detail("InFlight", inFlight);
-		if (inFlight > 1e6) { // Wait for just 1 MB to be in flight
-			wait(delay(1.0));
-		} else {
-			wait(delay(1.0));
-			TraceEvent("DynamicWarmingDone").log();
-			break;
+		try {
+			if (timeout.isReady()) {
+				throw timed_out();
+			}
+
+			int64_t inFlight = wait(getDataInFlight(cx, workload->dbInfo));
+			TraceEvent("DynamicWarming").detail("InFlight", inFlight);
+			if (inFlight > 1e6) { // Wait for just 1 MB to be in flight
+				wait(delay(1.0));
+			} else {
+				wait(delay(1.0));
+				TraceEvent("DynamicWarmingDone").log();
+				break;
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_attribute_not_found ||
+			    (e.code() == error_code_timed_out && !timeout.isReady())) {
+				// DD may not be initialized yet and attribute "DataInFlight" can be missing
+				wait(delay(1.0));
+			} else {
+				TraceEvent(SevWarn, "WaitForLowInFlightError").error(e);
+				throw;
+			}
 		}
 	}
 	return Void();
@@ -188,7 +230,8 @@ Future<Void> bulkSetup(Database cx,
                        int keySaveIncrement = 0,
                        double keyCheckInterval = 0.1,
                        uint64_t startNodeIdx = 0,
-                       uint64_t endNodeIdx = 0) {
+                       uint64_t endNodeIdx = 0,
+                       std::vector<TenantName> tenants = std::vector<TenantName>()) {
 
 	state std::vector<std::pair<uint64_t, uint64_t>> jobs;
 	state uint64_t startNode = startNodeIdx ? startNodeIdx : (nodeCount * workload->clientId) / workload->clientCount;
@@ -268,7 +311,7 @@ Future<Void> bulkSetup(Database cx,
 		keySaveIncrement = 0;
 
 	for (int j = 0; j < BULK_SETUP_WORKERS; j++)
-		fs.push_back(setupRangeWorker(cx, workload, &jobs, maxWorkerInsertRate, keySaveIncrement, j));
+		fs.push_back(setupRangeWorker(cx, workload, &jobs, maxWorkerInsertRate, keySaveIncrement, j, tenants));
 	try {
 		wait(success(insertionTimes) && waitForAll(fs));
 	} catch (Error& e) {
@@ -294,8 +337,8 @@ Future<Void> bulkSetup(Database cx,
 	// Here we wait for data in flight to go to 0 (this will not work on a database with other users)
 	if (postSetupWarming != 0) {
 		try {
-			wait(delay(5.0) >>
-			     waitForLowInFlight(cx, workload)); // Wait for the data distribution in a small test to start
+			wait(delay(5.0));
+			wait(waitForLowInFlight(cx, workload)); // Wait for the data distribution in a small test to start
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;

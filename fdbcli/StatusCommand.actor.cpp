@@ -411,6 +411,7 @@ void printStatus(StatusObjectReader statusObj,
 			outputString += "\nConfiguration:";
 			std::string outputStringCache = outputString;
 			bool isOldMemory = false;
+			bool blobGranuleEnabled{ false };
 			try {
 				// Configuration section
 				// FIXME: Should we suppress this if there are cluster messages implying that the database has no
@@ -433,7 +434,21 @@ void printStatus(StatusObjectReader statusObj,
 				} else
 					outputString += "unknown";
 
-				int intVal;
+				int intVal = 0;
+				if (statusObjConfig.get("blob_granules_enabled", intVal) && intVal) {
+					blobGranuleEnabled = true;
+				}
+				if (blobGranuleEnabled) {
+					outputString += "\n  Blob granules          - enabled";
+				}
+
+				outputString += "\n  Encryption at-rest    - ";
+				if (statusObjConfig.get("encryption_at_rest_mode", strVal)) {
+					outputString += strVal;
+				} else {
+					outputString += "disabled";
+				}
+
 				outputString += "\n  Coordinators           - ";
 				if (statusObjConfig.get("coordinators_count", intVal)) {
 					outputString += std::to_string(intVal);
@@ -1102,6 +1117,15 @@ void printStatus(StatusObjectReader statusObj,
 					outputString += "\n\nCoordination servers:";
 					outputString += getCoordinatorsInfoString(statusObj);
 				}
+
+				if (blobGranuleEnabled) {
+					outputString += "\n\nBlob Granules:";
+					StatusObjectReader statusObjBlobGranules = statusObjCluster["blob_granules"];
+					auto numWorkers = statusObjBlobGranules["number_of_blob_workers"].get_int();
+					outputString += "\n  Number of Workers      - " + format("%d", numWorkers);
+					auto numKeyRanges = statusObjBlobGranules["number_of_key_ranges"].get_int();
+					outputString += "\n  Number of Key Ranges   - " + format("%d", numKeyRanges);
+				}
 			}
 
 			// client time
@@ -1232,7 +1256,7 @@ ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
 		StatusObject _s = wait(StatusClient::statusFetcher(localDb));
 		s = _s;
 	} else {
-		state ThreadFuture<Optional<Value>> statusValueF = tr->get(LiteralStringRef("\xff\xff/status/json"));
+		state ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
 		Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
 		if (!statusValue.present()) {
 			fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");

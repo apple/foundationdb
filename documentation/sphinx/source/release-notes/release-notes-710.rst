@@ -2,6 +2,61 @@
 Release Notes
 #############
 
+7.1.23
+======
+* Same as 7.1.22 release with AVX enabled.
+
+7.1.22
+======
+* Released with AVX disabled.
+* Added new latency samples for GetValue, GetRange, QueueWait, and VersionWait in storage servers. `(PR #8215) <https://github.com/apple/foundationdb/pull/8215>`_
+* Fixed a rare partial data write for TLogs. `(PR #8210) <https://github.com/apple/foundationdb/pull/8210>`_
+* Added HTTP proxy support for backup agents. `(PR #8193) <https://github.com/apple/foundationdb/pull/8193>`_
+* Fixed a memory bug of secondary queries in index prefetch. `(PR #8195) <https://github.com/apple/foundationdb/pull/8195>`_, `(PR #8190) <https://github.com/apple/foundationdb/pull/8190>`_
+* Introduced STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT knob to recreate SS at io_timeout errors. `(PR #8123) <https://github.com/apple/foundationdb/pull/8123>`_
+* Fixed two TLog stopped bugs and a CC leader replacement bug. `(PR #8081) <https://github.com/apple/foundationdb/pull/8081>`_
+* Added back RecoveryAvailable trace event for status's seconds_since_last_recovered field. `(PR #8068) <https://github.com/apple/foundationdb/pull/8068>`_
+
+7.1.21
+======
+* Same as 7.1.20 release with AVX enabled.
+
+7.1.20
+======
+* Released with AVX disabled.
+* Fixed missing localities for fdbserver that can cause cross DC calls among storage servers. `(PR #7995) <https://github.com/apple/foundationdb/pull/7995>`_
+* Removed extremely spammy trace event in FetchKeys and fixed transaction_profiling_analyzer.py. `(PR #7934) <https://github.com/apple/foundationdb/pull/7934>`_
+* Fixed bugs when GRV proxy returns an error. `(PR #7860) <https://github.com/apple/foundationdb/pull/7860>`_
+
+7.1.19
+======
+* Same as 7.1.18 release with AVX enabled.
+
+7.1.18
+======
+* Released with AVX disabled.
+* Added knobs for the minimum and the maximum of the Ratekeeper's default priority. `(PR #7820) <https://github.com/apple/foundationdb/pull/7820>`_
+* Fixed bugs in ``getRange`` of the special key space. `(PR #7778) <https://github.com/apple/foundationdb/pull/7778>`_, `(PR #7720) <https://github.com/apple/foundationdb/pull/7720>`_
+* Added debug ID for secondary queries in index prefetching. `(PR #7755) <https://github.com/apple/foundationdb/pull/7755>`_
+* Changed hostname resolving to prefer IPv6 addresses. `(PR #7750) <https://github.com/apple/foundationdb/pull/7750>`_
+* Added more transaction debug events for prefetch queries. `(PR #7732) <https://github.com/apple/foundationdb/pull/7732>`_
+
+7.1.17
+======
+* Same as 7.1.16 release with AVX enabled.
+
+7.1.16
+======
+* Released with AVX disabled.
+* Fixed a crash bug when cluster controller shuts down. `(PR #7706) <https://github.com/apple/foundationdb/pull/7706>`_
+* Fixed a storage server failure when getReadVersion returns an error. `(PR #7688) <https://github.com/apple/foundationdb/pull/7688>`_
+* Fixed unbounded status json generation. `(PR #7680) <https://github.com/apple/foundationdb/pull/7680>`_
+* Fixed ScopeEventFieldTypeMismatch error for TLogMetrics. `(PR #7640) <https://github.com/apple/foundationdb/pull/7640>`_
+* Added getMappedRange latency metrics. `(PR #7632) <https://github.com/apple/foundationdb/pull/7632>`_
+* Fixed a version vector performance bug due to not updating client side tag cache. `(PR #7616) <https://github.com/apple/foundationdb/pull/7616>`_
+* Fixed DiskReadSeconds and DiskWriteSeconds calculation in ProcessMetrics. `(PR #7609) <https://github.com/apple/foundationdb/pull/7609>`_
+* Added Rocksdb compression and data size stats. `(PR #7596) <https://github.com/apple/foundationdb/pull/7596>`_
+
 7.1.15
 ======
 * Same as 7.1.14 release with AVX enabled.
@@ -58,7 +113,7 @@ Release Notes
 * Added support of the reboot command in go bindings. `(PR #7270) <https://github.com/apple/foundationdb/pull/7270>`_
 * Fixed several issues in profiling special keys using GlobalConfig. `(PR #7120) <https://github.com/apple/foundationdb/pull/7120>`_
 * Fixed a stuck transaction system bug due to inconsistent recovery transaction version. `(PR #7261) <https://github.com/apple/foundationdb/pull/7261>`_
-* Fixed a unknown_error crash due to not resolving hostnames. `(PR #7254) <https://github.com/apple/foundationdb/pull/7254>`_
+* Fixed an unknown_error crash due to not resolving hostnames. `(PR #7254) <https://github.com/apple/foundationdb/pull/7254>`_
 * Fixed a heap-use-after-free bug. `(PR #7250) <https://github.com/apple/foundationdb/pull/7250>`_
 * Fixed a performance issue that remote TLogs are sending too many pops to log routers. `(PR #7235) <https://github.com/apple/foundationdb/pull/7235>`_
 * Fixed an issue that SharedTLogs are not displaced and leaking disk space. `(PR #7246) <https://github.com/apple/foundationdb/pull/7246>`_

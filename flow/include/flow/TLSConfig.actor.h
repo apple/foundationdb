@@ -33,6 +33,8 @@
 #include <string>
 #include <vector>
 #include <boost/system/system_error.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/ssl.hpp>
 #include "flow/FastRef.h"
 #include "flow/Knobs.h"
 #include "flow/flow.h"
@@ -180,8 +182,7 @@ public:
 
 	// Return the explicitly set path.
 	// If one was not set, return the path from the environment.
-	// (Cert and Key only) If neither exist, check for fdb.pem in cwd
-	// (Cert and Key only) If fdb.pem doesn't exist, check for it in default config dir
+	// (Cert and Key only) If cert.pem or key.pem don't exist, check for them in default config dir
 	// Otherwise return the empty string.
 	// Theoretically, fileExists() can block, so these functions are labelled as synchronous
 	// TODO: make an easy to use Future<bool> fileExists, and port lots of code over to it.
@@ -201,21 +202,23 @@ private:
 	TLSEndpointType endpointType = TLSEndpointType::UNSET;
 };
 
-namespace boost {
-namespace asio {
-namespace ssl {
-struct context;
-}
-} // namespace asio
-} // namespace boost
-void ConfigureSSLContext(
-    const LoadedTLSConfig& loaded,
-    boost::asio::ssl::context* context,
-    std::function<void()> onPolicyFailure = []() {});
+class TLSPolicy;
+
+void ConfigureSSLContext(const LoadedTLSConfig& loaded, boost::asio::ssl::context& context);
+
+// Set up SSL for stream object based on policy.
+// Optionally arm a callback that gets called with verify-outcome of each cert in peer certificate chain:
+// e.g. for peer with a valid, trusted length-3 certificate chain (root CA, intermediate CA, and server certs),
+// callback(true) will be called 3 times.
+void ConfigureSSLStream(Reference<TLSPolicy> policy,
+                        boost::asio::ssl::stream<boost::asio::ip::tcp::socket&>& stream,
+                        std::function<void(bool)> callback);
 
 class TLSPolicy : ReferenceCounted<TLSPolicy> {
+	void set_verify_peers(std::vector<std::string> verify_peers);
+
 public:
-	TLSPolicy(TLSEndpointType client) : is_client(client == TLSEndpointType::CLIENT) {}
+	TLSPolicy(const LoadedTLSConfig& loaded, std::function<void()> on_failure);
 	virtual ~TLSPolicy();
 
 	virtual void addref() { ReferenceCounted<TLSPolicy>::addref(); }
@@ -223,7 +226,6 @@ public:
 
 	static std::string ErrorString(boost::system::error_code e);
 
-	void set_verify_peers(std::vector<std::string> verify_peers);
 	bool verify_peer(bool preverified, X509_STORE_CTX* store_ctx);
 
 	std::string toString() const;
@@ -242,6 +244,7 @@ public:
 	};
 
 	std::vector<Rule> rules;
+	std::function<void()> on_failure;
 	bool is_client;
 };
 

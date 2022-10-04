@@ -317,7 +317,7 @@ ACTOR Future<Void> serverPeekParallelGetMore(ILogSystem::ServerPeekCursor* self,
 				//
 				// A cursor for a log router can be delayed indefinitely during a network partition, so only fail
 				// simulation tests sufficiently far after we finish simulating network partitions.
-				TEST(e.code() == error_code_timed_out); // peek cursor timed out
+				CODE_PROBE(e.code() == error_code_timed_out, "peek cursor timed out");
 				if (now() >= FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME) {
 					ASSERT_WE_THINK(e.code() == error_code_operation_obsolete ||
 					                SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME < 10);
@@ -382,7 +382,8 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 			DebugLogTraceEvent(SevDebug, "SPC_GetMoreB_Error", self->randomID)
 			    .errorUnsuppressed(e)
 			    .detail("Tag", self->tag);
-			if (e.code() == error_code_connection_failed || e.code() == error_code_operation_obsolete) {
+			if (e.code() == error_code_connection_failed || e.code() == error_code_operation_obsolete ||
+			    e.code() == error_code_request_maybe_delivered) {
 				// NOTE: delay in order to avoid the endless retry loop block other tasks
 				self->peekReplyStream.reset();
 				wait(delay(0));
@@ -653,7 +654,7 @@ void ILogSystem::MergedPeekCursor::updateMessage(bool usePolicy) {
 			c->advanceTo(messageVersion);
 			if (start <= messageVersion && messageVersion < c->version()) {
 				advancedPast = true;
-				TEST(true); // Merge peek cursor advanced past desired sequence
+				CODE_PROBE(true, "Merge peek cursor advanced past desired sequence");
 			}
 		}
 
@@ -965,7 +966,7 @@ void ILogSystem::SetPeekCursor::updateMessage(int logIdx, bool usePolicy) {
 				c->advanceTo(messageVersion);
 				if (start <= messageVersion && messageVersion < c->version()) {
 					advancedPast = true;
-					TEST(true); // Merge peek cursor with logIdx advanced past desired sequence
+					CODE_PROBE(true, "Merge peek cursor with logIdx advanced past desired sequence");
 				}
 			}
 		}

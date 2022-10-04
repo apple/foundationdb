@@ -416,6 +416,9 @@ FoundationDB will never use processes on the same machine for the replication of
 ``three_data_hall`` mode
     FoundationDB stores data in triplicate, with one copy on a storage server in each of three data halls. The transaction logs are replicated four times, with two data halls containing two replicas apiece. Four available machines (two in each of two data halls) are therefore required to make progress. This configuration enables the cluster to remain available after losing a single data hall and one machine in another data hall.
 
+``three_data_hall_fallback`` mode
+    FoundationDB stores data in duplicate, with one copy each on a storage server in two of three data halls. The transaction logs are replicated four times, with two data halls containing two replicas apiece. Four available machines (two in each of two data halls) are therefore required to make progress. This configuration is similar to ``three_data_hall``, differing only in that data is stored on two instead of three replicas. This configuration is useful to unblock data distribution when a data hall becomes temporarily unavailable. Because ``three_data_hall_fallback`` reduces the redundancy level to two, it should only be used as a temporary measure to restore cluster health during a datacenter outage.
+
 Datacenter-aware mode
 ---------------------
 

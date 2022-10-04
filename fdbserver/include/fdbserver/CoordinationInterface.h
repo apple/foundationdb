@@ -224,7 +224,9 @@ class ConfigNode;
 
 class ServerCoordinators : public ClientCoordinators {
 public:
-	explicit ServerCoordinators(Reference<IClusterConnectionRecord> ccr);
+	ServerCoordinators() {}
+	explicit ServerCoordinators(Reference<IClusterConnectionRecord> ccr,
+	                            ConfigDBType configDBType = ConfigDBType::PAXOS);
 
 	std::vector<LeaderElectionRegInterface> leaderElectionServers;
 	std::vector<GenerationRegInterface> stateServers;
@@ -235,5 +237,10 @@ Future<Void> coordinationServer(std::string const& dataFolder,
                                 Reference<IClusterConnectionRecord> const& ccf,
                                 Reference<ConfigNode> const&,
                                 ConfigBroadcastInterface const&);
+
+// Read a value of MovableValue and if the old cluster key is nested in it, update it to the new key
+Optional<Value> updateCCSInMovableValue(ValueRef movableVal, KeyRef oldClusterKey, KeyRef newClusterKey);
+
+Future<Void> coordChangeClusterKey(std::string dataFolder, KeyRef newClusterKey, KeyRef oldClusterKey);
 
 #endif

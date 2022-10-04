@@ -47,6 +47,7 @@ import org.opentest4j.TestAbortedException;
  * be running a server and you don't want to deal with spurious test failures.
  */
 public class RequiresDatabase implements ExecutionCondition, BeforeAllCallback {
+	public static final int API_VERSION = 720;
 
 	public static boolean canRunIntegrationTest() {
 		String prop = System.getProperty("run.integration.tests");
@@ -80,7 +81,7 @@ public class RequiresDatabase implements ExecutionCondition, BeforeAllCallback {
 		 * assume that if we are here, then canRunIntegrationTest() is returning true and we don't have to bother
 		 * checking it.
 		 */
-		try (Database db = FDB.selectAPIVersion(720).open()) {
+		try (Database db = FDB.selectAPIVersion(API_VERSION).open()) {
 			db.run(tr -> {
 				CompletableFuture<byte[]> future = tr.get("test".getBytes());
 

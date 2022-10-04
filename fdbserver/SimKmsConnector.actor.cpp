@@ -22,11 +22,11 @@
 
 #include "fmt/format.h"
 #include "fdbrpc/sim_validation.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbserver/KmsConnectorInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
-#include "flow/BlobCipher.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
@@ -66,28 +66,33 @@ struct SimKmsConnectorContext : NonCopyable, ReferenceCounted<SimKmsConnectorCon
 		// Construct encryption keyStore.
 		// Note the keys generated must be the same after restart.
 		for (int i = 1; i <= maxEncryptionKeys; i++) {
-			Arena arena;
-			StringRef digest = computeAuthToken(
-			    reinterpret_cast<const unsigned char*>(&i), sizeof(i), SHA_KEY, AES_256_KEY_LENGTH, arena);
-			simEncryptKeyStore[i] =
-			    std::make_unique<SimEncryptKeyCtx>(i, reinterpret_cast<const char*>(digest.begin()));
+			uint8_t digest[AUTH_TOKEN_HMAC_SHA_SIZE];
+			computeAuthToken({ { reinterpret_cast<const uint8_t*>(&i), sizeof(i) } },
+			                 SHA_KEY,
+			                 AES_256_KEY_LENGTH,
+			                 &digest[0],
+			                 EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
+			                 AUTH_TOKEN_HMAC_SHA_SIZE);
+			simEncryptKeyStore[i] = std::make_unique<SimEncryptKeyCtx>(i, reinterpret_cast<const char*>(&digest[0]));
 		}
 	}
 };
 
 namespace {
-Optional<int64_t> getRefreshInterval(int64_t now, int64_t defaultTtl) {
+Optional<int64_t> getRefreshInterval(const int64_t now, const int64_t defaultTtl) {
 	if (BUGGIFY) {
-		return Optional<int64_t>(now + defaultTtl);
+		return Optional<int64_t>(now);
 	}
-	return Optional<int64_t>();
+	return Optional<int64_t>(now + defaultTtl);
 }
 
-Optional<int64_t> getExpireInterval(Optional<int64_t> refTS) {
+Optional<int64_t> getExpireInterval(Optional<int64_t> refTS, const int64_t defaultTtl) {
+	ASSERT(refTS.present());
+
 	if (BUGGIFY) {
 		return Optional<int64_t>(-1);
 	}
-	return refTS;
+	return (refTS.get() + defaultTtl);
 }
 } // namespace
 
@@ -105,11 +110,17 @@ ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
 	}
 
 	// Lookup corresponding EncryptKeyCtx for input keyId
+	const int64_t currTS = (int64_t)now();
+	// Fetch default TTL to avoid BUGGIFY giving different value per invocation causing refTS > expTS
+	const int64_t defaultTtl = FLOW_KNOBS->ENCRYPT_CIPHER_KEY_CACHE_TTL;
+	Optional<int64_t> refAtTS = getRefreshInterval(currTS, defaultTtl);
+	Optional<int64_t> expAtTS = getExpireInterval(refAtTS, defaultTtl);
+	TraceEvent("SimKms.EKLookupById").detail("RefreshAt", refAtTS).detail("ExpireAt", expAtTS);
 	for (const auto& item : req.encryptKeyInfos) {
 		const auto& itr = ctx->simEncryptKeyStore.find(item.baseCipherId);
 		if (itr != ctx->simEncryptKeyStore.end()) {
 			rep.cipherKeyDetails.emplace_back_deep(
-			    rep.arena, item.domainId, itr->first, StringRef(itr->second.get()->key));
+			    rep.arena, item.domainId, itr->first, StringRef(itr->second.get()->key), refAtTS, expAtTS);
 
 			if (dbgKIdTrace.present()) {
 				// {encryptDomainId, baseCipherId} forms a unique tuple across encryption domains
@@ -145,11 +156,12 @@ ACTOR Future<Void> ekLookupByDomainIds(Reference<SimKmsConnectorContext> ctx,
 	// Map encryptionDomainId to corresponding EncryptKeyCtx element using a modulo operation. This
 	// would mean multiple domains gets mapped to the same encryption key which is fine, the
 	// EncryptKeyStore guarantees that keyId -> plaintext encryptKey mapping is idempotent.
-	int64_t currTS = (int64_t)now();
+	const int64_t currTS = (int64_t)now();
 	// Fetch default TTL to avoid BUGGIFY giving different value per invocation causing refTS > expTS
-	int64_t defaultTtl = FLOW_KNOBS->ENCRYPT_CIPHER_KEY_CACHE_TTL;
+	const int64_t defaultTtl = FLOW_KNOBS->ENCRYPT_CIPHER_KEY_CACHE_TTL;
 	Optional<int64_t> refAtTS = getRefreshInterval(currTS, defaultTtl);
-	Optional<int64_t> expAtTS = getExpireInterval(refAtTS);
+	Optional<int64_t> expAtTS = getExpireInterval(refAtTS, defaultTtl);
+	TraceEvent("SimKms.EKLookupByDomainId").detail("RefreshAt", refAtTS).detail("ExpireAt", expAtTS);
 	for (const auto& info : req.encryptDomainInfos) {
 		EncryptCipherBaseKeyId keyId = 1 + abs(info.domainId) % SERVER_KNOBS->SIM_KMS_MAX_KEYS;
 		const auto& itr = ctx->simEncryptKeyStore.find(keyId);
@@ -286,7 +298,7 @@ ACTOR Future<Void> testRunWorkload(KmsConnectorInterface inf, uint32_t nEncrypti
 		for (i = 0; i < maxDomainIds; i++) {
 			// domainIdsReq.encryptDomainIds.push_back(i);
 			EncryptCipherDomainId domainId = i;
-			EncryptCipherDomainName domainName = StringRef(domainIdsReq.arena, std::to_string(domainId));
+			EncryptCipherDomainNameRef domainName = StringRef(domainIdsReq.arena, std::to_string(domainId));
 			domainIdsReq.encryptDomainInfos.emplace_back(domainIdsReq.arena, i, domainName);
 		}
 		KmsConnLookupEKsByDomainIdsRep domainIdsRep = wait(inf.ekLookupByDomainIds.getReply(domainIdsReq));

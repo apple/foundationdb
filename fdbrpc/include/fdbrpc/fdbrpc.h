@@ -648,10 +648,29 @@ struct serializable_traits<ReplyPromiseStream<T>> : std::true_type {
 	}
 };
 
+template <class T, class = int>
+struct HasReply_t : std::false_type {};
+
+template <class T>
+struct HasReply_t<T, decltype((void)T::reply, 0)> : std::true_type {};
+
+template <class T>
+constexpr bool HasReply = HasReply_t<T>::value;
+
+template <class T, class = int>
+struct HasVerify_t : std::false_type {};
+
+template <class T>
+struct HasVerify_t<T, decltype(void(std::declval<T>().verify()), 0)> : std::true_type {};
+
+template <class T>
+constexpr bool HasVerify = HasVerify_t<T>::value;
+
 template <class T, bool IsPublic>
 struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotifiedQueue<T, IsPublic>> {
 	using FastAllocated<NetNotifiedQueue<T, IsPublic>>::operator new;
 	using FastAllocated<NetNotifiedQueue<T, IsPublic>>::operator delete;
+	static_assert(!IsPublic || HasVerify<T>, "Public request stream objects need to implement bool T::verify()");
 
 	NetNotifiedQueue(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
 	NetNotifiedQueue(int futures, int promises, const Endpoint& remoteEndpoint)
@@ -662,7 +681,17 @@ struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<Ne
 		this->addPromiseRef();
 		T message;
 		reader.deserialize(message);
-		this->send(std::move(message));
+		if constexpr (IsPublic) {
+			if (!message.verify()) {
+				if constexpr (HasReply<T>) {
+					message.reply.sendError(permission_denied());
+				}
+			} else {
+				this->send(std::move(message));
+			}
+		} else {
+			this->send(std::move(message));
+		}
 		this->delPromiseRef();
 	}
 	bool isStream() const override { return true; }
@@ -782,8 +811,13 @@ public:
 			Future<Void> disc =
 			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
 			auto& p = getReplyPromiseStream(value);
-			if (disc.isReady()) {
-				p.sendError(request_maybe_delivered());
+			// FIXME: buggify only in simulation/not during speed up simulation?
+			if (disc.isReady() || BUGGIFY_WITH_PROB(0.01)) {
+				if (disc.isReady() && IFailureMonitor::failureMonitor().knownUnauthorized(getEndpoint())) {
+					p.sendError(unauthorized_attempt());
+				} else {
+					p.sendError(request_maybe_delivered());
+				}
 			} else {
 				Reference<Peer> peer =
 				    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);

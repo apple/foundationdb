@@ -23,6 +23,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/ApiVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct BackupToDBAbort : TestWorkload {
@@ -32,12 +33,12 @@ struct BackupToDBAbort : TestWorkload {
 	UID lockid;
 
 	explicit BackupToDBAbort(const WorkloadContext& wcx) : TestWorkload(wcx) {
-		abortDelay = getOption(options, LiteralStringRef("abortDelay"), 50.0);
+		abortDelay = getOption(options, "abortDelay"_sr, 50.0);
 
-		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
+		addDefaultBackupRanges(backupRanges);
 
-		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
-		extraDB = Database::createDatabase(extraFile, -1);
+		ASSERT(g_simulator->extraDatabases.size() == 1);
+		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], wcx.defaultTenant);
 
 		lockid = UID(0xbeeffeed, 0xdecaf00d);
 	}
@@ -91,8 +92,8 @@ struct BackupToDBAbort : TestWorkload {
 		TraceEvent("BDBA_End").log();
 
 		// SOMEDAY: Remove after backup agents can exist quiescently
-		if (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
-			g_simulator.drAgents = ISimulator::BackupAgentType::NoBackupAgents;
+		if (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
+			g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
 		}
 
 		return Void();

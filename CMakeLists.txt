@@ -22,6 +22,11 @@ else()
   cmake_minimum_required(VERSION 3.13)
 endif()
 
+# silence deprecation warnings in newer versions of cmake
+if(POLICY CMP0135)
+  cmake_policy(SET CMP0135 NEW)
+endif()
+
 project(foundationdb
   VERSION 7.2.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
@@ -206,7 +211,7 @@ endif()
 if (CMAKE_EXPORT_COMPILE_COMMANDS AND WITH_PYTHON)
   add_custom_command(
 	  OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
-	  COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/contrib/gen_compile_db.py
+	  COMMAND $<TARGET_FILE:Python3::Interpreter> ${CMAKE_CURRENT_SOURCE_DIR}/contrib/gen_compile_db.py
 	  ARGS -b ${CMAKE_CURRENT_BINARY_DIR} -s ${CMAKE_CURRENT_SOURCE_DIR} -o ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
 	  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/contrib/gen_compile_db.py ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
 	  COMMENT "Build compile commands for IDE"

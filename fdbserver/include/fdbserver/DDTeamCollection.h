@@ -173,6 +173,13 @@ FDB_DECLARE_BOOLEAN_PARAM(IsRedundantTeam);
 FDB_DECLARE_BOOLEAN_PARAM(IsBadTeam);
 FDB_DECLARE_BOOLEAN_PARAM(WaitWiggle);
 
+// send request/signal to DDTeamCollection through interface
+// call synchronous method from components outside DDTeamCollection
+struct IDDTeamCollection {
+	PromiseStream<GetTeamRequest> getTeam;
+	virtual ~IDDTeamCollection() {}
+};
+
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	friend class DDTeamCollectionImpl;
 	friend class DDTeamCollectionUnitTest;
@@ -402,7 +409,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	// in the next iteration of the loop. Otherwise, you may miss checking some elements in machineTeams
 	bool removeMachineTeam(Reference<TCMachineTeamInfo> targetMT);
 
-	// Adds storage servers held on process of which the Process Id is “id” into excludeServers which prevent
+	// Adds storage servers held on process of which the Process id is “id” into excludeServers which prevent
 	// recruiting the wiggling storage servers and let teamTracker start to move data off the affected teams;
 	// Return a vector of futures wait for all data is moved to other teams.
 	Future<Void> excludeStorageServersForWiggle(const UID& id);
@@ -596,6 +603,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	int addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams);
 
 public:
+	Reference<IDDTxnProcessor> db;
 	Database cx;
 
 	DatabaseConfiguration configuration;
@@ -613,7 +621,7 @@ public:
 	AsyncTrigger printDetailedTeamsInfo;
 	Reference<LocalitySet> storageServerSet;
 
-	DDTeamCollection(Database const& cx,
+	DDTeamCollection(Reference<IDDTxnProcessor>& db,
 	                 UID distributorId,
 	                 MoveKeysLock const& lock,
 	                 PromiseStream<RelocateShard> const& output,
@@ -668,6 +676,12 @@ public:
 	std::pair<StorageWiggler::State, double> getStorageWigglerState() const;
 
 	UID getDistributorId() const { return distributorId; }
+
+	// Divide TSS evenly in each DC if there are multiple
+	// TODO would it be better to put all of them in primary DC?
+	int32_t getTargetTSSInDC() const;
+
+	bool reachTSSPairTarget() const;
 
 	// Keep track of servers and teams -- serves requests for getRandomTeam
 	static Future<Void> run(Reference<DDTeamCollection> teamCollection,

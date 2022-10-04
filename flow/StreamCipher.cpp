@@ -113,16 +113,6 @@ void StreamCipher::cleanup() noexcept {
 	}
 }
 
-void applyHmacKeyDerivationFunc(StreamCipherKey* cipherKey, HmacSha256StreamCipher* hmacGenerator, Arena& arena) {
-	uint8_t buf[cipherKey->size() + sizeof(uint64_t)];
-	memcpy(&buf[0], cipherKey->data(), cipherKey->size());
-	uint64_t seed = deterministicRandom()->randomUInt64();
-	memcpy(&buf[0] + cipherKey->size(), &seed, sizeof(uint64_t));
-	StringRef digest = hmacGenerator->digest(&buf[0], cipherKey->size() + sizeof(uint64_t), arena);
-	std::copy(digest.begin(), digest.end(), &buf[0]);
-	cipherKey->initializeKey(&buf[0], cipherKey->size());
-}
-
 EncryptionStreamCipher::EncryptionStreamCipher(const StreamCipherKey* key, const StreamCipher::IV& iv)
   : cipher(StreamCipher(key->size())) {
 	EVP_EncryptInit_ex(cipher.getCtx(), EVP_aes_256_gcm(), nullptr, nullptr, nullptr);
@@ -131,7 +121,7 @@ EncryptionStreamCipher::EncryptionStreamCipher(const StreamCipherKey* key, const
 }
 
 StringRef EncryptionStreamCipher::encrypt(unsigned char const* plaintext, int len, Arena& arena) {
-	TEST(true); // Encrypting data with StreamCipher
+	CODE_PROBE(true, "Encrypting data with StreamCipher");
 	auto ciphertext = new (arena) unsigned char[len + AES_BLOCK_SIZE];
 	int bytes{ 0 };
 	EVP_EncryptUpdate(cipher.getCtx(), ciphertext, &bytes, plaintext, len);
@@ -153,7 +143,7 @@ DecryptionStreamCipher::DecryptionStreamCipher(const StreamCipherKey* key, const
 }
 
 StringRef DecryptionStreamCipher::decrypt(unsigned char const* ciphertext, int len, Arena& arena) {
-	TEST(true); // Decrypting data with StreamCipher
+	CODE_PROBE(true, "Decrypting data with StreamCipher");
 	auto plaintext = new (arena) unsigned char[len];
 	int bytesDecrypted{ 0 };
 	EVP_DecryptUpdate(cipher.getCtx(), plaintext, &bytesDecrypted, ciphertext, len);
@@ -173,15 +163,6 @@ HmacSha256StreamCipher::HmacSha256StreamCipher() : cipher(EVP_MAX_KEY_LENGTH) {
 	HMAC_Init_ex(cipher.getHmacCtx(), NULL, 0, EVP_sha256(), nullptr);
 }
 
-StringRef HmacSha256StreamCipher::digest(unsigned char const* data, int len, Arena& arena) {
-	TEST(true); // Digest using StreamCipher
-	unsigned int digestLen = HMAC_size(cipher.getHmacCtx());
-	auto digest = new (arena) unsigned char[digestLen];
-	HMAC_Update(cipher.getHmacCtx(), data, len);
-	HMAC_Final(cipher.getHmacCtx(), digest, &digestLen);
-	return StringRef(digest, digestLen);
-}
-
 StringRef HmacSha256StreamCipher::finish(Arena& arena) {
 	unsigned int digestLen = HMAC_size(cipher.getHmacCtx());
 	auto digest = new (arena) unsigned char[digestLen];
@@ -199,11 +180,11 @@ TEST_CASE("flow/StreamCipher") {
 	StreamCipherKey const* key = StreamCipherKey::getGlobalCipherKey();
 
 	StreamCipher::IV iv;
-	generateRandomData(iv.data(), iv.size());
+	deterministicRandom()->randomBytes(iv.data(), iv.size());
 
 	Arena arena;
 	std::vector<unsigned char> plaintext(deterministicRandom()->randomInt(0, 10001));
-	generateRandomData(&plaintext.front(), plaintext.size());
+	deterministicRandom()->randomBytes(&plaintext.front(), plaintext.size());
 	std::vector<unsigned char> ciphertext(plaintext.size() + AES_BLOCK_SIZE);
 	std::vector<unsigned char> decryptedtext(plaintext.size() + AES_BLOCK_SIZE);
 

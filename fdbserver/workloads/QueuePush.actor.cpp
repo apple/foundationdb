@@ -40,16 +40,16 @@ struct QueuePushWorkload : TestWorkload {
 
 	QueuePushWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), commitLatencies(2000), GRVLatencies(2000) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		actorCount = getOption(options, LiteralStringRef("actorCount"), 50);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		actorCount = getOption(options, "actorCount"_sr, 50);
 
-		valueBytes = getOption(options, LiteralStringRef("valueBytes"), 96);
+		valueBytes = getOption(options, "valueBytes"_sr, 96);
 		valueString = std::string(valueBytes, 'x');
 
-		forward = getOption(options, LiteralStringRef("forward"), true);
+		forward = getOption(options, "forward"_sr, true);
 
-		endingKey = LiteralStringRef("9999999900000001");
-		startingKey = LiteralStringRef("0000000000000001");
+		endingKey = "9999999900000001"_sr;
+		startingKey = "0000000000000001"_sr;
 	}
 
 	std::string description() const override { return "QueuePush"; }

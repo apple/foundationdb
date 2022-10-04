@@ -27,7 +27,7 @@ struct CacheWorkload : TestWorkload {
 	Key keyPrefix;
 
 	CacheWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		keyPrefix = unprintable(getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef("")).toString());
+		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
 	}
 
 	std::string description() const override { return "CacheWorkload"; }

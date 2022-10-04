@@ -22,10 +22,10 @@
 #define FDBCLIENT_BLOBGRANULECOMMON_H
 #pragma once
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 
-#include "flow/BlobCipher.h"
 #include "flow/EncryptUtils.h"
 #include "flow/IRandom.h"
 #include "flow/serialize.h"
@@ -35,7 +35,6 @@
 #define BG_ENCRYPT_COMPRESS_DEBUG false
 
 // file format of actual blob files
-// FIXME: use VecSerStrategy::String serialization for this
 struct GranuleSnapshot : VectorRef<KeyValueRef> {
 
 	constexpr static FileIdentifier file_identifier = 1300395;
@@ -46,6 +45,7 @@ struct GranuleSnapshot : VectorRef<KeyValueRef> {
 	}
 };
 
+// Deltas in version order
 struct GranuleDeltas : VectorRef<MutationsAndVersionRef> {
 	constexpr static FileIdentifier file_identifier = 8563013;
 
@@ -53,6 +53,13 @@ struct GranuleDeltas : VectorRef<MutationsAndVersionRef> {
 	void serialize(Ar& ar) {
 		serializer(ar, ((VectorRef<MutationsAndVersionRef>&)*this));
 	}
+};
+
+struct GranuleMaterializeStats {
+	int64_t inputBytes;
+	int64_t outputBytes;
+
+	GranuleMaterializeStats() : inputBytes(0), outputBytes(0) {}
 };
 
 struct BlobGranuleCipherKeysMeta {
@@ -142,16 +149,11 @@ struct BlobGranuleCipherKeysMetaRef {
 	StringRef ivRef;
 
 	BlobGranuleCipherKeysMetaRef() {}
-	BlobGranuleCipherKeysMetaRef(Arena& to,
-	                             const EncryptCipherDomainId tDomainId,
-	                             const EncryptCipherBaseKeyId tBaseCipherId,
-	                             const EncryptCipherRandomSalt tSalt,
-	                             const EncryptCipherDomainId hDomainId,
-	                             const EncryptCipherBaseKeyId hBaseCipherId,
-	                             const EncryptCipherRandomSalt hSalt,
-	                             const std::string& ivStr)
-	  : textDomainId(tDomainId), textBaseCipherId(tBaseCipherId), textSalt(tSalt), headerDomainId(hDomainId),
-	    headerBaseCipherId(hBaseCipherId), headerSalt(hSalt), ivRef(StringRef(to, ivStr)) {}
+	BlobGranuleCipherKeysMetaRef(Arena& to, BlobGranuleCipherKeysMeta cipherKeysMeta)
+	  : textDomainId(cipherKeysMeta.textDomainId), textBaseCipherId(cipherKeysMeta.textBaseCipherId),
+	    textSalt(cipherKeysMeta.textSalt), headerDomainId(cipherKeysMeta.headerDomainId),
+	    headerBaseCipherId(cipherKeysMeta.headerBaseCipherId), headerSalt(cipherKeysMeta.headerSalt),
+	    ivRef(StringRef(to, cipherKeysMeta.ivStr)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -161,15 +163,30 @@ struct BlobGranuleCipherKeysMetaRef {
 
 struct BlobFilePointerRef {
 	constexpr static FileIdentifier file_identifier = 5253554;
+	// Serializable fields
 	StringRef filename;
 	int64_t offset;
 	int64_t length;
 	int64_t fullFileLength;
-	Optional<BlobGranuleCipherKeysMetaRef> cipherKeysMetaRef;
+	Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx;
+
+	// Non-serializable fields
+	Optional<BlobGranuleCipherKeysMetaRef>
+	    cipherKeysMetaRef; // Placeholder to cache information sufficient to lookup encryption ciphers
 
 	BlobFilePointerRef() {}
+
 	BlobFilePointerRef(Arena& to, const std::string& filename, int64_t offset, int64_t length, int64_t fullFileLength)
 	  : filename(to, filename), offset(offset), length(length), fullFileLength(fullFileLength) {}
+
+	BlobFilePointerRef(Arena& to,
+	                   const std::string& filename,
+	                   int64_t offset,
+	                   int64_t length,
+	                   int64_t fullFileLength,
+	                   Optional<BlobGranuleCipherKeysCtx> ciphKeysCtx)
+	  : filename(to, filename), offset(offset), length(length), fullFileLength(fullFileLength),
+	    cipherKeysCtx(ciphKeysCtx) {}
 
 	BlobFilePointerRef(Arena& to,
 	                   const std::string& filename,
@@ -179,30 +196,23 @@ struct BlobFilePointerRef {
 	                   Optional<BlobGranuleCipherKeysMeta> ciphKeysMeta)
 	  : filename(to, filename), offset(offset), length(length), fullFileLength(fullFileLength) {
 		if (ciphKeysMeta.present()) {
-			cipherKeysMetaRef = BlobGranuleCipherKeysMetaRef(to,
-			                                                 ciphKeysMeta.get().textDomainId,
-			                                                 ciphKeysMeta.get().textBaseCipherId,
-			                                                 ciphKeysMeta.get().textSalt,
-			                                                 ciphKeysMeta.get().headerDomainId,
-			                                                 ciphKeysMeta.get().headerBaseCipherId,
-			                                                 ciphKeysMeta.get().headerSalt,
-			                                                 ciphKeysMeta.get().ivStr);
+			cipherKeysMetaRef = BlobGranuleCipherKeysMetaRef(to, ciphKeysMeta.get());
 		}
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, filename, offset, length, fullFileLength, cipherKeysMetaRef);
+		serializer(ar, filename, offset, length, fullFileLength, cipherKeysCtx);
 	}
 
 	std::string toString() const {
 		std::stringstream ss;
 		ss << filename.toString() << ":" << offset << ":" << length << ":" << fullFileLength;
-		if (cipherKeysMetaRef.present()) {
-			ss << ":CipherKeysMeta:TextCipher:" << cipherKeysMetaRef.get().textDomainId << ":"
-			   << cipherKeysMetaRef.get().textBaseCipherId << ":" << cipherKeysMetaRef.get().textSalt
-			   << ":HeaderCipher:" << cipherKeysMetaRef.get().headerDomainId << ":"
-			   << cipherKeysMetaRef.get().headerBaseCipherId << ":" << cipherKeysMetaRef.get().headerSalt;
+		if (cipherKeysCtx.present()) {
+			ss << ":CipherKeysCtx:TextCipher:" << cipherKeysCtx.get().textCipherKey.encryptDomainId << ":"
+			   << cipherKeysCtx.get().textCipherKey.baseCipherId << ":" << cipherKeysCtx.get().textCipherKey.salt
+			   << ":HeaderCipher:" << cipherKeysCtx.get().headerCipherKey.encryptDomainId << ":"
+			   << cipherKeysCtx.get().headerCipherKey.baseCipherId << ":" << cipherKeysCtx.get().headerCipherKey.salt;
 		}
 		return std::move(ss).str();
 	}
@@ -223,32 +233,75 @@ struct BlobGranuleChunkRef {
 	VectorRef<BlobFilePointerRef> deltaFiles;
 	GranuleDeltas newDeltas;
 	Optional<KeyRef> tenantPrefix;
-	Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar,
-		           keyRange,
-		           includedVersion,
-		           snapshotVersion,
-		           snapshotFile,
-		           deltaFiles,
-		           newDeltas,
-		           tenantPrefix,
-		           cipherKeysCtx);
+		serializer(ar, keyRange, includedVersion, snapshotVersion, snapshotFile, deltaFiles, newDeltas, tenantPrefix);
 	}
 };
 
+struct BlobGranuleSummaryRef {
+	constexpr static FileIdentifier file_identifier = 9774587;
+	KeyRangeRef keyRange;
+	Version snapshotVersion;
+	int64_t snapshotSize;
+	Version deltaVersion;
+	int64_t deltaSize;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, keyRange, snapshotVersion, snapshotSize, deltaVersion, deltaSize);
+	}
+};
+
+BlobGranuleSummaryRef summarizeGranuleChunk(Arena& ar, const BlobGranuleChunkRef& chunk);
+
 enum BlobGranuleSplitState { Unknown = 0, Initialized = 1, Assigned = 2, Done = 3 };
+
+// Boundary metadata for each range indexed by the beginning of the range.
+struct BlobGranuleMergeBoundary {
+	constexpr static FileIdentifier file_identifier = 557861;
+
+	// Hard boundaries represent backing regions we want to keep separate.
+	bool buddy;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, buddy);
+	}
+};
 
 struct BlobGranuleHistoryValue {
 	constexpr static FileIdentifier file_identifier = 991434;
 	UID granuleID;
-	VectorRef<std::pair<KeyRangeRef, Version>> parentGranules;
+	VectorRef<KeyRef> parentBoundaries;
+	VectorRef<Version> parentVersions;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, granuleID, parentGranules);
+		serializer(ar, granuleID, parentBoundaries, parentVersions);
+	}
+};
+
+struct GranuleHistory {
+	KeyRange range;
+	Version version;
+	Standalone<BlobGranuleHistoryValue> value;
+
+	GranuleHistory() {}
+
+	GranuleHistory(KeyRange range, Version version, Standalone<BlobGranuleHistoryValue> value)
+	  : range(range), version(version), value(value) {}
+};
+
+// A manifest to assist full fdb restore from blob granule files
+struct BlobManifest {
+	constexpr static FileIdentifier file_identifier = 298872;
+	VectorRef<KeyValueRef> rows;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rows);
 	}
 };
 

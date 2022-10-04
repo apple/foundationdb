@@ -25,16 +25,17 @@
 #include <utility>
 #include <vector>
 
-#include "fdbclient/FDBTypes.h"
-#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/EncryptKeyProxyInterface.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/GlobalConfig.h"
+#include "fdbclient/GrvProxyInterface.h"
+#include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/VersionVector.h"
 
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
-#include "GrvProxyInterface.h"
 
 struct CommitProxyInterface {
 	constexpr static FileIdentifier file_identifier = 8954922;
@@ -117,8 +118,12 @@ struct ClientDBInfo {
 	Optional<Value> forward;
 	std::vector<VersionHistory> history;
 	UID clusterId;
+	bool isEncryptionEnabled = false;
+	Optional<EncryptKeyProxyInterface> encryptKeyProxy;
 
 	TenantMode tenantMode;
+	ClusterType clusterType = ClusterType::STANDALONE;
+	Optional<ClusterName> metaclusterName;
 
 	ClientDBInfo() {}
 
@@ -130,7 +135,18 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, grvProxies, commitProxies, id, forward, history, tenantMode, clusterId);
+		serializer(ar,
+		           grvProxies,
+		           commitProxies,
+		           id,
+		           forward,
+		           history,
+		           tenantMode,
+		           isEncryptionEnabled,
+		           encryptKeyProxy,
+		           clusterId,
+		           clusterType,
+		           metaclusterName);
 	}
 };
 
@@ -176,10 +192,12 @@ struct CommitTransactionRequest : TimedRequest {
 	CommitTransactionRequest() : CommitTransactionRequest(SpanContext()) {}
 	CommitTransactionRequest(SpanContext const& context) : spanContext(context), flags(0) {}
 
+	bool verify() const { return tenantInfo.isAuthorized(); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(
-		    ar, transaction, reply, arena, flags, debugID, commitCostEstimation, tagSet, spanContext, tenantInfo);
+		    ar, transaction, reply, flags, debugID, commitCostEstimation, tagSet, spanContext, tenantInfo, arena);
 	}
 };
 
@@ -281,6 +299,8 @@ struct GetReadVersionRequest : TimedRequest {
 		}
 	}
 
+	bool verify() const { return true; }
+
 	bool operator<(GetReadVersionRequest const& rhs) const { return priority < rhs.priority; }
 
 	template <class Ar>
@@ -319,7 +339,7 @@ struct GetKeyServerLocationsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, results, resultsTssMapping, tenantEntry, arena, resultsTagMapping);
+		serializer(ar, results, resultsTssMapping, tenantEntry, resultsTagMapping, arena);
 	}
 };
 
@@ -327,7 +347,7 @@ struct GetKeyServerLocationsRequest {
 	constexpr static FileIdentifier file_identifier = 9144680;
 	Arena arena;
 	SpanContext spanContext;
-	Optional<TenantNameRef> tenant;
+	TenantInfo tenant;
 	KeyRef begin;
 	Optional<KeyRef> end;
 	int limit;
@@ -342,7 +362,7 @@ struct GetKeyServerLocationsRequest {
 
 	GetKeyServerLocationsRequest() : limit(0), reverse(false), minTenantVersion(latestVersion) {}
 	GetKeyServerLocationsRequest(SpanContext spanContext,
-	                             Optional<TenantNameRef> const& tenant,
+	                             TenantInfo const& tenant,
 	                             KeyRef const& begin,
 	                             Optional<KeyRef> const& end,
 	                             int limit,
@@ -351,6 +371,8 @@ struct GetKeyServerLocationsRequest {
 	                             Arena const& arena)
 	  : arena(arena), spanContext(spanContext), tenant(tenant), begin(begin), end(end), limit(limit), reverse(reverse),
 	    minTenantVersion(minTenantVersion) {}
+
+	bool verify() const { return tenant.isAuthorized(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -521,7 +543,7 @@ struct ProxySnapRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, snapPayload, snapUID, reply, arena, debugID);
+		serializer(ar, snapPayload, snapUID, reply, debugID, arena);
 	}
 };
 
@@ -549,6 +571,34 @@ struct ExclusionSafetyCheckRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, exclusions, reply);
+	}
+};
+
+struct GlobalConfigRefreshReply {
+	constexpr static FileIdentifier file_identifier = 12680327;
+	Arena arena;
+	RangeResultRef result;
+
+	GlobalConfigRefreshReply() {}
+	GlobalConfigRefreshReply(Arena const& arena, RangeResultRef result) : arena(arena), result(result) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, result, arena);
+	}
+};
+
+struct GlobalConfigRefreshRequest {
+	constexpr static FileIdentifier file_identifier = 2828131;
+	Version lastKnown;
+	ReplyPromise<GlobalConfigRefreshReply> reply;
+
+	GlobalConfigRefreshRequest() {}
+	explicit GlobalConfigRefreshRequest(Version lastKnown) : lastKnown(lastKnown) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, lastKnown, reply);
 	}
 };
 

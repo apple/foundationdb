@@ -29,6 +29,7 @@ import java.util.Optional;
 
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
@@ -64,7 +65,7 @@ abstract class Context implements Runnable, AutoCloseable {
 	private List<Thread> children = new LinkedList<>();
 	private static Map<String, TransactionState> transactionMap = new HashMap<>();
 	private static Map<Transaction, AtomicInteger> transactionRefCounts = new HashMap<>();
-	private static Map<byte[], Tenant> tenantMap = new HashMap<>();
+	private static Map<byte[], Tenant> tenantMap = new ConcurrentHashMap<>();
 
 	Context(Database db, byte[] prefix) {
 		this.db = db;
@@ -83,8 +84,8 @@ abstract class Context implements Runnable, AutoCloseable {
 		try {
 			executeOperations();
 		} catch(Throwable t) {
-			// EAT
 			t.printStackTrace();
+			System.exit(1);
 		}
 		while(children.size() > 0) {
 			//System.out.println("Shutting down...waiting on " + children.size() + " threads");
@@ -146,10 +147,11 @@ abstract class Context implements Runnable, AutoCloseable {
 	private static synchronized boolean newTransaction(Database db, Optional<Tenant> tenant, String trName, boolean allowReplace) {
 		TransactionState oldState = transactionMap.get(trName);
 		if (oldState != null) {
-			releaseTransaction(oldState.transaction);
-		}
-		else if (!allowReplace) {
-			return false;
+			if (allowReplace) {
+				releaseTransaction(oldState.transaction);
+			} else {
+				return false;
+			}
 		}
 
 		TransactionState newState = new TransactionState(createTransaction(db, tenant), tenant);

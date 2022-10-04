@@ -123,9 +123,9 @@ struct ThreadSafetyWorkload : TestWorkload {
 
 	ThreadSafetyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), stopped(false) {
 
-		threadsPerClient = getOption(options, LiteralStringRef("threadsPerClient"), 3);
-		threadDuration = getOption(options, LiteralStringRef("threadDuration"), 60.0);
-		numKeys = getOption(options, LiteralStringRef("numKeys"), 100);
+		threadsPerClient = getOption(options, "threadsPerClient"_sr, 3);
+		threadDuration = getOption(options, "threadDuration"_sr, 60.0);
+		numKeys = getOption(options, "numKeys"_sr, 100);
 
 		commitBarrier.setNumRequired(threadsPerClient);
 
@@ -149,7 +149,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 		self->db = dbRef;
 
 		if (deterministicRandom()->coinflip()) {
-			MultiVersionApi::api->selectApiVersion(cx->apiVersion);
+			MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 			self->db = MultiVersionDatabase::debugCreateFromExistingDatabase(dbRef);
 		}
 

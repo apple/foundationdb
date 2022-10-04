@@ -256,6 +256,7 @@ FORMAT_TRACEABLE(long int, "%ld");
 FORMAT_TRACEABLE(unsigned long int, "%lu");
 FORMAT_TRACEABLE(long long int, "%lld");
 FORMAT_TRACEABLE(unsigned long long int, "%llu");
+FORMAT_TRACEABLE(float, "%g");
 FORMAT_TRACEABLE(double, "%g");
 FORMAT_TRACEABLE(void*, "%p");
 FORMAT_TRACEABLE(volatile long, "%ld");
@@ -513,7 +514,7 @@ public:
 
 	void log();
 
-	void disable() { enabled = false; } // Disables the trace event so it doesn't get
+	void disable() { enabled = false; } // Disables the trace event so it doesn't get logged
 
 	virtual ~BaseTraceEvent(); // Actually logs the event
 
@@ -583,7 +584,7 @@ private:
 class StringRef;
 
 struct TraceInterval {
-	TraceInterval(const char* type) : type(type), count(-1), severity(SevInfo) {}
+	TraceInterval(const char* type, UID id = UID()) : type(type), pairID(id), count(-1), severity(SevInfo) {}
 
 	TraceInterval& begin();
 	TraceInterval& end() { return *this; }
@@ -661,6 +662,9 @@ void removeTraceRole(std::string const& role);
 void retrieveTraceLogIssues(std::set<std::string>& out);
 void setTraceLogGroup(const std::string& role);
 void addUniversalTraceField(std::string const& name, std::string const& value);
+void setTraceLocalAddress(const NetworkAddress& addr);
+void disposeTraceFileWriter();
+std::string getTraceFormatExtension();
 uint64_t getTraceThreadId();
 
 template <class T>

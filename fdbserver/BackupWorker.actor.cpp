@@ -20,13 +20,13 @@
 
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/BackupProgress.actor.h"
-#include "fdbserver/EncryptedMutationMessage.h"
-#include "fdbserver/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
@@ -54,10 +54,10 @@ struct VersionedMessage {
 	Version getVersion() const { return version.version; }
 	uint32_t getSubVersion() const { return version.sub; }
 
-	// Returns true if the message is a mutation that should be backuped, i.e.,
-	// either key is not in system key space or is not a metadataVersionKey.
-	bool isBackupMessage(MutationRef* m,
-	                     const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys) {
+	// Returns true if the message is a mutation that could be backed up (normal keys, system key backup ranges, or the
+	// metadata version key)
+	bool isCandidateBackupMessage(MutationRef* m,
+	                              const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys) {
 		for (Tag tag : tags) {
 			if (tag.locality == tagLocalitySpecial || tag.locality == tagLocalityTxs) {
 				return false; // skip Txs mutations
@@ -72,27 +72,42 @@ struct VersionedMessage {
 		if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader))
 			return false;
 		if (reader.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(reader)) {
-			TEST(true); // Returning false for OTELSpanContextMessage
+			CODE_PROBE(true, "Returning false for OTELSpanContextMessage");
 			return false;
 		}
-		if (EncryptedMutationMessage::isNextIn(reader)) {
+		reader >> *m;
+		if (m->isEncrypted()) {
 			// In case the mutation is encrypted, get the decrypted mutation and also update message to point to
 			// the decrypted mutation.
 			// We use dedicated arena for decrypt buffer, as the other arena is used to count towards backup lock bytes.
-			*m = EncryptedMutationMessage::decrypt(reader, decryptArena, cipherKeys, &message);
-		} else {
-			reader >> *m;
+			*m = m->decrypt(cipherKeys, decryptArena, BlobCipherMetrics::BACKUP, &message);
 		}
-		return normalKeys.contains(m->param1) || m->param1 == metadataVersionKey;
+
+		// Return true if the mutation intersects any legal backup ranges
+		if (normalKeys.contains(m->param1) || m->param1 == metadataVersionKey) {
+			return true;
+		} else if (m->type != MutationRef::Type::ClearRange) {
+			return systemBackupMutationMask().rangeContaining(m->param1).value();
+		} else {
+			for (auto& r : systemBackupMutationMask().intersectingRanges(KeyRangeRef(m->param1, m->param2))) {
+				if (r->value()) {
+					return true;
+				}
+			}
+
+			return false;
+		}
 	}
 
 	void collectCipherDetailIfEncrypted(std::unordered_set<BlobCipherDetails>& cipherDetails) {
-		ArenaReader reader(arena, message, AssumeVersion(g_network->protocolVersion()));
-		if (EncryptedMutationMessage::isNextIn(reader)) {
-			EncryptedMutationMessage emm;
-			reader >> emm;
-			cipherDetails.insert(emm.header.cipherTextDetails);
-			cipherDetails.insert(emm.header.cipherHeaderDetails);
+		ASSERT(!message.empty());
+		if (*message.begin() == MutationRef::Encrypted) {
+			ArenaReader reader(arena, message, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+			MutationRef m;
+			reader >> m;
+			const BlobCipherEncryptHeader* header = m.encryptionHeader();
+			cipherDetails.insert(header->cipherTextDetails);
+			cipherDetails.insert(header->cipherHeaderDetails);
 		}
 	}
 };
@@ -453,20 +468,30 @@ struct BackupData {
 	ACTOR static Future<Version> _getMinKnownCommittedVersion(BackupData* self) {
 		state Span span("BA:GetMinCommittedVersion"_loc);
 		loop {
-			GetReadVersionRequest request(span.context,
-			                              0,
-			                              TransactionPriority::DEFAULT,
-			                              invalidVersion,
-			                              GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
-			choose {
-				when(wait(self->cx->onProxiesChanged())) {}
-				when(GetReadVersionReply reply =
-				         wait(basicLoadBalance(self->cx->getGrvProxies(UseProvisionalProxies::False),
-				                               &GrvProxyInterface::getConsistentReadVersion,
-				                               request,
-				                               self->cx->taskID))) {
-					self->cx->ssVersionVectorCache.applyDelta(reply.ssVersionVectorDelta);
-					return reply.version;
+			try {
+				GetReadVersionRequest request(span.context,
+				                              0,
+				                              TransactionPriority::DEFAULT,
+				                              invalidVersion,
+				                              GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
+				choose {
+					when(wait(self->cx->onProxiesChanged())) {}
+					when(GetReadVersionReply reply =
+					         wait(basicLoadBalance(self->cx->getGrvProxies(UseProvisionalProxies::False),
+					                               &GrvProxyInterface::getConsistentReadVersion,
+					                               request,
+					                               self->cx->taskID))) {
+						self->cx->ssVersionVectorCache.applyDelta(reply.ssVersionVectorDelta);
+						return reply.version;
+					}
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_batch_transaction_throttled ||
+				    e.code() == error_code_grv_proxy_memory_limit_exceeded) {
+					// GRV Proxy returns an error
+					wait(delayJittered(CLIENT_KNOBS->GRV_ERROR_RETRY_DELAY));
+				} else {
+					throw;
 				}
 			}
 		}
@@ -770,7 +795,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self,
 	// Fetch cipher keys if any of the messages are encrypted.
 	if (!cipherDetails.empty()) {
 		std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-		    wait(getEncryptCipherKeys(self->db, cipherDetails));
+		    wait(getEncryptCipherKeys(self->db, cipherDetails, BlobCipherMetrics::BLOB_GRANULE));
 		cipherKeys = getCipherKeysResult;
 	}
 
@@ -778,7 +803,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self,
 	for (idx = 0; idx < numMsg; idx++) {
 		auto& message = self->messages[idx];
 		MutationRef m;
-		if (!message.isBackupMessage(&m, cipherKeys))
+		if (!message.isCandidateBackupMessage(&m, cipherKeys))
 			continue;
 
 		DEBUG_MUTATION("addMutation", message.version.version, m)
@@ -1058,7 +1083,7 @@ ACTOR static Future<Void> monitorWorkerPause(BackupData* self) {
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			Optional<Value> value = wait(tr->get(backupPausedKey));
-			bool paused = value.present() && value.get() == LiteralStringRef("1");
+			bool paused = value.present() && value.get() == "1"_sr;
 			if (self->paused.get() != paused) {
 				TraceEvent(paused ? "BackupWorkerPaused" : "BackupWorkerResumed", self->myId).log();
 				self->paused.set(paused);

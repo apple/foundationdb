@@ -57,7 +57,8 @@ struct IQuorumChange : ReferenceCounted<IQuorumChange> {
 // Change to use the given set of coordination servers
 ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
                                                                ClusterConnectionString* conn,
-                                                               std::string newName);
+                                                               std::string newName,
+                                                               bool disableConfigDB);
 ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change);
 Reference<IQuorumChange> autoQuorumChange(int desired = -1);
 Reference<IQuorumChange> nameQuorumChange(std::string const& name, Reference<IQuorumChange> const& other);
@@ -158,6 +159,10 @@ bool schemaMatch(json_spirit::mValue const& schema,
 // execute payload in 'snapCmd' on all the coordinators, TLogs and
 // storage nodes
 ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
+
+// Set and get the storage quota per tenant
+void setStorageQuota(Transaction& tr, StringRef tenantName, uint64_t quota);
+ACTOR Future<Optional<uint64_t>> getStorageQuota(Transaction* tr, StringRef tenantName);
 
 #include "flow/unactorcompiler.h"
 #endif

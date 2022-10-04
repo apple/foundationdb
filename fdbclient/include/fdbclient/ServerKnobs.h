@@ -50,7 +50,6 @@ public:
 	bool PEEK_USING_STREAMING;
 	double TLOG_TIMEOUT; // tlog OR commit proxy failure - master's reaction time
 	double TLOG_SLOW_REJOIN_WARN_TIMEOUT_SECS; // Warns if a tlog takes too long to rejoin
-	double RECOVERY_TLOG_SMART_QUORUM_DELAY; // smaller might be better for bug amplification
 	double TLOG_STORAGE_MIN_UPDATE_INTERVAL;
 	double BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL;
 	int DESIRED_TOTAL_BYTES;
@@ -58,10 +57,6 @@ public:
 	double UPDATE_DELAY;
 	int MAXIMUM_PEEK_BYTES;
 	int APPLY_MUTATION_BYTES;
-	int RECOVERY_DATA_BYTE_LIMIT;
-	int BUGGIFY_RECOVERY_DATA_LIMIT;
-	double LONG_TLOG_COMMIT_TIME;
-	int64_t LARGE_TLOG_COMMIT_BYTES;
 	double BUGGIFY_RECOVER_MEMORY_LIMIT;
 	double BUGGIFY_WORKER_REMOVED_MAX_LAG;
 	int64_t UPDATE_STORAGE_BYTE_LIMIT;
@@ -123,16 +118,16 @@ public:
 	double BG_REBALANCE_POLLING_INTERVAL;
 	double BG_REBALANCE_SWITCH_CHECK_INTERVAL;
 	double DD_QUEUE_LOGGING_INTERVAL;
+	double DD_QUEUE_COUNTER_REFRESH_INTERVAL;
+	double DD_QUEUE_COUNTER_MAX_LOG; // max number of servers for which trace events will be generated in each round of
+	                                 // DD_QUEUE_COUNTER_REFRESH_INTERVAL duration
+	bool DD_QUEUE_COUNTER_SUMMARIZE; // Enable summary of remaining servers when the number of servers with ongoing
+	                                 // relocations in the last minute exceeds DD_QUEUE_COUNTER_MAX_LOG
 	double RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 	double RELOCATION_PARALLELISM_PER_DEST_SERVER;
 	int DD_QUEUE_MAX_KEY_SERVERS;
 	int DD_REBALANCE_PARALLELISM;
 	int DD_REBALANCE_RESET_AMOUNT;
-	double BG_DD_MAX_WAIT;
-	double BG_DD_MIN_WAIT;
-	double BG_DD_INCREASE_RATE;
-	double BG_DD_DECREASE_RATE;
-	double BG_DD_SATURATION_DELAY;
 	double INFLIGHT_PENALTY_HEALTHY;
 	double INFLIGHT_PENALTY_REDUNDANT;
 	double INFLIGHT_PENALTY_UNHEALTHY;
@@ -161,8 +156,15 @@ public:
 	int PRIORITY_TEAM_FAILED; // Priority when a server in the team is excluded as failed
 	int PRIORITY_TEAM_0_LEFT;
 	int PRIORITY_SPLIT_SHARD;
+	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD; // Priority when a physical shard is oversize or anonymous
 
 	// Data distribution
+	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
+	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
+	int64_t MAX_PHYSICAL_SHARD_BYTES;
+	double PHYSICAL_SHARD_METRICS_DELAY;
+	double ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME;
+
 	double READ_REBALANCE_CPU_THRESHOLD; // read rebalance only happens if the source servers' CPU > threshold
 	int READ_REBALANCE_SRC_PARALLELISM; // the max count a server become a source server within a certain interval
 	int READ_REBALANCE_SHARD_TOPK; // top k shards from which to select randomly for read-rebalance
@@ -193,7 +195,6 @@ public:
 	double SERVER_LIST_DELAY;
 	double RECRUITMENT_IDLE_DELAY;
 	double STORAGE_RECRUITMENT_DELAY;
-	double BLOB_WORKER_RECRUITMENT_DELAY;
 	bool TSS_HACK_IDENTITY_MAPPING;
 	double TSS_RECRUITMENT_TIMEOUT;
 	double TSS_DD_CHECK_INTERVAL;
@@ -232,6 +233,8 @@ public:
 	int DD_TEAM_ZERO_SERVER_LEFT_LOG_DELAY;
 	int DD_STORAGE_WIGGLE_PAUSE_THRESHOLD; // How many unhealthy relocations are ongoing will pause storage wiggle
 	int DD_STORAGE_WIGGLE_STUCK_THRESHOLD; // How many times bestTeamStuck accumulate will pause storage wiggle
+	int64_t
+	    DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC; // Minimal age of a correct-configured server before it's chosen to be wiggled
 	bool DD_TENANT_AWARENESS_ENABLED;
 	int TENANT_CACHE_LIST_REFRESH_INTERVAL; // How often the TenantCache is refreshed
 
@@ -253,9 +256,8 @@ public:
 
 	// Run storage enginee on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;
-	// A delay to avoid race on file resources if the new kv store process started immediately after the previous kv
-	// store process died
-	double REMOTE_KV_STORE_INIT_DELAY;
+	// A delay to avoid race on file resources after seeing lock_file_failure
+	double REBOOT_KV_STORE_DELAY;
 	// max waiting time for the remote kv store to initialize
 	double REMOTE_KV_STORE_MAX_INIT_DURATION;
 
@@ -300,9 +302,13 @@ public:
 	int64_t REPLACE_CONTENTS_BYTES;
 
 	// KeyValueStoreRocksDB
+	bool ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
+	int ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
+	int ROCKSDB_READ_RANGE_ROW_LIMIT;
 	int ROCKSDB_BACKGROUND_PARALLELISM;
 	int ROCKSDB_READ_PARALLELISM;
 	int64_t ROCKSDB_MEMTABLE_BYTES;
+	bool ROCKSDB_LEVEL_STYLE_COMPACTION;
 	bool ROCKSDB_UNSAFE_AUTO_FSYNC;
 	int64_t ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 	int ROCKSDB_PREFIX_LEN;
@@ -324,8 +330,10 @@ public:
 	int64_t ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
 	bool ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE;
 	std::string DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY;
+	bool ROCKSDB_DISABLE_AUTO_COMPACTIONS;
 	bool ROCKSDB_PERFCONTEXT_ENABLE; // Enable rocks perf context metrics. May cause performance overhead
 	double ROCKSDB_PERFCONTEXT_SAMPLE_RATE;
+	double ROCKSDB_METRICS_SAMPLE_INTERVAL;
 	int ROCKSDB_MAX_SUBCOMPACTIONS;
 	int64_t ROCKSDB_SOFT_PENDING_COMPACT_BYTES_LIMIT;
 	int64_t ROCKSDB_HARD_PENDING_COMPACT_BYTES_LIMIT;
@@ -335,6 +343,12 @@ public:
 	int64_t ROCKSDB_COMPACTION_READAHEAD_SIZE;
 	int64_t ROCKSDB_BLOCK_SIZE;
 	bool ENABLE_SHARDED_ROCKSDB;
+	int64_t ROCKSDB_WRITE_BUFFER_SIZE;
+	int64_t ROCKSDB_CF_WRITE_BUFFER_SIZE;
+	int64_t ROCKSDB_MAX_TOTAL_WAL_SIZE;
+	int64_t ROCKSDB_MAX_BACKGROUND_JOBS;
+	int64_t ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD;
+	double ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -399,6 +413,10 @@ public:
 	double RESET_MASTER_DELAY;
 	double RESET_RESOLVER_DELAY;
 
+	double GLOBAL_CONFIG_MIGRATE_TIMEOUT;
+	double GLOBAL_CONFIG_REFRESH_INTERVAL;
+	double GLOBAL_CONFIG_REFRESH_TIMEOUT;
+
 	// Master Server
 	double COMMIT_SLEEP_TIME;
 	double MIN_BALANCE_TIME;
@@ -443,6 +461,7 @@ public:
 	double ATTEMPT_RECRUITMENT_DELAY;
 	double WAIT_FOR_DISTRIBUTOR_JOIN_DELAY;
 	double WAIT_FOR_RATEKEEPER_JOIN_DELAY;
+	double WAIT_FOR_CONSISTENCYSCAN_JOIN_DELAY;
 	double WAIT_FOR_BLOB_MANAGER_JOIN_DELAY;
 	double WAIT_FOR_ENCRYPT_KEY_PROXY_JOIN_DELAY;
 	double WORKER_FAILURE_TIME;
@@ -456,6 +475,7 @@ public:
 	double CHECK_REMOTE_HEALTH_INTERVAL; // Remote DC health refresh interval.
 	double FORCE_RECOVERY_CHECK_DELAY;
 	double RATEKEEPER_FAILURE_TIME;
+	double CONSISTENCYSCAN_FAILURE_TIME;
 	double BLOB_MANAGER_FAILURE_TIME;
 	double REPLACE_INTERFACE_DELAY;
 	double REPLACE_INTERFACE_CHECK_DELAY;
@@ -542,6 +562,10 @@ public:
 	double RATEKEEPER_DEFAULT_LIMIT;
 	double RATEKEEPER_LIMIT_REASON_SAMPLE_RATE;
 	bool RATEKEEPER_PRINT_LIMIT_REASON;
+	double RATEKEEPER_MIN_RATE;
+	double RATEKEEPER_MAX_RATE;
+	double RATEKEEPER_BATCH_MIN_RATE;
+	double RATEKEEPER_BATCH_MAX_RATE;
 
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER;
 	int64_t SPRING_BYTES_STORAGE_SERVER;
@@ -550,9 +574,12 @@ public:
 	int64_t SPRING_BYTES_STORAGE_SERVER_BATCH;
 	int64_t STORAGE_HARD_LIMIT_BYTES;
 	int64_t STORAGE_HARD_LIMIT_BYTES_OVERAGE;
+	int64_t STORAGE_HARD_LIMIT_BYTES_SPEED_UP_SIM;
+	int64_t STORAGE_HARD_LIMIT_BYTES_OVERAGE_SPEED_UP_SIM;
 	int64_t STORAGE_HARD_LIMIT_VERSION_OVERAGE;
 	int64_t STORAGE_DURABILITY_LAG_HARD_MAX;
 	int64_t STORAGE_DURABILITY_LAG_SOFT_MAX;
+	bool STORAGE_INCLUDE_FEED_STORAGE_QUEUE;
 
 	int64_t LOW_PRIORITY_STORAGE_QUEUE_BYTES;
 	int64_t LOW_PRIORITY_DURABILITY_LAG;
@@ -585,11 +612,14 @@ public:
 	// Use global tag throttling strategy. i.e. throttle based on the cluster-wide
 	// throughput for tags and their associated quotas.
 	bool GLOBAL_TAG_THROTTLING;
+	// Enforce tag throttling on proxies rather than on clients
+	bool ENFORCE_TAG_THROTTLING_ON_PROXIES;
 	// Minimum number of transactions per second that the global tag throttler must allow for each tag
 	double GLOBAL_TAG_THROTTLING_MIN_RATE;
 	// Used by global tag throttling counters
 	double GLOBAL_TAG_THROTTLING_FOLDING_TIME;
-	double GLOBAL_TAG_THROTTLING_TRACE_INTERVAL;
+	// Cost multiplier for writes (because write operations are more expensive than reads)
+	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
@@ -612,8 +642,19 @@ public:
 	double INITIAL_DURABILITY_LAG_MULTIPLIER;
 	double DURABILITY_LAG_REDUCTION_RATE;
 	double DURABILITY_LAG_INCREASE_RATE;
-
 	double STORAGE_SERVER_LIST_FETCH_TIMEOUT;
+	bool BW_THROTTLING_ENABLED;
+	double TARGET_BW_LAG;
+	double TARGET_BW_LAG_BATCH;
+	double TARGET_BW_LAG_UPDATE;
+	int MIN_BW_HISTORY;
+	double BW_ESTIMATION_INTERVAL;
+	double BW_LAG_INCREASE_AMOUNT;
+	double BW_LAG_DECREASE_AMOUNT;
+	double BW_FETCH_WORKERS_INTERVAL;
+	double BW_RW_LOGGING_INTERVAL;
+	double BW_MAX_BLOCKED_INTERVAL;
+	double BW_RK_SIM_QUIESCE_DELAY;
 
 	// disk snapshot
 	int64_t MAX_FORKED_PROCESS_OUTPUT;
@@ -652,12 +693,14 @@ public:
 	int STORAGE_LIMIT_BYTES;
 	int BUGGIFY_LIMIT_BYTES;
 	bool FETCH_USING_STREAMING;
+	bool FETCH_USING_BLOB;
 	int FETCH_BLOCK_BYTES;
 	int FETCH_KEYS_PARALLELISM_BYTES;
 	int FETCH_KEYS_PARALLELISM;
+	int FETCH_KEYS_PARALLELISM_FULL;
 	int FETCH_KEYS_LOWER_PRIORITY;
-	int FETCH_CHANGEFEED_PARALLELISM;
 	int SERVE_FETCH_CHECKPOINT_PARALLELISM;
+	int CHANGE_FEED_DISK_READS_PARALLELISM;
 	int BUGGIFY_BLOCK_BYTES;
 	int64_t STORAGE_RECOVERY_VERSION_LAG_LIMIT;
 	double STORAGE_DURABILITY_LAG_REJECT_THRESHOLD;
@@ -665,7 +708,6 @@ public:
 	int STORAGE_COMMIT_BYTES;
 	int STORAGE_FETCH_BYTES;
 	double STORAGE_COMMIT_INTERVAL;
-	double UPDATE_SHARD_VERSION_INTERVAL;
 	int BYTE_SAMPLING_FACTOR;
 	int BYTE_SAMPLING_OVERHEAD;
 	int MAX_STORAGE_SERVER_WATCH_BYTES;
@@ -674,7 +716,6 @@ public:
 	int BYTE_SAMPLE_LOAD_PARALLELISM;
 	double BYTE_SAMPLE_LOAD_DELAY;
 	double BYTE_SAMPLE_START_DELAY;
-	double UPDATE_STORAGE_PROCESS_STATS_INTERVAL;
 	double BEHIND_CHECK_DELAY;
 	int BEHIND_CHECK_COUNT;
 	int64_t BEHIND_CHECK_VERSIONS;
@@ -698,6 +739,7 @@ public:
 	int CHECKPOINT_TRANSFER_BLOCK_BYTES;
 	int QUICK_GET_KEY_VALUES_LIMIT;
 	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
+	int STORAGE_FEED_QUERY_HARD_LIMIT;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -731,6 +773,12 @@ public:
 	bool WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER; // When enabled, the worker's health monitor also report any recent
 	                                                 // destroyed peers who are part of the transaction system to
 	                                                 // cluster controller.
+	bool STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT; // When enabled, storage server's worker will crash on io_timeout error;
+	                                          // this allows fdbmonitor to restart the worker and recreate the same SS.
+	                                          // When SS can be temporarily throttled by infrastructure, e.g, k8s,
+	                                          // Enabling this can reduce toil of manually restarting the SS.
+	                                          // Enable with caution: If io_timeout is caused by disk failure, we won't
+	                                          // want to restart the SS, which increases risk of data corruption.
 
 	// Test harness
 	double WORKER_POLL_DELAY;
@@ -744,7 +792,7 @@ public:
 
 	// Dynamic Knobs (implementation)
 	double COMPACTION_INTERVAL;
-	double UPDATE_NODE_TIMEOUT;
+	double BROADCASTER_SELF_UPDATE_DELAY;
 	double GET_COMMITTED_VERSION_TIMEOUT;
 	double GET_SNAPSHOT_AND_CHANGES_TIMEOUT;
 	double FETCH_CHANGES_TIMEOUT;
@@ -759,14 +807,6 @@ public:
 	int CONFIGURATION_ROWS_TO_FETCH;
 	bool DISABLE_DUPLICATE_LOG_WARNING;
 	double HISTOGRAM_REPORT_INTERVAL;
-
-	// IPager
-	int PAGER_RESERVED_PAGES;
-
-	// IndirectShadowPager
-	int FREE_PAGE_VACUUM_THRESHOLD;
-	int VACUUM_QUEUE_SIZE;
-	int VACUUM_BYTES_PER_SECOND;
 
 	// Timekeeper
 	int64_t TIME_KEEPER_DELAY;
@@ -790,11 +830,9 @@ public:
 	int64_t FASTRESTORE_ROLE_LOGGING_DELAY;
 	int64_t FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL; // How quickly to update process metrics for restore
 	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
-	int64_t FASTRESTORE_APPLYING_PARALLELISM; // number of outstanding txns writing to dest. DB
 	int64_t FASTRESTORE_MONITOR_LEADER_DELAY;
 	int64_t FASTRESTORE_STRAGGLER_THRESHOLD_SECONDS;
 	bool FASTRESTORE_TRACK_REQUEST_LATENCY; // true to track reply latency of each request in a request batch
-	bool FASTRESTORE_TRACK_LOADER_SEND_REQUESTS; // track requests of load send mutations to appliers?
 	int64_t FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT; // threshold when pipelined actors should be delayed
 	int64_t FASTRESTORE_WAIT_FOR_MEMORY_LATENCY;
 	int64_t FASTRESTORE_HEARTBEAT_DELAY; // interval for master to ping loaders and appliers
@@ -863,6 +901,7 @@ public:
 	int SIM_KMS_MAX_KEYS;
 	int ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH;
 	bool ENABLE_TLOG_ENCRYPTION;
+	bool ENABLE_STORAGE_SERVER_ENCRYPTION; // Currently only Redwood engine supports encryption
 	bool ENABLE_BLOB_GRANULE_ENCRYPTION;
 
 	// Compression
@@ -876,14 +915,13 @@ public:
 	// FIXME: configure url with database configuration instead of knob eventually
 	std::string BG_URL;
 
-	// whether to use blobRangeKeys or tenants for blob granule range sources
-	std::string BG_RANGE_SOURCE;
 	// Whether to use knobs or EKP for blob metadata and credentials
 	std::string BG_METADATA_SOURCE;
 
 	int BG_SNAPSHOT_FILE_TARGET_BYTES;
-	int BG_SNAPSHOT_FILE_TARGET_CHUNKS;
+	int BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES;
 	int BG_DELTA_FILE_TARGET_BYTES;
+	int BG_DELTA_FILE_TARGET_CHUNK_BYTES;
 	int BG_DELTA_BYTES_BEFORE_COMPACT;
 	int BG_MAX_SPLIT_FANOUT;
 	int BG_MAX_MERGE_FANIN;
@@ -892,18 +930,29 @@ public:
 	int BG_CONSISTENCY_CHECK_TARGET_SPEED_KB;
 	bool BG_ENABLE_MERGING;
 	int BG_MERGE_CANDIDATE_THRESHOLD_SECONDS;
+	int BG_MERGE_CANDIDATE_DELAY_SECONDS;
+	int BG_KEY_TUPLE_TRUNCATE_OFFSET;
 
 	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
+	int BLOB_WORKER_RESNAPSHOT_PARALLELISM;
+	int BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM;
+
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
 	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
 	double BLOB_WORKERLIST_FETCH_INTERVAL;
 	double BLOB_WORKER_BATCH_GRV_INTERVAL;
+	bool BLOB_WORKER_DO_REJECT_WHEN_FULL;
+	double BLOB_WORKER_REJECT_WHEN_FULL_THRESHOLD;
+	double BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY;
 
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN;
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX;
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT;
+	int BLOB_MANAGER_CONCURRENT_MERGE_CHECKS;
 	double BGCC_TIMEOUT;
 	double BGCC_MIN_INTERVAL;
+	bool BLOB_MANIFEST_BACKUP;
+	bool BLOB_FULL_RESTORE_MODE;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;

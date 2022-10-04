@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_READYOURWRITES_H
 #define FDBCLIENT_READYOURWRITES_H
+#include "fdbclient/Status.h"
 #pragma once
 
 #include "fdbclient/NativeAPI.actor.h"
@@ -120,11 +121,16 @@ public:
 	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRange& range, int64_t chunkSize) override;
 	Future<int64_t> getEstimatedRangeSizeBytes(const KeyRange& keys) override;
 
-	Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRange& range) override;
+	Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRange& range, int rangeLimit) override;
 	Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranules(const KeyRange& range,
 	                                                                    Version begin,
 	                                                                    Optional<Version> readVersion,
 	                                                                    Version* readVersionOut) override;
+
+	Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRange& range,
+	                                                                           Optional<Version> summaryVersion,
+	                                                                           int rangeLimit) override;
+	void addGranuleMaterializeStats(const GranuleMaterializeStats& stats) override;
 
 	void addReadConflictRange(KeyRangeRef const& keys) override;
 	void makeSelfConflicting() override { tr.makeSelfConflicting(); }
@@ -192,7 +198,17 @@ public:
 	KeyRangeMap<std::pair<bool, Optional<Value>>>& getSpecialKeySpaceWriteMap() { return specialKeySpaceWriteMap; }
 	bool readYourWritesDisabled() const { return options.readYourWritesDisabled; }
 	const Optional<std::string>& getSpecialKeySpaceErrorMsg() { return specialKeySpaceErrorMsg; }
-	void setSpecialKeySpaceErrorMsg(const std::string& msg) { specialKeySpaceErrorMsg = msg; }
+	void setSpecialKeySpaceErrorMsg(const std::string& msg) {
+		if (g_network && g_network->isSimulated()) {
+			try {
+				readJSONStrictly(msg);
+			} catch (Error& e) {
+				TraceEvent(SevError, "InvalidSpecialKeySpaceErrorMessage").error(e).detail("Message", msg);
+				ASSERT(false);
+			}
+		}
+		specialKeySpaceErrorMsg = msg;
+	}
 	Transaction& getTransaction() { return tr; }
 
 	Optional<TenantName> getTenant() { return tr.getTenant(); }

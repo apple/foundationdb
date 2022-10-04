@@ -6,9 +6,7 @@ else()
   list(APPEND FDBSERVER_SRCS coroimpl/CoroFlow.actor.cpp)
 endif()
 
-if (WITH_ROCKSDB_EXPERIMENTAL)
-  add_definitions(-DSSD_ROCKSDB_EXPERIMENTAL)
-
+if(WITH_ROCKSDB_EXPERIMENTAL)
   include(CompileRocksDB)
   # CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
   # statically, so find the static library here.
@@ -22,13 +20,6 @@ endif()
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
 add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
-
-find_package(ZLIB)
-if(ZLIB_FOUND)
-  add_compile_definitions(ZLIB_LIB_SUPPORTED)
-else()
-  message(STATUS "ZLIB package not found")
-endif()
 
 target_include_directories(fdbserver PRIVATE
   ${CMAKE_SOURCE_DIR}/bindings/c
@@ -51,6 +42,9 @@ else()
 endif()
 
 target_link_libraries(fdbserver PRIVATE toml11_target jemalloc rapidjson)
+if(WITH_ROCKSDB_EXPERIMENTAL)
+  target_compile_definitions(fdbserver PRIVATE SSD_ROCKSDB_EXPERIMENTAL)
+endif()
 # target_compile_definitions(fdbserver PRIVATE -DENABLE_SAMPLING)
 
 if(GPERFTOOLS_FOUND)

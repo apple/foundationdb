@@ -31,9 +31,9 @@ struct LockDatabaseWorkload : TestWorkload {
 	bool onlyCheckLocked;
 
 	LockDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), ok(true) {
-		lockAfter = getOption(options, LiteralStringRef("lockAfter"), 0.0);
-		unlockAfter = getOption(options, LiteralStringRef("unlockAfter"), 10.0);
-		onlyCheckLocked = getOption(options, LiteralStringRef("onlyCheckLocked"), false);
+		lockAfter = getOption(options, "lockAfter"_sr, 0.0);
+		unlockAfter = getOption(options, "unlockAfter"_sr, 10.0);
+		onlyCheckLocked = getOption(options, "onlyCheckLocked"_sr, false);
 		ASSERT(unlockAfter > lockAfter);
 	}
 
@@ -113,7 +113,7 @@ struct LockDatabaseWorkload : TestWorkload {
 				self->ok = false;
 				return Void();
 			} catch (Error& e) {
-				TEST(e.code() == error_code_database_locked); // Database confirmed locked
+				CODE_PROBE(e.code() == error_code_database_locked, "Database confirmed locked");
 				wait(tr.onError(e));
 			}
 		}

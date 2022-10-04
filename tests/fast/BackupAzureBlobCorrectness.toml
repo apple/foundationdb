@@ -1,3 +1,5 @@
+testClass = "Backup"
+
 [[test]]
 testTitle = 'Cycle'
 clearAfterTest = 'false'
@@ -39,7 +41,9 @@ testTitle = 'Backup'
     testName = 'BackupToBlob'
     backupAfter = 0.0
     backupTag = 'default'
-    backupURL = 'azure://0.0.0.0:10000/devstoreaccount1/test_container/'
+    # azure storage account style format: azure://<account_name>.blob.core.windows.net/<container_name>
+    # general ip-port style format: azure://<IP|Hostname>:<Port>/<account_name>/<container_name>
+    backupURL = 'azure://0.0.0.0:10000/devstoreaccount1/testcontainer'
     
     [[test.workload]]
     testName = 'RandomClogging'
@@ -72,7 +76,7 @@ clearAfterTest = 'false'
     testName = 'RestoreFromBlob'
     restoreAfter = 0.0
     backupTag = 'default'
-    backupURL = 'azure://0.0.0.0:10000/devstoreaccount1/test_container/'
+    backupURL = 'azure://0.0.0.0:10000/devstoreaccount1/testcontainer'
 
     [[test.workload]]
     testName = 'RandomClogging'

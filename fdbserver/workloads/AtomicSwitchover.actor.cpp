@@ -33,14 +33,14 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 
 	AtomicSwitchoverWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 
-		switch1delay = getOption(options, LiteralStringRef("switch1delay"), 50.0);
-		switch2delay = getOption(options, LiteralStringRef("switch2delay"), 50.0);
-		stopDelay = getOption(options, LiteralStringRef("stopDelay"), 50.0);
+		switch1delay = getOption(options, "switch1delay"_sr, 50.0);
+		switch2delay = getOption(options, "switch2delay"_sr, 50.0);
+		stopDelay = getOption(options, "stopDelay"_sr, 50.0);
 
-		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
+		addDefaultBackupRanges(backupRanges);
 
-		auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
-		extraDB = Database::createDatabase(extraFile, -1);
+		ASSERT(g_simulator->extraDatabases.size() == 1);
+		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], wcx.defaultTenant);
 	}
 
 	std::string description() const override { return "AtomicSwitchover"; }
@@ -191,8 +191,8 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		TraceEvent("AS_Done").log();
 
 		// SOMEDAY: Remove after backup agents can exist quiescently
-		if (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
-			g_simulator.drAgents = ISimulator::BackupAgentType::NoBackupAgents;
+		if (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
+			g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
 		}
 
 		return Void();

@@ -36,8 +36,8 @@ struct CommitBugWorkload : TestWorkload {
 
 	ACTOR Future<Void> bug1(Database cx, CommitBugWorkload* self) {
 		state Key key = StringRef(format("B1Key%d", self->clientId));
-		state Value val1 = LiteralStringRef("Value1");
-		state Value val2 = LiteralStringRef("Value2");
+		state Value val1 = "Value1"_sr;
+		state Value val2 = "Value2"_sr;
 
 		loop {
 			state Transaction tr(cx);
@@ -49,7 +49,7 @@ struct CommitBugWorkload : TestWorkload {
 					break;
 				} catch (Error& e) {
 					TraceEvent("CommitBugSetVal1Error").error(e);
-					TEST(e.code() == error_code_commit_unknown_result); // Commit unknown result
+					CODE_PROBE(e.code() == error_code_commit_unknown_result, "Commit unknown result");
 					wait(tr.onError(e));
 				}
 			}
@@ -140,7 +140,7 @@ struct CommitBugWorkload : TestWorkload {
 
 						break;
 					} else {
-						TEST(true); // Commit conflict
+						CODE_PROBE(true, "Commit conflict");
 
 						TraceEvent("CommitBug2Error").error(e).detail("AttemptedNum", i + 1);
 						wait(tr.onError(e));
