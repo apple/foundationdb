@@ -180,24 +180,13 @@ public:
 		if (databaseCreateErrorInjected && canBeInjectedDatabaseCreateError(err.code())) {
 			// Failed to create a database because of failure injection
 			// Restart by recreating the transaction in a valid database
-			auto thisRef = std::static_pointer_cast<TransactionContextBase>(shared_from_this());
-			scheduler->schedule([thisRef]() {
-				fdb::Database db = thisRef->executor->selectDatabase();
-				thisRef->fdbDb.atomic_store(db);
-				if (thisRef->transactional) {
-					if (thisRef->tenantName) {
-						fdb::Tenant tenant = db.openTenant(*thisRef->tenantName);
-						thisRef->fdbTx.atomic_store(tenant.createTransaction());
-					} else {
-						thisRef->fdbTx.atomic_store(db.createTransaction());
-					}
-				}
-				thisRef->restartTransaction();
-			});
+			recreateAndRestartTransaction();
 		} else if (transactional) {
 			onErrorArg = err;
 			onErrorFuture = tx().onError(err);
 			handleOnErrorFuture();
+		} else if (isRetriableDBOpError(err.code())) {
+			restartTransaction();
 		} else {
 			transactionFailed(err);
 		}
@@ -222,6 +211,8 @@ protected:
 	bool canBeInjectedDatabaseCreateError(fdb::Error::CodeType errCode) {
 		return errCode == error_code_no_cluster_file_found || errCode == error_code_connection_string_invalid;
 	}
+
+	bool isRetriableDBOpError(fdb::Error::CodeType errCode) { return errCode == error_code_cluster_version_changed; }
 
 	// Complete the transaction with an (unretriable) error
 	void transactionFailed(fdb::Error err) {
@@ -260,6 +251,23 @@ protected:
 		commitCalled = false;
 		lock.unlock();
 		startFct(shared_from_this());
+	}
+
+	void recreateAndRestartTransaction() {
+		auto thisRef = std::static_pointer_cast<TransactionContextBase>(shared_from_this());
+		scheduler->schedule([thisRef]() {
+			fdb::Database db = thisRef->executor->selectDatabase();
+			thisRef->fdbDb.atomic_store(db);
+			if (thisRef->transactional) {
+				if (thisRef->tenantName) {
+					fdb::Tenant tenant = db.openTenant(*thisRef->tenantName);
+					thisRef->fdbTx.atomic_store(tenant.createTransaction());
+				} else {
+					thisRef->fdbTx.atomic_store(db.createTransaction());
+				}
+			}
+			thisRef->restartTransaction();
+		});
 	}
 
 	// Checks if a transaction can be retried. Fails the transaction if the check fails
@@ -671,11 +679,23 @@ public:
 		try {
 			std::shared_ptr<ITransactionContext> ctx;
 			if (options.blockOnFutures) {
-				ctx = std::make_shared<BlockingTransactionContext>(
-				    this, startFct, cont, scheduler, options.transactionRetryLimit, bgBasePath, tenantName, true);
+				ctx = std::make_shared<BlockingTransactionContext>(this,
+				                                                   startFct,
+				                                                   cont,
+				                                                   scheduler,
+				                                                   options.transactionRetryLimit,
+				                                                   bgBasePath,
+				                                                   tenantName,
+				                                                   transactional);
 			} else {
-				ctx = std::make_shared<AsyncTransactionContext>(
-				    this, startFct, cont, scheduler, options.transactionRetryLimit, bgBasePath, tenantName, true);
+				ctx = std::make_shared<AsyncTransactionContext>(this,
+				                                                startFct,
+				                                                cont,
+				                                                scheduler,
+				                                                options.transactionRetryLimit,
+				                                                bgBasePath,
+				                                                tenantName,
+				                                                transactional);
 			}
 			startFct(ctx);
 		} catch (...) {
