@@ -436,8 +436,10 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 		wait(self->scanMappedRange(cx, 10, 490, mapper, self, matchIndex));
 
-		Key mapper = getMapper(self, true);
-		wait(self->scanMappedRange(cx, 10, 490, mapper, self, MATCH_INDEX_UNMATCHED_ONLY, true));
+		{
+			Key mapper = getMapper(self, true);
+			wait(self->scanMappedRange(cx, 10, 490, mapper, self, MATCH_INDEX_UNMATCHED_ONLY, true));
+		}
 
 		return Void();
 	}
