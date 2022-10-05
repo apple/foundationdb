@@ -7865,25 +7865,46 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 }
 
 // kind of a hack, but necessary to work around needing to access system keys in a tenant-enabled transaction
-ACTOR Future<TenantMapEntry> blobGranuleGetTenantEntry(Transaction* self, Key rangeStartKey) {
+ACTOR Future<TenantMapEntry> blobGranuleGetTenantEntry(Transaction* self,
+                                                       Key rangeStartKey,
+                                                       Optional<TenantName> tenantName) {
+	ASSERT(tenantName.present() || self->getTenant().present());
+	TenantName tName = tenantName.present() ? tenantName.get() : self->getTenant().get();
+	state TenantMapEntry tme;
+
 	Optional<KeyRangeLocationInfo> cachedLocationInfo =
-	    self->trState->cx->getCachedLocation(self->getTenant().get(), rangeStartKey, Reverse::False);
+	    self->trState->cx->getCachedLocation(tName, rangeStartKey, Reverse::False);
 	if (!cachedLocationInfo.present()) {
+		// If we're passing in a tenant, use that and do not touch the transaction.
+		TenantInfo tInfo;
+		if (tenantName.present()) {
+			tInfo = TenantInfo(tName, {}, TenantInfo::INVALID_TENANT);
+		} else {
+			tInfo = self->trState->getTenantInfo(AllowInvalidTenantID::True);
+		}
 		KeyRangeLocationInfo l = wait(getKeyLocation_internal(
 		    self->trState->cx,
-		    self->trState->getTenantInfo(AllowInvalidTenantID::True),
+		    tInfo,
 		    rangeStartKey,
 		    self->trState->spanContext,
 		    self->trState->readOptions.present() ? self->trState->readOptions.get().debugID : Optional<UID>(),
 		    self->trState->useProvisionalProxies,
 		    Reverse::False,
 		    latestVersion));
-		self->trState->trySetTenantId(l.tenantEntry.id);
-		return l.tenantEntry;
+		tme = l.tenantEntry;
 	} else {
-		self->trState->trySetTenantId(cachedLocationInfo.get().tenantEntry.id);
-		return cachedLocationInfo.get().tenantEntry;
+		tme = cachedLocationInfo.get().tenantEntry;
 	}
+
+	if (tme.id == TenantInfo::INVALID_TENANT) {
+		throw tenant_not_found();
+	}
+
+	// Modify transaction if desired.
+	if (!tenantName.present()) {
+		self->trState->trySetTenantId(tme.id);
+	}
+	return tme;
 }
 
 Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize) {
@@ -7908,7 +7929,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Trans
 
 	if (self->getTenant().present()) {
 		// have to bypass tenant to read system key space, and add tenant prefix to part of mapping
-		TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(self, currentRange.begin));
+		TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(self, currentRange.begin, {}));
 		tenantPrefix = tenantEntry.prefix;
 	} else {
 		self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -8011,7 +8032,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 
 	if (self->getTenant().present()) {
 		// have to bypass tenant to read system key space, and add tenant prefix to part of mapping
-		TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(self, range.begin));
+		TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(self, range.begin, {}));
 		tenantPrefix = tenantEntry.prefix;
 		Standalone<StringRef> mappingPrefix = tenantEntry.prefix.withPrefix(blobGranuleMappingKeys.begin);
 
@@ -10492,7 +10513,7 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			if (tenant.present() && !loadedTenantPrefix) {
-				TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(&tr, range.begin));
+				TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(&tr, range.begin, tenant));
 				loadedTenantPrefix = true;
 				purgeRange = purgeRange.withPrefix(tenantEntry.prefix);
 			}
