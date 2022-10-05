@@ -485,7 +485,9 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 			TraceEventFields teamCollectionInfoMessage = wait(timeoutError(
 			    dataDistributorWorker.eventLogRequest.getReply(EventLogRequest("TeamCollectionInfo"_sr)), 1.0));
 
-			TraceEvent("GetTeamCollectionValid").detail("Stage", "GotString");
+			TraceEvent("GetTeamCollectionValid")
+				.detail("Stage", "GotString")
+				.detail("Message", teamCollectionInfoMessage.toString());
 
 			state int64_t currentTeams =
 			    boost::lexical_cast<int64_t>(teamCollectionInfoMessage.getValue("CurrentServerTeams"));
@@ -592,6 +594,8 @@ ACTOR Future<bool> getDataDistributionActive(Database cx, WorkerInterface distri
 
 		TraceEventFields activeMessage = wait(
 		    timeoutError(distributorWorker.eventLogRequest.getReply(EventLogRequest("DDTrackerStarting"_sr)), 1.0));
+
+		TraceEvent("DataDistributionActive").detail("Message", activeMessage.toString());
 
 		return activeMessage.getValue("State") == "Active";
 	} catch (Error& e) {

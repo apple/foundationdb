@@ -2623,10 +2623,16 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			}
 			when(EventLogRequest req = waitNext(interf.eventLogRequest.getFuture())) {
 				TraceEventFields e;
-				if (req.getLastError)
+				if (req.getLastError) {
 					e = latestEventCache.getLatestError();
-				else
+					TraceEvent("EventLogRequestError", interf.id())
+						.detail("Error", e.toString());
+				} else {
 					e = latestEventCache.get(req.eventName.toString());
+					TraceEvent("EventLogRequest", interf.id())
+						.detail("Event", req.eventName.toString())
+						.detail("Message", e.toString());
+				}
 				req.reply.send(e);
 			}
 			when(TraceBatchDumpRequest req = waitNext(interf.traceBatchDumpRequest.getFuture())) {
