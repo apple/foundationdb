@@ -4031,13 +4031,13 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 
 	std::stringstream memInfoStream(memString);
 	linux_os::getMemoryInfo(request, memInfoStream);
-	ASSERT(request[LiteralStringRef("MemTotal:")] == 24733228);
-	ASSERT(request[LiteralStringRef("MemFree:")] == 2077580);
-	ASSERT(request[LiteralStringRef("MemAvailable:")] == 0);
-	ASSERT(request[LiteralStringRef("Buffers:")] == 266940);
-	ASSERT(request[LiteralStringRef("Cached:")] == 16798292);
-	ASSERT(request[LiteralStringRef("SwapTotal:")] == 25165820);
-	ASSERT(request[LiteralStringRef("SwapFree:")] == 23680228);
+	ASSERT(request["MemTotal:"_sr] == 24733228);
+	ASSERT(request["MemFree:"_sr] == 2077580);
+	ASSERT(request["MemAvailable:"_sr] == 0);
+	ASSERT(request["Buffers:"_sr] == 266940);
+	ASSERT(request["Cached:"_sr] == 16798292);
+	ASSERT(request["SwapTotal:"_sr] == 25165820);
+	ASSERT(request["SwapFree:"_sr] == 23680228);
 	for (auto& item : request) {
 		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}
@@ -4082,13 +4082,13 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 
 	std::stringstream memInfoStream1(memString1);
 	linux_os::getMemoryInfo(request, memInfoStream1);
-	ASSERT(request[LiteralStringRef("MemTotal:")] == 31856496);
-	ASSERT(request[LiteralStringRef("MemFree:")] == 25492716);
-	ASSERT(request[LiteralStringRef("MemAvailable:")] == 28470756);
-	ASSERT(request[LiteralStringRef("Buffers:")] == 313644);
-	ASSERT(request[LiteralStringRef("Cached:")] == 2956444);
-	ASSERT(request[LiteralStringRef("SwapTotal:")] == 0);
-	ASSERT(request[LiteralStringRef("SwapFree:")] == 0);
+	ASSERT(request["MemTotal:"_sr] == 31856496);
+	ASSERT(request["MemFree:"_sr] == 25492716);
+	ASSERT(request["MemAvailable:"_sr] == 28470756);
+	ASSERT(request["Buffers:"_sr] == 313644);
+	ASSERT(request["Cached:"_sr] == 2956444);
+	ASSERT(request["SwapTotal:"_sr] == 0);
+	ASSERT(request["SwapFree:"_sr] == 0);
 	for (auto& item : request) {
 		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}
