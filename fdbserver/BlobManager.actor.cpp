@@ -485,6 +485,19 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 		}
 		return false;
 	}
+
+	bool maybeInjectTargetedRestart() {
+		// inject a BW restart at most once per test
+		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
+		    now() > g_simulator->injectTargetedBMRestartTime) {
+			CODE_PROBE(true, "Injecting BM targeted restart");
+			TraceEvent("SimBMInjectTargetedRestart", id);
+			g_simulator->injectTargetedBMRestartTime = std::numeric_limits<double>::max();
+			iAmReplaced.send(Void());
+			return true;
+		}
+		return false;
+	}
 };
 
 // Helper function for alignKeys().
@@ -849,7 +862,18 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			if (bmData->workersById.count(workerID.get()) == 0) {
 				throw no_more_servers();
 			}
-			wait(bmData->workersById[workerID.get()].assignBlobRangeRequest.getReply(req));
+			state Future<Void> assignFuture = bmData->workersById[workerID.get()].assignBlobRangeRequest.getReply(req);
+
+			if (BUGGIFY) {
+				// wait for request to actually send
+				wait(delay(0));
+				if (bmData->maybeInjectTargetedRestart()) {
+					throw blob_manager_replaced();
+				}
+			}
+
+			wait(assignFuture);
+
 			if (assignment.previousFailure.present()) {
 				// previous assign failed and this one succeeded
 				--bmData->stats.blockedAssignments;
@@ -1216,6 +1240,10 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 			}
 		}
 		i += j;
+	}
+	if (BUGGIFY && bmData->maybeInjectTargetedRestart()) {
+		wait(delay(0)); // should be cancelled
+		ASSERT(false);
 	}
 	return Void();
 }
@@ -1655,6 +1683,11 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 		}
 	}
 
+	if (BUGGIFY && bmData->maybeInjectTargetedRestart()) {
+		wait(delay(0)); // should be cancelled
+		ASSERT(false);
+	}
+
 	// transaction committed, send updated range assignments. Even if there is only one range still, we need to revoke
 	// it and re-assign it to cancel the old granule and retry
 	CODE_PROBE(true, "BM successfully changed initial split too big");
@@ -1942,6 +1975,11 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 
 			wait(tr->commit());
 
+			if (BUGGIFY && bmData->maybeInjectTargetedRestart()) {
+				wait(delay(0)); // should be cancelled
+				ASSERT(false);
+			}
+
 			// Update BlobGranuleMergeBoundary in-memory state.
 			for (auto it = splitPoints.boundaries.begin(); it != splitPoints.boundaries.end(); it++) {
 				bmData->mergeBoundaries[it->first] = it->second;
@@ -2219,6 +2257,11 @@ ACTOR Future<std::pair<UID, Version>> persistMergeGranulesStart(Reference<BlobMa
 
 			wait(tr->commit());
 
+			if (BUGGIFY && bmData->maybeInjectTargetedRestart()) {
+				wait(delay(0)); // should be cancelled
+				ASSERT(false);
+			}
+
 			Version mergeVersion = tr->getCommittedVersion();
 			if (BM_DEBUG) {
 				fmt::print("Granule merge intent persisted [{0} - {1}): {2} @ {3}!\n",
@@ -2378,6 +2421,12 @@ ACTOR Future<bool> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 				           tr->getCommittedVersion());
 			}
 			CODE_PROBE(true, "Granule merge complete");
+
+			if (BUGGIFY && bmData->maybeInjectTargetedRestart()) {
+				wait(delay(0)); // should be cancelled
+				ASSERT(false);
+			}
+
 			return true;
 		} catch (Error& e) {
 			wait(tr->onError(e));
@@ -3673,6 +3722,10 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		}
 	}
 
+	if (BUGGIFY && bmData->maybeInjectTargetedRestart()) {
+		throw blob_manager_replaced();
+	}
+
 	// Get set of workers again. Some could have died after reporting assignments
 	std::unordered_set<UID> endingWorkers;
 	for (auto& it : bmData->workersById) {
@@ -3760,6 +3813,10 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 	ASSERT(bmData->doneRecovering.canBeSet());
 	bmData->doneRecovering.send(Void());
+
+	if (BUGGIFY && bmData->maybeInjectTargetedRestart()) {
+		throw blob_manager_replaced();
+	}
 
 	return Void();
 }
@@ -4465,6 +4522,12 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 				// instead cover whole of intersecting granules at begin/end
 				wait(krmSetRangeCoalescing(&tr, blobGranuleForcePurgedKeys.begin, range, normalKeys, "1"_sr));
 				wait(tr.commit());
+
+				if (BUGGIFY && self->maybeInjectTargetedRestart()) {
+					wait(delay(0)); // should be cancelled
+					ASSERT(false);
+				}
+
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -4761,6 +4824,10 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 			fmt::print("BM {0}: About to fully delete granule {1}\n", self->epoch, granuleId.toString());
 		}
 		wait(fullyDeleteGranule(self, granuleId, historyKey, purgeVersion, keyRange, mergeChildId, force));
+		if (BUGGIFY && self->maybeInjectTargetedRestart()) {
+			wait(delay(0)); // should be cancelled
+			ASSERT(false);
+		}
 	}
 
 	if (BM_PURGE_DEBUG) {
