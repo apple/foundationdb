@@ -1189,7 +1189,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	    .detail("MetaclusterId", metaclusterId)
 	    .detail("DataClusterName", clusterName)
 	    .detail("DataClusterId", clusterId)
-	    .trackLatest(self->recoveredConfigEventHolder->trackingKey);
+	    .trackLatest(self->metaclusterEventHolder->trackingKey);
 
 	uniquify(self->allTags);
 
