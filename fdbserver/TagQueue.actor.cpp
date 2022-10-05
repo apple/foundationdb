@@ -114,18 +114,25 @@ void TagQueue::runEpoch(double elapsed,
 
 ACTOR static Future<Void> mockClient(TagQueue* tagQueue,
                                      TransactionPriority priority,
-                                     TransactionTagMap<uint32_t> tags,
+                                     TagSet tagSet,
+                                     int batchSize,
                                      double desiredRate,
-                                     int64_t* count) {
+                                     TransactionTagMap<uint32_t>* counters) {
 	state Future<Void> timer;
+	state TransactionTagMap<uint32_t> tags;
+	for (const auto& tag : tagSet) {
+		tags[tag] = batchSize;
+	}
 	loop {
-		timer = delayJittered(1.0 / desiredRate);
+		timer = delayJittered(static_cast<double>(batchSize) / desiredRate);
 		GetReadVersionRequest req;
 		req.tags = tags;
 		req.priority = priority;
 		tagQueue->addRequest(req);
 		wait(success(req.reply.getFuture()) && timer);
-		++(*count);
+		for (auto& [tag, _] : tags) {
+			(*counters)[tag] += batchSize;
+		}
 	}
 }
 
@@ -160,82 +167,105 @@ static bool isNear(double desired, int64_t actual) {
 // Client should be throttled to only 10 transactions per second.
 TEST_CASE("/TagQueue/Simple") {
 	state TagQueue tagQueue;
-	state TransactionTagMap<uint32_t> tags;
-	state int64_t counter = 0;
+	state TagSet tagSet;
+	state TransactionTagMap<uint32_t> counters;
 	{
 		std::map<TransactionTag, double> rates;
 		rates["sampleTag"_sr] = 10.0;
 		tagQueue.updateRates(rates);
 	}
-	tags["sampleTag"_sr] = 1;
+	tagSet.addTag("sampleTag"_sr);
 
-	state Future<Void> client = mockClient(&tagQueue, TransactionPriority::DEFAULT, tags, 20.0, &counter);
+	state Future<Void> client = mockClient(&tagQueue, TransactionPriority::DEFAULT, tagSet, 1, 20.0, &counters);
 	state Future<Void> server = mockServer(&tagQueue);
 	wait(timeout(client && server, 60.0, Void()));
-	TraceEvent("TagQuotaTest_Simple").detail("Counter", counter);
-	ASSERT(isNear(counter, 60.0 * 10.0));
+	TraceEvent("TagQuotaTest_Simple").detail("Counter", counters["sampleTag"_sr]);
+	ASSERT(isNear(counters["sampleTag"_sr], 60.0 * 10.0));
 	return Void();
 }
 
 // Immediate-priority transactions are not throttled by the TagQueue
 TEST_CASE("/TagQueue/Immediate") {
 	state TagQueue tagQueue;
-	state TransactionTagMap<uint32_t> tags;
-	state int64_t counter = 0;
+	state TagSet tagSet;
+	state TransactionTagMap<uint32_t> counters;
 	{
 		std::map<TransactionTag, double> rates;
 		rates["sampleTag"_sr] = 10.0;
 		tagQueue.updateRates(rates);
 	}
-	tags["sampleTag"_sr] = 1;
+	tagSet.addTag("sampleTag"_sr);
 
-	state Future<Void> client = mockClient(&tagQueue, TransactionPriority::IMMEDIATE, tags, 20.0, &counter);
+	state Future<Void> client = mockClient(&tagQueue, TransactionPriority::IMMEDIATE, tagSet, 1, 20.0, &counters);
 	state Future<Void> server = mockServer(&tagQueue);
 	wait(timeout(client && server, 60.0, Void()));
-	TraceEvent("TagQuotaTest_Immediate").detail("Counter", counter);
-	ASSERT(isNear(counter, 60.0 * 20.0));
+	TraceEvent("TagQuotaTest_Immediate").detail("Counter", counters["sampleTag"_sr]);
+	ASSERT(isNear(counters["sampleTag"_sr], 60.0 * 20.0));
 	return Void();
 }
 
 // Throttle based on the tag with the lowest rate
 TEST_CASE("/TagQueue/MultiTag") {
 	state TagQueue tagQueue;
-	state TransactionTagMap<uint32_t> tags;
-	state int64_t counter = 0;
+	state TagSet tagSet;
+	state TransactionTagMap<uint32_t> counters;
 	{
 		std::map<TransactionTag, double> rates;
 		rates["sampleTag1"_sr] = 10.0;
 		rates["sampleTag2"_sr] = 20.0;
 		tagQueue.updateRates(rates);
 	}
-	tags["sampleTag1"_sr] = tags["sampleTag2"_sr] = 1;
+	tagSet.addTag("sampleTag1"_sr);
+	tagSet.addTag("sampleTag2"_sr);
 
-	state Future<Void> client = mockClient(&tagQueue, TransactionPriority::DEFAULT, tags, 30.0, &counter);
+	state Future<Void> client = mockClient(&tagQueue, TransactionPriority::DEFAULT, tagSet, 1, 30.0, &counters);
 	state Future<Void> server = mockServer(&tagQueue);
 	wait(timeout(client && server, 60.0, Void()));
-	TraceEvent("TagQuotaTest_MultiTag").detail("Counter", counter);
-	ASSERT(isNear(counter, 60.0 * 10.0));
+	TraceEvent("TagQuotaTest_MultiTag").detail("Counter", counters["sampleTag1"_sr]);
+	ASSERT_EQ(counters["sampleTag1"_sr], counters["sampleTag2"_sr]);
+	ASSERT(isNear(counters["sampleTag1"_sr], 60.0 * 10.0));
+
 	return Void();
 }
 
 // Clients share the available 10 transaction/second budget
 TEST_CASE("/TagQueue/MultiClient") {
 	state TagQueue tagQueue;
-	state TransactionTagMap<uint32_t> tags;
-	state int64_t counter = 0;
+	state TagSet tagSet;
+	state TransactionTagMap<uint32_t> counters;
 	{
 		std::map<TransactionTag, double> rates;
-		rates["sampleTag1"_sr] = 10.0;
+		rates["sampleTag"_sr] = 10.0;
 		tagQueue.updateRates(rates);
 	}
-	tags["sampleTag1"_sr] = 1;
+	tagSet.addTag("sampleTag"_sr);
 
-	state Future<Void> client1 = mockClient(&tagQueue, TransactionPriority::DEFAULT, tags, 20.0, &counter);
-	state Future<Void> client2 = mockClient(&tagQueue, TransactionPriority::DEFAULT, tags, 20.0, &counter);
+	state Future<Void> client1 = mockClient(&tagQueue, TransactionPriority::DEFAULT, tagSet, 1, 20.0, &counters);
+	state Future<Void> client2 = mockClient(&tagQueue, TransactionPriority::DEFAULT, tagSet, 1, 20.0, &counters);
 
 	state Future<Void> server = mockServer(&tagQueue);
 	wait(timeout(client1 && client2 && server, 60.0, Void()));
-	TraceEvent("TagQuotaTest_MultiTag").detail("Counter", counter);
-	ASSERT(isNear(counter, 60.0 * 10.0));
+	TraceEvent("TagQuotaTest_MultiClient").detail("Counter", counters["sampleTag"_sr]);
+	ASSERT(isNear(counters["sampleTag"_sr], 60.0 * 10.0));
+	return Void();
+}
+
+TEST_CASE("/TagQueue/Batch") {
+	state TagQueue tagQueue;
+	state TagSet tagSet;
+	state TransactionTagMap<uint32_t> counters;
+	{
+		std::map<TransactionTag, double> rates;
+		rates["sampleTag"_sr] = 10.0;
+		tagQueue.updateRates(rates);
+	}
+	tagSet.addTag("sampleTag"_sr);
+
+	state Future<Void> client = mockClient(&tagQueue, TransactionPriority::DEFAULT, tagSet, 5, 20.0, &counters);
+	state Future<Void> server = mockServer(&tagQueue);
+	wait(timeout(client && server, 60.0, Void()));
+
+	TraceEvent("TagQuotaTest_Batch").detail("Counter", counters["sampleTag"_sr]);
+	ASSERT(isNear(counters["sampleTag"_sr], 60.0 * 10.0));
 	return Void();
 }
