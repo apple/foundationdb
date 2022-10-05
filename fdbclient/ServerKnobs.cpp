@@ -35,8 +35,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( VERSIONS_PER_SECOND,                                   1e6 );
 	init( MAX_VERSIONS_IN_FLIGHT,                100 * VERSIONS_PER_SECOND );
 	init( MAX_VERSIONS_IN_FLIGHT_FORCED,         6e5 * VERSIONS_PER_SECOND ); //one week of versions
-	init( ENABLE_VERSION_VECTOR_TLOG_UNICAST,                  false );
-	init( ENABLE_VERSION_VECTOR,                               false );
+	init( ENABLE_VERSION_VECTOR_TLOG_UNICAST,                  false ); if (randomize && BUGGIFY) ENABLE_VERSION_VECTOR_TLOG_UNICAST = true;
+	init( ENABLE_VERSION_VECTOR,                               false ); if (ENABLE_VERSION_VECTOR_TLOG_UNICAST == true) ENABLE_VERSION_VECTOR = true;
 
 	bool buggifyShortReadWindow = randomize && BUGGIFY && !ENABLE_VERSION_VECTOR;
 	init( MAX_READ_TRANSACTION_LIFE_VERSIONS,      5 * VERSIONS_PER_SECOND ); if (randomize && BUGGIFY) MAX_READ_TRANSACTION_LIFE_VERSIONS = VERSIONS_PER_SECOND; else if (buggifyShortReadWindow) MAX_READ_TRANSACTION_LIFE_VERSIONS = std::max<int>(1, 0.1 * VERSIONS_PER_SECOND); else if( randomize && BUGGIFY ) MAX_READ_TRANSACTION_LIFE_VERSIONS = 10 * VERSIONS_PER_SECOND;
@@ -467,6 +467,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PROXY_REJECT_BATCH_QUEUED_TOO_LONG,                    true );
 
 	bool buggfyUseResolverPrivateMutations = randomize && BUGGIFY && !ENABLE_VERSION_VECTOR_TLOG_UNICAST;
+	if (ENABLE_VERSION_VECTOR_TLOG_UNICAST == true) buggfyUseResolverPrivateMutations = true;
+
 	init( PROXY_USE_RESOLVER_PRIVATE_MUTATIONS,                 false ); if( buggfyUseResolverPrivateMutations ) PROXY_USE_RESOLVER_PRIVATE_MUTATIONS = deterministicRandom()->coinflip();
 
 	init( RESET_MASTER_BATCHES,                                   200 );
