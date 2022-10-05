@@ -1,6 +1,15 @@
 find_package(Threads REQUIRED)
 
+option(FLOW_USE_ZSTD "Enable zstd compression in flow" OFF)
+
 fdb_find_sources(FLOW_SRCS)
+
+if (FLOW_USE_ZSTD)
+  # NOTE: To enable boost::iostreams with zstd library support, manually add
+  # zstd.cpp to source files is required. Ref:
+  #   https://www.boost.org/doc/libs/1_79_0/libs/iostreams/doc/installation.html
+  list(APPEND FLOW_SRCS ../contrib/boost_zstd/zstd.cpp)
+endif()
 
 # Remove files with `main` defined so we can create a link test executable.
 list(REMOVE_ITEM FLOW_SRCS TLSTest.cpp)
@@ -23,6 +32,14 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY
 add_flow_target(STATIC_LIBRARY NAME flow SRCS ${FLOW_SRCS})
 add_flow_target(STATIC_LIBRARY NAME flow_sampling SRCS ${FLOW_SRCS})
 
+if (FLOW_USE_ZSTD)
+  include(CompileZstd)
+  compile_zstd()
+
+  target_link_libraries(flow PRIVATE libzstd_static)
+  target_compile_definitions(flow PUBLIC ZSTD_LIB_SUPPORTED)
+endif()
+
 # When creating a static or shared library, undefined symbols will be ignored.
 # Since we want to ensure no symbols from other modules are used, create an
 # executable so the linker will throw errors if it can't find the declaration
@@ -43,16 +60,11 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
     set(IS_ARM_MAC YES)
 endif()
 
-# TODO: Limit ZSTD availability to CLANG, for gcc resolve library link ordering
-if(CLANG AND NOT IS_ARM_MAC)
-    include(CompileZstd)
-    compile_zstd()
-    target_link_libraries(flow PUBLIC ZSTD::ZSTD)
-    target_compile_definitions(flow PUBLIC ZSTD_LIB_SUPPORTED)
-endif()
-
 foreach(ft flow flow_sampling flowlinktest)
     target_include_directories(${ft} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+    if (FLOW_USE_ZSTD)
+        target_include_directories(${ft} PRIVATE SYSTEM ${ZSTD_LIB_INCLUDE_DIR})
+    endif()
 
     target_link_libraries(${ft} PRIVATE stacktrace)
     target_link_libraries(${ft} PUBLIC fmt::fmt SimpleOpt crc32)
