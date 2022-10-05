@@ -4433,16 +4433,16 @@ ACTOR Future<Void> validateRangeAgainstServers(StorageServer* data, KeyRange ran
 		}
 	}
 
-	std::vector<StorageServerInterface> ssis;
+	std::vector<Future<Void>> fs;
 	for (const auto& v : serverListValues) {
 		if (!v.present()) {
 			TraceEvent(SevWarn, "ValidateRangeRemoteServerNotFound", data->thisServerID).detail("Range", range);
 			throw audit_storage_failed();
 		}
-		ssis.push_back(decodeServerListValue(v.get()));
+		fs.push_back(validateRangeAgainstServer(data, range, version, decodeServerListValue(v.get())));
 	}
 
-	wait(validateRangeAgainstServer(data, range, version, ssis[0]));
+	wait(waitForAll(fs));
 
 	return Void();
 }
