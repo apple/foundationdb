@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "boost/algorithm/string.hpp"
+#include "fdbclient/CommitTransaction.h"
 #include "fmt/format.h"
 
 #include "fdbclient/FDBOptions.g.h"
@@ -8930,6 +8931,7 @@ struct ChangeFeedTSSValidationData {
 	PromiseStream<Version> ssStreamSummary;
 	ReplyPromiseStream<ChangeFeedStreamReply> tssStream;
 	Future<Void> validatorFuture;
+	std::deque<std::pair<Version, Version>> rollbacks;
 	Version popVersion = invalidVersion;
 	bool done = false;
 
@@ -8938,13 +8940,39 @@ struct ChangeFeedTSSValidationData {
 
 	void updatePopped(Version newPopVersion) { popVersion = std::max(popVersion, newPopVersion); }
 
+	bool checkRollback(const MutationsAndVersionRef& m) {
+		if (m.mutations.size() == 1 && m.mutations.back().param1 == lastEpochEndPrivateKey) {
+			if (rollbacks.empty() || rollbacks.back().second < m.version) {
+				Version rollbackVersion;
+				BinaryReader br(m.mutations.back().param2, Unversioned());
+				br >> rollbackVersion;
+				if (!rollbacks.empty()) {
+					ASSERT(rollbacks.back().second <= rollbackVersion);
+				}
+				rollbacks.push_back({ rollbackVersion, m.version });
+			}
+
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+	bool shouldAddMutation(const MutationsAndVersionRef& m) {
+		return !done && !m.mutations.empty() && !checkRollback(m);
+	}
+
+	bool isRolledBack(Version v) {
+		return !rollbacks.empty() && rollbacks.front().first < v && rollbacks.front().second > v;
+	}
+
 	void send(const ChangeFeedStreamReply& ssReply) {
 		if (done) {
 			return;
 		}
 		updatePopped(ssReply.popVersion);
 		for (auto& it : ssReply.mutations) {
-			if (!it.mutations.empty()) {
+			if (shouldAddMutation(it)) {
 				ssStreamSummary.send(it.version);
 			}
 		}
@@ -9058,12 +9086,12 @@ ACTOR Future<Void> changeFeedTSSValidator(ChangeFeedStreamRequest req,
 			try {
 				choose {
 					when(ChangeFeedStreamReply nextTss = waitNext(data->get().tssStream.getFuture())) {
+						data->get().updatePopped(nextTss.popVersion);
 						for (auto& it : nextTss.mutations) {
-							if (!it.mutations.empty()) {
+							if (data->get().shouldAddMutation(it)) {
 								tssSummary.push_back(it.version);
 							}
 						}
-						data->get().popVersion = std::max(data->get().popVersion, nextTss.popVersion);
 					}
 					// if ss has result, tss needs to return it
 					when(wait((ssDone || !ssSummary.empty()) ? delay(2.0 * FLOW_KNOBS->LOAD_BALANCE_TSS_TIMEOUT)
@@ -9092,14 +9120,16 @@ ACTOR Future<Void> changeFeedTSSValidator(ChangeFeedStreamRequest req,
 			}
 		}
 
-		while (!ssSummary.empty() && ssSummary.front() < data->get().popVersion) {
+		// handle rollbacks and concurrent pops
+		while (!ssSummary.empty() &&
+		       (ssSummary.front() < data->get().popVersion || data->get().isRolledBack(ssSummary.front()))) {
 			ssSummary.pop_front();
 		}
 
-		while (!tssSummary.empty() && tssSummary.front() < data->get().popVersion) {
+		while (!tssSummary.empty() &&
+		       (tssSummary.front() < data->get().popVersion || data->get().isRolledBack(tssSummary.front()))) {
 			tssSummary.pop_front();
 		}
-
 		while (!ssSummary.empty() && !tssSummary.empty()) {
 			CODE_PROBE(true, "Comparing TSS change feed data");
 			if (ssSummary.front() != tssSummary.front()) {
@@ -9118,6 +9148,10 @@ ACTOR Future<Void> changeFeedTSSValidator(ChangeFeedStreamRequest req,
 			lastMatchingVersion = ssSummary.front();
 			ssSummary.pop_front();
 			tssSummary.pop_front();
+
+			while (!data->get().rollbacks.empty() && data->get().rollbacks.front().second <= lastMatchingVersion) {
+				data->get().rollbacks.pop_front();
+			}
 		}
 
 		ASSERT(!ssDone || !tssDone); // both shouldn't be done, otherwise we shouldn't have looped
@@ -9338,11 +9372,11 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 					while (resultLoc < rep.mutations.size()) {
 						wait(results.onEmpty());
 						if (rep.mutations[resultLoc].version >= nextVersion) {
-							results.send(rep.mutations[resultLoc]);
-							if (tssData->present() && !tssData->get().done &&
-							    !rep.mutations[resultLoc].mutations.empty()) {
+							if (tssData->present() && tssData->get().shouldAddMutation(rep.mutations[resultLoc])) {
 								tssData->get().ssStreamSummary.send(rep.mutations[resultLoc].version);
 							}
+
+							results.send(rep.mutations[resultLoc]);
 
 							if (DEBUG_CF_CLIENT_TRACE) {
 								TraceEvent(SevDebug, "TraceChangeFeedClientMergeCursorSend", debugUID)
