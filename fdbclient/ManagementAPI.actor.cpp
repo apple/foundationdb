@@ -874,12 +874,12 @@ ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromSt
 
 ACTOR Future<Void> verifyConfigurationDatabaseAlive(Database cx) {
 	state Backoff backoff;
+	state Reference<ISingleThreadTransaction> configTr;
 	loop {
 		try {
 			// Attempt to read a random value from the configuration
 			// database to make sure it is online.
-			state Reference<ISingleThreadTransaction> configTr =
-			    ISingleThreadTransaction::create(ISingleThreadTransaction::Type::PAXOS_CONFIG, cx);
+			configTr = ISingleThreadTransaction::create(ISingleThreadTransaction::Type::PAXOS_CONFIG, cx);
 			Tuple tuple;
 			tuple.appendNull(); // config class
 			tuple << "test"_sr;

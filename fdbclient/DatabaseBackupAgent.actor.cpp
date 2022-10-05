@@ -79,9 +79,9 @@ public:
 	DRConfig(Reference<Task> task)
 	  : DRConfig(BinaryReader::fromStringRef<UID>(task->params[BackupAgentBase::keyConfigLogUid], Unversioned())) {}
 
-	KeyBackedBinaryValue<int64_t> rangeBytesWritten() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedBinaryValue<int64_t> rangeBytesWritten() { return configSpace.pack(__FUNCTION__sr); }
 
-	KeyBackedBinaryValue<int64_t> logBytesWritten() { return configSpace.pack(LiteralStringRef(__FUNCTION__)); }
+	KeyBackedBinaryValue<int64_t> logBytesWritten() { return configSpace.pack(__FUNCTION__sr); }
 
 	void clear(Reference<ReadYourWritesTransaction> tr) { tr->clear(configSpace.range()); }
 
@@ -136,7 +136,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 	static constexpr uint32_t version = 1;
 
 	static struct {
-		static TaskParam<int64_t> bytesWritten() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<int64_t> bytesWritten() { return __FUNCTION__sr; }
 	} Params;
 
 	static const Key keyAddBackupRangeTasks;
@@ -704,7 +704,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 	static constexpr uint32_t version = 1;
 
 	static struct {
-		static TaskParam<int64_t> bytesWritten() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<int64_t> bytesWritten() { return __FUNCTION__sr; }
 	} Params;
 
 	static const Key keyNextBeginVersion;
@@ -1455,7 +1455,7 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 	static constexpr uint32_t version = 1;
 
 	static struct {
-		static TaskParam<int64_t> bytesWritten() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<int64_t> bytesWritten() { return __FUNCTION__sr; }
 	} Params;
 
 	static const Key keyNextBeginVersion;

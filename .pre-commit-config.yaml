@@ -1,0 +1,9 @@
+repos:
+-   repo: https://github.com/psf/black
+    rev: 2018e667a6a36ee3fbfa8041cd36512f92f60d49  # frozen: 22.8.0
+    hooks:
+    - id: black
+-   repo: https://github.com/pycqa/flake8
+    rev: f8e1b317742036ff11ff86356fd2b68147e169f7  # frozen: 5.0.4
+    hooks:
+    - id: flake8
