@@ -99,8 +99,7 @@ Future<Void> tssComparison(Req req,
 
 	loop {
 		choose {
-			when(ErrorOr<Resp> _src = wait(fSource)) {
-				src = _src;
+			when(wait(store(src, fSource))) {
 				srcEndTime = now();
 				fSource = Never();
 				finished++;
@@ -108,8 +107,7 @@ Future<Void> tssComparison(Req req,
 					break;
 				}
 			}
-			when(Optional<ErrorOr<Resp>> _tss = wait(fTssWithTimeout)) {
-				tss = _tss;
+			when(wait(store(tss, fTssWithTimeout))) {
 				tssEndTime = now();
 				fTssWithTimeout = Never();
 				finished++;

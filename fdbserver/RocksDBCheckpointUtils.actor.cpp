@@ -542,8 +542,7 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 			wait(IAsyncFileSystem::filesystem()->deleteFile(localFile, true));
 			const int64_t flags = IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE |
 			                      IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
-			Reference<IAsyncFile> _asyncFile = wait(IAsyncFileSystem::filesystem()->open(localFile, flags, 0666));
-			asyncFile = std::move(_asyncFile);
+			wait(store(asyncFile, IAsyncFileSystem::filesystem()->open(localFile, flags, 0666)));
 
 			state ReplyPromiseStream<FetchCheckpointReply> stream =
 			    ssi.fetchCheckpoint.getReplyStream(FetchCheckpointRequest(metaData->checkpointID, remoteFile));

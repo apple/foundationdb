@@ -89,16 +89,14 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state std::unordered_set<UID> excludes;
 		state std::unordered_set<UID> includes;
 		state int teamSize = 1;
-		{
-			std::vector<UID> _teamA = wait(self->moveShard(self,
-			                                               cx,
-			                                               deterministicRandom()->randomUniqueID(),
-			                                               KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr),
-			                                               teamSize,
-			                                               includes,
-			                                               excludes));
-			teamA = std::move(_teamA);
-		}
+		wait(store(teamA,
+		           self->moveShard(self,
+		                           cx,
+		                           deterministicRandom()->randomUniqueID(),
+		                           KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr),
+		                           teamSize,
+		                           includes,
+		                           excludes)));
 		excludes.insert(teamA.begin(), teamA.end());
 
 		state uint64_t sh0 = deterministicRandom()->randomUInt64();
@@ -106,16 +104,14 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state uint64_t sh2 = deterministicRandom()->randomUInt64();
 
 		// Move range [TestKeyA, TestKeyB) to sh0.
-		{
-			std::vector<UID> _teamA = wait(self->moveShard(self,
-			                                               cx,
-			                                               UID(sh0, deterministicRandom()->randomUInt64()),
-			                                               KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr),
-			                                               teamSize,
-			                                               includes,
-			                                               excludes));
-			teamA = std::move(_teamA);
-		}
+		wait(store(teamA,
+		           self->moveShard(self,
+		                           cx,
+		                           UID(sh0, deterministicRandom()->randomUInt64()),
+		                           KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr),
+		                           teamSize,
+		                           includes,
+		                           excludes)));
 
 		// Move range [TestKeyB, TestKeyC) to sh1, on the same server.
 		includes.insert(teamA.begin(), teamA.end());
