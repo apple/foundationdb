@@ -72,12 +72,17 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	ACTOR static Future<bool> _check(AutomaticIdempotencyWorkload* self, Reference<ReadYourWritesTransaction> tr) {
 		RangeResult result = wait(tr->getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY));
 		ASSERT(!result.more);
-		if (result.size() != self->clientCount * self->numTransactions) {
+		std::unordered_set<Value> ids;
+		// Make sure they're all unique - ie no transaction committed twice
+		for (const auto& [k, v] : result) {
+			ids.emplace(v);
+		}
+		if (ids.size() != self->clientCount * self->numTransactions) {
 			for (const auto& [k, v] : result) {
 				TraceEvent("IdempotencyIdWorkloadTransactionCommitted").detail("Id", v);
 			}
 		}
-		ASSERT_EQ(result.size(), self->clientCount * self->numTransactions);
+		ASSERT_EQ(ids.size(), self->clientCount * self->numTransactions);
 		return true;
 	}
 
