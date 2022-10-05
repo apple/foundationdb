@@ -343,7 +343,7 @@ private:
 			TraceEvent("AFCUnderlyingOpenEnd").detail("Filename", filename);
 			int64_t l = wait(f->size());
 			TraceEvent("AFCUnderlyingSize").detail("Filename", filename).detail("Size", l);
-			return new AsyncFileCached(f, filename, l, pageCache);
+			return Reference<AsyncFileCached>(new AsyncFileCached(f, filename, l, pageCache)).castTo<IAsyncFile>();
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled)
 				openFiles.erase(filename);

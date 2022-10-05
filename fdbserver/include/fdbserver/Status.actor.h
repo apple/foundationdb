@@ -18,8 +18,11 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_STATUS_H
-#define FDBSERVER_STATUS_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_ACTOR_STATUS_G_H)
+#define FDBSERVER_ACTOR_STATUS_G_H
+#include "fdbserver/Status.actor.g.h"
+#elif !defined(FDBSERVER_ACTOR_STATUS_H)
+#define FDBSERVER_ACTOR_STATUS_H
 #pragma once
 
 #include "fdbrpc/fdbrpc.h"
@@ -27,6 +30,9 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/ClusterInterface.h"
+#include "fdbclient/Metacluster.h"
+
+#include "flow/actorcompiler.h" // has to be last include
 
 struct ProcessIssues {
 	NetworkAddress address;
@@ -44,10 +50,14 @@ Future<StatusReply> clusterGetStatus(
     ServerCoordinators const& coordinators,
     std::vector<NetworkAddress> const& incompatibleConnections,
     Version const& datacenterVersionDifference,
-    ConfigBroadcaster const* const& conifgBroadcaster);
+    ConfigBroadcaster const* const& conifgBroadcaster,
+    Optional<MetaclusterRegistrationEntry> const& metaclusterRegistration,
+    MetaclusterMetrics const& metaclusterMetrics);
 
 struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};
-Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
-    std::vector<WorkerDetails> const& workers,
-    std::string const& eventName);
+ACTOR Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
+    std::vector<WorkerDetails> workers,
+    std::string eventName);
+
+#include "flow/unactorcompiler.h"
 #endif

@@ -1654,4 +1654,36 @@ struct transaction_creator_traits<T, std::void_t<typename T::TransactionT>> : st
 template <typename T>
 constexpr bool is_transaction_creator = transaction_creator_traits<T>::value;
 
+struct Versionstamp {
+	Version version = invalidVersion;
+	uint16_t batchNumber = 0;
+
+	bool operator==(const Versionstamp& r) const { return version == r.version && batchNumber == r.batchNumber; }
+	bool operator!=(const Versionstamp& r) const { return !(*this == r); }
+	bool operator<(const Versionstamp& r) const {
+		return version < r.version || (version == r.version && batchNumber < r.batchNumber);
+	}
+	bool operator>(const Versionstamp& r) const { return r < *this; }
+	bool operator<=(const Versionstamp& r) const { return !(*this > r); }
+	bool operator>=(const Versionstamp& r) const { return !(*this < r); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		int64_t beVersion;
+		int16_t beBatch;
+
+		if constexpr (!Ar::isDeserializing) {
+			beVersion = bigEndian64(version);
+			beBatch = bigEndian16(batchNumber);
+		}
+
+		serializer(ar, beVersion, beBatch);
+
+		if constexpr (Ar::isDeserializing) {
+			version = bigEndian64(version);
+			batchNumber = bigEndian16(beBatch);
+		}
+	}
+};
+
 #endif

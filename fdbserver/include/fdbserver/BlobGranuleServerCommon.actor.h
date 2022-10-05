@@ -135,7 +135,7 @@ private:
 	Future<Void> collection;
 };
 
-ACTOR Future<Void> dumpManifest(Database db, Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<Void> dumpManifest(Database db, Reference<BlobConnectionProvider> blobConn, int64_t epoch, int64_t seqNo);
 ACTOR Future<Void> loadManifest(Database db, Reference<BlobConnectionProvider> blobConn);
 ACTOR Future<Void> printRestoreSummary(Database db, Reference<BlobConnectionProvider> blobConn);
 inline bool isFullRestoreMode() {

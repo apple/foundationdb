@@ -29,6 +29,11 @@
 struct InitialDataDistribution;
 struct DDShardInfo;
 
+struct ServerWorkerInfos {
+	std::vector<std::pair<StorageServerInterface, ProcessClass>> servers;
+	Optional<Version> readVersion; // the read version of the txn reading server lists
+};
+
 /* Testability Contract:
  * a. The DataDistributor has to use this interface to interact with data-plane (aka. run transaction / use Database),
  * because the testability benefits from a mock implementation; b. Other control-plane roles should consider providing
@@ -44,8 +49,8 @@ public:
 	// get the source server list and complete source server list for range
 	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) { return SourceServers{}; };
 
-	// get the storage server list and Process class
-	virtual Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() = 0;
+	// get the storage server list and Process class, only throw transaction non-retryable exceptions
+	virtual Future<ServerWorkerInfos> getServerListAndProcessClasses() = 0;
 
 	virtual Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
 	    const UID& distributorId,
@@ -63,6 +68,10 @@ public:
 	                                       const std::vector<Optional<Key>>& remoteIds,
 	                                       const DatabaseConfiguration& configuration) const {
 		return Void();
+	}
+
+	virtual Future<int> tryUpdateReplicasKeyForDc(const Optional<Key>& dcId, const int& storageTeamSize) const {
+		return storageTeamSize;
 	}
 
 	virtual Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const { return Void(); };
@@ -109,6 +118,10 @@ public:
 	virtual Future<HealthMetrics> getHealthMetrics(bool detailed = false) const = 0;
 
 	virtual Future<Optional<Value>> readRebalanceDDIgnoreKey() const { return {}; }
+
+	virtual Future<UID> getClusterId() const { return {}; }
+
+	virtual Future<Void> waitDDTeamInfoPrintSignal() const { return Never(); }
 };
 
 class DDTxnProcessorImpl;
@@ -128,7 +141,7 @@ public:
 	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
 
 	// Call NativeAPI implementation directly
-	Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() override;
+	Future<ServerWorkerInfos> getServerListAndProcessClasses() override;
 
 	Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
 	    const UID& distributorId,
@@ -143,6 +156,8 @@ public:
 	Future<Void> updateReplicaKeys(const std::vector<Optional<Key>>& primaryIds,
 	                               const std::vector<Optional<Key>>& remoteIds,
 	                               const DatabaseConfiguration& configuration) const override;
+
+	Future<int> tryUpdateReplicasKeyForDc(const Optional<Key>& dcId, const int& storageTeamSize) const override;
 
 	Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const override;
 
@@ -183,6 +198,10 @@ public:
 	Future<HealthMetrics> getHealthMetrics(bool detailed) const override;
 
 	Future<Optional<Value>> readRebalanceDDIgnoreKey() const override;
+
+	Future<UID> getClusterId() const override;
+
+	Future<Void> waitDDTeamInfoPrintSignal() const override;
 };
 
 // A mock transaction implementation for test usage.
@@ -196,7 +215,7 @@ class DDMockTxnProcessor : public IDDTxnProcessor {
 public:
 	explicit DDMockTxnProcessor(std::shared_ptr<MockGlobalState> mgs = nullptr) : mgs(std::move(mgs)){};
 
-	Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses() override;
+	Future<ServerWorkerInfos> getServerListAndProcessClasses() override;
 
 	Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
 	    const UID& distributorId,

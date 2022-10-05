@@ -35,7 +35,7 @@ struct BulkSetupWorkload : TestWorkload {
 	BulkSetupWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
 		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
-		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString());
+		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
 		std::vector<std::string> tenants = getOption(options, "tenants"_sr, std::vector<std::string>());
 		for (std::string tenant : tenants) {
 			tenantNames.push_back(TenantName(tenant));

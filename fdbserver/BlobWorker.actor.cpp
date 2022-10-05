@@ -199,6 +199,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	Promise<Void> doGRVCheck;
 	NotifiedVersion grvVersion;
 	Promise<Void> fatalError;
+	Promise<Void> simInjectFailure;
 
 	Reference<FlowLock> initialSnapshotLock;
 	Reference<FlowLock> resnapshotLock;
@@ -291,6 +292,19 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 		stats.estimatedMaxResidentMemory = stats.lastResidentMemory + totalExtra;
 
 		return stats.estimatedMaxResidentMemory >= memoryFullThreshold;
+	}
+
+	bool maybeInjectTargetedRestart() {
+		// inject a BW restart at most once per test
+		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
+		    now() > g_simulator->injectTargetedBWRestartTime) {
+			CODE_PROBE(true, "Injecting BW targeted restart");
+			TraceEvent("SimBWInjectTargetedRestart", id);
+			g_simulator->injectTargetedBWRestartTime = std::numeric_limits<double>::max();
+			simInjectFailure.send(Void());
+			return true;
+		}
+		return false;
 	}
 };
 
@@ -780,6 +794,11 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 					    tr->getCommittedVersion());
 				}
 
+				if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
+					wait(delay(0)); // should be cancelled
+					ASSERT(false);
+				}
+
 				if (BUGGIFY_WITH_PROB(0.01)) {
 					wait(delay(deterministicRandom()->random01()));
 				}
@@ -1007,6 +1026,11 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 		    .detail("Compressed", compressFilter.present());
 	}
 
+	if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
+		wait(delay(0)); // should be cancelled
+		ASSERT(false);
+	}
+
 	// FIXME: change when we implement multiplexing
 	return BlobFileIndex(version, fname, 0, serializedSize, serializedSize, cipherKeysMeta);
 }
@@ -1056,6 +1080,11 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			    .detail("Granule", metadata->keyRange)
 			    .detail("Version", readVersion);
 			DEBUG_KEY_RANGE("BlobWorkerFDBSnapshot", readVersion, metadata->keyRange, bwData->id);
+
+			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
+				wait(delay(0)); // should be cancelled
+				ASSERT(false);
+			}
 
 			// initial snapshot is committed in fdb, we can pop the change feed up to this version
 			inFlightPops->push_back(bwData->db->popChangeFeedMutations(cfKey, readVersion + 1));
@@ -1443,6 +1472,10 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
 			                         seqno);
 			reply.proposedSplitKey = proposedSplitKey;
 			bwData->currentManagerStatusStream.get().send(reply);
+			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
+				wait(delay(0)); // should be cancelled
+				ASSERT(false);
+			}
 			// if a new manager appears, also tell it about this granule being splittable, or retry after a certain
 			// amount of time of not hearing back
 			wait(success(timeout(bwData->currentManagerStatusStream.onChange(), 10.0)));
@@ -4043,6 +4076,11 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				openEv.detail("SplitParentGranuleID", info.splitParentGranule.get().second);
 			}
 
+			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
+				wait(delay(0)); // should be cancelled
+				ASSERT(false);
+			}
+
 			return info;
 		} catch (Error& e) {
 			if (e.code() == error_code_granule_assignment_conflict) {
@@ -4985,7 +5023,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				ASSERT(false);
 				throw internal_error();
 			}
-			when(wait(selfRemoved)) {
+			when(wait(selfRemoved || self->simInjectFailure.getFuture())) {
 				if (BW_DEBUG) {
 					printf("Blob worker detected removal. Exiting...\n");
 				}
