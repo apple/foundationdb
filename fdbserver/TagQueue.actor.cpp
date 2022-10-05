@@ -44,7 +44,7 @@ void TagQueue::runEpoch(double elapsed,
                         SpannedDeque<GetReadVersionRequest>& outBatchPriority,
                         SpannedDeque<GetReadVersionRequest>& outDefaultPriority) {
 	for (auto& [_, rateInfo] : rateInfos) {
-		rateInfo.startEpoch();
+		rateInfo.startReleaseWindow();
 	}
 
 	Deque<DelayedRequest> newDelayedRequests;
@@ -94,7 +94,7 @@ void TagQueue::runEpoch(double elapsed,
 
 	delayedRequests = std::move(newDelayedRequests);
 	for (auto& [tag, rateInfo] : rateInfos) {
-		rateInfo.endEpoch(std::move(releasedInEpoch)[tag], false, elapsed);
+		rateInfo.endReleaseWindow(std::move(releasedInEpoch)[tag], false, elapsed);
 	}
 }
 

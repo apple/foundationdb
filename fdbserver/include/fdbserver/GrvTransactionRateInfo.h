@@ -24,10 +24,10 @@
 
 // Used by GRV Proxy to enforce rate limits received from the Ratekeeper.
 //
-// Between delays, the GrvTransactionRateInfo executes an "epoch" starting
-// with a call to the startEpoch method. Within this epoch, transactions are
-// released while canStart returns true. At the end of the epoch, the
-// endEpoch method is called, and the budget is updated to add or
+// Between waits, the GrvTransactionRateInfo executes an "release window" starting
+// with a call to the startReleaseWindow method. Within this release window, transactions are
+// released while canStart returns true. At the end of the release window, the
+// endReleaseWindow method is called, and the budget is updated to add or
 // remove  capacity.
 //
 // Meanwhile, the desired rate is updated through the setRate method.
@@ -45,17 +45,17 @@ public:
 	explicit GrvTransactionRateInfo(double rate = 0.0);
 
 	// Determines the number of transactions that this proxy is allowed to release
-	// in this epoch.
-	void startEpoch();
+	// in this release window.
+	void startReleaseWindow();
 
 	// Checks if a "count" new transactions can be released, given that
 	// "numAlreadyStarted" transactions have already been released in the
-	// current epoch.
+	// current release window.
 	bool canStart(int64_t numAlreadyStarted, int64_t count) const;
 
 	// Updates the budget to accumulate any extra capacity available or remove any excess that was used.
-	// Call at the end of an epoch.
-	void endEpoch(int64_t numStartedAtPriority, bool queueEmptyAtPriority, double elapsed);
+	// Call at the end of a release window.
+	void endReleaseWindow(int64_t numStartedAtPriority, bool queueEmptyAtPriority, double elapsed);
 
 	// Smoothly sets rate. If currently disabled, reenable
 	void setRate(double rate);
