@@ -888,8 +888,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 			elapsed = 1e-15;
 		}
 
-		// TODO: Remove systemQueue parameter?
-		tagQueue.runEpoch(elapsed, defaultQueue, batchQueue, systemQueue);
+		tagQueue.runEpoch(elapsed, defaultQueue, batchQueue);
 		normalRateInfo.startEpoch();
 		batchRateInfo.startEpoch();
 

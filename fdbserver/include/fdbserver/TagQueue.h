@@ -27,7 +27,6 @@ public:
 	void updateRates(TransactionTagMap<double> const& newRates);
 	void runEpoch(double elapsed,
 	              SpannedDeque<GetReadVersionRequest>& outBatchPriority,
-	              SpannedDeque<GetReadVersionRequest>& outDefaultPriority,
-	              SpannedDeque<GetReadVersionRequest>& outImmediatePriority);
+	              SpannedDeque<GetReadVersionRequest>& outDefaultPriority);
 	void addRequest(GetReadVersionRequest);
 };
