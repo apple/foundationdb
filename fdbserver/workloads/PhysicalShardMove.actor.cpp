@@ -233,7 +233,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		loop {
 			try {
 				Version _readVersion = wait(tr.getReadVersion());
-				readVersion = readVersion;
+				readVersion = _readVersion;
 				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
