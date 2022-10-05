@@ -365,7 +365,7 @@ struct Int {
 		serializer(ar, value);
 	}
 };
-} // namespace
+} // namespace flow_tests_details
 
 TEST_CASE("/flow/flow/nonserializable futures") {
 	// Types no longer need to be statically serializable to make futures, promises, actors
