@@ -2991,16 +2991,16 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 	{
 		auto mapping = rocksdbStore->getDataMapping();
 		ASSERT(mapping.size() == 3);
+
+		// Remove ranges again.
+		kvStore->persistRangeMapping(KeyRangeRef("a"_sr, "f"_sr), false);
+		kvStore->removeRange(KeyRangeRef("a"_sr, "f"_sr));
+
+		mapping = rocksdbStore->getDataMapping();
+		ASSERT(mapping.size() == 1);
+
+		wait(kvStore->commit(false));
 	}
-
-	// Remove ranges again.
-	kvStore->persistRangeMapping(KeyRangeRef("a"_sr, "f"_sr), false);
-	kvStore->removeRange(KeyRangeRef("a"_sr, "f"_sr));
-
-	mapping = rocksdbStore->getDataMapping();
-	ASSERT(mapping.size() == 1);
-
-	wait(kvStore->commit(false));
 
 	// Restart.
 	{
