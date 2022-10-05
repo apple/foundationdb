@@ -4681,7 +4681,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		if (BM_PURGE_DEBUG) {
 			fmt::print("BM {0}   Checking {1} parents\n", self->epoch, currHistoryNode.parentVersions.size());
 		}
-		Optional<UID> mergeChildID =
+		Optional<UID> mergeChildID2 =
 		    currHistoryNode.parentVersions.size() > 1 ? currHistoryNode.granuleID : Optional<UID>();
 		for (int i = 0; i < currHistoryNode.parentVersions.size(); i++) {
 			// for (auto& parent : currHistoryNode.parentVersions.size()) {
@@ -4712,7 +4712,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 
 			// the parent's end version is this node's startVersion,
 			// since this node must have started where it's parent finished
-			historyEntryQueue.push({ parentRange, parentVersion, startVersion, mergeChildID });
+			historyEntryQueue.push({ parentRange, parentVersion, startVersion, mergeChildID2 });
 		}
 	}
 
