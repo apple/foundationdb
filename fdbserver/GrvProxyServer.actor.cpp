@@ -884,8 +884,8 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 			elapsed = 1e-15;
 		}
 
-		normalRateInfo.startEpoch();
-		batchRateInfo.startEpoch();
+		normalRateInfo.startReleaseWindow();
+		batchRateInfo.startReleaseWindow();
 
 		grvProxyData->stats.transactionLimit = normalRateInfo.getLimit();
 		grvProxyData->stats.batchTransactionLimit = batchRateInfo.getLimit();
@@ -995,11 +995,11 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 		transactionCount += transactionsStarted[0] + transactionsStarted[1];
 		batchTransactionCount += batchTotalStarted;
 
-		normalRateInfo.endEpoch(
+		normalRateInfo.endReleaseWindow(
 		    systemTotalStarted + normalTotalStarted, systemQueue.empty() && defaultQueue.empty(), elapsed);
-		batchRateInfo.endEpoch(systemTotalStarted + normalTotalStarted + batchTotalStarted,
-		                       systemQueue.empty() && defaultQueue.empty() && batchQueue.empty(),
-		                       elapsed);
+		batchRateInfo.endReleaseWindow(systemTotalStarted + normalTotalStarted + batchTotalStarted,
+		                               systemQueue.empty() && defaultQueue.empty() && batchQueue.empty(),
+		                               elapsed);
 
 		if (debugID.present()) {
 			g_traceBatch.addEvent("TransactionDebug",

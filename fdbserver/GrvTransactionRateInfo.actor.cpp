@@ -33,7 +33,7 @@ bool GrvTransactionRateInfo::canStart(int64_t numAlreadyStarted, int64_t count) 
 	       std::min(limit + budget, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
 }
 
-void GrvTransactionRateInfo::endEpoch(int64_t numStartedAtPriority, bool queueEmptyAtPriority, double elapsed) {
+void GrvTransactionRateInfo::endReleaseWindow(int64_t numStartedAtPriority, bool queueEmptyAtPriority, double elapsed) {
 	// Update the budget to accumulate any extra capacity available or remove any excess that was used.
 	// The actual delta is the portion of the limit we didn't use multiplied by the fraction of the window that
 	// elapsed.
@@ -77,7 +77,7 @@ void GrvTransactionRateInfo::setRate(double rate) {
 	}
 }
 
-void GrvTransactionRateInfo::startEpoch() {
+void GrvTransactionRateInfo::startReleaseWindow() {
 	// Determine the number of transactions that this proxy is allowed to release
 	// Roughly speaking, this is done by computing the number of transactions over some historical window that we
 	// could have started but didn't, and making that our limit. More precisely, we track a smoothed rate limit and
@@ -98,10 +98,10 @@ ACTOR static Future<Void> mockClient(GrvTransactionRateInfo* rateInfo, double de
 	loop {
 		state double elapsed = (0.9 + 0.2 * deterministicRandom()->random01()) / desiredRate;
 		wait(delay(elapsed));
-		rateInfo->startEpoch();
+		rateInfo->startReleaseWindow();
 		int started = rateInfo->canStart(0, 1) ? 1 : 0;
 		*counter += started;
-		rateInfo->endEpoch(started, false, elapsed);
+		rateInfo->endReleaseWindow(started, false, elapsed);
 	}
 }
 
