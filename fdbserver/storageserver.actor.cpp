@@ -10217,6 +10217,7 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 	state int i = 0;
 	state Version prevVersion;
 	state double beginTime;
+	ASSERT(!self->db->get().versionIndexers.empty());
 	for (auto& vInterface : self->db->get().versionIndexers) {
 		interfaces.emplace_back(new ReferencedInterface<VersionIndexerInterface>(vInterface));
 	}
@@ -10274,8 +10275,8 @@ ACTOR Future<Void> versionIndexerPeekerImpl(StorageServer* self) {
 ACTOR Future<Void> versionIndexerPeeker(StorageServer* self) {
 	loop {
 		Future<Void> impl = Never();
-		ASSERT_WE_THINK(self->db->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
-		                !self->db->get().versionIndexers.empty());
+		// ASSERT_WE_THINK(self->db->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
+		//                 !self->db->get().versionIndexers.empty());
 		if (self->db.isValid() && !self->db->get().versionIndexers.empty()) {
 			impl = versionIndexerPeekerImpl(self);
 		}

@@ -1527,6 +1527,12 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 // Send the version and the set of tags we are writing to to the version indexers. This can be made asynchronous in the
 // future, but for now it isn't in order to simplify the implementation.
 Future<Void> informVersionIndexers(CommitBatchContext* self) {
+	const auto& versionIndexers = self->pProxyCommitData->db->get().versionIndexers;
+	// If there are no version indexers configured, then we don't have to wait for them.
+	if (versionIndexers.empty()) {
+		return Future<Void>(Void());
+	}
+
 	VersionIndexerCommitRequest req;
 	req.commitVersion = self->commitVersion;
 	req.previousVersion = self->prevVersion;
@@ -1534,13 +1540,14 @@ Future<Void> informVersionIndexers(CommitBatchContext* self) {
 	const std::unordered_set<Tag>& tags = self->toCommit.getWrittenTags();
 	req.tags.reserve(tags.size());
 	req.tags.insert(req.tags.end(), tags.begin(), tags.end());
+
 	std::vector<Future<Void>> resp;
-	const auto& versionIndexers = self->pProxyCommitData->db->get().versionIndexers;
 	resp.reserve(versionIndexers.size());
 	for (const auto& vi : versionIndexers) {
 		req.reply = ReplyPromise<Void>();
 		resp.emplace_back(vi.commit.getReply(req));
 	}
+
 	return waitForAll(resp);
 }
 
