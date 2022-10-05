@@ -270,7 +270,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	ACTOR static Future<Void> restoreCluster(MetaclusterManagementWorkload* self) {
 		state ClusterName clusterName = self->chooseClusterName();
 		state DataClusterData* dataDb = &self->dataDbs[clusterName];
-		state bool retried = false;
 
 		try {
 			loop {
@@ -278,21 +277,10 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				    MetaclusterAPI::restoreCluster(self->managementDb,
 				                                   clusterName,
 				                                   dataDb->db->getConnectionRecord()->getConnectionString(),
-				                                   AddNewTenants::False,
-				                                   RemoveMissingTenants::True);
-				try {
-					Optional<Void> result = wait(timeout(restoreFuture, deterministicRandom()->randomInt(1, 30)));
-					if (result.present()) {
-						break;
-					} else {
-						retried = true;
-					}
-				} catch (Error& e) {
-					if (false) {
-						break;
-					} else {
-						throw;
-					}
+				                                   ApplyManagementClusterUpdates::True);
+				Optional<Void> result = wait(timeout(restoreFuture, deterministicRandom()->randomInt(1, 30)));
+				if (result.present()) {
+					break;
 				}
 			}
 

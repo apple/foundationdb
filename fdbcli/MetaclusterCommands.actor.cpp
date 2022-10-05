@@ -183,7 +183,7 @@ ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vecto
 	state bool restore_from_data_cluster = tokens.size() == 5;
 	if (restore_from_data_cluster) {
 		wait(MetaclusterAPI::restoreCluster(
-		    db, tokens[2], config.get().first.get(), AddNewTenants::False, RemoveMissingTenants::True));
+		    db, tokens[2], config.get().first.get(), ApplyManagementClusterUpdates::True));
 
 		fmt::print("The cluster `{}' has been restored\n", printable(tokens[2]).c_str());
 		return true;

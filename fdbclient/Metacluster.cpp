@@ -21,7 +21,7 @@
 #include "fdbclient/Metacluster.h"
 #include "fdbclient/MetaclusterManagement.actor.h"
 
-FDB_DEFINE_BOOLEAN_PARAM(AddNewTenants);
+FDB_DEFINE_BOOLEAN_PARAM(ApplyManagementClusterUpdates);
 FDB_DEFINE_BOOLEAN_PARAM(RemoveMissingTenants);
 FDB_DEFINE_BOOLEAN_PARAM(AssignClusterAutomatically);
 
