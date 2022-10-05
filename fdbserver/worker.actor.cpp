@@ -1020,6 +1020,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 						if (disconnectedPeer || degradedPeer) {
 							TraceEvent("HealthMonitorDetectDegradedPeer")
 							    .detail("Peer", address)
+							    .detail("Satellite", true)
 							    .detail("Elapsed", now() - peer->lastLoggedTime)
 							    .detail("Disconnected", disconnectedPeer)
 							    .detail("MinLatency", peer->pingLatencies.min())
