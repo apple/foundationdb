@@ -89,7 +89,7 @@ struct IdempotencyIdRef {
 			return StringRef();
 		}
 		if (indirect()) {
-			return StringRef(reinterpret_cast<const uint8_t*>(second.ptr), first);
+			return StringRef(second.ptr, first);
 		} else {
 			return StringRef(reinterpret_cast<const uint8_t*>(this), sizeof(*this));
 		}
