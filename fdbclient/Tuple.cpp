@@ -117,7 +117,7 @@ Tuple& Tuple::append(Tuple const& tuple) {
 	return *this;
 }
 
-Tuple& Tuple::append(Versionstamp const& vs) {
+Tuple& Tuple::append(TupleVersionstamp const& vs) {
 	offsets.push_back(data.size());
 
 	data.push_back(data.arena(), VERSIONSTAMP_96_CODE);
@@ -413,7 +413,7 @@ double Tuple::getDouble(size_t index) const {
 	return bigEndianDouble(swap);
 }
 
-Versionstamp Tuple::getVersionstamp(size_t index) const {
+TupleVersionstamp Tuple::getVersionstamp(size_t index) const {
 	if (index >= offsets.size()) {
 		throw invalid_tuple_index();
 	}
@@ -422,7 +422,7 @@ Versionstamp Tuple::getVersionstamp(size_t index) const {
 	if (code != VERSIONSTAMP_96_CODE) {
 		throw invalid_tuple_data_type();
 	}
-	return Versionstamp(StringRef(data.begin() + offsets[index] + 1, VERSIONSTAMP_TUPLE_SIZE));
+	return TupleVersionstamp(StringRef(data.begin() + offsets[index] + 1, VERSIONSTAMP_TUPLE_SIZE));
 }
 
 Tuple::UserTypeStr Tuple::getUserType(size_t index) const {
@@ -495,7 +495,7 @@ TEST_CASE("/fdbclient/Tuple/makeTuple") {
 	                            "byteStr"_sr,
 	                            Tuple::UnicodeStr("str"_sr),
 	                            nullptr,
-	                            Versionstamp("000000000000"_sr),
+	                            TupleVersionstamp("000000000000"_sr),
 	                            Tuple::UserTypeStr(0x41, "12345678"_sr));
 	Tuple t2 = Tuple()
 	               .append(1)
@@ -505,7 +505,7 @@ TEST_CASE("/fdbclient/Tuple/makeTuple") {
 	               .append("byteStr"_sr)
 	               .append(Tuple::UnicodeStr("str"_sr))
 	               .append(nullptr)
-	               .append(Versionstamp("000000000000"_sr))
+	               .append(TupleVersionstamp("000000000000"_sr))
 	               .append(Tuple::UserTypeStr(0x41, "12345678"_sr));
 
 	ASSERT(t1.pack() == t2.pack());
@@ -531,7 +531,7 @@ TEST_CASE("/fdbclient/Tuple/unpack") {
 	                            "byteStr"_sr,
 	                            Tuple::UnicodeStr("str"_sr),
 	                            nullptr,
-	                            Versionstamp("000000000000"_sr),
+	                            TupleVersionstamp("000000000000"_sr),
 	                            Tuple::UserTypeStr(0x41, "12345678"_sr));
 
 	Standalone<StringRef> packed = t1.pack();
