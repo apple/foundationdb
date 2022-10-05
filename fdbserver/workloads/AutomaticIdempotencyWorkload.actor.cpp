@@ -24,13 +24,17 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// This tests launches a bunch of transactions with idempotency ids (so they should be idempotent automatically). Each
+// transaction sets a version stamped key, and then we check that the right number of transactions were committed.
+// If a transaction commits multiple times or doesn't commit, that probably indicates a problem with
+// `determineCommitStatus` in NativeAPI.
 struct AutomaticIdempotencyWorkload : TestWorkload {
-	int64_t countTo;
-	Key key;
+	int64_t numTransactions;
+	Key keyPrefix;
 
 	AutomaticIdempotencyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		countTo = getOption(options, "countTo"_sr, 1000);
-		key = KeyRef(getOption(options, "key"_sr, "automaticIdempotencyKey"_sr));
+		numTransactions = getOption(options, "numTransactions"_sr, 1000);
+		keyPrefix = KeyRef(getOption(options, "keyPrefix"_sr, "automaticIdempotencyKeyPrefix"_sr));
 	}
 
 	std::string description() const override { return "AutomaticIdempotency"; }
@@ -41,14 +45,19 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(AutomaticIdempotencyWorkload* self, Database cx) {
 		state int i = 0;
-		for (; i < self->countTo; ++i) {
-			wait(runRYWTransaction(cx, [self = self](Reference<ReadYourWritesTransaction> tr) {
-				tr->setOption(FDBTransactionOptions::AUTOMATIC_IDEMPOTENCY);
-				uint64_t oneInt = 1;
-				Value oneVal = StringRef(reinterpret_cast<const uint8_t*>(&oneInt), sizeof(oneInt));
-				tr->atomicOp(self->key, oneVal, MutationRef::AddValue);
-				return Future<Void>(Void());
-			}));
+		for (; i < self->numTransactions; ++i) {
+			state Value idempotencyId = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
+			TraceEvent("IdempotencyIdWorkloadTransaction").detail("Id", idempotencyId);
+			wait(runRYWTransaction(
+			    cx, [self = self, idempotencyId = idempotencyId](Reference<ReadYourWritesTransaction> tr) {
+				    tr->setOption(FDBTransactionOptions::IDEMPOTENCY_ID, idempotencyId);
+				    uint32_t index = self->keyPrefix.size();
+				    Value suffix = makeString(14);
+				    memset(mutateString(suffix), 0, 10);
+				    memcpy(mutateString(suffix) + 10, &index, 4);
+				    tr->atomicOp(self->keyPrefix.withSuffix(suffix), idempotencyId, MutationRef::SetVersionstampedKey);
+				    return Future<Void>(Void());
+			    }));
 		}
 		return Void();
 	}
@@ -61,12 +70,14 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<bool> _check(AutomaticIdempotencyWorkload* self, Reference<ReadYourWritesTransaction> tr) {
-		Optional<Value> val = wait(tr->get(self->key));
-		ASSERT(val.present());
-		uint64_t result;
-		ASSERT(val.get().size() == sizeof(result));
-		memcpy(&result, val.get().begin(), val.get().size());
-		ASSERT_EQ(result, self->clientCount * self->countTo);
+		RangeResult result = wait(tr->getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY));
+		ASSERT(!result.more);
+		if (result.size() != self->clientCount * self->numTransactions) {
+			for (const auto& [k, v] : result) {
+				TraceEvent("IdempotencyIdWorkloadTransactionCommitted").detail("Id", v);
+			}
+		}
+		ASSERT_EQ(result.size(), self->clientCount * self->numTransactions);
 		return true;
 	}
 
