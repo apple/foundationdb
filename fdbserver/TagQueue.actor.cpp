@@ -2,7 +2,7 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include
 
-void TagQueue::updateRates(std::map<TransactionTag, double> const& newRates) {
+void TagQueue::updateRates(TransactionTagMap<double> const& newRates) {
 	for (const auto& [tag, rate] : newRates) {
 		auto it = rateInfos.find(tag);
 		if (it == rateInfos.end()) {
@@ -170,7 +170,7 @@ TEST_CASE("/TagQueue/Simple") {
 	state TagSet tagSet;
 	state TransactionTagMap<uint32_t> counters;
 	{
-		std::map<TransactionTag, double> rates;
+		TransactionTagMap<double> rates;
 		rates["sampleTag"_sr] = 10.0;
 		tagQueue.updateRates(rates);
 	}
@@ -190,7 +190,7 @@ TEST_CASE("/TagQueue/Immediate") {
 	state TagSet tagSet;
 	state TransactionTagMap<uint32_t> counters;
 	{
-		std::map<TransactionTag, double> rates;
+		TransactionTagMap<double> rates;
 		rates["sampleTag"_sr] = 10.0;
 		tagQueue.updateRates(rates);
 	}
@@ -210,7 +210,7 @@ TEST_CASE("/TagQueue/MultiTag") {
 	state TagSet tagSet;
 	state TransactionTagMap<uint32_t> counters;
 	{
-		std::map<TransactionTag, double> rates;
+		TransactionTagMap<double> rates;
 		rates["sampleTag1"_sr] = 10.0;
 		rates["sampleTag2"_sr] = 20.0;
 		tagQueue.updateRates(rates);
@@ -234,7 +234,7 @@ TEST_CASE("/TagQueue/MultiClient") {
 	state TagSet tagSet;
 	state TransactionTagMap<uint32_t> counters;
 	{
-		std::map<TransactionTag, double> rates;
+		TransactionTagMap<double> rates;
 		rates["sampleTag"_sr] = 10.0;
 		tagQueue.updateRates(rates);
 	}
@@ -255,7 +255,7 @@ TEST_CASE("/TagQueue/Batch") {
 	state TagSet tagSet;
 	state TransactionTagMap<uint32_t> counters;
 	{
-		std::map<TransactionTag, double> rates;
+		TransactionTagMap<double> rates;
 		rates["sampleTag"_sr] = 10.0;
 		tagQueue.updateRates(rates);
 	}

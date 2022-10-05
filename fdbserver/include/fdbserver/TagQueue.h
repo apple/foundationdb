@@ -23,7 +23,7 @@ class TagQueue {
 	void endEpoch(double elapsed);
 
 public:
-	void updateRates(std::map<TransactionTag, double> const& newRates);
+	void updateRates(TransactionTagMap<double> const& newRates);
 	void runEpoch(double elapsed,
 	              SpannedDeque<GetReadVersionRequest>& outBatchPriority,
 	              SpannedDeque<GetReadVersionRequest>& outDefaultPriority,

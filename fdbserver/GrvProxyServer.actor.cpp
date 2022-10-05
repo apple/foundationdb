@@ -30,6 +30,7 @@
 #include "fdbserver/GrvTransactionRateInfo.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
+#include "fdbserver/TagQueue.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbrpc/sim_validation.h"
@@ -361,7 +362,7 @@ ACTOR Future<Void> getRate(UID myID,
                            GetHealthMetricsReply* detailedHealthMetricsReply,
                            TransactionTagMap<uint64_t>* transactionTagCounter,
                            PrioritizedTransactionTagMap<ClientTagThrottleLimits>* clientThrottledTags,
-                           PrioritizedTransactionTagMap<GrvTransactionRateInfo>* perTagRateInfo,
+                           TagQueue* tagQueue,
                            GrvProxyStats* stats,
                            GrvProxyData* proxyData) {
 	state Future<Void> nextRequestTimer = Never();
@@ -422,12 +423,7 @@ ACTOR Future<Void> getRate(UID myID,
 				*clientThrottledTags = std::move(rep.clientThrottledTags.get());
 			}
 			if (rep.proxyThrottledTags.present()) {
-				perTagRateInfo->clear();
-				for (const auto& [priority, tagToRate] : rep.proxyThrottledTags.get()) {
-					for (const auto& [tag, rate] : tagToRate) {
-						(*perTagRateInfo)[priority][tag].setRate(rate);
-					}
-				}
+				tagQueue->updateRates(rep.proxyThrottledTags.get());
 			}
 		}
 		when(wait(leaseTimeout)) {
@@ -461,20 +457,19 @@ void dropRequestFromQueue(Deque<GetReadVersionRequest>* queue, GrvProxyStats* st
 }
 
 // Put a GetReadVersion request into the queue corresponding to its priority.
-ACTOR Future<Void> queueGetReadVersionRequests(
-    Reference<AsyncVar<ServerDBInfo> const> db,
-    SpannedDeque<GetReadVersionRequest>* systemQueue,
-    SpannedDeque<GetReadVersionRequest>* defaultQueue,
-    SpannedDeque<GetReadVersionRequest>* batchQueue,
-    FutureStream<GetReadVersionRequest> readVersionRequests,
-    PromiseStream<Void> GRVTimer,
-    double* lastGRVTime,
-    double* GRVBatchTime,
-    FutureStream<double> normalGRVLatency,
-    GrvProxyStats* stats,
-    GrvTransactionRateInfo* batchRateInfo,
-    TransactionTagMap<uint64_t>* transactionTagCounter,
-    PrioritizedTransactionTagMap<GrvTransactionRateInfo> const* perClientRateInfo) {
+ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const> db,
+                                               SpannedDeque<GetReadVersionRequest>* systemQueue,
+                                               SpannedDeque<GetReadVersionRequest>* defaultQueue,
+                                               SpannedDeque<GetReadVersionRequest>* batchQueue,
+                                               FutureStream<GetReadVersionRequest> readVersionRequests,
+                                               PromiseStream<Void> GRVTimer,
+                                               double* lastGRVTime,
+                                               double* GRVBatchTime,
+                                               FutureStream<double> normalGRVLatency,
+                                               GrvProxyStats* stats,
+                                               GrvTransactionRateInfo* batchRateInfo,
+                                               TransactionTagMap<uint64_t>* transactionTagCounter,
+                                               TagQueue* tagQueue) {
 	getCurrentLineage()->modify(&TransactionLineage::operation) =
 	    TransactionLineage::Operation::GetConsistentReadVersion;
 	loop choose {
@@ -541,7 +536,11 @@ ACTOR Future<Void> queueGetReadVersionRequests(
 					stats->txnStartIn += req.transactionCount;
 					stats->txnDefaultPriorityStartIn += req.transactionCount;
 					++stats->defaultGRVQueueSize;
-					defaultQueue->push_back(req);
+					if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
+						tagQueue->addRequest(req);
+					} else {
+						defaultQueue->push_back(req);
+					}
 					// defaultQueue->span.addParent(req.spanContext);
 				} else {
 					// Return error for batch_priority GRV requests
@@ -554,7 +553,11 @@ ACTOR Future<Void> queueGetReadVersionRequests(
 						stats->txnStartIn += req.transactionCount;
 						stats->txnBatchPriorityStartIn += req.transactionCount;
 						++stats->batchGRVQueueSize;
-						batchQueue->push_back(req);
+						if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
+							tagQueue->addRequest(req);
+						} else {
+							batchQueue->push_back(req);
+						}
 						// batchQueue->span.addParent(req.spanContext);
 					}
 				}
@@ -819,7 +822,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	state int64_t batchTransactionCount = 0;
 	state GrvTransactionRateInfo normalRateInfo(10);
 	state GrvTransactionRateInfo batchRateInfo(0);
-	state PrioritizedTransactionTagMap<GrvTransactionRateInfo> perTagRateInfo;
+	state TagQueue tagQueue;
 
 	state SpannedDeque<GetReadVersionRequest> systemQueue("GP:transactionStarterSystemQueue"_loc);
 	state SpannedDeque<GetReadVersionRequest> defaultQueue("GP:transactionStarterDefaultQueue"_loc);
@@ -846,7 +849,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	                      detailedHealthMetricsReply,
 	                      &transactionTagCounter,
 	                      &clientThrottledTags,
-	                      &perTagRateInfo,
+	                      &tagQueue,
 	                      &grvProxyData->stats,
 	                      grvProxyData));
 	addActor.send(queueGetReadVersionRequests(db,
@@ -861,7 +864,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	                                          &grvProxyData->stats,
 	                                          &batchRateInfo,
 	                                          &transactionTagCounter,
-	                                          &perTagRateInfo));
+	                                          &tagQueue));
 
 	while (std::find(db->get().client.grvProxies.begin(), db->get().client.grvProxies.end(), proxy) ==
 	       db->get().client.grvProxies.end()) {
@@ -884,6 +887,8 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 			elapsed = 1e-15;
 		}
 
+		// TODO: Remove systemQueue parameter?
+		tagQueue.runEpoch(elapsed, defaultQueue, batchQueue, systemQueue);
 		normalRateInfo.startEpoch();
 		batchRateInfo.startEpoch();
 
