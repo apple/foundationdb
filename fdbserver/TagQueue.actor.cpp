@@ -198,25 +198,28 @@ TEST_CASE("/TagQueue/MultiTag") {
 	return Void();
 }
 
-// Clients share the available 10 transaction/second budget
+// Clients share the available 30 transaction/second budget
 TEST_CASE("/TagQueue/MultiClient") {
 	state TagQueue tagQueue;
 	state TagSet tagSet;
 	state TransactionTagMap<uint32_t> counters;
 	{
 		TransactionTagMap<double> rates;
-		rates["sampleTag"_sr] = 10.0;
+		rates["sampleTag"_sr] = 30.0;
 		tagQueue.updateRates(rates);
 	}
 	tagSet.addTag("sampleTag"_sr);
 
-	state Future<Void> client1 = mockClient(&tagQueue, TransactionPriority::DEFAULT, tagSet, 1, 20.0, &counters);
-	state Future<Void> client2 = mockClient(&tagQueue, TransactionPriority::DEFAULT, tagSet, 1, 20.0, &counters);
+	state std::vector<Future<Void>> clients;
+	clients.reserve(10);
+	for (int i = 0; i < 10; ++i) {
+		clients.push_back(mockClient(&tagQueue, TransactionPriority::DEFAULT, tagSet, 1, 10.0, &counters));
+	}
 
 	state Future<Void> server = mockServer(&tagQueue);
-	wait(timeout(client1 && client2 && server, 60.0, Void()));
+	wait(timeout(waitForAll(clients) && server, 60.0, Void()));
 	TraceEvent("TagQuotaTest_MultiClient").detail("Counter", counters["sampleTag"_sr]);
-	ASSERT(isNear(counters["sampleTag"_sr], 60.0 * 10.0));
+	ASSERT(isNear(counters["sampleTag"_sr], 60.0 * 30.0));
 	return Void();
 }
 
