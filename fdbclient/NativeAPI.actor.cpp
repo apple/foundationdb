@@ -6121,14 +6121,18 @@ ACTOR static Future<Optional<CommitResult>> determineCommitStatus(Reference<Tran
 	tr.span.setParent(span.context);
 	loop {
 		try {
-			TraceEvent("DetermineCommitStatus")
-			    .detail("IdempotencyId", idempotencyId.asStringRefUnsafe().printable())
-			    .detail("Retries", retries);
 			tr.trState->options = trState->options;
 			tr.trState->taskID = trState->taskID;
 			tr.trState->authToken = trState->authToken;
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			Version rv = wait(tr.getReadVersion());
+			TraceEvent("DetermineCommitStatusAttempt")
+			    .detail("IdempotencyId", idempotencyId.asStringRefUnsafe())
+			    .detail("Retries", retries)
+			    .detail("ReadVersion", rv)
+			    .detail("MinPossibleCommitVersion", minPossibleCommitVersion)
+			    .detail("MaxPossibleCommitVersion", maxPossibleCommitVersion);
 			KeyRange possibleRange =
 			    KeyRangeRef(BinaryWriter::toValue(bigEndian64(minPossibleCommitVersion), Unversioned())
 			                    .withPrefix(idempotencyIdKeys.begin),
@@ -6139,14 +6143,22 @@ ACTOR static Future<Optional<CommitResult>> determineCommitStatus(Reference<Tran
 			for (const auto& kv : range) {
 				auto commitResult = kvContainsIdempotencyId(kv, idempotencyId);
 				if (commitResult.present()) {
+					TraceEvent("DetermineCommitStatus")
+					    .detail("Committed", 1)
+					    .detail("IdempotencyId", idempotencyId.asStringRefUnsafe())
+					    .detail("Retries", retries);
 					return commitResult;
 				}
 			}
+			TraceEvent("DetermineCommitStatus")
+			    .detail("Committed", 0)
+			    .detail("IdempotencyId", idempotencyId.asStringRefUnsafe())
+			    .detail("Retries", retries);
 			return Optional<CommitResult>();
 		} catch (Error& e) {
 			TraceEvent("DetermineCommitStatusError")
 			    .errorUnsuppressed(e)
-			    .detail("IdempotencyId", idempotencyId.asStringRefUnsafe().printable())
+			    .detail("IdempotencyId", idempotencyId.asStringRefUnsafe())
 			    .detail("Retries", retries);
 			wait(tr.onError(e));
 		}
