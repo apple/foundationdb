@@ -66,12 +66,13 @@ void TagQueue::runEpoch(double elapsed,
 	Deque<DelayedRequest> newDelayedRequests;
 
 	while (!delayedRequests.empty()) {
-		auto const& delayedReq = delayedRequests.front();
-		auto const& req = delayedReq.req;
+		auto& delayedReq = delayedRequests.front();
+		auto& req = delayedReq.req;
 		if (canStart(req)) {
 			for (const auto& [tag, count] : req.tags) {
 				releasedInEpoch[tag] += count;
 			}
+			req.proxyTagThrottledDuration = delayedReq.delayTime();
 			if (req.priority == TransactionPriority::BATCH) {
 				outBatchPriority.push_back(req);
 			} else if (req.priority == TransactionPriority::DEFAULT) {

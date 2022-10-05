@@ -10,6 +10,7 @@ class TagQueue {
 		double startTime;
 		GetReadVersionRequest req;
 		explicit DelayedRequest(GetReadVersionRequest req) : startTime(now()), req(req) {}
+		double delayTime() const { return now() - startTime; }
 	};
 
 	std::map<TransactionTag, GrvTransactionRateInfo> rateInfos;
