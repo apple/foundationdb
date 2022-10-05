@@ -19,15 +19,16 @@
  */
 
 #include <cinttypes>
-#include "fdbclient/BackupAgent.actor.h"
 #include "fmt/format.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyBackedTypes.h"
-#include "fdbserver/Status.h"
+#include "fdbserver/Status.actor.h"
 #include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/Metacluster.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -35,7 +36,7 @@
 #include "fdbserver/ClusterRecovery.actor.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/DataDistribution.actor.h"
-#include "fdbclient/ConsistencyScanInterface.h"
+#include "fdbclient/ConsistencyScanInterface.actor.h"
 #include "flow/UnitTest.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/RecoveryState.h"
@@ -2924,7 +2925,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
     ServerCoordinators coordinators,
     std::vector<NetworkAddress> incompatibleConnections,
     Version datacenterVersionDifference,
-    ConfigBroadcaster const* configBroadcaster) {
+    ConfigBroadcaster const* configBroadcaster,
+    Optional<MetaclusterRegistrationEntry> metaclusterRegistration,
+    MetaclusterMetrics metaclusterMetrics) {
 	state double tStart = timer();
 
 	state JsonBuilderArray messages;
@@ -3066,6 +3069,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state JsonBuilderObject qos;
 		state JsonBuilderObject dataOverlay;
 		state JsonBuilderObject tenants;
+		state JsonBuilderObject metacluster;
 		state JsonBuilderObject storageWiggler;
 		state std::unordered_set<UID> wiggleServers;
 
@@ -3247,6 +3251,25 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			// Add qos section if it was populated
 			if (!qos.empty())
 				statusObj["qos"] = qos;
+
+			// Metacluster metadata
+			if (metaclusterRegistration.present()) {
+				metacluster["cluster_type"] = clusterTypeToString(metaclusterRegistration.get().clusterType);
+				metacluster["metacluster_name"] = metaclusterRegistration.get().metaclusterName;
+				metacluster["metacluster_id"] = metaclusterRegistration.get().metaclusterId.toString();
+				if (metaclusterRegistration.get().clusterType == ClusterType::METACLUSTER_DATA) {
+					metacluster["data_cluster_name"] = metaclusterRegistration.get().name;
+					metacluster["data_cluster_id"] = metaclusterRegistration.get().id.toString();
+				} else { // clusterType == ClusterType::METACLUSTER_MANAGEMENT
+					metacluster["num_data_clusters"] = metaclusterMetrics.numDataClusters;
+					tenants["num_tenants"] = metaclusterMetrics.numTenants;
+					tenants["tenant_group_capacity"] = metaclusterMetrics.tenantGroupCapacity;
+					tenants["tenant_groups_allocated"] = metaclusterMetrics.tenantGroupsAllocated;
+				}
+			} else {
+				metacluster["cluster_type"] = clusterTypeToString(ClusterType::STANDALONE);
+			}
+			statusObj["metacluster"] = metacluster;
 
 			if (!tenants.empty())
 				statusObj["tenants"] = tenants;

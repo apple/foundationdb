@@ -18,8 +18,11 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_CONSISTENCYSCANINTERFACE_H
-#define FDBCLIENT_CONSISTENCYSCANINTERFACE_H
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_CONSISTENCYSCANINTERFACE_ACTOR_G_H)
+#define FDBCLIENT_CONSISTENCYSCANINTERFACE_ACTOR_G_H
+#include "fdbclient/ConsistencyScanInterface.actor.g.h"
+#elif !defined(FDBCLIENT_CONSISTENCYSCANINTERFACE_ACTOR_H)
+#define FDBCLIENT_CONSISTENCYSCANINTERFACE_ACTOR_H
 
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
@@ -27,6 +30,8 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
+
+#include "flow/actorcompiler.h" // must be last include
 
 struct ConsistencyScanInterface {
 	constexpr static FileIdentifier file_identifier = 4983265;
@@ -155,35 +160,37 @@ struct ConsistencyScanInfo {
 	}
 };
 
-Future<Version> getVersion(Database const& cx);
-Future<bool> getKeyServers(
-    Database const& cx,
-    Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> const& keyServersPromise,
-    KeyRangeRef const& kr,
-    bool const& performQuiescentChecks);
-Future<bool> getKeyLocations(Database const& cx,
-                             std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> const& shards,
-                             Promise<Standalone<VectorRef<KeyValueRef>>> const& keyLocationPromise,
-                             bool const& performQuiescentChecks);
-Future<bool> checkDataConsistency(Database const& cx,
-                                  VectorRef<KeyValueRef> const& keyLocations,
-                                  DatabaseConfiguration const& configuration,
-                                  std::map<UID, StorageServerInterface> const& tssMapping,
-                                  bool const& performQuiescentChecks,
-                                  bool const& performTSSCheck,
-                                  bool const& firstClient,
-                                  bool const& failureIsError,
-                                  int const& clientId,
-                                  int const& clientCount,
-                                  bool const& distributed,
-                                  bool const& shuffleShards,
-                                  int const& shardSampleFactor,
-                                  int64_t const& sharedRandomNumber,
-                                  int64_t const& repetitions,
-                                  int64_t* const& bytesReadInPreviousRound,
-                                  int const& restart,
-                                  int64_t const& maxRate,
-                                  int64_t const& targetInterval,
-                                  KeyRef const& progressKey);
+ACTOR Future<Version> getVersion(Database cx);
+ACTOR Future<bool> getKeyServers(
+    Database cx,
+    Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise,
+    KeyRangeRef kr,
+    bool performQuiescentChecks);
+ACTOR Future<bool> getKeyLocations(Database cx,
+                                   std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> shards,
+                                   Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise,
+                                   bool performQuiescentChecks);
+ACTOR Future<bool> checkDataConsistency(Database cx,
+                                        VectorRef<KeyValueRef> keyLocations,
+                                        DatabaseConfiguration configuration,
+                                        std::map<UID, StorageServerInterface> tssMapping,
+                                        bool performQuiescentChecks,
+                                        bool performTSSCheck,
+                                        bool firstClient,
+                                        bool failureIsError,
+                                        int clientId,
+                                        int clientCount,
+                                        bool distributed,
+                                        bool shuffleShards,
+                                        int shardSampleFactor,
+                                        int64_t sharedRandomNumber,
+                                        int64_t repetitions,
+                                        int64_t* bytesReadInPreviousRound,
+                                        int restart,
+                                        int64_t maxRate,
+                                        int64_t targetInterval,
+                                        KeyRef progressKey);
+
+#include "flow/unactorcompiler.h"
 
 #endif // FDBCLIENT_CONSISTENCYSCANINTERFACE_H

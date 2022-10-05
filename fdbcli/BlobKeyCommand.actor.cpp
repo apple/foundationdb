@@ -174,7 +174,7 @@ ACTOR Future<bool> blobKeyCommandActor(Database localDb,
 		version = v;
 	}
 
-	if (key >= LiteralStringRef("\xff")) {
+	if (key >= "\xff"_sr) {
 		fmt::print("No blob history for system keyspace\n", key.printable());
 		return false;
 	} else {

@@ -171,12 +171,12 @@ inline StringRef metricTypeName() {
 #define MAKE_TYPENAME(T, S)                                                                                            \
 	template <>                                                                                                        \
 	inline StringRef metricTypeName<T>() {                                                                             \
-		return LiteralStringRef(S);                                                                                    \
+		return S;                                                                                                      \
 	}
-MAKE_TYPENAME(bool, "Bool")
-MAKE_TYPENAME(int64_t, "Int64")
-MAKE_TYPENAME(double, "Double")
-MAKE_TYPENAME(Standalone<StringRef>, "String")
+MAKE_TYPENAME(bool, "Bool"_sr)
+MAKE_TYPENAME(int64_t, "Int64"_sr)
+MAKE_TYPENAME(double, "Double"_sr)
+MAKE_TYPENAME(Standalone<StringRef>, "String"_sr)
 #undef MAKE_TYPENAME
 
 struct BaseMetric;

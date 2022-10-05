@@ -503,6 +503,8 @@ public:
 	bool allowStorageMigrationTypeChange = false;
 	double injectTargetedSSRestartTime = std::numeric_limits<double>::max();
 	double injectSSDelayTime = std::numeric_limits<double>::max();
+	double injectTargetedBMRestartTime = std::numeric_limits<double>::max();
+	double injectTargetedBWRestartTime = std::numeric_limits<double>::max();
 
 	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 
