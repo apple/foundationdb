@@ -144,6 +144,14 @@ ACTOR static Future<Void> cheeseWaitActor() {
 	return Void();
 }
 
+size_t cheeseWaitActorSize() {
+#ifndef OPEN_FOR_IDE
+	return sizeof(CheeseWaitActorActor);
+#else
+	return 0ul;
+#endif
+}
+
 ACTOR static void trivialVoidActor(int* result) {
 	*result = 1;
 }
@@ -1084,9 +1092,7 @@ TEST_CASE("#flow/flow/perf/actor patterns") {
 			ASSERT(out2[i].isReady());
 		}
 		printf("2xcheeseActor(chooseTwoActor(cheeseActor(fifo), never)): %0.2f M/sec\n", N / 1e6 / (timer() - start));
-#ifndef OPEN_FOR_IDE
-		printf("sizeof(CheeseWaitActorActor) == %zu\n", sizeof(CheeseWaitActorActor));
-#endif
+		printf("sizeof(CheeseWaitActorActor) == %zu\n", cheeseWaitActorSize());
 	}
 
 	{
