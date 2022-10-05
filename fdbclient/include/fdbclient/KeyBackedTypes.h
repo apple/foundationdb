@@ -310,7 +310,7 @@ public:
 	void setVersionstamp(Transaction tr, T const& val, int offset) {
 		tr->atomicOp(
 		    key,
-		    BinaryWriter::toValue<T>(val, Unversioned()).withSuffix(StringRef(reinterpret_cast<uint8_t*>(offset), 4)),
+		    BinaryWriter::toValue<T>(val, Unversioned()).withSuffix(StringRef(reinterpret_cast<uint8_t*>(&offset), 4)),
 		    MutationRef::SetVersionstampedValue);
 	}
 
