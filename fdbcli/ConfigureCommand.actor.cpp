@@ -331,7 +331,7 @@ CommandFactory configureFactory(
     CommandHelp(
         "configure [new|tss]"
         "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|"
-        "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
+        "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>|version_indexers=<VERSION_INDEXERS>>*|"
         "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|perpetual_storage_wiggle_locality="
         "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|storage_migration_type={disabled|gradual|aggressive}"
         "|tenant_mode={disabled|optional_experimental|required_experimental}|blob_granules_enabled={0|1}"
@@ -361,7 +361,7 @@ CommandFactory configureFactory(
         "logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. "
         "Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\n"
         "version_indexers=<VERSION_INDEXERS>: Sets the desired number of version indexers in the cluster. "
-        "Must be at least 1, or set to -1 which restores the number of version indexers to the default value.\n\n"
+        "Must be at least 0, or set to -1 which restores the number of version indexers to the default value.\n\n"
         "perpetual_storage_wiggle=<WIGGLE_SPEED>: Set the value speed (a.k.a., the number of processes that the Data "
         "Distributor should wiggle at a time). Currently, only 0 and 1 are supported. The value 0 means to disable the "
         "perpetual storage wiggle.\n\n"
