@@ -359,6 +359,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REPLACE_CONTENTS_BYTES,                                1e5 );
 
 	// KeyValueStoreRocksDB
+	init( ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES,         true ); if( randomize && BUGGIFY )  ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES = false;
+ 	init( ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE,                  true ); if( randomize && BUGGIFY )  ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE = false;
+	init( ROCKSDB_SAMPLE_THREAD_RETURN_PROMISE_LATENCY,         true );
+ 	init( ROCKSDB_THREAD_PROMISE_PRIORITY,                      7500 );
 	init( ROCKSDB_READER_THREAD_PRIORITY,                          0 );
  	init( ROCKSDB_WRITER_THREAD_PRIORITY,                          0 );
 	init( ROCKSDB_BACKGROUND_PARALLELISM,                          4 );
@@ -747,12 +751,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENABLE_WORKER_HEALTH_MONITOR,                        false );
 	init( WORKER_HEALTH_MONITOR_INTERVAL,                       60.0 );
 	init( PEER_LATENCY_CHECK_MIN_POPULATION,                      30 );
-	init( PEER_LATENCY_DEGRADATION_PERCENTILE,                  0.90 );
+	init( PEER_LATENCY_DEGRADATION_PERCENTILE,                  0.50 );
 	init( PEER_LATENCY_DEGRADATION_THRESHOLD,                   0.05 );
-	init( PEER_LATENCY_DEGRADATION_PERCENTILE_SATELLITE,        0.90 );
+	init( PEER_LATENCY_DEGRADATION_PERCENTILE_SATELLITE,        0.50 );
 	init( PEER_LATENCY_DEGRADATION_THRESHOLD_SATELLITE,          0.1 );
 	init( PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD,         0.1 );
-	init( PEER_DEGRADATION_CONNECTION_FAILURE_COUNT,               1 );
+	init( PEER_DEGRADATION_CONNECTION_FAILURE_COUNT,               5 );
 	init( WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER,           true );
 	init( STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT,                 false ); if ( randomize && BUGGIFY ) STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT = true;
 
