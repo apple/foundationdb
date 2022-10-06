@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "boost/algorithm/string.hpp"
+#include "flow/CodeProbe.h"
 #include "fmt/format.h"
 
 #include "fdbclient/FDBOptions.g.h"
@@ -222,6 +223,52 @@ void DatabaseContext::addSSIdTagMapping(const UID& uid, const Tag& tag) {
 	ssidTagMapping[uid] = tag;
 }
 
+void DatabaseContext::getLatestCommitVersionForSSID(const UID& ssid, Tag& tag, Version& commitVersion) {
+	// initialization
+	tag = invalidTag;
+	commitVersion = invalidVersion;
+
+	auto iter = ssidTagMapping.find(ssid);
+	if (iter != ssidTagMapping.end()) {
+		tag = iter->second;
+
+		if (ssVersionVectorCache.hasVersion(tag)) {
+			commitVersion = ssVersionVectorCache.getVersion(tag);
+		}
+	}
+}
+
+void DatabaseContext::getLatestCommitVersion(const StorageServerInterface& ssi,
+                                             Version readVersion,
+                                             VersionVector& latestCommitVersion) {
+	latestCommitVersion.clear();
+
+	if (ssVersionVectorCache.getMaxVersion() == invalidVersion) {
+		return;
+	}
+
+	// Error checking (based on the assumption that the read version was not obtained
+	// from the client's grv cache).
+	if (readVersion > ssVersionVectorCache.getMaxVersion()) {
+		TraceEvent(SevError, "ReadVersionExceedsVersionVectorMax")
+		    .detail("ReadVersion", readVersion)
+		    .detail("VersionVector", ssVersionVectorCache.toString());
+		if (g_network->isSimulated()) {
+			ASSERT(false);
+		} else {
+			return; // Do not return a stale commit version in production.
+		}
+	}
+
+	Tag tag = invalidTag;
+	Version commitVersion = invalidVersion;
+	getLatestCommitVersionForSSID(ssi.id(), tag, commitVersion);
+
+	if (tag != invalidTag && commitVersion != invalidVersion && commitVersion < readVersion) {
+		latestCommitVersion.setVersion(tag, commitVersion);
+	}
+}
+
 void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& locationInfo,
                                               Version readVersion,
                                               Reference<TransactionState> info,
@@ -254,24 +301,20 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 
 	std::map<Version, std::set<Tag>> versionMap; // order the versions to be returned
 	for (int i = 0; i < locationInfo->locations()->size(); i++) {
-		bool updatedVersionMap = false;
-		Version commitVersion = invalidVersion;
 		Tag tag = invalidTag;
-		auto iter = ssidTagMapping.find(locationInfo->locations()->getId(i));
-		if (iter != ssidTagMapping.end()) {
-			tag = iter->second;
-			if (ssVersionVectorCache.hasVersion(tag)) {
-				commitVersion = ssVersionVectorCache.getVersion(tag); // latest commit version
-				if (commitVersion < readVersion) {
-					updatedVersionMap = true;
-					versionMap[commitVersion].insert(tag);
-				}
-			}
+		Version commitVersion = invalidVersion; // latest commit version
+		getLatestCommitVersionForSSID(locationInfo->locations()->getId(i), tag, commitVersion);
+
+		bool updatedVersionMap = false;
+		if (tag != invalidTag && commitVersion != invalidVersion && commitVersion < readVersion) {
+			updatedVersionMap = true;
+			versionMap[commitVersion].insert(tag);
 		}
+
 		// Do not log if commitVersion >= readVersion.
 		if (!updatedVersionMap && commitVersion == invalidVersion) {
 			TraceEvent(SevDebug, "CommitVersionNotFoundForSS")
-			    .detail("InSSIDMap", iter != ssidTagMapping.end() ? 1 : 0)
+			    .detail("InSSIDMap", tag != invalidTag ? 1 : 0)
 			    .detail("Tag", tag)
 			    .detail("CommitVersion", commitVersion)
 			    .detail("ReadVersion", readVersion)
@@ -3632,6 +3675,9 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 		                                                              parameters->useProvisionalProxies,
 		                                                              Reverse::False,
 		                                                              parameters->version));
+		if (parameters->tenant.tenantId != locationInfo.tenantEntry.id) {
+			throw tenant_not_found();
+		}
 
 		try {
 			state Optional<UID> watchValueID = Optional<UID>();
@@ -5305,6 +5351,44 @@ Future<TenantInfo> populateAndGetTenant(Reference<TransactionState> trState, Key
 	}
 }
 
+// Restarts a watch after a database switch
+ACTOR Future<Void> restartWatch(Database cx,
+                                TenantInfo tenantInfo,
+                                Key key,
+                                Optional<Value> value,
+                                TagSet tags,
+                                SpanContext spanContext,
+                                TaskPriority taskID,
+                                Optional<UID> debugID,
+                                UseProvisionalProxies useProvisionalProxies) {
+	// The ID of the tenant may be different on the cluster that we switched to, so obtain the new ID
+	if (tenantInfo.name.present()) {
+		state KeyRangeLocationInfo locationInfo = wait(getKeyLocation(cx,
+		                                                              tenantInfo,
+		                                                              key,
+		                                                              &StorageServerInterface::watchValue,
+		                                                              spanContext,
+		                                                              debugID,
+		                                                              useProvisionalProxies,
+		                                                              Reverse::False,
+		                                                              latestVersion));
+		tenantInfo.tenantId = locationInfo.tenantEntry.id;
+	}
+
+	wait(watchValueMap(cx->minAcceptableReadVersion,
+	                   tenantInfo,
+	                   key,
+	                   value,
+	                   cx,
+	                   tags,
+	                   spanContext,
+	                   taskID,
+	                   debugID,
+	                   useProvisionalProxies));
+
+	return Void();
+}
+
 // FIXME: This seems pretty horrible. Now a Database can't die until all of its watches do...
 ACTOR Future<Void> watch(Reference<Watch> watch,
                          Database cx,
@@ -5332,16 +5416,15 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 						when(wait(cx->connectionFileChanged())) {
 							CODE_PROBE(true, "Recreated a watch after switch");
 							cx->clearWatchMetadata();
-							watch->watchFuture = watchValueMap(cx->minAcceptableReadVersion,
-							                                   tenantInfo,
-							                                   watch->key,
-							                                   watch->value,
-							                                   cx,
-							                                   tags,
-							                                   spanContext,
-							                                   taskID,
-							                                   debugID,
-							                                   useProvisionalProxies);
+							watch->watchFuture = restartWatch(cx,
+							                                  tenantInfo,
+							                                  watch->key,
+							                                  watch->value,
+							                                  tags,
+							                                  spanContext,
+							                                  taskID,
+							                                  debugID,
+							                                  useProvisionalProxies);
 						}
 					}
 				}
@@ -7926,6 +8009,23 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		}
 		if (keyRange.end < granuleEndKey) {
 			granuleEndKey = keyRange.end;
+		}
+
+		if (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01)) {
+			// simulate as if we read a stale mapping and a different worker owns the granule
+			ASSERT(!self->trState->cx->blobWorker_interf.empty());
+			CODE_PROBE(true, "Randomizing blob worker id for request");
+			TraceEvent ev("RandomizingBlobWorkerForReq");
+			ev.detail("OriginalWorker", workerId);
+			int randomIdx = deterministicRandom()->randomInt(0, self->trState->cx->blobWorker_interf.size());
+			for (auto& it : self->trState->cx->blobWorker_interf) {
+				if (randomIdx == 0) {
+					workerId = it.first;
+					break;
+				}
+				randomIdx--;
+			}
+			ev.detail("NewWorker", workerId);
 		}
 
 		state BlobGranuleFileRequest req;

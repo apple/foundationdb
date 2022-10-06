@@ -304,6 +304,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		state int64_t timeTravelChecksMemory = 0;
 		state Version prevPurgeVersion = -1;
 		state UID dbgId = debugRandom()->randomUniqueID();
+		state Version newPurgeVersion = 0;
 
 		TraceEvent("BlobGranuleVerifierStart");
 		if (BGV_DEBUG) {
@@ -321,6 +322,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			try {
 				state double currentTime = now();
 				state std::map<double, OldRead>::iterator timeTravelIt = timeTravelChecks.begin();
+				newPurgeVersion = 0;
 				while (timeTravelIt != timeTravelChecks.end() && currentTime >= timeTravelIt->first) {
 					state OldRead oldRead = timeTravelIt->second;
 					timeTravelChecksMemory -= oldRead.oldResult.expectedSize();
@@ -331,7 +333,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					}
 
 					// before doing read, purge just before read version
-					state Version newPurgeVersion = 0;
 					state bool doPurging =
 					    allowPurging && !self->purgeAtLatest && deterministicRandom()->random01() < 0.5;
 					state bool forcePurge = doPurging && self->doForcePurge && deterministicRandom()->random01() < 0.25;
@@ -1028,6 +1029,13 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			wait(self->setUpBlobRange(cx));
 		}
 
+		state Future<Void> checkFeedCleanupFuture;
+		if (self->clientId == 0) {
+			checkFeedCleanupFuture = checkFeedCleanup(cx, BGV_DEBUG);
+		} else {
+			checkFeedCleanupFuture = Future<Void>(Void());
+		}
+
 		state Version readVersion = wait(self->doGrv(&tr));
 		state Version startReadVersion = readVersion;
 		state int checks = 0;
@@ -1124,6 +1132,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 
 		state bool dataPassed = wait(self->checkAllData(cx, self));
+		wait(checkFeedCleanupFuture);
 
 		state bool result =
 		    availabilityPassed && dataPassed && self->mismatches == 0 && (checks > 0) && (self->timeTravelTooOld == 0);

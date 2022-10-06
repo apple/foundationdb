@@ -469,4 +469,5 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 };
 
 WorkloadFactory<MachineAttritionWorkload> MachineAttritionWorkloadFactory("Attrition");
-FailureInjectorFactory<MachineAttritionWorkload> MachineAttritionFailureWorkloadFactory;
+// TODO: Enable MachineAttritionWorkload injection once this is bug-free
+// FailureInjectorFactory<MachineAttritionWorkload> MachineAttritionFailureWorkloadFactory;

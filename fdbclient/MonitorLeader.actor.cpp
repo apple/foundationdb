@@ -376,7 +376,7 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 				output += "#";
 				int charCount = deterministicRandom()->randomInt(0, 20);
 				for (int i = 0; i < charCount; i++) {
-					output += deterministicRandom()->randomChoice(LiteralStringRef("asdfzxcv123345:!@#$#$&()<\"\' \t"));
+					output += deterministicRandom()->randomChoice("asdfzxcv123345:!@#$#$&()<\"\' \t"_sr);
 				}
 				output += deterministicRandom()->randomChoice("\n\r"_sr);
 			}
