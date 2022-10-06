@@ -21,6 +21,7 @@
 #include <cmath>
 #include "flow/ApiVersion.h"
 #include "flow/Knobs.h"
+#include "flow/SystemMonitor.h"
 #include "flow/UnitTest.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/DatabaseContext.h"
@@ -30,6 +31,7 @@
 #include "fdbserver/MetricClient.h"
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/network.h"
 
 struct MetricsRule {
 	MetricsRule(bool enabled = false, int minLevel = 0, StringRef const& name = StringRef())
@@ -413,7 +415,6 @@ ACTOR Future<Void> startMetricsSimulationServer() {
 	state NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(port));
 	state Reference<IUDPSocket> serverSocket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
 	serverSocket->bind(localAddress);
-
 	state Standalone<StringRef> packetString = makeString(IUDPSocket::MAX_PACKET_SIZE);
 	state uint8_t* packet = mutateString(packetString);
 
@@ -456,6 +457,22 @@ ACTOR Future<Void> runMetrics() {
 		batch.clear();
 		wait(delay(FLOW_KNOBS->METRICS_EMISSION_INTERVAL));
 	}
+}
+
+TEST_CASE("/fdbserver/metrics/statsd/CreateStatsdMessage") {
+	std::string msg1 = "name:120|c";
+	std::string msg2 = "blank";
+	std::string msg3 = "name:781";
+	std::string msg4 = "name_67138:200.13|g";
+	std::string msg5 = "name:34|f";
+	std::string msg6 = "";
+	ASSERT(verifyStatsdMessage(msg1));
+	ASSERT(!verifyStatsdMessage(msg2));
+	ASSERT(!verifyStatsdMessage(msg3));
+	ASSERT(verifyStatsdMessage(msg4));
+	ASSERT(!verifyStatsdMessage(msg5));
+	ASSERT(!verifyStatsdMessage(msg6));
+	return Void{};
 }
 
 TEST_CASE("/fdbserver/metrics/TraceEvents") {

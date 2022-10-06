@@ -1320,6 +1320,7 @@ public:
 		}
 		m->setGlobal(enNetworkConnections, (flowGlobalType)m->network);
 		m->setGlobal(enASIOTimedOut, (flowGlobalType) false);
+		m->setGlobal(INetwork::enMetrics, (flowGlobalType)&m->metrics);
 
 		TraceEvent("NewMachine")
 		    .detail("Name", name)
