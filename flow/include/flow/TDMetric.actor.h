@@ -1450,22 +1450,22 @@ enum StatsDMetric { GAUGE = 0, COUNTER };
 
 class IMetric {
 protected:
-	std::string name;
+	std::string metric_name;
 	MetricsDataModel model;
 
 public:
-	IMetric(const std::string& n, MetricsDataModel m) : name{ n }, model{ m } {
+	IMetric(const std::string& n, MetricsDataModel m) : metric_name{ n }, model{ m } {
 		MetricCollection* metrics = MetricCollection::getMetricCollection();
 		ASSERT(metrics != nullptr);
-		if (metrics->map.count(name) > 0) {
-			TraceEvent(SevError, "MetricCollection_NameCollision").detail("NameConflict", name.c_str());
-			ASSERT(metrics->map.count(name) > 0);
+		if (metrics->map.count(metric_name) > 0) {
+			TraceEvent(SevError, "MetricCollection_NameCollision").detail("NameConflict", metric_name.c_str());
+			ASSERT(metrics->map.count(metric_name) > 0);
 		}
-		metrics->map[name] = this;
+		metrics->map[metric_name] = this;
 	}
 	virtual ~IMetric() {
 		MetricCollection* metrics = MetricCollection::getMetricCollection();
-		metrics->map.erase(name);
+		metrics->map.erase(metric_name);
 	}
 	virtual void flush(MetricBatch&) = 0;
 };
@@ -1476,6 +1476,8 @@ std::string createStatsdMessage(const std::string& name,
                                 const std::vector<std::pair<std::string, std::string>>& tags);
 
 std::string createStatsdMessage(const std::string& name, StatsDMetric type, const std::string& val);
+
+std::vector<std::string> splitString(const std::string& str, const std::string& delimit);
 
 bool verifyStatsdMessage(const std::string& msg);
 

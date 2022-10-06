@@ -21,6 +21,7 @@
 #include <cmath>
 #include "flow/ApiVersion.h"
 #include "flow/Knobs.h"
+#include "flow/SystemMonitor.h"
 #include "flow/UnitTest.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/DatabaseContext.h"
@@ -30,6 +31,7 @@
 #include "fdbserver/MetricClient.h"
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/network.h"
 
 struct MetricsRule {
 	MetricsRule(bool enabled = false, int minLevel = 0, StringRef const& name = StringRef())
@@ -406,11 +408,43 @@ ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig* config, 
 // 	return Void();
 // }
 
+ACTOR Future<Void> startMetricsSimulationServer() {
+	TraceEvent(SevInfo, "MetricsUDPServerStarted")
+	    .detail("Address", "127.0.0.1")
+	    .detail("Port", FLOW_KNOBS->METRICS_UDP_EMISSION_PORT);
+	state NetworkAddress localAddress =
+	    NetworkAddress::parse("127.0.0.1:" + std::to_string(FLOW_KNOBS->METRICS_UDP_EMISSION_PORT));
+	state Reference<IUDPSocket> serverSocket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
+	serverSocket->bind(localAddress);
+
+	state Standalone<StringRef> packetString = makeString(IUDPSocket::MAX_PACKET_SIZE);
+	state uint8_t* packet = mutateString(packetString);
+
+	loop {
+		int size = wait(serverSocket->receive(packet, packet + IUDPSocket::MAX_PACKET_SIZE));
+		auto message = packetString.substr(0, size);
+
+		// Let's just focus on statsd for now. For statsd, the message is expected to be seperated by newlines. We need
+		// to break each statsd metric and verify them individually.
+		if (knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL) == MetricsDataModel::STATSD) {
+			std::string statsd_message = message.toString();
+			auto metrics = splitString(statsd_message, "\n");
+			for (const auto& metric : metrics) {
+				ASSERT(verifyStatsdMessage(metric));
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> runMetrics() {
 	state MetricCollection* metrics = nullptr;
 	state MetricBatch batch;
 	// state IMetricClient* metricClient = new StatsdClient{};
 	state StatsdClient metricClient;
+	state Future<Void> metrics_actor;
+	if (g_network->isSimulated()) {
+		metrics_actor = startMetricsSimulationServer();
+	}
 	loop {
 		metrics = MetricCollection::getMetricCollection();
 		if (metrics != nullptr) {
@@ -422,6 +456,22 @@ ACTOR Future<Void> runMetrics() {
 		batch.clear();
 		wait(delay(FLOW_KNOBS->METRICS_EMISSION_INTERVAL));
 	}
+}
+
+TEST_CASE("/fdbserver/metrics/statsd/CreateStatsdMessage") {
+	std::string msg1 = "name:120|c";
+	std::string msg2 = "blank";
+	std::string msg3 = "name:781";
+	std::string msg4 = "name_67138:200.13|g";
+	std::string msg5 = "name:34|f";
+	std::string msg6 = "";
+	ASSERT(verifyStatsdMessage(msg1));
+	ASSERT(!verifyStatsdMessage(msg2));
+	ASSERT(!verifyStatsdMessage(msg3));
+	ASSERT(verifyStatsdMessage(msg4));
+	ASSERT(!verifyStatsdMessage(msg5));
+	ASSERT(!verifyStatsdMessage(msg6));
+	return Void{};
 }
 
 TEST_CASE("/fdbserver/metrics/TraceEvents") {
