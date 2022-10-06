@@ -467,9 +467,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PROXY_REJECT_BATCH_QUEUED_TOO_LONG,                    true );
 
 	bool buggfyUseResolverPrivateMutations = randomize && BUGGIFY && !ENABLE_VERSION_VECTOR_TLOG_UNICAST;
-	if (ENABLE_VERSION_VECTOR_TLOG_UNICAST == true) buggfyUseResolverPrivateMutations = true;
 
 	init( PROXY_USE_RESOLVER_PRIVATE_MUTATIONS,                 false ); if( buggfyUseResolverPrivateMutations ) PROXY_USE_RESOLVER_PRIVATE_MUTATIONS = deterministicRandom()->coinflip();
+	if (ENABLE_VERSION_VECTOR_TLOG_UNICAST == true) PROXY_USE_RESOLVER_PRIVATE_MUTATIONS = true;
 
 	init( RESET_MASTER_BATCHES,                                   200 );
 	init( RESET_RESOLVER_BATCHES,                                 200 );
