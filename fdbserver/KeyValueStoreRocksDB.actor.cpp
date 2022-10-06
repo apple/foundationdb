@@ -111,6 +111,9 @@ public:
 	std::vector<std::shared_ptr<LatencySample>> readLatency;
 	std::vector<std::shared_ptr<LatencySample>> scanLatency;
 	std::vector<std::shared_ptr<LatencySample>> readQueueLatency;
+	LatencySample commitLatency;
+	LatencySample commitQueueLatency;
+	LatencySample dbWriteLatency;
 	Reference<Histogram> readReturnHistogram;
 
 private:
@@ -122,7 +125,19 @@ SharedRocksDBState::SharedRocksDBState(UID id)
                                     ? Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
                                                               ROCKSDB_READ_RETURN_LATENCY_HISTOGRAM,
                                                               Histogram::Unit::microseconds)
-                                    : Reference<Histogram>()) {
+                                    : Reference<Histogram>()),
+    commitLatency(LatencySample("RocksDBCommitLatency",
+                                id,
+                                SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+                                SERVER_KNOBS->LATENCY_SAMPLE_SIZE)),
+    commitQueueLatency(LatencySample("RocksDBCommitQueueLatency",
+                                     id,
+                                     SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+                                     SERVER_KNOBS->LATENCY_SAMPLE_SIZE)),
+    dbWriteLatency(LatencySample("RocksDBWriteLatency",
+                                 id,
+                                 SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+                                 SERVER_KNOBS->LATENCY_SAMPLE_SIZE)) {
 	for (int i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; i++) {
 		readLatency.push_back(std::make_shared<LatencySample>(format("RocksDBReadLatency-%d", i),
 		                                                      id,
@@ -287,7 +302,16 @@ StringRef toStringRef(rocksdb::Slice s) {
 rocksdb::ColumnFamilyOptions getCFOptions() {
 	rocksdb::ColumnFamilyOptions options;
 	options.level_compaction_dynamic_level_bytes = SERVER_KNOBS->ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
-	options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
+	if (SERVER_KNOBS->ROCKSDB_LEVEL_STYLE_COMPACTION) {
+		options.OptimizeLevelStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
+	} else {
+		options.OptimizeUniversalStyleCompaction(SERVER_KNOBS->ROCKSDB_MEMTABLE_BYTES);
+	}
+
+	if (SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS) {
+		options.disable_auto_compactions = SERVER_KNOBS->ROCKSDB_DISABLE_AUTO_COMPACTIONS;
+	}
+
 	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
 		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 	}
@@ -807,14 +831,29 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		{ "CountWalFileSyncs", rocksdb::WAL_FILE_SYNCED, 0 },
 		{ "CountWalFileBytes", rocksdb::WAL_FILE_BYTES, 0 },
 		{ "CompactReadBytes", rocksdb::COMPACT_READ_BYTES, 0 },
+		{ "CompactReadBytesMarked", rocksdb::COMPACT_READ_BYTES_MARKED, 0 },
+		{ "CompactReadBytesPeriodic", rocksdb::COMPACT_READ_BYTES_PERIODIC, 0 },
+		{ "CompactReadBytesTtl", rocksdb::COMPACT_READ_BYTES_TTL, 0 },
 		{ "CompactWriteBytes", rocksdb::COMPACT_WRITE_BYTES, 0 },
+		{ "CompactWriteBytesMarked", rocksdb::COMPACT_WRITE_BYTES_MARKED, 0 },
+		{ "CompactWriteBytesPeriodic", rocksdb::COMPACT_WRITE_BYTES_PERIODIC, 0 },
+		{ "CompactWriteBytesTtl", rocksdb::COMPACT_WRITE_BYTES_TTL, 0 },
 		{ "FlushWriteBytes", rocksdb::FLUSH_WRITE_BYTES, 0 },
 		{ "CountBlocksCompressed", rocksdb::NUMBER_BLOCK_COMPRESSED, 0 },
 		{ "CountBlocksDecompressed", rocksdb::NUMBER_BLOCK_DECOMPRESSED, 0 },
 		{ "RowCacheHit", rocksdb::ROW_CACHE_HIT, 0 },
 		{ "RowCacheMiss", rocksdb::ROW_CACHE_MISS, 0 },
 		{ "CountIterSkippedKeys", rocksdb::NUMBER_ITER_SKIP, 0 },
+	};
 
+	state std::vector<std::pair<const char*, uint32_t>> histogramStats = {
+		{ "CompactionTime", rocksdb::COMPACTION_TIME },
+		{ "CompactionCPUTime", rocksdb::COMPACTION_CPU_TIME },
+		{ "CompressionTimeNanos", rocksdb::COMPRESSION_TIMES_NANOS },
+		{ "DecompressionTimeNanos", rocksdb::DECOMPRESSION_TIMES_NANOS },
+		{ "HardRateLimitDelayCount", rocksdb::HARD_RATE_LIMIT_DELAY_COUNT },
+		{ "SoftRateLimitDelayCount", rocksdb::SOFT_RATE_LIMIT_DELAY_COUNT },
+		{ "WriteStall", rocksdb::WRITE_STALL },
 	};
 	state std::vector<std::pair<const char*, std::string>> intPropertyStats = {
 		{ "NumImmutableMemtables", rocksdb::DB::Properties::kNumImmutableMemTable },
@@ -865,6 +904,13 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 			stat = statistics->getTickerCount(ticker);
 			e.detail(name, stat - cum);
 			cum = stat;
+		}
+
+		for (auto& [name, histogram] : histogramStats) {
+			rocksdb::HistogramData histogram_data;
+			statistics->histogramData(histogram, &histogram_data);
+			e.detail(format("%s%d", name, "P95"), histogram_data.percentile95);
+			e.detail(format("%s%d", name, "P99"), histogram_data.percentile99);
 		}
 
 		for (const auto& [name, property] : intPropertyStats) {
@@ -941,15 +987,17 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		std::shared_ptr<PerfContextMetrics> perfContextMetrics;
 		int threadIndex;
 		ThreadReturnPromiseStream<std::tuple<int, std::string, double>> metricPromiseStream;
+		std::shared_ptr<SharedRocksDBState> sharedState;
 
 		explicit Writer(DB& db,
 		                CF& cf,
 		                UID id,
+		                std::shared_ptr<SharedRocksDBState> sharedState,
 		                std::shared_ptr<ReadIteratorPool> readIterPool,
 		                std::shared_ptr<PerfContextMetrics> perfContextMetrics,
 		                int threadIndex)
-		  : db(db), cf(cf), id(id), readIterPool(readIterPool), perfContextMetrics(perfContextMetrics),
-		    threadIndex(threadIndex),
+		  : db(db), cf(cf), id(id), sharedState(sharedState), readIterPool(readIterPool),
+		    perfContextMetrics(perfContextMetrics), threadIndex(threadIndex),
 		    rateLimiter(SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0
 		                    ? rocksdb::NewGenericRateLimiter(
 		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC, // rate_bytes_per_sec
@@ -1103,10 +1151,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double startTime;
 			bool getHistograms;
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
-			CommitAction() {
+			CommitAction() : startTime(timer_monotonic()) {
 				if (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) {
 					getHistograms = true;
-					startTime = timer_monotonic();
 				} else {
 					getHistograms = false;
 				}
@@ -1119,9 +1166,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (doPerfContextMetrics) {
 				perfContextMetrics->reset();
 			}
-			double commitBeginTime;
+			double commitBeginTime = timer_monotonic();
+			sharedState->commitQueueLatency.addMeasurement(commitBeginTime - a.startTime);
 			if (a.getHistograms) {
-				commitBeginTime = timer_monotonic();
 				metricPromiseStream.send(std::make_tuple(
 				    threadIndex, ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM.toString(), commitBeginTime - a.startTime));
 			}
@@ -1138,7 +1185,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::WriteOptions options;
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
 
-			double writeBeginTime = a.getHistograms ? timer_monotonic() : 0;
+			double writeBeginTime = timer_monotonic();
 			if (rateLimiter) {
 				// Controls the total write rate of compaction and flush in bytes per second.
 				// Request for batchToCommit bytes. If this request cannot be satisfied, the call is blocked.
@@ -1146,9 +1193,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			s = db->Write(options, a.batchToCommit.get());
 			readIterPool->update();
+			double currTime = timer_monotonic();
+			sharedState->dbWriteLatency.addMeasurement(currTime - writeBeginTime);
 			if (a.getHistograms) {
-				metricPromiseStream.send(std::make_tuple(
-				    threadIndex, ROCKSDB_WRITE_HISTOGRAM.toString(), timer_monotonic() - writeBeginTime));
+				metricPromiseStream.send(
+				    std::make_tuple(threadIndex, ROCKSDB_WRITE_HISTOGRAM.toString(), currTime - writeBeginTime));
 			}
 
 			if (!s.ok()) {
@@ -1171,8 +1220,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					}
 				}
 			}
+			currTime = timer_monotonic();
+			sharedState->commitLatency.addMeasurement(currTime - a.startTime);
 			if (a.getHistograms) {
-				double currTime = timer_monotonic();
 				metricPromiseStream.send(std::make_tuple(
 				    threadIndex, ROCKSDB_COMMIT_ACTION_HISTOGRAM.toString(), currTime - commitBeginTime));
 				metricPromiseStream.send(
@@ -1741,8 +1791,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			writeThread = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
 			readThreads = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY);
 		}
-		struct Writer* writer =
-		    new Writer(db, defaultFdbCF, id, readIterPool, perfContextMetrics, SERVER_KNOBS->ROCKSDB_READ_PARALLELISM);
+		struct Writer* writer = new Writer(db,
+		                                   defaultFdbCF,
+		                                   id,
+		                                   this->sharedState,
+		                                   readIterPool,
+		                                   perfContextMetrics,
+		                                   SERVER_KNOBS->ROCKSDB_READ_PARALLELISM);
 		if (SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE > 0) {
 			actors.push_back(updateHistogram(writer->metricPromiseStream.getFuture()));
 		}
