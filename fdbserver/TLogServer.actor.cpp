@@ -1070,8 +1070,9 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 	    BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistKnownCommittedVersionKeys.begin),
 	    BinaryWriter::toValue(logData->knownCommittedVersion, Unversioned())));
 	logData->persistentDataVersion = newPersistentDataVersion;
-
+	TraceEvent("TLogUpdatePersistentCommit", logData->logId).log();
 	wait(self->persistentData->commit()); // SOMEDAY: This seems to be running pretty often, should we slow it down???
+	TraceEvent("TLogUpdatePersistentCommitCompleted", logData->logId).log();
 	wait(delay(0, TaskPriority::UpdateStorage));
 
 	// Now that the changes we made to persistentData are durable, erase the data we moved from memory and the queue,
@@ -2376,6 +2377,7 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 
 	TraceEvent("TLogInitCommit", logData->logId).log();
 	wait(ioTimeoutError(self->persistentData->commit(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+	TraceEvent("TLogInitCommitCompleted", logData->logId).log();
 	return Void();
 }
 
@@ -3322,8 +3324,7 @@ bool tlogTerminated(TLogData* self, IKeyValueStore* persistentData, TLogQueue* p
 	}
 
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
-	    e.code() == error_code_file_not_found || e.code() == error_code_invalid_cluster_id ||
-	    e.code() == error_code_broken_promise) {
+	    e.code() == error_code_file_not_found || e.code() == error_code_invalid_cluster_id) {
 		TraceEvent("TLogTerminated", self->dbgid).errorUnsuppressed(e);
 		return true;
 	} else

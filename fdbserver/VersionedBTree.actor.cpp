@@ -3748,17 +3748,17 @@ public:
 	Value getCommitRecord() const override { return lastCommittedHeader.userCommitRecord; }
 
 	ACTOR void shutdown(DWALPager* self, bool dispose) {
+		if (self->errorPromise.canBeSet()) {
+			debug_printf("DWALPager(%s) shutdown sending error\n", self->filename.c_str());
+			self->errorPromise.sendError(actor_cancelled()); // Ideally this should be shutdown_in_progress
+		}
+
 		debug_printf("DWALPager(%s) shutdown cancel recovery\n", self->filename.c_str());
 		self->recoverFuture.cancel();
 		debug_printf("DWALPager(%s) shutdown cancel commit\n", self->filename.c_str());
 		self->commitFuture.cancel();
 		debug_printf("DWALPager(%s) shutdown cancel remap\n", self->filename.c_str());
 		self->remapCleanupFuture.cancel();
-
-		if (self->errorPromise.canBeSet()) {
-			debug_printf("DWALPager(%s) shutdown sending error\n", self->filename.c_str());
-			self->errorPromise.sendError(actor_cancelled()); // Ideally this should be shutdown_in_progress
-		}
 
 		// Must wait for pending operations to complete, canceling them can cause a crash because the underlying
 		// operations may be uncancellable and depend on memory from calling scope's page reference
@@ -7715,6 +7715,7 @@ public:
 		                               m_error);
 		m_tree = new VersionedBTree(pager, filename, encodingType, m_keyProvider);
 		m_init = catchError(init_impl(this));
+		m_lastCommit = m_init;
 	}
 
 	Future<Void> init() override { return m_init; }
@@ -7770,6 +7771,10 @@ public:
 	Future<Void> onClosed() const override { return m_closed.getFuture(); }
 
 	Future<Void> commit(bool sequential = false) override {
+		// TODO: remove following debugging assertions if the commit pipeline is enabled
+		ASSERT(m_init.isReady());
+		ASSERT(m_lastCommit.isReady());
+
 		m_lastCommit = catchError(m_tree->commit(m_nextCommitVersion));
 		// Currently not keeping history
 		m_tree->setOldestReadableVersion(m_nextCommitVersion);
