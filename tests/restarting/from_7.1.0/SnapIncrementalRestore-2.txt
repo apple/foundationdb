@@ -1,4 +1,3 @@
-testClass=SnapshotTest
 storageEngineExcludeTypes=[4, 5]
 
 testTitle=RestoreBackup
