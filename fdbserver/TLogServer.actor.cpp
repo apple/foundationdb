@@ -3587,6 +3587,8 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 	TraceEvent("SharedTlog", tlogId);
 	try {
 		try {
+			wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+
 			if (restoreFromDisk) {
 				wait(restorePersistentState(&self, locality, oldLog, recovered, tlogRequests));
 			} else {
