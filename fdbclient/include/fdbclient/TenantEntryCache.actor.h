@@ -376,9 +376,8 @@ public:
 
 	TenantEntryCache(Database db, TenantEntryCacheRefreshMode mode)
 	  : uid(deterministicRandom()->randomUniqueID()), db(db), createPayloadFunc(defaultCreatePayload),
-	    refreshMode(mode), metrics("TenantEntryCacheMetrics", uid.toString()),
-	    hits("TenantEntryCacheHits", metrics), misses("TenantEntryCacheMisses", metrics),
-	    refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
+	    refreshMode(mode), metrics("TenantEntryCacheMetrics", uid.toString()), hits("TenantEntryCacheHits", metrics),
+	    misses("TenantEntryCacheMisses", metrics), refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
 	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics),
 	    numRefreshes("TenantEntryCacheNumRefreshes", metrics),
 	    refreshByWatchTrigger("TenantEntryCacheRefreshWatchTrigger", metrics) {
