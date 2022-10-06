@@ -18,12 +18,14 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Metacluster.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupProgress.actor.h"
 #include "fdbserver/ClusterRecovery.actor.h"
 #include "fdbserver/EncryptionOpsUtils.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
 
@@ -429,6 +431,17 @@ ACTOR Future<Void> rejoinRequestHandler(Reference<ClusterRecoveryData> self) {
 	}
 }
 
+namespace {
+EncryptionAtRestMode getEncryptionAtRest() {
+	// TODO: Use db-config encryption config to determine cluster encryption status
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
+		return EncryptionAtRestMode(EncryptionAtRestMode::Mode::AES_256_CTR);
+	} else {
+		return EncryptionAtRestMode();
+	}
+}
+} // namespace
+
 // Keeps the coordinated state (cstate) updated as the set of recruited tlogs change through recovery.
 ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
                                      Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems,
@@ -441,6 +454,7 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		state DBCoreState newState;
 		self->logSystem->toCoreState(newState);
 		newState.recoveryCount = recoverCount;
+		newState.encryptionAtRestMode = getEncryptionAtRest();
 		state Future<Void> changed = self->logSystem->onCoreStateChanged();
 
 		ASSERT(newState.tLogs[0].tLogWriteAntiQuorum == configuration.tLogWriteAntiQuorum &&

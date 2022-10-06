@@ -28,6 +28,7 @@
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/MasterInterface.h"
+#include "flow/ObjectSerializerTraits.h"
 
 class LogSet;
 struct OldLogData;
@@ -200,7 +201,8 @@ struct DBCoreState {
 			           tLogs[0].tLogWriteAntiQuorum,
 			           recoveryCount,
 			           tLogs[0].tLogReplicationFactor,
-			           logSystemType);
+			           logSystemType,
+			           encryptionAtRestMode);
 			tLogs[0].tLogVersion = TLogVersion::V2;
 
 			uint64_t tLocalitySize = (uint64_t)tLogs[0].tLogLocalities.size();

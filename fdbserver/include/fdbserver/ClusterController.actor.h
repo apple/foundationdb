@@ -123,6 +123,9 @@ struct RecruitRemoteWorkersInfo : ReferenceCounted<RecruitRemoteWorkersInfo> {
 	RecruitRemoteWorkersInfo(RecruitRemoteFromConfigurationRequest const& req) : req(req) {}
 };
 
+// Forward declaration
+struct ClusterRecoveryData;
+
 class ClusterControllerData {
 public:
 	struct DBInfo {
@@ -3399,6 +3402,8 @@ public:
 	std::unordered_set<NetworkAddress>
 	    excludedDegradedServers; // The degraded servers to be excluded when assigning workers to roles.
 	std::queue<double> recentHealthTriggeredRecoveryTime;
+
+	AsyncVar<Reference<ClusterRecoveryData>> recoveryData;
 
 	CounterCollection clusterControllerMetrics;
 

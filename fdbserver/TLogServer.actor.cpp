@@ -2396,28 +2396,19 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 }
 
 ACTOR Future<EncryptionAtRestMode> getEncryptionAtRestMode(TLogData* self) {
-	state ReadYourWritesTransaction tr(self->cx);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> value = wait(tr.get(encryptionAtRestModeConfKey));
-			EncryptionAtRestMode m;
-			if (value.present()) {
-				m = EncryptionAtRestMode::fromValue(value);
-			}
+	GetEncryptionAtRestModeRequest req;
+	GetEncryptionAtRestModeResponse resp =
+	    wait(brokenPromiseToNever(self->dbInfo->get().clusterInterface.getEncryptionAtRestMode.getReply(req)));
 
-			// TODO: Encryption at-rest is controlled via SEVER_KNOBs, in future the code shall be updated to replace
-			// per-component (TLog, Redwood, BlobGranule) KNOBs with single db-config
-			if (m.mode == EncryptionAtRestMode::Mode::DISABLED &&
-			    (SERVER_KNOBS->ENABLE_ENCRYPTION && SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION)) {
-				m = EncryptionAtRestMode(EncryptionAtRestMode::Mode::AES_256_CTR);
-			}
-			TraceEvent("GetEncryptionAtRestMode", self->dbgid).detail("Mode", m.toString());
-			return m;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
+	TraceEvent("GetEncryptionAtRestMode").detail("Mode", resp.mode);
+
+	// TODO: TLOG_ENCTYPTION KNOB shall be removed and db-config check should be sufficient to determine tlog (and
+	// cluster) encryption status
+	if ((EncryptionAtRestMode::Mode)resp.mode != EncryptionAtRestMode::Mode::DISABLED &&
+	    SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION) {
+		return EncryptionAtRestMode((EncryptionAtRestMode::Mode)resp.mode);
+	} else {
+		return EncryptionAtRestMode();
 	}
 }
 

@@ -32,6 +32,7 @@
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -271,7 +272,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
                                         ServerCoordinators coordinators,
                                         Future<Void> recoveredDiskFiles) {
 	state MasterInterface iMaster;
-	state Reference<ClusterRecoveryData> recoveryData;
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> recoveryCore;
 
@@ -328,18 +328,18 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			                              // the "first" recovery after more than a second of normal operation
 
 			TraceEvent("CCWDB", cluster->id).detail("Watching", iMaster.id());
-			recoveryData = makeReference<ClusterRecoveryData>(cluster,
-			                                                  db->serverInfo,
-			                                                  db->serverInfo->get().master,
-			                                                  db->serverInfo->get().masterLifetime,
-			                                                  coordinators,
-			                                                  db->serverInfo->get().clusterInterface,
-			                                                  ""_sr,
-			                                                  addActor,
-			                                                  db->forceRecovery);
+			cluster->recoveryData.set(makeReference<ClusterRecoveryData>(cluster,
+			                                                             db->serverInfo,
+			                                                             db->serverInfo->get().master,
+			                                                             db->serverInfo->get().masterLifetime,
+			                                                             coordinators,
+			                                                             db->serverInfo->get().clusterInterface,
+			                                                             ""_sr,
+			                                                             addActor,
+			                                                             db->forceRecovery));
 
-			collection = actorCollection(recoveryData->addActor.getFuture());
-			recoveryCore = clusterRecoveryCore(recoveryData);
+			collection = actorCollection(cluster->recoveryData.get()->addActor.getFuture());
+			recoveryCore = clusterRecoveryCore(cluster->recoveryData.get());
 
 			// Master failure detection is pretty sensitive, but if we are in the middle of a very long recovery we
 			// really don't want to have to start over
@@ -359,10 +359,11 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				when(wait(db->serverInfo->onChange())) {}
 				when(BackupWorkerDoneRequest req =
 				         waitNext(db->serverInfo->get().clusterInterface.notifyBackupWorkerDone.getFuture())) {
-					if (recoveryData->logSystem.isValid() && recoveryData->logSystem->removeBackupWorker(req)) {
-						recoveryData->registrationTrigger.trigger();
+					if (cluster->recoveryData.get()->logSystem.isValid() &&
+					    cluster->recoveryData.get()->logSystem->removeBackupWorker(req)) {
+						cluster->recoveryData.get()->registrationTrigger.trigger();
 					}
-					++recoveryData->backupWorkerDoneRequests;
+					++cluster->recoveryData.get()->backupWorkerDoneRequests;
 					req.reply.send(Void());
 					TraceEvent(SevDebug, "BackupWorkerDoneRequest", cluster->id).log();
 				}
@@ -375,7 +376,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			}
 
 			recoveryCore.cancel();
-			wait(cleanupRecoveryActorCollection(recoveryData, /*exThrown=*/false));
+			wait(cleanupRecoveryActorCollection(cluster->recoveryData.get(), /*exThrown=*/false));
 			ASSERT(addActor.isEmpty());
 
 			wait(spinDelay);
@@ -389,7 +390,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				wait(delay(0.0));
 
 			recoveryCore.cancel();
-			wait(cleanupRecoveryActorCollection(recoveryData, true /* exThrown */));
+			wait(cleanupRecoveryActorCollection(cluster->recoveryData.get(), /*exThrown=*/true));
 			ASSERT(addActor.isEmpty());
 
 			CODE_PROBE(err.code() == error_code_tlog_failed, "Terminated due to tLog failure");
@@ -3025,6 +3026,26 @@ ACTOR Future<Void> updateClusterId(ClusterControllerData* self) {
 	}
 }
 
+ACTOR Future<Void> handleGetEncryptionAtRestMode(ClusterControllerData* self, GetEncryptionAtRestModeRequest req) {
+	loop {
+		if (!self->recoveryData.get().isValid()) {
+			wait(self->recoveryData.onChange());
+		}
+
+		choose {
+			when(wait(self->recoveryData.get()->cstate.isReadable.getFuture())) {
+				GetEncryptionAtRestModeResponse resp;
+				resp.mode = self->recoveryData.get()->cstate.myDBState.encryptionAtRestMode.mode;
+				req.reply.send(resp);
+				return Void();
+			}
+			when(wait(self->recoveryData.onChange())) {
+				// handle cluster recovery restart scenario
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
                                          ServerCoordinators coordinators,
@@ -3090,8 +3111,8 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 				endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Stop Received Signal", true);
 			}
 
-			// We shut down normally even if there was a serious error (so this fdbserver may be re-elected cluster
-			// controller)
+			// We shut down normally even if there was a serious error (so this fdbserver may be re-elected
+			// cluster controller)
 			return Void();
 		}
 		when(OpenDatabaseRequest req = waitNext(interf.clientInterface.openDatabase.getFuture())) {
@@ -3159,6 +3180,9 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		}
 		when(GetServerDBInfoRequest req = waitNext(interf.getServerDBInfo.getFuture())) {
 			self.addActor.send(clusterGetServerInfo(&self.db, req.knownServerInfoID, req.reply));
+		}
+		when(GetEncryptionAtRestModeRequest req = waitNext(interf.getEncryptionAtRestMode.getFuture())) {
+			self.addActor.send(handleGetEncryptionAtRestMode(&self, req));
 		}
 		when(wait(leaderFail)) {
 			// We are no longer the leader if this has changed.
@@ -3243,11 +3267,11 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
                                      Reference<AsyncVar<Optional<UID>>> clusterId) {
 
 	// Defer this wait optimization of cluster configuration has 'Encryption data at-rest' enabled.
-	// Encryption depends on available of EncryptKeyProxy (EKP) FDB role to enable fetch/refresh of encryption keys
-	// created and managed by external KeyManagementService (KMS).
+	// Encryption depends on available of EncryptKeyProxy (EKP) FDB role to enable fetch/refresh of
+	// encryption keys created and managed by external KeyManagementService (KMS).
 	//
-	// TODO: Wait optimization is to ensure the worker server on the same process gets registered with the new CC before
-	// recruitment. Unify the codepath for both Encryption enable vs disable scenarios.
+	// TODO: Wait optimization is to ensure the worker server on the same process gets registered with the
+	// new CC before recruitment. Unify the codepath for both Encryption enable vs disable scenarios.
 
 	if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		wait(recoveredDiskFiles);
@@ -3278,8 +3302,8 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 
 namespace {
 
-// Tests `ClusterControllerData::updateWorkerHealth()` can update `ClusterControllerData::workerHealth` based on
-// `UpdateWorkerHealth` request correctly.
+// Tests `ClusterControllerData::updateWorkerHealth()` can update `ClusterControllerData::workerHealth`
+// based on `UpdateWorkerHealth` request correctly.
 TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
 	state ClusterControllerData data(ClusterControllerFullInterface(),
@@ -3292,8 +3316,8 @@ TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 	state NetworkAddress badPeer2(IPAddress(0x03030303), 1);
 	state NetworkAddress badPeer3(IPAddress(0x04040404), 1);
 
-	// Create a `UpdateWorkerHealthRequest` with two bad peers, and they should appear in the `workerAddress`'s
-	// degradedPeers.
+	// Create a `UpdateWorkerHealthRequest` with two bad peers, and they should appear in the
+	// `workerAddress`'s degradedPeers.
 	{
 		UpdateWorkerHealthRequest req;
 		req.address = workerAddress;
@@ -3354,8 +3378,8 @@ TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 		previousRefreshTime = health.degradedPeers[badPeer3].lastRefreshTime;
 	}
 
-	// Create a `UpdateWorkerHealthRequest` with empty `degradedPeers`, which should not remove the worker from
-	// `workerHealth`.
+	// Create a `UpdateWorkerHealthRequest` with empty `degradedPeers`, which should not remove the worker
+	// from `workerHealth`.
 	{
 		wait(delay(0.001));
 		UpdateWorkerHealthRequest req;
@@ -3439,8 +3463,8 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 	NetworkAddress badPeer3(IPAddress(0x04040404), 1);
 	NetworkAddress badPeer4(IPAddress(0x05050505), 1);
 
-	// Test that a reported degraded link should stay for sometime before being considered as a degraded link by
-	// cluster controller.
+	// Test that a reported degraded link should stay for sometime before being considered as a degraded
+	// link by cluster controller.
 	{
 		data.workerHealth[worker].degradedPeers[badPeer1] = { now(), now() };
 		data.workerHealth[worker].disconnectedPeers[badPeer2] = { now(), now() };
@@ -3472,7 +3496,8 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 		data.workerHealth.clear();
 	}
 
-	// Test that if both A complains B and B compalins A, only one of the server will be chosen as degraded server.
+	// Test that if both A complains B and B compalins A, only one of the server will be chosen as degraded
+	// server.
 	{
 		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
 			                                                  now() };
@@ -3553,8 +3578,8 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 		data.workerHealth.clear();
 	}
 
-	// Test that if the degradation is reported both ways between A and other 4 servers, no degraded server is
-	// returned.
+	// Test that if the degradation is reported both ways between A and other 4 servers, no degraded server
+	// is returned.
 	{
 		ASSERT(SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE < 4);
 		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,

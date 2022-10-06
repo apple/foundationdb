@@ -79,6 +79,7 @@ public:
 	DBCoreState myDBState;
 	bool finalWriteStarted;
 	Future<Void> previousWrite;
+	Promise<Void> isReadable;
 
 	ReusableCoordinatedState(ServerCoordinators const& coordinators,
 	                         PromiseStream<Future<Void>> const& addActor,
@@ -117,6 +118,8 @@ private:
 			self->prevDBState = BinaryReader::fromStringRef<DBCoreState>(prevDBStateRaw, IncludeVersion());
 			self->myDBState = self->prevDBState;
 		}
+
+		self->isReadable.send(Void());
 
 		return Void();
 	}
