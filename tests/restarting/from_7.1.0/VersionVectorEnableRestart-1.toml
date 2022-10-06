@@ -1,4 +1,5 @@
-storageEngineExcludeTypes=3
+[configuration]
+storageEngineExcludeTypes = [3]
 
 [[knobs]]
 enable_version_vector = false
