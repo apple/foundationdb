@@ -19,19 +19,17 @@ void TagQueue::updateRates(TransactionTagMap<double> const& newRates) {
 	}
 }
 
-bool TagQueue::canStart(TransactionTag tag, int64_t count) const {
+bool TagQueue::canStart(TransactionTag tag, int64_t alreadyReleased, int64_t count) const {
 	auto it = rateInfos.find(tag);
 	if (it == rateInfos.end()) {
 		return true;
 	}
-	auto it2 = releasedInEpoch.find(tag);
-	auto alreadyReleased = (it2 == releasedInEpoch.end() ? 0 : it2->second);
 	return it->second.canStart(alreadyReleased, count);
 }
 
-bool TagQueue::canStart(GetReadVersionRequest req) const {
+bool TagQueue::canStart(GetReadVersionRequest req, TransactionTagMap<int64_t>& releasedInEpoch) const {
 	for (const auto& [tag, count] : req.tags) {
-		if (!canStart(tag, count)) {
+		if (!canStart(tag, releasedInEpoch[tag], count)) {
 			return false;
 		}
 	}
@@ -42,29 +40,20 @@ void TagQueue::addRequest(GetReadVersionRequest req) {
 	newRequests.push_back(req);
 }
 
-void TagQueue::startEpoch() {
-	for (auto& [_, rateInfo] : rateInfos) {
-		rateInfo.startEpoch();
-	}
-	releasedInEpoch.clear();
-}
-
-void TagQueue::endEpoch(double elapsed) {
-	for (auto& [tag, rateInfo] : rateInfos) {
-		rateInfo.endEpoch(releasedInEpoch[tag], false, elapsed);
-	}
-}
-
 void TagQueue::runEpoch(double elapsed,
                         SpannedDeque<GetReadVersionRequest>& outBatchPriority,
                         SpannedDeque<GetReadVersionRequest>& outDefaultPriority) {
-	startEpoch();
+	for (auto& [_, rateInfo] : rateInfos) {
+		rateInfo.startEpoch();
+	}
+
 	Deque<DelayedRequest> newDelayedRequests;
+	TransactionTagMap<int64_t> releasedInEpoch;
 
 	while (!delayedRequests.empty()) {
 		auto& delayedReq = delayedRequests.front();
 		auto& req = delayedReq.req;
-		if (canStart(req)) {
+		if (canStart(req, releasedInEpoch)) {
 			for (const auto& [tag, count] : req.tags) {
 				releasedInEpoch[tag] += count;
 			}
@@ -85,7 +74,7 @@ void TagQueue::runEpoch(double elapsed,
 
 	while (!newRequests.empty()) {
 		auto const& req = newRequests.front();
-		if (canStart(req)) {
+		if (canStart(req, releasedInEpoch)) {
 			for (const auto& [tag, count] : req.tags) {
 				releasedInEpoch[tag] += count;
 			}
@@ -104,7 +93,9 @@ void TagQueue::runEpoch(double elapsed,
 	}
 
 	delayedRequests = std::move(newDelayedRequests);
-	endEpoch(elapsed);
+	for (auto& [tag, rateInfo] : rateInfos) {
+		rateInfo.endEpoch(std::move(releasedInEpoch)[tag], false, elapsed);
+	}
 }
 
 ACTOR static Future<Void> mockClient(TagQueue* tagQueue,
