@@ -47,6 +47,13 @@ struct SubmitBackupWorkload final : TestWorkload {
 		snapshotInterval = getOption(options, "snapshotInterval"_sr, 1e8);
 		stopWhenDone.set(getOption(options, "stopWhenDone"_sr, true));
 		incremental.set(getOption(options, "incremental"_sr, false));
+		if (g_network->isSimulated()) {
+			// TODO: Currently this workload uses optional tenant mode so using the tenant cache
+			// causes lots of misses which in turn causes the workload to time out. When optional tenant mode with
+			// backups is fully supported (more performant) this can be removed.
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob("backup_encrypted_snapshot_use_tenant_cache",
+			                                                          KnobValueRef::create(bool{ false }));
+		}
 	}
 
 	static constexpr const char* DESCRIPTION = "SubmitBackup";
@@ -63,7 +70,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 			                                    self->snapshotInterval,
 			                                    self->tag.toString(),
 			                                    backupRanges,
-			                                    false,
+			                                    SERVER_KNOBS->ENABLE_ENCRYPTION,
 			                                    self->stopWhenDone,
 			                                    UsePartitionedLog::False,
 			                                    self->incremental));

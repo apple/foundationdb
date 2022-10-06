@@ -134,6 +134,13 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				    .detail("RangeEnd", (beginRange < endRange) ? printable(endRange) : printable(beginRange));
 			}
 		}
+		if (g_network->isSimulated()) {
+			// TODO: Currently this workload uses optional tenant mode so using the tenant cache
+			// causes lots of misses which in turn causes the workload to time out. When optional tenant mode with
+			// backups is fully supported (more performant) this can be removed.
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob("backup_encrypted_snapshot_use_tenant_cache",
+			                                                          KnobValueRef::create(bool{ false }));
+		}
 	}
 
 	std::string description() const override { return "BackupAndParallelRestoreCorrectness"; }
@@ -225,7 +232,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			                               deterministicRandom()->randomInt(0, 100),
 			                               tag.toString(),
 			                               backupRanges,
-			                               false,
+			                               SERVER_KNOBS->ENABLE_ENCRYPTION,
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               self->usePartitionedLogs));
 		} catch (Error& e) {
@@ -485,7 +492,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
 					                                       self->backupRanges,
-					                                       false,
+					                                       SERVER_KNOBS->ENABLE_ENCRYPTION,
 					                                       StopWhenDone::True,
 					                                       UsePartitionedLog::False);
 				} catch (Error& e) {

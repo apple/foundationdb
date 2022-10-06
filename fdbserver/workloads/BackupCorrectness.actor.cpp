@@ -46,8 +46,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	bool allowPauses;
 	bool shareLogRange;
 	bool shouldSkipRestoreRanges;
-	bool enableBackupEncryption;
 	bool defaultBackup;
+	bool useTenantCacheDuringBackup;
 	Optional<std::string> encryptionKeyFileName;
 
 	BackupAndRestoreCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -62,7 +62,6 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		backupTag = getOption(options, "backupTag"_sr, BackupAgentBase::getDefaultTag());
 		backupRangesCount = getOption(options, "backupRangesCount"_sr, 5);
 		backupRangeLengthMax = getOption(options, "backupRangeLengthMax"_sr, 1);
-		enableBackupEncryption = getOption(options, "enableBackupEncryption"_sr, false);
 		abortAndRestartAfter =
 		    getOption(options,
 		              "abortAndRestartAfter"_sr,
@@ -82,6 +81,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		allowPauses = getOption(options, "allowPauses"_sr, true);
 		shareLogRange = getOption(options, "shareLogRange"_sr, false);
 		defaultBackup = getOption(options, "defaultBackup"_sr, false);
+		useTenantCacheDuringBackup = getOption(options, "useTenantCacheDuringBackup"_sr, false);
+		if (g_network->isSimulated()) {
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob(
+			    "backup_encrypted_snapshot_use_tenant_cache", KnobValueRef::create(bool{ useTenantCacheDuringBackup }));
+		}
 
 		std::vector<std::string> restorePrefixesToInclude =
 		    getOption(options, "restorePrefixesToInclude"_sr, std::vector<std::string>());
@@ -343,7 +347,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			                               deterministicRandom()->randomInt(0, 2000),
 			                               tag.toString(),
 			                               backupRanges,
-			                               self->enableBackupEncryption && SERVER_KNOBS->ENABLE_ENCRYPTION,
+			                               SERVER_KNOBS->ENABLE_ENCRYPTION,
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               UsePartitionedLog::False,
 			                               IncrementalBackupOnly::False,
@@ -597,16 +601,15 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			if (!self->locked && BUGGIFY) {
 				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
 				try {
-					extraBackup =
-					    backupAgent.submitBackup(cx,
-					                             "file://simfdb/backups/"_sr,
-					                             {},
-					                             deterministicRandom()->randomInt(0, 60),
-					                             deterministicRandom()->randomInt(0, 100),
-					                             self->backupTag.toString(),
-					                             self->backupRanges,
-					                             self->enableBackupEncryption && SERVER_KNOBS->ENABLE_ENCRYPTION,
-					                             StopWhenDone::True);
+					extraBackup = backupAgent.submitBackup(cx,
+					                                       "file://simfdb/backups/"_sr,
+					                                       {},
+					                                       deterministicRandom()->randomInt(0, 60),
+					                                       deterministicRandom()->randomInt(0, 100),
+					                                       self->backupTag.toString(),
+					                                       self->backupRanges,
+					                                       SERVER_KNOBS->ENABLE_ENCRYPTION,
+					                                       StopWhenDone::True);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
 					    .error(e)

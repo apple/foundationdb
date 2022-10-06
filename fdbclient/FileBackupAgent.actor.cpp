@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
@@ -649,10 +650,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		return Void();
 	}
 
-	ACTOR static Future<Void> updateEncryptionKeysCtx(EncryptedRangeFileWriter* self,
-	                                                  KeyRef key,
-	                                                  Reference<TenantEntryCache<Void>> cache) {
-		state std::pair<int64_t, TenantName> curTenantInfo = wait(getEncryptionDomainDetails(key, cache));
+	ACTOR static Future<Void> updateEncryptionKeysCtx(EncryptedRangeFileWriter* self, KeyRef key) {
+		state std::pair<int64_t, TenantName> curTenantInfo = wait(getEncryptionDomainDetails(key, self));
 		state Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 
 		// Get text and header cipher key
@@ -694,13 +693,12 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 	static bool isSystemKey(KeyRef key) { return key.size() && key[0] == systemKeys.begin[0]; }
 
-	ACTOR static Future<std::pair<int64_t, TenantName>> getEncryptionDomainDetailsImpl(
-	    KeyRef key,
-	    Reference<TenantEntryCache<Void>> tenantCache) {
+	ACTOR static Future<std::pair<int64_t, TenantName>>
+	getEncryptionDomainDetailsImpl(KeyRef key, Reference<TenantEntryCache<Void>> tenantCache, bool useTenantCache) {
 		if (isSystemKey(key)) {
 			return std::make_pair(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME);
 		}
-		if (key.size() < TENANT_PREFIX_SIZE) {
+		if (key.size() < TENANT_PREFIX_SIZE || !useTenantCache) {
 			return std::make_pair(FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
 		}
 		KeyRef tenantPrefix = KeyRef(key.begin(), TENANT_PREFIX_SIZE);
@@ -712,10 +710,15 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		return std::make_pair(FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME);
 	}
 
-	static Future<std::pair<int64_t, TenantName>> getEncryptionDomainDetails(
-	    KeyRef key,
-	    Reference<TenantEntryCache<Void>> tenantCache) {
-		return getEncryptionDomainDetailsImpl(key, tenantCache);
+	static Future<std::pair<int64_t, TenantName>> getEncryptionDomainDetails(KeyRef key,
+	                                                                         EncryptedRangeFileWriter* self) {
+		// If tenants are disabled on a cluster then don't use the TenantEntryCache as it will result in alot of
+		// unnecessary cache misses. It is strongly recommended NOT to use snapshot backups with
+		// TenantMode::OPTIONAL_TENANT for now as it can also result in many cache misses
+		bool useTenantCache = self->cx->clientInfo->get().tenantMode != TenantMode::DISABLED &&
+		                      CLIENT_KNOBS->BACKUP_ENCRYPTED_SNAPSHOT_USE_TENANT_CACHE;
+		CODE_PROBE(useTenantCache, "using tenant cache");
+		return getEncryptionDomainDetailsImpl(key, self->tenantCache, useTenantCache);
 	}
 
 	// Handles the first block and internal blocks.  Ends current block if needed.
@@ -813,7 +816,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		appendStringRefWithLenToBuffer(self, &endKey);
 		appendStringRefWithLenToBuffer(self, &newValue);
 		wait(newBlock(self, 0, endKey, writeValue));
-		wait(updateEncryptionKeysCtx(self, self->lastKey, self->tenantCache));
+		wait(updateEncryptionKeysCtx(self, self->lastKey));
 		return Void();
 	}
 
@@ -825,9 +828,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		if (self->lastKey.size() == 0 || k.size() == 0) {
 			return false;
 		}
-		state std::pair<int64_t, TenantName> curKeyTenantInfo = wait(getEncryptionDomainDetails(k, self->tenantCache));
-		state std::pair<int64_t, TenantName> prevKeyTenantInfo =
-		    wait(getEncryptionDomainDetails(self->lastKey, self->tenantCache));
+		state std::pair<int64_t, TenantName> curKeyTenantInfo = wait(getEncryptionDomainDetails(k, self));
+		state std::pair<int64_t, TenantName> prevKeyTenantInfo = wait(getEncryptionDomainDetails(self->lastKey, self));
 		// crossing tenant boundaries so finish the current block using only the tenant prefix of the new key
 		if (curKeyTenantInfo.first != prevKeyTenantInfo.first) {
 			CODE_PROBE(true, "crossed tenant boundaries");
@@ -840,7 +842,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	// Start a new block if needed, then write the key and value
 	ACTOR static Future<Void> writeKV_impl(EncryptedRangeFileWriter* self, Key k, Value v) {
 		if (!self->cipherKeys.headerCipherKey.isValid() || !self->cipherKeys.textCipherKey.isValid()) {
-			wait(updateEncryptionKeysCtx(self, k, self->tenantCache));
+			wait(updateEncryptionKeysCtx(self, k));
 		}
 		state int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
 		wait(newBlockIfNeeded(self, toWrite));
@@ -862,7 +864,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		// TODO (Nim): Is it possible to write empty begin and end keys?
 		if (k.size() > 0 &&
 		    (!self->cipherKeys.headerCipherKey.isValid() || !self->cipherKeys.textCipherKey.isValid())) {
-			wait(updateEncryptionKeysCtx(self, k, self->tenantCache));
+			wait(updateEncryptionKeysCtx(self, k));
 		}
 
 		// Need to account for extra "empty" value being written in the case of crossing tenant boundaries

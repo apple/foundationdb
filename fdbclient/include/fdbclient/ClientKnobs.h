@@ -191,6 +191,7 @@ public:
 	double BACKUP_STATUS_JITTER;
 	double MIN_CLEANUP_SECONDS;
 	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
+	bool BACKUP_ENCRYPTED_SNAPSHOT_USE_TENANT_CACHE; // whether the encrypted backup agent should use tenant entry cache
 
 	// Configuration
 	int32_t DEFAULT_AUTO_COMMIT_PROXIES;
