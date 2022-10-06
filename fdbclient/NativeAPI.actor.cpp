@@ -222,6 +222,52 @@ void DatabaseContext::addSSIdTagMapping(const UID& uid, const Tag& tag) {
 	ssidTagMapping[uid] = tag;
 }
 
+void DatabaseContext::getLatestCommitVersionForSSID(const UID& ssid, Tag& tag, Version& commitVersion) {
+	// initialization
+	tag = invalidTag;
+	commitVersion = invalidVersion;
+
+	auto iter = ssidTagMapping.find(ssid);
+	if (iter != ssidTagMapping.end()) {
+		tag = iter->second;
+
+		if (ssVersionVectorCache.hasVersion(tag)) {
+			commitVersion = ssVersionVectorCache.getVersion(tag);
+		}
+	}
+}
+
+void DatabaseContext::getLatestCommitVersion(const StorageServerInterface& ssi,
+                                             Version readVersion,
+                                             VersionVector& latestCommitVersion) {
+	latestCommitVersion.clear();
+
+	if (ssVersionVectorCache.getMaxVersion() == invalidVersion) {
+		return;
+	}
+
+	// Error checking (based on the assumption that the read version was not obtained
+	// from the client's grv cache).
+	if (readVersion > ssVersionVectorCache.getMaxVersion()) {
+		TraceEvent(SevError, "ReadVersionExceedsVersionVectorMax")
+		    .detail("ReadVersion", readVersion)
+		    .detail("VersionVector", ssVersionVectorCache.toString());
+		if (g_network->isSimulated()) {
+			ASSERT(false);
+		} else {
+			return; // Do not return a stale commit version in production.
+		}
+	}
+
+	Tag tag = invalidTag;
+	Version commitVersion = invalidVersion;
+	getLatestCommitVersionForSSID(ssi.id(), tag, commitVersion);
+
+	if (tag != invalidTag && commitVersion != invalidVersion && commitVersion < readVersion) {
+		latestCommitVersion.setVersion(tag, commitVersion);
+	}
+}
+
 void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& locationInfo,
                                               Version readVersion,
                                               Reference<TransactionState> info,
@@ -253,24 +299,20 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 
 	std::map<Version, std::set<Tag>> versionMap; // order the versions to be returned
 	for (int i = 0; i < locationInfo->locations()->size(); i++) {
-		bool updatedVersionMap = false;
-		Version commitVersion = invalidVersion;
 		Tag tag = invalidTag;
-		auto iter = ssidTagMapping.find(locationInfo->locations()->getId(i));
-		if (iter != ssidTagMapping.end()) {
-			tag = iter->second;
-			if (ssVersionVectorCache.hasVersion(tag)) {
-				commitVersion = ssVersionVectorCache.getVersion(tag); // latest commit version
-				if (commitVersion < readVersion) {
-					updatedVersionMap = true;
-					versionMap[commitVersion].insert(tag);
-				}
-			}
+		Version commitVersion = invalidVersion; // latest commit version
+		getLatestCommitVersionForSSID(locationInfo->locations()->getId(i), tag, commitVersion);
+
+		bool updatedVersionMap = false;
+		if (tag != invalidTag && commitVersion != invalidVersion && commitVersion < readVersion) {
+			updatedVersionMap = true;
+			versionMap[commitVersion].insert(tag);
 		}
+
 		// Do not log if commitVersion >= readVersion.
 		if (!updatedVersionMap && commitVersion == invalidVersion) {
 			TraceEvent(SevDebug, "CommitVersionNotFoundForSS")
-			    .detail("InSSIDMap", iter != ssidTagMapping.end() ? 1 : 0)
+			    .detail("InSSIDMap", tag != invalidTag ? 1 : 0)
 			    .detail("Tag", tag)
 			    .detail("CommitVersion", commitVersion)
 			    .detail("ReadVersion", readVersion)
