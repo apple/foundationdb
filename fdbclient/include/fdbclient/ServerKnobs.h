@@ -22,6 +22,7 @@
 
 #include "flow/BooleanParam.h"
 #include "flow/Knobs.h"
+#include "flow/swift_compat.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/ClientKnobs.h"
@@ -29,7 +30,7 @@
 // Disk queue
 static constexpr int _PAGE_SIZE = 4096;
 
-class ServerKnobs : public KnobsImpl<ServerKnobs> {
+class SWIFT_CXX_REF_IMMORTAL ServerKnobs : public KnobsImpl<ServerKnobs> {
 public:
 	bool ALLOW_DANGEROUS_KNOBS;
 	// Versions

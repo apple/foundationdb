@@ -135,6 +135,8 @@ struct GetCommitVersionReply {
 	}
 };
 
+#include "fdbserver/ResolutionBalancer.actor.h"
+
 struct GetCommitVersionRequest {
 	constexpr static FileIdentifier file_identifier = 16683181;
 	SpanContext spanContext;
@@ -249,6 +251,12 @@ struct LifetimeToken {
 
 using MAP_UInt64_GetCommitVersionReply = std::map<uint64_t, GetCommitVersionReply>;
 
+inline void eraseReplies(MAP_UInt64_GetCommitVersionReply &replies,
+                         uint64_t untilUpperBound) {
+    replies.erase(replies.begin(),
+                  replies.upper_bound(untilUpperBound));
+}
+
 // FIXME(swift): this isn't really a reference type but we can't create it unless a ref or copy constructor...
 struct SWIFT_CXX_REF_IMMORTAL CommitProxyVersionReplies {
   MAP_UInt64_GetCommitVersionReply replies;
@@ -306,7 +314,11 @@ struct SWIFT_CXX_REF_IMMORTAL MasterDataShared : NonCopyable, ReferenceCounted<M
 
 //  MasterInterface myInterface;
 //
-//  ResolutionBalancer resolutionBalancer;
+  ResolutionBalancer resolutionBalancer;
+    
+    inline ResolutionBalancer &getResolutionBalancer() {
+        return resolutionBalancer;
+    }
 
   bool forceRecovery;
 //
@@ -351,7 +363,9 @@ struct SWIFT_CXX_REF_IMMORTAL MasterDataShared : NonCopyable, ReferenceCounted<M
       cc("Master", dbgid.toString()),
       getCommitVersionRequests("GetCommitVersionRequests", cc),
       getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
-      reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc)
+      reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
+    version(invalidVersion),
+    resolutionBalancer(&version)
       {
     if (forceRecovery && !myInterface.locality.dcId().present()) {
       TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
