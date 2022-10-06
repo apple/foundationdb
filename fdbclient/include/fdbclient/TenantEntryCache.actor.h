@@ -374,6 +374,17 @@ public:
 		TraceEvent("TenantEntryCacheCreatedDefaultFunc", uid);
 	}
 
+	TenantEntryCache(Database db, TenantEntryCacheRefreshMode mode)
+	  : uid(deterministicRandom()->randomUniqueID()), db(db), createPayloadFunc(defaultCreatePayload),
+	    refreshMode(mode), metrics("TenantEntryCacheMetrics", uid.toString()),
+	    hits("TenantEntryCacheHits", metrics), misses("TenantEntryCacheMisses", metrics),
+	    refreshByCacheInit("TenantEntryCacheRefreshInit", metrics),
+	    refreshByCacheMiss("TenantEntryCacheRefreshMiss", metrics),
+	    numRefreshes("TenantEntryCacheNumRefreshes", metrics),
+	    refreshByWatchTrigger("TenantEntryCacheRefreshWatchTrigger", metrics) {
+		TraceEvent("TenantEntryCacheCreatedDefaultFunc", uid);
+	}
+
 	TenantEntryCache(Database db, TenantEntryCachePayloadFunc<T> fn)
 	  : uid(deterministicRandom()->randomUniqueID()), db(db), createPayloadFunc(fn),
 	    refreshMode(TenantEntryCacheRefreshMode::PERIODIC_TASK), metrics("TenantEntryCacheMetrics", uid.toString()),
