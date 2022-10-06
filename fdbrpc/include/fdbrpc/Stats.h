@@ -140,6 +140,7 @@ public:
 	void flush(MetricBatch& batch) override;
 
 private:
+	std::string name;
 	double interval_start, last_event, interval_sq_time, roughness_interval_start;
 	Value interval_delta, interval_start_value;
 	Int64MetricHandle metric;
@@ -221,7 +222,8 @@ public:
 class LatencySample : public IMetric {
 public:
 	LatencySample(std::string name, UID id, double loggingInterval, double accuracy)
-	  : IMetric(name, knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)), id(id), sampleStart(now()), sketch(accuracy),
+	  : name(name), IMetric(name + "_" + id.toString(), knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)), id(id),
+	    sampleStart(now()), sketch(accuracy),
 	    latencySampleEventHolder(makeReference<EventCacheHolder>(id.toString() + "/" + name)) {
 		logger = recurring([this]() { logSample(); }, loggingInterval);
 	}
@@ -266,6 +268,7 @@ public:
 	}
 
 private:
+	std::string name;
 	UID id;
 	double sampleStart;
 
