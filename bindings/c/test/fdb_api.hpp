@@ -666,7 +666,7 @@ public:
 	void addReadConflictRange(KeyRef begin, KeyRef end) {
 		if (auto err = Error(native::fdb_transaction_add_conflict_range(
 		        tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), FDB_CONFLICT_RANGE_TYPE_READ))) {
-			throwError(fmt::format("ERROR: addReadConflictRange({}, {}): ", begin, end), err);
+			throwError("fdb_transaction_add_conflict_range returned error: ", err);
 		}
 	}
 };
