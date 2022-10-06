@@ -1164,12 +1164,32 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	    wait(self->txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration().key));
 	Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
 	    MetaclusterRegistrationEntry::decode(metaclusterRegistrationVal);
+	Optional<ClusterName> metaclusterName;
+	Optional<UID> metaclusterId;
+	Optional<ClusterName> clusterName;
+	Optional<UID> clusterId;
+	self->controllerData->db.metaclusterRegistration = metaclusterRegistration;
 	if (metaclusterRegistration.present()) {
 		self->controllerData->db.metaclusterName = metaclusterRegistration.get().metaclusterName;
 		self->controllerData->db.clusterType = metaclusterRegistration.get().clusterType;
+		metaclusterName = metaclusterRegistration.get().metaclusterName;
+		metaclusterId = metaclusterRegistration.get().metaclusterId;
+		if (metaclusterRegistration.get().clusterType == ClusterType::METACLUSTER_DATA) {
+			clusterName = metaclusterRegistration.get().name;
+			clusterId = metaclusterRegistration.get().id;
+		}
 	} else {
+		self->controllerData->db.metaclusterName = Optional<ClusterName>();
 		self->controllerData->db.clusterType = ClusterType::STANDALONE;
 	}
+
+	TraceEvent("MetaclusterMetadata")
+	    .detail("ClusterType", clusterTypeToString(self->controllerData->db.clusterType))
+	    .detail("MetaclusterName", metaclusterName)
+	    .detail("MetaclusterId", metaclusterId)
+	    .detail("DataClusterName", clusterName)
+	    .detail("DataClusterId", clusterId)
+	    .trackLatest(self->metaclusterEventHolder->trackingKey);
 
 	uniquify(self->allTags);
 

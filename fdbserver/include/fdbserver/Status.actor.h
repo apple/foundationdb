@@ -30,6 +30,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/ClusterInterface.h"
+#include "fdbclient/Metacluster.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -49,7 +50,9 @@ Future<StatusReply> clusterGetStatus(
     ServerCoordinators const& coordinators,
     std::vector<NetworkAddress> const& incompatibleConnections,
     Version const& datacenterVersionDifference,
-    ConfigBroadcaster const* const& conifgBroadcaster);
+    ConfigBroadcaster const* const& conifgBroadcaster,
+    Optional<MetaclusterRegistrationEntry> const& metaclusterRegistration,
+    MetaclusterMetrics const& metaclusterMetrics);
 
 struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};
 ACTOR Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
