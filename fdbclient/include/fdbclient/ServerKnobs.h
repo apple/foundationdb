@@ -953,6 +953,7 @@ public:
 	double BGCC_TIMEOUT;
 	double BGCC_MIN_INTERVAL;
 	bool BLOB_MANIFEST_BACKUP;
+	double BLOB_MANIFEST_BACKUP_INTERVAL;
 	bool BLOB_FULL_RESTORE_MODE;
 
 	// Blob metadata

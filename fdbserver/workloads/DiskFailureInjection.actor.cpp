@@ -25,7 +25,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
-#include "fdbserver/Status.h"
+#include "fdbserver/Status.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct DiskFailureInjectionWorkload : FailureInjectionWorkload {

@@ -968,6 +968,9 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
       },
       "tenants":{
          "num_tenants":0
+      },
+      "metacluster" : {
+         "cluster_type" : "standalone"
       }
    },
    "client":{

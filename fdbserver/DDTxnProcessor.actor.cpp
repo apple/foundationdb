@@ -28,6 +28,20 @@
 class DDTxnProcessorImpl {
 	friend class DDTxnProcessor;
 
+	ACTOR static Future<ServerWorkerInfos> getServerListAndProcessClasses(Database cx) {
+		state Transaction tr(cx);
+		state ServerWorkerInfos res;
+		loop {
+			try {
+				wait(store(res.servers, NativeAPI::getServerListAndProcessClasses(&tr)));
+				res.readVersion = tr.getReadVersion().get();
+				return res;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	// return {sourceServers, completeSources}
 	ACTOR static Future<IDDTxnProcessor::SourceServers> getSourceServersForRange(Database cx, KeyRangeRef keys) {
 		state std::set<UID> servers;
@@ -125,6 +139,43 @@ class DDTxnProcessorImpl {
 			}
 		}
 		return Void();
+	}
+
+	ACTOR static Future<int> tryUpdateReplicasKeyForDc(Database cx, Optional<Key> dcId, int storageTeamSize) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				Optional<Value> val = wait(tr.get(datacenterReplicasKeyFor(dcId)));
+				state int oldReplicas = val.present() ? decodeDatacenterReplicasValue(val.get()) : 0;
+				if (oldReplicas == storageTeamSize) {
+					return oldReplicas;
+				}
+				if (oldReplicas < storageTeamSize) {
+					tr.set(rebootWhenDurableKey, StringRef());
+				}
+				tr.set(datacenterReplicasKeyFor(dcId), datacenterReplicasValue(storageTeamSize));
+				wait(tr.commit());
+
+				return oldReplicas;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	ACTOR static Future<UID> getClusterId(Database cx) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<Value> clusterId = wait(tr.get(clusterIdKey));
+				ASSERT(clusterId.present());
+				return BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
 	}
 
 	// Read keyservers, return unique set of teams
@@ -465,15 +516,29 @@ class DDTxnProcessorImpl {
 			}
 		}
 	}
+
+	ACTOR static Future<Void> waitDDTeamInfoPrintSignal(Database cx) {
+		state ReadYourWritesTransaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				state Future<Void> watchFuture = tr.watch(triggerDDTeamInfoPrintKey);
+				wait(tr.commit());
+				wait(watchFuture);
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
 };
 
 Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(const KeyRangeRef range) {
 	return DDTxnProcessorImpl::getSourceServersForRange(cx, range);
 }
 
-Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> DDTxnProcessor::getServerListAndProcessClasses() {
-	Transaction tr(cx);
-	return NativeAPI::getServerListAndProcessClasses(&tr);
+Future<ServerWorkerInfos> DDTxnProcessor::getServerListAndProcessClasses() {
+	return DDTxnProcessorImpl::getServerListAndProcessClasses(cx);
 }
 
 Future<MoveKeysLock> DDTxnProcessor::takeMoveKeysLock(const UID& ddId) const {
@@ -539,12 +604,25 @@ Future<Optional<Value>> DDTxnProcessor::readRebalanceDDIgnoreKey() const {
 	return DDTxnProcessorImpl::readRebalanceDDIgnoreKey(cx);
 }
 
-Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>>
-DDMockTxnProcessor::getServerListAndProcessClasses() {
-	std::vector<std::pair<StorageServerInterface, ProcessClass>> res;
+Future<int> DDTxnProcessor::tryUpdateReplicasKeyForDc(const Optional<Key>& dcId, const int& storageTeamSize) const {
+	return DDTxnProcessorImpl::tryUpdateReplicasKeyForDc(cx, dcId, storageTeamSize);
+}
+
+Future<UID> DDTxnProcessor::getClusterId() const {
+	return DDTxnProcessorImpl::getClusterId(cx);
+}
+
+Future<Void> DDTxnProcessor::waitDDTeamInfoPrintSignal() const {
+	return DDTxnProcessorImpl::waitDDTeamInfoPrintSignal(cx);
+}
+
+Future<ServerWorkerInfos> DDMockTxnProcessor::getServerListAndProcessClasses() {
+	ServerWorkerInfos res;
 	for (auto& [_, mss] : mgs->allServers) {
-		res.emplace_back(mss.ssi, ProcessClass(ProcessClass::StorageClass, ProcessClass::DBSource));
+		res.servers.emplace_back(mss.ssi, ProcessClass(ProcessClass::StorageClass, ProcessClass::DBSource));
 	}
+	// FIXME(xwang): possible generate version from time?
+	res.readVersion = 0;
 	return res;
 }
 
@@ -619,7 +697,7 @@ Future<Reference<InitialDataDistribution>> DDMockTxnProcessor::getInitialDataDis
 	// FIXME: now we just ignore ddEnabledState and moveKeysLock, will fix it in the future
 	Reference<InitialDataDistribution> res = makeReference<InitialDataDistribution>();
 	res->mode = 1;
-	res->allServers = getServerListAndProcessClasses().get();
+	res->allServers = getServerListAndProcessClasses().get().servers;
 	res->shards = getDDShardInfos();
 	std::tie(res->primaryTeams, res->remoteTeams) = getAllTeamsInRegion(res->shards);
 	return res;

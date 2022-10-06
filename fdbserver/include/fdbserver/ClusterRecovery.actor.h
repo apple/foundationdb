@@ -248,6 +248,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 
 	Future<Void> logger;
 
+	Reference<EventCacheHolder> metaclusterEventHolder;
 	Reference<EventCacheHolder> swVersionCheckedEventHolder;
 	Reference<EventCacheHolder> recoveredConfigEventHolder;
 	Reference<EventCacheHolder> clusterRecoveryStateEventHolder;
@@ -278,6 +279,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
+	    metaclusterEventHolder(makeReference<EventCacheHolder>("MetaclusterMetadata")),
 	    swVersionCheckedEventHolder(makeReference<EventCacheHolder>("SWVersionCompatibilityChecked")),
 	    recoveredConfigEventHolder(makeReference<EventCacheHolder>("RecoveredConfig")) {
 		clusterRecoveryStateEventHolder = makeReference<EventCacheHolder>(

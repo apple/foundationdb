@@ -1177,10 +1177,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (doPerfContextMetrics) {
 				perfContextMetrics->reset();
 			}
-			double commitBeginTime;
+			double commitBeginTime = timer_monotonic();
 			sharedState->commitQueueLatency->addMeasurement(commitBeginTime - a.startTime);
 			if (a.getHistograms) {
-				commitBeginTime = timer_monotonic();
 				metricPromiseStream->send(
 				    std::make_pair(ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM.toString(), commitBeginTime - a.startTime));
 			}
@@ -2384,12 +2383,16 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/RocksDBReopen") {
 	// Confirm that `init()` is idempotent.
 	wait(kvStore->init());
 
-	Optional<Value> val = wait(kvStore->readValue("foo"_sr));
-	ASSERT(Optional<Value>("bar"_sr) == val);
+	{
+		Optional<Value> val = wait(kvStore->readValue("foo"_sr));
+		ASSERT(Optional<Value>("bar"_sr) == val);
+	}
 
-	Future<Void> closed = kvStore->onClosed();
-	kvStore->dispose();
-	wait(closed);
+	{
+		Future<Void> closed = kvStore->onClosed();
+		kvStore->dispose();
+		wait(closed);
+	}
 
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 	return Void();
@@ -2427,8 +2430,10 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreColumnFamily") 
 	checkpoints.push_back(metaData);
 	wait(kvStoreCopy->restore(checkpoints));
 
-	Optional<Value> val = wait(kvStoreCopy->readValue("foo"_sr));
-	ASSERT(Optional<Value>("bar"_sr) == val);
+	{
+		Optional<Value> val = wait(kvStoreCopy->readValue("foo"_sr));
+		ASSERT(Optional<Value>("bar"_sr) == val);
+	}
 
 	std::vector<Future<Void>> closes;
 	closes.push_back(kvStore->onClosed());

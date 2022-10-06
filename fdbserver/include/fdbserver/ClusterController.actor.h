@@ -31,6 +31,7 @@
 #define FDBSERVER_CLUSTERCONTROLLER_ACTOR_H
 
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/Metacluster.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbserver/Knobs.h"
@@ -142,6 +143,8 @@ public:
 		AsyncVar<bool> blobGranulesEnabled;
 		ClusterType clusterType = ClusterType::STANDALONE;
 		Optional<ClusterName> metaclusterName;
+		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
+		MetaclusterMetrics metaclusterMetrics;
 
 		DBInfo()
 		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
