@@ -1669,8 +1669,8 @@ struct Versionstamp {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		int64_t beVersion;
-		int16_t beBatch;
+		uint64_t beVersion;
+		uint16_t beBatch;
 
 		if constexpr (!Ar::isDeserializing) {
 			beVersion = bigEndian64(version);
@@ -1685,5 +1685,15 @@ struct Versionstamp {
 		}
 	}
 };
+
+template <class Ar>
+inline void save(Ar& ar, const Versionstamp& value) {
+	return const_cast<Versionstamp&>(value).serialize(ar);
+}
+
+template <class Ar>
+inline void load(Ar& ar, Versionstamp& value) {
+	value.serialize(ar);
+}
 
 #endif

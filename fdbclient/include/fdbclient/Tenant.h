@@ -181,7 +181,7 @@ struct TenantMetadataSpecification {
 	KeyBackedObjectProperty<TenantTombstoneCleanupData, decltype(IncludeVersion())> tombstoneCleanupData;
 	KeyBackedSet<Tuple> tenantGroupTenantIndex;
 	KeyBackedObjectMap<TenantGroupName, TenantGroupEntry, decltype(IncludeVersion()), NullCodec> tenantGroupMap;
-	KeyBackedProperty<std::string> lastTenantModification;
+	KeyBackedBinaryValue<Versionstamp> lastTenantModification;
 
 	TenantMetadataSpecification(KeyRef prefix)
 	  : subspace(prefix.withSuffix("tenant/"_sr)), tenantMap(subspace.withSuffix("map/"_sr), IncludeVersion()),
