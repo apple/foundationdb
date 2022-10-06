@@ -384,7 +384,7 @@ private:
 			return FDB_DEFAULT_ENCRYPT_DOMAIN_NAME;
 		}
 		if (tenantPrefixIndex.isValid()) {
-			StringRef prefix = TenantMapEntry::idToPrefix(domainId);
+			Key prefix(TenantMapEntry::idToPrefix(domainId));
 			auto view = tenantPrefixIndex->atLatest();
 			auto itr = view.find(prefix);
 			if (itr != view.end()) {
