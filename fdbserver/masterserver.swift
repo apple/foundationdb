@@ -87,64 +87,63 @@ public actor MasterDataActor {
              assert(req.requestNum < lastVersionReplies.getLatestRequestNumRef().get()) // The latest request can never be acknowledged
              req.reply.sendNever()
              return
+        }
+        
+        var rep = GetCommitVersionReply()
+
+        if (myself.version == invalidVersion) {
+            myself.lastVersionTime = now()
+            myself.version = myself.recoveryTransactionVersion
+            rep.prevVersion = myself.lastEpochEnd
         } else {
-            var rep = GetCommitVersionReply()
-
-            if (myself.version == invalidVersion) {
-                myself.lastVersionTime = now()
-                myself.version = myself.recoveryTransactionVersion
-                rep.prevVersion = myself.lastEpochEnd
-
-            } else {
-                var t1 = now()
-                if BUGGIFY {
-                    t1 = myself.lastVersionTime
-                }
-                
-                let toAdd = max(Version(1), min(
-                              getServerKnobs().MAX_READ_TRANSACTION_LIFE_VERSIONS,
-                              Version(getServerKnobs().VERSIONS_PER_SECOND) * Version(t1 - myself.lastVersionTime)))
-                rep.prevVersion = myself.version
-                if myself.referenceVersion.present() {
-                    // FIXME: myself.referenceVersion.get()
-                    // FIXME: getMutating() ambiguity
-                    var r = myself.referenceVersion
-                    myself.version = figureVersion(current: myself.version,
-                                  now: g_network.timer(),
-                                  reference: Version(r.__getUnsafe().pointee),
-                                  toAdd: toAdd,
-                                  maxVersionRateModifier: getServerKnobs().MAX_VERSION_RATE_MODIFIER,
-                                  maxVersionRateOffset: getServerKnobs().MAX_VERSION_RATE_OFFSET)
-                    assert(myself.version > rep.prevVersion)
-                } else {
-                    myself.version += toAdd
-                }
-                
-                // NOTE: CODE_PROBE is macro, won't be imported
-                // CODE_PROBE(self.version - rep.prevVersion == 1, "Minimum possible version gap");
-                let maxVersionGap = myself.version - rep.prevVersion == getServerKnobs().MAX_READ_TRANSACTION_LIFE_VERSIONS
-                // CODE_PROBE(maxVersionGap, "Maximum possible version gap");
-                
-                myself.lastVersionTime = t1
-                myself.getResolutionBalancer().setChangesInReply(req.requestingProxy, &rep)
+            var t1 = now()
+            if BUGGIFY {
+                t1 = myself.lastVersionTime
             }
 
-            rep.version = myself.version;
-            rep.requestNum = req.requestNum;
+            let toAdd = max(Version(1), min(
+                          getServerKnobs().MAX_READ_TRANSACTION_LIFE_VERSIONS,
+                          Version(getServerKnobs().VERSIONS_PER_SECOND) * Version(t1 - myself.lastVersionTime)))
+            rep.prevVersion = myself.version
+            if myself.referenceVersion.present() {
+                // FIXME: myself.referenceVersion.get()
+                // FIXME: getMutating() ambiguity
+                var r = myself.referenceVersion
+                myself.version = figureVersion(current: myself.version,
+                              now: g_network.timer(),
+                              reference: Version(r.__getUnsafe().pointee),
+                              toAdd: toAdd,
+                              maxVersionRateModifier: getServerKnobs().MAX_VERSION_RATE_MODIFIER,
+                              maxVersionRateOffset: getServerKnobs().MAX_VERSION_RATE_OFFSET)
+                assert(myself.version > rep.prevVersion)
+            } else {
+                myself.version += toAdd
+            }
 
-            //  FIXME: figure out how to map:
-            //            // lastVersionReplies.replies.erase(
-            //            //        lastVersionReplies.replies.begin(),
-            //            //        lastVersionReplies.replies.upper_bound(req.mostRecentProcessedRequestNum))
-            eraseReplies(&lastVersionReplies.replies, req.mostRecentProcessedRequestNum)
-            lastVersionReplies.replies[UInt(req.requestNum)] = rep
-            assert(rep.prevVersion >= 0)
+            // NOTE: CODE_PROBE is macro, won't be imported
+            // CODE_PROBE(self.version - rep.prevVersion == 1, "Minimum possible version gap");
+            let maxVersionGap = myself.version - rep.prevVersion == getServerKnobs().MAX_READ_TRANSACTION_LIFE_VERSIONS
+            // CODE_PROBE(maxVersionGap, "Maximum possible version gap");
 
-            req.reply.send(&rep)
-
-            assert(lastVersionReplies.getLatestRequestNumRef().get() == req.requestNum - 1)
-            lastVersionReplies.getLatestRequestNumRef().set(Int(req.requestNum))
+            myself.lastVersionTime = t1
+            myself.getResolutionBalancer().setChangesInReply(req.requestingProxy, &rep)
         }
+
+        rep.version = myself.version;
+        rep.requestNum = req.requestNum;
+
+        //  FIXME: figure out how to map:
+        //            // lastVersionReplies.replies.erase(
+        //            //        lastVersionReplies.replies.begin(),
+        //            //        lastVersionReplies.replies.upper_bound(req.mostRecentProcessedRequestNum))
+        eraseReplies(&lastVersionReplies.replies, req.mostRecentProcessedRequestNum)
+        lastVersionReplies.replies[UInt(req.requestNum)] = rep
+        assert(rep.prevVersion >= 0)
+
+        req.reply.send(&rep)
+
+        assert(lastVersionReplies.getLatestRequestNumRef().get() == req.requestNum - 1)
+        lastVersionReplies.getLatestRequestNumRef().set(Int(req.requestNum))
     }
 }
 
