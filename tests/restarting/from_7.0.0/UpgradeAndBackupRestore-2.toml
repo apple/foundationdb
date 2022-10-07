@@ -1,5 +1,3 @@
-testClass = "Backup"
-
 [[test]]
 testTitle = 'SecondCycleTest'
 simBackupAgents = 'BackupToFile'

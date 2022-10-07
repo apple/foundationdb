@@ -115,6 +115,9 @@ struct ManagementClusterMetadata {
 	static KeyBackedSet<Tuple> clusterTenantGroupIndex;
 };
 
+// Helper function to compute metacluster capacity by passing the result of MetaclusterAPI::listClusters
+std::pair<ClusterUsage, ClusterUsage> metaclusterCapacity(std::map<ClusterName, DataClusterMetadata> const& clusters);
+
 ACTOR Future<Reference<IDatabase>> openDatabase(ClusterConnectionString connectionString);
 
 ACTOR template <class Transaction>

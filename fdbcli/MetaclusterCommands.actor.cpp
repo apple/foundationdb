@@ -291,13 +291,7 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 		std::map<ClusterName, DataClusterMetadata> clusters =
 		    wait(MetaclusterAPI::listClusters(db, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
 
-		ClusterUsage totalCapacity;
-		ClusterUsage totalAllocated;
-		for (auto cluster : clusters) {
-			totalCapacity.numTenantGroups +=
-			    std::max(cluster.second.entry.capacity.numTenantGroups, cluster.second.entry.allocated.numTenantGroups);
-			totalAllocated.numTenantGroups += cluster.second.entry.allocated.numTenantGroups;
-		}
+		auto capacityNumbers = MetaclusterAPI::metaclusterCapacity(clusters);
 
 		if (useJson) {
 			json_spirit::mObject obj;
@@ -305,15 +299,15 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 
 			json_spirit::mObject metaclusterObj;
 			metaclusterObj["data_clusters"] = (int)clusters.size();
-			metaclusterObj["capacity"] = totalCapacity.toJson();
-			metaclusterObj["allocated"] = totalAllocated.toJson();
+			metaclusterObj["capacity"] = capacityNumbers.first.toJson();
+			metaclusterObj["allocated"] = capacityNumbers.second.toJson();
 
 			obj["metacluster"] = metaclusterObj;
 			fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(obj), json_spirit::pretty_print).c_str());
 		} else {
 			fmt::print("  number of data clusters: {}\n", clusters.size());
-			fmt::print("  tenant group capacity: {}\n", totalCapacity.numTenantGroups);
-			fmt::print("  allocated tenant groups: {}\n", totalAllocated.numTenantGroups);
+			fmt::print("  tenant group capacity: {}\n", capacityNumbers.first.numTenantGroups);
+			fmt::print("  allocated tenant groups: {}\n", capacityNumbers.second.numTenantGroups);
 		}
 
 		return true;

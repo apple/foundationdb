@@ -1894,12 +1894,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			a.done.send(Void());
-			for (const auto& [id, range] : deletes) {
-				auto cf = columnFamilyMap->find(id);
-				ASSERT(cf != columnFamilyMap->end());
-				auto begin = toSlice(range.begin);
-				auto end = toSlice(range.end);
-				if (SERVER_KNOBS->ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE) {
+			if (SERVER_KNOBS->ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE) {
+				for (const auto& [id, range] : deletes) {
+					auto cf = columnFamilyMap->find(id);
+					ASSERT(cf != columnFamilyMap->end());
+					auto begin = toSlice(range.begin);
+					auto end = toSlice(range.end);
+
 					ASSERT(a.db->SuggestCompactRange(cf->second, &begin, &end).ok());
 				}
 			}
@@ -2597,8 +2598,10 @@ TEST_CASE("noSim/ShardedRocksDB/SingleShardRead") {
 
 	Optional<Value> val = wait(kvStore->readValue("a"_sr));
 	ASSERT(Optional<Value>("foo"_sr) == val);
-	Optional<Value> val = wait(kvStore->readValue("ac"_sr));
-	ASSERT(Optional<Value>("bar"_sr) == val);
+	{
+		Optional<Value> val = wait(kvStore->readValue("ac"_sr));
+		ASSERT(Optional<Value>("bar"_sr) == val);
+	}
 
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->dispose();
@@ -2662,17 +2665,21 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 	}
 
 	// Read backward full range.
-	RangeResult result = wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), -1000, 10000));
-	ASSERT_EQ(result.size(), expectedRows.size());
-	for (int i = 0; i < expectedRows.size(); ++i) {
-		ASSERT(result[i] == expectedRows[59 - i]);
+	{
+		RangeResult result = wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), -1000, 10000));
+		ASSERT_EQ(result.size(), expectedRows.size());
+		for (int i = 0; i < expectedRows.size(); ++i) {
+			ASSERT(result[i] == expectedRows[59 - i]);
+		}
 	}
 
 	// Forward with row limit.
-	RangeResult result = wait(kvStore->readRange(KeyRangeRef("2"_sr, "6"_sr), 10, 10000));
-	ASSERT_EQ(result.size(), 10);
-	for (int i = 0; i < 10; ++i) {
-		ASSERT(result[i] == expectedRows[20 + i]);
+	{
+		RangeResult result = wait(kvStore->readRange(KeyRangeRef("2"_sr, "6"_sr), 10, 10000));
+		ASSERT_EQ(result.size(), 10);
+		for (int i = 0; i < 10; ++i) {
+			ASSERT(result[i] == expectedRows[20 + i]);
+		}
 	}
 
 	// Add another range on shard-1.
@@ -2688,32 +2695,40 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 
 	wait(kvStore->commit(false));
 
-	Future<Void> closed = kvStore->onClosed();
-	kvStore->close();
-	wait(closed);
+	{
+		Future<Void> closed = kvStore->onClosed();
+		kvStore->close();
+		wait(closed);
+	}
 	kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	wait(kvStore->init());
 
 	// Read all values.
-	RangeResult result = wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), 1000, 10000));
-	ASSERT_EQ(result.size(), expectedRows.size());
-	for (int i = 0; i < expectedRows.size(); ++i) {
-		ASSERT(result[i] == expectedRows[i]);
+	{
+		RangeResult result = wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), 1000, 10000));
+		ASSERT_EQ(result.size(), expectedRows.size());
+		for (int i = 0; i < expectedRows.size(); ++i) {
+			ASSERT(result[i] == expectedRows[i]);
+		}
 	}
 
 	// Read partial range with row limit
-	RangeResult result = wait(kvStore->readRange(KeyRangeRef("5"_sr, ":"_sr), 35, 10000));
-	ASSERT_EQ(result.size(), 35);
-	for (int i = 0; i < result.size(); ++i) {
-		ASSERT(result[i] == expectedRows[40 + i]);
+	{
+		RangeResult result = wait(kvStore->readRange(KeyRangeRef("5"_sr, ":"_sr), 35, 10000));
+		ASSERT_EQ(result.size(), 35);
+		for (int i = 0; i < result.size(); ++i) {
+			ASSERT(result[i] == expectedRows[40 + i]);
+		}
 	}
 
 	// Clear a range on a single shard.
 	kvStore->clear(KeyRangeRef("40"_sr, "45"_sr));
 	wait(kvStore->commit(false));
 
-	RangeResult result = wait(kvStore->readRange(KeyRangeRef("4"_sr, "5"_sr), 20, 10000));
-	ASSERT_EQ(result.size(), 5);
+	{
+		RangeResult result = wait(kvStore->readRange(KeyRangeRef("4"_sr, "5"_sr), 20, 10000));
+		ASSERT_EQ(result.size(), 5);
+	}
 
 	// Clear a single value.
 	kvStore->clear(KeyRangeRef("01"_sr, keyAfter("01"_sr)));
@@ -2726,21 +2741,29 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 	kvStore->clear(KeyRangeRef("1"_sr, "8"_sr));
 	wait(kvStore->commit(false));
 
-	Future<Void> closed = kvStore->onClosed();
-	kvStore->close();
-	wait(closed);
+	{
+		Future<Void> closed = kvStore->onClosed();
+		kvStore->close();
+		wait(closed);
+	}
 	kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	wait(kvStore->init());
 
-	RangeResult result = wait(kvStore->readRange(KeyRangeRef("1"_sr, "8"_sr), 1000, 10000));
-	ASSERT_EQ(result.size(), 0);
+	{
+		RangeResult result = wait(kvStore->readRange(KeyRangeRef("1"_sr, "8"_sr), 1000, 10000));
+		ASSERT_EQ(result.size(), 0);
+	}
 
-	RangeResult result = wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), 1000, 10000));
-	ASSERT_EQ(result.size(), 19);
+	{
+		RangeResult result = wait(kvStore->readRange(KeyRangeRef("0"_sr, ":"_sr), 1000, 10000));
+		ASSERT_EQ(result.size(), 19);
+	}
 
-	Future<Void> closed = kvStore->onClosed();
-	kvStore->dispose();
-	wait(closed);
+	{
+		Future<Void> closed = kvStore->onClosed();
+		kvStore->dispose();
+		wait(closed);
+	}
 
 	return Void();
 }
@@ -2755,17 +2778,21 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 	wait(kvStore->init());
 
 	// Add some ranges.
-	std::vector<Future<Void>> addRangeFutures;
-	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("a"_sr, "c"_sr), "shard-1"));
-	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("c"_sr, "f"_sr), "shard-2"));
+	{
+		std::vector<Future<Void>> addRangeFutures;
+		addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("a"_sr, "c"_sr), "shard-1"));
+		addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("c"_sr, "f"_sr), "shard-2"));
 
-	wait(waitForAll(addRangeFutures));
+		wait(waitForAll(addRangeFutures));
+	}
 
-	std::vector<Future<Void>> addRangeFutures;
-	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("x"_sr, "z"_sr), "shard-1"));
-	addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("l"_sr, "n"_sr), "shard-3"));
+	{
+		std::vector<Future<Void>> addRangeFutures;
+		addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("x"_sr, "z"_sr), "shard-1"));
+		addRangeFutures.push_back(kvStore->addRange(KeyRangeRef("l"_sr, "n"_sr), "shard-3"));
 
-	wait(waitForAll(addRangeFutures));
+		wait(waitForAll(addRangeFutures));
+	}
 
 	// Remove single range.
 	std::vector<std::string> shardsToCleanUp;
@@ -2821,30 +2848,37 @@ TEST_CASE("noSim/ShardedRocksDB/ShardOps") {
 	kvStore = rocksdbStore;
 	wait(kvStore->init());
 
-	auto dataMap = rocksdbStore->getDataMapping();
-	for (auto it = dataMap.begin(); it != dataMap.end(); ++it) {
-		std::cout << "Begin " << it->first.begin.toString() << ", End " << it->first.end.toString() << ", id "
-		          << it->second << "\n";
+	{
+		auto dataMap = rocksdbStore->getDataMapping();
+		for (auto it = dataMap.begin(); it != dataMap.end(); ++it) {
+			std::cout << "Begin " << it->first.begin.toString() << ", End " << it->first.end.toString() << ", id "
+			          << it->second << "\n";
+		}
+		ASSERT(dataMap == mapping);
 	}
-	ASSERT(dataMap == mapping);
 
 	// Remove all the ranges.
-	state std::vector<std::string> shardsToCleanUp = kvStore->removeRange(KeyRangeRef("a"_sr, "z"_sr));
-	ASSERT_EQ(shardsToCleanUp.size(), 3);
+	{
+		state std::vector<std::string> shardsToCleanUp = kvStore->removeRange(KeyRangeRef("a"_sr, "z"_sr));
+		ASSERT_EQ(shardsToCleanUp.size(), 3);
 
-	// Add another range to shard-2.
-	wait(kvStore->addRange(KeyRangeRef("h"_sr, "i"_sr), "shard-2"));
+		// Add another range to shard-2.
+		wait(kvStore->addRange(KeyRangeRef("h"_sr, "i"_sr), "shard-2"));
 
-	// Clean up shards. Shard-2 should not be removed.
-	wait(kvStore->cleanUpShardsIfNeeded(shardsToCleanUp));
+		// Clean up shards. Shard-2 should not be removed.
+		wait(kvStore->cleanUpShardsIfNeeded(shardsToCleanUp));
+	}
+	{
+		auto dataMap = rocksdbStore->getDataMapping();
+		ASSERT_EQ(dataMap.size(), 2);
+		ASSERT(dataMap[0].second == "shard-2");
+	}
 
-	auto dataMap = rocksdbStore->getDataMapping();
-	ASSERT_EQ(dataMap.size(), 2);
-	ASSERT(dataMap[0].second == "shard-2");
-
-	Future<Void> closed = kvStore->onClosed();
-	kvStore->dispose();
-	wait(closed);
+	{
+		Future<Void> closed = kvStore->onClosed();
+		kvStore->dispose();
+		wait(closed);
+	}
 	return Void();
 }
 
@@ -2865,8 +2899,10 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 	kvStore->set(KeyValueRef(testSpecialKey, testSpecialValue));
 	wait(kvStore->commit(false));
 
-	Optional<Value> val = wait(kvStore->readValue(testSpecialKey));
-	ASSERT(val.get() == testSpecialValue);
+	{
+		Optional<Value> val = wait(kvStore->readValue(testSpecialKey));
+		ASSERT(val.get() == testSpecialValue);
+	}
 
 	// Add some ranges.
 	std::vector<Future<Void>> addRangeFutures;
@@ -2893,10 +2929,14 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 	}
 
 	// Read value back.
-	Optional<Value> val = wait(kvStore->readValue("a1"_sr));
-	ASSERT(val == Optional<Value>("foo"_sr));
-	Optional<Value> val = wait(kvStore->readValue("d1"_sr));
-	ASSERT(val == Optional<Value>("bar"_sr));
+	{
+		Optional<Value> val = wait(kvStore->readValue("a1"_sr));
+		ASSERT(val == Optional<Value>("foo"_sr));
+	}
+	{
+		Optional<Value> val = wait(kvStore->readValue("d1"_sr));
+		ASSERT(val == Optional<Value>("bar"_sr));
+	}
 
 	// Remove range containing a1.
 	kvStore->persistRangeMapping(KeyRangeRef("a"_sr, "b"_sr), false);
@@ -2904,22 +2944,30 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 	wait(kvStore->commit(false));
 
 	// Read a1.
-	Optional<Value> val = wait(kvStore->readValue("a1"_sr));
-	ASSERT(!val.present());
+	{
+		Optional<Value> val = wait(kvStore->readValue("a1"_sr));
+		ASSERT(!val.present());
+	}
 
 	// Restart.
-	Future<Void> closed = kvStore->onClosed();
-	kvStore->close();
-	wait(closed);
+	{
+		Future<Void> closed = kvStore->onClosed();
+		kvStore->close();
+		wait(closed);
+	}
 	rocksdbStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	kvStore = rocksdbStore;
 	wait(kvStore->init());
 
 	// Read again.
-	Optional<Value> val = wait(kvStore->readValue("a1"_sr));
-	ASSERT(!val.present());
-	Optional<Value> val = wait(kvStore->readValue("d1"_sr));
-	ASSERT(val == Optional<Value>("bar"_sr));
+	{
+		Optional<Value> val = wait(kvStore->readValue("a1"_sr));
+		ASSERT(!val.present());
+	}
+	{
+		Optional<Value> val = wait(kvStore->readValue("d1"_sr));
+		ASSERT(val == Optional<Value>("bar"_sr));
+	}
 
 	auto mapping = rocksdbStore->getDataMapping();
 	ASSERT(mapping.size() == 3);
@@ -2930,46 +2978,56 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 	ASSERT(mapping.size() == 1);
 
 	// Restart.
-	Future<Void> closed = kvStore->onClosed();
-	kvStore->close();
-	wait(closed);
+	{
+		Future<Void> closed = kvStore->onClosed();
+		kvStore->close();
+		wait(closed);
+	}
 	rocksdbStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	kvStore = rocksdbStore;
 	wait(kvStore->init());
 
 	// Because range metadata was not committed, ranges should be restored.
-	auto mapping = rocksdbStore->getDataMapping();
-	ASSERT(mapping.size() == 3);
+	{
+		auto mapping = rocksdbStore->getDataMapping();
+		ASSERT(mapping.size() == 3);
 
-	// Remove ranges again.
-	kvStore->persistRangeMapping(KeyRangeRef("a"_sr, "f"_sr), false);
-	kvStore->removeRange(KeyRangeRef("a"_sr, "f"_sr));
+		// Remove ranges again.
+		kvStore->persistRangeMapping(KeyRangeRef("a"_sr, "f"_sr), false);
+		kvStore->removeRange(KeyRangeRef("a"_sr, "f"_sr));
 
-	mapping = rocksdbStore->getDataMapping();
-	ASSERT(mapping.size() == 1);
+		mapping = rocksdbStore->getDataMapping();
+		ASSERT(mapping.size() == 1);
 
-	wait(kvStore->commit(false));
+		wait(kvStore->commit(false));
+	}
 
 	// Restart.
-	Future<Void> closed = kvStore->onClosed();
-	kvStore->close();
-	wait(closed);
+	{
+		Future<Void> closed = kvStore->onClosed();
+		kvStore->close();
+		wait(closed);
+	}
 
 	rocksdbStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	kvStore = rocksdbStore;
 	wait(kvStore->init());
 
 	// No range available.
-	auto mapping = rocksdbStore->getDataMapping();
-	for (auto it = mapping.begin(); it != mapping.end(); ++it) {
-		std::cout << "Begin " << it->first.begin.toString() << ", End " << it->first.end.toString() << ", id "
-		          << it->second << "\n";
+	{
+		auto mapping = rocksdbStore->getDataMapping();
+		for (auto it = mapping.begin(); it != mapping.end(); ++it) {
+			std::cout << "Begin " << it->first.begin.toString() << ", End " << it->first.end.toString() << ", id "
+			          << it->second << "\n";
+		}
+		ASSERT(mapping.size() == 1);
 	}
-	ASSERT(mapping.size() == 1);
 
-	Future<Void> closed = kvStore->onClosed();
-	kvStore->dispose();
-	wait(closed);
+	{
+		Future<Void> closed = kvStore->onClosed();
+		kvStore->dispose();
+		wait(closed);
+	}
 
 	return Void();
 }
