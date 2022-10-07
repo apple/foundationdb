@@ -451,7 +451,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 									throw;
 								}
 								ASSERT(e.code() == error_code_blob_granule_transaction_too_old);
-								CODE_PROBE(true, "BGV verified too old after purge");
+								CODE_PROBE(true, "BGV verified too old after purge", probe::decoration::rare);
 							}
 						}
 					}
@@ -730,7 +730,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						if (!foundAnyHistoryForRange) {
 							// if range never existed in blob, and was doing the initial snapshot,  it could have a
 							// change feed but not a history entry/snapshot
-							CODE_PROBE(true, "not failing test for leaked feed with no history");
+							CODE_PROBE(
+							    true, "not failing test for leaked feed with no history", probe::decoration::rare);
 							fmt::print("Not failing test b/c feed never had history!\n");
 						}
 						return !foundAnyHistoryForRange;

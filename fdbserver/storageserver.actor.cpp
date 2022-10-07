@@ -2011,7 +2011,8 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 			options.debugID = metadata->debugID;
 
 			CODE_PROBE(latest >= minVersion && latest < data->data().latestVersion,
-			           "Starting watch loop with latestVersion > data->version");
+			           "Starting watch loop with latestVersion > data->version",
+			           probe::decoration::rare);
 			GetValueRequest getReq(
 			    span.context, TenantInfo(), metadata->key, latest, metadata->tags, options, VersionVector());
 			state Future<Void> getValue = getValueQ(
@@ -4558,7 +4559,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		// end the last actual key returned must be from this shard. A begin offset of 1 is also OK because then either
 		// begin is past end or equal to end (so the result is definitely empty)
 		if ((offset1 && offset1 != 1) || (offset2 && offset2 != 1)) {
-			CODE_PROBE(true, "wrong_shard_server due to offset in getMappedKeyValuesQ");
+			CODE_PROBE(true, "wrong_shard_server due to offset in getMappedKeyValuesQ", probe::decoration::rare);
 			// We could detect when offset1 takes us off the beginning of the database or offset2 takes us off the end,
 			// and return a clipped range rather than an error (since that is what the NativeAPI.getRange will do anyway
 			// via its "slow path"), but we would have to add some flags to the response to encode whether we went off
@@ -4754,7 +4755,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		// end the last actual key returned must be from this shard. A begin offset of 1 is also OK because then either
 		// begin is past end or equal to end (so the result is definitely empty)
 		if ((offset1 && offset1 != 1) || (offset2 && offset2 != 1)) {
-			CODE_PROBE(true, "wrong_shard_server due to offset in rangeStream");
+			CODE_PROBE(true, "wrong_shard_server due to offset in rangeStream", probe::decoration::rare);
 			// We could detect when offset1 takes us off the beginning of the database or offset2 takes us off the end,
 			// and return a clipped range rather than an error (since that is what the NativeAPI.getRange will do anyway
 			// via its "slow path"), but we would have to add some flags to the response to encode whether we went off
@@ -6131,7 +6132,8 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		if (!existing) {
 			CODE_PROBE(cleanupPending,
 			           "Fetch change feed which is cleanup pending. This means there was a move away and a move back, "
-			           "this will remake the metadata");
+			           "this will remake the metadata",
+			           probe::decoration::rare);
 
 			changeFeedInfo = Reference<ChangeFeedInfo>(new ChangeFeedInfo());
 			changeFeedInfo->range = cfEntry.range;
@@ -6182,7 +6184,9 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 			}
 
 			if (changeFeedInfo->destroyed) {
-				CODE_PROBE(true, "Change feed fetched and destroyed by other fetch while fetching metadata");
+				CODE_PROBE(true,
+				           "Change feed fetched and destroyed by other fetch while fetching metadata",
+				           probe::decoration::rare);
 				continue;
 			}
 
@@ -6240,7 +6244,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		// isn't in the fetched response. In that case, the feed must have been destroyed between lastMetadataVersion
 		// and fetchedMetadataVersion
 		if (lastMetadataVersion >= fetchedMetadataVersion) {
-			CODE_PROBE(true, "Change Feed fetched higher metadata version before moved away");
+			CODE_PROBE(true, "Change Feed fetched higher metadata version before moved away", probe::decoration::rare);
 			continue;
 		}
 
@@ -9865,7 +9869,7 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 			}
 			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
 				if (!self->isReadable(req.keys)) {
-					CODE_PROBE(true, "readHotSubRanges immediate wrong_shard_server()");
+					CODE_PROBE(true, "readHotSubRanges immediate wrong_shard_server()", probe::decoration::rare);
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
 					self->metrics.getReadHotRanges(req);
@@ -10089,7 +10093,8 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 						self->sendErrorWithPenalty(req.reply, e, self->getPenalty());
 						break;
 					}
-					CODE_PROBE(true, "Reading a watched key failed with transaction_too_old case 5");
+					CODE_PROBE(
+					    true, "Reading a watched key failed with transaction_too_old case 5", probe::decoration::rare);
 				}
 			}
 		}
