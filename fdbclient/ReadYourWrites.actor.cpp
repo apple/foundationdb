@@ -1331,6 +1331,11 @@ public:
 	ACTOR static void simulateTimeoutInFlightCommit(ReadYourWritesTransaction* ryw_) {
 		state Reference<ReadYourWritesTransaction> ryw = Reference<ReadYourWritesTransaction>::addRef(ryw_);
 		ASSERT(ryw->options.timeoutInSeconds > 0);
+		// An actual in-flight commit (i.e. one that's past the point where cancelling the transaction would stop it)
+		// would already have a read version. We need to get a read version too, otherwise committing a conflicting
+		// transaction may not ensure this transaction is no longer in-flight, since this transaction could get a read
+		// version _after_.
+		wait(success(ryw->getReadVersion()));
 		if (!ryw->resetPromise.isSet())
 			ryw->resetPromise.sendError(transaction_timed_out());
 		wait(delay(deterministicRandom()->random01() * 5));
