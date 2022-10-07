@@ -24,11 +24,11 @@
 
 // Used by GRV Proxy to enforce rate limits received from the Ratekeeper.
 //
-// Between waits, the GrvTransactionRateInfo executes an "release window" starting
+// Between waits, the GrvTransactionRateInfo executes a "release window" starting
 // with a call to the startReleaseWindow method. Within this release window, transactions are
 // released while canStart returns true. At the end of the release window, the
 // endReleaseWindow method is called, and the budget is updated to add or
-// remove  capacity.
+// remove capacity.
 //
 // Meanwhile, the desired rate is updated through the setRate method.
 //
