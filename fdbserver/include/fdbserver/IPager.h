@@ -498,7 +498,7 @@ public:
 	//        Secret is set if needed
 	// Post:  Main and Encoding subheaders are updated
 	//        Payload is possibly encrypted
-	void preWrite(PhysicalPageID pageID) {
+	void preWrite(PhysicalPageID pageID) const {
 		// Explicitly check payload definedness to make the source of valgrind errors more clear.
 		// Without this check, calculating a checksum on a payload with undefined bytes does not
 		// cause a valgrind error but the resulting checksum is undefined which causes errors later.
@@ -519,7 +519,6 @@ public:
 		} else {
 			throw page_header_version_not_supported();
 		}
-		encodingHeaderAvailable = true;
 	}
 
 	// Must be called after reading from disk to verify all non-payload bytes
@@ -532,7 +531,6 @@ public:
 	void postReadHeader(PhysicalPageID pageID, bool verify = true) {
 		pPayload = page->getPayload();
 		payloadSize = logicalSize - (pPayload - buffer);
-		encodingHeaderAvailable = true;
 
 		if (page->headerVersion == 1) {
 			if (verify) {
@@ -570,18 +568,7 @@ public:
 	// Returns true if the page's encoding type employs encryption
 	bool isEncrypted() const { return isEncodingTypeEncrypted(getEncodingType()); }
 
-	// Return encryption domain id used. This method only use information from the encryptionKey.
-	// Caller should make sure encryption domain is in use.
-	int64_t getEncryptionDomainId() const {
-		// encryption domain is only supported by AESEncryptionV1.
-		ASSERT(getEncodingType() == EncodingType::AESEncryptionV1);
-		const Reference<BlobCipherKey>& cipherKey = encryptionKey.aesKey.cipherTextKey;
-		ASSERT(cipherKey.isValid());
-		return cipherKey->getDomainId();
-	}
-
-	// Return pointer to encoding header.
-	const void* getEncodingHeader() const { return encodingHeaderAvailable ? page->getEncodingHeader() : nullptr; }
+	void* getEncodingHeader() { return page->getEncodingHeader(); }
 
 private:
 	Arena arena;
@@ -620,9 +607,6 @@ public:
 
 	// Used by encodings that do encryption
 	EncryptionKey encryptionKey;
-
-	// Whether encoding header is set
-	bool encodingHeaderAvailable = false;
 
 	mutable ArbitraryObject extra;
 };
