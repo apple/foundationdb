@@ -30,4 +30,5 @@
 
 ACTOR Future<Void> persistAuditStorageState(Key key, AuditStorageState auditState);
 
+#include "flow/unactorcompiler.h"
 #endif

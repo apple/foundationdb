@@ -54,9 +54,11 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct DDAudit {
-	DDAudit(UID id, AuditType type) : id(id), type(type), auditMap(AuditPhase::Invalid, allKeys.end), actors(true) {}
+	DDAudit(UID id, KeyRange range, AuditType type)
+	  : id(id), range(range), type(type), auditMap(AuditPhase::Invalid, allKeys.end), actors(true) {}
 
 	const UID id;
+	KeyRange range;
 	const AuditType type;
 	KeyRangeMap<AuditPhase> auditMap;
 	ActorCollection actors;
@@ -1355,10 +1357,17 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 	state std::shared_ptr<DDAudit> audit;
 	auto it = self->audits.find(req.getType());
 	if (it != self->audits.end() && !it->second.empty()) {
-		audit = it->second.front();
+		ASSERT_EQ(it->second.size(), 1);
+		auto& currentAudit = it->second.front();
+		if (currentAudit->range.contains(req.range)) {
+			audit = it->second.front();
+		} else {
+			req.reply.sendError(audit_storage_exeed_max());
+			return Void();
+		}
 	} else {
 		const UID auditId = deterministicRandom()->randomUniqueID();
-		audit = std::make_shared<DDAudit>(auditId, req.getType());
+		audit = std::make_shared<DDAudit>(auditId, req.range, req.getType());
 		self->audits[req.getType()].push_back(audit);
 		audit->actors.add(scheduleAuditForRange(self, audit, req.range));
 		TraceEvent(SevDebug, "DDAuditStorageBegin", audit->id).detail("Range", req.range).detail("AuditType", req.type);

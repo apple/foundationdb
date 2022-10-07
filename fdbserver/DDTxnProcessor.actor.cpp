@@ -119,18 +119,20 @@ class DDTxnProcessorImpl {
 					UID srcId, destId;
 					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
 
-					state IDDTxnProcessor::DDRangeLocations current(KeyRangeRef(shards[i].key, shards[i + 1].key));
-					state int j = 0;
-					for (j = 0; j < src.size(); ++j) {
-						Optional<Value> serverListValue = wait(tr.get(serverListKeyFor(src[j])));
-						KeyRangeRef currentRange(shards[i].key, shards[i + 1].key);
-						if (!serverListValue.present()) {
+					std::vector<Future<Optional<Value>>> serverListEntries;
+					for (int j = 0; j < src.size(); ++j) {
+						serverListEntries.push_back(tr.get(serverListKeyFor(src[j])));
+					}
+					std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+					IDDTxnProcessor::DDRangeLocations current(KeyRangeRef(shards[i].key, shards[i + 1].key));
+					for (int j = 0; j < serverListValues.size(); ++j) {
+						if (!serverListValues[j].present()) {
 							TraceEvent(SevWarnAlways, "GetSourceServerInterfacesMissing")
 							    .detail("StorageServer", src[j])
-							    .detail("Range", currentRange);
+							    .detail("Range", KeyRangeRef(shards[i].key, shards[i + 1].key));
 							continue;
 						}
-						const StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
+						StorageServerInterface ssi = decodeServerListValue(serverListValues[j].get());
 						current.servers[ssi.locality.describeDcId()].push_back(ssi);
 					}
 					res.push_back(current);

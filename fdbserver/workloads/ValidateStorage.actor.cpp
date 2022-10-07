@@ -179,67 +179,6 @@ struct ValidateStorage : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> readAndVerify(ValidateStorage* self,
-	                                 Database cx,
-	                                 Key key,
-	                                 ErrorOr<Optional<Value>> expectedValue) {
-		state Transaction tr(cx);
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-		loop {
-			try {
-				state Version readVersion = wait(tr.getReadVersion());
-				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
-				const bool equal = !expectedValue.isError() && res == expectedValue.get();
-				if (!equal) {
-					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
-				}
-				break;
-			} catch (Error& e) {
-				TraceEvent("TestReadError").errorUnsuppressed(e);
-				if (expectedValue.isError() && expectedValue.getError().code() == e.code()) {
-					break;
-				}
-				wait(tr.onError(e));
-			}
-		}
-
-		TraceEvent("TestReadSuccess").detail("Version", readVersion);
-
-		return Void();
-	}
-
-	ACTOR Future<Version> writeAndVerify(ValidateStorage* self, Database cx, Key key, Optional<Value> value) {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-		state Version version;
-		loop {
-			state UID debugID = deterministicRandom()->randomUniqueID();
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->debugTransaction(debugID);
-				if (value.present()) {
-					tr->set(key, value.get());
-					tr->set("Test?"_sr, value.get());
-					tr->set(key, value.get());
-				} else {
-					tr->clear(key);
-				}
-				wait(timeoutError(tr->commit(), 30.0));
-				version = tr->getCommittedVersion();
-				break;
-			} catch (Error& e) {
-				TraceEvent("TestCommitError").errorUnsuppressed(e);
-				wait(tr->onError(e));
-			}
-		}
-
-		TraceEvent("TestCommitSuccess").detail("CommitVersion", tr->getCommittedVersion()).detail("DebugID", debugID);
-
-		wait(self->readAndVerify(self, cx, key, value));
-
-		return version;
-	}
-
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}

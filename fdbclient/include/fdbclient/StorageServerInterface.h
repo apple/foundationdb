@@ -121,9 +121,8 @@ struct StorageServerInterface {
 	RequestStream<struct GetCheckpointRequest> checkpoint;
 	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
 	RequestStream<struct FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues;
-	RequestStream<struct AuditStorageRequest> auditStorage;
-
 	RequestStream<struct UpdateCommitCostRequest> updateCommitCostRequest;
+	RequestStream<struct AuditStorageRequest> auditStorage;
 
 private:
 	bool acceptingRequests;

@@ -4189,7 +4189,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
                                               KeyRange range,
                                               Version version,
                                               StorageServerInterface remoteServer) {
-	TraceEvent(SevDebug, "ValidateRangeAgainstServerBegin", data->thisServerID)
+	TraceEvent(SevInfo, "ValidateRangeAgainstServerBegin", data->thisServerID)
 	    .detail("Range", range)
 	    .detail("Version", version)
 	    .detail("RemoteServer", remoteServer.toString());
@@ -4198,20 +4198,19 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 	state std::string error;
 	loop {
 		try {
-			state int limit = 1e4;
-			state int limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-			state GetKeyValuesRequest req;
+			std::vector<Future<ErrorOr<GetKeyValuesReply>>> fs;
+			int limit = 1e4;
+			int limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+			GetKeyValuesRequest req;
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
 			req.limit = limit;
 			req.limitBytes = limitBytes;
 			req.version = version;
 			req.tags = TagSet();
-			state Future<ErrorOr<GetKeyValuesReply>> remoteKeyValueFuture =
-			    remoteServer.getKeyValues.getReplyUnlessFailedFor(req, 2, 0);
-			state ErrorOr<GetKeyValuesReply> remoteResult = wait(remoteKeyValueFuture);
+			fs.push_back(remoteServer.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 
-			state GetKeyValuesRequest localReq;
+			GetKeyValuesRequest localReq;
 			localReq.begin = firstGreaterOrEqual(range.begin);
 			localReq.end = firstGreaterOrEqual(range.end);
 			localReq.limit = limit;
@@ -4219,34 +4218,28 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 			localReq.version = version;
 			localReq.tags = TagSet();
 			data->actors.add(getKeyValuesQ(data, localReq));
-			GetKeyValuesReply local = wait(localReq.reply.getFuture());
-			if (local.error.present()) {
-				TraceEvent(SevWarn, "ValidateRangeGetLocalKeyValuesError", data->thisServerID)
-				    .errorUnsuppressed(local.error.get())
-				    .detail("Range", range);
-				throw local.error.get();
+			fs.push_back(errorOr(localReq.reply.getFuture()));
+			std::vector<ErrorOr<GetKeyValuesReply>> reps = wait(getAll(fs));
+
+			for (int i = 0; i < reps.size(); ++i) {
+				if (reps[i].isError()) {
+					TraceEvent(SevWarn, "ValidateRangeGetKeyValuesError", data->thisServerID)
+					    .errorUnsuppressed(reps[i].getError())
+					    .detail("ReplyIndex", i)
+					    .detail("Range", range);
+					throw reps[i].getError();
+				}
+				if (reps[i].get().error.present()) {
+					TraceEvent(SevWarn, "ValidateRangeGetKeyValuesError", data->thisServerID)
+					    .errorUnsuppressed(reps[i].get().error.get())
+					    .detail("ReplyIndex", i)
+					    .detail("Range", range);
+					throw reps[i].get().error.get();
+				}
 			}
 
+			GetKeyValuesReply remote = reps[0].get(), local = reps[1].get();
 			Key lastKey = range.begin;
-
-			if (remoteResult.isError()) {
-				TraceEvent(SevWarn, "ValidateRangeGetRemoteKeyValuesError", data->thisServerID)
-				    .errorUnsuppressed(remoteResult.getError())
-				    .detail("Range", range);
-				throw remoteResult.getError();
-			}
-
-			GetKeyValuesReply remote = remoteResult.get();
-			if (remote.error.present()) {
-				TraceEvent(SevWarn, "ValidateRangeGetRemoteKeyValuesError", data->thisServerID)
-				    .errorUnsuppressed(remote.error.get())
-				    .detail("Range", range);
-				throw remote.error.get();
-			}
-
-			TraceEvent(SevVerbose, "ValidateRangeGetRemoteKeyValuesResult", data->thisServerID)
-			    .detail("Range", range)
-			    .detail("RemoteResultSize", remote.data.size());
 
 			const int end = std::min(local.data.size(), remote.data.size());
 			int i = 0;
