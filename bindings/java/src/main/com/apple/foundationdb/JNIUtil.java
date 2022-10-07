@@ -182,19 +182,15 @@ public class JNIUtil {
 	private static OS getRunningOS() {
 		String osname = System.getProperty("os.name").toLowerCase();
 		String arch = System.getProperty("os.arch");
-		Boolean eagerDelete = true;
-		if (System.getProperty("fdb.bindings.java.eager_delete") != null) {
-			eagerDelete = false;
-		}
 		if (!arch.equals("amd64") && !arch.equals("x86_64") && !arch.equals("aarch64") && !arch.equals("ppc64le")) {
 			throw new IllegalStateException("Unknown or unsupported arch: " + arch);
 		}
 		if (osname.startsWith("windows")) {
 			return new OS("windows", arch, /* canDeleteEager */ false);
 		} else if (osname.startsWith("linux")) {
-			return new OS("linux", arch, /* canDeleteEager */ eagerDelete);
+			return new OS("linux", arch, /* canDeleteEager */ true);
 		} else if (osname.startsWith("mac") || osname.startsWith("darwin")) {
-			return new OS("osx", arch, /* canDeleteEager */ eagerDelete);
+			return new OS("osx", arch, /* canDeleteEager */ true);
 		} else {
 			throw new IllegalStateException("Unknown or unsupported OS: " + osname);
 		}

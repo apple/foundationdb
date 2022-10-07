@@ -2537,8 +2537,12 @@ void MultiVersionApi::setupNetwork() {
 				externalClients[filename] = {};
 				auto libCopies = copyExternalLibraryPerThread(path);
 				for (int idx = 0; idx < libCopies.size(); ++idx) {
+					bool unlinkOnLoad = libCopies[idx].second;
+					if (!CLIENT_KNOBS->UNLINKONLOAD_FDBCLIB) {
+						unlinkOnLoad = false;
+					}
 					externalClients[filename].push_back(Reference<ClientInfo>(
-					    new ClientInfo(new DLApi(libCopies[idx].first, libCopies[idx].second /*unlink on load*/),
+					    new ClientInfo(new DLApi(libCopies[idx].first, unlinkOnLoad /*unlink on load*/),
 					                   path,
 					                   useFutureVersion,
 					                   idx)));
@@ -2552,7 +2556,7 @@ void MultiVersionApi::setupNetwork() {
 			//
 			// Typically we would create a more specific error for this case, but since we expect
 			// this case to go away soon, we can use a trace event and a generic error.
-			TraceEvent(SevWarn, "CannotSetupNetwork")
+			TraceEvent("CannotSetupNetwork")
 			    .detail("Reason", "Local client is disabled and no external clients configured");
 
 			throw client_invalid_operation();
