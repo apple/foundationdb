@@ -37,18 +37,21 @@ bool GrvTransactionRateInfo::canStart(int64_t numAlreadyStarted, int64_t count) 
 
 void GrvTransactionRateInfo::endReleaseWindow(int64_t numStartedAtPriority, bool queueEmptyAtPriority, double elapsed) {
 	// Update the budget to accumulate any extra capacity available or remove any excess that was used.
-	// The actual delta is the portion of the limit we didn't use multiplied by the fraction of the window that
+	// The actual delta is the portion of the limit we didn't use multiplied by the fraction of the rate window that
 	// elapsed.
 	//
 	// We may have exceeded our limit due to the budget or because of higher priority transactions, in which case
 	// this delta will be negative. The delta can also be negative in the event that our limit was negative, which
-	// can happen if we had already started more transactions in our window than our rate would have allowed.
+	// can happen if we had already started more transactions in our rate window than our rate would have allowed.
 	//
 	// This budget has the property that when the budget is required to start transactions (because batches are
 	// big), the sum limit+budget will increase linearly from 0 to the batch size over time and decrease by the
 	// batch size upon starting a batch. In other words, this works equivalently to a model where we linearly
-	// accumulate budget over time in the case that our batches are too big to take advantage of the window based
+	// accumulate budget over time in the case that our batches are too big to take advantage of the rate window based
 	// limits.
+	//
+	// Note that "rate window" here indicates a period of SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW seconds,
+	// whereas "release window" is the period between wait statements, with duration indicated by "elapsed."
 	budget =
 	    std::max(0.0, budget + elapsed * (limit - numStartedAtPriority) / SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW);
 
