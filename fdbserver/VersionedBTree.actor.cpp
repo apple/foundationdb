@@ -2192,7 +2192,7 @@ public:
 	          int64_t remapCleanupWindowBytes,
 	          int concurrentExtentReads,
 	          bool memoryOnly,
-	          Reference<IPageEncryptionKeyProvider> keyProvider,
+	          Reference<IEncryptionKeyProvider> keyProvider,
 	          Promise<Void> errorPromise = {})
 	  : keyProvider(keyProvider), ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2),
 	    pageCacheBytes(pageCacheSizeBytes), desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize),
@@ -2974,7 +2974,7 @@ public:
 		try {
 			page->postReadHeader(pageID);
 			if (page->isEncrypted()) {
-				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
+				EncryptionKey k = wait(self->keyProvider->getSecrets(page->encryptionKey));
 				page->encryptionKey = k;
 			}
 			page->postReadPayload(pageID);
@@ -3042,7 +3042,7 @@ public:
 		try {
 			page->postReadHeader(pageIDs.front());
 			if (page->isEncrypted()) {
-				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
+				EncryptionKey k = wait(self->keyProvider->getSecrets(page->encryptionKey));
 				page->encryptionKey = k;
 			}
 			page->postReadPayload(pageIDs.front());
@@ -3955,7 +3955,7 @@ private:
 	int physicalExtentSize;
 	int pagesPerExtent;
 
-	Reference<IPageEncryptionKeyProvider> keyProvider;
+	Reference<IEncryptionKeyProvider> keyProvider;
 
 	PriorityMultiLock ioLock;
 
@@ -5035,7 +5035,7 @@ public:
 	VersionedBTree(IPager2* pager,
 	               std::string name,
 	               EncodingType defaultEncodingType,
-	               Reference<IPageEncryptionKeyProvider> keyProvider)
+	               Reference<IEncryptionKeyProvider> keyProvider)
 	  : m_pager(pager), m_encodingType(defaultEncodingType), m_enforceEncodingType(false), m_keyProvider(keyProvider),
 	    m_pBuffer(nullptr), m_mutationCount(0), m_name(name) {
 
@@ -5063,7 +5063,7 @@ public:
 		state Reference<ArenaPage> page = self->m_pager->newPageBuffer();
 		page->init(self->m_encodingType, PageType::BTreeNode, 1);
 		if (page->isEncrypted()) {
-			ArenaPage::EncryptionKey k = wait(self->m_keyProvider->getLatestDefaultEncryptionKey());
+			EncryptionKey k = wait(self->m_keyProvider->getByRange(dbBegin.key, dbEnd.key));
 			page->encryptionKey = k;
 		}
 
@@ -5542,7 +5542,7 @@ private:
 	IPager2* m_pager;
 	EncodingType m_encodingType;
 	bool m_enforceEncodingType;
-	Reference<IPageEncryptionKeyProvider> m_keyProvider;
+	Reference<IEncryptionKeyProvider> m_keyProvider;
 
 	// Counter to update with DecodeCache memory usage
 	int64_t* m_pDecodeCacheMemory = nullptr;
@@ -5842,7 +5842,7 @@ private:
 			           (pagesToBuild[pageIndex].blockCount == 1) ? PageType::BTreeNode : PageType::BTreeSuperNode,
 			           height);
 			if (page->isEncrypted()) {
-				ArenaPage::EncryptionKey k = wait(self->m_keyProvider->getLatestDefaultEncryptionKey());
+				EncryptionKey k = wait(self->m_keyProvider->getByRange(pageLowerBound.key, pageUpperBound.key));
 				page->encryptionKey = k;
 			}
 
@@ -7693,7 +7693,7 @@ RedwoodRecordRef VersionedBTree::dbEnd("\xff\xff\xff\xff\xff"_sr);
 
 class KeyValueStoreRedwood : public IKeyValueStore {
 public:
-	KeyValueStoreRedwood(std::string filename, UID logID, Reference<IPageEncryptionKeyProvider> encryptionKeyProvider)
+	KeyValueStoreRedwood(std::string filename, UID logID, Reference<IEncryptionKeyProvider> encryptionKeyProvider)
 	  : m_filename(filename), m_concurrentReads(SERVER_KNOBS->REDWOOD_KVSTORE_CONCURRENT_READS, 0),
 	    prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 
@@ -7722,7 +7722,7 @@ public:
 		//
 		// TODO(yiwu): When the cluster encryption config is available later, fail if the cluster is configured to
 		// enable encryption, but the Redwood instance is unencrypted.
-		if (encryptionKeyProvider && encryptionKeyProvider->enableEncryption()) {
+		if (encryptionKeyProvider && encryptionKeyProvider->shouldEnableEncryption()) {
 			encodingType = EncodingType::AESEncryptionV1;
 			m_keyProvider = encryptionKeyProvider;
 		}
@@ -8019,7 +8019,7 @@ private:
 	PriorityMultiLock m_concurrentReads;
 	bool prefetch;
 	Version m_nextCommitVersion;
-	Reference<IPageEncryptionKeyProvider> m_keyProvider;
+	Reference<IEncryptionKeyProvider> m_keyProvider;
 	Future<Void> m_lastCommit = Void();
 
 	template <typename T>
@@ -8030,7 +8030,7 @@ private:
 
 IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                        UID logID,
-                                       Reference<IPageEncryptionKeyProvider> encryptionKeyProvider) {
+                                       Reference<IEncryptionKeyProvider> encryptionKeyProvider) {
 	return new KeyValueStoreRedwood(filename, logID, encryptionKeyProvider);
 }
 
@@ -9804,7 +9804,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 	state EncodingType encodingType =
 	    static_cast<EncodingType>(deterministicRandom()->randomInt(0, EncodingType::MAX_ENCODING_TYPE));
-	state Reference<IPageEncryptionKeyProvider> keyProvider;
+	state Reference<IEncryptionKeyProvider> keyProvider;
 	if (encodingType == EncodingType::AESEncryptionV1) {
 		keyProvider = makeReference<RandomEncryptionKeyProvider>();
 	} else if (encodingType == EncodingType::XOREncryption_TestOnly) {
@@ -10290,7 +10290,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 		                      remapCleanupWindowBytes,
 		                      concurrentExtentReads,
 		                      false,
-		                      Reference<IPageEncryptionKeyProvider>());
+		                      Reference<IEncryptionKeyProvider>());
 
 		wait(success(pager->init()));
 
@@ -10348,7 +10348,7 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	                      remapCleanupWindowBytes,
 	                      concurrentExtentReads,
 	                      false,
-	                      Reference<IPageEncryptionKeyProvider>());
+	                      Reference<IEncryptionKeyProvider>());
 	wait(success(pager->init()));
 
 	printf("Starting ExtentQueue FastPath Recovery from Disk.\n");
@@ -10493,9 +10493,9 @@ TEST_CASE(":/redwood/performance/set") {
 	                                 remapCleanupWindowBytes,
 	                                 concurrentExtentReads,
 	                                 pagerMemoryOnly,
-	                                 Reference<IPageEncryptionKeyProvider>());
+	                                 Reference<IEncryptionKeyProvider>());
 	state VersionedBTree* btree =
-	    new VersionedBTree(pager, file, EncodingType::XXHash64, Reference<IPageEncryptionKeyProvider>());
+	    new VersionedBTree(pager, file, EncodingType::XXHash64, Reference<IEncryptionKeyProvider>());
 	wait(btree->init());
 	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 

@@ -170,13 +170,16 @@ public:
 private:
 	Reference<BlobCipherKey> generateCipherKey(const BlobCipherDetails& cipherDetails) {
 		static unsigned char SHA_KEY[] = "3ab9570b44b8315fdb261da6b1b6c13b";
-		uint8_t digest[AUTH_TOKEN_SIZE];
-		computeAuthToken(reinterpret_cast<const unsigned char*>(&cipherDetails.baseCipherId),
-		                 sizeof(EncryptCipherBaseKeyId),
-		                 SHA_KEY,
-		                 AES_256_KEY_LENGTH,
-		                 &digest[0],
-		                 AUTH_TOKEN_SIZE);
+		Arena arena;
+		uint8_t digest[AUTH_TOKEN_HMAC_SHA_SIZE];
+		computeAuthToken(
+		    { { reinterpret_cast<const uint8_t*>(&cipherDetails.baseCipherId), sizeof(EncryptCipherBaseKeyId) } },
+		    SHA_KEY,
+		    AES_256_KEY_LENGTH,
+		    &digest[0],
+		    EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
+		    AUTH_TOKEN_HMAC_SHA_SIZE);
+		ASSERT_EQ(AUTH_TOKEN_HMAC_SHA_SIZE, AES_256_KEY_LENGTH);
 		return makeReference<BlobCipherKey>(cipherDetails.encryptDomainId,
 		                                    cipherDetails.baseCipherId,
 		                                    &digest[0],
