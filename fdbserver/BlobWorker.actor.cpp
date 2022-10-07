@@ -199,6 +199,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	Promise<Void> doGRVCheck;
 	NotifiedVersion grvVersion;
 	Promise<Void> fatalError;
+	Promise<Void> simInjectFailure;
 
 	Reference<FlowLock> initialSnapshotLock;
 	Reference<FlowLock> resnapshotLock;
@@ -291,6 +292,19 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 		stats.estimatedMaxResidentMemory = stats.lastResidentMemory + totalExtra;
 
 		return stats.estimatedMaxResidentMemory >= memoryFullThreshold;
+	}
+
+	bool maybeInjectTargetedRestart() {
+		// inject a BW restart at most once per test
+		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
+		    now() > g_simulator->injectTargetedBWRestartTime) {
+			CODE_PROBE(true, "Injecting BW targeted restart");
+			TraceEvent("SimBWInjectTargetedRestart", id);
+			g_simulator->injectTargetedBWRestartTime = std::numeric_limits<double>::max();
+			simInjectFailure.send(Void());
+			return true;
+		}
+		return false;
 	}
 };
 
@@ -645,7 +659,7 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 			CODE_PROBE(true, "Granule split stopping change feed");
 		}
 	} else if (BW_DEBUG) {
-		CODE_PROBE(true, "Out of order granule split state updates ignored");
+		CODE_PROBE(true, "Out of order granule split state updates ignored", probe::decoration::rare);
 		fmt::print("Ignoring granule {0} split state from {1} {2} -> {3}\n",
 		           currentGranuleID.toString(),
 		           parentGranuleID.toString(),
@@ -778,6 +792,11 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 					    serializedSize,
 					    currentDeltaVersion,
 					    tr->getCommittedVersion());
+				}
+
+				if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
+					wait(delay(0)); // should be cancelled
+					ASSERT(false);
 				}
 
 				if (BUGGIFY_WITH_PROB(0.01)) {
@@ -1007,6 +1026,11 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 		    .detail("Compressed", compressFilter.present());
 	}
 
+	if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
+		wait(delay(0)); // should be cancelled
+		ASSERT(false);
+	}
+
 	// FIXME: change when we implement multiplexing
 	return BlobFileIndex(version, fname, 0, serializedSize, serializedSize, cipherKeysMeta);
 }
@@ -1056,6 +1080,11 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			    .detail("Granule", metadata->keyRange)
 			    .detail("Version", readVersion);
 			DEBUG_KEY_RANGE("BlobWorkerFDBSnapshot", readVersion, metadata->keyRange, bwData->id);
+
+			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
+				wait(delay(0)); // should be cancelled
+				ASSERT(false);
+			}
 
 			// initial snapshot is committed in fdb, we can pop the change feed up to this version
 			inFlightPops->push_back(bwData->db->popChangeFeedMutations(cfKey, readVersion + 1));
@@ -1443,6 +1472,10 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobWorkerData> bwData,
 			                         seqno);
 			reply.proposedSplitKey = proposedSplitKey;
 			bwData->currentManagerStatusStream.get().send(reply);
+			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
+				wait(delay(0)); // should be cancelled
+				ASSERT(false);
+			}
 			// if a new manager appears, also tell it about this granule being splittable, or retry after a certain
 			// amount of time of not hearing back
 			wait(success(timeout(bwData->currentManagerStatusStream.onChange(), 10.0)));
@@ -2617,7 +2650,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				// queue too many files in parallel, and slow down change feed consuming to let file writing
 				// catch up
 
-				CODE_PROBE(true, "Granule processing long tail of old change feed");
+				CODE_PROBE(true, "Granule processing long tail of old change feed", probe::decoration::rare);
 				if (inFlightFiles.size() > 10 && inFlightFiles.front().version <= metadata->knownCommittedVersion) {
 					if (BW_DEBUG) {
 						fmt::print("[{0} - {1}) Waiting on delta file b/c old change feed\n",
@@ -2698,7 +2731,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			// FIXME: better way to fix this?
 			bool isForcePurging = wait(checkFileNotFoundForcePurgeRace(bwData, metadata->keyRange));
 			if (isForcePurging) {
-				CODE_PROBE(true, "Granule got file not found from force purge");
+				CODE_PROBE(true, "Granule got file not found from force purge", probe::decoration::rare);
 				TraceEvent("GranuleFileUpdaterFileNotFoundForcePurge", bwData->id)
 				    .error(e2)
 				    .detail("KeyRange", metadata->keyRange)
@@ -3517,7 +3550,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 						// We can get change feed cancelled from whenAtLeast. This means the change feed may
 						// retry, or may be cancelled. Wait a bit and try again to see
 						if (e.code() == error_code_change_feed_popped) {
-							CODE_PROBE(true, "Change feed popped while read waiting");
+							CODE_PROBE(true, "Change feed popped while read waiting", probe::decoration::rare);
 							throw wrong_shard_server();
 						}
 						if (e.code() != error_code_change_feed_cancelled) {
@@ -3541,7 +3574,9 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					Version emptyVersion = metadata->activeCFData.get()->popVersion - 1;
 					if (req.readVersion > metadata->durableDeltaVersion.get() &&
 					    emptyVersion > metadata->bufferedDeltaVersion) {
-						CODE_PROBE(true, "feed popped for read but granule updater didn't notice yet");
+						CODE_PROBE(true,
+						           "feed popped for read but granule updater didn't notice yet",
+						           probe::decoration::rare);
 						// FIXME: could try to cancel the actor here somehow, but it should find out eventually
 						throw wrong_shard_server();
 					}
@@ -3756,7 +3791,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 		when(wait(doBlobGranuleFileRequest(bwData, req))) {}
 		when(wait(delay(SERVER_KNOBS->BLOB_WORKER_REQUEST_TIMEOUT))) {
 			if (!req.reply.isSet()) {
-				CODE_PROBE(true, "Blob Worker request timeout hit");
+				CODE_PROBE(true, "Blob Worker request timeout hit", probe::decoration::rare);
 				if (BW_DEBUG) {
 					fmt::print("BW {0} request [{1} - {2}) @ {3} timed out, sending WSS\n",
 					           bwData->id.toString().substr(0, 5),
@@ -3845,7 +3880,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				// if it's the first snapshot of a new granule, history won't be present
 				if (info.history.present()) {
 					if (info.granuleID != info.history.get().value.granuleID) {
-						CODE_PROBE(true, "Blob Worker re-opening granule after merge+resplit");
+						CODE_PROBE(true, "Blob Worker re-opening granule after merge+resplit", probe::decoration::rare);
 						// The only case this can happen is when a granule was merged into a larger granule,
 						// then split back out to the same one. Validate that this is a new granule that was
 						// split previously. Just check lock based on epoch, since seqno is intentionally
@@ -4041,6 +4076,11 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			    .detail("PreviousDurableVersion", info.previousDurableVersion);
 			if (info.splitParentGranule.present()) {
 				openEv.detail("SplitParentGranuleID", info.splitParentGranule.get().second);
+			}
+
+			if (BUGGIFY && bwData->maybeInjectTargetedRestart()) {
+				wait(delay(0)); // should be cancelled
+				ASSERT(false);
 			}
 
 			return info;
@@ -4985,7 +5025,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 				ASSERT(false);
 				throw internal_error();
 			}
-			when(wait(selfRemoved)) {
+			when(wait(selfRemoved || self->simInjectFailure.getFuture())) {
 				if (BW_DEBUG) {
 					printf("Blob worker detected removal. Exiting...\n");
 				}

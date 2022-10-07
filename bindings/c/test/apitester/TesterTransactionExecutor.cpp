@@ -187,7 +187,7 @@ public:
 			onErrorArg = err;
 			onErrorFuture = tx().onError(err);
 			handleOnErrorFuture();
-		} else if (isRetriableDBOpError(err.code())) {
+		} else if (err.retryable()) {
 			restartTransaction();
 		} else {
 			transactionFailed(err);
@@ -213,8 +213,6 @@ protected:
 	bool canBeInjectedDatabaseCreateError(fdb::Error::CodeType errCode) {
 		return errCode == error_code_no_cluster_file_found || errCode == error_code_connection_string_invalid;
 	}
-
-	bool isRetriableDBOpError(fdb::Error::CodeType errCode) { return errCode == error_code_cluster_version_changed; }
 
 	// Complete the transaction with an (unretriable) error
 	void transactionFailed(fdb::Error err) {

@@ -31,7 +31,7 @@
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/BlobManagerInterface.h"
-#include "fdbclient/ConsistencyScanInterface.h"
+#include "fdbclient/ConsistencyScanInterface.actor.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/LatencyBandConfig.h"
 #include "fdbserver/WorkerInterface.actor.h"

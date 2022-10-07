@@ -1,5 +1,4 @@
-testClass=SnapshotTest
-storageEngineExcludeTypes=[4, 5]
+storageEngineExcludeTypes=4,5
 buggify=off
 
 testTitle=SnapCycleRestore
