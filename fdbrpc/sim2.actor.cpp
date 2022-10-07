@@ -921,7 +921,7 @@ public:
 			if (!ordered && !currentProcess->rebooting && machine == currentProcess &&
 			    !currentProcess->shutdownSignal.isSet() && FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
 			    deterministicRandom()->random01() < 0.25) {
-        // FIXME: why doesn't this work when we are changing machines?
+				// FIXME: why doesn't this work when we are changing machines?
 				seconds += FLOW_KNOBS->MAX_BUGGIFIED_DELAY * pow(deterministicRandom()->random01(), 1000.0);
 			}
 			double at = now() + seconds;
