@@ -322,9 +322,9 @@ function(create_long_running_correctness_package)
     DEPENDS ${package_files}
             ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTest.sh
             ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTimeout.sh
-    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/longRunningCorrectnessTest.sh
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTest.sh
                                     ${out_dir}/joshua_test
-    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/longRunningCorrectnessTimeout.sh
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTimeout.sh
                                     ${out_dir}/joshua_timeout
     COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} ${package_files}
                                                     ${out_dir}/joshua_test
