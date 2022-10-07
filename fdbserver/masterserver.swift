@@ -42,10 +42,9 @@ func figureVersion(current: Version,
 }
 
 public actor MasterDataActor {
-    // We're re-rolling the model type one field at a time...
-    let myself: MasterDataShared
+    let myself: MasterData
 
-    init(data: MasterDataShared) {
+    init(data: MasterData) {
         self.myself = data
     }
 
@@ -54,13 +53,19 @@ public actor MasterDataActor {
         print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) handle request")
         // NOTE: the `req` is inout since `req.reply.sendNever()` imports as `mutating`
         var req = req
+        print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) a")
 
         // TODO: Wrap with a tracing span
         let requestingProxyUID: UID = req.requestingProxy
         myself.getGetCommitVersionRequests() += 1
+        print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) b")
+        swift_test_masterData(myself)
+        let lp = swift_lookup_Map_UID_CommitProxyVersionReplies(myself, requestingProxyUID)
+        print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) b1")
 
         // FIXME: workaround for std::map usability, see: rdar://100487652 ([fdp] std::map usability, can't effectively work with map in Swift)
-        guard let lastVersionReplies = lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID) else {
+        guard let lastVersionReplies = lp/*lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID)*/ else {
+            print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) c")
             // Request from invalid proxy (e.g. from duplicate recruitment request)
             req.reply.sendNever()
             return
@@ -110,7 +115,7 @@ public actor MasterDataActor {
                 // FIXME: getMutating() ambiguity
                 var r = myself.referenceVersion
                 myself.version = figureVersion(current: myself.version,
-                              now: g_network.timer(),
+                                               now: SwiftGNetwork.timer(),
                               reference: Version(r.__getUnsafe().pointee),
                               toAdd: toAdd,
                               maxVersionRateModifier: getServerKnobs().MAX_VERSION_RATE_MODIFIER,
@@ -143,7 +148,10 @@ public actor MasterDataActor {
         req.reply.send(&rep)
 
         assert(lastVersionReplies.getLatestRequestNumRef().get() == req.requestNum - 1)
-        lastVersionReplies.getLatestRequestNumRef().set(Int(req.requestNum))
+        // FIXME: link issue.
+        // lastVersionReplies.getLatestRequestNumRef().set(Int(req.requestNum))
+        swift_workaround_setLatestRequestNumber(lastVersionReplies.getLatestRequestNumRef(),
+                                                Version(req.requestNum))
     }
 }
 
@@ -152,11 +160,8 @@ public actor MasterDataActor {
 public struct MasterDataActorCxx {
     let myself: MasterDataActor
 
-    public init() {
-        fatalError("TODO") // FIXME
-    }
     /// Mirror actor initializer, and initialize `myself`.
-    public init(data: MasterDataShared) {
+    public init(data: MasterData) {
         myself = MasterDataActor(data: data)
     }
 
@@ -164,8 +169,9 @@ public struct MasterDataActorCxx {
     /// If missing, please declare new `using PromiseXXX = Promise<XXX>;` in `swift_<MODULE>_future_support.h` files.
     public func getVersion(req: GetCommitVersionRequest, result promise: PromiseVoid) {
         print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
+        swift_test_masterData(myself.myself)
         Task {
-            print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
+            print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
             await myself.getVersion(req: req)
             var result = Flow.Void()
             promise.send(&result)

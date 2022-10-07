@@ -104,6 +104,7 @@
 #endif
 
 #if __has_include("SwiftModules/FDBServer")
+class MasterData;
 #include "SwiftModules/FDBServer"
 #define SWIFT_REVERSE_INTEROP_SUPPORTED
 #endif

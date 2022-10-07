@@ -32,111 +32,11 @@
 #include "flow/Trace.h"
 #include "flow/swift_compat.h"
 #include "fdbclient/VersionVector.h"
+#include "fdbserver/MasterData.actor.h"
 
 #include "SwiftModules/FDBServer"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
-
-struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
-	UID dbgid;
-
-	Version lastEpochEnd, // The last version in the old epoch not (to be) rolled back in this recovery
-	    recoveryTransactionVersion; // The first version in this epoch
-
-	NotifiedVersion prevTLogVersion; // Order of transactions to tlogs
-
-	NotifiedVersion liveCommittedVersion; // The largest live committed version reported by commit proxies.
-	bool databaseLocked;
-	Optional<Value> proxyMetadataVersion;
-	Version minKnownCommittedVersion;
-
-	ServerCoordinators coordinators;
-
-	Version version; // The last version assigned to a proxy by getVersion()
-	double lastVersionTime;
-	Optional<Version> referenceVersion;
-
-	std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
-
-	MasterInterface myInterface;
-
-	ResolutionBalancer resolutionBalancer;
-
-	bool forceRecovery;
-
-	// Captures the latest commit version targeted for each storage server in the cluster.
-	// @todo We need to ensure that the latest commit versions of storage servers stay
-	// up-to-date in the presence of key range splits/merges.
-	VersionVector ssVersionVector;
-
-	int8_t locality; // sequencer locality
-
-	CounterCollection cc;
-	Counter getCommitVersionRequests;
-	Counter getLiveCommittedVersionRequests;
-	Counter reportLiveCommittedVersionRequests;
-	// This counter gives an estimate of the number of non-empty peeks that storage servers
-	// should do from tlogs (in the worst case, ignoring blocking peek timeouts).
-	LatencySample versionVectorTagUpdates;
-	Counter waitForPrevCommitRequests;
-	Counter nonWaitForPrevCommitRequests;
-	LatencySample versionVectorSizeOnCVReply;
-	LatencySample waitForPrevLatencies;
-
-	PromiseStream<Future<Void>> addActor;
-
-	Future<Void> logger;
-	Future<Void> balancer;
-
-	MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
-	           MasterInterface const& myInterface,
-	           ServerCoordinators const& coordinators,
-	           ClusterControllerFullInterface const& clusterController,
-	           Standalone<StringRef> const& dbId,
-	           PromiseStream<Future<Void>> addActor,
-	           bool forceRecovery)
-	  : dbgid(myInterface.id()),
-      lastEpochEnd(invalidVersion),
-      recoveryTransactionVersion(invalidVersion),
-	    liveCommittedVersion(invalidVersion),
-      databaseLocked(false),
-      minKnownCommittedVersion(invalidVersion),
-	    coordinators(coordinators),
-      version(invalidVersion),
-      lastVersionTime(0),
-      myInterface(myInterface),
-	    resolutionBalancer(&version),
-      forceRecovery(forceRecovery),
-      cc("Master", dbgid.toString()),
-	    getCommitVersionRequests("GetCommitVersionRequests", cc),
-	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
-	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
-	    versionVectorTagUpdates("VersionVectorTagUpdates",
-	                            dbgid,
-	                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                            SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-	    waitForPrevCommitRequests("WaitForPrevCommitRequests", cc),
-	    nonWaitForPrevCommitRequests("NonWaitForPrevCommitRequests", cc),
-	    versionVectorSizeOnCVReply("VersionVectorSizeOnCVReply",
-	                               dbgid,
-	                               SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                               SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-	    waitForPrevLatencies("WaitForPrevLatencies",
-	                         dbgid,
-	                         SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                         SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-	    addActor(addActor) {
-		logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
-		if (forceRecovery && !myInterface.locality.dcId().present()) {
-			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
-			forceRecovery = false;
-		}
-		balancer = resolutionBalancer.resolutionBalancing();
-		locality = tagLocalityInvalid;
-	}
-
-	~MasterData() = default;
-};
 
 Version figureVersion(Version current,
                       double now,
@@ -160,12 +60,11 @@ Version figureVersion(Version current,
 	return std::clamp(expected, current + toAdd - maxOffset, current + toAdd + maxOffset);
 }
 
-using ReferenceMasterDataShared = Reference<MasterDataShared>;
-
 ACTOR Future<Void> getVersionSwift(Reference<MasterData> self, GetCommitVersionRequest req) {
   using namespace fdbserver_swift;
 
-  auto masterDataActor = MasterDataActor::init();
+  auto masterDataActor = MasterDataActor::init(self.getPtr());
+  swift_test_masterData(self.getPtr());
 
   // TODO: we likely can pre-bake something to make these calls easier, without the explicit Promise creation
   auto promise = Promise<Void>();
@@ -174,7 +73,28 @@ ACTOR Future<Void> getVersionSwift(Reference<MasterData> self, GetCommitVersionR
   return Void();
 }
 
-ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
+void swift_test_masterData(MasterData *p) {
+    printf("[swift] TEST MD pointer: \(%p)\n", p);
+    printf("[swift] TEST MD ref count: \(%d)\n", (int)p->debugGetReferenceCount());
+    printf("[swift] TEST MD map count: \(%d)\n", (int)p->lastCommitProxyVersionReplies.size());
+}
+
+void swift_marker_x() {
+    
+}
+
+CommitProxyVersionReplies *_Nullable swift_lookup_Map_UID_CommitProxyVersionReplies(MasterData *p, UID value) {
+    auto &map = p->lastCommitProxyVersionReplies;
+    auto it = map.find(value);
+    if (it == map.end())
+        return nullptr;
+    swift_test_masterData(p);
+    CommitProxyVersionReplies *pret = &(*it).second;
+    printf("[swift] TEST ret found pointer: \(%p)\n", pret);
+    return pret;
+}
+
+ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionRequest req) {
 	state Span span("M:getVersion"_loc, req.spanContext);
 	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
 	    self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes
@@ -257,6 +177,13 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 
 	return Void();
 }
+
+void swift_workaround_setLatestRequestNumber(NotifiedVersion &latestRequestNum,
+                                             Version v) {
+    latestRequestNum.set(v);
+}
+
+#define getVersion getVersionSwift
 
 ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	state ActorCollection versionActors(false);
