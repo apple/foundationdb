@@ -888,7 +888,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 			elapsed = 1e-15;
 		}
 
-		tagQueue.runEpoch(elapsed, defaultQueue, batchQueue);
+		tagQueue.releaseTransactions(elapsed, defaultQueue, batchQueue);
 		normalRateInfo.startReleaseWindow();
 		batchRateInfo.startReleaseWindow();
 

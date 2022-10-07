@@ -44,9 +44,9 @@ public:
 	// elapsed indicates the amount of time since the last epoch was run.
 	// If a request is ready to be executed, it is sent to the deque
 	// corresponding to its priority. If not, the request remains queued.
-	void runEpoch(double elapsed,
-	              SpannedDeque<GetReadVersionRequest>& outBatchPriority,
-	              SpannedDeque<GetReadVersionRequest>& outDefaultPriority);
+	void releaseTransactions(double elapsed,
+	                         SpannedDeque<GetReadVersionRequest>& outBatchPriority,
+	                         SpannedDeque<GetReadVersionRequest>& outDefaultPriority);
 
 	void addRequest(GetReadVersionRequest);
 };

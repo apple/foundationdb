@@ -40,9 +40,9 @@ void TagQueue::addRequest(GetReadVersionRequest req) {
 	newRequests.push_back(req);
 }
 
-void TagQueue::runEpoch(double elapsed,
-                        SpannedDeque<GetReadVersionRequest>& outBatchPriority,
-                        SpannedDeque<GetReadVersionRequest>& outDefaultPriority) {
+void TagQueue::releaseTransactions(double elapsed,
+                                   SpannedDeque<GetReadVersionRequest>& outBatchPriority,
+                                   SpannedDeque<GetReadVersionRequest>& outDefaultPriority) {
 	for (auto& [_, rateInfo] : rateInfos) {
 		rateInfo.startReleaseWindow();
 	}
@@ -128,7 +128,7 @@ ACTOR static Future<Void> mockServer(TagQueue* tagQueue) {
 	loop {
 		state double elapsed = (0.009 + 0.002 * deterministicRandom()->random01());
 		wait(delay(elapsed));
-		tagQueue->runEpoch(elapsed, outBatchPriority, outDefaultPriority);
+		tagQueue->releaseTransactions(elapsed, outBatchPriority, outDefaultPriority);
 		while (!outBatchPriority.empty()) {
 			outBatchPriority.front().reply.send(GetReadVersionReply{});
 			outBatchPriority.pop_front();
