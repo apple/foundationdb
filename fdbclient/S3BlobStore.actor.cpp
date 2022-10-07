@@ -98,7 +98,7 @@ S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 
 bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 #define TRY_PARAM(n, sn)                                                                                               \
-	if (name == LiteralStringRef(#n) || name == LiteralStringRef(#sn)) {                                               \
+	if (name == #n || name == #sn) {                                                                                   \
 		n = value;                                                                                                     \
 		return true;                                                                                                   \
 	}
@@ -476,7 +476,7 @@ ACTOR Future<Void> deleteRecursively_impl(Reference<S3BlobStoreEndpoint> b,
 	state Future<Void> done = b->listObjectsStream(bucket, resultStream, prefix, '/', std::numeric_limits<int>::max());
 	// Wrap done in an actor which will send end_of_stream since listObjectsStream() does not (so that many calls can
 	// write to the same stream)
-	done = map(done, [=](Void) {
+	done = map(done, [=](Void) mutable {
 		resultStream.sendError(end_of_stream());
 		return Void();
 	});
@@ -1193,7 +1193,7 @@ ACTOR Future<S3BlobStoreEndpoint::ListResult> listObjects_impl(Reference<S3BlobS
 	    bstore->listObjectsStream(bucket, resultStream, prefix, delimiter, maxDepth, recurseFilter);
 	// Wrap done in an actor which sends end_of_stream because list does not so that many lists can write to the same
 	// stream
-	done = map(done, [=](Void) {
+	done = map(done, [=](Void) mutable {
 		resultStream.sendError(end_of_stream());
 		return Void();
 	});
@@ -1759,7 +1759,7 @@ Future<Void> S3BlobStoreEndpoint::finishMultiPartUpload(std::string const& bucke
 }
 
 TEST_CASE("/backup/s3/v4headers") {
-	S3BlobStoreEndpoint::Credentials creds{ "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "" }
+	S3BlobStoreEndpoint::Credentials creds{ "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "" };
 	// GET without query parameters
 	{
 		S3BlobStoreEndpoint s3("s3.amazonaws.com", "443", "amazonaws", "proxy", "port", creds);

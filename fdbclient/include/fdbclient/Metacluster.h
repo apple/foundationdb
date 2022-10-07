@@ -53,6 +53,8 @@ struct Traceable<ClusterUsage> : std::true_type {
 	}
 };
 
+std::string clusterTypeToString(const ClusterType& clusterType);
+
 // Represents the various states that a data cluster could be in.
 //
 // READY - the data cluster is active
@@ -96,6 +98,15 @@ struct DataClusterEntry {
 	void serialize(Ar& ar) {
 		serializer(ar, id, capacity, allocated, clusterState);
 	}
+};
+
+struct MetaclusterMetrics {
+	int numTenants = 0;
+	int numDataClusters = 0;
+	int tenantGroupCapacity = 0;
+	int tenantGroupsAllocated = 0;
+
+	MetaclusterMetrics() = default;
 };
 
 struct MetaclusterRegistrationEntry {

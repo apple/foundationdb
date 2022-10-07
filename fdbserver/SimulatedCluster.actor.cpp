@@ -2437,6 +2437,14 @@ ACTOR void setupAndRun(std::string dataFolder,
 		g_simulator->injectSSDelayTime = 60.0 + 240.0 * deterministicRandom()->random01();
 	}
 
+	if (deterministicRandom()->random01() < 0.25) {
+		g_simulator->injectTargetedBMRestartTime = 60.0 + 340.0 * deterministicRandom()->random01();
+	}
+
+	if (deterministicRandom()->random01() < 0.25) {
+		g_simulator->injectTargetedBWRestartTime = 60.0 + 340.0 * deterministicRandom()->random01();
+	}
+
 	// Build simulator allow list
 	allowList.addTrustedSubnet("0.0.0.0/2"sv);
 	allowList.addTrustedSubnet("abcd::/16"sv);
