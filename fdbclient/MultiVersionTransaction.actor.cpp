@@ -2556,7 +2556,7 @@ void MultiVersionApi::setupNetwork() {
 			//
 			// Typically we would create a more specific error for this case, but since we expect
 			// this case to go away soon, we can use a trace event and a generic error.
-			TraceEvent("CannotSetupNetwork")
+			TraceEvent(SevWarn, "CannotSetupNetwork")
 			    .detail("Reason", "Local client is disabled and no external clients configured");
 
 			throw client_invalid_operation();
