@@ -360,7 +360,7 @@ public:
 	//(e.g. to simulate power failure)
 	Future<Void> kill() {
 		TraceEvent("AsyncFileNonDurable_Kill", id).detail("Filename", filename);
-		CODE_PROBE(true, "AsyncFileNonDurable was killed");
+		CODE_PROBE(true, "AsyncFileNonDurable was killed", probe::decoration::rare);
 		return sync(this, false);
 	}
 
@@ -404,7 +404,7 @@ private:
 			TraceEvent("AsyncFileNonDurable_KilledFileOperation", self->id)
 			    .detail("In", context)
 			    .detail("Filename", self->filename);
-			CODE_PROBE(true, "AsyncFileNonDurable operation killed");
+			CODE_PROBE(true, "AsyncFileNonDurable operation killed", probe::decoration::rare);
 			throw io_error().asInjectedFault();
 		}
 
@@ -603,13 +603,13 @@ private:
 					    .detail("HasGarbage", garbage)
 					    .detail("Side", side)
 					    .detail("Filename", self->filename);
-					CODE_PROBE(true, "AsyncFileNonDurable bad write");
+					CODE_PROBE(true, "AsyncFileNonDurable bad write", probe::decoration::rare);
 				} else {
 					TraceEvent("AsyncFileNonDurable_DroppedWrite", self->id)
 					    .detail("Offset", offset + writeOffset + pageOffset)
 					    .detail("Length", sectorLength)
 					    .detail("Filename", self->filename);
-					CODE_PROBE(true, "AsyncFileNonDurable dropped write");
+					CODE_PROBE(true, "AsyncFileNonDurable dropped write", probe::decoration::rare);
 				}
 
 				pageOffset += sectorLength;
@@ -689,7 +689,7 @@ private:
 			wait(self->file->truncate(size));
 		else {
 			TraceEvent("AsyncFileNonDurable_DroppedTruncate", self->id).detail("Size", size);
-			CODE_PROBE(true, "AsyncFileNonDurable dropped truncate");
+			CODE_PROBE(true, "AsyncFileNonDurable dropped truncate", probe::decoration::rare);
 		}
 
 		return Void();
@@ -753,7 +753,7 @@ private:
 			// temporary file and then renamed to the correct location once sync is called.  By not calling sync, we
 			// simulate a failure to fsync the directory storing the file
 			if (self->hasBeenSynced && writeDurable && deterministicRandom()->random01() < 0.5) {
-				CODE_PROBE(true, "AsyncFileNonDurable kill was durable and synced");
+				CODE_PROBE(true, "AsyncFileNonDurable kill was durable and synced", probe::decoration::rare);
 				wait(success(errorOr(self->file->sync())));
 			}
 

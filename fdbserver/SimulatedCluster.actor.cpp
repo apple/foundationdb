@@ -908,7 +908,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 
 			CODE_PROBE(bootCount >= 1, "Simulated machine rebooted");
 			CODE_PROBE(bootCount >= 2, "Simulated machine rebooted twice");
-			CODE_PROBE(bootCount >= 3, "Simulated machine rebooted three times");
+			CODE_PROBE(bootCount >= 3, "Simulated machine rebooted three times", probe::decoration::rare);
 			++bootCount;
 
 			TraceEvent("SimulatedMachineStart", randomId)
@@ -1056,7 +1056,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				avail.pop_back();
 
 				if (myFolders != toRebootFrom) {
-					CODE_PROBE(true, "Simulated machine swapped data folders");
+					CODE_PROBE(true, "Simulated machine swapped data folders", probe::decoration::rare);
 					TraceEvent("SimulatedMachineFolderSwap", randomId)
 					    .detail("OldFolder0", myFolders[0])
 					    .detail("NewFolder0", toRebootFrom[0])

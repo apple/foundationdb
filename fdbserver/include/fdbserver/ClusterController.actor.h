@@ -2968,9 +2968,8 @@ public:
 				workerHealth[req.address].degradedPeers[degradedPeer] = { currentTime, currentTime };
 			}
 
-			// TODO(zhewu): add disconnected peers in worker health.
 			for (const auto& degradedPeer : req.disconnectedPeers) {
-				workerHealth[req.address].degradedPeers[degradedPeer] = { currentTime, currentTime };
+				workerHealth[req.address].disconnectedPeers[degradedPeer] = { currentTime, currentTime };
 			}
 
 			return;
@@ -2980,23 +2979,24 @@ public:
 
 		auto& health = workerHealth[req.address];
 
-		auto updateDegradedPeer = [&health, currentTime](const NetworkAddress& degradedPeer) {
-			auto it = health.degradedPeers.find(degradedPeer);
-			if (it == health.degradedPeers.end()) {
-				health.degradedPeers[degradedPeer] = { currentTime, currentTime };
-				return;
-			}
-			it->second.lastRefreshTime = currentTime;
-		};
-
 		// Update the worker's degradedPeers.
 		for (const auto& peer : req.degradedPeers) {
-			updateDegradedPeer(peer);
+			auto it = health.degradedPeers.find(peer);
+			if (it == health.degradedPeers.end()) {
+				health.degradedPeers[peer] = { currentTime, currentTime };
+				continue;
+			}
+			it->second.lastRefreshTime = currentTime;
 		}
 
-		// TODO(zhewu): add disconnected peers in worker health.
+		// Update the worker's disconnectedPeers.
 		for (const auto& peer : req.disconnectedPeers) {
-			updateDegradedPeer(peer);
+			auto it = health.disconnectedPeers.find(peer);
+			if (it == health.disconnectedPeers.end()) {
+				health.disconnectedPeers[peer] = { currentTime, currentTime };
+				continue;
+			}
+			it->second.lastRefreshTime = currentTime;
 		}
 	}
 
@@ -3012,10 +3012,18 @@ public:
 					++it;
 				}
 			}
+			for (auto it = health.disconnectedPeers.begin(); it != health.disconnectedPeers.end();) {
+				if (currentTime - it->second.lastRefreshTime > SERVER_KNOBS->CC_DEGRADED_LINK_EXPIRATION_INTERVAL) {
+					TraceEvent("WorkerPeerHealthRecovered").detail("Worker", workerAddress).detail("Peer", it->first);
+					health.disconnectedPeers.erase(it++);
+				} else {
+					++it;
+				}
+			}
 		}
 
 		for (auto it = workerHealth.begin(); it != workerHealth.end();) {
-			if (it->second.degradedPeers.empty()) {
+			if (it->second.degradedPeers.empty() && it->second.disconnectedPeers.empty()) {
 				TraceEvent("WorkerAllPeerHealthRecovered").detail("Worker", it->first);
 				workerHealth.erase(it++);
 			} else {
@@ -3028,6 +3036,8 @@ public:
 		std::unordered_set<NetworkAddress>
 		    degradedServers; // The servers that the cluster controller is considered as degraded. The servers in this
 		                     // list are not excluded unless they are added to `excludedDegradedServers`.
+		std::unordered_set<NetworkAddress>
+		    disconnectedServers; // Similar to the above list, but the servers experiencing connection issue.
 
 		bool degradedSatellite = false; // Indicates that the entire satellite DC is degraded.
 	};
@@ -3038,6 +3048,7 @@ public:
 
 		// Build a map keyed by measured degraded peer. This map gives the info that who complains a particular server.
 		std::unordered_map<NetworkAddress, std::unordered_set<NetworkAddress>> degradedLinkDst2Src;
+		std::unordered_map<NetworkAddress, std::unordered_set<NetworkAddress>> disconnectedLinkDst2Src;
 		double currentTime = now();
 		for (const auto& [server, health] : workerHealth) {
 			for (const auto& [degradedPeer, times] : health.degradedPeers) {
@@ -3047,6 +3058,13 @@ public:
 				}
 				degradedLinkDst2Src[degradedPeer].insert(server);
 			}
+			for (const auto& [disconnectedPeer, times] : health.disconnectedPeers) {
+				if (currentTime - times.startTime < SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL) {
+					// This degraded link is not long enough to be considered as degraded.
+					continue;
+				}
+				disconnectedLinkDst2Src[disconnectedPeer].insert(server);
+			}
 		}
 
 		// Sort degraded peers based on the number of workers complaining about it.
@@ -3055,6 +3073,12 @@ public:
 			count2DegradedPeer.push_back({ complainers.size(), degradedPeer });
 		}
 		std::sort(count2DegradedPeer.begin(), count2DegradedPeer.end(), std::greater<>());
+
+		std::vector<std::pair<int, NetworkAddress>> count2DisconnectedPeer;
+		for (const auto& [disconnectedPeer, complainers] : disconnectedLinkDst2Src) {
+			count2DisconnectedPeer.push_back({ complainers.size(), disconnectedPeer });
+		}
+		std::sort(count2DisconnectedPeer.begin(), count2DisconnectedPeer.end(), std::greater<>());
 
 		// Go through all reported degraded peers by decreasing order of the number of complainers. For a particular
 		// degraded peer, if a complainer has already be considered as degraded, we skip the current examine degraded
@@ -3084,9 +3108,25 @@ public:
 			}
 		}
 
+		DegradationInfo currentDegradationInfo;
+		for (const auto& [complainerCount, badServer] : count2DisconnectedPeer) {
+			for (const auto& complainer : disconnectedLinkDst2Src[badServer]) {
+				if (currentDegradationInfo.disconnectedServers.find(complainer) ==
+				    currentDegradationInfo.disconnectedServers.end()) {
+					currentDegradationInfo.disconnectedServers.insert(badServer);
+					break;
+				}
+			}
+
+			if (SERVER_KNOBS->CC_ENABLE_ENTIRE_SATELLITE_MONITORING &&
+			    addressInDbAndPrimarySatelliteDc(badServer, db.serverInfo) &&
+			    complainerCount >= SERVER_KNOBS->CC_SATELLITE_DEGRADATION_MIN_COMPLAINER) {
+				++satelliteBadServerCount;
+			}
+		}
+
 		// For degraded server that are complained by more than SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE, we
 		// don't know if it is a hot server, or the network is bad. We remove from the returned degraded server list.
-		DegradationInfo currentDegradationInfo;
 		for (const auto& badServer : currentDegradedServers) {
 			if (degradedLinkDst2Src[badServer].size() <= SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE) {
 				currentDegradationInfo.degradedServers.insert(badServer);
@@ -3104,43 +3144,48 @@ public:
 
 	// Whether the transaction system (in primary DC if in HA setting) contains degraded servers.
 	bool transactionSystemContainsDegradedServers() {
-		const ServerDBInfo dbi = db.serverInfo->get();
-		for (const auto& excludedServer : degradationInfo.degradedServers) {
-			if (dbi.master.addresses().contains(excludedServer)) {
-				return true;
-			}
-
-			for (auto& logSet : dbi.logSystemConfig.tLogs) {
-				if (!logSet.isLocal || logSet.locality == tagLocalitySatellite) {
-					continue;
+		const ServerDBInfo& dbi = db.serverInfo->get();
+		auto transactionWorkerInList = [&dbi](const std::unordered_set<NetworkAddress>& serverList) -> bool {
+			for (const auto& server : serverList) {
+				if (dbi.master.addresses().contains(server)) {
+					return true;
 				}
-				for (const auto& tlog : logSet.tLogs) {
-					if (tlog.present() && tlog.interf().addresses().contains(excludedServer)) {
+
+				for (const auto& logSet : dbi.logSystemConfig.tLogs) {
+					if (!logSet.isLocal || logSet.locality == tagLocalitySatellite) {
+						continue;
+					}
+					for (const auto& tlog : logSet.tLogs) {
+						if (tlog.present() && tlog.interf().addresses().contains(server)) {
+							return true;
+						}
+					}
+				}
+
+				for (const auto& proxy : dbi.client.grvProxies) {
+					if (proxy.addresses().contains(server)) {
+						return true;
+					}
+				}
+
+				for (const auto& proxy : dbi.client.commitProxies) {
+					if (proxy.addresses().contains(server)) {
+						return true;
+					}
+				}
+
+				for (const auto& resolver : dbi.resolvers) {
+					if (resolver.addresses().contains(server)) {
 						return true;
 					}
 				}
 			}
 
-			for (auto& proxy : dbi.client.grvProxies) {
-				if (proxy.addresses().contains(excludedServer)) {
-					return true;
-				}
-			}
+			return false;
+		};
 
-			for (auto& proxy : dbi.client.commitProxies) {
-				if (proxy.addresses().contains(excludedServer)) {
-					return true;
-				}
-			}
-
-			for (auto& resolver : dbi.resolvers) {
-				if (resolver.addresses().contains(excludedServer)) {
-					return true;
-				}
-			}
-		}
-
-		return false;
+		return transactionWorkerInList(degradationInfo.degradedServers) ||
+		       transactionWorkerInList(degradationInfo.disconnectedServers);
 	}
 
 	// Whether transaction system in the remote DC, e.g. log router and tlogs in the remote DC, contains degraded
@@ -3151,6 +3196,12 @@ public:
 		}
 
 		for (const auto& excludedServer : degradationInfo.degradedServers) {
+			if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
+				return true;
+			}
+		}
+
+		for (const auto& excludedServer : degradationInfo.disconnectedServers) {
 			if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
 				return true;
 			}
@@ -3188,7 +3239,8 @@ public:
 	// Returns true when the cluster controller should trigger a recovery due to degraded servers used in the
 	// transaction system in the primary data center.
 	bool shouldTriggerRecoveryDueToDegradedServers() {
-		if (degradationInfo.degradedServers.size() > SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
+		if (degradationInfo.degradedServers.size() + degradationInfo.disconnectedServers.size() >
+		    SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
 			return false;
 		}
 
@@ -3227,8 +3279,9 @@ public:
 			return true;
 		}
 
-		if (degradationInfo.degradedServers.size() < SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION ||
-		    degradationInfo.degradedServers.size() > SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION) {
+		int degradedServerSize = degradationInfo.degradedServers.size() + degradationInfo.disconnectedServers.size();
+		if (degradedServerSize < SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION ||
+		    degradedServerSize > SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION) {
 			return false;
 		}
 
@@ -3319,6 +3372,7 @@ public:
 			double lastRefreshTime = 0;
 		};
 		std::unordered_map<NetworkAddress, DegradedTimes> degradedPeers;
+		std::unordered_map<NetworkAddress, DegradedTimes> disconnectedPeers;
 
 		// TODO(zhewu): Include disk and CPU signals.
 	};

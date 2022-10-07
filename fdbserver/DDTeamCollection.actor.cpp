@@ -1321,7 +1321,7 @@ public:
 								}
 							}
 							if (addedNewBadTeam && self->badTeamRemover.isReady()) {
-								CODE_PROBE(true, "Server locality change created bad teams");
+								CODE_PROBE(true, "Server locality change created bad teams", probe::decoration::rare);
 								self->doBuildTeams = true;
 								self->badTeamRemover = removeBadTeams(self);
 								self->addActor.send(self->badTeamRemover);
