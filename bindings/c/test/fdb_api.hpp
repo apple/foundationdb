@@ -662,6 +662,13 @@ public:
 	void clearRange(KeyRef begin, KeyRef end) {
 		native::fdb_transaction_clear_range(tr.get(), begin.data(), intSize(begin), end.data(), intSize(end));
 	}
+
+	void addReadConflictRange(KeyRef begin, KeyRef end) {
+		if (auto err = Error(native::fdb_transaction_add_conflict_range(
+		        tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), FDB_CONFLICT_RANGE_TYPE_READ))) {
+			throwError("fdb_transaction_add_conflict_range returned error: ", err);
+		}
+	}
 };
 
 class Tenant final {
