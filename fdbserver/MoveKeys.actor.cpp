@@ -652,7 +652,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 							// Attempt to move onto a server that isn't in serverList (removed or never added to the
 							// database) This can happen (why?) and is handled by the data distribution algorithm
 							// FIXME: Answer why this can happen?
-							CODE_PROBE(true, "start move keys moving to a removed server");
+							CODE_PROBE(true, "start move keys moving to a removed server", probe::decoration::rare);
 							throw move_to_removed_server();
 						}
 					}
@@ -846,7 +846,7 @@ ACTOR Future<Void> checkFetchingState(Database cx,
 			for (int s = 0; s < serverListValues.size(); s++) {
 				if (!serverListValues[s].present()) {
 					// FIXME: Is this the right behavior?  dataMovementComplete will never be sent!
-					CODE_PROBE(true, "check fetching state moved to removed server");
+					CODE_PROBE(true, "check fetching state moved to removed server", probe::decoration::rare);
 					throw move_to_removed_server();
 				}
 				auto si = decodeServerListValue(serverListValues[s].get());
