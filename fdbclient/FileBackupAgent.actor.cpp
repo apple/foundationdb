@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/FDBTypes.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
@@ -713,8 +712,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	static Future<std::pair<int64_t, TenantName>> getEncryptionDomainDetails(KeyRef key,
 	                                                                         EncryptedRangeFileWriter* self) {
 		// If tenants are disabled on a cluster then don't use the TenantEntryCache as it will result in alot of
-		// unnecessary cache misses. It is strongly recommended NOT to use snapshot backups with
-		// TenantMode::OPTIONAL_TENANT for now as it can also result in many cache misses
+		// unnecessary cache misses. For a cluster configured in TenantMode::Optional, the backup performance may
+		// degrade if most of the mutations belong to an invalid tenant
 		bool useTenantCache = self->cx->clientInfo->get().tenantMode != TenantMode::DISABLED &&
 		                      CLIENT_KNOBS->BACKUP_ENCRYPTED_SNAPSHOT_USE_TENANT_CACHE;
 		CODE_PROBE(useTenantCache, "using tenant cache");
