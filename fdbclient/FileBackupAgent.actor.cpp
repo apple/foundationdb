@@ -23,6 +23,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyBackedTypes.h"
@@ -714,8 +715,14 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		// If tenants are disabled on a cluster then don't use the TenantEntryCache as it will result in alot of
 		// unnecessary cache misses. For a cluster configured in TenantMode::Optional, the backup performance may
 		// degrade if most of the mutations belong to an invalid tenant
-		bool useTenantCache = self->cx->clientInfo->get().tenantMode != TenantMode::DISABLED &&
-		                      CLIENT_KNOBS->BACKUP_ENCRYPTED_SNAPSHOT_USE_TENANT_CACHE;
+		TenantMode mode = self->cx->clientInfo->get().tenantMode;
+		bool useTenantCache = mode != TenantMode::DISABLED;
+		if (g_network->isSimulated() && mode == TenantMode::OPTIONAL_TENANT) {
+			// TODO: Currently simulation tests run with optional tenant mode but most data does not belong to any
+			// tenant. This results in many timeouts so disable using the tenant cache until optional tenant mode
+			// support with backups is more performant
+			useTenantCache = false;
+		}
 		CODE_PROBE(useTenantCache, "using tenant cache");
 		return getEncryptionDomainDetailsImpl(key, self->tenantCache, useTenantCache);
 	}

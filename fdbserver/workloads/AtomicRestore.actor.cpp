@@ -71,13 +71,6 @@ struct AtomicRestoreWorkload : TestWorkload {
 		// Do not support removePrefix right now because we must ensure all backup keys have the removePrefix
 		// otherwise, test will fail because fast restore will simply add the removePrefix to every key in the end.
 		ASSERT(removePrefix.size() == 0);
-		if (g_network->isSimulated()) {
-			// TODO: Currently this workload uses optional tenant mode so using the tenant cache
-			// causes lots of misses which in turn causes the workload to time out. When optional tenant mode with
-			// backups is fully supported (more performant) this can be removed.
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob("backup_encrypted_snapshot_use_tenant_cache",
-			                                                          KnobValueRef::create(bool{ false }));
-		}
 	}
 
 	std::string description() const override { return "AtomicRestore"; }

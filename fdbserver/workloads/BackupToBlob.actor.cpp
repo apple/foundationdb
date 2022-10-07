@@ -46,13 +46,6 @@ struct BackupToBlobWorkload : TestWorkload {
 			updateBackupURL(backupURLString, accessKeyEnvVar, "<access_key>", secretKeyEnvVar, "<secret_key>");
 		}
 		backupURL = backupURLString;
-		if (g_network->isSimulated()) {
-			// TODO: Currently this workload uses optional tenant mode so using the tenant cache
-			// causes lots of misses which in turn causes the workload to time out. When optional tenant mode with
-			// backups is fully supported (more performant) this can be removed.
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob("backup_encrypted_snapshot_use_tenant_cache",
-			                                                          KnobValueRef::create(bool{ false }));
-		}
 	}
 
 	std::string description() const override { return DESCRIPTION; }

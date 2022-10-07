@@ -47,7 +47,6 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	bool shareLogRange;
 	bool shouldSkipRestoreRanges;
 	bool defaultBackup;
-	bool useTenantCacheDuringBackup;
 	Optional<std::string> encryptionKeyFileName;
 
 	BackupAndRestoreCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -81,11 +80,6 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		allowPauses = getOption(options, "allowPauses"_sr, true);
 		shareLogRange = getOption(options, "shareLogRange"_sr, false);
 		defaultBackup = getOption(options, "defaultBackup"_sr, false);
-		useTenantCacheDuringBackup = getOption(options, "useTenantCacheDuringBackup"_sr, false);
-		if (g_network->isSimulated()) {
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob(
-			    "backup_encrypted_snapshot_use_tenant_cache", KnobValueRef::create(bool{ useTenantCacheDuringBackup }));
-		}
 
 		std::vector<std::string> restorePrefixesToInclude =
 		    getOption(options, "restorePrefixesToInclude"_sr, std::vector<std::string>());
