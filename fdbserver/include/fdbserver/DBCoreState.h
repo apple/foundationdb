@@ -143,11 +143,13 @@ struct DBCoreState {
 	std::set<int8_t> pseudoLocalities;
 	ProtocolVersion newestProtocolVersion;
 	ProtocolVersion lowestCompatibleProtocolVersion;
+	EncryptionAtRestMode encryptionAtRestMode;
 
 	DBCoreState()
 	  : logRouterTags(0), txsTags(0), recoveryCount(0), logSystemType(LogSystemType::empty),
 	    newestProtocolVersion(ProtocolVersion::invalidProtocolVersion),
-	    lowestCompatibleProtocolVersion(ProtocolVersion::invalidProtocolVersion) {}
+	    lowestCompatibleProtocolVersion(ProtocolVersion::invalidProtocolVersion),
+	    encryptionAtRestMode(EncryptionAtRestMode()) {}
 
 	std::vector<UID> getPriorCommittedLogServers() {
 		std::vector<UID> priorCommittedLogServers;
@@ -169,7 +171,7 @@ struct DBCoreState {
 	bool isEqual(const DBCoreState& r) const {
 		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs &&
 		       oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags && txsTags == r.txsTags &&
-		       pseudoLocalities == r.pseudoLocalities;
+		       pseudoLocalities == r.pseudoLocalities && encryptionAtRestMode == r.encryptionAtRestMode;
 	}
 	bool operator==(const DBCoreState& rhs) const { return isEqual(rhs); }
 	bool operator!=(const DBCoreState& rhs) const { return !isEqual(rhs); }
@@ -188,6 +190,9 @@ struct DBCoreState {
 			if (ar.protocolVersion().hasSWVersionTracking()) {
 				serializer(ar, newestProtocolVersion, lowestCompatibleProtocolVersion);
 			}
+			if (ar.protocolVersion().hasEncryptionAtRest()) {
+				serializer(ar, encryptionAtRestMode);
+			}
 		} else if (ar.isDeserializing) {
 			tLogs.push_back(CoreTLogSet());
 			serializer(ar,
@@ -195,7 +200,8 @@ struct DBCoreState {
 			           tLogs[0].tLogWriteAntiQuorum,
 			           recoveryCount,
 			           tLogs[0].tLogReplicationFactor,
-			           logSystemType);
+			           logSystemType,
+			           encryptionAtRestMode);
 			tLogs[0].tLogVersion = TLogVersion::V2;
 
 			uint64_t tLocalitySize = (uint64_t)tLogs[0].tLogLocalities.size();
