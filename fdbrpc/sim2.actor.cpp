@@ -915,9 +915,15 @@ public:
 			return Never();
 
 		PromiseTask* t = new PromiseTask(machine);
-		if (seconds <= 0.) {
+		if (seconds <= TIME_EPS) {
 			taskQueue.addReady(taskID, t);
 		} else {
+			if (!ordered && !currentProcess->rebooting && machine == currentProcess &&
+			    !currentProcess->shutdownSignal.isSet() && FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
+			    deterministicRandom()->random01() < 0.25) {
+        // FIXME: why doesn't this work when we are changing machines?
+				seconds += FLOW_KNOBS->MAX_BUGGIFIED_DELAY * pow(deterministicRandom()->random01(), 1000.0);
+			}
 			double at = now() + seconds;
 			taskQueue.addTimer(at, taskID, t);
 		}
@@ -1216,8 +1222,8 @@ public:
 		while (!self->isStopped) {
 			if (self->taskQueue.canSleep()) {
 				double sleepTime = self->taskQueue.getSleepTime(self->time);
-				self->time += sleepTime + 500e-6 +
-				              FLOW_KNOBS->MAX_BUGGIFIED_DELAY * pow(deterministicRandom()->random01(), 1000.0);
+				self->time +=
+				    sleepTime + FLOW_KNOBS->MAX_RUNLOOP_SLEEP_DELAY * pow(deterministicRandom()->random01(), 1000.0);
 				if (self->printSimTime) {
 					printf("Time: %d\n", (int)self->time);
 				}

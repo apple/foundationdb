@@ -72,10 +72,10 @@ public:
 		return 0;
 	}
 
-	// Moves all timers that are scheduled to be executed before now to the ready queue.
+	// Moves all timers that are scheduled to be executed at or before now to the ready queue.
 	void processReadyTimers(double now) {
 		int numTimers = 0;
-		while (!timers.empty() && timers.top().at < now) {
+		while (!timers.empty() && timers.top().at <= now + INetwork::TIME_EPS) {
 			++numTimers;
 			++countTimers;
 			ready.push(timers.top());

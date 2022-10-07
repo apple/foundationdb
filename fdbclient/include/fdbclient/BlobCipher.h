@@ -311,14 +311,14 @@ public:
 		if (refreshAtTS == std::numeric_limits<int64_t>::max()) {
 			return false;
 		}
-		return now() >= refreshAtTS ? true : false;
+		return now() + INetwork::TIME_EPS >= refreshAtTS ? true : false;
 	}
 
 	inline bool isExpired() {
 		if (expireAtTS == std::numeric_limits<int64_t>::max()) {
 			return false;
 		}
-		return now() >= expireAtTS ? true : false;
+		return now() + INetwork::TIME_EPS >= expireAtTS ? true : false;
 	}
 
 	void reset();
