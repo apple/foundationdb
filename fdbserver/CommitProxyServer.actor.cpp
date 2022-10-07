@@ -2684,15 +2684,14 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
 	commitData.logAdapter =
 	    new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
-	commitData.txnStateStore =
-	    keyValueStoreLogSystem(commitData.logAdapter,
-	                           commitData.db,
-	                           proxy.id(),
-	                           2e9,
-	                           true,
-	                           true,
-	                           true,
-	                           isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION));
+	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter,
+	                                                  commitData.db,
+	                                                  proxy.id(),
+	                                                  2e9,
+	                                                  true,
+	                                                  true,
+	                                                  true,
+	                                                  isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION));
 	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
 
 	commitData.updateLatencyBandConfig(commitData.db->get().latencyBandConfig);
