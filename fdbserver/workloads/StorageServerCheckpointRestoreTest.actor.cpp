@@ -74,6 +74,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		state Key endKey = "TestKey0"_sr;
 		state Value oldValue = "TestValue"_sr;
 		state KeyRange testRange = KeyRangeRef(key, endKey);
+		state std::vector<CheckpointMetaData> records;
 
 		int ignore = wait(setDDMode(cx, 0));
 		state Version version = wait(self->writeAndVerify(self, cx, key, oldValue));
@@ -98,9 +99,9 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 
 		// Fetch checkpoint meta data.
 		loop {
+			records.clear();
 			try {
-				state std::vector<CheckpointMetaData> records =
-				    wait(getCheckpointMetaData(cx, testRange, version, format));
+				wait(store(records, getCheckpointMetaData(cx, testRange, version, format)));
 				break;
 			} catch (Error& e) {
 				TraceEvent("TestFetchCheckpointMetadataError")
@@ -161,10 +162,11 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		// Compare the keyrange between the original database and the one restored from checkpoint.
 		// For now, it should have been a single key.
 		tr.reset();
+		state RangeResult res;
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				state RangeResult res = wait(tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
+				wait(store(res, tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY)));
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -181,7 +183,10 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		kvStore->dispose();
 		wait(close);
 
-		int ignore = wait(setDDMode(cx, 1));
+		{
+			int ignore = wait(setDDMode(cx, 1));
+			(void)ignore;
+		}
 		return Void();
 	}
 

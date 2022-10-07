@@ -27,7 +27,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/OnDemandStore.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/Status.h"
+#include "fdbserver/Status.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
@@ -489,16 +489,16 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 // Generation register values are stored without prefixing in the coordinated state, but always begin with an
 // alphanumeric character (they are always derived from a ClusterConnectionString key). Forwarding values are stored in
 // this range:
-const KeyRangeRef fwdKeys(LiteralStringRef("\xff"
-                                           "fwd"),
-                          LiteralStringRef("\xff"
-                                           "fwe"));
+const KeyRangeRef fwdKeys("\xff"
+                          "fwd"_sr,
+                          "\xff"
+                          "fwe"_sr);
 
 // The time when forwarding was last set is stored in this range:
-const KeyRangeRef fwdTimeKeys(LiteralStringRef("\xff"
-                                               "fwdTime"),
-                              LiteralStringRef("\xff"
-                                               "fwdTimf"));
+const KeyRangeRef fwdTimeKeys("\xff"
+                              "fwdTime"_sr,
+                              "\xff"
+                              "fwdTimf"_sr);
 struct LeaderRegisterCollection {
 	// SOMEDAY: Factor this into a generic tool?  Extend ActorCollection to support removal actions?  What?
 	ActorCollection actors;

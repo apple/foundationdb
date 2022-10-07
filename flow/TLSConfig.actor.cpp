@@ -178,11 +178,7 @@ std::string TLSConfig::getCertificatePathSync() const {
 		return envCertPath;
 	}
 
-	const char* defaultCertFileName = "fdb.pem";
-	if (fileExists(defaultCertFileName)) {
-		return defaultCertFileName;
-	}
-
+	const char* defaultCertFileName = "cert.pem";
 	if (fileExists(joinPath(platform::getDefaultConfigPath(), defaultCertFileName))) {
 		return joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
 	}
@@ -200,13 +196,9 @@ std::string TLSConfig::getKeyPathSync() const {
 		return envKeyPath;
 	}
 
-	const char* defaultCertFileName = "fdb.pem";
-	if (fileExists(defaultCertFileName)) {
-		return defaultCertFileName;
-	}
-
-	if (fileExists(joinPath(platform::getDefaultConfigPath(), defaultCertFileName))) {
-		return joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
+	const char* defaultKeyFileName = "key.pem";
+	if (fileExists(joinPath(platform::getDefaultConfigPath(), defaultKeyFileName))) {
+		return joinPath(platform::getDefaultConfigPath(), defaultKeyFileName);
 	}
 
 	return std::string();

@@ -18,8 +18,9 @@
  * limitations under the License.
  */
 
-#include "flow/flow.h"
+#include "flow/EncryptUtils.h"
 #include "flow/Error.h"
+#include "flow/flow.h"
 #include "flow/Knobs.h"
 #include "flow/BooleanParam.h"
 #include "flow/UnitTest.h"
@@ -240,7 +241,6 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( SIM_SPEEDUP_AFTER_SECONDS,                           450 );
 	init( MAX_TRACE_LINES,                               1'000'000 );
 	init( CODE_COV_TRACE_EVENT_SEVERITY,                        10 ); // Code coverage TraceEvent severity level
-	init( ENABLE_SIMULATION_IMPROVEMENTS,                    false ); // Separate normal workloads and failure injection
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
@@ -301,6 +301,10 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( TOKEN_CACHE_SIZE,                                    100 );
 	init( ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,                  5.0 );
 	init( ENCRYPT_KEY_CACHE_LOGGING_SAMPLE_SIZE,              1000 );
+	// Refer to EncryptUtil::EncryptAuthTokenAlgo for more details
+	init( ENCRYPT_HEADER_AUTH_TOKEN_ENABLED,                  true ); if ( randomize && BUGGIFY ) { ENCRYPT_HEADER_AUTH_TOKEN_ENABLED = !ENCRYPT_HEADER_AUTH_TOKEN_ENABLED; }
+	init( ENCRYPT_HEADER_AUTH_TOKEN_ALGO,                        1 ); if ( randomize && BUGGIFY ) { ENCRYPT_HEADER_AUTH_TOKEN_ALGO = getRandomAuthTokenAlgo(); }
+
 
 	// REST Client
 	init( RESTCLIENT_MAX_CONNECTIONPOOL_SIZE,                   10 );

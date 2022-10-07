@@ -20,6 +20,7 @@
 
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -40,7 +41,12 @@ struct AtomicRestoreWorkload : TestWorkload {
 		startAfter = getOption(options, "startAfter"_sr, 10.0);
 		restoreAfter = getOption(options, "restoreAfter"_sr, 20.0);
 		fastRestore = getOption(options, "fastRestore"_sr, false);
-		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
+		if (!fastRestore) {
+			addDefaultBackupRanges(backupRanges);
+		} else {
+			// Fast restore doesn't support multiple ranges yet
+			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
+		}
 		usePartitionedLogs.set(
 		    getOption(options, "usePartitionedLogs"_sr, deterministicRandom()->random01() < 0.5 ? true : false));
 
@@ -98,6 +104,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 			                              deterministicRandom()->randomInt(0, 100),
 			                              BackupAgentBase::getDefaultTagName(),
 			                              self->backupRanges,
+			                              false,
 			                              StopWhenDone::False,
 			                              self->usePartitionedLogs));
 		} catch (Error& e) {
@@ -117,17 +124,9 @@ struct AtomicRestoreWorkload : TestWorkload {
 			    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, self->addPrefix, self->removePrefix));
 		} else { // Old style restore
 			loop {
-				std::vector<Future<Version>> restores;
-				if (deterministicRandom()->random01() < 0.5) {
-					for (auto& range : self->backupRanges)
-						restores.push_back(backupAgent.atomicRestore(
-						    cx, BackupAgentBase::getDefaultTag(), range, StringRef(), StringRef()));
-				} else {
-					restores.push_back(backupAgent.atomicRestore(
-					    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()));
-				}
 				try {
-					wait(waitForAll(restores));
+					wait(success(backupAgent.atomicRestore(
+					    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef())));
 					break;
 				} catch (Error& e) {
 					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)

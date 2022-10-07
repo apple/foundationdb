@@ -1007,48 +1007,74 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 						continue;
 					}
 					bool degradedPeer = false;
+					bool disconnectedPeer = false;
 					if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
 					    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo))) {
 						// Monitors intra DC latencies between servers that in the primary or remote DC's transaction
 						// systems. Note that currently we are not monitor storage servers, since lagging in storage
 						// servers today already can trigger server exclusion by data distributor.
 
-						if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT ||
-						    peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
-						        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD ||
-						    peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
-						        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
+						if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT) {
+							disconnectedPeer = true;
+						} else if (peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
+						               SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD ||
+						           peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
+						               SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
 							degradedPeer = true;
+						}
+						if (disconnectedPeer || degradedPeer) {
+							TraceEvent("HealthMonitorDetectDegradedPeer")
+							    .detail("Peer", address)
+							    .detail("Elapsed", now() - peer->lastLoggedTime)
+							    .detail("Disconnected", disconnectedPeer)
+							    .detail("MinLatency", peer->pingLatencies.min())
+							    .detail("MaxLatency", peer->pingLatencies.max())
+							    .detail("MeanLatency", peer->pingLatencies.mean())
+							    .detail("MedianLatency", peer->pingLatencies.median())
+							    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
+							    .detail(
+							        "CheckedPercentileLatency",
+							        peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
+							    .detail("PingCount", peer->pingLatencies.getPopulationSize())
+							    .detail("PingTimeoutCount", peer->timeoutCount)
+							    .detail("ConnectionFailureCount", peer->connectFailedCount);
 						}
 					} else if (workerLocation == Primary && addressInDbAndPrimarySatelliteDc(address, dbInfo)) {
 						// Monitors inter DC latencies between servers in primary and primary satellite DC. Note that
 						// TLog workers in primary satellite DC are on the critical path of serving a commit.
-						if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT ||
-						    peer->pingLatencies.percentile(
-						        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE_SATELLITE) >
-						        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD_SATELLITE ||
-						    peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
-						        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
+						if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT) {
+							disconnectedPeer = true;
+						} else if (peer->pingLatencies.percentile(
+						               SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE_SATELLITE) >
+						               SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD_SATELLITE ||
+						           peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
+						               SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
 							degradedPeer = true;
+						}
+
+						if (disconnectedPeer || degradedPeer) {
+							TraceEvent("HealthMonitorDetectDegradedPeer")
+							    .detail("Peer", address)
+							    .detail("Elapsed", now() - peer->lastLoggedTime)
+							    .detail("Disconnected", disconnectedPeer)
+							    .detail("MinLatency", peer->pingLatencies.min())
+							    .detail("MaxLatency", peer->pingLatencies.max())
+							    .detail("MeanLatency", peer->pingLatencies.mean())
+							    .detail("MedianLatency", peer->pingLatencies.median())
+							    .detail("CheckedPercentile",
+							            SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE_SATELLITE)
+							    .detail("CheckedPercentileLatency",
+							            peer->pingLatencies.percentile(
+							                SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE_SATELLITE))
+							    .detail("PingCount", peer->pingLatencies.getPopulationSize())
+							    .detail("PingTimeoutCount", peer->timeoutCount)
+							    .detail("ConnectionFailureCount", peer->connectFailedCount);
 						}
 					}
 
-					if (degradedPeer) {
-						TraceEvent("HealthMonitorDetectDegradedPeer")
-						    .suppressFor(30)
-						    .detail("Peer", address)
-						    .detail("Elapsed", now() - peer->lastLoggedTime)
-						    .detail("MinLatency", peer->pingLatencies.min())
-						    .detail("MaxLatency", peer->pingLatencies.max())
-						    .detail("MeanLatency", peer->pingLatencies.mean())
-						    .detail("MedianLatency", peer->pingLatencies.median())
-						    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
-						    .detail("CheckedPercentileLatency",
-						            peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
-						    .detail("PingCount", peer->pingLatencies.getPopulationSize())
-						    .detail("PingTimeoutCount", peer->timeoutCount)
-						    .detail("ConnectionFailureCount", peer->connectFailedCount);
-
+					if (disconnectedPeer) {
+						req.disconnectedPeers.push_back(address);
+					} else if (degradedPeer) {
 						req.degradedPeers.push_back(address);
 					}
 				}
@@ -1069,13 +1095,13 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 						    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo)) ||
 						    (workerLocation == Primary && addressInDbAndPrimarySatelliteDc(address, dbInfo))) {
 							TraceEvent("HealthMonitorDetectRecentClosedPeer").suppressFor(30).detail("Peer", address);
-							req.degradedPeers.push_back(address);
+							req.disconnectedPeers.push_back(address);
 						}
 					}
 				}
 			}
 
-			if (!req.degradedPeers.empty()) {
+			if (!req.disconnectedPeers.empty() || !req.degradedPeers.empty()) {
 				req.address = FlowTransport::transport().getLocalAddress();
 				ccInterface->get().get().updateWorkerHealth.send(req);
 			}
@@ -2997,34 +3023,45 @@ TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
 		return Void();
 	}
 
-	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                           ProtocolVersion::withTSS())));
-
-	ErrorOr<SWVersion> swversion = wait(errorOr(
-	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
-
-	if (!swversion.isError()) {
-		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
-
-		TraceEvent(SevInfo, "UT/swversion/runCompatibleOlder").detail("SWVersion", swversion.get());
+	{
+		ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                           ProtocolVersion::withTSS())));
 	}
 
-	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-	                                                           ProtocolVersion::withTSS(),
-	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                           ProtocolVersion::withTSS())));
+	{
+		ErrorOr<SWVersion> swversion = wait(errorOr(
+		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
 
-	ErrorOr<SWVersion> swversion = wait(errorOr(
-	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+		if (!swversion.isError()) {
+			ASSERT(swversion.get().newestProtocolVersion() ==
+			       ProtocolVersion::withStorageInterfaceReadiness().version());
+			ASSERT(swversion.get().lastRunProtocolVersion() ==
+			       ProtocolVersion::withStorageInterfaceReadiness().version());
+			ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
 
-	if (!swversion.isError()) {
-		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withTSS().version());
-		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+			TraceEvent(SevInfo, "UT/swversion/runCompatibleOlder").detail("SWVersion", swversion.get());
+		}
+	}
+
+	{
+		ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+		                                                           ProtocolVersion::withTSS(),
+		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                           ProtocolVersion::withTSS())));
+	}
+
+	{
+		ErrorOr<SWVersion> swversion = wait(errorOr(
+		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+		if (!swversion.isError()) {
+			ASSERT(swversion.get().newestProtocolVersion() ==
+			       ProtocolVersion::withStorageInterfaceReadiness().version());
+			ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withTSS().version());
+			ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+		}
 	}
 
 	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
@@ -3038,24 +3075,32 @@ TEST_CASE("/fdbserver/worker/swversion/runIncompatibleOlder") {
 		return Void();
 	}
 
-	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                           ProtocolVersion::withTSS())));
-
-	ErrorOr<SWVersion> swversion = wait(errorOr(
-	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
-
-	if (!swversion.isError()) {
-		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	{
+		ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                           ProtocolVersion::withTSS())));
 	}
 
-	ErrorOr<SWVersion> swversion =
-	    wait(errorOr(testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withCacheRole())));
+	{
+		ErrorOr<SWVersion> swversion = wait(errorOr(
+		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
 
-	ASSERT(swversion.isError() && swversion.getError().code() == error_code_incompatible_software_version);
+		if (!swversion.isError()) {
+			ASSERT(swversion.get().newestProtocolVersion() ==
+			       ProtocolVersion::withStorageInterfaceReadiness().version());
+			ASSERT(swversion.get().lastRunProtocolVersion() ==
+			       ProtocolVersion::withStorageInterfaceReadiness().version());
+			ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+		}
+	}
+
+	{
+		ErrorOr<SWVersion> swversion =
+		    wait(errorOr(testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withCacheRole())));
+
+		ASSERT(swversion.isError() && swversion.getError().code() == error_code_incompatible_software_version);
+	}
 
 	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));
 
@@ -3068,32 +3113,42 @@ TEST_CASE("/fdbserver/worker/swversion/runNewer") {
 		return Void();
 	}
 
-	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-	                                                           ProtocolVersion::withTSS(),
-	                                                           ProtocolVersion::withTSS(),
-	                                                           ProtocolVersion::withCacheRole())));
-
-	ErrorOr<SWVersion> swversion = wait(errorOr(
-	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
-
-	if (!swversion.isError()) {
-		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withTSS().version());
-		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withTSS().version());
-		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withCacheRole().version());
+	{
+		ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+		                                                           ProtocolVersion::withTSS(),
+		                                                           ProtocolVersion::withTSS(),
+		                                                           ProtocolVersion::withCacheRole())));
 	}
 
-	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
-	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                           ProtocolVersion::withTSS())));
+	{
+		ErrorOr<SWVersion> swversion = wait(errorOr(
+		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
 
-	ErrorOr<SWVersion> swversion = wait(errorOr(
-	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+		if (!swversion.isError()) {
+			ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withTSS().version());
+			ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withTSS().version());
+			ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withCacheRole().version());
+		}
+	}
 
-	if (!swversion.isError()) {
-		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	{
+		ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+		                                                           ProtocolVersion::withTSS())));
+	}
+
+	{
+		ErrorOr<SWVersion> swversion = wait(errorOr(
+		    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+		if (!swversion.isError()) {
+			ASSERT(swversion.get().newestProtocolVersion() ==
+			       ProtocolVersion::withStorageInterfaceReadiness().version());
+			ASSERT(swversion.get().lastRunProtocolVersion() ==
+			       ProtocolVersion::withStorageInterfaceReadiness().version());
+			ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+		}
 	}
 
 	wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(swversionTestDirName, versionFileName), true));

@@ -25,7 +25,7 @@
 
 #include "flow/flow.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/Versionstamp.h"
+#include "fdbclient/TupleVersionstamp.h"
 
 struct Tuple {
 	struct UnicodeStr {
@@ -63,7 +63,7 @@ struct Tuple {
 	Tuple& append(double);
 	Tuple& append(std::nullptr_t);
 	Tuple& appendNull();
-	Tuple& append(Versionstamp const&);
+	Tuple& append(TupleVersionstamp const&);
 	Tuple& append(UserTypeStr const&);
 
 	Standalone<StringRef> pack() const {
@@ -92,7 +92,7 @@ struct Tuple {
 	StringRef subTupleRawString(size_t index) const;
 	ElementType getType(size_t index) const;
 	Standalone<StringRef> getString(size_t index) const;
-	Versionstamp getVersionstamp(size_t index) const;
+	TupleVersionstamp getVersionstamp(size_t index) const;
 	int64_t getInt(size_t index, bool allow_incomplete = false) const;
 	bool getBool(size_t index) const;
 	float getFloat(size_t index) const;

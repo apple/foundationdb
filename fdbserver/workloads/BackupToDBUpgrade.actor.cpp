@@ -18,9 +18,11 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -78,9 +80,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		}
 
 		ASSERT(g_simulator->extraDatabases.size() == 1);
-		auto extraFile =
-		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator->extraDatabases[0]));
-		extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
+		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], wcx.defaultTenant);
 
 		TraceEvent("DRU_Start").log();
 	}
@@ -162,9 +162,6 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			TraceEvent("DRU_CheckLeftoverkeys").detail("BackupTag", printable(tag));
 
 			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
 				// Check the left over tasks
 				// We have to wait for the list to empty since an abort and get status
 				// can leave extra tasks in the queue
@@ -181,7 +178,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					wait(TaskBucket::debugPrintRange(cx, "\xff"_sr, StringRef()));
 				}
 
-				loop {
+				while (taskCount > 0) {
 					waitCycles++;
 
 					TraceEvent("DRU_NonzeroTaskWait")
@@ -192,21 +189,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 					wait(delay(20.0));
 					tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
-					int64_t _taskCount = wait(backupAgent->getTaskCount(tr));
-					taskCount = _taskCount;
-
-					if (!taskCount) {
-						break;
-					}
-				}
-
-				if (taskCount) {
-					displaySystemKeys++;
-					TraceEvent(SevError, "DRU_NonzeroTaskCount")
-					    .detail("BackupTag", printable(tag))
-					    .detail("TaskCount", taskCount)
-					    .detail("WaitCycles", waitCycles);
-					printf("BackupCorrectnessLeftoverLogTasks: %ld\n", (long)taskCount);
+					wait(store(taskCount, backupAgent->getTaskCount(tr)));
 				}
 
 				RangeResult agentValues =
@@ -291,6 +274,28 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 	ACTOR static Future<Void> _setup(Database cx, BackupToDBUpgradeWorkload* self) {
 		state DatabaseBackupAgent backupAgent(cx);
 
+		if (cx->defaultTenant.present() || BUGGIFY) {
+			if (cx->defaultTenant.present()) {
+				TenantMapEntry entry = wait(TenantAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
+
+				// If we are specifying sub-ranges (or randomly, if backing up normal keys), adjust them to be relative
+				// to the tenant
+				if (self->backupRanges.size() != 1 || self->backupRanges[0] != normalKeys ||
+				    deterministicRandom()->coinflip()) {
+					Standalone<VectorRef<KeyRangeRef>> modifiedBackupRanges;
+					for (int i = 0; i < self->backupRanges.size(); ++i) {
+						modifiedBackupRanges.push_back_deep(
+						    modifiedBackupRanges.arena(),
+						    self->backupRanges[i].withPrefix(entry.prefix, self->backupRanges.arena()));
+					}
+					self->backupRanges = modifiedBackupRanges;
+				}
+			}
+			for (auto r : getSystemBackupRanges()) {
+				self->backupRanges.push_back_deep(self->backupRanges.arena(), r);
+			}
+		}
+
 		try {
 			wait(delay(self->backupAfter));
 
@@ -301,7 +306,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			wait(b);
 			TraceEvent("DRU_DoBackupWaitEnd").detail("BackupTag", printable(self->backupTag));
 		} catch (Error& e) {
-			TraceEvent(SevError, "BackupToDBUpgradeSetuEerror").error(e);
+			TraceEvent(SevError, "BackupToDBUpgradeSetupError").error(e);
 			throw;
 		}
 
@@ -325,7 +330,9 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 				try {
 					loop {
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+						tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
+						tr2.setOption(FDBTransactionOptions::RAW_ACCESS);
 						state Future<RangeResult> srcFuture = tr.getRange(KeyRangeRef(begin, range.end), 1000);
 						state Future<RangeResult> bkpFuture =
 						    tr2.getRange(KeyRangeRef(begin, range.end).withPrefix(backupPrefix), 1000);

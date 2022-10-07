@@ -56,13 +56,14 @@ class ConfigIncrementWorkload : public TestWorkload {
 	}
 
 	ACTOR static Future<Void> incrementActor(ConfigIncrementWorkload* self, Database cx) {
-		TraceEvent(SevDebug, "ConfigIncrementStartIncrementActor");
 		state int trsComplete = 0;
+		state Reference<ISingleThreadTransaction> tr;
+		TraceEvent(SevDebug, "ConfigIncrementStartIncrementActor");
 		while (trsComplete < self->incrementsPerActor) {
 			try {
 				loop {
 					try {
-						state Reference<ISingleThreadTransaction> tr = self->getTransaction(cx);
+						tr = self->getTransaction(cx);
 						state int currentValue = wait(get(tr));
 						ASSERT_GE(currentValue, self->lastKnownValue);
 						set(tr, currentValue + 1);
@@ -100,9 +101,11 @@ class ConfigIncrementWorkload : public TestWorkload {
 	}
 
 	ACTOR static Future<bool> check(ConfigIncrementWorkload* self, Database cx) {
+		state Reference<ISingleThreadTransaction> tr;
 		loop {
+			tr.clear();
 			try {
-				state Reference<ISingleThreadTransaction> tr = self->getTransaction(cx);
+				tr = self->getTransaction(cx);
 				state int currentValue = wait(get(tr));
 				auto expectedValue = self->incrementActors * self->incrementsPerActor;
 				TraceEvent("ConfigIncrementCheck")

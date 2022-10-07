@@ -55,6 +55,7 @@ struct WorkloadContext {
 	int64_t sharedRandomNumber;
 	Reference<AsyncVar<struct ServerDBInfo> const> dbInfo;
 	Reference<IClusterConnectionRecord> ccr;
+	Optional<TenantName> defaultTenant;
 
 	WorkloadContext();
 	WorkloadContext(const WorkloadContext&);

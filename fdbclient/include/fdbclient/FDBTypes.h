@@ -517,6 +517,32 @@ using KeySelector = Standalone<struct KeySelectorRef>;
 using RangeResult = Standalone<struct RangeResultRef>;
 using MappedRangeResult = Standalone<struct MappedRangeResultRef>;
 
+namespace std {
+template <>
+struct hash<KeyRangeRef> {
+	static constexpr std::hash<StringRef> hashFunc{};
+	std::size_t operator()(KeyRangeRef const& range) const {
+		std::size_t seed = 0;
+		boost::hash_combine(seed, hashFunc(range.begin));
+		boost::hash_combine(seed, hashFunc(range.end));
+		return seed;
+	}
+};
+} // namespace std
+
+namespace std {
+template <>
+struct hash<KeyRange> {
+	static constexpr std::hash<StringRef> hashFunc{};
+	std::size_t operator()(KeyRangeRef const& range) const {
+		std::size_t seed = 0;
+		boost::hash_combine(seed, hashFunc(range.begin));
+		boost::hash_combine(seed, hashFunc(range.end));
+		return seed;
+	}
+};
+} // namespace std
+
 enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
 inline Key keyAfter(const KeyRef& key) {
@@ -1627,5 +1653,37 @@ struct transaction_creator_traits<T, std::void_t<typename T::TransactionT>> : st
 
 template <typename T>
 constexpr bool is_transaction_creator = transaction_creator_traits<T>::value;
+
+struct Versionstamp {
+	Version version = invalidVersion;
+	uint16_t batchNumber = 0;
+
+	bool operator==(const Versionstamp& r) const { return version == r.version && batchNumber == r.batchNumber; }
+	bool operator!=(const Versionstamp& r) const { return !(*this == r); }
+	bool operator<(const Versionstamp& r) const {
+		return version < r.version || (version == r.version && batchNumber < r.batchNumber);
+	}
+	bool operator>(const Versionstamp& r) const { return r < *this; }
+	bool operator<=(const Versionstamp& r) const { return !(*this > r); }
+	bool operator>=(const Versionstamp& r) const { return !(*this < r); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		int64_t beVersion;
+		int16_t beBatch;
+
+		if constexpr (!Ar::isDeserializing) {
+			beVersion = bigEndian64(version);
+			beBatch = bigEndian16(batchNumber);
+		}
+
+		serializer(ar, beVersion, beBatch);
+
+		if constexpr (Ar::isDeserializing) {
+			version = bigEndian64(version);
+			batchNumber = bigEndian16(beBatch);
+		}
+	}
+};
 
 #endif
