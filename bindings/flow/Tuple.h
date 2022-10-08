@@ -24,7 +24,9 @@
 #pragma once
 
 #include "bindings/flow/fdb_flow.h"
-#include "fdbclient/Versionstamp.h"
+#include "fdbclient/TupleVersionstamp.h"
+
+typedef TupleVersionstamp Versionstamp;
 
 namespace FDB {
 struct Uuid {

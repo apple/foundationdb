@@ -74,6 +74,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 	ACTOR Future<Void> _start(PhysicalShardMoveWorkLoad* self, Database cx) {
 		int ignore = wait(setDDMode(cx, 0));
+		state std::vector<UID> teamA;
 		state std::map<Key, Value> kvs({ { "TestKeyA"_sr, "TestValueA"_sr },
 		                                 { "TestKeyB"_sr, "TestValueB"_sr },
 		                                 { "TestKeyC"_sr, "TestValueC"_sr },
@@ -88,13 +89,14 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state std::unordered_set<UID> excludes;
 		state std::unordered_set<UID> includes;
 		state int teamSize = 1;
-		std::vector<UID> teamA = wait(self->moveShard(self,
-		                                              cx,
-		                                              deterministicRandom()->randomUniqueID(),
-		                                              KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr),
-		                                              teamSize,
-		                                              includes,
-		                                              excludes));
+		wait(store(teamA,
+		           self->moveShard(self,
+		                           cx,
+		                           deterministicRandom()->randomUniqueID(),
+		                           KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr),
+		                           teamSize,
+		                           includes,
+		                           excludes)));
 		excludes.insert(teamA.begin(), teamA.end());
 
 		state uint64_t sh0 = deterministicRandom()->randomUInt64();
@@ -102,13 +104,14 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state uint64_t sh2 = deterministicRandom()->randomUInt64();
 
 		// Move range [TestKeyA, TestKeyB) to sh0.
-		state std::vector<UID> teamA = wait(self->moveShard(self,
-		                                                    cx,
-		                                                    UID(sh0, deterministicRandom()->randomUInt64()),
-		                                                    KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr),
-		                                                    teamSize,
-		                                                    includes,
-		                                                    excludes));
+		wait(store(teamA,
+		           self->moveShard(self,
+		                           cx,
+		                           UID(sh0, deterministicRandom()->randomUInt64()),
+		                           KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr),
+		                           teamSize,
+		                           includes,
+		                           excludes)));
 
 		// Move range [TestKeyB, TestKeyC) to sh1, on the same server.
 		includes.insert(teamA.begin(), teamA.end());
@@ -153,15 +156,19 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr), &kvs));
 		TraceEvent("TestValueVerified").log();
 
-		int ignore = wait(setDDMode(cx, 1));
+		{
+			int _ = wait(setDDMode(cx, 1));
+			(void)_;
+		}
 		return Void();
 	}
 
 	ACTOR Future<Version> populateData(PhysicalShardMoveWorkLoad* self, Database cx, std::map<Key, Value>* kvs) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		state Version version;
+		state UID debugID;
 		loop {
-			state UID debugID = deterministicRandom()->randomUniqueID();
+			debugID = deterministicRandom()->randomUniqueID();
 			try {
 				tr->debugTransaction(debugID);
 				for (const auto& [key, value] : *kvs) {
@@ -188,8 +195,9 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	                                KeyRange range,
 	                                std::map<Key, Value>* kvs) {
 		state Transaction tr(cx);
+		state UID debugID;
 		loop {
-			state UID debugID = deterministicRandom()->randomUniqueID();
+			debugID = deterministicRandom()->randomUniqueID();
 			try {
 				tr.debugTransaction(debugID);
 				RangeResult res = wait(tr.getRange(range, CLIENT_KNOBS->TOO_MANY));
@@ -215,11 +223,13 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	                                 Key key,
 	                                 ErrorOr<Optional<Value>> expectedValue) {
 		state Transaction tr(cx);
+		state Version readVersion;
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 		loop {
 			try {
-				state Version readVersion = wait(tr.getReadVersion());
+				Version _readVersion = wait(tr.getReadVersion());
+				readVersion = _readVersion;
 				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
@@ -244,8 +254,9 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		// state Transaction tr(cx);
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		state Version version;
+		state UID debugID;
 		loop {
-			state UID debugID = deterministicRandom()->randomUniqueID();
+			debugID = deterministicRandom()->randomUniqueID();
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->debugTransaction(debugID);

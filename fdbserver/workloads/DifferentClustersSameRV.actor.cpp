@@ -21,6 +21,7 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ApiVersion.h"
@@ -39,9 +40,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 
 	DifferentClustersSameRVWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		ASSERT(g_simulator->extraDatabases.size() == 1);
-		auto extraFile =
-		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator->extraDatabases[0]));
-		extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
+		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], wcx.defaultTenant);
 		testDuration = getOption(options, "testDuration"_sr, 100.0);
 		switchAfter = getOption(options, "switchAfter"_sr, 50.0);
 		keyToRead = getOption(options, "keyToRead"_sr, "someKey"_sr);
@@ -50,13 +49,27 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 
 	std::string description() const override { return "DifferentClustersSameRV"; }
 
-	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> setup(Database const& cx) override {
+		if (clientId != 0) {
+			return Void();
+		}
+		return _setup(cx, this);
+	}
+
+	ACTOR static Future<Void> _setup(Database cx, DifferentClustersSameRVWorkload* self) {
+		if (self->extraDB->defaultTenant.present()) {
+			wait(success(TenantAPI::createTenant(self->extraDB.getReference(), self->extraDB->defaultTenant.get())));
+		}
+
+		return Void();
+	}
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId != 0) {
 			return Void();
 		}
 		auto switchConnFileDb = Database::createDatabase(cx->getConnectionRecord(), -1);
+		switchConnFileDb->defaultTenant = cx->defaultTenant;
 		originalDB = cx;
 		std::vector<Future<Void>> clients = { readerClientSeparateDBs(cx, this),
 			                                  doSwitch(switchConnFileDb, this),

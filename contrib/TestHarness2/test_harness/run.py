@@ -335,7 +335,12 @@ class TestRun:
         command: List[str] = []
         env: Dict[str, str] = os.environ.copy()
         valgrind_file: Path | None = None
-        if self.use_valgrind:
+        if self.use_valgrind and self.binary == config.binary:
+            # Only run the binary under test under valgrind. There's nothing we
+            # can do about valgrind errors in old binaries anyway, and it makes
+            # the test take longer. Also old binaries weren't built with
+            # USE_VALGRIND=ON, and we have seen false positives with valgrind in
+            # such binaries.
             command.append('valgrind')
             valgrind_file = self.temp_path / Path('valgrind-{}.xml'.format(self.random_seed))
             dbg_path = os.getenv('FDB_VALGRIND_DBGPATH')

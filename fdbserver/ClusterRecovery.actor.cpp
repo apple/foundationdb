@@ -751,7 +751,7 @@ ACTOR Future<Void> updateLogsValue(Reference<ClusterRecoveryData> self, Database
 			}
 
 			if (!found) {
-				CODE_PROBE(true, "old master attempted to change logsKey");
+				CODE_PROBE(true, "old master attempted to change logsKey", probe::decoration::rare);
 				return Void();
 			}
 
@@ -830,7 +830,7 @@ ACTOR Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Refer
 			                            std::vector<UID>()));
 		} else {
 			// The cluster should enter the accepting commits phase soon, and then we will register again
-			CODE_PROBE(true, "cstate is updated but we aren't accepting commits yet");
+			CODE_PROBE(true, "cstate is updated but we aren't accepting commits yet", probe::decoration::rare);
 		}
 	}
 }
@@ -1112,7 +1112,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 		self->recoveryTransactionVersion += deterministicRandom()->randomInt64(0, 10000000);
 	}
 
-	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_RECOVERED_EVENT_NAME).c_str(),
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_RECOVERING_EVENT_NAME).c_str(),
 	           self->dbgid)
 	    .detail("LastEpochEnd", self->lastEpochEnd)
 	    .detail("RecoveryTransactionVersion", self->recoveryTransactionVersion);
@@ -1164,12 +1164,32 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	    wait(self->txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration().key));
 	Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
 	    MetaclusterRegistrationEntry::decode(metaclusterRegistrationVal);
+	Optional<ClusterName> metaclusterName;
+	Optional<UID> metaclusterId;
+	Optional<ClusterName> clusterName;
+	Optional<UID> clusterId;
+	self->controllerData->db.metaclusterRegistration = metaclusterRegistration;
 	if (metaclusterRegistration.present()) {
 		self->controllerData->db.metaclusterName = metaclusterRegistration.get().metaclusterName;
 		self->controllerData->db.clusterType = metaclusterRegistration.get().clusterType;
+		metaclusterName = metaclusterRegistration.get().metaclusterName;
+		metaclusterId = metaclusterRegistration.get().metaclusterId;
+		if (metaclusterRegistration.get().clusterType == ClusterType::METACLUSTER_DATA) {
+			clusterName = metaclusterRegistration.get().name;
+			clusterId = metaclusterRegistration.get().id;
+		}
 	} else {
+		self->controllerData->db.metaclusterName = Optional<ClusterName>();
 		self->controllerData->db.clusterType = ClusterType::STANDALONE;
 	}
+
+	TraceEvent("MetaclusterMetadata")
+	    .detail("ClusterType", clusterTypeToString(self->controllerData->db.clusterType))
+	    .detail("MetaclusterName", metaclusterName)
+	    .detail("MetaclusterId", metaclusterId)
+	    .detail("DataClusterName", clusterName)
+	    .detail("DataClusterId", clusterId)
+	    .trackLatest(self->metaclusterEventHolder->trackingKey);
 
 	uniquify(self->allTags);
 

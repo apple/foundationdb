@@ -18,7 +18,12 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+#include <string>
+#include <vector>
+
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbserver/Knobs.h"
 #include "flow/FastRef.h"
 #include "flow/flow.h"
@@ -32,13 +37,13 @@
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include
-#include "fmt/core.h"
 
 //
 // This module offers routines to dump or load blob manifest file, which is used for full restore from granules
 //
 
-static std::string MANIFEST_FILENAME = "manifest"; // Default manifest file name on external blob storage
+// Default manifest folder on external blob storage
+#define MANIFEST_FOLDER "manifest"
 
 #define ENABLE_DEBUG_PRINT true
 template <typename... T>
@@ -47,10 +52,53 @@ inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
 		fmt::print(fmt, std::forward<T>(args)...);
 }
 
+// Defines a manifest file. THe file name includes the epoch of blob manager and a dump sequence number.
+struct BlobManifestFile {
+	std::string fileName;
+	int64_t epoch{ 0 };
+	int64_t seqNo{ 0 };
+
+	BlobManifestFile(const std::string& path) {
+		if (sscanf(path.c_str(), MANIFEST_FOLDER "/manifest.%" SCNd64 ".%" SCNd64, &epoch, &seqNo) == 2) {
+			fileName = path;
+		}
+	}
+
+	// Sort in descending order of {epoch, seqNo}
+	bool operator<(const BlobManifestFile& rhs) const {
+		return epoch == rhs.epoch ? seqNo > rhs.seqNo : epoch > rhs.epoch;
+	}
+
+	// List all blob manifest files, sorted in descending order
+	ACTOR static Future<std::vector<BlobManifestFile>> list(Reference<BackupContainerFileSystem> reader) {
+		std::function<bool(std::string const&)> filter = [=](std::string const& path) {
+			BlobManifestFile file(path);
+			return file.epoch > 0 && file.seqNo > 0;
+		};
+		BackupContainerFileSystem::FilesAndSizesT filesAndSizes = wait(reader->listFiles(MANIFEST_FOLDER, filter));
+
+		std::vector<BlobManifestFile> result;
+		for (auto& f : filesAndSizes) {
+			BlobManifestFile file(f.first);
+			result.push_back(file);
+		}
+		std::sort(result.begin(), result.end());
+		return result;
+	}
+
+	// Find the last manifest file
+	ACTOR static Future<std::string> last(Reference<BackupContainerFileSystem> reader) {
+		std::vector<BlobManifestFile> files = wait(list(reader));
+		ASSERT(!files.empty());
+		return files.front().fileName;
+	}
+};
+
 // This class dumps blob manifest to external blob storage.
 class BlobManifestDumper : public ReferenceCounted<BlobManifestDumper> {
 public:
-	BlobManifestDumper(Database& db, Reference<BlobConnectionProvider> blobConn) : db_(db), blobConn_(blobConn) {}
+	BlobManifestDumper(Database& db, Reference<BlobConnectionProvider> blobConn, int64_t epoch, int64_t seqNo)
+	  : db_(db), blobConn_(blobConn), epoch_(epoch), seqNo_(seqNo) {}
 	virtual ~BlobManifestDumper() {}
 
 	// Execute the dumper
@@ -61,6 +109,7 @@ public:
 			manifest.rows = rows;
 			Value data = encode(manifest);
 			wait(writeToFile(self, data));
+			wait(cleanup(self));
 		} catch (Error& e) {
 			dprint("WARNING: unexpected blob manifest dumper error {}\n", e.what()); // skip error handling for now
 		}
@@ -100,13 +149,14 @@ private:
 	// Write data to blob manifest file
 	ACTOR static Future<Void> writeToFile(Reference<BlobManifestDumper> self, Value data) {
 		state Reference<BackupContainerFileSystem> writer;
-		state std::string fileName;
+		state std::string fullPath;
 
-		std::tie(writer, fileName) = self->blobConn_->createForWrite(MANIFEST_FILENAME);
+		std::tie(writer, fullPath) = self->blobConn_->createForWrite(MANIFEST_FOLDER);
+		state std::string fileName = format(MANIFEST_FOLDER "/manifest.%lld.%lld", self->epoch_, self->seqNo_);
 		state Reference<IBackupFile> file = wait(writer->writeFile(fileName));
 		wait(file->append(data.begin(), data.size()));
 		wait(file->finish());
-		dprint("Write blob manifest file with {} bytes\n", data.size());
+		dprint("Write blob manifest file {} with {} bytes\n", fileName, data.size());
 		return Void();
 	}
 
@@ -117,8 +167,26 @@ private:
 		return wr.toValue();
 	}
 
+	// Remove old manifest file
+	ACTOR static Future<Void> cleanup(Reference<BlobManifestDumper> self) {
+		state Reference<BackupContainerFileSystem> writer;
+		state std::string fullPath;
+		std::tie(writer, fullPath) = self->blobConn_->createForWrite(MANIFEST_FOLDER);
+		std::vector<BlobManifestFile> files = wait(BlobManifestFile::list(writer));
+		if (files.size() > sMaxCount_) {
+			for (auto iter = files.begin() + sMaxCount_; iter < files.end(); ++iter) {
+				writer->deleteFile(iter->fileName);
+				dprint("Delete manifest file {}\n", iter->fileName);
+			}
+		}
+		return Void();
+	}
+
 	Database db_;
 	Reference<BlobConnectionProvider> blobConn_;
+	int64_t epoch_; // blob manager epoch
+	int64_t seqNo_; // manifest seq number
+	static const int sMaxCount_{ 5 }; // max number of manifest file to keep
 };
 
 // Defines granule info that interests full restore
@@ -177,8 +245,9 @@ public:
 private:
 	// Read data from a manifest file
 	ACTOR static Future<Value> readFromFile(Reference<BlobManifestLoader> self) {
-		state Reference<BackupContainerFileSystem> readBstore = self->blobConn_->getForRead(MANIFEST_FILENAME);
-		state Reference<IAsyncFile> reader = wait(readBstore->readFile(MANIFEST_FILENAME));
+		state Reference<BackupContainerFileSystem> container = self->blobConn_->getForRead(MANIFEST_FOLDER);
+		std::string fileName = wait(BlobManifestFile::last(container));
+		state Reference<IAsyncFile> reader = wait(container->readFile(fileName));
 		state int64_t fileSize = wait(reader->size());
 		state Arena arena;
 		state uint8_t* data = new (arena) uint8_t[fileSize];
@@ -353,8 +422,8 @@ private:
 };
 
 // API to dump a manifest copy to external storage
-ACTOR Future<Void> dumpManifest(Database db, Reference<BlobConnectionProvider> blobConn) {
-	Reference<BlobManifestDumper> dumper = makeReference<BlobManifestDumper>(db, blobConn);
+ACTOR Future<Void> dumpManifest(Database db, Reference<BlobConnectionProvider> blobConn, int64_t epoch, int64_t seqNo) {
+	Reference<BlobManifestDumper> dumper = makeReference<BlobManifestDumper>(db, blobConn, epoch, seqNo);
 	wait(BlobManifestDumper::execute(dumper));
 	return Void();
 }

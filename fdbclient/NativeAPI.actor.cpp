@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "boost/algorithm/string.hpp"
+#include "flow/CodeProbe.h"
 #include "fmt/format.h"
 
 #include "fdbclient/FDBOptions.g.h"
@@ -45,6 +46,7 @@
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ClusterConnectionFile.h"
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
@@ -221,6 +223,52 @@ void DatabaseContext::addSSIdTagMapping(const UID& uid, const Tag& tag) {
 	ssidTagMapping[uid] = tag;
 }
 
+void DatabaseContext::getLatestCommitVersionForSSID(const UID& ssid, Tag& tag, Version& commitVersion) {
+	// initialization
+	tag = invalidTag;
+	commitVersion = invalidVersion;
+
+	auto iter = ssidTagMapping.find(ssid);
+	if (iter != ssidTagMapping.end()) {
+		tag = iter->second;
+
+		if (ssVersionVectorCache.hasVersion(tag)) {
+			commitVersion = ssVersionVectorCache.getVersion(tag);
+		}
+	}
+}
+
+void DatabaseContext::getLatestCommitVersion(const StorageServerInterface& ssi,
+                                             Version readVersion,
+                                             VersionVector& latestCommitVersion) {
+	latestCommitVersion.clear();
+
+	if (ssVersionVectorCache.getMaxVersion() == invalidVersion) {
+		return;
+	}
+
+	// Error checking (based on the assumption that the read version was not obtained
+	// from the client's grv cache).
+	if (readVersion > ssVersionVectorCache.getMaxVersion()) {
+		TraceEvent(SevError, "ReadVersionExceedsVersionVectorMax")
+		    .detail("ReadVersion", readVersion)
+		    .detail("VersionVector", ssVersionVectorCache.toString());
+		if (g_network->isSimulated()) {
+			ASSERT(false);
+		} else {
+			return; // Do not return a stale commit version in production.
+		}
+	}
+
+	Tag tag = invalidTag;
+	Version commitVersion = invalidVersion;
+	getLatestCommitVersionForSSID(ssi.id(), tag, commitVersion);
+
+	if (tag != invalidTag && commitVersion != invalidVersion && commitVersion < readVersion) {
+		latestCommitVersion.setVersion(tag, commitVersion);
+	}
+}
+
 void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& locationInfo,
                                               Version readVersion,
                                               Reference<TransactionState> info,
@@ -253,24 +301,20 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 
 	std::map<Version, std::set<Tag>> versionMap; // order the versions to be returned
 	for (int i = 0; i < locationInfo->locations()->size(); i++) {
-		bool updatedVersionMap = false;
-		Version commitVersion = invalidVersion;
 		Tag tag = invalidTag;
-		auto iter = ssidTagMapping.find(locationInfo->locations()->getId(i));
-		if (iter != ssidTagMapping.end()) {
-			tag = iter->second;
-			if (ssVersionVectorCache.hasVersion(tag)) {
-				commitVersion = ssVersionVectorCache.getVersion(tag); // latest commit version
-				if (commitVersion < readVersion) {
-					updatedVersionMap = true;
-					versionMap[commitVersion].insert(tag);
-				}
-			}
+		Version commitVersion = invalidVersion; // latest commit version
+		getLatestCommitVersionForSSID(locationInfo->locations()->getId(i), tag, commitVersion);
+
+		bool updatedVersionMap = false;
+		if (tag != invalidTag && commitVersion != invalidVersion && commitVersion < readVersion) {
+			updatedVersionMap = true;
+			versionMap[commitVersion].insert(tag);
 		}
+
 		// Do not log if commitVersion >= readVersion.
 		if (!updatedVersionMap && commitVersion == invalidVersion) {
 			TraceEvent(SevDebug, "CommitVersionNotFoundForSS")
-			    .detail("InSSIDMap", iter != ssidTagMapping.end() ? 1 : 0)
+			    .detail("InSSIDMap", tag != invalidTag ? 1 : 0)
 			    .detail("Tag", tag)
 			    .detail("CommitVersion", commitVersion)
 			    .detail("ReadVersion", readVersion)
@@ -2306,6 +2350,13 @@ Database Database::createDatabase(std::string connFileName,
 	return Database::createDatabase(rccr, apiVersion, internal, clientLocality);
 }
 
+Database Database::createSimulatedExtraDatabase(std::string connectionString, Optional<TenantName> defaultTenant) {
+	auto extraFile = makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(connectionString));
+	Database db = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
+	db->defaultTenant = defaultTenant;
+	return db;
+}
+
 Reference<WatchMetadata> DatabaseContext::getWatchMetadata(int64_t tenantId, KeyRef key) const {
 	const auto it = watchMap.find(std::make_pair(tenantId, key));
 	if (it == watchMap.end())
@@ -2659,7 +2710,7 @@ bool DatabaseContext::isCurrentGrvProxy(UID proxyId) const {
 		if (proxy.id() == proxyId)
 			return true;
 	}
-	CODE_PROBE(true, "stale GRV proxy detected");
+	CODE_PROBE(true, "stale GRV proxy detected", probe::decoration::rare);
 	return false;
 }
 
@@ -3624,6 +3675,9 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 		                                                              parameters->useProvisionalProxies,
 		                                                              Reverse::False,
 		                                                              parameters->version));
+		if (parameters->tenant.tenantId != locationInfo.tenantEntry.id) {
+			throw tenant_not_found();
+		}
 
 		try {
 			state Optional<UID> watchValueID = Optional<UID>();
@@ -3680,7 +3734,7 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 			} else if (e.code() == error_code_watch_cancelled || e.code() == error_code_process_behind) {
 				// clang-format off
 				CODE_PROBE(e.code() == error_code_watch_cancelled, "Too many watches on the storage server, poll for changes instead");
-				CODE_PROBE(e.code() == error_code_process_behind, "The storage servers are all behind");
+				CODE_PROBE(e.code() == error_code_process_behind, "The storage servers are all behind", probe::decoration::rare);
 				// clang-format on
 				wait(delay(CLIENT_KNOBS->WATCH_POLLING_TIME, parameters->taskID));
 			} else if (e.code() == error_code_timed_out) { // The storage server occasionally times out watches in case
@@ -3936,7 +3990,6 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 			req.version = version;
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
-
 			setMatchIndex<GetKeyValuesFamilyRequest>(req, matchIndex);
 			req.spanContext = span.context;
 			trState->cx->getLatestCommitVersions(
@@ -5298,6 +5351,44 @@ Future<TenantInfo> populateAndGetTenant(Reference<TransactionState> trState, Key
 	}
 }
 
+// Restarts a watch after a database switch
+ACTOR Future<Void> restartWatch(Database cx,
+                                TenantInfo tenantInfo,
+                                Key key,
+                                Optional<Value> value,
+                                TagSet tags,
+                                SpanContext spanContext,
+                                TaskPriority taskID,
+                                Optional<UID> debugID,
+                                UseProvisionalProxies useProvisionalProxies) {
+	// The ID of the tenant may be different on the cluster that we switched to, so obtain the new ID
+	if (tenantInfo.name.present()) {
+		state KeyRangeLocationInfo locationInfo = wait(getKeyLocation(cx,
+		                                                              tenantInfo,
+		                                                              key,
+		                                                              &StorageServerInterface::watchValue,
+		                                                              spanContext,
+		                                                              debugID,
+		                                                              useProvisionalProxies,
+		                                                              Reverse::False,
+		                                                              latestVersion));
+		tenantInfo.tenantId = locationInfo.tenantEntry.id;
+	}
+
+	wait(watchValueMap(cx->minAcceptableReadVersion,
+	                   tenantInfo,
+	                   key,
+	                   value,
+	                   cx,
+	                   tags,
+	                   spanContext,
+	                   taskID,
+	                   debugID,
+	                   useProvisionalProxies));
+
+	return Void();
+}
+
 // FIXME: This seems pretty horrible. Now a Database can't die until all of its watches do...
 ACTOR Future<Void> watch(Reference<Watch> watch,
                          Database cx,
@@ -5325,16 +5416,15 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 						when(wait(cx->connectionFileChanged())) {
 							CODE_PROBE(true, "Recreated a watch after switch");
 							cx->clearWatchMetadata();
-							watch->watchFuture = watchValueMap(cx->minAcceptableReadVersion,
-							                                   tenantInfo,
-							                                   watch->key,
-							                                   watch->value,
-							                                   cx,
-							                                   tags,
-							                                   spanContext,
-							                                   taskID,
-							                                   debugID,
-							                                   useProvisionalProxies);
+							watch->watchFuture = restartWatch(cx,
+							                                  tenantInfo,
+							                                  watch->key,
+							                                  watch->value,
+							                                  tags,
+							                                  spanContext,
+							                                  taskID,
+							                                  debugID,
+							                                  useProvisionalProxies);
 						}
 					}
 				}
@@ -5570,18 +5660,18 @@ Future<Void> Transaction::getRangeStream(PromiseStream<RangeResult>& results,
 
 	KeySelector b = begin;
 	if (b.orEqual) {
-		CODE_PROBE(true, "Native stream begin orEqual==true");
+		CODE_PROBE(true, "Native stream begin orEqual==true", probe::decoration::rare);
 		b.removeOrEqual(b.arena());
 	}
 
 	KeySelector e = end;
 	if (e.orEqual) {
-		CODE_PROBE(true, "Native stream end orEqual==true");
+		CODE_PROBE(true, "Native stream end orEqual==true", probe::decoration::rare);
 		e.removeOrEqual(e.arena());
 	}
 
 	if (b.offset >= e.offset && b.getKey() >= e.getKey()) {
-		CODE_PROBE(true, "Native stream range inverted");
+		CODE_PROBE(true, "Native stream range inverted", probe::decoration::rare);
 		results.sendError(end_of_stream());
 		return Void();
 	}
@@ -7921,6 +8011,23 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			granuleEndKey = keyRange.end;
 		}
 
+		if (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01)) {
+			// simulate as if we read a stale mapping and a different worker owns the granule
+			ASSERT(!self->trState->cx->blobWorker_interf.empty());
+			CODE_PROBE(true, "Randomizing blob worker id for request");
+			TraceEvent ev("RandomizingBlobWorkerForReq");
+			ev.detail("OriginalWorker", workerId);
+			int randomIdx = deterministicRandom()->randomInt(0, self->trState->cx->blobWorker_interf.size());
+			for (auto& it : self->trState->cx->blobWorker_interf) {
+				if (randomIdx == 0) {
+					workerId = it.first;
+					break;
+				}
+				randomIdx--;
+			}
+			ev.detail("NewWorker", workerId);
+		}
+
 		state BlobGranuleFileRequest req;
 		req.keyRange = KeyRangeRef(StringRef(req.arena, granuleStartKey), StringRef(req.arena, granuleEndKey));
 		req.beginVersion = begin;
@@ -9647,7 +9754,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				results->storageData.clear();
 				if (e.code() == error_code_change_feed_popped) {
 					++db->feedNonRetriableErrors;
-					CODE_PROBE(true, "getChangeFeedStreamActor got popped");
+					CODE_PROBE(true, "getChangeFeedStreamActor got popped", probe::decoration::rare);
 					results->mutations.sendError(e);
 					results->refresh.sendError(e);
 				} else {

@@ -23,6 +23,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -53,7 +54,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 	ACTOR static Future<Void> _start(SubmitBackupWorkload* self, Database cx) {
 		wait(delay(self->delayFor));
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
-		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
+		addDefaultBackupRanges(backupRanges);
 		try {
 			wait(self->backupAgent.submitBackup(cx,
 			                                    self->backupDir,
@@ -62,6 +63,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 			                                    self->snapshotInterval,
 			                                    self->tag.toString(),
 			                                    backupRanges,
+			                                    false,
 			                                    self->stopWhenDone,
 			                                    UsePartitionedLog::False,
 			                                    self->incremental));

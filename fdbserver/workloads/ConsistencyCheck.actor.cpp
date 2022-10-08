@@ -564,6 +564,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					state int j = 0;
 					for (j = 0; j < iter_ss.size(); j++) {
 						resetReply(req);
+						if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+							cx->getLatestCommitVersion(iter_ss[j], req.version, req.ssLatestCommitVersions);
+						}
 						keyValueFutures.push_back(iter_ss[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 					}
 
@@ -801,6 +804,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
 					for (const auto& kv : shards[i].second) {
 						resetReply(req);
+						if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+							cx->getLatestCommitVersion(kv, req.version, req.ssLatestCommitVersions);
+						}
 						keyValueFutures.push_back(kv.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 					}
 
@@ -1109,6 +1115,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		if (foundExtraDataStore) {
+			wait(delay(10)); // let the cluster get to fully_recovered after the reboot before retrying
 			self->testFailure("Extra data stores present on workers");
 			return false;
 		}

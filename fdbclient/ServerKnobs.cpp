@@ -374,6 +374,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REPLACE_CONTENTS_BYTES,                                1e5 );
 
 	// KeyValueStoreRocksDB
+	init( ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES,         true ); if( randomize && BUGGIFY )  ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES = false;
+	init( ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE,                  true ); if( randomize && BUGGIFY )  ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE = false;
 	init( ROCKSDB_READ_RANGE_ROW_LIMIT,                        65535 ); if( randomize && BUGGIFY )  ROCKSDB_READ_RANGE_ROW_LIMIT = deterministicRandom()->randomInt(2, 10);
 
 	init( ROCKSDB_BACKGROUND_PARALLELISM,                          4 );
@@ -381,6 +383,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Use a smaller memtable in simulation to avoid OOMs.
 	int64_t memtableBytes = isSimulated ? 32 * 1024 : 512 * 1024 * 1024;
 	init( ROCKSDB_MEMTABLE_BYTES,                      memtableBytes );
+	init( ROCKSDB_LEVEL_STYLE_COMPACTION,                       true );
 	init( ROCKSDB_UNSAFE_AUTO_FSYNC,                           false );
 	init( ROCKSDB_PERIODIC_COMPACTION_SECONDS,                     0 );
 	init( ROCKSDB_PREFIX_LEN,                                      0 );
@@ -404,6 +407,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// If true, enables dynamic adjustment of ROCKSDB_WRITE_RATE_LIMITER_BYTES according to the recent demand of background IO.
 	init( ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE,                 true );
 	init( DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY,                    "fdb");
+	init( ROCKSDB_DISABLE_AUTO_COMPACTIONS,                    false ); // RocksDB default
 
 	init( ROCKSDB_PERFCONTEXT_ENABLE,                          false ); if( randomize && BUGGIFY ) ROCKSDB_PERFCONTEXT_ENABLE = deterministicRandom()->coinflip() ? false : true;
 	init( ROCKSDB_PERFCONTEXT_SAMPLE_RATE,                    0.0001 );
@@ -688,8 +692,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BW_THROTTLING_ENABLED,                                true );
 
 	bool buggifySmallBWLag = randomize && BUGGIFY;
-	init( TARGET_BW_LAG,                                        50.0 ); if(buggifySmallBWLag) TARGET_BW_LAG = 10.0;
-	init( TARGET_BW_LAG_BATCH,                                  30.0 ); if(buggifySmallBWLag) TARGET_BW_LAG_BATCH = 4.0;
+	init( TARGET_BW_LAG,                                       240.0 ); if(buggifySmallBWLag) TARGET_BW_LAG = 10.0;
+	init( TARGET_BW_LAG_BATCH,                                 200.0 ); if(buggifySmallBWLag) TARGET_BW_LAG_BATCH = 4.0;
 	init( TARGET_BW_LAG_UPDATE,                                  9.0 ); if(buggifySmallBWLag) TARGET_BW_LAG_UPDATE = 1.0;
 	init( MIN_BW_HISTORY,                                         10 );
 	init( BW_ESTIMATION_INTERVAL,                               10.0 ); if(buggifySmallBWLag) BW_ESTIMATION_INTERVAL = 2.0;
@@ -716,6 +720,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENFORCE_TAG_THROTTLING_ON_PROXIES,                   false );
 	init( GLOBAL_TAG_THROTTLING_MIN_RATE,                        1.0 );
 	init( GLOBAL_TAG_THROTTLING_FOLDING_TIME,                   10.0 );
+	init( GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO,            5.0 );
 
 	//Storage Metrics
 	init( STORAGE_METRICS_AVERAGE_INTERVAL,                    120.0 );
@@ -766,7 +771,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( MIN_TAG_READ_PAGES_RATE,                             1.0e4 ); if( randomize && BUGGIFY ) MIN_TAG_READ_PAGES_RATE = 0;
 	init( MIN_TAG_WRITE_PAGES_RATE,                             3200 ); if( randomize && BUGGIFY ) MIN_TAG_WRITE_PAGES_RATE = 0;
 	init( TAG_MEASUREMENT_INTERVAL,                        30.0 ); if( randomize && BUGGIFY ) TAG_MEASUREMENT_INTERVAL = 1.0;
-	init( READ_COST_BYTE_FACTOR,                          16384 ); if( randomize && BUGGIFY ) READ_COST_BYTE_FACTOR = 4096;
 	init( PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS,                    true ); if( randomize && BUGGIFY ) PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS = false;
 	init( REPORT_DD_METRICS,                                    true );
 	init( DD_METRICS_REPORT_INTERVAL,                           30.0 );
@@ -783,10 +787,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( QUICK_GET_KEY_VALUES_LIMIT,                           2000 );
 	init( QUICK_GET_KEY_VALUES_LIMIT_BYTES,                      1e7 );
 	init( STORAGE_FEED_QUERY_HARD_LIMIT,                      100000 );
-	init( STORAGE_SERVER_READ_CONCURRENCY,                        70 );
-	// Priorities which each ReadType maps to, in enumeration order
-	init( STORAGESERVER_READ_RANKS,                      "0,2,1,1,1" );
-	init( STORAGESERVER_READ_PRIORITIES,                   "48,32,8" );
 
 	//Wait Failure
 	init( MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS,                 250 ); if( randomize && BUGGIFY ) MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS = 2;
@@ -807,12 +807,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENABLE_WORKER_HEALTH_MONITOR,                        false );
 	init( WORKER_HEALTH_MONITOR_INTERVAL,                       60.0 );
 	init( PEER_LATENCY_CHECK_MIN_POPULATION,                      30 );
-	init( PEER_LATENCY_DEGRADATION_PERCENTILE,                  0.90 );
+	init( PEER_LATENCY_DEGRADATION_PERCENTILE,                  0.50 );
 	init( PEER_LATENCY_DEGRADATION_THRESHOLD,                   0.05 );
-	init( PEER_LATENCY_DEGRADATION_PERCENTILE_SATELLITE,        0.90 );
+	init( PEER_LATENCY_DEGRADATION_PERCENTILE_SATELLITE,        0.50 );
 	init( PEER_LATENCY_DEGRADATION_THRESHOLD_SATELLITE,          0.1 );
 	init( PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD,         0.1 );
-	init( PEER_DEGRADATION_CONNECTION_FAILURE_COUNT,               1 );
+	init( PEER_DEGRADATION_CONNECTION_FAILURE_COUNT,               5 );
 	init( WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER,           true );
 	init( STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT,                 false ); if ( randomize && BUGGIFY ) STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT = true;
 
@@ -898,6 +898,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REDWOOD_DEFAULT_EXTENT_SIZE,              32 * 1024 * 1024 );
 	init( REDWOOD_DEFAULT_EXTENT_READ_SIZE,              1024 * 1024 );
 	init( REDWOOD_EXTENT_CONCURRENT_READS,                         4 );
+	init( REDWOOD_KVSTORE_CONCURRENT_READS,                       64 );
 	init( REDWOOD_KVSTORE_RANGE_PREFETCH,                       true );
 	init( REDWOOD_PAGE_REBUILD_MAX_SLACK,                       0.33 );
 	init( REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES,                    10 );
@@ -910,7 +911,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REDWOOD_HISTOGRAM_INTERVAL,                           30.0 );
 	init( REDWOOD_EVICT_UPDATED_PAGES,                          true ); if( randomize && BUGGIFY ) { REDWOOD_EVICT_UPDATED_PAGES = false; }
 	init( REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT,                    2 ); if( randomize && BUGGIFY ) { REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT = deterministicRandom()->randomInt(1, 7); }
-	init( REDWOOD_PRIORITY_LAUNCHS,                    "32,32,32,32" );
 
 	// Server request latency measurement
 	init( LATENCY_SAMPLE_SIZE,                                100000 );
@@ -973,6 +973,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT,              1.5 );
 	init( BLOB_MANAGER_CONCURRENT_MERGE_CHECKS,                   64 ); if( randomize && BUGGIFY ) BLOB_MANAGER_CONCURRENT_MERGE_CHECKS = 1 << deterministicRandom()->randomInt(0, 7);
 	init( BLOB_MANIFEST_BACKUP,                                false );
+	init( BLOB_MANIFEST_BACKUP_INTERVAL,   isSimulated ?  5.0 : 30.0 );
 	init( BLOB_FULL_RESTORE_MODE,                              false );
 
 	init( BGCC_TIMEOUT,                   isSimulated ? 10.0 : 120.0 );

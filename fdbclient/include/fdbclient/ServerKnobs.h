@@ -302,10 +302,13 @@ public:
 	int64_t REPLACE_CONTENTS_BYTES;
 
 	// KeyValueStoreRocksDB
+	bool ROCKSDB_LEVEL_COMPACTION_DYNAMIC_LEVEL_BYTES;
+	int ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
 	int ROCKSDB_READ_RANGE_ROW_LIMIT;
 	int ROCKSDB_BACKGROUND_PARALLELISM;
 	int ROCKSDB_READ_PARALLELISM;
 	int64_t ROCKSDB_MEMTABLE_BYTES;
+	bool ROCKSDB_LEVEL_STYLE_COMPACTION;
 	bool ROCKSDB_UNSAFE_AUTO_FSYNC;
 	int64_t ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 	int ROCKSDB_PREFIX_LEN;
@@ -327,6 +330,7 @@ public:
 	int64_t ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
 	bool ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE;
 	std::string DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY;
+	bool ROCKSDB_DISABLE_AUTO_COMPACTIONS;
 	bool ROCKSDB_PERFCONTEXT_ENABLE; // Enable rocks perf context metrics. May cause performance overhead
 	double ROCKSDB_PERFCONTEXT_SAMPLE_RATE;
 	double ROCKSDB_METRICS_SAMPLE_INTERVAL;
@@ -614,7 +618,8 @@ public:
 	double GLOBAL_TAG_THROTTLING_MIN_RATE;
 	// Used by global tag throttling counters
 	double GLOBAL_TAG_THROTTLING_FOLDING_TIME;
-	double GLOBAL_TAG_THROTTLING_TRACE_INTERVAL;
+	// Cost multiplier for writes (because write operations are more expensive than reads)
+	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
@@ -735,9 +740,6 @@ public:
 	int QUICK_GET_KEY_VALUES_LIMIT;
 	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
 	int STORAGE_FEED_QUERY_HARD_LIMIT;
-	int STORAGE_SERVER_READ_CONCURRENCY;
-	std::string STORAGESERVER_READ_RANKS;
-	std::string STORAGESERVER_READ_PRIORITIES;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -867,6 +869,7 @@ public:
 	int REDWOOD_DEFAULT_EXTENT_SIZE; // Extent size for new Redwood files
 	int REDWOOD_DEFAULT_EXTENT_READ_SIZE; // Extent read size for Redwood files
 	int REDWOOD_EXTENT_CONCURRENT_READS; // Max number of simultaneous extent disk reads in progress.
+	int REDWOOD_KVSTORE_CONCURRENT_READS; // Max number of simultaneous point or range reads in progress.
 	bool REDWOOD_KVSTORE_RANGE_PREFETCH; // Whether to use range read prefetching
 	double REDWOOD_PAGE_REBUILD_MAX_SLACK; // When rebuilding pages, max slack to allow in page
 	int REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES; // Number of pages to try to pop from the lazy delete queue and process at
@@ -884,8 +887,6 @@ public:
 	double REDWOOD_HISTOGRAM_INTERVAL;
 	bool REDWOOD_EVICT_UPDATED_PAGES; // Whether to prioritize eviction of updated pages from cache.
 	int REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT; // Minimum height for which to keep and reuse page decode caches
-
-	std::string REDWOOD_PRIORITY_LAUNCHS;
 
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
@@ -951,6 +952,7 @@ public:
 	double BGCC_TIMEOUT;
 	double BGCC_MIN_INTERVAL;
 	bool BLOB_MANIFEST_BACKUP;
+	double BLOB_MANIFEST_BACKUP_INTERVAL;
 	bool BLOB_FULL_RESTORE_MODE;
 
 	// Blob metadata
