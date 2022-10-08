@@ -2177,8 +2177,12 @@ void MultiVersionApi::setupNetwork() {
 			if (externalClients.count(filename) == 0) {
 				externalClients[filename] = {};
 				for (const auto& tmp : copyExternalLibraryPerThread(path)) {
+					bool unlinkOnLoad = tmp.second;
+					if (!CLIENT_KNOBS->UNLINKONLOAD_FDBCLIB) {
+						unlinkOnLoad = false;
+					}
 					externalClients[filename].push_back(Reference<ClientInfo>(
-					    new ClientInfo(new DLApi(tmp.first, tmp.second /*unlink on load*/), path)));
+					    new ClientInfo(new DLApi(tmp.first, unlinkOnLoad /*unlink on load*/), path)));
 				}
 			}
 		}
