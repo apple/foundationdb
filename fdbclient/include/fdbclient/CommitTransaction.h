@@ -295,7 +295,10 @@ struct CommitTransactionRef {
 				serializer(ar, report_conflicting_keys);
 			}
 			if (ar.protocolVersion().hasResolverPrivateMutations()) {
-				serializer(ar, lock_aware, spanContext);
+				serializer(ar, lock_aware);
+			}
+			if (ar.protocolVersion().hasOTELSpanContext()) {
+				serializer(ar, spanContext);
 			}
 		}
 	}
