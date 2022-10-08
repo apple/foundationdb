@@ -16,10 +16,16 @@ void GrvProxyTransactionTagThrottler::updateRates(TransactionTagMap<double> cons
 	for (auto& [tag, queue] : queues) {
 		if (newRates.find(tag) == newRates.end()) {
 			queue.rateInfo.reset();
-			if (queue.requests.empty()) {
-				// FIXME: Use cleaner method of cleanup
-				queues.erase(tag);
-			}
+		}
+	}
+
+	// TODO: Use std::erase_if in C++20
+	for (auto it = queues.begin(); it != queues.end();) {
+		const auto& [tag, queue] = *it;
+		if (queue.requests.empty() && !queue.rateInfo.present()) {
+			it = queues.erase(it);
+		} else {
+			++it;
 		}
 	}
 }
@@ -83,6 +89,10 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 	}
 }
 
+uint32_t GrvProxyTransactionTagThrottler::size() {
+	return queues.size();
+}
+
 ACTOR static Future<Void> mockClient(GrvProxyTransactionTagThrottler* throttler,
                                      TransactionPriority priority,
                                      TagSet tagSet,
@@ -123,6 +133,16 @@ ACTOR static Future<Void> mockServer(GrvProxyTransactionTagThrottler* throttler)
 			outDefaultPriority.pop_front();
 		}
 	}
+}
+
+static TransactionTag getRandomTag() {
+	TransactionTag result;
+	auto arr = new (result.arena()) uint8_t[32];
+	for (int i = 0; i < 32; ++i) {
+		arr[i] = (uint8_t)deterministicRandom()->randomInt(0, 256);
+	}
+	result.contents() = TransactionTagRef(arr, 32);
+	return result;
 }
 
 static bool isNear(double desired, int64_t actual) {
@@ -175,6 +195,7 @@ TEST_CASE("/GrvProxyTransactionTagThrottler/MultiClient") {
 	return Void();
 }
 
+// Test processing GetReadVersionRequests that batch several transactions
 TEST_CASE("/GrvProxyTransactionTagThrottler/Batch") {
 	state GrvProxyTransactionTagThrottler throttler;
 	state TagSet tagSet;
@@ -192,5 +213,41 @@ TEST_CASE("/GrvProxyTransactionTagThrottler/Batch") {
 
 	TraceEvent("TagQuotaTest_Batch").detail("Counter", counters["sampleTag"_sr]);
 	ASSERT(isNear(counters["sampleTag"_sr], 60.0 * 10.0));
+	return Void();
+}
+
+// Tests cleanup of tags that are no longer throttled.
+TEST_CASE("/GrvProxyTransactionTagThrottler/Cleanup1") {
+	GrvProxyTransactionTagThrottler throttler;
+	for (int i = 0; i < 1000; ++i) {
+		auto const tag = getRandomTag();
+		TransactionTagMap<double> rates;
+		rates[tag] = 10.0;
+		throttler.updateRates(rates);
+		ASSERT_EQ(throttler.size(), 1);
+	}
+	return Void();
+}
+
+// Tests cleanup of tags once queues have been emptied
+TEST_CASE("/GrvProxyTransactionTagThrottler/Cleanup2") {
+	GrvProxyTransactionTagThrottler throttler;
+	{
+		GetReadVersionRequest req;
+		req.tags["sampleTag"_sr] = 1;
+		req.priority = TransactionPriority::DEFAULT;
+		throttler.addRequest(req);
+	}
+	ASSERT_EQ(throttler.size(), 1);
+	throttler.updateRates(TransactionTagMap<double>{});
+	ASSERT_EQ(throttler.size(), 1);
+	{
+		SpannedDeque<GetReadVersionRequest> outBatchPriority("TestGrvProxyTransactionTagThrottler_Batch"_loc);
+		SpannedDeque<GetReadVersionRequest> outDefaultPriority("TestGrvProxyTransactionTagThrottler_Default"_loc);
+		throttler.releaseTransactions(0.1, outBatchPriority, outDefaultPriority);
+	}
+	// Calling updates cleans up the queues in throttler
+	throttler.updateRates(TransactionTagMap<double>{});
+	ASSERT_EQ(throttler.size(), 0);
 	return Void();
 }

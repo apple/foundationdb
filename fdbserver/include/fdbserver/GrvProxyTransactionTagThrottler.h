@@ -59,4 +59,8 @@ public:
 	                         SpannedDeque<GetReadVersionRequest>& outDefaultPriority);
 
 	void addRequest(GetReadVersionRequest const&);
+
+public: // testing
+	// Returns number of tags tracked
+	uint32_t size();
 };
