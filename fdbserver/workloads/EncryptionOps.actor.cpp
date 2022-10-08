@@ -151,7 +151,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		    .detail("EnableTTL", enableTTLTest);
 	}
 
-	~EncryptionOpsWorkload() { TraceEvent("EncryptionOpsWorkload.Done").log(); }
+	~EncryptionOpsWorkload() { TraceEvent("EncryptionOpsWorkloadDone").log(); }
 
 	bool isFixedSizePayload() { return mode == 1; }
 
@@ -174,7 +174,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 	void setupCipherEssentials() {
 		Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 
-		TraceEvent("SetupCipherEssentials.Start").detail("MinDomainId", minDomainId).detail("MaxDomainId", maxDomainId);
+		TraceEvent("SetupCipherEssentialsStart").detail("MinDomainId", minDomainId).detail("MaxDomainId", maxDomainId);
 
 		uint8_t buff[AES_256_KEY_LENGTH];
 		std::vector<Reference<BlobCipherKey>> cipherKeys;
@@ -208,7 +208,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		ASSERT_EQ(memcmp(latestCipher->rawBaseCipher(), buff, cipherLen), 0);
 		headerRandomSalt = latestCipher->getSalt();
 
-		TraceEvent("SetupCipherEssentials.Done")
+		TraceEvent("SetupCipherEssentialsDone")
 		    .detail("MinDomainId", minDomainId)
 		    .detail("MaxDomainId", maxDomainId)
 		    .detail("HeaderBaseCipherId", headerBaseCipherId)
@@ -216,6 +216,8 @@ struct EncryptionOpsWorkload : TestWorkload {
 	}
 
 	void resetCipherEssentials() {
+		TraceEvent("ResetCipherEssentialsStart").detail("Min", minDomainId).detail("Max", maxDomainId);
+
 		Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 		for (EncryptCipherDomainId id = minDomainId; id <= maxDomainId; id++) {
 			cipherKeyCache->resetEncryptDomainId(id);
@@ -225,7 +227,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		cipherKeyCache->resetEncryptDomainId(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID);
 		cipherKeyCache->resetEncryptDomainId(ENCRYPT_HEADER_DOMAIN_ID);
 
-		TraceEvent("ResetCipherEssentials.Done").log();
+		TraceEvent("ResetCipherEssentialsDone");
 	}
 
 	void updateLatestBaseCipher(const EncryptCipherDomainId encryptDomainId,
@@ -272,11 +274,12 @@ struct EncryptionOpsWorkload : TestWorkload {
 	                                   uint8_t* payload,
 	                                   int len,
 	                                   const EncryptAuthTokenMode authMode,
+	                                   const EncryptAuthTokenAlgo authAlgo,
 	                                   BlobCipherEncryptHeader* header) {
 		uint8_t iv[AES_256_IV_LENGTH];
 		deterministicRandom()->randomBytes(&iv[0], AES_256_IV_LENGTH);
 		EncryptBlobCipherAes265Ctr encryptor(
-		    textCipherKey, headerCipherKey, &iv[0], AES_256_IV_LENGTH, authMode, BlobCipherMetrics::TEST);
+		    textCipherKey, headerCipherKey, &iv[0], AES_256_IV_LENGTH, authMode, authAlgo, BlobCipherMetrics::TEST);
 
 		auto start = std::chrono::high_resolution_clock::now();
 		Reference<EncryptBuf> encrypted = encryptor.encrypt(payload, len, header, arena);
@@ -307,6 +310,8 @@ struct EncryptionOpsWorkload : TestWorkload {
 		                                                            header.cipherHeaderDetails.salt);
 		ASSERT(cipherKey.isValid());
 		ASSERT(cipherKey->isEqual(orgCipherKey));
+		ASSERT(headerCipherKey.isValid() ||
+		       header.flags.authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE);
 
 		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, header.iv, BlobCipherMetrics::TEST);
 		const bool validateHeaderAuthToken = deterministicRandom()->randomInt(0, 100) < 65;
@@ -374,12 +379,14 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 			// Encrypt the payload - generates BlobCipherEncryptHeader to assist decryption later
 			BlobCipherEncryptHeader header;
-			const EncryptAuthTokenMode authMode = deterministicRandom()->randomInt(0, 100) < 50
-			                                          ? ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE
-			                                          : ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI;
+			const EncryptAuthTokenMode authMode = getRandomAuthTokenMode();
+			const EncryptAuthTokenAlgo authAlgo = authMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE
+			                                          ? EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE
+			                                          : getRandomAuthTokenAlgo();
+
 			try {
 				Reference<EncryptBuf> encrypted =
-				    doEncryption(cipherKey, headerCipherKey, buff.get(), dataLen, authMode, &header);
+				    doEncryption(cipherKey, headerCipherKey, buff.get(), dataLen, authMode, authAlgo, &header);
 
 				// Decrypt the payload - parses the BlobCipherEncryptHeader, fetch corresponding cipherKey and
 				// decrypt
@@ -388,7 +395,8 @@ struct EncryptionOpsWorkload : TestWorkload {
 				TraceEvent("Failed")
 				    .detail("DomainId", encryptDomainId)
 				    .detail("BaseCipherId", cipherKey->getBaseCipherId())
-				    .detail("AuthMode", authMode);
+				    .detail("AuthTokenMode", authMode)
+				    .detail("AuthTokenAlgo", authAlgo);
 				throw;
 			}
 
@@ -425,7 +433,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		state int64_t refreshAt;
 		state int64_t expAt;
 
-		TraceEvent("TestBlobCipherCacheTTL.Start").detail("DomId", domId);
+		TraceEvent("TestBlobCipherCacheTTLStart").detail("DomId", domId);
 
 		deterministicRandom()->randomBytes(baseCipher.get(), AES_256_KEY_LENGTH);
 
@@ -436,7 +444,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		cipherKey = cipherKeyCache->getLatestCipherKey(domId);
 		compareCipherDetails(cipherKey, domId, baseCipherId, baseCipher.get(), AES_256_KEY_LENGTH, refreshAt, expAt);
 
-		TraceEvent("TestBlobCipherCacheTTL.NonRevocableNoExpiry").detail("DomId", domId);
+		TraceEvent("TestBlobCipherCacheTTLNonRevocableNoExpiry").detail("DomId", domId);
 
 		// Validate 'non-revocable' cipher with expiration
 		state EncryptCipherBaseKeyId baseCipherId_1 = baseCipherId + 1;
@@ -454,7 +462,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		ASSERT(cipherKey.isValid());
 		compareCipherDetails(cipherKey, domId, baseCipherId_1, baseCipher.get(), AES_256_KEY_LENGTH, refreshAt, expAt);
 
-		TraceEvent("TestBlobCipherCacheTTL.NonRevocableWithExpiry").detail("DomId", domId);
+		TraceEvent("TestBlobCipherCacheTTLNonRevocableWithExpiry").detail("DomId", domId);
 
 		// Validate 'revocable' cipher with expiration
 		state EncryptCipherBaseKeyId baseCipherId_2 = baseCipherId + 2;
@@ -479,7 +487,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		cipherKey = cipherKeyCache->getCipherKey(domId, baseCipherId_2, salt);
 		ASSERT(!cipherKey.isValid());
 
-		TraceEvent("TestBlobCipherCacheTTL.End").detail("DomId", domId);
+		TraceEvent("TestBlobCipherCacheTTLEnd").detail("DomId", domId);
 		return Void();
 	}
 

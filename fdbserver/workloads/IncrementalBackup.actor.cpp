@@ -25,6 +25,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Arena.h"
 #include "flow/serialize.h"
@@ -145,9 +146,10 @@ struct IncrementalBackupWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> _start(Database cx, IncrementalBackupWorkload* self) {
+		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
+		addDefaultBackupRanges(backupRanges);
+
 		if (self->submitOnly) {
-			Standalone<VectorRef<KeyRangeRef>> backupRanges;
-			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 			TraceEvent("IBackupSubmitAttempt").log();
 			try {
 				wait(self->backupAgent.submitBackup(cx,
@@ -157,6 +159,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                    1e8,
 				                                    self->tag.toString(),
 				                                    backupRanges,
+				                                    false,
 				                                    StopWhenDone::False,
 				                                    UsePartitionedLog::False,
 				                                    IncrementalBackupOnly::True));
@@ -231,10 +234,10 @@ struct IncrementalBackupWorkload : TestWorkload {
 			                                       Key(self->tag.toString()),
 			                                       backupURL,
 			                                       {},
+			                                       backupRanges,
 			                                       WaitForComplete::True,
 			                                       invalidVersion,
 			                                       Verbose::True,
-			                                       normalKeys,
 			                                       Key(),
 			                                       Key(),
 			                                       LockDB::True,

@@ -1001,7 +1001,7 @@ GetMappedRangeResult getMappedIndexEntries(int beginId,
 TEST_CASE("versionstamp_unit_test") {
 	// a random 12 bytes long StringRef as a versionstamp
 	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12"_sr;
-	Versionstamp vs(str), vs2(str);
+	TupleVersionstamp vs(str), vs2(str);
 	ASSERT(vs == vs2);
 	ASSERT(vs.begin() != vs2.begin());
 
@@ -1031,7 +1031,7 @@ TEST_CASE("versionstamp_unit_test") {
 TEST_CASE("tuple_support_versionstamp") {
 	// a random 12 bytes long StringRef as a versionstamp
 	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12"_sr;
-	Versionstamp vs(str);
+	TupleVersionstamp vs(str);
 	const Tuple t = Tuple::makeTuple(prefix, RECORD, vs, "{K[3]}"_sr, "{...}"_sr);
 	ASSERT(t.getVersionstamp(2) == vs);
 
@@ -1047,7 +1047,7 @@ TEST_CASE("tuple_fail_to_append_truncated_versionstamp") {
 	// a truncated 11 bytes long StringRef as a versionstamp
 	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11"_sr;
 	try {
-		Versionstamp truncatedVersionstamp(str);
+		TupleVersionstamp truncatedVersionstamp(str);
 	} catch (Error& e) {
 		return;
 	}
@@ -1058,7 +1058,7 @@ TEST_CASE("tuple_fail_to_append_longer_versionstamp") {
 	// a longer than expected 13 bytes long StringRef as a versionstamp
 	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11"_sr;
 	try {
-		Versionstamp longerVersionstamp(str);
+		TupleVersionstamp longerVersionstamp(str);
 	} catch (Error& e) {
 		return;
 	}

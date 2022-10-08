@@ -411,7 +411,7 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 
 				const auto itr = lookupCipherInfoMap.find(std::make_pair(item.encryptDomainId, item.encryptKeyId));
 				if (itr == lookupCipherInfoMap.end()) {
-					TraceEvent(SevError, "GetCipherKeysByKeyIds_MappingNotFound", ekpProxyData->myId)
+					TraceEvent(SevError, "GetCipherKeysByKeyIdsMappingNotFound", ekpProxyData->myId)
 					    .detail("DomainId", item.encryptDomainId);
 					throw encrypt_keys_fetch_failed();
 				}
@@ -546,7 +546,7 @@ ACTOR Future<Void> getLatestCipherKeys(Reference<EncryptKeyProxyData> ekpProxyDa
 				// Record the fetched cipher details to the local cache for the future references
 				const auto itr = lookupCipherDomains.find(item.encryptDomainId);
 				if (itr == lookupCipherDomains.end()) {
-					TraceEvent(SevError, "GetLatestCipherKeys_DomainIdNotFound", ekpProxyData->myId)
+					TraceEvent(SevError, "GetLatestCipherKeysDomainIdNotFound", ekpProxyData->myId)
 					    .detail("DomainId", item.encryptDomainId);
 					throw encrypt_keys_fetch_failed();
 				}
@@ -602,7 +602,7 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
                                              KmsConnectorInterface kmsConnectorInf) {
 	state UID debugId = deterministicRandom()->randomUniqueID();
 
-	state TraceEvent t("RefreshEKs_Start", ekpProxyData->myId);
+	state TraceEvent t("RefreshEKsStart", ekpProxyData->myId);
 	t.setMaxEventLength(SERVER_KNOBS->ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH);
 	t.detail("KmsConnInf", kmsConnectorInf.id());
 	t.detail("DebugId", debugId);
@@ -634,7 +634,7 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
 		for (const auto& item : rep.cipherKeyDetails) {
 			const auto itr = ekpProxyData->baseCipherDomainIdCache.find(item.encryptDomainId);
 			if (itr == ekpProxyData->baseCipherDomainIdCache.end()) {
-				TraceEvent(SevInfo, "RefreshEKs_DomainIdNotFound", ekpProxyData->myId)
+				TraceEvent(SevInfo, "RefreshEKsDomainIdNotFound", ekpProxyData->myId)
 				    .detail("DomainId", item.encryptDomainId);
 				// Continue updating the cache with other elements
 				continue;
@@ -662,7 +662,7 @@ ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpP
 		t.detail("NumKeys", rep.cipherKeyDetails.size());
 	} catch (Error& e) {
 		if (!canReplyWith(e)) {
-			TraceEvent(SevWarn, "RefreshEKs_Error").error(e);
+			TraceEvent(SevWarn, "RefreshEKsError").error(e);
 			throw e;
 		}
 		TraceEvent("RefreshEKs").detail("ErrorCode", e.code());
@@ -828,7 +828,7 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface, 
 	state KmsConnectorInterface kmsConnectorInf;
 	kmsConnectorInf.initEndpoints();
 
-	TraceEvent("EKP_Start", self->myId).detail("KmsConnectorInf", kmsConnectorInf.id());
+	TraceEvent("EKPStart", self->myId).detail("KmsConnectorInf", kmsConnectorInf.id());
 
 	activateKmsConnector(self, kmsConnectorInf);
 
@@ -861,7 +861,7 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface, 
 				self->addActor.send(getLatestBlobMetadata(self, kmsConnectorInf, req));
 			}
 			when(HaltEncryptKeyProxyRequest req = waitNext(ekpInterface.haltEncryptKeyProxy.getFuture())) {
-				TraceEvent("EKP_Halted", self->myId).detail("ReqID", req.requesterID);
+				TraceEvent("EKPHalted", self->myId).detail("ReqID", req.requesterID);
 				req.reply.send(Void());
 				break;
 			}
@@ -871,7 +871,7 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface, 
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent("EKP_Terminated", self->myId).errorUnsuppressed(e);
+		TraceEvent("EKPTerminated", self->myId).errorUnsuppressed(e);
 	}
 
 	return Void();

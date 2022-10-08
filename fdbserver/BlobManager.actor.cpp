@@ -384,6 +384,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 
 	int64_t epoch;
 	int64_t seqNo = 1;
+	int64_t manifestDumperSeqNo = 1;
 
 	Promise<Void> iAmReplaced;
 
@@ -484,6 +485,19 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 		}
 		return false;
 	}
+
+	bool maybeInjectTargetedRestart() {
+		// inject a BW restart at most once per test
+		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
+		    now() > g_simulator->injectTargetedBMRestartTime) {
+			CODE_PROBE(true, "Injecting BM targeted restart");
+			TraceEvent("SimBMInjectTargetedRestart", id);
+			g_simulator->injectTargetedBMRestartTime = std::numeric_limits<double>::max();
+			iAmReplaced.send(Void());
+			return true;
+		}
+		return false;
+	}
 };
 
 // Helper function for alignKeys().
@@ -508,7 +522,7 @@ static void alignKeyBoundary(Reference<BlobManagerData> bmData,
 		alignedKey = alignedKey.removePrefix(tenantData->entry.prefix);
 	}
 	try {
-		t = Tuple::unpack(alignedKey, true);
+		t = Tuple::unpackUserType(alignedKey, true);
 		if (t.size() > offset) {
 			t2 = t.subTuple(0, t.size() - offset);
 			alignedKey = t2.pack();
@@ -848,7 +862,18 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			if (bmData->workersById.count(workerID.get()) == 0) {
 				throw no_more_servers();
 			}
-			wait(bmData->workersById[workerID.get()].assignBlobRangeRequest.getReply(req));
+			state Future<Void> assignFuture = bmData->workersById[workerID.get()].assignBlobRangeRequest.getReply(req);
+
+			if (BUGGIFY) {
+				// wait for request to actually send
+				wait(delay(0));
+				if (bmData->maybeInjectTargetedRestart()) {
+					throw blob_manager_replaced();
+				}
+			}
+
+			wait(assignFuture);
+
 			if (assignment.previousFailure.present()) {
 				// previous assign failed and this one succeeded
 				--bmData->stats.blockedAssignments;
@@ -1216,6 +1241,10 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 		}
 		i += j;
 	}
+	if (BUGGIFY && bmData->maybeInjectTargetedRestart()) {
+		wait(delay(0)); // should be cancelled
+		ASSERT(false);
+	}
 	return Void();
 }
 
@@ -1529,7 +1558,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 
 			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction(), granuleRange));
 			if (purgeState != ForcedPurgeState::NonePurged) {
-				CODE_PROBE(true, "Initial Split Re-evaluate stopped because of force purge");
+				CODE_PROBE(true, "Initial Split Re-evaluate stopped because of force purge", probe::decoration::rare);
 				TraceEvent("GranuleSplitReEvalCancelledForcePurge", bmData->id)
 				    .detail("Epoch", bmData->epoch)
 				    .detail("GranuleRange", granuleRange);
@@ -1550,7 +1579,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 			KeyRange range = blobGranuleFileKeyRangeFor(granuleID);
 			RangeResult granuleFiles = wait(tr->getRange(range, 1));
 			if (!granuleFiles.empty()) {
-				CODE_PROBE(true, "split too big was eventually solved by another worker");
+				CODE_PROBE(true, "split too big was eventually solved by another worker", probe::decoration::rare);
 				if (BM_DEBUG) {
 					fmt::print("BM {0} re-evaluating initial split [{1} - {2}) too big: solved by another worker\n",
 					           bmData->epoch,
@@ -1608,7 +1637,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 			RangeResult existingRanges = wait(
 			    krmGetRanges(tr, blobGranuleMappingKeys.begin, granuleRange, 3, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
 			if (existingRanges.size() > 2 || existingRanges.more) {
-				CODE_PROBE(true, "split too big was already re-split");
+				CODE_PROBE(true, "split too big was already re-split", probe::decoration::rare);
 				if (BM_DEBUG) {
 					fmt::print("BM {0} re-evaluating initial split [{1} - {2}) too big: already split\n",
 					           bmData->epoch,
@@ -1652,6 +1681,11 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 		} catch (Error& e) {
 			wait(tr->onError(e));
 		}
+	}
+
+	if (BUGGIFY && bmData->maybeInjectTargetedRestart()) {
+		wait(delay(0)); // should be cancelled
+		ASSERT(false);
 	}
 
 	// transaction committed, send updated range assignments. Even if there is only one range still, we need to revoke
@@ -1941,6 +1975,11 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 
 			wait(tr->commit());
 
+			if (BUGGIFY && bmData->maybeInjectTargetedRestart()) {
+				wait(delay(0)); // should be cancelled
+				ASSERT(false);
+			}
+
 			// Update BlobGranuleMergeBoundary in-memory state.
 			for (auto it = splitPoints.boundaries.begin(); it != splitPoints.boundaries.end(); it++) {
 				bmData->mergeBoundaries[it->first] = it->second;
@@ -2038,7 +2077,7 @@ ACTOR Future<bool> forceGranuleFlush(Reference<BlobManagerData> bmData,
 		try {
 			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr, keyRange));
 			if (purgeState != ForcedPurgeState::NonePurged) {
-				CODE_PROBE(true, "Granule flush stopped because of force purge");
+				CODE_PROBE(true, "Granule flush stopped because of force purge", probe::decoration::rare);
 				TraceEvent("GranuleFlushCancelledForcePurge", bmData->id)
 				    .detail("Epoch", bmData->epoch)
 				    .detail("KeyRange", keyRange);
@@ -2186,7 +2225,7 @@ ACTOR Future<std::pair<UID, Version>> persistMergeGranulesStart(Reference<BlobMa
 
 			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction(), mergeRange));
 			if (purgeState != ForcedPurgeState::NonePurged) {
-				CODE_PROBE(true, "Merge start stopped because of force purge");
+				CODE_PROBE(true, "Merge start stopped because of force purge", probe::decoration::rare);
 				TraceEvent("GranuleMergeStartCancelledForcePurge", bmData->id)
 				    .detail("Epoch", bmData->epoch)
 				    .detail("GranuleRange", mergeRange);
@@ -2217,6 +2256,11 @@ ACTOR Future<std::pair<UID, Version>> persistMergeGranulesStart(Reference<BlobMa
 			    tr, granuleIDToCFKey(mergeGranuleID), ChangeFeedStatus::CHANGE_FEED_CREATE, mergeRange));
 
 			wait(tr->commit());
+
+			if (BUGGIFY && bmData->maybeInjectTargetedRestart()) {
+				wait(delay(0)); // should be cancelled
+				ASSERT(false);
+			}
 
 			Version mergeVersion = tr->getCommittedVersion();
 			if (BM_DEBUG) {
@@ -2267,7 +2311,7 @@ ACTOR Future<bool> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 		}
 	}
 	if (tmpWorkerId == UID()) {
-		CODE_PROBE(true, "All workers dead right now");
+		CODE_PROBE(true, "All workers dead right now", probe::decoration::rare);
 		while (bmData->workersById.empty()) {
 			wait(bmData->recruitingStream.onChange() || bmData->foundBlobWorkers.getFuture());
 		}
@@ -2377,6 +2421,12 @@ ACTOR Future<bool> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 				           tr->getCommittedVersion());
 			}
 			CODE_PROBE(true, "Granule merge complete");
+
+			if (BUGGIFY && bmData->maybeInjectTargetedRestart()) {
+				wait(delay(0)); // should be cancelled
+				ASSERT(false);
+			}
+
 			return true;
 		} catch (Error& e) {
 			wait(tr->onError(e));
@@ -2514,7 +2564,9 @@ static void attemptStartMerge(Reference<BlobManagerData> bmData,
 	auto reCheckMergeCandidates = bmData->mergeCandidates.intersectingRanges(mergeRange);
 	for (auto it : reCheckMergeCandidates) {
 		if (!it->cvalue().mergeEligible()) {
-			CODE_PROBE(true, " granule no longer merge candidate after checking metrics, aborting merge");
+			CODE_PROBE(true,
+			           "granule no longer merge candidate after checking metrics, aborting merge",
+			           probe::decoration::rare);
 			return;
 		}
 	}
@@ -3672,6 +3724,10 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		}
 	}
 
+	if (BUGGIFY && bmData->maybeInjectTargetedRestart()) {
+		throw blob_manager_replaced();
+	}
+
 	// Get set of workers again. Some could have died after reporting assignments
 	std::unordered_set<UID> endingWorkers;
 	for (auto& it : bmData->workersById) {
@@ -3759,6 +3815,10 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 	ASSERT(bmData->doneRecovering.canBeSet());
 	bmData->doneRecovering.send(Void());
+
+	if (BUGGIFY && bmData->maybeInjectTargetedRestart()) {
+		throw blob_manager_replaced();
+	}
 
 	return Void();
 }
@@ -4464,6 +4524,12 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 				// instead cover whole of intersecting granules at begin/end
 				wait(krmSetRangeCoalescing(&tr, blobGranuleForcePurgedKeys.begin, range, normalKeys, "1"_sr));
 				wait(tr.commit());
+
+				if (BUGGIFY && self->maybeInjectTargetedRestart()) {
+					wait(delay(0)); // should be cancelled
+					ASSERT(false);
+				}
+
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -4681,7 +4747,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		if (BM_PURGE_DEBUG) {
 			fmt::print("BM {0}   Checking {1} parents\n", self->epoch, currHistoryNode.parentVersions.size());
 		}
-		Optional<UID> mergeChildID =
+		Optional<UID> mergeChildID2 =
 		    currHistoryNode.parentVersions.size() > 1 ? currHistoryNode.granuleID : Optional<UID>();
 		for (int i = 0; i < currHistoryNode.parentVersions.size(); i++) {
 			// for (auto& parent : currHistoryNode.parentVersions.size()) {
@@ -4712,7 +4778,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 
 			// the parent's end version is this node's startVersion,
 			// since this node must have started where it's parent finished
-			historyEntryQueue.push({ parentRange, parentVersion, startVersion, mergeChildID });
+			historyEntryQueue.push({ parentRange, parentVersion, startVersion, mergeChildID2 });
 		}
 	}
 
@@ -4760,6 +4826,10 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 			fmt::print("BM {0}: About to fully delete granule {1}\n", self->epoch, granuleId.toString());
 		}
 		wait(fullyDeleteGranule(self, granuleId, historyKey, purgeVersion, keyRange, mergeChildId, force));
+		if (BUGGIFY && self->maybeInjectTargetedRestart()) {
+			wait(delay(0)); // should be cancelled
+			ASSERT(false);
+		}
 	}
 
 	if (BM_PURGE_DEBUG) {
@@ -5072,16 +5142,12 @@ ACTOR Future<bool> hasPendingSplit(Reference<BlobManagerData> self) {
 // FIXME: could eventually make this more thorough by storing some state in the DB or something
 // FIXME: simpler solution could be to shuffle ranges
 ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
-
 	state Reference<IRateControl> rateLimiter =
 	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->BG_CONSISTENCY_CHECK_TARGET_SPEED_KB * 1024, 1));
-	bmData->initBStore();
 
 	if (BM_DEBUG) {
 		fmt::print("BGCC starting\n");
 	}
-	if (isFullRestoreMode())
-		wait(printRestoreSummary(bmData->db, bmData->bstore));
 
 	loop {
 		if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
@@ -5089,14 +5155,6 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 				printf("BGCC stopping\n");
 			}
 			return Void();
-		}
-
-		// Only dump blob manifest when there is no pending split to ensure data consistency
-		if (SERVER_KNOBS->BLOB_MANIFEST_BACKUP && !isFullRestoreMode()) {
-			bool pendingSplit = wait(hasPendingSplit(bmData));
-			if (!pendingSplit) {
-				wait(dumpManifest(bmData->db, bmData->bstore));
-			}
 		}
 
 		if (bmData->workersById.size() >= 1) {
@@ -5142,6 +5200,22 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 			}
 			wait(delay(60.0));
 		}
+	}
+}
+
+ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
+	if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
+		return Void();
+	}
+
+	bmData->initBStore();
+	loop {
+		bool pendingSplit = wait(hasPendingSplit(bmData));
+		if (!pendingSplit) {
+			wait(dumpManifest(bmData->db, bmData->bstore, bmData->epoch, bmData->manifestDumperSeqNo));
+			bmData->manifestDumperSeqNo++;
+		}
+		wait(delay(SERVER_KNOBS->BLOB_MANIFEST_BACKUP_INTERVAL));
 	}
 }
 
@@ -5208,6 +5282,9 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		}
 		if (SERVER_KNOBS->BG_ENABLE_MERGING) {
 			self->addActor.send(granuleMergeChecker(self));
+		}
+		if (SERVER_KNOBS->BLOB_MANIFEST_BACKUP && !isFullRestoreMode()) {
+			self->addActor.send(backupManifest(self));
 		}
 
 		if (BUGGIFY) {

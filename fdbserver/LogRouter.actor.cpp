@@ -365,7 +365,7 @@ ACTOR Future<Void> pullAsyncData(LogRouterData* self) {
 
 				if (!foundMessage) {
 					ver--; // ver is the next possible version we will get data for
-					if (ver > self->version.get()) {
+					if (ver > self->version.get() && ver >= r->popped()) {
 						wait(waitForVersion(self, ver));
 
 						self->version.set(ver);
