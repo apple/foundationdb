@@ -536,7 +536,7 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> 
 					stats->txnStartIn += req.transactionCount;
 					stats->txnDefaultPriorityStartIn += req.transactionCount;
 					++stats->defaultGRVQueueSize;
-					if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
+					if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES && req.isTagged()) {
 						tagThrottler->addRequest(req);
 					} else {
 						defaultQueue->push_back(req);
@@ -553,7 +553,7 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> 
 						stats->txnStartIn += req.transactionCount;
 						stats->txnBatchPriorityStartIn += req.transactionCount;
 						++stats->batchGRVQueueSize;
-						if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
+						if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES && req.isTagged()) {
 							tagThrottler->addRequest(req);
 						} else {
 							batchQueue->push_back(req);

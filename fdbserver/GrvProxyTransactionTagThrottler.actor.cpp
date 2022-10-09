@@ -51,21 +51,18 @@ void GrvProxyTransactionTagThrottler::updateRates(TransactionTagMap<double> cons
 }
 
 void GrvProxyTransactionTagThrottler::addRequest(GetReadVersionRequest const& req) {
-	if (req.tags.empty()) {
-		untaggedRequests.push_back(req);
-	} else {
-		auto const& tag = req.tags.begin()->first;
-		if (req.tags.size() > 1) {
-			// The GrvProxyTransactionTagThrottler assumes that each GetReadVersionRequest
-			// has at most one tag. If a transaction uses multiple tags and
-			// SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES is enabled, there may be
-			// unexpected behaviour, because only one tag is used for throttling.
-			TraceEvent(SevWarnAlways, "GrvProxyTransactionTagThrottler_MultipleTags")
-			    .detail("NumTags", req.tags.size())
-			    .detail("UsingTag", printable(tag));
-		}
-		queues[tag].requests.emplace_back(req);
+	ASSERT(req.isTagged());
+	auto const& tag = req.tags.begin()->first;
+	if (req.tags.size() > 1) {
+		// The GrvProxyTransactionTagThrottler assumes that each GetReadVersionRequest
+		// has at most one tag. If a transaction uses multiple tags and
+		// SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES is enabled, there may be
+		// unexpected behaviour, because only one tag is used for throttling.
+		TraceEvent(SevWarnAlways, "GrvProxyTransactionTagThrottler_MultipleTags")
+			.detail("NumTags", req.tags.size())
+			.detail("UsingTag", printable(tag));
 	}
+	queues[tag].requests.emplace_back(req);
 }
 
 void GrvProxyTransactionTagThrottler::TagQueue::releaseTransactions(

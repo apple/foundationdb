@@ -309,6 +309,8 @@ struct GetReadVersionRequest : TimedRequest {
 
 	bool operator<(GetReadVersionRequest const& rhs) const { return priority < rhs.priority; }
 
+	bool isTagged() const { return !tags.empty(); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext, maxVersion);

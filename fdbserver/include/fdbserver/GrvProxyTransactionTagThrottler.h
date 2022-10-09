@@ -64,9 +64,6 @@ class GrvProxyTransactionTagThrottler {
 	// Track the budgets for each tag
 	TransactionTagMap<TagQueue> queues;
 
-	// These requests are simply passed through with no throttling
-	Deque<GetReadVersionRequest> untaggedRequests;
-
 public:
 	// Called with rates received from ratekeeper
 	void updateRates(TransactionTagMap<double> const& newRates);
