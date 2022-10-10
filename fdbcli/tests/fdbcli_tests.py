@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-from cProfile import run
 import sys
 import shutil
 import os
