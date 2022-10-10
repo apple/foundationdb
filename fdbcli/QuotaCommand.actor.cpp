@@ -103,6 +103,21 @@ ACTOR Future<Void> setQuota(Reference<IDatabase> db, TransactionTag tag, LimitTy
 	}
 }
 
+ACTOR Future<Void> clearQuota(Reference<IDatabase> db, TransactionTag tag) {
+	state Reference<ITransaction> tr = db->createTransaction();
+	state Key key = tag.withPrefix(tagQuotaPrefix);
+	loop {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		try {
+			tr->clear(ThrottleApi::getTagQuotaKey(tag));
+			wait(safeThreadFutureToFuture(tr->commit()));
+			return Void();
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
 constexpr auto usage = "quota [get <tag> [reserved_throughput|total_throughput] | set <tag> "
                        "[reserved_throughput|total_throughput] <value>]";
 
@@ -117,16 +132,19 @@ namespace fdb_cli {
 
 ACTOR Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	state bool result = true;
-	if (tokens.size() != 5 && tokens.size() != 6) {
+	if (tokens.size() < 3 || tokens.size() > 5) {
 		return exitFailure();
 	} else {
 		auto tag = parseTag(tokens[2]);
-		auto limitType = parseLimitType(tokens[3]);
-		if (!tag.present() || !limitType.present()) {
+		if (!tag.present()) {
 			return exitFailure();
 		}
 		if (tokens[1] == "get"_sr) {
 			if (tokens.size() != 4) {
+				return exitFailure();
+			}
+			auto const limitType = parseLimitType(tokens[3]);
+			if (!limitType.present()) {
 				return exitFailure();
 			}
 			wait(getQuota(db, tag.get(), limitType.get()));
@@ -135,11 +153,18 @@ ACTOR Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<String
 			if (tokens.size() != 5) {
 				return exitFailure();
 			}
+			auto const limitType = parseLimitType(tokens[3]);
 			auto const limitValue = parseLimitValue(tokens[4]);
-			if (!limitValue.present()) {
+			if (!limitType.present() || !limitValue.present()) {
 				return exitFailure();
 			}
 			wait(setQuota(db, tag.get(), limitType.get(), limitValue.get()));
+			return true;
+		} else if (tokens[1] == "clear"_sr) {
+			if (tokens.size() != 3) {
+				return exitFailure();
+			}
+			wait(clearQuota(db, tag.get()));
 			return true;
 		} else {
 			return exitFailure();

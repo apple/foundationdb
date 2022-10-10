@@ -145,7 +145,7 @@ Value ThrottleApi::TagQuotaValue::toValue() const {
 
 ThrottleApi::TagQuotaValue ThrottleApi::TagQuotaValue::fromValue(ValueRef value) {
 	auto tuple = Tuple::unpack(value);
-	if (tuple.size() != 4) {
+	if (tuple.size() != 2) {
 		throw invalid_throttle_quota_value();
 	}
 	TagQuotaValue result;
