@@ -985,7 +985,6 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 		    .detail("RequiredCommitProxies", 1)
 		    .detail("RequiredGrvProxies", 1)
 		    .detail("RequiredResolvers", 1)
-		    .detail("RequiredVersionIndexers", 1)
 		    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 
 	// FIXME: we only need log routers for the same locality as the master
@@ -1623,7 +1622,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	ASSERT_LE(self->resolvers.size(), self->configuration.getDesiredResolvers());
 	ASSERT_GE(self->resolvers.size(), 1);
 	ASSERT_LE(self->versionIndexers.size(), self->configuration.getDesiredVersionIndexers());
-	ASSERT_GE(self->versionIndexers.size(), 1);
+	ASSERT_GE(self->versionIndexers.size(), 0);
 
 	self->recoveryState = RecoveryState::RECOVERY_TRANSACTION;
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)

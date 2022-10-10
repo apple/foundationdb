@@ -607,7 +607,6 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
       "recovery_state":{
          "seconds_since_last_recovered":1,
          "required_resolvers":1,
-         "required_version_indexers":1,
          "required_commit_proxies":1,
          "required_grv_proxies":1,
          "name":{

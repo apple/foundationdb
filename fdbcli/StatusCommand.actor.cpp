@@ -288,12 +288,11 @@ void printStatus(StatusObjectReader statusObj,
 							if (name == "recruiting_transaction_servers") {
 								description +=
 								    format("\nNeed at least %d log servers across unique zones, %d commit proxies, "
-								           "%d GRV proxies, %d resolvers and %d version indexers.",
+								           "%d GRV proxies and %d resolvers.",
 								           recoveryState["required_logs"].get_int(),
 								           recoveryState["required_commit_proxies"].get_int(),
 								           recoveryState["required_grv_proxies"].get_int(),
-								           recoveryState["required_resolvers"].get_int(),
-								           recoveryState["required_version_indexers"].get_int());
+								           recoveryState["required_resolvers"].get_int());
 								if (statusObjCluster.has("machines") && statusObjCluster.has("processes")) {
 									auto numOfNonExcludedProcessesAndZones =
 									    getNumOfNonExcludedProcessAndZones(statusObjCluster);

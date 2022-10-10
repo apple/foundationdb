@@ -1875,18 +1875,18 @@ public:
 		auto first_resolver = getWorkerForRoleInDatacenter(
 		    dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, req.configuration, id_used, preferredSharing);
 		preferredSharing[first_resolver.worker.interf.locality.processId()] = 2;
-		auto first_version_indexer = getWorkerForRoleInDatacenter(
-		    dcId, ProcessClass::VersionIndexer, ProcessClass::ExcludeFit, req.configuration, id_used, preferredSharing);
-		preferredSharing[first_version_indexer.worker.interf.locality.processId()] = 3;
+		//auto first_version_indexer = getWorkerForRoleInDatacenter(
+		//    dcId, ProcessClass::VersionIndexer, ProcessClass::ExcludeFit, req.configuration, id_used, preferredSharing);
+		//preferredSharing[first_version_indexer.worker.interf.locality.processId()] = 3;
 
 		// If one of the first process recruitments is forced to share a process, allow all of next recruitments
 		// to also share a process.
-		auto maxUsed = std::max(
-		    { first_commit_proxy.used, first_grv_proxy.used, first_resolver.used, first_version_indexer.used });
+		auto maxUsed = std::max({ first_commit_proxy.used,
+				          first_grv_proxy.used,
+					  first_resolver.used });
 		first_commit_proxy.used = maxUsed;
 		first_grv_proxy.used = maxUsed;
 		first_resolver.used = maxUsed;
-		first_version_indexer.used = maxUsed;
 
 		auto commit_proxies = getWorkersForRoleInDatacenter(dcId,
 		                                                    ProcessClass::CommitProxy,
@@ -1918,8 +1918,7 @@ public:
 		                                                      ProcessClass::ExcludeFit,
 		                                                      req.configuration,
 		                                                      id_used,
-		                                                      preferredSharing,
-		                                                      first_version_indexer);
+		                                                      preferredSharing);
 		//TraceEvent("GotWorkers")
 		//    .detail("CommitProxies", commit_proxies.size())
 		//    .detail("GRVProxies", grv_proxies.size())
@@ -2145,24 +2144,22 @@ public:
 					                                                   used,
 					                                                   preferredSharing);
 					preferredSharing[first_resolver.worker.interf.locality.processId()] = 2;
-					auto first_version_indexer = getWorkerForRoleInDatacenter(dcId,
-					                                                          ProcessClass::VersionIndexer,
-					                                                          ProcessClass::ExcludeFit,
-					                                                          req.configuration,
-					                                                          used,
-					                                                          preferredSharing);
-					preferredSharing[first_version_indexer.worker.interf.locality.processId()] = 3;
+					//auto first_version_indexer = getWorkerForRoleInDatacenter(dcId,
+					//                                                          ProcessClass::VersionIndexer,
+					//                                                          ProcessClass::ExcludeFit,
+					//                                                          req.configuration,
+					//                                                          used,
+					//                                                          preferredSharing);
+					//preferredSharing[first_version_indexer.worker.interf.locality.processId()] = 3;
 
 					// If one of the first process recruitments is forced to share a process, allow all of next
 					// recruitments to also share a process.
 					auto maxUsed = std::max({ first_commit_proxy.used,
 					                          first_grv_proxy.used,
-					                          first_resolver.used,
-					                          first_version_indexer.used });
+					                          first_resolver.used });
 					first_commit_proxy.used = maxUsed;
 					first_grv_proxy.used = maxUsed;
 					first_resolver.used = maxUsed;
-					first_version_indexer.used = maxUsed;
 
 					auto commit_proxies = getWorkersForRoleInDatacenter(dcId,
 					                                                    ProcessClass::CommitProxy,
@@ -2197,8 +2194,7 @@ public:
 					                                                      ProcessClass::ExcludeFit,
 					                                                      req.configuration,
 					                                                      used,
-					                                                      preferredSharing,
-					                                                      first_version_indexer);
+					                                                      preferredSharing);
 
 					auto fitness = std::make_tuple(RoleFitness(commit_proxies, ProcessClass::CommitProxy, used),
 					                               RoleFitness(grv_proxies, ProcessClass::GrvProxy, used),
@@ -2394,8 +2390,6 @@ public:
 					updateIdUsed(compare.grvProxies, secondUsed);
 					updateIdUsed(rep.resolvers, firstUsed);
 					updateIdUsed(compare.resolvers, secondUsed);
-					updateIdUsed(rep.versionIndexers, firstUsed);
-					updateIdUsed(compare.versionIndexers, secondUsed);
 					compareWorkers(req.configuration,
 					               rep.commitProxies,
 					               firstUsed,
@@ -2417,6 +2411,9 @@ public:
 					               secondUsed,
 					               ProcessClass::Resolver,
 					               "Resolver");
+
+					updateIdUsed(rep.versionIndexers, firstUsed);
+					updateIdUsed(compare.versionIndexers, secondUsed);
 					compareWorkers(req.configuration,
 					               rep.versionIndexers,
 					               firstUsed,
@@ -2930,20 +2927,20 @@ public:
 		                                                   preferredSharing,
 		                                                   true);
 		preferredSharing[first_resolver.worker.interf.locality.processId()] = 2;
-		auto first_version_indexer = getWorkerForRoleInDatacenter(clusterControllerDcId,
-		                                                          ProcessClass::VersionIndexer,
-		                                                          ProcessClass::ExcludeFit,
-		                                                          db.config,
-		                                                          id_used,
-		                                                          preferredSharing,
-		                                                          true);
-		preferredSharing[first_version_indexer.worker.interf.locality.processId()] = 3;
-		auto maxUsed = std::max(
-		    { first_commit_proxy.used, first_grv_proxy.used, first_resolver.used, first_version_indexer.used });
+		//auto first_version_indexer = getWorkerForRoleInDatacenter(clusterControllerDcId,
+		//                                                          ProcessClass::VersionIndexer,
+		//                                                          ProcessClass::ExcludeFit,
+		//                                                          db.config,
+		//                                                          id_used,
+		//                                                          preferredSharing,
+		//                                                          true);
+		//preferredSharing[first_version_indexer.worker.interf.locality.processId()] = 3;
+		auto maxUsed = std::max({ first_commit_proxy.used,
+				          first_grv_proxy.used,
+					  first_resolver.used });
 		first_commit_proxy.used = maxUsed;
 		first_grv_proxy.used = maxUsed;
 		first_resolver.used = maxUsed;
-		first_version_indexer.used = maxUsed;
 		auto commit_proxies = getWorkersForRoleInDatacenter(clusterControllerDcId,
 		                                                    ProcessClass::CommitProxy,
 		                                                    db.config.getDesiredCommitProxies(),
@@ -2978,7 +2975,7 @@ public:
 		                                                      db.config,
 		                                                      id_used,
 		                                                      preferredSharing,
-		                                                      first_version_indexer,
+		                                                      Optional<WorkerFitnessInfo>(),
 		                                                      true);
 
 		RoleFitness newCommitProxyFit(commit_proxies, ProcessClass::CommitProxy, id_used);
