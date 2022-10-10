@@ -1195,6 +1195,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ASSERT(!deletes.empty() || !a.batchToCommit->HasDeleteRange());
 			rocksdb::WriteOptions options;
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
+			if (SERVER_KNOBS->ROCKSDB_DISABLE_WAL_EXPERIMENTAL) {
+				options.disableWAL = true;
+				options.sync = false;
+			}
 
 			double writeBeginTime = a.getHistograms ? timer_monotonic() : 0;
 			if (rateLimiter) {
