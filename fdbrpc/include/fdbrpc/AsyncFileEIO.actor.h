@@ -116,7 +116,7 @@ public:
 	static Future<Void> deleteFile(std::string filename, bool mustBeDurable) {
 		::deleteFile(filename);
 		if (mustBeDurable) {
-			CODE_PROBE(true, "deleteFile and fsync parent dir");
+			CODE_PROBE(true, "deleteFile and fsync parent dir", probe::decoration::rare);
 			return async_fsync_parent(filename);
 		} else
 			return Void();
@@ -279,11 +279,11 @@ private:
 	AsyncFileEIO(int fd, int flags, std::string const& filename)
 	  : fd(fd), flags(flags), err(new ErrorInfo), filename(filename) {
 		if (!g_network->isSimulated()) {
-			countFileLogicalWrites.init(LiteralStringRef("AsyncFile.CountFileLogicalWrites"), filename);
-			countFileLogicalReads.init(LiteralStringRef("AsyncFile.CountFileLogicalReads"), filename);
+			countFileLogicalWrites.init("AsyncFile.CountFileLogicalWrites"_sr, filename);
+			countFileLogicalReads.init("AsyncFile.CountFileLogicalReads"_sr, filename);
 
-			countLogicalWrites.init(LiteralStringRef("AsyncFile.CountLogicalWrites"));
-			countLogicalReads.init(LiteralStringRef("AsyncFile.CountLogicalReads"));
+			countLogicalWrites.init("AsyncFile.CountLogicalWrites"_sr);
+			countLogicalReads.init("AsyncFile.CountLogicalReads"_sr);
 		}
 	}
 

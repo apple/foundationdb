@@ -35,12 +35,12 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 	SelectorCorrectnessWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries") {
 
-		minOperationsPerTransaction = getOption(options, LiteralStringRef("minOperationsPerTransaction"), 10);
-		maxOperationsPerTransaction = getOption(options, LiteralStringRef("minOperationsPerTransaction"), 50);
-		maxKeySpace = getOption(options, LiteralStringRef("maxKeySpace"), 10);
-		maxOffset = getOption(options, LiteralStringRef("maxOffset"), 20);
-		testReadYourWrites = getOption(options, LiteralStringRef("testReadYourWrites"), true);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
+		minOperationsPerTransaction = getOption(options, "minOperationsPerTransaction"_sr, 10);
+		maxOperationsPerTransaction = getOption(options, "minOperationsPerTransaction"_sr, 50);
+		maxKeySpace = getOption(options, "maxKeySpace"_sr, 10);
+		maxOffset = getOption(options, "maxOffset"_sr, 20);
+		testReadYourWrites = getOption(options, "testReadYourWrites"_sr, true);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
 	}
 
 	std::string description() const override { return "SelectorCorrectness"; }

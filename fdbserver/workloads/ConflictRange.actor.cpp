@@ -39,12 +39,12 @@ struct ConflictRangeWorkload : TestWorkload {
 
 	ConflictRangeWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), withConflicts("WithConflicts"), withoutConflicts("withoutConflicts"), retries("Retries") {
-		minOperationsPerTransaction = getOption(options, LiteralStringRef("minOperationsPerTransaction"), 2);
-		maxOperationsPerTransaction = getOption(options, LiteralStringRef("minOperationsPerTransaction"), 4);
-		maxKeySpace = getOption(options, LiteralStringRef("maxKeySpace"), 100);
-		maxOffset = getOption(options, LiteralStringRef("maxOffset"), 5);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		testReadYourWrites = getOption(options, LiteralStringRef("testReadYourWrites"), false);
+		minOperationsPerTransaction = getOption(options, "minOperationsPerTransaction"_sr, 2);
+		maxOperationsPerTransaction = getOption(options, "minOperationsPerTransaction"_sr, 4);
+		maxKeySpace = getOption(options, "maxKeySpace"_sr, 100);
+		maxOffset = getOption(options, "maxOffset"_sr, 5);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		testReadYourWrites = getOption(options, "testReadYourWrites"_sr, false);
 	}
 
 	std::string description() const override { return "ConflictRange"; }

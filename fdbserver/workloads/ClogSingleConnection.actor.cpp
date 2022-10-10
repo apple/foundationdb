@@ -60,10 +60,10 @@ public:
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	void clogRandomPair() {
-		auto m1 = deterministicRandom()->randomChoice(g_simulator.getAllProcesses());
-		auto m2 = deterministicRandom()->randomChoice(g_simulator.getAllProcesses());
+		auto m1 = deterministicRandom()->randomChoice(g_simulator->getAllProcesses());
+		auto m2 = deterministicRandom()->randomChoice(g_simulator->getAllProcesses());
 		if (m1->address.ip != m2->address.ip) {
-			g_simulator.clogPair(m1->address.ip, m2->address.ip, clogDuration.orDefault(10000));
+			g_simulator->clogPair(m1->address.ip, m2->address.ip, clogDuration.orDefault(10000));
 		}
 	}
 };

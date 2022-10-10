@@ -24,8 +24,11 @@
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Tracing.h"
+#include "flow/EncryptUtils.h"
+#include "flow/Knobs.h"
 
 // The versioned message has wire format : -1, version, messages
 static const int32_t VERSION_HEADER = -1;
@@ -152,12 +155,13 @@ struct MutationRef {
 		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
 		BinaryWriter bw(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 		bw << *this;
-		EncryptBlobCipherAes265Ctr cipher(textCipherItr->second,
-		                                  headerCipherItr->second,
-		                                  iv,
-		                                  AES_256_IV_LENGTH,
-		                                  ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
-		                                  usageType);
+		EncryptBlobCipherAes265Ctr cipher(
+		    textCipherItr->second,
+		    headerCipherItr->second,
+		    iv,
+		    AES_256_IV_LENGTH,
+		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+		    usageType);
 		BlobCipherEncryptHeader* header = new (arena) BlobCipherEncryptHeader;
 		StringRef headerRef(reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader));
 		StringRef payload =
@@ -171,6 +175,22 @@ struct MutationRef {
 		return encrypt(cipherKeys, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, arena, usageType);
 	}
 
+	MutationRef decrypt(TextAndHeaderCipherKeys cipherKeys,
+	                    Arena& arena,
+	                    BlobCipherMetrics::UsageType usageType,
+	                    StringRef* buf = nullptr) const {
+		const BlobCipherEncryptHeader* header = encryptionHeader();
+		DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header->iv, usageType);
+		StringRef plaintext = cipher.decrypt(param2.begin(), param2.size(), *header, arena)->toStringRef();
+		if (buf != nullptr) {
+			*buf = plaintext;
+		}
+		ArenaReader reader(arena, plaintext, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		MutationRef mutation;
+		reader >> mutation;
+		return mutation;
+	}
+
 	MutationRef decrypt(const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys,
 	                    Arena& arena,
 	                    BlobCipherMetrics::UsageType usageType,
@@ -180,15 +200,10 @@ struct MutationRef {
 		auto headerCipherItr = cipherKeys.find(header->cipherHeaderDetails);
 		ASSERT(textCipherItr != cipherKeys.end() && textCipherItr->second.isValid());
 		ASSERT(headerCipherItr != cipherKeys.end() && headerCipherItr->second.isValid());
-		DecryptBlobCipherAes256Ctr cipher(textCipherItr->second, headerCipherItr->second, header->iv, usageType);
-		StringRef plaintext = cipher.decrypt(param2.begin(), param2.size(), *header, arena)->toStringRef();
-		if (buf != nullptr) {
-			*buf = plaintext;
-		}
-		ArenaReader reader(arena, plaintext, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
-		MutationRef mutation;
-		reader >> mutation;
-		return mutation;
+		TextAndHeaderCipherKeys textAndHeaderKeys;
+		textAndHeaderKeys.cipherHeaderKey = headerCipherItr->second;
+		textAndHeaderKeys.cipherTextKey = textCipherItr->second;
+		return decrypt(textAndHeaderKeys, arena, usageType, buf);
 	}
 
 	// These masks define which mutation types have particular properties (they are used to implement
@@ -253,6 +268,11 @@ struct CommitTransactionRef {
 	VectorRef<KeyRangeRef> read_conflict_ranges;
 	VectorRef<KeyRangeRef> write_conflict_ranges;
 	VectorRef<MutationRef> mutations; // metadata mutations
+	// encryptedMutations should be a 1-1 corespondence with mutations field above. That is either
+	// encryptedMutations.size() == 0 or encryptedMutations.size() == mutations.size() and encryptedMutations[i] =
+	// mutations[i].encrypt(). Currently this field is not serialized so clients should NOT set this field during a
+	// usual commit path. It is currently only used during backup mutation log restores.
+	VectorRef<Optional<MutationRef>> encryptedMutations;
 	Version read_snapshot = 0;
 	bool report_conflicting_keys = false;
 	bool lock_aware = false; // set when metadata mutations are present
@@ -275,7 +295,10 @@ struct CommitTransactionRef {
 				serializer(ar, report_conflicting_keys);
 			}
 			if (ar.protocolVersion().hasResolverPrivateMutations()) {
-				serializer(ar, lock_aware, spanContext);
+				serializer(ar, lock_aware);
+			}
+			if (ar.protocolVersion().hasOTELSpanContext()) {
+				serializer(ar, spanContext);
 			}
 		}
 	}

@@ -299,12 +299,12 @@ public:
 	~TransportData();
 
 	void initMetrics() {
-		bytesSent.init(LiteralStringRef("Net2.BytesSent"));
-		countPacketsReceived.init(LiteralStringRef("Net2.CountPacketsReceived"));
-		countPacketsGenerated.init(LiteralStringRef("Net2.CountPacketsGenerated"));
-		countConnEstablished.init(LiteralStringRef("Net2.CountConnEstablished"));
-		countConnClosedWithError.init(LiteralStringRef("Net2.CountConnClosedWithError"));
-		countConnClosedWithoutError.init(LiteralStringRef("Net2.CountConnClosedWithoutError"));
+		bytesSent.init("Net2.BytesSent"_sr);
+		countPacketsReceived.init("Net2.CountPacketsReceived"_sr);
+		countPacketsGenerated.init("Net2.CountPacketsGenerated"_sr);
+		countConnEstablished.init("Net2.CountConnEstablished"_sr);
+		countConnClosedWithError.init("Net2.CountConnClosedWithError"_sr);
+		countConnClosedWithoutError.init("Net2.CountConnClosedWithoutError"_sr);
 	}
 
 	Reference<struct Peer> getPeer(NetworkAddress const& address);
@@ -1136,9 +1136,10 @@ static void scanPackets(TransportData* transport,
 		if (checksumEnabled) {
 			bool isBuggifyEnabled = false;
 			if (g_network->isSimulated() && !isStableConnection &&
-			    g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration &&
+			    g_network->now() - g_simulator->lastConnectionFailure >
+			        g_simulator->connectionFailuresDisableDuration &&
 			    BUGGIFY_WITH_PROB(0.0001)) {
-				g_simulator.lastConnectionFailure = g_network->now();
+				g_simulator->lastConnectionFailure = g_network->now();
 				isBuggifyEnabled = true;
 				TraceEvent(SevInfo, "BitsFlip").log();
 				int flipBits = 32 - (int)floor(log2(deterministicRandom()->randomUInt32()));
@@ -1588,7 +1589,7 @@ FlowTransport::FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IP
   : self(new TransportData(transportId, maxWellKnownEndpoints, allowList)) {
 	self->multiVersionCleanup = multiVersionCleanupWorker(self);
 	if (g_network->isSimulated()) {
-		for (auto const& p : g_simulator.authKeys) {
+		for (auto const& p : g_simulator->authKeys) {
 			self->publicKeys.emplace(p.first, p.second.toPublic());
 		}
 	}

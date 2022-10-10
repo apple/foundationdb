@@ -18,8 +18,9 @@
  * limitations under the License.
  */
 
-#include "flow/flow.h"
+#include "flow/EncryptUtils.h"
 #include "flow/Error.h"
+#include "flow/flow.h"
 #include "flow/Knobs.h"
 #include "flow/BooleanParam.h"
 #include "flow/UnitTest.h"
@@ -163,7 +164,9 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	//AsyncFileKAIO
 	init( MAX_OUTSTANDING,                                      64 );
 	init( MIN_SUBMIT,                                           10 );
-	init( DISK_METRIC_LOGGING_INTERVAL,                        5.0 );
+	init( SQLITE_DISK_METRIC_LOGGING_INTERVAL,                 5.0 );
+	init( KAIO_LATENCY_LOGGING_INTERVAL,                      30.0 );
+	init( KAIO_LATENCY_SAMPLE_SIZE,                          30000 );
 
 	init( PAGE_WRITE_CHECKSUM_HISTORY,                           0 ); if( randomize && BUGGIFY ) PAGE_WRITE_CHECKSUM_HISTORY = 10000000;
 	init( DISABLE_POSIX_KERNEL_AIO,                              0 );
@@ -298,6 +301,10 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( TOKEN_CACHE_SIZE,                                    100 );
 	init( ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,                  5.0 );
 	init( ENCRYPT_KEY_CACHE_LOGGING_SAMPLE_SIZE,              1000 );
+	// Refer to EncryptUtil::EncryptAuthTokenAlgo for more details
+	init( ENCRYPT_HEADER_AUTH_TOKEN_ENABLED,                  true ); if ( randomize && BUGGIFY ) { ENCRYPT_HEADER_AUTH_TOKEN_ENABLED = !ENCRYPT_HEADER_AUTH_TOKEN_ENABLED; }
+	init( ENCRYPT_HEADER_AUTH_TOKEN_ALGO,                        1 ); if ( randomize && BUGGIFY ) { ENCRYPT_HEADER_AUTH_TOKEN_ALGO = getRandomAuthTokenAlgo(); }
+
 
 	// REST Client
 	init( RESTCLIENT_MAX_CONNECTIONPOOL_SIZE,                   10 );

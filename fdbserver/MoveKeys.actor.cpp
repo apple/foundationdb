@@ -185,6 +185,34 @@ bool DDEnabledState::setDDEnabled(bool status, UID snapUID) {
 	return true;
 }
 
+ACTOR Future<Void> readMoveKeysLock(Transaction* tr, MoveKeysLock* lock) {
+	{
+		Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
+		lock->prevOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
+	}
+	{
+		Optional<Value> readVal = wait(tr->get(moveKeysLockWriteKey));
+		lock->prevWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
+	}
+	return Void();
+}
+
+ACTOR Future<MoveKeysLock> readMoveKeysLock(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			state MoveKeysLock lock;
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			wait(readMoveKeysLock(&tr, &lock));
+			return lock;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+			CODE_PROBE(true, "readMoveKeysLock retry");
+		}
+	}
+}
+
 ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 	state Transaction tr(cx);
 	loop {
@@ -197,16 +225,7 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 				txnId = deterministicRandom()->randomUniqueID();
 				tr.debugTransaction(txnId);
 			}
-			{
-				Optional<Value> readVal = wait(tr.get(moveKeysLockOwnerKey));
-				lock.prevOwner =
-				    readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
-			}
-			{
-				Optional<Value> readVal = wait(tr.get(moveKeysLockWriteKey));
-				lock.prevWrite =
-				    readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
-			}
+			wait(readMoveKeysLock(&tr, &lock));
 			lock.myOwner = deterministicRandom()->randomUniqueID();
 			tr.set(moveKeysLockOwnerKey, BinaryWriter::toValue(lock.myOwner, Unversioned()));
 			wait(tr.commit());
@@ -633,7 +652,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 							// Attempt to move onto a server that isn't in serverList (removed or never added to the
 							// database) This can happen (why?) and is handled by the data distribution algorithm
 							// FIXME: Answer why this can happen?
-							CODE_PROBE(true, "start move keys moving to a removed server");
+							CODE_PROBE(true, "start move keys moving to a removed server", probe::decoration::rare);
 							throw move_to_removed_server();
 						}
 					}
@@ -827,7 +846,7 @@ ACTOR Future<Void> checkFetchingState(Database cx,
 			for (int s = 0; s < serverListValues.size(); s++) {
 				if (!serverListValues[s].present()) {
 					// FIXME: Is this the right behavior?  dataMovementComplete will never be sent!
-					CODE_PROBE(true, "check fetching state moved to removed server");
+					CODE_PROBE(true, "check fetching state moved to removed server", probe::decoration::rare);
 					throw move_to_removed_server();
 				}
 				auto si = decodeServerListValue(serverListValues[s].get());
@@ -2306,6 +2325,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
                                    FlowLock* cleanUpDataMoveParallelismLock,
                                    KeyRange keys,
                                    const DDEnabledState* ddEnabledState) {
+	state KeyRange range;
 	TraceEvent(SevVerbose, "CleanUpDataMoveBegin", dataMoveId).detail("DataMoveID", dataMoveId).detail("Range", keys);
 	state bool complete = false;
 
@@ -2317,7 +2337,9 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 			state Transaction tr(occ);
 			state std::unordered_map<UID, std::vector<Shard>> physicalShardMap;
 			state std::set<UID> oldDests;
-			state KeyRange range;
+			state DataMoveMetaData dataMove;
+
+			range = KeyRange();
 
 			try {
 				tr.trState->taskID = TaskPriority::MoveKeys;
@@ -2327,7 +2349,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 
 				Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
 				if (val.present()) {
-					state DataMoveMetaData dataMove = decodeDataMoveValue(val.get());
+					dataMove = decodeDataMoveValue(val.get());
 					TraceEvent(SevVerbose, "CleanUpDataMoveMetaData", dataMoveId)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMoveMetaData", dataMove.toString());

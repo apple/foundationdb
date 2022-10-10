@@ -63,13 +63,13 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
 		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
 		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
-		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString());
+		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
 		traceParentProbability = getOption(options, "traceParentProbability"_sr, 0.01);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
 		if constexpr (MultiTenancy) {
 			ASSERT(g_network->isSimulated());
 			this->useToken = getOption(options, "useToken"_sr, true);
-			auto k = g_simulator.authKeys.begin();
+			auto k = g_simulator->authKeys.begin();
 			this->tenant = getOption(options, "tenant"_sr, "CycleTenant"_sr);
 			// make it comfortably longer than the timeout of the workload
 			auto currentTime = uint64_t(lround(g_network->timer()));
@@ -327,7 +327,7 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 					if (g_network->isSimulated() && retryCount > 50) {
 						CODE_PROBE(true, "Cycle check enable speedUpSimulation because too many transaction_too_old()");
 						// try to make the read window back to normal size (5 * version_per_sec)
-						g_simulator.speedUpSimulation = true;
+						g_simulator->speedUpSimulation = true;
 					}
 					wait(tr.onError(e));
 				}

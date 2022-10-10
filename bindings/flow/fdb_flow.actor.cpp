@@ -63,15 +63,14 @@ ACTOR Future<Void> _test() {
 	// wait( waitForAllReady( versions ) );
 	printf("Elapsed: %lf\n", timer_monotonic() - starttime);
 
-	tr->set(LiteralStringRef("foo"), LiteralStringRef("bar"));
+	tr->set("foo"_sr, "bar"_sr);
 
-	Optional<FDBStandalone<ValueRef>> v = wait(tr->get(LiteralStringRef("foo")));
+	Optional<FDBStandalone<ValueRef>> v = wait(tr->get("foo"_sr));
 	if (v.present()) {
 		printf("%s\n", v.get().toString().c_str());
 	}
 
-	FDBStandalone<RangeResultRef> r =
-	    wait(tr->getRange(KeyRangeRef(LiteralStringRef("a"), LiteralStringRef("z")), 100));
+	FDBStandalone<RangeResultRef> r = wait(tr->getRange(KeyRangeRef("a"_sr, "z"_sr), 100));
 
 	for (auto kv : r) {
 		printf("%s is %s\n", kv.key.toString().c_str(), kv.value.toString().c_str());

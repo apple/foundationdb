@@ -170,15 +170,16 @@ public:
 private:
 	Reference<BlobCipherKey> generateCipherKey(const BlobCipherDetails& cipherDetails) {
 		static unsigned char SHA_KEY[] = "3ab9570b44b8315fdb261da6b1b6c13b";
-		Arena arena;
-		StringRef digest = computeAuthToken(reinterpret_cast<const unsigned char*>(&cipherDetails.baseCipherId),
-		                                    sizeof(EncryptCipherBaseKeyId),
-		                                    SHA_KEY,
-		                                    AES_256_KEY_LENGTH,
-		                                    arena);
+		uint8_t digest[AUTH_TOKEN_SIZE];
+		computeAuthToken(reinterpret_cast<const unsigned char*>(&cipherDetails.baseCipherId),
+		                 sizeof(EncryptCipherBaseKeyId),
+		                 SHA_KEY,
+		                 AES_256_KEY_LENGTH,
+		                 &digest[0],
+		                 AUTH_TOKEN_SIZE);
 		return makeReference<BlobCipherKey>(cipherDetails.encryptDomainId,
 		                                    cipherDetails.baseCipherId,
-		                                    digest.begin(),
+		                                    &digest[0],
 		                                    AES_256_KEY_LENGTH,
 		                                    cipherDetails.salt,
 		                                    std::numeric_limits<int64_t>::max() /* refreshAt */,

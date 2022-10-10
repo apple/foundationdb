@@ -217,8 +217,8 @@ TEST_CASE("fdbrpc/SimExternalClient") {
 		// Wait until server is ready
 		threadSleep(0.01);
 	}
-	state Standalone<StringRef> data =
-	    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, maxDataLength + 1));
+	state Standalone<StringRef> data(
+	    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, maxDataLength + 1)));
 	PacketWriter packetWriter(packetQueue.getWriteBuffer(data.size()), nullptr, Unversioned());
 	packetWriter.serializeBytes(data);
 	wait(externalConn->onWritable());

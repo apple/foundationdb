@@ -106,10 +106,23 @@ void WorkloadBase::schedule(TTaskFct task) {
 	});
 }
 
-void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx,
+void WorkloadBase::execTransaction(TOpStartFct startFct,
                                    TTaskFct cont,
                                    std::optional<fdb::BytesRef> tenant,
                                    bool failOnError) {
+	doExecute(startFct, cont, tenant, failOnError, true);
+}
+
+// Execute a non-transactional database operation within the workload
+void WorkloadBase::execOperation(TOpStartFct startFct, TTaskFct cont, bool failOnError) {
+	doExecute(startFct, cont, {}, failOnError, false);
+}
+
+void WorkloadBase::doExecute(TOpStartFct startFct,
+                             TTaskFct cont,
+                             std::optional<fdb::BytesRef> tenant,
+                             bool failOnError,
+                             bool transactional) {
 	ASSERT(inProgress);
 	if (failed) {
 		return;
@@ -117,10 +130,9 @@ void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx,
 	tasksScheduled++;
 	numTxStarted++;
 	manager->txExecutor->execute(
-	    tx,
-	    [this, tx, cont, failOnError]() {
+	    startFct,
+	    [this, startFct, cont, failOnError](fdb::Error err) {
 		    numTxCompleted++;
-		    fdb::Error err = tx->getError();
 		    if (err.code() == error_code_success) {
 			    cont();
 		    } else {
@@ -135,7 +147,8 @@ void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx,
 		    }
 		    scheduledTaskDone();
 	    },
-	    tenant);
+	    tenant,
+	    transactional);
 }
 
 void WorkloadBase::info(const std::string& msg) {

@@ -59,7 +59,7 @@ ACTOR Future<bool> lockDatabase(Reference<IDatabase> db, UID id) {
 
 namespace fdb_cli {
 
-const KeyRef lockSpecialKey = LiteralStringRef("\xff\xff/management/db_locked");
+const KeyRef lockSpecialKey = "\xff\xff/management/db_locked"_sr;
 
 ACTOR Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() != 1) {

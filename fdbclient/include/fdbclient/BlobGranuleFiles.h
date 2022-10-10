@@ -43,7 +43,8 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
                                                     const KeyRangeRef& keyRange,
                                                     Version beginVersion,
                                                     Version readVersion,
-                                                    ReadBlobGranuleContext granuleContext);
+                                                    ReadBlobGranuleContext granuleContext,
+                                                    GranuleMaterializeStats& stats);
 
 RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
                                    KeyRangeRef keyRange,

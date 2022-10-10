@@ -21,6 +21,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/BlobStoreWorkload.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -35,15 +36,12 @@ struct BackupToBlobWorkload : TestWorkload {
 	static constexpr const char* DESCRIPTION = "BackupToBlob";
 
 	BackupToBlobWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		backupAfter = getOption(options, LiteralStringRef("backupAfter"), 10.0);
-		backupTag = getOption(options, LiteralStringRef("backupTag"), BackupAgentBase::getDefaultTag());
-		auto backupURLString =
-		    getOption(options, LiteralStringRef("backupURL"), LiteralStringRef("http://0.0.0.0:10000")).toString();
-		auto accessKeyEnvVar =
-		    getOption(options, LiteralStringRef("accessKeyVar"), LiteralStringRef("BLOB_ACCESS_KEY")).toString();
-		auto secretKeyEnvVar =
-		    getOption(options, LiteralStringRef("secretKeyVar"), LiteralStringRef("BLOB_SECRET_KEY")).toString();
-		bool provideKeys = getOption(options, LiteralStringRef("provideKeys"), false);
+		backupAfter = getOption(options, "backupAfter"_sr, 10.0);
+		backupTag = getOption(options, "backupTag"_sr, BackupAgentBase::getDefaultTag());
+		auto backupURLString = getOption(options, "backupURL"_sr, "http://0.0.0.0:10000"_sr).toString();
+		auto accessKeyEnvVar = getOption(options, "accessKeyVar"_sr, "BLOB_ACCESS_KEY"_sr).toString();
+		auto secretKeyEnvVar = getOption(options, "secretKeyVar"_sr, "BLOB_SECRET_KEY"_sr).toString();
+		bool provideKeys = getOption(options, "provideKeys"_sr, false);
 		if (provideKeys) {
 			updateBackupURL(backupURLString, accessKeyEnvVar, "<access_key>", secretKeyEnvVar, "<secret_key>");
 		}
@@ -57,7 +55,8 @@ struct BackupToBlobWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(Database cx, BackupToBlobWorkload* self) {
 		state FileBackupAgent backupAgent;
 		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
-		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
+
+		addDefaultBackupRanges(backupRanges);
 
 		wait(delay(self->backupAfter));
 		wait(backupAgent.submitBackup(cx,
@@ -66,7 +65,8 @@ struct BackupToBlobWorkload : TestWorkload {
 		                              self->initSnapshotInterval,
 		                              self->snapshotInterval,
 		                              self->backupTag.toString(),
-		                              backupRanges));
+		                              backupRanges,
+		                              false));
 		EBackupState backupStatus = wait(backupAgent.waitBackup(cx, self->backupTag.toString(), StopWhenDone::True));
 		TraceEvent("BackupToBlob_BackupStatus").detail("Status", BackupAgentBase::getStateText(backupStatus));
 		return Void();
