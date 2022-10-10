@@ -170,7 +170,7 @@ struct Arguments {
 	char txntagging_prefix[TAGPREFIXLENGTH_MAX];
 	FDBStreamingMode streaming_mode;
 	int64_t client_threads_per_version;
-	int disable_client_bypass;
+	bool disable_client_bypass;
 	int disable_ryw;
 	char json_output_path[PATH_MAX];
 	bool bg_materialize_files;

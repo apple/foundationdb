@@ -875,10 +875,10 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 		}
 	}
 
-	if (args.disable_client_bypass > 0) {
-		err = network::setOptionNothrow(FDB_NET_OPTION_DISABLE_CLIENT_BYPASS, args.disable_client_bypass);
+	if (args.disable_client_bypass) {
+		err = network::setOptionNothrow(FDB_NET_OPTION_DISABLE_CLIENT_BYPASS);
 		if (err) {
-			logr.error("network::setOption (FDB_NET_OPTION_DISABLE_CLIENT_BYPASS) ({}): {}",
+			logr.error("network::setOption (FDB_NET_OPTION_DISABLE_CLIENT_BYPASS): {}",
 			           args.disable_client_bypass,
 			           err.what());
 			return -1;
@@ -1015,7 +1015,7 @@ int initArguments(Arguments& args) {
 		args.txnspec.ops[i][OP_COUNT] = 0;
 	}
 	args.client_threads_per_version = 0;
-	args.disable_client_bypass = 0;
+	args.disable_client_bypass = false;
 	args.disable_ryw = 0;
 	args.json_output_path[0] = '\0';
 	args.stats_export_path[0] = '\0';
@@ -1459,7 +1459,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			args.client_threads_per_version = atoi(optarg);
 			break;
 		case ARG_DISABLE_CLIENT_BYPASS:
-			args.disable_client_bypass = 1;
+			args.disable_client_bypass = true;
 			break;
 		case ARG_DISABLE_RYW:
 			args.disable_ryw = 1;
