@@ -119,7 +119,7 @@ ACTOR Future<Void> clearQuota(Reference<IDatabase> db, TransactionTag tag) {
 }
 
 constexpr auto usage = "quota [get <tag> [reserved_throughput|total_throughput] | set <tag> "
-                       "[reserved_throughput|total_throughput] <value>]";
+                       "[reserved_throughput|total_throughput] <value> | clear <tag>]";
 
 bool exitFailure() {
 	fmt::print(usage);

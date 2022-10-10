@@ -539,7 +539,7 @@ void initHelp() {
 	                "Displays the current read version of the database or currently running transaction.");
 	helpMap["quota"] = CommandHelp("quota",
 	                               "quota [get <tag> [reserved_throughput|total_throughput] | set <tag> "
-	                               "[reserved_throughput|total_throughput] <value>]",
+	                               "[reserved_throughput|total_throughput] <value> | clear <tag>]",
 	                               "Get or modify the throughput quota for the specified tag.");
 	helpMap["reset"] =
 	    CommandHelp("reset",
