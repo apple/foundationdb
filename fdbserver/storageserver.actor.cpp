@@ -8166,105 +8166,127 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		start = now();
 		state UpdateEagerReadInfo eager;
 		state FetchInjectionInfo fii;
-		state Reference<ILogSystem::IPeekCursor> cloneCursor2 = cursor->cloneNoMore();
-		state Optional<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> cipherKeys;
-		state bool collectingCipherKeys = false;
+		state std::vector<LogMessage> messages;
+		messages.reserve(20000);
+		state int i;
 
-		// Collect eager read keys.
-		// If encrypted mutation is encountered, we collect cipher details and fetch cipher keys, then start over.
+		// The starting point of the batch to read is cursor, and batchReader will advance from there
+		// but cursor is untouched until after the batch is processed
+		state Reference<ILogSystem::IPeekCursor> batch = cursor->cloneNoMore();
+		batch->setProtocolVersion(data->logProtocol);
+
+		// Accumulate messages, then do eager reads and stop if the shard change counter is stable across the reads.
+		// If not, continue reading messages and try again.
 		loop {
 			state uint64_t changeCounter = data->shardChangeCounter;
-			bool epochEnd = false;
-			bool hasPrivateData = false;
-			bool firstMutation = true;
-			bool dbgLastMessageWasProtocol = false;
 
-			std::unordered_set<BlobCipherDetails> cipherDetails;
-
-			Reference<ILogSystem::IPeekCursor> cloneCursor1 = cloneCursor2->cloneNoMore();
-
-			cloneCursor1->setProtocolVersion(data->logProtocol);
-
-			for (; cloneCursor1->hasMessage(); cloneCursor1->nextMessage()) {
-				ArenaReader& cloneReader = *cloneCursor1->reader();
+			// Read from the cursor and accumulate results in messages vector
+			for (; batch->hasMessage(); batch->nextMessage()) {
+				ArenaReader& cloneReader = *batch->reader();
 
 				if (LogProtocolMessage::isNextIn(cloneReader)) {
+					// The LogProtocolMessage does not have any members but still must be removed from the stream.
 					LogProtocolMessage lpm;
 					cloneReader >> lpm;
 					//TraceEvent(SevDebug, "SSReadingLPM", data->thisServerID).detail("Mutation", lpm);
-					dbgLastMessageWasProtocol = true;
-					cloneCursor1->setProtocolVersion(cloneReader.protocolVersion());
+
+					// The protocol version to set comes from cloneReader so add that to the messages vector
+					messages.emplace_back(batch->version(), cloneReader.protocolVersion());
+					batch->setProtocolVersion(cloneReader.protocolVersion());
 				} else if (cloneReader.protocolVersion().hasSpanContext() &&
 				           SpanContextMessage::isNextIn(cloneReader)) {
 					SpanContextMessage scm;
 					cloneReader >> scm;
+					messages.emplace_back(batch->version(), scm);
 				} else if (cloneReader.protocolVersion().hasOTELSpanContext() &&
 				           OTELSpanContextMessage::isNextIn(cloneReader)) {
 					OTELSpanContextMessage scm;
 					cloneReader >> scm;
+					messages.emplace_back(batch->version(), scm);
 				} else {
 					MutationRef msg;
 					cloneReader >> msg;
 					if (msg.isEncrypted()) {
-						if (!cipherKeys.present()) {
-							const BlobCipherEncryptHeader* header = msg.encryptionHeader();
-							cipherDetails.insert(header->cipherTextDetails);
-							cipherDetails.insert(header->cipherHeaderDetails);
-							collectingCipherKeys = true;
-						} else {
-							msg = msg.decrypt(cipherKeys.get(), eager.arena, BlobCipherMetrics::TLOG);
-						}
+						messages.emplace_back(batch->version(), msg.decrypt(eager.arena, BlobCipherMetrics::TLOG));
+					} else {
+						messages.emplace_back(batch->version(), msg);
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
+				}
+			}
 
-					if (!collectingCipherKeys) {
-						if (firstMutation && msg.param1.startsWith(systemKeys.end))
-							hasPrivateData = true;
+			// Scan the message set, wait for decryptions (which may need keys), extract some properties, do some sanity
+			// checks
+			state bool firstMutation = true;
+			state bool hasPrivateData = false;
+			state bool epochEnd = false;
+
+			// If a lastEpoch mutation message is seen then there must be a ProtocolVersion message before it
+			// and there can be no other mutations in between the lastEpoch mutation and the ProtocolVersion.
+			// This boolean indicates that a ProtocolVersion has been seen and no mutations have been seen yet
+			// so it would be valid to see a LastEpoch mutation message.
+			state bool lastEpochCanHappenNext = false;
+
+			for (i = 0; i < messages.size(); ++i) {
+				auto& msg = messages[i].content;
+
+				if (std::holds_alternative<ProtocolVersion>(msg)) {
+					lastEpochCanHappenNext = true;
+				}
+
+				if (std::holds_alternative<Future<MutationRef>>(msg)) {
+					MutationRef m = wait(std::get<Future<MutationRef>>(msg));
+
+					if (firstMutation && m.param1.startsWith(systemKeys.end)) {
+						hasPrivateData = true;
 						firstMutation = false;
-
-						if (msg.param1 == lastEpochEndPrivateKey) {
-							epochEnd = true;
-							ASSERT(dbgLastMessageWasProtocol);
-						}
-
-						eager.addMutation(msg);
-						dbgLastMessageWasProtocol = false;
 					}
+
+					// If this is an epoch end the last message must exist and be a LogProtocolMessage
+					if (m.param1 == lastEpochEndPrivateKey) {
+						epochEnd = true;
+						ASSERT(lastEpochCanHappenNext);
+					}
+					lastEpochCanHappenNext = false;
+
+					eager.addMutation(m);
 				}
 			}
 
-			if (collectingCipherKeys) {
-				std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-				    wait(getEncryptCipherKeys(data->db, cipherDetails, BlobCipherMetrics::TLOG));
-				cipherKeys = getCipherKeysResult;
-				collectingCipherKeys = false;
-				eager = UpdateEagerReadInfo();
-			} else {
-				// Any fetchKeys which are ready to transition their shards to the adding,transferred state do so now.
-				// If there is an epoch end we skip this step, to increase testability and to prevent inserting a
-				// version in the middle of a rolled back version range.
-				while (!hasPrivateData && !epochEnd && !data->readyFetchKeys.empty()) {
-					auto fk = data->readyFetchKeys.back();
-					data->readyFetchKeys.pop_back();
-					fk.send(&fii);
-					// fetchKeys() would put the data it fetched into the fii. The thread will not return back to this
-					// actor until it was completed.
-				}
-
-				for (auto& c : fii.changes)
-					eager.addMutations(c.mutations);
-
-				wait(doEagerReads(data, &eager));
-				if (data->shardChangeCounter == changeCounter)
-					break;
-				CODE_PROBE(
-				    true,
-				    "A fetchKeys completed while we were doing this, so eager might be outdated.  Read it again.");
-				// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the reads
-				// only selectively
-				eager = UpdateEagerReadInfo();
-				cloneCursor2 = cursor->cloneNoMore();
+			// Any fetchKeys which are ready to transition their shards to the adding,transferred state do so now.
+			// If there is an epoch end we skip this step, to increase testability and to prevent inserting a
+			// version in the middle of a rolled back version range.
+			while (!hasPrivateData && !epochEnd && !data->readyFetchKeys.empty()) {
+				auto fk = data->readyFetchKeys.back();
+				data->readyFetchKeys.pop_back();
+				// Send fii to the actor waiting on this promise which is known to already exist and will be run
+				// immediately so after this call fii will be populated.
+				fk.send(&fii);
 			}
+
+			for (auto& c : fii.changes)
+				eager.addMutations(c.mutations);
+
+			wait(doEagerReads(data, &eager));
+
+			// If the shard counter has not changed then the eager read results are valid so leave this loop and
+			// continue to process the mutation batch
+			if (data->shardChangeCounter == changeCounter)
+				break;
+
+			CODE_PROBE(true,
+			           "A fetchKeys completed while we were doing this, so eager might be outdated.  Read it again.");
+
+			// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the reads
+			// only selectively.
+			eager = UpdateEagerReadInfo();
+
+			// Get a new cursor that maybe has more data, advance it to where the batch cursor left off
+			// and set its protocol version to the protocol version that the batch cursor last used.
+			Reference<ILogSystem::IPeekCursor> maybeNewData = cursor->cloneNoMore();
+			maybeNewData->advanceTo(batch->version());
+			maybeNewData->setProtocolVersion(batch->reader()->protocolVersion());
+			batch = maybeNewData;
 		}
 		data->eagerReadsLatencyHistogram->sampleSeconds(now() - start);
 
@@ -8305,24 +8327,25 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		data->fetchKeysPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeFetchKeysUpdates);
 
 		state Version ver = invalidVersion;
-		cloneCursor2->setProtocolVersion(data->logProtocol);
 		state SpanContext spanContext = SpanContext();
 		state double beforeTLogMsgsUpdates = now();
 		state std::set<Key> updatedChangeFeeds;
-		for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
+
+		for (i = 0; i < messages.size(); ++i) {
 			if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
 				mutationBytes = 0;
 				// Instead of just yielding, leave time for the storage server to respond to reads
 				wait(delay(SERVER_KNOBS->UPDATE_DELAY));
 			}
 
-			if (cloneCursor2->version().version > ver) {
-				ASSERT(cloneCursor2->version().version > data->version.get());
+			auto& logMsg = messages[i];
+			Version msgVersion = logMsg.version.version;
+
+			if (logMsg.version.version > ver) {
+				ASSERT(msgVersion > data->version.get());
 			}
 
-			auto& rd = *cloneCursor2->reader();
-
-			if (cloneCursor2->version().version > ver && cloneCursor2->version().version > data->version.get()) {
+			if (msgVersion > ver && msgVersion > data->version.get()) {
 				++data->counters.updateVersions;
 				if (data->currentChangeFeeds.size()) {
 					data->changeFeedVersions.emplace_back(
@@ -8330,38 +8353,28 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					updatedChangeFeeds.insert(data->currentChangeFeeds.begin(), data->currentChangeFeeds.end());
 					data->currentChangeFeeds.clear();
 				}
-				ver = cloneCursor2->version().version;
+				ver = msgVersion;
 			}
 
-			if (LogProtocolMessage::isNextIn(rd)) {
-				LogProtocolMessage lpm;
-				rd >> lpm;
-
-				data->logProtocol = rd.protocolVersion();
+			if (std::holds_alternative<ProtocolVersion>(logMsg.content)) {
+				data->logProtocol = std::get<ProtocolVersion>(logMsg.content);
 				data->storage.changeLogProtocol(ver, data->logProtocol);
-				cloneCursor2->setProtocolVersion(rd.protocolVersion());
 				spanContext.traceID = UID();
-			} else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
-				SpanContextMessage scm;
-				rd >> scm;
+			} else if (std::holds_alternative<SpanContextMessage>(logMsg.content)) {
+				SpanContextMessage& scm = std::get<SpanContextMessage>(logMsg.content);
+
 				CODE_PROBE(true, "storageserveractor converting SpanContextMessage into OTEL SpanContext");
 				spanContext =
 				    SpanContext(UID(scm.spanContext.first(), scm.spanContext.second()),
 				                0,
 				                scm.spanContext.first() != 0 && scm.spanContext.second() != 0 ? TraceFlags::sampled
 				                                                                              : TraceFlags::unsampled);
-			} else if (rd.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(rd)) {
+			} else if (std::holds_alternative<OTELSpanContextMessage>(logMsg.content)) {
 				CODE_PROBE(true, "storageserveractor reading OTELSpanContextMessage");
-				OTELSpanContextMessage scm;
-				rd >> scm;
+				OTELSpanContextMessage& scm = std::get<OTELSpanContextMessage>(logMsg.content);
 				spanContext = scm.spanContext;
 			} else {
-				MutationRef msg;
-				rd >> msg;
-				if (msg.isEncrypted()) {
-					ASSERT(cipherKeys.present());
-					msg = msg.decrypt(cipherKeys.get(), rd.arena(), BlobCipherMetrics::TLOG);
-				}
+				const MutationRef& msg = std::get<Future<MutationRef>>(logMsg.content).get();
 
 				Span span("SS:update"_loc, spanContext);
 				span.addAttribute("key"_sr, msg.param1);
@@ -8376,12 +8389,12 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				    deterministicRandom()->random01() < 0.05) {
 					TraceEvent(SevWarnAlways, "TSSInjectDropMutation", data->thisServerID)
 					    .detail("Mutation", msg)
-					    .detail("Version", cloneCursor2->version().toString());
+					    .detail("Version", logMsg.version.toString());
 				} else if (data->isTSSInQuarantine() &&
 				           (msg.param1.size() < 2 || msg.param1[0] != 0xff || msg.param1[1] != 0xff)) {
 					TraceEvent("TSSQuarantineDropMutation", data->thisServerID)
 					    .suppressFor(10.0)
-					    .detail("Version", cloneCursor2->version().toString());
+					    .detail("Version", logMsg.version.toString());
 				} else if (ver != invalidVersion) { // This change belongs to a version < minVersion
 					DEBUG_MUTATION("SSPeek", ver, msg, data->thisServerID);
 					if (ver == data->initialClusterVersion) {
@@ -8389,7 +8402,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 						// The following trace event may produce a value with special characters
 						TraceEvent("SSPeekMutation", data->thisServerID)
 						    .detail("Mutation", msg)
-						    .detail("Version", cloneCursor2->version().toString());
+						    .detail("Version", logMsg.version.toString());
 					}
 
 					updater.applyMutation(data, msg, ver, false);
@@ -8422,7 +8435,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				} else
 					TraceEvent(SevError, "DiscardingPeekedData", data->thisServerID)
 					    .detail("Mutation", msg)
-					    .detail("Version", cloneCursor2->version().toString());
+					    .detail("Version", logMsg.version.toString());
 			}
 		}
 		data->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeTLogMsgsUpdates);
@@ -8436,7 +8449,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		if (ver != invalidVersion) {
 			data->lastVersionWithData = ver;
 		}
-		ver = cloneCursor2->version().version - 1;
+		ver = batch->version().version - 1;
 
 		if (injectedChanges)
 			data->lastVersionWithData = ver;
@@ -8531,7 +8544,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 		}
 
-		data->logCursor->advanceTo(cloneCursor2->version());
+		data->logCursor->advanceTo(batch->version());
 		if (cursor->version().version >= data->lastTLogVersion) {
 			if (data->behind) {
 				TraceEvent("StorageServerNoLongerBehind", data->thisServerID)

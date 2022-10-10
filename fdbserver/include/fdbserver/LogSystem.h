@@ -902,4 +902,16 @@ void LogPushData::writeTypedMessage(T const& item, bool metadataMessage, bool al
 	next_message_tags.clear();
 }
 
+// Variant representing all of the types that could be found in a log cursor's message stream
+struct LogMessage {
+	// Template constructor to forward the second argument to content's constructor
+	// This exists so that emplace_back(version, content) will work.
+	// In c++20 this should no longer be necessary as default aggregate initialization should handle it
+	template <typename T>
+	LogMessage(LogMessageVersion version, T&& content) : version(version), content(std::forward<T>(content)) {}
+
+	LogMessageVersion version;
+	std::variant<ProtocolVersion, SpanContextMessage, OTELSpanContextMessage, Future<MutationRef>> content;
+};
+
 #endif // FDBSERVER_LOGSYSTEM_H

@@ -725,7 +725,7 @@ public:
 			Tree r = getRoot(version);
 			roots.emplace_back(version, r);
 		} else
-			ASSERT(version == latestVersion);
+			ASSERT_EQ(version, latestVersion);
 	}
 
 	// insert() and erase() invalidate atLatest() and all iterators into it
