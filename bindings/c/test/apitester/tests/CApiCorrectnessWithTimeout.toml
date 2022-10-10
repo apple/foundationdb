@@ -1,7 +1,7 @@
 [[test]]
 title = 'API Correctness with Timeouts'
 multiThreaded = true
-buggify = false
+buggify = true
 minFdbThreads = 2
 maxFdbThreads = 8
 minDatabases = 2
