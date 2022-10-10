@@ -33,20 +33,10 @@
 #include "fdbclient/Tenant.h"
 
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/Knobs.h"
 #include "flow/flow.h"
 
 #include "flow/actorcompiler.h" // has to be last include
-
-struct GranuleHistory {
-	KeyRange range;
-	Version version;
-	Standalone<BlobGranuleHistoryValue> value;
-
-	GranuleHistory() {}
-
-	GranuleHistory(KeyRange range, Version version, Standalone<BlobGranuleHistoryValue> value)
-	  : range(range), version(version), value(value) {}
-};
 
 // Stores info about a file in blob storage
 struct BlobFileIndex {
@@ -143,6 +133,13 @@ public:
 
 private:
 	Future<Void> collection;
+};
+
+ACTOR Future<Void> dumpManifest(Database db, Reference<BlobConnectionProvider> blobConn, int64_t epoch, int64_t seqNo);
+ACTOR Future<Void> loadManifest(Database db, Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<Void> printRestoreSummary(Database db, Reference<BlobConnectionProvider> blobConn);
+inline bool isFullRestoreMode() {
+	return SERVER_KNOBS->BLOB_FULL_RESTORE_MODE;
 };
 
 #include "flow/unactorcompiler.h"

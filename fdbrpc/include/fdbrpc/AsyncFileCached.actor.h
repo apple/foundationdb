@@ -73,7 +73,7 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 	explicit EvictablePageCache(int pageSize, int64_t maxSize)
 	  : pageSize(pageSize), maxPages(maxSize / pageSize),
 	    cacheEvictionType(evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY)) {
-		cacheEvictions.init(LiteralStringRef("EvictablePageCache.CacheEvictions"));
+		cacheEvictions.init("EvictablePageCache.CacheEvictions"_sr);
 	}
 
 	void allocate(EvictablePage* page) {
@@ -303,25 +303,25 @@ private:
 	  : filename(filename), uncached(uncached), length(length), prevLength(length), pageCache(pageCache),
 	    currentTruncate(Void()), currentTruncateSize(0), rateControl(nullptr) {
 		if (!g_network->isSimulated()) {
-			countFileCacheWrites.init(LiteralStringRef("AsyncFile.CountFileCacheWrites"), filename);
-			countFileCacheReads.init(LiteralStringRef("AsyncFile.CountFileCacheReads"), filename);
-			countFileCacheWritesBlocked.init(LiteralStringRef("AsyncFile.CountFileCacheWritesBlocked"), filename);
-			countFileCacheReadsBlocked.init(LiteralStringRef("AsyncFile.CountFileCacheReadsBlocked"), filename);
-			countFileCachePageReadsHit.init(LiteralStringRef("AsyncFile.CountFileCachePageReadsHit"), filename);
-			countFileCachePageReadsMissed.init(LiteralStringRef("AsyncFile.CountFileCachePageReadsMissed"), filename);
-			countFileCachePageReadsMerged.init(LiteralStringRef("AsyncFile.CountFileCachePageReadsMerged"), filename);
-			countFileCacheFinds.init(LiteralStringRef("AsyncFile.CountFileCacheFinds"), filename);
-			countFileCacheReadBytes.init(LiteralStringRef("AsyncFile.CountFileCacheReadBytes"), filename);
+			countFileCacheWrites.init("AsyncFile.CountFileCacheWrites"_sr, filename);
+			countFileCacheReads.init("AsyncFile.CountFileCacheReads"_sr, filename);
+			countFileCacheWritesBlocked.init("AsyncFile.CountFileCacheWritesBlocked"_sr, filename);
+			countFileCacheReadsBlocked.init("AsyncFile.CountFileCacheReadsBlocked"_sr, filename);
+			countFileCachePageReadsHit.init("AsyncFile.CountFileCachePageReadsHit"_sr, filename);
+			countFileCachePageReadsMissed.init("AsyncFile.CountFileCachePageReadsMissed"_sr, filename);
+			countFileCachePageReadsMerged.init("AsyncFile.CountFileCachePageReadsMerged"_sr, filename);
+			countFileCacheFinds.init("AsyncFile.CountFileCacheFinds"_sr, filename);
+			countFileCacheReadBytes.init("AsyncFile.CountFileCacheReadBytes"_sr, filename);
 
-			countCacheWrites.init(LiteralStringRef("AsyncFile.CountCacheWrites"));
-			countCacheReads.init(LiteralStringRef("AsyncFile.CountCacheReads"));
-			countCacheWritesBlocked.init(LiteralStringRef("AsyncFile.CountCacheWritesBlocked"));
-			countCacheReadsBlocked.init(LiteralStringRef("AsyncFile.CountCacheReadsBlocked"));
-			countCachePageReadsHit.init(LiteralStringRef("AsyncFile.CountCachePageReadsHit"));
-			countCachePageReadsMissed.init(LiteralStringRef("AsyncFile.CountCachePageReadsMissed"));
-			countCachePageReadsMerged.init(LiteralStringRef("AsyncFile.CountCachePageReadsMerged"));
-			countCacheFinds.init(LiteralStringRef("AsyncFile.CountCacheFinds"));
-			countCacheReadBytes.init(LiteralStringRef("AsyncFile.CountCacheReadBytes"));
+			countCacheWrites.init("AsyncFile.CountCacheWrites"_sr);
+			countCacheReads.init("AsyncFile.CountCacheReads"_sr);
+			countCacheWritesBlocked.init("AsyncFile.CountCacheWritesBlocked"_sr);
+			countCacheReadsBlocked.init("AsyncFile.CountCacheReadsBlocked"_sr);
+			countCachePageReadsHit.init("AsyncFile.CountCachePageReadsHit"_sr);
+			countCachePageReadsMissed.init("AsyncFile.CountCachePageReadsMissed"_sr);
+			countCachePageReadsMerged.init("AsyncFile.CountCachePageReadsMerged"_sr);
+			countCacheFinds.init("AsyncFile.CountCacheFinds"_sr);
+			countCacheReadBytes.init("AsyncFile.CountCacheReadBytes"_sr);
 		}
 	}
 
@@ -343,7 +343,7 @@ private:
 			TraceEvent("AFCUnderlyingOpenEnd").detail("Filename", filename);
 			int64_t l = wait(f->size());
 			TraceEvent("AFCUnderlyingSize").detail("Filename", filename).detail("Size", l);
-			return new AsyncFileCached(f, filename, l, pageCache);
+			return Reference<AsyncFileCached>(new AsyncFileCached(f, filename, l, pageCache)).castTo<IAsyncFile>();
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled)
 				openFiles.erase(filename);

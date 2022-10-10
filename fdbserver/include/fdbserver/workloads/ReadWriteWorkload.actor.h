@@ -86,51 +86,50 @@ struct ReadWriteCommon : KVWorkload {
 	double loadTime, clientBegin;
 
 	explicit ReadWriteCommon(WorkloadContext const& wcx)
-	  : KVWorkload(wcx), totalReadsMetric(LiteralStringRef("ReadWrite.TotalReads")),
-	    totalRetriesMetric(LiteralStringRef("ReadWrite.TotalRetries")), aTransactions("A Transactions"),
-	    bTransactions("B Transactions"), retries("Retries"), latencies(sampleSize), readLatencies(sampleSize),
-	    commitLatencies(sampleSize), GRVLatencies(sampleSize), fullReadLatencies(sampleSize), readLatencyTotal(0),
-	    readLatencyCount(0), loadTime(0.0), clientBegin(0) {
+	  : KVWorkload(wcx), totalReadsMetric("ReadWrite.TotalReads"_sr), totalRetriesMetric("ReadWrite.TotalRetries"_sr),
+	    aTransactions("A Transactions"), bTransactions("B Transactions"), retries("Retries"), latencies(sampleSize),
+	    readLatencies(sampleSize), commitLatencies(sampleSize), GRVLatencies(sampleSize), fullReadLatencies(sampleSize),
+	    readLatencyTotal(0), readLatencyCount(0), loadTime(0.0), clientBegin(0) {
 
-		transactionSuccessMetric.init(LiteralStringRef("ReadWrite.SuccessfulTransaction"));
-		transactionFailureMetric.init(LiteralStringRef("ReadWrite.FailedTransaction"));
-		readMetric.init(LiteralStringRef("ReadWrite.Read"));
+		transactionSuccessMetric.init("ReadWrite.SuccessfulTransaction"_sr);
+		transactionFailureMetric.init("ReadWrite.FailedTransaction"_sr);
+		readMetric.init("ReadWrite.Read"_sr);
 
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 5000.0) / clientCount;
-		double allowedLatency = getOption(options, LiteralStringRef("allowedLatency"), 0.250);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
+		double allowedLatency = getOption(options, "allowedLatency"_sr, 0.250);
 		actorCount = ceil(transactionsPerSecond * allowedLatency);
-		actorCount = getOption(options, LiteralStringRef("actorCountPerTester"), actorCount);
+		actorCount = getOption(options, "actorCountPerTester"_sr, actorCount);
 
-		readsPerTransactionA = getOption(options, LiteralStringRef("readsPerTransactionA"), 10);
-		writesPerTransactionA = getOption(options, LiteralStringRef("writesPerTransactionA"), 0);
-		readsPerTransactionB = getOption(options, LiteralStringRef("readsPerTransactionB"), 1);
-		writesPerTransactionB = getOption(options, LiteralStringRef("writesPerTransactionB"), 9);
-		alpha = getOption(options, LiteralStringRef("alpha"), 0.1);
+		readsPerTransactionA = getOption(options, "readsPerTransactionA"_sr, 10);
+		writesPerTransactionA = getOption(options, "writesPerTransactionA"_sr, 0);
+		readsPerTransactionB = getOption(options, "readsPerTransactionB"_sr, 1);
+		writesPerTransactionB = getOption(options, "writesPerTransactionB"_sr, 9);
+		alpha = getOption(options, "alpha"_sr, 0.1);
 
 		valueString = std::string(maxValueBytes, '.');
 		if (nodePrefix > 0) {
 			keyBytes += 16;
 		}
 
-		metricsStart = getOption(options, LiteralStringRef("metricsStart"), 0.0);
-		metricsDuration = getOption(options, LiteralStringRef("metricsDuration"), testDuration);
-		if (getOption(options, LiteralStringRef("discardEdgeMeasurements"), true)) {
+		metricsStart = getOption(options, "metricsStart"_sr, 0.0);
+		metricsDuration = getOption(options, "metricsDuration"_sr, testDuration);
+		if (getOption(options, "discardEdgeMeasurements"_sr, true)) {
 			// discardEdgeMeasurements keeps the metrics from the middle 3/4 of the test
 			metricsStart += testDuration * 0.125;
 			metricsDuration *= 0.75;
 		}
 
-		warmingDelay = getOption(options, LiteralStringRef("warmingDelay"), 0.0);
-		maxInsertRate = getOption(options, LiteralStringRef("maxInsertRate"), 1e12);
-		debugInterval = getOption(options, LiteralStringRef("debugInterval"), 0.0);
-		debugTime = getOption(options, LiteralStringRef("debugTime"), 0.0);
-		enableReadLatencyLogging = getOption(options, LiteralStringRef("enableReadLatencyLogging"), false);
-		periodicLoggingInterval = getOption(options, LiteralStringRef("periodicLoggingInterval"), 5.0);
-		cancelWorkersAtDuration = getOption(options, LiteralStringRef("cancelWorkersAtDuration"), true);
+		warmingDelay = getOption(options, "warmingDelay"_sr, 0.0);
+		maxInsertRate = getOption(options, "maxInsertRate"_sr, 1e12);
+		debugInterval = getOption(options, "debugInterval"_sr, 0.0);
+		debugTime = getOption(options, "debugTime"_sr, 0.0);
+		enableReadLatencyLogging = getOption(options, "enableReadLatencyLogging"_sr, false);
+		periodicLoggingInterval = getOption(options, "periodicLoggingInterval"_sr, 5.0);
+		cancelWorkersAtDuration = getOption(options, "cancelWorkersAtDuration"_sr, true);
 
-		useRYW = getOption(options, LiteralStringRef("useRYW"), false);
-		doSetup = getOption(options, LiteralStringRef("setup"), true);
+		useRYW = getOption(options, "useRYW"_sr, false);
+		doSetup = getOption(options, "setup"_sr, true);
 
 		// Validate that keyForIndex() is monotonic
 		for (int i = 0; i < 30; i++) {
@@ -144,7 +143,7 @@ struct ReadWriteCommon : KVWorkload {
 		}
 
 		std::vector<std::string> insertionCountsToMeasureString =
-		    getOption(options, LiteralStringRef("insertionCountsToMeasure"), std::vector<std::string>());
+		    getOption(options, "insertionCountsToMeasure"_sr, std::vector<std::string>());
 		for (int i = 0; i < insertionCountsToMeasureString.size(); i++) {
 			try {
 				uint64_t count = boost::lexical_cast<uint64_t>(insertionCountsToMeasureString[i]);

@@ -168,7 +168,8 @@ Future<Void> StorageWiggler::resetStats() {
 	auto newMetrics = StorageWiggleMetrics();
 	newMetrics.smoothed_round_duration = metrics.smoothed_round_duration;
 	newMetrics.smoothed_wiggle_duration = metrics.smoothed_wiggle_duration;
-	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->isPrimary(), newMetrics);
+	return StorageWiggleMetrics::runSetTransaction(
+	    teamCollection->dbContext(), teamCollection->isPrimary(), newMetrics);
 }
 
 Future<Void> StorageWiggler::restoreStats() {
@@ -179,7 +180,7 @@ Future<Void> StorageWiggler::restoreStats() {
 		}
 		return Void();
 	};
-	auto readFuture = StorageWiggleMetrics::runGetTransaction(teamCollection->cx, teamCollection->isPrimary());
+	auto readFuture = StorageWiggleMetrics::runGetTransaction(teamCollection->dbContext(), teamCollection->isPrimary());
 	return map(readFuture, assignFunc);
 }
 Future<Void> StorageWiggler::startWiggle() {
@@ -187,7 +188,7 @@ Future<Void> StorageWiggler::startWiggle() {
 	if (shouldStartNewRound()) {
 		metrics.last_round_start = metrics.last_wiggle_start;
 	}
-	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->isPrimary(), metrics);
+	return StorageWiggleMetrics::runSetTransaction(teamCollection->dbContext(), teamCollection->isPrimary(), metrics);
 }
 
 Future<Void> StorageWiggler::finishWiggle() {
@@ -202,7 +203,7 @@ Future<Void> StorageWiggler::finishWiggle() {
 		duration = metrics.last_round_finish - metrics.last_round_start;
 		metrics.smoothed_round_duration.setTotal((double)duration);
 	}
-	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->isPrimary(), metrics);
+	return StorageWiggleMetrics::runSetTransaction(teamCollection->dbContext(), teamCollection->isPrimary(), metrics);
 }
 
 ACTOR Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
@@ -264,7 +265,7 @@ public:
 	PromiseStream<Future<Void>> addActor;
 
 	// State initialized when bootstrap
-	std::shared_ptr<IDDTxnProcessor> txnProcessor;
+	Reference<IDDTxnProcessor> txnProcessor;
 	MoveKeysLock lock;
 	DatabaseConfiguration configuration;
 	std::vector<Optional<Key>> primaryDcId;
@@ -577,7 +578,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList) {
 	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
 	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
-	self->txnProcessor = std::shared_ptr<IDDTxnProcessor>(new DDTxnProcessor(cx));
+	self->txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(cx));
 
 	// cx->setOption( FDBDatabaseOptions::LOCATION_CACHE_SIZE, StringRef((uint8_t*)
 	// &SERVER_KNOBS->DD_LOCATION_CACHE_SIZE, 8) ); ASSERT( cx->locationCacheSize ==
@@ -643,7 +644,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			actors.push_back(self->pollMoveKeysLock());
 			actors.push_back(reportErrorsExcept(dataDistributionTracker(self->initData,
-			                                                            cx,
+			                                                            self->txnProcessor,
 			                                                            self->relocationProducer,
 			                                                            self->shardsAffectedByTeamFailure,
 			                                                            self->physicalShardCollection,
@@ -660,7 +661,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
-			actors.push_back(reportErrorsExcept(dataDistributionQueue(cx,
+			actors.push_back(reportErrorsExcept(dataDistributionQueue(self->txnProcessor,
 			                                                          self->relocationProducer,
 			                                                          self->relocationConsumer.getFuture(),
 			                                                          getShardMetrics,
@@ -695,7 +696,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			std::vector<DDTeamCollection*> teamCollectionsPtrs;
 			primaryTeamCollection = makeReference<DDTeamCollection>(
-			    cx,
+			    self->txnProcessor,
 			    self->ddId,
 			    self->lock,
 			    self->relocationProducer,
@@ -716,7 +717,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
 			if (self->configuration.usableRegions > 1) {
 				remoteTeamCollection =
-				    makeReference<DDTeamCollection>(cx,
+				    makeReference<DDTeamCollection>(self->txnProcessor,
 				                                    self->ddId,
 				                                    self->lock,
 				                                    self->relocationProducer,
@@ -898,8 +899,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 				workersMap[worker.interf.address()] = worker.interf;
 			}
 
-			Optional<Value> regionsValue =
-			    wait(tr.get(LiteralStringRef("usable_regions").withPrefix(configKeysPrefix)));
+			Optional<Value> regionsValue = wait(tr.get("usable_regions"_sr.withPrefix(configKeysPrefix)));
 			int usableRegions = 1;
 			if (regionsValue.present()) {
 				usableRegions = atoi(regionsValue.get().toString().c_str());
@@ -934,7 +934,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 			                                  configuration.storageTeamSize - 1) -
 			                         storageFailures;
 			if (*storageFaultTolerance < 0) {
-				CODE_PROBE(true, "Too many failed storage servers to complete snapshot");
+				CODE_PROBE(true, "Too many failed storage servers to complete snapshot", probe::decoration::rare);
 				throw snap_storage_failed();
 			}
 			// tlogs
@@ -955,7 +955,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 			// get coordinators
 			Optional<Value> coordinators = wait(tr.get(coordinatorsKey));
 			if (!coordinators.present()) {
-				CODE_PROBE(true, "Failed to read the coordinatorsKey");
+				CODE_PROBE(true, "Failed to read the coordinatorsKey", probe::decoration::rare);
 				throw operation_failed();
 			}
 			ClusterConnectionString ccs(coordinators.get().toString());

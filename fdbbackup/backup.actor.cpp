@@ -905,12 +905,12 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	SO_END_OF_OPTIONS
 };
 
-const KeyRef exeAgent = LiteralStringRef("backup_agent");
-const KeyRef exeBackup = LiteralStringRef("fdbbackup");
-const KeyRef exeRestore = LiteralStringRef("fdbrestore");
-const KeyRef exeFastRestoreTool = LiteralStringRef("fastrestore_tool"); // must be lower case
-const KeyRef exeDatabaseAgent = LiteralStringRef("dr_agent");
-const KeyRef exeDatabaseBackup = LiteralStringRef("fdbdr");
+const KeyRef exeAgent = "backup_agent"_sr;
+const KeyRef exeBackup = "fdbbackup"_sr;
+const KeyRef exeRestore = "fdbrestore"_sr;
+const KeyRef exeFastRestoreTool = "fastrestore_tool"_sr; // must be lower case
+const KeyRef exeDatabaseAgent = "dr_agent"_sr;
+const KeyRef exeDatabaseBackup = "fdbdr"_sr;
 
 extern const char* getSourceVersion();
 
@@ -1351,7 +1351,7 @@ ProgramExe getProgramType(std::string programExe) {
 	}
 #endif
 	// For debugging convenience, remove .debug suffix if present.
-	if (StringRef(programExe).endsWith(LiteralStringRef(".debug")))
+	if (StringRef(programExe).endsWith(".debug"_sr))
 		programExe = programExe.substr(0, programExe.size() - 6);
 
 	// Check if backup agent
@@ -1856,11 +1856,7 @@ ACTOR Future<Void> submitDBBackup(Database src,
                                   std::string tagName) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
-
-		// Backup everything, if no ranges were specified
-		if (backupRanges.size() == 0) {
-			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-		}
+		ASSERT(!backupRanges.empty());
 
 		wait(backupAgent.submitBackup(
 		    dest, KeyRef(tagName), backupRanges, StopWhenDone::False, StringRef(), StringRef(), LockDB::True));
@@ -1906,6 +1902,7 @@ ACTOR Future<Void> submitBackup(Database db,
                                 int initialSnapshotIntervalSeconds,
                                 int snapshotIntervalSeconds,
                                 Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                bool encryptionEnabled,
                                 std::string tagName,
                                 bool dryRun,
                                 WaitForComplete waitForCompletion,
@@ -1914,11 +1911,7 @@ ACTOR Future<Void> submitBackup(Database db,
                                 IncrementalBackupOnly incrementalBackupOnly) {
 	try {
 		state FileBackupAgent backupAgent;
-
-		// Backup everything, if no ranges were specified
-		if (backupRanges.size() == 0) {
-			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-		}
+		ASSERT(!backupRanges.empty());
 
 		if (dryRun) {
 			state KeyBackedTag tag = makeBackupTag(tagName);
@@ -1965,6 +1958,7 @@ ACTOR Future<Void> submitBackup(Database db,
 			                              snapshotIntervalSeconds,
 			                              tagName,
 			                              backupRanges,
+			                              encryptionEnabled,
 			                              stopWhenDone,
 			                              usePartitionedLog,
 			                              incrementalBackupOnly));
@@ -2018,11 +2012,7 @@ ACTOR Future<Void> switchDBBackup(Database src,
                                   ForceAction forceAction) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
-
-		// Backup everything, if no ranges were specified
-		if (backupRanges.size() == 0) {
-			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-		}
+		ASSERT(!backupRanges.empty());
 
 		wait(backupAgent.atomicSwitchover(dest, KeyRef(tagName), backupRanges, StringRef(), StringRef(), forceAction));
 		printf("The DR on tag `%s' was successfully switched.\n", printable(StringRef(tagName)).c_str());
@@ -2289,9 +2279,7 @@ ACTOR Future<Void> runRestore(Database db,
                               OnlyApplyMutationLogs onlyApplyMutationLogs,
                               InconsistentSnapshotOnly inconsistentSnapshotOnly,
                               Optional<std::string> encryptionKeyFile) {
-	if (ranges.empty()) {
-		ranges.push_back_deep(ranges.arena(), normalKeys);
-	}
+	ASSERT(!ranges.empty());
 
 	if (targetVersion != invalidVersion && !targetTimestamp.empty()) {
 		fprintf(stderr, "Restore target version and target timestamp cannot both be specified\n");
@@ -2372,7 +2360,7 @@ ACTOR Future<Void> runRestore(Database db,
 				fmt::print("Restored to version {}\n", restoredVersion);
 			}
 		} else {
-			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion, ranges));
+			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(targetVersion, db, ranges));
 
 			if (!rset.present()) {
 				fmt::print(stderr,
@@ -2449,8 +2437,8 @@ ACTOR Future<Void> runFastRestoreTool(Database db,
 			                                       dbVersion,
 			                                       LockDB::True,
 			                                       randomUID,
-			                                       LiteralStringRef(""),
-			                                       LiteralStringRef("")));
+			                                       ""_sr,
+			                                       ""_sr));
 			// TODO: Support addPrefix and removePrefix
 			if (waitForDone) {
 				// Wait for parallel restore to finish and unlock DB after that
@@ -2482,7 +2470,7 @@ ACTOR Future<Void> runFastRestoreTool(Database db,
 				restoreVersion = dbVersion;
 			}
 
-			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion));
+			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion, db));
 			if (!rset.present()) {
 				fmt::print(stderr, "Insufficient data to restore to version {}\n", restoreVersion);
 				throw restore_invalid_version();
@@ -2687,7 +2675,8 @@ ACTOR Future<Void> queryBackup(const char* name,
                                Version restoreVersion,
                                std::string originalClusterFile,
                                std::string restoreTimestamp,
-                               Verbose verbose) {
+                               Verbose verbose,
+                               Optional<Database> cx) {
 	state UID operationId = deterministicRandom()->randomUniqueID();
 	state JsonBuilderObject result;
 	state std::string errorMessage;
@@ -2752,7 +2741,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 			                           format("the specified restorable version %lld is not valid", restoreVersion));
 			return Void();
 		}
-		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, keyRangesFilter));
+		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, cx, keyRangesFilter));
 		if (fileSet.present()) {
 			int64_t totalRangeFilesSize = 0, totalLogFilesSize = 0;
 			result["restore_version"] = fileSet.get().targetVersion;
@@ -3089,7 +3078,7 @@ static void addKeyRange(std::string optionValue, Standalone<VectorRef<KeyRangeRe
 Version parseVersion(const char* str) {
 	StringRef s((const uint8_t*)str, strlen(str));
 
-	if (s.endsWith(LiteralStringRef("days")) || s.endsWith(LiteralStringRef("d"))) {
+	if (s.endsWith("days"_sr) || s.endsWith("d"_sr)) {
 		float days;
 		if (sscanf(str, "%f", &days) != 1) {
 			fprintf(stderr, "Could not parse version: %s\n", str);
@@ -3378,6 +3367,8 @@ int main(int argc, char* argv[]) {
 		bool trace = false;
 		bool quietDisplay = false;
 		bool dryRun = false;
+		// TODO (Nim): Set this value when we add optional encrypt_files CLI argument to backup agent start
+		bool encryptionEnabled = true;
 		std::string traceDir = "";
 		std::string traceFormat = "";
 		std::string traceLogGroup;
@@ -3608,7 +3599,7 @@ int main(int argc, char* argv[]) {
 			case OPT_DESTCONTAINER:
 				destinationContainer = args->OptionArg();
 				// If the url starts with '/' then prepend "file://" for backwards compatibility
-				if (StringRef(destinationContainer).startsWith(LiteralStringRef("/")))
+				if (StringRef(destinationContainer).startsWith("/"_sr))
 					destinationContainer = std::string("file://") + destinationContainer;
 				modifyOptions.destURL = destinationContainer;
 				break;
@@ -3654,7 +3645,7 @@ int main(int argc, char* argv[]) {
 			case OPT_RESTORECONTAINER:
 				restoreContainer = args->OptionArg();
 				// If the url starts with '/' then prepend "file://" for backwards compatibility
-				if (StringRef(restoreContainer).startsWith(LiteralStringRef("/")))
+				if (StringRef(restoreContainer).startsWith("/"_sr))
 					restoreContainer = std::string("file://") + restoreContainer;
 				break;
 			case OPT_DESCRIBE_DEEP:
@@ -3945,6 +3936,12 @@ int main(int argc, char* argv[]) {
 			return result.present();
 		};
 
+		// The fastrestore tool does not yet support multiple ranges and is incompatible with tenants
+		// or other features that back up data in the system keys
+		if (backupKeys.empty() && programExe != ProgramExe::FASTRESTORE_TOOL) {
+			addDefaultBackupRanges(backupKeys);
+		}
+
 		switch (programExe) {
 		case ProgramExe::AGENT:
 			if (!initCluster())
@@ -3964,6 +3961,7 @@ int main(int argc, char* argv[]) {
 				                           initialSnapshotIntervalSeconds,
 				                           snapshotIntervalSeconds,
 				                           backupKeys,
+				                           encryptionEnabled,
 				                           tagName,
 				                           dryRun,
 				                           waitForDone,
@@ -4084,7 +4082,8 @@ int main(int argc, char* argv[]) {
 				                          restoreVersion,
 				                          restoreClusterFileOrig,
 				                          restoreTimestamp,
-				                          Verbose{ !quietDisplay }));
+				                          Verbose{ !quietDisplay },
+				                          db));
 				break;
 
 			case BackupType::DUMP:
@@ -4323,19 +4322,19 @@ int main(int argc, char* argv[]) {
 				char* demangled = abi::__cxa_demangle(i->first, NULL, NULL, NULL);
 				if (demangled) {
 					s = demangled;
-					if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))
-						s = s.substr(LiteralStringRef("(anonymous namespace)::").size());
+					if (StringRef(s).startsWith("(anonymous namespace)::"_sr))
+						s = s.substr("(anonymous namespace)::"_sr.size());
 					free(demangled);
 				} else
 					s = i->first;
 #else
 				s = i->first;
-				if (StringRef(s).startsWith(LiteralStringRef("class `anonymous namespace'::")))
-					s = s.substr(LiteralStringRef("class `anonymous namespace'::").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("class ")))
-					s = s.substr(LiteralStringRef("class ").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
-					s = s.substr(LiteralStringRef("struct ").size());
+				if (StringRef(s).startsWith("class `anonymous namespace'::"_sr))
+					s = s.substr("class `anonymous namespace'::"_sr.size());
+				else if (StringRef(s).startsWith("class "_sr))
+					s = s.substr("class "_sr.size());
+				else if (StringRef(s).startsWith("struct "_sr))
+					s = s.substr("struct "_sr.size());
 #endif
 
 				typeNames.emplace_back(s, i->first);

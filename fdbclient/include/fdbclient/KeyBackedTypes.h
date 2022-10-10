@@ -29,6 +29,7 @@
 #include "fdbclient/GenericTransactionHelper.h"
 #include "fdbclient/Subspace.h"
 #include "flow/ObjectSerializer.h"
+#include "flow/Platform.h"
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
 
@@ -303,6 +304,14 @@ public:
 	template <class Transaction>
 	void atomicOp(Transaction tr, T const& val, MutationRef::Type type) {
 		tr->atomicOp(key, BinaryWriter::toValue<T>(val, Unversioned()), type);
+	}
+
+	template <class Transaction>
+	void setVersionstamp(Transaction tr, T const& val, int offset) {
+		tr->atomicOp(
+		    key,
+		    BinaryWriter::toValue<T>(val, Unversioned()).withSuffix(StringRef(reinterpret_cast<uint8_t*>(&offset), 4)),
+		    MutationRef::SetVersionstampedValue);
 	}
 
 	template <class Transaction>

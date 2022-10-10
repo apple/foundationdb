@@ -537,10 +537,10 @@ void initHelp() {
 	    CommandHelp("getversion",
 	                "Fetch the current read version",
 	                "Displays the current read version of the database or currently running transaction.");
-	helpMap["quota"] =
-	    CommandHelp("quota",
-	                "quota [get <tag> [reserved|total] [read|write]|set <tag> [reserved|total] [read|write] <value>]",
-	                "Get or modify the throughput quota for the specified tag.");
+	helpMap["quota"] = CommandHelp("quota",
+	                               "quota [get <tag> [reserved_throughput|total_throughput] | set <tag> "
+	                               "[reserved_throughput|total_throughput] <value>]",
+	                               "Get or modify the throughput quota for the specified tag.");
 	helpMap["reset"] =
 	    CommandHelp("reset",
 	                "reset the current transaction",
@@ -654,7 +654,7 @@ ACTOR Future<Void> checkStatus(Future<Void> f,
 		StatusObject _s = wait(StatusClient::statusFetcher(localDb));
 		s = _s;
 	} else {
-		state ThreadFuture<Optional<Value>> statusValueF = tr->get(LiteralStringRef("\xff\xff/status/json"));
+		state ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
 		Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
 		if (!statusValue.present()) {
 			fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
@@ -698,7 +698,7 @@ ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens) {
 	for (int i = 1; i < tokens.size(); i++) {
 		snapCmd = snapCmd.withSuffix(tokens[i]);
 		if (i != tokens.size() - 1) {
-			snapCmd = snapCmd.withSuffix(LiteralStringRef(" "));
+			snapCmd = snapCmd.withSuffix(" "_sr);
 		}
 	}
 	try {
@@ -1328,13 +1328,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 				}
 
 				if (tokencmp(tokens[0], "fileconfigure")) {
-					if (tokens.size() == 2 || (tokens.size() == 3 && (tokens[1] == LiteralStringRef("new") ||
-					                                                  tokens[1] == LiteralStringRef("FORCE")))) {
-						bool _result =
-						    wait(makeInterruptable(fileConfigureCommandActor(db,
-						                                                     tokens.back().toString(),
-						                                                     tokens[1] == LiteralStringRef("new"),
-						                                                     tokens[1] == LiteralStringRef("FORCE"))));
+					if (tokens.size() == 2 ||
+					    (tokens.size() == 3 && (tokens[1] == "new"_sr || tokens[1] == "FORCE"_sr))) {
+						bool _result = wait(makeInterruptable(fileConfigureCommandActor(
+						    db, tokens.back().toString(), tokens[1] == "new"_sr, tokens[1] == "FORCE"_sr)));
 						if (!_result)
 							is_error = true;
 					} else {
@@ -1388,6 +1385,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 
 				if (tokencmp(tokens[0], "blobrange")) {
 					bool _result = wait(makeInterruptable(blobRangeCommandActor(localDb, tenantEntry, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "blobkey")) {
+					bool _result = wait(makeInterruptable(blobKeyCommandActor(localDb, tenantEntry, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -1577,6 +1581,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 				if (tokencmp(tokens[0], "consistencycheck")) {
 					getTransaction(db, managementTenant, tr, options, intrans);
 					bool _result = wait(makeInterruptable(consistencyCheckCommandActor(tr, tokens, intrans)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "consistencyscan")) {
+					bool _result = wait(makeInterruptable(consistencyScanCommandActor(localDb, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -1874,48 +1885,32 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "createtenant")) {
-					bool _result = wait(makeInterruptable(createTenantCommandActor(db, tokens)));
-					if (!_result)
+				if (tokencmp(tokens[0], "tenant")) {
+					bool _result = wait(makeInterruptable(tenantCommand(db, tokens)));
+					if (!_result) {
 						is_error = true;
-					continue;
-				}
-
-				if (tokencmp(tokens[0], "deletetenant")) {
-					bool _result = wait(makeInterruptable(deleteTenantCommandActor(db, tokens)));
-					if (!_result)
-						is_error = true;
-					else if (tenantName.present() && tokens[1] == tenantName.get()) {
+					} else if (tokens.size() >= 3 && tenantName.present() && tokencmp(tokens[1], "delete") &&
+					           tokens[2] == tenantName.get()) {
 						printAtCol("WARNING: the active tenant was deleted. Use the `usetenant' or `defaulttenant' "
 						           "command to choose a new tenant.\n",
 						           80);
 					}
+
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "listtenants")) {
-					bool _result = wait(makeInterruptable(listTenantsCommandActor(db, tokens)));
-					if (!_result)
+				if (tokencmp(tokens[0], "createtenant") || tokencmp(tokens[0], "deletetenant") ||
+				    tokencmp(tokens[0], "listtenants") || tokencmp(tokens[0], "gettenant") ||
+				    tokencmp(tokens[0], "configuretenant") || tokencmp(tokens[0], "renametenant")) {
+					bool _result = wait(makeInterruptable(tenantCommandForwarder(db, tokens)));
+					if (!_result) {
 						is_error = true;
+					}
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "gettenant")) {
-					bool _result = wait(makeInterruptable(getTenantCommandActor(db, tokens)));
-					if (!_result)
-						is_error = true;
-					continue;
-				}
-
-				if (tokencmp(tokens[0], "configuretenant")) {
-					bool _result = wait(makeInterruptable(configureTenantCommandActor(db, tokens)));
-					if (!_result)
-						is_error = true;
-					continue;
-				}
-
-				if (tokencmp(tokens[0], "renametenant")) {
-					bool _result = wait(makeInterruptable(renameTenantCommandActor(db, tokens)));
+				if (tokencmp(tokens[0], "tenantgroup")) {
+					bool _result = wait(makeInterruptable(tenantGroupCommand(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -2065,9 +2060,7 @@ const char* checkTlsConfigAgainstCoordAddrs(const ClusterConnectionString& ccs) 
 			tlsAddrs++;
 		totalAddrs++;
 	}
-	if (tlsConfigured && tlsAddrs == 0) {
-		return "fdbcli is configured with TLS, but none of the coordinators have TLS addresses.";
-	} else if (!tlsConfigured && tlsAddrs == totalAddrs) {
+	if (!tlsConfigured && tlsAddrs == totalAddrs) {
 		return "fdbcli is not configured with TLS, but all of the coordinators have TLS addresses.";
 	} else {
 		return nullptr;

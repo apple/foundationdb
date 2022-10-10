@@ -698,8 +698,10 @@ ThreadFuture<Version> DLDatabase::verifyBlobRange(const KeyRangeRef& keyRange, O
 		return unsupported_operation();
 	}
 
+	Version readVersion = version.present() ? version.get() : latestVersion;
+
 	FdbCApi::FDBFuture* f = api->databaseVerifyBlobRange(
-	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), version);
+	    db, keyRange.begin.begin(), keyRange.begin.size(), keyRange.end.begin(), keyRange.end.size(), readVersion);
 
 	return toThreadFuture<Version>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		Version version = invalidVersion;
@@ -1459,7 +1461,10 @@ Optional<TenantName> MultiVersionTransaction::getTenant() {
 // Waits for the specified duration and signals the assignment variable with a timed out error
 // This will be canceled if a new timeout is set, in which case the tsav will not be signaled.
 ACTOR Future<Void> timeoutImpl(Reference<ThreadSingleAssignmentVar<Void>> tsav, double duration) {
-	wait(delay(duration));
+	state double endTime = now() + duration;
+	while (now() < endTime) {
+		wait(delayUntil(std::min(endTime + 0.0001, now() + CLIENT_KNOBS->TRANSACTION_TIMEOUT_DELAY_INTERVAL)));
+	}
 
 	tsav->trySendError(transaction_timed_out());
 	return Void();
@@ -1499,14 +1504,17 @@ void MultiVersionTransaction::setTimeout(Optional<StringRef> value) {
 
 	{ // lock scope
 		ThreadSpinLockHolder holder(timeoutLock);
-
-		Reference<ThreadSingleAssignmentVar<Void>> tsav = timeoutTsav;
-		ThreadFuture<Void> newTimeout = onMainThread([transactionStartTime, tsav, timeoutDuration]() {
-			return timeoutImpl(tsav, timeoutDuration - std::max(0.0, now() - transactionStartTime));
-		});
-
 		prevTimeout = currentTimeout;
-		currentTimeout = newTimeout;
+
+		if (timeoutDuration > 0) {
+			Reference<ThreadSingleAssignmentVar<Void>> tsav = timeoutTsav;
+			ThreadFuture<Void> newTimeout = onMainThread([transactionStartTime, tsav, timeoutDuration]() {
+				return timeoutImpl(tsav, timeoutDuration - std::max(0.0, now() - transactionStartTime));
+			});
+			currentTimeout = newTimeout;
+		} else {
+			currentTimeout = ThreadFuture<Void>();
+		}
 	}
 
 	// Cancel the previous timeout now that we have a new one. This means that changing the timeout
@@ -1575,6 +1583,9 @@ void MultiVersionTransaction::reset() {
 
 MultiVersionTransaction::~MultiVersionTransaction() {
 	timeoutTsav->trySendError(transaction_cancelled());
+	if (currentTimeout.isValid()) {
+		currentTimeout.cancel();
+	}
 }
 
 bool MultiVersionTransaction::isValid() {
@@ -2246,7 +2257,7 @@ void validateOption(Optional<StringRef> value, bool canBePresent, bool canBeAbse
 
 void MultiVersionApi::disableMultiVersionClientApi() {
 	MutexHolder holder(lock);
-	if (networkStartSetup || localClientDisabled) {
+	if (networkStartSetup || localClientDisabled || disableBypass) {
 		throw invalid_option();
 	}
 
@@ -2453,6 +2464,13 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		externalClient = true;
 		bypassMultiClientApi = true;
 		forwardOption = true;
+	} else if (option == FDBNetworkOptions::DISABLE_CLIENT_BYPASS) {
+		MutexHolder holder(lock);
+		ASSERT(!networkStartSetup);
+		if (bypassMultiClientApi) {
+			throw invalid_option();
+		}
+		disableBypass = true;
 	} else if (option == FDBNetworkOptions::CLIENT_THREADS_PER_VERSION) {
 		MutexHolder holder(lock);
 		validateOption(value, true, false, false);
@@ -2551,7 +2569,7 @@ void MultiVersionApi::setupNetwork() {
 
 		networkStartSetup = true;
 
-		if (externalClients.empty()) {
+		if (externalClients.empty() && !disableBypass) {
 			bypassMultiClientApi = true; // SOMEDAY: we won't be able to set this option once it becomes possible to add
 			                             // clients after setupNetwork is called
 		}
@@ -2932,8 +2950,8 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 
 MultiVersionApi::MultiVersionApi()
   : callbackOnMainThread(true), localClientDisabled(false), networkStartSetup(false), networkSetup(false),
-    bypassMultiClientApi(false), externalClient(false), apiVersion(0), threadCount(0), tmpDir("/tmp"),
-    traceShareBaseNameAmongThreads(false), envOptionsLoaded(false) {}
+    disableBypass(false), bypassMultiClientApi(false), externalClient(false), apiVersion(0), threadCount(0),
+    tmpDir("/tmp"), traceShareBaseNameAmongThreads(false), envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
 
