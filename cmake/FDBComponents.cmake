@@ -229,12 +229,7 @@ set(COROUTINE_IMPL ${DEFAULT_COROUTINE_IMPL} CACHE STRING "Which coroutine imple
 
 set(BUILD_AWS_BACKUP OFF CACHE BOOL "Build AWS S3 SDK backup client")
 if (BUILD_AWS_BACKUP)
-  if (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
-    set(WITH_AWS_BACKUP ON)
-  else()
-    message(WARNING "BUILD_AWS_BACKUP set but ignored ${CMAKE_SYSTEM_PROCESSOR} is not supported yet")
-    set(WITH_AWS_BACKUP OFF)
-  endif()
+  set(WITH_AWS_BACKUP ON)
 else()
   set(WITH_AWS_BACKUP OFF)
 endif()
