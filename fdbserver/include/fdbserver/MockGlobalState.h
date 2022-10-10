@@ -73,6 +73,8 @@ public:
 	decltype(serverKeys)::Ranges getAllRanges() { return serverKeys.ranges(); }
 
 	bool allShardStatusEqual(KeyRangeRef range, MockShardStatus status);
+
+	void setShardStatus(KeyRangeRef range, MockShardStatus status);
 };
 
 class MockGlobalState {

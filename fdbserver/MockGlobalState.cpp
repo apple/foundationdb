@@ -31,6 +31,8 @@ bool MockStorageServer::allShardStatusEqual(KeyRangeRef range, MockShardStatus s
 	return true;
 }
 
+void MockStorageServer::setShardStatus(KeyRangeRef range, MockShardStatus status) {}
+
 void MockGlobalState::initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf, uint64_t defaultDiskSpace) {
 	ASSERT(conf.storageTeamSize > 0);
 	configuration = conf;

@@ -681,6 +681,36 @@ Future<std::vector<ProcessData>> DDTxnProcessor::getWorkers() const {
 	return ::getWorkers(cx);
 }
 
+Future<Void> DDTxnProcessor::rawStartMovement(MoveKeysParams& params,
+                                              std::map<UID, StorageServerInterface>& tssMapping) {
+	UNREACHABLE();
+}
+
+Future<Void> DDTxnProcessor::rawFinishMovement(MoveKeysParams& params,
+                                               const std::map<UID, StorageServerInterface>& tssMapping) {
+	UNREACHABLE();
+}
+
+struct DDMockTxnProcessorImpl {
+	ACTOR static Future<Void> moveKeys(DDMockTxnProcessor* self, MoveKeysParams params) {
+		state std::map<UID, StorageServerInterface> tssMapping; // Not used at all
+		Future<Void> startF = self->rawStartMovement(params, tssMapping);
+		ASSERT(startF.isReady());
+		ASSERT(tssMapping.empty());
+
+		if (BUGGIFY_WITH_PROB(0.5)) {
+			wait(delayJittered(5.0));
+		}
+
+		Future<Void> finishF = self->rawFinishMovement(params, tssMapping);
+		ASSERT(finishF.isReady());
+
+		if (!params.dataMovementComplete.isSet())
+			params.dataMovementComplete.send(Void());
+		return Void();
+	}
+};
+
 Future<ServerWorkerInfos> DDMockTxnProcessor::getServerListAndProcessClasses() {
 	ServerWorkerInfos res;
 	for (auto& [_, mss] : mgs->allServers) {
@@ -819,7 +849,9 @@ void DDMockTxnProcessor::setupMockGlobalState(Reference<InitialDataDistribution>
 
 // FIXME: finish moveKeys implementation
 Future<Void> DDMockTxnProcessor::moveKeys(const MoveKeysParams& params) {
-	UNREACHABLE();
+	// Not support location metadata yet
+	ASSERT(!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+	return DDMockTxnProcessorImpl::moveKeys(this, params);
 }
 
 // FIXME: finish implementation
@@ -850,4 +882,23 @@ Future<std::pair<Optional<StorageMetrics>, int>> DDMockTxnProcessor::waitStorage
 // FIXME: finish implementation
 Future<std::vector<ProcessData>> DDMockTxnProcessor::getWorkers() const {
 	return Future<std::vector<ProcessData>>();
+}
+
+Future<Void> DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params,
+                                                  std::map<UID, StorageServerInterface>& tssMapping) {
+	std::vector<ShardsAffectedByTeamFailure::Team> destTeams;
+	destTeams.emplace_back(params.destinationTeam, true);
+	mgs->shardMapping->moveShard(params.keys, destTeams);
+
+	for (auto& id : params.destinationTeam) {
+		mgs->allServers.at(id).setShardStatus(params.keys, MockShardStatus::INFLIGHT);
+	}
+	return Void();
+}
+
+Future<Void> DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
+                                                   const std::map<UID, StorageServerInterface>& tssMapping) {
+	// get source and dest teams
+	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsFor(params.keys);
+	return Void();
 }

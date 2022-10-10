@@ -112,6 +112,11 @@ public:
 	                                         const MoveKeysLock& lock,
 	                                         const DDEnabledState* ddEnabledState) const = 0;
 
+	virtual Future<Void> rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) = 0;
+
+	virtual Future<Void> rawFinishMovement(MoveKeysParams& params,
+	                                    const std::map<UID, StorageServerInterface>& tssMapping) = 0;
+
 	virtual Future<Void> moveKeys(const MoveKeysParams& params) = 0;
 
 	virtual Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
@@ -198,6 +203,11 @@ public:
 		return ::removeStorageServer(cx, serverID, tssPairID, lock, ddEnabledState);
 	}
 
+	Future<Void> rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) override;
+
+	Future<Void> rawFinishMovement(MoveKeysParams& params,
+	                            const std::map<UID, StorageServerInterface>& tssMapping) override;
+
 	Future<Void> moveKeys(const MoveKeysParams& params) override { return ::moveKeys(cx, params); }
 
 	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
@@ -256,6 +266,11 @@ public:
 
 	// test only
 	void setupMockGlobalState(Reference<InitialDataDistribution> initData);
+
+	Future<Void> rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) override;
+
+	Future<Void> rawFinishMovement(MoveKeysParams& params,
+	                            const std::map<UID, StorageServerInterface>& tssMapping) override;
 
 	Future<Void> moveKeys(const MoveKeysParams& params) override;
 
