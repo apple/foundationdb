@@ -286,25 +286,30 @@ const KeyRangeRef writeConflictRangeKeysRange = KeyRangeRef("\xff\xff/transactio
 
 const KeyRef clusterIdKey = "\xff/clusterId"_sr;
 
-const KeyRangeRef auditRange = KeyRangeRef("\xff/audit/"_sr, "\xff/audit0"_sr);
-const KeyRef auditPrefix = auditRange.begin;
+extern const KeyRangeRef audits = KeyRangeRef("\xff/audits/"_sr, "\xff/audits0"_sr);
+extern const KeyRef auditPrefix = audits.begin;
+extern const KeyRangeRef auditRanges= KeyRangeRef("\xff/auditRanges/"_sr, "\xff/auditRanges0"_sr);
+extern const KeyRef auditRangePrefix = auditRanges.begin;
 
-const Key auditRangeKey(const AuditType type, const UID& auditId, const KeyRef& key) {
+const Key auditKey(const UID& auditId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(auditPrefix);
-	wr << static_cast<uint8_t>(type);
-	wr.serializeBytes("/"_sr);
+	wr << auditId;
+	return wr.toValue();
+}
+
+const Key auditRangeKey(const UID& auditId, const KeyRef& key) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(auditRangePrefix);
 	wr << auditId;
 	wr.serializeBytes("/"_sr);
 	wr.serializeBytes(key);
 	return wr.toValue();
 }
 
-const Key auditRangePrefix(const AuditType type, const UID& auditId) {
+const Key auditRangePrefixFor(const UID& auditId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(auditPrefix);
-	wr << static_cast<uint8_t>(type);
-	wr.serializeBytes("/"_sr);
 	wr << auditId;
 	wr.serializeBytes("/"_sr);
 	return wr.toValue();

@@ -18,17 +18,25 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_AUDITUTILS_ACTOR_H
-#define FDBCLIENT_AUDITUTILS_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_SERVER_AUDITUTILS_ACTOR_G_H)
+#define FDBSERVER_SERVER_AUDITUTILS_ACTOR_G_H
+#include "fdbserver/AuditUtils.actor.g.h"
+#elif !defined(FDBSERVER_SERVER_AUDITUTILS_ACTOR_H)
+#define FDBSERVER_SERVER_AUDITUTILS_ACTOR_H
 #pragma once
 
 #include "fdbclient/Audit.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/fdbrpc.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
-ACTOR Future<Void> persistAuditStorageState(Key key, AuditStorageState auditState);
+ACTOR Future<Void> persistAuditStorage(Database cx, AuditStorageState auditState);
+ACTOR Future<AuditStorageState> getAuditStorage(Database cx, UID id);
+
+ACTOR Future<Void> persistAuditStorageMap(Database cx, AuditStorageState auditState);
+ACTOR Future<std::vector<AuditStorageState>> getAuditStorageFroRange(Database cx, UID id, KeyRange range);
 
 #include "flow/unactorcompiler.h"
 #endif
