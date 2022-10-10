@@ -100,4 +100,6 @@ public:
 public:
 	void setQuota(TransactionTagRef, ThrottleApi::TagQuotaValue const&);
 	void removeQuota(TransactionTagRef);
+	void removeExpiredTags();
+	uint32_t tagsTracked() const;
 };
