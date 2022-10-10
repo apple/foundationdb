@@ -299,7 +299,7 @@ struct GetReadVersionRequest : TimedRequest {
 		}
 	}
 
-	bool verify() const { return true; }
+	bool verify() const { return !(flags & PRIORITY_SYSTEM_IMMEDIATE); }
 
 	bool operator<(GetReadVersionRequest const& rhs) const { return priority < rhs.priority; }
 
