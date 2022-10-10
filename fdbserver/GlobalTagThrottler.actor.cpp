@@ -286,7 +286,7 @@ class GlobalTagThrottlerImpl {
 		for (const auto& t : tagsAffectingStorageServer) {
 			auto const tQuota = getQuota(t, LimitType::TOTAL);
 			sumQuota += tQuota.orDefault(0);
-			if (tag.compare(tag) == 0) {
+			if (t.compare(tag) == 0) {
 				tagQuota = tQuota.orDefault(0);
 			}
 		}
