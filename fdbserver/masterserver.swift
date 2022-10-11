@@ -179,15 +179,6 @@ public struct MasterDataActorCxx {
     }
 }
 
-// FIXME: remove in favor of MasterDataActor_getVersion.
-@_expose(Cxx, "getVersion")
-public func MasterDataActor_getVersion(
-        target myself: MasterDataActorCxx,
-        req: GetCommitVersionRequest,
-        result promise: PromiseVoid) {
-    myself.getVersion(req: req, result: promise)
-}
-
 // FIXME: remove once MasterData is FRT.
 extension MasterDataSwiftReference {
     var version: Version {

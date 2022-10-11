@@ -67,7 +67,7 @@ ACTOR Future<Void> getVersionSwift(Reference<MasterData> self, GetCommitVersionR
 
   // TODO: we likely can pre-bake something to make these calls easier, without the explicit Promise creation
   auto promise = Promise<Void>();
-  getVersion(masterDataActor, req, /*result=*/promise);
+  masterDataActor.getVersion(req, /*result=*/promise);
   wait(promise.getFuture());
   return Void();
 }
