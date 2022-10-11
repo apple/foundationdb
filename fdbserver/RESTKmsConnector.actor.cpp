@@ -145,6 +145,7 @@ struct RESTKmsConnectorCtx : public ReferenceCounted<RESTKmsConnectorCtx> {
 	double lastKmsUrlsRefreshTs;
 	RESTClient restClient;
 	std::unordered_map<std::string, ValidationTokenCtx> validationTokens;
+	PromiseStream<Future<Void>> addActor;
 
 	RESTKmsConnectorCtx() : uid(deterministicRandom()->randomUniqueID()), lastKmsUrlsRefreshTs(0) {}
 	explicit RESTKmsConnectorCtx(const UID& id) : uid(id), lastKmsUrlsRefreshTs(0) {}
@@ -606,17 +607,22 @@ Future<Void> fetchEncryptionKeys_impl(Reference<RESTKmsConnectorCtx> ctx,
 	throw encrypt_keys_fetch_failed();
 }
 
-ACTOR Future<KmsConnLookupEKsByKeyIdsRep> fetchEncryptionKeysByKeyIds(Reference<RESTKmsConnectorCtx> ctx,
-                                                                      KmsConnLookupEKsByKeyIdsReq req) {
+ACTOR Future<Void> fetchEncryptionKeysByKeyIds(Reference<RESTKmsConnectorCtx> ctx, KmsConnLookupEKsByKeyIdsReq req) {
 	state KmsConnLookupEKsByKeyIdsRep reply;
-	bool refreshKmsUrls = shouldRefreshKmsUrls(ctx);
-	std::string requestBody;
+	try {
+		bool refreshKmsUrls = shouldRefreshKmsUrls(ctx);
+		StringRef requestBodyRef = getEncryptKeysByKeyIdsRequestBody(ctx, req, refreshKmsUrls, req.arena);
 
-	StringRef requestBodyRef = getEncryptKeysByKeyIdsRequestBody(ctx, req, refreshKmsUrls, req.arena);
-
-	wait(fetchEncryptionKeys_impl(ctx, requestBodyRef, &reply.arena, &reply.cipherKeyDetails));
-
-	return reply;
+		wait(fetchEncryptionKeys_impl(ctx, requestBodyRef, &reply.arena, &reply.cipherKeyDetails));
+		req.reply.send(reply);
+	} catch (Error& e) {
+		TraceEvent("LookupEKsByKeyIds_Failed", ctx->uid).error(e);
+		if (!canReplyWith(e)) {
+			throw e;
+		}
+		req.reply.sendError(e);
+	}
+	return Void();
 }
 
 StringRef getEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
@@ -696,15 +702,40 @@ StringRef getEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ct
 	return ref;
 }
 
-ACTOR Future<KmsConnLookupEKsByDomainIdsRep> fetchEncryptionKeysByDomainIds(Reference<RESTKmsConnectorCtx> ctx,
-                                                                            KmsConnLookupEKsByDomainIdsReq req) {
+ACTOR Future<Void> fetchEncryptionKeysByDomainIds(Reference<RESTKmsConnectorCtx> ctx,
+                                                  KmsConnLookupEKsByDomainIdsReq req) {
 	state KmsConnLookupEKsByDomainIdsRep reply;
-	bool refreshKmsUrls = shouldRefreshKmsUrls(ctx);
-	StringRef requestBodyRef = getEncryptKeysByDomainIdsRequestBody(ctx, req, refreshKmsUrls, req.arena);
+	try {
+		bool refreshKmsUrls = shouldRefreshKmsUrls(ctx);
+		StringRef requestBodyRef = getEncryptKeysByDomainIdsRequestBody(ctx, req, refreshKmsUrls, req.arena);
 
-	wait(fetchEncryptionKeys_impl(ctx, requestBodyRef, &reply.arena, &reply.cipherKeyDetails));
+		wait(fetchEncryptionKeys_impl(ctx, requestBodyRef, &reply.arena, &reply.cipherKeyDetails));
+		req.reply.send(reply);
+	} catch (Error& e) {
+		TraceEvent("LookupEKsByDomainIds_Failed", ctx->uid).error(e);
+		if (!canReplyWith(e)) {
+			throw e;
+		}
+		byDomainIdReq.reply.sendError(e);
+	}
+	return Void();
+}
 
-	return reply;
+ACTOR Future<KmsConnLookupEKsByDomainIdsRep> fetchBlobMetadata(Reference<RESTKmsConnectorCtx> ctx,
+                                                               KmsConnLookupEKsByDomainIdsReq req) {
+	state KmsConnLookupEKsByDomainIdsRep reply;
+	try {
+		// TODO: implement!
+		TraceEvent(SevWarn, "RESTKMSBlobMetadataNotImplemented!", interf.id());
+		req.reply.sendError(not_implemented());
+	} catch (Error& e) {
+		TraceEvent("LookupBlobMetadata_Failed", ctx->uid).error(e);
+		if (!canReplyWith(e)) {
+			throw e;
+		}
+		byDomainIdReq.reply.sendError(e);
+	}
+	return Void();
 }
 
 ACTOR Future<Void> procureValidationTokensFromFiles(Reference<RESTKmsConnectorCtx> ctx, std::string details) {
@@ -812,6 +843,7 @@ ACTOR Future<Void> procureValidationTokens(Reference<RESTKmsConnectorCtx> ctx) {
 
 ACTOR Future<Void> connectorCore_impl(KmsConnectorInterface interf) {
 	state Reference<RESTKmsConnectorCtx> self = makeReference<RESTKmsConnectorCtx>(interf.id());
+	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 
 	TraceEvent("RESTKmsConnector_Init", self->uid).log();
 
@@ -821,40 +853,17 @@ ACTOR Future<Void> connectorCore_impl(KmsConnectorInterface interf) {
 	loop {
 		choose {
 			when(KmsConnLookupEKsByKeyIdsReq req = waitNext(interf.ekLookupByIds.getFuture())) {
-				state KmsConnLookupEKsByKeyIdsReq byKeyIdReq = req;
-				state KmsConnLookupEKsByKeyIdsRep byKeyIdResp;
-				try {
-					KmsConnLookupEKsByKeyIdsRep _rByKeyId = wait(fetchEncryptionKeysByKeyIds(self, byKeyIdReq));
-					byKeyIdResp = _rByKeyId;
-					byKeyIdReq.reply.send(byKeyIdResp);
-				} catch (Error& e) {
-					TraceEvent("LookupEKsByKeyIds_Failed", self->uid).error(e);
-					if (!canReplyWith(e)) {
-						throw e;
-					}
-					byKeyIdReq.reply.sendError(e);
-				}
+				self->addActor.send(fetchEncryptionKeysByKeyIds(self, req));
 			}
 			when(KmsConnLookupEKsByDomainIdsReq req = waitNext(interf.ekLookupByDomainIds.getFuture())) {
-				state KmsConnLookupEKsByDomainIdsReq byDomainIdReq = req;
-				state KmsConnLookupEKsByDomainIdsRep byDomainIdResp;
-				try {
-					KmsConnLookupEKsByDomainIdsRep _rByDomainId =
-					    wait(fetchEncryptionKeysByDomainIds(self, byDomainIdReq));
-					byDomainIdResp = _rByDomainId;
-					byDomainIdReq.reply.send(byDomainIdResp);
-				} catch (Error& e) {
-					TraceEvent("LookupEKsByDomainIds_Failed", self->uid).error(e);
-					if (!canReplyWith(e)) {
-						throw e;
-					}
-					byDomainIdReq.reply.sendError(e);
-				}
+				self->addActor.send(fetchEncryptionKeysByDomainIds(self, req));
 			}
 			when(KmsConnBlobMetadataReq req = waitNext(interf.blobMetadataReq.getFuture())) {
-				// TODO: implement!
-				TraceEvent(SevWarn, "RESTKMSBlobMetadataNotImplemented!", interf.id());
-				req.reply.sendError(not_implemented());
+				self->addActor.send(fetchBlobMetadata(self, req));
+			}
+			when(wait(collection)) {
+				// this should throw an error, not complete
+				ASSERT(false);
 			}
 		}
 	}
