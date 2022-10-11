@@ -39,13 +39,15 @@ ${protocol_version}(${n (1 byte)}${idempotency_id (n bytes)}${low_order_byte_of_
 
 The batch index for each idempotency id can be reconstructed from the high order byte and low order bytes stored in the key and value, respectively. This is necessary for an "unknown_committed" transaction to recover their full version stamp. Batch index is a `short int`, i.e. 2 bytes.
 
-# Cleaner worker
+# Cleaning up old idempotency ids
 
-The cluster would recruit a single stateless process to serve as the idempotency id cleaner, and they would simply perform range clears at the beginning of the `\xff\x02/idmp/` keyspace according to the configured expiry. The cleaner worker would update a key `\xff\x02/idmpExpiredVersion` so that clients could report a non-retriable error that they've been in-flight for longer than the expiry.
-
-After reporting a successful commit, clients will send RPCs to the cleaner indicating that this idempotency id is no longer necessary. Once all idempotency ids in a value are no longer necessary, the cleaner may clear that value's key.
-
-This may be a bottleneck and is the main reason why I'm doing disabled by default an intermediate goal.
+After learning the result of an attempt to commit a transaction with an
+idempotency id, the client may inform the cluster that it's no longer interested
+in that id and the cluster can reclaim the space used to store the idempotency
+id. The happy-path reply to a CommitTransactionRequest will say which proxy this
+request should be sent to, and all idempotency ids for a database key will be
+sent to the same proxy so that it can clear the key once it receives all of
+them. The first proxy will also periodically clean up the oldest idempotency ids, based on a policy determined by two knobs. One knob will control the minimum lifetime of an idempotency id (i.e. don't delete anything younger than 1 day), and the other will control the target byte size of the idempotency keys (e.g. keep 100 MB of idempotency keys around).
 
 # Commit protocol
 
@@ -54,6 +56,8 @@ The basic change will be that a commit future will not become ready until the cl
 The idempotency id will be automatically added to both the read conflict range and the write conflict range, before makeSelfConflicting is called so that we don't duplicate that work. We can reuse the `\xff/SC/` self-conflicting key space here.
 
 ## Did I already commit?
+
+The first version of this scans the keys in the idmp key range to check for the idempotency ids. The plan for the next version is the following:
 
 Storage servers would have a new endpoint that clients can use to ask if the transaction for an idempotency id already committed. Clients would need to check every possible shard that their idempotency id may have ended up in.
 
@@ -69,7 +73,6 @@ If a transaction learns that it has been in-flight so long that its idempotency 
 
 - Additional storage space on the cluster. This can be controlled directly via an idempotency id target bytes knob/config.
 - Potential write hot spot.
-- Cleaner is a potential bottleneck, since all committed transactions need to send an rpc to it.
 
 # Multi-version client
 
