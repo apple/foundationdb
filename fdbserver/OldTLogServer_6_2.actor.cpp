@@ -156,7 +156,7 @@ private:
 			Standalone<StringRef> h = wait(self->queue->readNext(sizeof(uint32_t)));
 			if (h.size() != sizeof(uint32_t)) {
 				if (h.size()) {
-					CODE_PROBE(true, "Zero fill within size field");
+					CODE_PROBE(true, "Zero fill within size field", probe::decoration::rare);
 					int payloadSize = 0;
 					memcpy(&payloadSize, h.begin(), h.size());
 					zeroFillSize = sizeof(uint32_t) - h.size(); // zero fill the size itself
@@ -733,7 +733,7 @@ ACTOR Future<Void> tLogLock(TLogData* self, ReplyPromise<TLogLockResult> reply, 
 
 	CODE_PROBE(true, "TLog stopped by recovering master");
 	CODE_PROBE(logData->stopped, "logData already stopped");
-	CODE_PROBE(!logData->stopped, "logData not yet stopped");
+	CODE_PROBE(!logData->stopped, "logData not yet stopped", probe::decoration::rare);
 
 	TraceEvent("TLogStop", logData->logId)
 	    .detail("Ver", stopVersion)
@@ -1655,7 +1655,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			}
 			if (sequenceData.isSet()) {
 				if (sequenceData.getFuture().get().first != rep.end) {
-					CODE_PROBE(true, "tlog peek second attempt ended at a different version");
+					CODE_PROBE(true, "tlog peek second attempt ended at a different version", probe::decoration::rare);
 					replyPromise.sendError(operation_obsolete());
 					return Void();
 				}
@@ -1843,7 +1843,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		if (sequenceData.isSet()) {
 			trackerData.duplicatePeeks++;
 			if (sequenceData.getFuture().get().first != reply.end) {
-				CODE_PROBE(true, "tlog peek second attempt ended at a different version (2)");
+				CODE_PROBE(true, "tlog peek second attempt ended at a different version (2)", probe::decoration::rare);
 				replyPromise.sendError(operation_obsolete());
 				return Void();
 			}
@@ -1905,7 +1905,7 @@ ACTOR Future<Void> watchDegraded(TLogData* self) {
 	wait(lowPriorityDelay(SERVER_KNOBS->TLOG_DEGRADED_DURATION));
 
 	TraceEvent(SevWarnAlways, "TLogDegraded", self->dbgid).log();
-	CODE_PROBE(true, "TLog degraded");
+	CODE_PROBE(true, "TLog degraded", probe::decoration::rare);
 	self->degraded->set(true);
 	return Void();
 }
@@ -1963,7 +1963,7 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 		    .detail("LogId", logData->logId)
 		    .detail("Version", it->version.get())
 		    .detail("QueueVer", it->queueCommittedVersion.get());
-		CODE_PROBE(true, "A TLog was replaced before having a chance to commit its queue");
+		CODE_PROBE(true, "A TLog was replaced before having a chance to commit its queue", probe::decoration::rare);
 		it->queueCommittedVersion.set(it->version.get());
 	}
 	return Void();
@@ -2117,7 +2117,6 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 
 	// PERSIST: Initial setup of persistentData for a brand new tLog for a new database
 	state IKeyValueStore* storage = self->persistentData;
-	wait(storage->init());
 	storage->set(persistFormat);
 	storage->set(
 	    KeyValueRef(BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistCurrentVersionKeys.begin),
@@ -2427,7 +2426,7 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 		when(TLogCommitRequest req = waitNext(tli.commit.getFuture())) {
 			//TraceEvent("TLogCommitReq", logData->logId).detail("Ver", req.version).detail("PrevVer", req.prevVersion).detail("LogVer", logData->version.get());
 			ASSERT(logData->isPrimary);
-			CODE_PROBE(logData->stopped, "TLogCommitRequest while stopped");
+			CODE_PROBE(logData->stopped, "TLogCommitRequest while stopped", probe::decoration::rare);
 			if (!logData->stopped)
 				logData->addActor.send(tLogCommit(self, req, logData, warningCollectorInput));
 			else
@@ -2759,7 +2758,6 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	TraceEvent("TLogRestorePersistentState", self->dbgid).log();
 
 	state IKeyValueStore* storage = self->persistentData;
-	wait(storage->init());
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
 	state Future<Optional<Value>> fRecoveryLocation = storage->readValue(persistRecoveryLocationKey);
 	state Future<RangeResult> fVers = storage->readRange(persistCurrentVersionKeys);
@@ -2792,7 +2790,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	if (!fFormat.get().present()) {
 		RangeResult v = wait(self->persistentData->readRange(KeyRangeRef(StringRef(), "\xff"_sr), 1));
 		if (!v.size()) {
-			CODE_PROBE(true, "The DB is completely empty, so it was never initialized.  Delete it.");
+			CODE_PROBE(
+			    true, "The DB is completely empty, so it was never initialized.  Delete it.", probe::decoration::rare);
 			throw worker_removed();
 		} else {
 			// This should never happen
@@ -2940,7 +2939,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 			throw end_of_stream();
 		loop {
 			if (allRemoved.isReady()) {
-				CODE_PROBE(true, "all tlogs removed during queue recovery");
+				CODE_PROBE(true, "all tlogs removed during queue recovery", probe::decoration::rare);
 				throw worker_removed();
 			}
 			choose {
@@ -3292,6 +3291,8 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 	TraceEvent("SharedTlog", tlogId).detail("Version", "6.2");
 
 	try {
+		wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+
 		if (restoreFromDisk) {
 			wait(restorePersistentState(&self, locality, oldLog, recovered, tlogRequests));
 		} else {

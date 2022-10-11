@@ -134,7 +134,7 @@ bool TDMetricCollection::canLog(int level) const {
 void TDMetricCollection::checkRoll(uint64_t t, int64_t usedBytes) {
 	currentTimeBytes += usedBytes;
 	if (currentTimeBytes > 1e6) {
-		CODE_PROBE(true, "metrics were rolled");
+		CODE_PROBE(true, "metrics were rolled", probe::decoration::rare);
 		currentTimeBytes = 0;
 		rollTimes.push_back(t);
 		for (auto& it : metricMap)

@@ -2710,7 +2710,7 @@ bool DatabaseContext::isCurrentGrvProxy(UID proxyId) const {
 		if (proxy.id() == proxyId)
 			return true;
 	}
-	CODE_PROBE(true, "stale GRV proxy detected");
+	CODE_PROBE(true, "stale GRV proxy detected", probe::decoration::rare);
 	return false;
 }
 
@@ -3734,7 +3734,7 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 			} else if (e.code() == error_code_watch_cancelled || e.code() == error_code_process_behind) {
 				// clang-format off
 				CODE_PROBE(e.code() == error_code_watch_cancelled, "Too many watches on the storage server, poll for changes instead");
-				CODE_PROBE(e.code() == error_code_process_behind, "The storage servers are all behind");
+				CODE_PROBE(e.code() == error_code_process_behind, "The storage servers are all behind", probe::decoration::rare);
 				// clang-format on
 				wait(delay(CLIENT_KNOBS->WATCH_POLLING_TIME, parameters->taskID));
 			} else if (e.code() == error_code_timed_out) { // The storage server occasionally times out watches in case
@@ -5660,18 +5660,18 @@ Future<Void> Transaction::getRangeStream(PromiseStream<RangeResult>& results,
 
 	KeySelector b = begin;
 	if (b.orEqual) {
-		CODE_PROBE(true, "Native stream begin orEqual==true");
+		CODE_PROBE(true, "Native stream begin orEqual==true", probe::decoration::rare);
 		b.removeOrEqual(b.arena());
 	}
 
 	KeySelector e = end;
 	if (e.orEqual) {
-		CODE_PROBE(true, "Native stream end orEqual==true");
+		CODE_PROBE(true, "Native stream end orEqual==true", probe::decoration::rare);
 		e.removeOrEqual(e.arena());
 	}
 
 	if (b.offset >= e.offset && b.getKey() >= e.getKey()) {
-		CODE_PROBE(true, "Native stream range inverted");
+		CODE_PROBE(true, "Native stream range inverted", probe::decoration::rare);
 		results.sendError(end_of_stream());
 		return Void();
 	}
@@ -9754,7 +9754,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				results->storageData.clear();
 				if (e.code() == error_code_change_feed_popped) {
 					++db->feedNonRetriableErrors;
-					CODE_PROBE(true, "getChangeFeedStreamActor got popped");
+					CODE_PROBE(true, "getChangeFeedStreamActor got popped", probe::decoration::rare);
 					results->mutations.sendError(e);
 					results->refresh.sendError(e);
 				} else {

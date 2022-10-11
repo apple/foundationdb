@@ -1558,7 +1558,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 
 			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction(), granuleRange));
 			if (purgeState != ForcedPurgeState::NonePurged) {
-				CODE_PROBE(true, "Initial Split Re-evaluate stopped because of force purge");
+				CODE_PROBE(true, "Initial Split Re-evaluate stopped because of force purge", probe::decoration::rare);
 				TraceEvent("GranuleSplitReEvalCancelledForcePurge", bmData->id)
 				    .detail("Epoch", bmData->epoch)
 				    .detail("GranuleRange", granuleRange);
@@ -1579,7 +1579,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 			KeyRange range = blobGranuleFileKeyRangeFor(granuleID);
 			RangeResult granuleFiles = wait(tr->getRange(range, 1));
 			if (!granuleFiles.empty()) {
-				CODE_PROBE(true, "split too big was eventually solved by another worker");
+				CODE_PROBE(true, "split too big was eventually solved by another worker", probe::decoration::rare);
 				if (BM_DEBUG) {
 					fmt::print("BM {0} re-evaluating initial split [{1} - {2}) too big: solved by another worker\n",
 					           bmData->epoch,
@@ -1637,7 +1637,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 			RangeResult existingRanges = wait(
 			    krmGetRanges(tr, blobGranuleMappingKeys.begin, granuleRange, 3, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
 			if (existingRanges.size() > 2 || existingRanges.more) {
-				CODE_PROBE(true, "split too big was already re-split");
+				CODE_PROBE(true, "split too big was already re-split", probe::decoration::rare);
 				if (BM_DEBUG) {
 					fmt::print("BM {0} re-evaluating initial split [{1} - {2}) too big: already split\n",
 					           bmData->epoch,
@@ -2077,7 +2077,7 @@ ACTOR Future<bool> forceGranuleFlush(Reference<BlobManagerData> bmData,
 		try {
 			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr, keyRange));
 			if (purgeState != ForcedPurgeState::NonePurged) {
-				CODE_PROBE(true, "Granule flush stopped because of force purge");
+				CODE_PROBE(true, "Granule flush stopped because of force purge", probe::decoration::rare);
 				TraceEvent("GranuleFlushCancelledForcePurge", bmData->id)
 				    .detail("Epoch", bmData->epoch)
 				    .detail("KeyRange", keyRange);
@@ -2225,7 +2225,7 @@ ACTOR Future<std::pair<UID, Version>> persistMergeGranulesStart(Reference<BlobMa
 
 			ForcedPurgeState purgeState = wait(getForcePurgedState(&tr->getTransaction(), mergeRange));
 			if (purgeState != ForcedPurgeState::NonePurged) {
-				CODE_PROBE(true, "Merge start stopped because of force purge");
+				CODE_PROBE(true, "Merge start stopped because of force purge", probe::decoration::rare);
 				TraceEvent("GranuleMergeStartCancelledForcePurge", bmData->id)
 				    .detail("Epoch", bmData->epoch)
 				    .detail("GranuleRange", mergeRange);
@@ -2311,7 +2311,7 @@ ACTOR Future<bool> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 		}
 	}
 	if (tmpWorkerId == UID()) {
-		CODE_PROBE(true, "All workers dead right now");
+		CODE_PROBE(true, "All workers dead right now", probe::decoration::rare);
 		while (bmData->workersById.empty()) {
 			wait(bmData->recruitingStream.onChange() || bmData->foundBlobWorkers.getFuture());
 		}
@@ -2564,7 +2564,9 @@ static void attemptStartMerge(Reference<BlobManagerData> bmData,
 	auto reCheckMergeCandidates = bmData->mergeCandidates.intersectingRanges(mergeRange);
 	for (auto it : reCheckMergeCandidates) {
 		if (!it->cvalue().mergeEligible()) {
-			CODE_PROBE(true, " granule no longer merge candidate after checking metrics, aborting merge");
+			CODE_PROBE(true,
+			           "granule no longer merge candidate after checking metrics, aborting merge",
+			           probe::decoration::rare);
 			return;
 		}
 	}
