@@ -245,7 +245,7 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 				CODE_PROBE(true, "Worker terminated with file_not_found error");
 				return Void();
 			} else if (e.getError().code() == error_code_lock_file_failure) {
-				CODE_PROBE(true, "Unable to lock file");
+				CODE_PROBE(true, "Unable to lock file", probe::decoration::rare);
 				throw please_reboot_kv_store();
 			}
 			throw e.getError();
@@ -1055,6 +1055,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 						if (disconnectedPeer || degradedPeer) {
 							TraceEvent("HealthMonitorDetectDegradedPeer")
 							    .detail("Peer", address)
+							    .detail("Satellite", true)
 							    .detail("Elapsed", now() - peer->lastLoggedTime)
 							    .detail("Disconnected", disconnectedPeer)
 							    .detail("MinLatency", peer->pingLatencies.min())
@@ -2214,7 +2215,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					// from the same reqId. To keep epoch safety between different managers, instead of restarting the
 					// same manager id at the same epoch, we should just tell it the original request succeeded, and let
 					// it realize this manager died via failure detection and start a new one.
-					CODE_PROBE(true, "Recruited while formerly the same blob manager.");
+					CODE_PROBE(true, "Recruited while formerly the same blob manager.", probe::decoration::rare);
 				} else {
 					// TODO: it'd be more optimal to halt the last manager if present here, but it will figure it out
 					// via the epoch check
