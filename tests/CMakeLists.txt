@@ -397,7 +397,7 @@ if(WITH_PYTHON)
     endif()
   endif()
 
-  if (NOT WIN32)
+  if (NOT OPEN_FOR_IDE AND NOT WIN32 AND NOT USE_SANITIZER)
     # setup venv for testing token-based authorization
     if (APPLE)
       set(ld_env_name "DYLD_LIBRARY_PATH")
@@ -423,12 +423,10 @@ if(WITH_PYTHON)
     set_tests_properties(authorization_venv_setup PROPERTIES FIXTURES_SETUP authz_virtual_env TIMEOUT 60)
 
     set(authz_script_dir ${CMAKE_SOURCE_DIR}/tests/authorization)
-    set(authz_test_cmd "")
-    string(APPEND authz_test_cmd "${authz_venv_activate} && ")
-    string(APPEND authz_test_cmd "pytest ${authz_script_dir}/authz_test.py -rA --build-dir ${CMAKE_BINARY_DIR} -vvv")
+    set(authz_test_cmd "${authz_venv_activate} && pytest ${authz_script_dir}/authz_test.py -rA --build-dir ${CMAKE_BINARY_DIR} -vvv")
     add_test(
       NAME token_based_tenant_authorization
-      WORKING_DIRECTORY ${authz_script_dir}
+      WORKING_DIRECTORY ${authz_venv_dir}
       COMMAND bash -c ${authz_test_cmd})
     set_tests_properties(token_based_tenant_authorization PROPERTIES ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/tests/TestRunner;${ld_env_name}=${CMAKE_BINARY_DIR}/lib")
     set_tests_properties(token_based_tenant_authorization PROPERTIES FIXTURES_REQUIRED authz_virtual_env)
