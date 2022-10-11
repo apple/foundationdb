@@ -1375,7 +1375,7 @@ ACTOR Future<Void> fetchTopKShardMetrics(DataDistributionTracker* self, GetTopKM
 		when(wait(g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01) ? Never()
 		                                                              : fetchTopKShardMetrics_impl(self, req))) {}
 		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) {
-			CODE_PROBE(true, "TopK DD_SHARD_METRICS_TIMEOUT");
+			CODE_PROBE(true, "TopK DD_SHARD_METRICS_TIMEOUT", probe::decoration::rare);
 			req.reply.send(GetTopKMetricsReply());
 		}
 	}

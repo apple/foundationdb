@@ -690,44 +690,43 @@ ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxy
 	}
 
 	// Dedup the requested domainIds.
-	std::unordered_set<BlobMetadataDomainId> dedupedDomainIds;
-	for (auto id : req.domainIds) {
-		dedupedDomainIds.emplace(id);
+	std::unordered_map<BlobMetadataDomainId, BlobMetadataDomainName> dedupedDomainInfos;
+	for (auto info : req.domainInfos) {
+		dedupedDomainInfos.insert({ info.domainId, info.domainName });
 	}
 
 	if (dbgTrace.present()) {
-		dbgTrace.get().detail("NKeys", dedupedDomainIds.size());
-		for (BlobMetadataDomainId id : dedupedDomainIds) {
+		dbgTrace.get().detail("NKeys", dedupedDomainInfos.size());
+		for (auto& info : dedupedDomainInfos) {
 			// log domainids queried
-			dbgTrace.get().detail("BMQ" + std::to_string(id), "");
+			dbgTrace.get().detail("BMQ" + std::to_string(info.first), "");
 		}
 	}
 
 	// First, check if the requested information is already cached by the server.
 	// Ensure the cached information is within SERVER_KNOBS->BLOB_METADATA_CACHE_TTL time window.
-	std::vector<BlobMetadataDomainId> lookupDomains;
-	for (BlobMetadataDomainId id : dedupedDomainIds) {
-		const auto itr = ekpProxyData->blobMetadataDomainIdCache.find(id);
+	state KmsConnBlobMetadataReq kmsReq;
+	kmsReq.debugId = req.debugId;
+
+	for (auto& info : dedupedDomainInfos) {
+		const auto itr = ekpProxyData->blobMetadataDomainIdCache.find(info.first);
 		if (itr != ekpProxyData->blobMetadataDomainIdCache.end() && itr->second.isValid()) {
 			metadataDetails.arena().dependsOn(itr->second.metadataDetails.arena());
 			metadataDetails.push_back(metadataDetails.arena(), itr->second.metadataDetails);
 
 			if (dbgTrace.present()) {
-				dbgTrace.get().detail("BMC" + std::to_string(id), "");
+				dbgTrace.get().detail("BMC" + std::to_string(info.first), "");
 			}
-			++ekpProxyData->blobMetadataCacheHits;
 		} else {
-			lookupDomains.emplace_back(id);
-			++ekpProxyData->blobMetadataCacheMisses;
+			kmsReq.domainInfos.emplace_back(kmsReq.domainInfos.arena(), info.first, info.second);
 		}
 	}
 
-	ekpProxyData->baseCipherDomainIdCacheHits += metadataDetails.size();
-	ekpProxyData->baseCipherDomainIdCacheMisses += lookupDomains.size();
+	ekpProxyData->blobMetadataCacheHits += metadataDetails.size();
 
-	if (!lookupDomains.empty()) {
+	if (!kmsReq.domainInfos.empty()) {
+		ekpProxyData->blobMetadataCacheMisses += kmsReq.domainInfos.size();
 		try {
-			KmsConnBlobMetadataReq kmsReq(lookupDomains, req.debugId);
 			state double startTime = now();
 			KmsConnBlobMetadataRep kmsRep = wait(kmsConnectorInf.blobMetadataReq.getReply(kmsReq));
 			ekpProxyData->kmsBlobMetadataReqLatency.addMeasurement(now() - startTime);
@@ -755,7 +754,6 @@ ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxy
 	}
 
 	req.reply.send(EKPGetLatestBlobMetadataReply(metadataDetails));
-
 	return Void();
 }
 
@@ -771,10 +769,11 @@ ACTOR Future<Void> refreshBlobMetadataCore(Reference<EncryptKeyProxyData> ekpPro
 	try {
 		KmsConnBlobMetadataReq req;
 		req.debugId = debugId;
-		req.domainIds.reserve(ekpProxyData->blobMetadataDomainIdCache.size());
+		req.domainInfos.reserve(req.domainInfos.arena(), ekpProxyData->blobMetadataDomainIdCache.size());
 
+		// TODO add refresh + expire timestamp and filter to only ones that need refreshing
 		for (auto& item : ekpProxyData->blobMetadataDomainIdCache) {
-			req.domainIds.emplace_back(item.first);
+			req.domainInfos.emplace_back(req.domainInfos.arena(), item.first, item.second.metadataDetails.domainName);
 		}
 		state double startTime = now();
 		KmsConnBlobMetadataRep rep = wait(kmsConnectorInf.blobMetadataReq.getReply(req));
