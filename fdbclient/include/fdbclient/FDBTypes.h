@@ -1467,6 +1467,11 @@ struct EncryptionAtRestMode {
 
 	Value toValue() const { return ValueRef(format("%d", (int)mode)); }
 
+	bool isEquals(const EncryptionAtRestMode& e) const { return this->mode == e.mode; }
+
+	bool operator==(const EncryptionAtRestMode& e) const { return isEquals(e); }
+	bool operator!=(const EncryptionAtRestMode& e) const { return !isEquals(e); }
+
 	static EncryptionAtRestMode fromValue(Optional<ValueRef> val) {
 		if (!val.present()) {
 			return DISABLED;
@@ -1546,7 +1551,8 @@ struct ReadBlobGranuleContext {
 	int granuleParallelism = 1;
 };
 
-// Store metadata associated with each storage server. Now it only contains data be used in perpetual storage wiggle.
+// Store metadata associated with each storage server. Now it only contains data be used in perpetual storage
+// wiggle.
 struct StorageMetadataType {
 	constexpr static FileIdentifier file_identifier = 732123;
 	// when the SS is initialized, in epoch seconds, comes from currentTime()
@@ -1653,5 +1659,37 @@ struct transaction_creator_traits<T, std::void_t<typename T::TransactionT>> : st
 
 template <typename T>
 constexpr bool is_transaction_creator = transaction_creator_traits<T>::value;
+
+struct Versionstamp {
+	Version version = invalidVersion;
+	uint16_t batchNumber = 0;
+
+	bool operator==(const Versionstamp& r) const { return version == r.version && batchNumber == r.batchNumber; }
+	bool operator!=(const Versionstamp& r) const { return !(*this == r); }
+	bool operator<(const Versionstamp& r) const {
+		return version < r.version || (version == r.version && batchNumber < r.batchNumber);
+	}
+	bool operator>(const Versionstamp& r) const { return r < *this; }
+	bool operator<=(const Versionstamp& r) const { return !(*this > r); }
+	bool operator>=(const Versionstamp& r) const { return !(*this < r); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		int64_t beVersion;
+		int16_t beBatch;
+
+		if constexpr (!Ar::isDeserializing) {
+			beVersion = bigEndian64(version);
+			beBatch = bigEndian16(batchNumber);
+		}
+
+		serializer(ar, beVersion, beBatch);
+
+		if constexpr (Ar::isDeserializing) {
+			version = bigEndian64(version);
+			batchNumber = bigEndian16(beBatch);
+		}
+	}
+};
 
 #endif

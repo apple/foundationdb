@@ -451,12 +451,14 @@ TEST_CASE("/blobgranule/server/common/granulesummary") {
 }
 
 // FIXME: if credentials can expire, refresh periodically
-ACTOR Future<Void> loadBlobMetadataForTenants(BGTenantMap* self, std::vector<TenantMapEntry> tenantMapEntries) {
+ACTOR Future<Void> loadBlobMetadataForTenants(
+    BGTenantMap* self,
+    std::vector<std::pair<BlobMetadataDomainId, BlobMetadataDomainName>> tenantsToLoad) {
 	ASSERT(SERVER_KNOBS->BG_METADATA_SOURCE == "tenant");
-	ASSERT(!tenantMapEntries.empty());
-	state std::vector<BlobMetadataDomainId> domainIds;
-	for (auto& entry : tenantMapEntries) {
-		domainIds.push_back(entry.id);
+	ASSERT(!tenantsToLoad.empty());
+	state EKPGetLatestBlobMetadataRequest req;
+	for (auto& tenant : tenantsToLoad) {
+		req.domainInfos.emplace_back_deep(req.domainInfos.arena(), tenant.first, StringRef(tenant.second));
 	}
 
 	// FIXME: if one tenant gets an error, don't kill whole process
@@ -464,8 +466,7 @@ ACTOR Future<Void> loadBlobMetadataForTenants(BGTenantMap* self, std::vector<Ten
 	loop {
 		Future<EKPGetLatestBlobMetadataReply> requestFuture;
 		if (self->dbInfo.isValid() && self->dbInfo->get().encryptKeyProxy.present()) {
-			EKPGetLatestBlobMetadataRequest req;
-			req.domainIds = domainIds;
+			req.reply.reset();
 			requestFuture =
 			    brokenPromiseToNever(self->dbInfo->get().encryptKeyProxy.get().getLatestBlobMetadata.getReply(req));
 		} else {
@@ -473,7 +474,7 @@ ACTOR Future<Void> loadBlobMetadataForTenants(BGTenantMap* self, std::vector<Ten
 		}
 		choose {
 			when(EKPGetLatestBlobMetadataReply rep = wait(requestFuture)) {
-				ASSERT(rep.blobMetadataDetails.size() == domainIds.size());
+				ASSERT(rep.blobMetadataDetails.size() == req.domainInfos.size());
 				// not guaranteed to be in same order in the request as the response
 				for (auto& metadata : rep.blobMetadataDetails) {
 					auto info = self->tenantInfoById.find(metadata.domainId);
@@ -493,7 +494,7 @@ ACTOR Future<Void> loadBlobMetadataForTenants(BGTenantMap* self, std::vector<Ten
 
 // list of tenants that may or may not already exist
 void BGTenantMap::addTenants(std::vector<std::pair<TenantName, TenantMapEntry>> tenants) {
-	std::vector<TenantMapEntry> tenantsToLoad;
+	std::vector<std::pair<BlobMetadataDomainId, BlobMetadataDomainName>> tenantsToLoad;
 	for (auto entry : tenants) {
 		if (tenantInfoById.insert({ entry.second.id, entry.second }).second) {
 			auto r = makeReference<GranuleTenantData>(entry.first, entry.second);
@@ -501,7 +502,7 @@ void BGTenantMap::addTenants(std::vector<std::pair<TenantName, TenantMapEntry>> 
 			if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
 				r->bstoreLoaded.send(Void());
 			} else {
-				tenantsToLoad.push_back(entry.second);
+				tenantsToLoad.push_back({ entry.second.id, entry.first });
 			}
 		}
 	}

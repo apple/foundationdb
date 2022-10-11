@@ -157,7 +157,7 @@ private:
 			Standalone<StringRef> h = wait(self->queue->readNext(sizeof(uint32_t)));
 			if (h.size() != sizeof(uint32_t)) {
 				if (h.size()) {
-					CODE_PROBE(true, "Zero fill within size field");
+					CODE_PROBE(true, "Zero fill within size field", probe::decoration::rare);
 					int payloadSize = 0;
 					memcpy(&payloadSize, h.begin(), h.size());
 					zeroFillSize = sizeof(uint32_t) - h.size(); // zero fill the size itself
@@ -2189,7 +2189,7 @@ ACTOR Future<Void> doQueueCommit(TLogData* self,
 		    .detail("LogId", logData->logId)
 		    .detail("Version", it->version.get())
 		    .detail("QueueVer", it->queueCommittedVersion.get());
-		CODE_PROBE(true, "A TLog was replaced before having a chance to commit its queue");
+		CODE_PROBE(true, "A TLog was replaced before having a chance to commit its queue", probe::decoration::rare);
 		it->queueCommittedVersion.set(it->version.get());
 	}
 	return Void();
@@ -2996,7 +2996,6 @@ ACTOR Future<Void> initPersistentStorage(TLogData* self) {
 
 	// PERSIST: Initial setup of persistentData for a brand new tLog for a new database
 	state IKeyValueStore* storage = self->persistentData;
-	wait(storage->init());
 	storage->set(persistFormat);
 
 	wait(storage->commit());
@@ -3019,7 +3018,6 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	TraceEvent("TLogRestorePersistentState", self->dbgid).log();
 
 	state IKeyValueStore* storage = self->persistentData;
-	wait(storage->init());
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
 	state Future<Optional<Value>> fRecoveryLocation = storage->readValue(persistRecoveryLocationKey);
 	state Future<Optional<Value>> fClusterId = storage->readValue(persistClusterIdKey);
@@ -3587,6 +3585,8 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 	TraceEvent("SharedTlog", tlogId);
 	try {
 		try {
+			wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
+
 			if (restoreFromDisk) {
 				wait(restorePersistentState(&self, locality, oldLog, recovered, tlogRequests));
 			} else {

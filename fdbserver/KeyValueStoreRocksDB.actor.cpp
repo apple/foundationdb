@@ -1195,6 +1195,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ASSERT(!deletes.empty() || !a.batchToCommit->HasDeleteRange());
 			rocksdb::WriteOptions options;
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
+			if (SERVER_KNOBS->ROCKSDB_DISABLE_WAL_EXPERIMENTAL) {
+				options.disableWAL = true;
+				options.sync = false;
+			}
 
 			double writeBeginTime = a.getHistograms ? timer_monotonic() : 0;
 			if (rateLimiter) {
@@ -1667,8 +1671,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			writeThread = CoroThreadPool::createThreadPool();
 			readThreads = CoroThreadPool::createThreadPool();
 		} else {
-			writeThread = createGenericThreadPool();
-			readThreads = createGenericThreadPool();
+			writeThread = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
+			readThreads = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY);
 		}
 		if (SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE > 0) {
 			collection = actorCollection(addActor.getFuture());
