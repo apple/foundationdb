@@ -668,7 +668,7 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 		resolverCount = result.old_resolvers;
 	}
 
-	result.desired_version_indexers = 1;
+	result.desired_version_indexers = 0;
 	int versionIndexerCount;
 	if (!statusObjConfig.get("version_indexers", result.old_version_indexers)) {
 		result.old_version_indexers = CLIENT_KNOBS->DEFAULT_AUTO_VERSION_INDEXERS;
