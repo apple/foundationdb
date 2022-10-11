@@ -34,7 +34,7 @@
 //
 // Smoothers are used to avoid turbulent throttling behaviour.
 class GrvTransactionRateInfo {
-	double rate{ 0.0 };
+	double rate = 0.0;
 	double limit{ 0.0 };
 	double budget{ 0.0 };
 	bool disabled{ true };
