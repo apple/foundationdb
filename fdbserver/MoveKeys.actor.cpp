@@ -765,7 +765,6 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
                                   const DDEnabledState* ddEnabledState) {
 	state TraceInterval interval("RelocateShard_StartMoveKeys");
 	state Future<Void> warningLogger = logWarningAfter("StartMoveKeysTooLong", 600, servers);
-	// state TraceInterval waitInterval("");
 
 	wait(startMoveKeysLock->take(TaskPriority::DataDistributionLaunch));
 	state FlowLock::Releaser releaser(*startMoveKeysLock);
@@ -906,6 +905,322 @@ ACTOR Future<Void> checkFetchingState(Database cx,
 // keyServers[k].dest must be the same for all k in keys
 // Set serverKeys[dest][keys] = true; serverKeys[src][keys] = false for all src not in dest
 // Should be cancelled and restarted if keyServers[keys].dest changes (?so this is no longer true?)
+ACTOR static Future<Key> finishMoveKeysTransaction(Database occ,
+                                                   KeyRange keys,
+                                                   std::vector<UID>* destinationTeam,
+                                                   MoveKeysLock lock,
+                                                   FlowLock* finishMoveKeysParallelismLock,
+                                                   bool hasRemote,
+                                                   UID relocationIntervalId,
+                                                   std::map<UID, StorageServerInterface>* tssMapping,
+                                                   const DDEnabledState* ddEnabledState,
+                                                   Key begin) {
+	state TraceInterval waitInterval("");
+	state Key endKey;
+	state int retries = 0;
+	state FlowLock::Releaser releaser;
+	state std::unordered_set<UID> tssToIgnore;
+	// try waiting for tss for a 2 loops, give up if they're behind to not affect the rest of the cluster
+	state int waitForTSSCounter = 2;
+
+	state Transaction tr(occ);
+
+	// printf("finishMoveKeys( '%s'-'%s' )\n", begin.toString().c_str(), keys.end.toString().c_str());
+	loop {
+		try {
+
+			tr.trState->taskID = TaskPriority::MoveKeys;
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+			releaser.release();
+			wait(finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
+			releaser = FlowLock::Releaser(*finishMoveKeysParallelismLock);
+
+			wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
+
+			state KeyRange currentKeys = KeyRangeRef(begin, keys.end);
+			state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+			state RangeResult keyServers = wait(krmGetRanges(&tr,
+			                                                 keyServersPrefix,
+			                                                 currentKeys,
+			                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+			                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+
+			// Determine the last processed key (which will be the beginning for the next iteration)
+			endKey = keyServers.end()[-1].key;
+			currentKeys = KeyRangeRef(currentKeys.begin, endKey);
+
+			// printf("  finishMoveKeys( '%s'-'%s' ): read keyServers at %lld\n", keys.begin.toString().c_str(),
+			// keys.end.toString().c_str(), tr.getReadVersion().get());
+
+			// Decode and sanity check the result (dest must be the same for all ranges)
+			bool alreadyMoved = true;
+
+			state std::__1::vector<UID> dest;
+			state std::__1::set<UID> allServers;
+			state std::__1::set<UID> intendedTeam(destinationTeam->begin(), destinationTeam->end());
+			state std::__1::vector<UID> src;
+			std::__1::vector<UID> completeSrc;
+
+			// Iterate through the beginning of keyServers until we find one that hasn't already been processed
+			int currentIndex;
+			for (currentIndex = 0; currentIndex < keyServers.size() - 1 && alreadyMoved; currentIndex++) {
+				decodeKeyServersValue(UIDtoTagMap, keyServers[currentIndex].value, src, dest);
+
+				std::__1::set<UID> srcSet;
+				for (int s = 0; s < src.size(); s++) {
+					srcSet.insert(src[s]);
+				}
+
+				if (currentIndex == 0) {
+					completeSrc = src;
+				} else {
+					for (int i = 0; i < completeSrc.size(); i++) {
+						if (!srcSet.count(completeSrc[i])) {
+							swapAndPop(&completeSrc, i--);
+						}
+					}
+				}
+
+				std::__1::set<UID> destSet;
+				for (int s = 0; s < dest.size(); s++) {
+					destSet.insert(dest[s]);
+				}
+
+				allServers.insert(srcSet.begin(), srcSet.end());
+				allServers.insert(destSet.begin(), destSet.end());
+
+				// Because marking a server as failed can shrink a team, do not check for exact equality
+				// Instead, check for a subset of the intended team, which also covers the equality case
+				bool isSubset = std::includes(intendedTeam.begin(), intendedTeam.end(), srcSet.begin(), srcSet.end());
+				alreadyMoved = destSet.empty() && isSubset;
+				if (destSet != intendedTeam && !alreadyMoved) {
+					TraceEvent(SevWarn, "MoveKeysDestTeamNotIntended", relocationIntervalId)
+					    .detail("KeyBegin", keys.begin)
+					    .detail("KeyEnd", keys.end)
+					    .detail("IterationBegin", begin)
+					    .detail("IterationEnd", endKey)
+					    .detail("SrcSet", describe(srcSet))
+					    .detail("DestSet", describe(destSet))
+					    .detail("IntendedTeam", describe(intendedTeam))
+					    .detail("KeyServers", keyServers);
+					// ASSERT( false );
+
+					ASSERT(!dest.empty()); // The range has already been moved, but to a different dest (or
+					                       // maybe dest was cleared)
+
+					intendedTeam.clear();
+					for (int i = 0; i < dest.size(); i++)
+						intendedTeam.insert(dest[i]);
+				} else if (alreadyMoved) {
+					dest.clear();
+					src.clear();
+					CODE_PROBE(true, "FinishMoveKeys first key in iteration sub-range has already been processed");
+				}
+			}
+
+			// Process the rest of the key servers
+			for (; currentIndex < keyServers.size() - 1; currentIndex++) {
+				std::__1::vector<UID> src2, dest2;
+				decodeKeyServersValue(UIDtoTagMap, keyServers[currentIndex].value, src2, dest2);
+
+				std::__1::set<UID> srcSet;
+				for (int s = 0; s < src2.size(); s++)
+					srcSet.insert(src2[s]);
+
+				for (int i = 0; i < completeSrc.size(); i++) {
+					if (!srcSet.count(completeSrc[i])) {
+						swapAndPop(&completeSrc, i--);
+					}
+				}
+
+				allServers.insert(srcSet.begin(), srcSet.end());
+
+				// Because marking a server as failed can shrink a team, do not check for exact equality
+				// Instead, check for a subset of the intended team, which also covers the equality case
+				bool isSubset = std::includes(intendedTeam.begin(), intendedTeam.end(), srcSet.begin(), srcSet.end());
+				alreadyMoved = dest2.empty() && isSubset;
+				if (dest2 != dest && !alreadyMoved) {
+					TraceEvent(SevError, "FinishMoveKeysError", relocationIntervalId)
+					    .detail("Reason", "dest mismatch")
+					    .detail("Dest", describe(dest))
+					    .detail("Dest2", describe(dest2));
+					ASSERT(false);
+				}
+			}
+			if (!dest.size()) {
+				CODE_PROBE(true,
+				           "A previous finishMoveKeys for this range committed just as it was cancelled to "
+				           "start this one?");
+				TraceEvent("FinishMoveKeysNothingToDo", relocationIntervalId)
+				    .detail("KeyBegin", keys.begin)
+				    .detail("KeyEnd", keys.end)
+				    .detail("IterationBegin", begin)
+				    .detail("IterationEnd", endKey);
+				begin = keyServers.end()[-1].key;
+				break;
+			}
+
+			waitInterval = TraceInterval("RelocateShard_FinishMoveKeysWaitDurable");
+			TraceEvent(SevDebug, waitInterval.begin(), relocationIntervalId)
+			    .detail("KeyBegin", keys.begin)
+			    .detail("KeyEnd", keys.end);
+
+			// Wait for a durable quorum of servers in destServers to have keys available (readWrite)
+			// They must also have at least the transaction read version so they can't "forget" the shard
+			// between now and when this transaction commits.
+			state std::__1::vector<Future<Void>> serverReady; // only for count below
+			state std::__1::vector<Future<Void>> tssReady; // for waiting in parallel with tss
+			state std::__1::vector<StorageServerInterface> tssReadyInterfs;
+			state std::__1::vector<UID> newDestinations;
+			std::__1::set<UID> completeSrcSet(completeSrc.begin(), completeSrc.end());
+			for (auto& it : dest) {
+				if (!hasRemote || !completeSrcSet.count(it)) {
+					newDestinations.push_back(it);
+				}
+			}
+
+			// for smartQuorum
+			state std::__1::vector<StorageServerInterface> storageServerInterfaces;
+			std::__1::vector<Future<Optional<Value>>> serverListEntries;
+			serverListEntries.reserve(newDestinations.size());
+			for (int s = 0; s < newDestinations.size(); s++)
+				serverListEntries.push_back(tr.get(serverListKeyFor(newDestinations[s])));
+			state std::__1::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+
+			releaser.release();
+
+			for (int s = 0; s < serverListValues.size(); s++) {
+				ASSERT(serverListValues[s]
+				           .present()); // There should always be server list entries for servers in keyServers
+				auto si = decodeServerListValue(serverListValues[s].get());
+				ASSERT(si.id() == newDestinations[s]);
+				storageServerInterfaces.push_back(si);
+			}
+
+			// update client info in case tss mapping changed or server got updated
+
+			// Wait for new destination servers to fetch the keys
+
+			serverReady.reserve(storageServerInterfaces.size());
+			tssReady.reserve(storageServerInterfaces.size());
+			tssReadyInterfs.reserve(storageServerInterfaces.size());
+			for (int s = 0; s < storageServerInterfaces.size(); s++) {
+				serverReady.push_back(waitForShardReady(
+				    storageServerInterfaces[s], keys, tr.getReadVersion().get(), GetShardStateRequest::READABLE));
+
+				auto tssPair = tssMapping->find(storageServerInterfaces[s].id());
+
+				if (tssPair != tssMapping->end() && waitForTSSCounter > 0 && !tssToIgnore.count(tssPair->second.id())) {
+					tssReadyInterfs.push_back(tssPair->second);
+					tssReady.push_back(waitForShardReady(
+					    tssPair->second, keys, tr.getReadVersion().get(), GetShardStateRequest::READABLE));
+				}
+			}
+
+			// Wait for all storage server moves, and explicitly swallow errors for tss ones with
+			// waitForAllReady If this takes too long the transaction will time out and retry, which is ok
+			wait(timeout(waitForAll(serverReady) && waitForAllReady(tssReady),
+			             SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT,
+			             Void(),
+			             TaskPriority::MoveKeys));
+
+			// Check to see if we're waiting only on tss. If so, decrement the waiting counter.
+			// If the waiting counter is zero, ignore the slow/non-responsive tss processes before finalizing
+			// the data move.
+			if (tssReady.size()) {
+				bool allSSDone = true;
+				for (auto& f : serverReady) {
+					allSSDone &= f.isReady() && !f.isError();
+					if (!allSSDone) {
+						break;
+					}
+				}
+
+				if (allSSDone) {
+					bool anyTssNotDone = false;
+
+					for (auto& f : tssReady) {
+						if (!f.isReady() || f.isError()) {
+							anyTssNotDone = true;
+							waitForTSSCounter--;
+							break;
+						}
+					}
+
+					if (anyTssNotDone && waitForTSSCounter == 0) {
+						for (int i = 0; i < tssReady.size(); i++) {
+							if (!tssReady[i].isReady() || tssReady[i].isError()) {
+								tssToIgnore.insert(tssReadyInterfs[i].id());
+							}
+						}
+					}
+				}
+			}
+
+			int count = dest.size() - newDestinations.size();
+			for (int s = 0; s < serverReady.size(); s++)
+				count += serverReady[s].isReady() && !serverReady[s].isError();
+
+			int tssCount = 0;
+			for (int s = 0; s < tssReady.size(); s++)
+				tssCount += tssReady[s].isReady() && !tssReady[s].isError();
+
+			TraceEvent readyServersEv(SevDebug, waitInterval.end(), relocationIntervalId);
+			readyServersEv.detail("ReadyServers", count);
+			if (tssReady.size()) {
+				readyServersEv.detail("ReadyTSS", tssCount);
+			}
+
+			if (count == dest.size()) {
+				// update keyServers, serverKeys
+				// SOMEDAY: Doing these in parallel is safe because none of them overlap or touch (one per
+				// server)
+				wait(krmSetRangeCoalescing(
+				    &tr, keyServersPrefix, currentKeys, keys, keyServersValue(UIDtoTagMap, dest)));
+
+				std::__1::set<UID>::iterator asi = allServers.begin();
+				std::__1::vector<Future<Void>> actors;
+				while (asi != allServers.end()) {
+					bool destHasServer = std::find(dest.begin(), dest.end(), *asi) != dest.end();
+					actors.push_back(krmSetRangeCoalescing(&tr,
+					                                       serverKeysPrefixFor(*asi),
+					                                       currentKeys,
+					                                       allKeys,
+					                                       destHasServer ? serverKeysTrue : serverKeysFalse));
+					++asi;
+				}
+
+				wait(waitForAll(actors));
+				wait(tr.commit());
+
+				begin = endKey;
+				break;
+			}
+			tr.reset();
+		} catch (Error& error) {
+			if (error.code() == error_code_actor_cancelled)
+				throw;
+			state Error err = error;
+			wait(tr.onError(error));
+			retries++;
+			if (retries % 10 == 0) {
+				TraceEvent(retries == 20 ? SevWarnAlways : SevWarn,
+				           "RelocateShard_FinishMoveKeysRetrying",
+				           relocationIntervalId)
+				    .error(err)
+				    .detail("KeyBegin", keys.begin)
+				    .detail("KeyEnd", keys.end)
+				    .detail("IterationBegin", begin)
+				    .detail("IterationEnd", endKey);
+			}
+		}
+	}
+	return begin;
+}
+
 ACTOR static Future<Void> finishMoveKeys(Database occ,
                                          KeyRange keys,
                                          std::vector<UID> destinationTeam,
@@ -916,16 +1231,9 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
                                          std::map<UID, StorageServerInterface> tssMapping,
                                          const DDEnabledState* ddEnabledState) {
 	state TraceInterval interval("RelocateShard_FinishMoveKeys");
-	state TraceInterval waitInterval("");
 	state Future<Void> warningLogger = logWarningAfter("FinishMoveKeysTooLong", 600, destinationTeam);
 	state Key begin = keys.begin;
-	state Key endKey;
-	state int retries = 0;
-	state FlowLock::Releaser releaser;
 
-	state std::unordered_set<UID> tssToIgnore;
-	// try waiting for tss for a 2 loops, give up if they're behind to not affect the rest of the cluster
-	state int waitForTSSCounter = 2;
 
 	ASSERT(!destinationTeam.empty());
 
@@ -938,308 +1246,17 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 		// In that case, each iteration of this loop will have begin set to the end of the last processed shard
 		while (begin < keys.end) {
 			CODE_PROBE(begin > keys.begin, "Multi-transactional finishMoveKeys");
-
-			state Transaction tr(occ);
-
-			// printf("finishMoveKeys( '%s'-'%s' )\n", begin.toString().c_str(), keys.end.toString().c_str());
-			loop {
-				try {
-
-					tr.trState->taskID = TaskPriority::MoveKeys;
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-					releaser.release();
-					wait(finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
-					releaser = FlowLock::Releaser(*finishMoveKeysParallelismLock);
-
-					wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
-
-					state KeyRange currentKeys = KeyRangeRef(begin, keys.end);
-					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
-					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-					state RangeResult keyServers = wait(krmGetRanges(&tr,
-					                                                 keyServersPrefix,
-					                                                 currentKeys,
-					                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
-					                                                 SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
-
-					// Determine the last processed key (which will be the beginning for the next iteration)
-					endKey = keyServers.end()[-1].key;
-					currentKeys = KeyRangeRef(currentKeys.begin, endKey);
-
-					// printf("  finishMoveKeys( '%s'-'%s' ): read keyServers at %lld\n", keys.begin.toString().c_str(),
-					// keys.end.toString().c_str(), tr.getReadVersion().get());
-
-					// Decode and sanity check the result (dest must be the same for all ranges)
-					bool alreadyMoved = true;
-
-					state std::vector<UID> dest;
-					state std::set<UID> allServers;
-					state std::set<UID> intendedTeam(destinationTeam.begin(), destinationTeam.end());
-					state std::vector<UID> src;
-					std::vector<UID> completeSrc;
-
-					// Iterate through the beginning of keyServers until we find one that hasn't already been processed
-					int currentIndex;
-					for (currentIndex = 0; currentIndex < keyServers.size() - 1 && alreadyMoved; currentIndex++) {
-						decodeKeyServersValue(UIDtoTagMap, keyServers[currentIndex].value, src, dest);
-
-						std::set<UID> srcSet;
-						for (int s = 0; s < src.size(); s++) {
-							srcSet.insert(src[s]);
-						}
-
-						if (currentIndex == 0) {
-							completeSrc = src;
-						} else {
-							for (int i = 0; i < completeSrc.size(); i++) {
-								if (!srcSet.count(completeSrc[i])) {
-									swapAndPop(&completeSrc, i--);
-								}
-							}
-						}
-
-						std::set<UID> destSet;
-						for (int s = 0; s < dest.size(); s++) {
-							destSet.insert(dest[s]);
-						}
-
-						allServers.insert(srcSet.begin(), srcSet.end());
-						allServers.insert(destSet.begin(), destSet.end());
-
-						// Because marking a server as failed can shrink a team, do not check for exact equality
-						// Instead, check for a subset of the intended team, which also covers the equality case
-						bool isSubset =
-						    std::includes(intendedTeam.begin(), intendedTeam.end(), srcSet.begin(), srcSet.end());
-						alreadyMoved = destSet.empty() && isSubset;
-						if (destSet != intendedTeam && !alreadyMoved) {
-							TraceEvent(SevWarn, "MoveKeysDestTeamNotIntended", relocationIntervalId)
-							    .detail("KeyBegin", keys.begin)
-							    .detail("KeyEnd", keys.end)
-							    .detail("IterationBegin", begin)
-							    .detail("IterationEnd", endKey)
-							    .detail("SrcSet", describe(srcSet))
-							    .detail("DestSet", describe(destSet))
-							    .detail("IntendedTeam", describe(intendedTeam))
-							    .detail("KeyServers", keyServers);
-							// ASSERT( false );
-
-							ASSERT(!dest.empty()); // The range has already been moved, but to a different dest (or
-							                       // maybe dest was cleared)
-
-							intendedTeam.clear();
-							for (int i = 0; i < dest.size(); i++)
-								intendedTeam.insert(dest[i]);
-						} else if (alreadyMoved) {
-							dest.clear();
-							src.clear();
-							CODE_PROBE(true,
-							           "FinishMoveKeys first key in iteration sub-range has already been processed");
-						}
-					}
-
-					// Process the rest of the key servers
-					for (; currentIndex < keyServers.size() - 1; currentIndex++) {
-						std::vector<UID> src2, dest2;
-						decodeKeyServersValue(UIDtoTagMap, keyServers[currentIndex].value, src2, dest2);
-
-						std::set<UID> srcSet;
-						for (int s = 0; s < src2.size(); s++)
-							srcSet.insert(src2[s]);
-
-						for (int i = 0; i < completeSrc.size(); i++) {
-							if (!srcSet.count(completeSrc[i])) {
-								swapAndPop(&completeSrc, i--);
-							}
-						}
-
-						allServers.insert(srcSet.begin(), srcSet.end());
-
-						// Because marking a server as failed can shrink a team, do not check for exact equality
-						// Instead, check for a subset of the intended team, which also covers the equality case
-						bool isSubset =
-						    std::includes(intendedTeam.begin(), intendedTeam.end(), srcSet.begin(), srcSet.end());
-						alreadyMoved = dest2.empty() && isSubset;
-						if (dest2 != dest && !alreadyMoved) {
-							TraceEvent(SevError, "FinishMoveKeysError", relocationIntervalId)
-							    .detail("Reason", "dest mismatch")
-							    .detail("Dest", describe(dest))
-							    .detail("Dest2", describe(dest2));
-							ASSERT(false);
-						}
-					}
-					if (!dest.size()) {
-						CODE_PROBE(true,
-						           "A previous finishMoveKeys for this range committed just as it was cancelled to "
-						           "start this one?");
-						TraceEvent("FinishMoveKeysNothingToDo", relocationIntervalId)
-						    .detail("KeyBegin", keys.begin)
-						    .detail("KeyEnd", keys.end)
-						    .detail("IterationBegin", begin)
-						    .detail("IterationEnd", endKey);
-						begin = keyServers.end()[-1].key;
-						break;
-					}
-
-					waitInterval = TraceInterval("RelocateShard_FinishMoveKeysWaitDurable");
-					TraceEvent(SevDebug, waitInterval.begin(), relocationIntervalId)
-					    .detail("KeyBegin", keys.begin)
-					    .detail("KeyEnd", keys.end);
-
-					// Wait for a durable quorum of servers in destServers to have keys available (readWrite)
-					// They must also have at least the transaction read version so they can't "forget" the shard
-					// between now and when this transaction commits.
-					state std::vector<Future<Void>> serverReady; // only for count below
-					state std::vector<Future<Void>> tssReady; // for waiting in parallel with tss
-					state std::vector<StorageServerInterface> tssReadyInterfs;
-					state std::vector<UID> newDestinations;
-					std::set<UID> completeSrcSet(completeSrc.begin(), completeSrc.end());
-					for (auto& it : dest) {
-						if (!hasRemote || !completeSrcSet.count(it)) {
-							newDestinations.push_back(it);
-						}
-					}
-
-					// for smartQuorum
-					state std::vector<StorageServerInterface> storageServerInterfaces;
-					std::vector<Future<Optional<Value>>> serverListEntries;
-					serverListEntries.reserve(newDestinations.size());
-					for (int s = 0; s < newDestinations.size(); s++)
-						serverListEntries.push_back(tr.get(serverListKeyFor(newDestinations[s])));
-					state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
-
-					releaser.release();
-
-					for (int s = 0; s < serverListValues.size(); s++) {
-						ASSERT(serverListValues[s]
-						           .present()); // There should always be server list entries for servers in keyServers
-						auto si = decodeServerListValue(serverListValues[s].get());
-						ASSERT(si.id() == newDestinations[s]);
-						storageServerInterfaces.push_back(si);
-					}
-
-					// update client info in case tss mapping changed or server got updated
-
-					// Wait for new destination servers to fetch the keys
-
-					serverReady.reserve(storageServerInterfaces.size());
-					tssReady.reserve(storageServerInterfaces.size());
-					tssReadyInterfs.reserve(storageServerInterfaces.size());
-					for (int s = 0; s < storageServerInterfaces.size(); s++) {
-						serverReady.push_back(waitForShardReady(storageServerInterfaces[s],
-						                                        keys,
-						                                        tr.getReadVersion().get(),
-						                                        GetShardStateRequest::READABLE));
-
-						auto tssPair = tssMapping.find(storageServerInterfaces[s].id());
-
-						if (tssPair != tssMapping.end() && waitForTSSCounter > 0 &&
-						    !tssToIgnore.count(tssPair->second.id())) {
-							tssReadyInterfs.push_back(tssPair->second);
-							tssReady.push_back(waitForShardReady(
-							    tssPair->second, keys, tr.getReadVersion().get(), GetShardStateRequest::READABLE));
-						}
-					}
-
-					// Wait for all storage server moves, and explicitly swallow errors for tss ones with
-					// waitForAllReady If this takes too long the transaction will time out and retry, which is ok
-					wait(timeout(waitForAll(serverReady) && waitForAllReady(tssReady),
-					             SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT,
-					             Void(),
-					             TaskPriority::MoveKeys));
-
-					// Check to see if we're waiting only on tss. If so, decrement the waiting counter.
-					// If the waiting counter is zero, ignore the slow/non-responsive tss processes before finalizing
-					// the data move.
-					if (tssReady.size()) {
-						bool allSSDone = true;
-						for (auto& f : serverReady) {
-							allSSDone &= f.isReady() && !f.isError();
-							if (!allSSDone) {
-								break;
-							}
-						}
-
-						if (allSSDone) {
-							bool anyTssNotDone = false;
-
-							for (auto& f : tssReady) {
-								if (!f.isReady() || f.isError()) {
-									anyTssNotDone = true;
-									waitForTSSCounter--;
-									break;
-								}
-							}
-
-							if (anyTssNotDone && waitForTSSCounter == 0) {
-								for (int i = 0; i < tssReady.size(); i++) {
-									if (!tssReady[i].isReady() || tssReady[i].isError()) {
-										tssToIgnore.insert(tssReadyInterfs[i].id());
-									}
-								}
-							}
-						}
-					}
-
-					int count = dest.size() - newDestinations.size();
-					for (int s = 0; s < serverReady.size(); s++)
-						count += serverReady[s].isReady() && !serverReady[s].isError();
-
-					int tssCount = 0;
-					for (int s = 0; s < tssReady.size(); s++)
-						tssCount += tssReady[s].isReady() && !tssReady[s].isError();
-
-					TraceEvent readyServersEv(SevDebug, waitInterval.end(), relocationIntervalId);
-					readyServersEv.detail("ReadyServers", count);
-					if (tssReady.size()) {
-						readyServersEv.detail("ReadyTSS", tssCount);
-					}
-
-					if (count == dest.size()) {
-						// update keyServers, serverKeys
-						// SOMEDAY: Doing these in parallel is safe because none of them overlap or touch (one per
-						// server)
-						wait(krmSetRangeCoalescing(
-						    &tr, keyServersPrefix, currentKeys, keys, keyServersValue(UIDtoTagMap, dest)));
-
-						std::set<UID>::iterator asi = allServers.begin();
-						std::vector<Future<Void>> actors;
-						while (asi != allServers.end()) {
-							bool destHasServer = std::find(dest.begin(), dest.end(), *asi) != dest.end();
-							actors.push_back(krmSetRangeCoalescing(&tr,
-							                                       serverKeysPrefixFor(*asi),
-							                                       currentKeys,
-							                                       allKeys,
-							                                       destHasServer ? serverKeysTrue : serverKeysFalse));
-							++asi;
-						}
-
-						wait(waitForAll(actors));
-						wait(tr.commit());
-
-						begin = endKey;
-						break;
-					}
-					tr.reset();
-				} catch (Error& error) {
-					if (error.code() == error_code_actor_cancelled)
-						throw;
-					state Error err = error;
-					wait(tr.onError(error));
-					retries++;
-					if (retries % 10 == 0) {
-						TraceEvent(retries == 20 ? SevWarnAlways : SevWarn,
-						           "RelocateShard_FinishMoveKeysRetrying",
-						           relocationIntervalId)
-						    .error(err)
-						    .detail("KeyBegin", keys.begin)
-						    .detail("KeyEnd", keys.end)
-						    .detail("IterationBegin", begin)
-						    .detail("IterationEnd", endKey);
-					}
-				}
-			}
+			wait(store(begin,
+			           finishMoveKeysTransaction(occ,
+			                                     keys,
+			                                     &destinationTeam,
+			                                     lock,
+			                                     finishMoveKeysParallelismLock,
+			                                     hasRemote,
+			                                     relocationIntervalId,
+			                                     &tssMapping,
+			                                     ddEnabledState,
+			                                     begin)));
 		}
 
 		TraceEvent(SevDebug, interval.end(), relocationIntervalId);
