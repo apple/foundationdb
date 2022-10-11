@@ -232,17 +232,15 @@ struct KmsConnBlobMetadataRep {
 
 struct KmsConnBlobMetadataReq {
 	constexpr static FileIdentifier file_identifier = 3913147;
-	std::vector<BlobMetadataDomainId> domainIds;
+	Standalone<VectorRef<KmsConnLookupDomainIdsReqInfoRef>> domainInfos;
 	Optional<UID> debugId;
 	ReplyPromise<KmsConnBlobMetadataRep> reply;
 
 	KmsConnBlobMetadataReq() {}
-	explicit KmsConnBlobMetadataReq(const std::vector<BlobMetadataDomainId>& ids, Optional<UID> dbgId)
-	  : domainIds(ids), debugId(dbgId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, domainIds, debugId, reply);
+		serializer(ar, domainInfos, debugId, reply);
 	}
 };
 

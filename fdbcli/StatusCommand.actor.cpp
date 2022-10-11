@@ -442,7 +442,7 @@ void printStatus(StatusObjectReader statusObj,
 					outputString += "\n  Blob granules          - enabled";
 				}
 
-				outputString += "\n  Encryption at-rest    - ";
+				outputString += "\n  Encryption at-rest     - ";
 				if (statusObjConfig.get("encryption_at_rest_mode", strVal)) {
 					outputString += strVal;
 				} else {
