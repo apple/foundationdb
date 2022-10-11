@@ -32,6 +32,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 #include "fdbrpc/Replication.h"
+#include "fdbserver/AuditUtils.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/FDBExecHelper.actor.h"
@@ -1344,6 +1345,9 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 }
 
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
+ACTOR Future<Void> loadAndDispatchValidateRange(Reference<DataDistributor> self,
+                                                std::shared_ptr<DDAudit> audit,
+                                                KeyRange range);
 ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
                                          std::shared_ptr<DDAudit> audit,
                                          KeyRange range);
@@ -1355,6 +1359,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req) {
 	// TODO(heliu): Load running audit, and create one if no audit is running.
 	state std::shared_ptr<DDAudit> audit;
+	state AuditStorageState auditState(auditId, req.getType());
 	auto it = self->audits.find(req.getType());
 	if (it != self->audits.end() && !it->second.empty()) {
 		ASSERT_EQ(it->second.size(), 1);
@@ -1366,10 +1371,12 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			return Void();
 		}
 	} else {
-		const UID auditId = deterministicRandom()->randomUniqueID();
+		state UID auditId = deterministicRandom()->randomUniqueID();
+		auditState.range = req.range;
+		wait(persistAuditStorage(self->txnProcessor->context(), auditState));
 		audit = std::make_shared<DDAudit>(auditId, req.range, req.getType());
 		self->audits[req.getType()].push_back(audit);
-		audit->actors.add(scheduleAuditForRange(self, audit, req.range));
+		audit->actors.add(loadAndDispatchValidateRange(self, audit, req.range));
 		TraceEvent(SevDebug, "DDAuditStorageBegin", audit->id).detail("Range", req.range).detail("AuditType", req.type);
 	}
 
@@ -1394,6 +1401,46 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		    .detail("AuditType", req.type);
 	}
 
+	auditState.setPhase(AuditPhase::Complete);
+	wait(persistAuditStorage(self->txnProcessor->context(), auditState));
+	return Void();
+}
+
+ACTOR Future<Void> loadAndDispatchValidateRange(Reference<DataDistributor> self,
+                                                std::shared_ptr<DDAudit> audit,
+                                                KeyRange range) {
+	TraceEvent(SevDebug, "DDLoadAndDispatchValidateRangeBegin", audit->id)
+	    .detail("Range", range)
+	    .detail("AuditType", audit->type);
+	state Key begin = range.begin;
+	state KeyRange currentRange = range;
+
+	while (begin < range.end) {
+		currentRange = KeyRangeRef(begin, range.end);
+		std::vector<AuditStorageState> auditStates =
+		    wait(getAuditStorageFroRange(self->txnProcessor->context(), audit->id, range));
+		ASSERT(!auditStates.empty());
+		begin = auditStates.back().range.end;
+		try {
+			for (const auto& auditState : auditStates) {
+				const AuditPhase phase = auditState.getPhase();
+				if (phase == AuditPhase::Complete || phase == AuditPhase::Error) {
+					audit->auditMap.insert(auditState.range, phase);
+					continue;
+				} else {
+					audit->actors.add(scheduleAuditForRange(self, audit, range));
+				}
+			}
+		} catch (Error& e) {
+			TraceEvent(SevWarnAlways, "DDLoadAndDispatchValidateRangeError", audit->id)
+			    .errorUnsuppressed(e)
+			    .detail("Range", range);
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
+		}
+	}
+
 	return Void();
 }
 
@@ -1403,25 +1450,11 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
 	TraceEvent(SevDebug, "DDScheduleAuditForRangeBegin", audit->id)
 	    .detail("Range", range)
 	    .detail("AuditType", audit->type);
-	// TODO(heliu): Load the audit map for `range`.
 	state Key begin = range.begin;
 	state KeyRange currentRange = range;
 
 	while (begin < range.end) {
 		currentRange = KeyRangeRef(begin, range.end);
-
-		// Find the first keyrange that hasn't been validated.
-		auto f = audit->auditMap.intersectingRanges(currentRange);
-		for (auto it = f.begin(); it != f.end(); ++it) {
-			if (it->value() != AuditPhase::Invalid && it->value() != AuditPhase::Failed) {
-				begin = it->range().end;
-				currentRange = KeyRangeRef(it->range().end, currentRange.end);
-			} else {
-				currentRange = KeyRangeRef(it->range().begin, it->range().end) & currentRange;
-				break;
-			}
-		}
-
 		try {
 			state std::vector<IDDTxnProcessor::DDRangeLocations> rangeLocations =
 			    wait(self->txnProcessor->getSourceServerInterfacesForRange(currentRange));
@@ -1486,7 +1519,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		    .detail("TargetServers", describe(req.targetServers));
 		if (e.code() != error_code_actor_cancelled) {
 			audit->auditMap.insert(req.range, AuditPhase::Failed);
-			audit->actors.add(scheduleAuditForRange(self, audit, req.range));
+			audit->actors.add(loadAndDispatchValidateRange(self, audit, req.range));
 		}
 	}
 

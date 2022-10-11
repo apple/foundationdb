@@ -34,7 +34,7 @@ ACTOR Future<Void> persistAuditStorage(Database cx, AuditStorageState auditState
 		try {
 			tr.set(auditKey(auditState.id), auditStorageStateValue(auditState));
 			wait(tr.commit());
-            break;
+			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -84,27 +84,30 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStorageFroRange(Database cx
 	state RangeResult auditStates;
 	state Transaction tr(cx);
 
-    loop {
+	loop {
 		try {
 			RangeResult res_ = wait(krmGetRanges(&tr,
 			                                     auditRangePrefixFor(id),
 			                                     range,
 			                                     SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
 			                                     SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
-            auditStates = res_;
+			auditStates = res_;
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
 	}
 
-    std::vector<AuditStorageState> res;
-    for (int i = 0; i < auditStates.size() - 1; ++i) {
-        KeyRange currentRange = KeyRangeRef(auditStates[i].key, auditStates[i + 1].key);
-        AuditStorageState auditState = decodeAuditStorageState(auditStates[i].value);
-        auditState.range = currentRange;
-        res.push_back(auditState);
-    }
+	std::vector<AuditStorageState> res;
+	for (int i = 0; i < auditStates.size() - 1; ++i) {
+		KeyRange currentRange = KeyRangeRef(auditStates[i].key, auditStates[i + 1].key);
+		AuditStorageState auditState;
+		if (!auditStates[i].value.empty()) {
+			AuditStorageState auditState = decodeAuditStorageState(auditStates[i].value);
+		}
+		auditState.range = currentRange;
+		res.push_back(auditState);
+	}
 
-    return res;
+	return res;
 }

@@ -22,6 +22,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/simulator.h"
+#include "fdbserver/AuditUtils.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
@@ -87,6 +88,8 @@ struct ValidateStorage : TestWorkload {
 			try {
 				UID auditId = wait(auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA));
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId);
+				AuditStorageState auditState = wait(getAuditStorage(cx, auditId));
+				ASSERT(auditState.getPhase() == AuditPhase::Complete);
 				break;
 			} catch (Error& e) {
 				TraceEvent("AuditStorageError").errorUnsuppressed(e);
