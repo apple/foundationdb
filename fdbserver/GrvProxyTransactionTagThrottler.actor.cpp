@@ -96,7 +96,8 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 	};
 
 	// Track transactions released for each tag
-	TransactionTagMap<uint32_t> transactionsReleased;
+	std::vector<std::pair<TransactionTag, uint32_t>> transactionsReleased;
+	transactionsReleased.reserve(queues.size());
 
 	std::priority_queue<TagInfo> pq;
 	for (auto& [tag, queue] : queues) {
@@ -104,7 +105,8 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 			queue.rateInfo.get().startReleaseWindow();
 		}
 		if (!queue.requests.empty()) {
-			pq.emplace(queue, transactionsReleased[tag]);
+			auto& [_, count] = transactionsReleased.emplace_back(tag, 0);
+			pq.emplace(queue, count);
 		}
 	}
 
@@ -148,9 +150,17 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 			}
 		}
 	}
-	for (auto& [tag, queue] : queues) {
-		if (queue.rateInfo.present()) {
-			queue.rateInfo.get().endReleaseWindow(transactionsReleased[tag], false, elapsed);
+
+	// End release windows for queues with valid rateInfo
+	{
+		TransactionTagMap<uint32_t> transactionsReleasedMap;
+		for (const auto& [tag, count] : transactionsReleased) {
+			transactionsReleasedMap[tag] = count;
+		}
+		for (auto& [tag, queue] : queues) {
+			if (queue.rateInfo.present()) {
+				queue.rateInfo.get().endReleaseWindow(transactionsReleasedMap[tag], false, elapsed);
+			}
 		}
 	}
 }
