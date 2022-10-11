@@ -82,52 +82,68 @@ void GrvProxyTransactionTagThrottler::addRequest(GetReadVersionRequest const& re
 void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
                                                           SpannedDeque<GetReadVersionRequest>& outBatchPriority,
                                                           SpannedDeque<GetReadVersionRequest>& outDefaultPriority) {
-	struct TagInfo {
+	// Pointer to a TagQueue with some extra metadata stored alongside
+	struct TagQueueHandle {
 		// Store pointers here to avoid frequent std::unordered_map lookups
 		TagQueue* queue;
+		// Cannot be stored directly because we need to
 		uint32_t* numReleased;
 		// Sequence number of the first queued request
 		int64_t nextSeqNo;
-		bool operator<(TagInfo const& rhs) const { return nextSeqNo < rhs.nextSeqNo; }
-		explicit TagInfo(TagQueue& queue, uint32_t& numReleased) : queue(&queue), numReleased(&numReleased) {
+		bool operator<(TagQueueHandle const& rhs) const { return nextSeqNo < rhs.nextSeqNo; }
+		explicit TagQueueHandle(TagQueue& queue, uint32_t& numReleased) : queue(&queue), numReleased(&numReleased) {
 			ASSERT(!this->queue->requests.empty());
 			nextSeqNo = this->queue->requests.front().sequenceNumber;
 		}
 	};
 
+	// Priority queue of queues for each tag, ordered by the sequence number of the
+	// next request to process in each queue
+	std::priority_queue<TagQueueHandle> pqOfQueues;
+
 	// Track transactions released for each tag
 	std::vector<std::pair<TransactionTag, uint32_t>> transactionsReleased;
 	transactionsReleased.reserve(queues.size());
 
-	std::priority_queue<TagInfo> pq;
 	for (auto& [tag, queue] : queues) {
 		if (queue.rateInfo.present()) {
 			queue.rateInfo.get().startReleaseWindow();
 		}
 		if (!queue.requests.empty()) {
+			// First place the count in the transactionsReleased object,
+			// then pass a reference to the count to the TagQueueHandle object
+			// emplaced into pqOfQueues.
+			//
+			// Because we've reserved enough space in transactionsReleased
+			// to avoid resizing, this reference should remain valid.
+			// This allows each TagQueueHandle to update its number of
+			// numReleased counter without incurring the cost of a std::unordered_map lookup.
 			auto& [_, count] = transactionsReleased.emplace_back(tag, 0);
-			pq.emplace(queue, count);
+			pqOfQueues.emplace(queue, count);
 		}
 	}
 
-	while (!pq.empty()) {
-		auto info = pq.top();
-		pq.pop();
+	while (!pqOfQueues.empty()) {
+		auto tagQueueHandle = pqOfQueues.top();
+		pqOfQueues.pop();
 		// Used to determine when it is time to start processing another tag
-		auto const nextQueueSeqNo = pq.empty() ? std::numeric_limits<int64_t>::max() : pq.top().nextSeqNo;
+		auto const nextQueueSeqNo =
+		    pqOfQueues.empty() ? std::numeric_limits<int64_t>::max() : pqOfQueues.top().nextSeqNo;
 
-		while (!info.queue->requests.empty()) {
-			auto& delayedReq = info.queue->requests.front();
+		while (!tagQueueHandle.queue->requests.empty()) {
+			auto& delayedReq = tagQueueHandle.queue->requests.front();
 			auto count = delayedReq.req.tags.begin()->second;
-			ASSERT_EQ(info.nextSeqNo, delayedReq.sequenceNumber);
-			if (info.queue->rateInfo.present() && !info.queue->rateInfo.get().canStart(*(info.numReleased), count)) {
-				// Cannot release any more transaction from this tag (don't push the info back into pq)
+			ASSERT_EQ(tagQueueHandle.nextSeqNo, delayedReq.sequenceNumber);
+			if (tagQueueHandle.queue->rateInfo.present() &&
+			    !tagQueueHandle.queue->rateInfo.get().canStart(*(tagQueueHandle.numReleased), count)) {
+				// Cannot release any more transaction from this tag (don't push the tag queue handle back into
+				// pqOfQueues)
 				CODE_PROBE(true, "GrvProxyTransactionTagThrottler::releaseTransactions : Throttling transaction");
 				break;
 			} else {
-				if (info.nextSeqNo < nextQueueSeqNo) {
+				if (tagQueueHandle.nextSeqNo < nextQueueSeqNo) {
 					// Releasing transaction
-					*(info.numReleased) += count;
+					*(tagQueueHandle.numReleased) += count;
 					delayedReq.updateProxyTagThrottledDuration();
 					if (delayedReq.req.priority == TransactionPriority::BATCH) {
 						outBatchPriority.push_back(delayedReq.req);
@@ -137,14 +153,14 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 						// Immediate priority transactions should bypass the GrvProxyTransactionTagThrottler
 						ASSERT(false);
 					}
-					info.queue->requests.pop_front();
-					if (!info.queue->requests.empty()) {
-						info.nextSeqNo = info.queue->requests.front().sequenceNumber;
+					tagQueueHandle.queue->requests.pop_front();
+					if (!tagQueueHandle.queue->requests.empty()) {
+						tagQueueHandle.nextSeqNo = tagQueueHandle.queue->requests.front().sequenceNumber;
 					}
 				} else {
 					CODE_PROBE(
 					    true, "GrvProxyTransactionTagThrottler::releaseTransactions : Switching tags to preserve FIFO");
-					pq.push(info);
+					pqOfQueues.push(tagQueueHandle);
 					break;
 				}
 			}

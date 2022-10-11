@@ -31,10 +31,6 @@ GrvTransactionRateInfo::GrvTransactionRateInfo(double rate)
 }
 
 bool GrvTransactionRateInfo::canStart(int64_t numAlreadyStarted, int64_t count) const {
-	TraceEvent("HERE_CanStart")
-	    .detail("Limit", limit)
-	    .detail("Budget", budget)
-	    .detail("Rate", smoothRate.smoothTotal());
 	return numAlreadyStarted + count <=
 	       std::min(limit + budget, SERVER_KNOBS->START_TRANSACTION_MAX_TRANSACTIONS_TO_START);
 }
