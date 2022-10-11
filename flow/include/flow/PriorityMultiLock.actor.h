@@ -44,16 +44,20 @@
 // ids defined.
 //
 // Scheduling logic
+// Let
 // 	 launchLimits[n] = configured amount from the launchLimit vector for priority n
 //   waiters[n] = the number of waiters for priority n
 //   runnerCounts[n] = number of runners at priority n
 //
-//   totalActiveLaunchLimits = sum of limits for all priorities with waiters
+//   totalActiveLaunchLimits = sum of limits for all priorities with waiters[n] > 0
 //   When waiters[n] becomes == 0, totalActiveLaunchLimits -= launchLimits[n]
 //   When waiters[n] becomes  > 0, totalActiveLaunchLimits += launchLimits[n]
 //
 //   The total capacity of a priority to be considered when launching tasks is
 //     ceil(launchLimits[n] / totalLimits * concurrency)
+//
+// For improved memory locality the properties mentioned above are stored as priorities[n].<property>
+// in the actual implementation.
 //
 // The interface is similar to FlowMutex except that lock holders can just drop the lock to release it.
 //
@@ -223,6 +227,9 @@ private:
 		try {
 			wait(f);
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 		}
 
 		++self->available;
