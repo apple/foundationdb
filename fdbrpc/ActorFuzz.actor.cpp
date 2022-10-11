@@ -94,7 +94,6 @@ ACTOR Future<int> actorFuzz0(FutureStream<int> inputStream, PromiseStream<int> o
 }
 
 ACTOR Future<int> actorFuzz1(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
-	state int ifstate = 0;
 	state int i661806;
 	for (i661806 = 0; i661806 < 5; i661806++) {
 		outputStream.send(477566);
@@ -141,7 +140,6 @@ ACTOR Future<int> actorFuzz1(FutureStream<int> inputStream, PromiseStream<int> o
 }
 
 ACTOR Future<int> actorFuzz2(FutureStream<int> inputStream, PromiseStream<int> outputStream, Future<Void> error) {
-	state int ifstate = 0;
 	int input = waitNext(inputStream);
 	outputStream.send(input + 475677);
 	return 930237;

@@ -65,7 +65,7 @@ FDB_DEFINE_BOOLEAN_PARAM(IncrementalBackupOnly);
 FDB_DEFINE_BOOLEAN_PARAM(OnlyApplyMutationLogs);
 
 #define SevFRTestInfo SevVerbose
-//#define SevFRTestInfo SevInfo
+// #define SevFRTestInfo SevInfo
 
 static std::string boolToYesOrNo(bool val) {
 	return val ? std::string("Yes") : std::string("No");
@@ -2559,7 +2559,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 			    readCommitted(cx, results, lock, range, Terminator::False, AccessSystemKeys::True, LockAware::True));
 		}
 
-		state Future<Void> sendEOS = map(errorOr(waitForAll(rc)), [=](ErrorOr<Void> const& result) {
+		state Future<Void> sendEOS = map(errorOr(waitForAll(rc)), [=](ErrorOr<Void> const& result) mutable {
 			if (result.isError())
 				results.sendError(result.getError());
 			else
