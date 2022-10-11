@@ -314,12 +314,8 @@ struct EncryptionOpsWorkload : TestWorkload {
 		       header.flags.authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE);
 
 		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, header.iv, BlobCipherMetrics::TEST);
-		const bool validateHeaderAuthToken = deterministicRandom()->randomInt(0, 100) < 65;
 
 		auto start = std::chrono::high_resolution_clock::now();
-		if (validateHeaderAuthToken) {
-			decryptor.verifyHeaderAuthToken(header, arena);
-		}
 		Reference<EncryptBuf> decrypted = decryptor.decrypt(encrypted->begin(), len, header, arena);
 		auto end = std::chrono::high_resolution_clock::now();
 
