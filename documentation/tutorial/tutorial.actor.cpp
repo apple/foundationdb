@@ -30,6 +30,9 @@
 #include <unordered_map>
 #include <memory>
 #include <iostream>
+
+#include "flow/cpp20coro.h"
+
 #include "flow/actorcompiler.h"
 
 NetworkAddress serverAddress;
@@ -58,6 +61,22 @@ ACTOR Future<Void> simpleTimer() {
 	}
 }
 
+Future<Void> simpleTimerCoro() {
+	// we need to remember the time when we first
+	// started.
+	// This needs to be a state-variable because
+	// we will use it in different parts of the
+	// actor. If you don't understand how state
+	// variables work, it is a good idea to remove
+	// the state keyword here and look at the
+	// generated C++ code from the actor compiler.
+	double start_time = g_network->now();
+	while (1) {
+		co_await delay(1.0);
+		std::cout << format("Time: %.2f\n", g_network->now() - start_time);
+	}
+}
+
 // A actor that demonstrates how choose-when
 // blocks work.
 ACTOR Future<Void> someFuture(Future<int> ready) {
@@ -82,6 +101,15 @@ ACTOR Future<Void> promiseDemo() {
 	return Void();
 }
 
+Future<Void> promiseDemoCoro() {
+	Promise<int> promise;
+	Future<Void> f = someFuture(promise.getFuture());
+	co_await(delay(3.0));
+	promise.send(2);
+	co_await(f);
+	co_return Void();
+}
+
 ACTOR Future<Void> eventLoop(AsyncTrigger* trigger) {
 	loop choose {
 		when(wait(delay(0.5))) { std::cout << "Still waiting...\n"; }
@@ -100,6 +128,19 @@ ACTOR Future<Void> triggerDemo() {
 	}
 	std::cout << "Done.";
 	return Void();
+}
+
+Future<Void> triggerDemoCoro() {
+	int runs = 1;
+	AsyncTrigger trigger;
+	Future<Void> triggerLoop = eventLoop(&trigger);
+	while (++runs < 10) {
+		co_await(delay(1.0));
+		std::cout << "trigger..";
+		trigger.trigger();
+	}
+	std::cout << "Done.";
+	co_return Void();
 }
 
 struct EchoServerInterface {
@@ -521,8 +562,11 @@ ACTOR Future<Void> fdbStatusStresser() {
 
 std::unordered_map<std::string, std::function<Future<Void>()>> actors = {
 	{ "timer", &simpleTimer }, // ./tutorial timer
+	{ "timerCoro", &simpleTimerCoro }, // ./tutorial timerCoro
 	{ "promiseDemo", &promiseDemo }, // ./tutorial promiseDemo
+	{ "promiseDemoCoro", &promiseDemoCoro }, // ./tutorial promiseDemoCoro
 	{ "triggerDemo", &triggerDemo }, // ./tutorial triggerDemo
+	{ "triggerDemoCoro", &triggerDemoCoro }, // ./tutorial triggerDemoCoro
 	{ "echoServer", &echoServer }, // ./tutorial -p 6666 echoServer
 	{ "echoClient", &echoClient }, // ./tutorial -s 127.0.0.1:6666 echoClient
 	{ "kvStoreServer", &kvStoreServer }, // ./tutorial -p 6666 kvStoreServer
