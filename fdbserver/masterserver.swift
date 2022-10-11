@@ -14,11 +14,40 @@ var BUGGIFY: Bool {
     false
 }
 
-public actor MasterDataActor {
-    // We're re-rolling the model type one field at a time...
-    let myself: MasterDataShared
+func clamp(_ v: Version, lowerBound: Version, upperBound: Version) -> Version {
+    return max(min(v, upperBound), lowerBound)
+}
 
-    init(data: MasterDataShared) {
+func figureVersion(current: Version,
+                   now: Double,
+                   reference: Version,
+                   toAdd: Int64,
+                   maxVersionRateModifier: Double,
+                   maxVersionRateOffset: Int64) -> Version {
+    // Versions should roughly follow wall-clock time, based on the
+    // system clock of the current machine and an FDB-specific epoch.
+    // Calculate the expected version and determine whether we need to
+    // hand out versions faster or slower to stay in sync with the
+    // clock.
+    let expected = Version(now * Double(getServerKnobs().VERSIONS_PER_SECOND)) - reference
+
+    // Attempt to jump directly to the expected version. But make
+    // sure that versions are still being handed out at a rate
+    // around VERSIONS_PER_SECOND. This rate is scaled depending on
+    // how far off the calculated version is from the expected
+    // version.
+    let maxOffset = min(Int64(Double(toAdd) * maxVersionRateModifier), maxVersionRateOffset)
+    return clamp(expected, lowerBound: current + toAdd - maxOffset,
+                           upperBound: current + toAdd + maxOffset)
+}
+
+
+public actor MasterDataActor {
+    // FIXME: Make 'let' after resolving FRT layout issue.
+    // let myself: MasterData
+    var myself: MasterData
+
+    init(data: MasterData) {
         self.myself = data
     }
 
@@ -32,8 +61,10 @@ public actor MasterDataActor {
         let requestingProxyUID: UID = req.requestingProxy
         myself.getGetCommitVersionRequests() += 1
 
+        // FIXME: workaround for first runtime issue.
+        let lp = swift_lookup_Map_UID_CommitProxyVersionReplies(myself, requestingProxyUID)
         // FIXME: workaround for std::map usability, see: rdar://100487652 ([fdp] std::map usability, can't effectively work with map in Swift)
-        guard let lastVersionReplies = lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID) else {
+        guard let lastVersionReplies = lp/* FIXME: (workaround for first runtime issue): lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID)*/ else {
             // Request from invalid proxy (e.g. from duplicate recruitment request)
             req.reply.sendNever()
             return
@@ -47,86 +78,81 @@ public actor MasterDataActor {
                 .whenAtLeast(VersionMetricHandle.ValueType(req.requestNum - UInt64(1)))
         let latestRequestNum = try! await latestRequestNumFuture.waitValue
 
+        // FIXME: workaround for std::map usability, see: rdar://100487652 ([fdp] std::map usability, can't effectively work with map in Swift)
         if lastVersionReplies.replies.count(UInt(req.requestNum)) != 0 {
             // NOTE: CODE_PROBE is macro, won't be imported
             // CODE_PROBE(true, "Duplicate request for sequence")
-            var lastVersionNum = lastVersionReplies.replies.__atUnsafe(UInt(req.requestNum))
+            let lastVersionNum = lastVersionReplies.replies.__atUnsafe(UInt(req.requestNum))
             req.reply.sendCopy(lastVersionNum.pointee) // TODO(swift): we should not require those to be inout
             return
-//        } else if (req.requestNum <= lastVersionReplies.latestRequestNum.get()) {
-//            // NOTE: CODE_PROBE is macro, won't be imported
-//            // /root/src/foundationdb/flow/include/flow/CodeProbe.h:291:9: note: macro 'CODE_PROBE' not imported: function like macros not supported
-//            //#define CODE_PROBE(condition, comment, ...)                                                                            \
-//            //        ^
-//            // CODE_PROBE(true,
-//            //         "Old request for previously acknowledged sequence - may be impossible with current FlowTransport")
-//            assert(req.requestNum <
-//                    proxyItr.latestRequestNum.get()) // The latest request can never be acknowledged
-//            req.reply.sendNever()
-//            return
-        } else {
-            var rep = GetCommitVersionReply()
-
-            if (myself.version == invalidVersion) {
-                myself.lastVersionTime = now()
-                myself.version = myself.recoveryTransactionVersion
-                rep.prevVersion = myself.lastEpochEnd
-
-            } else {
-            }
-            //                var t1 = now()
-            //                if BUGGIFY {
-            //                    t1 = self.lastVersionTime;
-            //                }
-            //
-            //                let toAdd: Version =
-            //                        Version(
-            //                                Double.maximum(
-            //                                        1,
-            //                                        Double.minimum(
-            //                                                Double(SERVER_KNOBS.MAX_READ_TRANSACTION_LIFE_VERSIONS),
-            //                                                Double(SERVER_KNOBS.VERSIONS_PER_SECOND) * (t1 - self.lastVersionTime)
-            //                                        )
-            //                                ))
-            //
-            //                rep.prevVersion = self.version
-            //                if let referenceVersion = self.referenceVersion {
-            //                    self.version = figureVersion(
-            //                            self.version,
-            //                            g_network.timer(),
-            //                            referenceVersion,
-            //                            toAdd,
-            //                            SERVER_KNOBS.MAX_VERSION_RATE_MODIFIER,
-            //                            SERVER_KNOBS.MAX_VERSION_RATE_OFFSET);
-            //                    assert(self.version > rep.prevVersion)
-            //                } else {
-            //                    self.version = self.version + toAdd
-            //                }
-            //
-            //                CODE_PROBE(self.version - rep.prevVersion == 1, "Minimum possible version gap");
-            //
-            //                let maxVersionGap: Bool = self.version - rep.prevVersion == Version(SERVER_KNOBS.MAX_READ_TRANSACTION_LIFE_VERSIONS)
-            //                CODE_PROBE(maxVersionGap, "Maximum possible version gap")
-            //                self.lastVersionTime = t1
-            //
-            //                self.resolutionBalancer.setChangesInReply(req.requestingProxy, rep)
-            //            }
-            //
-            //            rep.version = self.version;
-            //            rep.requestNum = req.requestNum;
-            //
-            //            // TODO:
-            //            // lastVersionReplies.replies.erase(
-            //            //        lastVersionReplies.replies.begin(),
-            //            //        lastVersionReplies.replies.upper_bound(req.mostRecentProcessedRequestNum))
-            //            lastVersionReplies.replies[req.requestNum] = rep
-            //            assert(rep.prevVersion >= 0)
-            //
-            //            req.reply.send(rep)
-            //
-            //            assert(lastVersionReplies.latestRequestNum.get().value == req.requestNum - 1)
-            //            lastVersionReplies.latestRequestNum.set(.init(req.requestNum))
+         } else if (req.requestNum <= lastVersionReplies.getLatestRequestNumRef().get()) {
+             // NOTE: CODE_PROBE is macro, won't be imported
+             // CODE_PROBE(true, "Old request for previously acknowledged sequence - may be impossible with current FlowTransport");
+             assert(req.requestNum < lastVersionReplies.getLatestRequestNumRef().get()) // The latest request can never be acknowledged
+             req.reply.sendNever()
+             return
         }
+        
+        var rep = GetCommitVersionReply()
+
+        if (myself.version == invalidVersion) {
+            myself.lastVersionTime = now()
+            myself.version = myself.recoveryTransactionVersion
+            rep.prevVersion = myself.lastEpochEnd
+        } else {
+            var t1 = now()
+            if BUGGIFY {
+                t1 = myself.lastVersionTime
+            }
+
+            let toAdd = max(Version(1), min(
+                          getServerKnobs().MAX_READ_TRANSACTION_LIFE_VERSIONS,
+                          Version(getServerKnobs().VERSIONS_PER_SECOND) * Version(t1 - myself.lastVersionTime)))
+            rep.prevVersion = myself.version
+            if myself.referenceVersion.present() {
+                // FIXME: myself.referenceVersion.get()
+                // FIXME: getMutating() ambiguity
+                var r = myself.referenceVersion
+                // FIXME: Do not use r.__getUnsafe
+                myself.version = figureVersion(current: myself.version,
+                                               now: SwiftGNetwork.timer(),
+                              reference: Version(r.__getUnsafe().pointee),
+                              toAdd: toAdd,
+                              maxVersionRateModifier: getServerKnobs().MAX_VERSION_RATE_MODIFIER,
+                              maxVersionRateOffset: getServerKnobs().MAX_VERSION_RATE_OFFSET)
+                assert(myself.version > rep.prevVersion)
+            } else {
+                myself.version += toAdd
+            }
+
+            // NOTE: CODE_PROBE is macro, won't be imported
+            // CODE_PROBE(self.version - rep.prevVersion == 1, "Minimum possible version gap");
+            let maxVersionGap = myself.version - rep.prevVersion == getServerKnobs().MAX_READ_TRANSACTION_LIFE_VERSIONS
+            // CODE_PROBE(maxVersionGap, "Maximum possible version gap");
+
+            myself.lastVersionTime = t1
+            myself.getResolutionBalancer().setChangesInReply(req.requestingProxy, &rep)
+        }
+
+        rep.version = myself.version
+        rep.requestNum = req.requestNum
+        print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) reply with version: \(rep.version)")
+
+        //  FIXME: figure out how to map:
+        //            // lastVersionReplies.replies.erase(
+        //            //        lastVersionReplies.replies.begin(),
+        //            //        lastVersionReplies.replies.upper_bound(req.mostRecentProcessedRequestNum))
+        eraseReplies(&lastVersionReplies.replies, req.mostRecentProcessedRequestNum)
+        lastVersionReplies.replies[UInt(req.requestNum)] = rep
+        assert(rep.prevVersion >= 0)
+
+        req.reply.send(&rep)
+
+        assert(lastVersionReplies.getLatestRequestNumRef().get() == req.requestNum - 1)
+        // FIXME: link issue.
+        // lastVersionReplies.getLatestRequestNumRef().set(Int(req.requestNum))
+        swift_workaround_setLatestRequestNumber(lastVersionReplies.getLatestRequestNumRef(),
+                                                Version(req.requestNum))
     }
 }
 
@@ -135,11 +161,8 @@ public actor MasterDataActor {
 public struct MasterDataActorCxx {
     let myself: MasterDataActor
 
-    public init() {
-        fatalError("TODO") // FIXME
-    }
     /// Mirror actor initializer, and initialize `myself`.
-    public init(data: MasterDataShared) {
+    public init(data: MasterDataSwiftReference) {
         myself = MasterDataActor(data: data)
     }
 
@@ -148,7 +171,7 @@ public struct MasterDataActorCxx {
     public func getVersion(req: GetCommitVersionRequest, result promise: PromiseVoid) {
         print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
         Task {
-            print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
+            print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
             await myself.getVersion(req: req)
             var result = Flow.Void()
             promise.send(&result)
@@ -157,11 +180,31 @@ public struct MasterDataActorCxx {
     }
 }
 
-// FIXME: remove in favor of MasterDataActor_getVersion.
-@_expose(Cxx, "getVersion")
-public func MasterDataActor_getVersion(
-        target myself: MasterDataActorCxx,
-        req: GetCommitVersionRequest,
-        result promise: PromiseVoid) {
-    myself.getVersion(req: req, result: promise)
+// FIXME: remove once MasterData is FRT.
+extension MasterDataSwiftReference {
+    var version: Version {
+        get {
+            getVersion()
+        }
+        set {
+            setVersion(newValue)
+        }
+    }
+
+    var lastVersionTime: Double {
+        get {
+            getLastVersionTime()
+        }
+        set {
+            setLastVersionTime(newValue)
+        }
+    }
+
+    var recoveryTransactionVersion: Version { getRecoveryTransactionVersion() }
+
+    var lastEpochEnd: Version { getLastEpochEnd() }
+
+    var referenceVersion: MasterDataSwiftReference.OptionalVersion { getReferenceVersion() }
 }
+
+typealias MasterData = MasterDataSwiftReference

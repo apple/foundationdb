@@ -657,6 +657,13 @@ protected:
 	~INetwork() {} // Please don't try to delete through this interface!
 };
 
+/// A wrapper for `g_network` value  that lets you access global properties from Swift.
+namespace SwiftGNetwork {
+  inline double timer() {
+    return g_network->timer();
+  }
+}
+
 class IUDPSocket {
 public:
 	//  see https://en.wikipedia.org/wiki/User_Datagram_Protocol - the max size of a UDP packet

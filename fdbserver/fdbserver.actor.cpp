@@ -104,6 +104,8 @@
 #endif
 
 #if __has_include("SwiftModules/FDBServer")
+class MasterData;
+struct MasterDataSwiftReference; /* FIXME: remove once MasterDataSwiftReference is removed. */
 #include "SwiftModules/FDBServer"
 #define SWIFT_REVERSE_INTEROP_SUPPORTED
 #endif
