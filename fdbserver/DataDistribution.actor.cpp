@@ -1359,6 +1359,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req) {
 	// TODO(heliu): Load running audit, and create one if no audit is running.
 	state std::shared_ptr<DDAudit> audit;
+	state UID auditId = deterministicRandom()->randomUniqueID();
 	state AuditStorageState auditState(auditId, req.getType());
 	auto it = self->audits.find(req.getType());
 	if (it != self->audits.end() && !it->second.empty()) {
@@ -1371,7 +1372,6 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			return Void();
 		}
 	} else {
-		state UID auditId = deterministicRandom()->randomUniqueID();
 		auditState.range = req.range;
 		wait(persistAuditStorage(self->txnProcessor->context(), auditState));
 		audit = std::make_shared<DDAudit>(auditId, req.range, req.getType());
@@ -1387,7 +1387,8 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 	try {
 		wait(audit->actors.getResult());
 		TraceEvent(SevDebug, "DDAuditStorageEnd", audit->id).detail("Range", req.range).detail("AuditType", req.type);
-		// TODO(heliu): Set the audit result, and clear auditId.
+		auditState.setPhase(AuditPhase::Complete);
+		wait(persistAuditStorage(self->txnProcessor->context(), auditState));
 		if (!req.async && !req.reply.isSet()) {
 			TraceEvent(SevDebug, "DDAuditStorageReply", audit->id)
 			    .detail("Range", req.range)
@@ -1401,8 +1402,6 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		    .detail("AuditType", req.type);
 	}
 
-	auditState.setPhase(AuditPhase::Complete);
-	wait(persistAuditStorage(self->txnProcessor->context(), auditState));
 	return Void();
 }
 
