@@ -43,7 +43,7 @@
 #define FDBSERVER_MASTERDATA_ACTOR_H
 #include "flow/actorcompiler.h" // This must be the last #include
 
-struct SWIFT_CXX_REF_IMMORTAL MasterData : NonCopyable, ReferenceCounted<MasterData> {
+struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
     UID dbgid;
 
     Version lastEpochEnd, // The last version in the old epoch not (to be) rolled back in this recovery
@@ -157,13 +157,32 @@ using ReferenceMasterData = Reference<MasterData>;
 void swift_workaround_setLatestRequestNumber(NotifiedVersion &latestRequestNum,
                                              Version v);
 
-void swift_test_masterData(MasterData *p);
+// FIXME: Workaround for issue with FRT type layout.
+struct MasterDataSwiftReference {
+    MasterData &myself;
 
-void swift_marker_x();
+    MasterDataSwiftReference(MasterData &myself);
+
+    Counter &getGetCommitVersionRequests() const __attribute__((swift_attr("import_unsafe")));
+
+    Version getVersion() const;
+    void setVersion(Version v);
+
+    double getLastVersionTime() const;
+    void setLastVersionTime(double v);
+
+    Version getRecoveryTransactionVersion() const;
+
+    Version getLastEpochEnd() const;
+
+    using OptionalVersion = Optional<Version>;
+    Optional<Version> getReferenceVersion() const;
+
+    ResolutionBalancer &getResolutionBalancer() const __attribute__((swift_attr("import_unsafe")));
+};
 
 // FIXME: Workaround for runtime issue #1.
-CommitProxyVersionReplies *_Nullable swift_lookup_Map_UID_CommitProxyVersionReplies(MasterData *p, UID value);
-
+CommitProxyVersionReplies *_Nullable swift_lookup_Map_UID_CommitProxyVersionReplies(MasterDataSwiftReference rd, UID value);
 
 #include "flow/unactorcompiler.h"
 #endif

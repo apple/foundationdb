@@ -41,8 +41,11 @@ func figureVersion(current: Version,
                            upperBound: current + toAdd + maxOffset)
 }
 
+
 public actor MasterDataActor {
-    let myself: MasterData
+    // FIXME: Make 'let' after resolving FRT layout issue.
+    // let myself: MasterData
+    var myself: MasterData
 
     init(data: MasterData) {
         self.myself = data
@@ -58,14 +61,11 @@ public actor MasterDataActor {
         // TODO: Wrap with a tracing span
         let requestingProxyUID: UID = req.requestingProxy
         myself.getGetCommitVersionRequests() += 1
-        print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) b")
-        swift_test_masterData(myself)
-        let lp = swift_lookup_Map_UID_CommitProxyVersionReplies(myself, requestingProxyUID)
-        print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) b1")
 
+        // FIXME: workaround for first runtime issue.
+        let lp = swift_lookup_Map_UID_CommitProxyVersionReplies(myself, requestingProxyUID)
         // FIXME: workaround for std::map usability, see: rdar://100487652 ([fdp] std::map usability, can't effectively work with map in Swift)
-        guard let lastVersionReplies = lp/*lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID)*/ else {
-            print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) c")
+        guard let lastVersionReplies = lp/* FIXME: (workaround for first runtime issue): lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID)*/ else {
             // Request from invalid proxy (e.g. from duplicate recruitment request)
             req.reply.sendNever()
             return
@@ -161,7 +161,7 @@ public struct MasterDataActorCxx {
     let myself: MasterDataActor
 
     /// Mirror actor initializer, and initialize `myself`.
-    public init(data: MasterData) {
+    public init(data: MasterDataSwiftReference) {
         myself = MasterDataActor(data: data)
     }
 
@@ -169,7 +169,6 @@ public struct MasterDataActorCxx {
     /// If missing, please declare new `using PromiseXXX = Promise<XXX>;` in `swift_<MODULE>_future_support.h` files.
     public func getVersion(req: GetCommitVersionRequest, result promise: PromiseVoid) {
         print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl!")
-        swift_test_masterData(myself.myself)
         Task {
             print("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) Calling swift getVersion impl in task!")
             await myself.getVersion(req: req)
@@ -188,3 +187,32 @@ public func MasterDataActor_getVersion(
         result promise: PromiseVoid) {
     myself.getVersion(req: req, result: promise)
 }
+
+// FIXME: remove once MasterData is FRT.
+extension MasterDataSwiftReference {
+    var version: Version {
+        get {
+            getVersion()
+        }
+        set {
+            setVersion(newValue)
+        }
+    }
+
+    var lastVersionTime: Double {
+        get {
+            getLastVersionTime()
+        }
+        set {
+            setLastVersionTime(newValue)
+        }
+    }
+
+    var recoveryTransactionVersion: Version { getRecoveryTransactionVersion() }
+
+    var lastEpochEnd: Version { getLastEpochEnd() }
+
+    var referenceVersion: MasterDataSwiftReference.OptionalVersion { getReferenceVersion() }
+}
+
+typealias MasterData = MasterDataSwiftReference
