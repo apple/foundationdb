@@ -122,6 +122,6 @@ TEST_CASE("/GrvTransactionRateInfo/Simple") {
 	rateInfo.setRate(10.0);
 	wait(timeout(mockClient(&rateInfo, 20.0, &counter), 60.0, Void()));
 	TraceEvent("GrvTransactionRateInfoTest").detail("Counter", counter);
-	ASSERT(isNear(60.0 * 20.0, counter));
+	ASSERT(isNear(60.0 * 10.0, counter));
 	return Void();
 }
