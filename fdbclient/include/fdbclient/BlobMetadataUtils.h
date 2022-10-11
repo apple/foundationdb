@@ -45,8 +45,8 @@ struct BlobMetadataDetailsRef {
 	VectorRef<StringRef> partitions;
 
 	// cache options
-	int64_t refreshAt;
-	int64_t expireAt;
+	double refreshAt;
+	double expireAt;
 
 	BlobMetadataDetailsRef() {}
 	BlobMetadataDetailsRef(Arena& arena, const BlobMetadataDetailsRef& from)
@@ -60,8 +60,8 @@ struct BlobMetadataDetailsRef {
 	                                BlobMetadataDomainNameRef domainName,
 	                                Optional<StringRef> base,
 	                                VectorRef<StringRef> partitions,
-	                                int64_t refreshAt,
-	                                int64_t expireAt)
+	                                double refreshAt,
+	                                double expireAt)
 	  : domainId(domainId), domainName(domainName), base(base), partitions(partitions), refreshAt(refreshAt),
 	    expireAt(expireAt) {}
 

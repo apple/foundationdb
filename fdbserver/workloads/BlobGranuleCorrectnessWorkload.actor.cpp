@@ -281,6 +281,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		state int directoryIdx = 0;
 		state std::vector<std::pair<TenantName, TenantMapEntry>> tenants;
 		state BGTenantMap tenantData(self->dbInfo);
+		state Reference<GranuleTenantData> data;
 		for (; directoryIdx < self->directories.size(); directoryIdx++) {
 			// Set up the blob range first
 			TenantMapEntry tenantEntry = wait(self->setUpTenant(cx, self->directories[directoryIdx]->tenantName));
@@ -297,8 +298,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		// wait for tenant data to be loaded
 
 		for (directoryIdx = 0; directoryIdx < self->directories.size(); directoryIdx++) {
-			state Reference<GranuleTenantData> data =
-			    tenantData.getDataForGranule(self->directories[directoryIdx]->directoryRange);
+			wait(store(data, tenantData.getDataForGranule(self->directories[directoryIdx]->directoryRange)));
 			wait(data->bstoreLoaded.getFuture());
 			wait(delay(0));
 			self->directories[directoryIdx]->bstore = data->bstore;

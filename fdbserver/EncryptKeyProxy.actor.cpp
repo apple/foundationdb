@@ -716,7 +716,8 @@ ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxy
 
 	for (auto& info : dedupedDomainInfos) {
 		const auto itr = ekpProxyData->blobMetadataDomainIdCache.find(info.first);
-		if (itr != ekpProxyData->blobMetadataDomainIdCache.end() && itr->second.isValid()) {
+		if (itr != ekpProxyData->blobMetadataDomainIdCache.end() && itr->second.isValid() &&
+		    now() <= itr->second.metadataDetails.expireAt) {
 			metadataDetails.arena().dependsOn(itr->second.metadataDetails.arena());
 			metadataDetails.push_back(metadataDetails.arena(), itr->second.metadataDetails);
 
