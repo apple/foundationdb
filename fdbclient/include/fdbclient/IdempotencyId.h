@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#ifndef FDBCLIENT_IDEMPOTENCYID_H
+#define FDBCLIENT_IDEMPOTENCYID_H
+
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -159,3 +162,5 @@ private:
 
 // Check if id is present in kv, and if so return the commit version and batchIndex
 Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const IdempotencyIdRef& id);
+
+#endif

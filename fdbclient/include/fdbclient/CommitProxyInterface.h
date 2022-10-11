@@ -20,7 +20,6 @@
 
 #ifndef FDBCLIENT_COMMITPROXYINTERFACE_H
 #define FDBCLIENT_COMMITPROXYINTERFACE_H
-#include "fdbclient/IdempotencyId.h"
 #pragma once
 
 #include <utility>
@@ -31,6 +30,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/GrvProxyInterface.h"
+#include "fdbclient/IdempotencyId.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/VersionVector.h"
