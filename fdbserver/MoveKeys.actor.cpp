@@ -606,7 +606,7 @@ ACTOR static Future<MoveKeysBatchInfo> startMoveKeysTransaction(Database occ,
 			retries++;
 
 			// Keep track of old dests that may need to have ranges removed from serverKeys
-			state std::__1::set<UID> oldDests;
+			state std::set<UID> oldDests;
 
 			// Keep track of shards for all src servers so that we can preserve their values in serverKeys
 			state Map<UID, VectorRef<KeyRangeRef>> shardMap;
@@ -623,11 +623,11 @@ ACTOR static Future<MoveKeysBatchInfo> startMoveKeysTransaction(Database occ,
 				loadedTssMapping = true;
 			}
 
-			std::__1::vector<Future<Optional<Value>>> serverListEntries;
+			std::vector<Future<Optional<Value>>> serverListEntries;
 			serverListEntries.reserve(servers->size());
 			for (int s = 0; s < servers->size(); s++)
 				serverListEntries.push_back(tr->get(serverListKeyFor(servers->at(s))));
-			state std::__1::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+			state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
 
 			for (int s = 0; s < serverListValues.size(); s++) {
 				if (!serverListValues[s].present()) {
@@ -664,7 +664,7 @@ ACTOR static Future<MoveKeysBatchInfo> startMoveKeysTransaction(Database occ,
 			// Check that enough servers for each shard are in the correct state
 			state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-			std::__1::vector<std::__1::vector<UID>> addAsSource = wait(additionalSources(
+			std::vector<std::__1::vector<UID>> addAsSource = wait(additionalSources(
 			    old, tr, servers->size(), SERVER_KNOBS->MAX_ADDED_SOURCES_MULTIPLIER * servers->size()));
 
 			// For each intersecting range, update keyServers[range] dest to be servers and clear existing dest
@@ -708,7 +708,7 @@ ACTOR static Future<MoveKeysBatchInfo> startMoveKeysTransaction(Database occ,
 				}
 			}
 
-			state std::__1::set<UID>::iterator oldDest;
+			state std::set<UID>::iterator oldDest;
 
 			// Remove old dests from serverKeys.  In order for krmSetRangeCoalescing to work correctly in the
 			// same prefix for a single transaction, we must do most of the coalescing ourselves.  Only the
@@ -958,11 +958,11 @@ ACTOR static Future<Key> finishMoveKeysTransaction(Database occ,
 			// Decode and sanity check the result (dest must be the same for all ranges)
 			bool alreadyMoved = true;
 
-			state std::__1::vector<UID> dest;
-			state std::__1::set<UID> allServers;
-			state std::__1::set<UID> intendedTeam(destinationTeam->begin(), destinationTeam->end());
-			state std::__1::vector<UID> src;
-			std::__1::vector<UID> completeSrc;
+			state std::vector<UID> dest;
+			state std::set<UID> allServers;
+			state std::set<UID> intendedTeam(destinationTeam->begin(), destinationTeam->end());
+			state std::vector<UID> src;
+			std::vector<UID> completeSrc;
 
 			// Iterate through the beginning of keyServers until we find one that hasn't already been processed
 			int currentIndex;
@@ -1071,11 +1071,11 @@ ACTOR static Future<Key> finishMoveKeysTransaction(Database occ,
 			// Wait for a durable quorum of servers in destServers to have keys available (readWrite)
 			// They must also have at least the transaction read version so they can't "forget" the shard
 			// between now and when this transaction commits.
-			state std::__1::vector<Future<Void>> serverReady; // only for count below
-			state std::__1::vector<Future<Void>> tssReady; // for waiting in parallel with tss
-			state std::__1::vector<StorageServerInterface> tssReadyInterfs;
-			state std::__1::vector<UID> newDestinations;
-			std::__1::set<UID> completeSrcSet(completeSrc.begin(), completeSrc.end());
+			state std::vector<Future<Void>> serverReady; // only for count below
+			state std::vector<Future<Void>> tssReady; // for waiting in parallel with tss
+			state std::vector<StorageServerInterface> tssReadyInterfs;
+			state std::vector<UID> newDestinations;
+			std::set<UID> completeSrcSet(completeSrc.begin(), completeSrc.end());
 			for (auto& it : dest) {
 				if (!hasRemote || !completeSrcSet.count(it)) {
 					newDestinations.push_back(it);
@@ -1083,12 +1083,12 @@ ACTOR static Future<Key> finishMoveKeysTransaction(Database occ,
 			}
 
 			// for smartQuorum
-			state std::__1::vector<StorageServerInterface> storageServerInterfaces;
-			std::__1::vector<Future<Optional<Value>>> serverListEntries;
+			state std::vector<StorageServerInterface> storageServerInterfaces;
+			std::vector<Future<Optional<Value>>> serverListEntries;
 			serverListEntries.reserve(newDestinations.size());
 			for (int s = 0; s < newDestinations.size(); s++)
 				serverListEntries.push_back(tr.get(serverListKeyFor(newDestinations[s])));
-			state std::__1::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+			state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
 
 			releaser.release();
 
@@ -1181,8 +1181,8 @@ ACTOR static Future<Key> finishMoveKeysTransaction(Database occ,
 				wait(krmSetRangeCoalescing(
 				    &tr, keyServersPrefix, currentKeys, keys, keyServersValue(UIDtoTagMap, dest)));
 
-				std::__1::set<UID>::iterator asi = allServers.begin();
-				std::__1::vector<Future<Void>> actors;
+				std::set<UID>::iterator asi = allServers.begin();
+				std::vector<Future<Void>> actors;
 				while (asi != allServers.end()) {
 					bool destHasServer = std::find(dest.begin(), dest.end(), *asi) != dest.end();
 					actors.push_back(krmSetRangeCoalescing(&tr,
