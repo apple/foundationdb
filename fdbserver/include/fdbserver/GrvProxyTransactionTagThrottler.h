@@ -34,12 +34,18 @@
 // that have passed the tag throttling stage. Transactions that are not yet ready
 // are requeued during releaseTransactions.
 class GrvProxyTransactionTagThrottler {
-	struct DelayedRequest {
-		GetReadVersionRequest req;
+	class DelayedRequest {
+		static uint64_t lastSequenceNumber;
 		double startTime;
 
-		explicit DelayedRequest(GetReadVersionRequest const& req, double startTime = now())
-		  : req(req), startTime(startTime) {}
+	public:
+		GetReadVersionRequest req;
+		uint64_t sequenceNumber;
+
+		explicit DelayedRequest(GetReadVersionRequest const& req)
+		  : req(req), startTime(now()), sequenceNumber(++lastSequenceNumber) {}
+
+		void updateProxyTagThrottledDuration();
 	};
 
 	struct TagQueue {
@@ -48,17 +54,7 @@ class GrvProxyTransactionTagThrottler {
 
 		explicit TagQueue(double rate = 0.0) : rateInfo(rate) {}
 
-		void releaseTransactions(double elapsed,
-		                         SpannedDeque<GetReadVersionRequest>& outBatchPriority,
-		                         SpannedDeque<GetReadVersionRequest>& outDefaultPriority);
-
-		void setRate(double rate) {
-			if (rateInfo.present()) {
-				rateInfo.get().setRate(rate);
-			} else {
-				rateInfo = GrvTransactionRateInfo(rate);
-			}
-		}
+		void setRate(double rate);
 	};
 
 	// Track the budgets for each tag
