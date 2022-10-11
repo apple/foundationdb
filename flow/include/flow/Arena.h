@@ -731,15 +731,8 @@ struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::tru
 	static std::string toString(const Standalone<T>& value) { return Traceable<T>::toString(value); }
 };
 
-namespace literal_string_ref {
-template <class T, int Size>
-StringRef LiteralStringRefHelper(const char* str) {
-	static_assert(std::is_same_v<T, const char(&)[Size]> || std::is_same_v<T, const char[Size]>,
-	              "Argument to LiteralStringRef must be a literal string");
-	return StringRef(reinterpret_cast<const uint8_t*>(str), Size - 1);
-}
-} // namespace literal_string_ref
-#define LiteralStringRef(str) literal_string_ref::LiteralStringRefHelper<decltype(str), sizeof(str)>(str)
+#define __FILE__sr StringRef(reinterpret_cast<const uint8_t*>(__FILE__), sizeof(__FILE__) - 1)
+#define __FUNCTION__sr StringRef(reinterpret_cast<const uint8_t*>(__FUNCTION__), sizeof(__FUNCTION__) - 1)
 
 template <>
 struct fmt::formatter<StringRef> : formatter<std::string_view> {
@@ -829,6 +822,10 @@ inline bool operator==(const StringRef& lhs, const StringRef& rhs) {
 	}
 	ASSERT(lhs.size() >= 0);
 	return lhs.size() == rhs.size() && memcmp(lhs.begin(), rhs.begin(), static_cast<unsigned int>(lhs.size())) == 0;
+}
+template <int N>
+inline bool operator==(const StringRef& lhs, const char (&rhs)[N]) {
+	return lhs == StringRef(reinterpret_cast<const uint8_t*>(rhs), N - 1);
 }
 inline bool operator<(const StringRef& lhs, const StringRef& rhs) {
 	if (std::min(lhs.size(), rhs.size()) > 0) {

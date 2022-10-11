@@ -583,7 +583,7 @@ Future<Void> enableAuto(Reference<DB> db, bool enabled) {
 			    tr->get(tagThrottleAutoEnabledKey);
 			Optional<Value> value = wait(safeThreadFutureToFuture(valueF));
 			if (!value.present() || (enabled && value.get() != "1"_sr) || (!enabled && value.get() != "0"_sr)) {
-				tr->set(tagThrottleAutoEnabledKey, LiteralStringRef(enabled ? "1" : "0"));
+				tr->set(tagThrottleAutoEnabledKey, enabled ? "1"_sr : "0"_sr);
 				signalThrottleChange<typename DB::TransactionT>(tr);
 
 				wait(safeThreadFutureToFuture(tr->commit()));
