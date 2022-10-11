@@ -56,7 +56,6 @@ public actor MasterDataActor {
         print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) handle request")
         // NOTE: the `req` is inout since `req.reply.sendNever()` imports as `mutating`
         var req = req
-        print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) a")
 
         // TODO: Wrap with a tracing span
         let requestingProxyUID: UID = req.requestingProxy
@@ -114,6 +113,7 @@ public actor MasterDataActor {
                 // FIXME: myself.referenceVersion.get()
                 // FIXME: getMutating() ambiguity
                 var r = myself.referenceVersion
+                // FIXME: Do not use r.__getUnsafe
                 myself.version = figureVersion(current: myself.version,
                                                now: SwiftGNetwork.timer(),
                               reference: Version(r.__getUnsafe().pointee),
