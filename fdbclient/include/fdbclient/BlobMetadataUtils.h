@@ -44,9 +44,14 @@ struct BlobMetadataDetailsRef {
 	Optional<StringRef> base;
 	VectorRef<StringRef> partitions;
 
+	// cache options
+	int64_t refreshAt;
+	int64_t expireAt;
+
 	BlobMetadataDetailsRef() {}
 	BlobMetadataDetailsRef(Arena& arena, const BlobMetadataDetailsRef& from)
-	  : domainId(from.domainId), domainName(arena, from.domainName), partitions(arena, from.partitions) {
+	  : domainId(from.domainId), domainName(arena, from.domainName), partitions(arena, from.partitions),
+	    refreshAt(from.refreshAt), expireAt(from.expireAt) {
 		if (from.base.present()) {
 			base = StringRef(arena, from.base.get());
 		}
@@ -54,8 +59,11 @@ struct BlobMetadataDetailsRef {
 	explicit BlobMetadataDetailsRef(BlobMetadataDomainId domainId,
 	                                BlobMetadataDomainNameRef domainName,
 	                                Optional<StringRef> base,
-	                                VectorRef<StringRef> partitions)
-	  : domainId(domainId), domainName(domainName), base(base), partitions(partitions) {}
+	                                VectorRef<StringRef> partitions,
+	                                int64_t refreshAt,
+	                                int64_t expireAt)
+	  : domainId(domainId), domainName(domainName), base(base), partitions(partitions), refreshAt(refreshAt),
+	    expireAt(expireAt) {}
 
 	int expectedSize() const {
 		return sizeof(BlobMetadataDetailsRef) + domainName.size() + (base.present() ? base.get().size() : 0) +
@@ -64,7 +72,7 @@ struct BlobMetadataDetailsRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, domainId, domainName, base, partitions);
+		serializer(ar, domainId, domainName, base, partitions, refreshAt, expireAt);
 	}
 };
 

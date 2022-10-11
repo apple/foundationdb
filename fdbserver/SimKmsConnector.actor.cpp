@@ -226,6 +226,11 @@ static Standalone<BlobMetadataDetailsRef> createBlobMetadata(BlobMetadataDomainI
 			ev.detail("P" + std::to_string(i), metadata.partitions.back());
 		}
 	}
+
+	// set random refresh + expire time
+	metadata.refreshAt = now() + deterministicRandom()->random01() * 30;
+	metadata.expireAt = metadata.refreshAt + deterministicRandom()->random01() * 10;
+
 	return metadata;
 }
 

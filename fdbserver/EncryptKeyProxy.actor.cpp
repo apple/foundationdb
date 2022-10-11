@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BlobMetadataUtils.h"
 #include "fdbclient/EncryptKeyProxyInterface.h"
 
 #include "fdbrpc/Locality.h"
@@ -598,6 +599,11 @@ bool isCipherKeyEligibleForRefresh(const EncryptBaseCipherKey& cipherKey, int64_
 	return nextRefreshCycleTS > cipherKey.expireAt || nextRefreshCycleTS > cipherKey.refreshAt;
 }
 
+bool isBlobMetadataEligibleForRefresh(const BlobMetadataDetailsRef& blobMetadata, int64_t currTS) {
+	int64_t nextRefreshCycleTS = currTS + SERVER_KNOBS->BLOB_METADATA_REFRESH_INTERVAL;
+	return nextRefreshCycleTS > blobMetadata.expireAt || nextRefreshCycleTS > blobMetadata.refreshAt;
+}
+
 ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpProxyData,
                                              KmsConnectorInterface kmsConnectorInf) {
 	state UID debugId = deterministicRandom()->randomUniqueID();
@@ -760,6 +766,7 @@ ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxy
 ACTOR Future<Void> refreshBlobMetadataCore(Reference<EncryptKeyProxyData> ekpProxyData,
                                            KmsConnectorInterface kmsConnectorInf) {
 	state UID debugId = deterministicRandom()->randomUniqueID();
+	state double startTime;
 
 	state TraceEvent t("RefreshBlobMetadata_Start", ekpProxyData->myId);
 	t.setMaxEventLength(SERVER_KNOBS->ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH);
@@ -769,13 +776,28 @@ ACTOR Future<Void> refreshBlobMetadataCore(Reference<EncryptKeyProxyData> ekpPro
 	try {
 		KmsConnBlobMetadataReq req;
 		req.debugId = debugId;
-		req.domainInfos.reserve(req.domainInfos.arena(), ekpProxyData->blobMetadataDomainIdCache.size());
 
-		// TODO add refresh + expire timestamp and filter to only ones that need refreshing
-		for (auto& item : ekpProxyData->blobMetadataDomainIdCache) {
-			req.domainInfos.emplace_back(req.domainInfos.arena(), item.first, item.second.metadataDetails.domainName);
+		int64_t currTS = (int64_t)now();
+		for (auto itr = ekpProxyData->blobMetadataDomainIdCache.begin();
+		     itr != ekpProxyData->blobMetadataDomainIdCache.end();) {
+			if (isBlobMetadataEligibleForRefresh(itr->second.metadataDetails, currTS)) {
+				req.domainInfos.emplace_back_deep(
+				    req.domainInfos.arena(), itr->first, itr->second.metadataDetails.domainName);
+			}
+
+			// Garbage collect expired cached Blob Metadata
+			if (itr->second.metadataDetails.expireAt >= currTS) {
+				itr = ekpProxyData->blobMetadataDomainIdCache.erase(itr);
+			} else {
+				itr++;
+			}
 		}
-		state double startTime = now();
+
+		if (req.domainInfos.empty()) {
+			return Void();
+		}
+
+		startTime = now();
 		KmsConnBlobMetadataRep rep = wait(kmsConnectorInf.blobMetadataReq.getReply(req));
 		ekpProxyData->kmsBlobMetadataReqLatency.addMeasurement(now() - startTime);
 		for (auto& item : rep.metadataDetails) {
