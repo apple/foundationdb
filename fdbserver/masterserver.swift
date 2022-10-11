@@ -134,8 +134,9 @@ public actor MasterDataActor {
             myself.getResolutionBalancer().setChangesInReply(req.requestingProxy, &rep)
         }
 
-        rep.version = myself.version;
-        rep.requestNum = req.requestNum;
+        rep.version = myself.version
+        rep.requestNum = req.requestNum
+        print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) reply with version: \(rep.version)")
 
         //  FIXME: figure out how to map:
         //            // lastVersionReplies.replies.erase(
