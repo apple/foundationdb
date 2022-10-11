@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/BlobGranuleValidation.actor.h"
+#include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 ACTOR Future<std::pair<RangeResult, Version>> readFromFDB(Database cx, KeyRange range) {
@@ -207,6 +208,220 @@ ACTOR Future<Void> clearAndAwaitMerge(Database cx, KeyRange range) {
 			}
 			wait(delay(30.0)); // sleep a bit before checking on merge again
 			tr.reset();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<Standalone<VectorRef<BlobGranuleSummaryRef>>> getSummaries(Database cx,
+                                                                        KeyRange range,
+                                                                        Version summaryVersion,
+                                                                        Optional<TenantName> tenantName) {
+	state Transaction tr(cx, tenantName);
+	loop {
+		try {
+			Standalone<VectorRef<BlobGranuleSummaryRef>> summaries =
+			    wait(tr.summarizeBlobGranules(range, summaryVersion, 1000000));
+
+			// do some basic validation
+			ASSERT(!summaries.empty());
+			ASSERT(summaries.front().keyRange.begin == range.begin);
+			ASSERT(summaries.back().keyRange.end == range.end);
+
+			for (int i = 0; i < summaries.size() - 1; i++) {
+				ASSERT(summaries[i].keyRange.end == summaries[i + 1].keyRange.begin);
+			}
+
+			return summaries;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<Void> validateGranuleSummaries(Database cx,
+                                            KeyRange range,
+                                            Optional<TenantName> tenantName,
+                                            Promise<Void> testComplete) {
+	state Arena lastSummaryArena;
+	state KeyRangeMap<Optional<BlobGranuleSummaryRef>> lastSummary;
+	state Version lastSummaryVersion = invalidVersion;
+	state Transaction tr(cx, tenantName);
+	state int successCount = 0;
+	try {
+		loop {
+			// get grv and get latest summaries
+			state Version nextSummaryVersion;
+			tr.reset();
+			loop {
+				try {
+					wait(store(nextSummaryVersion, tr.getReadVersion()));
+					ASSERT(nextSummaryVersion >= lastSummaryVersion);
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+
+			state Standalone<VectorRef<BlobGranuleSummaryRef>> nextSummary;
+			try {
+				wait(store(nextSummary, getSummaries(cx, range, nextSummaryVersion, tenantName)));
+			} catch (Error& e) {
+				if (e.code() == error_code_blob_granule_transaction_too_old) {
+					ASSERT(lastSummaryVersion == invalidVersion);
+
+					wait(delay(1.0));
+					continue;
+				} else {
+					throw e;
+				}
+			}
+
+			if (lastSummaryVersion != invalidVersion) {
+				CODE_PROBE(true, "comparing multiple summaries");
+				// diff with last summary ranges to ensure versions never decreased for any range
+				for (auto& it : nextSummary) {
+					auto lastSummaries = lastSummary.intersectingRanges(it.keyRange);
+					for (auto& itLast : lastSummaries) {
+
+						if (!itLast.cvalue().present()) {
+							ASSERT(lastSummaryVersion == invalidVersion);
+							continue;
+						}
+						auto& last = itLast.cvalue().get();
+
+						ASSERT(it.snapshotVersion >= last.snapshotVersion);
+						// same invariant isn't always true for delta version because of force flushing around granule
+						// merges
+						if (it.keyRange == itLast.range()) {
+							ASSERT(it.deltaVersion >= last.deltaVersion);
+							if (it.snapshotVersion == last.snapshotVersion) {
+								ASSERT(it.snapshotSize == last.snapshotSize);
+							}
+							if (it.snapshotVersion == last.snapshotVersion && it.deltaVersion == last.deltaVersion) {
+								ASSERT(it.snapshotSize == last.snapshotSize);
+								ASSERT(it.deltaSize == last.deltaSize);
+							} else if (it.snapshotVersion == last.snapshotVersion) {
+								ASSERT(it.deltaSize > last.deltaSize);
+							}
+							break;
+						}
+					}
+				}
+
+				if (!testComplete.canBeSet()) {
+					return Void();
+				}
+			}
+
+			successCount++;
+
+			lastSummaryArena = nextSummary.arena();
+			lastSummaryVersion = nextSummaryVersion;
+			lastSummary.insert(range, {});
+			for (auto& it : nextSummary) {
+				lastSummary.insert(it.keyRange, it);
+			}
+
+			wait(delayJittered(deterministicRandom()->randomInt(1, 10)));
+		}
+	} catch (Error& e) {
+		if (e.code() != error_code_operation_cancelled) {
+			TraceEvent(SevError, "UnexpectedErrorValidateGranuleSummaries").error(e);
+		}
+		throw e;
+	}
+}
+
+struct feed_cmp_f {
+	bool operator()(const std::pair<Key, KeyRange>& lhs, const std::pair<Key, KeyRange>& rhs) const {
+		if (lhs.second.begin == rhs.second.begin) {
+			return lhs.second.end < rhs.second.end;
+		}
+		return lhs.second.begin < rhs.second.begin;
+	}
+};
+
+ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getActiveFeeds(Transaction* tr) {
+	RangeResult feedResult = wait(tr->getRange(changeFeedKeys, 10000));
+	ASSERT(!feedResult.more);
+	std::vector<std::pair<Key, KeyRange>> results;
+	for (auto& it : feedResult) {
+		Key feedKey = it.key.removePrefix(changeFeedPrefix);
+		KeyRange feedRange;
+		Version version;
+		ChangeFeedStatus status;
+
+		std::tie(feedRange, version, status) = decodeChangeFeedValue(it.value);
+		results.push_back({ feedKey, feedRange });
+	}
+
+	std::sort(results.begin(), results.end(), feed_cmp_f());
+
+	return results;
+}
+
+// TODO: add debug parameter
+// FIXME: this check currently assumes blob granules are the only users of change feeds, and will fail if that is not
+// the case
+ACTOR Future<Void> checkFeedCleanup(Database cx, bool debug) {
+	if (SERVER_KNOBS->BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY < 0) {
+		// no guarantee of feed cleanup, return
+		return Void();
+	}
+	// big extra timeout just because simulation can take a while to quiesce
+	state double checkTimeoutOnceStable = 300.0 + 2 * SERVER_KNOBS->BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY;
+	state Optional<double> stableTimestamp;
+	state Standalone<VectorRef<KeyRangeRef>> lastGranules;
+
+	state Transaction tr(cx);
+	loop {
+		try {
+			// get set of current granules. if different than last set of granules
+			state Standalone<VectorRef<KeyRangeRef>> granules = wait(tr.getBlobGranuleRanges(normalKeys, 10000));
+			state std::vector<std::pair<Key, KeyRange>> activeFeeds = wait(getActiveFeeds(&tr));
+
+			// TODO REMOVE
+			if (debug) {
+				fmt::print("{0} granules and {1} active feeds found\n", granules.size(), activeFeeds.size());
+			}
+			/*fmt::print("Granules:\n");
+			for (auto& it : granules) {
+			    fmt::print("  [{0} - {1})\n", it.begin.printable(), it.end.printable());
+			}*/
+			bool allPresent = granules.size() == activeFeeds.size();
+			for (int i = 0; allPresent && i < granules.size(); i++) {
+				if (granules[i] != activeFeeds[i].second) {
+					if (debug) {
+						fmt::print("Feed {0} for [{1} - {2}) still exists despite no granule!\n",
+						           activeFeeds[i].first.printable(),
+						           activeFeeds[i].second.begin.printable(),
+						           activeFeeds[i].second.end.printable());
+					}
+					allPresent = false;
+					break;
+				}
+			}
+			if (allPresent) {
+				if (debug) {
+					fmt::print("Feed Cleanup Check Complete\n");
+				}
+				return Void();
+			}
+			if (granules != lastGranules) {
+				stableTimestamp.reset();
+			} else if (!stableTimestamp.present()) {
+				stableTimestamp = now();
+			}
+			lastGranules = granules;
+
+			// ensure this converges within a time window of granules becoming stable
+			if (stableTimestamp.present()) {
+				ASSERT(now() - stableTimestamp.get() <= checkTimeoutOnceStable);
+			}
+
+			wait(delay(2.0));
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}

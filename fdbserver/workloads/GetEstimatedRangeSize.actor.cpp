@@ -20,6 +20,7 @@
 
 #include <cstring>
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -37,7 +38,7 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 	GetEstimatedRangeSizeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		nodeCount = getOption(options, "nodeCount"_sr, 10000.0);
-		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString());
+		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
 		hasTenant = hasOption(options, "tenant"_sr);
 		tenant = getOption(options, "tenant"_sr, "DefaultTenant"_sr);
 	}
@@ -62,7 +63,7 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 		                 0.1,
 		                 0,
 		                 0,
-		                 tenant);
+		                 { tenant });
 	}
 
 	Future<Void> start(Database const& cx) override {

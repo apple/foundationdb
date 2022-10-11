@@ -38,7 +38,7 @@
 #include <sys/syscall.h>
 #include "fdbrpc/linux_kaio.h"
 #include "flow/Knobs.h"
-#include "flow/Histogram.h"
+#include "fdbrpc/Stats.h"
 #include "flow/UnitTest.h"
 #include "crc32/crc32c.h"
 #include "flow/genericactors.actor.h"
@@ -47,14 +47,6 @@
 // Set this to true to enable detailed KAIO request logging, which currently is written to a hardcoded location
 // /data/v7/fdb/
 #define KAIO_LOGGING 0
-
-struct AsyncFileKAIOMetrics {
-	Reference<Histogram> readLatencyDist;
-	Reference<Histogram> writeLatencyDist;
-	Reference<Histogram> syncLatencyDist;
-} g_asyncFileKAIOMetrics;
-
-Future<Void> g_asyncFileKAIOHistogramLogger;
 
 DESCR struct SlowAioSubmit {
 	int64_t submitDuration; // ns
@@ -66,6 +58,25 @@ DESCR struct SlowAioSubmit {
 
 class AsyncFileKAIO final : public IAsyncFile, public ReferenceCounted<AsyncFileKAIO> {
 public:
+	struct AsyncFileKAIOMetrics {
+		LatencySample readLatencySample = { "AsyncFileKAIOReadLatency",
+			                                UID(),
+			                                FLOW_KNOBS->KAIO_LATENCY_LOGGING_INTERVAL,
+			                                FLOW_KNOBS->KAIO_LATENCY_SAMPLE_SIZE };
+		LatencySample writeLatencySample = { "AsyncFileKAIOWriteLatency",
+			                                 UID(),
+			                                 FLOW_KNOBS->KAIO_LATENCY_LOGGING_INTERVAL,
+			                                 FLOW_KNOBS->KAIO_LATENCY_SAMPLE_SIZE };
+		LatencySample syncLatencySample = { "AsyncFileKAIOSyncLatency",
+			                                UID(),
+			                                FLOW_KNOBS->KAIO_LATENCY_LOGGING_INTERVAL,
+			                                FLOW_KNOBS->KAIO_LATENCY_SAMPLE_SIZE };
+	};
+
+	static AsyncFileKAIOMetrics& getMetrics() {
+		static AsyncFileKAIOMetrics metrics;
+		return metrics;
+	}
 
 #if KAIO_LOGGING
 private:
@@ -162,8 +173,8 @@ public:
 			       // by l_whence and l_start through to the end of file, no matter how large the file grows."
 			lockDesc.l_pid = 0;
 			if (fcntl(fd, F_SETLK, &lockDesc) == -1) {
-				TraceEvent(SevError, "UnableToLockFile").detail("Filename", filename).GetLastError();
-				return io_error();
+				TraceEvent(SevWarn, "UnableToLockFile").detail("Filename", filename).GetLastError();
+				return lock_file_failure();
 			}
 		}
 
@@ -180,12 +191,12 @@ public:
 	static void init(Reference<IEventFD> ev, double ioTimeout) {
 		ASSERT(!FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO);
 		if (!g_network->isSimulated()) {
-			ctx.countAIOSubmit.init(LiteralStringRef("AsyncFile.CountAIOSubmit"));
-			ctx.countAIOCollect.init(LiteralStringRef("AsyncFile.CountAIOCollect"));
-			ctx.submitMetric.init(LiteralStringRef("AsyncFile.Submit"));
-			ctx.countPreSubmitTruncate.init(LiteralStringRef("AsyncFile.CountPreAIOSubmitTruncate"));
-			ctx.preSubmitTruncateBytes.init(LiteralStringRef("AsyncFile.PreAIOSubmitTruncateBytes"));
-			ctx.slowAioSubmitMetric.init(LiteralStringRef("AsyncFile.SlowAIOSubmit"));
+			ctx.countAIOSubmit.init("AsyncFile.CountAIOSubmit"_sr);
+			ctx.countAIOCollect.init("AsyncFile.CountAIOCollect"_sr);
+			ctx.submitMetric.init("AsyncFile.Submit"_sr);
+			ctx.countPreSubmitTruncate.init("AsyncFile.CountPreAIOSubmitTruncate"_sr);
+			ctx.preSubmitTruncateBytes.init("AsyncFile.PreAIOSubmitTruncateBytes"_sr);
+			ctx.slowAioSubmitMetric.init("AsyncFile.SlowAIOSubmit"_sr);
 		}
 
 		int rc = io_setup(FLOW_KNOBS->MAX_OUTSTANDING, &ctx.iocx);
@@ -353,7 +364,7 @@ public:
 #endif
 
 		KAIOLogEvent(logFile, id, OpLogEntry::SYNC, OpLogEntry::START);
-		double start_time = now();
+		double start_time = timer();
 
 		Future<Void> fsync = throwErrorIfFailed(
 		    Reference<AsyncFileKAIO>::addRef(this),
@@ -365,7 +376,7 @@ public:
 
 		fsync = map(fsync, [=](Void r) mutable {
 			KAIOLogEvent(logFile, id, OpLogEntry::SYNC, OpLogEntry::COMPLETE);
-			g_asyncFileKAIOMetrics.syncLatencyDist->sampleSeconds(now() - start_time);
+			getMetrics().syncLatencySample.addMeasurement(timer() - start_time);
 			return r;
 		});
 
@@ -404,6 +415,7 @@ public:
 			int64_t previousTruncateBytes = ctx.preSubmitTruncateBytes;
 			int64_t largestTruncate = 0;
 
+			double start = timer();
 			for (int i = 0; i < n; i++) {
 				auto io = ctx.queue.top();
 
@@ -411,7 +423,7 @@ public:
 
 				ctx.queue.pop();
 				toStart[i] = io;
-				io->startTime = now();
+				io->startTime = start;
 
 				if (ctx.ioTimeout > 0) {
 					ctx.appendToRequestList(io);
@@ -636,27 +648,17 @@ private:
 	  : failed(false), fd(fd), flags(flags), filename(filename) {
 		ASSERT(!FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO);
 		if (!g_network->isSimulated()) {
-			countFileLogicalWrites.init(LiteralStringRef("AsyncFile.CountFileLogicalWrites"), filename);
-			countFileLogicalReads.init(LiteralStringRef("AsyncFile.CountFileLogicalReads"), filename);
-			countLogicalWrites.init(LiteralStringRef("AsyncFile.CountLogicalWrites"));
-			countLogicalReads.init(LiteralStringRef("AsyncFile.CountLogicalReads"));
-			if (!g_asyncFileKAIOHistogramLogger.isValid()) {
-				auto& metrics = g_asyncFileKAIOMetrics;
-				metrics.readLatencyDist = Reference<Histogram>(new Histogram(
-				    Reference<HistogramRegistry>(), "AsyncFileKAIO", "ReadLatency", Histogram::Unit::microseconds));
-				metrics.writeLatencyDist = Reference<Histogram>(new Histogram(
-				    Reference<HistogramRegistry>(), "AsyncFileKAIO", "WriteLatency", Histogram::Unit::microseconds));
-				metrics.syncLatencyDist = Reference<Histogram>(new Histogram(
-				    Reference<HistogramRegistry>(), "AsyncFileKAIO", "SyncLatency", Histogram::Unit::microseconds));
-				g_asyncFileKAIOHistogramLogger = histogramLogger(FLOW_KNOBS->DISK_METRIC_LOGGING_INTERVAL);
-			}
+			countFileLogicalWrites.init("AsyncFile.CountFileLogicalWrites"_sr, filename);
+			countFileLogicalReads.init("AsyncFile.CountFileLogicalReads"_sr, filename);
+			countLogicalWrites.init("AsyncFile.CountLogicalWrites"_sr);
+			countLogicalReads.init("AsyncFile.CountLogicalReads"_sr);
 		}
 
 #if KAIO_LOGGING
 		logFile = nullptr;
 		// TODO:  Don't do this hacky investigation-specific thing
 		StringRef fname(filename);
-		if (fname.endsWith(LiteralStringRef(".sqlite")) || fname.endsWith(LiteralStringRef(".sqlite-wal"))) {
+		if (fname.endsWith(".sqlite"_sr) || fname.endsWith(".sqlite-wal"_sr)) {
 			std::string logFileName = basename(filename);
 			while (logFileName.find("/") != std::string::npos)
 				logFileName = logFileName.substr(logFileName.find("/") + 1);
@@ -735,6 +737,8 @@ private:
 					break;
 			}
 
+			double currentTime = timer();
+
 			++ctx.countAIOCollect;
 			// printf("io_getevents: collected %d/%d in %f us (%d queued)\n", n, ctx.outstanding, (timer()-before)*1e6,
 			// ctx.queue.size());
@@ -753,7 +757,6 @@ private:
 			ctx.outstanding -= n;
 
 			if (ctx.ioTimeout > 0) {
-				double currentTime = now();
 				while (ctx.submittedRequestList && currentTime - ctx.submittedRequestList->startTime > ctx.ioTimeout) {
 					ctx.submittedRequestList->timeout(ctx.timeoutWarnOnly);
 					ctx.removeFromRequestList(ctx.submittedRequestList);
@@ -769,31 +772,17 @@ private:
 					ctx.removeFromRequestList(iob);
 				}
 
-				auto& metrics = g_asyncFileKAIOMetrics;
 				switch (iob->aio_lio_opcode) {
 				case IO_CMD_PREAD:
-					metrics.readLatencyDist->sampleSeconds(now() - iob->startTime);
+					getMetrics().readLatencySample.addMeasurement(currentTime - iob->startTime);
 					break;
 				case IO_CMD_PWRITE:
-					metrics.writeLatencyDist->sampleSeconds(now() - iob->startTime);
+					getMetrics().writeLatencySample.addMeasurement(currentTime - iob->startTime);
 					break;
 				}
 
 				iob->setResult(ev[i].result);
 			}
-		}
-	}
-
-	ACTOR static Future<Void> histogramLogger(double interval) {
-		state double currentTime;
-		loop {
-			currentTime = now();
-			wait(delay(interval));
-			double elapsed = now() - currentTime;
-			auto& metrics = g_asyncFileKAIOMetrics;
-			metrics.readLatencyDist->writeToLog(elapsed);
-			metrics.writeLatencyDist->writeToLog(elapsed);
-			metrics.syncLatencyDist->writeToLog(elapsed);
 		}
 	}
 };

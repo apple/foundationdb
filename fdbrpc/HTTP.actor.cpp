@@ -100,14 +100,14 @@ PacketBuffer* writeRequestHeader(std::string const& verb,
 	writer.serializeBytes(verb);
 	writer.serializeBytes(" ", 1);
 	writer.serializeBytes(resource);
-	writer.serializeBytes(LiteralStringRef(" HTTP/1.1\r\n"));
+	writer.serializeBytes(" HTTP/1.1\r\n"_sr);
 	for (auto h : headers) {
 		writer.serializeBytes(h.first);
-		writer.serializeBytes(LiteralStringRef(": "));
+		writer.serializeBytes(": "_sr);
 		writer.serializeBytes(h.second);
-		writer.serializeBytes(LiteralStringRef("\r\n"));
+		writer.serializeBytes("\r\n"_sr);
 	}
-	writer.serializeBytes(LiteralStringRef("\r\n"));
+	writer.serializeBytes("\r\n"_sr);
 	return writer.finish();
 }
 
@@ -411,7 +411,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 		}
 
 		state Reference<HTTP::Response> r(new HTTP::Response());
-		state Future<Void> responseReading = r->read(conn, verb == "HEAD" || verb == "DELETE");
+		state Future<Void> responseReading = r->read(conn, verb == "HEAD" || verb == "DELETE" || verb == "CONNECT");
 
 		send_start = timer();
 
@@ -523,6 +523,137 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 		event.errorUnsuppressed(e);
 		throw;
 	}
+}
+
+ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
+                                           std::string remoteHost,
+                                           std::string remoteService) {
+	state Headers headers;
+	headers["Host"] = remoteHost + ":" + remoteService;
+	headers["Accept"] = "application/xml";
+	headers["Proxy-Connection"] = "Keep-Alive";
+	state int requestTimeout = 60;
+	state int maxTries = FLOW_KNOBS->RESTCLIENT_CONNECT_TRIES;
+	state int thisTry = 1;
+	state double nextRetryDelay = 2.0;
+	state Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
+	state int64_t bytes_sent = 0;
+
+	loop {
+		state Optional<Error> err;
+		state Reference<Response> r;
+
+		try {
+			Reference<Response> _r = wait(timeoutError(doRequest(conn,
+			                                                     "CONNECT",
+			                                                     remoteHost + ":" + remoteService,
+			                                                     headers,
+			                                                     nullptr,
+			                                                     0,
+			                                                     sendReceiveRate,
+			                                                     &bytes_sent,
+			                                                     sendReceiveRate),
+			                                           requestTimeout));
+			r = _r;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled)
+				throw;
+			err = e;
+		}
+
+		// If err is not present then r is valid.
+		// If r->code is in successCodes then record the successful request and return r.
+		if (!err.present() && r->code == 200) {
+			return Void();
+		}
+
+		// All errors in err are potentially retryable as well as certain HTTP response codes...
+		bool retryable = err.present() || r->code == 500 || r->code == 502 || r->code == 503 || r->code == 429;
+
+		// But only if our previous attempt was not the last allowable try.
+		retryable = retryable && (thisTry < maxTries);
+
+		TraceEvent event(SevWarn, retryable ? "ProxyConnectCommandFailedRetryable" : "ProxyConnectCommandFailed");
+
+		// Attach err to trace event if present, otherwise extract some stuff from the response
+		if (err.present()) {
+			event.errorUnsuppressed(err.get());
+		}
+		event.suppressFor(60);
+		if (!err.present()) {
+			event.detail("ResponseCode", r->code);
+		}
+
+		event.detail("ThisTry", thisTry);
+
+		// If r is not valid or not code 429 then increment the try count.  429's will not count against the attempt
+		// limit.
+		if (!r || r->code != 429)
+			++thisTry;
+
+		// We will wait delay seconds before the next retry, start with nextRetryDelay.
+		double delay = nextRetryDelay;
+		// Double but limit the *next* nextRetryDelay.
+		nextRetryDelay = std::min(nextRetryDelay * 2, 60.0);
+
+		if (retryable) {
+			// If r is valid then obey the Retry-After response header if present.
+			if (r) {
+				auto iRetryAfter = r->headers.find("Retry-After");
+				if (iRetryAfter != r->headers.end()) {
+					event.detail("RetryAfterHeader", iRetryAfter->second);
+					char* pEnd;
+					double retryAfter = strtod(iRetryAfter->second.c_str(), &pEnd);
+					if (*pEnd) // If there were other characters then don't trust the parsed value, use a probably safe
+					           // value of 5 minutes.
+						retryAfter = 300;
+					// Update delay
+					delay = std::max(delay, retryAfter);
+				}
+			}
+
+			// Log the delay then wait.
+			event.detail("RetryDelay", delay);
+			wait(::delay(delay));
+		} else {
+			// We can't retry, so throw something.
+
+			// This error code means the authentication header was not accepted, likely the account or key is wrong.
+			if (r && r->code == 406)
+				throw http_not_accepted();
+
+			if (r && r->code == 401)
+				throw http_auth_failed();
+
+			throw connection_failed();
+		}
+	}
+}
+
+ACTOR Future<Reference<IConnection>> proxyConnectImpl(std::string remoteHost,
+                                                      std::string remoteService,
+                                                      std::string proxyHost,
+                                                      std::string proxyService) {
+	state NetworkAddress remoteEndpoint =
+	    wait(map(INetworkConnections::net()->resolveTCPEndpoint(remoteHost, remoteService),
+	             [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
+		             NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
+		             addr.fromHostname = true;
+		             addr.flags = NetworkAddress::FLAG_TLS;
+		             return addr;
+	             }));
+	state Reference<IConnection> connection = wait(INetworkConnections::net()->connect(proxyHost, proxyService));
+	wait(sendProxyConnectRequest(connection, remoteHost, remoteService));
+	boost::asio::ip::tcp::socket socket = std::move(connection->getSocket());
+	Reference<IConnection> remoteConnection = wait(INetworkConnections::net()->connect(remoteEndpoint, &socket));
+	return remoteConnection;
+}
+
+Future<Reference<IConnection>> proxyConnect(const std::string& remoteHost,
+                                            const std::string& remoteService,
+                                            const std::string& proxyHost,
+                                            const std::string& proxyService) {
+	return proxyConnectImpl(remoteHost, remoteService, proxyHost, proxyService);
 }
 
 } // namespace HTTP

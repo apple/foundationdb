@@ -19,6 +19,7 @@
  */
 
 #include <cmath>
+#include "flow/ApiVersion.h"
 #include "flow/UnitTest.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/DatabaseContext.h"
@@ -89,12 +90,10 @@ struct MetricsRule {
 
 struct MetricsConfig {
 	MetricsConfig(Key prefix = KeyRef())
-	  : space(prefix), ruleMap(space.get(LiteralStringRef("Rules")).key()),
-	    addressMap(space.get(LiteralStringRef("Enum")).get(LiteralStringRef("Address")).key()),
-	    nameAndTypeMap(space.get(LiteralStringRef("Enum")).get(LiteralStringRef("NameType")).key()),
-	    ruleChangeKey(space.get(LiteralStringRef("RulesChanged")).key()),
-	    enumsChangeKey(space.get(LiteralStringRef("EnumsChanged")).key()),
-	    fieldChangeKey(space.get(LiteralStringRef("FieldsChanged")).key()) {}
+	  : space(prefix), ruleMap(space.get("Rules"_sr).key()), addressMap(space.get("Enum"_sr).get("Address"_sr).key()),
+	    nameAndTypeMap(space.get("Enum"_sr).get("NameType"_sr).key()),
+	    ruleChangeKey(space.get("RulesChanged"_sr).key()), enumsChangeKey(space.get("EnumsChanged"_sr).key()),
+	    fieldChangeKey(space.get("FieldsChanged"_sr).key()) {}
 
 	Subspace space;
 
@@ -417,8 +416,8 @@ TEST_CASE("/fdbserver/metrics/TraceEvents") {
 	}
 	fprintf(stdout, "Using environment variables METRICS_CONNFILE and METRICS_PREFIX.\n");
 
-	state Database metricsDb = Database::createDatabase(metricsConnFile, Database::API_VERSION_LATEST);
-	TDMetricCollection::getTDMetrics()->address = LiteralStringRef("0.0.0.0:0");
+	state Database metricsDb = Database::createDatabase(metricsConnFile, ApiVersion::LATEST_VERSION);
+	TDMetricCollection::getTDMetrics()->address = "0.0.0.0:0"_sr;
 	state Future<Void> metrics = runMetrics(metricsDb, KeyRef(metricsPrefix));
 	state int64_t x = 0;
 
@@ -437,9 +436,9 @@ TEST_CASE("/fdbserver/metrics/TraceEvents") {
 	fprintf(stdout, "  d is always present, is a string, and rotates through the values 'one', 'two', and ''.\n");
 	fprintf(stdout, "  Plotting j on the x axis and k on the y axis should look like x=sin(2t), y=sin(3t)\n");
 
-	state Int64MetricHandle intMetric = Int64MetricHandle(LiteralStringRef("DummyInt"));
-	state BoolMetricHandle boolMetric = BoolMetricHandle(LiteralStringRef("DummyBool"));
-	state StringMetricHandle stringMetric = StringMetricHandle(LiteralStringRef("DummyString"));
+	state Int64MetricHandle intMetric = Int64MetricHandle("DummyInt"_sr);
+	state BoolMetricHandle boolMetric = BoolMetricHandle("DummyBool"_sr);
+	state StringMetricHandle stringMetric = StringMetricHandle("DummyString"_sr);
 
 	static const char* dStrings[] = { "one", "two", "" };
 	state const char** d = dStrings;

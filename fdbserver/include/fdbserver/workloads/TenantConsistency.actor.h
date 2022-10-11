@@ -154,7 +154,6 @@ private:
 				ASSERT(tenantMapEntry.id <= metadata.lastTenantId);
 			}
 			ASSERT(metadata.tenantIdIndex[tenantMapEntry.id] == tenantName);
-			ASSERT(!metadata.tenantTombstones.count(tenantMapEntry.id));
 
 			if (tenantMapEntry.tenantGroup.present()) {
 				auto tenantGroupMapItr = metadata.tenantGroupMap.find(tenantMapEntry.tenantGroup.get());
@@ -167,9 +166,31 @@ private:
 
 			if (metadata.clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 				ASSERT(tenantMapEntry.assignedCluster.present());
+				// If the rename pair is present, it should be in the map and match our current entry
+				if (tenantMapEntry.renamePair.present()) {
+					auto pairMapEntry = metadata.tenantMap[tenantMapEntry.renamePair.get()];
+					ASSERT(pairMapEntry.id == tenantMapEntry.id);
+					ASSERT(pairMapEntry.prefix == tenantMapEntry.prefix);
+					ASSERT(pairMapEntry.encrypted == tenantMapEntry.encrypted);
+					ASSERT(pairMapEntry.configurationSequenceNum == tenantMapEntry.configurationSequenceNum);
+					ASSERT(pairMapEntry.assignedCluster.present());
+					ASSERT(pairMapEntry.assignedCluster.get() == tenantMapEntry.assignedCluster.get());
+					ASSERT(pairMapEntry.renamePair.present());
+					ASSERT(pairMapEntry.renamePair.get() == tenantName);
+					if (tenantMapEntry.tenantState == TenantState::RENAMING_FROM) {
+						ASSERT(pairMapEntry.tenantState == TenantState::RENAMING_TO);
+					} else if (tenantMapEntry.tenantState == TenantState::RENAMING_TO) {
+						ASSERT(pairMapEntry.tenantState == TenantState::RENAMING_FROM);
+					} else if (tenantMapEntry.tenantState == TenantState::REMOVING) {
+						ASSERT(pairMapEntry.tenantState == TenantState::REMOVING);
+					} else {
+						ASSERT(false); // Entry in an invalid state if we have a rename pair
+					}
+				}
 			} else {
 				ASSERT(tenantMapEntry.tenantState == TenantState::READY);
 				ASSERT(!tenantMapEntry.assignedCluster.present());
+				ASSERT(!tenantMapEntry.renamePair.present());
 			}
 		}
 	}
@@ -204,5 +225,7 @@ public:
 
 	Future<Void> run() { return run(this); }
 };
+
+#include "flow/unactorcompiler.h"
 
 #endif

@@ -292,8 +292,14 @@ private:
 			for (auto tenantName : expectedTenants) {
 				if (!dataClusterTenantMap.count(tenantName)) {
 					TenantMapEntry const& metaclusterEntry = self->managementMetadata.tenantMap[tenantName];
-					ASSERT(metaclusterEntry.tenantState == TenantState::REGISTERING ||
-					       metaclusterEntry.tenantState == TenantState::REMOVING);
+					if (metaclusterEntry.renamePair.present() &&
+					    (metaclusterEntry.tenantState == TenantState::RENAMING_FROM ||
+					     metaclusterEntry.tenantState == TenantState::RENAMING_TO)) {
+						ASSERT(dataClusterTenantMap.count(metaclusterEntry.renamePair.get()));
+					} else {
+						ASSERT(metaclusterEntry.tenantState == TenantState::REGISTERING ||
+						       metaclusterEntry.tenantState == TenantState::REMOVING);
+					}
 				}
 			}
 		}
@@ -353,5 +359,7 @@ public:
 
 	Future<Void> run() { return run(this); }
 };
+
+#include "flow/unactorcompiler.h"
 
 #endif

@@ -296,28 +296,28 @@ struct GetValueRequest : TimedRequest {
 	Key key;
 	Version version;
 	Optional<TagSet> tags;
-	Optional<UID> debugID;
 	ReplyPromise<GetValueReply> reply;
+	Optional<ReadOptions> options;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
+	GetValueRequest() {}
 
 	bool verify() const { return tenantInfo.isAuthorized(); }
 
-	GetValueRequest() {}
 	GetValueRequest(SpanContext spanContext,
 	                const TenantInfo& tenantInfo,
 	                const Key& key,
 	                Version ver,
 	                Optional<TagSet> tags,
-	                Optional<UID> debugID,
+	                Optional<ReadOptions> options,
 	                VersionVector latestCommitVersions)
-	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), tags(tags), debugID(debugID),
+	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), tags(tags), options(options),
 	    ssLatestCommitVersions(latestCommitVersions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, version, tags, debugID, reply, spanContext, tenantInfo, ssLatestCommitVersions);
+		serializer(ar, key, version, tags, reply, spanContext, tenantInfo, options, ssLatestCommitVersions);
 	}
 };
 
@@ -393,15 +393,14 @@ struct GetKeyValuesRequest : TimedRequest {
 	KeyRef mapper = KeyRef();
 	Version version; // or latestVersion
 	int limit, limitBytes;
-	bool isFetchKeys;
 	Optional<TagSet> tags;
-	Optional<UID> debugID;
+	Optional<ReadOptions> options;
 	ReplyPromise<GetKeyValuesReply> reply;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
 
-	GetKeyValuesRequest() : isFetchKeys(false) {}
+	GetKeyValuesRequest() {}
 
 	bool verify() const { return tenantInfo.isAuthorized(); }
 
@@ -413,14 +412,13 @@ struct GetKeyValuesRequest : TimedRequest {
 		           version,
 		           limit,
 		           limitBytes,
-		           isFetchKeys,
 		           tags,
-		           debugID,
 		           reply,
 		           spanContext,
 		           tenantInfo,
-		           arena,
-		           ssLatestCommitVersions);
+		           options,
+		           ssLatestCommitVersions,
+		           arena);
 	}
 };
 
@@ -452,15 +450,14 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	Version version; // or latestVersion
 	int limit, limitBytes;
 	int matchIndex;
-	bool isFetchKeys;
 	Optional<TagSet> tags;
-	Optional<UID> debugID;
+	Optional<ReadOptions> options;
 	ReplyPromise<GetMappedKeyValuesReply> reply;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key range
 
-	GetMappedKeyValuesRequest() : isFetchKeys(false) {}
+	GetMappedKeyValuesRequest() {}
 
 	bool verify() const { return tenantInfo.isAuthorized(); }
 
@@ -473,15 +470,14 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 		           version,
 		           limit,
 		           limitBytes,
-		           isFetchKeys,
 		           tags,
-		           debugID,
 		           reply,
 		           spanContext,
 		           tenantInfo,
-		           arena,
+		           options,
 		           ssLatestCommitVersions,
-		           matchIndex);
+		           matchIndex,
+		           arena);
 	}
 };
 
@@ -520,15 +516,14 @@ struct GetKeyValuesStreamRequest {
 	KeySelectorRef begin, end;
 	Version version; // or latestVersion
 	int limit, limitBytes;
-	bool isFetchKeys;
 	Optional<TagSet> tags;
-	Optional<UID> debugID;
+	Optional<ReadOptions> options;
 	ReplyPromiseStream<GetKeyValuesStreamReply> reply;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key range
 
-	GetKeyValuesStreamRequest() : isFetchKeys(false) {}
+	GetKeyValuesStreamRequest() {}
 
 	bool verify() const { return tenantInfo.isAuthorized(); }
 
@@ -540,14 +535,13 @@ struct GetKeyValuesStreamRequest {
 		           version,
 		           limit,
 		           limitBytes,
-		           isFetchKeys,
 		           tags,
-		           debugID,
 		           reply,
 		           spanContext,
 		           tenantInfo,
-		           arena,
-		           ssLatestCommitVersions);
+		           options,
+		           ssLatestCommitVersions,
+		           arena);
 	}
 };
 
@@ -573,29 +567,29 @@ struct GetKeyRequest : TimedRequest {
 	KeySelectorRef sel;
 	Version version; // or latestVersion
 	Optional<TagSet> tags;
-	Optional<UID> debugID;
 	ReplyPromise<GetKeyReply> reply;
+	Optional<ReadOptions> options;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
 
-	bool verify() const { return tenantInfo.isAuthorized(); }
-
 	GetKeyRequest() {}
+
+	bool verify() const { return tenantInfo.isAuthorized(); }
 
 	GetKeyRequest(SpanContext spanContext,
 	              TenantInfo tenantInfo,
 	              KeySelectorRef const& sel,
 	              Version version,
 	              Optional<TagSet> tags,
-	              Optional<UID> debugID,
+	              Optional<ReadOptions> options,
 	              VersionVector latestCommitVersions)
-	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), debugID(debugID),
+	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), tags(tags), options(options),
 	    ssLatestCommitVersions(latestCommitVersions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sel, version, tags, debugID, reply, spanContext, tenantInfo, arena, ssLatestCommitVersions);
+		serializer(ar, sel, version, tags, reply, spanContext, tenantInfo, options, ssLatestCommitVersions, arena);
 	}
 };
 
@@ -771,7 +765,7 @@ struct SplitMetricsRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, limits, used, estimated, isLastShard, reply, arena, minSplitBytes);
+		serializer(ar, keys, limits, used, estimated, isLastShard, reply, minSplitBytes, arena);
 	}
 };
 
@@ -1051,7 +1045,7 @@ struct OverlappingChangeFeedsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, feeds, arena, feedMetadataVersion);
+		serializer(ar, feeds, feedMetadataVersion, arena);
 	}
 };
 

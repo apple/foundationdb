@@ -44,7 +44,7 @@ template <class T>
 struct sfinae_true : std::true_type {};
 
 template <class T>
-auto testAuthToken(int) -> sfinae_true<decltype(std::declval<T>().getAuthToken())>;
+auto testAuthToken(int) -> sfinae_true<decltype(std::declval<T>().setAuthToken(std::declval<Transaction&>()))>;
 template <class>
 auto testAuthToken(long) -> std::false_type;
 
@@ -54,7 +54,7 @@ struct hasAuthToken : decltype(testAuthToken<T>(0)) {};
 template <class T>
 void setAuthToken(T const& self, Transaction& tr) {
 	if constexpr (hasAuthToken<T>::value) {
-		tr.setOption(FDBTransactionOptions::AUTHORIZATION_TOKEN, self.getAuthToken());
+		self.setAuthToken(tr);
 	}
 }
 
@@ -83,9 +83,13 @@ Future<bool> checkRangeSimpleValueSize(Database cx,
 
 // Returns true if the range was added
 ACTOR template <class T>
-Future<uint64_t> setupRange(Database cx, T* workload, uint64_t begin, uint64_t end, Optional<TenantName> tenant) {
+Future<uint64_t> setupRange(Database cx, T* workload, uint64_t begin, uint64_t end, std::vector<TenantName> tenants) {
 	state uint64_t bytesInserted = 0;
 	loop {
+		Optional<TenantName> tenant;
+		if (tenants.size() > 0) {
+			tenant = tenants.at(deterministicRandom()->randomInt(0, tenants.size()));
+		}
 		state Transaction tr(cx, tenant);
 		setAuthToken(*workload, tr);
 		try {
@@ -134,7 +138,7 @@ Future<uint64_t> setupRangeWorker(Database cx,
                                   double maxKeyInsertRate,
                                   int keySaveIncrement,
                                   int actorId,
-                                  Optional<TenantName> tenant) {
+                                  std::vector<TenantName> tenants) {
 	state double nextStart;
 	state uint64_t loadedRanges = 0;
 	state int lastStoredKeysLoaded = 0;
@@ -144,10 +148,14 @@ Future<uint64_t> setupRangeWorker(Database cx,
 		state std::pair<uint64_t, uint64_t> job = jobs->back();
 		jobs->pop_back();
 		nextStart = now() + (job.second - job.first) / maxKeyInsertRate;
-		uint64_t numBytes = wait(setupRange(cx, workload, job.first, job.second, tenant));
+		uint64_t numBytes = wait(setupRange(cx, workload, job.first, job.second, tenants));
 		if (numBytes > 0)
 			loadedRanges++;
 
+		Optional<TenantName> tenant;
+		if (tenants.size() > 0) {
+			tenant = tenants.at(deterministicRandom()->randomInt(0, tenants.size()));
+		}
 		if (keySaveIncrement > 0) {
 			keysLoaded += job.second - job.first;
 			bytesStored += numBytes;
@@ -204,7 +212,8 @@ Future<Void> waitForLowInFlight(Database cx, T* workload) {
 				break;
 			}
 		} catch (Error& e) {
-			if (e.code() == error_code_attribute_not_found) {
+			if (e.code() == error_code_attribute_not_found ||
+			    (e.code() == error_code_timed_out && !timeout.isReady())) {
 				// DD may not be initialized yet and attribute "DataInFlight" can be missing
 				wait(delay(1.0));
 			} else {
@@ -231,7 +240,7 @@ Future<Void> bulkSetup(Database cx,
                        double keyCheckInterval = 0.1,
                        uint64_t startNodeIdx = 0,
                        uint64_t endNodeIdx = 0,
-                       Optional<TenantName> tenant = Optional<TenantName>()) {
+                       std::vector<TenantName> tenants = std::vector<TenantName>()) {
 
 	state std::vector<std::pair<uint64_t, uint64_t>> jobs;
 	state uint64_t startNode = startNodeIdx ? startNodeIdx : (nodeCount * workload->clientId) / workload->clientCount;
@@ -248,6 +257,10 @@ Future<Void> bulkSetup(Database cx,
 	// For bulk data schemes where the value of the key is not critical to operation, check to
 	//  see if the database has already been set up.
 	if (valuesInconsequential) {
+		Optional<TenantName> tenant;
+		if (tenants.size() > 0) {
+			tenant = tenants.at(deterministicRandom()->randomInt(0, tenants.size()));
+		}
 		bool present = wait(checkRangeSimpleValueSize(cx, workload, startNode, endNode, tenant));
 		if (present) {
 			TraceEvent("BulkSetupRangeAlreadyPresent")
@@ -311,7 +324,7 @@ Future<Void> bulkSetup(Database cx,
 		keySaveIncrement = 0;
 
 	for (int j = 0; j < BULK_SETUP_WORKERS; j++)
-		fs.push_back(setupRangeWorker(cx, workload, &jobs, maxWorkerInsertRate, keySaveIncrement, j, tenant));
+		fs.push_back(setupRangeWorker(cx, workload, &jobs, maxWorkerInsertRate, keySaveIncrement, j, tenants));
 	try {
 		wait(success(insertionTimes) && waitForAll(fs));
 	} catch (Error& e) {

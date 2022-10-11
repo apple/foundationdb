@@ -98,7 +98,7 @@ S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 
 bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 #define TRY_PARAM(n, sn)                                                                                               \
-	if (name == LiteralStringRef(#n) || name == LiteralStringRef(#sn)) {                                               \
+	if (name == #n || name == #sn) {                                                                                   \
 		n = value;                                                                                                     \
 		return true;                                                                                                   \
 	}
@@ -109,7 +109,7 @@ bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(request_tries, rt);
 	TRY_PARAM(request_timeout_min, rtom);
 	// TODO: For backward compatibility because request_timeout was renamed to request_timeout_min
-	if (name == LiteralStringRef("request_timeout") || name == LiteralStringRef("rto")) {
+	if (name == "request_timeout"_sr || name == "rto"_sr) {
 		request_timeout_min = value;
 		return true;
 	}
@@ -187,7 +187,7 @@ std::string guessRegionFromDomain(std::string domain) {
 
 		StringRef h(domain.c_str() + p);
 
-		if (!h.startsWith(LiteralStringRef("oss-"))) {
+		if (!h.startsWith("oss-"_sr)) {
 			h.eat(service); // ignore s3 service
 		}
 
@@ -208,7 +208,7 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 	try {
 		StringRef t(url);
 		StringRef prefix = t.eat("://");
-		if (prefix != LiteralStringRef("blobstore"))
+		if (prefix != "blobstore"_sr)
 			throw format("Invalid blobstore URL prefix '%s'", prefix.toString().c_str());
 
 		Optional<std::string> proxyHost, proxyPort;
@@ -261,7 +261,7 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 			StringRef value = t.eat("&");
 
 			// Special case for header
-			if (name == LiteralStringRef("header")) {
+			if (name == "header"_sr) {
 				StringRef originalValue = value;
 				StringRef headerFieldName = value.eat(":");
 				StringRef headerFieldValue = value;
@@ -282,7 +282,7 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 			}
 
 			// overwrite s3 region from parameter
-			if (name == LiteralStringRef("region")) {
+			if (name == "region"_sr) {
 				region = value.toString();
 				continue;
 			}
@@ -476,7 +476,7 @@ ACTOR Future<Void> deleteRecursively_impl(Reference<S3BlobStoreEndpoint> b,
 	state Future<Void> done = b->listObjectsStream(bucket, resultStream, prefix, '/', std::numeric_limits<int>::max());
 	// Wrap done in an actor which will send end_of_stream since listObjectsStream() does not (so that many calls can
 	// write to the same stream)
-	done = map(done, [=](Void) {
+	done = map(done, [=](Void) mutable {
 		resultStream.sendError(end_of_stream());
 		return Void();
 	});
@@ -735,16 +735,21 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 		service = b->knobs.secure_connection ? "https" : "http";
 	}
 	bool isTLS = b->knobs.secure_connection == 1;
+	state Reference<IConnection> conn;
 	if (b->useProxy) {
-		// TODO(renxuan): Support http proxy + TLS
-		if (isTLS || b->service == "443") {
-			fprintf(stderr, "ERROR: TLS is not supported yet when using HTTP proxy.\n");
-			throw connection_failed();
+		if (isTLS) {
+			Reference<IConnection> _conn =
+			    wait(HTTP::proxyConnect(host, service, b->proxyHost.get(), b->proxyPort.get()));
+			conn = _conn;
+		} else {
+			host = b->proxyHost.get();
+			service = b->proxyPort.get();
+			Reference<IConnection> _conn = wait(INetworkConnections::net()->connect(host, service, false));
+			conn = _conn;
 		}
-		host = b->proxyHost.get();
-		service = b->proxyPort.get();
+	} else {
+		wait(store(conn, INetworkConnections::net()->connect(host, service, isTLS)));
 	}
-	state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(host, service, isTLS));
 	wait(conn->connectHandshake());
 
 	TraceEvent("S3BlobStoreEndpointNewConnection")
@@ -892,7 +897,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 				canonicalURI += boost::algorithm::join(queryParameters, "&");
 			}
 
-			if (bstore->useProxy) {
+			if (bstore->useProxy && bstore->knobs.secure_connection == 0) {
 				// Has to be in absolute-form.
 				canonicalURI = "http://" + bstore->host + ":" + bstore->service + canonicalURI;
 			}
@@ -1188,7 +1193,7 @@ ACTOR Future<S3BlobStoreEndpoint::ListResult> listObjects_impl(Reference<S3BlobS
 	    bstore->listObjectsStream(bucket, resultStream, prefix, delimiter, maxDepth, recurseFilter);
 	// Wrap done in an actor which sends end_of_stream because list does not so that many lists can write to the same
 	// stream
-	done = map(done, [=](Void) {
+	done = map(done, [=](Void) mutable {
 		resultStream.sendError(end_of_stream());
 		return Void();
 	});
@@ -1423,7 +1428,7 @@ void S3BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb,
 	if (headers.find("Content-MD5") != headers.end())
 		headersList.push_back({ "content-md5", trim_copy(headers["Content-MD5"]) + "\n" });
 	for (auto h : headers) {
-		if (StringRef(h.first).startsWith(LiteralStringRef("x-amz")))
+		if (StringRef(h.first).startsWith("x-amz"_sr))
 			headersList.push_back({ to_lower_copy(h.first), trim_copy(h.second) + "\n" });
 	}
 	std::sort(headersList.begin(), headersList.end());
@@ -1484,7 +1489,7 @@ void S3BlobStoreEndpoint::setAuthHeaders(std::string const& verb, std::string co
 	msg.append("\n");
 	for (auto h : headers) {
 		StringRef name = h.first;
-		if (name.startsWith(LiteralStringRef("x-amz")) || name.startsWith(LiteralStringRef("x-icloud"))) {
+		if (name.startsWith("x-amz"_sr) || name.startsWith("x-icloud"_sr)) {
 			msg.append(h.first);
 			msg.append(":");
 			msg.append(h.second);
@@ -1754,7 +1759,7 @@ Future<Void> S3BlobStoreEndpoint::finishMultiPartUpload(std::string const& bucke
 }
 
 TEST_CASE("/backup/s3/v4headers") {
-	S3BlobStoreEndpoint::Credentials creds{ "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "" }
+	S3BlobStoreEndpoint::Credentials creds{ "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "" };
 	// GET without query parameters
 	{
 		S3BlobStoreEndpoint s3("s3.amazonaws.com", "443", "amazonaws", "proxy", "port", creds);

@@ -27,7 +27,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/OnDemandStore.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/Status.h"
+#include "fdbserver/Status.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
@@ -97,17 +97,22 @@ LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local) : Client
 	forward.makeWellKnownEndpoint(WLTOKEN_LEADERELECTIONREG_FORWARD, TaskPriority::Coordination);
 }
 
-ServerCoordinators::ServerCoordinators(Reference<IClusterConnectionRecord> ccr) : ClientCoordinators(ccr) {
+ServerCoordinators::ServerCoordinators(Reference<IClusterConnectionRecord> ccr, ConfigDBType configDBType)
+  : ClientCoordinators(ccr) {
 	ClusterConnectionString cs = ccr->getConnectionString();
 	for (auto h : cs.hostnames) {
 		leaderElectionServers.emplace_back(h);
 		stateServers.emplace_back(h);
-		configServers.emplace_back(h);
+		if (configDBType != ConfigDBType::DISABLED) {
+			configServers.emplace_back(h);
+		}
 	}
 	for (auto s : cs.coords) {
 		leaderElectionServers.emplace_back(s);
 		stateServers.emplace_back(s);
-		configServers.emplace_back(s);
+		if (configDBType != ConfigDBType::DISABLED) {
+			configServers.emplace_back(s);
+		}
 	}
 }
 
@@ -183,8 +188,8 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	}
 
 	{
-		UniqueGeneration g = wait(
-		    reg.write.getReply(GenerationRegWriteRequest(KeyValueRef(the_key, LiteralStringRef("Value1")), firstGen)));
+		UniqueGeneration g =
+		    wait(reg.write.getReply(GenerationRegWriteRequest(KeyValueRef(the_key, "Value1"_sr), firstGen)));
 		//   (gen1==gen is considered a "successful" write)
 		ASSERT(g == firstGen);
 	}
@@ -193,7 +198,7 @@ TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 		GenerationRegReadReply r = wait(reg.read.getReply(GenerationRegReadRequest(the_key, UniqueGeneration())));
 		// read(key,gen2) returns (value,gen,rgen).
 		//     There was some earlier or concurrent write(key,value,gen).
-		ASSERT(r.value == LiteralStringRef("Value1"));
+		ASSERT(r.value == "Value1"_sr);
 		ASSERT(r.gen == firstGen);
 		//     There was some earlier or concurrent read(key,rgen).
 		ASSERT(r.rgen == firstGen);
@@ -484,16 +489,16 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 // Generation register values are stored without prefixing in the coordinated state, but always begin with an
 // alphanumeric character (they are always derived from a ClusterConnectionString key). Forwarding values are stored in
 // this range:
-const KeyRangeRef fwdKeys(LiteralStringRef("\xff"
-                                           "fwd"),
-                          LiteralStringRef("\xff"
-                                           "fwe"));
+const KeyRangeRef fwdKeys("\xff"
+                          "fwd"_sr,
+                          "\xff"
+                          "fwe"_sr);
 
 // The time when forwarding was last set is stored in this range:
-const KeyRangeRef fwdTimeKeys(LiteralStringRef("\xff"
-                                               "fwdTime"),
-                              LiteralStringRef("\xff"
-                                               "fwdTimf"));
+const KeyRangeRef fwdTimeKeys("\xff"
+                              "fwdTime"_sr,
+                              "\xff"
+                              "fwdTimf"_sr);
 struct LeaderRegisterCollection {
 	// SOMEDAY: Factor this into a generic tool?  Extend ActorCollection to support removal actions?  What?
 	ActorCollection actors;
@@ -725,9 +730,9 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 		}
 		when(ForwardRequest req = waitNext(interf.forward.getFuture())) {
 			Optional<LeaderInfo> forward = regs.getForward(req.key);
-			if (forward.present())
+			if (forward.present()) {
 				req.reply.send(Void());
-			else {
+			} else {
 				StringRef clusterName = ccr->getConnectionString().clusterKeyName();
 				if (!SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT && getClusterDescriptor(req.key).compare(clusterName)) {
 					TraceEvent(SevWarn, "CCRMismatch")
@@ -761,12 +766,14 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 	state Future<Void> configDatabaseServer = Never();
 	TraceEvent("CoordinationServer", myID)
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())
-	    .detail("Folder", dataFolder);
+	    .detail("Folder", dataFolder)
+	    .detail("ConfigNodeValid", configNode.isValid());
 
 	if (configNode.isValid()) {
 		configTransactionInterface.setupWellKnownEndpoints();
 		configFollowerInterface.setupWellKnownEndpoints();
-		configDatabaseServer = configNode->serve(cbi, configTransactionInterface, configFollowerInterface);
+		configDatabaseServer =
+		    brokenPromiseToNever(configNode->serve(cbi, configTransactionInterface, configFollowerInterface));
 	}
 
 	try {

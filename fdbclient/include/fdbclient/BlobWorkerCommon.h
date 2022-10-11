@@ -30,7 +30,7 @@ struct BlobWorkerStats {
 	Counter deltaBytesWritten, snapshotBytesWritten;
 	Counter bytesReadFromFDBForInitialSnapshot;
 	Counter bytesReadFromS3ForCompaction;
-	Counter rangeAssignmentRequests, readRequests;
+	Counter rangeAssignmentRequests, readRequests, summaryReads;
 	Counter wrongShardServer;
 	Counter changeFeedInputBytes;
 	Counter readReqTotalFilesReturned;
@@ -44,12 +44,14 @@ struct BlobWorkerStats {
 	Counter compressionBytesRaw;
 	Counter compressionBytesFinal;
 	Counter fullRejections;
+	Counter forceFlushCleanups;
 
 	int numRangesAssigned;
 	int mutationBytesBuffered;
 	int activeReadRequests;
 	int granulesPendingSplitCheck;
 	Version minimumCFVersion;
+	Version cfVersionLag;
 	int notAtLatestChangeFeeds;
 	int64_t lastResidentMemory;
 	int64_t estimatedMaxResidentMemory;
@@ -74,14 +76,15 @@ struct BlobWorkerStats {
 	    bytesReadFromFDBForInitialSnapshot("BytesReadFromFDBForInitialSnapshot", cc),
 	    bytesReadFromS3ForCompaction("BytesReadFromS3ForCompaction", cc),
 	    rangeAssignmentRequests("RangeAssignmentRequests", cc), readRequests("ReadRequests", cc),
-	    wrongShardServer("WrongShardServer", cc), changeFeedInputBytes("ChangeFeedInputBytes", cc),
-	    readReqTotalFilesReturned("ReadReqTotalFilesReturned", cc),
+	    summaryReads("SummaryReads", cc), wrongShardServer("WrongShardServer", cc),
+	    changeFeedInputBytes("ChangeFeedInputBytes", cc), readReqTotalFilesReturned("ReadReqTotalFilesReturned", cc),
 	    readReqDeltaBytesReturned("ReadReqDeltaBytesReturned", cc), commitVersionChecks("CommitVersionChecks", cc),
 	    granuleUpdateErrors("GranuleUpdateErrors", cc), granuleRequestTimeouts("GranuleRequestTimeouts", cc),
 	    readRequestsWithBegin("ReadRequestsWithBegin", cc), readRequestsCollapsed("ReadRequestsCollapsed", cc),
 	    flushGranuleReqs("FlushGranuleReqs", cc), compressionBytesRaw("CompressionBytesRaw", cc),
-	    compressionBytesFinal("CompressionBytesFinal", cc), fullRejections("FullRejections", cc), numRangesAssigned(0),
-	    mutationBytesBuffered(0), activeReadRequests(0), granulesPendingSplitCheck(0), minimumCFVersion(0),
+	    compressionBytesFinal("CompressionBytesFinal", cc), fullRejections("FullRejections", cc),
+	    forceFlushCleanups("ForceFlushCleanups", cc), numRangesAssigned(0), mutationBytesBuffered(0),
+	    activeReadRequests(0), granulesPendingSplitCheck(0), minimumCFVersion(0), cfVersionLag(0),
 	    notAtLatestChangeFeeds(0), lastResidentMemory(0), estimatedMaxResidentMemory(0),
 	    initialSnapshotLock(initialSnapshotLock), resnapshotLock(resnapshotLock), deltaWritesLock(deltaWritesLock) {
 		specialCounter(cc, "NumRangesAssigned", [this]() { return this->numRangesAssigned; });
@@ -89,6 +92,7 @@ struct BlobWorkerStats {
 		specialCounter(cc, "ActiveReadRequests", [this]() { return this->activeReadRequests; });
 		specialCounter(cc, "GranulesPendingSplitCheck", [this]() { return this->granulesPendingSplitCheck; });
 		specialCounter(cc, "MinimumChangeFeedVersion", [this]() { return this->minimumCFVersion; });
+		specialCounter(cc, "CFVersionLag", [this]() { return this->cfVersionLag; });
 		specialCounter(cc, "NotAtLatestChangeFeeds", [this]() { return this->notAtLatestChangeFeeds; });
 		specialCounter(cc, "LastResidentMemory", [this]() { return this->lastResidentMemory; });
 		specialCounter(cc, "EstimatedMaxResidentMemory", [this]() { return this->estimatedMaxResidentMemory; });

@@ -21,8 +21,10 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/ApiVersion.h"
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -37,25 +39,37 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 	bool switchComplete = false;
 
 	DifferentClustersSameRVWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		ASSERT(g_simulator.extraDatabases.size() == 1);
-		auto extraFile =
-		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
-		extraDB = Database::createDatabase(extraFile, -1);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 100.0);
-		switchAfter = getOption(options, LiteralStringRef("switchAfter"), 50.0);
-		keyToRead = getOption(options, LiteralStringRef("keyToRead"), LiteralStringRef("someKey"));
-		keyToWatch = getOption(options, LiteralStringRef("keyToWatch"), LiteralStringRef("anotherKey"));
+		ASSERT(g_simulator->extraDatabases.size() == 1);
+		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], wcx.defaultTenant);
+		testDuration = getOption(options, "testDuration"_sr, 100.0);
+		switchAfter = getOption(options, "switchAfter"_sr, 50.0);
+		keyToRead = getOption(options, "keyToRead"_sr, "someKey"_sr);
+		keyToWatch = getOption(options, "keyToWatch"_sr, "anotherKey"_sr);
 	}
 
 	std::string description() const override { return "DifferentClustersSameRV"; }
 
-	Future<Void> setup(Database const& cx) override { return Void(); }
+	Future<Void> setup(Database const& cx) override {
+		if (clientId != 0) {
+			return Void();
+		}
+		return _setup(cx, this);
+	}
+
+	ACTOR static Future<Void> _setup(Database cx, DifferentClustersSameRVWorkload* self) {
+		if (self->extraDB->defaultTenant.present()) {
+			wait(success(TenantAPI::createTenant(self->extraDB.getReference(), self->extraDB->defaultTenant.get())));
+		}
+
+		return Void();
+	}
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId != 0) {
 			return Void();
 		}
 		auto switchConnFileDb = Database::createDatabase(cx->getConnectionRecord(), -1);
+		switchConnFileDb->defaultTenant = cx->defaultTenant;
 		originalDB = cx;
 		std::vector<Future<Void>> clients = { readerClientSeparateDBs(cx, this),
 			                                  doSwitch(switchConnFileDb, this),
@@ -164,7 +178,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		wait(unlockDatabase(self->extraDB, lockUid));
 		TraceEvent("DifferentClusters_UnlockedExtraDB").log();
 		ASSERT(!watchFuture.isReady() || watchFuture.isError());
-		wait(doWrite(self->extraDB, self->keyToWatch, Optional<Value>{ LiteralStringRef("") }));
+		wait(doWrite(self->extraDB, self->keyToWatch, Optional<Value>{ ""_sr }));
 		TraceEvent("DifferentClusters_WaitingForWatch").log();
 		try {
 			wait(timeoutError(watchFuture, (self->testDuration - self->switchAfter) / 2));

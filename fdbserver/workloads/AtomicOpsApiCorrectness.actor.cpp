@@ -29,9 +29,9 @@ struct AtomicOpsApiCorrectnessWorkload : TestWorkload {
 	uint32_t opType;
 
 private:
-	static int getApiVersion(const Database& cx) { return cx->apiVersion; }
+	static int getApiVersion(const Database& cx) { return cx->apiVersion.version(); }
 
-	static void setApiVersion(Database* cx, int version) { (*cx)->apiVersion = version; }
+	static void setApiVersion(Database* cx, int version) { (*cx)->apiVersion = ApiVersion(version); }
 
 	Key getTestKey(std::string prefix) {
 		std::string key = prefix + std::to_string(clientId);
@@ -40,7 +40,7 @@ private:
 
 public:
 	AtomicOpsApiCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		opType = getOption(options, LiteralStringRef("opType"), -1);
+		opType = getOption(options, "opType"_sr, -1);
 	}
 
 	std::string description() const override { return "AtomicOpsApiCorrectness"; }

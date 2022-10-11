@@ -103,7 +103,7 @@ class FDBTenantList(object):
 # JSON strings of the tenant metadata
 @_impl.transactional
 def _list_tenants_impl(tr, begin, end, limit):
-    tr.options.set_read_system_keys()
+    tr.options.set_raw_access()
     begin_key = b'%s%s' % (_tenant_map_prefix, begin)
     end_key = b'%s%s' % (_tenant_map_prefix, end)
 

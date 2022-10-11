@@ -55,6 +55,13 @@ void printGranuleChunks(const Standalone<VectorRef<BlobGranuleChunkRef>>& chunks
 
 ACTOR Future<Void> clearAndAwaitMerge(Database cx, KeyRange range);
 
+ACTOR Future<Void> validateGranuleSummaries(Database cx,
+                                            KeyRange range,
+                                            Optional<TenantName> tenantName,
+                                            Promise<Void> testComplete);
+
+ACTOR Future<Void> checkFeedCleanup(Database cx, bool debug);
+
 #include "flow/unactorcompiler.h"
 
 #endif

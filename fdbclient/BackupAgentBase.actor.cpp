@@ -22,6 +22,10 @@
 #include <time.h>
 
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BlobCipher.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/DatabaseContext.h"
+#include "fdbclient/Metacluster.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h" // has to be last include
@@ -253,16 +257,18 @@ std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key) {
 	    bigEndian32(*(int32_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t) + sizeof(int64_t))));
 }
 
-void decodeBackupLogValue(Arena& arena,
-                          VectorRef<MutationRef>& result,
-                          int& mutationSize,
-                          StringRef value,
-                          StringRef addPrefix,
-                          StringRef removePrefix,
-                          Version version,
-                          Reference<KeyRangeMap<Version>> key_version) {
+ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
+                                               VectorRef<MutationRef>* result,
+                                               VectorRef<Optional<MutationRef>>* encryptedResult,
+                                               int* mutationSize,
+                                               Standalone<StringRef> value,
+                                               Key addPrefix,
+                                               Key removePrefix,
+                                               Version version,
+                                               Reference<KeyRangeMap<Version>> key_version,
+                                               Database cx) {
 	try {
-		uint64_t offset(0);
+		state uint64_t offset(0);
 		uint64_t protocolVersion = 0;
 		memcpy(&protocolVersion, value.begin(), sizeof(uint64_t));
 		offset += sizeof(uint64_t);
@@ -274,36 +280,48 @@ void decodeBackupLogValue(Arena& arena,
 			throw incompatible_protocol_version();
 		}
 
-		uint32_t totalBytes = 0;
+		state uint32_t totalBytes = 0;
 		memcpy(&totalBytes, value.begin() + offset, sizeof(uint32_t));
 		offset += sizeof(uint32_t);
-		uint32_t consumed = 0;
+		state uint32_t consumed = 0;
 
 		if (totalBytes + offset > value.size())
 			throw restore_missing_data();
 
-		int originalOffset = offset;
+		state int originalOffset = offset;
 
 		while (consumed < totalBytes) {
 			uint32_t type = 0;
 			memcpy(&type, value.begin() + offset, sizeof(uint32_t));
 			offset += sizeof(uint32_t);
-			uint32_t len1 = 0;
+			state uint32_t len1 = 0;
 			memcpy(&len1, value.begin() + offset, sizeof(uint32_t));
 			offset += sizeof(uint32_t);
-			uint32_t len2 = 0;
+			state uint32_t len2 = 0;
 			memcpy(&len2, value.begin() + offset, sizeof(uint32_t));
 			offset += sizeof(uint32_t);
 
 			ASSERT(offset + len1 + len2 <= value.size() && isValidMutationType(type));
 
-			MutationRef logValue;
-			Arena tempArena;
+			state MutationRef logValue;
+			state Arena tempArena;
 			logValue.type = type;
 			logValue.param1 = value.substr(offset, len1);
 			offset += len1;
 			logValue.param2 = value.substr(offset, len2);
 			offset += len2;
+			state Optional<MutationRef> encryptedLogValue = Optional<MutationRef>();
+
+			// Decrypt mutation ref if encrypted
+			if (logValue.isEncrypted()) {
+				encryptedLogValue = logValue;
+				Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
+				TextAndHeaderCipherKeys cipherKeys =
+				    wait(getEncryptCipherKeys(dbInfo, *logValue.encryptionHeader(), BlobCipherMetrics::BACKUP));
+				logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::BACKUP);
+			}
+			ASSERT(!logValue.isEncrypted());
+			MutationRef originalLogValue = logValue;
 
 			if (logValue.type == MutationRef::ClearRange) {
 				KeyRangeRef range(logValue.param1, logValue.param2);
@@ -311,7 +329,7 @@ void decodeBackupLogValue(Arena& arena,
 				for (auto r : ranges) {
 					if (version > r.value() && r.value() != invalidVersion) {
 						KeyRef minKey = std::min(r.range().end, range.end);
-						if (minKey == (removePrefix == StringRef() ? normalKeys.end : strinc(removePrefix))) {
+						if (minKey == (removePrefix == StringRef() ? allKeys.end : strinc(removePrefix))) {
 							logValue.param1 = std::max(r.range().begin, range.begin);
 							if (removePrefix.size()) {
 								logValue.param1 = logValue.param1.removePrefix(removePrefix);
@@ -319,9 +337,9 @@ void decodeBackupLogValue(Arena& arena,
 							if (addPrefix.size()) {
 								logValue.param1 = logValue.param1.withPrefix(addPrefix, tempArena);
 							}
-							logValue.param2 = addPrefix == StringRef() ? normalKeys.end : strinc(addPrefix, tempArena);
-							result.push_back_deep(arena, logValue);
-							mutationSize += logValue.expectedSize();
+							logValue.param2 = addPrefix == StringRef() ? allKeys.end : strinc(addPrefix, tempArena);
+							result->push_back_deep(*arena, logValue);
+							*mutationSize += logValue.expectedSize();
 						} else {
 							logValue.param1 = std::max(r.range().begin, range.begin);
 							logValue.param2 = minKey;
@@ -333,8 +351,13 @@ void decodeBackupLogValue(Arena& arena,
 								logValue.param1 = logValue.param1.withPrefix(addPrefix, tempArena);
 								logValue.param2 = logValue.param2.withPrefix(addPrefix, tempArena);
 							}
-							result.push_back_deep(arena, logValue);
-							mutationSize += logValue.expectedSize();
+							result->push_back_deep(*arena, logValue);
+							*mutationSize += logValue.expectedSize();
+						}
+						if (originalLogValue.param1 == logValue.param1 && originalLogValue.param2 == logValue.param2) {
+							encryptedResult->push_back_deep(*arena, encryptedLogValue);
+						} else {
+							encryptedResult->push_back_deep(*arena, Optional<MutationRef>());
 						}
 					}
 				}
@@ -348,8 +371,15 @@ void decodeBackupLogValue(Arena& arena,
 					if (addPrefix.size()) {
 						logValue.param1 = logValue.param1.withPrefix(addPrefix, tempArena);
 					}
-					result.push_back_deep(arena, logValue);
-					mutationSize += logValue.expectedSize();
+					result->push_back_deep(*arena, logValue);
+					*mutationSize += logValue.expectedSize();
+					// If we did not remove/add prefixes to the mutation then keep the original encrypted mutation so we
+					// do not have to re-encrypt unnecessarily
+					if (originalLogValue.param1 == logValue.param1 && originalLogValue.param2 == logValue.param2) {
+						encryptedResult->push_back_deep(*arena, encryptedLogValue);
+					} else {
+						encryptedResult->push_back_deep(*arena, Optional<MutationRef>());
+					}
 				}
 			}
 
@@ -374,6 +404,7 @@ void decodeBackupLogValue(Arena& arena,
 		    .detail("Value", value);
 		throw;
 	}
+	return Void();
 }
 
 static double lastErrorTime = 0;
@@ -414,7 +445,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 	loop {
 		try {
 			state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
-			                            (g_network->isSimulated() && !g_simulator.speedUpSimulation)
+			                            (g_network->isSimulated() && !g_simulator->speedUpSimulation)
 			                                ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
 			                                : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
@@ -493,7 +524,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 	loop {
 		try {
 			state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
-			                            (g_network->isSimulated() && !g_simulator.speedUpSimulation)
+			                            (g_network->isSimulated() && !g_simulator->speedUpSimulation)
 			                                ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
 			                                : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
@@ -614,21 +645,24 @@ ACTOR Future<int> dumpData(Database cx,
 		state int mutationSize = 0;
 		loop {
 			try {
-				RCGroup group = waitNext(results.getFuture());
+				state RCGroup group = waitNext(results.getFuture());
 				lock->release(group.items.expectedSize());
 
 				BinaryWriter bw(Unversioned());
 				for (int i = 0; i < group.items.size(); ++i) {
 					bw.serializeBytes(group.items[i].value);
 				}
-				decodeBackupLogValue(req.arena,
-				                     req.transaction.mutations,
-				                     mutationSize,
-				                     bw.toValue(),
-				                     addPrefix,
-				                     removePrefix,
-				                     group.groupKey,
-				                     keyVersion);
+				Standalone<StringRef> value = bw.toValue();
+				wait(decodeBackupLogValue(&req.arena,
+				                          &req.transaction.mutations,
+				                          &req.transaction.encryptedMutations,
+				                          &mutationSize,
+				                          value,
+				                          addPrefix,
+				                          removePrefix,
+				                          group.groupKey,
+				                          keyVersion,
+				                          cx));
 				newBeginVersion = group.groupKey + 1;
 				if (mutationSize >= CLIENT_KNOBS->BACKUP_LOG_WRITE_BATCH_MAX_SIZE) {
 					break;
@@ -652,8 +686,10 @@ ACTOR Future<int> dumpData(Database cx,
 		Key rangeEnd = getApplyKey(newBeginVersion, uid);
 
 		req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::SetValue, applyBegin, versionKey));
+		req.transaction.encryptedMutations.push_back_deep(req.arena, Optional<MutationRef>());
 		req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(applyBegin));
 		req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::ClearRange, rangeBegin, rangeEnd));
+		req.transaction.encryptedMutations.push_back_deep(req.arena, Optional<MutationRef>());
 		req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(rangeBegin));
 
 		// The commit request contains no read conflict ranges, so regardless of what read version we
@@ -968,10 +1004,9 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 					                                                       .get(BackupAgentBase::keySourceStates)
 					                                                       .get(currLogUid)
 					                                                       .pack(DatabaseBackupAgent::keyStateStatus));
-					state Future<Optional<Value>> foundBackupKey =
-					    tr->get(Subspace(currLogUid.withPrefix(LiteralStringRef("uid->config/"))
-					                         .withPrefix(fileBackupPrefixRange.begin))
-					                .pack(LiteralStringRef("stateEnum")));
+					state Future<Optional<Value>> foundBackupKey = tr->get(
+					    Subspace(currLogUid.withPrefix("uid->config/"_sr).withPrefix(fileBackupPrefixRange.begin))
+					        .pack("stateEnum"_sr));
 					wait(success(foundDRKey) && success(foundBackupKey));
 
 					if (foundDRKey.get().present() && foundBackupKey.get().present()) {
@@ -1165,3 +1200,38 @@ Standalone<StringRef> BackupAgentBase::getCurrentTime() {
 }
 
 std::string const BackupAgentBase::defaultTagName = "default";
+
+void addDefaultBackupRanges(Standalone<VectorRef<KeyRangeRef>>& backupKeys) {
+	backupKeys.push_back_deep(backupKeys.arena(), normalKeys);
+
+	for (auto& r : getSystemBackupRanges()) {
+		backupKeys.push_back_deep(backupKeys.arena(), r);
+	}
+}
+
+VectorRef<KeyRangeRef> const& getSystemBackupRanges() {
+	static Standalone<VectorRef<KeyRangeRef>> systemBackupRanges;
+	if (systemBackupRanges.empty()) {
+		systemBackupRanges.push_back_deep(systemBackupRanges.arena(), prefixRange(TenantMetadata::subspace()));
+		systemBackupRanges.push_back_deep(systemBackupRanges.arena(),
+		                                  singleKeyRange(MetaclusterMetadata::metaclusterRegistration().key));
+	}
+
+	return systemBackupRanges;
+}
+
+KeyRangeMap<bool> const& systemBackupMutationMask() {
+	static KeyRangeMap<bool> mask;
+	if (mask.size() == 1) {
+		for (auto r : getSystemBackupRanges()) {
+			mask.insert(r, true);
+		}
+	}
+
+	return mask;
+}
+
+KeyRangeRef const& getDefaultBackupSharedRange() {
+	static KeyRangeRef defaultSharedRange(""_sr, ""_sr);
+	return defaultSharedRange;
+}

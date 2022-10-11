@@ -31,6 +31,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
+#include "flow/ApiVersion.h"
 #include "flow/IAsyncFile.h"
 #include "fdbrpc/simulator.h"
 #include "flow/genericactors.actor.h"
@@ -365,13 +366,13 @@ ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 	// Protect restore worker from being killed in simulation;
 	// Future: Remove the protection once restore can tolerate failure
 	if (g_network->isSimulated()) {
-		auto addresses = g_simulator.getProcessByAddress(myWorkerInterf.address())->addresses;
+		auto addresses = g_simulator->getProcessByAddress(myWorkerInterf.address())->addresses;
 
-		g_simulator.protectedAddresses.insert(addresses.address);
+		g_simulator->protectedAddresses.insert(addresses.address);
 		if (addresses.secondaryAddress.present()) {
-			g_simulator.protectedAddresses.insert(addresses.secondaryAddress.get());
+			g_simulator->protectedAddresses.insert(addresses.secondaryAddress.get());
 		}
-		ISimulator::ProcessInfo* p = g_simulator.getProcessByAddress(myWorkerInterf.address());
+		ISimulator::ProcessInfo* p = g_simulator->getProcessByAddress(myWorkerInterf.address());
 		TraceEvent("ProtectRestoreWorker")
 		    .detail("Address", addresses.toString())
 		    .detail("IsReliable", p->isReliable())
@@ -410,7 +411,7 @@ ACTOR Future<Void> restoreWorker(Reference<IClusterConnectionRecord> connRecord,
                                  LocalityData locality,
                                  std::string coordFolder) {
 	try {
-		Database cx = Database::createDatabase(connRecord, Database::API_VERSION_LATEST, IsInternal::True, locality);
+		Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION, IsInternal::True, locality);
 		wait(reportErrors(_restoreWorker(cx, locality), "RestoreWorker"));
 	} catch (Error& e) {
 		TraceEvent("FastRestoreWorker").detail("Error", e.what());

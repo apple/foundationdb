@@ -139,7 +139,8 @@ public:
 		pair_type endPair(endKey, Val());
 		map.insert(endPair, true, mf(endPair));
 	}
-	Val const& operator[](const Key& k) { return rangeContaining(k).value(); }
+	Val const& operator[](const Key& k) const { return rangeContaining(k).value(); }
+	Val& operator[](const Key& k) { return rangeContaining(k).value(); }
 
 	Ranges ranges() { return Ranges(iterator(map.begin()), iterator(map.lastItem())); }
 	ConstRanges ranges() const { return ConstRanges(const_iterator(map.begin()), const_iterator(map.lastItem())); }
@@ -215,6 +216,19 @@ public:
 	void insert(const Range& keys, const Val& value);
 
 	Future<Void> clearAsync() { return map.clearAsync(); }
+
+	Metric getMetric(const_iterator x) const { return map.getMetric(x); }
+	Metric getMetric(iterator x) const { return getMetric(const_iterator{ x }); }
+
+	Metric sumTo(const_iterator to) const { return map.sumTo(to); }
+	Metric sumTo(iterator to) const { return sumTo(const_iterator{ to }); }
+
+	Metric sumRange(const_iterator begin, const_iterator end) const { return map.sumRange(begin, end); }
+	Metric sumRange(iterator begin, iterator end) const { return map.sumRange(begin, end); }
+	template <class KeyCompatible>
+	Metric sumRange(const KeyCompatible& begin, const KeyCompatible& end) const {
+		return map.sumRange(begin, end);
+	}
 
 protected:
 	Map<Key, Val, pair_type, Metric> map;

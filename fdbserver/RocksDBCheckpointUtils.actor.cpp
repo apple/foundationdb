@@ -109,9 +109,9 @@ public:
 
 	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit) override;
 
-	Future<Standalone<StringRef>> nextChunk(const int byteLimit) { throw not_implemented(); }
+	Future<Standalone<StringRef>> nextChunk(const int byteLimit) override { throw not_implemented(); }
 
-	Future<Void> close() { return doClose(this); }
+	Future<Void> close() override { return doClose(this); }
 
 private:
 	struct Reader : IThreadPoolReceiver {
@@ -526,8 +526,11 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 	}
 
 	state int attempt = 0;
+	state int64_t offset = 0;
+	state Reference<IAsyncFile> asyncFile;
 	loop {
 		try {
+			asyncFile = Reference<IAsyncFile>();
 			++attempt;
 			TraceEvent("FetchCheckpointFileBegin")
 			    .detail("RemoteFile", remoteFile)
@@ -539,8 +542,7 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 			wait(IAsyncFileSystem::filesystem()->deleteFile(localFile, true));
 			const int64_t flags = IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE |
 			                      IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
-			state int64_t offset = 0;
-			state Reference<IAsyncFile> asyncFile = wait(IAsyncFileSystem::filesystem()->open(localFile, flags, 0666));
+			wait(store(asyncFile, IAsyncFileSystem::filesystem()->open(localFile, flags, 0666)));
 
 			state ReplyPromiseStream<FetchCheckpointReply> stream =
 			    ssi.fetchCheckpoint.getReplyStream(FetchCheckpointRequest(metaData->checkpointID, remoteFile));

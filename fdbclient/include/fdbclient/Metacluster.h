@@ -20,7 +20,7 @@
 
 #ifndef FDBCLIENT_METACLUSTER_H
 #define FDBCLIENT_METACLUSTER_H
-#include "CoordinationInterface.h"
+#include "fdbclient/CoordinationInterface.h"
 #include "json_spirit/json_spirit_value.h"
 #pragma once
 
@@ -52,6 +52,8 @@ struct Traceable<ClusterUsage> : std::true_type {
 		return format("NumTenantGroups: %d", value.numTenantGroups);
 	}
 };
+
+std::string clusterTypeToString(const ClusterType& clusterType);
 
 // Represents the various states that a data cluster could be in.
 //
@@ -96,6 +98,15 @@ struct DataClusterEntry {
 	void serialize(Ar& ar) {
 		serializer(ar, id, capacity, allocated, clusterState);
 	}
+};
+
+struct MetaclusterMetrics {
+	int numTenants = 0;
+	int numDataClusters = 0;
+	int tenantGroupCapacity = 0;
+	int tenantGroupsAllocated = 0;
+
+	MetaclusterMetrics() = default;
 };
 
 struct MetaclusterRegistrationEntry {

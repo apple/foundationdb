@@ -264,9 +264,9 @@ Future<bool> getValidAutoEnabled(Reference<Tr> tr) {
 			tr->reset();
 			wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
 			continue;
-		} else if (value.get() == LiteralStringRef("1")) {
+		} else if (value.get() == "1"_sr) {
 			result = true;
-		} else if (value.get() == LiteralStringRef("0")) {
+		} else if (value.get() == "0"_sr) {
 			result = false;
 		} else {
 			TraceEvent(SevWarnAlways, "InvalidAutoTagThrottlingValue").detail("Value", value.get());
@@ -331,8 +331,7 @@ getThrottledTags(Reference<DB> db, int limit, ContainsRecommended containsRecomm
 
 template <class Tr>
 void signalThrottleChange(Reference<Tr> tr) {
-	tr->atomicOp(
-	    tagThrottleSignalKey, LiteralStringRef("XXXXXXXXXX\x00\x00\x00\x00"), MutationRef::SetVersionstampedValue);
+	tr->atomicOp(tagThrottleSignalKey, "XXXXXXXXXX\x00\x00\x00\x00"_sr, MutationRef::SetVersionstampedValue);
 }
 
 ACTOR template <class Tr>
@@ -583,9 +582,8 @@ Future<Void> enableAuto(Reference<DB> db, bool enabled) {
 			state typename DB::TransactionT::template FutureT<Optional<Value>> valueF =
 			    tr->get(tagThrottleAutoEnabledKey);
 			Optional<Value> value = wait(safeThreadFutureToFuture(valueF));
-			if (!value.present() || (enabled && value.get() != LiteralStringRef("1")) ||
-			    (!enabled && value.get() != LiteralStringRef("0"))) {
-				tr->set(tagThrottleAutoEnabledKey, LiteralStringRef(enabled ? "1" : "0"));
+			if (!value.present() || (enabled && value.get() != "1"_sr) || (!enabled && value.get() != "0"_sr)) {
+				tr->set(tagThrottleAutoEnabledKey, enabled ? "1"_sr : "0"_sr);
 				signalThrottleChange<typename DB::TransactionT>(tr);
 
 				wait(safeThreadFutureToFuture(tr->commit()));
@@ -599,10 +597,8 @@ Future<Void> enableAuto(Reference<DB> db, bool enabled) {
 
 class TagQuotaValue {
 public:
-	double reservedReadQuota{ 0.0 };
-	double totalReadQuota{ 0.0 };
-	double reservedWriteQuota{ 0.0 };
-	double totalWriteQuota{ 0.0 };
+	double reservedQuota{ 0.0 };
+	double totalQuota{ 0.0 };
 	bool isValid() const;
 	Value toValue() const;
 	static TagQuotaValue fromValue(ValueRef);
@@ -611,17 +607,10 @@ public:
 Key getTagQuotaKey(TransactionTagRef);
 
 template <class Tr>
-void setTagQuota(Reference<Tr> tr,
-                 TransactionTagRef tag,
-                 double reservedReadQuota,
-                 double totalReadQuota,
-                 double reservedWriteQuota,
-                 double totalWriteQuota) {
+void setTagQuota(Reference<Tr> tr, TransactionTagRef tag, double reservedQuota, double totalQuota) {
 	TagQuotaValue tagQuotaValue;
-	tagQuotaValue.reservedReadQuota = reservedReadQuota;
-	tagQuotaValue.totalReadQuota = totalReadQuota;
-	tagQuotaValue.reservedWriteQuota = reservedWriteQuota;
-	tagQuotaValue.totalWriteQuota = totalWriteQuota;
+	tagQuotaValue.reservedQuota = reservedQuota;
+	tagQuotaValue.totalQuota = totalQuota;
 	if (!tagQuotaValue.isValid()) {
 		throw invalid_throttle_quota_value();
 	}
