@@ -312,12 +312,20 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "blobGranulesEnabled") {
 				blobGranulesEnabled = strcmp(value.c_str(), "true") == 0;
 			}
+			if (attrib == "allowDefaultTenant") {
+				allowDefaultTenant = strcmp(value.c_str(), "true") == 0;
+			}
+			if (attrib == "allowDisablingTenants") {
+				allowDisablingTenants = strcmp(value.c_str(), "true") == 0;
+			}
+			if (attrib == "allowCreatingTenants") {
+				allowCreatingTenants = strcmp(value.c_str(), "true") == 0;
+			}
 			if (attrib == "injectSSTargetedRestart") {
 				injectTargetedSSRestart = strcmp(value.c_str(), "true") == 0;
 			}
-
-			if (attrib == "injectSSDelay") {
-				injectSSDelay = strcmp(value.c_str(), "true") == 0;
+			if (attrib == "defaultTenant") {
+				defaultTenant = value;
 			}
 		}
 
@@ -369,6 +377,7 @@ public:
 	bool allowCreatingTenants = true;
 	bool injectTargetedSSRestart = false;
 	bool injectSSDelay = false;
+	Optional<std::string> defaultTenant;
 	std::string testClass; // unused -- used in TestHarness
 	float testPriority; // unused -- used in TestHarness
 
@@ -435,7 +444,8 @@ public:
 		    .add("allowCreatingTenants", &allowCreatingTenants)
 		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
 		    .add("injectTargetedSSRestart", &injectTargetedSSRestart)
-		    .add("injectSSDelay", &injectSSDelay);
+		    .add("injectSSDelay", &injectSSDelay)
+		    .add("defaultTenant", &defaultTenant);
 		try {
 			auto file = toml::parse(testFile);
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
@@ -1116,18 +1126,18 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
                                           int* pTesterCount,
                                           Optional<ClusterConnectionString>* pConnString,
                                           Standalone<StringRef>* pStartingConfiguration,
-                                          TestConfig testConfig,
+                                          TestConfig* testConfig,
                                           std::string whitelistBinPaths,
                                           ProtocolVersion protocolVersion) {
 	CSimpleIni ini;
 	ini.SetUnicode();
 	ini.LoadFile(joinPath(baseFolder, "restartInfo.ini").c_str());
 
-	auto configDBType = testConfig.getConfigDBType();
+	auto configDBType = testConfig->getConfigDBType();
 
 	// Randomly change data center id names to test that localities
 	// can be modified on cluster restart
-	bool renameZoneIds = testConfig.randomlyRenameZoneId ? deterministicRandom()->random01() < 0.1 : false;
+	bool renameZoneIds = testConfig->randomlyRenameZoneId ? deterministicRandom()->random01() < 0.1 : false;
 	CODE_PROBE(renameZoneIds, "Zone ID names altered in restart test");
 
 	// allows multiple ipAddr entries
@@ -1144,26 +1154,30 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		int desiredCoordinators = atoi(ini.GetValue("META", "desiredCoordinators"));
 		int testerCount = atoi(ini.GetValue("META", "testerCount"));
 		auto tssModeStr = ini.GetValue("META", "tssMode");
+		std::string defaultTenant = ini.GetValue("META", "defaultTenant", "");
+		if (!defaultTenant.empty()) {
+			testConfig->defaultTenant = defaultTenant;
+		}
 		if (tssModeStr != nullptr) {
 			g_simulator->tssMode = (ISimulator::TSSMode)atoi(tssModeStr);
 		}
 		ClusterConnectionString conn(ini.GetValue("META", "connectionString"));
-		if (testConfig.extraDatabaseMode == ISimulator::ExtraDatabaseMode::Local) {
+		if (testConfig->extraDatabaseMode == ISimulator::ExtraDatabaseMode::Local) {
 			g_simulator->extraDatabases.clear();
 			g_simulator->extraDatabases.push_back(conn.toString());
 		}
-		if (!testConfig.disableHostname) {
+		if (!testConfig->disableHostname) {
 			auto mockDNSStr = ini.GetValue("META", "mockDNS");
 			if (mockDNSStr != nullptr) {
 				INetworkConnections::net()->parseMockDNSFromString(mockDNSStr);
 			}
 		}
 		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-		if (testConfig.disableRemoteKVS) {
+		if (testConfig->disableRemoteKVS) {
 			g_knobs.setKnob("remote_kv_store", KnobValueRef::create(bool{ false }));
 			TraceEvent(SevDebug, "DisableRemoteKVS");
 		}
-		if (testConfig.disableEncryption) {
+		if (testConfig->disableEncryption) {
 			g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
 			g_knobs.setKnob("enable_tlog_encryption", KnobValueRef::create(bool{ false }));
 			g_knobs.setKnob("enable_storage_server_encryption", KnobValueRef::create(bool{ false }));
@@ -2457,8 +2471,8 @@ ACTOR void setupAndRun(std::string dataFolder,
 
 		// Disable the default tenant in restarting tests for now
 		// TODO: persist the chosen default tenant in the restartInfo.ini file for the second test
-		allowDefaultTenant = false;
-		allowCreatingTenants = false;
+		// allowDefaultTenant = false;
+		// allowCreatingTenants = false;
 	}
 
 	// TODO: Currently backup and restore related simulation tests are failing when run with rocksDB storage engine
@@ -2510,7 +2524,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state TenantMode tenantMode = TenantMode::DISABLED;
 	if (allowDefaultTenant && deterministicRandom()->random01() < 0.5) {
 		defaultTenant = "SimulatedDefaultTenant"_sr;
-		tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
 		if (deterministicRandom()->random01() < 0.9) {
 			tenantMode = TenantMode::REQUIRED;
 		} else {
@@ -2520,19 +2533,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 		tenantMode = TenantMode::OPTIONAL_TENANT;
 	}
 
-	if (allowCreatingTenants && tenantMode != TenantMode::DISABLED && deterministicRandom()->random01() < 0.5) {
-		int numTenants = deterministicRandom()->randomInt(1, 6);
-		for (int i = 0; i < numTenants; ++i) {
-			tenantsToCreate.push_back_deep(tenantsToCreate.arena(),
-			                               TenantNameRef(format("SimulatedExtraTenant%04d", i)));
-		}
-	}
-
-	TraceEvent("SimulatedClusterTenantMode")
-	    .detail("UsingTenant", defaultTenant)
-	    .detail("TenantRequired", tenantMode.toString())
-	    .detail("TotalTenants", tenantsToCreate.size());
-
 	try {
 		// systemActors.push_back( startSystemMonitor(dataFolder) );
 		if (rebooting) {
@@ -2541,7 +2541,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 			                                         &testerCount,
 			                                         &connectionString,
 			                                         &startingConfiguration,
-			                                         testConfig,
+			                                         &testConfig,
 			                                         whitelistBinPaths,
 			                                         protocolVersion),
 			                  100.0));
@@ -2562,6 +2562,25 @@ ACTOR void setupAndRun(std::string dataFolder,
 			                     tenantMode);
 			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
 		}
+		if (testConfig.defaultTenant.present() && tenantMode != TenantMode::DISABLED && allowDefaultTenant) {
+			// Default tenant set by testConfig or restarting data in restartInfo.ini
+			defaultTenant = testConfig.defaultTenant.get();
+			tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
+		} else if (defaultTenant.present()) {
+			// Default tenant set randomly from above
+			tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
+		}
+		if (allowCreatingTenants && tenantMode != TenantMode::DISABLED && deterministicRandom()->random01() < 0.5) {
+			int numTenants = deterministicRandom()->randomInt(1, 6);
+			for (int i = 0; i < numTenants; ++i) {
+				tenantsToCreate.push_back_deep(tenantsToCreate.arena(),
+				                               TenantNameRef(format("SimulatedExtraTenant%04d", i)));
+			}
+		}
+		TraceEvent("SimulatedClusterTenantMode")
+		    .detail("UsingTenant", defaultTenant)
+		    .detail("TenantRequired", tenantMode.toString())
+		    .detail("TotalTenants", tenantsToCreate.size());
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(clusterFileDir);
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connectionString.get().toString());
