@@ -22,7 +22,7 @@ Commits for transactions with idempotency ids would not fail with `commit_unknow
 
 # Data model
 
-Commit proxies would combine idempotency ids for transactions within a batch. The purpose of this is to try to limit the number of distinct database keys that need to be written, and to lessen the number of extra mutation bytes for idempotency ids.
+Commit proxies would combine idempotency IDs for transactions within a batch. The purpose of this is to try to limit the number of distinct database keys that need to be written, and to lessen the number of extra mutation bytes for idempotency IDs.
 
 ## Key format
 ```
@@ -59,7 +59,7 @@ Storage servers would have a new endpoint that clients can use to ask if the tra
 
 Storage servers would maintain a map from idempotency id to versionstamp in memory, and clients would need to contact all storage servers responsible for the `[\xff\x02/idmp/, \xff\x02/idmp0)` keyspace to be sure of their commit status. Assuming an idempotency id + versionstamp is 16 + 10 bytes, and that the lifetime of most idempotency ids is less than 1 second, that corresponds to at least 260 MB of memory on the storage server at 1,000,000 transactions/s, which seems acceptable. Let's double that to account for things like hash table load factor and allocating extra memory to ensure amortized constant time insertion. Still seems acceptable. We probably want to use a hashtable with open addressing to avoid frequent heap allocations. I _think_ [swisstables](https://abseil.io/about/design/swisstables) would work here.
 
-When a transaction learns that it did in fact commit, the commit future succeeds, and the versionstamp gets filled with the original, successful transaction's versionstamp. After the successful commit is reported, it's no longer necessary to store its idempotency id. The client will send an rpc to the cleaner role indicating that it can remove this idempotency id.
+When a transaction learns that it did in fact commit, the commit future succeeds, and the versionstamp gets filled with the original, successful transaction's versionstamp. After the successful commit is reported, it's no longer necessary to store its idempotency ID. The client will send an RPC to the cleaner role indicating that it can remove this idempotency ID.
 
 If a transaction learns that it did in fact _not_ commit, the commit future will fail with an error that indicates that the transaction did not commit. Perhaps `transaction_too_old`.
 
