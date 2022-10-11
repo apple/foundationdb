@@ -1362,7 +1362,7 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		if (currentAudit->range.contains(req.range)) {
 			audit = it->second.front();
 		} else {
-			req.reply.sendError(audit_storage_exeed_max());
+			req.reply.sendError(audit_storage_exceeded_request_limit());
 			return Void();
 		}
 	} else {
@@ -1468,7 +1468,8 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 
 	try {
 		audit->auditMap.insert(req.range, AuditPhase::Running);
-		ErrorOr<AuditStorageState> vResult = wait(ssi.auditStorage.getReplyUnlessFailedFor(req, 2, 0));
+		ErrorOr<AuditStorageState> vResult = wait(ssi.auditStorage.getReplyUnlessFailedFor(
+		    req, /*sustainedFailureDuration=*/2.0, /*sustainedFailureSlope=*/0));
 		if (vResult.isError()) {
 			throw vResult.getError();
 		}
