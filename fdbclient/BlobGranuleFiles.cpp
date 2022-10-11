@@ -1672,23 +1672,13 @@ TEST_CASE("/blobgranule/files/applyDelta") {
 	printf("Testing blob granule delta applying\n");
 	Arena a;
 
-	// do this 2 phase arena creation of string refs instead of LiteralStringRef because there is no char* StringRef
-	// constructor, and valgrind might complain if the stringref data isn't in the arena
-	std::string sk_a = "A";
-	std::string sk_ab = "AB";
-	std::string sk_b = "B";
-	std::string sk_c = "C";
-	std::string sk_z = "Z";
-	std::string sval1 = "1";
-	std::string sval2 = "2";
-
-	StringRef k_a = StringRef(a, sk_a);
-	StringRef k_ab = StringRef(a, sk_ab);
-	StringRef k_b = StringRef(a, sk_b);
-	StringRef k_c = StringRef(a, sk_c);
-	StringRef k_z = StringRef(a, sk_z);
-	StringRef val1 = StringRef(a, sval1);
-	StringRef val2 = StringRef(a, sval2);
+	StringRef k_a = StringRef(a, "A"_sr);
+	StringRef k_ab = StringRef(a, "AB"_sr);
+	StringRef k_b = StringRef(a, "B"_sr);
+	StringRef k_c = StringRef(a, "C"_sr);
+	StringRef k_z = StringRef(a, "Z"_sr);
+	StringRef val1 = StringRef(a, "1"_sr);
+	StringRef val2 = StringRef(a, "2"_sr);
 
 	std::map<KeyRef, ValueRef> data;
 	data.insert({ k_a, val1 });
