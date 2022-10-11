@@ -1,6 +1,6 @@
 # Goals
 
-The main goal is to make transactions safer and easier to reason about. New users should get a "just works" experience. One of the main selling points of foundationdb is that it solves the hard distributed systems problems for you, so that you only need to concern yourself with your business logic. Non-idempotent transactions is probably the biggest "gotcha" that users need to be made aware of - and they won't discover it organically. In order to achieve this "just works" experience I believe it is necessary to make automatic idempotency have low-enough overhead that we can enable it by default.
+The main goal is to make transactions safer and easier to reason about. New users should get a "just works" experience. One of the main selling points of FoundationDB is that it solves the hard distributed systems problems for you, so that you only need to concern yourself with your business logic. Non-idempotent transactions is probably the biggest "gotcha" that users need to be made aware of -- and they won't discover it organically. In order to achieve this "just works" experience I believe it is necessary to make automatic idempotency have low-enough overhead so that we can enable it by default.
 
 As an intermediate goal, I plan to introduce this feature disabled by default. The long-term plan is to make it the default.
 
