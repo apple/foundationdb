@@ -683,12 +683,12 @@ Future<std::vector<ProcessData>> DDTxnProcessor::getWorkers() const {
 
 Future<Void> DDTxnProcessor::rawStartMovement(MoveKeysParams& params,
                                               std::map<UID, StorageServerInterface>& tssMapping) {
-	UNREACHABLE();
+	return ::rawStartMovement(cx, params, tssMapping);
 }
 
 Future<Void> DDTxnProcessor::rawFinishMovement(MoveKeysParams& params,
                                                const std::map<UID, StorageServerInterface>& tssMapping) {
-	UNREACHABLE();
+	return ::rawFinishMovement(cx, params, tssMapping);
 }
 
 struct DDMockTxnProcessorImpl {

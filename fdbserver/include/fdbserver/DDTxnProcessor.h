@@ -112,11 +112,6 @@ public:
 	                                         const MoveKeysLock& lock,
 	                                         const DDEnabledState* ddEnabledState) const = 0;
 
-	virtual Future<Void> rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) = 0;
-
-	virtual Future<Void> rawFinishMovement(MoveKeysParams& params,
-	                                    const std::map<UID, StorageServerInterface>& tssMapping) = 0;
-
 	virtual Future<Void> moveKeys(const MoveKeysParams& params) = 0;
 
 	virtual Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
@@ -143,6 +138,12 @@ public:
 	virtual Future<Void> waitDDTeamInfoPrintSignal() const { return Never(); }
 
 	virtual Future<std::vector<ProcessData>> getWorkers() const = 0;
+
+protected:
+	virtual Future<Void> rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) = 0;
+
+	virtual Future<Void> rawFinishMovement(MoveKeysParams& params,
+	                                       const std::map<UID, StorageServerInterface>& tssMapping) = 0;
 };
 
 class DDTxnProcessorImpl;
@@ -203,11 +204,6 @@ public:
 		return ::removeStorageServer(cx, serverID, tssPairID, lock, ddEnabledState);
 	}
 
-	Future<Void> rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) override;
-
-	Future<Void> rawFinishMovement(MoveKeysParams& params,
-	                            const std::map<UID, StorageServerInterface>& tssMapping) override;
-
 	Future<Void> moveKeys(const MoveKeysParams& params) override { return ::moveKeys(cx, params); }
 
 	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
@@ -233,12 +229,21 @@ public:
 	Future<Void> waitDDTeamInfoPrintSignal() const override;
 
 	Future<std::vector<ProcessData>> getWorkers() const override;
+
+protected:
+	Future<Void> rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) override;
+
+	Future<Void> rawFinishMovement(MoveKeysParams& params,
+	                               const std::map<UID, StorageServerInterface>& tssMapping) override;
 };
 
+struct DDMockTxnProcessorImpl;
 // A mock transaction implementation for test usage.
 // Contract: every function involving mock transaction should return immediately to mimic the ACI property of real
 // transaction.
 class DDMockTxnProcessor : public IDDTxnProcessor {
+	friend struct DDMockTxnProcessorImpl;
+
 	std::shared_ptr<MockGlobalState> mgs;
 
 	std::vector<DDShardInfo> getDDShardInfos() const;
@@ -267,11 +272,6 @@ public:
 	// test only
 	void setupMockGlobalState(Reference<InitialDataDistribution> initData);
 
-	Future<Void> rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) override;
-
-	Future<Void> rawFinishMovement(MoveKeysParams& params,
-	                            const std::map<UID, StorageServerInterface>& tssMapping) override;
-
 	Future<Void> moveKeys(const MoveKeysParams& params) override;
 
 	Database context() const override { UNREACHABLE(); };
@@ -297,6 +297,12 @@ public:
 	Future<HealthMetrics> getHealthMetrics(bool detailed = false) const override;
 
 	Future<std::vector<ProcessData>> getWorkers() const override;
+
+protected:
+	Future<Void> rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) override;
+
+	Future<Void> rawFinishMovement(MoveKeysParams& params,
+	                               const std::map<UID, StorageServerInterface>& tssMapping) override;
 };
 
 #endif // FOUNDATIONDB_DDTXNPROCESSOR_H

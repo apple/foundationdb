@@ -2505,7 +2505,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 	return Void();
 }
 
-Future<Void> startMovement(Database occ, MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
+Future<Void> rawStartMovement(Database occ, MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		return startMoveShards(std::move(occ),
 		                       params.dataMoveId,
@@ -2527,7 +2527,7 @@ Future<Void> startMovement(Database occ, MoveKeysParams& params, std::map<UID, S
 	                     params.ddEnabledState);
 }
 
-Future<Void> finishMovement(Database occ,
+Future<Void> rawFinishMovement(Database occ,
                             MoveKeysParams& params,
                             const std::map<UID, StorageServerInterface>& tssMapping) {
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
@@ -2559,7 +2559,7 @@ ACTOR Future<Void> moveKeys(Database occ, MoveKeysParams params) {
 
 	state std::map<UID, StorageServerInterface> tssMapping;
 
-	wait(startMovement(occ, params, tssMapping));
+	wait(rawStartMovement(occ, params, tssMapping));
 
 	state Future<Void> completionSignaller = checkFetchingState(occ,
 	                                                            params.healthyDestinations,
@@ -2568,7 +2568,7 @@ ACTOR Future<Void> moveKeys(Database occ, MoveKeysParams params) {
 	                                                            params.relocationIntervalId,
 	                                                            tssMapping);
 
-	wait(finishMovement(occ, params, tssMapping));
+	wait(rawFinishMovement(occ, params, tssMapping));
 
 	// This is defensive, but make sure that we always say that the movement is complete before moveKeys completes
 	completionSignaller.cancel();
