@@ -37,7 +37,7 @@ Commit proxies would combine idempotency IDs for transactions within a batch. Th
 ${protocol_version}(${n (1 byte)}${idempotency_id (n bytes)}${low_order_byte_of_batch_index})*
 ```
 
-The batch index for each idempotency id can be reconstructed from the high order byte and low order bytes stored in the key and value, respectively. This is necessary for an "unknown_committed" transaction to recover their full version stamp.
+The batch index for each idempotency id can be reconstructed from the high order byte and low order bytes stored in the key and value, respectively. This is necessary for an "unknown_committed" transaction to recover their full version stamp. Batch index is a `short int`, i.e. 2 bytes.
 
 # Cleaner worker
 
