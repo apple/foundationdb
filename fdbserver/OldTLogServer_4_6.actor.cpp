@@ -182,7 +182,7 @@ private:
 			Standalone<StringRef> h = wait(self->queue->readNext(sizeof(uint32_t)));
 			if (h.size() != sizeof(uint32_t)) {
 				if (h.size()) {
-					CODE_PROBE(true, "Zero fill within size field");
+					CODE_PROBE(true, "Zero fill within size field", probe::decoration::rare);
 					int payloadSize = 0;
 					memcpy(&payloadSize, h.begin(), h.size());
 					zeroFillSize = sizeof(uint32_t) - h.size(); // zero fill the size itself
@@ -488,7 +488,7 @@ ACTOR Future<Void> tLogLock(TLogData* self, ReplyPromise<TLogLockResult> reply, 
 
 	CODE_PROBE(true, "TLog stopped by recovering master");
 	CODE_PROBE(logData->stopped, "LogData already stopped");
-	CODE_PROBE(!logData->stopped, "LogData not yet stopped");
+	CODE_PROBE(!logData->stopped, "LogData not yet stopped", probe::decoration::rare);
 
 	TraceEvent("TLogStop", logData->logId)
 	    .detail("Ver", stopVersion)
@@ -1026,7 +1026,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 			}
 			if (sequenceData.isSet()) {
 				if (sequenceData.getFuture().get() != rep.end) {
-					CODE_PROBE(true, "tlog peek second attempt ended at a different version");
+					CODE_PROBE(true, "tlog peek second attempt ended at a different version", probe::decoration::rare);
 					replyPromise.sendError(operation_obsolete());
 					return Void();
 				}
@@ -1099,7 +1099,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		auto& sequenceData = trackerData.sequence_version[sequence + 1];
 		if (sequenceData.isSet()) {
 			if (sequenceData.getFuture().get() != reply.end) {
-				CODE_PROBE(true, "tlog peek second attempt ended at a different version (2)");
+				CODE_PROBE(true, "tlog peek second attempt ended at a different version (2)", probe::decoration::rare);
 				replyPromise.sendError(operation_obsolete());
 				return Void();
 			}
@@ -1462,7 +1462,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 	if (!fFormat.get().present()) {
 		RangeResult v = wait(self->persistentData->readRange(KeyRangeRef(StringRef(), "\xff"_sr), 1));
 		if (!v.size()) {
-			CODE_PROBE(true, "The DB is completely empty, so it was never initialized.  Delete it.");
+			CODE_PROBE(
+			    true, "The DB is completely empty, so it was never initialized.  Delete it.", probe::decoration::rare);
 			throw worker_removed();
 		} else {
 			// This should never happen
@@ -1548,7 +1549,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self, LocalityData locality)
 	try {
 		loop {
 			if (allRemoved.isReady()) {
-				CODE_PROBE(true, "all tlogs removed during queue recovery");
+				CODE_PROBE(true, "all tlogs removed during queue recovery", probe::decoration::rare);
 				throw worker_removed();
 			}
 			choose {
@@ -1632,6 +1633,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 	TraceEvent("SharedTlog", tlogId).detail("Version", "4.6");
 
 	try {
+		wait(ioTimeoutError(persistentData->init(), SERVER_KNOBS->TLOG_MAX_CREATE_DURATION));
 		wait(restorePersistentState(&self, locality));
 
 		self.sharedActors.send(cleanupPeekTrackers(&self));

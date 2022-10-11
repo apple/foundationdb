@@ -329,7 +329,8 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		CODE_PROBE(true, "Testing");
+		// TODO: Enable this workload in testing
+		CODE_PROBE(true, "Running EncryptKeyProxyTest", probe::decoration::rare);
 		if (!enableTest) {
 			return Void();
 		}
