@@ -104,6 +104,7 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 	// Track transactions released for each tag
 	std::vector<std::pair<TransactionTag, uint32_t>> transactionsReleased;
 	transactionsReleased.reserve(queues.size());
+	auto const transactionsReleasedInitialCapacity = transactionsReleased.capacity();
 
 	for (auto& [tag, queue] : queues) {
 		if (queue.rateInfo.present()) {
@@ -179,6 +180,9 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 			}
 		}
 	}
+	// If the capacity is increased, that means the vector has been illegally resized, potentially
+	// corrupting memory
+	ASSERT_EQ(transactionsReleased.capacity(), transactionsReleasedInitialCapacity);
 }
 
 uint32_t GrvProxyTransactionTagThrottler::size() {
