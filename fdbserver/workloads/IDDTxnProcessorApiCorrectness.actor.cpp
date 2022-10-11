@@ -71,6 +71,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 	std::string description() const override { return desc; }
 	Future<Void> setup(Database const& cx) override { return enabled ? _setup(cx, this) : Void(); }
 	Future<Void> start(Database const& cx) override { return enabled ? _start(cx, this) : Void(); }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
 
 	ACTOR Future<Void> _setup(Database cx, IDDTxnProcessorApiWorkload* self) {
 		self->real = std::make_shared<DDTxnProcessor>(cx);
@@ -101,7 +102,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 	ACTOR Future<Void> _start(Database cx, IDDTxnProcessorApiWorkload* self) {
 		state int oldMode = wait(setDDMode(cx, 0));
-		TraceEvent("RMKStartModeSetting").log();
+		TraceEvent("IDDTxnApiTestStartModeSetting").log();
 		self->mgs = std::make_shared<MockGlobalState>();
 		self->mgs->configuration = self->ddContext.configuration;
 		self->mock = std::make_shared<DDMockTxnProcessor>(self->mgs);
@@ -119,9 +120,9 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		// Void()));
 
 		// Always set the DD mode back, even if we die with an error
-		TraceEvent("RMKDoneMoving").log();
+		TraceEvent("IDDTxnApiTestDoneMoving").log();
 		wait(success(setDDMode(cx, oldMode)));
-		TraceEvent("RMKDoneModeSetting").log();
+		TraceEvent("IDDTxnApiTestDoneModeSetting").log();
 		return Void();
 	}
 
