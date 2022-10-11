@@ -18,15 +18,19 @@ struct CoroutineCallback : public Callback<T> {
 
 	n_coroutine::coroutine_handle<> h;
 
-	CoroutineCallback(n_coroutine::coroutine_handle<> h) : h(h) { std::cerr << "CoroutineCallback" << std::endl; }
-	~CoroutineCallback() { std::cerr << "~CoroutineCallback" << std::endl; }
+	CoroutineCallback(n_coroutine::coroutine_handle<> h) : h(h) {
+		// std::cerr << "CoroutineCallback" << std::endl;
+	}
+	~CoroutineCallback() {
+		// std::cerr << "~CoroutineCallback" << std::endl;
+	}
 
-	virtual void fire(T const& value) override {
-		std::cerr << "CoroutineCallback::fire()" << std::endl;
+	virtual void fire(T const&) override {
+		// std::cerr << "CoroutineCallback::fire()" << std::endl;
 		h.resume();
 	}
-	virtual void error(Error e) override {
-		// TODO: SET error
+	virtual void error(Error) override {
+		// std::cerr << "CoroutineCallback::error()" << std::endl;
 		h.resume();
 	}
 };
@@ -34,42 +38,62 @@ struct CoroutineCallback : public Callback<T> {
 template <typename T, typename... Args>
 struct n_coroutine::coroutine_traits<Future<T>, Args...> {
 	struct promise_type {
-		Promise<T> p;
+		SAV<T>* sav;
 
-		promise_type() { std::cerr << "promise_type()" << std::endl; }
-		~promise_type() { std::cerr << "~promise_type()" << std::endl; }
+		promise_type() : sav(new SAV<T>(0, 1)) {
+			// std::cerr << "promise_type()" << std::endl;
+		}
+		~promise_type() {
+			// std::cerr << "~promise_type()" << std::endl;
+			if (sav)
+				sav->delPromiseRef();
+		}
 
-		auto get_return_object() noexcept { return p.getFuture(); }
+		Future<T> get_return_object() noexcept {
+			// return p.getFuture();
+			sav->addFutureRef();
+			return Future<T>(sav);
+		}
 
 		n_coroutine::suspend_never initial_suspend() const noexcept { return {}; }
 		n_coroutine::suspend_never final_suspend() const noexcept { return {}; }
 
-		void return_value(const T& value) {
-			std::cerr << "return_value()" << std::endl;
-			p.send(value);
+		template <class U>
+		void return_value(U&& value) const {
+			// std::cerr << "return_value()" << std::endl;
+			// p.send(value);
+			sav->send(std::forward<U>(value));
 		}
-		void unhandled_exception() noexcept {
+
+		void unhandled_exception() {
 			// TODO: this->sendError(std::current_exception());
+			// std::cerr << "unhandled_exception()" << std::endl;
+			try {
+				std::rethrow_exception(std::current_exception());
+			} catch (const Error& E) {
+				sav->sendError(E);
+			}
 		}
 
 		template <typename U>
 		auto await_transform(Future<U> future) {
 
-			std::cerr << "await_transform" << std::endl;
+			// std::cerr << "await_transform" << std::endl;
 
 			struct awaitable {
 				Future<U> f;
 
+				// TODO: Determine the lifetime of the callback
 				CoroutineCallback<U>* cb = nullptr;
 
 				awaitable(Future<U>& f) : f(f) {}
 
 				bool await_ready() const {
-					std::cerr << "await_ready " << f.canGet() << std::endl;
+					// std::cerr << "await_ready " << f.canGet() << std::endl;
 					return f.canGet();
 				}
 				void await_suspend(n_coroutine::coroutine_handle<> h) {
-					std::cerr << "await_suspend" << std::endl;
+					// std::cerr << "await_suspend" << std::endl;
 
 					cb = new CoroutineCallback<U>(h);
 
@@ -78,15 +102,9 @@ struct n_coroutine::coroutine_traits<Future<T>, Args...> {
 					sf.addCallbackAndClear(cb);
 				}
 				U const& await_resume() {
-					// void await_resume() const {
-					std::cerr << "await_resume" << std::endl;
-
-					if (cb) {
+					// std::cerr << "await_resume" << std::endl;
+					if (cb)
 						cb->remove();
-						delete cb;
-						cb = nullptr;
-					}
-
 					if (f.isError()) {
 						throw f.getError();
 					} else if (f.canGet()) {
@@ -102,7 +120,6 @@ struct n_coroutine::coroutine_traits<Future<T>, Args...> {
 
 			return awaitable{ future };
 		}
-
 	};
 };
 
