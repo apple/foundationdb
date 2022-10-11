@@ -46,7 +46,10 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(AutomaticIdempotencyWorkload* self, Database cx) {
 		state int i = 0;
 		for (; i < self->numTransactions; ++i) {
-			state Value idempotencyId = BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned());
+			// Half direct representation, half indirect representation
+			int length = deterministicRandom()->coinflip() ? 16 : deterministicRandom()->randomInt(17, 256);
+			state Value idempotencyId = makeString(length);
+			deterministicRandom()->randomBytes(mutateString(idempotencyId), length);
 			TraceEvent("IdempotencyIdWorkloadTransaction").detail("Id", idempotencyId);
 			wait(runRYWTransaction(
 			    cx, [self = self, idempotencyId = idempotencyId](Reference<ReadYourWritesTransaction> tr) {
