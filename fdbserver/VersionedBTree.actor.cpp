@@ -64,8 +64,8 @@ static double g_debugStart = 0;
 static FILE* g_debugStream = stdout;
 
 #define debug_printf_always(...)                                                                                       \
-	if (now() >= g_debugStart &&                                                                                       \
-	    (!g_network->getLocalAddress().isValid() || g_network->getLocalAddress() == g_debugAddress)) {                 \
+	if (now() >= g_debugStart && (!g_network->getLocalAddress().isValid() || !g_debugAddress.isValid() ||              \
+	                              g_network->getLocalAddress() == g_debugAddress)) {                                   \
 		std::string prefix = format("%s %f %04d ", g_network->getLocalAddress().toString().c_str(), now(), __LINE__);  \
 		std::string msg = format(__VA_ARGS__);                                                                         \
 		fputs(addPrefix(prefix, msg).c_str(), g_debugStream);                                                          \
@@ -5384,7 +5384,11 @@ public:
 		m_latestCommit.cancel();
 	}
 
-	Future<Void> commit(Version v) { return commit_impl(this, v); }
+	Future<Void> commit(Version v) {
+		// Replace latest commit with a new one which waits on the old one
+		m_latestCommit = commit_impl(this, v, m_latestCommit);
+		return m_latestCommit;
+	}
 
 	// Clear all btree data, allow pager remap to fully process its queue, and verify final
 	// page counts in pager and queues.
@@ -5659,6 +5663,7 @@ private:
 	struct CommitBatch {
 		Version readVersion;
 		Version writeVersion;
+		Version newOldestVersion;
 		std::unique_ptr<MutationBuffer> mutations;
 		int64_t mutationCount;
 		Reference<IPagerSnapshot> snapshot;
@@ -7616,7 +7621,7 @@ private:
 		}
 	}
 
-	ACTOR static Future<Void> commit_impl(VersionedBTree* self, Version writeVersion) {
+	ACTOR static Future<Void> commit_impl(VersionedBTree* self, Version writeVersion, Future<Void> previousCommit) {
 		// Take ownership of the current mutation buffer and make a new one
 		state CommitBatch batch;
 		batch.mutations = std::move(self->m_pBuffer);
@@ -7625,11 +7630,7 @@ private:
 		self->m_mutationCount = 0;
 
 		batch.writeVersion = writeVersion;
-
-		// Replace the lastCommit future with a new one and then wait on the old one
-		state Promise<Void> committed;
-		Future<Void> previousCommit = self->m_latestCommit;
-		self->m_latestCommit = committed.getFuture();
+		batch.newOldestVersion = self->m_newOldestVersion;
 
 		// Wait for the latest commit to be finished.
 		wait(previousCommit);
@@ -7639,20 +7640,19 @@ private:
 		if (writeVersion == self->m_pager->getLastCommittedVersion()) {
 			ASSERT(batch.mutationCount == 0);
 			debug_printf("%s: Empty commit at repeat version %" PRId64 "\n", self->m_name.c_str(), batch.writeVersion);
-			committed.send(Void());
 			return Void();
 		}
 
 		// For this commit, use the latest snapshot that was just committed.
 		batch.readVersion = self->m_pager->getLastCommittedVersion();
 
-		self->m_pager->setOldestReadableVersion(self->m_newOldestVersion);
+		self->m_pager->setOldestReadableVersion(batch.newOldestVersion);
 		debug_printf("%s: Beginning commit of version %" PRId64 ", read version %" PRId64
 		             ", new oldest version set to %" PRId64 "\n",
 		             self->m_name.c_str(),
 		             batch.writeVersion,
 		             batch.readVersion,
-		             self->m_newOldestVersion);
+		             batch.newOldestVersion);
 
 		batch.snapshot = self->m_pager->getReadSnapshot(batch.readVersion);
 
@@ -7710,7 +7710,6 @@ private:
 		++g_redwoodMetrics.metric.opCommit;
 		self->m_lazyClearActor = incrementalLazyClear(self);
 
-		committed.send(Void());
 		return Void();
 	}
 
