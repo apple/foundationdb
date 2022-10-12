@@ -31,7 +31,67 @@ bool MockStorageServer::allShardStatusEqual(KeyRangeRef range, MockShardStatus s
 	return true;
 }
 
-void MockStorageServer::setShardStatus(KeyRangeRef range, MockShardStatus status) {}
+void MockStorageServer::setShardStatus(KeyRangeRef range, MockShardStatus status) {
+	auto ranges = serverKeys.intersectingRanges(range);
+	ASSERT(!ranges.empty());
+	if (ranges.begin().range().contains(range)) {
+		CODE_PROBE(true, "Implicitly split single shard to 3 pieces");
+		threeWayShardSplitting(ranges.begin().range(), range, ranges.begin().cvalue().shardSize);
+		return;
+	}
+	if (ranges.begin().begin() < range.begin) {
+		CODE_PROBE(true, "Implicitly split begin range to 2 pieces");
+		twoWayShardSplitting(ranges.begin().range(), range.begin, ranges.begin().cvalue().shardSize);
+	}
+	if (ranges.end().end() > range.end) {
+		CODE_PROBE(true, "Implicitly split end range to 2 pieces");
+		twoWayShardSplitting(ranges.end().range(), range.end, ranges.end().cvalue().shardSize);
+	}
+	ranges = serverKeys.containedRanges(range);
+	// now the boundary must be aligned
+	ASSERT(ranges.begin().begin() == range.begin);
+	ASSERT(ranges.end().end() == range.end);
+	uint64_t newSize = 0;
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		newSize += it->cvalue().shardSize;
+	}
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		it.value() = ShardInfo{ status, newSize };
+	}
+	serverKeys.coalesce(range);
+}
+
+// split the out range [a, d) based on the inner range's boundary [b, c). The result would be [a,b), [b,c), [c,d). The
+// size of the new shards are randomly split from old size of [a, d)
+void MockStorageServer::threeWayShardSplitting(KeyRangeRef outerRange,
+                                               KeyRangeRef innerRange,
+                                               uint64_t outerRangeSize) {
+	ASSERT(outerRange.contains(innerRange));
+
+	Key left = outerRange.begin;
+	// random generate 3 shard sizes, the caller guarantee that the min, max parameters are always valid.
+	int leftSize = deterministicRandom()->randomInt(SERVER_KNOBS->MIN_SHARD_BYTES,
+	                                                outerRangeSize - 2 * SERVER_KNOBS->MIN_SHARD_BYTES + 1);
+	int midSize = deterministicRandom()->randomInt(SERVER_KNOBS->MIN_SHARD_BYTES,
+	                                               outerRangeSize - leftSize - SERVER_KNOBS->MIN_SHARD_BYTES + 1);
+	int rightSize = outerRangeSize - leftSize - midSize;
+
+	serverKeys.insert(innerRange, { MockShardStatus::UNSET, (uint64_t)midSize });
+	serverKeys[left].shardSize = leftSize;
+	serverKeys[innerRange.end].shardSize = rightSize;
+}
+
+// split the range [a,c) with split point b. The result would be [a, b), [b, c). The
+// size of the new shards are randomly split from old size of [a, c)
+void MockStorageServer::twoWayShardSplitting(KeyRangeRef range, KeyRef splitPoint, uint64_t rangeSize) {
+	Key left = range.begin;
+	// random generate 3 shard sizes, the caller guarantee that the min, max parameters are always valid.
+	int leftSize =
+	    deterministicRandom()->randomInt(SERVER_KNOBS->MIN_SHARD_BYTES, rangeSize - SERVER_KNOBS->MIN_SHARD_BYTES + 1);
+	int rightSize = rangeSize - leftSize;
+	serverKeys.rawInsert(splitPoint, { MockShardStatus::UNSET, (uint64_t)rightSize });
+	serverKeys[left].shardSize = leftSize;
+}
 
 void MockGlobalState::initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf, uint64_t defaultDiskSpace) {
 	ASSERT(conf.storageTeamSize > 0);

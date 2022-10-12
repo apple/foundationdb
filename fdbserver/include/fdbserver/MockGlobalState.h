@@ -36,13 +36,16 @@ struct ShardSizeMetric {
 	}
 };
 
-enum class MockShardStatus { EMPTY = 0, COMPLETED, INFLIGHT };
+enum class MockShardStatus { UNSET = -1, EMPTY = 0, COMPLETED, INFLIGHT };
 
 class MockStorageServer {
 public:
 	struct ShardInfo {
 		MockShardStatus status;
 		uint64_t shardSize;
+
+		bool operator==(const ShardInfo& a) const { return shardSize == a.shardSize && status == a.status; }
+		bool operator!=(const ShardInfo& a) const { return !(a == *this); }
 	};
 
 	static constexpr uint64_t DEFAULT_DISK_SPACE = 1000LL * 1024 * 1024 * 1024;
@@ -75,6 +78,11 @@ public:
 	bool allShardStatusEqual(KeyRangeRef range, MockShardStatus status);
 
 	void setShardStatus(KeyRangeRef range, MockShardStatus status);
+
+protected:
+	void threeWayShardSplitting(KeyRangeRef outerRange, KeyRangeRef innerRange, uint64_t outerRangeSize);
+
+	void twoWayShardSplitting(KeyRangeRef range, KeyRef splitPoint, uint64_t rangeSize);
 };
 
 class MockGlobalState {
