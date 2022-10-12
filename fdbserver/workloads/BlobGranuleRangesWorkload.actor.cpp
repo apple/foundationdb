@@ -115,7 +115,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> registerNewRange(Database cx, BlobGranuleRangesWorkload* self) {
+	ACTOR Future<Void> registerNewRange(Database cx, BlobGranuleRangesWorkload* self, Optional<TenantName> tenantName) {
 		std::string nextRangeKey = "R_" + self->newKey();
 		state KeyRange range(KeyRangeRef(StringRef(nextRangeKey), strinc(StringRef(nextRangeKey))));
 		if (BGRW_DEBUG) {
@@ -124,7 +124,8 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 
 		// don't put in active ranges until AFTER set range command succeeds, to avoid checking a range that maybe
 		// wasn't initialized
-		bool success = wait(self->setRange(cx, range, true, self->tenantName));
+		bool success =
+		    wait(self->setRange(cx, range, true, tenantName.present() ? tenantName.get() : self->tenantName));
 		ASSERT(success);
 
 		if (BGRW_DEBUG) {
@@ -198,12 +199,21 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		if (self->tenantName.present()) {
 			wait(success(ManagementAPI::changeConfig(cx.getReference(), "tenant_mode=optional_experimental", true)));
 			wait(success(self->setupTenant(cx, self->tenantName.get())));
+
+			try {
+				wait(self->registerNewRange(cx, self, "BogusTenant"_sr));
+				ASSERT(false);
+			} catch (Error& e) {
+				if (e.code() != error_code_tenant_not_found) {
+					throw e;
+				}
+			}
 		}
 
 		state int i;
 		std::vector<Future<Void>> createInitialRanges;
 		for (i = 0; i < self->targetRanges; i++) {
-			wait(self->registerNewRange(cx, self));
+			wait(self->registerNewRange(cx, self, {}));
 		}
 		TraceEvent("BlobGranuleRangesSetupComplete");
 		return Void();
@@ -329,7 +339,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 			state Future<Void> waitNextOp = poisson(&last, 1.0 / self->operationsPerSecond);
 
 			if (self->activeRanges.empty() || deterministicRandom()->coinflip()) {
-				wait(self->registerNewRange(cx, self));
+				wait(self->registerNewRange(cx, self, {}));
 			} else {
 				wait(self->unregisterRandomRange(cx, self));
 			}
