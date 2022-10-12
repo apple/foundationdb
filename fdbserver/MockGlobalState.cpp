@@ -177,3 +177,46 @@ TEST_CASE("/MockGlobalState/initializeAsEmptyDatabaseMGS/SimpleThree") {
 
 	return Void();
 }
+
+struct MockGlobalStateTester {
+
+	// expectation [r0.begin, r0.end) => [r0.begin, x1), [x1, x2), [x2, r0.end)
+	void testThreeWaySplitFirstRange(MockStorageServer& mss) {
+		auto it = mss.serverKeys.nthRange(0);
+		uint64_t oldSize = SERVER_KNOBS->MAX_SHARD_BYTES * 8;
+		it->value().shardSize = oldSize;
+		KeyRangeRef outerRange = it->range();
+		Key x1 = keyAfter(it->range().begin);
+		Key x2 = keyAfter(x1);
+
+		mss.threeWayShardSplitting(outerRange, KeyRangeRef(x1, x2), oldSize);
+		auto ranges = mss.serverKeys.containedRanges(outerRange);
+		ASSERT(ranges.begin().range() == KeyRangeRef(outerRange.begin, x1));
+		ranges.pop_front();
+		ASSERT(ranges.begin().range() == KeyRangeRef(x1, x2));
+		ranges.pop_front();
+		ASSERT(ranges.begin().range() == KeyRangeRef(x2, outerRange.end));
+		ranges.pop_front();
+		ASSERT(ranges.empty());
+		return;
+	}
+};
+
+TEST_CASE("/MockGlobalState/MockStorageServer/SplittingFunctions") {
+	BasicTestConfig testConfig;
+	testConfig.simpleConfig = true;
+	testConfig.minimumReplication = 1;
+	testConfig.logAntiQuorum = 0;
+	DatabaseConfiguration dbConfig = generateNormalDatabaseConfiguration(testConfig);
+	TraceEvent("UnitTestDbConfig").detail("Config", dbConfig.toString());
+
+	auto mgs = std::make_shared<MockGlobalState>();
+	mgs->initializeAsEmptyDatabaseMGS(dbConfig);
+
+	// test three-way split
+	MockGlobalStateTester tester;
+	auto& mss = mgs->allServers[MockGlobalState::indexToUID(1)];
+	// tester.testThreeWaySplitFirstRange(mss);
+
+	return Void();
+}

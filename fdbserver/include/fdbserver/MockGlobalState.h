@@ -28,6 +28,8 @@
 #include "SimulatedCluster.h"
 #include "ShardsAffectedByTeamFailure.h"
 
+struct MockGlobalStateTester;
+
 template <class Metric>
 struct ShardSizeMetric {
 	template <typename pair_type>
@@ -39,6 +41,7 @@ struct ShardSizeMetric {
 enum class MockShardStatus { UNSET = -1, EMPTY = 0, COMPLETED, INFLIGHT };
 
 class MockStorageServer {
+	friend struct MockGlobalStateTester;
 public:
 	struct ShardInfo {
 		MockShardStatus status;
@@ -89,6 +92,8 @@ protected:
 };
 
 class MockGlobalState {
+	friend struct MockGlobalStateTester;
+
 public:
 	typedef ShardsAffectedByTeamFailure::Team Team;
 	// In-memory counterpart of the `keyServers` in system keyspace
