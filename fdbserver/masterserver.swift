@@ -43,7 +43,7 @@ func figureVersion(current: Version,
 
 
 public actor MasterDataActor {
-    // FIXME: Make 'let' after resolving FRT layout issue.
+    // FIXME: Make 'let' after resolving FRT layout issue (rdar://101092361).
     // let myself: MasterData
     var myself: MasterData
 
@@ -64,7 +64,7 @@ public actor MasterDataActor {
         // FIXME: workaround for first runtime issue.
         let lp = swift_lookup_Map_UID_CommitProxyVersionReplies(myself, requestingProxyUID)
         // FIXME: workaround for std::map usability, see: rdar://100487652 ([fdp] std::map usability, can't effectively work with map in Swift)
-        guard let lastVersionReplies = lp/* FIXME: (workaround for first runtime issue): lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID)*/ else {
+        guard let lastVersionReplies = lp/* FIXME: (workaround for first runtime issue (rdar://101092612)): lookup_Map_UID_CommitProxyVersionReplies(&myself.lastCommitProxyVersionReplies, requestingProxyUID)*/ else {
             // Request from invalid proxy (e.g. from duplicate recruitment request)
             req.reply.sendNever()
             return
@@ -149,7 +149,7 @@ public actor MasterDataActor {
         req.reply.send(&rep)
 
         assert(lastVersionReplies.getLatestRequestNumRef().get() == req.requestNum - 1)
-        // FIXME: link issue.
+        // FIXME: link issue (rdar://101092732).
         // lastVersionReplies.getLatestRequestNumRef().set(Int(req.requestNum))
         swift_workaround_setLatestRequestNumber(lastVersionReplies.getLatestRequestNumRef(),
                                                 Version(req.requestNum))
@@ -180,7 +180,7 @@ public struct MasterDataActorCxx {
     }
 }
 
-// FIXME: remove once MasterData is FRT.
+// FIXME: remove once MasterData is FRT (rdar://101092361).
 extension MasterDataSwiftReference {
     var version: Version {
         get {

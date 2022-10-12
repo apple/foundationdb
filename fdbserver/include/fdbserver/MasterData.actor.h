@@ -153,11 +153,11 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 using ReferenceMasterData = Reference<MasterData>;
 
-// FIXME: Workaround for linker issue.
+// FIXME: Workaround for linker issue (rdar://101092732).
 void swift_workaround_setLatestRequestNumber(NotifiedVersion &latestRequestNum,
                                              Version v);
 
-// FIXME: Workaround for issue with FRT type layout.
+// FIXME: Workaround for issue with FRT type layout (rdar://101092361).
 struct MasterDataSwiftReference {
     MasterData &myself;
 
@@ -181,7 +181,7 @@ struct MasterDataSwiftReference {
     ResolutionBalancer &getResolutionBalancer() const __attribute__((swift_attr("import_unsafe")));
 };
 
-// FIXME: Workaround for runtime issue #1.
+// FIXME: Workaround for runtime issue #1 (rdar://101092612).
 CommitProxyVersionReplies *_Nullable swift_lookup_Map_UID_CommitProxyVersionReplies(MasterDataSwiftReference rd, UID value);
 
 #include "flow/unactorcompiler.h"

@@ -72,7 +72,7 @@ ACTOR Future<Void> getVersionSwift(Reference<MasterData> self, GetCommitVersionR
   return Void();
 }
 
-// FIXME: remove once MasterData is an FRT
+// FIXME: remove once MasterData is an FRT (rdar://101092361)
 MasterDataSwiftReference::MasterDataSwiftReference(MasterData &myself) : myself(myself) {}
 Counter &MasterDataSwiftReference::getGetCommitVersionRequests() const __attribute__((swift_attr("import_unsafe"))) {
     return myself.getGetCommitVersionRequests();
@@ -88,7 +88,7 @@ ResolutionBalancer &MasterDataSwiftReference::getResolutionBalancer() const __at
     return myself.getResolutionBalancer();
 }
 
-// FIXME: remove once runtime issue #1 is fixed.
+// FIXME: remove once runtime issue #1 is fixed (rdar://101092612).
 CommitProxyVersionReplies *_Nullable swift_lookup_Map_UID_CommitProxyVersionReplies(MasterDataSwiftReference rd, UID value) {
     auto &map = rd.myself.lastCommitProxyVersionReplies;
     auto it = map.find(value);
@@ -98,7 +98,7 @@ CommitProxyVersionReplies *_Nullable swift_lookup_Map_UID_CommitProxyVersionRepl
     return pret;
 }
 
-// FIXME: remove once linker issue is fixed.
+// FIXME: remove once linker issue is fixed (rdar://101092732).
 void swift_workaround_setLatestRequestNumber(NotifiedVersion &latestRequestNum,
                                              Version v) {
     latestRequestNum.set(v);
