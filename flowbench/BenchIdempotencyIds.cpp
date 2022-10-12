@@ -18,13 +18,18 @@
  * limitations under the License.
  */
 
-
 #include "benchmark/benchmark.h"
 
 #include "fdbclient/BuildIdempotencyIdMutations.h"
 
-static void bench_add_idempotency_ids_absent(benchmark::State& state) {
+// We don't want the compiler to know that this is always false. It is though.
+static bool getRuntimeFalse() {
+	return deterministicRandom()->randomInt(0, 2) == -1;
+}
+
+static void bench_add_idempotency_ids(benchmark::State& state) {
 	auto numTransactions = state.range(0);
+	auto idSize = state.range(1);
 	auto trs = std::vector<CommitTransactionRequest>(numTransactions);
 	IdempotencyIdKVBuilder idempotencyKVBuilder;
 	Version commitVersion = 0;
@@ -33,14 +38,22 @@ static void bench_add_idempotency_ids_absent(benchmark::State& state) {
 	for (auto& c : committed) {
 		c = deterministicRandom()->coinflip() ? committedValue : 0;
 	}
-	// Don't want the compiler to know the value of locked, but it's always false in this benchmark
-	bool locked = deterministicRandom()->randomInt(0, 2) == -1;
+	for (auto& tr : trs) {
+		if (idSize > 0) {
+			auto id = makeString(idSize, tr.arena);
+			deterministicRandom()->randomBytes(mutateString(id), idSize);
+			tr.idempotencyId = IdempotencyIdRef(tr.arena, IdempotencyIdRef(id));
+		}
+	}
+	bool locked = getRuntimeFalse();
 	for (auto _ : state) {
 		buildIdempotencyIdMutations(
-		    trs, idempotencyKVBuilder, commitVersion++, committed, committedValue, locked, []() {
-			    ASSERT(false); // Shouldn't be called since there are not valid idempotency ids in this benchmark
+		    trs, idempotencyKVBuilder, commitVersion++, committed, committedValue, locked, [](const KeyValue&) {
+			    benchmark::DoNotOptimize(0);
 		    });
 	}
+	state.counters["TimePerTransaction"] = benchmark::Counter(
+	    state.iterations() * numTransactions, benchmark::Counter::kIsRate | benchmark::Counter::kInvert);
 }
 
-BENCHMARK(bench_add_idempotency_ids_absent)->Ranges({ { 1, 1 << 15 } });
+BENCHMARK(bench_add_idempotency_ids)->ArgsProduct({ benchmark::CreateRange(1, 16384, 4), { 0, 16, 255 } });

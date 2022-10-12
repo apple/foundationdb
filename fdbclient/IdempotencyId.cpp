@@ -50,7 +50,6 @@ void IdempotencyIdKVBuilder::add(const IdempotencyIdRef& id, uint16_t batchIndex
 Optional<KeyValue> IdempotencyIdKVBuilder::buildAndClear() {
 	ASSERT(impl->commitVersion.present());
 	if (!impl->batchIndexHighOrderByte.present()) {
-		*impl = IdempotencyIdKVBuilderImpl{};
 		return {};
 	}
 
@@ -61,7 +60,8 @@ Optional<KeyValue> IdempotencyIdKVBuilder::buildAndClear() {
 
 	Value v = impl->value.toValue();
 
-	*impl = IdempotencyIdKVBuilderImpl{};
+	impl->value = BinaryWriter(IncludeVersion());
+	impl->batchIndexHighOrderByte = Optional<uint8_t>();
 
 	Optional<KeyValue> result = KeyValue();
 	result.get().arena() = v.arena();

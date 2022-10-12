@@ -36,21 +36,21 @@ void buildIdempotencyIdMutations(const std::vector<CommitTransactionRequest>& tr
                                  uint8_t committedValue,
                                  bool locked,
                                  const OnKVReady& onKvReady) {
+	idempotencyKVBuilder.setCommitVersion(commitVersion);
 	for (int h = 0; h < trs.size(); h += 256) {
-		idempotencyKVBuilder.setCommitVersion(commitVersion);
-		for (int l = 0; h + l < trs.size() && l < 256; ++l) {
+		int end = std::min<int>(trs.size() - h, 256);
+		for (int l = 0; l < end; ++l) {
 			uint16_t batchIndex = h + l;
-			if (!(committed[batchIndex] == committedValue && (!locked || trs[batchIndex].isLockAware()))) {
-				continue;
+			if ((committed[batchIndex] == committedValue && (!locked || trs[batchIndex].isLockAware()))) {
+				const auto& idempotency_id = trs[batchIndex].idempotencyId;
+				if (idempotency_id.valid()) {
+					idempotencyKVBuilder.add(idempotency_id, batchIndex);
+				}
 			}
-			const auto& idempotency_id = trs[batchIndex].idempotencyId;
-			if (idempotency_id.valid()) {
-				idempotencyKVBuilder.add(idempotency_id, batchIndex);
-			}
-			Optional<KeyValue> kv = idempotencyKVBuilder.buildAndClear();
-			if (kv.present()) {
-				onKvReady(kv.get());
-			}
+		}
+		Optional<KeyValue> kv = idempotencyKVBuilder.buildAndClear();
+		if (kv.present()) {
+			onKvReady(kv.get());
 		}
 	}
 }

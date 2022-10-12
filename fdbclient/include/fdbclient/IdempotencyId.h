@@ -148,10 +148,10 @@ static_assert(sizeof(IdempotencyIdRef) == 16);
 struct IdempotencyIdKVBuilder : NonCopyable {
 	IdempotencyIdKVBuilder();
 	void setCommitVersion(Version commitVersion);
-	// All calls to add must share the same high order byte of batchIndex
+	// All calls to add must share the same high order byte of batchIndex (until the next call to buildAndClear)
 	void add(const IdempotencyIdRef& id, uint16_t batchIndex);
-	// Must call setCommitVersion before calling buildAndClear. After calling buildAndClear, this object is in the same
-	// state as if it were just default constructed.
+	// Must call setCommitVersion before calling buildAndClear. After calling buildAndClear, this object is ready to
+	// start a new kv pair for the high order byte of batchIndex.
 	Optional<KeyValue> buildAndClear();
 
 	~IdempotencyIdKVBuilder();
