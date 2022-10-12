@@ -1120,6 +1120,8 @@ public:
 		LatencySample readRangeLatencySample;
 		LatencySample readVersionWaitSample;
 		LatencySample readQueueWaitSample;
+		LatencySample kvReadRangeLatencySample;
+		LatencySample updateLatencySample;
 
 		LatencyBands readLatencyBands;
 		LatencySample mappedRangeSample; // Samples getMappedRange latency
@@ -1190,7 +1192,15 @@ public:
 		    mappedRangeLocalSample("GetMappedRangeLocalMetrics",
 		                           self->thisServerID,
 		                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-		                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {
+		                           SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    kvReadRangeLatencySample("KVGetRangeMetrics",
+		                             self->thisServerID,
+		                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+		    updateLatencySample("UpdateLatencyMetrics",
+		                        self->thisServerID,
+		                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+		                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE) {
 			specialCounter(cc, "LastTLogVersion", [self]() { return self->lastTLogVersion; });
 			specialCounter(cc, "Version", [self]() { return self->version.get(); });
 			specialCounter(cc, "StorageVersion", [self]() { return self->storageVersion(); });
@@ -2011,7 +2021,8 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 			options.debugID = metadata->debugID;
 
 			CODE_PROBE(latest >= minVersion && latest < data->data().latestVersion,
-			           "Starting watch loop with latestVersion > data->version");
+			           "Starting watch loop with latestVersion > data->version",
+			           probe::decoration::rare);
 			GetValueRequest getReq(
 			    span.context, TenantInfo(), metadata->key, latest, metadata->tags, options, VersionVector());
 			state Future<Void> getValue = getValueQ(
@@ -2852,20 +2863,6 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 	}
 
-	if (DEBUG_CF_TRACE) {
-		TraceEvent(SevDebug, "ChangeFeedMutationsDone", data->thisServerID)
-		    .detail("FeedID", req.rangeID)
-		    .detail("StreamUID", streamUID)
-		    .detail("Range", req.range)
-		    .detail("Begin", req.begin)
-		    .detail("End", req.end)
-		    .detail("FirstVersion", reply.mutations.empty() ? invalidVersion : reply.mutations.front().version)
-		    .detail("LastVersion", reply.mutations.empty() ? invalidVersion : reply.mutations.back().version)
-		    .detail("Count", reply.mutations.size())
-		    .detail("GotAll", gotAll)
-		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
-	}
-
 	if (DEBUG_CF_MISSING(req.rangeID, req.range, req.begin, reply.mutations.back().version) && !req.canReadPopped) {
 		bool foundVersion = false;
 		bool foundKey = false;
@@ -2916,6 +2913,21 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	}
 
 	reply.popVersion = feedInfo->emptyVersion + 1;
+
+	if (DEBUG_CF_TRACE) {
+		TraceEvent(SevDebug, "ChangeFeedMutationsDone", data->thisServerID)
+		    .detail("FeedID", req.rangeID)
+		    .detail("StreamUID", streamUID)
+		    .detail("Range", req.range)
+		    .detail("Begin", req.begin)
+		    .detail("End", req.end)
+		    .detail("FirstVersion", reply.mutations.empty() ? invalidVersion : reply.mutations.front().version)
+		    .detail("LastVersion", reply.mutations.empty() ? invalidVersion : reply.mutations.back().version)
+		    .detail("PopVersion", reply.popVersion)
+		    .detail("Count", reply.mutations.size())
+		    .detail("GotAll", gotAll)
+		    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
+	}
 
 	// If the SS's version advanced at all during any of the waits, the read from memory may have missed some
 	// mutations, so gotAll can only be true if data->version didn't change over the course of this actor
@@ -3826,6 +3838,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
 
+			state double kvReadRange = g_network->timer();
 			GetKeyValuesReply _r = wait(readRange(data,
 			                                      version,
 			                                      KeyRangeRef(begin, end),
@@ -3834,6 +3847,8 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			                                      span.context,
 			                                      options,
 			                                      tenantPrefix));
+			const double duration = g_network->timer() - kvReadRange;
+			data->counters.kvReadRangeLatencySample.addMeasurement(duration);
 			GetKeyValuesReply r = _r;
 
 			if (req.options.present() && req.options.get().debugID.present())
@@ -4558,7 +4573,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		// end the last actual key returned must be from this shard. A begin offset of 1 is also OK because then either
 		// begin is past end or equal to end (so the result is definitely empty)
 		if ((offset1 && offset1 != 1) || (offset2 && offset2 != 1)) {
-			CODE_PROBE(true, "wrong_shard_server due to offset in getMappedKeyValuesQ");
+			CODE_PROBE(true, "wrong_shard_server due to offset in getMappedKeyValuesQ", probe::decoration::rare);
 			// We could detect when offset1 takes us off the beginning of the database or offset2 takes us off the end,
 			// and return a clipped range rather than an error (since that is what the NativeAPI.getRange will do anyway
 			// via its "slow path"), but we would have to add some flags to the response to encode whether we went off
@@ -4754,7 +4769,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		// end the last actual key returned must be from this shard. A begin offset of 1 is also OK because then either
 		// begin is past end or equal to end (so the result is definitely empty)
 		if ((offset1 && offset1 != 1) || (offset2 && offset2 != 1)) {
-			CODE_PROBE(true, "wrong_shard_server due to offset in rangeStream");
+			CODE_PROBE(true, "wrong_shard_server due to offset in rangeStream", probe::decoration::rare);
 			// We could detect when offset1 takes us off the beginning of the database or offset2 takes us off the end,
 			// and return a clipped range rather than an error (since that is what the NativeAPI.getRange will do anyway
 			// via its "slow path"), but we would have to add some flags to the response to encode whether we went off
@@ -6131,7 +6146,8 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		if (!existing) {
 			CODE_PROBE(cleanupPending,
 			           "Fetch change feed which is cleanup pending. This means there was a move away and a move back, "
-			           "this will remake the metadata");
+			           "this will remake the metadata",
+			           probe::decoration::rare);
 
 			changeFeedInfo = Reference<ChangeFeedInfo>(new ChangeFeedInfo());
 			changeFeedInfo->range = cfEntry.range;
@@ -6182,7 +6198,9 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 			}
 
 			if (changeFeedInfo->destroyed) {
-				CODE_PROBE(true, "Change feed fetched and destroyed by other fetch while fetching metadata");
+				CODE_PROBE(true,
+				           "Change feed fetched and destroyed by other fetch while fetching metadata",
+				           probe::decoration::rare);
 				continue;
 			}
 
@@ -6240,7 +6258,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		// isn't in the fetched response. In that case, the feed must have been destroyed between lastMetadataVersion
 		// and fetchedMetadataVersion
 		if (lastMetadataVersion >= fetchedMetadataVersion) {
-			CODE_PROBE(true, "Change Feed fetched higher metadata version before moved away");
+			CODE_PROBE(true, "Change Feed fetched higher metadata version before moved away", probe::decoration::rare);
 			continue;
 		}
 
@@ -8057,6 +8075,7 @@ ACTOR Future<Void> tssDelayForever() {
 }
 
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
+	state double updateStart = g_network->timer();
 	state double start;
 	try {
 
@@ -8536,6 +8555,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 			data->behind = false;
 		}
+		const double duration = g_network->timer() - updateStart;
+		data->counters.updateLatencySample.addMeasurement(duration);
 
 		return Void(); // update will get called again ASAP
 	} catch (Error& err) {
@@ -9865,7 +9886,7 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 			}
 			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
 				if (!self->isReadable(req.keys)) {
-					CODE_PROBE(true, "readHotSubRanges immediate wrong_shard_server()");
+					CODE_PROBE(true, "readHotSubRanges immediate wrong_shard_server()", probe::decoration::rare);
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
 					self->metrics.getReadHotRanges(req);
@@ -10089,7 +10110,8 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 						self->sendErrorWithPenalty(req.reply, e, self->getPenalty());
 						break;
 					}
-					CODE_PROBE(true, "Reading a watched key failed with transaction_too_old case 5");
+					CODE_PROBE(
+					    true, "Reading a watched key failed with transaction_too_old case 5", probe::decoration::rare);
 				}
 			}
 		}

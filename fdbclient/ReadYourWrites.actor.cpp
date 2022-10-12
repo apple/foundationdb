@@ -1214,7 +1214,7 @@ public:
 		// isolation support. But it is not default and is rarely used. So we disallow it until we have thorough test
 		// coverage for it.)
 		if (snapshot) {
-			CODE_PROBE(true, "getMappedRange not supported for snapshot.");
+			CODE_PROBE(true, "getMappedRange not supported for snapshot.", probe::decoration::rare);
 			throw unsupported_operation();
 		}
 		// For now, getMappedRange requires read-your-writes being NOT disabled. But the support of RYW is limited
@@ -1223,7 +1223,7 @@ public:
 		// which returns the written value transparently. In another word, it makes sure not break RYW semantics without
 		// actually implementing reading from the writes.
 		if (ryw->options.readYourWritesDisabled) {
-			CODE_PROBE(true, "getMappedRange not supported for read-your-writes disabled.");
+			CODE_PROBE(true, "getMappedRange not supported for read-your-writes disabled.", probe::decoration::rare);
 			throw unsupported_operation();
 		}
 
@@ -1331,6 +1331,11 @@ public:
 	ACTOR static void simulateTimeoutInFlightCommit(ReadYourWritesTransaction* ryw_) {
 		state Reference<ReadYourWritesTransaction> ryw = Reference<ReadYourWritesTransaction>::addRef(ryw_);
 		ASSERT(ryw->options.timeoutInSeconds > 0);
+		// An actual in-flight commit (i.e. one that's past the point where cancelling the transaction would stop it)
+		// would already have a read version. We need to get a read version too, otherwise committing a conflicting
+		// transaction may not ensure this transaction is no longer in-flight, since this transaction could get a read
+		// version _after_.
+		wait(success(ryw->getReadVersion()));
 		if (!ryw->resetPromise.isSet())
 			ryw->resetPromise.sendError(transaction_timed_out());
 		wait(delay(deterministicRandom()->random01() * 5));
@@ -1649,7 +1654,7 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 
 	// This optimization prevents nullptr operations from being added to the conflict range
 	if (limits.isReached()) {
-		CODE_PROBE(true, "RYW range read limit 0");
+		CODE_PROBE(true, "RYW range read limit 0", probe::decoration::rare);
 		return RangeResult();
 	}
 
@@ -1663,7 +1668,7 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 		end.removeOrEqual(end.arena());
 
 	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
-		CODE_PROBE(true, "RYW range inverted");
+		CODE_PROBE(true, "RYW range inverted", probe::decoration::rare);
 		return RangeResult();
 	}
 

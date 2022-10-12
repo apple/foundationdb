@@ -44,19 +44,20 @@ ConfigKey ConfigKeyRef::decodeKey(KeyRef const& key) {
 }
 
 Value KnobValueRef::ToValueFunc::operator()(int v) const {
-	return BinaryWriter::toValue(v, Unversioned());
+	// return BinaryWriter::toValue(v, Unversioned());
+	return Tuple::makeTuple(v).pack();
 }
 Value KnobValueRef::ToValueFunc::operator()(int64_t v) const {
-	return BinaryWriter::toValue(v, Unversioned());
+	return Tuple::makeTuple(v).pack();
 }
 Value KnobValueRef::ToValueFunc::operator()(bool v) const {
-	return BinaryWriter::toValue(v, Unversioned());
+	return Tuple::makeTuple(v).pack();
 }
 Value KnobValueRef::ToValueFunc::operator()(ValueRef v) const {
-	return v;
+	return Tuple::makeTuple(v).pack();
 }
 Value KnobValueRef::ToValueFunc::operator()(double v) const {
-	return BinaryWriter::toValue(v, Unversioned());
+	return Tuple::makeTuple(v).pack();
 }
 
 KnobValue KnobValueRef::CreatorFunc::operator()(NoKnobFound) const {

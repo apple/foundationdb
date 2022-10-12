@@ -44,7 +44,8 @@ class ConfigIncrementWorkload : public TestWorkload {
 		if (!serializedValue.present()) {
 			return 0;
 		} else {
-			int value = BinaryReader::fromStringRef<int>(serializedValue.get(), Unversioned());
+			Tuple t = Tuple::unpack(serializedValue.get());
+			int value = t.getInt(0);
 			te.detail("Value", value);
 			return value;
 		}
