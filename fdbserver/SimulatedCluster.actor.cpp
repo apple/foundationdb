@@ -324,6 +324,9 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "injectSSTargetedRestart") {
 				injectTargetedSSRestart = strcmp(value.c_str(), "true") == 0;
 			}
+			if (attrib == "tenantMode" && strcmp(value.c_str(), "random") != 0) {
+				tenantMode = TenantMode::fromValue(value);
+			}
 			if (attrib == "defaultTenant") {
 				defaultTenant = value;
 			}
@@ -377,6 +380,9 @@ public:
 	bool allowCreatingTenants = true;
 	bool injectTargetedSSRestart = false;
 	bool injectSSDelay = false;
+	// By default, tenant mode is set randomly
+	// If provided, set using TenantMode::fromValue
+	std::string tenantMode = "random";
 	Optional<std::string> defaultTenant;
 	std::string testClass; // unused -- used in TestHarness
 	float testPriority; // unused -- used in TestHarness
@@ -445,6 +451,7 @@ public:
 		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
 		    .add("injectTargetedSSRestart", &injectTargetedSSRestart)
 		    .add("injectSSDelay", &injectSSDelay)
+		    .add("tenantMode", &tenantMode)
 		    .add("defaultTenant", &defaultTenant);
 		try {
 			auto file = toml::parse(testFile);
@@ -1154,6 +1161,10 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		int desiredCoordinators = atoi(ini.GetValue("META", "desiredCoordinators"));
 		int testerCount = atoi(ini.GetValue("META", "testerCount"));
 		auto tssModeStr = ini.GetValue("META", "tssMode");
+		std::string tenantModeStr = ini.GetValue("META", "tenantMode", "");
+		if (!tenantModeStr.empty()) {
+			testConfig->tenantMode = tenantModeStr;
+		}
 		std::string defaultTenant = ini.GetValue("META", "defaultTenant", "");
 		if (!defaultTenant.empty()) {
 			testConfig->defaultTenant = defaultTenant;
@@ -2530,15 +2541,25 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state Optional<TenantName> defaultTenant;
 	state Standalone<VectorRef<TenantNameRef>> tenantsToCreate;
 	state TenantMode tenantMode = TenantMode::DISABLED;
-	if (allowDefaultTenant && deterministicRandom()->random01() < 0.5) {
-		defaultTenant = "SimulatedDefaultTenant"_sr;
-		if (deterministicRandom()->random01() < 0.9) {
-			tenantMode = TenantMode::REQUIRED;
+	// If this is a restarting test, restartInfo.ini is read in restartSimulatedSystem
+	// where we update the defaultTenant and tenantMode in the testConfig
+	// Defer setting tenant mode and default tenant until later
+	if (!rebooting) {
+		if (testConfig.tenantMode != "random") {
+			tenantMode = TenantMode::fromValue(testConfig.tenantMode);
 		} else {
-			tenantMode = TenantMode::OPTIONAL_TENANT;
+			if (allowDefaultTenant && deterministicRandom()->random01() < 0.5) {
+				defaultTenant = "SimulatedDefaultTenant"_sr;
+				tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
+				if (deterministicRandom()->random01() < 0.9) {
+					tenantMode = TenantMode::REQUIRED;
+				} else {
+					tenantMode = TenantMode::OPTIONAL_TENANT;
+				}
+			} else if (!allowDisablingTenants || deterministicRandom()->random01() < 0.5) {
+				tenantMode = TenantMode::OPTIONAL_TENANT;
+			}
 		}
-	} else if (!allowDisablingTenants || deterministicRandom()->random01() < 0.5) {
-		tenantMode = TenantMode::OPTIONAL_TENANT;
 	}
 
 	try {
@@ -2570,15 +2591,20 @@ ACTOR void setupAndRun(std::string dataFolder,
 			                     tenantMode);
 			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
 		}
+		// restartSimulatedSystem can adjust some testConfig params related to tenants
+		// so set/overwrite those options if necessary here
+		if (rebooting) {
+			tenantMode = TenantMode::fromValue(testConfig.tenantMode);
+		}
 		if (testConfig.defaultTenant.present() && tenantMode != TenantMode::DISABLED && allowDefaultTenant) {
 			// Default tenant set by testConfig or restarting data in restartInfo.ini
 			defaultTenant = testConfig.defaultTenant.get();
-			tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
-		} else if (defaultTenant.present()) {
-			// Default tenant set randomly from above
-			tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
+			if (!rebooting) {
+				tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
+			}
 		}
-		if (allowCreatingTenants && tenantMode != TenantMode::DISABLED && deterministicRandom()->random01() < 0.5) {
+		if (!rebooting && allowCreatingTenants && tenantMode != TenantMode::DISABLED &&
+		    deterministicRandom()->random01() < 0.5) {
 			int numTenants = deterministicRandom()->randomInt(1, 6);
 			for (int i = 0; i < numTenants; ++i) {
 				tenantsToCreate.push_back_deep(tenantsToCreate.arena(),
