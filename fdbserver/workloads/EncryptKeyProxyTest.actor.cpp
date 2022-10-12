@@ -71,7 +71,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		for (int i = 0; i < self->numDomains / 2; i++) {
 			const EncryptCipherDomainId domainId = self->minDomainId + i;
 			self->domainInfos.emplace_back(
-			    EKPGetLatestCipherKeysRequestInfo(domainId, StringRef(std::to_string(domainId)), self->arena));
+			    EKPGetLatestCipherKeysRequestInfo(self->arena, domainId, StringRef(std::to_string(domainId))));
 		}
 
 		state int nAttempts = 0;
@@ -127,14 +127,14 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		for (int i = 0; i < expectedHits; i++) {
 			const EncryptCipherDomainId domainId = self->minDomainId + i;
 			self->domainInfos.emplace_back(
-			    EKPGetLatestCipherKeysRequestInfo(domainId, StringRef(std::to_string(domainId)), self->arena));
+			    EKPGetLatestCipherKeysRequestInfo(self->arena, domainId, StringRef(std::to_string(domainId))));
 		}
 
 		expectedMisses = deterministicRandom()->randomInt(1, self->numDomains / 2);
 		for (int i = 0; i < expectedMisses; i++) {
 			const EncryptCipherDomainId domainId = self->minDomainId + i + self->numDomains / 2 + 1;
 			self->domainInfos.emplace_back(
-			    EKPGetLatestCipherKeysRequestInfo(domainId, StringRef(std::to_string(domainId)), self->arena));
+			    EKPGetLatestCipherKeysRequestInfo(self->arena, domainId, StringRef(std::to_string(domainId))));
 		}
 
 		state int nAttempts = 0;
@@ -191,7 +191,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		for (int i = 0; i < self->numDomains; i++) {
 			const EncryptCipherDomainId domainId = self->minDomainId + i;
 			self->domainInfos.emplace_back(
-			    EKPGetLatestCipherKeysRequestInfo(domainId, StringRef(std::to_string(domainId)), self->arena));
+			    EKPGetLatestCipherKeysRequestInfo(self->arena, domainId, StringRef(std::to_string(domainId))));
 		}
 
 		EKPGetLatestBaseCipherKeysRequest req;

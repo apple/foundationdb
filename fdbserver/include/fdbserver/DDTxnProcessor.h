@@ -122,6 +122,8 @@ public:
 	virtual Future<UID> getClusterId() const { return {}; }
 
 	virtual Future<Void> waitDDTeamInfoPrintSignal() const { return Never(); }
+
+	virtual Future<std::vector<ProcessData>> getWorkers() const = 0;
 };
 
 class DDTxnProcessorImpl;
@@ -202,6 +204,8 @@ public:
 	Future<UID> getClusterId() const override;
 
 	Future<Void> waitDDTeamInfoPrintSignal() const override;
+
+	Future<std::vector<ProcessData>> getWorkers() const override;
 };
 
 // A mock transaction implementation for test usage.
@@ -259,6 +263,8 @@ public:
 	}
 
 	Future<HealthMetrics> getHealthMetrics(bool detailed = false) const override;
+
+	Future<std::vector<ProcessData>> getWorkers() const override;
 };
 
 #endif // FOUNDATIONDB_DDTXNPROCESSOR_H
