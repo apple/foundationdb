@@ -156,7 +156,8 @@ Future<Void> StorageWiggler::resetStats() {
 	auto newMetrics = StorageWiggleMetrics();
 	newMetrics.smoothed_round_duration = metrics.smoothed_round_duration;
 	newMetrics.smoothed_wiggle_duration = metrics.smoothed_wiggle_duration;
-	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->isPrimary(), newMetrics);
+	return StorageWiggleMetrics::runSetTransaction(
+	    teamCollection->dbContext(), teamCollection->isPrimary(), newMetrics);
 }
 
 Future<Void> StorageWiggler::restoreStats() {
@@ -167,7 +168,7 @@ Future<Void> StorageWiggler::restoreStats() {
 		}
 		return Void();
 	};
-	auto readFuture = StorageWiggleMetrics::runGetTransaction(teamCollection->cx, teamCollection->isPrimary());
+	auto readFuture = StorageWiggleMetrics::runGetTransaction(teamCollection->dbContext(), teamCollection->isPrimary());
 	return map(readFuture, assignFunc);
 }
 Future<Void> StorageWiggler::startWiggle() {
@@ -175,7 +176,7 @@ Future<Void> StorageWiggler::startWiggle() {
 	if (shouldStartNewRound()) {
 		metrics.last_round_start = metrics.last_wiggle_start;
 	}
-	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->isPrimary(), metrics);
+	return StorageWiggleMetrics::runSetTransaction(teamCollection->dbContext(), teamCollection->isPrimary(), metrics);
 }
 
 Future<Void> StorageWiggler::finishWiggle() {
@@ -190,7 +191,7 @@ Future<Void> StorageWiggler::finishWiggle() {
 		duration = metrics.last_round_finish - metrics.last_round_start;
 		metrics.smoothed_round_duration.setTotal((double)duration);
 	}
-	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->isPrimary(), metrics);
+	return StorageWiggleMetrics::runSetTransaction(teamCollection->dbContext(), teamCollection->isPrimary(), metrics);
 }
 
 ACTOR Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
@@ -917,7 +918,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 			                                  configuration.storageTeamSize - 1) -
 			                         storageFailures;
 			if (*storageFaultTolerance < 0) {
-				CODE_PROBE(true, "Too many failed storage servers to complete snapshot");
+				CODE_PROBE(true, "Too many failed storage servers to complete snapshot", probe::decoration::rare);
 				throw snap_storage_failed();
 			}
 			// tlogs
@@ -938,7 +939,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 			// get coordinators
 			Optional<Value> coordinators = wait(tr.get(coordinatorsKey));
 			if (!coordinators.present()) {
-				CODE_PROBE(true, "Failed to read the coordinatorsKey");
+				CODE_PROBE(true, "Failed to read the coordinatorsKey", probe::decoration::rare);
 				throw operation_failed();
 			}
 			ClusterConnectionString ccs(coordinators.get().toString());

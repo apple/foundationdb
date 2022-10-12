@@ -30,6 +30,7 @@
 
 #include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/IPager.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.h"
 
 #include "flow/Arena.h"
@@ -296,7 +297,7 @@ public:
 		return isEncryptionOpSupported(EncryptOperationType::STORAGE_SERVER_ENCRYPTION, db->get().client);
 	}
 
-	bool enableEncryptionDomain() const override { return true; }
+	bool enableEncryptionDomain() const override { return SERVER_KNOBS->REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT; }
 
 	ACTOR static Future<EncryptionKey> getEncryptionKey(TenantAwareEncryptionKeyProvider* self,
 	                                                    const void* encodingHeader) {
@@ -384,7 +385,7 @@ private:
 			return FDB_DEFAULT_ENCRYPT_DOMAIN_NAME;
 		}
 		if (tenantPrefixIndex.isValid()) {
-			StringRef prefix = TenantMapEntry::idToPrefix(domainId);
+			Key prefix(TenantMapEntry::idToPrefix(domainId));
 			auto view = tenantPrefixIndex->atLatest();
 			auto itr = view.find(prefix);
 			if (itr != view.end()) {

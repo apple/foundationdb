@@ -90,7 +90,7 @@ void StorageServerMetrics::notify(KeyRef key, StorageMetrics& metrics) {
 	if (g_network->isSimulated()) {
 		CODE_PROBE(metrics.bytesPerKSecond != 0, "ShardNotifyMetrics bytes");
 		CODE_PROBE(metrics.iosPerKSecond != 0, "ShardNotifyMetrics ios");
-		CODE_PROBE(metrics.bytesReadPerKSecond != 0, "ShardNotifyMetrics bytesRead");
+		CODE_PROBE(metrics.bytesReadPerKSecond != 0, "ShardNotifyMetrics bytesRead", probe::decoration::rare);
 	}
 
 	double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;

@@ -1467,6 +1467,11 @@ struct EncryptionAtRestMode {
 
 	Value toValue() const { return ValueRef(format("%d", (int)mode)); }
 
+	bool isEquals(const EncryptionAtRestMode& e) const { return this->mode == e.mode; }
+
+	bool operator==(const EncryptionAtRestMode& e) const { return isEquals(e); }
+	bool operator!=(const EncryptionAtRestMode& e) const { return !isEquals(e); }
+
 	static EncryptionAtRestMode fromValue(Optional<ValueRef> val) {
 		if (!val.present()) {
 			return DISABLED;
@@ -1546,7 +1551,8 @@ struct ReadBlobGranuleContext {
 	int granuleParallelism = 1;
 };
 
-// Store metadata associated with each storage server. Now it only contains data be used in perpetual storage wiggle.
+// Store metadata associated with each storage server. Now it only contains data be used in perpetual storage
+// wiggle.
 struct StorageMetadataType {
 	constexpr static FileIdentifier file_identifier = 732123;
 	// when the SS is initialized, in epoch seconds, comes from currentTime()
