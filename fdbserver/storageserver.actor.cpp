@@ -4282,6 +4282,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 		    .detail("Version", version)
 		    .detail("ErrorMessage", error)
 		    .detail("RemoteServer", remoteServer.toString());
+		throw audit_storage_error();
 	}
 
 	TraceEvent(SevDebug, "ValidateRangeAgainstServerEnd", data->thisServerID)
@@ -4471,7 +4472,11 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 		    .detail("RequestID", req.id)
 		    .detail("Range", req.range)
 		    .detail("AuditType", req.type);
-		req.reply.sendError(audit_storage_failed());
+		if (e.code() != error_code_audit_storage_error) {
+			req.reply.sendError(audit_storage_failed());
+		} else {
+			req.reply.sendError(audit_storage_error());
+		}
 	}
 
 	return Void();
