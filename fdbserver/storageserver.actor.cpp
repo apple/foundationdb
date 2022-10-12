@@ -4212,25 +4212,25 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 				if (!range.contains(remoteKV.key) || !range.contains(localKV.key)) {
 					TraceEvent(SevDebug, "SSValidateRangeKeyOutOfRange", data->thisServerID)
 					    .detail("Range", range)
-					    .detail("RemoteServer", remoteServer.toString())
-					    .detail("LocalKey", Traceable<StringRef>::toString(localKV.key))
-					    .detail("RemoteKey", Traceable<StringRef>::toString(remoteKV.key));
+					    .detail("RemoteServer", remoteServer.toString().c_str())
+					    .detail("LocalKey", Traceable<StringRef>::toString(localKV.key).c_str())
+					    .detail("RemoteKey", Traceable<StringRef>::toString(remoteKV.key).c_str());
 					throw wrong_shard_server();
 				}
 
 				if (remoteKV.key != localKV.key) {
 					error = format("Key Mismatch: local server (%016llx): %s, remote server(%016llx) %s",
 					               data->thisServerID.first(),
-					               Traceable<StringRef>::toString(localKV.key),
+					               Traceable<StringRef>::toString(localKV.key).c_str(),
 					               remoteServer.uniqueID.first(),
-					               Traceable<StringRef>::toString(remoteKV.key));
+					               Traceable<StringRef>::toString(remoteKV.key).c_str());
 				} else if (remoteKV.value != localKV.value) {
 					error = format("Value Mismatch for Key %s: local server (%016llx): %s, remote server(%016llx) %s",
-					               Traceable<StringRef>::toString(localKV.key),
+					               Traceable<StringRef>::toString(localKV.key).c_str(),
 					               data->thisServerID.first(),
-					               Traceable<StringRef>::toString(localKV.value),
+					               Traceable<StringRef>::toString(localKV.value).c_str(),
 					               remoteServer.uniqueID.first(),
-					               Traceable<StringRef>::toString(remoteKV.value));
+					               Traceable<StringRef>::toString(remoteKV.value).c_str());
 				} else {
 					TraceEvent(SevVerbose, "ValidatedKey", data->thisServerID).detail("Key", localKV.key);
 					++validatedKeys;
@@ -4248,14 +4248,14 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 			} else if (i >= local.data.size() && !local.more && i < remote.data.size()) {
 				error = format("Missing key(s) form local server (%lld), next key: %s, remote server(%016llx) ",
 				               data->thisServerID.first(),
-				               Traceable<StringRef>::toString(remote.data[i].key),
+				               Traceable<StringRef>::toString(remote.data[i].key).c_str(),
 				               remoteServer.uniqueID.first());
 				break;
 			} else if (i >= remote.data.size() && !remote.more && i < local.data.size()) {
 				error = format("Missing key(s) form remote server (%lld), next local server(%016llx) key: %s",
 				               remoteServer.uniqueID.first(),
 				               data->thisServerID.first(),
-				               Traceable<StringRef>::toString(local.data[i].key));
+				               Traceable<StringRef>::toString(local.data[i].key).c_str());
 				break;
 			}
 
