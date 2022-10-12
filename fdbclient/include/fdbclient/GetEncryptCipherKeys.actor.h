@@ -108,7 +108,7 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getL
 			cipherKeys[domain.first] = cachedCipherKey;
 		} else {
 			request.encryptDomainInfos.emplace_back(
-			    domain.first /*domainId*/, domain.second /*domainName*/, request.arena);
+			    request.arena, domain.first /*domainId*/, domain.second /*domainName*/);
 		}
 	}
 	if (request.encryptDomainInfos.empty()) {
