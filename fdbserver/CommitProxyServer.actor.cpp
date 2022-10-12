@@ -24,6 +24,7 @@
 #include "fdbclient/Atomic.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobCipher.h"
+#include "fdbclient/BuildIdempotencyIdMutations.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
@@ -1597,31 +1598,21 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		                        &self->computeStart));
 	}
 
-	// Add idempotency ids
-	for (int h = 0; h < self->trs.size(); h += 256) {
-		self->idempotencyKVBuilder.setCommitVersion(self->commitVersion);
-		for (int l = 0; h + l < self->trs.size() && l < 256; ++l) {
-			uint16_t batchIndex = h + l;
-			if (!(self->committed[batchIndex] == ConflictBatch::TransactionCommitted &&
-			      (!self->locked || self->trs[batchIndex].isLockAware()))) {
-				continue;
-			}
-			const auto& idempotency_id = self->trs[batchIndex].idempotencyId;
-			if (idempotency_id.valid()) {
-				self->idempotencyKVBuilder.add(idempotency_id, batchIndex);
-			}
-		}
-		Optional<KeyValue> kv = self->idempotencyKVBuilder.buildAndClear();
-		if (kv.present()) {
-			MutationRef idempotencyIdSet;
-			idempotencyIdSet.type = MutationRef::Type::SetValue;
-			idempotencyIdSet.param1 = kv.get().key;
-			idempotencyIdSet.param2 = kv.get().value;
-			auto& tags = pProxyCommitData->tagsForKey(kv.get().key);
-			self->toCommit.addTags(tags);
-			self->toCommit.writeTypedMessage(idempotencyIdSet);
-		}
-	}
+	buildIdempotencyIdMutations(self->trs,
+	                            self->idempotencyKVBuilder,
+	                            self->commitVersion,
+	                            self->committed,
+	                            ConflictBatch::TransactionCommitted,
+	                            self->locked,
+	                            [&](const KeyValue& kv) {
+		                            MutationRef idempotencyIdSet;
+		                            idempotencyIdSet.type = MutationRef::Type::SetValue;
+		                            idempotencyIdSet.param1 = kv.key;
+		                            idempotencyIdSet.param2 = kv.value;
+		                            auto& tags = pProxyCommitData->tagsForKey(kv.key);
+		                            self->toCommit.addTags(tags);
+		                            self->toCommit.writeTypedMessage(idempotencyIdSet);
+	                            });
 
 	self->toCommit.saveTags(self->writtenTags);
 
