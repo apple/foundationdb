@@ -94,7 +94,7 @@ void decodeKeyServersValue(RangeResult result,
 
 extern const KeyRef clusterIdKey;
 
-extern const KeyRangeRef audits;
+extern const KeyRangeRef auditKeys;
 extern const KeyRef auditPrefix;
 extern const KeyRangeRef auditRanges;
 extern const KeyRef auditRangePrefix;

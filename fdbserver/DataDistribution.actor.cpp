@@ -543,6 +543,19 @@ public:
 	}
 };
 
+ACTOR Future<Void> doAuditStorage(Reference<DataDistributor> self, AuditStorageState auditStates);
+ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
+ACTOR Future<Void> loadAndDispatchAuditRange(Reference<DataDistributor> self,
+                                             std::shared_ptr<DDAudit> audit,
+                                             KeyRange range);
+ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
+                                         std::shared_ptr<DDAudit> audit,
+                                         KeyRange range);
+ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
+                                          std::shared_ptr<DDAudit> audit,
+                                          StorageServerInterface ssi,
+                                          AuditStorageRequest req);
+
 ACTOR Future<Void> storageQuotaTracker(Database cx, StorageQuotaInfo* storageQuotaInfo) {
 	loop {
 		state Transaction tr(cx);
@@ -606,6 +619,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
 			ASSERT(self->configuration.storageTeamSize > 0);
+
+			for (const auto& auditState : self->initData->auditStates) {
+				self->addActor.send(doAuditStorage(self, auditState));
+			}
 
 			state PromiseStream<Promise<int64_t>> getAverageShardBytes;
 			state PromiseStream<Promise<int>> getUnhealthyRelocationCount;
@@ -1344,19 +1361,6 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 
 	return Void();
 }
-
-ACTOR Future<Void> doAuditStorage(Reference<DataDistributor> self, AuditStorageState auditStates);
-ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
-ACTOR Future<Void> loadAndDispatchAuditRange(Reference<DataDistributor> self,
-                                             std::shared_ptr<DDAudit> audit,
-                                             KeyRange range);
-ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
-                                         std::shared_ptr<DDAudit> audit,
-                                         KeyRange range);
-ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
-                                          std::shared_ptr<DDAudit> audit,
-                                          StorageServerInterface ssi,
-                                          AuditStorageRequest req);
 
 ACTOR Future<Void> doAuditStorage(Reference<DataDistributor> self, AuditStorageState auditState) {
 	if (auditState.getPhase() == AuditPhase::Complete) {

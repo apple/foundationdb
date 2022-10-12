@@ -103,8 +103,10 @@ struct ValidateStorage : TestWorkload {
 	ACTOR Future<Version> populateData(ValidateStorage* self, Database cx, std::map<Key, Value>* kvs) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		state Version version;
+		state UID debugID;
+
 		loop {
-			state UID debugID = deterministicRandom()->randomUniqueID();
+			debugID = deterministicRandom()->randomUniqueID();
 			try {
 				tr->debugTransaction(debugID);
 				for (const auto& [key, value] : *kvs) {

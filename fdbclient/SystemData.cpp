@@ -286,8 +286,8 @@ const KeyRangeRef writeConflictRangeKeysRange = KeyRangeRef("\xff\xff/transactio
 
 const KeyRef clusterIdKey = "\xff/clusterId"_sr;
 
-extern const KeyRangeRef audits = KeyRangeRef("\xff/audits/"_sr, "\xff/audits0"_sr);
-extern const KeyRef auditPrefix = audits.begin;
+extern const KeyRangeRef auditKeys = KeyRangeRef("\xff/audits/"_sr, "\xff/audits0"_sr);
+extern const KeyRef auditPrefix = auditKeys.begin;
 extern const KeyRangeRef auditRanges= KeyRangeRef("\xff/auditRanges/"_sr, "\xff/auditRanges0"_sr);
 extern const KeyRef auditRangePrefix = auditRanges.begin;
 

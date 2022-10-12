@@ -442,6 +442,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	std::vector<DDShardInfo> shards;
 	Optional<Key> initHealthyZoneValue; // set for maintenance mode
 	KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
+	std::vector<AuditStorageState> auditStates;
 };
 
 struct ShardMetrics {

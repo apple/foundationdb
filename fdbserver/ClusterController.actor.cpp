@@ -2017,6 +2017,8 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 	TraceEvent(SevInfo, "CCTriggerAuditStorageBegin", self->id)
 	    .detail("Range", req.range)
 	    .detail("AuditType", req.type);
+	state UID auditId;
+
 	try {
 		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
 		       !self->db.serverInfo->get().distributor.present()) {
@@ -2024,7 +2026,8 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 		}
 
 		TriggerAuditRequest fReq(req.getType(), req.range);
-		state UID auditId = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
+		UID auditId_ = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
+		auditId = auditId_;
 		TraceEvent(SevDebug, "CCTriggerAuditStorageEnd", self->id)
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)
