@@ -1162,12 +1162,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			bool getHistograms;
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 			CommitAction() {
-				if (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) {
-					getHistograms = true;
-					startTime = timer_monotonic();
-				} else {
-					getHistograms = false;
-				}
+				startTime = timer_monotonic();
+				getHistograms = deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE;
 			}
 		};
 		void action(CommitAction& a) {
