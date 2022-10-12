@@ -2026,7 +2026,8 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 		}
 
 		TriggerAuditRequest fReq(req.getType(), req.range);
-		auditId = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
+		UID auditId_ = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
+		auditId = auditId_;
 		TraceEvent(SevDebug, "CCTriggerAuditStorageEnd", self->id)
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)
