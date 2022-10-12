@@ -379,7 +379,6 @@ public:
 	bool allowDisablingTenants = true;
 	bool allowCreatingTenants = true;
 	bool injectTargetedSSRestart = false;
-	bool tenantModeRequired = false;
 	bool injectSSDelay = false;
 	// By default, tenant mode is set randomly
 	// If provided, set using TenantMode::fromValue
@@ -449,7 +448,6 @@ public:
 		    .add("allowDefaultTenant", &allowDefaultTenant)
 		    .add("allowDisablingTenants", &allowDisablingTenants)
 		    .add("allowCreatingTenants", &allowCreatingTenants)
-		    .add("tenantModeRequired", &tenantModeRequired)
 		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
 		    .add("injectTargetedSSRestart", &injectTargetedSSRestart)
 		    .add("injectSSDelay", &injectSSDelay)
@@ -2478,7 +2476,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
 	state bool allowDisablingTenants = testConfig.allowDisablingTenants;
 	state bool allowCreatingTenants = testConfig.allowCreatingTenants;
-	state bool tenantModeRequired = testConfig.tenantModeRequired;
 
 	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		testConfig.storageEngineExcludeTypes.push_back(5);
@@ -2490,12 +2487,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 	if (std::string_view(testFile).find("restarting") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.push_back(4);
 		testConfig.storageEngineExcludeTypes.push_back(5);
-
-		// Disable the default tenant in restarting tests for now
-		// TODO: persist the chosen default tenant in the restartInfo.ini file for the second test
-		// allowDefaultTenant = false;
-		// allowCreatingTenants = false;
-		// tenantModeRequired = false;
 	}
 
 	// TODO: Currently backup and restore related simulation tests are failing when run with rocksDB storage engine
@@ -2552,10 +2543,10 @@ ACTOR void setupAndRun(std::string dataFolder,
 		if (testConfig.tenantMode != "random") {
 			tenantMode = TenantMode::fromValue(testConfig.tenantMode);
 		} else {
-			if (tenantModeRequired || (allowDefaultTenant && deterministicRandom()->random01() < 0.5)) {
+			if (allowDefaultTenant && deterministicRandom()->random01() < 0.5) {
 				defaultTenant = "SimulatedDefaultTenant"_sr;
 				tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
-				if (tenantModeRequired || deterministicRandom()->random01() < 0.9) {
+				if (deterministicRandom()->random01() < 0.9) {
 					tenantMode = TenantMode::REQUIRED;
 				} else {
 					tenantMode = TenantMode::OPTIONAL_TENANT;
