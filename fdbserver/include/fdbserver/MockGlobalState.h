@@ -79,6 +79,9 @@ public:
 
 	void setShardStatus(KeyRangeRef range, MockShardStatus status);
 
+	// this function removed an aligned range from server
+	void removeShard(KeyRangeRef range);
+
 protected:
 	void threeWayShardSplitting(KeyRangeRef outerRange, KeyRangeRef innerRange, uint64_t outerRangeSize);
 

@@ -900,5 +900,25 @@ Future<Void> DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
                                                    const std::map<UID, StorageServerInterface>& tssMapping) {
 	// get source and dest teams
 	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsFor(params.keys);
+
+	ASSERT_EQ(destTeams.size(), 0);
+	if (destTeams.front() != ShardsAffectedByTeamFailure::Team{ params.destinationTeam, true }) {
+		TraceEvent(SevError, "MockRawFinishMovementError")
+		    .detail("Reason", "InconsistentDestinations")
+		    .detail("ShardMappingDest", describe(destTeams.front().servers))
+		    .detail("ParamDest", describe(params.destinationTeam));
+		ASSERT(false); // This shouldn't happen because the overlapped key range movement won't be executed in parallel
+	}
+
+	for (auto& id : params.destinationTeam) {
+		mgs->allServers.at(id).setShardStatus(params.keys, MockShardStatus::COMPLETED);
+	}
+
+	ASSERT_EQ(srcTeams.size(), 0);
+	for (auto& id : srcTeams.front().servers) {
+		mgs->allServers.at(id).removeShard(params.keys);
+	}
+	mgs->shardMapping->finishMove(params.keys);
+
 	return Void();
 }

@@ -93,6 +93,12 @@ void MockStorageServer::twoWayShardSplitting(KeyRangeRef range, KeyRef splitPoin
 	serverKeys[left].shardSize = leftSize;
 }
 
+void MockStorageServer::removeShard(KeyRangeRef range) {
+	auto ranges = serverKeys.containedRanges(range);
+	ASSERT(ranges.begin().range() == range);
+	serverKeys.rawErase(range);
+}
+
 void MockGlobalState::initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf, uint64_t defaultDiskSpace) {
 	ASSERT(conf.storageTeamSize > 0);
 	configuration = conf;
