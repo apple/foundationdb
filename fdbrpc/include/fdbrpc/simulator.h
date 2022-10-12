@@ -521,6 +521,9 @@ public:
 		return 0;
 	}
 
+	// generate authz token for use in simulation environment
+	Standalone<StringRef> makeToken(StringRef tenantName, uint64_t ttlSecondsFromNow);
+
 	static thread_local ProcessInfo* currentProcess;
 
 	bool checkInjectedCorruption() {

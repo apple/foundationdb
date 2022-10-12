@@ -1,0 +1,18 @@
+[configuration]
+allowDefaultTenant = false
+allowDisablingTenants = false
+
+[[test]]
+testTitle = 'TenantCreation'
+
+    [[test.workload]]
+    testName = 'CreateTenant'
+    name = 'AuthzSecurityTenant'
+
+[[test]]
+testTitle = 'AuthzSecurityCheck'
+
+    [[test.workload]]
+    testName = 'AuthzSecurity'
+    tenant = 'AuthzSecurityTenant'
+    testDuration = 10.0
