@@ -90,6 +90,15 @@ bool validationIsEnabled(BuggifyType type);
 #define EXPENSIVE_VALIDATION                                                                                           \
 	(validationIsEnabled(BuggifyType::General) && deterministicRandom()->random01() < P_EXPENSIVE_VALIDATION)
 
+namespace SwiftBridging {
+
+inline bool buggify(const char *filename, int line) {
+    // SEE: BUGGIFY_WITH_PROB and BUGGIFY macros above.
+    return getSBVar(filename, line, BuggifyType::General) && deterministicRandom()->random01() < (P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::General)]);
+}
+
+} // namespace SwiftBridging
+
 extern Optional<uint64_t> parse_with_suffix(std::string const& toparse, std::string const& default_unit = "");
 extern Optional<uint64_t> parseDuration(std::string const& str, std::string const& defaultUnit = "");
 extern std::string format(const char* form, ...);
