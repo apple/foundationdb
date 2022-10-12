@@ -28,6 +28,12 @@
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+void traceError(const char* filename, int line, Error const& e) {
+	TraceEvent("DifferentClustersSameRVWorkload_Error").error(e).detail("File", filename).detail("Line", line);
+}
+
+#define TRACE_ERROR(e) traceError(__FILE__, __LINE__, e)
+
 // A workload attempts to read from two different clusters with the same read version.
 struct DifferentClustersSameRVWorkload : TestWorkload {
 	Database originalDB;
@@ -57,10 +63,34 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> _setup(Database cx, DifferentClustersSameRVWorkload* self) {
+		state Version rv1;
+		state Version rv2;
+		state Version newClusterVersion;
+		state Transaction tr1(cx);
+		state Transaction tr2(self->extraDB);
+		TraceEvent("DifferentClustersSameRVWorkload")
+		    .detail("Tenant1", cx->defaultTenant)
+		    .detail("Tenant2", self->extraDB->defaultTenant);
+
 		if (self->extraDB->defaultTenant.present()) {
 			wait(success(TenantAPI::createTenant(self->extraDB.getReference(), self->extraDB->defaultTenant.get())));
+			TraceEvent("DifferentClustersSameRVWorkload_TenantCreated").log();
 		}
 
+		// we want to advance the read version of both clusters so that they are roughly the same. This makes the test
+		// more effective (since it's more likely that we can read from both clusters with the same version) and it
+		// also makes sure that both tenants exist for all legal read versions when the test starts.
+		loop {
+			try {
+				wait(store(rv1, tr1.getReadVersion()) && store(rv2, tr2.getReadVersion()));
+				break;
+			} catch (Error& e) {
+				wait(tr1.onError(e) && tr2.onError(e));
+			}
+		}
+		newClusterVersion = std::max(rv1, rv2) + 10e6;
+		wait(::advanceVersion(cx, newClusterVersion) && ::advanceVersion(self->extraDB, newClusterVersion));
+		TraceEvent("DifferentClustersSameRVWorkload_AdvancedVersion").detail("Version", newClusterVersion);
 		return Void();
 	}
 
@@ -98,6 +128,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 				Optional<Value> val1 = wait(tr.get(self->keyToRead));
 				return std::make_pair(rv, val1);
 			} catch (Error& e) {
+				TRACE_ERROR(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -116,6 +147,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
+				TRACE_ERROR(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -135,6 +167,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 					return Void();
 				}
 			} catch (Error& e) {
+				TRACE_ERROR(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -170,6 +203,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 			ASSERT(val1 == val2);
 		} catch (Error& e) {
 			TraceEvent("DifferentClusters_ReadError").error(e);
+			TRACE_ERROR(e);
 			wait(tr.onError(e));
 		}
 		// In an actual switch we would call switchConnectionRecord after unlocking the database. But it's possible
@@ -209,30 +243,51 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 				wait(tr.commit());
 				tr.reset();
 			} catch (Error& e) {
+				TRACE_ERROR(e);
 				wait(tr.onError(e));
 			}
 		}
 	}
 
+	ACTOR static Future<Optional<Value>> readAtVersion(DifferentClustersSameRVWorkload* self,
+	                                                   const char* name,
+	                                                   Transaction* tr,
+	                                                   Version version) {
+		state Optional<Value> res;
+		try {
+			tr->reset();
+			tr->setVersion(version);
+			wait(store(res, tr->get(self->keyToRead)));
+			return res;
+		} catch (Error& e) {
+			TraceEvent(name).error(e);
+			throw e;
+		}
+	}
+
 	ACTOR static Future<Void> readerClientSeparateDBs(Database cx, DifferentClustersSameRVWorkload* self) {
+		state Transaction tr1(cx);
+		state Transaction tr2(self->extraDB);
+		state Version rv1;
+		state Version rv2;
+		state Optional<Value> val1;
+		state Optional<Value> val2;
 		loop {
-			state Transaction tr1(cx);
-			state Transaction tr2(self->extraDB);
+			tr1.reset();
+			tr2.reset();
 			tr1.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr2.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			try {
-				wait(success(tr1.getReadVersion()) && success(tr2.getReadVersion()));
-				state Version rv = std::min(tr1.getReadVersion().get(), tr2.getReadVersion().get());
-				tr1.reset();
-				tr2.reset();
-				tr1.setVersion(rv);
-				tr2.setVersion(rv);
-				state Future<Optional<Value>> val1 = tr1.get(self->keyToRead);
-				state Future<Optional<Value>> val2 = tr2.get(self->keyToRead);
-				wait(success(val1) && success(val2));
+				wait(store(rv1, tr1.getReadVersion()) && store(rv2, tr2.getReadVersion()));
+				TraceEvent("DifferentClustersSameRVWorkload_GotReadVersion").detail("RV1", rv1).detail("RV2", rv2);
+				state Version rv = std::min(rv1, rv2);
+				wait(store(val1, readAtVersion(self, "DifferentClustersSameRVWorkload_Transaction1_Error", &tr1, rv)) &&
+				     store(val2, readAtVersion(self, "DifferentClustersSameRVWorkload_Transaction2_Error", &tr2, rv)));
 				// We're reading from different db's with the same read version. We can get a different value.
-				CODE_PROBE(val1.get() != val2.get(), "reading from different dbs with the same version");
+				CODE_PROBE(val1.present() != val2.present() || !val1.present() || val1.get() != val2.get(),
+				           "reading from different dbs with the same version");
 			} catch (Error& e) {
+				TRACE_ERROR(e);
 				wait(tr1.onError(e) && tr2.onError(e));
 			}
 		}
