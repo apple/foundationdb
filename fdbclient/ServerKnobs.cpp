@@ -1014,6 +1014,11 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// NOTE: 'token-name" can NOT contain '#' character
 	init( REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS,             "");
 
+	// Idempotency ids
+	init( IDEMPOTENCY_IDS_BYTE_TARGET,                          10e6 );
+	init( IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL,               10 );
+	init( IDEMPOTENCY_IDS_MIN_AGE_SECONDS,             7 * 3600 * 24 );
+
 	// clang-format on
 
 	if (clientKnobs) {

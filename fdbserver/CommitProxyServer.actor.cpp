@@ -2469,6 +2469,74 @@ ACTOR Future<Void> reportTxnTagCommitCost(UID myID,
 	}
 }
 
+ACTOR static Future<Version> timeKeeperVersionFromUnixEpoch(int64_t time, Reference<ReadYourWritesTransaction> tr) {
+	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
+	state KeyBackedRangeResult<std::pair<int64_t, Version>> rangeResult =
+	    wait(versionMap.getRange(tr, 0, time, 1, Snapshot::False, Reverse::True));
+	if (time < 0) {
+		return 0;
+	}
+	if (rangeResult.results.size() != 1) {
+		// No key less than time was found in the database
+		// Look for a key >= time.
+		wait(store(rangeResult, versionMap.getRange(tr, time, std::numeric_limits<int64_t>::max(), 1)));
+
+		if (rangeResult.results.size() != 1) {
+			// No timekeeper entries? Use current version and time to guess
+			Version version = wait(tr->getReadVersion());
+			rangeResult.results.emplace_back(static_cast<int64_t>(g_network->now()), version);
+		}
+	}
+
+	// Adjust version found by the delta between time and the time found and return at minimum 0
+	auto& result = rangeResult.results[0];
+	return std::max<Version>(0, result.second + (time - result.first) * CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+}
+
+ACTOR static Future<Void> idempotencyIdsCleaner(Database db) {
+	state int64_t idmpKeySize;
+	state Reference<ReadYourWritesTransaction> tr;
+	loop {
+		tr = makeReference<ReadYourWritesTransaction>(db);
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(store(idmpKeySize, tr->getEstimatedRangeSizeBytes(idempotencyIdKeys)));
+				if (idmpKeySize > SERVER_KNOBS->IDEMPOTENCY_IDS_BYTE_TARGET) {
+					Version canDeleteLowerThan = wait(timeKeeperVersionFromUnixEpoch(
+					    static_cast<int64_t>(g_network->now()) - SERVER_KNOBS->IDEMPOTENCY_IDS_MIN_AGE_SECONDS, tr));
+					KeySelector begin = firstGreaterOrEqual(idempotencyIdKeys.begin);
+					KeySelector end =
+					    firstGreaterOrEqual(BinaryWriter::toValue(bigEndian64(canDeleteLowerThan), Unversioned())
+					                            .withPrefix(idempotencyIdKeys.begin));
+					// Only read the amount of bytes we're overshooting our target by
+					auto limits = GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
+					                             idmpKeySize - SERVER_KNOBS->IDEMPOTENCY_IDS_BYTE_TARGET);
+					RangeResult result = wait(tr->getRange(begin, end, limits));
+					if (result.size() > 0) {
+						// The keys we read comprise about the right number of bytes to delete to get to our target, so
+						// delete them all (and record the highest expired version)
+						tr->clear(KeyRangeRef(result.front().key, keyAfter(result.back().key)));
+						Version expiredVersion;
+						BinaryReader rd(result.back().key, Unversioned());
+						rd.readBytes(idempotencyIdKeys.begin.size());
+						rd >> expiredVersion;
+						expiredVersion = bigEndian64(expiredVersion);
+						tr->set(idempotencyIdsExpiredVersion,
+						        ObjectWriter::toValue(IdempotencyIdsExpiredVersion{ expiredVersion }, Unversioned()));
+					}
+				}
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+		wait(delay(SERVER_KNOBS->IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL));
+	}
+}
+
 namespace {
 
 struct TransactionStateResolveContext {
@@ -2733,6 +2801,9 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(ddMetricsRequestServer(proxy, db));
 	addActor.send(reportTxnTagCommitCost(proxy.id(), db, &commitData.ssTrTagCommitCost));
+	if (firstProxy) {
+		addActor.send(idempotencyIdsCleaner(openDBOnServer(db)));
+	}
 
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));

@@ -34,6 +34,17 @@ struct CommitResult {
 	uint16_t batchIndex;
 };
 
+// The type of the value stored at the key |idempotencyIdsExpiredVersion|
+struct IdempotencyIdsExpiredVersion {
+	static constexpr auto file_identifier = 3746945;
+	Version expired = 0;
+
+	template <class Archive>
+	void serialize(Archive& ar) {
+		serializer(ar, expired);
+	}
+};
+
 // See design/idempotency_ids.md for more information. Designed so that the common case of a random 16 byte id does not
 // usually require indirection. Either invalid or an id with length >= 16 and < 256.
 struct IdempotencyIdRef {

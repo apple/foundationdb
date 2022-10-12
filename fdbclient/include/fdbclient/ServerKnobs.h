@@ -985,6 +985,11 @@ public:
 	std::string REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT;
 	std::string REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT;
 
+	// Idempotency ids
+	int64_t IDEMPOTENCY_IDS_BYTE_TARGET;
+	int64_t IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL;
+	int64_t IDEMPOTENCY_IDS_MIN_AGE_SECONDS;
+
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);
 };
