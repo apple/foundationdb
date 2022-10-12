@@ -167,8 +167,13 @@ struct TokenCacheImpl {
 ACTOR Future<Void> tokenCacheAudit(TokenCacheImpl* self) {
 	state boost::unordered_set<AuditEntry> audits;
 	state boost::unordered_set<AuditEntry>::iterator iter;
+	state double lastLoggedTime = 0;
 	loop {
-		wait(delay(FLOW_KNOBS->AUDIT_TIME_WINDOW));
+		auto const timeSinceLog = g_network->timer() - lastLoggedTime;
+		if (timeSinceLog < FLOW_KNOBS->AUDIT_TIME_WINDOW) {
+			wait(delay(FLOW_KNOBS->AUDIT_TIME_WINDOW - timeSinceLog));
+		}
+		lastLoggedTime = g_network->timer();
 		audits.swap(self->usedTokens);
 		for (iter = audits.begin(); iter != audits.end(); ++iter) {
 			CODE_PROBE(true, "Audit Logging Running");
@@ -299,7 +304,7 @@ bool TokenCacheImpl::validate(TenantNameRef name, StringRef token) {
 		TraceEvent(SevWarn, "TenantTokenMismatch").detail("From", peer).detail("Tenant", name.toString());
 		return false;
 	}
-	// autit logging
+	// audit logging
 	usedTokens.insert(AuditEntry(peer, *cachedEntry.get()));
 	return true;
 }
