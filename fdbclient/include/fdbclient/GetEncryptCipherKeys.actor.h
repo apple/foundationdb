@@ -59,11 +59,12 @@ Future<Void> onEncryptKeyProxyChange(Reference<AsyncVar<T> const> db) {
 
 ACTOR template <class T>
 Future<EKPGetLatestBaseCipherKeysReply> getUncachedLatestEncryptCipherKeys(Reference<AsyncVar<T> const> db,
-                                                                           EKPGetLatestBaseCipherKeysRequest request) {
+                                                                           EKPGetLatestBaseCipherKeysRequest request,
+                                                                           BlobCipherMetrics::UsageType usageType) {
 	Optional<EncryptKeyProxyInterface> proxy = db->get().encryptKeyProxy;
 	if (!proxy.present()) {
 		// Wait for onEncryptKeyProxyChange.
-		TraceEvent("GetLatestEncryptCipherKeys_EncryptKeyProxyNotPresent");
+		TraceEvent("GetLatestEncryptCipherKeys_EncryptKeyProxyNotPresent").detail("UsageType", toString(usageType));
 		return Never();
 	}
 	request.reply.reset();
@@ -117,7 +118,7 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getL
 	// Fetch any uncached cipher keys.
 	state double startTime = now();
 	loop choose {
-		when(EKPGetLatestBaseCipherKeysReply reply = wait(getUncachedLatestEncryptCipherKeys(db, request))) {
+		when(EKPGetLatestBaseCipherKeysReply reply = wait(getUncachedLatestEncryptCipherKeys(db, request, usageType))) {
 			// Insert base cipher keys into cache and construct result.
 			for (const EKPBaseCipherDetails& details : reply.baseCipherDetails) {
 				EncryptCipherDomainId domainId = details.encryptDomainId;
@@ -167,11 +168,12 @@ Future<Reference<BlobCipherKey>> getLatestEncryptCipherKey(Reference<AsyncVar<T>
 
 ACTOR template <class T>
 Future<EKPGetBaseCipherKeysByIdsReply> getUncachedEncryptCipherKeys(Reference<AsyncVar<T> const> db,
-                                                                    EKPGetBaseCipherKeysByIdsRequest request) {
+                                                                    EKPGetBaseCipherKeysByIdsRequest request,
+                                                                    BlobCipherMetrics::UsageType usageType) {
 	Optional<EncryptKeyProxyInterface> proxy = db->get().encryptKeyProxy;
 	if (!proxy.present()) {
 		// Wait for onEncryptKeyProxyChange.
-		TraceEvent("GetEncryptCipherKeys_EncryptKeyProxyNotPresent");
+		TraceEvent("GetEncryptCipherKeys_EncryptKeyProxyNotPresent").detail("UsageType", toString(usageType));
 		return Never();
 	}
 	request.reply.reset();
@@ -232,7 +234,7 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncry
 	// Fetch any uncached cipher keys.
 	state double startTime = now();
 	loop choose {
-		when(EKPGetBaseCipherKeysByIdsReply reply = wait(getUncachedEncryptCipherKeys(db, request))) {
+		when(EKPGetBaseCipherKeysByIdsReply reply = wait(getUncachedEncryptCipherKeys(db, request, usageType))) {
 			std::unordered_map<BaseCipherIndex, EKPBaseCipherDetails, boost::hash<BaseCipherIndex>> baseCipherKeys;
 			for (const EKPBaseCipherDetails& baseDetails : reply.baseCipherDetails) {
 				BaseCipherIndex baseIdx = std::make_pair(baseDetails.encryptDomainId, baseDetails.baseCipherId);
