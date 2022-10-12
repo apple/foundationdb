@@ -616,6 +616,10 @@ Future<Void> DDTxnProcessor::waitDDTeamInfoPrintSignal() const {
 	return DDTxnProcessorImpl::waitDDTeamInfoPrintSignal(cx);
 }
 
+Future<std::vector<ProcessData>> DDTxnProcessor::getWorkers() const {
+	return ::getWorkers(cx);
+}
+
 Future<ServerWorkerInfos> DDMockTxnProcessor::getServerListAndProcessClasses() {
 	ServerWorkerInfos res;
 	for (auto& [_, mss] : mgs->allServers) {
@@ -780,4 +784,9 @@ Future<std::pair<Optional<StorageMetrics>, int>> DDMockTxnProcessor::waitStorage
     int shardLimit,
     int expectedShardCount) const {
 	return Future<std::pair<Optional<StorageMetrics>, int>>();
+}
+
+// FIXME: finish implementation
+Future<std::vector<ProcessData>> DDMockTxnProcessor::getWorkers() const {
+	return Future<std::vector<ProcessData>>();
 }
