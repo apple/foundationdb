@@ -246,6 +246,8 @@ private:
 
 		if (cache->refreshMode == TenantEntryCacheRefreshMode::WATCH) {
 			// Entry not found. Do a point refresh
+			// TODO: Don't initiate refresh if tenantId < maxTenantId (stored as a system key currently) as we know that
+			// such a tenant does not exist (it has either never existed or has been deleted)
 			wait(refreshCacheById(tenantId, cache, TenantEntryCacheRefreshReason::CACHE_MISS));
 		} else {
 			// Entry not found. Refresh cacheEntries by scanning underlying KeyRange.
