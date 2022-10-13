@@ -717,6 +717,12 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 		}
 	}
 
+	for (const auto& versionIndexer : dbi.versionIndexers) {
+		if (versionIndexer.address() == address) {
+			return true;
+		}
+	}
+
 	for (const auto& grvProxy : dbi.client.grvProxies) {
 		if (grvProxy.addresses().contains(address)) {
 			return true;
@@ -1743,6 +1749,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		DUMPTOKEN(recruited.commitProxy);
 		DUMPTOKEN(recruited.grvProxy);
 		DUMPTOKEN(recruited.resolver);
+		DUMPTOKEN(recruited.versionIndexer);
 		DUMPTOKEN(recruited.storage);
 		DUMPTOKEN(recruited.debugPing);
 		DUMPTOKEN(recruited.coordinationPing);
@@ -2561,6 +2568,20 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				    recruited, forwardError(errors, Role::RESOLVER, recruited.id(), resolver(recruited, req, dbInfo))));
 				req.reply.send(recruited);
 			}
+			when(InitializeVersionIndexerRequest req = waitNext(interf.versionIndexer.getFuture())) {
+				LocalLineage _;
+				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::VersionIndexer;
+				VersionIndexerInterface recruited;
+				recruited.locality = locality;
+				recruited.initEndpoints();
+				startRole(Role::VERSION_INDEXER, recruited.id(), interf.id());
+				DUMPTOKEN(recruited.waitFailure);
+				errorForwarders.add(
+				    zombie(recruited,
+				           forwardError(
+				               errors, Role::VERSION_INDEXER, recruited.id(), versionIndexer(recruited, req, dbInfo))));
+				req.reply.send(recruited);
+			}
 			when(InitializeLogRouterRequest req = waitNext(interf.logRouter.getFuture())) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::LogRouter;
@@ -2604,10 +2625,16 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			}
 			when(EventLogRequest req = waitNext(interf.eventLogRequest.getFuture())) {
 				TraceEventFields e;
-				if (req.getLastError)
+				if (req.getLastError) {
 					e = latestEventCache.getLatestError();
-				else
+					TraceEvent("EventLogRequestError", interf.id())
+						.detail("Error", e.toString());
+				} else {
 					e = latestEventCache.get(req.eventName.toString());
+					TraceEvent("EventLogRequest", interf.id())
+						.detail("Event", req.eventName.toString())
+						.detail("Message", e.toString());
+				}
 				req.reply.send(e);
 			}
 			when(TraceBatchDumpRequest req = waitNext(interf.traceBatchDumpRequest.getFuture())) {
@@ -3551,3 +3578,4 @@ const Role Role::COORDINATOR("Coordinator", "CD");
 const Role Role::BACKUP("Backup", "BK");
 const Role Role::ENCRYPT_KEY_PROXY("EncryptKeyProxy", "EP");
 const Role Role::CONSISTENCYSCAN("ConsistencyScan", "CS");
+const Role Role::VERSION_INDEXER("VersionIndexer", "VI");

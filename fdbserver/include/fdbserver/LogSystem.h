@@ -747,11 +747,15 @@ struct LogPushData : NonCopyable {
 	void addTxsTag();
 
 	// addTag() adds a tag for the *next* message to be added
-	void addTag(Tag tag) { next_message_tags.push_back(tag); }
+	void addTag(Tag tag) {
+		next_message_tags.push_back(tag);
+		writtenTags.insert(tag);
+	}
 
 	template <class T>
 	void addTags(T tags) {
 		next_message_tags.insert(next_message_tags.end(), tags.begin(), tags.end());
+		writtenTags.insert(tags.begin(), tags.end());
 	}
 
 	// Add transaction info to be written before the first mutation in the transaction.
@@ -759,12 +763,12 @@ struct LogPushData : NonCopyable {
 
 	// copy written_tags, after filtering, into given set
 	void saveTags(std::set<Tag>& filteredTags) const {
-		for (const auto& tag : written_tags) {
+		for (const auto& tag : writtenTags) {
 			filteredTags.insert(tag);
 		}
 	}
 
-	void addWrittenTags(const std::set<Tag>& tags) { written_tags.insert(tags.begin(), tags.end()); }
+	void addWrittenTags(const std::set<Tag>& tags) { writtenTags.insert(tags.begin(), tags.end()); }
 
 	void getLocations(const std::set<Tag>& tags, std::set<uint16_t>& writtenTLogs) {
 		std::vector<Tag> vtags(tags.begin(), tags.end());
@@ -812,11 +816,14 @@ struct LogPushData : NonCopyable {
 	// getAllMessages() and is used before writing any other mutations.
 	void setMutations(uint32_t totalMutations, VectorRef<StringRef> mutations);
 
+	// Returns the set of tags these to which these mutations have been written.
+	const std::unordered_set<Tag>& getWrittenTags() const { return writtenTags; }
+
 private:
 	Reference<ILogSystem> logSystem;
+	std::unordered_set<Tag> writtenTags;
 	std::vector<Tag> next_message_tags;
 	std::vector<Tag> prev_tags;
-	std::set<Tag> written_tags;
 	std::vector<BinaryWriter> messagesWriter;
 	std::vector<bool> messagesWritten; // if messagesWriter has written anything
 	std::vector<int> msg_locations;
@@ -898,7 +905,6 @@ void LogPushData::writeTypedMessage(T const& item, bool metadataMessage, bool al
 			wr.serializeBytes((uint8_t*)from.getData() + firstOffset, firstLength);
 		}
 	}
-	written_tags.insert(next_message_tags.begin(), next_message_tags.end());
 	next_message_tags.clear();
 }
 

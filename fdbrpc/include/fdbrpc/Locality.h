@@ -50,6 +50,7 @@ struct ProcessClass {
 		BlobWorkerClass,
 		EncryptKeyProxyClass,
 		ConsistencyScanClass,
+		VersionIndexerClass,
 		InvalidClass = -1
 	};
 
@@ -77,6 +78,7 @@ struct ProcessClass {
 	static_assert(ProcessClass::BlobWorkerClass == 19);
 	static_assert(ProcessClass::EncryptKeyProxyClass == 20);
 	static_assert(ProcessClass::ConsistencyScanClass == 21);
+	static_assert(ProcessClass::VersionIndexerClass == 22);
 	static_assert(ProcessClass::InvalidClass == -1);
 
 	enum Fitness {
@@ -105,6 +107,7 @@ struct ProcessClass {
 		StorageCache,
 		Backup,
 		EncryptKeyProxy,
+		VersionIndexer,
 		Worker, // used for actor lineage tracking
 		NoRole
 	};
@@ -150,6 +153,7 @@ public:
 		else if (s=="storage_cache") _class = StorageCacheClass;
 		else if (s=="backup") _class = BackupClass;
 		else if (s=="encrypt_key_proxy") _class = EncryptKeyProxyClass;
+		else if (s=="version_indexer") _class = VersionIndexerClass;
 		else _class = InvalidClass;
 	}
 
@@ -181,6 +185,7 @@ public:
 		else if (classStr=="storage_cache") _class = StorageCacheClass;
 		else if (classStr=="backup") _class = BackupClass;
 		else if (classStr=="encrypt_key_proxy") _class = EncryptKeyProxyClass;
+		else if (classStr=="version_indexer") _class = VersionIndexerClass;
 		else _class = InvalidClass;
 
 		if (sourceStr=="command_line") _source = CommandLineSource;
@@ -222,6 +227,7 @@ public:
 			case StorageCacheClass: return "storage_cache";
 			case BackupClass: return "backup";
 			case EncryptKeyProxyClass: return "encrypt_key_proxy";
+			case VersionIndexerClass: return "version_indexer";
 			default: return "invalid";
 		}
 	}
@@ -249,6 +255,8 @@ public:
 		serializer(ar, _class, _source);
 	}
 };
+
+StringRef to_string(ProcessClass::ClusterRole role);
 
 struct LocalityData {
 	std::map<Standalone<StringRef>, Optional<Standalone<StringRef>>> _data;

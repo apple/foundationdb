@@ -370,6 +370,7 @@ static std::set<int> const& normalMasterErrors() {
 		s.insert(error_code_commit_proxy_failed);
 		s.insert(error_code_grv_proxy_failed);
 		s.insert(error_code_resolver_failed);
+		s.insert(error_code_version_indexer_failed);
 		s.insert(error_code_backup_worker_failed);
 		s.insert(error_code_recruitment_failed);
 		s.insert(error_code_no_more_servers);
@@ -445,8 +446,9 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 			addActor.getFuture().pop();
 		}
 
-		CODE_PROBE(
-		    err.code() == error_code_tlog_failed, "Master: terminated due to tLog failure", probe::decoration::rare);
+		CODE_PROBE(err.code() == error_code_tlog_failed,
+			   "Master: terminated due to tLog failure",
+			   probe::decoration::rare);
 		CODE_PROBE(err.code() == error_code_commit_proxy_failed,
 		           "Master: terminated due to commit proxy failure",
 		           probe::decoration::rare);
@@ -456,6 +458,9 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 		CODE_PROBE(err.code() == error_code_resolver_failed,
 		           "Master: terminated due to resolver failure",
 		           probe::decoration::rare);
+		CODE_PROBE(err.code() == error_code_version_indexer_failed,
+		           "Master: terminated due to version indexer failure",
+			   probe::decoration::rare);
 		CODE_PROBE(err.code() == error_code_backup_worker_failed,
 		           "Master: terminated due to backup worker failure",
 		           probe::decoration::rare);

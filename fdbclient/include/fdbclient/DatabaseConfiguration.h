@@ -212,6 +212,10 @@ struct DatabaseConfiguration {
 	int32_t resolverCount;
 	int32_t autoResolverCount;
 
+	// Version Indexers
+	int32_t versionIndexerCount;
+	int32_t autoVersionIndexerCount;
+
 	// TLogs
 	Reference<IReplicationPolicy> tLogPolicy;
 	int32_t desiredTLogCount;
@@ -279,6 +283,12 @@ struct DatabaseConfiguration {
 		if (resolverCount == -1)
 			return autoResolverCount;
 		return resolverCount;
+	}
+	int32_t getDesiredVersionIndexers() const {
+		if (versionIndexerCount == -1) {
+			return autoVersionIndexerCount;
+		}
+		return versionIndexerCount;
 	}
 	int32_t getDesiredLogs() const {
 		if (desiredTLogCount == -1)

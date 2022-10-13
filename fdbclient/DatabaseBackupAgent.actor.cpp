@@ -362,7 +362,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 					if ((!prevAdjacent || !nextAdjacent) &&
 					    rangeCount > ((prevAdjacent || nextAdjacent) ? CLIENT_KNOBS->BACKUP_MAP_KEY_UPPER_LIMIT
 					                                                 : CLIENT_KNOBS->BACKUP_MAP_KEY_LOWER_LIMIT)) {
-						CODE_PROBE(true, "range insert delayed because too versionMap is too large");
+						CODE_PROBE(true, "range insert delayed because versionMap is too large");
 
 						if (rangeCount > CLIENT_KNOBS->BACKUP_MAP_KEY_UPPER_LIMIT)
 							TraceEvent(SevWarnAlways, "DBA_KeyRangeMapTooLarge").log();

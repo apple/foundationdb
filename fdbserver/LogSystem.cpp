@@ -283,9 +283,9 @@ LogPushData::LogPushData(Reference<ILogSystem> logSystem, int tlogCount) : logSy
 
 void LogPushData::addTxsTag() {
 	if (logSystem->getTLogVersion() >= TLogVersion::V4) {
-		next_message_tags.push_back(logSystem->getRandomTxsTag());
+		addTag(logSystem->getRandomTxsTag());
 	} else {
-		next_message_tags.push_back(txsTag);
+		addTag(txsTag);
 	}
 }
 
@@ -306,7 +306,6 @@ void LogPushData::writeMessage(StringRef rawMessageWithoutLength, bool usePrevio
 		}
 		msg_locations.clear();
 		logSystem->getPushLocations(prev_tags, msg_locations);
-		written_tags.insert(next_message_tags.begin(), next_message_tags.end());
 		next_message_tags.clear();
 	}
 	uint32_t subseq = this->subsequence++;

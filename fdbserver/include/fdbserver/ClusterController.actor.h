@@ -567,7 +567,7 @@ public:
 		}
 	}
 
-	// Log the reason why the worker is considered as unavailable.
+	// Log the reason why the worker is considered as unavailable as a tlog.
 	void logWorkerUnavailable(const Severity severity,
 	                          const UID& id,
 	                          const std::string& method,
@@ -904,7 +904,7 @@ public:
 			}
 			if (fitness == ProcessClass::NeverAssign) {
 				logWorkerUnavailable(
-				    SevDebug, id, "complex", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
+				    SevDebug, id, "simple", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
 				continue;
 			}
 			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
@@ -1503,10 +1503,17 @@ public:
 		throw no_more_servers();
 	}
 
+	// Recruit workers for a specific role.
+	// Prefer workers with
+	//     1. better fitness
+	//     2. not previously used
+	//     3. not a long-lived stateless process
+	//     4. something about preferred sharing.
 	std::vector<WorkerDetails> getWorkersForRoleInDatacenter(
 	    Optional<Standalone<StringRef>> const& dcId,
 	    ProcessClass::ClusterRole role,
 	    int amount,
+	    ProcessClass::Fitness unacceptableFitness,
 	    DatabaseConfiguration const& conf,
 	    std::map<Optional<Standalone<StringRef>>, int>& id_used,
 	    std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
@@ -1521,23 +1528,52 @@ public:
 			return results;
 		}
 
-		for (auto& it : id_worker) {
-			auto fitness = it.second.details.processClass.machineClassFitness(role);
-			if (workerAvailable(it.second, checkStable) &&
-			    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
-			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
-			    it.second.details.interf.locality.dcId() == dcId &&
-			    (!minWorker.present() ||
-			     (it.second.details.interf.id() != minWorker.get().worker.interf.id() &&
-			      (fitness < minWorker.get().fitness ||
-			       (fitness == minWorker.get().fitness && id_used[it.first] <= minWorker.get().used))))) {
-				auto sharing = preferredSharing.find(it.first);
-				fitness_workers[std::make_tuple(fitness,
-				                                id_used[it.first],
-				                                isLongLivedStateless(it.first),
-				                                sharing != preferredSharing.end() ? sharing->second : 1e6)]
-				    .push_back(it.second.details);
+		for (const auto& [worker_process_id, worker_info] : id_worker) {
+			const WorkerDetails& worker_details = worker_info.details;
+			auto fitness = worker_details.processClass.machineClassFitness(role);
+			auto sharing = preferredSharing.find(worker_process_id);
+			bool long_lived_stateless = isLongLivedStateless(worker_process_id);
+
+			if (minWorker.present() && worker_details.interf.id() == minWorker.get().worker.interf.id()) {
+				// Worker has already been assigned to role.
+				continue;
 			}
+			if (worker_details.interf.locality.dcId() != dcId) {
+				// Worker is not in the target datacenter.
+				continue;
+			}
+			if (fitness >= unacceptableFitness) {
+				// Worker's fitness is unacceptable.
+				continue;
+			}
+			if (!workerAvailable(worker_info, checkStable)) {
+				// Worker is unavailable.
+				continue;
+			}
+			if (conf.isExcludedServer(worker_details.interf.addresses())) {
+				// Worker is excluded from the cluster.
+				continue;
+			}
+			if (isExcludedDegradedServer(worker_details.interf.addresses())) {
+				// Worker is exclude from the cluster due to degradation.
+				continue;
+			}
+			if (minWorker.present()) {
+				if (fitness > minWorker.get().fitness) {
+					// Worker has worse fitness than "minWorker".
+					continue;
+				}
+				if (fitness == minWorker.get().fitness && id_used[worker_process_id] > minWorker.get().used) {
+					// Worker has more assignments than "minWorker".
+					continue;
+				}
+			}
+
+			fitness_workers[std::make_tuple(fitness,
+			                                id_used[worker_process_id],
+			                                long_lived_stateless,
+			                                sharing != preferredSharing.end() ? sharing->second : 1e6)]
+			    .push_back(worker_details);
 		}
 
 		for (auto& it : fitness_workers) {
@@ -1701,8 +1737,12 @@ public:
 			result.remoteTLogs.push_back(remoteLogs[i].interf);
 		}
 
-		auto logRouters = getWorkersForRoleInDatacenter(
-		    req.dcId, ProcessClass::LogRouter, req.logRouterCount, req.configuration, id_used);
+		auto logRouters = getWorkersForRoleInDatacenter(req.dcId,
+		                                                ProcessClass::LogRouter,
+		                                                req.logRouterCount,
+		                                                ProcessClass::ExcludeFit,
+		                                                req.configuration,
+		                                                id_used);
 		for (int i = 0; i < logRouters.size(); i++) {
 			result.logRouters.push_back(logRouters[i].interf);
 		}
@@ -1796,7 +1836,9 @@ public:
 
 		// If one of the first process recruitments is forced to share a process, allow all of next recruitments
 		// to also share a process.
-		auto maxUsed = std::max({ first_commit_proxy.used, first_grv_proxy.used, first_resolver.used });
+		auto maxUsed = std::max({ first_commit_proxy.used,
+				          first_grv_proxy.used,
+					  first_resolver.used });
 		first_commit_proxy.used = maxUsed;
 		first_grv_proxy.used = maxUsed;
 		first_resolver.used = maxUsed;
@@ -1804,6 +1846,7 @@ public:
 		auto commit_proxies = getWorkersForRoleInDatacenter(dcId,
 		                                                    ProcessClass::CommitProxy,
 		                                                    req.configuration.getDesiredCommitProxies(),
+		                                                    ProcessClass::ExcludeFit,
 		                                                    req.configuration,
 		                                                    id_used,
 		                                                    preferredSharing,
@@ -1811,6 +1854,7 @@ public:
 		auto grv_proxies = getWorkersForRoleInDatacenter(dcId,
 		                                                 ProcessClass::GrvProxy,
 		                                                 req.configuration.getDesiredGrvProxies(),
+		                                                 ProcessClass::ExcludeFit,
 		                                                 req.configuration,
 		                                                 id_used,
 		                                                 preferredSharing,
@@ -1818,16 +1862,26 @@ public:
 		auto resolvers = getWorkersForRoleInDatacenter(dcId,
 		                                               ProcessClass::Resolver,
 		                                               req.configuration.getDesiredResolvers(),
+		                                               ProcessClass::ExcludeFit,
 		                                               req.configuration,
 		                                               id_used,
 		                                               preferredSharing,
 		                                               first_resolver);
+		auto version_indexers = getWorkersForRoleInDatacenter(dcId,
+		                                                      ProcessClass::VersionIndexer,
+		                                                      req.configuration.getDesiredVersionIndexers(),
+		                                                      ProcessClass::ExcludeFit,
+		                                                      req.configuration,
+		                                                      id_used,
+		                                                      preferredSharing);
 		for (int i = 0; i < commit_proxies.size(); i++)
 			result.commitProxies.push_back(commit_proxies[i].interf);
 		for (int i = 0; i < grv_proxies.size(); i++)
 			result.grvProxies.push_back(grv_proxies[i].interf);
 		for (int i = 0; i < resolvers.size(); i++)
 			result.resolvers.push_back(resolvers[i].interf);
+		for (int i = 0; i < version_indexers.size(); i++)
+			result.versionIndexers.push_back(version_indexers[i].interf);
 
 		if (req.maxOldLogRouters > 0) {
 			if (tlogs.size() == 1) {
@@ -1845,8 +1899,8 @@ public:
 			const int nBackup = std::max<int>(
 			    (req.configuration.desiredLogRouterCount > 0 ? req.configuration.desiredLogRouterCount : tlogs.size()),
 			    req.maxOldLogRouters);
-			auto backupWorkers =
-			    getWorkersForRoleInDatacenter(dcId, ProcessClass::Backup, nBackup, req.configuration, id_used);
+			auto backupWorkers = getWorkersForRoleInDatacenter(
+			    dcId, ProcessClass::Backup, nBackup, ProcessClass::ExcludeFit, req.configuration, id_used);
 			std::transform(backupWorkers.begin(),
 			               backupWorkers.end(),
 			               std::back_inserter(result.backupWorkers),
@@ -1872,7 +1926,11 @@ public:
 		     RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS,
 		                 req.configuration.getDesiredResolvers(),
 		                 ProcessClass::Resolver)
-		         .betterCount(RoleFitness(resolvers, ProcessClass::Resolver, id_used)))) {
+		         .betterCount(RoleFitness(resolvers, ProcessClass::Resolver, id_used)) ||
+		     RoleFitness(SERVER_KNOBS->EXPECTED_VERSION_INDEXER_FITNESS,
+		                 req.configuration.getDesiredVersionIndexers(),
+		                 ProcessClass::VersionIndexer)
+		         .betterCount(RoleFitness(version_indexers, ProcessClass::VersionIndexer, id_used)))) {
 			return operation_failed();
 		}
 
@@ -2005,7 +2063,7 @@ public:
 
 			auto datacenters = getDatacenters(req.configuration);
 
-			std::tuple<RoleFitness, RoleFitness, RoleFitness> bestFitness;
+			std::tuple<RoleFitness, RoleFitness, RoleFitness, RoleFitness> bestFitness;
 			int numEquivalent = 1;
 			Optional<Key> bestDC;
 
@@ -2039,7 +2097,9 @@ public:
 
 					// If one of the first process recruitments is forced to share a process, allow all of next
 					// recruitments to also share a process.
-					auto maxUsed = std::max({ first_commit_proxy.used, first_grv_proxy.used, first_resolver.used });
+					auto maxUsed = std::max({ first_commit_proxy.used,
+					                          first_grv_proxy.used,
+					                          first_resolver.used });
 					first_commit_proxy.used = maxUsed;
 					first_grv_proxy.used = maxUsed;
 					first_resolver.used = maxUsed;
@@ -2047,6 +2107,7 @@ public:
 					auto commit_proxies = getWorkersForRoleInDatacenter(dcId,
 					                                                    ProcessClass::CommitProxy,
 					                                                    req.configuration.getDesiredCommitProxies(),
+					                                                    ProcessClass::ExcludeFit,
 					                                                    req.configuration,
 					                                                    used,
 					                                                    preferredSharing,
@@ -2055,6 +2116,7 @@ public:
 					auto grv_proxies = getWorkersForRoleInDatacenter(dcId,
 					                                                 ProcessClass::GrvProxy,
 					                                                 req.configuration.getDesiredGrvProxies(),
+					                                                 ProcessClass::ExcludeFit,
 					                                                 req.configuration,
 					                                                 used,
 					                                                 preferredSharing,
@@ -2063,32 +2125,45 @@ public:
 					auto resolvers = getWorkersForRoleInDatacenter(dcId,
 					                                               ProcessClass::Resolver,
 					                                               req.configuration.getDesiredResolvers(),
+					                                               ProcessClass::ExcludeFit,
 					                                               req.configuration,
 					                                               used,
 					                                               preferredSharing,
 					                                               first_resolver);
 
+					auto version_indexers = getWorkersForRoleInDatacenter(dcId,
+					                                                      ProcessClass::VersionIndexer,
+					                                                      req.configuration.getDesiredVersionIndexers(),
+					                                                      ProcessClass::ExcludeFit,
+					                                                      req.configuration,
+					                                                      used,
+					                                                      preferredSharing);
+
 					auto fitness = std::make_tuple(RoleFitness(commit_proxies, ProcessClass::CommitProxy, used),
 					                               RoleFitness(grv_proxies, ProcessClass::GrvProxy, used),
-					                               RoleFitness(resolvers, ProcessClass::Resolver, used));
+					                               RoleFitness(resolvers, ProcessClass::Resolver, used),
+					                               RoleFitness(version_indexers, ProcessClass::VersionIndexer, used));
 
 					if (dcId == clusterControllerDcId) {
 						bestFitness = fitness;
 						bestDC = dcId;
-						for (int i = 0; i < resolvers.size(); i++) {
-							result.resolvers.push_back(resolvers[i].interf);
-						}
 						for (int i = 0; i < commit_proxies.size(); i++) {
 							result.commitProxies.push_back(commit_proxies[i].interf);
 						}
 						for (int i = 0; i < grv_proxies.size(); i++) {
 							result.grvProxies.push_back(grv_proxies[i].interf);
 						}
+						for (int i = 0; i < resolvers.size(); i++) {
+							result.resolvers.push_back(resolvers[i].interf);
+						}
+						for (int i = 0; i < version_indexers.size(); i++) {
+							result.versionIndexers.push_back(version_indexers[i].interf);
+						}
 
 						if (req.configuration.backupWorkerEnabled) {
 							const int nBackup = std::max<int>(tlogs.size(), req.maxOldLogRouters);
 							auto backupWorkers = getWorkersForRoleInDatacenter(
-							    dcId, ProcessClass::Backup, nBackup, req.configuration, used);
+							    dcId, ProcessClass::Backup, nBackup, ProcessClass::ExcludeFit, req.configuration, used);
 							std::transform(backupWorkers.begin(),
 							               backupWorkers.end(),
 							               std::back_inserter(result.backupWorkers),
@@ -2131,7 +2206,9 @@ public:
 			    .detail("DesiredGrvProxies", req.configuration.getDesiredGrvProxies())
 			    .detail("ActualGrvProxies", result.grvProxies.size())
 			    .detail("DesiredResolvers", req.configuration.getDesiredResolvers())
-			    .detail("ActualResolvers", result.resolvers.size());
+			    .detail("ActualResolvers", result.resolvers.size())
+			    .detail("DesiredVersionIndexers", req.configuration.getDesiredVersionIndexers())
+			    .detail("ActualVersionIndexers", result.versionIndexers.size());
 
 			if (!goodRecruitmentTime.isReady() && checkGoodRecruitment &&
 			    (RoleFitness(
@@ -2148,7 +2225,11 @@ public:
 			     RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS,
 			                 req.configuration.getDesiredResolvers(),
 			                 ProcessClass::Resolver)
-			         .betterCount(std::get<2>(bestFitness)))) {
+			         .betterCount(std::get<2>(bestFitness)) ||
+			     RoleFitness(SERVER_KNOBS->EXPECTED_VERSION_INDEXER_FITNESS,
+			                 req.configuration.getDesiredVersionIndexers(),
+			                 ProcessClass::VersionIndexer)
+			         .betterCount(std::get<3>(bestFitness)))) {
 				throw operation_failed();
 			}
 
@@ -2194,12 +2275,14 @@ public:
 			TraceEvent(SevError, "NonDeterministicRecruitment")
 			    .detail("FirstFitness", firstFitness.toString())
 			    .detail("SecondFitness", secondFitness.toString())
-			    .detail("ClusterRole", role);
+			    .detail("ClusterRole", to_string(role))
+			    .detail("DesiredResolvers", conf.getDesiredResolvers())
+			    .detail("DesiredVersionIndexers", conf.getDesiredVersionIndexers());
 		}
 	}
 
 	RecruitFromConfigurationReply findWorkersForConfiguration(RecruitFromConfigurationRequest const& req) {
-		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req, true);
+		RecruitFromConfigurationReply rep = findWorkersForConfigurationDispatch(req, /*checkGoodRecruitment*/ true);
 		if (g_network->isSimulated()) {
 			try {
 				// FIXME: The logic to pick a satellite in a remote region is not
@@ -2217,7 +2300,8 @@ public:
 					}
 				}
 				if (!remoteDCUsedAsSatellite) {
-					RecruitFromConfigurationReply compare = findWorkersForConfigurationDispatch(req, false);
+					RecruitFromConfigurationReply compare =
+					    findWorkersForConfigurationDispatch(req, /*checkGoodRecruitment*/ false);
 
 					std::map<Optional<Standalone<StringRef>>, int> firstUsed;
 					std::map<Optional<Standalone<StringRef>>, int> secondUsed;
@@ -2270,6 +2354,17 @@ public:
 					               secondUsed,
 					               ProcessClass::Resolver,
 					               "Resolver");
+
+					updateIdUsed(rep.versionIndexers, firstUsed);
+					updateIdUsed(compare.versionIndexers, secondUsed);
+					compareWorkers(req.configuration,
+					               rep.versionIndexers,
+					               firstUsed,
+					               compare.versionIndexers,
+					               secondUsed,
+					               ProcessClass::VersionIndexer,
+					               "VersionIndexer");
+
 					updateIdUsed(rep.backupWorkers, firstUsed);
 					updateIdUsed(compare.backupWorkers, secondUsed);
 					compareWorkers(req.configuration,
@@ -2322,11 +2417,13 @@ public:
 			}
 
 			getWorkerForRoleInDatacenter(
-			    regions[0].dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
-			getWorkerForRoleInDatacenter(
 			    regions[0].dcId, ProcessClass::CommitProxy, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
 			getWorkerForRoleInDatacenter(
 			    regions[0].dcId, ProcessClass::GrvProxy, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
+			getWorkerForRoleInDatacenter(
+			    regions[0].dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
+			getWorkerForRoleInDatacenter(
+			    regions[0].dcId, ProcessClass::VersionIndexer, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
 
 			std::vector<Optional<Key>> dcPriority;
 			dcPriority.push_back(regions[0].dcId);
@@ -2527,6 +2624,25 @@ public:
 			resolverClasses.push_back(resolverWorker->second.details);
 		}
 
+		// Get version indexer classes
+		std::vector<WorkerDetails> versionIndexerClasses;
+		for (auto& it : dbi.versionIndexers) {
+			auto versionIndexerWorker = id_worker.find(it.locality.processId());
+			if (versionIndexerWorker == id_worker.end()) {
+				TraceEvent("NewRecruitmentIsWorse", id)
+				    .detail("Reason", "CannotFindVersionIndexer")
+				    .detail("ProcessID", it.locality.processId());
+				return false;
+			}
+			if (versionIndexerWorker->second.priorityInfo.isExcluded) {
+				TraceEvent("BetterMasterExists", id)
+				    .detail("Reason", "VersionIndexerExcluded")
+				    .detail("ProcessID", it.locality.processId());
+				return true;
+			}
+			versionIndexerClasses.push_back(versionIndexerWorker->second.details);
+		}
+
 		// Check master fitness. Don't return false if master is excluded in case all the processes are excluded, we
 		// still need master for recovery.
 		ProcessClass::Fitness oldMasterFit =
@@ -2702,6 +2818,7 @@ public:
 			newLogRoutersFit = RoleFitness(getWorkersForRoleInDatacenter(*remoteDC.begin(),
 			                                                             ProcessClass::LogRouter,
 			                                                             newRouterCount,
+			                                                             ProcessClass::ExcludeFit,
 			                                                             db.config,
 			                                                             id_used,
 			                                                             {},
@@ -2718,13 +2835,15 @@ public:
 			newLogRoutersFit.worstFit = ProcessClass::NeverAssign;
 		}
 
-		// Check proxy/grvProxy/resolver fitness
+		// Check proxy/grvProxy/resolver/versionIndexer fitness
 		updateIdUsed(commitProxyClasses, old_id_used);
 		updateIdUsed(grvProxyClasses, old_id_used);
 		updateIdUsed(resolverClasses, old_id_used);
+		updateIdUsed(versionIndexerClasses, old_id_used);
 		RoleFitness oldCommitProxyFit(commitProxyClasses, ProcessClass::CommitProxy, old_id_used);
 		RoleFitness oldGrvProxyFit(grvProxyClasses, ProcessClass::GrvProxy, old_id_used);
 		RoleFitness oldResolverFit(resolverClasses, ProcessClass::Resolver, old_id_used);
+		RoleFitness oldVersionIndexerFit(versionIndexerClasses, ProcessClass::VersionIndexer, old_id_used);
 
 		std::map<Optional<Standalone<StringRef>>, int> preferredSharing;
 		auto first_commit_proxy = getWorkerForRoleInDatacenter(clusterControllerDcId,
@@ -2751,13 +2870,16 @@ public:
 		                                                   preferredSharing,
 		                                                   true);
 		preferredSharing[first_resolver.worker.interf.locality.processId()] = 2;
-		auto maxUsed = std::max({ first_commit_proxy.used, first_grv_proxy.used, first_resolver.used });
+		auto maxUsed = std::max({ first_commit_proxy.used,
+				          first_grv_proxy.used,
+					  first_resolver.used });
 		first_commit_proxy.used = maxUsed;
 		first_grv_proxy.used = maxUsed;
 		first_resolver.used = maxUsed;
 		auto commit_proxies = getWorkersForRoleInDatacenter(clusterControllerDcId,
 		                                                    ProcessClass::CommitProxy,
 		                                                    db.config.getDesiredCommitProxies(),
+		                                                    ProcessClass::ExcludeFit,
 		                                                    db.config,
 		                                                    id_used,
 		                                                    preferredSharing,
@@ -2766,6 +2888,7 @@ public:
 		auto grv_proxies = getWorkersForRoleInDatacenter(clusterControllerDcId,
 		                                                 ProcessClass::GrvProxy,
 		                                                 db.config.getDesiredGrvProxies(),
+		                                                 ProcessClass::ExcludeFit,
 		                                                 db.config,
 		                                                 id_used,
 		                                                 preferredSharing,
@@ -2774,15 +2897,26 @@ public:
 		auto resolvers = getWorkersForRoleInDatacenter(clusterControllerDcId,
 		                                               ProcessClass::Resolver,
 		                                               db.config.getDesiredResolvers(),
+		                                               ProcessClass::ExcludeFit,
 		                                               db.config,
 		                                               id_used,
 		                                               preferredSharing,
 		                                               first_resolver,
 		                                               true);
+		auto version_indexers = getWorkersForRoleInDatacenter(clusterControllerDcId,
+		                                                      ProcessClass::VersionIndexer,
+		                                                      db.config.getDesiredVersionIndexers(),
+		                                                      ProcessClass::ExcludeFit,
+		                                                      db.config,
+		                                                      id_used,
+		                                                      preferredSharing,
+		                                                      Optional<WorkerFitnessInfo>(),
+		                                                      true);
 
 		RoleFitness newCommitProxyFit(commit_proxies, ProcessClass::CommitProxy, id_used);
 		RoleFitness newGrvProxyFit(grv_proxies, ProcessClass::GrvProxy, id_used);
 		RoleFitness newResolverFit(resolvers, ProcessClass::Resolver, id_used);
+		RoleFitness newVersionIndexerFit(version_indexers, ProcessClass::VersionIndexer, id_used);
 
 		// Check backup worker fitness
 		updateIdUsed(backup_workers, old_id_used);
@@ -2791,6 +2925,7 @@ public:
 		RoleFitness newBackupWorkersFit(getWorkersForRoleInDatacenter(clusterControllerDcId,
 		                                                              ProcessClass::Backup,
 		                                                              nBackup,
+		                                                              ProcessClass::ExcludeFit,
 		                                                              db.config,
 		                                                              id_used,
 		                                                              {},
@@ -2804,6 +2939,7 @@ public:
 		                              oldCommitProxyFit,
 		                              oldGrvProxyFit,
 		                              oldResolverFit,
+		                              oldVersionIndexerFit,
 		                              oldBackupWorkersFit,
 		                              oldRemoteTLogFit,
 		                              oldLogRoutersFit);
@@ -2812,6 +2948,7 @@ public:
 		                              newCommitProxyFit,
 		                              newGrvProxyFit,
 		                              newResolverFit,
+		                              newVersionIndexerFit,
 		                              newBackupWorkersFit,
 		                              newRemoteTLogFit,
 		                              newLogRoutersFit);
@@ -2830,6 +2967,8 @@ public:
 			    .detail("NewGrvProxyFit", newGrvProxyFit.toString())
 			    .detail("OldResolverFit", oldResolverFit.toString())
 			    .detail("NewResolverFit", newResolverFit.toString())
+			    .detail("OldVersionIndexerFit", oldVersionIndexerFit.toString())
+			    .detail("NewVersionIndexerFit", newVersionIndexerFit.toString())
 			    .detail("OldBackupWorkerFit", oldBackupWorkersFit.toString())
 			    .detail("NewBackupWorkerFit", newBackupWorkersFit.toString())
 			    .detail("OldRemoteFit", oldRemoteTLogFit.toString())
@@ -2855,6 +2994,8 @@ public:
 			    .detail("NewGrvProxyFit", newGrvProxyFit.toString())
 			    .detail("OldResolverFit", oldResolverFit.toString())
 			    .detail("NewResolverFit", newResolverFit.toString())
+			    .detail("OldVersionIndexerFit", oldVersionIndexerFit.toString())
+			    .detail("NewVersionIndexerFit", newVersionIndexerFit.toString())
 			    .detail("OldBackupWorkerFit", oldBackupWorkersFit.toString())
 			    .detail("NewBackupWorkerFit", newBackupWorkersFit.toString())
 			    .detail("OldRemoteFit", oldRemoteTLogFit.toString())
@@ -2890,6 +3031,10 @@ public:
 				return true;
 		}
 		for (const ResolverInterface& interf : dbInfo.resolvers) {
+			if (interf.locality.processId() == processId)
+				return true;
+		}
+		for (const VersionIndexerInterface& interf : dbInfo.versionIndexers) {
 			if (interf.locality.processId() == processId)
 				return true;
 		}
@@ -2937,6 +3082,10 @@ public:
 			idUsed[interf.processId]++;
 		}
 		for (const ResolverInterface& interf : dbInfo.resolvers) {
+			ASSERT(interf.locality.processId().present());
+			idUsed[interf.locality.processId()]++;
+		}
+		for (const VersionIndexerInterface& interf : dbInfo.versionIndexers) {
 			ASSERT(interf.locality.processId().present());
 			idUsed[interf.locality.processId()]++;
 		}
@@ -3176,6 +3325,12 @@ public:
 
 				for (const auto& resolver : dbi.resolvers) {
 					if (resolver.addresses().contains(server)) {
+						return true;
+					}
+				}
+
+				for (const auto& versionIndexer : dbi.versionIndexers) {
+					if (versionIndexer.addresses().contains(server)) {
 						return true;
 					}
 				}

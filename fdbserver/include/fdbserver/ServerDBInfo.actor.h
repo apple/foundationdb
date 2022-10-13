@@ -53,6 +53,7 @@ struct ServerDBInfo {
 	Optional<EncryptKeyProxyInterface> encryptKeyProxy;
 	Optional<ConsistencyScanInterface> consistencyScan;
 	std::vector<ResolverInterface> resolvers;
+	std::vector<VersionIndexerInterface> versionIndexers;
 	DBRecoveryCount
 	    recoveryCount; // A recovery count from DBCoreState.  A successful cluster recovery increments it twice;
 	                   // unsuccessful recoveries may increment it once. Depending on where the current master is in its
@@ -93,7 +94,8 @@ struct ServerDBInfo {
 		           logSystemConfig,
 		           priorCommittedLogServers,
 		           latencyBandConfig,
-		           infoGeneration);
+		           infoGeneration,
+		           versionIndexers);
 	}
 };
 
