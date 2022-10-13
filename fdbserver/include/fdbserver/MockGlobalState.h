@@ -30,7 +30,23 @@
 
 struct MockGlobalStateTester;
 
-enum class MockShardStatus { EMPTY = 0, COMPLETED, INFLIGHT, UNSET };
+enum class MockShardStatus {
+	EMPTY = 0, // data loss
+	COMPLETED,
+	INFLIGHT,
+	UNSET
+};
+
+inline bool isStatusTransitionValid(MockShardStatus from, MockShardStatus to) {
+	switch (from) {
+	case MockShardStatus::UNSET:
+	case MockShardStatus::EMPTY:
+	case MockShardStatus::INFLIGHT:
+		return to == MockShardStatus::COMPLETED || to == MockShardStatus::INFLIGHT || to == MockShardStatus::EMPTY;
+	case MockShardStatus::COMPLETED:
+		return to == MockShardStatus::EMPTY;
+	}
+}
 
 class MockStorageServer {
 	friend struct MockGlobalStateTester;
@@ -118,7 +134,7 @@ public:
 	 * Shard is in-flight.
 	 * * In mgs.shardMapping,the destination teams is non-empty for a given shard;
 	 * * For each MSS belonging to the source teams, mss.serverKeys[shard] = Completed
-	 * * For each MSS belonging to the destination teams, mss.serverKeys[shard] = InFlight
+	 * * For each MSS belonging to the destination teams, mss.serverKeys[shard] = InFlight|Completed
 	 * Shard is lost.
 	 * * In mgs.shardMapping,  the destination teams is empty for the given shard;
 	 * * For each MSS belonging to the source teams, mss.serverKeys[shard] = Empty

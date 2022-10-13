@@ -56,7 +56,19 @@ void MockStorageServer::setShardStatus(KeyRangeRef range, MockShardStatus status
 		newSize += it->cvalue().shardSize;
 	}
 	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
-		it.value() = ShardInfo{ status, newSize };
+		auto oldStatus = it.value().status;
+		if (isStatusTransitionValid(oldStatus, status)) {
+			it.value() = ShardInfo{ status, newSize };
+		} else if (oldStatus == MockShardStatus::COMPLETED && status == MockShardStatus::INFLIGHT) {
+			CODE_PROBE(true, "Shard already on server");
+		} else {
+			TraceEvent(SevError, "MockShardStatusTransitionError")
+			    .detail("From", oldStatus)
+			    .detail("To", status)
+			    .detail("ID", id)
+			    .detail("KeyBegin", range.begin.toHexString())
+			    .detail("KeyEnd", range.begin.toHexString());
+		}
 	}
 	serverKeys.coalesce(range);
 }

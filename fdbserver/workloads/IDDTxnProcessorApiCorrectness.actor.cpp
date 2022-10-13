@@ -151,9 +151,17 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		state KeyRangeMap<std::vector<StorageServerInterface>> inFlight;
 		state KeyRangeActorMap inFlightActors;
 		state double lastTime = now();
-
+		state int choice = 0;
 		loop {
+			choice = deterministicRandom()->randomInt(0, 2);
 
+			if (choice == 0) {
+
+			} else if (choice == 1) {
+
+			} else {
+				ASSERT(false);
+			}
 			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 			// Keep trying to get the moveKeysLock
 		}
