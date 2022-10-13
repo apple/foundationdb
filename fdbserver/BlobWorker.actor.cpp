@@ -225,8 +225,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	    resnapshotLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_RESNAPSHOT_PARALLELISM)),
 	    deltaWritesLock(new FlowLock(SERVER_KNOBS->BLOB_WORKER_DELTA_FILE_WRITE_PARALLELISM)),
 	    stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, initialSnapshotLock, resnapshotLock, deltaWritesLock),
-	    isEncryptionEnabled(
-	        isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION, db->clientInfo->get())) {}
+	    isEncryptionEnabled(isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION)) {}
 
 	bool managerEpochOk(int64_t epoch) {
 		if (epoch < currentManagerEpoch) {
@@ -1195,8 +1194,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 			deltaF = files.deltaFiles[deltaIdx];
 
 			if (deltaF.cipherKeysMeta.present()) {
-				ASSERT(isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION,
-				                               bwData->dbInfo->get().client));
+				ASSERT(isEncryptionOpSupported(EncryptOperationType::BLOB_GRANULE_ENCRYPTION));
 
 				BlobGranuleCipherKeysCtx keysCtx =
 				    wait(getGranuleCipherKeysFromKeysMeta(bwData, deltaF.cipherKeysMeta.get(), &filenameArena));

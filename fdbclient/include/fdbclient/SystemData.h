@@ -94,6 +94,13 @@ void decodeKeyServersValue(RangeResult result,
 
 extern const KeyRef clusterIdKey;
 
+extern const KeyRangeRef auditRange;
+extern const KeyRef auditPrefix;
+const Key auditRangeKey(const AuditType type, const UID& auditId, const KeyRef& key);
+const Key auditRangePrefix(const AuditType type, const UID& auditId);
+const Value auditStorageStateValue(const AuditStorageState& auditStorageState);
+AuditStorageState decodeAuditStorageState(const ValueRef& value);
+
 // "\xff/checkpoint/[[UID]] := [[CheckpointMetaData]]"
 extern const KeyRef checkpointPrefix;
 const Key checkpointKeyFor(UID checkpointID);
@@ -707,6 +714,9 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 extern const KeyRangeRef storageQuotaKeys;
 extern const KeyRef storageQuotaPrefix;
 Key storageQuotaKey(StringRef tenantName);
+
+extern const KeyRangeRef idempotencyIdKeys;
+extern const KeyRef idempotencyIdsExpiredVersion;
 
 #pragma clang diagnostic pop
 
