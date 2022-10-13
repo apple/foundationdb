@@ -2049,16 +2049,18 @@ int main(int argc, char* argv[]) {
 			// startOldSimulator();
 			opts.buildNetwork(argv[0]);
 			startNewSimulator(opts.printSimTime);
+			printf("[c++][sim2:%p][%s:%d](%s) using simulator!\n", g_network, __FILE_NAME__, __LINE__, __FUNCTION__);
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			openTracer(TracerType(deterministicRandom()->randomInt(static_cast<int>(TracerType::DISABLED),
 			                                                       static_cast<int>(TracerType::SIM_END))));
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
+			installGlobalSwiftConcurrencyHooks(g_network);
+			printf("[c++][net2:%p][%s:%d](%s) using simulator!\n", g_network, __FILE_NAME__, __LINE__, __FUNCTION__);
 
 			// FIXME(swift): This is test code, remove.
 			if (getenv("FDBSWIFTTEST")) {
-				//        printf("[c++][main] setting up Swift Concurrency hooks\n");
-				installGlobalSwiftConcurrencyHooks(g_network);
+				printf("[c++][main] setting up Swift Concurrency hooks\n");
 
 				// Test calling into Swift's fdbserver module.
 				using namespace fdbserver_swift;
@@ -2066,10 +2068,10 @@ int main(int argc, char* argv[]) {
 				if (val != 42)
 					abort();
 
-        		auto swiftCallingFlowActor = swiftCallsActor(); // spawns actor that will call Swift functions
+				auto swiftCallingFlowActor = swiftCallsActor(); // spawns actor that will call Swift functions
 
 				g_network->run();
-				while (true) {
+				while (true);
 					// ...
 				}
 			}
