@@ -106,6 +106,8 @@ public:
 	std::array<CounterSet, int(UsageType::MAX)> counterSets;
 };
 
+std::string toString(BlobCipherMetrics::UsageType type);
+
 // Encryption operations buffer management
 // Approach limits number of copies needed during encryption or decryption operations.
 // For encryption EncryptBuf is allocated using client supplied Arena and provided to AES library to capture
@@ -311,14 +313,14 @@ public:
 		if (refreshAtTS == std::numeric_limits<int64_t>::max()) {
 			return false;
 		}
-		return now() >= refreshAtTS ? true : false;
+		return now() + INetwork::TIME_EPS >= refreshAtTS ? true : false;
 	}
 
 	inline bool isExpired() {
 		if (expireAtTS == std::numeric_limits<int64_t>::max()) {
 			return false;
 		}
-		return now() >= expireAtTS ? true : false;
+		return now() + INetwork::TIME_EPS >= expireAtTS ? true : false;
 	}
 
 	void reset();

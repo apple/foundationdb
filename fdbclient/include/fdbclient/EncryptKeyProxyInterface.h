@@ -197,6 +197,7 @@ struct EKPGetLatestBaseCipherKeysReply {
 	}
 };
 
+// TODO: also used for blob metadata, fix name
 struct EKPGetLatestCipherKeysRequestInfo {
 	constexpr static FileIdentifier file_identifier = 2180516;
 	// Encryption domain identifier
@@ -206,7 +207,7 @@ struct EKPGetLatestCipherKeysRequestInfo {
 	EncryptCipherDomainNameRef domainName;
 
 	EKPGetLatestCipherKeysRequestInfo() : domainId(INVALID_ENCRYPT_DOMAIN_ID) {}
-	EKPGetLatestCipherKeysRequestInfo(const EncryptCipherDomainId dId, StringRef name, Arena& arena)
+	explicit EKPGetLatestCipherKeysRequestInfo(Arena& arena, const EncryptCipherDomainId dId, StringRef name)
 	  : domainId(dId), domainName(StringRef(arena, name)) {}
 
 	bool operator==(const EKPGetLatestCipherKeysRequestInfo& info) const {
@@ -261,16 +262,15 @@ struct EKPGetLatestBlobMetadataReply {
 
 struct EKPGetLatestBlobMetadataRequest {
 	constexpr static FileIdentifier file_identifier = 3821549;
-	std::vector<BlobMetadataDomainId> domainIds;
+	Standalone<VectorRef<EKPGetLatestCipherKeysRequestInfo>> domainInfos;
 	Optional<UID> debugId;
 	ReplyPromise<EKPGetLatestBlobMetadataReply> reply;
 
 	EKPGetLatestBlobMetadataRequest() {}
-	explicit EKPGetLatestBlobMetadataRequest(const std::vector<BlobMetadataDomainId>& ids) : domainIds(ids) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, domainIds, debugId, reply);
+		serializer(ar, domainInfos, debugId, reply);
 	}
 };
 
