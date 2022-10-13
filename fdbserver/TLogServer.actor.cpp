@@ -514,6 +514,15 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	std::set<Tag> unpoppedRecoveredTags;
 	std::map<Tag, Promise<Void>> waitingTags;
 
+	void wakeWaitingPeeks(std::set<Tag> tags) {
+		for (Tag tag : tags) {
+			auto iter = waitingTags.find(tag);
+			auto promise = iter->second;
+			waitingTags.erase(iter);
+			promise.send(Void());
+		}
+	}
+
 	Reference<TagData> getTagData(Tag tag) {
 		int idx = tag.toTagDataIndex();
 		if (idx >= tag_data.size()) {
@@ -2320,12 +2329,7 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 		// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 		logData->version.set(req.version);
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-			for (Tag tag : tags) {
-				auto iter = logData->waitingTags.find(tag);
-				auto promise = iter->second;
-				logData->waitingTags.erase(iter);
-				promise.send(Void());
-			}
+			logData->wakeWaitingPeeks(tags);
 			self->unknownCommittedVersions.push_front(std::make_tuple(req.version, req.tLogCount));
 			while (!self->unknownCommittedVersions.empty() &&
 			       std::get<0>(self->unknownCommittedVersions.back()) <= req.knownCommittedVersion) {
@@ -2849,12 +2853,7 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 					// actors
 					logData->version.set(ver);
 					if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-						for (Tag tag : tags) {
-							auto iter = logData->waitingTags.find(tag);
-							auto promise = iter->second;
-							logData->waitingTags.erase(iter);
-							promise.send(Void());
-						}
+						logData->wakeWaitingPeeks(tags);
 					}
 					wait(yield(TaskPriority::TLogCommit));
 				}
@@ -3261,14 +3260,6 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 							logData->version.set(qe.version);
 							logData->queueCommittedVersion.set(qe.version);
 
-							if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-								for (Tag tag : tags) {
-									auto iter = logData->waitingTags.find(tag);
-									auto promise = iter->second;
-									logData->waitingTags.erase(iter);
-									promise.send(Void());
-								}
-							}
 							while (self->bytesInput - self->bytesDurable >= recoverMemoryLimit) {
 								CODE_PROBE(true, "Flush excess data during TLog queue recovery");
 								TraceEvent("FlushLargeQueueDuringRecovery", self->dbgid)
