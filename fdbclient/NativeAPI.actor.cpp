@@ -7403,20 +7403,8 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
 		WaitMetricsRequest req(tenantInfo, keys, StorageMetrics(), StorageMetrics());
 		req.min.bytes = 0;
 		req.max.bytes = -1;
-		// if (tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
-		// 	TraceEvent(SevWarn, "AKNative0", debugId)
-		// 	    .detail("TenantId", tenantInfo.tenantId)
-		// 	    .detail("TenantName", tenantInfo.name.present() ? tenantInfo.name.get() : "not present"_sr)
-		// 	    .detail("Keys", keys.toString());
-		// }
 		StorageMetrics m = wait(loadBalance(
 		    locationInfo->locations(), &StorageServerInterface::waitMetrics, req, TaskPriority::DataDistribution));
-		// if (tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
-		// 	TraceEvent(SevWarn, "AKNative1", debugId)
-		// 	    .detail("TenantId", tenantInfo.tenantId)
-		// 	    .detail("TenantName", tenantInfo.name.present() ? tenantInfo.name.get() : "not present"_sr)
-		// 	    .detail("Bytes", m.bytes);
-		// }
 		return m;
 	} catch (Error& e) {
 		if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
@@ -7425,18 +7413,7 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
 		}
 		wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 		cx->invalidateCache(tenantEntry.prefix, keys);
-		// TODO: Is this needed?
-		if (tenantInfo.name.present()) {
-			cx->invalidateCachedTenant(tenantInfo.name.get());
-		}
 
-		// if (tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
-		// 	TraceEvent(SevWarn, "AKNative2", debugId)
-		// 	    .detail("TenantId", tenantInfo.tenantId)
-		// 	    .detail("TenantName", tenantInfo.name.present() ? tenantInfo.name.get() : "not present"_sr)
-		// 	    .detail("TenantPrefix", tenantEntry.prefix)
-		// 	    .detail("Keys", keys.toString());
-		// }
 		StorageMetrics m = wait(getStorageMetricsLargeKeyRange(cx, keys, trState));
 		return m;
 	}
@@ -7470,18 +7447,7 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
 		fx[i] = doGetStorageMetrics(
 		    cx, KeyRangeRef(partBegin, partEnd), locations[i].locations, locations[i].tenantEntry, trState, debugId);
 	}
-	// if (tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
-	// 	TraceEvent(SevWarn, "AKNative3", debugId)
-	// 	    .detail("TenantId", tenantInfo.tenantId)
-	// 	    .detail("TenantName", tenantInfo.name.present() ? tenantInfo.name.get() : "not present"_sr)
-	// 	    .detail("NumLocs", nLocs);
-	// }
 	wait(waitForAll(fx));
-	// if (tenantInfo.tenantId != TenantInfo::INVALID_TENANT) {
-	// 	TraceEvent(SevWarn, "AKNative4", debugId)
-	// 	    .detail("TenantId", tenantInfo.tenantId)
-	// 	    .detail("TenantName", tenantInfo.name.present() ? tenantInfo.name.get() : "not present"_sr);
-	// }
 	for (int i = 0; i < nLocs; i++) {
 		total += fx[i].get();
 	}
