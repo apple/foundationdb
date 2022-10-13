@@ -2529,50 +2529,7 @@ ACTOR static Future<int64_t> timeKeeperUnixEpochFromVersion(Version v, Reference
 	}
 
 	auto result = found.first + (v - found.second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
-	fmt::print(
-	    "version -> time, use ({}, {}) : (Time, Version), result: {} -> {}\n", found.first, found.second, v, result);
 	return result;
-}
-
-// Return a key > begin and < end that splits a key range roughly in half,
-// assuming keys are uniformly distributed
-static Key splitKey(KeyRangeRef range) {
-	ASSERT(!range.empty());
-	ASSERT(!equalsKeyAfter(range.begin, range.end));
-	int i = 0;
-	Standalone<VectorRef<uint8_t>> result;
-	while (i < range.begin.size() && i < range.end.size()) {
-		if (range.begin[i] == range.end[i]) {
-			result.push_back(result.arena(), range.begin[i]);
-			++i;
-		} else {
-			break;
-		}
-	}
-
-	// |i| now points to index where begin and end first differ
-
-	// Add bytes to result as necessary to make result > begin and < end
-	int endVal = i < range.end.size() ? range.end[i] : 256;
-	for (;;) {
-		int beginVal = i < range.begin.size() ? range.begin[i] : 0;
-		endVal = std::max(endVal, i < range.end.size() ? range.end[i] : 256);
-		int newVal = (beginVal + endVal) / 2;
-		result.push_back(result.arena(), newVal);
-		if (newVal > beginVal) {
-			break;
-		}
-		++i;
-		if (beginVal < endVal) {
-			endVal = 256;
-		}
-	}
-
-	auto s = Key(StringRef(result.begin(), result.size()), result.arena());
-
-	ASSERT(range.begin < s);
-	ASSERT(s < range.end);
-	return s;
 }
 
 ACTOR static Future<Void> idempotencyIdsCleaner(Database db) {
@@ -2584,6 +2541,8 @@ ACTOR static Future<Void> idempotencyIdsCleaner(Database db) {
 	state Reference<ReadYourWritesTransaction> tr;
 	state Version expiredVersion;
 	state Key firstKey;
+	state Version firstVersion;
+	state Version canDeleteLowerThan;
 	loop {
 		tr = makeReference<ReadYourWritesTransaction>(db);
 		loop {
@@ -2600,23 +2559,33 @@ ACTOR static Future<Void> idempotencyIdsCleaner(Database db) {
 					break;
 				}
 				firstKey = result.front().key;
+				{
+					BinaryReader rd(firstKey, Unversioned());
+					rd.readBytes(idempotencyIdKeys.begin.size());
+					rd >> firstVersion;
+					firstVersion = bigEndian64(firstVersion);
+				}
 
-				Version canDeleteLowerThan = wait(timeKeeperVersionFromUnixEpoch(
-				    static_cast<int64_t>(g_network->now()) - SERVER_KNOBS->IDEMPOTENCY_IDS_MIN_AGE_SECONDS, tr));
-				candidateRangeToClean =
-				    KeyRangeRef(firstKey,
-				                BinaryWriter::toValue(bigEndian64(canDeleteLowerThan), Unversioned())
-				                    .withPrefix(idempotencyIdKeys.begin));
+				wait(store(canDeleteLowerThan,
+				           timeKeeperVersionFromUnixEpoch(static_cast<int64_t>(g_network->now()) -
+				                                              SERVER_KNOBS->IDEMPOTENCY_IDS_MIN_AGE_SECONDS,
+				                                          tr)));
+				if (firstVersion >= canDeleteLowerThan) {
+					break;
+				}
 
 				// Keep dividing the candidate range until clearing it would (probably) not take us under the byte
 				// target
 				lastCandidateDeleteSize = std::numeric_limits<int64_t>::max();
 				loop {
+					candidateRangeToClean =
+					    KeyRangeRef(firstKey,
+					                BinaryWriter::toValue(bigEndian64(canDeleteLowerThan), Unversioned())
+					                    .withPrefix(idempotencyIdKeys.begin));
 					wait(store(candidateDeleteSize, tr->getEstimatedRangeSizeBytes(candidateRangeToClean)));
 					if (candidateDeleteSize == lastCandidateDeleteSize) {
 						break;
 					}
-					lastCandidateDeleteSize = candidateDeleteSize;
 					TraceEvent("IdempotencyIdsCleanerCandidateDelete")
 					    .detail("IdmpKeySizeEstimate", idmpKeySize)
 					    .detail("ClearRangeSizeEstimate", candidateDeleteSize)
@@ -2624,7 +2593,8 @@ ACTOR static Future<Void> idempotencyIdsCleaner(Database db) {
 					if (idmpKeySize - candidateDeleteSize >= SERVER_KNOBS->IDEMPOTENCY_IDS_BYTE_TARGET) {
 						break;
 					}
-					candidateRangeToClean = KeyRangeRef(candidateRangeToClean.begin, splitKey(candidateRangeToClean));
+					lastCandidateDeleteSize = candidateDeleteSize;
+					canDeleteLowerThan = (firstVersion + canDeleteLowerThan) / 2;
 				}
 				finalRange = KeyRangeRef(idempotencyIdKeys.begin, candidateRangeToClean.end);
 				RangeResult finalRangeEnd = wait(tr->getRange(finalRange, /*limit*/ 1, Snapshot::False, Reverse::True));
