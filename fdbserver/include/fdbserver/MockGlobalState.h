@@ -30,14 +30,6 @@
 
 struct MockGlobalStateTester;
 
-template <class Metric>
-struct ShardSizeMetric {
-	template <typename pair_type>
-	Metric operator()(pair_type const& p) const {
-		return Metric(p.value.shardSize);
-	}
-};
-
 enum class MockShardStatus { UNSET = -1, EMPTY = 0, COMPLETED, INFLIGHT };
 
 class MockStorageServer {
@@ -57,8 +49,9 @@ public:
 	uint64_t usedDiskSpace = 0, availableDiskSpace = DEFAULT_DISK_SPACE;
 
 	// In-memory counterpart of the `serverKeys` in system keyspace
-	// the value ShardStatus is [InFlight, Completed, Empty] and metrics uint64_t is the shard size
-	KeyRangeMap<ShardInfo, uint64_t, ShardSizeMetric<uint64_t>> serverKeys;
+	// the value ShardStatus is [InFlight, Completed, Empty] and metrics uint64_t is the shard size, the caveat is the
+	// size() and nthRange() would use the metrics as index instead
+	KeyRangeMap<ShardInfo> serverKeys;
 
 	// sampled metrics
 	StorageServerMetrics metrics;
@@ -84,6 +77,8 @@ public:
 
 	// this function removed an aligned range from server
 	void removeShard(KeyRangeRef range);
+
+	uint64_t sumRangeSize(KeyRangeRef range) const;
 
 protected:
 	void threeWayShardSplitting(KeyRangeRef outerRange, KeyRangeRef innerRange, uint64_t outerRangeSize);

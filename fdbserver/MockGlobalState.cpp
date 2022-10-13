@@ -99,6 +99,15 @@ void MockStorageServer::removeShard(KeyRangeRef range) {
 	serverKeys.rawErase(range);
 }
 
+uint64_t MockStorageServer::sumRangeSize(KeyRangeRef range) const {
+	auto ranges = serverKeys.intersectingRanges(range);
+	uint64_t totalSize = 0;
+	for(auto it = ranges.begin(); it != ranges.end(); ++ it) {
+		totalSize += it->cvalue().shardSize;
+	}
+	return totalSize;
+}
+
 void MockGlobalState::initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf, uint64_t defaultDiskSpace) {
 	ASSERT(conf.storageTeamSize > 0);
 	configuration = conf;
@@ -172,7 +181,7 @@ TEST_CASE("/MockGlobalState/initializeAsEmptyDatabaseMGS/SimpleThree") {
 		auto id = MockGlobalState::indexToUID(i);
 		std::cout << "Check server " << i << "\n";
 		ASSERT(mgs->serverIsSourceForShard(id, allKeys));
-		ASSERT(mgs->allServers.at(id).serverKeys.sumRange(allKeys.begin, allKeys.end) == 0);
+		ASSERT(mgs->allServers.at(id).sumRangeSize(allKeys) == 0);
 	}
 
 	return Void();
@@ -182,12 +191,14 @@ struct MockGlobalStateTester {
 
 	// expectation [r0.begin, r0.end) => [r0.begin, x1), [x1, x2), [x2, r0.end)
 	void testThreeWaySplitFirstRange(MockStorageServer& mss) {
-		auto it = mss.serverKeys.nthRange(0);
-		uint64_t oldSize = SERVER_KNOBS->MAX_SHARD_BYTES * 8;
+		auto it = mss.serverKeys.ranges().begin();
+		uint64_t oldSize =
+		    deterministicRandom()->randomInt(SERVER_KNOBS->MIN_SHARD_BYTES, std::numeric_limits<int>::max());
 		it->value().shardSize = oldSize;
 		KeyRangeRef outerRange = it->range();
 		Key x1 = keyAfter(it->range().begin);
 		Key x2 = keyAfter(x1);
+		std::cout << "it->range.begin: " << it->range().begin.toHexString() << " size: " << oldSize << "\n";
 
 		mss.threeWayShardSplitting(outerRange, KeyRangeRef(x1, x2), oldSize);
 		auto ranges = mss.serverKeys.containedRanges(outerRange);
@@ -198,7 +209,25 @@ struct MockGlobalStateTester {
 		ASSERT(ranges.begin().range() == KeyRangeRef(x2, outerRange.end));
 		ranges.pop_front();
 		ASSERT(ranges.empty());
-		return;
+	}
+
+	// expectation [r0.begin, r0.end) => [r0.begin, x1), [x1, r0.end)
+	void testTwoWaySplitFirstRange(MockStorageServer& mss) {
+		auto it = mss.serverKeys.nthRange(0);
+		uint64_t oldSize =
+		    deterministicRandom()->randomInt(SERVER_KNOBS->MIN_SHARD_BYTES, std::numeric_limits<int>::max());
+		it->value().shardSize = oldSize;
+		KeyRangeRef outerRange = it->range();
+		Key x1 = keyAfter(it->range().begin);
+		std::cout << "it->range.begin: " << it->range().begin.toHexString() << " size: " << oldSize << "\n";
+
+		mss.twoWayShardSplitting(it->range(), x1, oldSize);
+		auto ranges = mss.serverKeys.containedRanges(outerRange);
+		ASSERT(ranges.begin().range() == KeyRangeRef(outerRange.begin, x1));
+		ranges.pop_front();
+		ASSERT(ranges.begin().range() == KeyRangeRef(x1, outerRange.end));
+		ranges.pop_front();
+		ASSERT(ranges.empty());
 	}
 };
 
@@ -213,10 +242,13 @@ TEST_CASE("/MockGlobalState/MockStorageServer/SplittingFunctions") {
 	auto mgs = std::make_shared<MockGlobalState>();
 	mgs->initializeAsEmptyDatabaseMGS(dbConfig);
 
-	// test three-way split
 	MockGlobalStateTester tester;
-	auto& mss = mgs->allServers[MockGlobalState::indexToUID(1)];
-	// tester.testThreeWaySplitFirstRange(mss);
+	auto& mss = mgs->allServers.at(MockGlobalState::indexToUID(1));
+	std::cout << "Test 3-way splitting...\n";
+	tester.testThreeWaySplitFirstRange(mss);
+	std::cout << "Test 2-way splitting...\n";
+	mss.serverKeys.insert(allKeys, {MockShardStatus::COMPLETED, 0}); // reset to empty
+	tester.testTwoWaySplitFirstRange(mss);
 
 	return Void();
 }
