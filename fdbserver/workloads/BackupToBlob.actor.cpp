@@ -66,7 +66,7 @@ struct BackupToBlobWorkload : TestWorkload {
 		                              self->snapshotInterval,
 		                              self->backupTag.toString(),
 		                              backupRanges,
-		                              false));
+		                              SERVER_KNOBS->ENABLE_ENCRYPTION));
 		EBackupState backupStatus = wait(backupAgent.waitBackup(cx, self->backupTag.toString(), StopWhenDone::True));
 		TraceEvent("BackupToBlob_BackupStatus").detail("Status", BackupAgentBase::getStateText(backupStatus));
 		return Void();

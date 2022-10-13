@@ -185,10 +185,13 @@ ACTOR Future<Void> ekLookupByDomainIds(Reference<SimKmsConnectorContext> ctx,
 
 	return Void();
 }
-
-static Standalone<BlobMetadataDetailsRef> createBlobMetadata(BlobMetadataDomainId domainId) {
+// TODO: switch this to use bg_url instead of hardcoding file://fdbblob, so it works as FDBPerfKmsConnector
+// FIXME: make this (more) deterministic outside of simulation for FDBPerfKmsConnector
+static Standalone<BlobMetadataDetailsRef> createBlobMetadata(BlobMetadataDomainId domainId,
+                                                             BlobMetadataDomainName domainName) {
 	Standalone<BlobMetadataDetailsRef> metadata;
 	metadata.domainId = domainId;
+	metadata.domainName = domainName;
 	// 0 == no partition, 1 == suffix partitioned, 2 == storage location partitioned
 	int type = deterministicRandom()->randomInt(0, 3);
 	int partitionCount = (type == 0) ? 0 : deterministicRandom()->randomInt(2, 12);
@@ -234,17 +237,19 @@ ACTOR Future<Void> blobMetadataLookup(KmsConnectorInterface interf, KmsConnBlobM
 		dbgDIdTrace.get().detail("DbgId", req.debugId.get());
 	}
 
-	for (BlobMetadataDomainId domainId : req.domainIds) {
-		auto it = simBlobMetadataStore.find(domainId);
+	for (auto const& domainInfo : req.domainInfos) {
+		auto it = simBlobMetadataStore.find(domainInfo.domainId);
 		if (it == simBlobMetadataStore.end()) {
 			// construct new blob metadata
-			it = simBlobMetadataStore.insert({ domainId, createBlobMetadata(domainId) }).first;
+			it = simBlobMetadataStore
+			         .insert({ domainInfo.domainId, createBlobMetadata(domainInfo.domainId, domainInfo.domainName) })
+			         .first;
 		}
 		rep.metadataDetails.arena().dependsOn(it->second.arena());
 		rep.metadataDetails.push_back(rep.metadataDetails.arena(), it->second);
 	}
 
-	wait(delayJittered(1.0)); // simulate network delay
+	wait(delay(deterministicRandom()->random01())); // simulate network delay
 
 	req.reply.send(rep);
 

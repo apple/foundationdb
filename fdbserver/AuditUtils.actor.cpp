@@ -111,3 +111,13 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStorageFroRange(Database cx
 
 	return res;
 }
+
+StringRef auditTypeToString(const AuditType type) {
+	switch (type) {
+		case AuditType::Invalid:
+		return "Invalid"_sr;
+		case AuditType::ValidateHA:
+		return "ValidateHA"_sr;
+	}
+	return "Invalid"_sr;
+}

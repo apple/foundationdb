@@ -38,5 +38,7 @@ ACTOR Future<AuditStorageState> getAuditStorage(Database cx, UID id);
 ACTOR Future<Void> persistAuditStorageMap(Database cx, AuditStorageState auditState);
 ACTOR Future<std::vector<AuditStorageState>> getAuditStorageFroRange(Database cx, UID id, KeyRange range);
 
+StringRef auditTypeToString(const AuditType type);
+
 #include "flow/unactorcompiler.h"
 #endif

@@ -2546,8 +2546,9 @@ void MultiVersionApi::setupNetwork() {
 				externalClients[filename] = {};
 				auto libCopies = copyExternalLibraryPerThread(path);
 				for (int idx = 0; idx < libCopies.size(); ++idx) {
+					bool unlinkOnLoad = libCopies[idx].second && CLIENT_KNOBS->DELETE_NATIVE_LIB_AFTER_LOADING;
 					externalClients[filename].push_back(Reference<ClientInfo>(
-					    new ClientInfo(new DLApi(libCopies[idx].first, libCopies[idx].second /*unlink on load*/),
+					    new ClientInfo(new DLApi(libCopies[idx].first, unlinkOnLoad /*unlink on load*/),
 					                   path,
 					                   useFutureVersion,
 					                   idx)));

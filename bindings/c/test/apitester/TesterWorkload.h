@@ -166,6 +166,12 @@ protected:
 	// The maximum number of errors before stoppoing the workload
 	int maxErrors;
 
+	// The timeout (in ms) automatically set for all transactions to a random value
+	// in the range [minTxTimeoutMs, maxTxTimeoutMs]
+	// If maxTxTimeoutMs <= 0, no timeout is set
+	int minTxTimeoutMs;
+	int maxTxTimeoutMs;
+
 	// Workload identifier, consisting of workload name and client ID
 	std::string workloadId;
 
