@@ -30,10 +30,11 @@
 
 struct MockGlobalStateTester;
 
-enum class MockShardStatus { UNSET = -1, EMPTY = 0, COMPLETED, INFLIGHT };
+enum class MockShardStatus { EMPTY = 0, COMPLETED, INFLIGHT, UNSET };
 
 class MockStorageServer {
 	friend struct MockGlobalStateTester;
+
 public:
 	struct ShardInfo {
 		MockShardStatus status;

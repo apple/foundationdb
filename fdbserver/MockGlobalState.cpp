@@ -76,7 +76,7 @@ void MockStorageServer::threeWayShardSplitting(KeyRangeRef outerRange,
 	                                               outerRangeSize - leftSize - SERVER_KNOBS->MIN_SHARD_BYTES + 1);
 	int rightSize = outerRangeSize - leftSize - midSize;
 
-	serverKeys.insert(innerRange, { MockShardStatus::UNSET, (uint64_t)midSize });
+	serverKeys.insert(innerRange, { serverKeys[left].status, (uint64_t)midSize });
 	serverKeys[left].shardSize = leftSize;
 	serverKeys[innerRange.end].shardSize = rightSize;
 }
@@ -89,7 +89,7 @@ void MockStorageServer::twoWayShardSplitting(KeyRangeRef range, KeyRef splitPoin
 	int leftSize =
 	    deterministicRandom()->randomInt(SERVER_KNOBS->MIN_SHARD_BYTES, rangeSize - SERVER_KNOBS->MIN_SHARD_BYTES + 1);
 	int rightSize = rangeSize - leftSize;
-	serverKeys.rawInsert(splitPoint, { MockShardStatus::UNSET, (uint64_t)rightSize });
+	serverKeys.rawInsert(splitPoint, { serverKeys[left].status, (uint64_t)rightSize });
 	serverKeys[left].shardSize = leftSize;
 }
 
@@ -102,7 +102,7 @@ void MockStorageServer::removeShard(KeyRangeRef range) {
 uint64_t MockStorageServer::sumRangeSize(KeyRangeRef range) const {
 	auto ranges = serverKeys.intersectingRanges(range);
 	uint64_t totalSize = 0;
-	for(auto it = ranges.begin(); it != ranges.end(); ++ it) {
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
 		totalSize += it->cvalue().shardSize;
 	}
 	return totalSize;
@@ -194,6 +194,7 @@ struct MockGlobalStateTester {
 		auto it = mss.serverKeys.ranges().begin();
 		uint64_t oldSize =
 		    deterministicRandom()->randomInt(SERVER_KNOBS->MIN_SHARD_BYTES, std::numeric_limits<int>::max());
+		MockShardStatus oldStatus = it.cvalue().status;
 		it->value().shardSize = oldSize;
 		KeyRangeRef outerRange = it->range();
 		Key x1 = keyAfter(it->range().begin);
@@ -205,6 +206,7 @@ struct MockGlobalStateTester {
 		ASSERT(ranges.begin().range() == KeyRangeRef(outerRange.begin, x1));
 		ranges.pop_front();
 		ASSERT(ranges.begin().range() == KeyRangeRef(x1, x2));
+		ASSERT(ranges.begin().cvalue().status == oldStatus);
 		ranges.pop_front();
 		ASSERT(ranges.begin().range() == KeyRangeRef(x2, outerRange.end));
 		ranges.pop_front();
@@ -214,6 +216,7 @@ struct MockGlobalStateTester {
 	// expectation [r0.begin, r0.end) => [r0.begin, x1), [x1, r0.end)
 	void testTwoWaySplitFirstRange(MockStorageServer& mss) {
 		auto it = mss.serverKeys.nthRange(0);
+		MockShardStatus oldStatus = it.cvalue().status;
 		uint64_t oldSize =
 		    deterministicRandom()->randomInt(SERVER_KNOBS->MIN_SHARD_BYTES, std::numeric_limits<int>::max());
 		it->value().shardSize = oldSize;
@@ -226,6 +229,7 @@ struct MockGlobalStateTester {
 		ASSERT(ranges.begin().range() == KeyRangeRef(outerRange.begin, x1));
 		ranges.pop_front();
 		ASSERT(ranges.begin().range() == KeyRangeRef(x1, outerRange.end));
+		ASSERT(ranges.begin().cvalue().status == oldStatus);
 		ranges.pop_front();
 		ASSERT(ranges.empty());
 	}
@@ -247,7 +251,7 @@ TEST_CASE("/MockGlobalState/MockStorageServer/SplittingFunctions") {
 	std::cout << "Test 3-way splitting...\n";
 	tester.testThreeWaySplitFirstRange(mss);
 	std::cout << "Test 2-way splitting...\n";
-	mss.serverKeys.insert(allKeys, {MockShardStatus::COMPLETED, 0}); // reset to empty
+	mss.serverKeys.insert(allKeys, { MockShardStatus::COMPLETED, 0 }); // reset to empty
 	tester.testTwoWaySplitFirstRange(mss);
 
 	return Void();

@@ -70,7 +70,8 @@ public:
 	    const UID& distributorId,
 	    const MoveKeysLock& moveKeysLock,
 	    const std::vector<Optional<Key>>& remoteDcIds,
-	    const DDEnabledState* ddEnabledState) = 0;
+	    const DDEnabledState* ddEnabledState,
+	    bool skipDDModeCheck) = 0;
 
 	virtual ~IDDTxnProcessor() = default;
 
@@ -140,7 +141,8 @@ public:
 	virtual Future<std::vector<ProcessData>> getWorkers() const = 0;
 
 protected:
-	virtual Future<Void> rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) = 0;
+	virtual Future<Void> rawStartMovement(MoveKeysParams& params,
+	                                      std::map<UID, StorageServerInterface>& tssMapping) = 0;
 
 	virtual Future<Void> rawFinishMovement(MoveKeysParams& params,
 	                                       const std::map<UID, StorageServerInterface>& tssMapping) = 0;
@@ -168,11 +170,11 @@ public:
 	// Call NativeAPI implementation directly
 	Future<ServerWorkerInfos> getServerListAndProcessClasses() override;
 
-	Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
-	    const UID& distributorId,
-	    const MoveKeysLock& moveKeysLock,
-	    const std::vector<Optional<Key>>& remoteDcIds,
-	    const DDEnabledState* ddEnabledState) override;
+	Future<Reference<InitialDataDistribution>> getInitialDataDistribution(const UID& distributorId,
+	                                                                      const MoveKeysLock& moveKeysLock,
+	                                                                      const std::vector<Optional<Key>>& remoteDcIds,
+	                                                                      const DDEnabledState* ddEnabledState,
+	                                                                      bool skipDDModeCheck) override;
 
 	Future<MoveKeysLock> takeMoveKeysLock(UID const& ddId) const override;
 
@@ -253,11 +255,11 @@ public:
 
 	Future<ServerWorkerInfos> getServerListAndProcessClasses() override;
 
-	Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
-	    const UID& distributorId,
-	    const MoveKeysLock& moveKeysLock,
-	    const std::vector<Optional<Key>>& remoteDcIds,
-	    const DDEnabledState* ddEnabledState) override;
+	Future<Reference<InitialDataDistribution>> getInitialDataDistribution(const UID& distributorId,
+	                                                                      const MoveKeysLock& moveKeysLock,
+	                                                                      const std::vector<Optional<Key>>& remoteDcIds,
+	                                                                      const DDEnabledState* ddEnabledState,
+	                                                                      bool skipDDModeCheck) override;
 
 	Future<Void> removeKeysFromFailedServer(const UID& serverID,
 	                                        const std::vector<UID>& teamForDroppedRange,
