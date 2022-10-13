@@ -514,7 +514,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	std::set<Tag> unpoppedRecoveredTags;
 	std::map<Tag, Promise<Void>> waitingTags;
 
-	void wakeWaitingPeeks(std::set<Tag> tags) {
+	void wakeWaitingPeeks(const std::set<Tag>& tags) {
 		for (Tag tag : tags) {
 			auto iter = waitingTags.find(tag);
 			auto promise = iter->second;
