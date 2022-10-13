@@ -52,6 +52,11 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		enabled = !clientId; // only do this on the "first" client
 	}
 
+	// TODO: Currently this workload doesn't play well with MachineAttrition, but it probably should
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert("Attrition");
+	}
+
 	std::string description() const override { return "GetMappedRange"; }
 
 	Future<Void> start(Database const& cx) override {
