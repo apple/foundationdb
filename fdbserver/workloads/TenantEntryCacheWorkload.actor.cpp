@@ -94,9 +94,6 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		Optional<TenantEntryCachePayload<int64_t>> value1 = wait(cache->getByPrefix(dummy.prefix));
 		ASSERT(!value1.present());
 
-		// Ensure associated counter values gets updated
-		ASSERT_EQ(cache->numRefreshByMisses(), 2);
-
 		TraceEvent("TenantNotFoundEnd");
 		return Void();
 	}

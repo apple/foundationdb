@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/Trace.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_TENANTENTRYCACHE_ACTOR_G_H)
 #define FDBCLIENT_TENANTENTRYCACHE_ACTOR_G_H
 #include "fdbclient/TenantEntryCache.actor.g.h"
@@ -51,7 +52,7 @@ enum class TenantEntryCacheRefreshReason {
 	REMOVE_ENTRY = 4,
 	WATCH_TRIGGER = 5
 };
-enum class TenantEntryCacheRefreshMode { PERIODIC_TASK = 1, NONE = 2, WATCH = 3 };
+enum class TenantEntryCacheRefreshMode { PERIODIC_TASK = 1, WATCH = 2, NONE = 3 };
 
 template <class T>
 struct TenantEntryCachePayload {
@@ -108,7 +109,7 @@ private:
 	ACTOR static Future<Void> refreshCacheById(int64_t tenantId,
 	                                           TenantEntryCache<T>* cache,
 	                                           TenantEntryCacheRefreshReason reason) {
-		TraceEvent(SevDebug, "TenantEntryCacheIDRefreshStart", cache->id()).detail("Reason", static_cast<int>(reason));
+		TraceEvent(SevInfo, "TenantEntryCacheIDRefreshStart", cache->id()).detail("Reason", static_cast<int>(reason));
 		state Reference<ReadYourWritesTransaction> tr = cache->getDatabase()->createTransaction();
 		loop {
 			try {
@@ -119,23 +120,22 @@ private:
 					Optional<TenantMapEntry> entry = wait(TenantMetadata::tenantMap().get(tr, name.get()));
 					if (entry.present()) {
 						cache->put(std::make_pair(name.get(), entry.get()));
+						updateCacheRefreshMetrics(cache, reason);
 					}
 				}
-				updateCacheRefreshMetrics(cache, reason);
 				break;
 			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
 		}
-		TraceEvent(SevDebug, "TenantEntryCacheIDRefreshEnd", cache->id()).detail("Reason", static_cast<int>(reason));
+		TraceEvent(SevInfo, "TenantEntryCacheIDRefreshEnd", cache->id()).detail("Reason", static_cast<int>(reason));
 		return Void();
 	}
 
 	ACTOR static Future<Void> refreshCacheByName(TenantName name,
 	                                             TenantEntryCache<T>* cache,
 	                                             TenantEntryCacheRefreshReason reason) {
-		TraceEvent(SevDebug, "TenantEntryCacheNameRefreshStart", cache->id())
-		    .detail("Reason", static_cast<int>(reason));
+		TraceEvent(SevInfo, "TenantEntryCacheNameRefreshStart", cache->id()).detail("Reason", static_cast<int>(reason));
 		state Reference<ReadYourWritesTransaction> tr = cache->getDatabase()->createTransaction();
 		loop {
 			try {
@@ -144,14 +144,14 @@ private:
 				Optional<TenantMapEntry> entry = wait(TenantMetadata::tenantMap().get(tr, name));
 				if (entry.present()) {
 					cache->put(std::make_pair(name, entry.get()));
+					updateCacheRefreshMetrics(cache, reason);
 				}
-				updateCacheRefreshMetrics(cache, reason);
 				break;
 			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
 		}
-		TraceEvent(SevDebug, "TenantEntryCacheNameRefreshEnd", cache->id()).detail("Reason", static_cast<int>(reason));
+		TraceEvent(SevInfo, "TenantEntryCacheNameRefreshEnd", cache->id()).detail("Reason", static_cast<int>(reason));
 		return Void();
 	}
 
