@@ -86,6 +86,26 @@ BlobCipherMetrics::BlobCipherMetrics()
 	traceFuture = traceCounters("BlobCipherMetrics", UID(), FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL, &cc);
 }
 
+std::string toString(BlobCipherMetrics::UsageType type) {
+	switch (type) {
+	case BlobCipherMetrics::UsageType::TLOG:
+		return "TLog";
+	case BlobCipherMetrics::UsageType::KV_MEMORY:
+		return "KVMemory";
+	case BlobCipherMetrics::UsageType::KV_REDWOOD:
+		return "KVRedwood";
+	case BlobCipherMetrics::UsageType::BLOB_GRANULE:
+		return "BlobGranule";
+	case BlobCipherMetrics::UsageType::BACKUP:
+		return "Backup";
+	case BlobCipherMetrics::UsageType::TEST:
+		return "Test";
+	default:
+		ASSERT(false);
+		return "";
+	}
+}
+
 // BlobCipherKey class methods
 
 BlobCipherKey::BlobCipherKey(const EncryptCipherDomainId& domainId,

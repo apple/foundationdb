@@ -63,7 +63,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 			                                    self->snapshotInterval,
 			                                    self->tag.toString(),
 			                                    backupRanges,
-			                                    false,
+			                                    SERVER_KNOBS->ENABLE_ENCRYPTION,
 			                                    self->stopWhenDone,
 			                                    UsePartitionedLog::False,
 			                                    self->incremental));

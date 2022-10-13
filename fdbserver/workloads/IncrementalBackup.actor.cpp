@@ -159,7 +159,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                    1e8,
 				                                    self->tag.toString(),
 				                                    backupRanges,
-				                                    false,
+				                                    SERVER_KNOBS->ENABLE_ENCRYPTION,
 				                                    StopWhenDone::False,
 				                                    UsePartitionedLog::False,
 				                                    IncrementalBackupOnly::True));
