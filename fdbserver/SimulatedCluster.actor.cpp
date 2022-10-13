@@ -620,6 +620,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
                                                          std::string* coordFolder,
                                                          std::string baseFolder,
                                                          ClusterConnectionString connStr,
+                                                         ClusterConnectionString otherConnStr,
                                                          bool useSeedFile,
                                                          AgentMode runBackupAgents,
                                                          std::string whitelistBinPaths,
@@ -830,6 +831,23 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				connRecord =
 				    makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"), connStr.toString());
 			}
+		} else if (onShutdown.get() == ISimulator::RebootProcessAndSwitch) {
+			TraceEvent("SimulatedFDBDRebootAndSwitch")
+			    .detail("Cycles", cycles)
+			    .detail("RandomId", randomId)
+			    .detail("Address", process->address)
+			    .detail("ZoneId", localities.zoneId())
+			    .detail("KillType", shutdownResult)
+			    .detail("ConnectionString", connStr.toString())
+			    .detail("OtherConnectionString", otherConnStr.toString())
+			    .detail("SwitchingTo", g_simulator->hasSwitchedCluster(process->address));
+
+			// Handle the case where otherConnStr is '@'.
+			if (otherConnStr.toString().size() > 1) {
+				std::string newConnStr =
+				    g_simulator->hasSwitchedCluster(process->address) ? otherConnStr.toString() : connStr.toString();
+				connRecord = makeReference<ClusterConnectionFile>(joinPath(*dataFolder, "fdb.cluster"), newConnStr);
+			}
 		} else {
 			TraceEvent("SimulatedFDBDJustRepeat")
 			    .detail("Cycles", cycles)
@@ -846,6 +864,7 @@ std::map<Optional<Standalone<StringRef>>, std::vector<std::vector<std::string>>>
 // process count is no longer needed because it is now the length of the vector of ip's, because it was one ip per
 // process
 ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
+                                    ClusterConnectionString otherConnStr,
                                     std::vector<IPAddress> ips,
                                     bool sslEnabled,
                                     LocalityData localities,
@@ -924,6 +943,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					                                          &coordFolders[i],
 					                                          baseFolder,
 					                                          connStr,
+					                                          otherConnStr,
 					                                          useSeedFile,
 					                                          agentMode,
 					                                          whitelistBinPaths,
@@ -942,6 +962,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					                                          &coordFolders[i],
 					                                          baseFolder,
 					                                          connStr,
+					                                          otherConnStr,
 					                                          useSeedFile,
 					                                          agentMode,
 					                                          whitelistBinPaths,
@@ -1311,6 +1332,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			// SOMEDAY: parse backup agent from test file
 			systemActors->push_back(reportErrors(
 			    simulatedMachine(conn,
+			                     ClusterConnectionString(),
 			                     ipAddrs,
 			                     usingSSL,
 			                     localities,
@@ -2346,20 +2368,23 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			// check the sslEnablementMap using only one ip
 			LocalityData localities(Optional<Standalone<StringRef>>(), zoneId, machineId, dcUID);
 			localities.set("data_hall"_sr, dcUID);
-			systemActors->push_back(reportErrors(simulatedMachine(conn,
-			                                                      ips,
-			                                                      sslEnabled,
-			                                                      localities,
-			                                                      processClass,
-			                                                      baseFolder,
-			                                                      false,
-			                                                      machine == useSeedForMachine,
-			                                                      requiresExtraDBMachines ? AgentOnly : AgentAddition,
-			                                                      sslOnly,
-			                                                      whitelistBinPaths,
-			                                                      protocolVersion,
-			                                                      configDBType),
-			                                     "SimulatedMachine"));
+			systemActors->push_back(reportErrors(
+			    simulatedMachine(conn,
+			                     requiresExtraDBMachines ? ClusterConnectionString(g_simulator->extraDatabases.at(0))
+			                                             : ClusterConnectionString(),
+			                     ips,
+			                     sslEnabled,
+			                     localities,
+			                     processClass,
+			                     baseFolder,
+			                     false,
+			                     machine == useSeedForMachine,
+			                     requiresExtraDBMachines ? AgentOnly : AgentAddition,
+			                     sslOnly,
+			                     whitelistBinPaths,
+			                     protocolVersion,
+			                     configDBType),
+			    "SimulatedMachine"));
 
 			if (requiresExtraDBMachines) {
 				int cluster = 4;
@@ -2376,6 +2401,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 					LocalityData localities(Optional<Standalone<StringRef>>(), newZoneId, newMachineId, dcUID);
 					localities.set("data_hall"_sr, dcUID);
 					systemActors->push_back(reportErrors(simulatedMachine(ClusterConnectionString(extraDatabase),
+					                                                      conn,
 					                                                      extraIps,
 					                                                      sslEnabled,
 					                                                      localities,
@@ -2422,6 +2448,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		    Optional<Standalone<StringRef>>(), newZoneId, newZoneId, Optional<Standalone<StringRef>>());
 		systemActors->push_back(
 		    reportErrors(simulatedMachine(conn,
+		                                  ClusterConnectionString(),
 		                                  ips,
 		                                  sslEnabled,
 		                                  localities,
