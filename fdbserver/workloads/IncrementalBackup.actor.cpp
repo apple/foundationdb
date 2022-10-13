@@ -228,13 +228,41 @@ struct IncrementalBackupWorkload : TestWorkload {
 			    .detail("Size", containers.size())
 			    .detail("First", containers.front());
 			state Key backupURL = Key(containers.front());
+
+			state Standalone<VectorRef<KeyRangeRef>> restoreRange;
+			state bool containsSystemKeys = false;
+			for (auto r : backupRanges) {
+				if (!r.intersects(getSystemBackupRanges())) {
+					restoreRange.push_back_deep(restoreRange.arena(), r);
+				} else {
+					containsSystemKeys = true;
+				}
+			}
+			if (containsSystemKeys) {
+				TraceEvent("IBackupSystemRestoreAttempt").detail("BeginVersion", beginVersion);
+				wait(success(self->backupAgent.restore(cx,
+				                                       cx,
+				                                       StringRef("system_restore"),
+				                                       backupURL,
+				                                       {},
+				                                       getSystemBackupRanges(),
+				                                       WaitForComplete::True,
+				                                       invalidVersion,
+				                                       Verbose::True,
+				                                       Key(),
+				                                       Key(),
+				                                       LockDB::True,
+				                                       OnlyApplyMutationLogs::True,
+				                                       InconsistentSnapshotOnly::False,
+				                                       beginVersion)));
+			}
 			TraceEvent("IBackupRestoreAttempt").detail("BeginVersion", beginVersion);
 			wait(success(self->backupAgent.restore(cx,
 			                                       cx,
 			                                       Key(self->tag.toString()),
 			                                       backupURL,
 			                                       {},
-			                                       backupRanges,
+			                                       restoreRange,
 			                                       WaitForComplete::True,
 			                                       invalidVersion,
 			                                       Verbose::True,

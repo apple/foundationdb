@@ -26,6 +26,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/genericactors.actor.g.h"
 
 struct RestoreBackupWorkload final : TestWorkload {
 
@@ -113,6 +114,22 @@ struct RestoreBackupWorkload final : TestWorkload {
 		wait(delay(self->delayFor));
 		wait(waitOnBackup(self, cx));
 		wait(clearDatabase(cx));
+		// restore system keys
+		VectorRef<KeyRangeRef> systemBackupRanges = getSystemBackupRanges();
+		state std::vector<Future<Version>> restores;
+		for (int i = 0; i < systemBackupRanges.size(); i++) {
+			restores.push_back((self->backupAgent.restore(cx,
+			                                              cx,
+			                                              StringRef("system_restore"),
+			                                              Key(self->backupContainer->getURL()),
+			                                              self->backupContainer->getProxy(),
+			                                              WaitForComplete::True,
+			                                              ::invalidVersion,
+			                                              Verbose::True,
+			                                              systemBackupRanges[i])));
+		}
+		waitForAll(restores);
+		// restore non-system keys
 		wait(success(self->backupAgent.restore(cx,
 		                                       cx,
 		                                       self->tag,
@@ -120,7 +137,8 @@ struct RestoreBackupWorkload final : TestWorkload {
 		                                       self->backupContainer->getProxy(),
 		                                       WaitForComplete::True,
 		                                       ::invalidVersion,
-		                                       Verbose::True)));
+		                                       Verbose::True,
+		                                       normalKeys)));
 		return Void();
 	}
 
