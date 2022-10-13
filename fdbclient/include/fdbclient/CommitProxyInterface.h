@@ -224,6 +224,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	bool rkBatchThrottled = false;
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
+	double proxyTagThrottledDuration{ 0.0 };
 
 	VersionVector ssVersionVectorDelta;
 	UID proxyId; // GRV proxy ID to detect old GRV proxies at client side
@@ -242,7 +243,8 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           rkDefaultThrottled,
 		           rkBatchThrottled,
 		           ssVersionVectorDelta,
-		           proxyId);
+		           proxyId,
+		           proxyTagThrottledDuration);
 	}
 };
 
@@ -267,6 +269,10 @@ struct GetReadVersionRequest : TimedRequest {
 	TransactionPriority priority;
 
 	TransactionTagMap<uint32_t> tags;
+	// Not serialized, because this field does not need to be sent to master.
+	// It is used for reporting to clients the amount of time spent delayed by
+	// the TagQueue
+	double proxyTagThrottledDuration{ 0.0 };
 
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
@@ -302,6 +308,8 @@ struct GetReadVersionRequest : TimedRequest {
 	bool verify() const { return true; }
 
 	bool operator<(GetReadVersionRequest const& rhs) const { return priority < rhs.priority; }
+
+	bool isTagged() const { return !tags.empty(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

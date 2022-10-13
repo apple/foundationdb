@@ -2031,7 +2031,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						    .detail("BlobManagerID",
 						            localInfo.blobManager.present() ? localInfo.blobManager.get().id() : UID())
 						    .detail("EncryptKeyProxyID",
-						            localInfo.encryptKeyProxy.present() ? localInfo.encryptKeyProxy.get().id() : UID());
+						            localInfo.encryptKeyProxy.present() ? localInfo.encryptKeyProxy.get().id() : UID())
+						    .detail("IsEncryptionEnabled", localInfo.client.isEncryptionEnabled);
 
 						dbInfo->set(localInfo);
 					}
@@ -2754,8 +2755,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			f.cancel();
 		state Error e = err;
 		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_actor_cancelled ||
-		          e.code() == error_code_please_reboot_delete;
-
+		          e.code() == error_code_please_reboot_delete || e.code() == error_code_local_config_changed;
 		endRole(Role::WORKER, interf.id(), "WorkerError", ok, e);
 		errorForwarders.clear(false);
 		sharedLogs.clear();

@@ -203,6 +203,13 @@ The ``get`` command fetches the value of a given key. Its syntax is ``get <KEY>`
 
 Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
 
+getknob
+-------
+
+The ``getknob`` command fetches the value of a given knob that has been populated by ``setknob``. Its syntax is ``getknob <KNOBNAME> [CONFIGCLASS]``. It displays the value of ``<KNOBNAME>`` if ``<KNOBNAME>`` is present in the database and ``not found`` otherwise.
+
+Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
+
 getrange
 --------
 
@@ -394,6 +401,13 @@ setclass
 The ``setclass`` command can be used to change the :ref:`process class <guidelines-process-class-config>` for a given process. Its syntax is ``setclass [<ADDRESS> <CLASS>]``. If no arguments are specified, then the process classes of all processes are listed. Setting the class to ``default`` to revert to the process class specified on the command line.
 
 The available process classes are ``unset``, ``storage``, ``transaction``, ``resolution``, ``grv_proxy``, ``commit_proxy``, ``master``, ``test``, ``unset``, ``stateless``, ``log``, ``router``, ``cluster_controller``, ``fast_restore``, ``data_distributor``, ``coordinator``, ``ratekeeper``, ``storage_cache``, ``backup``, and ``default``.
+
+setknob
+-------
+
+The ``setknob`` command can be used to set knobs dynamically. Its syntax is ``setknob <KNOBNAME> <KNOBVALUE> [CONFIGCLASS]``. If not present in a ``begin\commit`` block, the CLI will prompt for a description of the change. 
+
+Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
 
 sleep
 -----

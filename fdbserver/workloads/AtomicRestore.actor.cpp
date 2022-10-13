@@ -104,7 +104,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 			                              deterministicRandom()->randomInt(0, 100),
 			                              BackupAgentBase::getDefaultTagName(),
 			                              self->backupRanges,
-			                              false,
+			                              SERVER_KNOBS->ENABLE_ENCRYPTION,
 			                              StopWhenDone::False,
 			                              self->usePartitionedLogs));
 		} catch (Error& e) {

@@ -26,6 +26,7 @@ env_set(TRACE_PC_GUARD_INSTRUMENTATION_LIB "" STRING "Path to a library containi
 env_set(PROFILE_INSTR_GENERATE OFF BOOL "If set, build FDB as an instrumentation build to generate profiles")
 env_set(PROFILE_INSTR_USE "" STRING "If set, build FDB with profile")
 env_set(FULL_DEBUG_SYMBOLS OFF BOOL "Generate full debug symbols")
+env_set(ENABLE_LONG_RUNNING_TESTS OFF BOOL "Add a long running tests package")
 
 set(USE_SANITIZER OFF)
 if(USE_ASAN OR USE_VALGRIND OR USE_MSAN OR USE_TSAN OR USE_UBSAN)
