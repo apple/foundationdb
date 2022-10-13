@@ -90,7 +90,8 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 		uint32_t* numReleased;
 		// Sequence number of the first queued request
 		int64_t nextSeqNo;
-		bool operator<(TagQueueHandle const& rhs) const { return nextSeqNo < rhs.nextSeqNo; }
+		// Reverse order because std::priority_queue is a max heap
+		bool operator<(TagQueueHandle const& rhs) const { return nextSeqNo > rhs.nextSeqNo; }
 		explicit TagQueueHandle(TagQueue& queue, uint32_t& numReleased) : queue(&queue), numReleased(&numReleased) {
 			ASSERT(!this->queue->requests.empty());
 			nextSeqNo = this->queue->requests.front().sequenceNumber;
@@ -139,7 +140,7 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 			    !tagQueueHandle.queue->rateInfo.get().canStart(*(tagQueueHandle.numReleased), count)) {
 				// Cannot release any more transaction from this tag (don't push the tag queue handle back into
 				// pqOfQueues)
-				CODE_PROBE(true, "GrvProxyTransactionTagThrottler::releaseTransactions : Throttling transaction");
+				CODE_PROBE(true, "GrvProxyTransactionTagThrottler throttling transaction");
 				break;
 			} else {
 				if (tagQueueHandle.nextSeqNo < nextQueueSeqNo) {
@@ -159,8 +160,7 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 						tagQueueHandle.nextSeqNo = tagQueueHandle.queue->requests.front().sequenceNumber;
 					}
 				} else {
-					CODE_PROBE(
-					    true, "GrvProxyTransactionTagThrottler::releaseTransactions : Switching tags to preserve FIFO");
+					CODE_PROBE(true, "GrvProxyTransactionTagThrottler switching tags to preserve FIFO");
 					pqOfQueues.push(tagQueueHandle);
 					break;
 				}
@@ -211,6 +211,40 @@ ACTOR static Future<Void> mockClient(GrvProxyTransactionTagThrottler* throttler,
 			(*counters)[tag] += batchSize;
 		}
 	}
+}
+
+ACTOR static Future<Void> mockFifoClient(GrvProxyTransactionTagThrottler* throttler) {
+	state TransactionTagMap<uint32_t> tagSet1;
+	state TransactionTagMap<uint32_t> tagSet2;
+	state std::vector<GetReadVersionRequest> reqs;
+	state int i = 0;
+	tagSet1["sampleTag1"_sr] = 1;
+	tagSet2["sampleTag2"_sr] = 1;
+	for (i = 0; i < 1000; ++i) {
+		auto& req = reqs.emplace_back();
+		req.priority = TransactionPriority::DEFAULT;
+		req.tags = tagSet1;
+	}
+	for (i = 0; i < 1000; ++i) {
+		auto& req = reqs.emplace_back();
+		req.priority = TransactionPriority::DEFAULT;
+		req.tags = tagSet2;
+	}
+	deterministicRandom()->randomShuffle(reqs);
+	for (const auto& req : reqs) {
+		throttler->addRequest(req);
+	}
+	for (i = 0; i < 1999; ++i) {
+		choose {
+			when(wait(success(reqs[i].reply.getFuture()))) {}
+			when(wait(success(reqs[i + 1].reply.getFuture()))) {
+				// Requests reordered
+				ASSERT(false);
+			}
+		}
+	}
+	wait(success(reqs[1999].reply.getFuture()));
+	return Void();
 }
 
 ACTOR static Future<Void> mockServer(GrvProxyTransactionTagThrottler* throttler) {
@@ -345,5 +379,14 @@ TEST_CASE("/GrvProxyTransactionTagThrottler/Cleanup2") {
 	// Calling updates cleans up the queues in throttler
 	throttler.updateRates(TransactionTagMap<double>{});
 	ASSERT_EQ(throttler.size(), 0);
+	return Void();
+}
+
+// Tests that unthrottled transactions are released in FIFO order, even when they
+// have different tags
+TEST_CASE("/GrvProxyTransactionTagThrottler/Fifo") {
+	state GrvProxyTransactionTagThrottler throttler;
+	state Future<Void> server = mockServer(&throttler);
+	wait(mockFifoClient(&throttler));
 	return Void();
 }
