@@ -2493,9 +2493,54 @@ ACTOR static Future<Version> timeKeeperVersionFromUnixEpoch(int64_t time, Refere
 	return std::max<Version>(0, result.second + (time - result.first) * CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 }
 
+ACTOR Future<int64_t> timeKeeperUnixEpochFromVersion(Version v, Reference<ReadYourWritesTransaction> tr) {
+	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
+
+	// Binary search to find the closest date with a version <= v
+	state int64_t min = 0;
+	state int64_t max = (int64_t)now();
+	state int64_t mid;
+	state std::pair<int64_t, Version> found;
+	Version version = wait(tr->getReadVersion());
+
+	found = std::make_pair(static_cast<int64_t>(g_network->now()), version); // Worst case we use this for our guess
+
+	loop {
+		mid = (min + max + 1) / 2; // ceiling
+
+		// Find the highest time < mid
+		state KeyBackedRangeResult<std::pair<int64_t, Version>> rangeResult =
+		    wait(versionMap.getRange(tr, min, mid, 1, Snapshot::False, Reverse::True));
+
+		if (rangeResult.results.size() != 1) {
+			if (min == mid) {
+				break;
+			}
+			min = mid;
+			break;
+		}
+
+		if (v < found.second) {
+			max = found.first;
+		} else {
+			found = rangeResult.results[0];
+			min = found.first;
+		}
+	}
+
+	auto result = found.first + (v - found.second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+	fmt::print(
+	    "version -> time, use ({}, {}) : (Time, Version), result: {} -> {}\n", found.first, found.second, v, result);
+	return result;
+}
+
 ACTOR static Future<Void> idempotencyIdsCleaner(Database db) {
 	state int64_t idmpKeySize;
+	state int64_t candidateDeleteSize;
+	state KeyRange candidateRangeToClean;
 	state Reference<ReadYourWritesTransaction> tr;
+	state Version expiredVersion;
+	state Key firstKey;
 	loop {
 		tr = makeReference<ReadYourWritesTransaction>(db);
 		loop {
@@ -2503,34 +2548,55 @@ ACTOR static Future<Void> idempotencyIdsCleaner(Database db) {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(store(idmpKeySize, tr->getEstimatedRangeSizeBytes(idempotencyIdKeys)));
-				if (idmpKeySize > SERVER_KNOBS->IDEMPOTENCY_IDS_BYTE_TARGET) {
-					Version canDeleteLowerThan = wait(timeKeeperVersionFromUnixEpoch(
-					    static_cast<int64_t>(g_network->now()) - SERVER_KNOBS->IDEMPOTENCY_IDS_MIN_AGE_SECONDS, tr));
-					KeySelector begin = firstGreaterOrEqual(idempotencyIdKeys.begin);
-					KeySelector end =
-					    firstGreaterOrEqual(BinaryWriter::toValue(bigEndian64(canDeleteLowerThan), Unversioned())
-					                            .withPrefix(idempotencyIdKeys.begin));
-					// Only read the amount of bytes we're overshooting our target by
-					auto limits = GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
-					                             idmpKeySize - SERVER_KNOBS->IDEMPOTENCY_IDS_BYTE_TARGET);
-					RangeResult result = wait(tr->getRange(begin, end, limits));
-					if (result.size() > 0) {
-						Version expiredVersion;
-						BinaryReader rd(result.back().key, Unversioned());
-						rd.readBytes(idempotencyIdKeys.begin.size());
-						rd >> expiredVersion;
-						expiredVersion = bigEndian64(expiredVersion);
-						TraceEvent("IdempotencyIdsCleanerAttemptToClean")
-						    .detail("BytesToClean", result.expectedSize())
-						    .detail("TotalBytesEstimate", idmpKeySize)
-						    .detail("ExpiredVersion", expiredVersion);
+				fmt::print("IdmpKeySize: {}\n", idmpKeySize);
+				if (idmpKeySize <= SERVER_KNOBS->IDEMPOTENCY_IDS_BYTE_TARGET) {
+					break;
+				}
 
-						// The keys we read comprise about the right number of bytes to delete to get to our target, so
-						// delete them all (and record the highest expired version)
-						tr->clear(KeyRangeRef(result.front().key, keyAfter(result.back().key)));
-						tr->set(idempotencyIdsExpiredVersion,
-						        ObjectWriter::toValue(IdempotencyIdsExpiredVersion{ expiredVersion }, Unversioned()));
+				RangeResult result = wait(tr->getRange(idempotencyIdKeys, /*limit*/ 1));
+				if (!result.size()) {
+					break;
+				}
+				firstKey = result.front().key;
+
+				Version canDeleteLowerThan = wait(timeKeeperVersionFromUnixEpoch(
+				    static_cast<int64_t>(g_network->now()) - SERVER_KNOBS->IDEMPOTENCY_IDS_MIN_AGE_SECONDS, tr));
+				candidateRangeToClean =
+				    KeyRangeRef(firstKey,
+				                BinaryWriter::toValue(bigEndian64(canDeleteLowerThan), Unversioned())
+				                    .withPrefix(idempotencyIdKeys.begin));
+
+				// Keep dividing the candidate range until clearing it would (probably) not take us under the byte
+				// target
+				loop {
+					wait(store(candidateDeleteSize, tr->getEstimatedRangeSizeBytes(candidateRangeToClean)));
+					fmt::print("CandidateDeleteSize: {}\n", candidateDeleteSize);
+					fmt::print("CanDeleteRange: {}\n", candidateRangeToClean.toString());
+					if (idmpKeySize - candidateDeleteSize >= SERVER_KNOBS->IDEMPOTENCY_IDS_BYTE_TARGET) {
+						break;
 					}
+					candidateRangeToClean = KeyRangeRef(candidateRangeToClean.begin, keyBetween(candidateRangeToClean));
+					if (candidateRangeToClean.empty()) {
+						// Avoid potential infinite loop
+						break;
+					}
+				}
+				RangeResult candidateRangeEnd =
+				    wait(tr->getRange(candidateRangeToClean, /*limit*/ 1, Snapshot::False, Reverse::True));
+				if (candidateRangeEnd.size()) {
+					tr->clear(candidateRangeToClean);
+					BinaryReader rd(candidateRangeEnd.front().key, Unversioned());
+					rd.readBytes(idempotencyIdKeys.begin.size());
+					rd >> expiredVersion;
+					expiredVersion = bigEndian64(expiredVersion);
+					tr->set(idempotencyIdsExpiredVersion,
+					        ObjectWriter::toValue(IdempotencyIdsExpiredVersion{ expiredVersion }, Unversioned()));
+					int64_t expiredTime = wait(timeKeeperUnixEpochFromVersion(expiredVersion, tr));
+					TraceEvent("IdempotencyIdsCleanerAttempt")
+					    .detail("IdmpKeySizeEstimate", idmpKeySize)
+					    .detail("ClearRangeSizeEstimate", candidateDeleteSize)
+					    .detail("ExpiredVersion", expiredVersion)
+					    .detail("ExpiredVersionAgeEstimate", static_cast<int64_t>(g_network->now()) - expiredTime);
 				}
 				wait(tr->commit());
 				break;
