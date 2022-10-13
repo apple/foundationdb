@@ -90,8 +90,7 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 		uint32_t* numReleased;
 		// Sequence number of the first queued request
 		int64_t nextSeqNo;
-		// Reverse order because std::priority_queue is a max heap
-		bool operator<(TagQueueHandle const& rhs) const { return nextSeqNo > rhs.nextSeqNo; }
+		bool operator>(TagQueueHandle const& rhs) const { return nextSeqNo > rhs.nextSeqNo; }
 		explicit TagQueueHandle(TagQueue& queue, uint32_t& numReleased) : queue(&queue), numReleased(&numReleased) {
 			ASSERT(!this->queue->requests.empty());
 			nextSeqNo = this->queue->requests.front().sequenceNumber;
@@ -100,7 +99,7 @@ void GrvProxyTransactionTagThrottler::releaseTransactions(double elapsed,
 
 	// Priority queue of queues for each tag, ordered by the sequence number of the
 	// next request to process in each queue
-	std::priority_queue<TagQueueHandle> pqOfQueues;
+	std::priority_queue<TagQueueHandle, std::vector<TagQueueHandle>, std::greater<TagQueueHandle>> pqOfQueues;
 
 	// Track transactions released for each tag
 	std::vector<std::pair<TransactionTag, uint32_t>> transactionsReleased;
