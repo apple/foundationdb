@@ -3711,9 +3711,10 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 		}
 
 		if (tlogTerminated(&self, persistentData, self.persistentQueue, e)) {
-			return Void();
+			throw please_reboot();
+			// return Void();
 		} else {
-			throw;
+			throw please_reboot();
 		}
 	}
 }
