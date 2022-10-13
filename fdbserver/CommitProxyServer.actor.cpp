@@ -2515,14 +2515,19 @@ ACTOR static Future<Void> idempotencyIdsCleaner(Database db) {
 					                             idmpKeySize - SERVER_KNOBS->IDEMPOTENCY_IDS_BYTE_TARGET);
 					RangeResult result = wait(tr->getRange(begin, end, limits));
 					if (result.size() > 0) {
-						// The keys we read comprise about the right number of bytes to delete to get to our target, so
-						// delete them all (and record the highest expired version)
-						tr->clear(KeyRangeRef(result.front().key, keyAfter(result.back().key)));
 						Version expiredVersion;
 						BinaryReader rd(result.back().key, Unversioned());
 						rd.readBytes(idempotencyIdKeys.begin.size());
 						rd >> expiredVersion;
 						expiredVersion = bigEndian64(expiredVersion);
+						TraceEvent("IdempotencyIdsCleanerAttemptToClean")
+						    .detail("BytesToClean", result.expectedSize())
+						    .detail("TotalBytesEstimate", idmpKeySize)
+						    .detail("ExpiredVersion", expiredVersion);
+
+						// The keys we read comprise about the right number of bytes to delete to get to our target, so
+						// delete them all (and record the highest expired version)
+						tr->clear(KeyRangeRef(result.front().key, keyAfter(result.back().key)));
 						tr->set(idempotencyIdsExpiredVersion,
 						        ObjectWriter::toValue(IdempotencyIdsExpiredVersion{ expiredVersion }, Unversioned()));
 					}
