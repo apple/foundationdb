@@ -54,6 +54,7 @@ public:
 		FailDisk,
 		RebootAndDelete,
 		RebootProcessAndDelete,
+		RebootProcessAndSwitch,
 		Reboot,
 		RebootProcess,
 		None
@@ -304,6 +305,7 @@ public:
 	                          KillType kt,
 	                          bool forceKill = false,
 	                          KillType* ktFinal = nullptr) = 0;
+	virtual bool killAll(KillType kt, bool forceKill = false, KillType* ktFinal = nullptr) = 0;
 	// virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses,
 	                              std::vector<ProcessInfo*> const& deadProcesses,
@@ -389,6 +391,9 @@ public:
 	bool isCleared(NetworkAddress const& address) const {
 		return clearedAddresses.find(address) != clearedAddresses.end();
 	}
+
+	void switchCluster(NetworkAddress const& address) { switchedCluster[address] = !switchedCluster[address]; }
+	bool hasSwitchedCluster(NetworkAddress const& address) const { return switchedCluster.at(address); }
 
 	void excludeAddress(NetworkAddress const& address) {
 		excludedAddresses[address]++;
@@ -540,6 +545,7 @@ private:
 	std::set<Optional<Standalone<StringRef>>> swapsDisabled;
 	std::map<NetworkAddress, int> excludedAddresses;
 	std::map<NetworkAddress, int> clearedAddresses;
+	std::map<NetworkAddress, bool> switchedCluster;
 	std::map<NetworkAddress, std::map<std::string, int>> roleAddresses;
 	std::map<std::string, double> disabledMap;
 	bool allSwapsDisabled;

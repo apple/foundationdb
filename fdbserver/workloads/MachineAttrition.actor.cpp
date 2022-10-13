@@ -357,6 +357,11 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 				TraceEvent("Assassination").detail("TargetDataHall", target).detail("KillType", kt);
 
 				g_simulator->killDataHall(target, kt);
+			} else if (!g_simulator->extraDatabases.empty() && deterministicRandom()->random01() < 0.1) {
+				state ISimulator::KillType kt = ISimulator::RebootProcessAndSwitch;
+				g_simulator->killAll(kt, true);
+				wait(delay(self->testDuration / 2));
+				g_simulator->killAll(kt, true);
 			} else {
 				state int killedMachines = 0;
 				while (killedMachines < self->machinesToKill && self->machines.size() > self->machinesToLeave) {
