@@ -218,32 +218,40 @@ ACTOR static Future<Void> mockFifoClient(GrvProxyTransactionTagThrottler* thrott
 	state TransactionTagMap<uint32_t> tagSet2;
 	state std::vector<GetReadVersionRequest> reqs;
 	state int i = 0;
+	// Used to track the order in which replies are received
+	state std::vector<int> replyIndices;
+
+	// Tag half of requests with one tag, half with another, then randomly shuffle
 	tagSet1["sampleTag1"_sr] = 1;
 	tagSet2["sampleTag2"_sr] = 1;
-	for (i = 0; i < 1000; ++i) {
+	for (i = 0; i < 2000; ++i) {
 		auto& req = reqs.emplace_back();
 		req.priority = TransactionPriority::DEFAULT;
-		req.tags = tagSet1;
-	}
-	for (i = 0; i < 1000; ++i) {
-		auto& req = reqs.emplace_back();
-		req.priority = TransactionPriority::DEFAULT;
-		req.tags = tagSet2;
+		if (i < 1000) {
+			req.tags = tagSet1;
+		} else {
+			req.tags = tagSet2;
+		}
 	}
 	deterministicRandom()->randomShuffle(reqs);
+
+	// Send requests to throttler and assert that responses are received in FIFO order
 	for (const auto& req : reqs) {
 		throttler->addRequest(req);
 	}
-	for (i = 0; i < 1999; ++i) {
-		choose {
-			when(wait(success(reqs[i].reply.getFuture()))) {}
-			when(wait(success(reqs[i + 1].reply.getFuture()))) {
-				// Requests reordered
-				ASSERT(false);
-			}
-		}
+	state std::vector<Future<Void>> futures;
+	for (int j = 0; j < 2000; ++j) {
+		// Flow hack to capture replyIndices
+		auto* _replyIndices = &replyIndices;
+		futures.push_back(map(reqs[j].reply.getFuture(), [_replyIndices, j](auto const&) {
+			(*_replyIndices).push_back(j);
+			return Void();
+		}));
 	}
-	wait(success(reqs[1999].reply.getFuture()));
+	wait(waitForAll(futures));
+	for (i = 0; i < 2000; ++i) {
+		ASSERT_EQ(replyIndices[i], i);
+	}
 	return Void();
 }
 
