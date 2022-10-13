@@ -27,6 +27,8 @@
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Tracing.h"
+#include "flow/EncryptUtils.h"
+#include "flow/Knobs.h"
 
 // The versioned message has wire format : -1, version, messages
 static const int32_t VERSION_HEADER = -1;
@@ -153,12 +155,13 @@ struct MutationRef {
 		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
 		BinaryWriter bw(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 		bw << *this;
-		EncryptBlobCipherAes265Ctr cipher(textCipherItr->second,
-		                                  headerCipherItr->second,
-		                                  iv,
-		                                  AES_256_IV_LENGTH,
-		                                  ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
-		                                  usageType);
+		EncryptBlobCipherAes265Ctr cipher(
+		    textCipherItr->second,
+		    headerCipherItr->second,
+		    iv,
+		    AES_256_IV_LENGTH,
+		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+		    usageType);
 		BlobCipherEncryptHeader* header = new (arena) BlobCipherEncryptHeader;
 		StringRef headerRef(reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader));
 		StringRef payload =
@@ -292,7 +295,19 @@ struct CommitTransactionRef {
 				serializer(ar, report_conflicting_keys);
 			}
 			if (ar.protocolVersion().hasResolverPrivateMutations()) {
-				serializer(ar, lock_aware, spanContext);
+				serializer(ar, lock_aware);
+				if (!ar.protocolVersion().hasOTELSpanContext()) {
+					Optional<UID> context;
+					serializer(ar, context);
+					if (context.present()) {
+						SpanContext res;
+						res.traceID = context.get();
+						spanContext = res;
+					}
+				}
+			}
+			if (ar.protocolVersion().hasOTELSpanContext()) {
+				serializer(ar, spanContext);
 			}
 		}
 	}

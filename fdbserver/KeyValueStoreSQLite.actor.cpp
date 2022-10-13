@@ -309,7 +309,17 @@ struct SQLiteDB : NonCopyable {
 			    db, 0, restart ? SQLITE_CHECKPOINT_RESTART : SQLITE_CHECKPOINT_FULL, &logSize, &checkpointCount);
 			if (!rc)
 				break;
-			if ((sqlite3_errcode(db) & 0xff) == SQLITE_BUSY) {
+
+			// In simulation, if the process is shutting down then do not wait/retry on a busy result because the wait
+			// or the retry could take too long to complete such that the virtual process is forcibly destroyed first,
+			// leaking all outstanding actors and their related states which would include references to the SQLite
+			// data files which would remain open.  This would cause the replacement virtual process to fail an assert
+			// when opening the SQLite files as they would already be in use.
+			if (g_network->isSimulated() && g_simulator->getCurrentProcess()->shutdownSignal.isSet()) {
+				VFSAsyncFile::setInjectedError(rc);
+				checkError("checkpoint", rc);
+				ASSERT(false); // should never reach this point
+			} else if ((sqlite3_errcode(db) & 0xff) == SQLITE_BUSY) {
 				// printf("#");
 				// threadSleep(.010);
 				sqlite3_sleep(10);

@@ -25,7 +25,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/SimpleIni.h"
-#include "fdbserver/Status.h"
+#include "fdbserver/Status.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -120,6 +120,7 @@ public: // ctor & dtor
 		restartInfoLocation = getOption(options, "restartInfoLocation"_sr, "simfdb/restartInfo.ini"_sr).toString();
 		skipCheck = false;
 		retryLimit = getOption(options, "retryLimit"_sr, 5);
+		g_simulator->allowLogSetKills = false;
 	}
 
 public: // workload functions

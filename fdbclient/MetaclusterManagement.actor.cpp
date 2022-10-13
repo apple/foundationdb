@@ -27,6 +27,17 @@
 
 namespace MetaclusterAPI {
 
+std::pair<ClusterUsage, ClusterUsage> metaclusterCapacity(std::map<ClusterName, DataClusterMetadata> const& clusters) {
+	ClusterUsage tenantGroupCapacity;
+	ClusterUsage tenantGroupsAllocated;
+	for (auto cluster : clusters) {
+		tenantGroupCapacity.numTenantGroups +=
+		    std::max(cluster.second.entry.capacity.numTenantGroups, cluster.second.entry.allocated.numTenantGroups);
+		tenantGroupsAllocated.numTenantGroups += cluster.second.entry.allocated.numTenantGroups;
+	}
+	return { tenantGroupCapacity, tenantGroupsAllocated };
+}
+
 ACTOR Future<Reference<IDatabase>> openDatabase(ClusterConnectionString connectionString) {
 	if (g_network->isSimulated()) {
 		Reference<IClusterConnectionRecord> clusterFile =

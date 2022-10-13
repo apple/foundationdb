@@ -203,6 +203,13 @@ The ``get`` command fetches the value of a given key. Its syntax is ``get <KEY>`
 
 Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
 
+getknob
+-------
+
+The ``getknob`` command fetches the value of a given knob that has been populated by ``setknob``. Its syntax is ``getknob <KNOBNAME> [CONFIGCLASS]``. It displays the value of ``<KNOBNAME>`` if ``<KNOBNAME>`` is present in the database and ``not found`` otherwise.
+
+Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
+
 getrange
 --------
 
@@ -395,6 +402,13 @@ The ``setclass`` command can be used to change the :ref:`process class <guidelin
 
 The available process classes are ``unset``, ``storage``, ``transaction``, ``resolution``, ``grv_proxy``, ``commit_proxy``, ``master``, ``test``, ``unset``, ``stateless``, ``log``, ``router``, ``cluster_controller``, ``fast_restore``, ``data_distributor``, ``coordinator``, ``ratekeeper``, ``storage_cache``, ``backup``, and ``default``.
 
+setknob
+-------
+
+The ``setknob`` command can be used to set knobs dynamically. Its syntax is ``setknob <KNOBNAME> <KNOBVALUE> [CONFIGCLASS]``. If not present in a ``begin\commit`` block, the CLI will prompt for a description of the change. 
+
+Note that :ref:`characters can be escaped <cli-escaping>` when specifying keys (or values) in ``fdbcli``.
+
 sleep
 -----
 
@@ -439,13 +453,15 @@ The ``tenant`` command is used to view and manage the tenants in a cluster. The 
 create
 ^^^^^^
 
-``tenant create <NAME> [tenant_group=<TENANT_GROUP>]``
+``tenant create <NAME> [tenant_group=<TENANT_GROUP>] [assigned_cluster=<CLUSTER_NAME>]``
 
 Creates a new tenant in the cluster.
 
 ``NAME`` - The desired name of the tenant. The name can be any byte string that does not begin with the ``\xff`` byte. 
 
 ``TENANT_GROUP`` - The tenant group the tenant will be placed in.
+
+``CLUSTER_NAME`` - The cluster the tenant will be placed in (metacluster only). If unspecified, the metacluster will choose the cluster.
 
 delete
 ^^^^^^

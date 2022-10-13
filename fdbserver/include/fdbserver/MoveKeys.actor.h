@@ -70,6 +70,9 @@ struct MoveKeysParams {
 	CancelConflictingDataMoves cancelConflictingDataMoves = CancelConflictingDataMoves::False;
 };
 
+// read the lock value in system keyspace but do not change anything
+ACTOR Future<MoveKeysLock> readMoveKeysLock(Database cx);
+
 // Calling moveKeys, etc with the return value of this actor ensures that no movekeys, etc
 // has been executed by a different locker since takeMoveKeysLock(), as calling
 // takeMoveKeysLock() updates "moveKeysLockOwnerKey" to a random UID.

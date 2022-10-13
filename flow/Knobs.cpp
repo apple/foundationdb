@@ -18,8 +18,9 @@
  * limitations under the License.
  */
 
-#include "flow/flow.h"
+#include "flow/EncryptUtils.h"
 #include "flow/Error.h"
+#include "flow/flow.h"
 #include "flow/Knobs.h"
 #include "flow/BooleanParam.h"
 #include "flow/UnitTest.h"
@@ -84,8 +85,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	init( WRITE_TRACING_ENABLED,                              true ); if( randomize && BUGGIFY ) WRITE_TRACING_ENABLED = false;
 	init( TRACING_SPAN_ATTRIBUTES_ENABLED,                   false ); // Additional K/V and tenant data added to Span Attributes
-	init( TRACING_SAMPLE_RATE,                                 0.0 ); // Fraction of distributed traces (not spans) to sample (0 means ignore all traces)
-	init( TRACING_UDP_LISTENER_ADDR,                   "127.0.0.1" ); // Only applicable if TracerType is set to a network option
+	init( TRACING_SAMPLE_RATE,                                 0.0); // Fraction of distributed traces (not spans) to sample (0 means ignore all traces)
+	init( TRACING_UDP_LISTENER_ADDR,                   "127.0.0.1"); // Only applicable if TracerType is set to a network option
 	init( TRACING_UDP_LISTENER_PORT,                          8889 ); // Only applicable if TracerType is set to a network option
 
 	//connectionMonitor
@@ -135,6 +136,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( PUBLIC_KEY_FILE_MAX_SIZE,                    1024 * 1024 );
 	init( PUBLIC_KEY_FILE_REFRESH_INTERVAL_SECONDS,             30 );
 	init( MAX_CACHED_EXPIRED_TOKENS,                          1024 );
+	init( AUDIT_TIME_WINDOW,                                   5.0 );
 
 	//AsyncFileCached
 	init( PAGE_CACHE_4K,                                   2LL<<30 );
@@ -221,13 +223,14 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( SLOW_NETWORK_LATENCY,                             100e-3 );
 	init( MAX_CLOGGING_LATENCY,                                  0 ); if( randomize && BUGGIFY ) MAX_CLOGGING_LATENCY =  0.1 * deterministicRandom()->random01();
 	init( MAX_BUGGIFIED_DELAY,                                   0 ); if( randomize && BUGGIFY ) MAX_BUGGIFIED_DELAY =  0.2 * deterministicRandom()->random01();
+	init( MAX_RUNLOOP_SLEEP_DELAY,                               0 );
 	init( SIM_CONNECT_ERROR_MODE, deterministicRandom()->randomInt(0,3) );
 
 	//Tracefiles
 	init( ZERO_LENGTH_FILE_PAD,                                  1 );
 	init( TRACE_FLUSH_INTERVAL,                               0.25 );
 	init( TRACE_RETRY_OPEN_INTERVAL,						  1.00 );
-	init( MIN_TRACE_SEVERITY,                isSimulated ?  1 : 10 ); // Related to the trace severity in Trace.h
+	init( MIN_TRACE_SEVERITY,                isSimulated ?  1 : 10, Atomic::NO ); // Related to the trace severity in Trace.h
 	init( MAX_TRACE_SUPPRESSIONS,                              1e4 );
 	init( TRACE_DATETIME_ENABLED,                             true ); // trace time in human readable format (always real time)
 	init( TRACE_SYNC_ENABLED,                                    0 );
@@ -240,11 +243,10 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( SIM_SPEEDUP_AFTER_SECONDS,                           450 );
 	init( MAX_TRACE_LINES,                               1'000'000 );
 	init( CODE_COV_TRACE_EVENT_SEVERITY,                        10 ); // Code coverage TraceEvent severity level
-	init( ENABLE_SIMULATION_IMPROVEMENTS,                    false ); // Separate normal workloads and failure injection
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
-	init( MAX_METRIC_SIZE,                                    2500 );
+	init( MAX_METRIC_SIZE,                                    2500, Atomic::NO );
 	init( MAX_METRIC_LEVEL,                                     25 );
 	init( METRIC_LEVEL_DIVISOR,                             log(4) );
 	init( METRIC_LIMIT_START_QUEUE_SIZE,                        10 );  // The queue size at which to start restricting logging by disabling levels
@@ -301,6 +303,10 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( TOKEN_CACHE_SIZE,                                    100 );
 	init( ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,                  5.0 );
 	init( ENCRYPT_KEY_CACHE_LOGGING_SAMPLE_SIZE,              1000 );
+	// Refer to EncryptUtil::EncryptAuthTokenAlgo for more details
+	init( ENCRYPT_HEADER_AUTH_TOKEN_ENABLED,                  true ); if ( randomize && BUGGIFY ) { ENCRYPT_HEADER_AUTH_TOKEN_ENABLED = !ENCRYPT_HEADER_AUTH_TOKEN_ENABLED; }
+	init( ENCRYPT_HEADER_AUTH_TOKEN_ALGO,                        1 ); if ( randomize && BUGGIFY ) { ENCRYPT_HEADER_AUTH_TOKEN_ALGO = getRandomAuthTokenAlgo(); }
+
 
 	// REST Client
 	init( RESTCLIENT_MAX_CONNECTIONPOOL_SIZE,                   10 );

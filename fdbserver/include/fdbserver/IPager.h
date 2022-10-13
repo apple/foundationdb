@@ -21,6 +21,7 @@
 
 #ifndef FDBSERVER_IPAGER_H
 #define FDBSERVER_IPAGER_H
+
 #include <cstddef>
 #include <stdint.h>
 #include "fdbclient/BlobCipher.h"
@@ -28,8 +29,10 @@
 #include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/Tenant.h"
 #include "fdbserver/IClosable.h"
+#include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/FastAlloc.h"
+#include "flow/Knobs.h"
 #include "flow/flow.h"
 #include "flow/ProtocolVersion.h"
 
@@ -369,7 +372,7 @@ public:
 			Header* h = reinterpret_cast<Header*>(header);
 			EncryptBlobCipherAes265Ctr cipher(cipherKeys.cipherTextKey,
 			                                  cipherKeys.cipherHeaderKey,
-			                                  ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+			                                  getEncryptAuthTokenMode(ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 			                                  BlobCipherMetrics::KV_REDWOOD);
 			Arena arena;
 			StringRef ciphertext = cipher.encrypt(payload, len, h, arena)->toStringRef();
@@ -495,7 +498,7 @@ public:
 	//        Secret is set if needed
 	// Post:  Main and Encoding subheaders are updated
 	//        Payload is possibly encrypted
-	void preWrite(PhysicalPageID pageID) const {
+	void preWrite(PhysicalPageID pageID) {
 		// Explicitly check payload definedness to make the source of valgrind errors more clear.
 		// Without this check, calculating a checksum on a payload with undefined bytes does not
 		// cause a valgrind error but the resulting checksum is undefined which causes errors later.
@@ -516,6 +519,7 @@ public:
 		} else {
 			throw page_header_version_not_supported();
 		}
+		encodingHeaderAvailable = true;
 	}
 
 	// Must be called after reading from disk to verify all non-payload bytes
@@ -528,6 +532,7 @@ public:
 	void postReadHeader(PhysicalPageID pageID, bool verify = true) {
 		pPayload = page->getPayload();
 		payloadSize = logicalSize - (pPayload - buffer);
+		encodingHeaderAvailable = true;
 
 		if (page->headerVersion == 1) {
 			if (verify) {
@@ -565,7 +570,18 @@ public:
 	// Returns true if the page's encoding type employs encryption
 	bool isEncrypted() const { return isEncodingTypeEncrypted(getEncodingType()); }
 
-	void* getEncodingHeader() { return page->getEncodingHeader(); }
+	// Return encryption domain id used. This method only use information from the encryptionKey.
+	// Caller should make sure encryption domain is in use.
+	int64_t getEncryptionDomainId() const {
+		// encryption domain is only supported by AESEncryptionV1.
+		ASSERT(getEncodingType() == EncodingType::AESEncryptionV1);
+		const Reference<BlobCipherKey>& cipherKey = encryptionKey.aesKey.cipherTextKey;
+		ASSERT(cipherKey.isValid());
+		return cipherKey->getDomainId();
+	}
+
+	// Return pointer to encoding header.
+	const void* getEncodingHeader() const { return encodingHeaderAvailable ? page->getEncodingHeader() : nullptr; }
 
 private:
 	Arena arena;
@@ -604,6 +620,9 @@ public:
 
 	// Used by encodings that do encryption
 	EncryptionKey encryptionKey;
+
+	// Whether encoding header is set
+	bool encodingHeaderAvailable = false;
 
 	mutable ArbitraryObject extra;
 };

@@ -655,6 +655,12 @@ public:
 	// Adds or updates the specified (UID, Tag) pair in the tag mapping.
 	void addSSIdTagMapping(const UID& uid, const Tag& tag);
 
+	// Returns the latest commit version that mutated the specified storage server.
+	// @in ssid id of the storage server interface
+	// @out tag storage server's tag, if an entry exists for "ssid" in "ssidTagMapping"
+	// @out commitVersion latest commit version that mutated the storage server
+	void getLatestCommitVersionForSSID(const UID& ssid, Tag& tag, Version& commitVersion);
+
 	// Returns the latest commit versions that mutated the specified storage servers
 	/// @note returns the latest commit version for a storage server only if the latest
 	// commit version of that storage server is below the specified "readVersion".
@@ -662,6 +668,14 @@ public:
 	                             Version readVersion,
 	                             Reference<TransactionState> info,
 	                             VersionVector& latestCommitVersions);
+
+	// Returns the latest commit version that mutated the specified storage server.
+	// @note this is a lightweight version of "getLatestCommitVersions()", to be used
+	// when the state ("TransactionState") of the transaction that fetched the read
+	// version is not available.
+	void getLatestCommitVersion(const StorageServerInterface& ssi,
+	                            Version readVersion,
+	                            VersionVector& latestCommitVersion);
 
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;

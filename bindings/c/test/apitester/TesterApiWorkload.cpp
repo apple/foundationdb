@@ -166,6 +166,7 @@ void ApiWorkload::populateDataTx(TTaskFct cont, std::optional<int> tenantId) {
 	execTransaction(
 	    [kvPairs](auto ctx) {
 		    for (const fdb::KeyValue& kv : *kvPairs) {
+			    ctx->tx().addReadConflictRange(kv.key, kv.key + fdb::Key(1, '\x00'));
 			    ctx->tx().set(kv.key, kv.value);
 		    }
 		    ctx->commit();
@@ -198,6 +199,10 @@ void ApiWorkload::clearTenantData(TTaskFct cont, std::optional<int> tenantId) {
 void ApiWorkload::clearData(TTaskFct cont) {
 	execTransaction(
 	    [this](auto ctx) {
+		    // Make this self-conflicting, so that if we're retrying on timeouts
+		    // once we get a successful commit all previous attempts are no
+		    // longer in-flight.
+		    ctx->tx().addReadConflictRange(keyPrefix, keyPrefix + fdb::Key(1, '\xff'));
 		    ctx->tx().clearRange(keyPrefix, keyPrefix + fdb::Key(1, '\xff'));
 		    ctx->commit();
 	    },
@@ -253,6 +258,7 @@ void ApiWorkload::randomInsertOp(TTaskFct cont, std::optional<int> tenantId) {
 	execTransaction(
 	    [kvPairs](auto ctx) {
 		    for (const fdb::KeyValue& kv : *kvPairs) {
+			    ctx->tx().addReadConflictRange(kv.key, kv.key + fdb::Key(1, '\x00'));
 			    ctx->tx().set(kv.key, kv.value);
 		    }
 		    ctx->commit();
@@ -275,6 +281,7 @@ void ApiWorkload::randomClearOp(TTaskFct cont, std::optional<int> tenantId) {
 	execTransaction(
 	    [keys](auto ctx) {
 		    for (const auto& key : *keys) {
+			    ctx->tx().addReadConflictRange(key, key + fdb::Key(1, '\x00'));
 			    ctx->tx().clear(key);
 		    }
 		    ctx->commit();
@@ -296,6 +303,7 @@ void ApiWorkload::randomClearRangeOp(TTaskFct cont, std::optional<int> tenantId)
 	}
 	execTransaction(
 	    [begin, end](auto ctx) {
+		    ctx->tx().addReadConflictRange(begin, end);
 		    ctx->tx().clearRange(begin, end);
 		    ctx->commit();
 	    },

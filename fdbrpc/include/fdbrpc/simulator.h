@@ -482,6 +482,7 @@ public:
 	TSSMode tssMode;
 	std::map<NetworkAddress, bool> corruptWorkerMap;
 	ConfigDBType configDBType;
+	bool blobGranulesEnabled;
 
 	// Used by workloads that perform reconfigurations
 	int testerCount;
@@ -502,6 +503,8 @@ public:
 	bool allowStorageMigrationTypeChange = false;
 	double injectTargetedSSRestartTime = std::numeric_limits<double>::max();
 	double injectSSDelayTime = std::numeric_limits<double>::max();
+	double injectTargetedBMRestartTime = std::numeric_limits<double>::max();
+	double injectTargetedBWRestartTime = std::numeric_limits<double>::max();
 
 	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 

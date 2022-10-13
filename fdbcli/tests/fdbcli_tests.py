@@ -335,6 +335,57 @@ def consistencycheck(logger):
 
 
 @enable_logging()
+def knobmanagement(logger):
+    # this test will set knobs and verify that the knobs are properly set
+    # must use begin/commit to avoid prompt for description
+
+    # Incorrect arguments
+    output = run_fdbcli_command('setknob')
+    assert output == "Usage: setknob <KEY> <VALUE> [CONFIG_CLASS]"
+    output = run_fdbcli_command('setknob', 'min_trace_severity')
+    assert output == "Usage: setknob <KEY> <VALUE> [CONFIG_CLASS]"
+    output = run_fdbcli_command('getknob')
+    assert output == "Usage: getknob <KEY> [CONFIG_CLASS]"
+    logger.debug("incorrect args passed")
+
+    # Invalid knob name
+    err = run_fdbcli_command_and_get_error('begin; setknob dummy_knob 20; commit \"fdbcli change\";')
+    logger.debug("err is: {}".format(err))
+    assert len(err) > 0
+    logger.debug("invalid knob name passed")
+
+    # Invalid type for knob
+    err = run_fdbcli_command_and_get_error('begin; setknob min_trace_severity dummy-text; commit \"fdbcli change\";')
+    logger.debug("err is: {}".format(err))
+    assert len(err) > 0
+    logger.debug("invalid knob type passed")
+
+    # Verifying we can't do a normal set, clear, get, getrange, clearrange 
+    # with a setknob
+    err = run_fdbcli_command_and_get_error('writemode on; begin; set foo bar; setknob max_metric_size 1000; commit;')
+    logger.debug("err is: {}".format(err))
+    assert len(err) > 0
+
+    err = run_fdbcli_command_and_get_error('writemode on; begin; clear foo; setknob max_metric_size 1000; commit')
+    logger.debug("err is: {}".format(err))
+    assert len(err) > 0 
+
+    # Various setknobs and verified by getknob
+    output = run_fdbcli_command('begin; setknob min_trace_severity 30; setknob max_metric_size 1000; \
+                                setknob tracing_udp_listener_addr 192.168.0.1;                       \
+                                setknob tracing_sample_rate 0.3;                                     \
+                                commit \"This is an fdbcli test for knobs\";')
+    assert "Committed" in output
+    output = run_fdbcli_command('getknob', 'min_trace_severity')
+    assert r"`min_trace_severity' is `30'" == output
+    output = run_fdbcli_command('getknob', 'max_metric_size')
+    assert r"`max_metric_size' is `1000'" == output
+    output = run_fdbcli_command('getknob', 'tracing_udp_listener_addr')
+    assert r"`tracing_udp_listener_addr' is `'192.168.0.1''" == output
+    output = run_fdbcli_command('getknob', 'tracing_sample_rate')
+    assert r"`tracing_sample_rate' is `0.300000'" == output
+
+@enable_logging()
 def cache_range(logger):
     # this command is currently experimental
     # just test we can set and clear the cached range
@@ -919,66 +970,22 @@ def integer_options():
     assert error_output == b''
 
 def tls_address_suffix():
-    # fdbcli shall prevent a non-TLS fdbcli run from connecting to an all-TLS cluster, and vice versa
+    # fdbcli shall prevent a non-TLS fdbcli run from connecting to an all-TLS cluster
     preamble = 'eNW1yf1M:eNW1yf1M@'
-    def make_addr(port: int, tls: bool = False):
-        return "127.0.0.1:{}{}".format(port, ":tls" if tls else "")
-    testcases = [
-        # IsServerTLS, NumServerAddrs
-        (True, 1),
-        (False, 1),
-        (True, 3),
-        (False, 3),
-    ]
-    err_output_server_no_tls = "ERROR: fdbcli is configured with TLS, but none of the coordinators have TLS addresses."
+    num_server_addrs = [1, 2, 5]
     err_output_server_tls = "ERROR: fdbcli is not configured with TLS, but all of the coordinators have TLS addresses."
 
-    # technically the contents of the certs and key files are not evaluated
-    # before tls-suffix check against tls configuration takes place,
-    # but we generate the certs and keys anyway to avoid
-    # imposing nuanced TLSConfig evaluation ordering requirement on the testcase
     with tempfile.TemporaryDirectory() as tmpdir:
-        cert_file = tmpdir + "/client-cert.pem"
-        key_file = tmpdir + "/client-key.pem"
-        ca_file = tmpdir + "/server-ca.pem"
-        mkcert_process = subprocess.run([
-                args.build_dir + "/bin/mkcert",
-                "--server-chain-length", "1",
-                "--client-chain-length", "1",
-                "--server-cert-file", tmpdir + "/server-cert.pem",
-                "--client-cert-file", tmpdir + "/client-cert.pem",
-                "--server-key-file", tmpdir + "/server-key.pem",
-                "--client-key-file", tmpdir + "/client-key.pem",
-                "--server-ca-file", tmpdir + "/server-ca.pem",
-                "--client-ca-file", tmpdir + "/client-ca.pem",
-            ],
-            capture_output=True)
-        if mkcert_process.returncode != 0:
-            print("mkcert returned with code {}".format(mkcert_process.returncode))
-            print("Output:\n{}{}\n".format(
-                        mkcert_process.stdout.decode("utf8").strip(),
-                        mkcert_process.stderr.decode("utf8").strip()))
-            assert False
         cluster_fn = tmpdir + "/fdb.cluster"
-        for testcase in testcases:
-            is_server_tls, num_server_addrs = testcase
+        for num_server_addr in num_server_addrs:
             with open(cluster_fn, "w") as fp:
                 fp.write(preamble + ",".join(
-                    [make_addr(port=4000 + addr_idx, tls=is_server_tls) for addr_idx in range(num_server_addrs)]))
+                    ["127.0.0.1:{}:tls".format(4000 + addr_idx) for addr_idx in range(num_server_addr)]))
                 fp.close()
-                tls_args = ["--tls-certificate-file",
-                            cert_file,
-                            "--tls-key-file",
-                            key_file,
-                            "--tls-ca-file",
-                            ca_file] if not is_server_tls else []
-                fdbcli_process = subprocess.run(command_template[:2] + [cluster_fn] + tls_args, capture_output=True)
+                fdbcli_process = subprocess.run(command_template[:2] + [cluster_fn], capture_output=True)
                 assert fdbcli_process.returncode != 0
                 err_out = fdbcli_process.stderr.decode("utf8").strip()
-                if is_server_tls:
-                    assert err_out == err_output_server_tls, f"unexpected output: {err_out}"
-                else:
-                    assert err_out == err_output_server_no_tls, f"unexpected output: {err_out}"
+                assert err_out == err_output_server_tls, f"unexpected output: {err_out}"
 
 if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter,
@@ -1027,6 +1034,7 @@ if __name__ == '__main__':
         versionepoch()
         integer_options()
         tls_address_suffix()
+        knobmanagement()
     else:
         assert args.process_number > 1, "Process number should be positive"
         coordinators()

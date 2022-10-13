@@ -874,12 +874,12 @@ ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromSt
 
 ACTOR Future<Void> verifyConfigurationDatabaseAlive(Database cx) {
 	state Backoff backoff;
+	state Reference<ISingleThreadTransaction> configTr;
 	loop {
 		try {
 			// Attempt to read a random value from the configuration
 			// database to make sure it is online.
-			state Reference<ISingleThreadTransaction> configTr =
-			    ISingleThreadTransaction::create(ISingleThreadTransaction::Type::PAXOS_CONFIG, cx);
+			configTr = ISingleThreadTransaction::create(ISingleThreadTransaction::Type::PAXOS_CONFIG, cx);
 			Tuple tuple;
 			tuple.appendNull(); // config class
 			tuple << "test"_sr;
@@ -2353,6 +2353,21 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 			}
 			when(wait(clusterInterface->onChange())) {}
 		}
+	}
+}
+
+ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile, KeyRange range, AuditType type) {
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+
+	loop {
+		while (!clusterInterface->get().present()) {
+			wait(clusterInterface->onChange());
+		}
+
+		UID auditId = wait(clusterInterface->get().get().triggerAudit.getReply(TriggerAuditRequest(type, range)));
+		TraceEvent(SevDebug, "ManagementAPIAuditStorageEnd").detail("AuditID", auditId);
+		return auditId;
 	}
 }
 

@@ -120,10 +120,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		ASSERT(g_simulator->extraDatabases.size() > 0);
 		for (auto connectionString : g_simulator->extraDatabases) {
 			ClusterConnectionString ccs(connectionString);
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(ccs);
 			self->dataDbIndex.push_back(ClusterName(format("cluster_%08d", self->dataDbs.size())));
 			self->dataDbs[self->dataDbIndex.back()] =
-			    DataClusterData(Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION));
+			    DataClusterData(Database::createSimulatedExtraDatabase(connectionString, cx->defaultTenant));
 		}
 
 		wait(success(MetaclusterAPI::createMetacluster(cx.getReference(), "management_cluster"_sr)));
@@ -745,14 +744,14 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			self->createdTenants[newTenantName] = tenantData->second;
 			self->createdTenants.erase(tenantData);
 
-			auto& dataDb = self->dataDbs[tenantData->second.cluster];
+			auto& dataDb = self->dataDbs[newEntry.assignedCluster.get()];
 			ASSERT(dataDb.registered);
 
 			dataDb.tenants.erase(tenant);
 			dataDb.tenants.insert(newTenantName);
 
-			if (tenantData->second.tenantGroup.present()) {
-				auto& tenantGroup = self->tenantGroups[tenantData->second.tenantGroup.get()];
+			if (newEntry.tenantGroup.present()) {
+				auto& tenantGroup = self->tenantGroups[newEntry.tenantGroup.get()];
 				tenantGroup.tenants.erase(tenant);
 				tenantGroup.tenants.insert(newTenantName);
 			} else {
@@ -907,18 +906,25 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		std::map<ClusterName, DataClusterMetadata> dataClusters = wait(MetaclusterAPI::listClusters(
 		    self->managementDb, ""_sr, "\xff\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS + 1));
 
+		int totalTenantGroupsAllocated = 0;
 		std::vector<Future<Void>> dataClusterChecks;
 		for (auto [clusterName, dataClusterData] : self->dataDbs) {
 			auto dataClusterItr = dataClusters.find(clusterName);
 			if (dataClusterData.registered) {
 				ASSERT(dataClusterItr != dataClusters.end());
 				ASSERT(dataClusterItr->second.entry.capacity.numTenantGroups == dataClusterData.tenantGroupCapacity);
+				totalTenantGroupsAllocated +=
+				    dataClusterData.tenantGroups.size() + dataClusterData.ungroupedTenants.size();
 			} else {
 				ASSERT(dataClusterItr == dataClusters.end());
 			}
 
 			dataClusterChecks.push_back(checkDataCluster(self, clusterName, dataClusterData));
 		}
+		auto capacityNumbers = MetaclusterAPI::metaclusterCapacity(dataClusters);
+		ASSERT(capacityNumbers.first.numTenantGroups == self->totalTenantGroupCapacity);
+		ASSERT(capacityNumbers.second.numTenantGroups == totalTenantGroupsAllocated);
+
 		wait(waitForAll(dataClusterChecks));
 
 		wait(decommissionMetacluster(self));

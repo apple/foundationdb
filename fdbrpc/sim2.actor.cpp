@@ -53,6 +53,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/AsyncFileWriteChecker.h"
 #include "flow/FaultInjection.h"
+#include "flow/TaskQueue.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ISimulator* g_simulator = nullptr;
@@ -908,20 +909,25 @@ public:
 	}
 	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine, bool ordered = false) {
 		ASSERT(seconds >= -0.0001);
-		seconds = std::max(0.0, seconds);
-		Future<Void> f;
 
-		if (!ordered && !currentProcess->rebooting && machine == currentProcess &&
-		    !currentProcess->shutdownSignal.isSet() && FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
-		    deterministicRandom()->random01() < 0.25) { // FIXME: why doesn't this work when we are changing machines?
-			seconds += FLOW_KNOBS->MAX_BUGGIFIED_DELAY * pow(deterministicRandom()->random01(), 1000.0);
+		if (seconds >= 4e12) // Intervals that overflow an int64_t in microseconds (more than 100,000 years) are treated
+		                     // as infinite
+			return Never();
+
+		PromiseTask* t = new PromiseTask(machine);
+		if (seconds <= TIME_EPS) {
+			taskQueue.addReady(taskID, t);
+		} else {
+			if (!ordered && !currentProcess->rebooting && machine == currentProcess &&
+			    !currentProcess->shutdownSignal.isSet() && FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
+			    deterministicRandom()->random01() < 0.25) {
+				// FIXME: why doesn't this work when we are changing machines?
+				seconds += FLOW_KNOBS->MAX_BUGGIFIED_DELAY * pow(deterministicRandom()->random01(), 1000.0);
+			}
+			double at = now() + seconds;
+			taskQueue.addTimer(at, taskID, t);
 		}
-
-		mutex.enter();
-		tasks.push(Task(time + seconds, taskID, taskCount++, machine, f));
-		mutex.leave();
-
-		return f;
+		return t->promise.getFuture();
 	}
 	ACTOR static Future<Void> checkShutdown(Sim2* self, TaskPriority taskID) {
 		wait(success(self->getCurrentProcess()->shutdownSignal.getFuture()));
@@ -1214,20 +1220,28 @@ public:
 	static void runLoop(Sim2* self) {
 		ISimulator::ProcessInfo* callingMachine = self->currentProcess;
 		while (!self->isStopped) {
-			self->mutex.enter();
-			if (self->tasks.size() == 0) {
-				self->mutex.leave();
-				ASSERT(false);
+			if (self->taskQueue.canSleep()) {
+				double sleepTime = self->taskQueue.getSleepTime(self->time);
+				self->time +=
+				    sleepTime + FLOW_KNOBS->MAX_RUNLOOP_SLEEP_DELAY * pow(deterministicRandom()->random01(), 1000.0);
+				if (self->printSimTime) {
+					printf("Time: %d\n", (int)self->time);
+				}
+				self->timerTime = std::max(self->timerTime, self->time);
 			}
 			// if (!randLog/* && now() >= 32.0*/)
 			//	randLog = fopen("randLog.txt", "wt");
-			Task t = std::move(self->tasks.top()); // Unfortunately still a copy under gcc where .top() returns const&
-			self->currentTaskID = t.taskID;
-			self->tasks.pop();
-			self->mutex.leave();
 
-			self->execTask(t);
-			self->yielded = false;
+			self->taskQueue.processReadyTimers(self->time);
+			self->taskQueue.processThreadReady();
+
+			while (self->taskQueue.hasReadyTask()) {
+				self->currentTaskID = self->taskQueue.getReadyTaskID();
+				PromiseTask* task = self->taskQueue.getReadyTask();
+				self->taskQueue.popReadyTask();
+				self->execTask(*task);
+				self->yielded = false;
+			}
 		}
 		self->currentProcess = callingMachine;
 		for (auto& fn : self->stopCallbacks) {
@@ -1365,6 +1379,45 @@ public:
 			primaryTLogsDead = primaryProcessesDead.validate(remoteTLogPolicy);
 		}
 		return primaryTLogsDead || primaryProcessesDead.validate(storagePolicy);
+	}
+
+	// The following function will determine if a machine can be remove in case when it has a blob worker
+	bool canKillMachineWithBlobWorkers(Optional<Standalone<StringRef>> machineId, KillType kt, KillType* ktFinal) {
+		// Allow if no blob workers, or it's a reboot(without removing the machine)
+		if (!blobGranulesEnabled && kt >= RebootAndDelete) {
+			return true;
+		}
+
+		// Allow if the machine doesn't support blob worker
+		MachineInfo& currentMachine = machines[machineId];
+		bool hasBlobWorker = false;
+		for (auto processInfo : currentMachine.processes) {
+			if (processInfo->startingClass == ProcessClass::BlobWorkerClass) {
+				hasBlobWorker = true;
+				break;
+			}
+		}
+		if (!hasBlobWorker)
+			return true;
+
+		// Count # remaining support blob workers in current dc
+		auto currentDcId = currentMachine.machineProcess->locality.dcId();
+		int nLeft = 0;
+		for (auto processInfo : getAllProcesses()) {
+			if (currentDcId != processInfo->locality.dcId() || // skip other dc
+			    processInfo->startingClass != ProcessClass::BlobWorkerClass || // skip non blob workers
+			    processInfo->locality.machineId() == machineId) { // skip current machine
+				continue;
+			}
+			nLeft++; // alive blob workers after killing machineId
+		}
+
+		// Ensure there is at least 1 remaining blob workers after removing current machine
+		if (nLeft <= 1) {
+			*ktFinal = RebootAndDelete; // reboot and delete data, but keep this machine
+			return false;
+		}
+		return true;
 	}
 
 	// The following function will determine if the specified configuration of available and dead processes can allow
@@ -1615,7 +1668,8 @@ public:
 		CODE_PROBE(kt == FailDisk,
 		           "Simulated machine was killed with a failed disk",
 		           probe::context::sim2,
-		           probe::assert::simOnly);
+		           probe::assert::simOnly,
+		           probe::decoration::rare);
 
 		if (kt == KillInstantly) {
 			TraceEvent(SevWarn, "FailMachine")
@@ -1787,6 +1841,14 @@ public:
 		// Check if machine can be removed, if requested
 		if (!forceKill && ((kt == KillInstantly) || (kt == InjectFaults) || (kt == FailDisk) ||
 		                   (kt == RebootAndDelete) || (kt == RebootProcessAndDelete))) {
+
+			if (!canKillMachineWithBlobWorkers(machineId, kt, &kt)) {
+				TraceEvent("CanKillMachineWithBlobWorkers")
+				    .detail("MachineId", machineId)
+				    .detail("KillType", kt)
+				    .detail("OrigKillType", ktOrig);
+			}
+
 			std::vector<ProcessInfo*> processesLeft, processesDead;
 			int protectedWorker = 0, unavailable = 0, excluded = 0, cleared = 0;
 
@@ -2079,8 +2141,11 @@ public:
 		    .detail("KillTypeMin", ktMin)
 		    .detail("KilledDC", kt == ktMin);
 
-		CODE_PROBE(
-		    kt != ktMin, "DataCenter kill was rejected by killMachine", probe::context::sim2, probe::assert::simOnly);
+		CODE_PROBE(kt != ktMin,
+		           "DataCenter kill was rejected by killMachine",
+		           probe::context::sim2,
+		           probe::assert::simOnly,
+		           probe::decoration::rare);
 		CODE_PROBE((kt == ktMin) && (kt == RebootAndDelete),
 		           "Datacenter kill Resulted in a reboot and delete",
 		           probe::context::sim2,
@@ -2175,7 +2240,7 @@ public:
 	}
 
 	Sim2(bool printSimTime)
-	  : time(0.0), timerTime(0.0), currentTaskID(TaskPriority::Zero), taskCount(0), yielded(false), yield_limit(0),
+	  : time(0.0), timerTime(0.0), currentTaskID(TaskPriority::Zero), yielded(false), yield_limit(0),
 	    printSimTime(printSimTime) {
 		// Not letting currentProcess be nullptr eliminates some annoying special cases
 		currentProcess =
@@ -2196,61 +2261,20 @@ public:
 	}
 
 	// Implementation
-	struct Task {
-		TaskPriority taskID;
-		double time;
-		uint64_t stable;
+	struct PromiseTask final {
+		Promise<Void> promise;
 		ProcessInfo* machine;
-		Promise<Void> action;
-		Task(double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Promise<Void>&& action)
-		  : taskID(taskID), time(time), stable(stable), machine(machine), action(std::move(action)) {}
-		Task(double time, TaskPriority taskID, uint64_t stable, ProcessInfo* machine, Future<Void>& future)
-		  : taskID(taskID), time(time), stable(stable), machine(machine) {
-			future = action.getFuture();
-		}
-		Task(Task&& rhs) noexcept
-		  : taskID(rhs.taskID), time(rhs.time), stable(rhs.stable), machine(rhs.machine),
-		    action(std::move(rhs.action)) {}
-		void operator=(Task const& rhs) {
-			taskID = rhs.taskID;
-			time = rhs.time;
-			stable = rhs.stable;
-			machine = rhs.machine;
-			action = rhs.action;
-		}
-		Task(Task const& rhs)
-		  : taskID(rhs.taskID), time(rhs.time), stable(rhs.stable), machine(rhs.machine), action(rhs.action) {}
-		void operator=(Task&& rhs) noexcept {
-			time = rhs.time;
-			taskID = rhs.taskID;
-			stable = rhs.stable;
-			machine = rhs.machine;
-			action = std::move(rhs.action);
-		}
-
-		bool operator<(Task const& rhs) const {
-			// Ordering is reversed for priority_queue
-			if (time != rhs.time)
-				return time > rhs.time;
-			return stable > rhs.stable;
-		}
+		explicit PromiseTask(ProcessInfo* machine) : machine(machine) {}
+		PromiseTask(ProcessInfo* machine, Promise<Void>&& promise) : machine(machine), promise(std::move(promise)) {}
 	};
 
-	void execTask(struct Task& t) {
+	void execTask(struct PromiseTask& t) {
 		if (t.machine->failed) {
-			t.action.send(Never());
+			t.promise.send(Never());
 		} else {
-			mutex.enter();
-			if (printSimTime && (int)this->time < (int)t.time) {
-				printf("Time: %d\n", (int)t.time);
-			}
-			this->time = t.time;
-			this->timerTime = std::max(this->timerTime, this->time);
-			mutex.leave();
-
 			this->currentProcess = t.machine;
 			try {
-				t.action.send(Void());
+				t.promise.send(Void());
 				ASSERT(this->currentProcess == t.machine);
 			} catch (Error& e) {
 				TraceEvent(SevError, "UnhandledSimulationEventError").errorUnsuppressed(e);
@@ -2259,11 +2283,10 @@ public:
 
 			if (randLog)
 				fmt::print(randLog,
-				           "T {0} {1} {2} {3}\n",
+				           "T {0} {1} {2}\n",
 				           this->time,
 				           int(deterministicRandom()->peek() % 10000),
-				           t.machine ? t.machine->name : "none",
-				           t.stable);
+				           t.machine ? t.machine->name : "none");
 		}
 	}
 
@@ -2271,11 +2294,10 @@ public:
 		// This is presumably coming from either a "fake" thread pool thread, i.e. it is actually on this thread
 		// or a thread created with g_network->startThread
 		ASSERT(getCurrentProcess());
-
-		mutex.enter();
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
-		tasks.push(Task(time, taskID, taskCount++, getCurrentProcess(), std::move(signal)));
-		mutex.leave();
+
+		PromiseTask* p = new PromiseTask(getCurrentProcess(), std::move(signal));
+		taskQueue.addReadyThreadSafe(isOnMainThread(), taskID, p);
 	}
 	bool isOnMainThread() const override { return net2->isOnMainThread(); }
 	Future<Void> onProcess(ISimulator::ProcessInfo* process, TaskPriority taskID) override {
@@ -2289,21 +2311,15 @@ public:
 
 	ProtocolVersion protocolVersion() const override { return getCurrentProcess()->protocolVersion; }
 
-	// time is guarded by ISimulator::mutex. It is not necessary to guard reads on the main thread because
-	// time should only be modified from the main thread.
 	double time;
 	double timerTime;
 	TaskPriority currentTaskID;
-
-	// taskCount is guarded by ISimulator::mutex
-	uint64_t taskCount;
 
 	std::map<Optional<Standalone<StringRef>>, MachineInfo> machines;
 	std::map<NetworkAddress, ProcessInfo*> addressMap;
 	std::map<ProcessInfo*, Promise<Void>> filesDeadMap;
 
-	// tasks is guarded by ISimulator::mutex
-	std::priority_queue<Task, std::vector<Task>> tasks;
+	TaskQueue<PromiseTask> taskQueue;
 
 	std::vector<std::function<void()>> stopCallbacks;
 

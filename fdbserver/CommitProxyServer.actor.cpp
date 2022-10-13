@@ -22,6 +22,7 @@
 #include <tuple>
 
 #include "fdbclient/Atomic.h"
+#include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseContext.h"
@@ -54,6 +55,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
+#include "flow/CodeProbe.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
@@ -997,7 +999,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	// Fetch cipher keys if needed.
 	state Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getCipherKeys;
 	if (pProxyCommitData->isEncryptionEnabled) {
-		static std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> defaultDomains = {
+		static const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> defaultDomains = {
 			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME },
 			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_ENCRYPT_HEADER_DOMAIN_NAME },
 			{ FDB_DEFAULT_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
@@ -1090,6 +1092,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				committed =
 				    committed && self->resolution[resolver].stateMutations[versionIndex][transactionIndex].committed;
 			if (committed) {
+				// Note: since we are not to commit, we don't need to pass cipherKeys for encryption.
 				applyMetadataMutations(SpanContext(),
 				                       *self->pProxyCommitData,
 				                       self->arena,
@@ -1444,9 +1447,26 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				UNREACHABLE();
 			}
 
-			// Check on backing up key, if backup ranges are defined and a normal key
-			if (!(pProxyCommitData->vecBackupKeys.size() > 1 &&
-			      (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey))) {
+			if (pProxyCommitData->vecBackupKeys.size() <= 1) {
+				continue;
+			}
+
+			// Check whether the mutation intersects any legal backup ranges
+			// If so, it will be clamped to the intersecting range(s) later
+			bool hasCandidateBackupKeys = false;
+			if (normalKeys.contains(m.param1) || m.param1 == metadataVersionKey) {
+				hasCandidateBackupKeys = true;
+			} else if (m.type != MutationRef::Type::ClearRange) {
+				hasCandidateBackupKeys = systemBackupMutationMask().rangeContaining(m.param1).value();
+			} else {
+				for (auto& r : systemBackupMutationMask().intersectingRanges(KeyRangeRef(m.param1, m.param2))) {
+					if (r->value()) {
+						hasCandidateBackupKeys = true;
+						break;
+					}
+				}
+			}
+			if (!hasCandidateBackupKeys) {
 				continue;
 			}
 
@@ -2470,6 +2490,17 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		tag_uid[decodeServerTagValue(kv.value)] = decodeServerTagKey(kv.key);
 	}
 
+	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
+	if (pContext->pCommitData->isEncryptionEnabled) {
+		static const std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> metadataDomains = {
+			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_NAME },
+			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_ENCRYPT_HEADER_DOMAIN_NAME }
+		};
+		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cks =
+		    wait(getLatestEncryptCipherKeys(pContext->pCommitData->db, metadataDomains, BlobCipherMetrics::TLOG));
+		cipherKeys = cks;
+	}
+
 	loop {
 		wait(yield());
 
@@ -2487,9 +2518,9 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		std::vector<UID> src, dest;
 		ServerCacheInfo info;
 		// NOTE: An ACTOR will be compiled into several classes, the this pointer is from one of them.
-		auto updateTagInfo = [this](const std::vector<UID>& uids,
-		                            std::vector<Tag>& tags,
-		                            std::vector<Reference<StorageInfo>>& storageInfoItems) {
+		auto updateTagInfo = [pContext = pContext](const std::vector<UID>& uids,
+		                                           std::vector<Tag>& tags,
+		                                           std::vector<Reference<StorageInfo>>& storageInfoItems) {
 			for (const auto& id : uids) {
 				auto storageInfo = getStorageInfo(id, &pContext->pCommitData->storageCache, pContext->pTxnStateStore);
 				ASSERT(storageInfo->tag != invalidTag);
@@ -2527,13 +2558,16 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 
 		Arena arena;
 		bool confChanges;
+		CODE_PROBE(
+		    pContext->pCommitData->isEncryptionEnabled,
+		    "Commit proxy apply metadata mutations from txnStateStore on recovery, with encryption-at-rest enabled");
 		applyMetadataMutations(SpanContext(),
 		                       *pContext->pCommitData,
 		                       arena,
 		                       Reference<ILogSystem>(),
 		                       mutations,
 		                       /* pToCommit= */ nullptr,
-		                       /* pCipherKeys= */ nullptr,
+		                       pContext->pCommitData->isEncryptionEnabled ? &cipherKeys : nullptr,
 		                       confChanges,
 		                       /* version= */ 0,
 		                       /* popVersion= */ 0,
@@ -2625,7 +2659,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	// Wait until we can load the "real" logsystem, since we don't support switching them currently
 	while (!(masterLifetime.isEqual(commitData.db->get().masterLifetime) &&
 	         commitData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION &&
-	         (!isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, db->get().client) ||
+	         (!isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION) ||
 	          commitData.db->get().encryptKeyProxy.present()))) {
 		//TraceEvent("ProxyInit2", proxy.id()).detail("LSEpoch", db->get().logSystemConfig.epoch).detail("Need", epoch);
 		wait(commitData.db->onChange());
@@ -2650,15 +2684,14 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
 	commitData.logAdapter =
 	    new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
-	commitData.txnStateStore =
-	    keyValueStoreLogSystem(commitData.logAdapter,
-	                           commitData.db,
-	                           proxy.id(),
-	                           2e9,
-	                           true,
-	                           true,
-	                           true,
-	                           isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, db->get().client));
+	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter,
+	                                                  commitData.db,
+	                                                  proxy.id(),
+	                                                  2e9,
+	                                                  true,
+	                                                  true,
+	                                                  true,
+	                                                  isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION));
 	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
 
 	commitData.updateLatencyBandConfig(commitData.db->get().latencyBandConfig);

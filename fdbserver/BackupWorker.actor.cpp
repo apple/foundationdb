@@ -54,10 +54,10 @@ struct VersionedMessage {
 	Version getVersion() const { return version.version; }
 	uint32_t getSubVersion() const { return version.sub; }
 
-	// Returns true if the message is a mutation that should be backuped, i.e.,
-	// either key is not in system key space or is not a metadataVersionKey.
-	bool isBackupMessage(MutationRef* m,
-	                     const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys) {
+	// Returns true if the message is a mutation that could be backed up (normal keys, system key backup ranges, or the
+	// metadata version key)
+	bool isCandidateBackupMessage(MutationRef* m,
+	                              const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys) {
 		for (Tag tag : tags) {
 			if (tag.locality == tagLocalitySpecial || tag.locality == tagLocalityTxs) {
 				return false; // skip Txs mutations
@@ -82,7 +82,21 @@ struct VersionedMessage {
 			// We use dedicated arena for decrypt buffer, as the other arena is used to count towards backup lock bytes.
 			*m = m->decrypt(cipherKeys, decryptArena, BlobCipherMetrics::BACKUP, &message);
 		}
-		return normalKeys.contains(m->param1) || m->param1 == metadataVersionKey;
+
+		// Return true if the mutation intersects any legal backup ranges
+		if (normalKeys.contains(m->param1) || m->param1 == metadataVersionKey) {
+			return true;
+		} else if (m->type != MutationRef::Type::ClearRange) {
+			return systemBackupMutationMask().rangeContaining(m->param1).value();
+		} else {
+			for (auto& r : systemBackupMutationMask().intersectingRanges(KeyRangeRef(m->param1, m->param2))) {
+				if (r->value()) {
+					return true;
+				}
+			}
+
+			return false;
+		}
 	}
 
 	void collectCipherDetailIfEncrypted(std::unordered_set<BlobCipherDetails>& cipherDetails) {
@@ -789,7 +803,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self,
 	for (idx = 0; idx < numMsg; idx++) {
 		auto& message = self->messages[idx];
 		MutationRef m;
-		if (!message.isBackupMessage(&m, cipherKeys))
+		if (!message.isCandidateBackupMessage(&m, cipherKeys))
 			continue;
 
 		DEBUG_MUTATION("addMutation", message.version.version, m)

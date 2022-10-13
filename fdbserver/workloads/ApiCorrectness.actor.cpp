@@ -35,7 +35,7 @@ struct ApiCorrectnessWorkload : ApiWorkload {
 private:
 // Enable to track the activity on a particular key
 #if CENABLED(0, NOT_IN_CLEAN)
-#define targetKey LiteralStringRef( ??? )
+#define targetKey "???"_sr
 
 	void debugKey(KeyRef key, std::string context) {
 		if (key == targetKey)
@@ -435,7 +435,7 @@ public:
 	// Gets a single range of values from the database and memory stores and compares them, returning true if the
 	// results were the same
 	ACTOR Future<bool> runGetRange(VectorRef<KeyValueRef> data, ApiCorrectnessWorkload* self) {
-		state Reverse reverse = deterministicRandom()->coinflip();
+		state Reverse reverse(deterministicRandom()->coinflip());
 
 		// Generate a random range
 		Key key = self->selectRandomKey(data, 0.5);
@@ -481,7 +481,7 @@ public:
 	// Gets a single range of values using key selectors from the database and memory store and compares them, returning
 	// true if the results were the same
 	ACTOR Future<bool> runGetRangeSelector(VectorRef<KeyValueRef> data, ApiCorrectnessWorkload* self) {
-		state Reverse reverse = deterministicRandom()->coinflip();
+		state Reverse reverse(deterministicRandom()->coinflip());
 
 		KeySelector selectors[2];
 		Key keys[2];

@@ -751,7 +751,7 @@ ACTOR Future<Void> updateLogsValue(Reference<ClusterRecoveryData> self, Database
 			}
 
 			if (!found) {
-				CODE_PROBE(true, "old master attempted to change logsKey");
+				CODE_PROBE(true, "old master attempted to change logsKey", probe::decoration::rare);
 				return Void();
 			}
 
@@ -830,7 +830,7 @@ ACTOR Future<Void> updateRegistration(Reference<ClusterRecoveryData> self, Refer
 			                            std::vector<UID>()));
 		} else {
 			// The cluster should enter the accepting commits phase soon, and then we will register again
-			CODE_PROBE(true, "cstate is updated but we aren't accepting commits yet");
+			CODE_PROBE(true, "cstate is updated but we aren't accepting commits yet", probe::decoration::rare);
 		}
 	}
 }
@@ -1056,18 +1056,19 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// Sets self->configuration to the configuration (FF/conf/ keys) at self->lastEpochEnd
 
 	// Recover transaction state store
+	bool enableEncryptionForTxnStateStore = isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION);
+	CODE_PROBE(enableEncryptionForTxnStateStore, "Enable encryption for txnStateStore");
 	if (self->txnStateStore)
 		self->txnStateStore->close();
 	self->txnStateLogAdapter = openDiskQueueAdapter(oldLogSystem, myLocality, txsPoppedVersion);
-	self->txnStateStore = keyValueStoreLogSystem(
-	    self->txnStateLogAdapter,
-	    self->dbInfo,
-	    self->dbgid,
-	    self->memoryLimit,
-	    false,
-	    false,
-	    true,
-	    isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, self->dbInfo->get().client));
+	self->txnStateStore = keyValueStoreLogSystem(self->txnStateLogAdapter,
+	                                             self->dbInfo,
+	                                             self->dbgid,
+	                                             self->memoryLimit,
+	                                             false,
+	                                             false,
+	                                             true,
+	                                             enableEncryptionForTxnStateStore);
 
 	// Version 0 occurs at the version epoch. The version epoch is the number
 	// of microseconds since the Unix epoch. It can be set through fdbcli.
@@ -1164,12 +1165,32 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	    wait(self->txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration().key));
 	Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
 	    MetaclusterRegistrationEntry::decode(metaclusterRegistrationVal);
+	Optional<ClusterName> metaclusterName;
+	Optional<UID> metaclusterId;
+	Optional<ClusterName> clusterName;
+	Optional<UID> clusterId;
+	self->controllerData->db.metaclusterRegistration = metaclusterRegistration;
 	if (metaclusterRegistration.present()) {
 		self->controllerData->db.metaclusterName = metaclusterRegistration.get().metaclusterName;
 		self->controllerData->db.clusterType = metaclusterRegistration.get().clusterType;
+		metaclusterName = metaclusterRegistration.get().metaclusterName;
+		metaclusterId = metaclusterRegistration.get().metaclusterId;
+		if (metaclusterRegistration.get().clusterType == ClusterType::METACLUSTER_DATA) {
+			clusterName = metaclusterRegistration.get().name;
+			clusterId = metaclusterRegistration.get().id;
+		}
 	} else {
+		self->controllerData->db.metaclusterName = Optional<ClusterName>();
 		self->controllerData->db.clusterType = ClusterType::STANDALONE;
 	}
+
+	TraceEvent("MetaclusterMetadata")
+	    .detail("ClusterType", clusterTypeToString(self->controllerData->db.clusterType))
+	    .detail("MetaclusterName", metaclusterName)
+	    .detail("MetaclusterId", metaclusterId)
+	    .detail("DataClusterName", clusterName)
+	    .detail("DataClusterId", clusterId)
+	    .trackLatest(self->metaclusterEventHolder->trackingKey);
 
 	uniquify(self->allTags);
 
@@ -1668,8 +1689,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	                       self->dbgid,
 	                       recoveryCommitRequest.arena,
 	                       tr.mutations.slice(mmApplied, tr.mutations.size()),
-	                       self->txnStateStore,
-	                       self->dbInfo);
+	                       self->txnStateStore);
 	mmApplied = tr.mutations.size();
 
 	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the initial

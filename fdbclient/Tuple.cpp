@@ -99,6 +99,48 @@ Tuple Tuple::unpack(StringRef const& str, bool exclude_incomplete) {
 	return Tuple(str, exclude_incomplete);
 }
 
+std::string Tuple::tupleToString(const Tuple& tuple) {
+	std::string str;
+	if (tuple.size() > 1) {
+		str += "(";
+	}
+	for (int i = 0; i < tuple.size(); ++i) {
+		Tuple::ElementType type = tuple.getType(i);
+		if (type == Tuple::NULL_TYPE) {
+			str += "NULL";
+		} else if (type == Tuple::BYTES || type == Tuple::UTF8) {
+			if (type == Tuple::UTF8) {
+				str += "u";
+			}
+			str += "\'" + tuple.getString(i).printable() + "\'";
+		} else if (type == Tuple::INT) {
+			str += format("%ld", tuple.getInt(i));
+		} else if (type == Tuple::FLOAT) {
+			str += format("%f", tuple.getFloat(i));
+		} else if (type == Tuple::DOUBLE) {
+			str += format("%f", tuple.getDouble(i));
+		} else if (type == Tuple::BOOL) {
+			str += tuple.getBool(i) ? "true" : "false";
+		} else if (type == Tuple::VERSIONSTAMP) {
+			TupleVersionstamp versionstamp = tuple.getVersionstamp(i);
+			str += format("Transaction Version: '%ld', BatchNumber: '%hd', UserVersion : '%hd'",
+			              versionstamp.getVersion(),
+			              versionstamp.getBatchNumber(),
+			              versionstamp.getUserVersion());
+		} else {
+			ASSERT(false);
+		}
+
+		if (i < tuple.size() - 1) {
+			str += ", ";
+		}
+	}
+	if (tuple.size() > 1) {
+		str += ")";
+	}
+	return str;
+}
+
 Tuple Tuple::unpackUserType(StringRef const& str, bool exclude_incomplete) {
 	return Tuple(str, exclude_incomplete, true);
 }
@@ -117,7 +159,7 @@ Tuple& Tuple::append(Tuple const& tuple) {
 	return *this;
 }
 
-Tuple& Tuple::append(Versionstamp const& vs) {
+Tuple& Tuple::append(TupleVersionstamp const& vs) {
 	offsets.push_back(data.size());
 
 	data.push_back(data.arena(), VERSIONSTAMP_96_CODE);
@@ -413,7 +455,7 @@ double Tuple::getDouble(size_t index) const {
 	return bigEndianDouble(swap);
 }
 
-Versionstamp Tuple::getVersionstamp(size_t index) const {
+TupleVersionstamp Tuple::getVersionstamp(size_t index) const {
 	if (index >= offsets.size()) {
 		throw invalid_tuple_index();
 	}
@@ -422,7 +464,7 @@ Versionstamp Tuple::getVersionstamp(size_t index) const {
 	if (code != VERSIONSTAMP_96_CODE) {
 		throw invalid_tuple_data_type();
 	}
-	return Versionstamp(StringRef(data.begin() + offsets[index] + 1, VERSIONSTAMP_TUPLE_SIZE));
+	return TupleVersionstamp(StringRef(data.begin() + offsets[index] + 1, VERSIONSTAMP_TUPLE_SIZE));
 }
 
 Tuple::UserTypeStr Tuple::getUserType(size_t index) const {
@@ -495,7 +537,7 @@ TEST_CASE("/fdbclient/Tuple/makeTuple") {
 	                            "byteStr"_sr,
 	                            Tuple::UnicodeStr("str"_sr),
 	                            nullptr,
-	                            Versionstamp("000000000000"_sr),
+	                            TupleVersionstamp("000000000000"_sr),
 	                            Tuple::UserTypeStr(0x41, "12345678"_sr));
 	Tuple t2 = Tuple()
 	               .append(1)
@@ -505,7 +547,7 @@ TEST_CASE("/fdbclient/Tuple/makeTuple") {
 	               .append("byteStr"_sr)
 	               .append(Tuple::UnicodeStr("str"_sr))
 	               .append(nullptr)
-	               .append(Versionstamp("000000000000"_sr))
+	               .append(TupleVersionstamp("000000000000"_sr))
 	               .append(Tuple::UserTypeStr(0x41, "12345678"_sr));
 
 	ASSERT(t1.pack() == t2.pack());
@@ -531,7 +573,7 @@ TEST_CASE("/fdbclient/Tuple/unpack") {
 	                            "byteStr"_sr,
 	                            Tuple::UnicodeStr("str"_sr),
 	                            nullptr,
-	                            Versionstamp("000000000000"_sr),
+	                            TupleVersionstamp("000000000000"_sr),
 	                            Tuple::UserTypeStr(0x41, "12345678"_sr));
 
 	Standalone<StringRef> packed = t1.pack();

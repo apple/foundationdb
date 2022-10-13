@@ -25,6 +25,8 @@
 #include "flow/FileIdentifier.h"
 
 using BlobMetadataDomainId = int64_t;
+using BlobMetadataDomainNameRef = StringRef;
+using BlobMetadataDomainName = Standalone<BlobMetadataDomainNameRef>;
 
 /*
  * There are 3 cases for blob metadata.
@@ -38,26 +40,31 @@ using BlobMetadataDomainId = int64_t;
 struct BlobMetadataDetailsRef {
 	constexpr static FileIdentifier file_identifier = 6685526;
 	BlobMetadataDomainId domainId;
+	BlobMetadataDomainNameRef domainName;
 	Optional<StringRef> base;
 	VectorRef<StringRef> partitions;
 
 	BlobMetadataDetailsRef() {}
 	BlobMetadataDetailsRef(Arena& arena, const BlobMetadataDetailsRef& from)
-	  : domainId(from.domainId), partitions(arena, from.partitions) {
+	  : domainId(from.domainId), domainName(arena, from.domainName), partitions(arena, from.partitions) {
 		if (from.base.present()) {
 			base = StringRef(arena, from.base.get());
 		}
 	}
 	explicit BlobMetadataDetailsRef(BlobMetadataDomainId domainId,
+	                                BlobMetadataDomainNameRef domainName,
 	                                Optional<StringRef> base,
 	                                VectorRef<StringRef> partitions)
-	  : domainId(domainId), base(base), partitions(partitions) {}
+	  : domainId(domainId), domainName(domainName), base(base), partitions(partitions) {}
 
-	int expectedSize() const { return sizeof(BlobMetadataDetailsRef) + partitions.expectedSize(); }
+	int expectedSize() const {
+		return sizeof(BlobMetadataDetailsRef) + domainName.size() + (base.present() ? base.get().size() : 0) +
+		       partitions.expectedSize();
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, domainId, base, partitions);
+		serializer(ar, domainId, domainName, base, partitions);
 	}
 };
 
