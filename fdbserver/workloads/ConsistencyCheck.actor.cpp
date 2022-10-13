@@ -1538,6 +1538,22 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			return false;
 		}
 
+		// Check BlobMigrator
+		if (config.blobGranulesEnabled && db.blobMigrator.present() &&
+		    (!nonExcludedWorkerProcessMap.count(db.blobMigrator.get().address()) ||
+		     nonExcludedWorkerProcessMap[db.blobMigrator.get().address()].processClass.machineClassFitness(
+		         ProcessClass::BlobMigrator) > fitnessLowerBound)) {
+			TraceEvent("ConsistencyCheck_BlobMigratorNotBest")
+			    .detail("BestBlobMigratorFitness", fitnessLowerBound)
+			    .detail(
+			        "ExistingBlobMigratorFitness",
+			        nonExcludedWorkerProcessMap.count(db.blobMigrator.get().address())
+			            ? nonExcludedWorkerProcessMap[db.blobMigrator.get().address()].processClass.machineClassFitness(
+			                  ProcessClass::BlobMigrator)
+			            : -1);
+			return false;
+		}
+
 		// Check EncryptKeyProxy
 		if (SERVER_KNOBS->ENABLE_ENCRYPTION && db.encryptKeyProxy.present() &&
 		    (!nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address()) ||

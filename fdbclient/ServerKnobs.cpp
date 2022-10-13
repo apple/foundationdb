@@ -570,6 +570,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( RATEKEEPER_FAILURE_TIME,                               1.0 );
 	init( CONSISTENCYSCAN_FAILURE_TIME,                          1.0 );
 	init( BLOB_MANAGER_FAILURE_TIME,                             1.0 );
+	init( BLOB_MIGRATOR_FAILURE_TIME,                            1.0 );
 	init( REPLACE_INTERFACE_DELAY,                              60.0 );
 	init( REPLACE_INTERFACE_CHECK_DELAY,                         5.0 );
 	init( COORDINATOR_REGISTER_INTERVAL,                         5.0 );
