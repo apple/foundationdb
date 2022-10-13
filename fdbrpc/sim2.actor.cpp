@@ -1794,6 +1794,15 @@ public:
 		}
 		return result;
 	}
+	bool killAll(KillType kt, bool forceKill, KillType* ktFinal) override {
+		bool result = false;
+		for (auto& machine : machines) {
+			if (killMachine(machine.second.machineId, kt, forceKill, ktFinal)) {
+				result = true;
+			}
+		}
+		return result;
+	}
 	bool killMachine(Optional<Standalone<StringRef>> machineId,
 	                 KillType kt,
 	                 bool forceKill,
@@ -2008,7 +2017,7 @@ public:
 				if (process->startingClass != ProcessClass::TesterClass)
 					killProcess_internal(process, kt);
 			}
-		} else if (kt == Reboot || kt == RebootAndDelete) {
+		} else if (kt == Reboot || kt == RebootAndDelete || kt == RebootProcessAndSwitch) {
 			for (auto& process : machines[machineId].processes) {
 				TraceEvent("KillMachineProcess")
 				    .detail("KillType", kt)
@@ -2564,7 +2573,7 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 
 	try {
 		ASSERT(kt == ISimulator::RebootProcess || kt == ISimulator::Reboot || kt == ISimulator::RebootAndDelete ||
-		       kt == ISimulator::RebootProcessAndDelete);
+		       kt == ISimulator::RebootProcessAndDelete || kt == ISimulator::RebootProcessAndSwitch);
 
 		CODE_PROBE(kt == ISimulator::RebootProcess,
 		           "Simulated process rebooted",
@@ -2578,6 +2587,10 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 		           probe::context::sim2);
 		CODE_PROBE(kt == ISimulator::RebootProcessAndDelete,
 		           "Simulated process rebooted with data and coordination state deletion",
+		           probe::assert::simOnly,
+		           probe::context::sim2);
+		CODE_PROBE(kt == ISimulator::RebootProcessAndSwitch,
+		           "Simulated process rebooted with different cluster file",
 		           probe::assert::simOnly,
 		           probe::context::sim2);
 
@@ -2608,6 +2621,8 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 		if ((kt == ISimulator::RebootAndDelete) || (kt == ISimulator::RebootProcessAndDelete)) {
 			p->cleared = true;
 			g_simulator->clearAddress(p->address);
+		} else if (kt == ISimulator::RebootProcessAndSwitch) {
+			g_simulator->switchCluster(p->address);
 		}
 		p->shutdownSignal.send(kt);
 	} catch (Error& e) {
