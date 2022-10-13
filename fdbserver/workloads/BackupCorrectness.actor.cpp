@@ -516,6 +516,40 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR static Future<Void> clearAndRestoreSystemKeys(Database cx,
+	                                                    BackupAndRestoreCorrectnessWorkload* self,
+	                                                    FileBackupAgent* backupAgent,
+	                                                    Version targetVersion,
+	                                                    Reference<IBackupContainer> lastBackupContainer) {
+		// restore system keys before restoring any other ranges
+		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			for (auto& range : getSystemBackupRanges())
+				tr->clear(range);
+			return Void();
+		}));
+		state Standalone<StringRef> restoreTag(self->backupTag.toString() + "_system");
+		printf("BackupCorrectness, backupAgent.restore is called for tag:%s\n", restoreTag.toString().c_str());
+		wait(success(backupAgent->restore(cx,
+		                                  cx,
+		                                  restoreTag,
+		                                  KeyRef(lastBackupContainer->getURL()),
+		                                  lastBackupContainer->getProxy(),
+		                                  getSystemBackupRanges(),
+		                                  WaitForComplete::True,
+		                                  targetVersion,
+		                                  Verbose::True,
+		                                  Key(),
+		                                  Key(),
+		                                  self->locked,
+		                                  OnlyApplyMutationLogs::False,
+		                                  InconsistentSnapshotOnly::False,
+		                                  ::invalidVersion,
+		                                  self->encryptionKeyFileName)));
+		printf("BackupCorrectness, backupAgent.restore finished for tag:%s\n", restoreTag.toString().c_str());
+		return Void();
+	}
+
 	ACTOR static Future<Void> _start(Database cx, BackupAndRestoreCorrectnessWorkload* self) {
 		state FileBackupAgent backupAgent;
 		state Future<Void> extraBackup;
@@ -639,7 +673,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				                                                 lastBackupContainer->getEncryptionKeyFileName());
 				BackupDescription desc = wait(container->describeBackup());
 
-				Version targetVersion = -1;
+				state Version targetVersion = -1;
 				if (desc.maxRestorableVersion.present()) {
 					if (deterministicRandom()->random01() < 0.1) {
 						targetVersion = desc.minRestorableVersion.get();
@@ -657,6 +691,21 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				state std::vector<Standalone<StringRef>> restoreTags;
 				state bool multipleRangesInOneTag = false;
 				state int restoreIndex = 0;
+				// make sure system keys are not present in the restoreRanges as they will get restored first seperately
+				// from the rest
+				Standalone<VectorRef<KeyRangeRef>> modifiedRestoreRanges;
+				bool hasSystemRanges = false;
+				for (int i = 0; i < self->restoreRanges.size(); ++i) {
+					if (!self->restoreRanges[i].intersects(getSystemBackupRanges())) {
+						modifiedRestoreRanges.push_back_deep(modifiedRestoreRanges.arena(), self->restoreRanges[i]);
+					} else {
+						hasSystemRanges = true;
+					}
+				}
+				self->restoreRanges = modifiedRestoreRanges;
+				if (hasSystemRanges) {
+					wait(clearAndRestoreSystemKeys(cx, self, &backupAgent, targetVersion, lastBackupContainer));
+				}
 				if (deterministicRandom()->random01() < 0.5) {
 					for (restoreIndex = 0; restoreIndex < self->restoreRanges.size(); restoreIndex++) {
 						auto range = self->restoreRanges[restoreIndex];

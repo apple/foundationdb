@@ -501,10 +501,31 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 
 			state Standalone<VectorRef<KeyRangeRef>> restoreRanges;
+			state bool containsSystemKeys = false;
 			for (auto r : prevBackupRanges) {
-				restoreRanges.push_back_deep(
-				    restoreRanges.arena(),
-				    KeyRangeRef(r.begin.withPrefix(self->backupPrefix), r.end.withPrefix(self->backupPrefix)));
+				if (!r.intersects(getSystemBackupRanges())) {
+					restoreRanges.push_back_deep(
+					    restoreRanges.arena(),
+					    KeyRangeRef(r.begin.withPrefix(self->backupPrefix), r.end.withPrefix(self->backupPrefix)));
+				} else {
+					containsSystemKeys = true;
+				}
+			}
+
+			// restore system keys first before restoring user data
+			if (containsSystemKeys) {
+				state Key systemRestoreTag = StringRef("restore_system");
+				TraceEvent("DRU_RestoreDbSystemKeys").detail("RestoreTag", printable(systemRestoreTag));
+				try {
+					wait(restoreTool.submitBackup(
+					    cx, systemRestoreTag, getSystemBackupRanges(), StopWhenDone::True, StringRef(), StringRef()));
+				} catch (Error& e) {
+					TraceEvent("DRU_RestoreSubmitBackupError").error(e).detail("Tag", printable(systemRestoreTag));
+					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
+						throw;
+				}
+				wait(success(restoreTool.waitBackup(cx, systemRestoreTag)));
+				wait(restoreTool.unlockBackup(cx, systemRestoreTag));
 			}
 
 			// start restoring db

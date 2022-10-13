@@ -668,10 +668,38 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				// wait(diffRanges(self->backupRanges, self->backupPrefix, cx, self->extraDB));
 
 				state Standalone<VectorRef<KeyRangeRef>> restoreRange;
+				state bool containsSystemKeys = false;
 				for (auto r : self->backupRanges) {
-					restoreRange.push_back_deep(
-					    restoreRange.arena(),
-					    KeyRangeRef(r.begin.withPrefix(self->backupPrefix), r.end.withPrefix(self->backupPrefix)));
+					if (!r.intersects(getSystemBackupRanges())) {
+						restoreRange.push_back_deep(
+						    restoreRange.arena(),
+						    KeyRangeRef(r.begin.withPrefix(self->backupPrefix), r.end.withPrefix(self->backupPrefix)));
+					} else {
+						containsSystemKeys = true;
+					}
+				}
+
+				// restore system keys first before restoring user data
+				if (containsSystemKeys) {
+					state Key systemRestoreTag = StringRef("restore_system");
+					try {
+						wait(restoreTool.submitBackup(cx,
+						                              systemRestoreTag,
+						                              getSystemBackupRanges(),
+						                              StopWhenDone::True,
+						                              StringRef(),
+						                              self->backupPrefix,
+						                              self->locked,
+						                              DatabaseBackupAgent::PreBackupAction::CLEAR));
+					} catch (Error& e) {
+						TraceEvent("BARW_DoBackupSubmitBackupException", randomID)
+						    .error(e)
+						    .detail("Tag", printable(systemRestoreTag));
+						if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
+							throw;
+					}
+					wait(success(restoreTool.waitBackup(cx, systemRestoreTag)));
+					wait(restoreTool.unlockBackup(cx, systemRestoreTag));
 				}
 
 				try {
