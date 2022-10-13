@@ -8,6 +8,7 @@
 #include "flow/network.h"
 
 #include <boost/unordered_map.hpp>
+#include <boost/unordered_set.hpp>
 
 #include <fmt/format.h>
 #include <list>
@@ -123,19 +124,69 @@ TEST_CASE("/fdbrpc/authz/LRUCache") {
 	return Void();
 }
 
-struct TokenCacheImpl {
-	struct CacheEntry {
-		Arena arena;
-		VectorRef<TenantNameRef> tenants;
-		double expirationTime = 0.0;
-	};
+struct CacheEntry {
+	Arena arena;
+	VectorRef<TenantNameRef> tenants;
+	Optional<StringRef> tokenId;
+	double expirationTime = 0.0;
+};
 
+struct AuditEntry {
+	NetworkAddress address;
+	Optional<Standalone<StringRef>> tokenId;
+	explicit AuditEntry(NetworkAddress const& address, CacheEntry const& cacheEntry)
+	  : address(address),
+	    tokenId(cacheEntry.tokenId.present() ? Standalone<StringRef>(cacheEntry.tokenId.get(), cacheEntry.arena)
+	                                         : Optional<Standalone<StringRef>>()) {}
+};
+
+bool operator==(AuditEntry const& lhs, AuditEntry const& rhs) {
+	return (lhs.address == rhs.address) && (lhs.tokenId.present() == rhs.tokenId.present()) &&
+	       (!lhs.tokenId.present() || lhs.tokenId.get() == rhs.tokenId.get());
+}
+
+std::size_t hash_value(AuditEntry const& value) {
+	std::size_t seed = 0;
+	boost::hash_combine(seed, value.address);
+	if (value.tokenId.present()) {
+		boost::hash_combine(seed, value.tokenId.get());
+	}
+	return seed;
+}
+
+struct TokenCacheImpl {
 	LRUCache<StringRef, CacheEntry> cache;
-	TokenCacheImpl() : cache(FLOW_KNOBS->TOKEN_CACHE_SIZE) {}
+	boost::unordered_set<AuditEntry> usedTokens;
+	Future<Void> auditor;
+	TokenCacheImpl();
 
 	bool validate(TenantNameRef tenant, StringRef token);
 	bool validateAndAdd(double currentTime, StringRef token, NetworkAddress const& peer);
 };
+
+ACTOR Future<Void> tokenCacheAudit(TokenCacheImpl* self) {
+	state boost::unordered_set<AuditEntry> audits;
+	state boost::unordered_set<AuditEntry>::iterator iter;
+	state double lastLoggedTime = 0;
+	loop {
+		auto const timeSinceLog = g_network->timer() - lastLoggedTime;
+		if (timeSinceLog < FLOW_KNOBS->AUDIT_TIME_WINDOW) {
+			wait(delay(FLOW_KNOBS->AUDIT_TIME_WINDOW - timeSinceLog));
+		}
+		lastLoggedTime = g_network->timer();
+		audits.swap(self->usedTokens);
+		for (iter = audits.begin(); iter != audits.end(); ++iter) {
+			CODE_PROBE(true, "Audit Logging Running");
+			TraceEvent("AuditTokenUsed").detail("Client", iter->address).detail("TokenId", iter->tokenId).log();
+			wait(yield());
+		}
+		audits.clear();
+	}
+}
+
+TokenCacheImpl::TokenCacheImpl() : cache(FLOW_KNOBS->TOKEN_CACHE_SIZE) {
+	auditor = tokenCacheAudit(this);
+}
 
 TokenCache::TokenCache() : impl(new TokenCacheImpl()) {}
 TokenCache::~TokenCache() {
@@ -212,6 +263,9 @@ bool TokenCacheImpl::validateAndAdd(double currentTime, StringRef token, Network
 		for (auto tenant : t.tenants.get()) {
 			c.tenants.push_back_deep(c.arena, tenant);
 		}
+		if (t.tokenId.present()) {
+			c.tokenId = StringRef(c.arena, t.tokenId.get());
+		}
 		cache.insert(StringRef(c.arena, token), c);
 		return true;
 	}
@@ -250,6 +304,8 @@ bool TokenCacheImpl::validate(TenantNameRef name, StringRef token) {
 		TraceEvent(SevWarn, "TenantTokenMismatch").detail("From", peer).detail("Tenant", name.toString());
 		return false;
 	}
+	// audit logging
+	usedTokens.insert(AuditEntry(peer, *cachedEntry.get()));
 	return true;
 }
 

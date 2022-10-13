@@ -351,7 +351,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				SpanContext spanContext =
 				    req.transactions[t].spanContext.present() ? req.transactions[t].spanContext.get() : SpanContext();
 
-				applyMetadataMutations(spanContext, *resolverData, req.transactions[t].mutations, db);
+				applyMetadataMutations(spanContext, *resolverData, req.transactions[t].mutations);
 			}
 			CODE_PROBE(self->forceRecovery, "Resolver detects forced recovery");
 		}
@@ -574,7 +574,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		bool confChanges; // Ignore configuration changes for initial commits.
 		ResolverData resolverData(
 		    pContext->pResolverData->dbgid, pContext->pTxnStateStore, &pContext->pResolverData->keyInfo, confChanges);
-		applyMetadataMutations(SpanContext(), resolverData, mutations, db);
+		applyMetadataMutations(SpanContext(), resolverData, mutations);
 	} // loop
 
 	auto lockedKey = pContext->pTxnStateStore->readValue(databaseLockedKey).get();
@@ -653,15 +653,14 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	state TransactionStateResolveContext transactionStateResolveContext;
 	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 		self->logAdapter = new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
-		self->txnStateStore =
-		    keyValueStoreLogSystem(self->logAdapter,
-		                           db,
-		                           resolver.id(),
-		                           2e9,
-		                           true,
-		                           true,
-		                           true,
-		                           isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, db->get().client));
+		self->txnStateStore = keyValueStoreLogSystem(self->logAdapter,
+		                                             db,
+		                                             resolver.id(),
+		                                             2e9,
+		                                             true,
+		                                             true,
+		                                             true,
+		                                             isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION));
 
 		// wait for txnStateStore recovery
 		wait(success(self->txnStateStore->readValue(StringRef())));

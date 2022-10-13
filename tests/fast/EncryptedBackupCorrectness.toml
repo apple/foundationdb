@@ -1,6 +1,7 @@
 [configuration]
 allowDefaultTenant = false
 allowDisablingTenants = false
+tenantModeRequired = true
 
 [[knobs]]
 enable_encryption = true
@@ -32,7 +33,6 @@ simBackupAgents = 'BackupToFile'
 
     [[test.workload]]
     testName = 'BackupAndRestoreCorrectness'
-    enableBackupEncryption = true
     defaultBackup = true
     backupAfter = 10.0
     restoreAfter = 60.0
