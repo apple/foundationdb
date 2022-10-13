@@ -191,6 +191,7 @@ static Standalone<BlobMetadataDetailsRef> createBlobMetadata(BlobMetadataDomainI
                                                              BlobMetadataDomainName domainName) {
 	Standalone<BlobMetadataDetailsRef> metadata;
 	metadata.domainId = domainId;
+	metadata.arena().dependsOn(domainName.arena());
 	metadata.domainName = domainName;
 	// 0 == no partition, 1 == suffix partitioned, 2 == storage location partitioned
 	int type = deterministicRandom()->randomInt(0, 3);
