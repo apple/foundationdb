@@ -77,10 +77,11 @@ public:
 	                       int retryLimit,
 	                       std::string bgBasePath,
 	                       std::optional<fdb::BytesRef> tenantName,
-	                       bool transactional)
+	                       bool transactional,
+	                       bool restartOnTimeout)
 	  : executor(executor), startFct(startFct), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
 	    txState(TxState::IN_PROGRESS), commitCalled(false), bgBasePath(bgBasePath), tenantName(tenantName),
-	    transactional(transactional) {
+	    transactional(transactional), restartOnTimeout(restartOnTimeout) {
 		databaseCreateErrorInjected = executor->getOptions().injectDatabaseCreateErrors &&
 		                              Random::get().randomBool(executor->getOptions().databaseCreateErrorRatio);
 		if (databaseCreateErrorInjected) {
@@ -177,7 +178,8 @@ public:
 
 		ASSERT(!onErrorFuture);
 
-		if (databaseCreateErrorInjected && canBeInjectedDatabaseCreateError(err.code())) {
+		if ((databaseCreateErrorInjected && canBeInjectedDatabaseCreateError(err.code())) ||
+		    (restartOnTimeout && err.code() == error_code_transaction_timed_out)) {
 			// Failed to create a database because of failure injection
 			// Restart by recreating the transaction in a valid database
 			recreateAndRestartTransaction();
@@ -235,7 +237,11 @@ protected:
 		fdb::Error err = onErrorFuture.error();
 		onErrorFuture = {};
 		if (err) {
-			transactionFailed(err);
+			if (restartOnTimeout && err.code() == error_code_transaction_timed_out) {
+				recreateAndRestartTransaction();
+			} else {
+				transactionFailed(err);
+			}
 		} else {
 			restartTransaction();
 		}
@@ -359,6 +365,9 @@ protected:
 	// Accessed on initialization and in ON_ERROR state only (no need for mutex)
 	bool databaseCreateErrorInjected;
 
+	// Restart the transaction automatically on timeout errors
+	const bool restartOnTimeout;
+
 	// The tenant that we will run this transaction in
 	const std::optional<fdb::BytesRef> tenantName;
 
@@ -378,9 +387,17 @@ public:
 	                           int retryLimit,
 	                           std::string bgBasePath,
 	                           std::optional<fdb::BytesRef> tenantName,
-	                           bool transactional)
-	  : TransactionContextBase(executor, startFct, cont, scheduler, retryLimit, bgBasePath, tenantName, transactional) {
-	}
+	                           bool transactional,
+	                           bool restartOnTimeout)
+	  : TransactionContextBase(executor,
+	                           startFct,
+	                           cont,
+	                           scheduler,
+	                           retryLimit,
+	                           bgBasePath,
+	                           tenantName,
+	                           transactional,
+	                           restartOnTimeout) {}
 
 protected:
 	void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
@@ -456,9 +473,17 @@ public:
 	                        int retryLimit,
 	                        std::string bgBasePath,
 	                        std::optional<fdb::BytesRef> tenantName,
-	                        bool transactional)
-	  : TransactionContextBase(executor, startFct, cont, scheduler, retryLimit, bgBasePath, tenantName, transactional) {
-	}
+	                        bool transactional,
+	                        bool restartOnTimeout)
+	  : TransactionContextBase(executor,
+	                           startFct,
+	                           cont,
+	                           scheduler,
+	                           retryLimit,
+	                           bgBasePath,
+	                           tenantName,
+	                           transactional,
+	                           restartOnTimeout) {}
 
 protected:
 	void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
@@ -470,7 +495,7 @@ protected:
 		lock.unlock();
 		try {
 			f.then([this](fdb::Future f) { futureReadyCallback(f, this); });
-		} catch (std::runtime_error& err) {
+		} catch (std::exception& err) {
 			lock.lock();
 			callbackMap.erase(f);
 			lock.unlock();
@@ -482,7 +507,7 @@ protected:
 		try {
 			AsyncTransactionContext* txCtx = (AsyncTransactionContext*)param;
 			txCtx->onFutureReady(f);
-		} catch (std::runtime_error& err) {
+		} catch (std::exception& err) {
 			fmt::print("Unexpected exception in callback {}\n", err.what());
 			abort();
 		} catch (...) {
@@ -544,7 +569,7 @@ protected:
 		try {
 			AsyncTransactionContext* txCtx = (AsyncTransactionContext*)param;
 			txCtx->onErrorReady(f);
-		} catch (std::runtime_error& err) {
+		} catch (std::exception& err) {
 			fmt::print("Unexpected exception in callback {}\n", err.what());
 			abort();
 		} catch (...) {
@@ -673,7 +698,8 @@ public:
 	void execute(TOpStartFct startFct,
 	             TOpContFct cont,
 	             std::optional<fdb::BytesRef> tenantName,
-	             bool transactional) override {
+	             bool transactional,
+	             bool restartOnTimeout) override {
 		try {
 			std::shared_ptr<ITransactionContext> ctx;
 			if (options.blockOnFutures) {
@@ -684,7 +710,8 @@ public:
 				                                                   options.transactionRetryLimit,
 				                                                   bgBasePath,
 				                                                   tenantName,
-				                                                   transactional);
+				                                                   transactional,
+				                                                   restartOnTimeout);
 			} else {
 				ctx = std::make_shared<AsyncTransactionContext>(this,
 				                                                startFct,
@@ -693,7 +720,8 @@ public:
 				                                                options.transactionRetryLimit,
 				                                                bgBasePath,
 				                                                tenantName,
-				                                                transactional);
+				                                                transactional,
+				                                                restartOnTimeout);
 			}
 			startFct(ctx);
 		} catch (...) {

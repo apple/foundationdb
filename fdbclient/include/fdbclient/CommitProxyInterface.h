@@ -30,6 +30,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/GrvProxyInterface.h"
+#include "fdbclient/IdempotencyId.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/VersionVector.h"
@@ -186,6 +187,7 @@ struct CommitTransactionRequest : TimedRequest {
 	Optional<UID> debugID;
 	Optional<ClientTrCommitCostEstimation> commitCostEstimation;
 	Optional<TagSet> tagSet;
+	IdempotencyIdRef idempotencyId;
 
 	TenantInfo tenantInfo;
 
@@ -196,8 +198,17 @@ struct CommitTransactionRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, transaction, reply, flags, debugID, commitCostEstimation, tagSet, spanContext, tenantInfo, arena);
+		serializer(ar,
+		           transaction,
+		           reply,
+		           flags,
+		           debugID,
+		           commitCostEstimation,
+		           tagSet,
+		           spanContext,
+		           tenantInfo,
+		           idempotencyId,
+		           arena);
 	}
 };
 
@@ -224,6 +235,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	bool rkBatchThrottled = false;
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
+	double proxyTagThrottledDuration{ 0.0 };
 
 	VersionVector ssVersionVectorDelta;
 	UID proxyId; // GRV proxy ID to detect old GRV proxies at client side
@@ -242,7 +254,8 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           rkDefaultThrottled,
 		           rkBatchThrottled,
 		           ssVersionVectorDelta,
-		           proxyId);
+		           proxyId,
+		           proxyTagThrottledDuration);
 	}
 };
 
@@ -267,6 +280,10 @@ struct GetReadVersionRequest : TimedRequest {
 	TransactionPriority priority;
 
 	TransactionTagMap<uint32_t> tags;
+	// Not serialized, because this field does not need to be sent to master.
+	// It is used for reporting to clients the amount of time spent delayed by
+	// the TagQueue
+	double proxyTagThrottledDuration{ 0.0 };
 
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
@@ -302,6 +319,8 @@ struct GetReadVersionRequest : TimedRequest {
 	bool verify() const { return true; }
 
 	bool operator<(GetReadVersionRequest const& rhs) const { return priority < rhs.priority; }
+
+	bool isTagged() const { return !tags.empty(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

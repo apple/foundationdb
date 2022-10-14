@@ -27,14 +27,13 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WatchesSameKeyWorkload : TestWorkload {
+	static constexpr auto NAME = "WatchesSameKeyCorrectness";
 	int numWatches;
 	std::vector<Future<Void>> cases;
 
 	WatchesSameKeyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		numWatches = getOption(options, "numWatches"_sr, 3);
 	}
-
-	std::string description() const override { return "WatchesSameKeyCorrectness"; }
 
 	Future<Void> setup(Database const& cx) override {
 		cases.push_back(case1(cx, "foo1"_sr, this));
@@ -241,4 +240,4 @@ struct WatchesSameKeyWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<WatchesSameKeyWorkload> WatchesSameKeyWorkloadFactory("WatchesSameKeyCorrectness");
+WorkloadFactory<WatchesSameKeyWorkload> WatchesSameKeyWorkloadFactory;

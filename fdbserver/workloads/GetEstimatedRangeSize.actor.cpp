@@ -32,6 +32,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct GetEstimatedRangeSizeWorkload : TestWorkload {
+	static constexpr auto NAME = "GetEstimatedRangeSize";
 	int nodeCount;
 	double testDuration;
 	Key keyPrefix;
@@ -47,8 +48,6 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 		tenant = hasTenant ? getOption(options, "tenant"_sr, "DefaultNeverUsed"_sr) : Optional<TenantName>();
 		checkOnly = getOption(options, "checkOnly"_sr, false);
 	}
-
-	std::string description() const override { return "GetEstimatedRangeSize"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (checkOnly) {
@@ -131,4 +130,4 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<GetEstimatedRangeSizeWorkload> GetEstimatedRangeSizeWorkloadFactory("GetEstimatedRangeSize", false);
+WorkloadFactory<GetEstimatedRangeSizeWorkload> GetEstimatedRangeSizeWorkloadFactory;

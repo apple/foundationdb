@@ -35,6 +35,7 @@
 #include "flow/actorcompiler.h"
 
 struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "SpecialKeySpaceCorrectness";
 
 	int actorCount, minKeysPerRange, maxKeysPerRange, rangeCount, keyBytes, valBytes, conflictRangeSizeFactor;
 	double testDuration, absoluteRandomProb, transactionsPerSecond;
@@ -61,14 +62,13 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		ASSERT(conflictRangeSizeFactor >= 1);
 	}
 
-	std::string description() const override { return "SpecialKeySpaceCorrectness"; }
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	Future<bool> check(Database const& cx) override { return wrongResults.getValue() == 0; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 	// disable the default timeout setting
 	double getCheckTimeout() const override { return std::numeric_limits<double>::max(); }
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("MoveKeysWorkload"); }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("RandomMoveKeys"); }
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		cx->specialKeySpace = std::make_unique<SpecialKeySpace>();
@@ -1337,6 +1337,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				ASSERT(!ddKVs.more && ddKVs.size() == 1);
 				ASSERT(ddKVs[0].key ==
 				       "mode"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("datadistribution")));
+				TraceEvent("DDKVsValue").detail("Value", ddKVs[0].value);
 				ASSERT(ddKVs[0].value == Value(boost::lexical_cast<std::string>(-1)));
 				tx->reset();
 				break;
@@ -1548,4 +1549,4 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<SpecialKeySpaceCorrectnessWorkload> SpecialKeySpaceCorrectnessFactory("SpecialKeySpaceCorrectness");
+WorkloadFactory<SpecialKeySpaceCorrectnessWorkload> SpecialKeySpaceCorrectnessFactory;

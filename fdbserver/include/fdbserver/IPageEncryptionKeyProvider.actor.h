@@ -294,7 +294,7 @@ public:
 	EncodingType expectedEncodingType() const override { return EncodingType::AESEncryptionV1; }
 
 	bool enableEncryption() const override {
-		return isEncryptionOpSupported(EncryptOperationType::STORAGE_SERVER_ENCRYPTION, db->get().client);
+		return isEncryptionOpSupported(EncryptOperationType::STORAGE_SERVER_ENCRYPTION);
 	}
 
 	bool enableEncryptionDomain() const override { return SERVER_KNOBS->REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT; }

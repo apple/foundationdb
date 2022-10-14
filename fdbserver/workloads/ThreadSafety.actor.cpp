@@ -102,6 +102,8 @@ private:
 
 // A workload which uses the thread safe API from multiple threads
 struct ThreadSafetyWorkload : TestWorkload {
+	static constexpr auto NAME = "ThreadSafety";
+
 	int threadsPerClient;
 	double threadDuration;
 
@@ -134,8 +136,6 @@ struct ThreadSafetyWorkload : TestWorkload {
 		// This test is not deterministic
 		noUnseed = true;
 	}
-
-	std::string description() const override { return "ThreadSafety"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -292,4 +292,4 @@ struct ThreadSafetyWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<ThreadSafetyWorkload> ThreadSafetyWorkloadFactory("ThreadSafety");
+WorkloadFactory<ThreadSafetyWorkload> ThreadSafetyWorkloadFactory;
