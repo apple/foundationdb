@@ -62,6 +62,7 @@ struct GrvProxyStats {
 	LatencySample defaultTxnGRVTimeInQueue;
 	LatencySample batchTxnGRVTimeInQueue;
 
+	// These latency bands and samples ignore latency injected by the GrvProxyTransactionTagThrottler
 	LatencyBands grvLatencyBands;
 	LatencySample grvLatencySample; // GRV latency metric sample of default priority
 	LatencySample grvBatchLatencySample; // GRV latency metric sample of batched priority
