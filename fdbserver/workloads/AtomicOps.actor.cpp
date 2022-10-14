@@ -107,7 +107,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		}
 		TraceEvent("AtomicWorkload").detail("OpType", opType);
 	}
-	
+
 	Future<Void> setup(Database const& cx) override {
 		if (apiVersion500)
 			cx->apiVersion = ApiVersion(500);

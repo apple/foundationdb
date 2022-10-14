@@ -118,7 +118,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		repetitions = 0;
 		bytesReadInPreviousRound = 0;
 	}
-	
+
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
 	ACTOR Future<Void> _setup(Database cx, ConsistencyCheckWorkload* self) {

@@ -48,7 +48,7 @@ struct CpuProfilerWorkload : TestWorkload {
 		roles = getOption(options, "roles"_sr, std::vector<std::string>());
 		success = true;
 	}
-	
+
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	// Turns the profiler on or off

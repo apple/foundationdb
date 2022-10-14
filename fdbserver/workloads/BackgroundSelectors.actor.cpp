@@ -48,7 +48,7 @@ struct BackgroundSelectorWorkload : TestWorkload {
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 10.0) / (clientCount * actorsPerClient);
 		resultLimit = 10 * maxDiff;
 	}
-	
+
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }

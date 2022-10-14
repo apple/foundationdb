@@ -34,7 +34,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 	WatchesSameKeyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		numWatches = getOption(options, "numWatches"_sr, 3);
 	}
-	
+
 	Future<Void> setup(Database const& cx) override {
 		cases.push_back(case1(cx, "foo1"_sr, this));
 		cases.push_back(case2(cx, "foo2"_sr, this));

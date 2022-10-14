@@ -54,7 +54,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 		sendDetailedHealthMetrics = getOption(options, "sendDetailedHealthMetrics"_sr, true);
 		maxAllowedStaleness = getOption(options, "maxAllowedStaleness"_sr, 60.0);
 	}
-	
+
 	ACTOR static Future<Void> _setup(Database cx, HealthMetricsApiWorkload* self) {
 		if (!self->sendDetailedHealthMetrics) {
 			// Clear detailed health metrics that are already populated

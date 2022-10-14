@@ -42,7 +42,7 @@ struct Increment : TestWorkload {
 		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
 	}
-	
+
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		for (int c = 0; c < actorCount; c++)

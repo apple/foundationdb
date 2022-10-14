@@ -213,7 +213,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		    .detail("SamplingProbability", samplingProbability)
 		    .detail("TrInfoSizeLimit", trInfoSizeLimit);
 	}
-	
+
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
 			IKnobCollection::getMutableGlobalKnobCollection().setKnob("csi_status_delay",

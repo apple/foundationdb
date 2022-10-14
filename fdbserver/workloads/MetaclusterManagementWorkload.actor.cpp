@@ -93,7 +93,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 	}
-	
+
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
 		out.insert("MachineAttritionWorkload");
 	}

@@ -90,9 +90,7 @@ struct MiniCycleWorkload : TestWorkload {
 					if (!ok)
 						return false;
 				}
-				when(wait(end)) {
-					break;
-				}
+				when(wait(end)) { break; }
 			}
 		}
 

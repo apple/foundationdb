@@ -38,7 +38,7 @@ struct GetRangeStream : TestWorkload {
 		end = getOption(options, "end"_sr, normalKeys.end);
 		printKVPairs = getOption(options, "printKVPairs"_sr, false);
 	}
-	
+
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override {

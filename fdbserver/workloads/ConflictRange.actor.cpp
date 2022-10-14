@@ -47,7 +47,7 @@ struct ConflictRangeWorkload : TestWorkload {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		testReadYourWrites = getOption(options, "testReadYourWrites"_sr, false);
 	}
-	
+
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }

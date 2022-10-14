@@ -53,7 +53,7 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 		fileSize = getOption(options, "fileSize"_sr, 10002432);
 		sequential = getOption(options, "sequential"_sr, true);
 	}
-	
+
 	Future<Void> setup(Database const& cx) override {
 		if (enabled)
 			return _setup(this);

@@ -33,7 +33,7 @@
 
 struct IncrementalBackupWorkload : TestWorkload {
 	static constexpr auto NAME = "IncrementalBackup";
-	
+
 	Standalone<StringRef> backupDir;
 	Standalone<StringRef> tag;
 	FileBackupAgent backupAgent;

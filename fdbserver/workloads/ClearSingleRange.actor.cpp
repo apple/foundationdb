@@ -35,7 +35,7 @@ struct ClearSingleRange : TestWorkload {
 		end = getOption(options, "end"_sr, normalKeys.end);
 		startDelay = getOption(options, "beginClearRange"_sr, 10.0);
 	}
-	
+
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override { return clientId != 0 ? Void() : fdbClientClearRange(cx, this); }

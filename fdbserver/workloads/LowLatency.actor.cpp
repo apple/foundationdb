@@ -48,7 +48,7 @@ struct LowLatencyWorkload : TestWorkload {
 		testWrites = getOption(options, "testWrites"_sr, true);
 		testKey = getOption(options, "testKey"_sr, "testKey"_sr);
 	}
-	
+
 	Future<Void> setup(Database const& cx) override {
 		if (g_network->isSimulated()) {
 			IKnobCollection::getMutableGlobalKnobCollection().setKnob("min_delay_cc_worst_fit_candidacy_seconds",

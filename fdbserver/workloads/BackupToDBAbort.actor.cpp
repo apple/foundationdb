@@ -43,7 +43,7 @@ struct BackupToDBAbort : TestWorkload {
 
 		lockid = UID(0xbeeffeed, 0xdecaf00d);
 	}
-	
+
 	Future<Void> setup(const Database& cx) override {
 		if (clientId != 0)
 			return Void();

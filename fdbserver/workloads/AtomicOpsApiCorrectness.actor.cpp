@@ -43,7 +43,7 @@ public:
 	AtomicOpsApiCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		opType = getOption(options, "opType"_sr, -1);
 	}
-	
+
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override {
