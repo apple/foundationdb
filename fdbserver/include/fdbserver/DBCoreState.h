@@ -144,7 +144,7 @@ struct DBCoreState {
 	std::set<int8_t> pseudoLocalities;
 	ProtocolVersion newestProtocolVersion;
 	ProtocolVersion lowestCompatibleProtocolVersion;
-	EncryptionAtRestMode encryptionAtRestMode;
+	EncryptionAtRestMode encryptionAtRestMode; // cluster encryption data at-rest mode
 
 	DBCoreState()
 	  : logRouterTags(0), txsTags(0), recoveryCount(0), logSystemType(LogSystemType::empty),
@@ -201,8 +201,7 @@ struct DBCoreState {
 			           tLogs[0].tLogWriteAntiQuorum,
 			           recoveryCount,
 			           tLogs[0].tLogReplicationFactor,
-			           logSystemType,
-			           encryptionAtRestMode);
+			           logSystemType);
 			tLogs[0].tLogVersion = TLogVersion::V2;
 
 			uint64_t tLocalitySize = (uint64_t)tLogs[0].tLogLocalities.size();

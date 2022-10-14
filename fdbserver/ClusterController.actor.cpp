@@ -25,6 +25,7 @@
 #include <set>
 #include <vector>
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/FailureMonitor.h"
@@ -67,6 +68,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/KeyBackedTypes.h"
+#include "flow/Error.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -272,6 +274,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
                                         ServerCoordinators coordinators,
                                         Future<Void> recoveredDiskFiles) {
 	state MasterInterface iMaster;
+	state Reference<ClusterRecoveryData> recoveryData;
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> recoveryCore;
 
@@ -328,18 +331,18 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			                              // the "first" recovery after more than a second of normal operation
 
 			TraceEvent("CCWDB", cluster->id).detail("Watching", iMaster.id());
-			cluster->recoveryData.set(makeReference<ClusterRecoveryData>(cluster,
-			                                                             db->serverInfo,
-			                                                             db->serverInfo->get().master,
-			                                                             db->serverInfo->get().masterLifetime,
-			                                                             coordinators,
-			                                                             db->serverInfo->get().clusterInterface,
-			                                                             ""_sr,
-			                                                             addActor,
-			                                                             db->forceRecovery));
+			recoveryData = makeReference<ClusterRecoveryData>(cluster,
+			                                                  db->serverInfo,
+			                                                  db->serverInfo->get().master,
+			                                                  db->serverInfo->get().masterLifetime,
+			                                                  coordinators,
+			                                                  db->serverInfo->get().clusterInterface,
+			                                                  ""_sr,
+			                                                  addActor,
+			                                                  db->forceRecovery);
 
-			collection = actorCollection(cluster->recoveryData.get()->addActor.getFuture());
-			recoveryCore = clusterRecoveryCore(cluster->recoveryData.get());
+			collection = actorCollection(recoveryData->addActor.getFuture());
+			recoveryCore = clusterRecoveryCore(recoveryData);
 
 			// Master failure detection is pretty sensitive, but if we are in the middle of a very long recovery we
 			// really don't want to have to start over
@@ -359,11 +362,10 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				when(wait(db->serverInfo->onChange())) {}
 				when(BackupWorkerDoneRequest req =
 				         waitNext(db->serverInfo->get().clusterInterface.notifyBackupWorkerDone.getFuture())) {
-					if (cluster->recoveryData.get()->logSystem.isValid() &&
-					    cluster->recoveryData.get()->logSystem->removeBackupWorker(req)) {
-						cluster->recoveryData.get()->registrationTrigger.trigger();
+					if (recoveryData->logSystem.isValid() && recoveryData->logSystem->removeBackupWorker(req)) {
+						recoveryData->registrationTrigger.trigger();
 					}
-					++cluster->recoveryData.get()->backupWorkerDoneRequests;
+					++recoveryData->backupWorkerDoneRequests;
 					req.reply.send(Void());
 					TraceEvent(SevDebug, "BackupWorkerDoneRequest", cluster->id).log();
 				}
@@ -376,7 +378,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			}
 
 			recoveryCore.cancel();
-			wait(cleanupRecoveryActorCollection(cluster->recoveryData.get(), /*exThrown=*/false));
+			wait(cleanupRecoveryActorCollection(recoveryData, /*exThrown=*/false));
 			ASSERT(addActor.isEmpty());
 
 			wait(spinDelay);
@@ -390,7 +392,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				wait(delay(0.0));
 
 			recoveryCore.cancel();
-			wait(cleanupRecoveryActorCollection(cluster->recoveryData.get(), /*exThrown=*/true));
+			wait(cleanupRecoveryActorCollection(recoveryData, /*exThrown=*/true));
 			ASSERT(addActor.isEmpty());
 
 			CODE_PROBE(err.code() == error_code_tlog_failed, "Terminated due to tLog failure");
@@ -3026,23 +3028,15 @@ ACTOR Future<Void> updateClusterId(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> handleGetEncryptionAtRestMode(ClusterControllerData* self, GetEncryptionAtRestModeRequest req) {
+ACTOR Future<Void> handleGetEncryptionAtRestMode(ClusterControllerData* self, ClusterControllerFullInterface ccInterf) {
 	loop {
-		if (!self->recoveryData.get().isValid()) {
-			wait(self->recoveryData.onChange());
-		}
-
-		choose {
-			when(wait(self->recoveryData.get()->cstate.isReadable.getFuture())) {
-				GetEncryptionAtRestModeResponse resp;
-				resp.mode = self->recoveryData.get()->cstate.myDBState.encryptionAtRestMode.mode;
-				req.reply.send(resp);
-				return Void();
-			}
-			when(wait(self->recoveryData.onChange())) {
-				// handle cluster recovery restart scenario
-			}
-		}
+		state GetEncryptionAtRestModeRequest req = waitNext(ccInterf.getEncryptionAtRestMode.getFuture());
+		TraceEvent("HandleGetEncryptionAtRestModeStart").detail("TlogId", req.tlogId);
+		EncryptionAtRestMode mode = wait(self->encryptionAtRestMode.getFuture());
+		GetEncryptionAtRestModeResponse resp;
+		resp.mode = mode;
+		req.reply.send(resp);
+		TraceEvent("HandleGetEncryptionAtRestModeEnd").detail("TlogId", req.tlogId).detail("Mode", resp.mode);
 	}
 }
 
@@ -3091,6 +3085,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(metaclusterMetricsUpdater(&self));
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(updateClusterId(&self));
+	self.addActor.send(handleGetEncryptionAtRestMode(&self, interf));
 	self.addActor.send(self.clusterControllerMetrics.traceCounters("ClusterControllerMetrics",
 	                                                               self.id,
 	                                                               SERVER_KNOBS->STORAGE_LOGGING_DELAY,
@@ -3180,9 +3175,6 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		}
 		when(GetServerDBInfoRequest req = waitNext(interf.getServerDBInfo.getFuture())) {
 			self.addActor.send(clusterGetServerInfo(&self.db, req.knownServerInfoID, req.reply));
-		}
-		when(GetEncryptionAtRestModeRequest req = waitNext(interf.getEncryptionAtRestMode.getFuture())) {
-			self.addActor.send(handleGetEncryptionAtRestMode(&self, req));
 		}
 		when(wait(leaderFail)) {
 			// We are no longer the leader if this has changed.

@@ -45,6 +45,8 @@
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/Histogram.h"
 #include "flow/DebugTrace.h"
+#include "flow/genericactors.actor.h"
+#include "flow/network.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TLogQueueEntryRef {
@@ -2396,19 +2398,29 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 }
 
 ACTOR Future<EncryptionAtRestMode> getEncryptionAtRestMode(TLogData* self) {
-	GetEncryptionAtRestModeRequest req;
-	GetEncryptionAtRestModeResponse resp =
-	    wait(brokenPromiseToNever(self->dbInfo->get().clusterInterface.getEncryptionAtRestMode.getReply(req)));
+	loop {
+		state GetEncryptionAtRestModeRequest req(self->dbgid);
+		try {
+			choose {
+				when(wait(self->dbInfo->onChange())) {}
+				when(GetEncryptionAtRestModeResponse resp = wait(brokenPromiseToNever(
+				         self->dbInfo->get().clusterInterface.getEncryptionAtRestMode.getReply(req)))) {
+					TraceEvent("GetEncryptionAtRestMode", self->dbgid).detail("Mode", resp.mode);
 
-	TraceEvent("GetEncryptionAtRestMode").detail("Mode", resp.mode);
-
-	// TODO: TLOG_ENCTYPTION KNOB shall be removed and db-config check should be sufficient to determine tlog (and
-	// cluster) encryption status
-	if ((EncryptionAtRestMode::Mode)resp.mode != EncryptionAtRestMode::Mode::DISABLED &&
-	    SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION) {
-		return EncryptionAtRestMode((EncryptionAtRestMode::Mode)resp.mode);
-	} else {
-		return EncryptionAtRestMode();
+					// TODO: TLOG_ENCTYPTION KNOB shall be removed and db-config check should be sufficient to
+					// determine tlog (and cluster) encryption status
+					if ((EncryptionAtRestMode::Mode)resp.mode != EncryptionAtRestMode::Mode::DISABLED &&
+					    SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION) {
+						return EncryptionAtRestMode((EncryptionAtRestMode::Mode)resp.mode);
+					} else {
+						return EncryptionAtRestMode();
+					}
+				}
+			}
+		} catch (Error& e) {
+			TraceEvent("GetEncryptionAtRestError", self->dbgid).error(e);
+		}
+		wait(delay(0.0));
 	}
 }
 
@@ -2606,6 +2618,9 @@ ACTOR Future<Void> checkUpdateEncryptionAtRestMode(TLogData* self) {
 	if (self->encryptionAtRestMode.present()) {
 		// Ensure the TLog encryptionAtRestMode status matches with the cluster config, if not, kill the TLog process.
 		// Approach prevents a fake TLog process joining the cluster.
+		TraceEvent("EncryptionAtRestMismatch", self->dbgid)
+		    .detail("Expected", encryptionAtRestMode.toString())
+		    .detail("Present", self->encryptionAtRestMode.get().toString());
 		ASSERT(self->encryptionAtRestMode.get() == encryptionAtRestMode);
 	} else {
 		self->encryptionAtRestMode = Optional<EncryptionAtRestMode>(encryptionAtRestMode);
@@ -2614,7 +2629,8 @@ ACTOR Future<Void> checkUpdateEncryptionAtRestMode(TLogData* self) {
 		self->persistentData->set(
 		    KeyValueRef(persistEncryptionAtRestModeKey, self->encryptionAtRestMode.get().toValue()));
 		wait(self->persistentData->commit());
-		TraceEvent("PersistEncryptionAtRestMode").detail("Mode", self->encryptionAtRestMode.get().toString());
+		TraceEvent("PersistEncryptionAtRestMode", self->dbgid)
+		    .detail("Mode", self->encryptionAtRestMode.get().toString());
 	}
 
 	return Void();

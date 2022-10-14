@@ -79,7 +79,6 @@ public:
 	DBCoreState myDBState;
 	bool finalWriteStarted;
 	Future<Void> previousWrite;
-	Promise<Void> isReadable;
 
 	ReusableCoordinatedState(ServerCoordinators const& coordinators,
 	                         PromiseStream<Future<Void>> const& addActor,
@@ -119,8 +118,6 @@ private:
 			self->myDBState = self->prevDBState;
 		}
 
-		self->isReadable.send(Void());
-
 		return Void();
 	}
 
@@ -135,7 +132,7 @@ private:
 
 		try {
 			wait(self->cstate.setExclusive(
-			    BinaryWriter::toValue(newState, IncludeVersion(ProtocolVersion::withDBCoreState()))));
+			    BinaryWriter::toValue(newState, IncludeVersion(ProtocolVersion::withEncryptionAtRest()))));
 		} catch (Error& e) {
 			CODE_PROBE(true, "Master displaced during writeMasterState");
 			throw;

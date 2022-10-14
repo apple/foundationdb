@@ -590,13 +590,15 @@ struct GetEncryptionAtRestModeResponse {
 
 struct GetEncryptionAtRestModeRequest {
 	constexpr static FileIdentifier file_identifier = 2670826;
+	UID tlogId;
 	ReplyPromise<GetEncryptionAtRestModeResponse> reply;
 
 	GetEncryptionAtRestModeRequest() {}
+	GetEncryptionAtRestModeRequest(UID tId) : tlogId(tId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply);
+		serializer(ar, tlogId, reply);
 	}
 };
 
