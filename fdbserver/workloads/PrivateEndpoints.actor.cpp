@@ -141,4 +141,4 @@ struct PrivateEndpoints : TestWorkload {
 
 } // namespace
 
-WorkloadFactory<PrivateEndpoints> PrivateEndpointsFactory(true);
+WorkloadFactory<PrivateEndpoints> PrivateEndpointsFactory(UntrustedMode::True);

@@ -231,13 +231,16 @@ struct IWorkloadFactory : ReferenceCounted<IWorkloadFactory> {
 	virtual Reference<TestWorkload> create(WorkloadContext const& wcx) = 0;
 };
 
+FDB_DECLARE_BOOLEAN_PARAM(UntrustedMode);
+
 template <class Workload>
 struct WorkloadFactory : IWorkloadFactory {
 	static_assert(std::is_convertible_v<decltype(Workload::NAME), std::string>,
 	              "Each workload must have a Workload::NAME member");
 	using WorkloadType = TestWorkloadImpl<Workload>;
 	bool runInUntrustedClient;
-	WorkloadFactory(bool runInUntrustedClient = false) : runInUntrustedClient(runInUntrustedClient) {
+	WorkloadFactory(UntrustedMode runInUntrustedClient = UntrustedMode::False)
+	  : runInUntrustedClient(runInUntrustedClient) {
 		factories()[WorkloadType::NAME] = Reference<IWorkloadFactory>::addRef(this);
 	}
 	Reference<TestWorkload> create(WorkloadContext const& wcx) override {

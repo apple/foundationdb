@@ -328,5 +328,5 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	}
 };
 
-WorkloadFactory<CycleWorkload<false>> CycleWorkloadFactory(false);
-WorkloadFactory<CycleWorkload<true>> TenantCycleWorkloadFactory(true);
+WorkloadFactory<CycleWorkload<false>> CycleWorkloadFactory(UntrustedMode::False);
+WorkloadFactory<CycleWorkload<true>> TenantCycleWorkloadFactory(UntrustedMode::True);
