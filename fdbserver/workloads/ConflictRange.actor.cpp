@@ -29,6 +29,7 @@
 // (sim2.actor.cpp)
 
 struct ConflictRangeWorkload : TestWorkload {
+	static constexpr auto NAME = "ConflictRange";
 	int minOperationsPerTransaction, maxOperationsPerTransaction, maxKeySpace, maxOffset, minInitialAmount,
 	    maxInitialAmount;
 	double testDuration;
@@ -46,8 +47,6 @@ struct ConflictRangeWorkload : TestWorkload {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		testReadYourWrites = getOption(options, "testReadYourWrites"_sr, false);
 	}
-
-	std::string description() const override { return "ConflictRange"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -407,4 +406,4 @@ struct ConflictRangeWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<ConflictRangeWorkload> ConflictRangeWorkloadFactory("ConflictRange");
+WorkloadFactory<ConflictRangeWorkload> ConflictRangeWorkloadFactory;

@@ -46,6 +46,8 @@ void forceLinkAtomicTests();
 void forceLinkIdempotencyIdTests();
 
 struct UnitTestWorkload : TestWorkload {
+	static constexpr auto NAME = "UnitTests";
+
 	bool enabled;
 	std::string testPattern;
 	Optional<std::string> testsIgnored;
@@ -104,7 +106,6 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkIdempotencyIdTests();
 	}
 
-	std::string description() const override { return "UnitTests"; }
 	Future<Void> setup(Database const& cx) override {
 		platform::eraseDirectoryRecursive(testParams.getDataDir());
 		return Void();
@@ -199,7 +200,7 @@ struct UnitTestWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<UnitTestWorkload> UnitTestWorkloadFactory("UnitTests");
+WorkloadFactory<UnitTestWorkload> UnitTestWorkloadFactory;
 
 TEST_CASE("/fdbserver/UnitTestWorkload/long delay") {
 	wait(delay(60));

@@ -41,10 +41,11 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-//#define SevCCheckInfo SevVerbose
+// #define SevCCheckInfo SevVerbose
 #define SevCCheckInfo SevInfo
 
 struct ConsistencyCheckWorkload : TestWorkload {
+	static constexpr auto NAME = "ConsistencyCheck";
 	// Whether or not we should perform checks that will only pass if the database is in a quiescent state
 	bool performQuiescentChecks;
 
@@ -117,8 +118,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		repetitions = 0;
 		bytesReadInPreviousRound = 0;
 	}
-
-	std::string description() const override { return "ConsistencyCheck"; }
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
@@ -1575,4 +1574,4 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<ConsistencyCheckWorkload> ConsistencyCheckWorkloadFactory("ConsistencyCheck");
+WorkloadFactory<ConsistencyCheckWorkload> ConsistencyCheckWorkloadFactory;

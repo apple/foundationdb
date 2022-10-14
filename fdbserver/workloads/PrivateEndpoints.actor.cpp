@@ -25,7 +25,8 @@
 namespace {
 
 struct PrivateEndpoints : TestWorkload {
-	static constexpr const char* WorkloadName = "PrivateEndpoints";
+	static constexpr auto NAME = "PrivateEndpoints";
+
 	bool success = true;
 	int numSuccesses = 0;
 	double startAfter;
@@ -104,7 +105,6 @@ struct PrivateEndpoints : TestWorkload {
 		addTestFor(&CommitProxyInterface::exclusionSafetyCheckReq);
 		// addTestFor(&CommitProxyInterface::getDDMetrics);
 	}
-	std::string description() const override { return WorkloadName; }
 	Future<Void> start(Database const& cx) override { return _start(this, cx); }
 	Future<bool> check(Database const& cx) override { return success; }
 	void getMetrics(std::vector<PerfMetric>& m) override {
@@ -141,4 +141,4 @@ struct PrivateEndpoints : TestWorkload {
 
 } // namespace
 
-WorkloadFactory<PrivateEndpoints> PrivateEndpointsFactory(PrivateEndpoints::WorkloadName, true);
+WorkloadFactory<PrivateEndpoints> PrivateEndpointsFactory(UntrustedMode::True);

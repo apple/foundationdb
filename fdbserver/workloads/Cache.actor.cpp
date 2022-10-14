@@ -24,13 +24,13 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct CacheWorkload : TestWorkload {
+	static constexpr auto NAME = "Cache";
 	Key keyPrefix;
 
 	CacheWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
 	}
 
-	std::string description() const override { return "CacheWorkload"; }
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
 			// Call management API to cache keys under the given prefix
@@ -43,4 +43,4 @@ struct CacheWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<CacheWorkload> CacheWorkloadFactory("Cache");
+WorkloadFactory<CacheWorkload> CacheWorkloadFactory;

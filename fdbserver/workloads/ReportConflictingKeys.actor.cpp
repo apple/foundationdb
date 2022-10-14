@@ -29,6 +29,7 @@
 // For this test to report properly buggify must be disabled (flow.h) , and failConnection must be disabled in
 // (sim2.actor.cpp)
 struct ReportConflictingKeysWorkload : TestWorkload {
+	static constexpr auto NAME = "ReportConflictingKeys";
 
 	double testDuration, transactionsPerSecond, addReadConflictRangeProb, addWriteConflictRangeProb;
 	Key keyPrefix;
@@ -56,8 +57,6 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		ASSERT(keyPrefix.size() + 8 <= keyBytes); // make sure the string format is valid
 		nodeCount = getOption(options, "nodeCount"_sr, 100);
 	}
-
-	std::string description() const override { return "ReportConflictingKeysWorkload"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -297,4 +296,4 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<ReportConflictingKeysWorkload> ReportConflictingKeysWorkload("ReportConflictingKeys");
+WorkloadFactory<ReportConflictingKeysWorkload> ReportConflictingKeysWorkload;
