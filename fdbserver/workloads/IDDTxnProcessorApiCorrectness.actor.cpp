@@ -26,6 +26,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "fdbclient/VersionedMap.h"
 
 bool compareShardInfo(const DDShardInfo& a, const DDShardInfo& other) {
 	// Mock DD just care about the server<->key mapping in DDShardInfo
@@ -194,29 +195,15 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> testRawMovementApi(IDDTxnProcessorApiWorkload* self) {
-		state std::map<UID, StorageServerInterface> emptyTssMapping; // always empty
-		state Reference<InitialDataDistribution> mockInitData;
 		state TraceInterval relocateShardInterval("RelocateShard");
 		state FlowLock fl1(1);
 		state FlowLock fl2(1);
-		state MoveKeysParams params;
-		state MoveKeysLock lock = wait(takeMoveKeysLock(self->real->context(), UID()));
-
-		KeyRange keys = self->getRandomKeys();
-		std::vector<UID> destTeams = self->getRandomTeam();
-
-		params = MoveKeysParams{ deterministicRandom()->randomUniqueID(),
-			                     keys,
-			                     destTeams,
-			                     destTeams,
-			                     lock,
-			                     Promise<Void>(),
-			                     &fl1,
-			                     &fl2,
-			                     false,
-			                     relocateShardInterval.pairID,
-			                     self->ddContext.ddEnabledState.get(),
-			                     CancelConflictingDataMoves::True };
+		state std::map<UID, StorageServerInterface> emptyTssMapping;
+		state Reference<InitialDataDistribution> mockInitData;
+		state MoveKeysParams params = wait(generateMoveKeysParams(self));
+		params.startMoveKeysParallelismLock = &fl1;
+		params.finishMoveKeysParallelismLock = &fl2;
+		params.relocationIntervalId = relocateShardInterval.pairID;
 
 		// test start
 		self->mock->testRawStartMovement(params, emptyTssMapping);
@@ -253,6 +240,51 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR static Future<MoveKeysParams> generateMoveKeysParams(IDDTxnProcessorApiWorkload* self) { // always empty
+		state MoveKeysLock lock = wait(takeMoveKeysLock(self->real->context(), UID()));
+
+		KeyRange keys = self->getRandomKeys();
+		std::vector<UID> destTeams = self->getRandomTeam();
+		return MoveKeysParams{ deterministicRandom()->randomUniqueID(),
+			                   keys,
+			                   destTeams,
+			                   destTeams,
+			                   lock,
+			                   Promise<Void>(),
+			                   nullptr,
+			                   nullptr,
+			                   false,
+			                   UID(),
+			                   self->ddContext.ddEnabledState.get(),
+			                   CancelConflictingDataMoves::True };
+	}
+
+	ACTOR static Future<Void> testMoveKeys(IDDTxnProcessorApiWorkload* self) {
+		state TraceInterval relocateShardInterval("RelocateShard");
+		state FlowLock fl1(1);
+		state FlowLock fl2(1);
+		state std::map<UID, StorageServerInterface> emptyTssMapping;
+		state Reference<InitialDataDistribution> mockInitData;
+		state MoveKeysParams params = wait(generateMoveKeysParams(self));
+		params.startMoveKeysParallelismLock = &fl1;
+		params.finishMoveKeysParallelismLock = &fl2;
+		params.relocationIntervalId = relocateShardInterval.pairID;
+
+		self->mock->moveKeys(params);
+		wait(self->real->moveKeys(params));
+
+		// read initial data again
+		wait(readRealInitialDataDistribution(self));
+		mockInitData =
+		    self->mock
+		        ->getInitialDataDistribution(
+		            self->ddContext.id(), self->ddContext.lock, {}, self->ddContext.ddEnabledState.get(), true)
+		        .get();
+
+		verifyInitDataEqual(self->realInitDD, mockInitData);
+		
+		return Void();
+	}
 	ACTOR Future<Void> worker(Database cx, IDDTxnProcessorApiWorkload* self) {
 		state double lastTime = now();
 		state int choice = 0;
@@ -261,7 +293,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 			if (choice == 0) { // test rawStartMovement and rawFinishMovement separately
 				wait(testRawMovementApi(self));
 			} else if (choice == 1) { // test moveKeys
-
+				wait(testMoveKeys(self));
 			} else {
 				ASSERT(false);
 			}
