@@ -28,16 +28,19 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 bool compareShardInfo(const DDShardInfo& a, const DDShardInfo& other) {
-	std::cout << a.key.toHexString() << " | " << other.key.toHexString() << "\n";
-	std::cout << a.hasDest << " | " << other.hasDest << "\n";
-	std::cout << describe(a.primarySrc) << " | " << describe(other.primarySrc) << "\n";
-	std::cout << describe(a.primaryDest) << " | " << describe(other.primaryDest) << "\n";
-	std::cout << describe(a.remoteSrc) << " | " << describe(other.remoteSrc) << "\n";
-	std::cout << describe(a.remoteDest) << " | " << describe(other.remoteDest) << "\n";
-
 	// Mock DD just care about the server<->key mapping in DDShardInfo
-	return a.key == other.key && a.hasDest == other.hasDest && a.primaryDest == other.primaryDest &&
-	       a.primarySrc == other.primarySrc && a.remoteSrc == other.remoteSrc && a.remoteDest == other.remoteDest;
+	bool result = a.key == other.key && a.hasDest == other.hasDest && a.primaryDest == other.primaryDest &&
+	              a.primarySrc == other.primarySrc && a.remoteSrc == other.remoteSrc &&
+	              a.remoteDest == other.remoteDest;
+	if (!result) {
+		std::cout << a.key.toHexString() << " | " << other.key.toHexString() << "\n";
+		std::cout << a.hasDest << " | " << other.hasDest << "\n";
+		std::cout << describe(a.primarySrc) << " | " << describe(other.primarySrc) << "\n";
+		std::cout << describe(a.primaryDest) << " | " << describe(other.primaryDest) << "\n";
+		std::cout << describe(a.remoteSrc) << " | " << describe(other.remoteSrc) << "\n";
+		std::cout << describe(a.remoteDest) << " | " << describe(other.remoteDest) << "\n";
+	}
+	return result;
 }
 
 void verifyInitDataEqual(Reference<InitialDataDistribution> real, Reference<InitialDataDistribution> mock) {
@@ -50,6 +53,33 @@ void verifyInitDataEqual(Reference<InitialDataDistribution> real, Reference<Init
 	ASSERT_EQ(real->shards.size(), mock->shards.size());
 }
 
+// testers expose protected methods
+class DDMockTxnProcessorTester : public DDMockTxnProcessor {
+public:
+	explicit DDMockTxnProcessorTester(std::shared_ptr<MockGlobalState> mgs = nullptr) : DDMockTxnProcessor(mgs) {}
+	void testRawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
+		ASSERT(this->rawStartMovement(params, tssMapping).isReady());
+	}
+
+	void testRawFinishMovement(MoveKeysParams& params, const std::map<UID, StorageServerInterface>& tssMapping) {
+		ASSERT(this->rawFinishMovement(params, tssMapping).isReady());
+	}
+};
+
+class DDTxnProcessorTester : public DDTxnProcessor {
+public:
+	explicit DDTxnProcessorTester(Database cx) : DDTxnProcessor(cx) {}
+
+	Future<Void> testRawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
+		return this->rawStartMovement(params, tssMapping);
+	}
+
+	Future<Void> testRawFinishMovement(MoveKeysParams& params,
+	                                   const std::map<UID, StorageServerInterface>& tssMapping) {
+		return this->rawFinishMovement(params, tssMapping);
+	}
+};
+
 // Verify that all IDDTxnProcessor API implementations has consistent result
 struct IDDTxnProcessorApiWorkload : TestWorkload {
 	static constexpr auto NAME = "IDDTxnProcessorApiCorrectness";
@@ -59,9 +89,9 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 	double maxKeyspace = 0.1;
 	DDSharedContext ddContext;
 
-	std::shared_ptr<IDDTxnProcessor> real;
+	std::shared_ptr<DDTxnProcessorTester> real;
 	std::shared_ptr<MockGlobalState> mgs;
-	std::shared_ptr<DDMockTxnProcessor> mock;
+	std::shared_ptr<DDMockTxnProcessorTester> mock;
 
 	Reference<InitialDataDistribution> realInitDD;
 
@@ -107,11 +137,25 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		return KeyRangeRef(doubleToTestKey(pos), doubleToTestKey(pos + len));
 	}
 
+	std::vector<UID> getRandomTeam() {
+		int& teamSize = ddContext.configuration.storageTeamSize;
+		if (realInitDD->allServers.size() < teamSize) {
+			TraceEvent(SevWarnAlways, "CandidatesLessThanTeamSize").log();
+			throw operation_failed();
+		}
+		deterministicRandom()->randomShuffle(realInitDD->allServers, teamSize);
+		std::vector<UID> result(teamSize);
+		for (int i = 0; i < teamSize; ++i) {
+			result[i] = realInitDD->allServers[i].first.id();
+		}
+		return result;
+	}
+
 	ACTOR Future<Void> _setup(Database cx, IDDTxnProcessorApiWorkload* self) {
 		int oldMode = wait(setDDMode(cx, 0));
 		TraceEvent("IDDTxnApiTestStartModeSetting").detail("OldValue", oldMode).log();
 
-		self->real = std::make_shared<DDTxnProcessor>(cx);
+		self->real = std::make_shared<DDTxnProcessorTester>(cx);
 		// Get the database configuration so as to use proper team size
 		wait(store(self->ddContext.configuration, self->real->getDatabaseConfiguration()));
 		ASSERT(self->ddContext.configuration.storageTeamSize > 0);
@@ -126,7 +170,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 		self->mgs = std::make_shared<MockGlobalState>();
 		self->mgs->configuration = self->ddContext.configuration;
-		self->mock = std::make_shared<DDMockTxnProcessor>(self->mgs);
+		self->mock = std::make_shared<DDMockTxnProcessorTester>(self->mgs);
 		self->mock->setupMockGlobalState(self->realInitDD);
 
 		Reference<InitialDataDistribution> mockInitData =
@@ -147,17 +191,74 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR static Future<Void> testRawMovementApi(IDDTxnProcessorApiWorkload* self) {
+		state std::map<UID, StorageServerInterface> emptyTssMapping; // always empty
+		state Reference<InitialDataDistribution> mockInitData;
+		state TraceInterval relocateShardInterval("RelocateShard");
+		state FlowLock fl1(1);
+		state FlowLock fl2(1);
+		state MoveKeysParams params;
+		state MoveKeysLock lock = wait(takeMoveKeysLock(self->real->context(), UID()));
+
+		KeyRange keys = self->getRandomKeys();
+		std::vector<UID> destTeams = self->getRandomTeam();
+
+		params = MoveKeysParams{ deterministicRandom()->randomUniqueID(),
+			                     keys,
+			                     destTeams,
+			                     destTeams,
+			                     lock,
+			                     Promise<Void>(),
+			                     &fl1,
+			                     &fl2,
+			                     false,
+			                     relocateShardInterval.pairID,
+			                     self->ddContext.ddEnabledState.get(),
+			                     CancelConflictingDataMoves::True };
+
+		// test start
+		self->mock->testRawStartMovement(params, emptyTssMapping);
+		wait(self->real->testRawStartMovement(params, emptyTssMapping));
+
+		// read initial data again
+		wait(readRealInitialDataDistribution(self));
+		mockInitData =
+		    self->mock
+		        ->getInitialDataDistribution(
+		            self->ddContext.id(), self->ddContext.lock, {}, self->ddContext.ddEnabledState.get(), true)
+		        .get();
+
+		verifyInitDataEqual(self->realInitDD, mockInitData);
+
+		// test finish or started but cancelled movement
+		if (deterministicRandom()->coinflip()) {
+			CODE_PROBE(true, "RawMovementApi partial started");
+			return Void();
+		}
+
+		self->mock->testRawFinishMovement(params, emptyTssMapping);
+		wait(self->real->testRawFinishMovement(params, emptyTssMapping));
+
+		// read initial data again
+		wait(readRealInitialDataDistribution(self));
+		mockInitData =
+		    self->mock
+		        ->getInitialDataDistribution(
+		            self->ddContext.id(), self->ddContext.lock, {}, self->ddContext.ddEnabledState.get(), true)
+		        .get();
+
+		verifyInitDataEqual(self->realInitDD, mockInitData);
+		return Void();
+	}
+
 	ACTOR Future<Void> worker(Database cx, IDDTxnProcessorApiWorkload* self) {
-		state KeyRangeMap<std::vector<StorageServerInterface>> inFlight;
-		state KeyRangeActorMap inFlightActors;
 		state double lastTime = now();
 		state int choice = 0;
 		loop {
 			choice = deterministicRandom()->randomInt(0, 2);
-
-			if (choice == 0) {
-
-			} else if (choice == 1) {
+			if (choice == 0) { // test rawStartMovement and rawFinishMovement separately
+				wait(testRawMovementApi(self));
+			} else if (choice == 1) { // test moveKeys
 
 			} else {
 				ASSERT(false);
