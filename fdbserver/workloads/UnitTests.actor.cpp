@@ -44,6 +44,7 @@ void forceLinkRESTKmsConnectorTest();
 void forceLinkCompressionUtilsTest();
 void forceLinkAtomicTests();
 void forceLinkIdempotencyIdTests();
+void forceLinkBlobConnectionProviderTests();
 
 struct UnitTestWorkload : TestWorkload {
 	bool enabled;
@@ -102,6 +103,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkCompressionUtilsTest();
 		forceLinkAtomicTests();
 		forceLinkIdempotencyIdTests();
+		forceLinkBlobConnectionProviderTests();
 	}
 
 	std::string description() const override { return "UnitTests"; }

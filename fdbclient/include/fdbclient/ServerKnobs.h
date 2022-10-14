@@ -963,7 +963,6 @@ public:
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;
-	int64_t BLOB_METADATA_REFRESH_INTERVAL;
 
 	// HTTP KMS Connector
 	std::string REST_KMS_CONNECTOR_KMS_DISCOVERY_URL_MODE;

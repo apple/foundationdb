@@ -76,4 +76,7 @@ struct BlobMetadataDetailsRef {
 	}
 };
 
+Standalone<BlobMetadataDetailsRef> createRandomTestBlobMetadata(BlobMetadataDomainId domainId,
+                                                                BlobMetadataDomainName domainName);
+
 #endif
