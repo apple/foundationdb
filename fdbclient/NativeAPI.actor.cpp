@@ -7395,8 +7395,7 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
                                                  KeyRange keys,
                                                  Reference<LocationInfo> locationInfo,
                                                  TenantMapEntry tenantEntry,
-                                                 Optional<Reference<TransactionState>> trState,
-                                                 UID debugId) {
+                                                 Optional<Reference<TransactionState>> trState) {
 	state TenantInfo tenantInfo =
 	    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
 	try {
@@ -7422,8 +7421,6 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
 ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
                                                             KeyRange keys,
                                                             Optional<Reference<TransactionState>> trState) {
-	state UID debugId = debugRandom()->randomUniqueID();
-	// TraceEvent(SevWarn, "AKNative25", debugId).detail("Keys", keys.toString());
 	state Span span("NAPI:GetStorageMetricsLargeKeyRange"_loc);
 	state TenantInfo tenantInfo =
 	    wait(trState.present() ? populateAndGetTenant(trState.get(), keys.begin, latestVersion) : TenantInfo());
@@ -7445,7 +7442,7 @@ ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx,
 		partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
 		partEnd = (i == nLocs - 1) ? keys.end : locations[i].range.end;
 		fx[i] = doGetStorageMetrics(
-		    cx, KeyRangeRef(partBegin, partEnd), locations[i].locations, locations[i].tenantEntry, trState, debugId);
+		    cx, KeyRangeRef(partBegin, partEnd), locations[i].locations, locations[i].tenantEntry, trState);
 	}
 	wait(waitForAll(fx));
 	for (int i = 0; i < nLocs; i++) {

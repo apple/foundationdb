@@ -88,7 +88,7 @@ Future<uint64_t> setupRange(Database cx, T* workload, uint64_t begin, uint64_t e
 	loop {
 		Optional<TenantName> tenant;
 		if (tenants.size() > 0) {
-			tenant = tenants.at(deterministicRandom()->randomInt(0, tenants.size()));
+			tenant = deterministicRandom()->randomChoice(tenants);
 		}
 		state Transaction tr(cx, tenant);
 		setAuthToken(*workload, tr);
@@ -154,7 +154,7 @@ Future<uint64_t> setupRangeWorker(Database cx,
 
 		Optional<TenantName> tenant;
 		if (tenants.size() > 0) {
-			tenant = tenants.at(deterministicRandom()->randomInt(0, tenants.size()));
+			tenant = deterministicRandom()->randomChoice(tenants);
 		}
 		if (keySaveIncrement > 0) {
 			keysLoaded += job.second - job.first;
@@ -259,7 +259,7 @@ Future<Void> bulkSetup(Database cx,
 	if (valuesInconsequential) {
 		Optional<TenantName> tenant;
 		if (tenants.size() > 0) {
-			tenant = tenants.at(deterministicRandom()->randomInt(0, tenants.size()));
+			tenant = deterministicRandom()->randomChoice(tenants);
 		}
 		bool present = wait(checkRangeSimpleValueSize(cx, workload, startNode, endNode, tenant));
 		if (present) {
