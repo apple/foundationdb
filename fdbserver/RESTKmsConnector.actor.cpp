@@ -339,8 +339,8 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 	//        "base_cipher_id"    : <cipherKeyId>,
 	//        "encrypt_domain_id" : <domainId>,
 	//        "base_cipher"       : <baseCipher>,
-	//        "refresh_after_sec"   : <refreshCipherTimeInterval>, (Optional)
-	//        "expire_after_sec"    : <expireCipherTimeInterval>  (Optional)
+	//        "refresh_after_sec"   : <refreshTimeInterval>, (Optional)
+	//        "expire_after_sec"    : <expireTimeInterval>  (Optional)
 	//     },
 	//     {
 	//         ....
@@ -430,8 +430,8 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 	//        "partitions" : [
 	//			  "partition1", "partition2", ...
 	//		  ], (Optional if baseLocation is present)
-	//        "refresh_after_sec"   : <refreshCipherTimeInterval>, (Optional)
-	//        "expire_after_sec"    : <expireCipherTimeInterval>  (Optional)
+	//        "refresh_after_sec"   : <refreshTimeInterval>, (Optional)
+	//        "expire_after_sec"    : <expireTimeInterval>  (Optional)
 	//     },
 	//     {
 	//         ....
@@ -773,6 +773,7 @@ Future<T> kmsRequestImpl(Reference<RESTKmsConnectorCtx> ctx,
 	TraceEvent(SevDebug, "KmsRequest_Failed", ctx->uid).detail("RequestID", requestID);
 
 	// Failed to do request from the remote KMS
+	// TODO: generic KMS error types
 	throw encrypt_keys_fetch_failed();
 }
 
