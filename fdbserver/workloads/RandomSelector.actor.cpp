@@ -25,6 +25,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct RandomSelectorWorkload : TestWorkload {
+	static constexpr auto NAME = "RandomSelector";
+
 	int minOperationsPerTransaction, maxOperationsPerTransaction, maxKeySpace, maxOffset, minInitialAmount,
 	    maxInitialAmount;
 	double testDuration;
@@ -45,8 +47,6 @@ struct RandomSelectorWorkload : TestWorkload {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 		fail = false;
 	}
-
-	std::string description() const override { return "RandomSelector"; }
 
 	Future<Void> setup(Database const& cx) override { return randomSelectorSetup(cx->clone(), this); }
 
@@ -571,4 +571,4 @@ struct RandomSelectorWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<RandomSelectorWorkload> RandomSelectorWorkloadFactory("RandomSelector");
+WorkloadFactory<RandomSelectorWorkload> RandomSelectorWorkloadFactory;

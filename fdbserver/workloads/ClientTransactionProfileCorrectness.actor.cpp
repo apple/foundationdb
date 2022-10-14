@@ -197,6 +197,7 @@ bool checkTxInfoEntryFormat(BinaryReader& reader) {
 }
 
 struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "ClientTransactionProfileCorrectness";
 	double samplingProbability;
 	int64_t trInfoSizeLimit;
 
@@ -212,9 +213,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		    .detail("SamplingProbability", samplingProbability)
 		    .detail("TrInfoSizeLimit", trInfoSizeLimit);
 	}
-
-	std::string description() const override { return "ClientTransactionProfileCorrectness"; }
-
+	
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
 			IKnobCollection::getMutableGlobalKnobCollection().setKnob("csi_status_delay",
@@ -368,5 +367,4 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<ClientTransactionProfileCorrectnessWorkload> ClientTransactionProfileCorrectnessWorkloadFactory(
-    "ClientTransactionProfileCorrectness");
+WorkloadFactory<ClientTransactionProfileCorrectnessWorkload> ClientTransactionProfileCorrectnessWorkloadFactory;

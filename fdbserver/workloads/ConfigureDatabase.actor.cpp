@@ -224,6 +224,7 @@ std::string generateRegions() {
 }
 
 struct ConfigureDatabaseWorkload : TestWorkload {
+	static constexpr auto NAME = "ConfigureDatabase";
 	double testDuration;
 	int additionalDBs;
 	bool allowDescriptorChange;
@@ -245,8 +246,6 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		downgradeTest1 = getOption(options, "downgradeTest1"_sr, false);
 		g_simulator->usableRegions = 1;
 	}
-
-	std::string description() const override { return "DestroyDatabaseWorkload"; }
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
 		out.insert("MachineAttritionWorkload");
@@ -478,4 +477,4 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<ConfigureDatabaseWorkload> DestroyDatabaseWorkloadFactory("ConfigureDatabase");
+WorkloadFactory<ConfigureDatabaseWorkload> DestroyDatabaseWorkloadFactory;

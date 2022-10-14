@@ -27,6 +27,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct IndexScanWorkload : KVWorkload {
+	constexpr static auto NAME = "IndexScan";
 	uint64_t rowsRead, chunks;
 	int bytesPerRead, failedTransactions, scans;
 	double totalTimeFetching, testDuration, transactionDuration;
@@ -40,8 +41,6 @@ struct IndexScanWorkload : KVWorkload {
 		singleProcess = getOption(options, "singleProcess"_sr, true);
 		readYourWrites = getOption(options, "readYourWrites"_sr, true);
 	}
-
-	std::string description() const override { return "SimpleRead"; }
 
 	Future<Void> setup(Database const& cx) override {
 		// this will be set up by and external force!
@@ -93,7 +92,9 @@ struct IndexScanWorkload : KVWorkload {
 	ACTOR static Future<Void> serialScans(Database cx, IndexScanWorkload* self) {
 		state double start = now();
 		try {
-			loop { wait(scanDatabase(cx, self)); }
+			loop {
+				wait(scanDatabase(cx, self));
+			}
 		} catch (...) {
 			self->totalTimeFetching = now() - start;
 			throw;
@@ -144,4 +145,4 @@ struct IndexScanWorkload : KVWorkload {
 	}
 };
 
-WorkloadFactory<IndexScanWorkload> IndexScanWorkloadFactory("IndexScan");
+WorkloadFactory<IndexScanWorkload> IndexScanWorkloadFactory;

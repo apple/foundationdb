@@ -40,7 +40,7 @@
 namespace {
 
 struct UDPWorkload : TestWorkload {
-	constexpr static const char* name = "UDPWorkload";
+	constexpr static auto NAME = "UDPWorkload";
 	// config
 	Key keyPrefix;
 	double runFor;
@@ -61,7 +61,6 @@ struct UDPWorkload : TestWorkload {
 		}
 	}
 
-	std::string description() const override { return name; }
 	ACTOR static Future<Void> _setup(UDPWorkload* self, Database cx) {
 		state NetworkAddress localAddress(g_network->getLocalAddress().ip,
 		                                  deterministicRandom()->randomInt(self->minPort, self->maxPort + 1),
@@ -184,7 +183,9 @@ struct UDPWorkload : TestWorkload {
 					finished = delay(1.0);
 					done = Never();
 				}
-				when(wait(finished)) { return Void(); }
+				when(wait(finished)) {
+					return Void();
+				}
 			}
 		}
 	}
@@ -198,7 +199,9 @@ struct UDPWorkload : TestWorkload {
 		loop {
 			choose {
 				when(wait(delay(0.1))) {}
-				when(wait(actors.getResult())) { UNSTOPPABLE_ASSERT(false); }
+				when(wait(actors.getResult())) {
+					UNSTOPPABLE_ASSERT(false);
+				}
 			}
 			if (!socket.get().isValid() || deterministicRandom()->random01() < 0.05) {
 				peer = deterministicRandom()->randomChoice(*remotes);
@@ -262,4 +265,4 @@ struct UDPWorkload : TestWorkload {
 
 } // namespace
 
-WorkloadFactory<UDPWorkload> UDPWorkloadFactory(UDPWorkload::name);
+WorkloadFactory<UDPWorkload> UDPWorkloadFactory;

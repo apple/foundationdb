@@ -35,6 +35,7 @@
 #include "flow/actorcompiler.h"
 
 struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "SpecialKeySpaceCorrectness";
 
 	int actorCount, minKeysPerRange, maxKeysPerRange, rangeCount, keyBytes, valBytes, conflictRangeSizeFactor;
 	double testDuration, absoluteRandomProb, transactionsPerSecond;
@@ -61,7 +62,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		ASSERT(conflictRangeSizeFactor >= 1);
 	}
 
-	std::string description() const override { return "SpecialKeySpaceCorrectness"; }
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	Future<bool> check(Database const& cx) override { return wrongResults.getValue() == 0; }
@@ -1548,4 +1548,4 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<SpecialKeySpaceCorrectnessWorkload> SpecialKeySpaceCorrectnessFactory("SpecialKeySpaceCorrectness");
+WorkloadFactory<SpecialKeySpaceCorrectnessWorkload> SpecialKeySpaceCorrectnessFactory;

@@ -43,6 +43,7 @@
 FDB_DEFINE_BOOLEAN_PARAM(AllowPartialMetaclusterOperations);
 
 struct MetaclusterManagementWorkload : TestWorkload {
+	static constexpr auto NAME = "MetaclusterManagement";
 
 	struct DataClusterData {
 		Database db;
@@ -92,9 +93,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 	}
-
-	std::string description() const override { return "MetaclusterManagement"; }
-
+	
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
 		out.insert("MachineAttritionWorkload");
 	}
@@ -935,4 +934,4 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<MetaclusterManagementWorkload> MetaclusterManagementWorkloadFactory("MetaclusterManagement");
+WorkloadFactory<MetaclusterManagementWorkload> MetaclusterManagementWorkloadFactory;

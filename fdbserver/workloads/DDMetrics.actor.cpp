@@ -27,13 +27,12 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct DDMetricsWorkload : TestWorkload {
+	static constexpr auto NAME = "DDMetrics";
 	double startDelay, ddDone;
 
 	DDMetricsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), ddDone(0.0) {
 		startDelay = getOption(options, "beginPoll"_sr, 10.0);
 	}
-
-	std::string description() const override { return "Data Distribution Metrics"; }
 
 	ACTOR Future<int> getHighPriorityRelocationsInFlight(Database cx, DDMetricsWorkload* self) {
 		WorkerInterface masterWorker = wait(getMasterWorker(cx, self->dbInfo));
@@ -74,4 +73,4 @@ struct DDMetricsWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override { m.emplace_back("DDDuration", ddDone, Averaged::False); }
 };
 
-WorkloadFactory<DDMetricsWorkload> DDMetricsWorkloadFactory("DDMetrics");
+WorkloadFactory<DDMetricsWorkload> DDMetricsWorkloadFactory;

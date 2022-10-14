@@ -44,6 +44,7 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 } // namespace
 
 struct SSCheckpointRestoreWorkload : TestWorkload {
+	static constexpr auto NAME = "SSCheckpointRestoreWorkload";
 	const bool enabled;
 	bool pass;
 
@@ -55,8 +56,6 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		    .detail("ActualValue", printValue(actualValue));
 		pass = false;
 	}
-
-	std::string description() const override { return "SSCheckpoint"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -246,4 +245,4 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<SSCheckpointRestoreWorkload> SSCheckpointRestoreWorkloadFactory("SSCheckpointRestoreWorkload");
+WorkloadFactory<SSCheckpointRestoreWorkload> SSCheckpointRestoreWorkloadFactory;

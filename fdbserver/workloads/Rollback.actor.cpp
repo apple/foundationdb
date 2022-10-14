@@ -33,6 +33,8 @@
 // While the network is still clogged, the workload kills the proxy and clogs the unclogged tlog's interface.
 // Note: The clogged network link's latency will become "clogDuration".
 struct RollbackWorkload : FailureInjectionWorkload {
+	static constexpr auto NAME = "Rollback";
+
 	bool enableFailures = false, multiple = true, enabled;
 	double meanDelay = 20.0, clogDuration = clogDuration = 3.0, testDuration = 10.0;
 
@@ -53,7 +55,6 @@ struct RollbackWorkload : FailureInjectionWorkload {
 		enableFailures = random.random01() < 0.2;
 	}
 
-	std::string description() const override { return "RollbackWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (g_simulator == g_network && enabled)
@@ -131,5 +132,5 @@ struct RollbackWorkload : FailureInjectionWorkload {
 	}
 };
 
-WorkloadFactory<RollbackWorkload> RollbackWorkloadFactory("Rollback");
+WorkloadFactory<RollbackWorkload> RollbackWorkloadFactory;
 FailureInjectorFactory<RollbackWorkload> RollbackFailureInjectorFactory;

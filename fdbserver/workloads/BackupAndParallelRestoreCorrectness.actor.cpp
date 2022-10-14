@@ -33,6 +33,7 @@
 
 // A workload which test the correctness of backup and restore process
 struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "BackupAndParallelRestoreCorrectness";
 	double backupAfter, restoreAfter, abortAndRestartAfter;
 	double backupStartAt, restoreStartAfterBackupFinished, stopDifferentialAfter;
 	Key backupTag;
@@ -135,8 +136,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			}
 		}
 	}
-
-	std::string description() const override { return "BackupAndParallelRestoreCorrectness"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -791,5 +790,4 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 int BackupAndParallelRestoreCorrectnessWorkload::backupAgentRequests = 0;
 
-WorkloadFactory<BackupAndParallelRestoreCorrectnessWorkload> BackupAndParallelRestoreCorrectnessWorkloadFactory(
-    "BackupAndParallelRestoreCorrectness");
+WorkloadFactory<BackupAndParallelRestoreCorrectnessWorkload> BackupAndParallelRestoreCorrectnessWorkloadFactory;

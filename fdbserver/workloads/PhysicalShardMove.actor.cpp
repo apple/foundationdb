@@ -44,6 +44,8 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 } // namespace
 
 struct PhysicalShardMoveWorkLoad : TestWorkload {
+	static constexpr auto NAME = "PhysicalShardMove";
+
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
 	FlowLock cleanUpDataMoveParallelismLock;
@@ -58,8 +60,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		    .detail("ActualValue", printValue(actualValue));
 		pass = false;
 	}
-
-	std::string description() const override { return "PhysicalShardMove"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -389,4 +389,4 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<PhysicalShardMoveWorkLoad> PhysicalShardMoveWorkLoadFactory("PhysicalShardMove");
+WorkloadFactory<PhysicalShardMoveWorkLoad> PhysicalShardMoveWorkLoadFactory;

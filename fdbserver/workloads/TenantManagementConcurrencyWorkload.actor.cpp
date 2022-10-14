@@ -38,6 +38,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TenantManagementConcurrencyWorkload : TestWorkload {
+	static constexpr auto NAME = "TenantManagementConcurrency";
+
 	const TenantName tenantNamePrefix = "tenant_management_concurrency_workload_"_sr;
 	const Key testParametersKey = "test_parameters"_sr;
 
@@ -61,8 +63,6 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 			useMetacluster = false;
 		}
 	}
-
-	std::string description() const override { return "TenantManagementConcurrency"; }
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
 		out.insert("MachineAttritionWorkload");
@@ -343,5 +343,4 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<TenantManagementConcurrencyWorkload> TenantManagementConcurrencyWorkloadFactory(
-    "TenantManagementConcurrency");
+WorkloadFactory<TenantManagementConcurrencyWorkload> TenantManagementConcurrencyWorkloadFactory;

@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
 
@@ -42,6 +41,8 @@ TenantEntryCachePayload<int64_t> createPayload(const TenantName& name, const Ten
 } // namespace
 
 struct TenantEntryCacheWorkload : TestWorkload {
+	static constexpr auto NAME = "TenantEntryCache";
+
 	const TenantName tenantNamePrefix = "tenant_entry_cache_workload_"_sr;
 	TenantName localTenantNamePrefix;
 	int maxTenants;
@@ -316,9 +317,8 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		return Void();
 	}
 
-	std::string description() const override { return "TenantEntryCache"; }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<TenantEntryCacheWorkload> TenantEntryCacheWorkloadFactory("TenantEntryCache");
+WorkloadFactory<TenantEntryCacheWorkload> TenantEntryCacheWorkloadFactory;

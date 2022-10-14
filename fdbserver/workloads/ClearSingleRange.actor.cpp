@@ -25,6 +25,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct ClearSingleRange : TestWorkload {
+	static constexpr auto NAME = "ClearSingleRange";
 	Key begin;
 	Key end;
 	double startDelay;
@@ -34,9 +35,7 @@ struct ClearSingleRange : TestWorkload {
 		end = getOption(options, "end"_sr, normalKeys.end);
 		startDelay = getOption(options, "beginClearRange"_sr, 10.0);
 	}
-
-	std::string description() const override { return "ClearSingleRangeWorkload"; }
-
+	
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override { return clientId != 0 ? Void() : fdbClientClearRange(cx, this); }
@@ -64,4 +63,4 @@ struct ClearSingleRange : TestWorkload {
 	}
 };
 
-WorkloadFactory<ClearSingleRange> ClearSingleRangeWorkloadFactory("ClearSingleRange");
+WorkloadFactory<ClearSingleRange> ClearSingleRangeWorkloadFactory;

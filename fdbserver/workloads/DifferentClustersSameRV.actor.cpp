@@ -36,6 +36,7 @@ void traceError(const char* filename, int line, Error const& e) {
 
 // A workload attempts to read from two different clusters with the same read version.
 struct DifferentClustersSameRVWorkload : TestWorkload {
+	static constexpr auto NAME = "DifferentClustersSameRV";
 	Database originalDB;
 	Database extraDB;
 	double testDuration;
@@ -52,8 +53,6 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		keyToRead = getOption(options, "keyToRead"_sr, "someKey"_sr);
 		keyToWatch = getOption(options, "keyToWatch"_sr, "anotherKey"_sr);
 	}
-
-	std::string description() const override { return "DifferentClustersSameRV"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId != 0) {
@@ -294,4 +293,4 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<DifferentClustersSameRVWorkload> DifferentClustersSameRVWorkloadFactory("DifferentClustersSameRV");
+WorkloadFactory<DifferentClustersSameRVWorkload> DifferentClustersSameRVWorkloadFactory;
