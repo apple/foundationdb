@@ -33,8 +33,7 @@ ACTOR static Future<std::vector<AuditStorageState>> getLatestAuditStates(Transac
 	loop {
 		auditStates.clear();
 		try {
-			RangeResult res =
-			    wait(tr->getRange(auditKeyRange(type), num, Snapshot::False, Reverse::True));
+			RangeResult res = wait(tr->getRange(auditKeyRange(type), num, Snapshot::False, Reverse::True));
 			for (int i = 0; i < res.size(); ++i) {
 				auditStates.push_back(decodeAuditStorageState(res[i].value));
 			}
@@ -60,8 +59,10 @@ ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState
 				nextId = auditStates.front().id.first() + 1;
 			}
 			auditId = UID(nextId, 0LL);
+			auditState.id = auditId;
 			tr.set(auditKey(auditState.getType(), auditId), auditStorageStateValue(auditState));
 			wait(tr.commit());
+			TraceEvent("PersistedNewAuditState", auditId).detail("AuditKey", auditKey(auditState.getType(), auditId));
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -90,12 +91,12 @@ ACTOR Future<Void> persistAuditStorage(Database cx, AuditStorageState auditState
 ACTOR Future<AuditStorageState> getAuditStorage(Database cx, AuditType type, UID id) {
 	state Transaction tr(cx);
 	state Optional<Value> res;
-	state std::vector<AuditType> allTypes = { AuditType::ValidateHA };
 
 	loop {
 		try {
 			Optional<Value> res_ = wait(tr.get(auditKey(type, id)));
 			res = res_;
+			TraceEvent("ReadAuditState", id).detail("AuditKey", auditKey(type, id));
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));

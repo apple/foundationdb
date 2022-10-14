@@ -1425,6 +1425,7 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			auditState.range = req.range;
 			auditState.setPhase(AuditPhase::Running);
 			UID auditId = wait(persistNewAuditState(self->txnProcessor->context(), auditState));
+			auditState.id = auditId;
 			audit = std::make_shared<DDAudit>(auditId, req.range, req.getType());
 			self->audits[req.getType()].push_back(audit);
 			audit->actors.add(loadAndDispatchAuditRange(self, audit, req.range));

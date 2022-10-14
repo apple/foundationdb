@@ -49,7 +49,7 @@ struct AuditStorageState {
 		serializer(ar, id, keyId, range, type, phase, error);
 	}
 
-	void setType(AuditType type) { this->type = static_cast<uint8_t>(this->type); }
+	void setType(AuditType type) { this->type = static_cast<uint8_t>(type); }
 	AuditType getType() const { return static_cast<AuditType>(this->type); }
 
 	void setPhase(AuditPhase phase) { this->phase = static_cast<uint8_t>(phase); }

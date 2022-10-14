@@ -90,11 +90,9 @@ struct ValidateStorage : TestWorkload {
 				UID auditId_ = wait(auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA));
 				auditId = auditId_;
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId);
-				AuditStorageState auditState = wait(getAuditStorage(cx, AuditType::ValidateHA, auditId));
-				ASSERT(auditState.getPhase() == AuditPhase::Complete);
 				break;
 			} catch (Error& e) {
-				TraceEvent("AuditStorageError").errorUnsuppressed(e);
+				TraceEvent("StartAuditStorageError").errorUnsuppressed(e);
 				wait(delay(1));
 			}
 		}
@@ -102,15 +100,15 @@ struct ValidateStorage : TestWorkload {
 		loop {
 			try {
 				AuditStorageState auditState = wait(getAuditStorage(cx, AuditType::ValidateHA, auditId));
-				if(auditState.getPhase() != AuditPhase::Complete) {
-					ASSERT(auditState.getPhase() != AuditPhase::Running);
+				if (auditState.getPhase() != AuditPhase::Complete) {
+					ASSERT(auditState.getPhase() == AuditPhase::Running);
 					wait(delay(30));
 				} else {
 					ASSERT(auditState.getPhase() == AuditPhase::Complete);
 					break;
 				}
 			} catch (Error& e) {
-				TraceEvent("AuditStorageError").errorUnsuppressed(e);
+				TraceEvent("WaitAuditStorageError").errorUnsuppressed(e).detail("AuditID", auditId);
 				wait(delay(1));
 			}
 		}
