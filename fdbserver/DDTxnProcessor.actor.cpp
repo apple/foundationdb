@@ -896,7 +896,7 @@ Future<Void> DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params,
 	mgs->shardMapping->moveShard(params.keys, destTeams);
 
 	for (auto& id : params.destinationTeam) {
-		mgs->allServers.at(id).setShardStatus(params.keys, MockShardStatus::INFLIGHT);
+		mgs->allServers.at(id).setShardStatus(params.keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
 	}
 	return Void();
 }
@@ -918,7 +918,7 @@ Future<Void> DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
 	}
 
 	for (auto& id : params.destinationTeam) {
-		mgs->allServers.at(id).setShardStatus(params.keys, MockShardStatus::COMPLETED);
+		mgs->allServers.at(id).setShardStatus(params.keys, MockShardStatus::COMPLETED, mgs->restrictSize);
 	}
 
 	ASSERT_EQ(srcTeams.size(), 0);

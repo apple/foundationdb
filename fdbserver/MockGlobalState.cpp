@@ -31,21 +31,21 @@ bool MockStorageServer::allShardStatusEqual(KeyRangeRef range, MockShardStatus s
 	return true;
 }
 
-void MockStorageServer::setShardStatus(KeyRangeRef range, MockShardStatus status) {
+void MockStorageServer::setShardStatus(KeyRangeRef range, MockShardStatus status, bool restrictSize) {
 	auto ranges = serverKeys.intersectingRanges(range);
 	ASSERT(!ranges.empty());
 	if (ranges.begin().range().contains(range)) {
 		CODE_PROBE(true, "Implicitly split single shard to 3 pieces");
-		threeWayShardSplitting(ranges.begin().range(), range, ranges.begin().cvalue().shardSize);
+		threeWayShardSplitting(ranges.begin().range(), range, ranges.begin().cvalue().shardSize, restrictSize);
 		return;
 	}
 	if (ranges.begin().begin() < range.begin) {
 		CODE_PROBE(true, "Implicitly split begin range to 2 pieces");
-		twoWayShardSplitting(ranges.begin().range(), range.begin, ranges.begin().cvalue().shardSize);
+		twoWayShardSplitting(ranges.begin().range(), range.begin, ranges.begin().cvalue().shardSize, restrictSize);
 	}
 	if (ranges.end().end() > range.end) {
 		CODE_PROBE(true, "Implicitly split end range to 2 pieces");
-		twoWayShardSplitting(ranges.end().range(), range.end, ranges.end().cvalue().shardSize);
+		twoWayShardSplitting(ranges.end().range(), range.end, ranges.end().cvalue().shardSize, restrictSize);
 	}
 	ranges = serverKeys.containedRanges(range);
 	// now the boundary must be aligned
@@ -77,16 +77,21 @@ void MockStorageServer::setShardStatus(KeyRangeRef range, MockShardStatus status
 // size of the new shards are randomly split from old size of [a, d)
 void MockStorageServer::threeWayShardSplitting(KeyRangeRef outerRange,
                                                KeyRangeRef innerRange,
-                                               uint64_t outerRangeSize) {
+                                               uint64_t outerRangeSize,
+                                               bool restrictSize) {
 	ASSERT(outerRange.contains(innerRange));
 
 	Key left = outerRange.begin;
 	// random generate 3 shard sizes, the caller guarantee that the min, max parameters are always valid.
-	int leftSize = deterministicRandom()->randomInt(SERVER_KNOBS->MIN_SHARD_BYTES,
-	                                                outerRangeSize - 2 * SERVER_KNOBS->MIN_SHARD_BYTES + 1);
-	int midSize = deterministicRandom()->randomInt(SERVER_KNOBS->MIN_SHARD_BYTES,
-	                                               outerRangeSize - leftSize - SERVER_KNOBS->MIN_SHARD_BYTES + 1);
-	int rightSize = outerRangeSize - leftSize - midSize;
+	int leftSize = deterministicRandom()->randomInt(
+	    SERVER_KNOBS->MIN_SHARD_BYTES,
+	    restrictSize ? outerRangeSize - 2 * SERVER_KNOBS->MIN_SHARD_BYTES + 1 : SERVER_KNOBS->MAX_SHARD_BYTES);
+	int midSize = deterministicRandom()->randomInt(
+	    SERVER_KNOBS->MIN_SHARD_BYTES,
+	    restrictSize ? outerRangeSize - leftSize - SERVER_KNOBS->MIN_SHARD_BYTES + 1 : SERVER_KNOBS->MAX_SHARD_BYTES);
+	int rightSize =
+	    restrictSize ? outerRangeSize - leftSize - midSize
+	                 : deterministicRandom()->randomInt(SERVER_KNOBS->MIN_SHARD_BYTES, SERVER_KNOBS->MAX_SHARD_BYTES);
 
 	serverKeys.insert(innerRange, { serverKeys[left].status, (uint64_t)midSize });
 	serverKeys[left].shardSize = leftSize;
@@ -95,12 +100,18 @@ void MockStorageServer::threeWayShardSplitting(KeyRangeRef outerRange,
 
 // split the range [a,c) with split point b. The result would be [a, b), [b, c). The
 // size of the new shards are randomly split from old size of [a, c)
-void MockStorageServer::twoWayShardSplitting(KeyRangeRef range, KeyRef splitPoint, uint64_t rangeSize) {
+void MockStorageServer::twoWayShardSplitting(KeyRangeRef range,
+                                             KeyRef splitPoint,
+                                             uint64_t rangeSize,
+                                             bool restrictSize) {
 	Key left = range.begin;
 	// random generate 3 shard sizes, the caller guarantee that the min, max parameters are always valid.
-	int leftSize =
-	    deterministicRandom()->randomInt(SERVER_KNOBS->MIN_SHARD_BYTES, rangeSize - SERVER_KNOBS->MIN_SHARD_BYTES + 1);
-	int rightSize = rangeSize - leftSize;
+	int leftSize = deterministicRandom()->randomInt(SERVER_KNOBS->MIN_SHARD_BYTES,
+	                                                restrictSize ? rangeSize - SERVER_KNOBS->MIN_SHARD_BYTES + 1
+	                                                             : SERVER_KNOBS->MAX_SHARD_BYTES);
+	int rightSize =
+	    restrictSize ? rangeSize - leftSize
+	                 : deterministicRandom()->randomInt(SERVER_KNOBS->MIN_SHARD_BYTES, SERVER_KNOBS->MAX_SHARD_BYTES);
 	serverKeys.rawInsert(splitPoint, { serverKeys[left].status, (uint64_t)rightSize });
 	serverKeys[left].shardSize = leftSize;
 }
@@ -213,7 +224,7 @@ struct MockGlobalStateTester {
 		Key x2 = keyAfter(x1);
 		std::cout << "it->range.begin: " << it->range().begin.toHexString() << " size: " << oldSize << "\n";
 
-		mss.threeWayShardSplitting(outerRange, KeyRangeRef(x1, x2), oldSize);
+		mss.threeWayShardSplitting(outerRange, KeyRangeRef(x1, x2), oldSize, false);
 		auto ranges = mss.serverKeys.containedRanges(outerRange);
 		ASSERT(ranges.begin().range() == KeyRangeRef(outerRange.begin, x1));
 		ranges.pop_front();
@@ -236,7 +247,7 @@ struct MockGlobalStateTester {
 		Key x1 = keyAfter(it->range().begin);
 		std::cout << "it->range.begin: " << it->range().begin.toHexString() << " size: " << oldSize << "\n";
 
-		mss.twoWayShardSplitting(it->range(), x1, oldSize);
+		mss.twoWayShardSplitting(it->range(), x1, oldSize, false);
 		auto ranges = mss.serverKeys.containedRanges(outerRange);
 		ASSERT(ranges.begin().range() == KeyRangeRef(outerRange.begin, x1));
 		ranges.pop_front();

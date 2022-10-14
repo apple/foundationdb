@@ -170,6 +170,8 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 		self->mgs = std::make_shared<MockGlobalState>();
 		self->mgs->configuration = self->ddContext.configuration;
+		self->mgs->restrictSize = false; // no need to check the validity of shard size
+
 		self->mock = std::make_shared<DDMockTxnProcessorTester>(self->mgs);
 		self->mock->setupMockGlobalState(self->realInitDD);
 

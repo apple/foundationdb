@@ -90,7 +90,7 @@ public:
 
 	bool allShardStatusEqual(KeyRangeRef range, MockShardStatus status);
 
-	void setShardStatus(KeyRangeRef range, MockShardStatus status);
+	void setShardStatus(KeyRangeRef range, MockShardStatus status, bool restrictSize);
 
 	// this function removed an aligned range from server
 	void removeShard(KeyRangeRef range);
@@ -98,9 +98,12 @@ public:
 	uint64_t sumRangeSize(KeyRangeRef range) const;
 
 protected:
-	void threeWayShardSplitting(KeyRangeRef outerRange, KeyRangeRef innerRange, uint64_t outerRangeSize);
+	void threeWayShardSplitting(KeyRangeRef outerRange,
+	                            KeyRangeRef innerRange,
+	                            uint64_t outerRangeSize,
+	                            bool restrictSize);
 
-	void twoWayShardSplitting(KeyRangeRef range, KeyRef splitPoint, uint64_t rangeSize);
+	void twoWayShardSplitting(KeyRangeRef range, KeyRef splitPoint, uint64_t rangeSize, bool restrictSize);
 };
 
 class MockGlobalState {
@@ -117,6 +120,7 @@ public:
 	// user defined parameters for mock workload purpose
 	double emptyProb; // probability of doing an empty read
 	uint32_t minByteSize, maxByteSize; // the size band of a point data operation
+	bool restrictSize = true;
 
 	MockGlobalState() : shardMapping(new ShardsAffectedByTeamFailure) {}
 
