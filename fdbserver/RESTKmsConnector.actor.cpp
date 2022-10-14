@@ -556,13 +556,11 @@ void addLatestDomainDetailsToDoc(rapidjson::Document& doc,
 		domainId.SetInt64(detail.domainId);
 		keyIdDetail.AddMember(key, domainId, doc.GetAllocator());
 
-		// Add 'encrypt_domain_name'
 		key.SetString(nameTagName, doc.GetAllocator());
 		rapidjson::Value domainName;
 		domainName.SetString(detail.domainName.toString().c_str(), detail.domainName.size(), doc.GetAllocator());
 		keyIdDetail.AddMember(key, domainName, doc.GetAllocator());
 
-		// push above object to the array
 		keyIdDetails.PushBack(keyIdDetail, doc.GetAllocator());
 	}
 	rapidjson::Value memberKey(rootTagName, doc.GetAllocator());
@@ -713,7 +711,7 @@ Future<T> kmsRequestImpl(Reference<RESTKmsConnectorCtx> ctx,
 	state UID requestID = deterministicRandom()->randomUniqueID();
 
 	// Follow 2-phase scheme:
-	// Phase-1: Attempt to fetch encryption keys by reaching out to cached KmsUrls in the order of
+	// Phase-1: Attempt to do request reaching out to cached KmsUrls in the order of
 	//          past success requests success counts.
 	// Phase-2: For some reason if none of the cached KmsUrls worked, re-discover the KmsUrls and
 	//          repeat phase-1.
@@ -751,30 +749,30 @@ Future<T> kmsRequestImpl(Reference<RESTKmsConnectorCtx> ctx,
 				} catch (Error& e) {
 					TraceEvent(SevWarn, "KmsRequest_RespParseFailure").error(e).detail("RequestID", requestID);
 					curUrl->nResponseParseFailures++;
-					// attempt to fetch encryption details from next KmsUrl
+					// attempt to do request from next KmsUrl
 				}
 			} catch (Error& e) {
 				curUrl->nFailedResponses++;
 				if (pass > 1 && isKmsNotReachable(e.code())) {
-					TraceEvent(SevDebug, "FetchEncryptionKeys_FailedUnreachable", ctx->uid)
+					TraceEvent(SevDebug, "KmsRequest_FailedUnreachable", ctx->uid)
 					    .error(e)
 					    .detail("RequestID", requestID);
 					throw e;
 				} else {
-					TraceEvent(SevDebug, "FetchEncryptionKeys_Error", ctx->uid).error(e).detail("RequestID", requestID);
-					// attempt to fetch encryption details from next KmsUrl
+					TraceEvent(SevDebug, "KmsRequest_Error", ctx->uid).error(e).detail("RequestID", requestID);
+					// attempt to do request from next KmsUrl
 				}
 			}
 		}
 
 		if (pass == 1) {
-			// Re-discover KMS urls and re-attempt to fetch the encryption key details using newer KMS URLs
+			// Re-discover KMS urls and re-attempt request using newer KMS URLs
 			wait(discoverKmsUrls(ctx, true));
 		}
 	}
-	TraceEvent(SevDebug, "FetchEncryptionKeys_Failed", ctx->uid).detail("RequestID", requestID);
+	TraceEvent(SevDebug, "KmsRequest_Failed", ctx->uid).detail("RequestID", requestID);
 
-	// Failed to fetch encryption keys from the remote KMS
+	// Failed to do request from the remote KMS
 	throw encrypt_keys_fetch_failed();
 }
 
