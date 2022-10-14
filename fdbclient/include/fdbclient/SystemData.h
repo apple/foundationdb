@@ -99,7 +99,8 @@ extern const KeyRef auditPrefix;
 extern const KeyRangeRef auditRanges;
 extern const KeyRef auditRangePrefix;
 
-const Key auditKey(const UID& auditId);
+const Key auditKey(const AuditType type, const UID& auditId);
+const KeyRange auditKeyRange(const AuditType type);
 const Key auditRangeKey(const UID& auditId, const KeyRef& key);
 const Key auditRangePrefixFor(const UID& auditId);
 

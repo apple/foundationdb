@@ -76,6 +76,7 @@ struct ValidateStorage : TestWorkload {
 		                                 { "TestKeyD"_sr, "TestValueD"_sr },
 		                                 { "TestKeyE"_sr, "TestValueE"_sr },
 		                                 { "TestKeyF"_sr, "TestValueF"_sr } });
+		state UID auditId;
 
 		Version _ = wait(self->populateData(self, cx, &kvs));
 
@@ -86,11 +87,28 @@ struct ValidateStorage : TestWorkload {
 
 		loop {
 			try {
-				UID auditId = wait(auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA));
+				UID auditId_ = wait(auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA));
+				auditId = auditId_;
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId);
-				AuditStorageState auditState = wait(getAuditStorage(cx, auditId));
+				AuditStorageState auditState = wait(getAuditStorage(cx, AuditType::ValidateHA, auditId));
 				ASSERT(auditState.getPhase() == AuditPhase::Complete);
 				break;
+			} catch (Error& e) {
+				TraceEvent("AuditStorageError").errorUnsuppressed(e);
+				wait(delay(1));
+			}
+		}
+
+		loop {
+			try {
+				AuditStorageState auditState = wait(getAuditStorage(cx, AuditType::ValidateHA, auditId));
+				if(auditState.getPhase() != AuditPhase::Complete) {
+					ASSERT(auditState.getPhase() != AuditPhase::Running);
+					wait(delay(30));
+				} else {
+					ASSERT(auditState.getPhase() == AuditPhase::Complete);
+					break;
+				}
 			} catch (Error& e) {
 				TraceEvent("AuditStorageError").errorUnsuppressed(e);
 				wait(delay(1));

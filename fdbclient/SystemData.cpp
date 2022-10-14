@@ -288,14 +288,24 @@ const KeyRef clusterIdKey = "\xff/clusterId"_sr;
 
 extern const KeyRangeRef auditKeys = KeyRangeRef("\xff/audits/"_sr, "\xff/audits0"_sr);
 extern const KeyRef auditPrefix = auditKeys.begin;
-extern const KeyRangeRef auditRanges= KeyRangeRef("\xff/auditRanges/"_sr, "\xff/auditRanges0"_sr);
+extern const KeyRangeRef auditRanges = KeyRangeRef("\xff/auditRanges/"_sr, "\xff/auditRanges0"_sr);
 extern const KeyRef auditRangePrefix = auditRanges.begin;
 
-const Key auditKey(const UID& auditId) {
+const Key auditKey(const AuditType type, const UID& auditId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(auditPrefix);
-	wr << auditId;
+	wr << static_cast<uint8_t>(type);
+	wr.serializeBytes("/"_sr);
+	wr << bigEndian64(auditId.first());
 	return wr.toValue();
+}
+
+const KeyRange auditKeyRange(const AuditType type) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(auditPrefix);
+	wr << static_cast<uint8_t>(type);
+	wr.serializeBytes("/"_sr);
+	return prefixRange(wr.toValue());
 }
 
 const Key auditRangeKey(const UID& auditId, const KeyRef& key) {

@@ -1403,9 +1403,9 @@ ACTOR Future<Void> doAuditStorage(Reference<DataDistributor> self, AuditStorageS
 
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req) {
 	state std::shared_ptr<DDAudit> audit;
-	// TODO: Get commit/read version.
-	state UID auditId = deterministicRandom()->randomUniqueID();
-	state AuditStorageState auditState(auditId, req.getType());
+	// TODO: store AuditStorageState in DDAudit.
+	state AuditStorageState auditState;
+	auditState.setType(req.getType());
 
 	try {
 		auto it = self->audits.find(req.getType());
@@ -1413,7 +1413,9 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			ASSERT_EQ(it->second.size(), 1);
 			auto& currentAudit = it->second.front();
 			if (currentAudit->range.contains(req.range)) {
+				auditState.id = currentAudit->id;
 				auditState.range = currentAudit->range;
+				auditState.setPhase(AuditPhase::Running);
 				audit = it->second.front();
 			} else {
 				req.reply.sendError(audit_storage_exceeded_request_limit());
@@ -1421,7 +1423,8 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			}
 		} else {
 			auditState.range = req.range;
-			wait(persistAuditStorage(self->txnProcessor->context(), auditState));
+			auditState.setPhase(AuditPhase::Running);
+			UID auditId = wait(persistNewAuditState(self->txnProcessor->context(), auditState));
 			audit = std::make_shared<DDAudit>(auditId, req.range, req.getType());
 			self->audits[req.getType()].push_back(audit);
 			audit->actors.add(loadAndDispatchAuditRange(self, audit, req.range));

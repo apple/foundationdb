@@ -32,8 +32,9 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState);
 ACTOR Future<Void> persistAuditStorage(Database cx, AuditStorageState auditState);
-ACTOR Future<AuditStorageState> getAuditStorage(Database cx, UID id);
+ACTOR Future<AuditStorageState> getAuditStorage(Database cx, AuditType type, UID id);
 
 ACTOR Future<Void> persistAuditStorageMap(Database cx, AuditStorageState auditState);
 ACTOR Future<std::vector<AuditStorageState>> getAuditStorageFroRange(Database cx, UID id, KeyRange range);
