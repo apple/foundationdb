@@ -1005,6 +1005,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// NOTE: Care must be taken when attempting to update below configurations for a up/running FDB cluster.
 	init( REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE,                "");
 	init( REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT,         "");
+	init( REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT,           "");
 	// Details to fetch validation token from a localhost file
 	// acceptable format: "<token_name1>#<absolute_file_path1>,<token_name2>#<absolute_file_path2>,.."
 	// NOTE: 'token-name" can NOT contain '#' character
