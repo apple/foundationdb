@@ -87,7 +87,8 @@ struct ValidateStorage : TestWorkload {
 
 		loop {
 			try {
-				UID auditId_ = wait(auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA));
+				UID auditId_ =
+				    wait(auditStorage(cx->getConnectionRecord(), allKeys, AuditType::ValidateHA, /*async=*/true));
 				auditId = auditId_;
 				TraceEvent("TestValidateEnd").detail("AuditID", auditId);
 				break;
@@ -99,7 +100,7 @@ struct ValidateStorage : TestWorkload {
 
 		loop {
 			try {
-				AuditStorageState auditState = wait(getAuditStorage(cx, AuditType::ValidateHA, auditId));
+				AuditStorageState auditState = wait(getAuditState(cx, AuditType::ValidateHA, auditId));
 				if (auditState.getPhase() != AuditPhase::Complete) {
 					ASSERT(auditState.getPhase() == AuditPhase::Running);
 					wait(delay(30));

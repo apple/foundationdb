@@ -1383,7 +1383,7 @@ ACTOR Future<Void> doAuditStorage(Reference<DataDistributor> self, AuditStorageS
 		    .detail("Range", auditState.range)
 		    .detail("AuditType", auditState.type);
 		auditState.setPhase(AuditPhase::Complete);
-		wait(persistAuditStorage(self->txnProcessor->context(), auditState));
+		wait(persistAuditState(self->txnProcessor->context(), auditState));
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "DDAuditStorageOperationError", self->ddId)
 		    .errorUnsuppressed(e)
@@ -1392,7 +1392,7 @@ ACTOR Future<Void> doAuditStorage(Reference<DataDistributor> self, AuditStorageS
 		    .detail("AuditType", auditState.type);
 		if (e.code() == error_code_audit_storage_error) {
 			auditState.setPhase(AuditPhase::Error);
-			wait(persistAuditStorage(self->txnProcessor->context(), auditState));
+			wait(persistAuditState(self->txnProcessor->context(), auditState));
 		} else if (e.code() != error_code_actor_cancelled) {
 			self->addActor.send(doAuditStorage(self, auditState));
 		}
@@ -1445,7 +1445,7 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		    .detail("Range", req.range)
 		    .detail("AuditType", req.type);
 		auditState.setPhase(AuditPhase::Complete);
-		wait(persistAuditStorage(self->txnProcessor->context(), auditState));
+		wait(persistAuditState(self->txnProcessor->context(), auditState));
 		if (!req.async && !req.reply.isSet()) {
 			TraceEvent(SevDebug, "DDAuditStorageReply", self->ddId)
 			    .detail("AuditID", audit->id)
@@ -1463,7 +1463,7 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			if (e.code() == error_code_audit_storage_error) {
 				req.reply.sendError(e);
 				auditState.setPhase(AuditPhase::Error);
-				wait(persistAuditStorage(self->txnProcessor->context(), auditState));
+				wait(persistAuditState(self->txnProcessor->context(), auditState));
 			} else {
 				req.reply.sendError(audit_storage_failed());
 			}
@@ -1486,7 +1486,7 @@ ACTOR Future<Void> loadAndDispatchAuditRange(Reference<DataDistributor> self,
 	while (begin < range.end) {
 		currentRange = KeyRangeRef(begin, range.end);
 		std::vector<AuditStorageState> auditStates =
-		    wait(getAuditStorageFroRange(self->txnProcessor->context(), audit->id, range));
+		    wait(getAuditStateForRange(self->txnProcessor->context(), audit->id, range));
 		ASSERT(!auditStates.empty());
 		begin = auditStates.back().range.end;
 		for (const auto& auditState : auditStates) {

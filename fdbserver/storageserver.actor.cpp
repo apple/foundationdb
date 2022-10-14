@@ -4265,7 +4265,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 			if (i > 0) {
 				range = KeyRangeRef(keyAfter(lastKey), range.end);
 				auditState.range = KeyRangeRef(originBegin, range.begin);
-				wait(persistAuditStorageMap(data->cx, auditState));
+				wait(persistAuditStateMap(data->cx, auditState));
 			}
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "ValidateRangeAgainstServerError", data->thisServerID)

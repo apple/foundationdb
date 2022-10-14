@@ -27,7 +27,7 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-ACTOR static Future<std::vector<AuditStorageState>> getLatestAuditStates(Transaction* tr, AuditType type, int num) {
+ACTOR static Future<std::vector<AuditStorageState>> getLatestAuditStatesImpl(Transaction* tr, AuditType type, int num) {
 	state std::vector<AuditStorageState> auditStates;
 
 	loop {
@@ -53,7 +53,7 @@ ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState
 
 	loop {
 		try {
-			std::vector<AuditStorageState> auditStates = wait(getLatestAuditStates(&tr, auditState.getType(), 1));
+			std::vector<AuditStorageState> auditStates = wait(getLatestAuditStatesImpl(&tr, auditState.getType(), 1));
 			uint64_t nextId = 1;
 			if (!auditStates.empty()) {
 				nextId = auditStates.front().id.first() + 1;
@@ -72,7 +72,7 @@ ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState
 	return auditId;
 }
 
-ACTOR Future<Void> persistAuditStorage(Database cx, AuditStorageState auditState) {
+ACTOR Future<Void> persistAuditState(Database cx, AuditStorageState auditState) {
 	state Transaction tr(cx);
 
 	loop {
@@ -88,7 +88,7 @@ ACTOR Future<Void> persistAuditStorage(Database cx, AuditStorageState auditState
 	return Void();
 }
 
-ACTOR Future<AuditStorageState> getAuditStorage(Database cx, AuditType type, UID id) {
+ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID id) {
 	state Transaction tr(cx);
 	state Optional<Value> res;
 
@@ -110,7 +110,11 @@ ACTOR Future<AuditStorageState> getAuditStorage(Database cx, AuditType type, UID
 	return decodeAuditStorageState(res.get());
 }
 
-ACTOR Future<Void> persistAuditStorageMap(Database cx, AuditStorageState auditState) {
+ACTOR Future<std::vector<AuditStorageState>> getLatestAuditStates(Database cx, AuditType type, int num) {
+	return getLatestAuditStatesImpl(&tr, auditState.getType(), 1);
+}
+
+ACTOR Future<Void> persistAuditStateMap(Database cx, AuditStorageState auditState) {
 	state Transaction tr(cx);
 
 	loop {
@@ -126,7 +130,7 @@ ACTOR Future<Void> persistAuditStorageMap(Database cx, AuditStorageState auditSt
 	return Void();
 }
 
-ACTOR Future<std::vector<AuditStorageState>> getAuditStorageFroRange(Database cx, UID id, KeyRange range) {
+ACTOR Future<std::vector<AuditStorageState>> getAuditStateForRange(Database cx, UID id, KeyRange range) {
 	state RangeResult auditStates;
 	state Transaction tr(cx);
 
