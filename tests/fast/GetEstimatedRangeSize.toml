@@ -19,12 +19,14 @@ testTitle = 'GetEstimatedRangeSizeTest'
     [[test.workload]]
     testName = 'GetEstimatedRangeSize'
     tenant = 'First'
-    nodeCount = 250000.0
+    nodeCount = 250000
 
     [[test.workload]]
     testName = 'GetEstimatedRangeSize'
     tenant = 'Second'
-    nodeCount = 25000.0
+    nodeCount = 25000
 
     [[test.workload]]
     testName = 'GetEstimatedRangeSize'
+    checkOnly = true  # don't run setup
+    nodeCount = 275000

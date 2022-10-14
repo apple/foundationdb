@@ -25,6 +25,7 @@
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbrpc/TenantInfo.h"
 #include "flow/ApiVersion.h"
 #include "fmt/format.h"
 #include "fdbclient/CommitTransaction.h"
@@ -9878,7 +9879,7 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 	loop {
 		choose {
 			when(state WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
-				if (req.tenantInfo.tenantId == -1 && !self->isReadable(req.keys)) {
+				if (req.tenantInfo.tenantId == TenantInfo::INVALID_TENANT && !self->isReadable(req.keys)) {
 					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()");
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
