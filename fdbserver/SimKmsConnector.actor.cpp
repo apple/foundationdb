@@ -201,7 +201,8 @@ ACTOR Future<Void> blobMetadataLookup(KmsConnectorInterface interf, KmsConnBlobM
 			// construct new blob metadata
 			it = simBlobMetadataStore
 			         .insert({ domainInfo.domainId,
-			                   createRandomTestBlobMetadata(domainInfo.domainId, domainInfo.domainName) })
+			                   createRandomTestBlobMetadata(
+			                       SERVER_KNOBS->BG_URL, domainInfo.domainId, domainInfo.domainName) })
 			         .first;
 		} else if (now() >= it->second.expireAt) {
 			// update random refresh and expire time

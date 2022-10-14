@@ -21,6 +21,7 @@
 #include "fdbclient/BlobConnectionProvider.h"
 
 #include "flow/UnitTest.h"
+#include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 void forceLinkBlobConnectionProviderTests() {}
@@ -171,7 +172,7 @@ TEST_CASE("/fdbserver/blob/connectionprovider") {
 	for (int i = 0; i < settings.numProviders; i++) {
 		std::string nameStr = std::to_string(i);
 		BlobMetadataDomainName name(nameStr);
-		auto metadata = createRandomTestBlobMetadata(i, name);
+		auto metadata = createRandomTestBlobMetadata(SERVER_KNOBS->BG_URL, i, name);
 		providers.emplace_back(BlobConnectionProvider::newBlobConnectionProvider(metadata));
 	}
 	fmt::print("BlobConnectionProviderTest\n");

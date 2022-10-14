@@ -24,10 +24,41 @@
 #include "flow/IRandom.h"
 #include "flow/flow.h"
 #include "fdbclient/Knobs.h"
+#include "fdbclient/S3BlobStore.h"
 
-// TODO: switch this to use bg_url instead of hardcoding file://fdbblob, so it works as FDBPerfKmsConnector
+std::string buildPartitionPath(const std::string& url, const std::string& partition) {
+	ASSERT(!partition.empty());
+	ASSERT(partition.front() != '/');
+	ASSERT(partition.back() == '/');
+	StringRef u(url);
+	if (u.startsWith("file://"_sr)) {
+		ASSERT(u.endsWith("/"_sr));
+		return url + partition;
+	} else if (u.startsWith("blobstore://"_sr)) {
+		std::string resource;
+		std::string lastOpenError;
+		S3BlobStoreEndpoint::ParametersT backupParams;
+
+		std::string urlCopy = url;
+
+		Reference<S3BlobStoreEndpoint> bstore =
+		    S3BlobStoreEndpoint::fromString(url, {}, &resource, &lastOpenError, &backupParams);
+
+		ASSERT(!resource.empty());
+		ASSERT(resource.back() != '/');
+		size_t resourceStart = url.find(resource);
+		ASSERT(resourceStart != std::string::npos);
+
+		return urlCopy.insert(resourceStart + resource.size(), "/" + partition);
+	} else {
+		// FIXME: support azure
+		throw backup_invalid_url();
+	}
+}
+
 // FIXME: make this (more) deterministic outside of simulation for FDBPerfKmsConnector
-Standalone<BlobMetadataDetailsRef> createRandomTestBlobMetadata(BlobMetadataDomainId domainId,
+Standalone<BlobMetadataDetailsRef> createRandomTestBlobMetadata(const std::string& baseUrl,
+                                                                BlobMetadataDomainId domainId,
                                                                 BlobMetadataDomainName domainName) {
 	Standalone<BlobMetadataDetailsRef> metadata;
 	metadata.domainId = domainId;
@@ -36,34 +67,30 @@ Standalone<BlobMetadataDetailsRef> createRandomTestBlobMetadata(BlobMetadataDoma
 	// 0 == no partition, 1 == suffix partitioned, 2 == storage location partitioned
 	int type = deterministicRandom()->randomInt(0, 3);
 	int partitionCount = (type == 0) ? 0 : deterministicRandom()->randomInt(2, 12);
-	fmt::print("SimBlobMetadata ({})\n", domainId);
 	TraceEvent ev(SevDebug, "SimBlobMetadata");
 	ev.detail("DomainId", domainId).detail("TypeNum", type).detail("PartitionCount", partitionCount);
 	if (type == 0) {
 		// single storage location
-		metadata.base = StringRef(metadata.arena(), "file://fdbblob/" + std::to_string(domainId) + "/");
-		fmt::print("  {}\n", metadata.base.get().printable());
+		std::string partition = std::to_string(domainId) + "/";
+		metadata.base = StringRef(metadata.arena(), buildPartitionPath(baseUrl, partition));
 		ev.detail("Base", metadata.base);
 	}
 	if (type == 1) {
 		// simulate hash prefixing in s3
-		metadata.base = StringRef(metadata.arena(), "file://fdbblob/"_sr);
+		metadata.base = StringRef(metadata.arena(), baseUrl);
 		ev.detail("Base", metadata.base);
-		fmt::print("    {} ({})\n", metadata.base.get().printable(), partitionCount);
 		for (int i = 0; i < partitionCount; i++) {
 			metadata.partitions.push_back_deep(metadata.arena(),
 			                                   deterministicRandom()->randomUniqueID().shortString() + "-" +
 			                                       std::to_string(domainId) + "/");
-			fmt::print("      {}\n", metadata.partitions.back().printable());
 			ev.detail("P" + std::to_string(i), metadata.partitions.back());
 		}
 	}
 	if (type == 2) {
 		// simulate separate storage location per partition
 		for (int i = 0; i < partitionCount; i++) {
-			metadata.partitions.push_back_deep(
-			    metadata.arena(), "file://fdbblob" + std::to_string(domainId) + "_" + std::to_string(i) + "/");
-			fmt::print("      {}\n", metadata.partitions.back().printable());
+			std::string partition = std::to_string(domainId) + "_" + std::to_string(i) + "/";
+			metadata.partitions.push_back_deep(metadata.arena(), buildPartitionPath(baseUrl, partition));
 			ev.detail("P" + std::to_string(i), metadata.partitions.back());
 		}
 	}
