@@ -32,6 +32,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct IncrementalBackupWorkload : TestWorkload {
+	static constexpr auto NAME = "IncrementalBackup";
 
 	Standalone<StringRef> backupDir;
 	Standalone<StringRef> tag;
@@ -55,8 +56,6 @@ struct IncrementalBackupWorkload : TestWorkload {
 		checkBeginVersion = getOption(options, "checkBeginVersion"_sr, false);
 		clearBackupAgentKeys = getOption(options, "clearBackupAgentKeys"_sr, false);
 	}
-
-	std::string description() const override { return "IncrementalBackup"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -159,7 +158,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 				                                    1e8,
 				                                    self->tag.toString(),
 				                                    backupRanges,
-				                                    false,
+				                                    SERVER_KNOBS->ENABLE_ENCRYPTION,
 				                                    StopWhenDone::False,
 				                                    UsePartitionedLog::False,
 				                                    IncrementalBackupOnly::True));
@@ -252,4 +251,4 @@ struct IncrementalBackupWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<IncrementalBackupWorkload> IncrementalBackupWorkloadFactory("IncrementalBackup");
+WorkloadFactory<IncrementalBackupWorkload> IncrementalBackupWorkloadFactory;

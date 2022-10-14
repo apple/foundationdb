@@ -109,6 +109,7 @@ struct WorkloadMetrics {
 // 3. Time spent decrypting the buffer (doesn't incude key lookup time); also records the throughput in MB/sec.
 
 struct EncryptionOpsWorkload : TestWorkload {
+	static constexpr auto NAME = "EncryptionOps";
 	int mode;
 	int64_t numIterations;
 	int pageSize;
@@ -314,12 +315,8 @@ struct EncryptionOpsWorkload : TestWorkload {
 		       header.flags.authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE);
 
 		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, header.iv, BlobCipherMetrics::TEST);
-		const bool validateHeaderAuthToken = deterministicRandom()->randomInt(0, 100) < 65;
 
 		auto start = std::chrono::high_resolution_clock::now();
-		if (validateHeaderAuthToken) {
-			decryptor.verifyHeaderAuthToken(header, arena);
-		}
 		Reference<EncryptBuf> decrypted = decryptor.decrypt(encrypted->begin(), len, header, arena);
 		auto end = std::chrono::high_resolution_clock::now();
 
@@ -493,8 +490,6 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& ctx) override { return Void(); }
 
-	std::string description() const override { return "EncryptionOps"; }
-
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
 	ACTOR Future<Void> _start(Database cx, EncryptionOpsWorkload* self) {
@@ -510,4 +505,4 @@ struct EncryptionOpsWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override { metrics->recordMetrics(getModeStr(), numIterations); }
 };
 
-WorkloadFactory<EncryptionOpsWorkload> EncryptionOpsWorkloadFactory("EncryptionOps");
+WorkloadFactory<EncryptionOpsWorkload> EncryptionOpsWorkloadFactory;

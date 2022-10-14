@@ -96,6 +96,8 @@ void printMessages(std::vector<Future<TraceEventFields>>& messages) {
 }
 
 struct SnapTestWorkload : TestWorkload {
+	static constexpr auto NAME = "SnapTest";
+
 public: // variables
 	int numSnaps; // num of snapshots to be taken
 	              // FIXME: currently validation works on numSnap = 1
@@ -124,7 +126,6 @@ public: // ctor & dtor
 	}
 
 public: // workload functions
-	std::string description() const override { return "SnapTest"; }
 	Future<Void> setup(Database const& cx) override {
 		TraceEvent("SnapTestWorkloadSetup").log();
 		return Void();
@@ -343,4 +344,4 @@ public: // workload functions
 	}
 };
 
-WorkloadFactory<SnapTestWorkload> SnapTestWorkloadFactory("SnapTest");
+WorkloadFactory<SnapTestWorkload> SnapTestWorkloadFactory;

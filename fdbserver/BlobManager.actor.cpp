@@ -562,11 +562,12 @@ ACTOR Future<BlobGranuleSplitPoints> alignKeys(Reference<BlobManagerData> bmData
 
 	state Transaction tr = Transaction(bmData->db);
 	state int idx = 1;
-	state Reference<GranuleTenantData> tenantData = bmData->tenantData.getDataForGranule(granuleRange);
+	state Reference<GranuleTenantData> tenantData;
+	wait(store(tenantData, bmData->tenantData.getDataForGranule(granuleRange)));
 	while (SERVER_KNOBS->BG_METADATA_SOURCE == "tenant" && !tenantData.isValid()) {
 		// this is a bit of a hack, but if we know this range is supposed to have a tenant, and it doesn't, just wait
 		wait(delay(1.0));
-		tenantData = bmData->tenantData.getDataForGranule(granuleRange);
+		wait(store(tenantData, bmData->tenantData.getDataForGranule(granuleRange)));
 	}
 	for (; idx < splits.size() - 1; idx++) {
 		loop {
@@ -4212,7 +4213,8 @@ ACTOR Future<Reference<BlobConnectionProvider>> getBStoreForGranule(Reference<Bl
 		return self->bstore;
 	}
 	loop {
-		state Reference<GranuleTenantData> data = self->tenantData.getDataForGranule(granuleRange);
+		state Reference<GranuleTenantData> data;
+		wait(store(data, self->tenantData.getDataForGranule(granuleRange)));
 		if (data.isValid()) {
 			wait(data->bstoreLoaded.getFuture());
 			wait(delay(0));

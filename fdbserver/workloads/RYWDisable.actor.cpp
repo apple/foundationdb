@@ -26,6 +26,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct RYWDisableWorkload : TestWorkload {
+	static constexpr auto NAME = "RYWDisable";
+
 	int nodes, keyBytes;
 	double testDuration;
 	std::vector<Future<Void>> clients;
@@ -35,8 +37,6 @@ struct RYWDisableWorkload : TestWorkload {
 		nodes = getOption(options, "nodes"_sr, 100);
 		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 16);
 	}
-
-	std::string description() const override { return "RYWDisable"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -122,4 +122,4 @@ struct RYWDisableWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<RYWDisableWorkload> RYWDisableWorkloadFactory("RYWDisable");
+WorkloadFactory<RYWDisableWorkload> RYWDisableWorkloadFactory;
