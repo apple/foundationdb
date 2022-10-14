@@ -572,7 +572,8 @@ ACTOR Future<Void> registrationClient(
     Reference<LocalConfiguration> localConfig,
     ConfigBroadcastInterface configBroadcastInterface,
     Reference<AsyncVar<ServerDBInfo>> dbInfo,
-    Promise<Void> recoveredDiskFiles) {
+    Promise<Void> recoveredDiskFiles,
+    Reference<AsyncVar<Optional<UID>>> clusterId) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply
 	// (requiring us to re-register) The registration request piggybacks optional distributor interface if it exists.
@@ -611,7 +612,8 @@ ACTOR Future<Void> registrationClient(
 		    localConfig.isValid() ? localConfig->lastSeenVersion() : Optional<Version>(),
 		    localConfig.isValid() ? localConfig->configClassSet() : Optional<ConfigClassSet>(),
 		    recoveredDiskFiles.isSet(),
-		    configBroadcastInterface);
+		    configBroadcastInterface,
+		    clusterId->get());
 
 		for (auto const& i : issues->get()) {
 			request.issues.push_back_deep(request.issues.arena(), i);
@@ -651,7 +653,8 @@ ACTOR Future<Void> registrationClient(
 			TraceEvent("WorkerRegister")
 			    .detail("CCID", ccInterface->get().get().id())
 			    .detail("Generation", requestGeneration)
-			    .detail("RecoveredDiskFiles", recoveredDiskFiles.isSet());
+			    .detail("RecoveredDiskFiles", recoveredDiskFiles.isSet())
+			    .detail("ClusterId", clusterId->get());
 		}
 		state Future<RegisterWorkerReply> registrationReply =
 		    ccInterfacePresent ? brokenPromiseToNever(ccInterface->get().get().registerWorker.getReply(request))
@@ -1636,6 +1639,50 @@ ACTOR Future<Void> resetBlobManagerWhenDoneOrError(
 	return Void();
 }
 
+static const std::string clusterIdFilename = "clusterId";
+
+ACTOR Future<Void> createClusterIdFile(std::string folder, UID clusterId) {
+	state std::string clusterIdPath = joinPath(folder, clusterIdFilename);
+	if (fileExists(clusterIdPath)) {
+		return Void();
+	}
+	loop {
+		try {
+			state ErrorOr<Reference<IAsyncFile>> clusterIdFile =
+			    wait(errorOr(IAsyncFileSystem::filesystem(g_network)->open(
+			        clusterIdPath, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK, 0600)));
+
+			if (clusterIdFile.isError() && clusterIdFile.getError().code() == error_code_file_not_found &&
+			    !fileExists(clusterIdPath)) {
+				Reference<IAsyncFile> _clusterIdFile = wait(IAsyncFileSystem::filesystem()->open(
+				    clusterIdPath,
+				    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_LOCK |
+				        IAsyncFile::OPEN_READWRITE,
+				    0600));
+				clusterIdFile = _clusterIdFile;
+				BinaryWriter wr(IncludeVersion());
+				wr << clusterId;
+				wait(clusterIdFile.get()->write(wr.getData(), wr.getLength(), 0));
+				wait(clusterIdFile.get()->sync());
+				return Void();
+			} else {
+				throw clusterIdFile.getError();
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			if (!e.isInjectedFault()) {
+				fprintf(stderr,
+				        "ERROR: error creating or opening cluster id file `%s'.\n",
+				        joinPath(folder, clusterIdFilename).c_str());
+			}
+			TraceEvent(SevError, "OpenClusterIdError").error(e);
+			throw;
+		}
+	}
+}
+
 ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 LocalityData locality,
@@ -1652,7 +1699,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                 ConfigBroadcastInterface configBroadcastInterface,
                                 Reference<ConfigNode> configNode,
-                                Reference<LocalConfiguration> localConfig) {
+                                Reference<LocalConfiguration> localConfig,
+                                Reference<AsyncVar<Optional<UID>>> clusterId) {
 	state PromiseStream<ErrorInfo> errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
 	    new AsyncVar<Optional<DataDistributorInterface>>());
@@ -1997,7 +2045,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       localConfig,
 		                                       configBroadcastInterface,
 		                                       dbInfo,
-		                                       recoveredDiskFiles));
+		                                       recoveredDiskFiles,
+		                                       clusterId));
 
 		if (configNode.isValid()) {
 			errorForwarders.add(brokenPromiseToNever(localConfig->consume(configBroadcastInterface)));
@@ -2008,7 +2057,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		}
 
 		loop choose {
-			when(UpdateServerDBInfoRequest req = waitNext(interf.updateServerDBInfo.getFuture())) {
+			when(state UpdateServerDBInfoRequest req = waitNext(interf.updateServerDBInfo.getFuture())) {
 				ServerDBInfo localInfo = BinaryReader::fromStringRef<ServerDBInfo>(
 				    req.serializedDbInfo, AssumeVersion(g_network->protocolVersion()));
 				localInfo.myLocality = locality;
@@ -2044,6 +2093,18 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					}
 					errorForwarders.add(
 					    success(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, notUpdated, true)));
+
+					if (!clusterId->get().present() && localInfo.recoveryState >= RecoveryState::ACCEPTING_COMMITS &&
+					    localInfo.client.clusterId.isValid()) {
+						// Persist the cluster ID as a file in the data
+						// directory once recovery has made the transaction
+						// state store durable. The txnStateStore also stores
+						// the cluster ID.
+						// TODO: Does the txnStateStore need to store the cluster ID?
+						state UID tmpClusterId = localInfo.client.clusterId;
+						wait(createClusterIdFile(folder, tmpClusterId));
+						clusterId->set(tmpClusterId);
+					}
 				}
 			}
 			when(RebootRequest req = waitNext(interf.clientInterface.reboot.getFuture())) {
@@ -3378,7 +3439,8 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
     Future<Void> recoveredDiskFiles,
     LocalityData locality,
     Reference<AsyncVar<ServerDBInfo>> dbInfo,
-    ConfigDBType configDBType) {
+    ConfigDBType configDBType,
+    Reference<AsyncVar<Optional<UID>>> clusterId) {
 	state Future<Void> monitor = monitorLeaderWithDelayedCandidacyImpl(connRecord, currentCC);
 	state Future<Void> timeout;
 
@@ -3405,7 +3467,7 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
 			when(wait(timeout.isValid() ? timeout : Never())) {
 				monitor.cancel();
 				wait(clusterController(
-				    connRecord, currentCC, asyncPriorityInfo, recoveredDiskFiles, locality, configDBType));
+				    connRecord, currentCC, asyncPriorityInfo, recoveredDiskFiles, locality, configDBType, clusterId));
 				return Void();
 			}
 		}
@@ -3453,6 +3515,17 @@ ACTOR Future<Void> serveProcess() {
 			}
 		}
 	}
+}
+
+Optional<UID> readClusterId(std::string filePath) {
+	if (!fileExists(filePath)) {
+		return Optional<UID>();
+	}
+	std::string contents(readFileBytes(filePath, 10000));
+	BinaryReader br(StringRef(contents), IncludeVersion());
+	UID clusterId;
+	br >> clusterId;
+	return clusterId;
 }
 
 ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
@@ -3529,6 +3602,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		serverDBInfo.client.isEncryptionEnabled = SERVER_KNOBS->ENABLE_ENCRYPTION;
 		serverDBInfo.myLocality = localities;
 		auto dbInfo = makeReference<AsyncVar<ServerDBInfo>>(serverDBInfo);
+		Reference<AsyncVar<Optional<UID>>> clusterId(
+		    new AsyncVar<Optional<UID>>(readClusterId(joinPath(dataFolder, clusterIdFilename))));
 		TraceEvent("MyLocality").detail("Locality", dbInfo->get().myLocality.toString());
 
 		actors.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo),
@@ -3543,13 +3618,18 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 			                                                                recoveredDiskFiles.getFuture(),
 			                                                                localities,
 			                                                                dbInfo,
-			                                                                configDBType),
+			                                                                configDBType,
+			                                                                clusterId),
 			                              "ClusterController"));
 		} else {
-			actors.push_back(reportErrors(
-			    clusterController(
-			        connRecord, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, configDBType),
-			    "ClusterController"));
+			actors.push_back(reportErrors(clusterController(connRecord,
+			                                                cc,
+			                                                asyncPriorityInfo,
+			                                                recoveredDiskFiles.getFuture(),
+			                                                localities,
+			                                                configDBType,
+			                                                clusterId),
+			                              "ClusterController"));
 		}
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
 		actors.push_back(reportErrorsExcept(workerServer(connRecord,
@@ -3568,7 +3648,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		                                                 dbInfo,
 		                                                 configBroadcastInterface,
 		                                                 configNode,
-		                                                 localConfig),
+		                                                 localConfig,
+		                                                 clusterId),
 		                                    "WorkerServer",
 		                                    UID(),
 		                                    &normalWorkerErrors()));
