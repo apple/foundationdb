@@ -756,13 +756,13 @@ ACTOR static Future<MoveKeysBatchInfo> startMoveKeysTransaction(Database occ,
 }
 
 ACTOR static Future<Void> startMoveKeys(Database occ,
-                                  KeyRange keys,
-                                  std::vector<UID> servers,
-                                  MoveKeysLock lock,
-                                  FlowLock* startMoveKeysLock,
-                                  UID relocationIntervalId,
-                                  std::map<UID, StorageServerInterface>* tssMapping,
-                                  const DDEnabledState* ddEnabledState) {
+                                        KeyRange keys,
+                                        std::vector<UID> servers,
+                                        MoveKeysLock lock,
+                                        FlowLock* startMoveKeysLock,
+                                        UID relocationIntervalId,
+                                        std::map<UID, StorageServerInterface>* tssMapping,
+                                        const DDEnabledState* ddEnabledState) {
 	state TraceInterval interval("RelocateShard_StartMoveKeys");
 	state Future<Void> warningLogger = logWarningAfter("StartMoveKeysTooLong", 600, servers);
 
@@ -1233,7 +1233,6 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 	state TraceInterval interval("RelocateShard_FinishMoveKeys");
 	state Future<Void> warningLogger = logWarningAfter("FinishMoveKeysTooLong", 600, destinationTeam);
 	state Key begin = keys.begin;
-
 
 	ASSERT(!destinationTeam.empty());
 
@@ -2528,8 +2527,8 @@ Future<Void> rawStartMovement(Database occ, MoveKeysParams& params, std::map<UID
 }
 
 Future<Void> rawFinishMovement(Database occ,
-                            MoveKeysParams& params,
-                            const std::map<UID, StorageServerInterface>& tssMapping) {
+                               MoveKeysParams& params,
+                               const std::map<UID, StorageServerInterface>& tssMapping) {
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		return finishMoveShards(std::move(occ),
 		                        params.dataMoveId,

@@ -282,7 +282,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		        .get();
 
 		verifyInitDataEqual(self->realInitDD, mockInitData);
-		
+
 		return Void();
 	}
 	ACTOR Future<Void> worker(Database cx, IDDTxnProcessorApiWorkload* self) {
