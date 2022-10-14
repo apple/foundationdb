@@ -64,9 +64,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		}
 	}
 
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
-		out.insert("MachineAttritionWorkload");
-	}
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
 
 	struct TestParameters {
 		constexpr static FileIdentifier file_identifier = 14350843;

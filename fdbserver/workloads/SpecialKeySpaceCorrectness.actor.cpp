@@ -68,7 +68,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 	// disable the default timeout setting
 	double getCheckTimeout() const override { return std::numeric_limits<double>::max(); }
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("MoveKeysWorkload"); }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("RandomMoveKeys"); }
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
 		cx->specialKeySpace = std::make_unique<SpecialKeySpace>();
@@ -1337,6 +1337,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				ASSERT(!ddKVs.more && ddKVs.size() == 1);
 				ASSERT(ddKVs[0].key ==
 				       "mode"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("datadistribution")));
+				TraceEvent("DDKVsValue").detail("Value", ddKVs[0].value);
 				ASSERT(ddKVs[0].value == Value(boost::lexical_cast<std::string>(-1)));
 				tx->reset();
 				break;

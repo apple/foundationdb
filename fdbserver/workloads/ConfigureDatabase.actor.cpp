@@ -247,9 +247,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		g_simulator->usableRegions = 1;
 	}
 
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
-		out.insert("MachineAttritionWorkload");
-	}
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
