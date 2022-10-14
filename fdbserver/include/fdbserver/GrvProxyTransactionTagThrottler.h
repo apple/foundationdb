@@ -46,6 +46,7 @@ class GrvProxyTransactionTagThrottler {
 		  : req(req), startTime(now()), sequenceNumber(++lastSequenceNumber) {}
 
 		void updateProxyTagThrottledDuration();
+		bool isTooOld() const;
 	};
 
 	struct TagQueue {
@@ -56,6 +57,8 @@ class GrvProxyTransactionTagThrottler {
 		explicit TagQueue(double rate) : rateInfo(rate) {}
 
 		void setRate(double rate);
+		bool isTooOld() const;
+		void rejectRequests();
 	};
 
 	// Track the budgets for each tag

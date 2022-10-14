@@ -272,6 +272,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( TAG_THROTTLE_EXPIRATION_INTERVAL,        60.0 ); if( randomize && BUGGIFY ) TAG_THROTTLE_EXPIRATION_INTERVAL = 1.0;
 	init( WRITE_COST_BYTE_FACTOR,                 16384 ); if( randomize && BUGGIFY ) WRITE_COST_BYTE_FACTOR = 4096;
 	init( READ_COST_BYTE_FACTOR,                  16384 ); if( randomize && BUGGIFY ) READ_COST_BYTE_FACTOR = 4096;
+	init( PROXY_MAX_TAG_THROTTLE,                   5.0 ); if( randomize && BUGGIFY ) PROXY_MAX_TAG_THROTTLE = 0.5;
 
 	// busyness reporting
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );
