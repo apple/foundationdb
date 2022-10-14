@@ -56,7 +56,7 @@ ACTOR Future<Void> getQuota(Reference<IDatabase> db, TransactionTag tag, LimitTy
 	loop {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		try {
-			state ThreadFuture<Optional<Value>> resultFuture = tr->get(tag.withPrefix(tagQuotaPrefix));
+			state ThreadFuture<Optional<Value>> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(tag));
 			Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
 			if (!v.present()) {
 				fmt::print("<empty>\n");
@@ -77,11 +77,10 @@ ACTOR Future<Void> getQuota(Reference<IDatabase> db, TransactionTag tag, LimitTy
 
 ACTOR Future<Void> setQuota(Reference<IDatabase> db, TransactionTag tag, LimitType limitType, double value) {
 	state Reference<ITransaction> tr = db->createTransaction();
-	state Key key = tag.withPrefix(tagQuotaPrefix);
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
-			state ThreadFuture<Optional<Value>> resultFuture = tr->get(key);
+			state ThreadFuture<Optional<Value>> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(tag));
 			Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
 			ThrottleApi::TagQuotaValue quota;
 			if (v.present()) {
@@ -105,7 +104,6 @@ ACTOR Future<Void> setQuota(Reference<IDatabase> db, TransactionTag tag, LimitTy
 
 ACTOR Future<Void> clearQuota(Reference<IDatabase> db, TransactionTag tag) {
 	state Reference<ITransaction> tr = db->createTransaction();
-	state Key key = tag.withPrefix(tagQuotaPrefix);
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
@@ -135,7 +133,7 @@ ACTOR Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<String
 	if (tokens.size() < 3 || tokens.size() > 5) {
 		return exitFailure();
 	} else {
-		auto tag = parseTag(tokens[2]);
+		auto const tag = parseTag(tokens[2]);
 		if (!tag.present()) {
 			return exitFailure();
 		}
