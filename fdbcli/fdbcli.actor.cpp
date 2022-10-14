@@ -543,7 +543,7 @@ void initHelp() {
 	helpMap["quota"] = CommandHelp("quota",
 	                               "quota [get <tag> [reserved_throughput|total_throughput] | set <tag> "
 	                               "[reserved_throughput|total_throughput] <value> | clear <tag>]",
-	                               "Get or modify the throughput quota for the specified tag.");
+	                               "Get, modify, or clear the throughput quota for the specified tag.");
 	helpMap["reset"] =
 	    CommandHelp("reset",
 	                "reset the current transaction",
