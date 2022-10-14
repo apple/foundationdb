@@ -41,12 +41,17 @@ struct AtomicRestoreWorkload : TestWorkload {
 		startAfter = getOption(options, "startAfter"_sr, 10.0);
 		restoreAfter = getOption(options, "restoreAfter"_sr, 20.0);
 		fastRestore = getOption(options, "fastRestore"_sr, false);
-		if (!fastRestore) {
-			addDefaultBackupRanges(backupRanges);
-		} else {
-			// Fast restore doesn't support multiple ranges yet
-			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-		}
+		// TODO: Currently atomic restore does not work well with system key backup since we cannot seperate system key
+		// restore from the normal key restore, once we can support this (or no longer need to seperate the two
+		// restores) then the below logic can be uncommented
+
+		// if (!fastRestore) {
+		// 	addDefaultBackupRanges(backupRanges);
+		// } else {
+		// 	// Fast restore doesn't support multiple ranges yet
+		// 	backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
+		// }
+		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		usePartitionedLogs.set(
 		    getOption(options, "usePartitionedLogs"_sr, deterministicRandom()->random01() < 0.5 ? true : false));
 
