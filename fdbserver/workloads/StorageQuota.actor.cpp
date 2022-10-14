@@ -25,9 +25,9 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct StorageQuotaWorkload : TestWorkload {
+	static constexpr auto NAME = "StorageQuota";
 	StorageQuotaWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
-	std::string description() const override { return "StorageQuotaWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return (clientId == 0) ? _start(cx) : Void(); }
 	Future<bool> check(Database const& cx) override { return true; }
@@ -75,4 +75,4 @@ struct StorageQuotaWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<StorageQuotaWorkload> StorageQuotaWorkloadFactory("StorageQuota");
+WorkloadFactory<StorageQuotaWorkload> StorageQuotaWorkloadFactory;

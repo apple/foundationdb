@@ -30,6 +30,7 @@
 
 #include "fdbserver/EncryptionOpsUtils.h"
 #include "fdbserver/IPager.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.h"
 
 #include "flow/Arena.h"
@@ -293,10 +294,10 @@ public:
 	EncodingType expectedEncodingType() const override { return EncodingType::AESEncryptionV1; }
 
 	bool enableEncryption() const override {
-		return isEncryptionOpSupported(EncryptOperationType::STORAGE_SERVER_ENCRYPTION, db->get().client);
+		return isEncryptionOpSupported(EncryptOperationType::STORAGE_SERVER_ENCRYPTION);
 	}
 
-	bool enableEncryptionDomain() const override { return true; }
+	bool enableEncryptionDomain() const override { return SERVER_KNOBS->REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT; }
 
 	ACTOR static Future<EncryptionKey> getEncryptionKey(TenantAwareEncryptionKeyProvider* self,
 	                                                    const void* encodingHeader) {

@@ -116,7 +116,8 @@ public:
 	virtual void execute(TOpStartFct start,
 	                     TOpContFct cont,
 	                     std::optional<fdb::BytesRef> tenantName,
-	                     bool transactional) = 0;
+	                     bool transactional,
+	                     bool restartOnTimeout) = 0;
 	virtual fdb::Database selectDatabase() = 0;
 	virtual std::string getClusterFileForErrorInjection() = 0;
 	virtual const TransactionExecutorOptions& getOptions() = 0;

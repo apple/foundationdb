@@ -45,6 +45,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TenantManagementWorkload : TestWorkload {
+	static constexpr auto NAME = "TenantManagement";
+
 	struct TenantData {
 		int64_t id;
 		Optional<TenantGroupName> tenantGroup;
@@ -133,8 +135,6 @@ struct TenantManagementWorkload : TestWorkload {
 
 		useMetacluster = getOption(options, "useMetacluster"_sr, defaultUseMetacluster);
 	}
-
-	std::string description() const override { return "TenantManagement"; }
 
 	struct TestParameters {
 		constexpr static FileIdentifier file_identifier = 1527576;
@@ -1783,4 +1783,4 @@ struct TenantManagementWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<TenantManagementWorkload> TenantManagementWorkload("TenantManagement");
+WorkloadFactory<TenantManagementWorkload> TenantManagementWorkload;

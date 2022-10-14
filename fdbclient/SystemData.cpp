@@ -286,6 +286,41 @@ const KeyRangeRef writeConflictRangeKeysRange = KeyRangeRef("\xff\xff/transactio
 
 const KeyRef clusterIdKey = "\xff/clusterId"_sr;
 
+const KeyRangeRef auditRange = KeyRangeRef("\xff/audit/"_sr, "\xff/audit0"_sr);
+const KeyRef auditPrefix = auditRange.begin;
+
+const Key auditRangeKey(const AuditType type, const UID& auditId, const KeyRef& key) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(auditPrefix);
+	wr << static_cast<uint8_t>(type);
+	wr.serializeBytes("/"_sr);
+	wr << auditId;
+	wr.serializeBytes("/"_sr);
+	wr.serializeBytes(key);
+	return wr.toValue();
+}
+
+const Key auditRangePrefix(const AuditType type, const UID& auditId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(auditPrefix);
+	wr << static_cast<uint8_t>(type);
+	wr.serializeBytes("/"_sr);
+	wr << auditId;
+	wr.serializeBytes("/"_sr);
+	return wr.toValue();
+}
+
+const Value auditStorageStateValue(const AuditStorageState& auditStorageState) {
+	return ObjectWriter::toValue(auditStorageState, IncludeVersion());
+}
+
+AuditStorageState decodeAuditStorageState(const ValueRef& value) {
+	AuditStorageState auditState;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(auditState);
+	return auditState;
+}
+
 const KeyRef checkpointPrefix = "\xff/checkpoint/"_sr;
 
 const Key checkpointKeyFor(UID checkpointID) {
@@ -1628,6 +1663,9 @@ const KeyRef storageQuotaPrefix = storageQuotaKeys.begin;
 Key storageQuotaKey(StringRef tenantName) {
 	return tenantName.withPrefix(storageQuotaPrefix);
 }
+
+const KeyRangeRef idempotencyIdKeys("\xff\x02/idmp/"_sr, "\xff\x02/idmp0"_sr);
+const KeyRef idempotencyIdsExpiredVersion("\xff\x02/idmpExpiredVersion"_sr);
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi) {

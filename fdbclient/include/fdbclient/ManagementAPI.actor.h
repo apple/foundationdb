@@ -138,6 +138,9 @@ ACTOR Future<int> setDDMode(Database cx, int mode);
 
 ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile, Standalone<StringRef> dcId);
 
+// Start an audit on range of the specific type.
+ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile, KeyRange range, AuditType type);
+
 ACTOR Future<Void> printHealthyZone(Database cx);
 ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning = false, bool clearSSFailureZoneString = false);
 ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds, bool printWarning = false);

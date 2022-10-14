@@ -27,6 +27,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct DDMetricsExcludeWorkload : TestWorkload {
+	static constexpr auto NAME = "DDMetricsExclude";
 	double ddDone;
 	Value excludeIp;
 	int excludePort;
@@ -91,7 +92,6 @@ struct DDMetricsExcludeWorkload : TestWorkload {
 		return Void();
 	}
 
-	std::string description() const override { return "Data Distribution Metrics Exclude"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	Future<bool> check(Database const& cx) override {
@@ -108,4 +108,4 @@ struct DDMetricsExcludeWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<DDMetricsExcludeWorkload> DDMetricsExcludeWorkloadFactory("DDMetricsExclude");
+WorkloadFactory<DDMetricsExcludeWorkload> DDMetricsExcludeWorkloadFactory;

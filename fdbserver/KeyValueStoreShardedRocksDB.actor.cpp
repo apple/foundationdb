@@ -1023,6 +1023,10 @@ public:
 		writeBatch->Put(metadataShard->cf,
 		                getShardMappingKey(lastKey, shardMappingPrefix),
 		                nextShard == nullptr ? "" : nextShard->physicalShard->id);
+		TraceEvent(SevDebug, "ShardedRocksDB", this->logId)
+		    .detail("Action", "PersistRangeMappingEnd")
+		    .detail("NextShardKey", lastKey)
+		    .detail("Value", nextShard == nullptr ? "" : nextShard->physicalShard->id);
 		dirtyShards->insert(metadataShard.get());
 	}
 
@@ -2239,8 +2243,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			writeThread = CoroThreadPool::createThreadPool();
 			readThreads = CoroThreadPool::createThreadPool();
 		} else {
-			writeThread = createGenericThreadPool();
-			readThreads = createGenericThreadPool();
+			writeThread = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_WRITER_THREAD_PRIORITY);
+			readThreads = createGenericThreadPool(/*stackSize=*/0, SERVER_KNOBS->ROCKSDB_READER_THREAD_PRIORITY);
 		}
 		writeThread->addThread(new Writer(id, 0, shardManager.getColumnFamilyMap(), rocksDBMetrics), "fdb-rocksdb-wr");
 		TraceEvent("ShardedRocksDBReadThreads", id)

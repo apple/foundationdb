@@ -41,10 +41,11 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-//#define SevCCheckInfo SevVerbose
+// #define SevCCheckInfo SevVerbose
 #define SevCCheckInfo SevInfo
 
 struct ConsistencyCheckWorkload : TestWorkload {
+	static constexpr auto NAME = "ConsistencyCheck";
 	// Whether or not we should perform checks that will only pass if the database is in a quiescent state
 	bool performQuiescentChecks;
 
@@ -117,8 +118,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		repetitions = 0;
 		bytesReadInPreviousRound = 0;
 	}
-
-	std::string description() const override { return "ConsistencyCheck"; }
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
@@ -1538,6 +1537,22 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			return false;
 		}
 
+		// Check BlobMigrator
+		if (config.blobGranulesEnabled && db.blobMigrator.present() &&
+		    (!nonExcludedWorkerProcessMap.count(db.blobMigrator.get().address()) ||
+		     nonExcludedWorkerProcessMap[db.blobMigrator.get().address()].processClass.machineClassFitness(
+		         ProcessClass::BlobMigrator) > fitnessLowerBound)) {
+			TraceEvent("ConsistencyCheck_BlobMigratorNotBest")
+			    .detail("BestBlobMigratorFitness", fitnessLowerBound)
+			    .detail(
+			        "ExistingBlobMigratorFitness",
+			        nonExcludedWorkerProcessMap.count(db.blobMigrator.get().address())
+			            ? nonExcludedWorkerProcessMap[db.blobMigrator.get().address()].processClass.machineClassFitness(
+			                  ProcessClass::BlobMigrator)
+			            : -1);
+			return false;
+		}
+
 		// Check EncryptKeyProxy
 		if (SERVER_KNOBS->ENABLE_ENCRYPTION && db.encryptKeyProxy.present() &&
 		    (!nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address()) ||
@@ -1559,4 +1574,4 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<ConsistencyCheckWorkload> ConsistencyCheckWorkloadFactory("ConsistencyCheck");
+WorkloadFactory<ConsistencyCheckWorkload> ConsistencyCheckWorkloadFactory;

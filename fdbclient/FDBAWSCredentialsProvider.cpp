@@ -22,7 +22,7 @@
 #include "fdbclient/FDBAWSCredentialsProvider.h"
 #include "fdbclient/Tracing.h"
 
-#ifdef BUILD_AWS_BACKUP
+#ifdef WITH_AWS_BACKUP
 
 // You're supposed to call AWS::ShutdownAPI(options); once done
 // But we want this to live for the lifetime of the process, so we don't do that

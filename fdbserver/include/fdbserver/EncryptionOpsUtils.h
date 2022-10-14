@@ -27,8 +27,11 @@
 
 typedef enum { TLOG_ENCRYPTION = 0, STORAGE_SERVER_ENCRYPTION = 1, BLOB_GRANULE_ENCRYPTION = 2 } EncryptOperationType;
 
-inline bool isEncryptionOpSupported(EncryptOperationType operation_type, const ClientDBInfo& dbInfo) {
-	if (!dbInfo.isEncryptionEnabled) {
+inline bool isEncryptionOpSupported(EncryptOperationType operation_type) {
+	// We would check against dbInfo.isEncryptionEnabled instead, but the dbInfo may not be available before
+	// ClusterController broadcast the dbInfo to workers. Before the broadcast encryption may appear to be disabled
+	// when it should be enabled. Moving the encryption switch to DB config could fix the issue.
+	if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		return false;
 	}
 

@@ -106,6 +106,62 @@ class DDTxnProcessorImpl {
 		return IDDTxnProcessor::SourceServers{ std::vector<UID>(servers.begin(), servers.end()), completeSources };
 	}
 
+	ACTOR static Future<std::vector<IDDTxnProcessor::DDRangeLocations>> getSourceServerInterfacesForRange(
+	    Database cx,
+	    KeyRangeRef range) {
+		state std::vector<IDDTxnProcessor::DDRangeLocations> res;
+		state Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+		loop {
+			res.clear();
+			try {
+				state RangeResult shards = wait(krmGetRanges(&tr,
+				                                             keyServersPrefix,
+				                                             range,
+				                                             SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+				                                             SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
+				ASSERT(!shards.empty());
+
+				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+
+				state int i = 0;
+				for (i = 0; i < shards.size() - 1; ++i) {
+					state std::vector<UID> src;
+					std::vector<UID> dest;
+					UID srcId, destId;
+					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
+
+					std::vector<Future<Optional<Value>>> serverListEntries;
+					for (int j = 0; j < src.size(); ++j) {
+						serverListEntries.push_back(tr.get(serverListKeyFor(src[j])));
+					}
+					std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+					IDDTxnProcessor::DDRangeLocations current(KeyRangeRef(shards[i].key, shards[i + 1].key));
+					for (int j = 0; j < serverListValues.size(); ++j) {
+						if (!serverListValues[j].present()) {
+							TraceEvent(SevWarnAlways, "GetSourceServerInterfacesMissing")
+							    .detail("StorageServer", src[j])
+							    .detail("Range", KeyRangeRef(shards[i].key, shards[i + 1].key));
+							continue;
+						}
+						StorageServerInterface ssi = decodeServerListValue(serverListValues[j].get());
+						current.servers[ssi.locality.describeDcId()].push_back(ssi);
+					}
+					res.push_back(current);
+				}
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevWarnAlways, "GetSourceServerInterfacesError").errorUnsuppressed(e).detail("Range", range);
+				wait(tr.onError(e));
+			}
+		}
+
+		return res;
+	}
+
 	// set the system key space
 	ACTOR static Future<Void> updateReplicaKeys(Database cx,
 	                                            std::vector<Optional<Key>> primaryDcId,
@@ -537,6 +593,11 @@ Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(
 	return DDTxnProcessorImpl::getSourceServersForRange(cx, range);
 }
 
+Future<std::vector<IDDTxnProcessor::DDRangeLocations>> DDTxnProcessor::getSourceServerInterfacesForRange(
+    const KeyRangeRef range) {
+	return DDTxnProcessorImpl::getSourceServerInterfacesForRange(cx, range);
+}
+
 Future<ServerWorkerInfos> DDTxnProcessor::getServerListAndProcessClasses() {
 	return DDTxnProcessorImpl::getServerListAndProcessClasses(cx);
 }
@@ -614,6 +675,10 @@ Future<UID> DDTxnProcessor::getClusterId() const {
 
 Future<Void> DDTxnProcessor::waitDDTeamInfoPrintSignal() const {
 	return DDTxnProcessorImpl::waitDDTeamInfoPrintSignal(cx);
+}
+
+Future<std::vector<ProcessData>> DDTxnProcessor::getWorkers() const {
+	return ::getWorkers(cx);
 }
 
 Future<ServerWorkerInfos> DDMockTxnProcessor::getServerListAndProcessClasses() {
@@ -780,4 +845,9 @@ Future<std::pair<Optional<StorageMetrics>, int>> DDMockTxnProcessor::waitStorage
     int shardLimit,
     int expectedShardCount) const {
 	return Future<std::pair<Optional<StorageMetrics>, int>>();
+}
+
+// FIXME: finish implementation
+Future<std::vector<ProcessData>> DDMockTxnProcessor::getWorkers() const {
+	return Future<std::vector<ProcessData>>();
 }

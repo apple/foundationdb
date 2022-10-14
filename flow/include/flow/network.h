@@ -507,6 +507,9 @@ public:
 	// on. Note that there are tools for disk access, scheduling, etc as well as networking, and that almost all access
 	//   to the network should be through FlowTransport, not directly through these low level interfaces!
 
+	// Time instants (e.g. from now()) within TIME_EPS are considered to be equal.
+	static constexpr double TIME_EPS = 1e-7; // 100ns
+
 	enum enumGlobal {
 		enFailureMonitor = 0,
 		enFlowTransport = 1,
