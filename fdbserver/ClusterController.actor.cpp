@@ -1228,6 +1228,15 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 	std::vector<NetworkAddress> coordinatorAddresses = wait(cs.tryResolveHostnames());
 
 	const WorkerInterface& w = req.wi;
+	if (req.clusterId.present() && self->clusterId->get().present() && req.clusterId != self->clusterId->get()) {
+		TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "WorkerBelongsToExistingCluster", self->id)
+		    .detail("WorkerClusterId", req.clusterId)
+		    .detail("ClusterControllerClusterId", self->clusterId->get())
+		    .detail("WorkerId", w.id())
+		    .detail("ProcessId", w.locality.processId());
+		return Void();
+	}
+
 	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find(w.locality.processId());
 	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
@@ -2968,8 +2977,9 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          ServerCoordinators coordinators,
                                          LocalityData locality,
                                          ConfigDBType configDBType,
-                                         Future<Void> recoveredDiskFiles) {
-	state ClusterControllerData self(interf, locality, coordinators);
+                                         Future<Void> recoveredDiskFiles,
+                                         Reference<AsyncVar<Optional<UID>>> clusterId) {
+	state ClusterControllerData self(interf, locality, coordinators, clusterId);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
 	state uint64_t step = 0;
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
@@ -3123,7 +3133,8 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      LocalityData locality,
                                      ConfigDBType configDBType,
-                                     Future<Void> recoveredDiskFiles) {
+                                     Future<Void> recoveredDiskFiles,
+                                     Reference<AsyncVar<Optional<UID>>> clusterId) {
 	loop {
 		state ClusterControllerFullInterface cci;
 		state bool inRole = false;
@@ -3150,7 +3161,8 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 				startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
 				inRole = true;
 
-				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, configDBType, recoveredDiskFiles));
+				wait(clusterControllerCore(
+				    cci, leaderFail, coordinators, locality, configDBType, recoveredDiskFiles, clusterId));
 			}
 		} catch (Error& e) {
 			if (inRole)
@@ -3174,7 +3186,8 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      Future<Void> recoveredDiskFiles,
                                      LocalityData locality,
-                                     ConfigDBType configDBType) {
+                                     ConfigDBType configDBType,
+                                     Reference<AsyncVar<Optional<UID>>> clusterId) {
 
 	// Defer this wait optimization of cluster configuration has 'Encryption data at-rest' enabled.
 	// Encryption depends on available of EncryptKeyProxy (EKP) FDB role to enable fetch/refresh of encryption keys
@@ -3194,8 +3207,14 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 	loop {
 		try {
 			ServerCoordinators coordinators(connRecord, configDBType);
-			wait(clusterController(
-			    coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType, recoveredDiskFiles));
+			wait(clusterController(coordinators,
+			                       currentCC,
+			                       hasConnected,
+			                       asyncPriorityInfo,
+			                       locality,
+			                       configDBType,
+			                       recoveredDiskFiles,
+			                       clusterId));
 			hasConnected = true;
 		} catch (Error& e) {
 			if (e.code() != error_code_coordinators_changed)
@@ -3213,7 +3232,8 @@ TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 	state ClusterControllerData data(ClusterControllerFullInterface(),
 	                                 LocalityData(),
 	                                 ServerCoordinators(Reference<IClusterConnectionRecord>(
-	                                     new ClusterConnectionMemoryRecord(ClusterConnectionString()))));
+	                                     new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                                 makeReference<AsyncVar<Optional<UID>>>());
 	state NetworkAddress workerAddress(IPAddress(0x01010101), 1);
 	state NetworkAddress badPeer1(IPAddress(0x02020202), 1);
 	state NetworkAddress badPeer2(IPAddress(0x03030303), 1);
@@ -3308,7 +3328,8 @@ TEST_CASE("/fdbserver/clustercontroller/updateRecoveredWorkers") {
 	ClusterControllerData data(ClusterControllerFullInterface(),
 	                           LocalityData(),
 	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
-	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))));
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
 	NetworkAddress worker1(IPAddress(0x01010101), 1);
 	NetworkAddress worker2(IPAddress(0x11111111), 1);
 	NetworkAddress badPeer1(IPAddress(0x02020202), 1);
@@ -3357,7 +3378,8 @@ TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 	ClusterControllerData data(ClusterControllerFullInterface(),
 	                           LocalityData(),
 	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
-	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))));
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
 	NetworkAddress worker(IPAddress(0x01010101), 1);
 	NetworkAddress badPeer1(IPAddress(0x02020202), 1);
 	NetworkAddress badPeer2(IPAddress(0x03030303), 1);
@@ -3510,7 +3532,8 @@ TEST_CASE("/fdbserver/clustercontroller/recentRecoveryCountDueToHealth") {
 	ClusterControllerData data(ClusterControllerFullInterface(),
 	                           LocalityData(),
 	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
-	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))));
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
 
 	ASSERT_EQ(data.recentRecoveryCountDueToHealth(), 0);
 
@@ -3531,7 +3554,8 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	ClusterControllerData data(ClusterControllerFullInterface(),
 	                           LocalityData(),
 	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
-	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))));
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
 	NetworkAddress master(IPAddress(0x01010101), 1);
 	NetworkAddress tlog(IPAddress(0x02020202), 1);
 	NetworkAddress satelliteTlog(IPAddress(0x03030303), 1);
@@ -3667,7 +3691,8 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServer
 	ClusterControllerData data(ClusterControllerFullInterface(),
 	                           LocalityData(),
 	                           ServerCoordinators(Reference<IClusterConnectionRecord>(
-	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))));
+	                               new ClusterConnectionMemoryRecord(ClusterConnectionString()))),
+	                           makeReference<AsyncVar<Optional<UID>>>());
 	NetworkAddress master(IPAddress(0x01010101), 1);
 	NetworkAddress tlog(IPAddress(0x02020202), 1);
 	NetworkAddress satelliteTlog(IPAddress(0x03030303), 1);
