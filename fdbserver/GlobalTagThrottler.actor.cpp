@@ -413,6 +413,10 @@ public:
 				CODE_PROBE(true,
 				           "Global tag throttler ignoring transactions because maximum number of trackable tags has "
 				           "been reached");
+				TraceEvent("GlobalTagThrottler_IgnoringRequests")
+				    .suppressFor(1.0)
+				    .detail("Tag", printable(tag))
+				    .detail("Count", count);
 			} else {
 				tagStatistics[tag].addTransactions(static_cast<double>(count));
 			}
@@ -1103,7 +1107,7 @@ TEST_CASE("/GlobalTagThrottler/ExpireTags") {
 	return Void();
 }
 
-// Test that
+// Test that the number of tags tracked does not grow beyond SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED
 TEST_CASE("/GlobalTagThrottler/TagLimit") {
 	state GlobalTagThrottler globalTagThrottler(Database{}, UID{});
 	state GlobalTagThrottlerTesting::StorageServerCollection storageServers(10, 5);
