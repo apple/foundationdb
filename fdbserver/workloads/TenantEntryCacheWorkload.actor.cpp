@@ -18,7 +18,9 @@
  * limitations under the License.
  */
 
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
 
@@ -246,6 +248,26 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR static Future<Void> testCacheTenantsDisabled(Database cx) {
+		ASSERT(cx->clientInfo->get().tenantMode == TenantMode::DISABLED);
+		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(
+		    cx, deterministicRandom()->randomUniqueID(), createPayload, TenantEntryCacheRefreshMode::NONE);
+
+		TraceEvent("TestCacheTenantDisabledStart");
+
+		wait(cache->init());
+		// Ensure associated counter values gets updated
+		ASSERT_EQ(cache->numRefreshByInit(), 1);
+		ASSERT_GE(cache->numCacheRefreshes(), 1);
+
+		Optional<TenantEntryCachePayload<int64_t>> entry = wait(cache->getById(12));
+		ASSERT(!entry.present());
+		ASSERT_EQ(cache->numCacheRefreshes(), 1);
+
+		TraceEvent("TestCacheTenantDisabledEnd");
+		return Void();
+	}
+
 	ACTOR static Future<Void> tenantEntryRemove(Database cx,
 	                                            std::vector<std::pair<TenantName, TenantMapEntry>>* tenantList) {
 		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(
@@ -295,7 +317,6 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		state Reference<TenantEntryCache<int64_t>> cache = makeReference<TenantEntryCache<int64_t>>(
 		    cx, deterministicRandom()->randomUniqueID(), createPayload, TenantEntryCacheRefreshMode::WATCH);
 		wait(cache->init());
-
 		// Ensure associated counter values gets updated
 		ASSERT_EQ(cache->numRefreshByInit(), 1);
 		ASSERT_GE(cache->numCacheRefreshes(), 1);
@@ -349,13 +370,34 @@ struct TenantEntryCacheWorkload : TestWorkload {
 		} else {
 			refreshMode = TenantEntryCacheRefreshMode::WATCH;
 		}
-		wait(testTenantNotFound(cx, refreshMode));
-		wait(testCreateTenantsAndLookup(cx, self, &tenantList, refreshMode));
-		wait(testTenantInsert(cx, self, &tenantList, refreshMode));
-		wait(tenantEntryRemove(cx, &tenantList));
-		wait(testTenantCacheDefaultFunc(cx));
-		wait(testCacheRefresh(cx));
-		wait(testCacheWatchRefresh(cx));
+		// get the tenant mode from db config
+		state Transaction tr = Transaction(cx);
+		state DatabaseConfiguration configuration;
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				RangeResult results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
+				configuration.fromKeyValues((VectorRef<KeyValueRef>)results);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
+		if (configuration.tenantMode == TenantMode::DISABLED) {
+			wait(testCacheTenantsDisabled(cx));
+		} else {
+			wait(testTenantNotFound(cx, refreshMode));
+			wait(testCreateTenantsAndLookup(cx, self, &tenantList, refreshMode));
+			wait(testTenantInsert(cx, self, &tenantList, refreshMode));
+			wait(tenantEntryRemove(cx, &tenantList));
+			wait(testTenantCacheDefaultFunc(cx));
+			wait(testCacheRefresh(cx));
+			wait(testCacheWatchRefresh(cx));
+		}
 
 		return Void();
 	}
