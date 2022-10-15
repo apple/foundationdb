@@ -25,6 +25,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct Increment : TestWorkload {
+	static constexpr auto NAME = "Increment";
 	int actorCount, nodeCount;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond;
 
@@ -41,8 +42,6 @@ struct Increment : TestWorkload {
 		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
 	}
-
-	std::string description() const override { return "IncrementWorkload"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
@@ -176,4 +175,4 @@ struct Increment : TestWorkload {
 	}
 };
 
-WorkloadFactory<Increment> IncrementWorkloadFactory("Increment");
+WorkloadFactory<Increment> IncrementWorkloadFactory;

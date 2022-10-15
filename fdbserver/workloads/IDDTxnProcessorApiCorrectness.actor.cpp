@@ -52,7 +52,7 @@ void verifyInitDataEqual(Reference<InitialDataDistribution> real, Reference<Init
 
 // Verify that all IDDTxnProcessor API implementations has consistent result
 struct IDDTxnProcessorApiWorkload : TestWorkload {
-	static const char* desc;
+	static constexpr auto NAME = "IDDTxnProcessorApiCorrectness";
 	bool enabled;
 	double testDuration;
 	DDSharedContext ddContext;
@@ -68,7 +68,6 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 	}
 
-	std::string description() const override { return desc; }
 	Future<Void> setup(Database const& cx) override { return enabled ? _setup(cx, this) : Void(); }
 	Future<Void> start(Database const& cx) override { return enabled ? _start(cx, this) : Void(); }
 
@@ -137,6 +136,5 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 	} // Give the database time to recover from our damage
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
-const char* IDDTxnProcessorApiWorkload::desc = "IDDTxnProcessorApiCorrectness";
 
-WorkloadFactory<IDDTxnProcessorApiWorkload> IDDTxnProcessorApiWorkload(IDDTxnProcessorApiWorkload::desc);
+WorkloadFactory<IDDTxnProcessorApiWorkload> IDDTxnProcessorApiWorkload;

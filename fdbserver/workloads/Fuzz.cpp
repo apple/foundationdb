@@ -23,6 +23,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 
 struct ActorFuzzWorkload : TestWorkload {
+	static constexpr auto NAME = "ActorFuzz";
 	bool enabled;
 	std::pair<int, int> fuzzResults;
 
@@ -30,7 +31,6 @@ struct ActorFuzzWorkload : TestWorkload {
 		enabled = !clientId; // only do this on the "first" client
 	}
 
-	std::string description() const override { return "ActorFuzzWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (enabled) {
@@ -51,4 +51,4 @@ struct ActorFuzzWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<ActorFuzzWorkload> ActorFuzzWorkloadFactory("ActorFuzz");
+WorkloadFactory<ActorFuzzWorkload> ActorFuzzWorkloadFactory;

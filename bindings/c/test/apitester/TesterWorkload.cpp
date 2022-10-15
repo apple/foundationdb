@@ -20,6 +20,7 @@
 
 #include "TesterWorkload.h"
 #include "TesterUtil.h"
+#include "fdb_c_options.g.h"
 #include "fmt/core.h"
 #include "test/apitester/TesterScheduler.h"
 #include <cstdlib>
@@ -82,6 +83,8 @@ WorkloadBase::WorkloadBase(const WorkloadConfig& config)
   : manager(nullptr), tasksScheduled(0), numErrors(0), clientId(config.clientId), numClients(config.numClients),
     failed(false), numTxCompleted(0), numTxStarted(0), inProgress(false) {
 	maxErrors = config.getIntOption("maxErrors", 10);
+	minTxTimeoutMs = config.getIntOption("minTxTimeoutMs", 0);
+	maxTxTimeoutMs = config.getIntOption("maxTxTimeoutMs", 0);
 	workloadId = fmt::format("{}{}", config.name, clientId);
 }
 
@@ -129,9 +132,15 @@ void WorkloadBase::doExecute(TOpStartFct startFct,
 	}
 	tasksScheduled++;
 	numTxStarted++;
-	manager->txExecutor->execute(
-	    startFct,
-	    [this, startFct, cont, failOnError](fdb::Error err) {
+	manager->txExecutor->execute( //
+	    [this, transactional, cont, startFct](auto ctx) {
+		    if (transactional && maxTxTimeoutMs > 0) {
+			    int timeoutMs = Random::get().randomInt(minTxTimeoutMs, maxTxTimeoutMs);
+			    ctx->tx().setOption(FDB_TR_OPTION_TIMEOUT, timeoutMs);
+		    }
+		    startFct(ctx);
+	    },
+	    [this, cont, failOnError](fdb::Error err) {
 		    numTxCompleted++;
 		    if (err.code() == error_code_success) {
 			    cont();
@@ -148,7 +157,8 @@ void WorkloadBase::doExecute(TOpStartFct startFct,
 		    scheduledTaskDone();
 	    },
 	    tenant,
-	    transactional);
+	    transactional,
+	    maxTxTimeoutMs > 0);
 }
 
 void WorkloadBase::info(const std::string& msg) {

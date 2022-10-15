@@ -27,6 +27,8 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 struct TriggerRecoveryLoopWorkload : TestWorkload {
+	static constexpr auto NAME = "TriggerRecoveryLoop";
+
 	double startTime;
 	int numRecoveries;
 	double delayBetweenRecoveries;
@@ -45,8 +47,6 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		    .detail("NumRecoveries", numRecoveries)
 		    .detail("DelayBetweenRecoveries", delayBetweenRecoveries);
 	}
-
-	std::string description() const override { return "TriggerRecoveryLoop"; }
 
 	ACTOR Future<Void> setOriginalNumOfResolvers(Database cx, TriggerRecoveryLoopWorkload* self) {
 		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
@@ -173,4 +173,4 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<TriggerRecoveryLoopWorkload> TriggerRecoveryLoopWorkloadFactory("TriggerRecoveryLoop");
+WorkloadFactory<TriggerRecoveryLoopWorkload> TriggerRecoveryLoopWorkloadFactory;

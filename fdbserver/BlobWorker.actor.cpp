@@ -366,7 +366,7 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
                                                                   KeyRange keyRange,
                                                                   Arena* arena) {
 	state BlobGranuleCipherKeysCtx cipherKeysCtx;
-	state Reference<GranuleTenantData> tenantData = bwData->tenantData.getDataForGranule(keyRange);
+	state Reference<GranuleTenantData> tenantData = wait(bwData->tenantData.getDataForGranule(keyRange));
 
 	ASSERT(tenantData.isValid());
 
@@ -4095,7 +4095,8 @@ ACTOR Future<Reference<BlobConnectionProvider>> loadBStoreForTenant(Reference<Bl
                                                                     KeyRange keyRange) {
 	state int retryCount = 0;
 	loop {
-		state Reference<GranuleTenantData> data = bwData->tenantData.getDataForGranule(keyRange);
+		state Reference<GranuleTenantData> data;
+		wait(store(data, bwData->tenantData.getDataForGranule(keyRange)));
 		if (data.isValid()) {
 			wait(data->bstoreLoaded.getFuture());
 			wait(delay(0));

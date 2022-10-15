@@ -30,6 +30,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct ChangeConfigWorkload : TestWorkload {
+	static constexpr auto NAME = "ChangeConfig";
 	double minDelayBeforeChange, maxDelayBeforeChange;
 	std::string configMode; //<\"single\"|\"double\"|\"triple\">
 	std::string networkAddresses; // comma separated list e.g. "127.0.0.1:4000,127.0.0.1:4001"
@@ -46,8 +47,6 @@ struct ChangeConfigWorkload : TestWorkload {
 			coordinatorChanges = 1;
 		}
 	}
-
-	std::string description() const override { return "ChangeConfig"; }
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
 
@@ -226,4 +225,4 @@ struct ChangeConfigWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<ChangeConfigWorkload> ChangeConfigWorkloadFactory("ChangeConfig");
+WorkloadFactory<ChangeConfigWorkload> ChangeConfigWorkloadFactory;

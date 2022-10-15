@@ -25,6 +25,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct PubSubMultiplesWorkload : TestWorkload {
+	static constexpr auto NAME = "PubSubMultiples";
+
 	double testDuration, messagesPerSecond;
 	int actorCount, inboxesPerActor;
 
@@ -38,7 +40,6 @@ struct PubSubMultiplesWorkload : TestWorkload {
 		inboxesPerActor = getOption(options, "inboxesPerActor"_sr, 20);
 	}
 
-	std::string description() const override { return "PubSubMultiplesWorkload"; }
 	Future<Void> setup(Database const& cx) override { return createNodes(this, cx); }
 	Future<Void> start(Database const& cx) override {
 		Future<Void> _ = startTests(this, cx);
@@ -114,4 +115,4 @@ struct PubSubMultiplesWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<PubSubMultiplesWorkload> PubSubMultiplesWorkloadFactory("PubSubMultiples");
+WorkloadFactory<PubSubMultiplesWorkload> PubSubMultiplesWorkloadFactory;

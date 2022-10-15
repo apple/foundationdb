@@ -196,6 +196,7 @@ ACTOR Future<Void> testKVCommit(KVTest* test, TestHistogram<float>* latency, Per
 Future<Void> testKVStore(struct KVStoreTestWorkload* const&);
 
 struct KVStoreTestWorkload : TestWorkload {
+	static constexpr auto NAME = "KVStoreTest";
 	bool enabled, saturation;
 	double testDuration, operationsPerSecond;
 	double commitFraction, setFraction;
@@ -224,7 +225,6 @@ struct KVStoreTestWorkload : TestWorkload {
 		saturation = getOption(options, "saturation"_sr, false);
 		storeType = getOption(options, "storeType"_sr, "ssd"_sr).toString();
 	}
-	std::string description() const override { return "KVStoreTest"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (enabled)
@@ -251,7 +251,7 @@ struct KVStoreTestWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<KVStoreTestWorkload> KVStoreTestWorkloadFactory("KVStoreTest");
+WorkloadFactory<KVStoreTestWorkload> KVStoreTestWorkloadFactory;
 
 ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest) {
 	state KVTest& test = *ptest;

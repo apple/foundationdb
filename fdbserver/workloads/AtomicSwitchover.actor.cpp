@@ -27,6 +27,7 @@
 
 // A workload which test the correctness of backup and restore process
 struct AtomicSwitchoverWorkload : TestWorkload {
+	static constexpr auto NAME = "AtomicSwitchover";
 	double switch1delay, switch2delay, stopDelay;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	Database extraDB;
@@ -42,8 +43,6 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		ASSERT(g_simulator->extraDatabases.size() == 1);
 		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], wcx.defaultTenant);
 	}
-
-	std::string description() const override { return "AtomicSwitchover"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId != 0)
@@ -199,4 +198,4 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<AtomicSwitchoverWorkload> AtomicSwitchoverWorkloadFactory("AtomicSwitchover");
+WorkloadFactory<AtomicSwitchoverWorkload> AtomicSwitchoverWorkloadFactory;
