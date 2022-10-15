@@ -49,13 +49,13 @@ ACTOR Future<Void> unitPerfTest() {
 }
 
 struct UnitPerfWorkload : TestWorkload {
+	static constexpr auto NAME = "UnitPerf";
 	bool enabled;
 
 	UnitPerfWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 	}
 
-	std::string description() const override { return "UnitPerfWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (enabled)
@@ -66,4 +66,4 @@ struct UnitPerfWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<UnitPerfWorkload> UnitPerfWorkloadFactory("UnitPerf");
+WorkloadFactory<UnitPerfWorkload> UnitPerfWorkloadFactory;

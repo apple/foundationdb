@@ -25,6 +25,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct GetRangeStream : TestWorkload {
+	static constexpr auto NAME = "GetRangeStream";
 	PerfIntCounter bytesRead;
 	bool useGetRange;
 	Key begin;
@@ -37,8 +38,6 @@ struct GetRangeStream : TestWorkload {
 		end = getOption(options, "end"_sr, normalKeys.end);
 		printKVPairs = getOption(options, "printKVPairs"_sr, false);
 	}
-
-	std::string description() const override { return "GetRangeStreamWorkload"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -125,4 +124,4 @@ struct GetRangeStream : TestWorkload {
 	}
 };
 
-WorkloadFactory<GetRangeStream> GetRangeStreamWorkloadFactory("GetRangeStream");
+WorkloadFactory<GetRangeStream> GetRangeStreamWorkloadFactory;

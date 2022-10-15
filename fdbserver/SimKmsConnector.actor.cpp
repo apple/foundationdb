@@ -38,6 +38,7 @@
 #include "flow/network.h"
 #include "flow/UnitTest.h"
 
+#include <limits>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -191,6 +192,7 @@ static Standalone<BlobMetadataDetailsRef> createBlobMetadata(BlobMetadataDomainI
                                                              BlobMetadataDomainName domainName) {
 	Standalone<BlobMetadataDetailsRef> metadata;
 	metadata.domainId = domainId;
+	metadata.arena().dependsOn(domainName.arena());
 	metadata.domainName = domainName;
 	// 0 == no partition, 1 == suffix partitioned, 2 == storage location partitioned
 	int type = deterministicRandom()->randomInt(0, 3);
@@ -226,6 +228,17 @@ static Standalone<BlobMetadataDetailsRef> createBlobMetadata(BlobMetadataDomainI
 			ev.detail("P" + std::to_string(i), metadata.partitions.back());
 		}
 	}
+
+	// set random refresh + expire time
+	if (deterministicRandom()->coinflip()) {
+		metadata.refreshAt = now() + deterministicRandom()->random01() * SERVER_KNOBS->BLOB_METADATA_REFRESH_INTERVAL;
+		metadata.expireAt =
+		    metadata.refreshAt + deterministicRandom()->random01() * SERVER_KNOBS->BLOB_METADATA_REFRESH_INTERVAL;
+	} else {
+		metadata.refreshAt = std::numeric_limits<double>::max();
+		metadata.expireAt = metadata.refreshAt;
+	}
+
 	return metadata;
 }
 
@@ -244,6 +257,10 @@ ACTOR Future<Void> blobMetadataLookup(KmsConnectorInterface interf, KmsConnBlobM
 			it = simBlobMetadataStore
 			         .insert({ domainInfo.domainId, createBlobMetadata(domainInfo.domainId, domainInfo.domainName) })
 			         .first;
+		} else if (now() >= it->second.expireAt) {
+			// update random refresh and expire time
+			it->second.refreshAt = now() + deterministicRandom()->random01() * 30;
+			it->second.expireAt = it->second.refreshAt + deterministicRandom()->random01() * 10;
 		}
 		rep.metadataDetails.arena().dependsOn(it->second.arena());
 		rep.metadataDetails.push_back(rep.metadataDetails.arena(), it->second);

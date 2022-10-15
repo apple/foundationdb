@@ -50,6 +50,7 @@
  * To catch availability issues with the blob worker, it does a request to each granule at the end of the test.
  */
 struct BlobGranuleVerifierWorkload : TestWorkload {
+	static constexpr auto NAME = "BlobGranuleVerifier";
 	bool doSetup;
 	double testDuration;
 	double timeTravelLimit;
@@ -172,7 +173,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 	}
 
-	std::string description() const override { return "BlobGranuleVerifier"; }
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
 	ACTOR Future<Void> _setup(Database cx, BlobGranuleVerifierWorkload* self) {
@@ -1236,4 +1236,4 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<BlobGranuleVerifierWorkload> BlobGranuleVerifierWorkloadFactory("BlobGranuleVerifier");
+WorkloadFactory<BlobGranuleVerifierWorkload> BlobGranuleVerifierWorkloadFactory;

@@ -42,6 +42,7 @@
 // A workload specifically designed to stress the blob range management of the blob manager + blob worker, and test the
 // blob database api functions
 struct BlobGranuleRangesWorkload : TestWorkload {
+	static constexpr auto NAME = "BlobGranuleRanges";
 	// test settings
 	double testDuration;
 	int operationsPerSecond;
@@ -88,7 +89,6 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		TraceEvent("BlobGranuleRangesWorkloadInit").detail("TargetRanges", targetRanges);
 	}
 
-	std::string description() const override { return "BlobGranuleRangesWorkload"; }
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
 	std::string newKey() {
@@ -675,4 +675,4 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<BlobGranuleRangesWorkload> BlobGranuleRangesWorkloadFactory("BlobGranuleRanges");
+WorkloadFactory<BlobGranuleRangesWorkload> BlobGranuleRangesWorkloadFactory;

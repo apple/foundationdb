@@ -26,6 +26,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct BulkSetupWorkload : TestWorkload {
+	static constexpr auto NAME = "BulkSetup";
 
 	std::vector<TenantName> tenantNames;
 	int nodeCount;
@@ -41,8 +42,6 @@ struct BulkSetupWorkload : TestWorkload {
 			tenantNames.push_back(TenantName(tenant));
 		}
 	}
-
-	std::string description() const override { return "BulkSetup"; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
@@ -72,4 +71,4 @@ struct BulkSetupWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override { return true; }
 };
 
-WorkloadFactory<BulkSetupWorkload> BulkSetupWorkloadFactory("BulkSetup");
+WorkloadFactory<BulkSetupWorkload> BulkSetupWorkloadFactory;
