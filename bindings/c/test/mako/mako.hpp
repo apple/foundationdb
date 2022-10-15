@@ -71,6 +71,7 @@ enum ArgKind {
 	ARG_TPSCHANGE,
 	ARG_TXNTRACE,
 	ARG_TXNTAGGING,
+	ARG_IDEMPOTENCY_ID_SIZE,
 	ARG_TXNTAGGINGPREFIX,
 	ARG_STREAMING_MODE,
 	ARG_DISABLE_RYW,
@@ -168,6 +169,7 @@ struct Arguments {
 	uint8_t flatbuffers;
 	int txntrace;
 	int txntagging;
+	int idempotency_id_size;
 	char txntagging_prefix[TAGPREFIXLENGTH_MAX];
 	FDBStreamingMode streaming_mode;
 	int64_t client_threads_per_version;

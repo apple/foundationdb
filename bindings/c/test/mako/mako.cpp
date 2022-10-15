@@ -522,9 +522,11 @@ int runWorkload(Database db,
                 std::atomic<int> const& signal,
                 ThreadStatistics& stats,
                 int const dotrace,
-                int const dotagging) {
+                int const dotagging,
+                int const idempotency_id_size) {
 	auto traceid = std::string{};
 	auto tagstr = std::string{};
+	auto idempotency_id = std::string{};
 
 	if (thread_tps < 0)
 		return 0;
@@ -608,7 +610,19 @@ int runWorkload(Database db,
 			               urand(0, args.txntagging - 1));
 			auto err = tx.setOptionNothrow(FDB_TR_OPTION_AUTO_THROTTLE_TAG, toBytesRef(tagstr));
 			if (err) {
-				logr.error("TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: {}", err.what());
+				logr.error("TR_OPTION_AUTO_THROTTLE_TAG: {}", err.what());
+			}
+		}
+
+		/* enable idempotency ids */
+		if (idempotency_id_size > 0) {
+			idempotency_id.clear();
+			for (int i = 0; i < idempotency_id_size; ++i) {
+				idempotency_id.push_back(urand(0, 255));
+			}
+			auto err = tx.setOptionNothrow(FDB_TR_OPTION_IDEMPOTENCY_ID, toBytesRef(idempotency_id));
+			if (err) {
+				logr.error("FDB_TR_OPTION_IDEMPOTENCY_ID: {}", err.what());
 			}
 		}
 
@@ -745,6 +759,7 @@ void workerThread(ThreadArgs& thread_args) {
 	const auto dotrace = (worker_id == 0 && thread_id == 0 && args.txntrace) ? args.txntrace : 0;
 	auto database = thread_args.database;
 	const auto dotagging = args.txntagging;
+	const auto idempotency_id_size = args.idempotency_id_size;
 	const auto& signal = thread_args.shm.headerConst().signal;
 	const auto& throttle_factor = thread_args.shm.headerConst().throttle_factor;
 	auto& readycount = thread_args.shm.header().readycount;
@@ -781,8 +796,16 @@ void workerThread(ThreadArgs& thread_args) {
 			logr.error("populate failed");
 		}
 	} else if (args.mode == MODE_RUN) {
-		auto rc =
-		    runWorkload(database, args, thread_tps, throttle_factor, thread_iters, signal, stats, dotrace, dotagging);
+		auto rc = runWorkload(database,
+		                      args,
+		                      thread_tps,
+		                      throttle_factor,
+		                      thread_iters,
+		                      signal,
+		                      stats,
+		                      dotrace,
+		                      dotagging,
+		                      idempotency_id_size);
 		if (rc < 0) {
 			logr.error("runWorkload failed");
 		}
@@ -1270,6 +1293,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "prefix_padding", no_argument, NULL, ARG_PREFIXPADDING },
 			{ "trace", no_argument, NULL, ARG_TRACE },
 			{ "txntagging", required_argument, NULL, ARG_TXNTAGGING },
+			{ "idempotency_id_size", required_argument, NULL, ARG_IDEMPOTENCY_ID_SIZE },
 			{ "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
 			{ "version", no_argument, NULL, ARG_VERSION },
 			{ "client_threads_per_version", required_argument, NULL, ARG_CLIENT_THREADS_PER_VERSION },
@@ -1463,6 +1487,18 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			args.txntagging = atoi(optarg);
 			if (args.txntagging > 1000) {
 				args.txntagging = 1000;
+			}
+			break;
+		case ARG_IDEMPOTENCY_ID_SIZE:
+			args.idempotency_id_size = atoi(optarg);
+			if (args.idempotency_id_size > 255) {
+				args.idempotency_id_size = 255;
+			}
+			if (args.idempotency_id_size < 0) {
+				args.idempotency_id_size = 0;
+			}
+			if (args.idempotency_id_size > 0 && args.idempotency_id_size < 16) {
+				args.txntagging = 16;
 			}
 			break;
 		case ARG_TXNTAGGINGPREFIX:
