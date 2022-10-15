@@ -1,0 +1,13 @@
+[[test]]
+testTitle='ThroughputQuotaTest'
+
+  [[test.workload]]
+  testName='ThroughputQuota'
+  transactionTag='sampleTag1'
+  totalQuota=1.0
+
+  [[test.workload]]
+  testName = 'Cycle'
+  transactionsPerSecond = 2500.0
+  testDuration = 10.0
+  expectedRate = 0
