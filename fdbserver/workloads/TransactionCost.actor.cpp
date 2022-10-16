@@ -54,9 +54,9 @@ class TransactionCostWorkload : public TestWorkload {
 			try {
 				ASSERT_EQ(tr.getTotalCost(), 0);
 				tr.set("foo"_sr, "bar"_sr);
-				ASSERT_EQ(tr.getTotalCost(), 1);
+				ASSERT_EQ(tr.getTotalCost(), CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO);
 				wait(tr.commit());
-				ASSERT_EQ(tr.getTotalCost(), 1);
+				ASSERT_EQ(tr.getTotalCost(), CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO);
 				return Void();
 			} catch (Error& e) {
 				TraceEvent("TransactionCost_Error").error(e);
@@ -74,6 +74,8 @@ class TransactionCostWorkload : public TestWorkload {
 			try {
 				ASSERT_EQ(tr.getTotalCost(), 0);
 				tr.clear(singleKeyRange("foo"_sr));
+				// Clears are not measured in Transaction::getTotalCost
+				ASSERT_EQ(tr.getTotalCost(), 0);
 				wait(tr.commit());
 				ASSERT_EQ(tr.getTotalCost(), 0);
 				return Void();
