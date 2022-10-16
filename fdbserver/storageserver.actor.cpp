@@ -4206,6 +4206,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 
 			GetKeyValuesReply remote = reps[0].get(), local = reps[1].get();
 			Key lastKey = range.begin;
+			auditState.range = range;
 
 			const int end = std::min(local.data.size(), remote.data.size());
 			int i = 0;
@@ -4265,6 +4266,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 			if (i > 0) {
 				range = KeyRangeRef(keyAfter(lastKey), range.end);
 				auditState.range = KeyRangeRef(originBegin, range.begin);
+				auditState.setPhase(AuditPhase::Complete);
 				wait(persistAuditStateMap(data->cx, auditState));
 			}
 		} catch (Error& e) {
@@ -4283,6 +4285,8 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 		    .detail("Version", version)
 		    .detail("ErrorMessage", error)
 		    .detail("RemoteServer", remoteServer.toString());
+		auditState.setPhase(AuditPhase::Error);
+		wait(persistAuditStateMap(data->cx, auditState));
 		throw audit_storage_error();
 	}
 

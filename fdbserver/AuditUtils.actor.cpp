@@ -111,7 +111,9 @@ ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID i
 }
 
 ACTOR Future<std::vector<AuditStorageState>> getLatestAuditStates(Database cx, AuditType type, int num) {
-	return getLatestAuditStatesImpl(&tr, auditState.getType(), 1);
+	Transaction tr(cx);
+	std::vector<AuditStorageState> auditStates = wait(getLatestAuditStatesImpl(&tr, type, num));
+	return auditStates;
 }
 
 ACTOR Future<Void> persistAuditStateMap(Database cx, AuditStorageState auditState) {
