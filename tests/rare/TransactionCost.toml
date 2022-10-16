@@ -1,0 +1,6 @@
+[[test]]
+testTitle = 'TransactionCostTest'
+
+    [[test.workload]]
+    testName = 'TransactionCost'
+    iterations = 1000

@@ -249,6 +249,9 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	SpanContext spanContext;
 	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
 	bool readVersionObtainedFromGrvProxy;
+	// Measured by summing the bytes accessed by each read and write operations,
+	// after rounding up to the nearest page size and applying a write penalty
+	uint64_t totalCost = 0;
 
 	// Special flag to skip prepending tenant prefix to mutations and conflict ranges
 	// when a dummy, internal transaction gets commited. The sole purpose of commitDummyTransaction() is to
@@ -445,6 +448,8 @@ public:
 	// May be called only after commit() returns success
 	Version getCommittedVersion() const { return trState->committedVersion; }
 
+	uint64_t getTotalCost() const { return trState->totalCost; }
+
 	// Will be fulfilled only after commit() returns success
 	[[nodiscard]] Future<Standalone<StringRef>> getVersionstamp();
 
@@ -566,6 +571,10 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 // Round up to the nearest page size
 inline uint64_t getWriteOperationCost(uint64_t bytes) {
 	return (bytes - 1) / CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR + 1;
+}
+
+inline uint64_t getReadOperationCost(uint64_t bytes) {
+	return (bytes - 1) / CLIENT_KNOBS->READ_COST_BYTE_FACTOR + 1;
 }
 
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value

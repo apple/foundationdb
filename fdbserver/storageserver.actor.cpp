@@ -1984,7 +1984,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
-	data->transactionTagCounter.addRequest(req.tags, resultSize);
+	data->transactionTagCounter.addRequest(req.tags, req.key.size() + resultSize);
 
 	++data->counters.finishedQueries;
 
