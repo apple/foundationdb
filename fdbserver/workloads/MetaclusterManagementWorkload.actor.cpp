@@ -324,7 +324,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 	ACTOR static Future<Optional<DataClusterEntry>> configureImpl(MetaclusterManagementWorkload* self,
 	                                                              ClusterName clusterName,
-	                                                              DataClusterData* dataDb,
 	                                                              Optional<int64_t> numTenantGroups,
 	                                                              Optional<ClusterConnectionString> connectionString) {
 		state Reference<ITransaction> tr = self->managementDb->createTransaction();
@@ -370,7 +369,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		try {
 			loop {
 				Optional<Optional<DataClusterEntry>> result =
-				    wait(timeout(configureImpl(self, clusterName, dataDb, newNumTenantGroups, connectionString),
+				    wait(timeout(configureImpl(self, clusterName, newNumTenantGroups, connectionString),
 				                 deterministicRandom()->randomInt(1, 30)));
 				if (result.present()) {
 					updatedEntry = result.get();
