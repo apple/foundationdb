@@ -26,7 +26,6 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include "flow/genericactors.actor.g.h"
 
 struct RestoreBackupWorkload : TestWorkload {
 
