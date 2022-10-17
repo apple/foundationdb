@@ -59,11 +59,11 @@ class DDMockTxnProcessorTester : public DDMockTxnProcessor {
 public:
 	explicit DDMockTxnProcessorTester(std::shared_ptr<MockGlobalState> mgs = nullptr) : DDMockTxnProcessor(mgs) {}
 	void testRawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
-		ASSERT(this->rawStartMovement(params, tssMapping).isReady());
+		rawStartMovement(params, tssMapping);
 	}
 
 	void testRawFinishMovement(MoveKeysParams& params, const std::map<UID, StorageServerInterface>& tssMapping) {
-		ASSERT(this->rawFinishMovement(params, tssMapping).isReady());
+		rawFinishMovement(params, tssMapping);
 	}
 };
 

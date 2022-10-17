@@ -699,18 +699,15 @@ Future<Void> DDTxnProcessor::rawFinishMovement(MoveKeysParams& params,
 
 struct DDMockTxnProcessorImpl {
 	ACTOR static Future<Void> moveKeys(DDMockTxnProcessor* self, MoveKeysParams params) {
-		state std::map<UID, StorageServerInterface> tssMapping; // Not used at all
-		Future<Void> startF = self->rawStartMovement(params, tssMapping);
-		ASSERT(startF.isReady());
+		state std::map<UID, StorageServerInterface> tssMapping;
+		self->rawStartMovement(params, tssMapping);
 		ASSERT(tssMapping.empty());
 
 		if (BUGGIFY_WITH_PROB(0.5)) {
 			wait(delayJittered(5.0));
 		}
 
-		Future<Void> finishF = self->rawFinishMovement(params, tssMapping);
-		ASSERT(finishF.isReady());
-
+		self->rawFinishMovement(params, tssMapping);
 		if (!params.dataMovementComplete.isSet())
 			params.dataMovementComplete.send(Void());
 		return Void();
@@ -890,8 +887,7 @@ Future<std::vector<ProcessData>> DDMockTxnProcessor::getWorkers() const {
 	return Future<std::vector<ProcessData>>();
 }
 
-Future<Void> DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params,
-                                                  std::map<UID, StorageServerInterface>& tssMapping) {
+void DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping) {
 	FlowLock::Releaser releaser(*params.startMoveKeysParallelismLock);
 	// Add wait(take) would always return immediately because there won’t be parallel rawStart or rawFinish in mock
 	// world due to the fact the following *mock* transaction code will always finish without coroutine switch.
@@ -904,11 +900,10 @@ Future<Void> DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params,
 	for (auto& id : params.destinationTeam) {
 		mgs->allServers.at(id).setShardStatus(params.keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
 	}
-	return Void();
 }
 
-Future<Void> DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
-                                                   const std::map<UID, StorageServerInterface>& tssMapping) {
+void DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
+                                           const std::map<UID, StorageServerInterface>& tssMapping) {
 	FlowLock::Releaser releaser(*params.finishMoveKeysParallelismLock);
 	// Add wait(take) would always return immediately because there won’t be parallel rawStart or rawFinish in mock
 	// world due to the fact the following *mock* transaction code will always finish without coroutine switch.
@@ -935,6 +930,4 @@ Future<Void> DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
 		mgs->allServers.at(id).removeShard(params.keys);
 	}
 	mgs->shardMapping->finishMove(params.keys);
-
-	return Void();
 }
