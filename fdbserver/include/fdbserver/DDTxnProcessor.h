@@ -26,6 +26,8 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/MockGlobalState.h"
 
+FDB_DECLARE_BOOLEAN_PARAM(SkipDDModeCheck);
+
 struct InitialDataDistribution;
 struct DDShardInfo;
 
@@ -71,7 +73,7 @@ public:
 	    const MoveKeysLock& moveKeysLock,
 	    const std::vector<Optional<Key>>& remoteDcIds,
 	    const DDEnabledState* ddEnabledState,
-	    bool skipDDModeCheck) = 0;
+	    SkipDDModeCheck skipDDModeCheck) = 0;
 
 	virtual ~IDDTxnProcessor() = default;
 
@@ -174,7 +176,7 @@ public:
 	                                                                      const MoveKeysLock& moveKeysLock,
 	                                                                      const std::vector<Optional<Key>>& remoteDcIds,
 	                                                                      const DDEnabledState* ddEnabledState,
-	                                                                      bool skipDDModeCheck) override;
+	                                                                      SkipDDModeCheck skipDDModeCheck) override;
 
 	Future<MoveKeysLock> takeMoveKeysLock(UID const& ddId) const override;
 
@@ -259,7 +261,7 @@ public:
 	                                                                      const MoveKeysLock& moveKeysLock,
 	                                                                      const std::vector<Optional<Key>>& remoteDcIds,
 	                                                                      const DDEnabledState* ddEnabledState,
-	                                                                      bool skipDDModeCheck) override;
+	                                                                      SkipDDModeCheck skipDDModeCheck) override;
 
 	Future<Void> removeKeysFromFailedServer(const UID& serverID,
 	                                        const std::vector<UID>& teamForDroppedRange,

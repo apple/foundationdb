@@ -25,6 +25,8 @@
 #include "fdbclient/DatabaseContext.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+FDB_DEFINE_BOOLEAN_PARAM(SkipDDModeCheck);
+
 class DDTxnProcessorImpl {
 	friend class DDTxnProcessor;
 
@@ -623,9 +625,9 @@ Future<Reference<InitialDataDistribution>> DDTxnProcessor::getInitialDataDistrib
     const MoveKeysLock& moveKeysLock,
     const std::vector<Optional<Key>>& remoteDcIds,
     const DDEnabledState* ddEnabledState,
-    bool skipDDModeCheck) {
+    SkipDDModeCheck skipDDModeCheck) {
 	return DDTxnProcessorImpl::getInitialDataDistribution(
-	    cx, distributorId, moveKeysLock, remoteDcIds, ddEnabledState, skipDDModeCheck);
+	    cx, distributorId, moveKeysLock, remoteDcIds, ddEnabledState, (bool)skipDDModeCheck);
 }
 
 Future<Void> DDTxnProcessor::waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const {
@@ -792,7 +794,7 @@ Future<Reference<InitialDataDistribution>> DDMockTxnProcessor::getInitialDataDis
     const MoveKeysLock& moveKeysLock,
     const std::vector<Optional<Key>>& remoteDcIds,
     const DDEnabledState* ddEnabledState,
-    bool skipDDModeCheck) {
+    SkipDDModeCheck skipDDModeCheck) {
 
 	// FIXME: now we just ignore ddEnabledState and moveKeysLock, will fix it in the future
 	Reference<InitialDataDistribution> res = makeReference<InitialDataDistribution>();

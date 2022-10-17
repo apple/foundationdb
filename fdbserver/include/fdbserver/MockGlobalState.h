@@ -90,6 +90,9 @@ public:
 
 	bool allShardStatusEqual(KeyRangeRef range, MockShardStatus status);
 
+	// change the status of range. This function may result in split to make the shard boundary align with range.begin
+	// and range.end. In this case, if restrictSize==true, the sum of the split shard size is strictly equal to the old
+	// large shard. Otherwise, the size are randomly generated between (min_shard_size, max_shard_size)
 	void setShardStatus(KeyRangeRef range, MockShardStatus status, bool restrictSize);
 
 	// this function removed an aligned range from server

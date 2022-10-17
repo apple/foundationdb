@@ -116,10 +116,12 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 			wait(store(self->ddContext.lock, ::readMoveKeysLock(self->real->context())));
 			// read real InitialDataDistribution
 			try {
-				wait(store(
-				    self->realInitDD,
-				    self->real->getInitialDataDistribution(
-				        self->ddContext.id(), self->ddContext.lock, {}, self->ddContext.ddEnabledState.get(), true)));
+				wait(store(self->realInitDD,
+				           self->real->getInitialDataDistribution(self->ddContext.id(),
+				                                                  self->ddContext.lock,
+				                                                  {},
+				                                                  self->ddContext.ddEnabledState.get(),
+				                                                  SkipDDModeCheck::True)));
 				std::cout << "Finish read real InitialDataDistribution: server size "
 				          << self->realInitDD->allServers.size() << ", shard size: " << self->realInitDD->shards.size()
 				          << std::endl;
@@ -178,8 +180,11 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 		Reference<InitialDataDistribution> mockInitData =
 		    self->mock
-		        ->getInitialDataDistribution(
-		            self->ddContext.id(), self->ddContext.lock, {}, self->ddContext.ddEnabledState.get(), true)
+		        ->getInitialDataDistribution(self->ddContext.id(),
+		                                     self->ddContext.lock,
+		                                     {},
+		                                     self->ddContext.ddEnabledState.get(),
+		                                     SkipDDModeCheck::True)
 		        .get();
 
 		verifyInitDataEqual(self->realInitDD, mockInitData);
@@ -211,11 +216,13 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 		// read initial data again
 		wait(readRealInitialDataDistribution(self));
-		mockInitData =
-		    self->mock
-		        ->getInitialDataDistribution(
-		            self->ddContext.id(), self->ddContext.lock, {}, self->ddContext.ddEnabledState.get(), true)
-		        .get();
+		mockInitData = self->mock
+		                   ->getInitialDataDistribution(self->ddContext.id(),
+		                                                self->ddContext.lock,
+		                                                {},
+		                                                self->ddContext.ddEnabledState.get(),
+		                                                SkipDDModeCheck::True)
+		                   .get();
 
 		verifyInitDataEqual(self->realInitDD, mockInitData);
 
@@ -230,11 +237,13 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 		// read initial data again
 		wait(readRealInitialDataDistribution(self));
-		mockInitData =
-		    self->mock
-		        ->getInitialDataDistribution(
-		            self->ddContext.id(), self->ddContext.lock, {}, self->ddContext.ddEnabledState.get(), true)
-		        .get();
+		mockInitData = self->mock
+		                   ->getInitialDataDistribution(self->ddContext.id(),
+		                                                self->ddContext.lock,
+		                                                {},
+		                                                self->ddContext.ddEnabledState.get(),
+		                                                SkipDDModeCheck::True)
+		                   .get();
 
 		verifyInitDataEqual(self->realInitDD, mockInitData);
 		return Void();
@@ -275,11 +284,13 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 		// read initial data again
 		wait(readRealInitialDataDistribution(self));
-		mockInitData =
-		    self->mock
-		        ->getInitialDataDistribution(
-		            self->ddContext.id(), self->ddContext.lock, {}, self->ddContext.ddEnabledState.get(), true)
-		        .get();
+		mockInitData = self->mock
+		                   ->getInitialDataDistribution(self->ddContext.id(),
+		                                                self->ddContext.lock,
+		                                                {},
+		                                                self->ddContext.ddEnabledState.get(),
+		                                                SkipDDModeCheck::True)
+		                   .get();
 
 		verifyInitDataEqual(self->realInitDD, mockInitData);
 

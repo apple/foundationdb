@@ -317,7 +317,7 @@ public:
 		                 lock,
 		                 configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(),
 		                 context->ddEnabledState.get(),
-		                 false));
+		                 SkipDDModeCheck::False));
 	}
 
 	void initDcInfo() {
