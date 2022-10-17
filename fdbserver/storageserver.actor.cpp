@@ -10165,7 +10165,7 @@ Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Vo
 
 ACTOR Future<Void> waitMetricsTenantAware(StorageServer* self, WaitMetricsRequest req) {
 	wait(success(waitForVersionNoTooOld(self, latestVersion)));
-	Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo);
+	Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo.get());
 	Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
 	if (tenantPrefix.present()) {
 		req.keys = req.keys.withPrefix(tenantPrefix.get(), req.arena);
@@ -10216,7 +10216,7 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 	loop {
 		choose {
 			when(state WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
-				if (req.tenantInfo.tenantId == TenantInfo::INVALID_TENANT && !self->isReadable(req.keys)) {
+				if (!req.tenantInfo.present() && !self->isReadable(req.keys)) {
 					CODE_PROBE(true, "waitMetrics immediate wrong_shard_server()");
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
