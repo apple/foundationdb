@@ -975,6 +975,7 @@ public:
 	bool REST_KMS_CONNECTOR_REFRESH_KMS_URLS;
 	double REST_KMS_CONNECTOR_REFRESH_KMS_URLS_INTERVAL_SEC;
 	std::string REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT;
+	std::string REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);
