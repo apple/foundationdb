@@ -34,10 +34,15 @@
 
 class KmsConnector : public NonCopyable {
 public:
-	KmsConnector() {}
+	KmsConnector(const std::string& conStr) : connectorStr(conStr) {}
 	virtual ~KmsConnector() {}
 
 	virtual Future<Void> connectorCore(struct KmsConnectorInterface interf) = 0;
+
+	std::string getConnectorStr() const { return connectorStr; }
+
+protected:
+	std::string connectorStr;
 };
 
 #endif
