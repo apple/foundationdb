@@ -24,6 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/BlobMigratorInterface.h"
+#include "fdbserver/IPager.h"
 #include "flow/ApiVersion.h"
 #include "flow/IAsyncFile.h"
 #include "fdbrpc/Locality.h"
@@ -68,6 +69,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/serialize.h"
+#include "opentelemetry/proto/metrics/v1/metrics.pb.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -98,6 +100,15 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 
 namespace {
 RoleLineageCollector roleLineageCollector;
+}
+
+void InitMetrics() {
+	opentelemetry::proto::metrics::v1::MetricsData data;
+	if (data.IsInitialized()) {
+		TraceEvent(SevWarn, "OTLPInit").detail("Message", "data.IsInitialized() is true");
+	} else {
+		TraceEvent(SevWarn, "OTLPInit").detail("Message", "data.IsInitialized() is false");
+	}
 }
 
 ACTOR Future<std::vector<Endpoint>> tryDBInfoBroadcast(RequestStream<UpdateServerDBInfoRequest> stream,
@@ -1709,6 +1720,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 	folder = abspath(folder);
 
+	InitMetrics();
 	if (metricsPrefix.size() > 0) {
 		if (metricsConnFile.size() > 0) {
 			try {

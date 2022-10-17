@@ -204,7 +204,16 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
   add_link_options(-lexecinfo)
 endif()
-
+include(CompileOtel)
+build_opentelemetry()
+# find_package(opentelemetry-cpp QUIET)
+set(opentelemetry_SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/opentelemetry-cpp")
+set(opentelemetry_include_dir ${opentelemetry_SOURCE_DIR}/api/include/
+      ${opentelemetry_SOURCE_DIR}/sdk/include/
+      ${opentelemetry_SOURCE_DIR}/exporters/otlp/include
+   )
+set(OPENTELEMETRY_CPP_INCLUDE_DIRS ${opentelemetry_include_dir})
+set(OPENTELEMETRY_CPP_LIBRARIES "opentelemetry::libopentelemetry")
 ################################################################################
 # process compile commands for IDE
 ################################################################################

@@ -1,0 +1,1 @@
+include_directories(/mnt/ephemeral/khoxha/build/foundationdb.linux.clang.x86_64/protobuf-install/include)

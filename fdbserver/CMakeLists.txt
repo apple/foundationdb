@@ -25,7 +25,14 @@ target_include_directories(fdbserver PRIVATE
   ${CMAKE_SOURCE_DIR}/bindings/c
   ${CMAKE_BINARY_DIR}/bindings/c
   ${CMAKE_CURRENT_SOURCE_DIR}/include
-  ${CMAKE_CURRENT_BINARY_DIR}/include)
+  ${CMAKE_CURRENT_BINARY_DIR}/include
+  # ${CMAKE_BINARY_DIR}/opentelemetry-cpp/api/include
+  # ${CMAKE_BINARY_DIR}/opentelemetry-cpp/sdk/include
+  # ${CMAKE_BINARY_DIR}/opentelemetry-cpp/exporters/otlp/include
+  # ${CMAKE_BINARY_DIR}/opentelemetry-build/generated/third_party/opentelemetry-proto
+  ${CMAKE_BINARY_DIR}/protobuf-install/include
+  )
+
 if (WITH_ROCKSDB_EXPERIMENTAL)
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)
@@ -41,7 +48,7 @@ else()
   target_link_libraries(fdbserver PRIVATE fdbclient sqlite)
 endif()
 
-target_link_libraries(fdbserver PRIVATE toml11_target jemalloc rapidjson)
+target_link_libraries(fdbserver PRIVATE toml11_target jemalloc rapidjson libopentelemetry)
 if(WITH_ROCKSDB_EXPERIMENTAL)
   target_compile_definitions(fdbserver PRIVATE SSD_ROCKSDB_EXPERIMENTAL)
 endif()
