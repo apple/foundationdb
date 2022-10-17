@@ -893,6 +893,10 @@ Future<std::vector<ProcessData>> DDMockTxnProcessor::getWorkers() const {
 Future<Void> DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params,
                                                   std::map<UID, StorageServerInterface>& tssMapping) {
 	FlowLock::Releaser releaser(*params.startMoveKeysParallelismLock);
+	// Add wait(take) would always return immediately because there won’t be parallel rawStart or rawFinish in mock
+	// world due to the fact the following *mock* transaction code will always finish without coroutine switch.
+	ASSERT(params.startMoveKeysParallelismLock->take().isReady());
+
 	std::vector<ShardsAffectedByTeamFailure::Team> destTeams;
 	destTeams.emplace_back(params.destinationTeam, true);
 	mgs->shardMapping->moveShard(params.keys, destTeams);
@@ -906,6 +910,9 @@ Future<Void> DDMockTxnProcessor::rawStartMovement(MoveKeysParams& params,
 Future<Void> DDMockTxnProcessor::rawFinishMovement(MoveKeysParams& params,
                                                    const std::map<UID, StorageServerInterface>& tssMapping) {
 	FlowLock::Releaser releaser(*params.finishMoveKeysParallelismLock);
+	// Add wait(take) would always return immediately because there won’t be parallel rawStart or rawFinish in mock
+	// world due to the fact the following *mock* transaction code will always finish without coroutine switch.
+	ASSERT(params.finishMoveKeysParallelismLock->take().isReady());
 
 	// get source and dest teams
 	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsFor(params.keys);
