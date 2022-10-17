@@ -103,6 +103,7 @@ public:
 	Counter latestCipherKeyCacheNeedsRefresh;
 	LatencySample getCipherKeysLatency;
 	LatencySample getLatestCipherKeysLatency;
+	LatencySample getBlobMetadataLatency;
 	std::array<CounterSet, int(UsageType::MAX)> counterSets;
 };
 

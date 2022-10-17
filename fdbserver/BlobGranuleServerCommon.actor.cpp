@@ -462,7 +462,7 @@ ACTOR Future<Void> loadBlobMetadataForTenants(
 	}
 
 	// FIXME: if one tenant gets an error, don't kill whole process
-	// TODO: add latency metrics
+	state double startTime = now();
 	loop {
 		Future<EKPGetLatestBlobMetadataReply> requestFuture;
 		if (self->dbInfo.isValid() && self->dbInfo->get().encryptKeyProxy.present()) {
@@ -485,6 +485,8 @@ ACTOR Future<Void> loadBlobMetadataForTenants(
 					ASSERT(dataEntry.begin() == info->second.prefix);
 					dataEntry.cvalue()->updateBStore(metadata);
 				}
+				double elapsed = now() - startTime;
+				BlobCipherMetrics::getInstance()->getBlobMetadataLatency.addMeasurement(elapsed);
 				return Void();
 			}
 			when(wait(self->dbInfo->onChange())) {}
