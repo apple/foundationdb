@@ -28,11 +28,11 @@ class TransactionCostWorkload : public TestWorkload {
 
 	class ITest {
 	protected:
-		uint64_t index;
-		explicit ITest(uint64_t index) : index(index) {}
+		uint64_t testNumber;
+		explicit ITest(uint64_t testNumber) : testNumber(testNumber) {}
 
 	public:
-		void debugTransaction(Transaction& tr) { tr.debugTransaction(getDebugID(index)); }
+		void debugTransaction(Transaction& tr) { tr.debugTransaction(getDebugID(testNumber)); }
 		virtual Future<Void> setup(TransactionCostWorkload const& workload, Database const&) { return Void(); }
 		virtual Future<Void> exec(TransactionCostWorkload const& workload, Transaction&) = 0;
 		virtual int64_t expectedFinalCost() const = 0;
@@ -41,10 +41,10 @@ class TransactionCostWorkload : public TestWorkload {
 
 	class ReadEmptyTest : public ITest {
 	public:
-		explicit ReadEmptyTest(uint64_t index) : ITest(index) {}
+		explicit ReadEmptyTest(uint64_t testNumber) : ITest(testNumber) {}
 
 		Future<Void> exec(TransactionCostWorkload const& workload, Transaction& tr) override {
-			return success(tr.get(workload.getKey(20, index)));
+			return success(tr.get(workload.getKey(20, testNumber)));
 		}
 
 		int64_t expectedFinalCost() const override { return 1; }
@@ -57,7 +57,7 @@ class TransactionCostWorkload : public TestWorkload {
 			state Transaction tr(cx);
 			loop {
 				try {
-					tr.set(workload->getKey(20, self->index), getValue(CLIENT_KNOBS->READ_COST_BYTE_FACTOR));
+					tr.set(workload->getKey(20, self->testNumber), getValue(CLIENT_KNOBS->READ_COST_BYTE_FACTOR));
 					wait(tr.commit());
 					return Void();
 				} catch (Error& e) {
@@ -67,14 +67,14 @@ class TransactionCostWorkload : public TestWorkload {
 		}
 
 	public:
-		explicit ReadLargeValueTest(int64_t index) : ITest(index) {}
+		explicit ReadLargeValueTest(int64_t testNumber) : ITest(testNumber) {}
 
 		Future<Void> setup(TransactionCostWorkload const& workload, Database const& cx) override {
 			return setup(&workload, this, cx);
 		}
 
 		Future<Void> exec(TransactionCostWorkload const& workload, Transaction& tr) override {
-			return success(tr.get(workload.getKey(20, index)));
+			return success(tr.get(workload.getKey(20, testNumber)));
 		}
 
 		int64_t expectedFinalCost() const override { return 2; }
@@ -82,22 +82,36 @@ class TransactionCostWorkload : public TestWorkload {
 
 	class WriteTest : public ITest {
 	public:
-		explicit WriteTest(int64_t index) : ITest(index) {}
+		explicit WriteTest(int64_t testNumber) : ITest(testNumber) {}
 
 		Future<Void> exec(TransactionCostWorkload const& workload, Transaction& tr) override {
-			tr.set(workload.getKey(20, index), getValue(20));
+			tr.set(workload.getKey(20, testNumber), getValue(20));
 			return Void();
 		}
 
 		int64_t expectedFinalCost() const override { return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO; }
 	};
 
-	class ClearTest : public ITest {
+	class WriteLargeValueTest : public ITest {
 	public:
-		explicit ClearTest(int64_t index) : ITest(index) {}
+		explicit WriteLargeValueTest(int64_t testNumber) : ITest(testNumber) {}
 
 		Future<Void> exec(TransactionCostWorkload const& workload, Transaction& tr) override {
-			tr.clear(singleKeyRange(workload.getKey(20, index)));
+			tr.set(workload.getKey(20, testNumber), getValue(CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR));
+			return Void();
+		}
+
+		int64_t expectedFinalCost() const override {
+			return 2 * CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
+		}
+	};
+
+	class ClearTest : public ITest {
+	public:
+		explicit ClearTest(int64_t testNumber) : ITest(testNumber) {}
+
+		Future<Void> exec(TransactionCostWorkload const& workload, Transaction& tr) override {
+			tr.clear(singleKeyRange(workload.getKey(20, testNumber)));
 			return Void();
 		}
 
@@ -107,28 +121,100 @@ class TransactionCostWorkload : public TestWorkload {
 		}
 	};
 
-	static std::unique_ptr<ITest> createRandomTest(int64_t index) {
-		auto const rand = deterministicRandom()->randomInt(0, 4);
+	class ReadRangeTest : public ITest {
+		ACTOR static Future<Void> setup(ReadRangeTest* self, TransactionCostWorkload const* workload, Database cx) {
+			state Transaction tr(cx);
+			loop {
+				try {
+					for (int i = 0; i < 10; ++i) {
+						tr.set(workload->getKey(20, self->testNumber, i), workload->getValue(20));
+					}
+					wait(tr.commit());
+					return Void();
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+		}
+
+	public:
+		explicit ReadRangeTest(int64_t testNumber) : ITest(testNumber) {}
+
+		Future<Void> setup(TransactionCostWorkload const& workload, Database const& cx) override {
+			return setup(this, &workload, cx);
+		}
+
+		Future<Void> exec(TransactionCostWorkload const& workload, Transaction& tr) override {
+			KeyRange const keys = KeyRangeRef(workload.getKey(20, testNumber, 0), workload.getKey(20, testNumber, 10));
+			return success(tr.getRange(keys, 10));
+		}
+
+		int64_t expectedFinalCost() const override { return 1; }
+	};
+
+	class LargeReadRangeTest : public ITest {
+		ACTOR static Future<Void> setup(LargeReadRangeTest* self,
+		                                TransactionCostWorkload const* workload,
+		                                Database cx) {
+			state Transaction tr(cx);
+			loop {
+				try {
+					for (int i = 0; i < 10; ++i) {
+						tr.set(workload->getKey(20, self->testNumber, i),
+						       workload->getValue(CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR));
+					}
+					wait(tr.commit());
+					return Void();
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+		}
+
+	public:
+		explicit LargeReadRangeTest(int64_t testNumber) : ITest(testNumber) {}
+
+		Future<Void> setup(TransactionCostWorkload const& workload, Database const& cx) override {
+			return setup(this, &workload, cx);
+		}
+
+		Future<Void> exec(TransactionCostWorkload const& workload, Transaction& tr) override {
+			KeyRange const keys = KeyRangeRef(workload.getKey(20, testNumber, 0), workload.getKey(20, testNumber, 10));
+			return success(tr.getRange(keys, 10));
+		}
+
+		int64_t expectedFinalCost() const override { return 11; }
+	};
+
+	static std::unique_ptr<ITest> createRandomTest(int64_t testNumber) {
+		auto const rand = deterministicRandom()->randomInt(0, 7);
 		if (rand == 0) {
-			return std::make_unique<ReadEmptyTest>(index);
+			return std::make_unique<ReadEmptyTest>(testNumber);
 		} else if (rand == 1) {
-			return std::make_unique<ReadLargeValueTest>(index);
+			return std::make_unique<ReadLargeValueTest>(testNumber);
 		} else if (rand == 2) {
-			return std::make_unique<WriteTest>(index);
+			return std::make_unique<WriteTest>(testNumber);
+		} else if (rand == 3) {
+			return std::make_unique<WriteLargeValueTest>(testNumber);
+		} else if (rand == 4) {
+			return std::make_unique<ClearTest>(testNumber);
+		} else if (rand == 5) {
+			return std::make_unique<ReadRangeTest>(testNumber);
 		} else {
-			return std::make_unique<ClearTest>(index);
+			return std::make_unique<LargeReadRangeTest>(testNumber);
 		}
 	}
 
-	static constexpr auto transactionTypes = 4;
-
-	Key getKey(uint32_t size, uint64_t index) const {
-		return BinaryWriter::toValue(index, Unversioned()).withPrefix(prefix);
+	Key getKey(uint32_t size, uint64_t testNumber, uint64_t index = 0) const {
+		BinaryWriter bw(Unversioned());
+		bw << bigEndian64(testNumber);
+		bw << bigEndian64(index);
+		return bw.toValue().withPrefix(prefix);
 	}
 
 	static Value getValue(uint32_t size) { return makeString(size); }
 
-	static UID getDebugID(uint64_t index) { return UID(index << 32, index << 32); }
+	static UID getDebugID(uint64_t testNumber) { return UID(testNumber << 32, testNumber << 32); }
 
 	ACTOR static Future<Void> runTest(TransactionCostWorkload* self, Database cx, ITest* test) {
 		wait(test->setup(*self, cx));
@@ -149,12 +235,12 @@ class TransactionCostWorkload : public TestWorkload {
 	}
 
 	ACTOR static Future<Void> start(TransactionCostWorkload* self, Database cx) {
-		state uint64_t i = 0;
+		state uint64_t testNumber = 0;
 		state Future<Void> f;
 		// Must use shared_ptr because Flow doesn't support perfect forwarding into actors
 		state std::shared_ptr<ITest> test;
-		for (; i < self->iterations; ++i) {
-			test = createRandomTest(i);
+		for (; testNumber < self->iterations; ++testNumber) {
+			test = createRandomTest(testNumber);
 			wait(runTest(self, cx, test.get()));
 		}
 		return Void();
