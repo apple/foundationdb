@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "boost/algorithm/string.hpp"
+
 #include "flow/CodeProbe.h"
 #include "fmt/format.h"
 
@@ -48,6 +49,7 @@
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/IKnobCollection.h"
@@ -188,6 +190,8 @@ void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageSe
 		                             TSSEndpointData(tssi.id(), tssi.getMappedKeyValues.getEndpoint(), metrics));
 		queueModel.updateTssEndpoint(ssi.getKeyValuesStream.getEndpoint().token.first(),
 		                             TSSEndpointData(tssi.id(), tssi.getKeyValuesStream.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.changeFeedStream.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.changeFeedStream.getEndpoint(), metrics));
 
 		// non-data requests duplicated for load
 		queueModel.updateTssEndpoint(ssi.watchValue.getEndpoint().token.first(),
@@ -198,6 +202,12 @@ void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageSe
 		                             TSSEndpointData(tssi.id(), tssi.getReadHotRanges.getEndpoint(), metrics));
 		queueModel.updateTssEndpoint(ssi.getRangeSplitPoints.getEndpoint().token.first(),
 		                             TSSEndpointData(tssi.id(), tssi.getRangeSplitPoints.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.overlappingChangeFeeds.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.overlappingChangeFeeds.getEndpoint(), metrics));
+
+		// duplicated to ensure feed data cleanup
+		queueModel.updateTssEndpoint(ssi.changeFeedPop.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.changeFeedPop.getEndpoint(), metrics));
 	}
 }
 
@@ -2710,7 +2720,7 @@ bool DatabaseContext::isCurrentGrvProxy(UID proxyId) const {
 		if (proxy.id() == proxyId)
 			return true;
 	}
-	CODE_PROBE(true, "stale GRV proxy detected");
+	CODE_PROBE(true, "stale GRV proxy detected", probe::decoration::rare);
 	return false;
 }
 
@@ -3734,7 +3744,7 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 			} else if (e.code() == error_code_watch_cancelled || e.code() == error_code_process_behind) {
 				// clang-format off
 				CODE_PROBE(e.code() == error_code_watch_cancelled, "Too many watches on the storage server, poll for changes instead");
-				CODE_PROBE(e.code() == error_code_process_behind, "The storage servers are all behind");
+				CODE_PROBE(e.code() == error_code_process_behind, "The storage servers are all behind", probe::decoration::rare);
 				// clang-format on
 				wait(delay(CLIENT_KNOBS->WATCH_POLLING_TIME, parameters->taskID));
 			} else if (e.code() == error_code_timed_out) { // The storage server occasionally times out watches in case
@@ -5660,18 +5670,18 @@ Future<Void> Transaction::getRangeStream(PromiseStream<RangeResult>& results,
 
 	KeySelector b = begin;
 	if (b.orEqual) {
-		CODE_PROBE(true, "Native stream begin orEqual==true");
+		CODE_PROBE(true, "Native stream begin orEqual==true", probe::decoration::rare);
 		b.removeOrEqual(b.arena());
 	}
 
 	KeySelector e = end;
 	if (e.orEqual) {
-		CODE_PROBE(true, "Native stream end orEqual==true");
+		CODE_PROBE(true, "Native stream end orEqual==true", probe::decoration::rare);
 		e.removeOrEqual(e.arena());
 	}
 
 	if (b.offset >= e.offset && b.getKey() >= e.getKey()) {
-		CODE_PROBE(true, "Native stream range inverted");
+		CODE_PROBE(true, "Native stream range inverted", probe::decoration::rare);
 		results.sendError(end_of_stream());
 		return Void();
 	}
@@ -6111,6 +6121,61 @@ ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trS
 	}
 }
 
+ACTOR static Future<Optional<CommitResult>> determineCommitStatus(Reference<TransactionState> trState,
+                                                                  Version minPossibleCommitVersion,
+                                                                  Version maxPossibleCommitVersion,
+                                                                  IdempotencyIdRef idempotencyId) {
+	state Transaction tr(trState->cx);
+	state int retries = 0;
+	state Span span("NAPI:determineCommitStatus"_loc, trState->spanContext);
+	tr.span.setParent(span.context);
+	loop {
+		try {
+			tr.trState->options = trState->options;
+			tr.trState->taskID = trState->taskID;
+			tr.trState->authToken = trState->authToken;
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			Version rv = wait(tr.getReadVersion());
+			TraceEvent("DetermineCommitStatusAttempt")
+			    .detail("IdempotencyId", idempotencyId.asStringRefUnsafe())
+			    .detail("Retries", retries)
+			    .detail("ReadVersion", rv)
+			    .detail("MinPossibleCommitVersion", minPossibleCommitVersion)
+			    .detail("MaxPossibleCommitVersion", maxPossibleCommitVersion);
+			KeyRange possibleRange =
+			    KeyRangeRef(BinaryWriter::toValue(bigEndian64(minPossibleCommitVersion), Unversioned())
+			                    .withPrefix(idempotencyIdKeys.begin),
+			                BinaryWriter::toValue(bigEndian64(maxPossibleCommitVersion + 1), Unversioned())
+			                    .withPrefix(idempotencyIdKeys.begin));
+			RangeResult range = wait(tr.getRange(possibleRange, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!range.more);
+			for (const auto& kv : range) {
+				auto commitResult = kvContainsIdempotencyId(kv, idempotencyId);
+				if (commitResult.present()) {
+					TraceEvent("DetermineCommitStatus")
+					    .detail("Committed", 1)
+					    .detail("IdempotencyId", idempotencyId.asStringRefUnsafe())
+					    .detail("Retries", retries);
+					return commitResult;
+				}
+			}
+			TraceEvent("DetermineCommitStatus")
+			    .detail("Committed", 0)
+			    .detail("IdempotencyId", idempotencyId.asStringRefUnsafe())
+			    .detail("Retries", retries);
+			return Optional<CommitResult>();
+		} catch (Error& e) {
+			TraceEvent("DetermineCommitStatusError")
+			    .errorUnsuppressed(e)
+			    .detail("IdempotencyId", idempotencyId.asStringRefUnsafe())
+			    .detail("Retries", retries);
+			wait(tr.onError(e));
+		}
+		++retries;
+	}
+}
+
 void Transaction::cancelWatches(Error const& e) {
 	for (int i = 0; i < watches.size(); ++i)
 		if (!watches[i]->onChangeTrigger.isSet())
@@ -6418,7 +6483,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 		if (e.code() == error_code_request_maybe_delivered || e.code() == error_code_commit_unknown_result) {
 			// We don't know if the commit happened, and it might even still be in flight.
 
-			if (!trState->options.causalWriteRisky) {
+			if (!trState->options.causalWriteRisky || req.idempotencyId.valid()) {
 				// Make sure it's not still in flight, either by ensuring the master we submitted to is dead, or the
 				// version we submitted with is dead, or by committing a conflicting transaction successfully
 				// if ( cx->getCommitProxies()->masterGeneration <= originalMasterGeneration )
@@ -6435,6 +6500,24 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 
 				wait(
 				    commitDummyTransaction(trState, singleKeyRange(selfConflictingRange.begin), tenantPrefixPrepended));
+				if (req.idempotencyId.valid()) {
+					Optional<CommitResult> commitResult = wait(determineCommitStatus(
+					    trState,
+					    req.transaction.read_snapshot,
+					    req.transaction.read_snapshot + 5e6 /* Based on MAX_WRITE_TRANSACTION_LIFE_VERSIONS */,
+					    req.idempotencyId));
+					if (commitResult.present()) {
+						Standalone<StringRef> ret = makeString(10);
+						placeVersionstamp(
+						    mutateString(ret), commitResult.get().commitVersion, commitResult.get().batchIndex);
+						trState->versionstampPromise.send(ret);
+						CODE_PROBE(true, "AutomaticIdempotencyCommitted");
+						return Void();
+					} else {
+						CODE_PROBE(true, "AutomaticIdempotencyNotCommitted");
+						throw transaction_too_old();
+					}
+				}
 			}
 
 			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry loops
@@ -6516,6 +6599,18 @@ Future<Void> Transaction::commitMutations() {
 			    extraConflictRanges[i].get().first < extraConflictRanges[i].get().second)
 				tr.transaction.read_conflict_ranges.emplace_back(
 				    tr.arena, extraConflictRanges[i].get().first, extraConflictRanges[i].get().second);
+
+		if (tr.idempotencyId.valid()) {
+			// We need to be able confirm that this transaction is no longer in
+			// flight, and if the idempotency id is in the read and write
+			// conflict range we can use that.
+			BinaryWriter wr(Unversioned());
+			wr.serializeBytes("\xFF/SC/"_sr);
+			wr.serializeBytes(tr.idempotencyId.asStringRefUnsafe());
+			auto r = singleKeyRange(wr.toValue(), tr.arena);
+			tr.transaction.read_conflict_ranges.push_back(tr.arena, r);
+			tr.transaction.write_conflict_ranges.push_back(tr.arena, r);
+		}
 
 		if (!trState->options.causalWriteRisky &&
 		    !intersects(tr.transaction.write_conflict_ranges, tr.transaction.read_conflict_ranges).present())
@@ -6826,6 +6921,23 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 			trState->authToken = Standalone<StringRef>(value.get());
 		else
 			trState->authToken.reset();
+		break;
+	case FDBTransactionOptions::IDEMPOTENCY_ID:
+		validateOptionValuePresent(value);
+		if (!(value.get().size() >= 16 && value.get().size() < 256)) {
+			Error e = invalid_option();
+			TraceEvent(SevWarn, "IdempotencyIdInvalidSize")
+			    .error(e)
+			    .detail("IdempotencyId", value.get().printable())
+			    .detail("Recommendation", "Use an idempotency id that's at least 16 bytes and less than 256 bytes");
+			throw e;
+		}
+		tr.idempotencyId = IdempotencyIdRef(tr.arena, IdempotencyIdRef(value.get()));
+		break;
+	case FDBTransactionOptions::AUTOMATIC_IDEMPOTENCY:
+		validateOptionValueNotPresent(value);
+		tr.idempotencyId = IdempotencyIdRef(
+		    tr.arena, IdempotencyIdRef(BinaryWriter::toValue(deterministicRandom()->randomUniqueID(), Unversioned())));
 		break;
 
 	default:
@@ -7753,25 +7865,46 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 }
 
 // kind of a hack, but necessary to work around needing to access system keys in a tenant-enabled transaction
-ACTOR Future<TenantMapEntry> blobGranuleGetTenantEntry(Transaction* self, Key rangeStartKey) {
+ACTOR Future<TenantMapEntry> blobGranuleGetTenantEntry(Transaction* self,
+                                                       Key rangeStartKey,
+                                                       Optional<TenantName> tenantName) {
+	ASSERT(tenantName.present() || self->getTenant().present());
+	TenantName tName = tenantName.present() ? tenantName.get() : self->getTenant().get();
+	state TenantMapEntry tme;
+
 	Optional<KeyRangeLocationInfo> cachedLocationInfo =
-	    self->trState->cx->getCachedLocation(self->getTenant().get(), rangeStartKey, Reverse::False);
+	    self->trState->cx->getCachedLocation(tName, rangeStartKey, Reverse::False);
 	if (!cachedLocationInfo.present()) {
+		// If we're passing in a tenant, use that and do not touch the transaction.
+		TenantInfo tInfo;
+		if (tenantName.present()) {
+			tInfo = TenantInfo(tName, {}, TenantInfo::INVALID_TENANT);
+		} else {
+			tInfo = self->trState->getTenantInfo(AllowInvalidTenantID::True);
+		}
 		KeyRangeLocationInfo l = wait(getKeyLocation_internal(
 		    self->trState->cx,
-		    self->trState->getTenantInfo(AllowInvalidTenantID::True),
+		    tInfo,
 		    rangeStartKey,
 		    self->trState->spanContext,
 		    self->trState->readOptions.present() ? self->trState->readOptions.get().debugID : Optional<UID>(),
 		    self->trState->useProvisionalProxies,
 		    Reverse::False,
 		    latestVersion));
-		self->trState->trySetTenantId(l.tenantEntry.id);
-		return l.tenantEntry;
+		tme = l.tenantEntry;
 	} else {
-		self->trState->trySetTenantId(cachedLocationInfo.get().tenantEntry.id);
-		return cachedLocationInfo.get().tenantEntry;
+		tme = cachedLocationInfo.get().tenantEntry;
 	}
+
+	if (tme.id == TenantInfo::INVALID_TENANT) {
+		throw tenant_not_found();
+	}
+
+	// Modify transaction if desired.
+	if (!tenantName.present()) {
+		self->trState->trySetTenantId(tme.id);
+	}
+	return tme;
 }
 
 Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize) {
@@ -7796,7 +7929,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Trans
 
 	if (self->getTenant().present()) {
 		// have to bypass tenant to read system key space, and add tenant prefix to part of mapping
-		TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(self, currentRange.begin));
+		TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(self, currentRange.begin, {}));
 		tenantPrefix = tenantEntry.prefix;
 	} else {
 		self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -7899,7 +8032,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 
 	if (self->getTenant().present()) {
 		// have to bypass tenant to read system key space, and add tenant prefix to part of mapping
-		TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(self, range.begin));
+		TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(self, range.begin, {}));
 		tenantPrefix = tenantEntry.prefix;
 		Standalone<StringRef> mappingPrefix = tenantEntry.prefix.withPrefix(blobGranuleMappingKeys.begin);
 
@@ -8230,7 +8363,10 @@ ACTOR Future<Version> checkBlobSubrange(Database db, KeyRange keyRange, Optional
 	}
 }
 
-ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRange range, Optional<Version> version) {
+ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx,
+                                           KeyRange range,
+                                           Optional<Version> version,
+                                           Optional<TenantName> tenantName) {
 	state Database db(cx);
 	state Transaction tr(db);
 	state Standalone<VectorRef<KeyRangeRef>> allRanges;
@@ -8238,6 +8374,7 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRan
 	state Version readVersionOut = invalidVersion;
 	state int batchSize = BUGGIFY ? deterministicRandom()->randomInt(2, 10) : CLIENT_KNOBS->BG_TOO_MANY_GRANULES / 2;
 	state int loadSize = (BUGGIFY ? deterministicRandom()->randomInt(1, 20) : 20) * batchSize;
+	state bool loadedTenantEntry = false;
 
 	if (version.present()) {
 		if (version.get() == latestVersion) {
@@ -8260,6 +8397,12 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRan
 	loop {
 		if (curRegion.begin >= range.end) {
 			return readVersionOut;
+		}
+		if (tenantName.present() && !loadedTenantEntry) {
+			TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(&tr, range.begin, tenantName));
+			loadedTenantEntry = true;
+			range = range.withPrefix(tenantEntry.prefix);
+			curRegion = KeyRangeRef(range.begin, range.begin);
 		}
 		loop {
 			try {
@@ -8312,8 +8455,10 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRan
 	}
 }
 
-Future<Version> DatabaseContext::verifyBlobRange(const KeyRange& range, Optional<Version> version) {
-	return verifyBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, version);
+Future<Version> DatabaseContext::verifyBlobRange(const KeyRange& range,
+                                                 Optional<Version> version,
+                                                 Optional<TenantName> tenantName) {
+	return verifyBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, version, tenantName);
 }
 
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
@@ -9013,6 +9158,273 @@ void DatabaseContext::setDesiredChangeFeedVersion(Version v) {
 	}
 }
 
+// Because two storage servers, depending on the shard map, can have different representations of a clear at the same
+// version depending on their shard maps at the time of the mutation, it is non-trivial to directly compare change feed
+// streams. Instead we compare the presence of data at each version. This both saves on cpu cost of validation, and
+// because historically most change feed corruption bugs are the absence of entire versions, not a subset of mutations
+// within a version.
+struct ChangeFeedTSSValidationData {
+	PromiseStream<Version> ssStreamSummary;
+	ReplyPromiseStream<ChangeFeedStreamReply> tssStream;
+	Future<Void> validatorFuture;
+	std::deque<std::pair<Version, Version>> rollbacks;
+	Version popVersion = invalidVersion;
+	bool done = false;
+
+	ChangeFeedTSSValidationData() {}
+	ChangeFeedTSSValidationData(ReplyPromiseStream<ChangeFeedStreamReply> tssStream) : tssStream(tssStream) {}
+
+	void updatePopped(Version newPopVersion) { popVersion = std::max(popVersion, newPopVersion); }
+
+	bool checkRollback(const MutationsAndVersionRef& m) {
+		if (m.mutations.size() == 1 && m.mutations.back().param1 == lastEpochEndPrivateKey) {
+			if (rollbacks.empty() || rollbacks.back().second < m.version) {
+				Version rollbackVersion;
+				BinaryReader br(m.mutations.back().param2, Unversioned());
+				br >> rollbackVersion;
+				if (!rollbacks.empty()) {
+					ASSERT(rollbacks.back().second <= rollbackVersion);
+				}
+				rollbacks.push_back({ rollbackVersion, m.version });
+			}
+
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+	bool shouldAddMutation(const MutationsAndVersionRef& m) {
+		return !done && !m.mutations.empty() && !checkRollback(m);
+	}
+
+	bool isRolledBack(Version v) {
+		return !rollbacks.empty() && rollbacks.front().first < v && rollbacks.front().second > v;
+	}
+
+	void send(const ChangeFeedStreamReply& ssReply) {
+		if (done) {
+			return;
+		}
+		updatePopped(ssReply.popVersion);
+		for (auto& it : ssReply.mutations) {
+			if (shouldAddMutation(it)) {
+				ssStreamSummary.send(it.version);
+			}
+		}
+	}
+
+	void complete() {
+		done = true;
+		// destroy TSS stream to stop server actor
+		tssStream.reset();
+	}
+};
+
+void handleTSSChangeFeedMismatch(const ChangeFeedStreamRequest& request,
+                                 const TSSEndpointData& tssData,
+                                 int64_t matchesFound,
+                                 Version lastMatchingVersion,
+                                 Version ssVersion,
+                                 Version tssVersion,
+                                 Version popVersion) {
+	if (request.canReadPopped) {
+		// There is a known issue where this can return different data between an SS and TSS when a feed was popped but
+		// the SS restarted before the pop could be persisted, for reads that can read popped data. As such, only count
+		// this as a mismatch when !req.canReadPopped
+		return;
+	}
+	CODE_PROBE(true, "TSS mismatch in stream comparison");
+
+	if (tssData.metrics->shouldRecordDetailedMismatch()) {
+		TraceEvent mismatchEvent(
+		    (g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
+		        ? SevWarnAlways
+		        : SevError,
+		    "TSSMismatchChangeFeedStream");
+		mismatchEvent.setMaxEventLength(FLOW_KNOBS->TSS_LARGE_TRACE_SIZE);
+
+		// request info
+		mismatchEvent.detail("TSSID", tssData.tssId);
+		mismatchEvent.detail("FeedID", request.rangeID);
+		mismatchEvent.detail("BeginVersion", request.begin);
+		mismatchEvent.detail("EndVersion", request.end);
+		mismatchEvent.detail("StartKey", request.range.begin);
+		mismatchEvent.detail("EndKey", request.range.end);
+		mismatchEvent.detail("CanReadPopped", request.canReadPopped);
+		mismatchEvent.detail("PopVersion", popVersion);
+		mismatchEvent.detail("DebugUID", request.debugUID);
+
+		// mismatch info
+		mismatchEvent.detail("MatchesFound", matchesFound);
+		mismatchEvent.detail("LastMatchingVersion", lastMatchingVersion);
+		mismatchEvent.detail("SSVersion", ssVersion);
+		mismatchEvent.detail("TSSVersion", tssVersion);
+
+		CODE_PROBE(FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
+		           "Tracing Full TSS Feed Mismatch in stream comparison");
+		CODE_PROBE(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
+		           "Tracing Partial TSS Feed Mismatch in stream comparison and storing the rest in FDB");
+
+		if (!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL) {
+			mismatchEvent.disable();
+			UID mismatchUID = deterministicRandom()->randomUniqueID();
+			tssData.metrics->recordDetailedMismatchData(mismatchUID, mismatchEvent.getFields().toString());
+
+			// record a summarized trace event instead
+			TraceEvent summaryEvent(
+			    (g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
+			        ? SevWarnAlways
+			        : SevError,
+			    "TSSMismatchChangeFeedStream");
+			summaryEvent.detail("TSSID", tssData.tssId)
+			    .detail("MismatchId", mismatchUID)
+			    .detail("FeedDebugUID", request.debugUID);
+		}
+	}
+}
+
+ACTOR Future<Void> changeFeedTSSValidator(ChangeFeedStreamRequest req,
+                                          Optional<ChangeFeedTSSValidationData>* data,
+                                          TSSEndpointData tssData) {
+	state bool ssDone = false;
+	state bool tssDone = false;
+	state std::deque<Version> ssSummary;
+	state std::deque<Version> tssSummary;
+
+	ASSERT(data->present());
+	state int64_t matchesFound = 0;
+	state Version lastMatchingVersion = req.begin - 1;
+
+	loop {
+		// If SS stream gets error, whole stream data gets reset, so it's ok to cancel this actor
+		if (!ssDone && ssSummary.empty()) {
+			try {
+				Version next = waitNext(data->get().ssStreamSummary.getFuture());
+				ssSummary.push_back(next);
+			} catch (Error& e) {
+				if (e.code() != error_code_end_of_stream) {
+					data->get().complete();
+					if (e.code() != error_code_operation_cancelled) {
+						tssData.metrics->ssError(e.code());
+					}
+					throw e;
+				}
+				ssDone = true;
+				if (tssDone) {
+					data->get().complete();
+					return Void();
+				}
+			}
+		}
+
+		if (!tssDone && tssSummary.empty()) {
+			try {
+				choose {
+					when(ChangeFeedStreamReply nextTss = waitNext(data->get().tssStream.getFuture())) {
+						data->get().updatePopped(nextTss.popVersion);
+						for (auto& it : nextTss.mutations) {
+							if (data->get().shouldAddMutation(it)) {
+								tssSummary.push_back(it.version);
+							}
+						}
+					}
+					// if ss has result, tss needs to return it
+					when(wait((ssDone || !ssSummary.empty()) ? delay(2.0 * FLOW_KNOBS->LOAD_BALANCE_TSS_TIMEOUT)
+					                                         : Never())) {
+						++tssData.metrics->tssTimeouts;
+						data->get().complete();
+						return Void();
+					}
+				}
+
+			} catch (Error& e) {
+				if (e.code() == error_code_operation_cancelled) {
+					throw e;
+				}
+				if (e.code() == error_code_end_of_stream) {
+					tssDone = true;
+					if (ssDone) {
+						data->get().complete();
+						return Void();
+					}
+				} else {
+					tssData.metrics->tssError(e.code());
+					data->get().complete();
+					return Void();
+				}
+			}
+		}
+
+		// handle rollbacks and concurrent pops
+		while (!ssSummary.empty() &&
+		       (ssSummary.front() < data->get().popVersion || data->get().isRolledBack(ssSummary.front()))) {
+			ssSummary.pop_front();
+		}
+
+		while (!tssSummary.empty() &&
+		       (tssSummary.front() < data->get().popVersion || data->get().isRolledBack(tssSummary.front()))) {
+			tssSummary.pop_front();
+		}
+		while (!ssSummary.empty() && !tssSummary.empty()) {
+			CODE_PROBE(true, "Comparing TSS change feed data");
+			if (ssSummary.front() != tssSummary.front()) {
+				CODE_PROBE(true, "TSS change feed mismatch");
+				handleTSSChangeFeedMismatch(req,
+				                            tssData,
+				                            matchesFound,
+				                            lastMatchingVersion,
+				                            ssSummary.front(),
+				                            tssSummary.front(),
+				                            data->get().popVersion);
+				data->get().complete();
+				return Void();
+			}
+			matchesFound++;
+			lastMatchingVersion = ssSummary.front();
+			ssSummary.pop_front();
+			tssSummary.pop_front();
+
+			while (!data->get().rollbacks.empty() && data->get().rollbacks.front().second <= lastMatchingVersion) {
+				data->get().rollbacks.pop_front();
+			}
+		}
+
+		ASSERT(!ssDone || !tssDone); // both shouldn't be done, otherwise we shouldn't have looped
+		if ((ssDone && !tssSummary.empty()) || (tssDone && !ssSummary.empty())) {
+			CODE_PROBE(true, "TSS change feed mismatch at end of stream");
+			handleTSSChangeFeedMismatch(req,
+			                            tssData,
+			                            matchesFound,
+			                            lastMatchingVersion,
+			                            ssDone ? -1 : ssSummary.front(),
+			                            tssDone ? -1 : tssSummary.front(),
+			                            data->get().popVersion);
+			data->get().complete();
+			return Void();
+		}
+	}
+}
+
+void maybeDuplicateTSSChangeFeedStream(ChangeFeedStreamRequest& req,
+                                       const RequestStream<ChangeFeedStreamRequest>& stream,
+                                       QueueModel* model,
+                                       Optional<ChangeFeedTSSValidationData>* tssData) {
+	if (model) {
+		Optional<TSSEndpointData> tssPair = model->getTssData(stream.getEndpoint().token.first());
+		if (tssPair.present()) {
+			CODE_PROBE(true, "duplicating feed stream to TSS");
+			resetReply(req);
+
+			RequestStream<ChangeFeedStreamRequest> tssRequestStream(tssPair.get().endpoint);
+			*tssData = Optional<ChangeFeedTSSValidationData>(
+			    ChangeFeedTSSValidationData(tssRequestStream.getReplyStream(req)));
+			// tie validator actor to the lifetime of the stream being active
+			tssData->get().validatorFuture = changeFeedTSSValidator(req, tssData, tssPair.get());
+		}
+	}
+}
+
 ChangeFeedStorageData::~ChangeFeedStorageData() {
 	if (context) {
 		context->changeFeedUpdaters.erase(interfToken);
@@ -9134,7 +9546,8 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
                                            Version end,
                                            Reference<ChangeFeedData> feedData,
                                            Reference<ChangeFeedStorageData> storageData,
-                                           UID debugUID) {
+                                           UID debugUID,
+                                           Optional<ChangeFeedTSSValidationData>* tssData) {
 
 	// calling lastReturnedVersion's callbacks could cause us to be cancelled
 	state Promise<Void> refresh = feedData->refresh;
@@ -9178,6 +9591,9 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 					if (rep.popVersion > feedData->popVersion) {
 						feedData->popVersion = rep.popVersion;
 					}
+					if (tssData->present()) {
+						tssData->get().updatePopped(rep.popVersion);
+					}
 
 					if (lastEmpty != invalidVersion && !results.isEmpty()) {
 						for (auto& it : feedData->storageData) {
@@ -9192,6 +9608,10 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 					while (resultLoc < rep.mutations.size()) {
 						wait(results.onEmpty());
 						if (rep.mutations[resultLoc].version >= nextVersion) {
+							if (tssData->present() && tssData->get().shouldAddMutation(rep.mutations[resultLoc])) {
+								tssData->get().ssStreamSummary.send(rep.mutations[resultLoc].version);
+							}
+
 							results.send(rep.mutations[resultLoc]);
 
 							if (DEBUG_CF_CLIENT_TRACE) {
@@ -9388,6 +9808,11 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	state std::vector<Future<Void>> fetchers(interfs.size());
 	state std::vector<Future<Void>> onErrors(interfs.size());
 	state std::vector<MutationAndVersionStream> streams(interfs.size());
+	state std::vector<Optional<ChangeFeedTSSValidationData>> tssDatas;
+	tssDatas.reserve(interfs.size());
+	for (int i = 0; i < interfs.size(); i++) {
+		tssDatas.push_back({});
+	}
 
 	CODE_PROBE(interfs.size() > 10, "Large change feed merge cursor");
 	CODE_PROBE(interfs.size() > 100, "Very large change feed merge cursor");
@@ -9395,12 +9820,12 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	state UID mergeCursorUID = UID();
 	state std::vector<UID> debugUIDs;
 	results->streams.clear();
-	for (auto& it : interfs) {
+	for (int i = 0; i < interfs.size(); i++) {
 		ChangeFeedStreamRequest req;
 		req.rangeID = rangeID;
 		req.begin = *begin;
 		req.end = end;
-		req.range = it.second;
+		req.range = interfs[i].second;
 		req.canReadPopped = canReadPopped;
 		// divide total buffer size among sub-streams, but keep individual streams large enough to be efficient
 		req.replyBufferSize = replyBufferSize / interfs.size();
@@ -9412,7 +9837,11 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		mergeCursorUID =
 		    UID(mergeCursorUID.first() ^ req.debugUID.first(), mergeCursorUID.second() ^ req.debugUID.second());
 
-		results->streams.push_back(it.first.changeFeedStream.getReplyStream(req));
+		results->streams.push_back(interfs[i].first.changeFeedStream.getReplyStream(req));
+		maybeDuplicateTSSChangeFeedStream(req,
+		                                  interfs[i].first.changeFeedStream,
+		                                  db->enableLocalityLoadBalance ? &db->queueModel : nullptr,
+		                                  &tssDatas[i]);
 	}
 
 	results->maxSeenVersion = invalidVersion;
@@ -9449,7 +9878,8 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		                                      end,
 		                                      results,
 		                                      results->storageData[i],
-		                                      debugUIDs[i]);
+		                                      debugUIDs[i],
+		                                      &tssDatas[i]);
 	}
 
 	wait(waitForAny(onErrors) || mergeChangeFeedStreamInternal(results, interfs, streams, begin, end, mergeCursorUID));
@@ -9503,7 +9933,8 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
                                                   Reference<ChangeFeedData> results,
                                                   Key rangeID,
                                                   Version* begin,
-                                                  Version end) {
+                                                  Version end,
+                                                  Optional<ChangeFeedTSSValidationData>* tssData) {
 
 	state Promise<Void> refresh = results->refresh;
 	ASSERT(results->streams.size() == 1);
@@ -9538,6 +9969,9 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
 		if (feedReply.popVersion > results->popVersion) {
 			results->popVersion = feedReply.popVersion;
 		}
+		if (tssData->present()) {
+			tssData->get().updatePopped(feedReply.popVersion);
+		}
 
 		// don't send completely empty set of mutations to promise stream
 		bool anyMutations = false;
@@ -9551,6 +9985,10 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
 			// empty versions can come out of order, as we sometimes send explicit empty versions when restarting a
 			// stream. Anything with mutations should be strictly greater than lastReturnedVersion
 			ASSERT(feedReply.mutations.front().version > results->lastReturnedVersion.get());
+
+			if (tssData->present()) {
+				tssData->get().send(feedReply);
+			}
 
 			results->mutations.send(
 			    Standalone<VectorRef<MutationsAndVersionRef>>(feedReply.mutations, feedReply.arena));
@@ -9603,6 +10041,7 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
                                           bool canReadPopped) {
 	state Database cx(db);
 	state ChangeFeedStreamRequest req;
+	state Optional<ChangeFeedTSSValidationData> tssData;
 	req.rangeID = rangeID;
 	req.begin = *begin;
 	req.end = end;
@@ -9636,7 +10075,11 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	}
 	refresh.send(Void());
 
-	wait(results->streams[0].onError() || singleChangeFeedStreamInternal(range, results, rangeID, begin, end));
+	maybeDuplicateTSSChangeFeedStream(
+	    req, interf.changeFeedStream, cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr, &tssData);
+
+	wait(results->streams[0].onError() ||
+	     singleChangeFeedStreamInternal(range, results, rangeID, begin, end, &tssData));
 
 	return Void();
 }
@@ -9754,7 +10197,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				results->storageData.clear();
 				if (e.code() == error_code_change_feed_popped) {
 					++db->feedNonRetriableErrors;
-					CODE_PROBE(true, "getChangeFeedStreamActor got popped");
+					CODE_PROBE(true, "getChangeFeedStreamActor got popped", probe::decoration::rare);
 					results->mutations.sendError(e);
 					results->refresh.sendError(e);
 				} else {
@@ -9982,12 +10425,23 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 		return Void();
 	}
 
+	auto model = cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr;
+
 	bool foundFailed = false;
 	for (int i = 0; i < locations.size() && !foundFailed; i++) {
 		for (int j = 0; j < locations[i].locations->size() && !foundFailed; j++) {
 			if (IFailureMonitor::failureMonitor()
 			        .getState(locations[i].locations->get(j, &StorageServerInterface::changeFeedPop).getEndpoint())
 			        .isFailed()) {
+				foundFailed = true;
+			}
+			// for now, if any of popping SS has a TSS pair, just always use backup method
+			if (model && model
+			                 ->getTssData(locations[i]
+			                                  .locations->get(j, &StorageServerInterface::changeFeedPop)
+			                                  .getEndpoint()
+			                                  .token.first())
+			                 .present()) {
 				foundFailed = true;
 			}
 		}
@@ -10071,7 +10525,7 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			if (tenant.present() && !loadedTenantPrefix) {
-				TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(&tr, range.begin));
+				TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(&tr, range.begin, tenant));
 				loadedTenantPrefix = true;
 				purgeRange = purgeRange.withPrefix(tenantEntry.prefix);
 			}
@@ -10190,15 +10644,26 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobRanges(Reference<ReadYou
 	}
 }
 
-ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx, KeyRange range, bool active) {
+ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
+                                     KeyRange range,
+                                     bool active,
+                                     Optional<TenantName> tenantName) {
 	state Database db(cx);
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	state bool loadedTenantEntry = false;
 
 	state Value value = active ? blobRangeActive : blobRangeInactive;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			if (tenantName.present() && !loadedTenantEntry) {
+				TenantMapEntry tenantEntry =
+				    wait(blobGranuleGetTenantEntry(&tr->getTransaction(), range.begin, tenantName));
+				loadedTenantEntry = true;
+				range = range.withPrefix(tenantEntry.prefix);
+			}
 
 			Standalone<VectorRef<KeyRangeRef>> startBlobRanges = wait(getBlobRanges(tr, range, 1));
 
@@ -10236,27 +10701,59 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx, KeyRange ran
 	}
 }
 
-Future<bool> DatabaseContext::blobbifyRange(KeyRange range) {
-	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, true);
+Future<bool> DatabaseContext::blobbifyRange(KeyRange range, Optional<TenantName> tenantName) {
+	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, true, tenantName);
 }
 
-Future<bool> DatabaseContext::unblobbifyRange(KeyRange range) {
-	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, false);
+Future<bool> DatabaseContext::unblobbifyRange(KeyRange range, Optional<TenantName> tenantName) {
+	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, false, tenantName);
 }
 
 ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRangesActor(Reference<DatabaseContext> cx,
                                                                            KeyRange range,
-                                                                           int rangeLimit) {
+                                                                           int rangeLimit,
+                                                                           Optional<TenantName> tenantName) {
 	state Database db(cx);
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	state TenantMapEntry tme;
+
+	loop {
+		try {
+			if (tenantName.present()) {
+				wait(store(tme, blobGranuleGetTenantEntry(&tr->getTransaction(), range.begin, tenantName)));
+				range = range.withPrefix(tme.prefix);
+			}
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
 
 	state Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(getBlobRanges(tr, range, rangeLimit));
+	if (!tenantName.present()) {
+		return blobRanges;
+	}
 
-	return blobRanges;
+	// Strip tenant prefix out.
+	state Standalone<VectorRef<KeyRangeRef>> tenantBlobRanges;
+	for (auto& blobRange : blobRanges) {
+		// Filter out blob ranges that span tenants for some reason.
+		if (!blobRange.begin.startsWith(tme.prefix) || !blobRange.end.startsWith(tme.prefix)) {
+			TraceEvent("ListBlobbifiedRangeSpansTenants")
+			    .suppressFor(/*seconds=*/5)
+			    .detail("Tenant", tenantName.get())
+			    .detail("Range", blobRange);
+			continue;
+		}
+		tenantBlobRanges.push_back_deep(tenantBlobRanges.arena(), blobRange.removePrefix(tme.prefix));
+	}
+	return tenantBlobRanges;
 }
 
-Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges(KeyRange range, int rowLimit) {
-	return listBlobbifiedRangesActor(Reference<DatabaseContext>::addRef(this), range, rowLimit);
+Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges(KeyRange range,
+                                                                                 int rowLimit,
+                                                                                 Optional<TenantName> tenantName) {
+	return listBlobbifiedRangesActor(Reference<DatabaseContext>::addRef(this), range, rowLimit, tenantName);
 }
 
 int64_t getMaxKeySize(KeyRef const& key) {

@@ -26,6 +26,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MetricLoggingWorkload : TestWorkload {
+	static constexpr auto NAME = "MetricLogging";
 	int actorCount, metricCount;
 	double testDuration;
 	bool testBool, enabled;
@@ -50,8 +51,6 @@ struct MetricLoggingWorkload : TestWorkload {
 			}
 		}
 	}
-
-	std::string description() const override { return "MetricLogging"; }
 
 	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
 
@@ -99,4 +98,4 @@ struct MetricLoggingWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<MetricLoggingWorkload> MetricLoggingWorkloadFactory("MetricLogging");
+WorkloadFactory<MetricLoggingWorkload> MetricLoggingWorkloadFactory;

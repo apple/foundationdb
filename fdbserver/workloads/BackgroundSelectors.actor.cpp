@@ -31,6 +31,7 @@ KeySelector randomizedSelector(const KeyRef& key, bool orEqual, int offset) {
 }
 
 struct BackgroundSelectorWorkload : TestWorkload {
+	static constexpr auto NAME = "BackgroundSelector";
 	int actorsPerClient, maxDiff, minDrift, maxDrift, resultLimit;
 	double testDuration, transactionsPerSecond;
 
@@ -47,8 +48,6 @@ struct BackgroundSelectorWorkload : TestWorkload {
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 10.0) / (clientCount * actorsPerClient);
 		resultLimit = 10 * maxDiff;
 	}
-
-	std::string description() const override { return "BackgroundSelector"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -218,4 +217,4 @@ struct BackgroundSelectorWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<BackgroundSelectorWorkload> BackgroundSelectorWorkloadFactory("BackgroundSelector");
+WorkloadFactory<BackgroundSelectorWorkload> BackgroundSelectorWorkloadFactory;

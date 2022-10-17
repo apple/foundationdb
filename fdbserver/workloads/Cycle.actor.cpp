@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#include <cstring>
-
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
@@ -48,6 +46,7 @@ struct CycleMembers<true> {
 
 template <bool MultiTenancy>
 struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
+	static constexpr auto NAME = MultiTenancy ? "TenantCycle" : "Cycle";
 	int actorCount, nodeCount;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
 	Key keyPrefix;
@@ -84,14 +83,6 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 			this->token.tenants = tenants;
 			// we currently don't support this workload to be run outside of simulation
 			this->signedToken = authz::jwt::signToken(this->arena, this->token, k->second);
-		}
-	}
-
-	std::string description() const override {
-		if constexpr (MultiTenancy) {
-			return "TenantCycleWorkload";
-		} else {
-			return "CycleWorkload";
 		}
 	}
 
@@ -337,5 +328,5 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	}
 };
 
-WorkloadFactory<CycleWorkload<false>> CycleWorkloadFactory("Cycle", false);
-WorkloadFactory<CycleWorkload<true>> TenantCycleWorkloadFactory("TenantCycle", true);
+WorkloadFactory<CycleWorkload<false>> CycleWorkloadFactory(UntrustedMode::False);
+WorkloadFactory<CycleWorkload<true>> TenantCycleWorkloadFactory(UntrustedMode::True);

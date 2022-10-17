@@ -45,7 +45,7 @@ struct ConflictBatch {
 		TransactionCommitted,
 	};
 
-	void addTransaction(const CommitTransactionRef& transaction);
+	void addTransaction(const CommitTransactionRef& transaction, Version newOldestVersion);
 	void detectConflicts(Version now,
 	                     Version newOldestVersion,
 	                     std::vector<int>& nonConflicting,

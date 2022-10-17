@@ -22,6 +22,7 @@
 #define FDBCLIENT_STORAGESERVERINTERFACE_H
 #pragma once
 
+#include "fdbclient/Audit.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbclient/StorageServerShard.h"
@@ -120,8 +121,8 @@ struct StorageServerInterface {
 	RequestStream<struct GetCheckpointRequest> checkpoint;
 	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
 	RequestStream<struct FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues;
-
 	RequestStream<struct UpdateCommitCostRequest> updateCommitCostRequest;
+	RequestStream<struct AuditStorageRequest> auditStorage;
 
 private:
 	bool acceptingRequests;
@@ -194,6 +195,8 @@ public:
 				    getValue.getEndpoint().getAdjustedEndpoint(21));
 				updateCommitCostRequest =
 				    RequestStream<struct UpdateCommitCostRequest>(getValue.getEndpoint().getAdjustedEndpoint(22));
+				auditStorage =
+				    RequestStream<struct AuditStorageRequest>(getValue.getEndpoint().getAdjustedEndpoint(23));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -245,6 +248,7 @@ public:
 		streams.push_back(fetchCheckpoint.getReceiver());
 		streams.push_back(fetchCheckpointKeyValues.getReceiver());
 		streams.push_back(updateCommitCostRequest.getReceiver());
+		streams.push_back(auditStorage.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };

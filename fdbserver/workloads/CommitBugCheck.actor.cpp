@@ -24,11 +24,10 @@
 
 // Regression tests for 2 commit related bugs
 struct CommitBugWorkload : TestWorkload {
+	static constexpr auto NAME = "CommitBug";
 	bool success;
 
 	CommitBugWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) { success = true; }
-
-	std::string description() const override { return "CommitBugWorkload"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -157,4 +156,4 @@ struct CommitBugWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<CommitBugWorkload> CommitBugWorkloadFactory("CommitBug");
+WorkloadFactory<CommitBugWorkload> CommitBugWorkloadFactory;

@@ -278,8 +278,9 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;
 		ConflictBatch conflictBatch(self->conflictSet, &reply.conflictingKeyRangeMap, &reply.arena);
+		const Version newOldestVersion = req.version - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
 		for (int t = 0; t < req.transactions.size(); t++) {
-			conflictBatch.addTransaction(req.transactions[t]);
+			conflictBatch.addTransaction(req.transactions[t], newOldestVersion);
 			self->resolvedReadConflictRanges += req.transactions[t].read_conflict_ranges.size();
 			self->resolvedWriteConflictRanges += req.transactions[t].write_conflict_ranges.size();
 
@@ -292,8 +293,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 					    it.begin, SERVER_KNOBS->SAMPLE_OFFSET_PER_KEY + it.begin.size(), expire);
 			}
 		}
-		conflictBatch.detectConflicts(
-		    req.version, req.version - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS, commitList, &tooOldList);
+		conflictBatch.detectConflicts(req.version, newOldestVersion, commitList, &tooOldList);
 
 		reply.debugID = req.debugID;
 		reply.committed.resize(reply.arena, req.transactions.size());
@@ -351,7 +351,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				SpanContext spanContext =
 				    req.transactions[t].spanContext.present() ? req.transactions[t].spanContext.get() : SpanContext();
 
-				applyMetadataMutations(spanContext, *resolverData, req.transactions[t].mutations, db);
+				applyMetadataMutations(spanContext, *resolverData, req.transactions[t].mutations);
 			}
 			CODE_PROBE(self->forceRecovery, "Resolver detects forced recovery");
 		}
@@ -574,7 +574,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		bool confChanges; // Ignore configuration changes for initial commits.
 		ResolverData resolverData(
 		    pContext->pResolverData->dbgid, pContext->pTxnStateStore, &pContext->pResolverData->keyInfo, confChanges);
-		applyMetadataMutations(SpanContext(), resolverData, mutations, db);
+		applyMetadataMutations(SpanContext(), resolverData, mutations);
 	} // loop
 
 	auto lockedKey = pContext->pTxnStateStore->readValue(databaseLockedKey).get();
@@ -653,15 +653,14 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	state TransactionStateResolveContext transactionStateResolveContext;
 	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 		self->logAdapter = new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
-		self->txnStateStore =
-		    keyValueStoreLogSystem(self->logAdapter,
-		                           db,
-		                           resolver.id(),
-		                           2e9,
-		                           true,
-		                           true,
-		                           true,
-		                           isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION, db->get().client));
+		self->txnStateStore = keyValueStoreLogSystem(self->logAdapter,
+		                                             db,
+		                                             resolver.id(),
+		                                             2e9,
+		                                             true,
+		                                             true,
+		                                             true,
+		                                             isEncryptionOpSupported(EncryptOperationType::TLOG_ENCRYPTION));
 
 		// wait for txnStateStore recovery
 		wait(success(self->txnStateStore->readValue(StringRef())));

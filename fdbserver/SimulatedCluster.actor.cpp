@@ -368,6 +368,7 @@ public:
 	bool allowDisablingTenants = true;
 	bool allowCreatingTenants = true;
 	bool injectTargetedSSRestart = false;
+	bool tenantModeRequired = false;
 	bool injectSSDelay = false;
 	std::string testClass; // unused -- used in TestHarness
 	float testPriority; // unused -- used in TestHarness
@@ -433,6 +434,7 @@ public:
 		    .add("allowDefaultTenant", &allowDefaultTenant)
 		    .add("allowDisablingTenants", &allowDisablingTenants)
 		    .add("allowCreatingTenants", &allowCreatingTenants)
+		    .add("tenantModeRequired", &tenantModeRequired)
 		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
 		    .add("injectTargetedSSRestart", &injectTargetedSSRestart)
 		    .add("injectSSDelay", &injectSSDelay);
@@ -908,7 +910,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 
 			CODE_PROBE(bootCount >= 1, "Simulated machine rebooted");
 			CODE_PROBE(bootCount >= 2, "Simulated machine rebooted twice");
-			CODE_PROBE(bootCount >= 3, "Simulated machine rebooted three times");
+			CODE_PROBE(bootCount >= 3, "Simulated machine rebooted three times", probe::decoration::rare);
 			++bootCount;
 
 			TraceEvent("SimulatedMachineStart", randomId)
@@ -1056,7 +1058,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				avail.pop_back();
 
 				if (myFolders != toRebootFrom) {
-					CODE_PROBE(true, "Simulated machine swapped data folders");
+					CODE_PROBE(true, "Simulated machine swapped data folders", probe::decoration::rare);
 					TraceEvent("SimulatedMachineFolderSwap", randomId)
 					    .detail("OldFolder0", myFolders[0])
 					    .detail("NewFolder0", toRebootFrom[0])
@@ -2451,6 +2453,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
 	state bool allowDisablingTenants = testConfig.allowDisablingTenants;
 	state bool allowCreatingTenants = testConfig.allowCreatingTenants;
+	state bool tenantModeRequired = testConfig.tenantModeRequired;
 
 	if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		testConfig.storageEngineExcludeTypes.push_back(5);
@@ -2467,6 +2470,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 		// TODO: persist the chosen default tenant in the restartInfo.ini file for the second test
 		allowDefaultTenant = false;
 		allowCreatingTenants = false;
+		tenantModeRequired = false;
 	}
 
 	// TODO: Currently backup and restore related simulation tests are failing when run with rocksDB storage engine
@@ -2516,10 +2520,10 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state Optional<TenantName> defaultTenant;
 	state Standalone<VectorRef<TenantNameRef>> tenantsToCreate;
 	state TenantMode tenantMode = TenantMode::DISABLED;
-	if (allowDefaultTenant && deterministicRandom()->random01() < 0.5) {
+	if (tenantModeRequired || (allowDefaultTenant && deterministicRandom()->random01() < 0.5)) {
 		defaultTenant = "SimulatedDefaultTenant"_sr;
 		tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
-		if (deterministicRandom()->random01() < 0.9) {
+		if (tenantModeRequired || deterministicRandom()->random01() < 0.9) {
 			tenantMode = TenantMode::REQUIRED;
 		} else {
 			tenantMode = TenantMode::OPTIONAL_TENANT;

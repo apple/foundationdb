@@ -29,6 +29,7 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 struct SuspendProcessesWorkload : TestWorkload {
+	static constexpr auto NAME = "SuspendProcesses";
 	std::vector<std::string> prefixSuspendProcesses;
 	double suspendTimeDuration;
 	double waitTimeDuration;
@@ -38,8 +39,6 @@ struct SuspendProcessesWorkload : TestWorkload {
 		waitTimeDuration = getOption(options, "waitTimeDuration"_sr, 0);
 		suspendTimeDuration = getOption(options, "suspendTimeDuration"_sr, 0);
 	}
-
-	std::string description() const override { return "SuspendProcesses"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -87,4 +86,4 @@ struct SuspendProcessesWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<SuspendProcessesWorkload> SuspendProcessesWorkloadFactory("SuspendProcesses");
+WorkloadFactory<SuspendProcessesWorkload> SuspendProcessesWorkloadFactory;

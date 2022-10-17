@@ -39,6 +39,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct EncryptKeyProxyTestWorkload : TestWorkload {
+	static constexpr auto NAME = "EncryptKeyProxyTest";
 	EncryptKeyProxyInterface ekpInf;
 	Reference<AsyncVar<struct ServerDBInfo> const> dbInfo;
 	Arena arena;
@@ -61,8 +62,6 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		}
 	}
 
-	std::string description() const override { return "EncryptKeyProxyTest"; }
-
 	Future<Void> setup(Database const& ctx) override { return Void(); }
 
 	ACTOR Future<Void> simEmptyDomainIdCache(EncryptKeyProxyTestWorkload* self) {
@@ -71,7 +70,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		for (int i = 0; i < self->numDomains / 2; i++) {
 			const EncryptCipherDomainId domainId = self->minDomainId + i;
 			self->domainInfos.emplace_back(
-			    EKPGetLatestCipherKeysRequestInfo(domainId, StringRef(std::to_string(domainId)), self->arena));
+			    EKPGetLatestCipherKeysRequestInfo(self->arena, domainId, StringRef(std::to_string(domainId))));
 		}
 
 		state int nAttempts = 0;
@@ -127,14 +126,14 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		for (int i = 0; i < expectedHits; i++) {
 			const EncryptCipherDomainId domainId = self->minDomainId + i;
 			self->domainInfos.emplace_back(
-			    EKPGetLatestCipherKeysRequestInfo(domainId, StringRef(std::to_string(domainId)), self->arena));
+			    EKPGetLatestCipherKeysRequestInfo(self->arena, domainId, StringRef(std::to_string(domainId))));
 		}
 
 		expectedMisses = deterministicRandom()->randomInt(1, self->numDomains / 2);
 		for (int i = 0; i < expectedMisses; i++) {
 			const EncryptCipherDomainId domainId = self->minDomainId + i + self->numDomains / 2 + 1;
 			self->domainInfos.emplace_back(
-			    EKPGetLatestCipherKeysRequestInfo(domainId, StringRef(std::to_string(domainId)), self->arena));
+			    EKPGetLatestCipherKeysRequestInfo(self->arena, domainId, StringRef(std::to_string(domainId))));
 		}
 
 		state int nAttempts = 0;
@@ -191,7 +190,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		for (int i = 0; i < self->numDomains; i++) {
 			const EncryptCipherDomainId domainId = self->minDomainId + i;
 			self->domainInfos.emplace_back(
-			    EKPGetLatestCipherKeysRequestInfo(domainId, StringRef(std::to_string(domainId)), self->arena));
+			    EKPGetLatestCipherKeysRequestInfo(self->arena, domainId, StringRef(std::to_string(domainId))));
 		}
 
 		EKPGetLatestBaseCipherKeysRequest req;
@@ -329,7 +328,8 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		CODE_PROBE(true, "Testing");
+		// TODO: Enable this workload in testing
+		CODE_PROBE(true, "Running EncryptKeyProxyTest", probe::decoration::rare);
 		if (!enableTest) {
 			return Void();
 		}
@@ -343,4 +343,4 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 
 std::atomic<int> EncryptKeyProxyTestWorkload::seed = 0;
 
-WorkloadFactory<EncryptKeyProxyTestWorkload> EncryptKeyProxyTestWorkloadFactory("EncryptKeyProxyTest");
+WorkloadFactory<EncryptKeyProxyTestWorkload> EncryptKeyProxyTestWorkloadFactory;

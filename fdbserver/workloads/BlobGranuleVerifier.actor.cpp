@@ -50,6 +50,7 @@
  * To catch availability issues with the blob worker, it does a request to each granule at the end of the test.
  */
 struct BlobGranuleVerifierWorkload : TestWorkload {
+	static constexpr auto NAME = "BlobGranuleVerifier";
 	bool doSetup;
 	double testDuration;
 	double timeTravelLimit;
@@ -172,7 +173,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 	}
 
-	std::string description() const override { return "BlobGranuleVerifier"; }
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
 	ACTOR Future<Void> _setup(Database cx, BlobGranuleVerifierWorkload* self) {
@@ -451,7 +451,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 									throw;
 								}
 								ASSERT(e.code() == error_code_blob_granule_transaction_too_old);
-								CODE_PROBE(true, "BGV verified too old after purge");
+								CODE_PROBE(true, "BGV verified too old after purge", probe::decoration::rare);
 							}
 						}
 					}
@@ -730,7 +730,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						if (!foundAnyHistoryForRange) {
 							// if range never existed in blob, and was doing the initial snapshot,  it could have a
 							// change feed but not a history entry/snapshot
-							CODE_PROBE(true, "not failing test for leaked feed with no history");
+							CODE_PROBE(
+							    true, "not failing test for leaked feed with no history", probe::decoration::rare);
 							fmt::print("Not failing test b/c feed never had history!\n");
 						}
 						return !foundAnyHistoryForRange;
@@ -1235,4 +1236,4 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<BlobGranuleVerifierWorkload> BlobGranuleVerifierWorkloadFactory("BlobGranuleVerifier");
+WorkloadFactory<BlobGranuleVerifierWorkload> BlobGranuleVerifierWorkloadFactory;

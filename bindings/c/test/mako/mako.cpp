@@ -875,6 +875,16 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 		}
 	}
 
+	if (args.disable_client_bypass) {
+		err = network::setOptionNothrow(FDB_NET_OPTION_DISABLE_CLIENT_BYPASS);
+		if (err) {
+			logr.error("network::setOption (FDB_NET_OPTION_DISABLE_CLIENT_BYPASS): {}",
+			           args.disable_client_bypass,
+			           err.what());
+			return -1;
+		}
+	}
+
 	/* Network thread must be setup before doing anything */
 	logr.debug("network::setup()");
 	network::setup();
@@ -1005,6 +1015,7 @@ int initArguments(Arguments& args) {
 		args.txnspec.ops[i][OP_COUNT] = 0;
 	}
 	args.client_threads_per_version = 0;
+	args.disable_client_bypass = false;
 	args.disable_ryw = 0;
 	args.json_output_path[0] = '\0';
 	args.stats_export_path[0] = '\0';
@@ -1188,6 +1199,8 @@ void usage() {
 	printf("%-24s %s\n", "    --flatbuffers", "Use flatbuffers");
 	printf("%-24s %s\n", "    --streaming", "Streaming mode: all (default), iterator, small, medium, large, serial");
 	printf("%-24s %s\n", "    --disable_ryw", "Disable snapshot read-your-writes");
+	printf(
+	    "%-24s %s\n", "    --disable_client_bypass", "Disable client-bypass forcing mako to use multi-version client");
 	printf("%-24s %s\n", "    --json_report=PATH", "Output stats to the specified json file (Default: mako.json)");
 	printf("%-24s %s\n",
 	       "    --bg_file_path=PATH",
@@ -1248,6 +1261,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
 			{ "version", no_argument, NULL, ARG_VERSION },
 			{ "client_threads_per_version", required_argument, NULL, ARG_CLIENT_THREADS_PER_VERSION },
+			{ "disable_client_bypass", no_argument, NULL, ARG_DISABLE_CLIENT_BYPASS },
 			{ "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
 			{ "json_report", optional_argument, NULL, ARG_JSON_REPORT },
 			{ "bg_file_path", required_argument, NULL, ARG_BG_FILE_PATH },
@@ -1445,6 +1459,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			break;
 		case ARG_CLIENT_THREADS_PER_VERSION:
 			args.client_threads_per_version = atoi(optarg);
+			break;
+		case ARG_DISABLE_CLIENT_BYPASS:
+			args.disable_client_bypass = true;
 			break;
 		case ARG_DISABLE_RYW:
 			args.disable_ryw = 1;

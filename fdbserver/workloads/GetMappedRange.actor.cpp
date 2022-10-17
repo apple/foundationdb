@@ -39,6 +39,7 @@ const KeyRef RECORD = "RECORD"_sr;
 const KeyRef INDEX = "INDEX"_sr;
 
 struct GetMappedRangeWorkload : ApiWorkload {
+	static constexpr auto NAME = "GetMappedRange";
 	bool enabled;
 	Snapshot snapshot = Snapshot::False;
 
@@ -51,8 +52,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	GetMappedRangeWorkload(WorkloadContext const& wcx) : ApiWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
 	}
-
-	std::string description() const override { return "GetMappedRange"; }
 
 	Future<Void> start(Database const& cx) override {
 		// This workload is generated different from typical ApiWorkload. So don't use ApiWorkload::_start.
@@ -463,4 +462,4 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<GetMappedRangeWorkload> GetMappedRangeWorkloadFactory("GetMappedRange");
+WorkloadFactory<GetMappedRangeWorkload> GetMappedRangeWorkloadFactory;
