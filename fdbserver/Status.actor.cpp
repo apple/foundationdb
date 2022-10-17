@@ -2912,7 +2912,7 @@ ACTOR Future<Optional<Value>> consistencyScanInfoFetcher(Database cx) {
 	}
 
 	TraceEvent("ConsistencyScanInfoFetcher").log();
-	return val.get();
+	return val;
 }
 
 // constructs the cluster section of the json status output
