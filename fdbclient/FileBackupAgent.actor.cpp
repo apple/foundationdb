@@ -722,12 +722,6 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		// degrade if most of the mutations belong to an invalid tenant
 		TenantMode mode = dbConfig.tenantMode;
 		bool useTenantCache = mode != TenantMode::DISABLED;
-		if (g_network->isSimulated() && mode == TenantMode::OPTIONAL_TENANT) {
-			// TODO: Currently simulation tests run with optional tenant mode but most data does not belong to any
-			// tenant. This results in many timeouts so disable using the tenant cache until optional tenant mode
-			// support with backups is more performant
-			useTenantCache = false;
-		}
 		CODE_PROBE(useTenantCache, "using tenant cache");
 		return getEncryptionDomainDetailsImpl(key, tenantCache, useTenantCache);
 	}

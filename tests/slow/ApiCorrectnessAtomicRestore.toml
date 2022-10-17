@@ -1,3 +1,6 @@
+[configuration]
+tenantModeRequired = true
+
 [[test]]
 testTitle = 'ApiCorrectnessTest'
 clearAfterTest = false

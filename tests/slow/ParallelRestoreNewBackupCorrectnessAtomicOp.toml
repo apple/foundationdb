@@ -1,6 +1,9 @@
 [configuration]
 allowDefaultTenant = false
 
+[[knobs]]
+enable_encryption = false
+
 [[test]]
 testTitle = 'BackupAndParallelRestoreWithAtomicOp'
 clearAfterTest = false
