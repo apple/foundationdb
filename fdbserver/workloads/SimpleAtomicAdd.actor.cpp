@@ -26,6 +26,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct SimpleAtomicAddWorkload : TestWorkload {
+	static constexpr auto NAME = "SimpleAtomicAdd";
+
 	int addValue;
 	int iterations;
 	bool initialize;
@@ -42,8 +44,6 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 		initialValue = getOption(options, "initialValue"_sr, 0);
 		sumKey = getOption(options, "sumKey"_sr, "sumKey"_sr);
 	}
-
-	std::string description() const override { return "SimpleAtomicAdd"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -134,4 +134,4 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<SimpleAtomicAddWorkload> SimpleAtomicAddWorkloadFactory("SimpleAtomicAdd");
+WorkloadFactory<SimpleAtomicAddWorkload> SimpleAtomicAddWorkloadFactory;

@@ -73,6 +73,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	init( RANDOMSEED_RETRY_LIMIT,                                4 );
 	init( FAST_ALLOC_LOGGING_BYTES,                           10e6 );
+	init( FAST_ALLOC_ALLOW_GUARD_PAGES,                      false );
 	init( HUGE_ARENA_LOGGING_BYTES,                          100e6 );
 	init( HUGE_ARENA_LOGGING_INTERVAL,                         5.0 );
 
@@ -136,6 +137,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( PUBLIC_KEY_FILE_MAX_SIZE,                    1024 * 1024 );
 	init( PUBLIC_KEY_FILE_REFRESH_INTERVAL_SECONDS,             30 );
 	init( MAX_CACHED_EXPIRED_TOKENS,                          1024 );
+	init( AUDIT_TIME_WINDOW,                                   5.0 );
 
 	//AsyncFileCached
 	init( PAGE_CACHE_4K,                                   2LL<<30 );

@@ -44,10 +44,24 @@ public:
 	struct SourceServers {
 		std::vector<UID> srcServers, completeSources; // the same as RelocateData.src, RelocateData.completeSources;
 	};
+
+	struct DDRangeLocations {
+		DDRangeLocations() = default;
+		DDRangeLocations(KeyRangeRef range) : range(range) {}
+
+		// A map of dcId : list of servers
+		std::map<std::string, std::vector<StorageServerInterface>> servers;
+		KeyRange range;
+	};
+
 	virtual Database context() const = 0;
 	virtual bool isMocked() const = 0;
 	// get the source server list and complete source server list for range
 	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) { return SourceServers{}; };
+
+	virtual Future<std::vector<DDRangeLocations>> getSourceServerInterfacesForRange(const KeyRangeRef range) {
+		return std::vector<DDRangeLocations>();
+	}
 
 	// get the storage server list and Process class, only throw transaction non-retryable exceptions
 	virtual Future<ServerWorkerInfos> getServerListAndProcessClasses() = 0;
@@ -141,6 +155,9 @@ public:
 	bool isMocked() const override { return false; };
 
 	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
+
+	Future<std::vector<IDDTxnProcessor::DDRangeLocations>> getSourceServerInterfacesForRange(
+	    const KeyRangeRef range) override;
 
 	// Call NativeAPI implementation directly
 	Future<ServerWorkerInfos> getServerListAndProcessClasses() override;

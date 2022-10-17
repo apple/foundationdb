@@ -28,6 +28,8 @@
 const int keyBytes = 16;
 
 struct QueuePushWorkload : TestWorkload {
+	static constexpr auto NAME = "QueuePush";
+
 	int actorCount, valueBytes;
 	double testDuration;
 	bool forward;
@@ -52,7 +54,6 @@ struct QueuePushWorkload : TestWorkload {
 		startingKey = "0000000000000001"_sr;
 	}
 
-	std::string description() const override { return "QueuePush"; }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
 	Future<bool> check(Database const& cx) override { return true; }
@@ -149,4 +150,4 @@ struct QueuePushWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<QueuePushWorkload> QueuePushWorkloadFactory("QueuePush");
+WorkloadFactory<QueuePushWorkload> QueuePushWorkloadFactory;

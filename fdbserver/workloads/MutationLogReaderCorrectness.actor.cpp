@@ -32,6 +32,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MutationLogReaderCorrectnessWorkload : TestWorkload {
+	static constexpr auto NAME = "MutationLogReaderCorrectness";
+
 	bool enabled;
 	int records;
 	Version versionRange;
@@ -65,8 +67,6 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 		// The version immediately after the last actual record version
 		endVersion = recordVersion(records - 1) + 1;
 	}
-
-	std::string description() const override { return "MutationLogReaderCorrectness"; }
 
 	Future<Void> start(Database const& cx) override {
 		if (enabled) {
@@ -158,5 +158,4 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<MutationLogReaderCorrectnessWorkload> MutationLogReaderCorrectnessWorkloadFactory(
-    "MutationLogReaderCorrectness");
+WorkloadFactory<MutationLogReaderCorrectnessWorkload> MutationLogReaderCorrectnessWorkloadFactory;

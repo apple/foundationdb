@@ -39,6 +39,7 @@
 #include "flow/xxhash.h"
 
 #include <functional>
+#include <limits>
 #include <tuple>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -154,12 +155,14 @@ public:
 		const EncodingHeader* h = reinterpret_cast<const EncodingHeader*>(encodingHeader);
 		EncryptionKey s;
 		s.xorKey = h->xorKey;
+		s.xorWith = xorWith;
 		return s;
 	}
 
 	Future<EncryptionKey> getLatestDefaultEncryptionKey() override {
 		EncryptionKey s;
-		s.xorKey = xorWith;
+		s.xorKey = static_cast<uint8_t>(deterministicRandom()->randomInt(0, std::numeric_limits<uint8_t>::max() + 1));
+		s.xorWith = xorWith;
 		return s;
 	}
 
@@ -294,7 +297,7 @@ public:
 	EncodingType expectedEncodingType() const override { return EncodingType::AESEncryptionV1; }
 
 	bool enableEncryption() const override {
-		return isEncryptionOpSupported(EncryptOperationType::STORAGE_SERVER_ENCRYPTION, db->get().client);
+		return isEncryptionOpSupported(EncryptOperationType::STORAGE_SERVER_ENCRYPTION);
 	}
 
 	bool enableEncryptionDomain() const override { return SERVER_KNOBS->REDWOOD_SPLIT_ENCRYPTED_PAGES_BY_TENANT; }

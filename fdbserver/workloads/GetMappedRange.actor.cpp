@@ -57,8 +57,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		out.insert("Attrition");
 	}
 
-	std::string description() const override { return "GetMappedRange"; }
-
 	Future<Void> start(Database const& cx) override {
 		// This workload is generated different from typical ApiWorkload. So don't use ApiWorkload::_start.
 		if (enabled) {
@@ -468,4 +466,4 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<GetMappedRangeWorkload> GetMappedRangeWorkloadFactory("GetMappedRange");
+WorkloadFactory<GetMappedRangeWorkload> GetMappedRangeWorkloadFactory;

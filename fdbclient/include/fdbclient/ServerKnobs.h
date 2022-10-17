@@ -480,6 +480,7 @@ public:
 	double RATEKEEPER_FAILURE_TIME;
 	double CONSISTENCYSCAN_FAILURE_TIME;
 	double BLOB_MANAGER_FAILURE_TIME;
+	double BLOB_MIGRATOR_FAILURE_TIME;
 	double REPLACE_INTERFACE_DELAY;
 	double REPLACE_INTERFACE_CHECK_DELAY;
 	double COORDINATOR_REGISTER_INTERVAL;
@@ -623,6 +624,12 @@ public:
 	double GLOBAL_TAG_THROTTLING_FOLDING_TIME;
 	// Cost multiplier for writes (because write operations are more expensive than reads)
 	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
+	// Maximum number of tags tracked by global tag throttler. Additional tags will be ignored
+	// until some existing tags expire
+	int64_t GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED;
+	// Global tag throttler forgets about throughput from a tag once no new transactions from that
+	// tag have been received for this duration (in seconds):
+	int64_t GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
@@ -703,6 +710,7 @@ public:
 	int FETCH_KEYS_PARALLELISM_FULL;
 	int FETCH_KEYS_LOWER_PRIORITY;
 	int SERVE_FETCH_CHECKPOINT_PARALLELISM;
+	int SERVE_AUDIT_STORAGE_PARALLELISM;
 	int CHANGE_FEED_DISK_READS_PARALLELISM;
 	int BUGGIFY_BLOCK_BYTES;
 	int64_t STORAGE_RECOVERY_VERSION_LAG_LIMIT;
@@ -973,6 +981,7 @@ public:
 	bool REST_KMS_CONNECTOR_REFRESH_KMS_URLS;
 	double REST_KMS_CONNECTOR_REFRESH_KMS_URLS_INTERVAL_SEC;
 	std::string REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT;
+	std::string REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

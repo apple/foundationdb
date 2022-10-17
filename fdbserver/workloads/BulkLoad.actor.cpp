@@ -25,6 +25,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct BulkLoadWorkload : TestWorkload {
+	static constexpr auto NAME = "BulkLoad";
 	int clientCount, actorCount, writesPerTransaction, valueBytes;
 	double testDuration;
 	Value value;
@@ -47,8 +48,6 @@ struct BulkLoadWorkload : TestWorkload {
 		keyPrefix = getOption(options, "keyPrefix"_sr, ""_sr);
 		keyPrefix = unprintable(keyPrefix.toString());
 	}
-
-	std::string description() const override { return "BulkLoad"; }
 
 	Future<Void> start(Database const& cx) override {
 		for (int c = 0; c < actorCount; c++)
@@ -115,4 +114,4 @@ struct BulkLoadWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<BulkLoadWorkload> BulkLoadWorkloadFactory("BulkLoad");
+WorkloadFactory<BulkLoadWorkload> BulkLoadWorkloadFactory;
