@@ -18,10 +18,7 @@
  * limitations under the License.
  */
 
-#include <cstdint>
-#include <limits>
 #include <algorithm>
-#include "fdbrpc/simulator.h"
 #include "fdbclient/MutationLogReader.actor.h"
 #include "fdbclient/Tuple.h"
 #include "fdbserver/workloads/ApiWorkload.h"
