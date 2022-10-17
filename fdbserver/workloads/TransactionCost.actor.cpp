@@ -26,6 +26,100 @@ class TransactionCostWorkload : public TestWorkload {
 	Key prefix;
 	bool debugTransactions{ false };
 
+	class ITest {
+	protected:
+		uint64_t index;
+		explicit ITest(uint64_t index) : index(index) {}
+
+	public:
+		void debugTransaction(Transaction& tr) { tr.debugTransaction(getDebugID(index)); }
+		virtual Future<Void> setup(TransactionCostWorkload const& workload, Database const&) { return Void(); }
+		virtual Future<Void> exec(TransactionCostWorkload const& workload, Transaction&) = 0;
+		virtual int64_t expectedFinalCost() const = 0;
+		virtual ~ITest() = default;
+	};
+
+	class ReadEmptyTest : public ITest {
+	public:
+		explicit ReadEmptyTest(uint64_t index) : ITest(index) {}
+
+		Future<Void> exec(TransactionCostWorkload const& workload, Transaction& tr) override {
+			return success(tr.get(workload.getKey(20, index)));
+		}
+
+		int64_t expectedFinalCost() const override { return 1; }
+	};
+
+	class ReadLargeValueTest : public ITest {
+		ACTOR static Future<Void> setup(TransactionCostWorkload const* workload,
+		                                ReadLargeValueTest* self,
+		                                Database cx) {
+			state Transaction tr(cx);
+			loop {
+				try {
+					tr.set(workload->getKey(20, self->index), getValue(CLIENT_KNOBS->READ_COST_BYTE_FACTOR));
+					wait(tr.commit());
+					return Void();
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+		}
+
+	public:
+		explicit ReadLargeValueTest(int64_t index) : ITest(index) {}
+
+		Future<Void> setup(TransactionCostWorkload const& workload, Database const& cx) override {
+			return setup(&workload, this, cx);
+		}
+
+		Future<Void> exec(TransactionCostWorkload const& workload, Transaction& tr) override {
+			return success(tr.get(workload.getKey(20, index)));
+		}
+
+		int64_t expectedFinalCost() const override { return 2; }
+	};
+
+	class WriteTest : public ITest {
+	public:
+		explicit WriteTest(int64_t index) : ITest(index) {}
+
+		Future<Void> exec(TransactionCostWorkload const& workload, Transaction& tr) override {
+			tr.set(workload.getKey(20, index), getValue(20));
+			return Void();
+		}
+
+		int64_t expectedFinalCost() const override { return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO; }
+	};
+
+	class ClearTest : public ITest {
+	public:
+		explicit ClearTest(int64_t index) : ITest(index) {}
+
+		Future<Void> exec(TransactionCostWorkload const& workload, Transaction& tr) override {
+			tr.clear(singleKeyRange(workload.getKey(20, index)));
+			return Void();
+		}
+
+		int64_t expectedFinalCost() const override {
+			// Clears are not measured in Transaction::getTotalCost
+			return 0;
+		}
+	};
+
+	static std::unique_ptr<ITest> createRandomTest(int64_t index) {
+		auto const rand = deterministicRandom()->randomInt(0, 4);
+		if (rand == 0) {
+			return std::make_unique<ReadEmptyTest>(index);
+		} else if (rand == 1) {
+			return std::make_unique<ReadLargeValueTest>(index);
+		} else if (rand == 2) {
+			return std::make_unique<WriteTest>(index);
+		} else {
+			return std::make_unique<ClearTest>(index);
+		}
+	}
+
 	static constexpr auto transactionTypes = 4;
 
 	Key getKey(uint32_t size, uint64_t index) const {
@@ -36,85 +130,19 @@ class TransactionCostWorkload : public TestWorkload {
 
 	static UID getDebugID(uint64_t index) { return UID(index << 32, index << 32); }
 
-	ACTOR static Future<Void> readLargeValue(TransactionCostWorkload* self, Database cx, uint64_t index) {
-		state Transaction tr(cx);
-		loop {
-			try {
-				tr.set(self->getKey(20, index), getValue(CLIENT_KNOBS->READ_COST_BYTE_FACTOR));
-				wait(tr.commit());
-				tr.reset();
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-		loop {
-			try {
-				ASSERT_EQ(tr.getTotalCost(), 0);
-				wait(success(tr.get(self->getKey(20, index))));
-				ASSERT_EQ(tr.getTotalCost(), 2);
-				return Void();
-			} catch (Error& e) {
-				TraceEvent("TransactionCost_ReadLargeValueError").error(e);
-				wait(tr.onError(e));
-			}
-		}
-	}
-
-	ACTOR static Future<Void> readEmpty(TransactionCostWorkload* self, Database cx, uint64_t index) {
+	ACTOR static Future<Void> runTest(TransactionCostWorkload* self, Database cx, ITest* test) {
+		wait(test->setup(*self, cx));
 		state Transaction tr(cx);
 		if (self->debugTransactions) {
-			tr.debugTransaction(getDebugID(index));
+			test->debugTransaction(tr);
 		}
 		loop {
 			try {
-				ASSERT_EQ(tr.getTotalCost(), 0);
-				wait(success(tr.get(self->getKey(20, index))));
-				ASSERT_EQ(tr.getTotalCost(), 1);
-				return Void();
-			} catch (Error& e) {
-				TraceEvent("TransactionCost_ReadEmptyError").error(e);
-				wait(tr.onError(e));
-			}
-		}
-	}
-
-	ACTOR static Future<Void> write(TransactionCostWorkload* self, Database cx, uint64_t index) {
-		state Transaction tr(cx);
-		if (self->debugTransactions) {
-			tr.debugTransaction(getDebugID(index));
-		}
-		loop {
-			try {
-				ASSERT_EQ(tr.getTotalCost(), 0);
-				tr.set(self->getKey(20, index), getValue(20));
-				ASSERT_EQ(tr.getTotalCost(), CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO);
+				wait(test->exec(*self, tr));
 				wait(tr.commit());
-				ASSERT_EQ(tr.getTotalCost(), CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO);
+				ASSERT_EQ(tr.getTotalCost(), test->expectedFinalCost());
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("TransactionCost_WriteError").error(e);
-				wait(tr.onError(e));
-			}
-		}
-	}
-
-	ACTOR static Future<Void> clear(TransactionCostWorkload* self, Database cx, uint64_t index) {
-		state Transaction tr(cx);
-		if (self->debugTransactions) {
-			tr.debugTransaction(getDebugID(index));
-		}
-		loop {
-			try {
-				ASSERT_EQ(tr.getTotalCost(), 0);
-				tr.clear(singleKeyRange("foo"_sr));
-				// Clears are not measured in Transaction::getTotalCost
-				ASSERT_EQ(tr.getTotalCost(), 0);
-				wait(tr.commit());
-				ASSERT_EQ(tr.getTotalCost(), 0);
-				return Void();
-			} catch (Error& e) {
-				TraceEvent("TransactionCost_ClearError").error(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -123,18 +151,11 @@ class TransactionCostWorkload : public TestWorkload {
 	ACTOR static Future<Void> start(TransactionCostWorkload* self, Database cx) {
 		state uint64_t i = 0;
 		state Future<Void> f;
+		// Must use shared_ptr because Flow doesn't support perfect forwarding into actors
+		state std::shared_ptr<ITest> test;
 		for (; i < self->iterations; ++i) {
-			int rand = deterministicRandom()->randomInt(0, transactionTypes);
-			if (rand == 0) {
-				f = readEmpty(self, cx, i);
-			} else if (rand == 1) {
-				f = write(self, cx, i);
-			} else if (rand == 2) {
-				f = clear(self, cx, i);
-			} else if (rand == 3) {
-				f = readLargeValue(self, cx, i);
-			}
-			wait(f);
+			test = createRandomTest(i);
+			wait(runTest(self, cx, test.get()));
 		}
 		return Void();
 	}
@@ -148,8 +169,6 @@ public:
 
 	static constexpr auto NAME = "TransactionCost";
 
-	std::string description() const override { return NAME; }
-
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override { return clientId ? Void() : start(this, cx); }
@@ -159,4 +178,4 @@ public:
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<TransactionCostWorkload> Transaction("TransactionCost");
+WorkloadFactory<TransactionCostWorkload> TransactionCostWorkloadFactory;
