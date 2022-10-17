@@ -251,7 +251,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	bool readVersionObtainedFromGrvProxy;
 	// Measured by summing the bytes accessed by each read and write operations,
 	// after rounding up to the nearest page size and applying a write penalty
-	uint64_t totalCost = 0;
+	int64_t totalCost = 0;
 
 	// Special flag to skip prepending tenant prefix to mutations and conflict ranges
 	// when a dummy, internal transaction gets commited. The sole purpose of commitDummyTransaction() is to
@@ -448,7 +448,7 @@ public:
 	// May be called only after commit() returns success
 	Version getCommittedVersion() const { return trState->committedVersion; }
 
-	uint64_t getTotalCost() const { return trState->totalCost; }
+	int64_t getTotalCost() const { return trState->totalCost; }
 
 	// Will be fulfilled only after commit() returns success
 	[[nodiscard]] Future<Standalone<StringRef>> getVersionstamp();

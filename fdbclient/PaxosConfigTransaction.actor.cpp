@@ -564,6 +564,10 @@ Version PaxosConfigTransaction::getCommittedVersion() const {
 	return impl->getCommittedVersion();
 }
 
+int64_t PaxosConfigTransaction::getTotalCost() const {
+	return 0;
+}
+
 int64_t PaxosConfigTransaction::getApproximateSize() const {
 	return impl->getApproximateSize();
 }

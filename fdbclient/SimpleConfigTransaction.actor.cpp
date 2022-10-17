@@ -296,6 +296,10 @@ Version SimpleConfigTransaction::getCommittedVersion() const {
 	return impl->getCommittedVersion();
 }
 
+int64_t SimpleConfigTransaction::getTotalCost() const {
+	return 0;
+}
+
 int64_t SimpleConfigTransaction::getApproximateSize() const {
 	return impl->getApproximateSize();
 }
