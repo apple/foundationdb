@@ -7865,25 +7865,46 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 }
 
 // kind of a hack, but necessary to work around needing to access system keys in a tenant-enabled transaction
-ACTOR Future<TenantMapEntry> blobGranuleGetTenantEntry(Transaction* self, Key rangeStartKey) {
+ACTOR Future<TenantMapEntry> blobGranuleGetTenantEntry(Transaction* self,
+                                                       Key rangeStartKey,
+                                                       Optional<TenantName> tenantName) {
+	ASSERT(tenantName.present() || self->getTenant().present());
+	TenantName tName = tenantName.present() ? tenantName.get() : self->getTenant().get();
+	state TenantMapEntry tme;
+
 	Optional<KeyRangeLocationInfo> cachedLocationInfo =
-	    self->trState->cx->getCachedLocation(self->getTenant().get(), rangeStartKey, Reverse::False);
+	    self->trState->cx->getCachedLocation(tName, rangeStartKey, Reverse::False);
 	if (!cachedLocationInfo.present()) {
+		// If we're passing in a tenant, use that and do not touch the transaction.
+		TenantInfo tInfo;
+		if (tenantName.present()) {
+			tInfo = TenantInfo(tName, {}, TenantInfo::INVALID_TENANT);
+		} else {
+			tInfo = self->trState->getTenantInfo(AllowInvalidTenantID::True);
+		}
 		KeyRangeLocationInfo l = wait(getKeyLocation_internal(
 		    self->trState->cx,
-		    self->trState->getTenantInfo(AllowInvalidTenantID::True),
+		    tInfo,
 		    rangeStartKey,
 		    self->trState->spanContext,
 		    self->trState->readOptions.present() ? self->trState->readOptions.get().debugID : Optional<UID>(),
 		    self->trState->useProvisionalProxies,
 		    Reverse::False,
 		    latestVersion));
-		self->trState->trySetTenantId(l.tenantEntry.id);
-		return l.tenantEntry;
+		tme = l.tenantEntry;
 	} else {
-		self->trState->trySetTenantId(cachedLocationInfo.get().tenantEntry.id);
-		return cachedLocationInfo.get().tenantEntry;
+		tme = cachedLocationInfo.get().tenantEntry;
 	}
+
+	if (tme.id == TenantInfo::INVALID_TENANT) {
+		throw tenant_not_found();
+	}
+
+	// Modify transaction if desired.
+	if (!tenantName.present()) {
+		self->trState->trySetTenantId(tme.id);
+	}
+	return tme;
 }
 
 Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize) {
@@ -7908,7 +7929,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Trans
 
 	if (self->getTenant().present()) {
 		// have to bypass tenant to read system key space, and add tenant prefix to part of mapping
-		TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(self, currentRange.begin));
+		TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(self, currentRange.begin, {}));
 		tenantPrefix = tenantEntry.prefix;
 	} else {
 		self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -8011,7 +8032,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 
 	if (self->getTenant().present()) {
 		// have to bypass tenant to read system key space, and add tenant prefix to part of mapping
-		TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(self, range.begin));
+		TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(self, range.begin, {}));
 		tenantPrefix = tenantEntry.prefix;
 		Standalone<StringRef> mappingPrefix = tenantEntry.prefix.withPrefix(blobGranuleMappingKeys.begin);
 
@@ -8342,7 +8363,10 @@ ACTOR Future<Version> checkBlobSubrange(Database db, KeyRange keyRange, Optional
 	}
 }
 
-ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRange range, Optional<Version> version) {
+ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx,
+                                           KeyRange range,
+                                           Optional<Version> version,
+                                           Optional<TenantName> tenantName) {
 	state Database db(cx);
 	state Transaction tr(db);
 	state Standalone<VectorRef<KeyRangeRef>> allRanges;
@@ -8350,6 +8374,7 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRan
 	state Version readVersionOut = invalidVersion;
 	state int batchSize = BUGGIFY ? deterministicRandom()->randomInt(2, 10) : CLIENT_KNOBS->BG_TOO_MANY_GRANULES / 2;
 	state int loadSize = (BUGGIFY ? deterministicRandom()->randomInt(1, 20) : 20) * batchSize;
+	state bool loadedTenantEntry = false;
 
 	if (version.present()) {
 		if (version.get() == latestVersion) {
@@ -8372,6 +8397,12 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRan
 	loop {
 		if (curRegion.begin >= range.end) {
 			return readVersionOut;
+		}
+		if (tenantName.present() && !loadedTenantEntry) {
+			TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(&tr, range.begin, tenantName));
+			loadedTenantEntry = true;
+			range = range.withPrefix(tenantEntry.prefix);
+			curRegion = KeyRangeRef(range.begin, range.begin);
 		}
 		loop {
 			try {
@@ -8424,8 +8455,10 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx, KeyRan
 	}
 }
 
-Future<Version> DatabaseContext::verifyBlobRange(const KeyRange& range, Optional<Version> version) {
-	return verifyBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, version);
+Future<Version> DatabaseContext::verifyBlobRange(const KeyRange& range,
+                                                 Optional<Version> version,
+                                                 Optional<TenantName> tenantName) {
+	return verifyBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, version, tenantName);
 }
 
 ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
@@ -10492,7 +10525,7 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			if (tenant.present() && !loadedTenantPrefix) {
-				TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(&tr, range.begin));
+				TenantMapEntry tenantEntry = wait(blobGranuleGetTenantEntry(&tr, range.begin, tenant));
 				loadedTenantPrefix = true;
 				purgeRange = purgeRange.withPrefix(tenantEntry.prefix);
 			}
@@ -10611,15 +10644,26 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobRanges(Reference<ReadYou
 	}
 }
 
-ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx, KeyRange range, bool active) {
+ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
+                                     KeyRange range,
+                                     bool active,
+                                     Optional<TenantName> tenantName) {
 	state Database db(cx);
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	state bool loadedTenantEntry = false;
 
 	state Value value = active ? blobRangeActive : blobRangeInactive;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			if (tenantName.present() && !loadedTenantEntry) {
+				TenantMapEntry tenantEntry =
+				    wait(blobGranuleGetTenantEntry(&tr->getTransaction(), range.begin, tenantName));
+				loadedTenantEntry = true;
+				range = range.withPrefix(tenantEntry.prefix);
+			}
 
 			Standalone<VectorRef<KeyRangeRef>> startBlobRanges = wait(getBlobRanges(tr, range, 1));
 
@@ -10657,27 +10701,59 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx, KeyRange ran
 	}
 }
 
-Future<bool> DatabaseContext::blobbifyRange(KeyRange range) {
-	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, true);
+Future<bool> DatabaseContext::blobbifyRange(KeyRange range, Optional<TenantName> tenantName) {
+	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, true, tenantName);
 }
 
-Future<bool> DatabaseContext::unblobbifyRange(KeyRange range) {
-	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, false);
+Future<bool> DatabaseContext::unblobbifyRange(KeyRange range, Optional<TenantName> tenantName) {
+	return setBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, false, tenantName);
 }
 
 ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> listBlobbifiedRangesActor(Reference<DatabaseContext> cx,
                                                                            KeyRange range,
-                                                                           int rangeLimit) {
+                                                                           int rangeLimit,
+                                                                           Optional<TenantName> tenantName) {
 	state Database db(cx);
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	state TenantMapEntry tme;
+
+	loop {
+		try {
+			if (tenantName.present()) {
+				wait(store(tme, blobGranuleGetTenantEntry(&tr->getTransaction(), range.begin, tenantName)));
+				range = range.withPrefix(tme.prefix);
+			}
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
 
 	state Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(getBlobRanges(tr, range, rangeLimit));
+	if (!tenantName.present()) {
+		return blobRanges;
+	}
 
-	return blobRanges;
+	// Strip tenant prefix out.
+	state Standalone<VectorRef<KeyRangeRef>> tenantBlobRanges;
+	for (auto& blobRange : blobRanges) {
+		// Filter out blob ranges that span tenants for some reason.
+		if (!blobRange.begin.startsWith(tme.prefix) || !blobRange.end.startsWith(tme.prefix)) {
+			TraceEvent("ListBlobbifiedRangeSpansTenants")
+			    .suppressFor(/*seconds=*/5)
+			    .detail("Tenant", tenantName.get())
+			    .detail("Range", blobRange);
+			continue;
+		}
+		tenantBlobRanges.push_back_deep(tenantBlobRanges.arena(), blobRange.removePrefix(tme.prefix));
+	}
+	return tenantBlobRanges;
 }
 
-Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges(KeyRange range, int rowLimit) {
-	return listBlobbifiedRangesActor(Reference<DatabaseContext>::addRef(this), range, rowLimit);
+Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges(KeyRange range,
+                                                                                 int rowLimit,
+                                                                                 Optional<TenantName> tenantName) {
+	return listBlobbifiedRangesActor(Reference<DatabaseContext>::addRef(this), range, rowLimit, tenantName);
 }
 
 int64_t getMaxKeySize(KeyRef const& key) {

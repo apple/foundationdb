@@ -1,6 +1,3 @@
-[configuration]
-storageEngineExcludeTypes = [3]
-
 [[knobs]]
 enable_version_vector = false
 enable_version_vector_tlog_unicast = false

@@ -228,6 +228,7 @@ public:
 	struct EncryptionKeyRef {
 		TextAndHeaderCipherKeys aesKey; // For AESEncryptionV1
 		uint8_t xorKey; // For XOREncryption_TestOnly
+		uint8_t xorWith; // For XOREncryption_TestOnly
 	};
 	using EncryptionKey = Standalone<EncryptionKeyRef>;
 
@@ -345,8 +346,9 @@ public:
 			Header* h = reinterpret_cast<Header*>(header);
 			h->checksum = XXH3_64bits_withSeed(payload, len, seed);
 			h->xorKey = encryptionKey.xorKey;
+			uint8_t xorMask = ~encryptionKey.xorKey ^ encryptionKey.xorWith;
 			for (int i = 0; i < len; ++i) {
-				payload[i] ^= h->xorKey;
+				payload[i] ^= xorMask;
 			}
 		}
 
@@ -356,8 +358,9 @@ public:
 		                   int len,
 		                   PhysicalPageID seed) {
 			Header* h = reinterpret_cast<Header*>(header);
+			uint8_t xorMask = ~encryptionKey.xorKey ^ encryptionKey.xorWith;
 			for (int i = 0; i < len; ++i) {
-				payload[i] ^= h->xorKey;
+				payload[i] ^= xorMask;
 			}
 			if (h->checksum != XXH3_64bits_withSeed(payload, len, seed)) {
 				throw page_decoding_failed();

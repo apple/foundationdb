@@ -624,6 +624,12 @@ public:
 	double GLOBAL_TAG_THROTTLING_FOLDING_TIME;
 	// Cost multiplier for writes (because write operations are more expensive than reads)
 	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
+	// Maximum number of tags tracked by global tag throttler. Additional tags will be ignored
+	// until some existing tags expire
+	int64_t GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED;
+	// Global tag throttler forgets about throughput from a tag once no new transactions from that
+	// tag have been received for this duration (in seconds):
+	int64_t GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
