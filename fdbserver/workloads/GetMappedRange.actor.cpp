@@ -18,10 +18,7 @@
  * limitations under the License.
  */
 
-#include <cstdint>
-#include <limits>
 #include <algorithm>
-#include "fdbrpc/simulator.h"
 #include "fdbclient/MutationLogReader.actor.h"
 #include "fdbclient/Tuple.h"
 #include "fdbserver/workloads/ApiWorkload.h"
@@ -39,6 +36,7 @@ const KeyRef RECORD = "RECORD"_sr;
 const KeyRef INDEX = "INDEX"_sr;
 
 struct GetMappedRangeWorkload : ApiWorkload {
+	static constexpr auto NAME = "GetMappedRange";
 	bool enabled;
 	Snapshot snapshot = Snapshot::False;
 
