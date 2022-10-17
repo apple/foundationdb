@@ -25,6 +25,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct FileSystemWorkload : TestWorkload {
+	static constexpr auto NAME = "FileSystem";
 	int actorCount, writeActorCount, fileCount, pathMinChars, pathCharRange, serverCount, userIDCount;
 	double testDuration, transactionsPerSecond, deletedFilesRatio;
 	bool discardEdgeMeasurements, performingWrites, loggingQueries;
@@ -60,8 +61,6 @@ struct FileSystemWorkload : TestWorkload {
 		writeActorCount = getOption(options, "writeActorCount"_sr, 4);
 		loggingQueries = getOption(options, "loggingQueries"_sr, false);
 	}
-
-	std::string description() const override { return "ReadWrite"; }
 
 	Future<Void> setup(Database const& cx) override { return nodeSetup(cx, this); }
 
@@ -334,4 +333,4 @@ struct FileSystemWorkload : TestWorkload {
 	};
 };
 
-WorkloadFactory<FileSystemWorkload> FileSystemWorkloadFactory("FileSystem");
+WorkloadFactory<FileSystemWorkload> FileSystemWorkloadFactory;

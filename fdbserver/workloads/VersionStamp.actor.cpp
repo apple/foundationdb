@@ -29,6 +29,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct VersionStampWorkload : TestWorkload {
+	static constexpr auto NAME = "VersionStamp";
+
 	uint64_t nodeCount;
 	double testDuration;
 	double transactionsPerSecond;
@@ -57,8 +59,6 @@ struct VersionStampWorkload : TestWorkload {
 		validateExtraDB = getOption(options, "validateExtraDB"_sr, false);
 		soleOwnerOfMetadataVersionKey = getOption(options, "soleOwnerOfMetadataVersionKey"_sr, false);
 	}
-
-	std::string description() const override { return "VersionStamp"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -452,4 +452,4 @@ struct VersionStampWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<VersionStampWorkload> VersionStampWorkloadFactory("VersionStamp");
+WorkloadFactory<VersionStampWorkload> VersionStampWorkloadFactory;

@@ -27,6 +27,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct BackupToDBAbort : TestWorkload {
+	static constexpr auto NAME = "BackupToDBAbort";
 	double abortDelay;
 	Database extraDB;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
@@ -42,8 +43,6 @@ struct BackupToDBAbort : TestWorkload {
 
 		lockid = UID(0xbeeffeed, 0xdecaf00d);
 	}
-
-	std::string description() const override { return "BackupToDBAbort"; }
 
 	Future<Void> setup(const Database& cx) override {
 		if (clientId != 0)

@@ -31,6 +31,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LogMetricsWorkload : TestWorkload {
+	static constexpr auto NAME = "LogMetrics";
+
 	std::string dataFolder;
 	double logAt, logDuration, logsPerSecond;
 
@@ -41,7 +43,6 @@ struct LogMetricsWorkload : TestWorkload {
 		dataFolder = getOption(options, "dataFolder"_sr, ""_sr).toString();
 	}
 
-	std::string description() const override { return "LogMetricsWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (clientId)
@@ -94,4 +95,4 @@ struct LogMetricsWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<LogMetricsWorkload> LogMetricsWorkloadFactory("LogMetrics");
+WorkloadFactory<LogMetricsWorkload> LogMetricsWorkloadFactory;

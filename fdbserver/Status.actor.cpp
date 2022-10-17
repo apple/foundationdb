@@ -828,6 +828,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("blob_manager", db->get().blobManager.get());
 	}
 
+	if (configuration.present() && configuration.get().blobGranulesEnabled && db->get().blobMigrator.present()) {
+		roles.addRole("blob_migrator", db->get().blobMigrator.get());
+	}
+
 	if (db->get().consistencyScan.present()) {
 		roles.addRole("consistency_scan", db->get().consistencyScan.get());
 	}

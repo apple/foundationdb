@@ -39,6 +39,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct EncryptKeyProxyTestWorkload : TestWorkload {
+	static constexpr auto NAME = "EncryptKeyProxyTest";
 	EncryptKeyProxyInterface ekpInf;
 	Reference<AsyncVar<struct ServerDBInfo> const> dbInfo;
 	Arena arena;
@@ -60,8 +61,6 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			TraceEvent("EKPTestInit").detail("MinDomainId", minDomainId).detail("MaxDomainId", maxDomainId);
 		}
 	}
-
-	std::string description() const override { return "EncryptKeyProxyTest"; }
 
 	Future<Void> setup(Database const& ctx) override { return Void(); }
 
@@ -344,4 +343,4 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 
 std::atomic<int> EncryptKeyProxyTestWorkload::seed = 0;
 
-WorkloadFactory<EncryptKeyProxyTestWorkload> EncryptKeyProxyTestWorkloadFactory("EncryptKeyProxyTest");
+WorkloadFactory<EncryptKeyProxyTestWorkload> EncryptKeyProxyTestWorkloadFactory;
