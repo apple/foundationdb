@@ -680,7 +680,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 				// restore system keys first before restoring user data
 				if (containsSystemKeys) {
-					state Key systemRestoreTag = StringRef("restore_system");
+					state Key systemRestoreTag = "restore_system"_sr;
 					try {
 						wait(restoreTool.submitBackup(cx,
 						                              systemRestoreTag,

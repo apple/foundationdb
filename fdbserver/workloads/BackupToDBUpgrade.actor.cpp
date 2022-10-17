@@ -513,7 +513,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 			// restore system keys first before restoring user data
 			if (containsSystemKeys) {
-				state Key systemRestoreTag = StringRef("restore_system");
+				state Key systemRestoreTag = "restore_system"_sr;
 				TraceEvent("DRU_RestoreDbSystemKeys").detail("RestoreTag", printable(systemRestoreTag));
 				try {
 					wait(restoreTool.submitBackup(
